@@ -1,0 +1,61 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: |
+            web/pnpm-lock.yaml
+            extensions/*/pnpm-lock.yaml
+      - run: make deps
+      - run: make check
+      - run: go test ./...
+      - name: Build
+        run: scripts/build.sh
+        env:
+          VERSION: ${{ github.ref_name }}
+          TARGETS: linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
+      - name: Package
+        run: |
+          slug=$(sed -n 's/^[[:space:]]*Slug = "\(.*\)"$/\1/p' internal/brand/brand.go)
+          mkdir -p release
+          for f in dist/"$slug"-*-*; do
+            name=$(basename "$f")
+            mkdir -p "release/$name"
+            cp "$f" "release/$name/$slug"
+            cp LICENSE THIRD_PARTY_NOTICES.md web/dist/licenses.md "release/$name/"
+            tar -C release -czf "release/$name.tar.gz" "$name"
+          done
+          (cd release && sha256sum *.tar.gz > SHA256SUMS)
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: release/*.tar.gz
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ver=${GITHUB_REF_NAME#v}
+          awk -v v="$ver" '$0 ~ "^## \\[" v "\\]" {p=1; next} /^## \[/ {p=0} p' CHANGELOG.md > notes.md
+          gh release create "$GITHUB_REF_NAME" release/*.tar.gz release/SHA256SUMS --notes-file notes.md --verify-tag

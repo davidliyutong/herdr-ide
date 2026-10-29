@@ -1,0 +1,186 @@
+# Deployment
+
+webherdr runs on one host (your laptop or an always-on machine) and is used
+from browsers. It reaches herdr machines over ssh; nothing listens on the
+machines.
+
+- [Local use](#local-use)
+- [Remote access through a reverse proxy](#remote-access-through-a-reverse-proxy)
+- [Air-gapped networks](#air-gapped-networks)
+- [Remote resources](#remote-resources)
+- [Running as a service](#running-as-a-service)
+- [Several cores and development builds](#several-cores-and-development-builds)
+
+## Local use
+
+```bash
+scripts/build.sh
+./dist/webherdr-$(go env GOOS)-$(go env GOARCH)    # http://127.0.0.1:7780
+```
+
+Machines come from herdr's saved SSH machines (`herdr machine list`); add
+others with `--ssh`. webherdr uses OpenSSH with your `~/.ssh/config`
+(ProxyJump, agent, keys) in BatchMode. A machine that needs a password, 2FA or
+a host-key confirmation shows **Authentication required**; **Authenticate…**
+opens a terminal for it, and later connections reuse that ssh ControlMaster.
+
+## Remote access through a reverse proxy
+
+The server has no login. It must stay on loopback behind a reverse proxy that
+authenticates users and terminates TLS. HTTPS is required in practice: VS Code
+webviews (Git Graph, media preview) need service workers, and the clipboard
+and notification APIs need a secure context (plain `http://localhost` is the
+only exception).
+
+Tell webherdr the public origin so its Host/Origin checks accept it:
+
+```bash
+webherdr --allowed-origin https://ide.example.com
+```
+
+**Tailscale** (tailnet only, automatic certificates):
+
+```bash
+webherdr --allowed-origin https://mac.your-tailnet.ts.net --user-header Tailscale-User-Login
+tailscale serve --bg --https=443 http://127.0.0.1:7780
+```
+
+**Caddy** with forward auth (Authelia, oauth2-proxy, …):
+
+```caddy
+ide.example.com {
+	forward_auth authelia:9091 {
+		uri /api/verify?rd=https://auth.example.com
+		copy_headers Remote-User
+	}
+	reverse_proxy 127.0.0.1:7780 {
+		header_up X-webherdr-Proxy-Secret {env.WEBHERDR_PROXY_SECRET}
+	}
+}
+```
+
+**nginx**: forward WebSockets and keep the Host header.
+
+```nginx
+location / {
+    auth_request /oauth2/auth;
+    proxy_pass http://127.0.0.1:7780;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_set_header X-webherdr-Proxy-Secret "<secret>";
+    proxy_read_timeout 1d;
+}
+```
+
+### Guardrails
+
+- **Proxy secret** – `--proxy-secret-file FILE` makes webherdr require the
+  `X-webherdr-Proxy-Secret` header on every request that does not come from a
+  browser on the same host, so only your proxy can talk to it. With a secret,
+  `--listen` may use a non-loopback address (e.g. a proxy in a container);
+  without one, that needs the explicit `--insecure-listen`.
+- **Read-only** – `--read-only` serves a watch-only view (observe streams, no
+  input, no mutating herdr calls, no uploads, no VS Code). Run a second
+  instance with it for sharing screens or phones.
+- **Audit log** – `--audit-log FILE` records connections, mutating herdr
+  calls, uploads, VS Code and bridge use and refused requests as JSON lines,
+  with the user from `--user-header`.
+- The herdr API is exposed through an allowlist: the UI cannot stop herdr
+  servers, install integrations, link plugins or open raw event streams.
+
+See [SECURITY.md](../SECURITY.md) for the threat model.
+
+## Air-gapped networks
+
+Machines never need internet access: code-server releases and extensions are
+resolved on the core host and pushed through the agent. When the core host is
+offline too, prepare a bundle on a connected machine:
+
+```bash
+webherdr fetch-assets ./bundle                          # all platforms
+webherdr fetch-assets --platforms linux-amd64 ./bundle  # only what you need
+```
+
+Copy `./bundle` (tarballs, VSIXs and `.sha256` files) and the webherdr binary
+into the network, then run:
+
+```bash
+webherdr --offline --seed-dir ./bundle
+```
+
+Lookup order: `--seed-dir` directories, then the cache, then (unless
+`--offline`) a download from `--code-server-url` / `--extension-url`, which
+can point at an internal mirror. Every file is verified: the default versions
+have SHA-256 digests compiled into the binary; other versions need a
+`<file>.sha256` next to the file (written by `fetch-assets`). A mismatching
+seed is rejected, never replaced. A download without any known digest is
+accepted once and its digest recorded (logged as a warning).
+
+Bundles are for your own installations: Git Graph's license does not permit
+redistribution, so do not publish bundles that contain it.
+
+The web UI, the agents and the VS Code bridge are embedded in the binary;
+nothing else is fetched at runtime. Building from source needs Go modules and
+npm packages (vendor or mirror them for offline builds).
+
+## Remote resources
+
+What webherdr starts on a machine and how it is reclaimed:
+
+| Resource | Started | Reclaimed |
+| --- | --- | --- |
+| `webherdr-agent` | one per core while connected | Exits when its ssh session ends; a dead link is detected by keepalives within about 45 s. |
+| `herdr terminal session` processes | one per pane being viewed | Ends when the pane is no longer shown, or with the agent. |
+| code-server | on first VS Code use | Stopped after `--code-server-idle` (default 20 min) without VS Code connections, when the agent exits (if that agent started it), or by the stop button in the VS Code panel. Hidden VS Code panels disconnect after 10 min. A process left behind by a killed agent is stopped by the next agent, and code-server exits by itself after 1 h without connections. |
+| VS Code extension hosts | one per VS Code window | Disposed 5 min after the window disconnects. |
+| ssh ControlMaster | per machine | Exits after 10 min unused. |
+| Disk | see [reference](reference.md#files-and-directories) | Uploads and logs after 7 days; unused agent builds and code-server versions after 14 days. |
+
+## Running as a service
+
+macOS (launchd), `~/Library/LaunchAgents/dev.webherdr.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>dev.webherdr</string>
+  <key>ProgramArguments</key><array>
+    <string>/usr/local/bin/webherdr</string>
+    <string>--allowed-origin</string><string>https://ide.example.com</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardErrorPath</key><string>/tmp/webherdr.log</string>
+</dict></plist>
+```
+
+Linux (systemd user unit), `~/.config/systemd/user/webherdr.service`:
+
+```ini
+[Unit]
+Description=webherdr
+
+[Service]
+ExecStart=%h/.local/bin/webherdr --allowed-origin https://ide.example.com
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+```
+
+The service must run as the user who owns the herdr sessions and the ssh keys.
+
+## Several cores and development builds
+
+Two cores that connect to the same machine share one agent build directory
+but nothing else unless they use the same instance. Give each one its own
+`--instance` (state in `~/.webherdr-<instance>`); for development also use an
+isolated herdr session:
+
+```bash
+herdr --session webherdr-dev server &
+make dev-core     # go run ./cmd/webherdr --instance dev --local-only --local-session webherdr-dev --listen 127.0.0.1:7790
+```

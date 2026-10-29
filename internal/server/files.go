@@ -1,0 +1,249 @@
+package server
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
+	"mime"
+	"net/http"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+
+	"webherdr/internal/agentproto"
+	"webherdr/internal/machines"
+)
+
+func (s *Server) machine(w http.ResponseWriter, r *http.Request) *machines.Machine {
+	mc := s.mg.Get(r.PathValue("id"))
+	if mc == nil {
+		http.Error(w, "unknown machine", http.StatusNotFound)
+		return nil
+	}
+	return mc
+}
+
+var extraTypes = map[string]string{
+	".mkv": "video/x-matroska", ".mov": "video/quicktime", ".webm": "video/webm", ".mp4": "video/mp4",
+	".m4v": "video/mp4", ".avif": "image/avif", ".webp": "image/webp", ".heic": "image/heic",
+	".flac": "audio/flac", ".opus": "audio/ogg", ".md": "text/markdown; charset=utf-8",
+	".log": "text/plain; charset=utf-8", ".py": "text/plain; charset=utf-8", ".ts": "text/plain; charset=utf-8",
+	".go": "text/plain; charset=utf-8", ".rs": "text/plain; charset=utf-8", ".toml": "text/plain; charset=utf-8",
+	".yaml": "text/plain; charset=utf-8", ".yml": "text/plain; charset=utf-8", ".sh": "text/plain; charset=utf-8",
+}
+
+func contentType(name string) string {
+	ext := strings.ToLower(filepath.Ext(name))
+	if t, ok := extraTypes[ext]; ok {
+		return t
+	}
+	if t := mime.TypeByExtension(ext); t != "" {
+		// Never let a file be rendered as an active document from our origin.
+		if strings.HasPrefix(t, "text/html") || strings.Contains(t, "javascript") || strings.Contains(t, "xhtml") {
+			return "text/plain; charset=utf-8"
+		}
+		return t
+	}
+	return "application/octet-stream"
+}
+
+func parseRange(h string, size int64) (start, length int64, ok bool) {
+	if !strings.HasPrefix(h, "bytes=") || strings.Contains(h, ",") {
+		return 0, 0, false
+	}
+	spec := strings.TrimPrefix(h, "bytes=")
+	a, b, found := strings.Cut(spec, "-")
+	if !found {
+		return 0, 0, false
+	}
+	if a == "" {
+		n, err := strconv.ParseInt(b, 10, 64)
+		if err != nil || n <= 0 {
+			return 0, 0, false
+		}
+		if n > size {
+			n = size
+		}
+		return size - n, n, true
+	}
+	st, err := strconv.ParseInt(a, 10, 64)
+	if err != nil || st < 0 || st >= size {
+		return 0, 0, false
+	}
+	end := size - 1
+	if b != "" {
+		e, err := strconv.ParseInt(b, 10, 64)
+		if err != nil || e < st {
+			return 0, 0, false
+		}
+		if e < end {
+			end = e
+		}
+	}
+	return st, end - st + 1, true
+}
+
+// handleFile streams a file from a machine with HTTP Range support, so videos
+// can seek without downloading everything.
+func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
+	mc := s.machine(w, r)
+	if mc == nil {
+		return
+	}
+	p := r.URL.Query().Get("path")
+	if p == "" {
+		http.Error(w, "path required", http.StatusBadRequest)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	rep, err := requestAgent(ctx, mc, agentproto.Header{Op: agentproto.OpFsStat, Path: p})
+	cancel()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	st := rep.Stat
+	if st.IsDir {
+		http.Error(w, "is a directory", http.StatusBadRequest)
+		return
+	}
+	etag := fmt.Sprintf(`W/"%x-%x"`, st.Size, st.ModTime)
+	h := w.Header()
+	h.Set("ETag", etag)
+	h.Set("Last-Modified", time.UnixMilli(st.ModTime).UTC().Format(http.TimeFormat))
+	h.Set("Accept-Ranges", "bytes")
+	h.Set("Cache-Control", "no-cache")
+	h.Set("X-Content-Type-Options", "nosniff")
+	ctype := contentType(st.Path)
+	h.Set("Content-Type", ctype)
+	// Opened as a document, a file must not run script on our origin. PDFs
+	// are exempt because the browser's PDF viewer refuses sandboxed frames.
+	if ctype != "application/pdf" {
+		h.Set("Content-Security-Policy", "default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'; sandbox")
+	}
+	if r.URL.Query().Get("download") == "1" {
+		h.Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filepath.Base(st.Path)}))
+	}
+	if r.Header.Get("If-None-Match") == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	start, length, partial := int64(0), st.Size, false
+	if rh := r.Header.Get("Range"); rh != "" {
+		if a, n, ok := parseRange(rh, st.Size); ok {
+			start, length, partial = a, n, true
+		} else if st.Size > 0 {
+			h.Set("Content-Range", fmt.Sprintf("bytes */%d", st.Size))
+			http.Error(w, "invalid range", http.StatusRequestedRangeNotSatisfiable)
+			return
+		}
+	}
+	h.Set("Content-Length", strconv.FormatInt(length, 10))
+	if partial {
+		h.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, start+length-1, st.Size))
+		w.WriteHeader(http.StatusPartialContent)
+	}
+	if r.Method == http.MethodHead || length == 0 {
+		return
+	}
+	conn, _, err := mc.Open(r.Context(), agentproto.Header{Op: agentproto.OpFsRead, Path: st.Path, Offset: start, Length: length})
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+	io.CopyN(w, conn, length)
+}
+
+func requestAgent(ctx context.Context, mc *machines.Machine, h agentproto.Header) (*agentproto.Reply, error) {
+	conn, rep, err := mc.Open(ctx, h)
+	if err != nil {
+		return rep, err
+	}
+	conn.Close()
+	if rep.Stat == nil && (h.Op == agentproto.OpFsStat || h.Op == agentproto.OpFsList) {
+		return rep, errors.New("missing stat")
+	}
+	return rep, nil
+}
+
+func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
+	mc := s.machine(w, r)
+	if mc == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	rep, err := requestAgent(ctx, mc, agentproto.Header{Op: agentproto.OpFsList, Path: r.URL.Query().Get("path")})
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"dir": rep.Stat, "entries": rep.Entries})
+}
+
+const maxUpload = 4 << 30
+
+var unsafeName = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
+
+// uploadName makes a unique, shell-friendly file name for an upload: several
+// clipboard images are all called "image.png", so a timestamp alone would let
+// one overwrite another.
+func uploadName(original string, now time.Time) string {
+	base := unsafeName.ReplaceAllString(filepath.Base(original), "_")
+	base = strings.Trim(base, "._")
+	if base == "" {
+		base = "upload"
+	}
+	if len(base) > 80 {
+		base = base[len(base)-80:]
+	}
+	var rnd [4]byte
+	_, _ = rand.Read(rnd[:])
+	return now.Format("20060102-150405") + "-" + hex.EncodeToString(rnd[:]) + "-" + base
+}
+
+// handleUpload writes the request body to a file on the machine (used for
+// drag-and-drop and pasted images handed to agents).
+func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
+	mc := s.machine(w, r)
+	if mc == nil {
+		return
+	}
+	st := mc.State()
+	if st.Info == nil || st.Info.UploadDir == "" {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "machine not connected"})
+		return
+	}
+	p := filepath.Join(st.Info.UploadDir, uploadName(r.URL.Query().Get("name"), time.Now()))
+	s.audit.log(r, "file.upload", map[string]any{"machine": mc.ID(), "path": p, "size": r.ContentLength})
+	conn, _, err := mc.Open(r.Context(), agentproto.Header{Op: agentproto.OpFsWrite, Path: p, Mkdirs: true})
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	defer conn.Close()
+	cw := agentproto.ChunkWriter{W: conn}
+	if _, err := io.Copy(cw, io.LimitReader(r.Body, maxUpload)); err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := cw.Finish(); err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	var rep agentproto.Reply
+	if err := agentproto.ReadLine(conn, &rep); err != nil || !rep.OK {
+		msg := rep.Error
+		if err != nil {
+			msg = err.Error()
+		}
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": msg})
+		return
+	}
+	writeJSON(w, http.StatusOK, rep.Stat)
+}

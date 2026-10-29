@@ -1,0 +1,13 @@
+/dist/
+node_modules/
+web/dist/*
+!web/dist/.gitkeep
+internal/embedded/agents/*.gz
+internal/embedded/ext/*.vsix
+extensions/webherdr-bridge/dist/
+extensions/webherdr-bridge/*.vsix
+.DS_Store
+/bundle/
+coverage/
+.claude/settings.local.json
+CLAUDE.local.md

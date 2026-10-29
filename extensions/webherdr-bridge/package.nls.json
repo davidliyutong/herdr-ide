@@ -1,0 +1,6 @@
+{
+  "displayName": "webherdr bridge",
+  "description": "Connects code-server windows to the webherdr web IDE (open files, diffs, Git Graph, send code to agents).",
+  "command.sendToAgent": "Send to Agent",
+  "command.reconnect": "Reconnect"
+}

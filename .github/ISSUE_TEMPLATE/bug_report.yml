@@ -1,0 +1,30 @@
+name: Bug report / 问题反馈
+description: Something does not work as documented.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened / 发生了什么
+      description: Include what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce / 复现步骤
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Versions / 版本
+      description: "`webherdr version`, `herdr --version`, browser, OS/arch of core and machines"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / 日志
+      description: Core stderr, browser console. Remove secrets and hostnames you do not want to share.
+      render: text

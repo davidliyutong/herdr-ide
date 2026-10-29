@@ -1,0 +1,33 @@
+{
+  "name": "webherdr-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit -p . && vite build",
+    "typecheck": "tsc --noEmit -p .",
+    "test": "vitest run",
+    "format": "prettier --write \"src/**/*.{ts,tsx,css}\" vite.config.ts",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" vite.config.ts"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-unicode11": "^0.9.0",
+    "@xterm/addon-webgl": "^0.19.0",
+    "@xterm/xterm": "^6.0.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "zustand": "^5.0.16"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.5",
+    "vitest": "^4.0.0",
+    "prettier": "^3.6.2"
+  },
+  "packageManager": "pnpm@12.8.1"
+}

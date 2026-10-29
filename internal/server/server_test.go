@@ -1,0 +1,243 @@
+package server
+
+import (
+	"log"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"testing/fstest"
+	"time"
+
+	"webherdr/internal/machines"
+)
+
+func TestParseRange(t *testing.T) {
+	cases := []struct {
+		h          string
+		size       int64
+		start, len int64
+		ok         bool
+	}{
+		{"bytes=0-", 100, 0, 100, true},
+		{"bytes=10-19", 100, 10, 10, true},
+		{"bytes=90-200", 100, 90, 10, true},
+		{"bytes=-10", 100, 90, 10, true},
+		{"bytes=-500", 100, 0, 100, true},
+		{"bytes=100-", 100, 0, 0, false},
+		{"bytes=5-1", 100, 0, 0, false},
+		{"bytes=0-1,5-6", 100, 0, 0, false},
+		{"items=0-1", 100, 0, 0, false},
+	}
+	for _, c := range cases {
+		st, n, ok := parseRange(c.h, c.size)
+		if ok != c.ok || ok && (st != c.start || n != c.len) {
+			t.Errorf("parseRange(%q,%d) = %d,%d,%v want %d,%d,%v", c.h, c.size, st, n, ok, c.start, c.len, c.ok)
+		}
+	}
+}
+
+func TestContentTypeNeverActive(t *testing.T) {
+	for _, name := range []string{"x.html", "x.htm", "x.js", "x.xhtml"} {
+		if ct := contentType(name); ct != "text/plain; charset=utf-8" {
+			t.Errorf("%s served as %s", name, ct)
+		}
+	}
+	if ct := contentType("a.mp4"); ct != "video/mp4" {
+		t.Errorf("mp4 = %s", ct)
+	}
+}
+
+func newTestServer(origins ...string) *Server {
+	mg := machines.NewManager(nil, nil, log.New(os.Stderr, "", 0))
+	return New(mg, Options{AllowedOrigins: origins, Logger: log.New(os.Stderr, "", 0)})
+}
+
+func TestGuard(t *testing.T) {
+	h := newTestServer("https://ide.example.com").Handler()
+	cases := []struct {
+		host, origin string
+		want         int
+	}{
+		{"127.0.0.1:7780", "", 200},
+		{"localhost:7780", "http://localhost:5173", 200},
+		{"[::1]:7780", "", 200},
+		{"ide.example.com", "https://ide.example.com", 200},
+		{"evil.example.com", "", 403},                   // DNS rebinding
+		{"127.0.0.1:7780", "https://evil.example", 403}, // cross-site
+		{"127.0.0.1:7780", "null", 403},
+		{"ide.example.com", "http://ide.example.com", 403}, // scheme must match
+	}
+	for _, c := range cases {
+		r := httptest.NewRequest("GET", "/api/machines", nil)
+		r.Host = c.host
+		if c.origin != "" {
+			r.Header.Set("Origin", c.origin)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != c.want {
+			t.Errorf("host=%s origin=%s: got %d want %d", c.host, c.origin, w.Code, c.want)
+		}
+	}
+}
+
+func TestLoadKeyConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "config.toml")
+	os.WriteFile(cfg, []byte(`
+[keys]
+prefix = "ctrl+a"
+split_vertical = "prefix+|"
+
+[[keys.command]]
+key = "prefix+v"
+type = "plugin_action"
+command = "hx-w.visuals.open"
+description = "Visual previews"
+
+[ui]
+mouse_capture = true
+`), 0o644)
+	t.Setenv("HERDR_CONFIG_PATH", cfg)
+	k := loadKeyConfig()
+	if k.Prefix != "ctrl+a" || k.Bindings["split_vertical"] != "prefix+|" {
+		t.Fatalf("keys = %+v", k)
+	}
+	if len(k.Commands) != 1 || k.Commands[0].Command != "hx-w.visuals.open" || k.Commands[0].Type != "plugin_action" {
+		t.Fatalf("commands = %+v", k.Commands)
+	}
+}
+
+func TestBridgePick(t *testing.T) {
+	h := newBridgeHub(newTestServer())
+	a := &bridgeWindow{m: "m1", folders: []string{"/home/u/proj"}}
+	b := &bridgeWindow{m: "m1", folders: []string{"/home/u/proj/sub"}}
+	c := &bridgeWindow{m: "m2", folders: []string{"/home/u/proj/sub"}}
+	h.windows[a], h.windows[b], h.windows[c] = true, true, true
+	if w, sc := h.pick("m1", "/home/u/proj/sub"); w != b || sc != 3 {
+		t.Fatalf("exact pick = %v %d", w, sc)
+	}
+	if w, sc := h.pick("m1", "/home/u/proj/other"); w != a || sc != 2 {
+		t.Fatalf("containing pick = %v %d", w, sc)
+	}
+	if w, _ := h.pick("m3", "/x"); w != nil {
+		t.Fatal("picked window of another machine")
+	}
+	_ = http.StatusOK
+}
+
+func TestUploadNameUniqueAndSafe(t *testing.T) {
+	now := time.Date(2026, 10, 30, 2, 15, 0, 0, time.UTC)
+	a, b := uploadName("image.png", now), uploadName("image.png", now)
+	if a == b {
+		t.Fatalf("same name for two uploads in one second: %s", a)
+	}
+	if !strings.HasPrefix(a, "20261030-021500-") || !strings.HasSuffix(a, "-image.png") {
+		t.Fatalf("name = %s", a)
+	}
+	if n := uploadName("../../etc/pa ss;wd", now); strings.ContainsAny(n, "/ ;") {
+		t.Fatalf("unsafe name %q", n)
+	}
+}
+
+func TestAPIAllowlist(t *testing.T) {
+	s := newTestServer()
+	for m, want := range map[string]bool{
+		"pane.split": true, "agent.prompt": true, "session.snapshot": true, "plugin.action.invoke": true,
+		"server.stop": false, "server.live_handoff": false, "integration.install": false,
+		"plugin.link": false, "events.subscribe": false, "client_shell.surface.set": false,
+	} {
+		if s.apiAllowed(m) != want {
+			t.Errorf("apiAllowed(%s) != %v", m, want)
+		}
+	}
+	s.opts.ReadOnly = true
+	if s.apiAllowed("pane.split") || !s.apiAllowed("pane.list") {
+		t.Error("read-only allowlist wrong")
+	}
+}
+
+func TestProxySecret(t *testing.T) {
+	s := newTestServer("https://ide.example.com")
+	s.opts.ProxySecret = "0123456789abcdef-secret"
+	h := s.Handler()
+	do := func(remote, host, secret string) int {
+		r := httptest.NewRequest("GET", "/api/machines", nil)
+		r.RemoteAddr, r.Host = remote, host
+		if secret != "" {
+			r.Header.Set(ProxySecretHeader, secret)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w.Code
+	}
+	if c := do("127.0.0.1:5555", "127.0.0.1:7780", ""); c != 200 {
+		t.Errorf("local browser = %d", c)
+	}
+	if c := do("10.0.0.2:5555", "ide.example.com", ""); c != 403 {
+		t.Errorf("remote without secret = %d", c)
+	}
+	if c := do("10.0.0.2:5555", "ide.example.com", "wrong"); c != 403 {
+		t.Errorf("remote with wrong secret = %d", c)
+	}
+	if c := do("10.0.0.2:5555", "ide.example.com", "0123456789abcdef-secret"); c != 200 {
+		t.Errorf("remote with secret = %d", c)
+	}
+	// A proxy on the same host connects from loopback but keeps the public Host.
+	if c := do("127.0.0.1:5555", "ide.example.com", ""); c != 403 {
+		t.Errorf("same-host proxy without secret = %d", c)
+	}
+}
+
+func TestReadOnlyRefusesWrites(t *testing.T) {
+	s := newTestServer()
+	s.opts.ReadOnly = true
+	h := s.Handler()
+	for _, path := range []string{"/api/m/x/upload", "/api/m/x/bridge", "/api/m/x/code/start"} {
+		r := httptest.NewRequest("POST", path, nil)
+		r.Host = "127.0.0.1:7780"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != http.StatusForbidden {
+			t.Errorf("%s = %d", path, w.Code)
+		}
+	}
+}
+
+func TestCSPOnAppShell(t *testing.T) {
+	s := New(machines.NewManager(nil, nil, log.New(os.Stderr, "", 0)), Options{
+		Logger: log.New(os.Stderr, "", 0),
+		Static: fstest.MapFS{"index.html": {Data: []byte("<html></html>")}},
+	})
+	r := httptest.NewRequest("GET", "/", nil)
+	r.Host = "localhost:7780"
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if csp := w.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "frame-ancestors 'self'") || !strings.Contains(csp, "script-src 'self'") {
+		t.Fatalf("csp = %q", csp)
+	}
+	if w.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatal("nosniff missing")
+	}
+}
+
+func TestCodeServerIdleTracking(t *testing.T) {
+	s := newTestServer()
+	p := s.csProxy
+	p.touch("m1", 1) // an open VS Code connection
+	p.last["m1"] = time.Now().Add(-time.Hour)
+	if ids := p.idleAmong([]string{"m1"}, time.Minute); len(ids) != 0 {
+		t.Fatalf("machine with open connection reported idle: %v", ids)
+	}
+	p.touch("m1", -1)
+	p.last["m1"] = time.Now().Add(-time.Hour)
+	if ids := p.idleAmong([]string{"m1"}, time.Minute); len(ids) != 1 {
+		t.Fatalf("idle machine not reported: %v", ids)
+	}
+	if ids := p.idleAmong([]string{"m2"}, time.Minute); len(ids) != 0 {
+		t.Fatalf("machine without traffic yet must get a grace period: %v", ids)
+	}
+}

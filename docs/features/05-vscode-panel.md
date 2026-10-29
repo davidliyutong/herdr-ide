@@ -1,0 +1,90 @@
+# 05 · VS Code panel
+
+## Context
+
+Terminals are the primary surface, but reviewing an agent's work needs code
+browsing, diffs, Git history and media previews, and users want VS Code
+extensions such as Git Graph. The panel must open on demand next to the
+terminals, on the machine of the focused pane, at its working directory.
+
+## Goals / non-goals
+
+Goals: real VS Code with extensions on every machine; opened from panes and
+terminal links; works without internet on machines; costs nothing when not
+used.
+
+Non-goals: replacing the terminal as the main surface; syncing VS Code
+settings between machines.
+
+## Design
+
+**Provisioning** (`internal/codeserver`, agent `codeserver.go`)
+
+- code-server release per machine platform, resolved on the core host
+  ([09](09-air-gapped-installs.md)), uploaded through the agent and unpacked
+  into `~/.webherdr/code-server/<version>` (shared by instances).
+- The bundled Node is run once after unpacking; if it fails (old glibc), the
+  error is reported and the rest of webherdr keeps working.
+- Extensions are installed from VSIX files uploaded by the core: the
+  embedded bridge extension and the default extensions (Git Graph). Markers
+  in the extensions directory skip reinstallation.
+- Start flags: unix socket only (`--socket … --socket-mode 600`), `--auth
+  none` (the socket directory is private), telemetry and update checks off,
+  workspace trust off, `--reconnection-grace-time 300`,
+  `--idle-timeout-seconds 3600`.
+
+**Proxy** (`internal/server/codeserver.go`)
+
+- `/m/<machine>/code/…` is reverse-proxied to the agent's `cs.sock` through a
+  yamux stream (`dial-unix`), WebSockets included; the prefix is stripped and
+  the Host header preserved (code-server compares Origin with Host).
+- While code-server is being prepared, the panel shows a page that polls
+  `/api/m/<machine>/code/status` and translates the phase codes.
+- The panel is a same-origin iframe, one per machine, kept while used;
+  `?folder=` selects the workspace folder (the focused pane's cwd).
+
+**Bridge** (`extensions/webherdr-bridge`, `internal/server/bridge.go`)
+
+- The extension runs in code-server's extension host on the machine and
+  connects to `$WEBHERDR_BRIDGE_SOCKET`, which the agent tunnels to the core.
+  It announces its window id and workspace folders.
+- The core routes UI commands to the window that shows the requested folder
+  (waiting up to 60 s for the iframe to load, accepting a containing folder
+  after a grace period): `openFile` (path, line, column), `openDiff`
+  (multi-file "View Changes"), `gitGraph` (repository root), `openMedia`,
+  `reveal`.
+- **Send to Agent** in the editor sends `@file:lines` plus the selection; the
+  browser pastes it, unsubmitted, into the focused agent pane.
+
+## Alternatives considered
+
+| Option | Why not |
+| --- | --- |
+| Official `code serve-web` | Microsoft Marketplace and Pylance, but the server build is fetched by the CLI at runtime, licensing limits redistribution, and the user chose code-server (Open VSX). |
+| openvscode-server | No macOS builds. |
+| Remote-SSH from desktop VS Code | Not in the browser; no integration with panes. |
+| Driving the iframe from the page | VS Code exposes no command API to the embedding page; the extension host runs on the machine. |
+| Reverse ssh socket forward for the bridge | Replaced by the agent's listener tunnelled over the existing yamux session. |
+
+## Failure modes
+
+- **code-server crashes or the agent reconnects** → proxy errors invalidate
+  the ready state; the next request runs Ensure again.
+- **No window for the folder** → the bridge waits, then falls back to a
+  window containing the folder, then reports an error.
+- **Two cores on one machine (same instance)** → the bridge socket stays with
+  the first agent; the other logs that VS Code commands go to that core.
+  Separate instances avoid this.
+
+## Security
+
+The socket directory is 0700 and the socket 0600; `--auth none` is safe only
+because nothing else can connect. The proxy strips the proxy-secret header
+and adds `X-Frame-Options: SAMEORIGIN`. Read-only mode refuses the panel.
+
+## Testing
+
+`internal/codeserver/artifacts_test.go` (resolution and verification),
+`internal/server/server_test.go` (bridge window selection, idle tracking).
+Provisioning, Git Graph through the bridge and arm64 installs were verified
+on a macOS host and an arm64 Linux VM.

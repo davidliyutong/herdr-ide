@@ -1,0 +1,74 @@
+{
+  "name": "webherdr-bridge",
+  "displayName": "%displayName%",
+  "description": "%description%",
+  "version": "0.1.0",
+  "publisher": "webherdr",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "webherdr.sendToAgent",
+        "title": "%command.sendToAgent%",
+        "category": "webherdr"
+      },
+      {
+        "command": "webherdr.reconnect",
+        "title": "%command.reconnect%",
+        "category": "webherdr"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "webherdr.sendToAgent",
+          "group": "webherdr@1"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "webherdr.sendToAgent",
+          "group": "webherdr@1"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "webherdr.sendToAgent",
+        "key": "ctrl+alt+a",
+        "mac": "cmd+alt+a",
+        "when": "editorTextFocus"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "esbuild src/extension.ts --bundle --platform=node --format=cjs --target=node18 --external:vscode --outfile=dist/extension.js",
+    "package": "pnpm run build && vsce package --no-dependencies --allow-missing-repository -o webherdr-bridge.vsix",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\"",
+    "typecheck": "tsc -p ."
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.6.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.9.3",
+    "prettier": "^3.6.2"
+  },
+  "l10n": "./l10n",
+  "packageManager": "pnpm@12.8.1"
+}
