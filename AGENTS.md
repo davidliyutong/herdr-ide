@@ -80,6 +80,10 @@ playbooks):
 
 ## Gotchas
 
+- Key events in panes go through `routeKey` (`web/src/terminal/keys.ts`),
+  which cancels what it consumes; an uncancelled keydown makes xterm.js send
+  the key again on keypress. Any key the UI translates or swallows needs a row
+  in `web/src/__tests__/testdata/keys.json`.
 - yamux streams cannot be half-closed: use `agentproto.ChunkWriter` for
   uploads that expect a reply.
 - Frames from herdr are diffs against the previous frame of the same stream;

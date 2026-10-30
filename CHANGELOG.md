@@ -28,5 +28,6 @@ All notable changes are documented here. The format follows
   orphan reaping, retention of uploads, logs and old versions; `--instance`.
 - English and Simplified Chinese UI.
 - Project tooling: one-step rename with state migration, repository checks,
-  reproducible builds, third-party notices, CI, release workflow with
+  pane input contract tests (browser and herdr key encodings), reproducible
+  builds, third-party notices, CI, release workflow with
   checksums and build provenance, Dependabot.

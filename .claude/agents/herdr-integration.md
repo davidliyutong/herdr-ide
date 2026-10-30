@@ -34,8 +34,12 @@ Invariants to keep:
   reset;
 - one controller per pane; observers never resize.
 
-When upgrading herdr: run `make it`, compare the schema, check the terminal
-session command set (`terminal.input|resize|scroll|mouse|release`), and update
-the "herdr facts" section and feature 01 with the verified version.
+When upgrading herdr: run `make it` (including `TestIntegrationKeyParity`,
+which compares herdr's key encoding with the browser's key table), compare
+the schema, check the terminal session command set
+(`terminal.input|resize|scroll|mouse|release`) and whether frames now carry
+input modes or `terminal.input` accepts keys (either would let panes follow
+the application's modes; see feature 03, "Input modes"), and update the
+"herdr facts" section and feature 01 with the verified version.
 
 Report findings with file:line references and the herdr source you checked.

@@ -42,6 +42,47 @@ graphics protocols (dropped by the stream).
 | ⌘ shortcuts | left to the browser (copy, paste) |
 | prefix key | app keymap ([04](04-layout-and-keyboard.md)) |
 
+**Key routing** (`web/src/terminal/keys.ts`)
+
+Every key event in a pane passes through `routeKey`, which has three
+outcomes: xterm.js encodes it; the app consumes it (keymap) or sends its own
+bytes (Shift+Enter); or the browser keeps it (⌘ shortcuts). Consumed events
+are always cancelled. A keydown that xterm.js does not see but that is not
+cancelled is followed by a keypress, which xterm.js turns into a second
+character: Shift+Enter once sent `ESC CR` followed by a CR, which submitted
+the prompt instead of inserting a newline.
+
+The bytes a pane receives for each key are pinned in
+`web/src/__tests__/testdata/keys.json`, which two tests share:
+
+- `web/src/__tests__/input.test.ts` drives the real `TermController`, keymap
+  and xterm.js with the browser's event order (keydown, keypress only if the
+  keydown was not cancelled, keyup) and compares every row's bytes. It also
+  catches encoding changes from xterm.js upgrades.
+- `TestIntegrationKeyParity` (`make it`) sends each row's key with herdr's
+  own encoder (`pane.send_keys`) into a raw reader in normal mode and in
+  application cursor/keypad mode, and compares the result with the table.
+  Rows where the browser deliberately or unavoidably differs from herdr say
+  so (`herdr.legacy`, `herdr.app`, `note`).
+
+**Input modes**
+
+herdr's frames carry only synchronized output and cursor visibility, not the
+pane's input modes, so xterm.js always encodes keys as in a terminal's default
+modes. Consequences, recorded in the key table:
+
+- In application cursor mode (vim, less, zsh's line editor with keypad
+  transmit) arrow keys arrive as `ESC [ A` instead of `ESC O A`. Applications
+  generally accept both; key bindings made for one form only (for example a
+  zsh binding on `$terminfo[kcuu1]`) do not fire.
+- Applications that enable the kitty keyboard protocol receive legacy
+  encodings; modifiers that legacy encodings cannot express (Ctrl+Enter,
+  Shift+Enter) are lost or mapped as above.
+- Focus reporting is not sent.
+- Mouse reporting is decided by herdr from the pane's real modes, so clicks
+  reach an application exactly once; xterm.js still makes its local selection
+  during a drag.
+
 **Arbitration** (`internal/server/arbiter.go`)
 
 - Per pane, the core tracks viewers (browser, stream id, container size,
@@ -83,6 +124,7 @@ graphics protocols (dropped by the stream).
 ## Testing
 
 `internal/server` tests (guards, allowlist) and the integration test for
-stream semantics; the arbiter flow (join, claim, resize, leave) was exercised
+stream semantics; the key contract above (`input.test.ts`,
+`TestIntegrationKeyParity`); the arbiter flow (join, claim, resize, leave) was exercised
 with scripted WebSocket clients against a dev herdr session. Interactive
 behavior (IME, vim mouse, scrollback) was verified in Chrome.

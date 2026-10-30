@@ -11,6 +11,7 @@ import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { WebglAddon } from '@xterm/addon-webgl';
 import '@xterm/xterm/css/xterm.css';
 import { conn } from '../lib/conn';
+import { routeKey } from './keys';
 
 export type TermStatus = 'connecting' | 'open' | 'observe' | 'closed' | 'error';
 
@@ -266,18 +267,13 @@ export class TermController {
     term.onData((d) => this.input(d));
     term.onBinary((d) => this.send({ t: 'inb', b: b64(d) }));
 
-    term.attachCustomKeyEventHandler((ev) => {
-      if (this.opts.onKey?.(ev)) return false;
-      if (ev.type !== 'keydown') return true;
-      // Shift+Enter inserts a newline in Claude Code / Codex prompts.
-      if (ev.key === 'Enter' && ev.shiftKey && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
-        this.input('\x1b\r');
-        return false;
-      }
-      // Leave Cmd shortcuts (copy, paste, ...) to the browser.
-      if (ev.metaKey) return false;
-      return true;
-    });
+    term.attachCustomKeyEventHandler((ev) =>
+      routeKey(
+        ev,
+        (e) => !!this.opts.onKey?.(e),
+        (d) => this.input(d),
+      ),
+    );
 
     term.textarea?.addEventListener('focus', () => this.opts.onFocus?.());
     term.textarea?.addEventListener(

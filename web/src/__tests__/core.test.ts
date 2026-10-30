@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { resolvePath, mediaExt } from '../terminal/links';
 import { bracketedPaste } from '../terminal/paste';
+import { routeKey } from '../terminal/keys';
 import { paneRects } from '../actions';
 import type { LayoutNode } from '../lib/herdr';
 
@@ -48,5 +49,46 @@ describe('paneRects', () => {
     expect(r.get('p1')).toEqual({ x: 0, y: 0, w: 0.5, h: 1 });
     expect(r.get('p2')).toEqual({ x: 0.5, y: 0, w: 0.5, h: 0.25 });
     expect(r.get('p3')).toEqual({ x: 0.5, y: 0.25, w: 0.5, h: 0.75 });
+  });
+});
+
+describe('routeKey', () => {
+  const key = (init: Partial<KeyboardEvent>) =>
+    ({
+      type: 'keydown',
+      key: 'Enter',
+      shiftKey: false,
+      ctrlKey: false,
+      altKey: false,
+      metaKey: false,
+      isComposing: false,
+      keyCode: 13,
+      preventDefault: vi.fn(),
+      ...init,
+    }) as unknown as KeyboardEvent;
+  const none = () => false;
+  it('cancels every event it keeps from xterm.js, except browser shortcuts', () => {
+    const send = vi.fn();
+    const shiftEnter = key({ shiftKey: true });
+    expect(routeKey(shiftEnter, none, send)).toBe(false);
+    expect(send).toHaveBeenCalledWith('\x1b\r');
+    expect(shiftEnter.preventDefault).toHaveBeenCalled();
+    const prefix = key({ key: 'b', ctrlKey: true });
+    expect(routeKey(prefix, () => true, send)).toBe(false);
+    expect(prefix.preventDefault).toHaveBeenCalled();
+    const copy = key({ key: 'c', metaKey: true });
+    expect(routeKey(copy, none, send)).toBe(false);
+    expect(copy.preventDefault).not.toHaveBeenCalled();
+  });
+  it('leaves other keys, keypress events and IME composition to xterm.js', () => {
+    for (const ev of [
+      key({}),
+      key({ shiftKey: true, type: 'keypress' }),
+      key({ shiftKey: true, isComposing: true }),
+      key({ shiftKey: true, keyCode: 229 }),
+    ]) {
+      expect(routeKey(ev, none, () => {})).toBe(true);
+      expect(ev.preventDefault).not.toHaveBeenCalled();
+    }
   });
 });

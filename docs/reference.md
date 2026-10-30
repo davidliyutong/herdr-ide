@@ -83,7 +83,8 @@ run on the pane's machine.
 | `prefix prefix` | Send the prefix key itself | | |
 
 Default prefix: `ctrl+b`. In panes: Shift+Enter sends `ESC CR` (newline in
-Claude Code and similar prompts); Option/Alt-drag selects text locally;
+Claude Code and similar prompts; the bytes of every key are listed in
+[`keys.json`](../web/src/__tests__/testdata/keys.json)); Option/Alt-drag selects text locally;
 ⌘/Ctrl-click opens paths (media in the preview panel, code in VS Code) and
 URLs. Pasting or dropping files uploads them to the machine and types their
 paths.
