@@ -36,7 +36,8 @@ type Agent struct {
 	herdrMu    sync.Mutex
 	herdrCache map[string]string // hint -> resolved binary
 
-	cs *codeServer
+	cs  *codeServer
+	gui *gui
 }
 
 // YamuxConfig is shared by both ends of the session.
@@ -101,6 +102,7 @@ func Serve(ctx context.Context, conn io.ReadWriteCloser, opts Options) error {
 	}
 	a.cs = newCodeServer(a)
 	defer a.cs.stopAll()
+	a.gui = newGUI(a)
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -147,6 +149,8 @@ func (a *Agent) handle(ctx context.Context, st net.Conn) {
 		err = a.handleDialUnix(st, h)
 	case agentproto.OpCodeServer:
 		err = a.cs.handle(ctx, st, h)
+	case agentproto.OpGUI:
+		err = a.gui.handle(ctx, st, h)
 	default:
 		err = agentproto.Fail(st, fmt.Errorf("unknown op %q", h.Op))
 		st.Close()

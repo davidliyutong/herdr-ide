@@ -4,6 +4,7 @@
 // [sid u32][flags u8][width u16][height u16][ansi bytes].
 
 import type { AgentStatusEvent, MachineState } from './herdr';
+import type { GuiState } from '../gui/state';
 
 export interface StreamHandlers {
   onFrame(full: boolean, cols: number, rows: number, data: Uint8Array): void;
@@ -45,6 +46,7 @@ type Listener = {
   onAgent(machine: string, data: AgentStatusEvent): void;
   onConnection(connected: boolean): void;
   onBridgeSend(machine: string, text: string): void;
+  onGui(st: GuiState): void;
 };
 
 class Conn {
@@ -114,6 +116,9 @@ class Conn {
         break;
       case 'bridge.send':
         this.listener?.onBridgeSend(m.m, m.text);
+        break;
+      case 'gui':
+        this.listener?.onGui(m.state);
         break;
       case 'term': {
         const s = this.streams.get(m.sid);

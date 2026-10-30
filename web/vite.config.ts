@@ -52,7 +52,12 @@ export default defineConfig({
     proxy: {
       '/ws': { target: core, ws: true },
       '/api': { target: core },
-      '/m': { target: core, ws: true },
+      '/m': {
+        target: core,
+        ws: true,
+        // Pages of GUI windows are the app itself.
+        bypass: (req) => (/^\/m\/[^/]+\/gui\/\d+\/?(\?|$)/.test(req.url ?? '') ? '/index.html' : undefined),
+      },
     },
   },
 });

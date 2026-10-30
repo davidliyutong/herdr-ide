@@ -94,6 +94,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 	go c.writeLoop()
 	c.sendJSON(map[string]any{"t": "machines", "list": s.mg.States()})
+	for _, st := range s.gui.States() {
+		c.sendJSON(map[string]any{"t": "gui", "state": st})
+	}
 	unsub := s.mg.Subscribe(func(st machines.State) {
 		c.sendJSON(map[string]any{"t": "machine", "state": st})
 	}, func(ev machines.AgentEvent) {
@@ -264,13 +267,28 @@ func (c *wsClient) api(m *inMsg) {
 		c.sendJSON(reply)
 		return
 	}
+	defer func() {
+		// A malformed request must not take the core down.
+		if r := recover(); r != nil {
+			c.s.logger.Printf("api %s: %v", m.Method, r)
+			reply["error"] = map[string]string{"code": "internal", "message": "internal error"}
+			c.sendJSON(reply)
+		}
+	}()
+	withEnv, added := c.s.withPaneEnv(mc, m.Method, m.Params)
 	if !machines.IsReadOnlyMethod(m.Method) {
-		c.s.audit.log(c.req, "api", map[string]any{"machine": m.M, "method": m.Method, "params": json.RawMessage(m.Params)})
+		ev := map[string]any{"machine": m.M, "method": m.Method, "params": json.RawMessage(m.Params)}
+		if len(added) > 0 {
+			ev["env_added"] = added
+		}
+		c.s.audit.log(c.req, "api", ev)
 	}
 	ctx, cancel := context.WithTimeout(c.ctx, 5*time.Minute)
 	defer cancel()
 	var params any = map[string]any{}
-	if len(m.Params) > 0 && string(m.Params) != "null" {
+	if len(added) > 0 {
+		params = withEnv
+	} else if len(m.Params) > 0 && string(m.Params) != "null" {
 		params = m.Params
 	}
 	res, err := mc.Call(ctx, m.Method, params)

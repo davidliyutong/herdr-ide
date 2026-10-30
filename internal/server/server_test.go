@@ -2,7 +2,9 @@ package server
 
 import (
 	"bufio"
+	"encoding/json"
 	"flag"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -200,7 +202,7 @@ func TestReadOnlyRefusesWrites(t *testing.T) {
 	s := newTestServer()
 	s.opts.ReadOnly = true
 	h := s.Handler()
-	for _, path := range []string{"/api/m/x/upload", "/api/m/x/bridge", "/api/m/x/code/start"} {
+	for _, path := range []string{"/api/m/x/upload", "/api/m/x/bridge", "/api/m/x/code/start", "/api/m/x/gui/enable", "/m/x/gui/1/close"} {
 		r := httptest.NewRequest("POST", path, nil)
 		r.Host = "127.0.0.1:7780"
 		w := httptest.NewRecorder()
@@ -273,6 +275,7 @@ func TestSettingsAPI(t *testing.T) {
 		{`{"key":"mode","value":"z"}`, `"error":"invalid"`, 400},
 		{`{"key":"locked","value":"y"}`, `"error":"locked"`, 409},
 		{`{"key":"nope","value":"y"}`, `"error":"unknown"`, 404},
+		{`{"key":"mode","value":"a","machine":"no-such-machine"}`, `"error":"unknown"`, 404},
 		{`not json`, `"error":"invalid"`, 400},
 	} {
 		if code, b := do("PUT", c.body); code != c.status || !strings.Contains(b, c.code) {
@@ -328,5 +331,92 @@ func TestBridgeTheme(t *testing.T) {
 	case line := <-got:
 		t.Fatalf("unexpected %s", line)
 	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// New panes get the machine's display environment; what the caller set wins.
+func TestMergeEnv(t *testing.T) {
+	env := map[string]string{"DISPLAY": ":20", "XAUTHORITY": "/x"}
+	got, added := mergeEnv(json.RawMessage(`{"pane_id":"p1","direction":"right","env":{"DISPLAY":":5","FOO":"1"}}`), env)
+	var p struct {
+		PaneID string            `json:"pane_id"`
+		Env    map[string]string `json:"env"`
+	}
+	if err := json.Unmarshal(got, &p); err != nil || p.PaneID != "p1" {
+		t.Fatalf("params = %s (%v)", got, err)
+	}
+	if p.Env["DISPLAY"] != ":5" || p.Env["XAUTHORITY"] != "/x" || p.Env["FOO"] != "1" {
+		t.Errorf("env = %v", p.Env)
+	}
+	if strings.Join(added, ",") != "XAUTHORITY" {
+		t.Errorf("added = %v", added)
+	}
+	for _, params := range []string{"", "null", " null ", `{"env":null}`, `{"pane_id":"p1","env":null}`} {
+		got, added := mergeEnv(json.RawMessage(params), env)
+		if !strings.Contains(string(got), `"DISPLAY":":20"`) || len(added) != 2 {
+			t.Errorf("%q: %s %v", params, got, added)
+		}
+	}
+	if got, _ := mergeEnv(json.RawMessage(`{"a":1}`), nil); string(got) != `{"a":1}` {
+		t.Errorf("no env changed params: %s", got)
+	}
+	for _, bad := range []string{`{"env":"bad"}`, `[1]`, `{"env":{"A":1}}`} {
+		if got, added := mergeEnv(json.RawMessage(bad), env); string(got) != bad || added != nil {
+			t.Errorf("malformed %s replaced: %s", bad, got)
+		}
+	}
+}
+
+// Closing a program window needs the page's own Origin; "null" (sandboxed
+// frames, data: pages) and other sites are refused.
+func TestGUICloseOrigin(t *testing.T) {
+	h := newTestServer().Handler()
+	for _, c := range []struct {
+		origin string
+		want   int
+	}{
+		{"null", http.StatusForbidden},
+		{"https://evil.example", http.StatusForbidden},
+		{"http://127.0.0.1:7780", http.StatusNotFound}, // passed the guard; no such machine
+	} {
+		r := httptest.NewRequest("POST", "/m/m1/gui/7/close", nil)
+		r.Host = "127.0.0.1:7780"
+		r.Header.Set("Origin", c.origin)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != c.want {
+			t.Errorf("Origin %s: %d, want %d", c.origin, w.Code, c.want)
+		}
+	}
+	r := httptest.NewRequest("GET", "/api/machines", nil)
+	r.Host = "127.0.0.1:7780"
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if got := w.Header().Get("Referrer-Policy"); got != "same-origin" {
+		t.Errorf("Referrer-Policy = %q", got)
+	}
+}
+
+// A remote-only per-machine setting cannot be set for the core's own machine.
+func TestSettingsPerMachineScope(t *testing.T) {
+	mg := machines.NewManager([]machines.Spec{
+		{ID: "local", Kind: machines.KindLocal, Enabled: true},
+		{ID: "r1", Kind: machines.KindSSH, Target: "r1", Enabled: true},
+	}, nil, log.New(io.Discard, "", 0))
+	st := settings.New("", settings.Def{Key: "gui", Kind: settings.KindEnum, Default: "on", Options: []string{"on", "off"}, PerMachine: settings.ScopeRemote})
+	s := New(mg, Options{Logger: log.New(io.Discard, "", 0), Settings: st})
+	h := s.Handler()
+	put := func(body string) int {
+		r := httptest.NewRequest("PUT", "/api/settings", strings.NewReader(body))
+		r.RemoteAddr, r.Host = "127.0.0.1:5555", "127.0.0.1:7780"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w.Code
+	}
+	if c := put(`{"key":"gui","value":"off","machine":"local"}`); c != http.StatusBadRequest {
+		t.Errorf("local machine: %d", c)
+	}
+	if c := put(`{"key":"gui","value":"off","machine":"r1"}`); c != http.StatusOK || st.GetFor("gui", "r1") != "off" {
+		t.Errorf("remote machine: %d, %s", c, st.GetFor("gui", "r1"))
 	}
 }

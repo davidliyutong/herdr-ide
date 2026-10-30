@@ -29,7 +29,9 @@ Run `make check test` before finishing a change.
 
 1. **Never touch the user's real herdr session or state.** Experiments,
    tests and dev servers use `herdr --session herdr-ide-dev` (or the
-   integration test's `herdr-ide-it`) and `--instance dev`. Do not run
+   integration test's `herdr-ide-it`) and `--instance dev`; against remote
+   machines add `--remote-session herdr-ide-dev` (start that session there
+   with `herdr --session herdr-ide-dev server`). Do not run
    `herdr server stop` without `--session`, and do not attach to panes of
    the default session in control mode.
 2. **No hardcoded product name.** Use `brand.*` (Go), `APP_NAME`/`APP_SLUG`/

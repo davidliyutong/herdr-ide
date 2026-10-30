@@ -8,6 +8,26 @@ All notable changes are documented here. The format follows
 
 ### Added
 
+- Program windows: windows of programs on remote Linux machines (matplotlib,
+  MuJoCo, …) open in browser windows, one per program window, with mouse and
+  keyboard. New panes get a virtual display; Xvfb is fetched in user space
+  with `apt-get download` when missing; VirtualGL renders OpenGL on the GPU
+  (`vglrun`, or every program with `--gui-gpu=all`). Settings `--gui` and
+  `--gui-gpu`, also per remote machine in the settings dialog, which shows
+  each machine's display state. Panes opened before can be caught up
+  ("Enable in open panes", or the palette for the focused pane): shells at
+  their prompt get the variables typed in.
+- Core settings can be defined per machine: the settings file keeps
+  per-machine values, `PUT /api/settings` takes `machine`.
+- A page loaded before the core was replaced offers to reload.
+
+### Security
+
+- Pages are served with `Referrer-Policy: same-origin` instead of
+  `no-referrer`, so same-origin POSTs carry their Origin (requests from other
+  sites still get no referrer).
+- `--remote-session`: use an isolated herdr session on remote machines
+  (development and tests).
 - Web IDE for herdr: workspaces, tabs and split layouts from herdr's socket
   API; one xterm.js terminal per pane fed by herdr terminal-session streams;
   herdr-compatible prefix keymap and command palette.

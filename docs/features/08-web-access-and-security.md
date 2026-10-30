@@ -22,8 +22,11 @@ API and the code-server proxy on `127.0.0.1:7780` by default.
 
 **Guardrails** (`internal/server/security.go`, `server.go`), in request order:
 
-1. Security headers on every response (`nosniff`, `no-referrer`,
-   `Cross-Origin-Opener-Policy`).
+1. Security headers on every response (`nosniff`,
+   `Referrer-Policy: same-origin`, `Cross-Origin-Opener-Policy`). Same-origin
+   requests keep their Origin (under `no-referrer` a POST without CORS would
+   carry `Origin: null`, which the Origin check refuses); other sites get no
+   referrer.
 2. **Proxy secret** (`--proxy-secret-file`): requests not from a same-host
    browser must carry `X-herdr-ide-Proxy-Secret` (constant-time compare). A
    same-host proxy is recognized by its non-loopback Host or

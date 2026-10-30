@@ -6,6 +6,8 @@ import { locales, t, type MessageKey } from '../i18n';
 import { prefDefs, usePrefs } from '../prefs';
 import { paneTitle } from '../lib/herdr';
 import { StatusDot } from './StatusDot';
+import { useGui } from '../gui/state';
+import { enableGui } from '../gui/enable';
 
 interface Item {
   id: string;
@@ -91,6 +93,18 @@ export function Palette() {
         id: `theme:${th}`,
         label: t('action.theme', { theme: t(`settings.theme.${th}` as MessageKey) }),
         run: () => usePrefs.getState().setPref('theme', th),
+      });
+    }
+    const f = s.focused;
+    if (f && useGui.getState().machines[f.m]?.phase === 'ready') {
+      cmds.push({ id: 'gui:pane', label: t('action.enableGuiPane'), run: () => void enableGui(f.m, [f.pane]) });
+    }
+    for (const st of Object.values(useGui.getState().machines)) {
+      if (st.phase !== 'ready') continue;
+      cmds.push({
+        id: `gui:${st.m}`,
+        label: t('action.enableGuiMachine', { m: s.machines[st.m]?.label ?? st.m }),
+        run: () => void enableGui(st.m),
       });
     }
     if (mode === 'workspaces') return [...ws, ...agents];

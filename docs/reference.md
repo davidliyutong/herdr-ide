@@ -32,6 +32,7 @@ here; both READMEs link to this page instead of repeating it.
 | Flag | Default | Description |
 | --- | --- | --- |
 | `--local-session` | `default` | herdr session used on the local machine. |
+| `--remote-session` | – | herdr session used on every remote machine instead of the one saved in herdr (development and tests against an isolated session). |
 | `--local-only` | `false` | Do not connect to herdr's saved SSH machines (`--ssh` targets are still used). |
 | `--machine` | – | Connect only these machines, by id, label or ssh target (repeatable). |
 | `--ssh` | – | Extra ssh target (`~/.ssh/config` alias or `user@host`) not saved in herdr (repeatable). |
@@ -50,10 +51,20 @@ here; both READMEs link to this page instead of repeating it.
 | `--code-server-install` | `push` | How machines get code-server: `push` (the core resolves, verifies and uploads the release), `download` (the machine fetches it with curl or wget, verified against the same digest) or `existing` (a code-server already installed on the machine). `download` and `existing` fall back to `push`; `--offline` disables `download`. Also a setting in the UI. |
 | `--code-server-path` | – | code-server on machines for `existing` (absolute or `~/` path); empty searches `PATH`, `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin` and `/snap/bin`. Also a setting in the UI. |
 
+### Program windows
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--gui` | `on` | Show windows of programs on remote Linux machines in browser windows: new panes get a virtual display (`DISPLAY`, `XAUTHORITY`); Xvfb is fetched in user space when missing. Applies to panes created afterwards. Also a setting in the UI. |
+| `--gui-gpu` | `vglrun` | OpenGL on machines with VirtualGL: `vglrun` (programs started with `vglrun` render on the GPU) or `all` (every program in new panes runs under VirtualGL). Also a setting in the UI. |
+
 Settings marked "also a setting in the UI" can be changed in the settings
-dialog; the value is saved on the core host and applies from the next
-code-server start on each machine. A flag given on the command line wins and
-locks the setting in the UI.
+dialog; the value is saved on the core host. code-server settings apply from
+the next code-server start on each machine, GUI settings to panes created
+afterwards. `--gui` and `--gui-gpu` can also be set per remote machine in the
+dialog ("Per machine"); a machine without its own value uses the global one.
+A flag given on the command line wins, for every machine, and locks the
+setting in the UI.
 
 ### Development
 
@@ -120,7 +131,9 @@ On every machine (the agent's `$HOME`):
 | --- | --- | --- |
 | `~/.herdr-ide/agent/<build>/` | Uploaded agent binaries | Builds unused for 14 days are removed. |
 | `~/.herdr-ide/code-server/<version>/` | code-server releases (shared by instances) | Versions unused for 14 days are removed. |
-| `~/.herdr-ide[-<instance>]/run/` (0700) | `cs.sock`, `cs.pid`, `bridge.sock` | While the agent runs. |
+| `~/.herdr-ide[-<instance>]/run/` (0700) | `cs.sock`, `cs.pid`, `bridge.sock`; `gui.json` (reserved display and Xvfb pid), `xauth` (panes' display cookie) and `xauth.server` (Xvfb's copy), both 0600 and replaced at each Xvfb start, `gui.lock` | Sockets while the agent runs; the display files are kept so panes keep a valid environment. |
+| `~/.herdr-ide/xvfb/<version>/` | Xvfb unpacked from the distribution's package (shared by instances) | Versions unused for 14 days are removed when another is unpacked. |
+| `~/.herdr-ide[-<instance>]/xvfb.log` | Output of the last Xvfb started | Replaced at each start. |
 | `~/.herdr-ide[-<instance>]/cs-data/`, `cs-ext/` | VS Code settings, extensions | Kept; logs older than 7 days are pruned. |
 | `~/.herdr-ide[-<instance>]/uploads/` | Pasted and dropped files | Files older than 7 days are pruned. |
 

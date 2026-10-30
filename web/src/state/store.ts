@@ -14,6 +14,20 @@ export interface Renaming {
   id: string;
 }
 
+/** A button on a toast; the click also dismisses the toast. */
+export interface ToastAction {
+  label: string;
+  run(): void;
+  /** Stays until clicked or dismissed. */
+  sticky?: boolean;
+}
+
+export interface Toast {
+  id: number;
+  msg: string;
+  action?: ToastAction;
+}
+
 export type DockView =
   { kind: 'preview'; m: string; path: string } | { kind: 'code'; m: string; folder?: string } | { kind: 'agent'; m: string; pane: string };
 
@@ -37,7 +51,7 @@ interface UIState {
   palette?: 'commands' | 'workspaces' | 'help';
   settingsOpen: boolean;
   renaming?: Renaming;
-  toasts: { id: number; msg: string }[];
+  toasts: Toast[];
   auth?: string;
   /** The server runs with --read-only. */
   readOnly: boolean;
@@ -55,7 +69,7 @@ interface UIState {
   setPalette(p: UIState['palette']): void;
   openSettings(open: boolean): void;
   setRenaming(r: Renaming | undefined): void;
-  toast(msg: string): void;
+  toast(msg: string, action?: ToastAction): void;
   openAuth(m?: string): void;
   setReadOnly(v: boolean): void;
 }
@@ -128,10 +142,11 @@ export const useStore = create<UIState>((set, get) => ({
   openAuth: (auth) => set({ auth }),
   readOnly: false,
   setReadOnly: (readOnly) => set({ readOnly }),
-  toast: (msg) => {
+  toast: (msg, action) => {
     const id = ++toastSeq;
-    set((s) => ({ toasts: [...s.toasts, { id, msg }] }));
-    setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), 5000);
+    set((s) => ({ toasts: [...s.toasts, { id, msg, action }] }));
+    // A toast with an action waits longer for the click.
+    if (!action?.sticky) setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), action ? 15000 : 5000);
   },
 }));
 

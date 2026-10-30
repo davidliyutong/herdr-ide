@@ -20,6 +20,7 @@ import (
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/brand"
 	"herdr-ide/internal/codeserver"
+	"herdr-ide/internal/gui"
 	"herdr-ide/internal/machines"
 	"herdr-ide/internal/settings"
 )
@@ -62,6 +63,7 @@ type Server struct {
 	csProxy *codeServerProxy
 	cs      *codeserver.Manager
 	bridge  *bridgeHub
+	gui     *gui.Manager
 
 	clientsMu sync.Mutex
 	clients   map[*wsClient]bool
@@ -95,6 +97,7 @@ func New(mg *machines.Manager, opts Options) *Server {
 		s.hosts[strings.ToLower(u.Hostname())] = true
 	}
 	s.csProxy = newCodeServerProxy(s)
+	s.initGUI()
 	return s
 }
 
@@ -121,6 +124,10 @@ func (s *Server) Handler() http.Handler {
 		http.Redirect(w, r, u.String(), http.StatusFound)
 	})
 	mux.Handle("/m/{id}/code/", s.writable(s.csProxy.ServeHTTP))
+	mux.HandleFunc("GET /m/{id}/gui/{win}", s.handleGUIPage)
+	mux.HandleFunc("GET /m/{id}/gui/{win}/ws", s.handleGUIWS)
+	mux.HandleFunc("POST /m/{id}/gui/{win}/close", s.writable(s.handleGUIClose))
+	mux.HandleFunc("POST /api/m/{id}/gui/enable", s.writable(s.handleGUIEnable))
 	if s.opts.Static != nil {
 		mux.Handle("/", spaHandler(s.opts.Static))
 	}
@@ -263,6 +270,8 @@ func (s *Server) handleSetSetting(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Key   string `json:"key"`
 		Value string `json:"value"`
+		// Machine sets that machine's own value of a per-machine setting.
+		Machine string `json:"machine"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid", "detail": err.Error()})
@@ -272,10 +281,23 @@ func (s *Server) handleSetSetting(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown"})
 		return
 	}
-	err := s.opts.Settings.Set(req.Key, req.Value)
+	if req.Machine != "" {
+		mc := s.mg.Get(req.Machine)
+		if mc == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown"})
+			return
+		}
+		for _, e := range s.opts.Settings.List() {
+			if e.Key == req.Key && e.PerMachine == settings.ScopeRemote && mc.Local() {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid", "detail": req.Key + " applies to remote machines only"})
+				return
+			}
+		}
+	}
+	err := s.opts.Settings.SetFor(req.Key, req.Machine, req.Value)
 	switch {
 	case err == nil:
-		s.audit.log(r, "settings.set", map[string]any{"key": req.Key, "value": req.Value})
+		s.audit.log(r, "settings.set", map[string]any{"key": req.Key, "value": req.Value, "machine": req.Machine})
 		writeJSON(w, http.StatusOK, map[string]any{"settings": s.opts.Settings.List()})
 	case errors.Is(err, settings.ErrUnknown):
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown"})
