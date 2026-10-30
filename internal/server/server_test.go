@@ -153,6 +153,7 @@ func TestAPIAllowlist(t *testing.T) {
 	s := newTestServer()
 	for m, want := range map[string]bool{
 		"pane.split": true, "agent.prompt": true, "session.snapshot": true, "plugin.action.invoke": true,
+		"tab.move": true, "workspace.move": true,
 		"server.stop": false, "server.live_handoff": false, "integration.install": false,
 		"plugin.link": false, "events.subscribe": false, "client_shell.surface.set": false,
 	} {
@@ -161,7 +162,7 @@ func TestAPIAllowlist(t *testing.T) {
 		}
 	}
 	s.opts.ReadOnly = true
-	if s.apiAllowed("pane.split") || !s.apiAllowed("pane.list") {
+	if s.apiAllowed("pane.split") || s.apiAllowed("tab.move") || s.apiAllowed("workspace.move") || !s.apiAllowed("pane.list") {
 		t.Error("read-only allowlist wrong")
 	}
 }
@@ -245,6 +246,33 @@ func TestCodeServerIdleTracking(t *testing.T) {
 	}
 	if ids := p.idleAmong([]string{"m2"}, time.Minute); len(ids) != 0 {
 		t.Fatalf("machine without traffic yet must get a grace period: %v", ids)
+	}
+}
+
+// code-server's port proxy would serve any local service of a machine with
+// our origin; it is refused before the machine is even looked up.
+func TestCodeServerPortProxyRefused(t *testing.T) {
+	h := newTestServer().Handler()
+	get := func(path string) int {
+		r := httptest.NewRequest("GET", path, nil)
+		r.Host = "127.0.0.1:7780"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w.Code
+	}
+	for _, path := range []string{
+		"/m/local/code/proxy/5173/", "/m/local/code/proxy/5173", "/m/local/code/PROXY/5173/x",
+		"/m/local/code/absproxy/8888/", "/m/local/code/%70roxy/5173/", "/m/local/code/proxy",
+	} {
+		if got := get(path); got != http.StatusForbidden {
+			t.Errorf("GET %s = %d, want 403", path, got)
+		}
+	}
+	// Other code-server paths still reach the machine lookup.
+	for _, path := range []string{"/m/local/code/proxyish/", "/m/local/code/static/proxy/1"} {
+		if got := get(path); got != http.StatusNotFound {
+			t.Errorf("GET %s = %d, want 404 (unknown machine)", path, got)
+		}
 	}
 }
 

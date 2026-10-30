@@ -41,8 +41,8 @@ settings between machines.
   embedded bridge extension and the default extensions (Git Graph). Markers
   in the extensions directory skip reinstallation.
 - Start flags: unix socket only (`--socket … --socket-mode 600`), `--auth
-  none` (the socket directory is private), telemetry and update checks off,
-  workspace trust off, `--reconnection-grace-time 300`,
+  none` (the socket directory is private), `--disable-proxy`, telemetry and
+  update checks off, workspace trust off, `--reconnection-grace-time 300`,
   `--idle-timeout-seconds 3600`.
 
 **Proxy** (`internal/server/codeserver.go`)
@@ -114,13 +114,22 @@ The socket directory is 0700 and the socket 0600; `--auth none` is safe only
 because nothing else can connect. The proxy strips the proxy-secret header
 and adds `X-Frame-Options: SAMEORIGIN`. Read-only mode refuses the panel.
 
+code-server's port proxy (`/proxy/<port>/`, `/absproxy/<port>/`) is off: it
+would serve whatever listens on a port of the machine, including another
+user's service on a shared machine, with the UI's origin, where its scripts
+could open `/ws` and type into every pane. code-server is started with
+`--disable-proxy`, and the core refuses those paths (any case) itself, which
+also covers a code-server started by an earlier build that is still reused.
+VS Code's "open in browser" links for forwarded ports therefore do not work.
+
 ## Testing
 
 `internal/codeserver/artifacts_test.go` (resolution and verification),
 `internal/codeserver/manager_test.go` (install mode, recorded digests),
 `internal/agent/codeserver_test.go` (finding an installed code-server,
-verified machine downloads), `internal/server/server_test.go` (bridge window
-selection, idle tracking, theme broadcast). The fallback from `existing` to
+verified machine downloads, start flags), `internal/server/server_test.go`
+(bridge window selection, idle tracking, theme broadcast, refused port proxy
+paths). The fallback from `existing` to
 `push` and the theme switch in both directions were verified with
 code-server 4.144.0 in Chrome.
 Provisioning, Git Graph through the bridge and arm64 installs were verified

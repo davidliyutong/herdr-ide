@@ -87,7 +87,7 @@ body.resizing-row * {
 }
 body.resizing iframe,
 body.resizing-row iframe,
-body.pane-dragging iframe {
+body.dragging iframe {
   pointer-events: none;
 }
 
@@ -650,13 +650,13 @@ select,
   }
 }
 
-/* ---------- dragging panes ---------- */
-body.pane-dragging,
-body.pane-dragging * {
+/* ---------- dragging panes, tabs and workspaces ---------- */
+body.dragging,
+body.dragging * {
   cursor: grabbing !important;
   user-select: none;
 }
-.pane-drag-ghost {
+.drag-ghost {
   position: fixed;
   left: 0;
   top: 0;
@@ -672,7 +672,7 @@ body.pane-dragging * {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.pane-drop-marker {
+.drop-marker {
   position: fixed;
   z-index: 70;
   pointer-events: none;
@@ -685,8 +685,68 @@ body.pane-dragging * {
     width 0.08s,
     height 0.08s;
 }
-.pane-drop-marker[data-zone='center'] {
+.drop-marker[data-zone='center'] {
   border-style: dashed;
+}
+/* Insertion bar between two tabs or workspaces. */
+.drop-marker[data-zone='slot'] {
+  border: none;
+  border-radius: 1px;
+  background: var(--accent);
+}
+.tab,
+.ws-item {
+  user-select: none;
+}
+
+/* ---------- context menu ---------- */
+.context-menu {
+  position: fixed;
+  z-index: 90;
+  min-width: 200px;
+  max-width: 360px;
+  padding: 4px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px var(--shadow);
+  font-size: var(--fs-md);
+  outline: none;
+  user-select: none;
+}
+.context-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px 5px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  color: var(--fg);
+}
+.context-item.sel {
+  background: var(--bg-3);
+}
+.context-item.danger.sel {
+  color: var(--error);
+}
+.context-item.disabled {
+  color: var(--fg-mute);
+  cursor: default;
+}
+.context-icon {
+  display: inline-flex;
+  width: 1.15em;
+  color: var(--fg-dim);
+}
+.context-item .hint {
+  margin-left: auto;
+  padding-left: 16px;
+  white-space: nowrap;
+}
+.context-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--line);
 }
 .pane-body {
   flex: 1;

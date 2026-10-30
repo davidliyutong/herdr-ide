@@ -493,6 +493,22 @@ func (c *codeServer) baseArgs() []string {
 	return []string{"--user-data-dir", c.dataDir(), "--extensions-dir", c.extDir()}
 }
 
+// serveArgs are the arguments of the code-server process.
+func (c *codeServer) serveArgs() []string {
+	return append([]string{
+		"--socket", c.socket(), "--socket-mode", "600",
+		"--auth", "none",
+		// The port proxy (/proxy/<port>/, /absproxy/<port>/) would serve
+		// whatever listens on the machine with the UI's origin.
+		"--disable-proxy",
+		"--disable-telemetry", "--disable-update-check",
+		"--disable-workspace-trust", "--disable-getting-started-override",
+		"--ignore-last-opened",
+		"--reconnection-grace-time", strconv.Itoa(csGraceSeconds),
+		"--idle-timeout-seconds", strconv.Itoa(csIdleSeconds),
+	}, c.baseArgs()...)
+}
+
 func (c *codeServer) start(ctx context.Context, h agentproto.Header) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -524,16 +540,7 @@ func (c *codeServer) start(ctx context.Context, h agentproto.Header) error {
 	for _, d := range []string{c.dataDir(), c.extDir()} {
 		os.MkdirAll(d, 0o700)
 	}
-	args := append([]string{
-		"--socket", c.socket(), "--socket-mode", "600",
-		"--auth", "none",
-		"--disable-telemetry", "--disable-update-check",
-		"--disable-workspace-trust", "--disable-getting-started-override",
-		"--ignore-last-opened",
-		"--reconnection-grace-time", strconv.Itoa(csGraceSeconds),
-		"--idle-timeout-seconds", strconv.Itoa(csIdleSeconds),
-	}, c.baseArgs()...)
-	cmd := exec.Command(bin, args...)
+	cmd := exec.Command(bin, c.serveArgs()...)
 	// The bridge extension finds the agent's socket through this variable.
 	cmd.Env = append(cleanEnv(), "VSCODE_PROXY_URI=", brand.Env("BRIDGE_SOCKET")+"="+filepath.Join(c.a.runDir, "bridge.sock"))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}

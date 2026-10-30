@@ -112,7 +112,13 @@ With the mouse: click a pane's title to rename it (empty restores the
 terminal title); double-click a tab or workspace to rename it; drag a pane by
 its header onto another pane to swap the two (centre) or to place it beside
 that pane (edges), onto a tab to move it there, or onto `+` to move it into a
-new tab.
+new tab; drag a tab along the tab bar, or a workspace along its machine's
+list, to reorder it. Escape cancels a drag.
+
+Right-click a pane header, a tab or a workspace for a menu of its commands
+(rename, split, zoom, VS Code, new tab, move, close) with their bindings;
+↑↓ Home End select, Enter runs, Escape closes. In read-only mode the
+browser's menu shows instead.
 
 ## Environment variables
 

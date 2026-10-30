@@ -2,7 +2,7 @@
 
 import { conn } from './lib/conn';
 import type { LayoutNode, Pane, Snapshot } from './lib/herdr';
-import { paneCwd, statusRank } from './lib/herdr';
+import { paneCwd, statusRank, workspaceTabs } from './lib/herdr';
 import { activeTabId, useStore } from './state/store';
 import { getTerm } from './terminal/registry';
 import { mediaExt } from './terminal/links';
@@ -112,10 +112,10 @@ export const actions = {
     m ??= c?.m;
     ws ??= c?.ws;
     if (!m || !ws) return;
-    const snap = useStore.getState().machines[m]?.snapshot;
-    const cwd = c?.focused ? cwdOf(snap, c.focused) : undefined;
+    // The focused pane's cwd, when it is in that workspace.
+    const focused = c?.m === m ? c.snap.panes.find((p) => p.pane_id === c.focused && p.workspace_id === ws) : undefined;
     try {
-      const res = await conn.api(m, 'tab.create', { workspace_id: ws, cwd, focus: false });
+      const res = await conn.api(m, 'tab.create', { workspace_id: ws, cwd: paneCwd(focused), focus: false });
       const tab = res?.tab?.tab_id;
       if (tab) useStore.getState().selectTab(m, ws, tab);
       const root = res?.root_pane?.pane_id;
@@ -176,6 +176,27 @@ export const actions = {
     )
       return;
     await conn.api(m, 'workspace.close', { workspace_id: ws }).catch(report);
+  },
+
+  /** Moves a tab to a slot of its workspace's tab order: 0 is before the
+   * first tab, the tab count after the last (herdr's insert_index). */
+  async moveTab(m: string, tab: string, index: number) {
+    try {
+      const res = await conn.api(m, 'tab.move', { tab_id: tab, insert_index: index });
+      if (res?.tabs) useStore.getState().setOrder(m, { tabs: res.tabs });
+    } catch (e) {
+      useStore.getState().toast(t('workspace.moveFailed', { error: e instanceof Error ? e.message : String(e) }));
+    }
+  },
+
+  /** Moves a workspace to a slot of its machine's workspace order. */
+  async moveWorkspace(m: string, ws: string, index: number) {
+    try {
+      const res = await conn.api(m, 'workspace.move', { workspace_id: ws, insert_index: index });
+      if (res?.workspaces) useStore.getState().setOrder(m, { workspaces: res.workspaces });
+    } catch (e) {
+      useStore.getState().toast(t('sidebar.moveFailed', { error: e instanceof Error ? e.message : String(e) }));
+    }
   },
 
   /** Starts renaming in place; the tab, workspace or pane header shows an editor. */
@@ -248,7 +269,7 @@ export const actions = {
   switchTab(step: number | { index: number }) {
     const c = current();
     if (!c) return;
-    const tabs = c.snap.tabs.filter((t) => t.workspace_id === c.ws).sort((a, b) => a.number - b.number);
+    const tabs = workspaceTabs(c.snap, c.ws);
     if (!tabs.length) return;
     let next;
     if (typeof step === 'number') {

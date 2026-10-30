@@ -62,6 +62,18 @@ func TestCodeServerExistingBin(t *testing.T) {
 	}
 }
 
+// code-server runs without its port proxy, which would serve the machine's
+// local services with the UI's origin.
+func TestCodeServerArgsDisableProxy(t *testing.T) {
+	c := &codeServer{a: testAgent(t)}
+	args := strings.Join(c.serveArgs(), " ")
+	for _, want := range []string{"--disable-proxy", "--auth none", "--socket-mode 600"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("args %q lack %q", args, want)
+		}
+	}
+}
+
 func releaseTarball(t *testing.T) []byte {
 	t.Helper()
 	var buf bytes.Buffer

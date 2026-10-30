@@ -12,8 +12,9 @@ browser tab, with VS Code (code-server) one keystroke away.
   states come from herdr's socket API; every pane is an xterm.js terminal fed
   by herdr's own renderer, with input, mouse, scrollback, IME and resizable
   splits. Drag a pane by its header to swap or move it, click its title to
-  rename it. Keyboard shortcuts follow your herdr configuration (prefix
-  `ctrl+b`).
+  rename it; drag tabs and workspaces to reorder them; right-click a pane
+  header, tab or workspace for its commands. Keyboard shortcuts follow your
+  herdr configuration (prefix `ctrl+b`).
 - **Multi-machine.** Uses the SSH machines saved in herdr. One ssh connection
   per machine runs a small static agent (linux/macOS × amd64/arm64, uploaded
   automatically) that multiplexes everything; nothing listens on the

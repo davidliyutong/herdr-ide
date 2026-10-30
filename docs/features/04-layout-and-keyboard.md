@@ -30,8 +30,17 @@ Non-goals: a separate herdr-ide layout model; arbitrary docking of panes.
 - Tab and workspace selection is local to each browser (it does not move the
   focus of herdr TUI clients); opening an agent from the inbox calls
   `pane.focus` so herdr marks it as seen.
+- Tabs and workspaces are shown in the order of the snapshot's arrays, which
+  is herdr's order. `Tab.number` is not a position: it stays with a tab when
+  the tab moves (workspace numbers are positions). `prefix 1..9` picks tabs
+  by position.
 
-**Rearranging and renaming** (`web/src/paneDrag.ts`, `InlineEdit.tsx`)
+**Rearranging and renaming** (`web/src/drag.ts`, `paneDrag.ts`,
+`reorderDrag.ts`, `InlineEdit.tsx`)
+
+- All drags share `drag.ts`: a drag starts after the pointer moved a few
+  pixels (so a click stays a click), a ghost follows the pointer, a marker
+  shows where the drop lands, and Escape cancels.
 
 - Dragging a pane header (after a few pixels, so a click stays a click)
   shows a highlight of where the pane will go. The middle of another pane
@@ -42,11 +51,42 @@ Non-goals: a separate herdr-ide layout model; arbitrary docking of panes.
 - herdr 0.9.5 refuses `pane.move` within one tab (`same_tab`), so a move
   beside a pane of the same tab first moves the pane to a new tab, which herdr
   closes again when the pane leaves it.
+- Dragging a tab along the tab bar, or a workspace along its machine's list
+  in the sidebar, shows an insertion bar and reorders it (`tab.move`,
+  `workspace.move`). Their `insert_index` is a slot in the current order (0
+  before the first item, n after the last); the two slots beside the dragged
+  item change nothing and show no bar. A tab stays in its workspace and a
+  workspace on its machine. The reply (the moved group in its new order) is
+  applied to the shown snapshot at once; the snapshot that follows herdr's
+  `tab.moved` / `workspace.reordered` event replaces it. Tabs are still drop
+  targets for dragged panes; the two drags start from different elements.
 - Clicking a pane's title edits it in place (`pane.rename`; empty clears the
   label so the terminal title shows again). Double-clicking a tab or
   workspace, or its rename binding, edits it in place (`tab.rename`,
   `workspace.rename`). Enter or leaving the field saves, Escape cancels.
 - Read-only mode and zoomed panes have no drag, rename or mutating buttons.
+
+**Context menus** (`web/src/contextMenu.ts`, `menus.tsx`,
+`components/ContextMenu.tsx`)
+
+- Right-clicking a pane header, a tab or a workspace in the sidebar opens an
+  in-app menu at the pointer instead of the browser's:
+  - pane header: rename, split right / down, zoom or restore, VS Code /
+    changes / Git Graph of the pane's folder, close;
+  - tab: rename, new tab, move left / right, close;
+  - workspace: rename, new tab in it, move up / down, close.
+- Items call the same commands as the buttons and bindings, and show the
+  binding of the same command. Bindings act on the current tab or workspace,
+  so a menu of another tab or workspace shows none for those items. Moving
+  past either end is disabled.
+- The menu takes the keyboard: ↑↓ (skipping disabled items), Home/End,
+  Enter or Space runs, Escape or Tab closes; prefix bindings do not run
+  while it is open. Running an item or closing from the keyboard gives focus
+  back to what had it, before the item runs, so items that move focus
+  (rename, split) keep it. A click elsewhere, leaving the window or resizing
+  closes it.
+- Read-only mode offers no items, so the browser's menu shows. The terminal
+  body keeps the browser's menu (copy, paste).
 
 **Dialogs** (`web/src/dialog.ts`, `Dialogs.tsx`)
 
@@ -78,6 +118,9 @@ Non-goals: a separate herdr-ide layout model; arbitrary docking of panes.
 
 | Option | Why not |
 | --- | --- |
+| Reordering tabs and workspaces in the browser only | The order would differ from herdr's TUI and from other browsers. |
+| Bindings to move tabs and workspaces | herdr has no such bindings to mirror; the context menu's move items work from the keyboard. |
+| A "⋯" button on every header, tab and workspace row | Takes room on every tab and row; right-click covers desktop browsers. |
 | Desktop shell (Electron/Tauri) to own all shortcuts | Electron was replaced by browser access so the IDE works remotely; Tauri's WKWebView on macOS lacks service workers, which VS Code webviews need. |
 | Browser-specific bindings (`Cmd+…`) | Conflict with the browser and with muscle memory from herdr. |
 | Keyboard Lock API | Fullscreen-only and Chromium-only. |
@@ -87,12 +130,19 @@ Non-goals: a separate herdr-ide layout model; arbitrary docking of panes.
 - **Config unreadable** → defaults are used.
 - **Pane closed while focused** → focus falls back to the first pane of the
   tab on the next navigation.
+- **Move refused** (for example the tab was closed meanwhile) → a toast with
+  herdr's error; the order stays as herdr has it.
 
 ## Testing
 
 `internal/server/server_test.go` (`TestLoadKeyConfig`),
 `web/src/__tests__/core.test.ts` (pane geometry for directional focus),
-`web/src/__tests__/settings.test.ts` (drop zones, key labels); the
-`set_split_ratio` path semantics and the `pane.swap` / `pane.move` behavior
-(including `same_tab` and the temporary tab closing itself) were verified
-against a real herdr 0.9.5 session, and dragging and renaming in Chrome.
+`web/src/__tests__/settings.test.ts` (drop zones, key labels),
+`web/src/__tests__/menus.test.ts` (insertion slots, applying a move reply,
+menu items and their commands, read-only, keyboard and focus of the menu);
+`internal/server/server_test.go` (`TestAPIAllowlist`: moves are refused in
+read-only mode). The `set_split_ratio` path semantics, the `pane.swap` /
+`pane.move` behavior (including `same_tab` and the temporary tab closing
+itself) and the `insert_index` slots of `tab.move` / `workspace.move` were
+verified against a real herdr 0.9.5 session, and dragging, reordering and
+the menus in Chrome.
