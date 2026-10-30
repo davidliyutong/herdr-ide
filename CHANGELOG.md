@@ -54,6 +54,13 @@ All notable changes are documented here. The format follows
   replaced, the rename migration stops the old code-server first, and the
   core stops the local machine's code-server when it exits.
 
+### Security
+
+- code-server's port proxy (`/m/<machine>/code/proxy/<port>/`) is disabled
+  and refused by the core: it served any service listening on a machine,
+  including another user's on a shared machine, with the UI's origin, where
+  its scripts could type into every pane.
+
 ### Changed
 
 - Pane header actions use icons with larger targets and stay visible; read-only
