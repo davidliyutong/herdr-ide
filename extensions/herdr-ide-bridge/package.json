@@ -62,11 +62,11 @@
     "typecheck": "tsc -p ."
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
+    "@types/node": "^26.6.5",
     "@types/vscode": "^1.90.0",
-    "@vscode/vsce": "^3.6.0",
-    "esbuild": "^0.25.0",
-    "typescript": "^5.9.3",
+    "@vscode/vsce": "^4.0.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2",
     "prettier": "^3.6.2"
   },
   "l10n": "./l10n",
