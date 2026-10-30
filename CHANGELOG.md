@@ -6,6 +6,8 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-31
+
 ### Added
 
 - Program windows: windows of programs on remote Linux machines (matplotlib,
@@ -20,7 +22,6 @@ All notable changes are documented here. The format follows
 - Core settings can be defined per machine: the settings file keeps
   per-machine values, `PUT /api/settings` takes `machine`.
 - A page loaded before the core was replaced offers to reload.
-
 - `--remote-session`: use an isolated herdr session on remote machines
   (development and tests).
 - Web IDE for herdr: workspaces, tabs and split layouts from herdr's socket
@@ -90,7 +91,6 @@ All notable changes are documented here. The format follows
 - Pane header actions use icons with larger targets and stay visible; read-only
   mode hides actions it would refuse; the VS Code loading page follows the UI
   language and theme.
-
 - Renamed from webherdr to herdr-ide: binaries, Go module, `~/.herdr-ide`,
   `HERDR_IDE_*` variables and the `herdr-ide.herdr-ide-bridge` extension.
   Existing installs migrate on first start: machines move `~/.webherdr` to
