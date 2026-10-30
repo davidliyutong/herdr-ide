@@ -11,6 +11,8 @@ import { uploadPasted } from '../lib/files';
 import { StatusDot } from './StatusDot';
 import { InlineEdit } from './InlineEdit';
 import { startPaneDrag } from '../paneDrag';
+import { openMenu } from '../contextMenu';
+import { paneMenu } from '../menus';
 import { t } from '../i18n';
 
 interface Props {
@@ -53,7 +55,11 @@ export function PaneView({ m, paneId, zoomed }: Props) {
   };
   return (
     <div className={`pane ${focused ? 'focused' : ''}`} onMouseDown={onFocus} data-pane-id={paneId} data-tab-id={pane?.tab_id} data-m={m}>
-      <div className={`pane-header ${readOnly || zoomed ? '' : 'draggable'}`} onPointerDown={onHeaderPointerDown}>
+      <div
+        className={`pane-header ${readOnly || zoomed ? '' : 'draggable'}`}
+        onPointerDown={onHeaderPointerDown}
+        onContextMenu={(e) => !(e.target as HTMLElement).closest('input') && openMenu(e, paneMenu(m, paneId, !!zoomed))}
+      >
         {pane?.agent && <StatusDot status={pane.agent_status} />}
         {renaming ? (
           <InlineEdit

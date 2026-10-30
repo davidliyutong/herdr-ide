@@ -9,6 +9,9 @@ import { t, type MessageKey } from '../i18n';
 import { keyHint } from '../keymap';
 import { APP_NAME } from '../brand';
 import { InlineEdit } from './InlineEdit';
+import { startWorkspaceDrag } from '../reorderDrag';
+import { openMenu } from '../contextMenu';
+import { workspaceMenu } from '../menus';
 
 function aggregate(statuses: AgentStatus[]): AgentStatus | undefined {
   let best: AgentStatus | undefined;
@@ -89,7 +92,7 @@ function MachineItem({ m }: { m: MachineState }) {
   const renaming = useStore((s) => (s.renaming?.kind === 'workspace' && s.renaming.m === m.id ? s.renaming.id : undefined));
   const setRenaming = useStore((s) => s.setRenaming);
   const snap = m.snapshot;
-  const workspaces = [...(snap?.workspaces ?? [])].sort((a, b) => a.number - b.number);
+  const workspaces = snap?.workspaces ?? [];
   return (
     <div className="machine">
       <div className="machine-head" onClick={() => setOpen(!open)} title={m.error || m.platform}>
@@ -99,7 +102,7 @@ function MachineItem({ m }: { m: MachineState }) {
         <span className="caret">{open ? <ChevronDown /> : <ChevronRight />}</span>
       </div>
       {open && (
-        <div className="machine-body">
+        <div className="machine-body" data-m={m.id}>
           {m.status !== 'ready' && (
             <div className={`machine-status ms-${m.status}`}>
               {t(`machine.${m.status}` as MessageKey)}
@@ -118,16 +121,24 @@ function MachineItem({ m }: { m: MachineState }) {
             const panes = snap!.panes.filter((p) => p.workspace_id === w.workspace_id && p.agent);
             const agg = aggregate(panes.map((p) => p.agent_status));
             const selected = selM === m.id && selWs === w.workspace_id;
+            const editing = renaming === w.workspace_id;
             return (
               <div
                 key={w.workspace_id}
                 className={`ws-item ${selected ? 'selected' : ''}`}
                 onClick={() => selectWorkspace(m.id, w.workspace_id)}
                 onDoubleClick={() => !readOnly && actions.startRename('workspace', m.id, w.workspace_id)}
+                onPointerDown={(e) => {
+                  if (e.button !== 0 || readOnly || editing || (e.target as HTMLElement).closest('button, input')) return;
+                  startWorkspaceDrag(e, { m: m.id, ws: w.workspace_id, label: w.label });
+                }}
+                onContextMenu={(e) => !editing && openMenu(e, workspaceMenu(m.id, w.workspace_id))}
                 title={readOnly ? w.label : t('sidebar.workspaceHint', { label: w.label })}
+                data-ws-id={w.workspace_id}
+                data-m={m.id}
               >
                 <span className="ws-num">{w.number}</span>
-                {renaming === w.workspace_id ? (
+                {editing ? (
                   <InlineEdit
                     value={w.label}
                     onDone={(v) => {

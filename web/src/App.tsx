@@ -8,6 +8,7 @@ import { Palette } from './components/Palette';
 import { AuthDialog } from './components/AuthDialog';
 import { SettingsDialog } from './components/SettingsDialog';
 import { Dialogs } from './components/Dialogs';
+import { ContextMenu } from './components/ContextMenu';
 import { usePrefs } from './prefs';
 import { getKeyConfig, handleKey, loadKeymap, onKeyConfig, onPrefixChange } from './keymap';
 import { t } from './i18n';
@@ -84,6 +85,7 @@ export function App() {
       <SettingsDialog />
       <Dialogs />
       <AuthDialog />
+      <ContextMenu />
       <div className="toasts">
         {toasts.map((t) => (
           <div key={t.id} className="toast">

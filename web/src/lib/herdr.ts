@@ -117,3 +117,19 @@ export function shortPath(p: string | undefined, home?: string): string {
   if (home && (p === home || p.startsWith(home + '/'))) p = '~' + p.slice(home.length);
   return p;
 }
+
+/** Tabs of a workspace in herdr's order. `Tab.number` is not the position:
+ * it stays with the tab when the tab is moved. */
+export function workspaceTabs(snap: Snapshot, ws: string): Tab[] {
+  return snap.tabs.filter((t) => t.workspace_id === ws);
+}
+
+/** `items` with the entries of `fresh` (a group in its new order, with its
+ * new fields) put into the positions the group occupies; unchanged when
+ * `fresh` names an item twice or one that `items` lacks. */
+export function withOrder<T>(items: T[], id: (x: T) => string, fresh: T[]): T[] {
+  const ids = new Set(fresh.map(id));
+  if (ids.size !== fresh.length || items.filter((x) => ids.has(id(x))).length !== fresh.length) return items;
+  let k = 0;
+  return items.map((x) => (ids.has(id(x)) ? fresh[k++] : x));
+}
