@@ -149,13 +149,26 @@ func DialLocal(ctx context.Context, instance string, logger *log.Logger) (*Sessi
 		return nil, err
 	}
 	actx, cancel := context.WithCancel(context.Background())
+	served := make(chan struct{})
 	go func() {
+		defer close(served)
 		if err := agent.Serve(actx, c1, agent.Options{Instance: instance, Logger: log.New(logger.Writer(), "agent[local]: ", log.LstdFlags)}); err != nil {
 			logger.Printf("local agent: %v", err)
 		}
 		c1.Close()
 	}()
-	s, err := newSession(c0, closerFunc(func() error { cancel(); return c1.Close() }), logger)
+	// Closing waits for the agent's cleanup (it stops the code-server it
+	// started), which a remote agent does after its ssh session ends.
+	s, err := newSession(c0, closerFunc(func() error {
+		cancel()
+		err := c1.Close()
+		select {
+		case <-served:
+		case <-time.After(10 * time.Second):
+			logger.Printf("local agent did not finish cleaning up")
+		}
+		return err
+	}), logger)
 	if err != nil {
 		cancel()
 		c0.Close()

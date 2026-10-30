@@ -3,7 +3,9 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { useStore } from '../state/store';
 import { conn } from '../lib/conn';
-import { fontFamily, theme } from '../terminal/TermController';
+import { fontFamily, themes } from '../terminal/TermController';
+import { themeKind } from '../appearance';
+import { getPrefs } from '../prefs';
 import { t } from '../i18n';
 
 /** Interactive ssh authentication for a machine, run in a PTY on the core
@@ -21,7 +23,7 @@ export function AuthDialog() {
 
   useEffect(() => {
     if (!m || !hostRef.current) return;
-    const term = new Terminal({ fontFamily, fontSize: 13, theme, scrollback: 1000 });
+    const term = new Terminal({ fontFamily, fontSize: getPrefs().termFontSize, theme: themes[themeKind()], scrollback: 1000 });
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(hostRef.current);

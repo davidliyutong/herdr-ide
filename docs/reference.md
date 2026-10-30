@@ -47,6 +47,13 @@ here; both READMEs link to this page instead of repeating it.
 | `--extension-url` | Open VSX | Download URL template for extensions (`{publisher}`, `{name}`, `{version}`, `{file}`). |
 | `--seed-dir` | – | Directory with pre-downloaded tarballs and VSIXs (from `fetch-assets`), searched before the cache (repeatable). |
 | `--offline` | `false` | Never download; artifacts must come from `--seed-dir` or the cache. |
+| `--code-server-install` | `push` | How machines get code-server: `push` (the core resolves, verifies and uploads the release), `download` (the machine fetches it with curl or wget, verified against the same digest) or `existing` (a code-server already installed on the machine). `download` and `existing` fall back to `push`; `--offline` disables `download`. Also a setting in the UI. |
+| `--code-server-path` | – | code-server on machines for `existing` (absolute or `~/` path); empty searches `PATH`, `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin` and `/snap/bin`. Also a setting in the UI. |
+
+Settings marked "also a setting in the UI" can be changed in the settings
+dialog; the value is saved on the core host and applies from the next
+code-server start on each machine. A flag given on the command line wins and
+locks the setting in the UI.
 
 ### Development
 
@@ -80,6 +87,7 @@ run on the pane's machine.
 | `prefix shift+g` | Git Graph | `prefix o` | Jump to the agent that needs attention |
 | `prefix space` | Command palette | `prefix w` | Switch workspace or agent |
 | `prefix b` | Toggle sidebar | `prefix ?` | Shortcut list |
+| `prefix shift+t` | Rename tab | `prefix ,` | Settings |
 | `prefix prefix` | Send the prefix key itself | | |
 
 Default prefix: `ctrl+b`. In panes: Shift+Enter sends `ESC CR` (newline in
@@ -88,6 +96,12 @@ Claude Code and similar prompts; the bytes of every key are listed in
 ⌘/Ctrl-click opens paths (media in the preview panel, code in VS Code) and
 URLs. Pasting or dropping files uploads them to the machine and types their
 paths.
+
+With the mouse: click a pane's title to rename it (empty restores the
+terminal title); double-click a tab or workspace to rename it; drag a pane by
+its header onto another pane to swap the two (centre) or to place it beside
+that pane (edges), onto a tab to move it there, or onto `+` to move it into a
+new tab.
 
 ## Environment variables
 
@@ -113,6 +127,12 @@ On every machine (the agent's `$HOME`):
 On the core host: ssh control sockets in `/tmp/herdr-ide-<uid>/s` (must be
 owned by you, mode 0700), downloads in the user cache directory
 (`~/Library/Caches/herdr-ide/code-server` on macOS, `~/.cache/herdr-ide/code-server`
-on Linux) with `.sha256` sidecars.
+on Linux) with `.sha256` sidecars (also recorded for releases that machines
+downloaded themselves), and settings changed in the UI in
+`settings[-<instance>].json` in the user configuration directory
+(`~/Library/Application Support/herdr-ide/` on macOS, `~/.config/herdr-ide/` on
+Linux; directory 0700, file replaced atomically).
 
-In the browser: preferences in `localStorage` under `herdr-ide.*`.
+In the browser: preferences in `localStorage` under `herdr-ide.*` (language,
+theme, font sizes, panel position, Option as Meta, sidebar and panel sizes,
+the selected workspace).

@@ -141,7 +141,8 @@ func (p *codeServerProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // loadingPage is shown in the VS Code panel while code-server is prepared.
-// It translates the phase codes reported by /code/status itself.
+// It translates the phase codes reported by /code/status itself, and takes
+// the language and light/dark theme from the embedding page (same origin).
 func (p *codeServerProxy) loadingPage(w http.ResponseWriter, mc *machines.Machine) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
@@ -149,14 +150,17 @@ func (p *codeServerProxy) loadingPage(w http.ResponseWriter, mc *machines.Machin
 	fmt.Fprintf(w, `<!doctype html><meta charset="utf-8"><title>code-server</title>
 <style>body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;background:#1e1e1e;color:#c9d1d9;font:13px -apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif}
 .box{max-width:460px;text-align:center}.bar{height:4px;background:#333;border-radius:2px;margin:14px 0;overflow:hidden}.bar i{display:block;height:100%%;width:0;background:#7aa2f7;transition:width .3s}
-.err{color:#f7768e;white-space:pre-wrap;text-align:left;font-size:12px}button{margin-top:10px;background:#2b3245;color:#c9d1d9;border:1px solid #3b4a6b;border-radius:4px;padding:4px 12px;cursor:pointer}</style>
+.err{color:#f7768e;white-space:pre-wrap;text-align:left;font-size:12px}button{margin-top:10px;background:#2b3245;color:#c9d1d9;border:1px solid #3b4a6b;border-radius:4px;padding:4px 12px;cursor:pointer}
+.light{background:#fff;color:#24292f}.light .bar{background:#d0d7de}.light .bar i{background:#2f6fde}.light .err{color:#cf222e}.light button{background:#f6f8fa;color:#24292f;border-color:#d0d7de}</style>
 <div class="box"><div id="title"></div><div class="bar"><i id="bar"></i></div><div id="phase">…</div><div id="err" class="err"></div><button id="retry" hidden></button></div>
 <script>
 const machine=%q, base=%q;
 const T={
- en:{title:'Preparing VS Code on {m}',retry:'Retry',idle:'Waiting…',check:'Checking code-server {d}',download:'Downloading code-server {d}',upload:'Uploading and installing code-server {d}',install_bridge:'Installing the bridge extension',install_ext:'Installing extension {d}',start:'Starting code-server {d}',ready:'Ready',error:'Failed'},
- zh:{title:'正在 {m} 上准备 VS Code',retry:'重试',idle:'等待中…',check:'检查 code-server {d}',download:'下载 code-server {d}',upload:'上传并安装 code-server {d}',install_bridge:'安装桥接扩展',install_ext:'安装扩展 {d}',start:'启动 code-server {d}',ready:'就绪',error:'失败'}};
-const L=T[(navigator.language||'en').toLowerCase().startsWith('zh')?'zh':'en'];
+ en:{title:'Preparing VS Code on {m}',retry:'Retry',idle:'Waiting…',check:'Checking code-server {d}',download:'Downloading code-server {d}',machine_download:'{m} is downloading code-server {d}',upload:'Uploading and installing code-server {d}',install_bridge:'Installing the bridge extension',install_ext:'Installing extension {d}',start:'Starting code-server {d}',ready:'Ready',error:'Failed'},
+ zh:{title:'正在 {m} 上准备 VS Code',retry:'重试',idle:'等待中…',check:'检查 code-server {d}',download:'下载 code-server {d}',machine_download:'{m} 正在下载 code-server {d}',upload:'上传并安装 code-server {d}',install_bridge:'安装桥接扩展',install_ext:'安装扩展 {d}',start:'启动 code-server {d}',ready:'就绪',error:'失败'}};
+let host={};try{host=parent.document.documentElement}catch(e){}
+const L=T[(host.lang||navigator.language||'en').toLowerCase().startsWith('zh')?'zh':'en'];
+if(host.dataset&&host.dataset.theme==='light')document.body.className='light';
 const fmt=(s,v)=>s.replace('{m}',machine).replace('{d}',v||'');
 document.getElementById('title').textContent=fmt(L.title);
 document.getElementById('retry').textContent=L.retry;

@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, ArrowRight, ExternalLink, PanelBottom, PanelRight, Power, X } from 'lucide-react';
 import { useStore, type DockView } from '../state/store';
+import { usePrefs } from '../prefs';
 import { fileUrl, listDir, type RemoteStat } from '../lib/files';
 import { mediaExt } from '../terminal/links';
 import { actions } from '../actions';
@@ -10,7 +12,12 @@ export function Dock() {
   const dock = useStore((s) => s.dock);
   const width = useStore((s) => s.dockWidth);
   const setWidth = useStore((s) => s.setDockWidth);
+  const height = useStore((s) => s.dockHeight);
+  const setHeight = useStore((s) => s.setDockHeight);
   const openDock = useStore((s) => s.openDock);
+  const position = usePrefs((s) => s.prefs.dockPosition);
+  const setPref = usePrefs((s) => s.setPref);
+  const bottom = position === 'bottom';
   // code-server windows stay mounted per machine while in use so switching
   // back is instant; a window hidden for FRAME_TTL is unmounted, which closes
   // its connection and lets the core stop that machine's idle code-server.
@@ -49,11 +56,17 @@ export function Dock() {
   const onResize = (ev: React.PointerEvent) => {
     ev.preventDefault();
     const startX = ev.clientX;
+    const startY = ev.clientY;
     const startW = width;
-    document.body.classList.add('resizing');
-    const move = (e: PointerEvent) => setWidth(Math.min(window.innerWidth - 240, Math.max(320, startW + (startX - e.clientX))));
+    const startH = height;
+    const cls = bottom ? 'resizing-row' : 'resizing';
+    document.body.classList.add(cls);
+    const move = (e: PointerEvent) =>
+      bottom
+        ? setHeight(Math.min(window.innerHeight - 160, Math.max(160, startH + (startY - e.clientY))))
+        : setWidth(Math.min(window.innerWidth - 240, Math.max(320, startW + (startX - e.clientX))));
     const up = () => {
-      document.body.classList.remove('resizing');
+      document.body.classList.remove(cls);
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
     };
@@ -62,23 +75,33 @@ export function Dock() {
   };
 
   return (
-    <section className="dock" style={{ width, display: dock ? undefined : 'none' }}>
+    <section
+      className={`dock ${bottom ? 'dock-bottom' : 'dock-right'}`}
+      style={{ ...(bottom ? { height } : { width }), display: dock ? undefined : 'none' }}
+    >
       <div className="dock-resizer" onPointerDown={onResize} />
       <div className="dock-head">
         <DockTitle dock={dock} />
         <span className="spacer" />
         {dock?.kind === 'code' && (
           <>
-            <a className="btn" href={codeUrl(dock.m, dock.folder)} target="_blank" rel="noreferrer" title={t('dock.openInTab')}>
-              ↗
+            <a className="icon" href={codeUrl(dock.m, dock.folder)} target="_blank" rel="noreferrer" title={t('dock.openInTab')}>
+              <ExternalLink />
             </a>
             <button className="icon" title={t('dock.stopCode')} onClick={() => stopCode(dock.m)}>
-              ⏻
+              <Power />
             </button>
           </>
         )}
+        <button
+          className="icon"
+          title={t(bottom ? 'dock.moveRight' : 'dock.moveBottom')}
+          onClick={() => setPref('dockPosition', bottom ? 'right' : 'bottom')}
+        >
+          {bottom ? <PanelRight /> : <PanelBottom />}
+        </button>
         <button className="icon" title={t('dock.close')} onClick={() => openDock(undefined)}>
-          ✕
+          <X />
         </button>
       </div>
       <div className="dock-body">
@@ -119,7 +142,7 @@ function DockTitle({ dock }: { dock?: DockView }) {
   if (!dock) return null;
   if (dock.kind === 'code')
     return (
-      <span className="dock-title">
+      <span className="dock-title ellipsis" title={dock.folder}>
         {t('dock.code')} · {label} · <span className="muted">{shortPath(dock.folder, home) || '~'}</span>
       </span>
     );
@@ -210,11 +233,15 @@ function Preview({ m, path }: { m: string; path: string }) {
       <div className="preview-toolbar">
         {siblings.length > 1 && index >= 0 && (
           <>
-            <button onClick={() => go(-1)}>←</button>
+            <button className="icon" title={t('dock.previous')} onClick={() => go(-1)}>
+              <ArrowLeft />
+            </button>
             <span className="muted small">
               {index + 1}/{siblings.length}
             </span>
-            <button onClick={() => go(1)}>→</button>
+            <button className="icon" title={t('dock.next')} onClick={() => go(1)}>
+              <ArrowRight />
+            </button>
           </>
         )}
         <span className="spacer" />

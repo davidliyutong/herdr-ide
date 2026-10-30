@@ -43,6 +43,9 @@ type bridgeHub struct {
 	windows map[*bridgeWindow]bool
 	changed chan struct{}
 	seq     atomic.Uint64
+	// theme is the color theme kind ("dark" or "light") last chosen in a
+	// browser; every VS Code window follows it.
+	theme string
 }
 
 func newBridgeHub(s *Server) *bridgeHub {
@@ -103,8 +106,12 @@ func (h *bridgeHub) serve(mc *machines.Machine, conn net.Conn) {
 			w.folders = msg.Folders
 			w.active = time.Now()
 			h.windows[w] = true
+			theme := h.theme
 			h.mu.Unlock()
 			h.notify()
+			if theme != "" {
+				_ = w.send(map[string]string{"type": "theme", "kind": theme})
+			}
 		case "focus":
 			h.mu.Lock()
 			w.active = time.Now()
@@ -122,6 +129,27 @@ func (h *bridgeHub) serve(mc *machines.Machine, conn net.Conn) {
 			// focused one) and pastes without submitting.
 			h.s.broadcast(map[string]any{"t": "bridge.send", "m": mc.ID(), "text": msg.Text, "file": msg.File, "line": msg.Line, "end_line": msg.EndLine})
 		}
+	}
+}
+
+// setTheme makes every VS Code window, now and later, use a theme of kind.
+func (h *bridgeHub) setTheme(kind string) {
+	if kind != "dark" && kind != "light" {
+		return
+	}
+	h.mu.Lock()
+	if h.theme == kind {
+		h.mu.Unlock()
+		return
+	}
+	h.theme = kind
+	var ws []*bridgeWindow
+	for w := range h.windows {
+		ws = append(ws, w)
+	}
+	h.mu.Unlock()
+	for _, w := range ws {
+		_ = w.send(map[string]string{"type": "theme", "kind": kind})
 	}
 }
 

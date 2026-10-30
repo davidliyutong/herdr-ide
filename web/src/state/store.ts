@@ -7,6 +7,13 @@ export interface PaneRef {
   pane: string;
 }
 
+/** Something being renamed in place (pane title, tab or workspace). */
+export interface Renaming {
+  kind: 'pane' | 'tab' | 'workspace';
+  m: string;
+  id: string;
+}
+
 export type DockView =
   { kind: 'preview'; m: string; path: string } | { kind: 'code'; m: string; folder?: string } | { kind: 'agent'; m: string; pane: string };
 
@@ -25,7 +32,11 @@ interface UIState {
   sidebarOpen: boolean;
   dock?: DockView;
   dockWidth: number;
+  /** Height of the dock when it sits below the panes. */
+  dockHeight: number;
   palette?: 'commands' | 'workspaces' | 'help';
+  settingsOpen: boolean;
+  renaming?: Renaming;
   toasts: { id: number; msg: string }[];
   auth?: string;
   /** The server runs with --read-only. */
@@ -40,7 +51,10 @@ interface UIState {
   toggleSidebar(): void;
   openDock(v: DockView | undefined): void;
   setDockWidth(w: number): void;
+  setDockHeight(h: number): void;
   setPalette(p: UIState['palette']): void;
+  openSettings(open: boolean): void;
+  setRenaming(r: Renaming | undefined): void;
   toast(msg: string): void;
   openAuth(m?: string): void;
   setReadOnly(v: boolean): void;
@@ -70,6 +84,8 @@ export const useStore = create<UIState>((set, get) => ({
   tabByWorkspace: {},
   sidebarOpen: loadPref('sidebarOpen', true),
   dockWidth: loadPref('dockWidth', 640),
+  dockHeight: loadPref('dockHeight', 360),
+  settingsOpen: false,
   toasts: [],
 
   setConnected: (connected) => set({ connected }),
@@ -102,7 +118,13 @@ export const useStore = create<UIState>((set, get) => ({
     savePref('dockWidth', w);
     set({ dockWidth: w });
   },
+  setDockHeight: (h) => {
+    savePref('dockHeight', h);
+    set({ dockHeight: h });
+  },
   setPalette: (palette) => set({ palette }),
+  openSettings: (settingsOpen) => set({ settingsOpen }),
+  setRenaming: (renaming) => set({ renaming }),
   openAuth: (auth) => set({ auth }),
   readOnly: false,
   setReadOnly: (readOnly) => set({ readOnly }),

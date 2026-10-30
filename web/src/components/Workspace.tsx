@@ -1,3 +1,4 @@
+import { PanelLeft, Plus, X } from 'lucide-react';
 import { useStore, activeTabId } from '../state/store';
 import { actions } from '../actions';
 import { LayoutView } from './LayoutView';
@@ -5,6 +6,7 @@ import { StatusDot } from './StatusDot';
 import { statusRank, type AgentStatus } from '../lib/herdr';
 import { t, type MessageKey } from '../i18n';
 import { keyHint } from '../keymap';
+import { InlineEdit } from './InlineEdit';
 
 export function Workspace() {
   const m = useStore((s) => s.machineId);
@@ -15,6 +17,9 @@ export function Workspace() {
     return s.machineId && snap && s.workspaceId ? activeTabId(s, s.machineId, snap, s.workspaceId) : undefined;
   });
   const selectTab = useStore((s) => s.selectTab);
+  const renaming = useStore((s) => (s.renaming?.kind === 'tab' ? s.renaming : undefined));
+  const setRenaming = useStore((s) => s.setRenaming);
+  const readOnly = useStore((s) => s.readOnly);
 
   if (!m || !ws || !machine?.snapshot) {
     return (
@@ -50,7 +55,7 @@ export function Workspace() {
           title={t('workspace.sidebar', { key: keyHint('toggle_sidebar') })}
           onClick={() => actions.toggleSidebar()}
         >
-          ☰
+          <PanelLeft />
         </button>
         <span className="crumb">
           <span className="muted">{machine.label}</span> / {workspace?.label}
@@ -58,32 +63,60 @@ export function Workspace() {
         <div className="tabs">
           {tabs.map((tab) => {
             const st = tabStatus(tab.tab_id);
+            const editing = renaming?.m === m && renaming.id === tab.tab_id;
             return (
               <div
                 key={tab.tab_id}
                 className={`tab ${tab.tab_id === tabId ? 'active' : ''}`}
                 onClick={() => selectTab(m, ws, tab.tab_id)}
-                onDoubleClick={() => actions.renameTab(m, tab.tab_id, tab.label)}
-                title={tab.label}
+                onDoubleClick={() => !readOnly && actions.startRename('tab', m, tab.tab_id)}
+                title={readOnly ? tab.label : t('workspace.tabHint', { label: tab.label })}
+                data-tab-id={tab.tab_id}
+                data-m={m}
               >
                 {st && <StatusDot status={st} />}
-                <span>{tab.label}</span>
-                {tab.pane_count > 1 && <span className="muted small">{tab.pane_count}</span>}
-                <button
-                  className="tab-close"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    actions.closeTab(m, tab.tab_id);
-                  }}
-                >
-                  ×
-                </button>
+                {editing ? (
+                  <InlineEdit
+                    value={tab.label}
+                    onDone={(v) => {
+                      setRenaming(undefined);
+                      if (v && v !== tab.label) actions.renameTab(m, tab.tab_id, v);
+                    }}
+                  />
+                ) : (
+                  <span>{tab.label}</span>
+                )}
+                {tab.pane_count > 1 && (
+                  <span className="tab-count" title={t('workspace.paneCount', { n: tab.pane_count })}>
+                    {tab.pane_count}
+                  </span>
+                )}
+                {!readOnly && (
+                  <button
+                    className="tab-close"
+                    title={t('workspace.closeTab', { key: keyHint('close_tab') })}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      actions.closeTab(m, tab.tab_id);
+                    }}
+                  >
+                    <X />
+                  </button>
+                )}
               </div>
             );
           })}
-          <button className="icon" title={t('workspace.newTab', { key: keyHint('new_tab') })} onClick={() => actions.newTab(m, ws)}>
-            ＋
-          </button>
+          {!readOnly && (
+            <button
+              className="icon"
+              title={t('workspace.newTab', { key: keyHint('new_tab') })}
+              onClick={() => actions.newTab(m, ws)}
+              data-new-tab={ws}
+              data-m={m}
+            >
+              <Plus />
+            </button>
+          )}
         </div>
       </div>
       <div className="workspace-body">

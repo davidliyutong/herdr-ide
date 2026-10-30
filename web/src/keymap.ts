@@ -43,6 +43,7 @@ export const defaultBindings: Record<string, string> = {
   open_diff: 'prefix+d',
   open_git_graph: 'prefix+shift+g',
   command_palette: 'prefix+space',
+  open_settings: 'prefix+comma',
 };
 
 /** Localized label of a keymap action. */
@@ -95,11 +96,29 @@ export async function loadKeymap() {
   }
 }
 
+// Display forms of key names used in herdr's key specs.
+const keySymbols: Record<string, string> = {
+  minus: '-',
+  plus: '+',
+  comma: ',',
+  period: '.',
+  slash: '/',
+  backslash: '\\',
+  semicolon: ';',
+  quote: "'",
+  backtick: '`',
+};
+
+/** Human-readable form of a key spec, e.g. "prefix+comma" → "ctrl+b ,". */
+export function keyLabel(spec: string, prefix = config.prefix): string {
+  const parts = spec.split('+').map((p) => keySymbols[p.toLowerCase()] ?? p);
+  return parts.join('+').replace(/^prefix\+/, prefix + ' ');
+}
+
 /** Human-readable key for an action, e.g. "ctrl+b v". */
 export function keyHint(action: string): string {
   const spec = config.bindings[action];
-  if (!spec) return '';
-  return spec.replace(/^prefix\+/, config.prefix + ' ').replace('minus', '-');
+  return spec ? keyLabel(spec) : '';
 }
 
 const keyAliases: Record<string, string> = {
@@ -285,7 +304,7 @@ export function runAction(action: string, index?: number) {
     }
     case 'rename_tab': {
       const c = actions.currentTab();
-      if (c) actions.renameTab(c.m, c.tab, c.label);
+      if (c) actions.startRename('tab', c.m, c.tab);
       break;
     }
     case 'new_workspace':
@@ -294,9 +313,8 @@ export function runAction(action: string, index?: number) {
     case 'rename_workspace':
     case 'close_workspace': {
       if (!s.machineId || !s.workspaceId) break;
-      const w = s.machines[s.machineId]?.snapshot?.workspaces.find((x) => x.workspace_id === s.workspaceId);
       if (action === 'close_workspace') actions.closeWorkspace(s.machineId, s.workspaceId);
-      else actions.renameWorkspace(s.machineId, s.workspaceId, w?.label ?? '');
+      else actions.startRename('workspace', s.machineId, s.workspaceId);
       break;
     }
     case 'toggle_sidebar':
@@ -321,6 +339,9 @@ export function runAction(action: string, index?: number) {
       break;
     case 'help':
       s.setPalette?.('help');
+      break;
+    case 'open_settings':
+      s.openSettings(true);
       break;
   }
 }

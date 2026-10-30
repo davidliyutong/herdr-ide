@@ -58,6 +58,7 @@ class Conn {
   // Messages sent while disconnected; api requests carry their rid so that a
   // request rejected on disconnect is never replayed after reconnecting.
   private queue: { data: string; rid?: number }[] = [];
+  private theme?: string;
   connected = false;
 
   start(listener: Listener) {
@@ -74,6 +75,7 @@ class Conn {
       this.connected = true;
       this.backoff = 300;
       this.listener?.onConnection(true);
+      if (this.theme) this.rawSend({ t: 'theme', kind: this.theme });
       for (const [sid, s] of this.streams) this.rawSend({ t: 'attach', sid, ...s.params });
       for (const q of this.queue.splice(0)) ws.send(q.data);
     };
@@ -174,6 +176,14 @@ class Conn {
       this.pending.set(rid, { resolve, reject });
       this.send({ t: 'api', rid, m: machine, method, params }, rid);
     });
+  }
+
+  /** Tells the core the light/dark theme in use, now and after reconnects;
+   * VS Code windows follow it. */
+  setTheme(kind: string) {
+    if (kind === this.theme) return;
+    this.theme = kind;
+    this.rawSend({ t: 'theme', kind });
   }
 
   retry(machine: string) {

@@ -31,6 +31,7 @@ import (
 	"herdr-ide/internal/embedded"
 	"herdr-ide/internal/machines"
 	"herdr-ide/internal/server"
+	"herdr-ide/internal/settings"
 	"herdr-ide/internal/transport"
 	"herdr-ide/web"
 )
@@ -64,6 +65,28 @@ func (f *codeServerFlags) manager(logger *log.Logger) *codeserver.Manager {
 	cs.Offline = f.offline
 	cs.BridgeVSIX = embedded.BridgeVSIX
 	return cs
+}
+
+// settingsPath is the file holding settings changed in the UI, on the core
+// host. A directory left by a previous product name is moved first.
+func settingsPath(instance string) (string, error) {
+	base, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(base, brand.Slug)
+	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
+		for _, old := range brand.LegacySlugs {
+			if os.Rename(filepath.Join(base, old), dir) == nil {
+				break
+			}
+		}
+	}
+	name := "settings.json"
+	if instance != "" {
+		name = "settings-" + instance + ".json"
+	}
+	return filepath.Join(dir, name), nil
 }
 
 func main() {
@@ -130,15 +153,25 @@ func serve(args []string, logger *log.Logger) {
 		origins      listFlag
 		extraSSH     listFlag
 		csf          codeServerFlags
+		prefs        = settings.New("", codeserver.SettingDefs...)
 	)
 	fl.Var(&origins, "allowed-origin", "browser origin of the reverse proxy, e.g. https://ide.example.com (repeatable)")
 	fl.Var(&only, "machine", "connect only these machines, by id, label or ssh target (repeatable)")
 	fl.Var(&extraSSH, "ssh", "extra ssh target (~/.ssh/config alias or user@host) not saved in herdr (repeatable)")
 	csf.register(fl)
+	prefs.RegisterFlags(fl)
 	fl.Parse(args)
 
 	if !brand.ValidInstance(*instance) {
 		logger.Fatalf("--instance must be lowercase letters, digits and dashes")
+	}
+	if p, err := settingsPath(*instance); err != nil {
+		logger.Printf("settings are not saved: %v", err)
+	} else {
+		prefs.SetPath(p)
+		if err := prefs.Load(); err != nil {
+			logger.Printf("ignoring settings: %v", err)
+		}
 	}
 	embedded.AgentDir = *agentDir
 	embedded.ExtDir = *extDir
@@ -207,6 +240,7 @@ func serve(args []string, logger *log.Logger) {
 	}
 	cs := csf.manager(logger)
 	cs.RemoveLegacyCaches()
+	cs.Settings = prefs
 	srv := server.New(mg, server.Options{
 		AllowedOrigins: origins,
 		Static:         static,
@@ -218,11 +252,16 @@ func serve(args []string, logger *log.Logger) {
 		ProxySecret:    secret,
 		Audit:          audit,
 		UserHeader:     *userHeader,
+		Settings:       prefs,
 	})
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
-	go mg.Run(ctx)
+	machinesDone := make(chan struct{})
+	go func() {
+		mg.Run(ctx)
+		close(machinesDone)
+	}()
 	go srv.Run(ctx)
 
 	ln, err := net.Listen("tcp", *listen)
@@ -243,6 +282,13 @@ func serve(args []string, logger *log.Logger) {
 	logger.Printf("%s %s listening on http://%s (%d machines)%s", brand.Name, agentproto.Version, ln.Addr(), len(specs), mode)
 	if err := hs.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		logger.Fatal(err)
+	}
+	// Machine sessions end with ctx; wait for them so that the local agent
+	// stops the code-server it started instead of leaving it behind.
+	select {
+	case <-machinesDone:
+	case <-time.After(15 * time.Second):
+		logger.Printf("machines did not disconnect within 15s")
 	}
 }
 

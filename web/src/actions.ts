@@ -8,6 +8,7 @@ import { getTerm } from './terminal/registry';
 import { mediaExt } from './terminal/links';
 import { bridge } from './lib/bridge';
 import { t } from './i18n';
+import { confirmDialog, newWorkspaceDialog } from './dialog';
 
 export interface AttentionItem {
   m: string;
@@ -92,7 +93,17 @@ export const actions = {
 
   async closePane(m: string, pane: string) {
     const p = useStore.getState().machines[m]?.snapshot?.panes.find((x) => x.pane_id === pane);
-    if (p?.agent && p.agent_status === 'working' && !confirm(t('confirm.closeWorkingPane', { agent: p.agent }))) return;
+    if (
+      p?.agent &&
+      p.agent_status === 'working' &&
+      !(await confirmDialog({
+        title: t('confirm.closePaneTitle'),
+        message: t('confirm.closeWorkingPane', { agent: p.agent }),
+        confirm: t('confirm.close'),
+        danger: true,
+      }))
+    )
+      return;
     await conn.api(m, 'pane.close', { pane_id: pane }).catch(report);
   },
 
@@ -117,7 +128,16 @@ export const actions = {
   async closeTab(m: string, tab: string) {
     const snap = useStore.getState().machines[m]?.snapshot;
     const busy = snap?.panes.filter((p) => p.tab_id === tab && p.agent && p.agent_status === 'working') ?? [];
-    if (busy.length && !confirm(t('confirm.closeWorkingTab', { n: busy.length }))) return;
+    if (
+      busy.length &&
+      !(await confirmDialog({
+        title: t('confirm.closeTabTitle'),
+        message: t('confirm.closeWorkingTab', { n: busy.length }),
+        confirm: t('confirm.close'),
+        danger: true,
+      }))
+    )
+      return;
     await conn.api(m, 'tab.close', { tab_id: tab }).catch(report);
   },
 
@@ -125,14 +145,16 @@ export const actions = {
     const c = current();
     m ??= c?.m;
     if (!m) return;
+    let label: string | undefined;
     if (cwd === undefined) {
-      const def = (c?.focused && cwdOf(c.snap, c.focused)) || useStore.getState().machines[m]?.info?.home || '~';
-      const input = prompt(t('prompt.workspaceCwd'), def);
-      if (input === null) return;
-      cwd = input;
+      const def = (c?.m === m && c.focused && cwdOf(c.snap, c.focused)) || useStore.getState().machines[m]?.info?.home || '~';
+      const input = await newWorkspaceDialog(m, def);
+      if (!input) return;
+      cwd = input.cwd;
+      label = input.label || undefined;
     }
     try {
-      const res = await conn.api(m, 'workspace.create', { cwd, focus: false });
+      const res = await conn.api(m, 'workspace.create', { cwd, label, focus: false });
       const ws = res?.workspace?.workspace_id;
       if (ws) useStore.getState().selectWorkspace(m, ws);
       const root = res?.root_pane?.pane_id;
@@ -143,20 +165,39 @@ export const actions = {
   },
 
   async closeWorkspace(m: string, ws: string) {
-    if (!confirm(t('confirm.closeWorkspace'))) return;
+    const label = useStore.getState().machines[m]?.snapshot?.workspaces.find((w) => w.workspace_id === ws)?.label ?? ws;
+    if (
+      !(await confirmDialog({
+        title: t('confirm.closeWorkspaceTitle'),
+        message: t('confirm.closeWorkspace', { label }),
+        confirm: t('confirm.close'),
+        danger: true,
+      }))
+    )
+      return;
     await conn.api(m, 'workspace.close', { workspace_id: ws }).catch(report);
   },
 
-  async renameTab(m: string, tab: string, current: string) {
-    const label = prompt(t('prompt.renameTab'), current);
-    if (label === null) return;
+  /** Starts renaming in place; the tab, workspace or pane header shows an editor. */
+  startRename(kind: 'pane' | 'tab' | 'workspace', m: string, id: string) {
+    const s = useStore.getState();
+    if (kind === 'workspace' && !s.sidebarOpen) s.toggleSidebar();
+    s.setRenaming({ kind, m, id });
+  },
+
+  async renameTab(m: string, tab: string, label: string) {
+    if (!label) return;
     await conn.api(m, 'tab.rename', { tab_id: tab, label }).catch(report);
   },
 
-  async renameWorkspace(m: string, ws: string, current: string) {
-    const label = prompt(t('prompt.renameWorkspace'), current);
-    if (label === null) return;
+  async renameWorkspace(m: string, ws: string, label: string) {
+    if (!label) return;
     await conn.api(m, 'workspace.rename', { workspace_id: ws, label }).catch(report);
+  },
+
+  /** An empty label clears the pane's name (its terminal title shows again). */
+  async renamePane(m: string, pane: string, label: string) {
+    await conn.api(m, 'pane.rename', { pane_id: pane, label: label || null }).catch(report);
   },
 
   focusDirection(dir: 'left' | 'right' | 'up' | 'down') {
@@ -223,9 +264,8 @@ export const actions = {
     if (!p) return;
     s.selectWorkspace(m, p.workspace_id);
     s.selectTab(m, p.workspace_id, p.tab_id);
+    // A "done" agent is then marked as seen in herdr (seen.ts).
     focusPane(m, pane);
-    // Marks a "done" agent as seen in herdr.
-    conn.api(m, 'pane.focus', { pane_id: pane }).catch(() => {});
   },
 
   focusedContext() {

@@ -209,10 +209,32 @@ func (mg *Manager) artifact(ctx context.Context, file, url string, progress func
 	return path, nil
 }
 
-func (mg *Manager) tarball(ctx context.Context, asset string, progress func(done, total int64)) (string, error) {
+func (mg *Manager) tarballURL(asset string) string {
 	file := TarballFile(mg.Version, asset)
-	url := expandURL(mg.TarballURL, map[string]string{"version": mg.Version, "asset": asset, "file": file})
-	return mg.artifact(ctx, file, url, progress)
+	return expandURL(mg.TarballURL, map[string]string{"version": mg.Version, "asset": asset, "file": file})
+}
+
+func (mg *Manager) tarball(ctx context.Context, asset string, progress func(done, total int64)) (string, error) {
+	return mg.artifact(ctx, TarballFile(mg.Version, asset), mg.tarballURL(asset), progress)
+}
+
+// knownDigest returns the digest file must have, from the pinned table or a
+// sidecar in a seed directory or the cache; "" when unknown.
+func (mg *Manager) knownDigest(file string) string {
+	for _, dir := range append(append([]string(nil), mg.SeedDirs...), mg.CacheDir) {
+		if want := expectedSHA(dir, file); want != "" {
+			return want
+		}
+	}
+	return ""
+}
+
+// recordDigest stores a digest learnt on first use as a sidecar in the cache.
+func (mg *Manager) recordDigest(file, digest string) {
+	if err := os.MkdirAll(mg.CacheDir, 0o755); err != nil {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(mg.CacheDir, file+".sha256"), []byte(digest+"  "+file+"\n"), 0o644)
 }
 
 func (mg *Manager) extension(ctx context.Context, e Extension) (string, error) {

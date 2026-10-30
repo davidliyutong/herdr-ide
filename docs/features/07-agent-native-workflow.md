@@ -24,8 +24,14 @@ automatically, scheduling agents.
 - **Inbox** (sidebar): agents in `blocked` or `done` across all machines,
   blocked first, with machine, pane title and cwd; counts of working agents.
   Workspaces and tabs show the most urgent status of their agents.
-  `prefix o` jumps to the most urgent agent; opening one calls `pane.focus`
-  so herdr marks a finished agent as seen.
+  `prefix o` jumps to the most urgent agent.
+- **Seen** (`web/src/seen.ts`): herdr reports `done` for an agent that
+  finished outside its active workspace and clears it only when the pane is
+  focused in herdr (`pane.focus`; verified with herdr 0.9.5). Selection in
+  the web UI is local, so when the pane focused in the UI is `done`, on
+  screen and the page visible — opened from the inbox, from a notification
+  or by hand, or finishing while looked at — the UI focuses it in herdr.
+  Showing a tab focuses one of its panes (herdr's focused pane of the tab).
 - **Notifications**: a status change to `blocked` or `done` raises a desktop
   notification when the page is hidden (a toast when visible for `blocked`);
   clicking it focuses the agent. The title and the PWA badge count blocked
@@ -57,4 +63,7 @@ automatically, scheduling agents.
 
 Inbox ordering and notification triggering are driven by snapshot state and
 status events; they were verified against live machines with idle and working
-agents. `internal/herdr/client_test.go` covers status event parsing.
+agents. `internal/herdr/client_test.go` covers status event parsing;
+`web/src/__tests__/dialog.test.ts` the seen marking (once, only on screen).
+Clearing `done` by opening a workspace by hand was verified against herdr
+0.9.5 with `pane report-agent`.

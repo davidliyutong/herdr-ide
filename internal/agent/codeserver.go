@@ -5,12 +5,16 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"herdr-ide/internal/brand"
 	"io"
 	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,7 +30,9 @@ import (
 // codeServer installs and supervises code-server. Releases are shared by all
 // instances (~/<brand.DataDirName>/code-server/<version>); the process,
 // settings and extensions belong to the instance. It only ever listens on a
-// unix socket in the private run directory.
+// unix socket in the private run directory. A release is either pushed by the
+// core or downloaded by the machine; alternatively a code-server already
+// installed on the machine is used (Header.Bin).
 //
 // Ownership and reclamation: run/cs.pid records which agent started the
 // process. An agent stops the process it owns when it exits or when the core
@@ -89,17 +95,73 @@ func (c *codeServer) writePid(p csPid) {
 
 // kill terminates the process group recorded in the pid file.
 func (c *codeServer) kill(p csPid) {
-	if processAlive(p.Pid) {
-		_ = syscall.Kill(-p.Pid, syscall.SIGTERM)
-		for i := 0; i < 50 && processAlive(p.Pid); i++ {
-			time.Sleep(100 * time.Millisecond)
-		}
-		if processAlive(p.Pid) {
-			_ = syscall.Kill(-p.Pid, syscall.SIGKILL)
-		}
-	}
+	stopProcessGroup(p.Pid)
 	os.Remove(c.pidPath())
 	os.Remove(c.socket())
+}
+
+// stopProcessGroup terminates the process group pid belongs to (code-server is
+// started with Setpgid, so this includes its helpers), or only pid when that
+// group is the agent's own; it waits up to 5 s before SIGKILL.
+func stopProcessGroup(pid int) {
+	if pid <= 1 || pid == os.Getpid() || !processAlive(pid) {
+		return
+	}
+	target := pid
+	if pg, err := syscall.Getpgid(pid); err == nil && pg > 1 && pg != syscall.Getpgrp() {
+		target = -pg
+	}
+	_ = syscall.Kill(target, syscall.SIGTERM)
+	for i := 0; i < 50 && processAlive(pid); i++ {
+		time.Sleep(100 * time.Millisecond)
+	}
+	if processAlive(pid) {
+		_ = syscall.Kill(target, syscall.SIGKILL)
+	}
+}
+
+// serves reports whether the process on the socket serves VS Code's
+// workbench. A code-server whose installation was moved or deleted still
+// accepts connections (and answers /healthz) but returns 404 for every page.
+func (c *codeServer) serves() bool {
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "unix", c.socket())
+		}},
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	resp, err := client.Get("http://localhost/")
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode < 400
+}
+
+// replace stops whatever listens on the socket: the recorded process, or
+// else the socket's peer (a code-server this agent has no pid file for).
+func (c *codeServer) replace() {
+	if p, ok := c.readPid(); ok && processAlive(p.Pid) {
+		c.kill(p)
+		return
+	}
+	killListener(c.socket())
+	os.Remove(c.pidPath())
+	os.Remove(c.socket())
+}
+
+// killListener stops the process listening on a unix socket, if any.
+func killListener(path string) {
+	conn, err := net.DialTimeout("unix", path, time.Second)
+	if err != nil {
+		return
+	}
+	pid, err := peerPid(conn.(*net.UnixConn))
+	conn.Close()
+	if err == nil {
+		stopProcessGroup(pid)
+	}
 }
 
 // reapOrphan stops a code-server whose owning agent no longer exists.
@@ -144,10 +206,50 @@ func (c *codeServer) alive() bool {
 	return true
 }
 
-func (c *codeServer) status(v string) *agentproto.CSStatus {
-	st := &agentproto.CSStatus{Version: v, Socket: c.socket()}
-	if isExecutable(c.bin(v)) {
+// binFor returns the code-server executable a request refers to: the
+// release in the agent's directory, or an installed one (Header.Bin).
+func (c *codeServer) binFor(h agentproto.Header) (string, error) {
+	if h.Bin == "" {
+		bin := c.bin(h.Version)
+		if !isExecutable(bin) {
+			return "", errors.New("code-server is not installed")
+		}
+		return bin, nil
+	}
+	if h.Bin != "auto" {
+		p := h.Bin
+		if strings.HasPrefix(p, "~/") {
+			p = filepath.Join(c.a.home, p[2:])
+		}
+		if !filepath.IsAbs(p) {
+			return "", fmt.Errorf("code-server path %q is not absolute", h.Bin)
+		}
+		if !isExecutable(p) {
+			return "", fmt.Errorf("%s is not an executable", p)
+		}
+		return p, nil
+	}
+	// The agent's PATH comes from a non-interactive ssh session, so also look
+	// where the install script, Homebrew and distribution packages put it.
+	if p, err := exec.LookPath("code-server"); err == nil {
+		return p, nil
+	}
+	dirs := []string{filepath.Join(c.a.home, ".local", "bin"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/snap/bin"}
+	for _, d := range dirs {
+		if p := filepath.Join(d, "code-server"); isExecutable(p) {
+			return p, nil
+		}
+	}
+	return "", fmt.Errorf("no code-server on PATH or in %s", strings.Join(dirs, ", "))
+}
+
+func (c *codeServer) status(h agentproto.Header) *agentproto.CSStatus {
+	st := &agentproto.CSStatus{Version: h.Version, Socket: c.socket()}
+	if bin, err := c.binFor(h); err == nil {
 		st.Installed = true
+		st.Bin = bin
+	} else if h.Bin != "" {
+		st.Error = err.Error()
 	}
 	st.Running = c.alive()
 	return st
@@ -160,7 +262,15 @@ func (c *codeServer) handle(ctx context.Context, st net.Conn, h agentproto.Heade
 	}
 	switch h.Action {
 	case "status":
-		return agentproto.WriteLine(st, agentproto.Reply{OK: true, CS: c.status(h.Version)})
+		return agentproto.WriteLine(st, agentproto.Reply{OK: true, CS: c.status(h)})
+	case "download":
+		digest, err := c.download(ctx, h)
+		if err != nil {
+			return agentproto.Fail(st, err)
+		}
+		cs := c.status(h)
+		cs.Digest = digest
+		return agentproto.WriteLine(st, agentproto.Reply{OK: true, CS: cs})
 	case "install":
 		if err := agentproto.WriteLine(st, agentproto.Reply{OK: true}); err != nil {
 			return err
@@ -169,15 +279,15 @@ func (c *codeServer) handle(ctx context.Context, st net.Conn, h agentproto.Heade
 		if err != nil {
 			return agentproto.Fail(st, err)
 		}
-		return agentproto.WriteLine(st, agentproto.Reply{OK: true, CS: c.status(h.Version)})
+		return agentproto.WriteLine(st, agentproto.Reply{OK: true, CS: c.status(h)})
 	case "start":
-		if err := c.start(ctx, h.Version); err != nil {
+		if err := c.start(ctx, h); err != nil {
 			return agentproto.Fail(st, err)
 		}
-		return agentproto.WriteLine(st, agentproto.Reply{OK: true, CS: c.status(h.Version)})
+		return agentproto.WriteLine(st, agentproto.Reply{OK: true, CS: c.status(h)})
 	case "stop":
 		c.stop()
-		return agentproto.WriteLine(st, agentproto.Reply{OK: true, CS: c.status(h.Version)})
+		return agentproto.WriteLine(st, agentproto.Reply{OK: true, CS: c.status(h)})
 	case "install-ext":
 		// Args are extension ids; with Path set, the stream carries a vsix
 		// (chunked) that is installed from a temporary file.
@@ -190,9 +300,9 @@ func (c *codeServer) handle(ctx context.Context, st net.Conn, h agentproto.Heade
 		}
 		return agentproto.WriteLine(st, agentproto.Reply{OK: true, Exec: &agentproto.ExecResult{Stdout: lastN(out, 2000)}})
 	case "uninstall-ext":
-		bin := c.bin(h.Version)
-		if !isExecutable(bin) {
-			return agentproto.Fail(st, errors.New("code-server is not installed"))
+		bin, err := c.binFor(h)
+		if err != nil {
+			return agentproto.Fail(st, err)
 		}
 		args := c.baseArgs()
 		for _, id := range h.Args {
@@ -326,30 +436,89 @@ func (c *codeServer) install(version string, r io.Reader) error {
 	return nil
 }
 
+// download fetches a release tarball with the machine's curl or wget (so
+// its proxy and CA settings apply), verifies it and installs it. It returns
+// the tarball's SHA-256.
+func (c *codeServer) download(ctx context.Context, h agentproto.Header) (string, error) {
+	u, err := url.Parse(h.URL)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+		return "", fmt.Errorf("bad download URL %q", h.URL)
+	}
+	if err := os.MkdirAll(c.root(), 0o755); err != nil {
+		return "", err
+	}
+	// Below root(), so a file left by a crash goes with the old-version cleanup.
+	f, err := os.CreateTemp(c.root(), ".download-*")
+	if err != nil {
+		return "", err
+	}
+	f.Close()
+	defer os.Remove(f.Name())
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Minute)
+	defer cancel()
+	var cmd *exec.Cmd
+	if p, err := exec.LookPath("curl"); err == nil {
+		cmd = exec.CommandContext(ctx, p, "-fsSL", "--retry", "2", "-o", f.Name(), h.URL)
+	} else if p, err := exec.LookPath("wget"); err == nil {
+		cmd = exec.CommandContext(ctx, p, "-q", "-O", f.Name(), h.URL)
+	} else {
+		return "", errors.New("neither curl nor wget is available on the machine")
+	}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("download %s: %v %s", h.URL, err, lastN(string(out), 400))
+	}
+	r, err := os.Open(f.Name())
+	if err != nil {
+		return "", err
+	}
+	defer r.Close()
+	sum := sha256.New()
+	if _, err := io.Copy(sum, r); err != nil {
+		return "", err
+	}
+	got := hex.EncodeToString(sum.Sum(nil))
+	if h.Digest != "" && got != h.Digest {
+		return "", fmt.Errorf("%s: sha256 %s does not match expected %s", h.URL, got, h.Digest)
+	}
+	if _, err := r.Seek(0, io.SeekStart); err != nil {
+		return "", err
+	}
+	if err := c.install(h.Version, r); err != nil {
+		return "", err
+	}
+	return got, nil
+}
+
 func (c *codeServer) baseArgs() []string {
 	return []string{"--user-data-dir", c.dataDir(), "--extensions-dir", c.extDir()}
 }
 
-func (c *codeServer) start(ctx context.Context, version string) error {
+func (c *codeServer) start(ctx context.Context, h agentproto.Header) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.alive() {
-		// Adopt a running process whose owner is gone so that it is still
-		// stopped eventually.
-		if p, ok := c.readPid(); ok && !processAlive(p.Owner) {
-			p.Owner = os.Getpid()
-			c.writePid(p)
+		if c.serves() {
+			// Adopt a running process whose owner is gone so that it is
+			// still stopped eventually.
+			if p, ok := c.readPid(); ok && !processAlive(p.Owner) {
+				p.Owner = os.Getpid()
+				c.writePid(p)
+			}
+			return nil
 		}
-		return nil
+		c.a.logger.Printf("the code-server on %s does not serve VS Code (moved or deleted installation?); replacing it", c.socket())
+		c.replace()
 	}
 	if p, ok := c.readPid(); ok {
 		c.kill(p) // stale or hung
 	}
-	bin := c.bin(version)
-	now := time.Now()
-	_ = os.Chtimes(c.dir(version), now, now) // in use: keep it in cleanups
-	if !isExecutable(bin) {
-		return errors.New("code-server is not installed")
+	bin, err := c.binFor(h)
+	if err != nil {
+		return err
+	}
+	if h.Bin == "" {
+		now := time.Now()
+		_ = os.Chtimes(c.dir(h.Version), now, now) // in use: keep it in cleanups
 	}
 	os.Remove(c.socket())
 	for _, d := range []string{c.dataDir(), c.extDir()} {
@@ -377,7 +546,7 @@ func (c *codeServer) start(ctx context.Context, version string) error {
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	c.writePid(csPid{Pid: cmd.Process.Pid, Owner: os.Getpid(), Version: version, Started: time.Now().Unix()})
+	c.writePid(csPid{Pid: cmd.Process.Pid, Owner: os.Getpid(), Version: h.Version, Started: time.Now().Unix()})
 	exited := make(chan error, 1)
 	go func() {
 		err := cmd.Wait()
@@ -408,9 +577,9 @@ func (c *codeServer) start(ctx context.Context, version string) error {
 }
 
 func (c *codeServer) installExt(ctx context.Context, h agentproto.Header, st net.Conn) (string, error) {
-	bin := c.bin(h.Version)
-	if !isExecutable(bin) {
-		return "", errors.New("code-server is not installed")
+	bin, err := c.binFor(h)
+	if err != nil {
+		return "", err
 	}
 	var targets []string
 	if h.Path != "" {
@@ -442,6 +611,6 @@ func (c *codeServer) installExt(ctx context.Context, h agentproto.Header, st net
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
-	err := cmd.Run()
+	err = cmd.Run()
 	return out.String(), err
 }

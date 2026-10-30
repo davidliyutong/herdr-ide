@@ -10,3 +10,7 @@ export function registerTerm(key: string, c: TermController | undefined) {
 export function getTerm(m: string, pane: string): TermController | undefined {
   return terms.get(`${m}|${pane}`);
 }
+
+export function allTerms(): Iterable<TermController> {
+  return terms.values();
+}

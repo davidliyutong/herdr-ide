@@ -22,7 +22,8 @@ browser (React + xterm.js)  ──WebSocket + HTTP──▶  core (Go, `herdr-id
 | `internal/transport` | yamux sessions: in-process for the local machine, ssh stdio for others; agent upload. |
 | `internal/machines` | Machine registry (herdr's saved machines), state machine, herdr snapshots and subscriptions. |
 | `internal/herdr` | herdr public socket API client. |
-| `internal/codeserver` | code-server provisioning (artifacts, checksums, install, start/stop). |
+| `internal/codeserver` | code-server provisioning (artifacts, checksums, install modes, start/stop). |
+| `internal/settings` | Core settings changeable from the UI: definitions, flags, settings file. |
 | `internal/server` | HTTP/WS front: guards, arbiter, files, proxy, bridge, audit. |
 | `internal/embedded` | Build artifacts compiled into the core (agents, bridge VSIX). |
 | `web` | Browser UI (Vite, React, zustand, xterm.js); `web/embed.go` embeds `web/dist`. |
@@ -65,7 +66,7 @@ after a successful reply it carries op-specific bytes.
 | `fs.write` | core → agent | chunked upload, then a second reply |
 | `exec` | core → agent | – (buffered output in the reply) |
 | `dial-unix` | core → agent | raw pipe to a socket in the agent's run directory |
-| `code-server` | core → agent | actions `status`, `install` (chunked tarball), `start`, `stop`, `install-ext`, `uninstall-ext`, `marker` |
+| `code-server` | core → agent | actions `status`, `install` (chunked tarball), `download` (the machine fetches `URL`, checked against `Digest`), `start`, `stop`, `install-ext`, `uninstall-ext`, `marker`; `Bin` selects an installed code-server |
 | `bridge` | agent → core | JSON lines between the VS Code extension and the core |
 
 yamux streams cannot be half-closed, so uploads use `ChunkWriter` framing
@@ -84,6 +85,12 @@ Text frames are JSON with a `t` field; binary frames are terminal output
 | `detach`, `claim`, `resize`, `in`, `inb`, `scroll`, `mouse` | `term {sid, ev: open\|closed\|error\|notice, mode, cols, rows, code}` |
 | `api {rid, m, method, params}` (allowlisted herdr calls) | `api.res {rid, result\|error}` |
 | `retry {m}`, `ping` | `agent {m, data}` (status change), `bridge.send {m, text}` |
+| `theme {kind: dark\|light}` (VS Code follows it) | |
+
+HTTP endpoints besides files, uploads and the code-server proxy:
+`GET /api/config`, `GET /api/keymap`, `GET /api/machines`, and
+`GET`/`PUT /api/settings` (core settings with their definitions, see
+[13](features/13-settings-and-appearance.md)).
 
 User-facing text is never produced by the server: it sends codes (phases,
 notices) that the UI translates.
@@ -100,10 +107,13 @@ with a full frame.
 
 ## code-server lifecycle
 
-`codeserver.Manager.Ensure` (core): resolve the release for the machine's
-platform (seed → cache → download, SHA-256 verified) → upload and unpack →
-install the bridge and the default extensions (VSIXs, also from the core) →
-start. The agent records the process in `run/cs.pid` with its own pid as
+`codeserver.Manager.Ensure` (core): depending on the `code-server-install`
+setting, use an installed code-server, have the machine download the release
+(verified against the core's digest), or resolve it for the machine's
+platform (seed → cache → download, SHA-256 verified) → upload and unpack;
+the first two fall back to the last → install the bridge and the default
+extensions (VSIXs, also from the core) → start (a running code-server is
+reused only if it serves the workbench; otherwise it is replaced). The agent records the process in `run/cs.pid` with its own pid as
 owner; it stops its own process on exit, reaps processes whose owner died,
 and stops on request. The core stops code-server after `--code-server-idle`
 without WebSocket connections through its proxy. See
