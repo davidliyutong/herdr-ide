@@ -29,6 +29,7 @@ import (
 	"herdr-ide/internal/brand"
 	"herdr-ide/internal/codeserver"
 	"herdr-ide/internal/embedded"
+	"herdr-ide/internal/gui"
 	"herdr-ide/internal/machines"
 	"herdr-ide/internal/server"
 	"herdr-ide/internal/settings"
@@ -144,6 +145,7 @@ func serve(args []string, logger *log.Logger) {
 		userHeader   = fl.String("user-header", "", "request header carrying the authenticated user, for the audit log (e.g. Tailscale-User-Login)")
 		instance     = fl.String("instance", "", "state instance: machines use ~/"+brand.DataDirName+"-<instance> (lets a development core run next to the daily one)")
 		localSession = fl.String("local-session", "default", "herdr session name on the local machine")
+		remoteSess   = fl.String("remote-session", "", "herdr session name on every remote machine instead of the one saved in herdr (development and tests)")
 		localOnly    = fl.Bool("local-only", false, "do not connect to herdr's saved SSH machines")
 		csIdle       = fl.Duration("code-server-idle", 20*time.Minute, "stop a machine's code-server after this long without VS Code connections (0 disables)")
 		agentDir     = fl.String("agent-dir", "", "directory with uncompressed "+brand.AgentBin+"-<os>-<arch> builds (development)")
@@ -153,7 +155,7 @@ func serve(args []string, logger *log.Logger) {
 		origins      listFlag
 		extraSSH     listFlag
 		csf          codeServerFlags
-		prefs        = settings.New("", codeserver.SettingDefs...)
+		prefs        = settings.New("", append(append([]settings.Def{}, codeserver.SettingDefs...), gui.SettingDefs...)...)
 	)
 	fl.Var(&origins, "allowed-origin", "browser origin of the reverse proxy, e.g. https://ide.example.com (repeatable)")
 	fl.Var(&only, "machine", "connect only these machines, by id, label or ssh target (repeatable)")
@@ -202,6 +204,17 @@ func serve(args []string, logger *log.Logger) {
 	}
 
 	specs := selectSpecs(machines.LoadSpecs(*localSession, extraSpecs(extraSSH)), *localOnly, extraSSH, only)
+	if *remoteSess != "" {
+		// The name becomes part of paths on the machines.
+		if !brand.ValidInstance(*remoteSess) {
+			logger.Fatalf("invalid --remote-session %q (lowercase letters, digits and -)", *remoteSess)
+		}
+		for i := range specs {
+			if specs[i].Kind != machines.KindLocal {
+				specs[i].Session = *remoteSess
+			}
+		}
+	}
 	controlDir, err := transport.ControlDir()
 	if err != nil {
 		logger.Fatal(err)

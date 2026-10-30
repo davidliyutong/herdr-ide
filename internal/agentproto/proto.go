@@ -43,6 +43,9 @@ const (
 	// OpBridge is opened by the agent towards the core for every VS Code
 	// bridge extension connection.
 	OpBridge Op = "bridge"
+	// OpGUI manages the virtual display (actions status, install, start,
+	// shells) and, with action attach, streams its windows (see gui.go).
+	OpGUI Op = "gui"
 )
 
 // Header is the first line of every stream.
@@ -96,6 +99,7 @@ type Reply struct {
 	Exec    *ExecResult `json:"exec,omitempty"`
 	CS      *CSStatus   `json:"cs,omitempty"`
 	Bridge  *BridgeInfo `json:"bridge,omitempty"`
+	GUI     *GUIStatus  `json:"gui,omitempty"`
 }
 
 // Info describes the agent host.

@@ -8,6 +8,21 @@ All notable changes are documented here. The format follows
 
 ### Added
 
+- Program windows: windows of programs on remote Linux machines (matplotlib,
+  MuJoCo, …) open in browser windows, one per program window, with mouse and
+  keyboard. New panes get a virtual display; Xvfb is fetched in user space
+  with `apt-get download` when missing; VirtualGL renders OpenGL on the GPU
+  (`vglrun`, or every program with `--gui-gpu=all`). Settings `--gui` and
+  `--gui-gpu`, also per remote machine in the settings dialog, which shows
+  each machine's display state. Panes opened before can be caught up
+  ("Enable in open panes", or the palette for the focused pane): shells at
+  their prompt get the variables typed in.
+- Core settings can be defined per machine: the settings file keeps
+  per-machine values, `PUT /api/settings` takes `machine`.
+- A page loaded before the core was replaced offers to reload.
+
+- `--remote-session`: use an isolated herdr session on remote machines
+  (development and tests).
 - Web IDE for herdr: workspaces, tabs and split layouts from herdr's socket
   API; one xterm.js terminal per pane fed by herdr terminal-session streams;
   herdr-compatible prefix keymap and command palette.
@@ -63,13 +78,6 @@ All notable changes are documented here. The format follows
   picks tabs by position. A new tab created from another workspace's menu no
   longer takes the cwd of a pane elsewhere.
 
-### Security
-
-- code-server's port proxy (`/m/<machine>/code/proxy/<port>/`) is disabled
-  and refused by the core: it served any service listening on a machine,
-  including another user's on a shared machine, with the UI's origin, where
-  its scripts could type into every pane.
-
 ### Changed
 
 - Pane header actions use icons with larger targets and stay visible; read-only
@@ -81,3 +89,13 @@ All notable changes are documented here. The format follows
   Existing installs migrate on first start: machines move `~/.webherdr` to
   `~/.herdr-ide`, browsers move their stored preferences, code-server drops
   the old bridge extension and the core removes the old download cache.
+
+### Security
+
+- code-server's port proxy (`/m/<machine>/code/proxy/<port>/`) is disabled
+  and refused by the core: it served any service listening on a machine,
+  including another user's on a shared machine, with the UI's origin, where
+  its scripts could type into every pane.
+- Pages are served with `Referrer-Policy: same-origin` instead of
+  `no-referrer`, so same-origin POSTs carry their Origin (requests from other
+  sites still get no referrer).

@@ -35,12 +35,19 @@ syncing browser settings between browsers; theming terminal applications.
 
 **Core settings** (`/api/settings`)
 
-- Precedence: command line, then the settings file
+- Precedence: command line, then the machine's own value (settings defined
+  with `PerMachine`), then the settings file
   (`<config dir>/herdr-ide/settings[-<instance>].json`), then the default. A
-  flag locks the setting; the dialog shows which flag.
+  flag locks the setting, for every machine too; the dialog shows which flag.
+- Per-machine values live in the same file under
+  `"machines": {"<machine id>": {"<key>": "<value>"}}`; a definition's scope
+  is `all` or `remote` (machines other than the core's host). Values of
+  machines that are not configured at the moment are kept.
 - `GET /api/settings` lists definitions with value and source (`default`,
-  `saved`, `flag`); `PUT /api/settings {key, value}` validates, saves
-  atomically, notifies subscribers and returns the new list. Errors are codes
+  `saved`, `flag`), plus `per_machine` and the machines' own values;
+  `PUT /api/settings {key, value, machine?}` validates, saves atomically,
+  notifies subscribers (with the machine whose value changed) and returns the
+  new list. An empty machine value makes the machine follow the global one. Errors are codes
   (`invalid`, `locked`, `unknown`, `save`). An empty value restores the
   default. Saved values that no longer validate are ignored; unknown keys in
   the file are kept for other versions.
@@ -51,7 +58,14 @@ syncing browser settings between browsers; theming terminal applications.
 
 - Opened from the sidebar's gear, `prefix ,` or the palette. Sections:
   appearance, layout, terminal, VS Code (core settings whose key starts with
-  `code-server-`), server (other core settings).
+  `code-server-`), program windows (`gui`, `gui-*`), server (other core
+  settings).
+- Settings that can differ per machine get a table below the section's rows:
+  one row per machine (remote machines only for `remote` scope), a select
+  per setting offering "Default (current global value)" and each option.
+  The program windows section adds each machine's display state and a button
+  that enables program windows in its open panes
+  ([14](14-gui-windows.md)).
 - Controls by kind: segmented buttons (up to three options) or a select,
   steppers with reset for numbers, switches for booleans, text fields that
   save on Enter or blur. Core settings are disabled when locked or in
@@ -90,6 +104,10 @@ syncing browser settings between browsers; theming terminal applications.
   shows the error.
 - **No VS Code window connected** → the theme is sent when one connects.
 - **Two browsers choose different themes** → VS Code follows the last one.
+- **A page loaded before the core was replaced** has no labels for new
+  settings and lacks new features. After every reconnect the page compares
+  its entry script with the one the core serves and offers to reload
+  (`web/src/update.ts`).
 
 ## Security
 
@@ -100,7 +118,8 @@ proxy-secret guards, refused in read-only mode, audited. See
 ## Testing
 
 `internal/settings/settings_test.go` (precedence, persistence, validation,
-locked flags), `internal/server/server_test.go` (`TestSettingsAPI`,
+locked flags, per-machine values), `cmd/herdr-ide/main_test.go` (every core
+setting has a label, description and option labels), `internal/server/server_test.go` (`TestSettingsAPI`,
 `TestBridgeTheme`), `web/src/__tests__/settings.test.ts` (parsing and
 clamping, labels for every setting, theme resolution). The dialog, live theme
 and font changes and both panel positions were checked in Chrome in both

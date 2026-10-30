@@ -95,6 +95,9 @@ func (m *Machine) ID() string { return m.spec.ID }
 // Label returns the display label.
 func (m *Machine) Label() string { return m.spec.Label }
 
+// Local reports whether this is the machine the core runs on.
+func (m *Machine) Local() bool { return m.spec.Kind == KindLocal }
+
 // StreamHandler handles streams opened by the agent (VS Code bridge).
 type StreamHandler func(m *Machine, conn net.Conn, h agentproto.Header)
 

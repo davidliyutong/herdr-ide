@@ -82,7 +82,10 @@ const appCSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-
 
 func securityHeaders(h http.Header) {
 	h.Set("X-Content-Type-Options", "nosniff")
-	h.Set("Referrer-Policy", "no-referrer")
+	// Same-origin requests keep their Origin (a POST under no-referrer would
+	// carry "Origin: null", which the guard refuses); other sites get no
+	// referrer.
+	h.Set("Referrer-Policy", "same-origin")
 	h.Set("Cross-Origin-Opener-Policy", "same-origin")
 }
 

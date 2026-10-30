@@ -4,11 +4,13 @@
 browser (React + xterm.js)  ──WebSocket + HTTP──▶  core (Go, `herdr-ide`)
                                                      ├─ machines: registry + connection state machine
                                                      ├─ server: WS hub, pane arbiter, files, code-server proxy, bridge hub
+                                                     ├─ gui: virtual displays per machine, window list, frame routing
                                                      └─ one ssh session per machine ──yamux──▶ agent (`herdr-ide-agent`)
                                                                                                  ├─ herdr API socket (raw pipe)
                                                                                                  ├─ `herdr terminal session` processes
                                                                                                  ├─ files (stat/list/range read/upload)
                                                                                                  ├─ code-server (unix socket only)
+                                                                                                 ├─ Xvfb + window manager (programs' windows)
                                                                                                  └─ bridge.sock ◀── VS Code bridge extension
 ```
 
@@ -24,6 +26,7 @@ browser (React + xterm.js)  ──WebSocket + HTTP──▶  core (Go, `herdr-id
 | `internal/herdr` | herdr public socket API client. |
 | `internal/codeserver` | code-server provisioning (artifacts, checksums, install modes, start/stop). |
 | `internal/settings` | Core settings changeable from the UI: definitions, flags, settings file. |
+| `internal/gui` | Virtual displays on machines, their windows, frames and input between agents and browser windows. |
 | `internal/server` | HTTP/WS front: guards, arbiter, files, proxy, bridge, audit. |
 | `internal/embedded` | Build artifacts compiled into the core (agents, bridge VSIX). |
 | `web` | Browser UI (Vite, React, zustand, xterm.js); `web/embed.go` embeds `web/dist`. |
@@ -68,6 +71,7 @@ after a successful reply it carries op-specific bytes.
 | `dial-unix` | core → agent | raw pipe to a socket in the agent's run directory |
 | `code-server` | core → agent | actions `status`, `install` (chunked tarball), `download` (the machine fetches `URL`, checked against `Digest`), `start`, `stop`, `install-ext`, `uninstall-ext`, `marker`; `Bin` selects an installed code-server |
 | `bridge` | agent → core | JSON lines between the VS Code extension and the core |
+| `gui` | core → agent | actions `status`, `install` (fetch Xvfb in user space), `start`, `shells` (which of the pids in `Args` were started with the display) (reply `GUI`); `attach`: messages `[kind u8][len u32][payload]`, JSON events (`window`, `gone`, `layer`, `layer_gone`, `cursor`) and frames (`GUIFrameHeader` + JPEG/PNG) from the agent, JSON commands (`watch`, `ack`, `refresh`, input, `close`) from the core |
 
 yamux streams cannot be half-closed, so uploads use `ChunkWriter` framing
 (`[u32 length][data]…[0]`). Core and agent always come from the same build:
@@ -85,12 +89,18 @@ Text frames are JSON with a `t` field; binary frames are terminal output
 | `detach`, `claim`, `resize`, `in`, `inb`, `scroll`, `mouse` | `term {sid, ev: open\|closed\|error\|notice, mode, cols, rows, code}` |
 | `api {rid, m, method, params}` (allowlisted herdr calls) | `api.res {rid, result\|error}` |
 | `retry {m}`, `ping` | `agent {m, data}` (status change), `bridge.send {m, text}` |
-| `theme {kind: dark\|light}` (VS Code follows it) | |
+| `theme {kind: dark\|light}` (VS Code follows it) | `gui {state: {m, phase, gpu, windows}}` (program windows per machine) |
 
 HTTP endpoints besides files, uploads and the code-server proxy:
 `GET /api/config`, `GET /api/keymap`, `GET /api/machines`, and
 `GET`/`PUT /api/settings` (core settings with their definitions, see
-[13](features/13-settings-and-appearance.md)).
+[13](features/13-settings-and-appearance.md)). A program window is shown by
+the app at `GET /m/{id}/gui/{win}`, streamed over the WebSocket
+`/m/{id}/gui/{win}/ws` (JSON events and binary frames out, JSON commands in)
+and closed through `POST /m/{id}/gui/{win}/close`;
+`POST /api/m/{id}/gui/enable` gives open panes the display, see
+[14](features/14-gui-windows.md). `PUT /api/settings` takes an optional
+`machine` for settings that can differ per machine.
 
 User-facing text is never produced by the server: it sends codes (phases,
 notices) that the UI translates.

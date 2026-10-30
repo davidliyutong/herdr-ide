@@ -14,6 +14,7 @@ import { startPaneDrag } from '../paneDrag';
 import { openMenu } from '../contextMenu';
 import { paneMenu } from '../menus';
 import { t } from '../i18n';
+import { PaneGuiButton } from '../gui/GuiMenus';
 
 interface Props {
   m: string;
@@ -85,6 +86,7 @@ export function PaneView({ m, paneId, zoomed }: Props) {
           <bdi>{shortPath(cwd, home)}</bdi>
         </span>
         <span className="pane-actions">
+          <PaneGuiButton m={m} pane={paneId} />
           {!readOnly && (
             <>
               <button title={t('pane.openCode', { key: keyHint('open_code') })} onClick={() => actions.openCode(m, cwd)}>

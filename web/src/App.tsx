@@ -17,6 +17,8 @@ import { paneCwd, shortPath } from './lib/herdr';
 import { findPane } from './state/store';
 import { getTerm } from './terminal/registry';
 import { bracketedPaste } from './terminal/TermController';
+import { useGui } from './gui/state';
+import { GuiTray } from './gui/GuiMenus';
 
 /** Text sent from VS Code ("Send to agent") is pasted, not submitted, into the
  * focused pane when it is on the same machine, else that machine's most
@@ -55,6 +57,7 @@ export function App() {
       onAgent: (m, data) => notifyAgent(m, data),
       onConnection: (c) => useStore.getState().setConnected(c),
       onBridgeSend: (m, text) => pasteToAgent(m, text),
+      onGui: (st) => useGui.getState().setState(st),
     });
     loadKeymap();
     fetch('/api/config')
@@ -87,9 +90,20 @@ export function App() {
       <AuthDialog />
       <ContextMenu />
       <div className="toasts">
-        {toasts.map((t) => (
-          <div key={t.id} className="toast">
-            {t.msg}
+        {toasts.map((toast) => (
+          <div key={toast.id} className="toast">
+            <span>{toast.msg}</span>
+            {toast.action && (
+              <button
+                className="primary"
+                onClick={() => {
+                  toast.action!.run();
+                  useStore.setState((s) => ({ toasts: s.toasts.filter((x) => x.id !== toast.id) }));
+                }}
+              >
+                {toast.action.label}
+              </button>
+            )}
           </div>
         ))}
       </div>
@@ -123,6 +137,7 @@ function StatusBar({ connected, prefix }: { connected: boolean; prefix: boolean 
         </span>
       )}
       <span className="spacer" />
+      <GuiTray />
       {prefix && <span className="prefix-badge">PREFIX</span>}
       <span className="muted small">{t('app.hint', { prefix: keyPrefix })}</span>
     </footer>

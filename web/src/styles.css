@@ -703,6 +703,9 @@ body.dragging * {
 .context-menu {
   position: fixed;
   z-index: 90;
+  /* Its own width also near the window's right edge, where it is measured
+     before being moved inside. */
+  width: max-content;
   min-width: 200px;
   max-width: 360px;
   padding: 4px;
@@ -1299,4 +1302,200 @@ button.primary:hover {
   .crumb {
     display: none;
   }
+}
+
+/* ---------- program windows (gui/) ---------- */
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.toast button {
+  flex: none;
+}
+.gui-menu-anchor {
+  position: relative;
+  display: inline-flex;
+}
+.pane-actions .gui-menu-anchor button {
+  width: auto;
+  min-width: 1.95rem;
+  gap: 2px;
+  padding: 0 4px;
+}
+.gui-count {
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+.pane-actions button.attention,
+.gui-tray.attention {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.gui-tray {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 1.5rem;
+  padding: 0 6px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  cursor: pointer;
+}
+.gui-tray:hover {
+  color: var(--fg);
+  background: var(--bg-3);
+}
+.gui-tray .lucide,
+.gui-menu-item .lucide,
+.gui-note .lucide {
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+}
+.gui-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--fg-dim);
+}
+.gui-note.error {
+  color: var(--error);
+}
+.gui-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 40;
+  min-width: 240px;
+  max-width: 420px;
+  max-height: 50vh;
+  overflow: auto;
+  padding: 4px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px var(--shadow);
+}
+.statusbar .gui-menu {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
+.gui-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.gui-menu-item:hover {
+  background: var(--bg-3);
+}
+.gui-menu-item .ellipsis {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The page of a browser window showing one program window. */
+.gui-page {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  overflow: hidden;
+}
+.gui-host {
+  position: absolute;
+  inset: 0;
+  touch-action: none;
+  user-select: none;
+}
+.gui-stage {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+}
+.gui-stage canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: block;
+}
+.gui-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--overlay);
+  color: var(--fg-dim);
+  pointer-events: none;
+}
+.gui-banner {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.gui-banner-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--float);
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px var(--shadow);
+}
+.gui-banner-row .ellipsis {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Per-machine values in the settings dialog. */
+.settings-machines {
+  padding: 10px 0 4px;
+}
+.settings-machines-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 8px;
+}
+.settings-machines-grid {
+  display: grid;
+  align-items: center;
+  gap: 6px 10px;
+}
+.settings-machines-row {
+  display: contents;
+}
+.settings-machine {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.gui-state {
+  flex: none;
+  font-size: var(--fs-sm);
+  color: var(--fg-dim);
+}
+.gui-state.ready {
+  color: var(--done);
+}
+.gui-state.error {
+  color: var(--error);
+}
+.gui-state.installing,
+.gui-state.starting {
+  color: var(--working);
 }

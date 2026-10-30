@@ -28,6 +28,8 @@ Non-goals: CPU or memory quotas; managing processes started by herdr panes.
 | VS Code extension host | code-server | 5 min after its window disconnects (`--reconnection-grace-time`) |
 | curl / wget (machine downloads) | the agent's `download` request | the download finishes, fails, or runs 20 min |
 | ssh ControlMaster | OpenSSH | 10 min unused (`ControlPersist`) |
+| Xvfb | itself (own session, see [14](14-gui-windows.md)) | 6 h after its last client disconnected (`-terminate`, armed by one connection right after start); not with the agent, so programs survive disconnects. xorg-server before 21.1: when its last client leaves; a server that never got a client stays until an agent attaches |
+| `apt-get download xvfb` | the agent's `install` request | the download finishes, fails, or runs 5 min |
 
 - **Ownership** (`internal/agent/codeserver.go`): `cs.pid` holds the process
   id and the owning agent's pid. An agent stops only the process it owns on
@@ -46,11 +48,14 @@ Non-goals: CPU or memory quotas; managing processes started by herdr panes.
 | `agent/<build>/` | removed after 14 days unused; running agents touch their directory |
 | `code-server/<version>/` | removed after 14 days unused; touched on start |
 | `code-server/.download-*`, `.install-*` | removed when the download or install ends; left by a killed agent, removed with unused versions after 14 days |
+| `xvfb/<version>/` | removed after 14 days unused when another version is unpacked; touched on start |
+| `xvfb/.fetch-*` | removed when the install ends; left by a killed agent, removed by the next agent after 1 h |
+| `run/gui.json`, `run/xauth`, `run/xauth.server` | kept: the reserved display stays valid for panes; the cookie is replaced at each Xvfb start |
 | download cache (core host) | kept; legacy caches after renames are removed |
 | settings file (core host) | one file per instance, replaced on change |
 
-Directories are per instance except `agent/` and `code-server/`, which are
-shared and therefore never deleted while recently used.
+Directories are per instance except `agent/`, `code-server/` and `xvfb/`,
+which are shared and therefore never deleted while recently used.
 
 ## Alternatives considered
 

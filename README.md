@@ -29,6 +29,11 @@ browser tab, with VS Code (code-server) one keystroke away.
   extension: open a pane's folder, its diff or Git Graph with one key; jump
   from a `path:line` in the terminal to the editor. The panel sits beside or
   below the terminals. Idle instances are stopped.
+- **Program windows.** Windows that programs on remote Linux machines open
+  (matplotlib, the MuJoCo viewer, Qt tools) appear in browser windows, one
+  per program window, with mouse and keyboard. Panes get a virtual display
+  automatically; Xvfb is fetched without root when a machine lacks it, and
+  VirtualGL renders OpenGL on the GPU where it is installed.
 - **Quick Look.** ⌘/Ctrl-click a path in a terminal to preview images, GIFs,
   videos (with seeking), audio, PDFs, text or directories.
 - **Several browsers at once.** The active browser controls a pane; others
