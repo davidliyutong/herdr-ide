@@ -60,6 +60,13 @@ All notable changes are documented here. The format follows
 - Context menus on pane headers, tabs and workspaces with their commands and
   key bindings, usable from the keyboard; read-only mode keeps the browser's
   menu.
+- Tabs that do not fit continue on more rows instead of scrolling the tab
+  bar, so every tab stays visible and can be dragged anywhere; long labels
+  are cut with an ellipsis.
+- Selections longer than a pane: holding a selection drag above or below
+  the pane scrolls herdr's scrollback (`pane.scroll`) and extends the
+  selection; copying copies the whole range, read from herdr
+  (`pane.selection.read`).
 - Project tooling: one-step rename with state migration, repository checks,
   pane input contract tests (browser and herdr key encodings), reproducible
   builds, third-party notices, CI, release workflow with

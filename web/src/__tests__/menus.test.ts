@@ -22,28 +22,44 @@ describe('insertSlot', () => {
   // Three tabs at 0-100, 100-200, 200-300.
   const boxes = [box(0, 100), box(100, 100), box(200, 100)];
   it('maps a position to the slot nearest to it', () => {
-    expect(insertSlot(boxes, 2, 20, 'x')?.index).toBe(0);
-    expect(insertSlot(boxes, 2, 120, 'x')?.index).toBe(1);
-    expect(insertSlot(boxes, 0, 260, 'x')?.index).toBe(3);
-    expect(insertSlot(boxes, 0, 900, 'x')?.index).toBe(3);
-    expect(insertSlot(boxes, 2, -50, 'x')?.index).toBe(0);
+    expect(insertSlot(boxes, 2, 20, 20, 'x')?.index).toBe(0);
+    expect(insertSlot(boxes, 2, 120, 20, 'x')?.index).toBe(1);
+    expect(insertSlot(boxes, 0, 260, 20, 'x')?.index).toBe(3);
+    expect(insertSlot(boxes, 0, 900, 20, 'x')?.index).toBe(3);
+    expect(insertSlot(boxes, 2, -50, 20, 'x')?.index).toBe(0);
   });
   it('has no slot on either side of the dragged item', () => {
-    expect(insertSlot(boxes, 1, 120, 'x')).toBeUndefined();
-    expect(insertSlot(boxes, 1, 180, 'x')).toBeUndefined();
-    expect(insertSlot(boxes, 0, 20, 'x')).toBeUndefined();
-    expect(insertSlot(boxes, 2, 260, 'x')).toBeUndefined();
-    expect(insertSlot([], 0, 5, 'x')).toBeUndefined();
+    expect(insertSlot(boxes, 1, 120, 20, 'x')).toBeUndefined();
+    expect(insertSlot(boxes, 1, 180, 20, 'x')).toBeUndefined();
+    expect(insertSlot(boxes, 0, 20, 20, 'x')).toBeUndefined();
+    expect(insertSlot(boxes, 2, 260, 20, 'x')).toBeUndefined();
+    expect(insertSlot([], 0, 5, 20, 'x')).toBeUndefined();
   });
   it('puts the bar on the boundary', () => {
-    expect(insertSlot(boxes, 2, 120, 'x')?.box).toEqual({ left: 99, top: 10, width: 2, height: 20 });
-    expect(insertSlot(boxes, 0, 290, 'x')?.box).toEqual({ left: 299, top: 10, width: 2, height: 20 });
+    expect(insertSlot(boxes, 2, 120, 20, 'x')?.box).toEqual({ left: 99, top: 10, width: 2, height: 20 });
+    expect(insertSlot(boxes, 0, 290, 20, 'x')?.box).toEqual({ left: 299, top: 10, width: 2, height: 20 });
     const rows = [
       { left: 0, top: 0, width: 200, height: 30 },
       { left: 0, top: 34, width: 200, height: 30 },
     ];
-    expect(insertSlot(rows, 1, 5, 'y')).toEqual({ index: 0, box: { left: 0, top: -1, width: 200, height: 2 } });
-    expect(insertSlot(rows, 0, 60, 'y')).toEqual({ index: 2, box: { left: 0, top: 63, width: 200, height: 2 } });
+    expect(insertSlot(rows, 1, 100, 5, 'y')).toEqual({ index: 0, box: { left: 0, top: -1, width: 200, height: 2 } });
+    expect(insertSlot(rows, 0, 100, 60, 'y')).toEqual({ index: 2, box: { left: 0, top: 63, width: 200, height: 2 } });
+  });
+  it('picks the row under the pointer when tabs wrap', () => {
+    // Tabs 0-2 on a first row, 3-4 on a second.
+    const at = (left: number, top: number) => ({ left, top, width: 100, height: 28 });
+    const wrapped = [at(0, 0), at(100, 0), at(200, 0), at(0, 31), at(100, 31)];
+    // Within the second row, indexes count the whole list.
+    expect(insertSlot(wrapped, 0, 120, 40, 'x')).toEqual({ index: 4, box: { left: 99, top: 31, width: 2, height: 28 } });
+    expect(insertSlot(wrapped, 0, 5, 40, 'x')).toEqual({ index: 3, box: { left: -1, top: 31, width: 2, height: 28 } });
+    expect(insertSlot(wrapped, 0, 290, 40, 'x')).toEqual({ index: 5, box: { left: 199, top: 31, width: 2, height: 28 } });
+    // The end of the first row is the same slot, drawn on that row.
+    expect(insertSlot(wrapped, 4, 290, 10, 'x')).toEqual({ index: 3, box: { left: 299, top: 0, width: 2, height: 28 } });
+    expect(insertSlot(wrapped, 2, 290, 10, 'x')).toBeUndefined();
+    expect(insertSlot(wrapped, 2, 5, 40, 'x')).toBeUndefined();
+    // Outside the rows, the nearest row counts.
+    expect(insertSlot(wrapped, 0, 120, 300, 'x')?.index).toBe(4);
+    expect(insertSlot(wrapped, 4, 120, -50, 'x')?.index).toBe(1);
   });
 });
 

@@ -13,19 +13,35 @@ export interface Slot {
   box: Box;
 }
 
-/** The slot nearest to a pointer position along a row (x) or column (y) of
- * item boxes, or undefined when dropping there leaves the item at `from` in
- * place. */
-export function insertSlot(boxes: Box[], from: number, pos: number, axis: 'x' | 'y'): Slot | undefined {
+/** The slot nearest to a pointer position among item boxes laid out along a
+ * row (x) or column (y), or undefined when dropping there leaves the item at
+ * `from` in place. Items may wrap onto more lines, as tabs do: the line is
+ * the one under the pointer (else the nearest), the slot is the nearest
+ * within that line, and its index counts the whole list. */
+export function insertSlot(boxes: Box[], from: number, x: number, y: number, axis: 'x' | 'y'): Slot | undefined {
   if (!boxes.length) return undefined;
+  const [along, across] = axis === 'x' ? [x, y] : [y, x];
   const start = (b: Box) => (axis === 'x' ? b.left : b.top);
   const end = (b: Box) => (axis === 'x' ? b.left + b.width : b.top + b.height);
-  let index = boxes.findIndex((b) => pos < (start(b) + end(b)) / 2);
-  if (index < 0) index = boxes.length;
+  // A line ends where the next item starts before the previous one.
+  const lines: Array<[number, number]> = [];
+  for (let i = 1, first = 0; i <= boxes.length; i++) {
+    if (i < boxes.length && start(boxes[i]) >= start(boxes[i - 1])) continue;
+    lines.push([first, i]);
+    first = i;
+  }
+  const distance = ([a, b]: [number, number]) => {
+    const line = boxes.slice(a, b);
+    const lo = Math.min(...line.map((l) => (axis === 'x' ? l.top : l.left)));
+    const hi = Math.max(...line.map((l) => (axis === 'x' ? l.top + l.height : l.left + l.width)));
+    return Math.max(lo - across, across - hi, 0);
+  };
+  const [a, b] = lines.reduce((best, l) => (distance(l) < distance(best) ? l : best));
+  const k = boxes.slice(a, b).findIndex((l) => along < (start(l) + end(l)) / 2);
+  const index = k < 0 ? b : a + k;
   if (index === from || index === from + 1) return undefined;
-  const edge =
-    index === 0 ? start(boxes[0]) : index === boxes.length ? end(boxes[index - 1]) : (end(boxes[index - 1]) + start(boxes[index])) / 2;
-  const ref = boxes[Math.min(index, boxes.length - 1)];
+  const edge = index === a ? start(boxes[a]) : index === b ? end(boxes[b - 1]) : (end(boxes[index - 1]) + start(boxes[index])) / 2;
+  const ref = boxes[Math.min(index, b - 1)];
   const box =
     axis === 'x'
       ? { left: edge - 1, top: ref.top, width: 2, height: ref.height }
@@ -64,7 +80,7 @@ function startReorder(
     label: o.label,
     find: (x, y) => {
       const l = near(o.list(), o.items, o.idAttr, x, y, o.axis);
-      return l && insertSlot(l.boxes, l.ids.indexOf(o.id), o.axis === 'x' ? x : y, o.axis);
+      return l && insertSlot(l.boxes, l.ids.indexOf(o.id), x, y, o.axis);
     },
     marker: (slot) => ({ box: slot.box, zone: 'slot' }),
     drop: (slot) => o.move(slot.index),

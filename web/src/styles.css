@@ -401,12 +401,16 @@ select,
   justify-content: center;
   text-align: center;
 }
+/* Tabs that do not fit continue on more rows and the bar grows: every tab
+   stays visible and nothing scrolls. One row is as tall as an icon button;
+   the toggle and the breadcrumb stay on the first row. */
 .tabbar {
+  --tab-row: 1.85rem;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
-  height: 2.6rem;
-  padding: 0 8px;
+  min-height: 2.6rem;
+  padding: calc((2.6rem - 1px - var(--tab-row)) / 2) 8px;
   border-bottom: 1px solid var(--line);
   background: var(--bg-1);
   flex: none;
@@ -414,25 +418,34 @@ select,
 .crumb {
   white-space: nowrap;
   font-size: var(--fs-md);
+  line-height: var(--tab-row);
   padding-right: 6px;
   border-right: 1px solid var(--line);
 }
 .tabs {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 2px;
-  overflow-x: auto;
+  gap: 3px 2px;
+  flex: 1;
   min-width: 0;
 }
 .tab {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 6px 4px 10px;
+  height: var(--tab-row);
+  max-width: 100%;
+  padding: 0 6px 0 10px;
   border-radius: 5px;
   cursor: pointer;
   color: var(--fg-dim);
   white-space: nowrap;
+}
+/* A long label is cut so that one tab cannot take a whole row; the tooltip
+   has it in full. */
+.tab-label {
+  max-width: 16em;
 }
 .tab:hover {
   background: var(--bg-2);

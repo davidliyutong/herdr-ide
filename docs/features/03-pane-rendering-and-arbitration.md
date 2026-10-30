@@ -38,6 +38,7 @@ graphics protocols (dropped by the stream).
 | Shift+Enter | `ESC CR` (newline in Claude Code and similar prompts) |
 | wheel | `terminal.scroll` with cell position and modifiers; herdr routes it to the app or to its scrollback |
 | mouse down/drag/up | `terminal.mouse`; herdr drops it unless the app enabled mouse reporting |
+| drag held past the top or bottom edge | `pane.scroll` (see "Selections longer than the pane") |
 | Alt/Option-drag | local selection only |
 | ⌘ shortcuts | left to the browser (copy, paste) |
 | prefix key | app keymap ([04](04-layout-and-keyboard.md)) |
@@ -83,6 +84,47 @@ modes. Consequences, recorded in the key table:
   reach an application exactly once; xterm.js still makes its local selection
   during a drag.
 
+**Selections longer than the pane** (`web/src/terminal/longSelection.ts`)
+
+xterm.js has no scrollback here, so its own selection covers the visible
+rows only. A selection drag that is held past the top or bottom edge of a
+pane scrolls the pane and extends the selection, as herdr's own client
+does, using herdr's public API:
+
+- When the pointer first leaves the pane during a drag, `pane.get` gives
+  the scroll position (`offset_from_bottom`, `max_offset_from_bottom`,
+  `viewport_rows`). If herdr has lines to scroll in that direction, the drag
+  is taken over from xterm.js; otherwise (no scrollback, an alternate
+  screen, already at the end) xterm.js keeps it.
+- The selection is kept in herdr's absolute rows: row 0 is the oldest line
+  kept, the first visible row is `max_offset_from_bottom -
+  offset_from_bottom`. Its ends are cell boundaries rounded as xterm.js
+  does; past the top edge the end is the start of the first visible row,
+  past the bottom the end of the last.
+- Every 40 ms while the pointer stays past the edge, `pane.scroll` sets a
+  new absolute offset, 1 line per step at the edge and up to 15 further
+  away, one request at a time; the reply carries the new position. herdr
+  clamps the offset, so scrolling stops at the oldest line and at the live
+  bottom.
+- xterm.js only paints the visible part of the selection (`select`), again
+  after every frame (frames redraw the rows under it) and after wheel
+  scrolling or typing (debounced `pane.get`, since typing returns herdr to
+  the live bottom).
+- On release `pane.selection.read` returns the text between the two ends
+  (both cells included, rows trimmed as herdr does). Copying (⌘C/Ctrl+C or
+  the browser's menu) puts that text on the clipboard instead of xterm.js's
+  visible part. A copy before the text arrived copies the visible part and
+  writes the whole text when it arrives.
+- Only plain drags are taken over: not double- or triple-click word and line
+  selections, Shift-click extension, or Alt-drag column selections (outside
+  macOS; there Option-drag is a normal selection and is taken over too).
+  Only the controlling browser scrolls the pane, since the scroll position
+  is shared with every viewer: in read-only mode, and in an observed pane
+  until a plain click has claimed it (Option-drag does not claim), the drag
+  stays local.
+- A new selection (a click, a double click, a stream reopening) replaces
+  the long one. A right click keeps it for the browser's menu.
+
 **Arbitration** (`internal/server/arbiter.go`)
 
 - Per pane, the core tracks viewers (browser, stream id, container size,
@@ -110,6 +152,8 @@ modes. Consequences, recorded in the key table:
 | One shared control stream fanned out to all browsers | Frames are diffs; a late joiner cannot render without a full frame, and replay logs or forced redraws (resize jiggle) disturb applications. |
 | Every browser takes over on attach | Browsers fight; panes resize back and forth. |
 | xterm.js scrollback | Frames redraw the viewport; local scrollback would fill with duplicates. herdr's scrollback is the source of truth. |
+| Long selections from lines collected out of successive frames | Frames are diffs; how far each scroll moved would have to be guessed from their content, and lines that wrap or repeat break the guess. herdr already offers absolute positions and `pane.selection.read`. |
+| Long selections through stream `terminal.scroll` | Relative, with no reply: the position reached (and the end of the scrollback) is unknown. `pane.scroll` sets an absolute offset and answers with it. |
 | ghostty-web instead of xterm.js | Promising, but xterm.js is mature in Chromium and WebKit and herdr already does the emulation. |
 
 ## Failure modes
@@ -120,11 +164,26 @@ modes. Consequences, recorded in the key table:
   WebSocket; the client reconnects and reattaches with fresh full frames.
 - **Browser reconnects** → all panes reattach; pending API requests are
   rejected and never replayed.
+- **Output arrives while a long selection is shown** → herdr keeps a
+  scrolled-back view in place, but at the live bottom new lines move the
+  text under the highlight until the next scroll or keystroke; the copied
+  text is the range read at release.
+- **App with mouse reporting outside the alternate screen** → it receives the
+  drag as before, and a drag held past the edge also scrolls herdr's
+  scrollback (frames do not say whether the app reports the mouse).
+- **`pane.selection.read` fails** → copying falls back to xterm.js's visible
+  part.
 
 ## Testing
 
 `internal/server` tests (guards, allowlist) and the integration test for
 stream semantics; the key contract above (`input.test.ts`,
-`TestIntegrationKeyParity`); the arbiter flow (join, claim, resize, leave) was exercised
-with scripted WebSocket clients against a dev herdr session. Interactive
-behavior (IME, vim mouse, scrollback) was verified in Chrome.
+`TestIntegrationKeyParity`); `web/src/__tests__/longSelection.test.ts`
+(absolute rows, painted and read ranges, scrolling both ways and stopping
+at the ends, which drags are taken over, copy, replacement by another
+selection). The arbiter flow (join, claim, resize, leave) was exercised
+with scripted WebSocket clients against a dev herdr session. `pane.scroll`
+clamping, absolute rows and the inclusive ends of `pane.selection.read`
+were checked against herdr 0.9.5's sources and a dev session. Interactive
+behavior (IME, vim mouse, scrollback, long selections and copying them)
+was verified in Chrome.

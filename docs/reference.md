@@ -104,6 +104,8 @@ run on the pane's machine.
 Default prefix: `ctrl+b`. In panes: Shift+Enter sends `ESC CR` (newline in
 Claude Code and similar prompts; the bytes of every key are listed in
 [`keys.json`](../web/src/__tests__/testdata/keys.json)); Option/Alt-drag selects text locally;
+holding a selection drag above or below a pane scrolls it and extends the
+selection, and copying then copies all of it;
 ⌘/Ctrl-click opens paths (media in the preview panel, code in VS Code) and
 URLs. Pasting or dropping files uploads them to the machine and types their
 paths.

@@ -3,7 +3,8 @@
 // herdr renders the pane with its own VT emulator and sends ANSI frames, so
 // the xterm keeps no scrollback of its own: wheel and mouse events are
 // forwarded to herdr (terminal.scroll / terminal.mouse), which routes them to
-// the pane's application or to herdr's scrollback.
+// the pane's application or to herdr's scrollback. Selections that go past
+// the visible rows are handled by LongSelection.
 
 import { Terminal, type ILinkProvider, type ITheme } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -12,6 +13,7 @@ import { WebglAddon } from '@xterm/addon-webgl';
 import '@xterm/xterm/css/xterm.css';
 import { conn } from '../lib/conn';
 import { routeKey } from './keys';
+import { LongSelection } from './longSelection';
 import { getPrefs } from '../prefs';
 import { themeKind, type ThemeKind } from '../appearance';
 
@@ -115,6 +117,7 @@ export class TermController {
   private granted: 'control' | 'observe' | undefined;
   private queued: Array<Record<string, unknown>> = [];
   private claimed = false;
+  private long: LongSelection;
 
   constructor(
     private el: HTMLElement,
@@ -158,6 +161,13 @@ export class TermController {
       this.linkProvider = lp;
       term.registerLinkProvider(lp);
     }
+    this.long = new LongSelection({
+      term,
+      pane: opts.pane,
+      screen: () => this.term.element?.querySelector('.xterm-screen')?.getBoundingClientRect(),
+      canScroll: () => this.granted === 'control',
+      api: (method, params) => conn.api(opts.m, method, params),
+    });
 
     this.installInput();
     this.attach();
@@ -196,12 +206,13 @@ export class TermController {
             this.term.resize(w, h);
             this.fitObserver();
           }
-          this.term.write(data);
+          this.term.write(data, this.long.repaint);
         },
         onEvent: (ev) => {
           if (ev.ev === 'open') {
             // Every stream starts with a full frame; drop old state.
             this.term.reset();
+            this.long.drop();
             this.granted = ev.mode;
             this.claimed = false;
             if (ev.cols && ev.rows) this.term.resize(ev.cols, ev.rows);
@@ -263,7 +274,9 @@ export class TermController {
   }
 
   input(text: string) {
-    if (text) this.send({ t: 'in', d: text });
+    if (!text) return;
+    this.send({ t: 'in', d: text });
+    this.long.moved();
   }
 
   private scheduleResize(force = false) {
@@ -347,6 +360,7 @@ export class TermController {
           row: cell?.row,
           mods: this.mods(ev),
         });
+        this.long.moved();
       }
       ev.preventDefault();
       return false;
@@ -355,6 +369,7 @@ export class TermController {
     const el = term.element!;
     const button = (b: number) => (b === 1 ? 'middle' : b === 2 ? 'right' : 'left');
     el.addEventListener('mousedown', (ev) => {
+      this.long.down(ev);
       // Option/Alt-drag is a purely local selection.
       if (ev.altKey || ev.button === 2) return;
       const c = this.cellAt(ev);
@@ -365,7 +380,16 @@ export class TermController {
     });
     window.addEventListener('mousemove', this.onMouseMove);
     window.addEventListener('mouseup', this.onMouseUp);
+    // Captured: xterm.js stops mousemove at the document while it selects.
+    window.addEventListener('mousemove', this.onSelectMove, true);
+    window.addEventListener('mouseup', this.onSelectUp, true);
+    // Before xterm.js's own copy handler, which knows the visible rows only.
+    this.el.addEventListener('copy', this.onCopy, true);
   }
+
+  private onSelectMove = (ev: MouseEvent) => this.long.move(ev);
+  private onSelectUp = () => this.long.up();
+  private onCopy = (ev: ClipboardEvent) => this.long.copy(ev);
 
   private onMouseMove = (ev: MouseEvent) => {
     if (this.mouseDown === undefined) return;
@@ -417,6 +441,10 @@ export class TermController {
     window.clearTimeout(this.resizeTimer);
     window.removeEventListener('mousemove', this.onMouseMove);
     window.removeEventListener('mouseup', this.onMouseUp);
+    window.removeEventListener('mousemove', this.onSelectMove, true);
+    window.removeEventListener('mouseup', this.onSelectUp, true);
+    this.el.removeEventListener('copy', this.onCopy, true);
+    this.long.dispose();
     this.ro.disconnect();
     if (this.sid !== undefined) conn.detach(this.sid);
     this.webgl?.dispose();
