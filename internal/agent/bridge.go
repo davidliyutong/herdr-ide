@@ -8,7 +8,7 @@ import (
 	"syscall"
 	"time"
 
-	"webherdr/internal/agentproto"
+	"herdr-ide/internal/agentproto"
 )
 
 // serveBridge accepts connections from the VS Code bridge extension on

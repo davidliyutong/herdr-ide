@@ -17,11 +17,11 @@ make check           # formatting, vet, typecheck, brand/doc consistency
 ```
 
 Day-to-day development, without touching your real herdr session or the
-state of your daily webherdr:
+state of your daily herdr-ide:
 
 ```bash
-herdr --session webherdr-dev server &
-make dev-core        # core on 127.0.0.1:7790: --instance dev --local-only --local-session webherdr-dev
+herdr --session herdr-ide-dev server &
+make dev-core        # core on 127.0.0.1:7790: --instance dev --local-only --local-session herdr-ide-dev
 make dev-web         # Vite on http://localhost:5173, proxied to the dev core (DEV_LISTEN)
 ```
 

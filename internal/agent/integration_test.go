@@ -19,12 +19,12 @@ import (
 	"testing"
 	"time"
 
-	"webherdr/internal/agentproto"
-	"webherdr/internal/herdr"
-	"webherdr/internal/transport"
+	"herdr-ide/internal/agentproto"
+	"herdr-ide/internal/herdr"
+	"herdr-ide/internal/transport"
 )
 
-const itSession = "webherdr-it"
+const itSession = "herdr-ide-it"
 
 // startHerdr runs a herdr server in the isolated session and returns an agent
 // session and an API client for it.

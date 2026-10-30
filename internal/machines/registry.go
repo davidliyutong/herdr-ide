@@ -13,7 +13,7 @@ const (
 	KindSSH   = "ssh"
 )
 
-// LocalID is the id of the machine webherdr runs on.
+// LocalID is the id of the machine herdr-ide runs on.
 const LocalID = "local"
 
 // Spec describes one machine.

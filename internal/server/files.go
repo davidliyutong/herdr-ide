@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"webherdr/internal/agentproto"
-	"webherdr/internal/machines"
+	"herdr-ide/internal/agentproto"
+	"herdr-ide/internal/machines"
 )
 
 func (s *Server) machine(w http.ResponseWriter, r *http.Request) *machines.Machine {

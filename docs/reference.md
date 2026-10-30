@@ -8,10 +8,10 @@ here; both READMEs link to this page instead of repeating it.
 
 | Command | Description |
 | --- | --- |
-| `webherdr [serve] [flags]` | Run the server (default command). |
-| `webherdr fetch-assets [flags] DIR` | Download and verify code-server releases and extensions into `DIR` for air-gapped installs. |
-| `webherdr version` | Print the version. |
-| `webherdr-agent serve [--instance NAME]` | Per-machine helper; started by the core over ssh, never by hand. |
+| `herdr-ide [serve] [flags]` | Run the server (default command). |
+| `herdr-ide fetch-assets [flags] DIR` | Download and verify code-server releases and extensions into `DIR` for air-gapped installs. |
+| `herdr-ide version` | Print the version. |
+| `herdr-ide-agent serve [--instance NAME]` | Per-machine helper; started by the core over ssh, never by hand. |
 
 ## `serve` flags
 
@@ -21,7 +21,7 @@ here; both READMEs link to this page instead of repeating it.
 | --- | --- | --- |
 | `--listen` | `127.0.0.1:7780` | Address to listen on. Non-loopback addresses are refused unless `--proxy-secret-file` or `--insecure-listen` is given. |
 | `--allowed-origin` | – | Public origin of the reverse proxy, e.g. `https://ide.example.com` (repeatable). Host and Origin headers are checked against loopback plus these. |
-| `--proxy-secret-file` | – | File with a secret (≥ 16 characters) that the reverse proxy sends in `X-webherdr-Proxy-Secret`. Required for requests not coming from loopback. |
+| `--proxy-secret-file` | – | File with a secret (≥ 16 characters) that the reverse proxy sends in `X-herdr-ide-Proxy-Secret`. Required for requests not coming from loopback. |
 | `--insecure-listen` | `false` | Accept a non-loopback `--listen` without a proxy secret. Anyone reaching the port gets shell access to every machine. |
 | `--read-only` | `false` | Watch only: panes are observed, mutating herdr calls, uploads, ssh authentication and VS Code are refused. |
 | `--audit-log` | – | Append security-relevant events (connections, mutating API calls, uploads, VS Code and bridge use, denials) as JSON lines. |
@@ -35,7 +35,7 @@ here; both READMEs link to this page instead of repeating it.
 | `--local-only` | `false` | Do not connect to herdr's saved SSH machines (`--ssh` targets are still used). |
 | `--machine` | – | Connect only these machines, by id, label or ssh target (repeatable). |
 | `--ssh` | – | Extra ssh target (`~/.ssh/config` alias or `user@host`) not saved in herdr (repeatable). |
-| `--instance` | – | State instance: machines use `~/.webherdr-<instance>` instead of `~/.webherdr`, with separate sockets, code-server process and settings. Lets a development core run next to the daily one. |
+| `--instance` | – | State instance: machines use `~/.herdr-ide-<instance>` instead of `~/.herdr-ide`, with separate sockets, code-server process and settings. Lets a development core run next to the daily one. |
 
 ### code-server
 
@@ -52,8 +52,8 @@ here; both READMEs link to this page instead of repeating it.
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--agent-dir` | – | Directory with uncompressed `webherdr-agent-<os>-<arch>` builds, used instead of the embedded ones. |
-| `--ext-dir` | – | Directory containing `webherdr-bridge.vsix`, used instead of the embedded one. |
+| `--agent-dir` | – | Directory with uncompressed `herdr-ide-agent-<os>-<arch>` builds, used instead of the embedded ones. |
+| `--ext-dir` | – | Directory containing `herdr-ide-bridge.vsix`, used instead of the embedded one. |
 | `--web-dir` | – | Serve the UI from this directory instead of the embedded build. |
 
 ## `fetch-assets` flags
@@ -93,8 +93,8 @@ paths.
 
 | Variable | Where | Description |
 | --- | --- | --- |
-| `WEBHERDR_BRIDGE_SOCKET` | set by the agent for code-server | Socket of the VS Code bridge extension. |
-| `WEBHERDR_CORE` | `pnpm -C web dev` | Core URL the Vite dev server proxies to (default `http://127.0.0.1:7780`). |
+| `HERDR_IDE_BRIDGE_SOCKET` | set by the agent for code-server | Socket of the VS Code bridge extension. |
+| `HERDR_IDE_CORE` | `pnpm -C web dev` | Core URL the Vite dev server proxies to (default `http://127.0.0.1:7780`). |
 | `HERDR_BIN` | agent | herdr binary to use on a machine. |
 | `XDG_STATE_HOME`, `XDG_CONFIG_HOME`, `HERDR_CONFIG_PATH`, `HERDR_SOCKET_PATH` | core, agent | Honoured like herdr does when locating its state, configuration and sockets. |
 
@@ -104,15 +104,15 @@ On every machine (the agent's `$HOME`):
 
 | Path | Content | Lifetime |
 | --- | --- | --- |
-| `~/.webherdr/agent/<build>/` | Uploaded agent binaries | Builds unused for 14 days are removed. |
-| `~/.webherdr/code-server/<version>/` | code-server releases (shared by instances) | Versions unused for 14 days are removed. |
-| `~/.webherdr[-<instance>]/run/` (0700) | `cs.sock`, `cs.pid`, `bridge.sock` | While the agent runs. |
-| `~/.webherdr[-<instance>]/cs-data/`, `cs-ext/` | VS Code settings, extensions | Kept; logs older than 7 days are pruned. |
-| `~/.webherdr[-<instance>]/uploads/` | Pasted and dropped files | Files older than 7 days are pruned. |
+| `~/.herdr-ide/agent/<build>/` | Uploaded agent binaries | Builds unused for 14 days are removed. |
+| `~/.herdr-ide/code-server/<version>/` | code-server releases (shared by instances) | Versions unused for 14 days are removed. |
+| `~/.herdr-ide[-<instance>]/run/` (0700) | `cs.sock`, `cs.pid`, `bridge.sock` | While the agent runs. |
+| `~/.herdr-ide[-<instance>]/cs-data/`, `cs-ext/` | VS Code settings, extensions | Kept; logs older than 7 days are pruned. |
+| `~/.herdr-ide[-<instance>]/uploads/` | Pasted and dropped files | Files older than 7 days are pruned. |
 
-On the core host: ssh control sockets in `/tmp/webherdr-<uid>/s` (must be
+On the core host: ssh control sockets in `/tmp/herdr-ide-<uid>/s` (must be
 owned by you, mode 0700), downloads in the user cache directory
-(`~/Library/Caches/webherdr/code-server` on macOS, `~/.cache/webherdr/code-server`
+(`~/Library/Caches/herdr-ide/code-server` on macOS, `~/.cache/herdr-ide/code-server`
 on Linux) with `.sha256` sidecars.
 
-In the browser: preferences in `localStorage` under `webherdr.*`.
+In the browser: preferences in `localStorage` under `herdr-ide.*`.

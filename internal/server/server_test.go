@@ -11,7 +11,7 @@ import (
 	"testing/fstest"
 	"time"
 
-	"webherdr/internal/machines"
+	"herdr-ide/internal/machines"
 )
 
 func TestParseRange(t *testing.T) {

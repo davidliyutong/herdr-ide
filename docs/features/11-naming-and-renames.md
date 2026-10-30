@@ -2,7 +2,8 @@
 
 ## Context
 
-"webherdr" is a working name. The name appears in binaries, the Go module
+The project started as "webherdr" and was renamed to "herdr-ide" with the
+mechanism described here. The name appears in binaries, the Go module
 path, directories on every machine, environment variables, browser storage,
 the VS Code extension identity, protocol prefixes and documentation. A rename
 should be quick, mechanical and safe for existing installs.
@@ -21,7 +22,7 @@ identifiers (herdr session names, herdr paths).
 - **Definitions**: `internal/brand/brand.go` (Go: `Name`, `Slug`,
   `EnvPrefix`, binary and extension names, `DataDirName`, `DataDir(instance)`,
   `AgentDir`, `BridgeExtID`), `web/src/brand.ts` (`APP_NAME`, `APP_SLUG`,
-  namespaced `storage`), `extensions/webherdr-bridge/src/brand.ts`
+  namespaced `storage`), `extensions/herdr-ide-bridge/src/brand.ts`
   (`SLUG`, `DATA_DIR`, `ENV_PREFIX`). Display name and slug are separate, so
   the visible name can change without touching identifiers.
 - **Consistency**: `internal/brand/brand_test.go` checks that the TypeScript

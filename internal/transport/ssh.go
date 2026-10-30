@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"herdr-ide/internal/brand"
 	"io"
 	"log"
 	"os"
@@ -14,7 +15,6 @@ import (
 	"sync"
 	"syscall"
 	"time"
-	"webherdr/internal/brand"
 )
 
 // ErrAuthRequired means ssh could not authenticate without user interaction.

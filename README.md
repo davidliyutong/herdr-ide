@@ -1,4 +1,4 @@
-# webherdr
+# herdr-ide
 
 English | [简体中文](README.zh-CN.md)
 
@@ -44,7 +44,7 @@ Requirements:
 
 ```bash
 make deps && make build
-./dist/webherdr-$(go env GOOS)-$(go env GOARCH)
+./dist/herdr-ide-$(go env GOOS)-$(go env GOARCH)
 ```
 
 Open <http://127.0.0.1:7780>. Press `ctrl+b space` for the command palette and
@@ -53,7 +53,7 @@ Open <http://127.0.0.1:7780>. Press `ctrl+b space` for the command palette and
 
 ## Remote access
 
-webherdr has no login of its own: keep it on `127.0.0.1` and put an
+herdr-ide has no login of its own: keep it on `127.0.0.1` and put an
 authenticating reverse proxy with HTTPS in front (Tailscale, Caddy, nginx), then
 pass its origin with `--allowed-origin`. Optional guardrails: a proxy secret
 header, a read-only mode and an audit log. See
@@ -61,8 +61,8 @@ header, a read-only mode and an audit log. See
 
 ## Air-gapped networks
 
-Machines never download anything. If the host running webherdr is offline
-too, run `webherdr fetch-assets DIR` on a connected machine, carry `DIR` over
+Machines never download anything. If the host running herdr-ide is offline
+too, run `herdr-ide fetch-assets DIR` on a connected machine, carry `DIR` over
 and start with `--offline --seed-dir DIR`. Downloads are verified against
 pinned SHA-256 digests. Details in
 [docs/deployment.md](docs/deployment.md#air-gapped-networks).
@@ -78,7 +78,7 @@ pinned SHA-256 digests. Details in
 ## Development
 
 ```bash
-herdr --session webherdr-dev server &   # isolated herdr session
+herdr --session herdr-ide-dev server &   # isolated herdr session
 make dev-core                            # core on :7790 with --instance dev
 make dev-web                             # UI with hot reload on :5173
 make check test                          # before sending a PR

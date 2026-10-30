@@ -3,7 +3,7 @@
 ## Context
 
 Lab and robot machines often have no internet access, and some deployments
-have none at all. Everything webherdr installs on machines (agent,
+have none at all. Everything herdr-ide installs on machines (agent,
 code-server, extensions) must reach them without the machines downloading
 anything, and downloads that do happen must be verifiable.
 
@@ -33,16 +33,16 @@ proxy or vendoring); offline herdr installation.
   is refused (never silently replaced); a mismatching cached file is
   discarded and re-downloaded when online; a download with no known digest is
   accepted once, logged, and its digest recorded.
-- **Bundles**: `webherdr fetch-assets [--platforms …] DIR` downloads (or
+- **Bundles**: `herdr-ide fetch-assets [--platforms …] DIR` downloads (or
   copies from the cache), verifies and writes sidecars, for carrying into the
-  network; then `webherdr --offline --seed-dir DIR`.
+  network; then `herdr-ide --offline --seed-dir DIR`.
 
 ## Alternatives considered
 
 | Option | Why not |
 | --- | --- |
 | Machines download code-server and extensions themselves | Fails on offline machines; no central verification. |
-| Bundle code-server in the core binary | ~200 MB per platform; versions tied to webherdr releases. |
+| Bundle code-server in the core binary | ~200 MB per platform; versions tied to herdr-ide releases. |
 | Trust HTTPS only | A compromised mirror or release would be installed on every machine. |
 
 ## Failure modes

@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"webherdr/internal/agentproto"
+	"herdr-ide/internal/agentproto"
 )
 
 // Pane arbitration across browsers.

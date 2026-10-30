@@ -1,4 +1,4 @@
-// Package embedded carries build artifacts compiled into the webherdr binary:
+// Package embedded carries build artifacts compiled into the herdr-ide binary:
 // the per-platform agents (gzip) and the VS Code bridge extension.
 package embedded
 
@@ -9,19 +9,19 @@ import (
 	"embed"
 	"encoding/hex"
 	"fmt"
+	"herdr-ide/internal/brand"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"sync"
-	"webherdr/internal/brand"
 )
 
 //go:embed all:agents
 var agentsFS embed.FS
 
 // AgentDir, when set, is searched before the embedded agents. It holds
-// uncompressed webherdr-agent-<os>-<arch> files (development builds).
+// uncompressed herdr-ide-agent-<os>-<arch> files (development builds).
 var AgentDir string
 
 type agentEntry struct {
@@ -76,7 +76,7 @@ var extFS embed.FS
 // ExtDir, when set, is searched before the embedded extension (development).
 var ExtDir string
 
-// BridgeVSIX returns the webherdr-bridge VS Code extension, if bundled.
+// BridgeVSIX returns the herdr-ide-bridge VS Code extension, if bundled.
 func BridgeVSIX() []byte {
 	if ExtDir != "" {
 		if b, err := os.ReadFile(filepath.Join(ExtDir, brand.BridgeExt+".vsix")); err == nil {

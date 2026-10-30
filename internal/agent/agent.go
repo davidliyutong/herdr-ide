@@ -1,4 +1,4 @@
-// Package agent implements webherdr-agent: the per-machine helper that the
+// Package agent implements herdr-ide-agent: the per-machine helper that the
 // core reaches over a yamux session (ssh stdio for remote machines, an
 // in-process pipe for the local machine).
 package agent
@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"herdr-ide/internal/brand"
 	"io"
 	"log"
 	"net"
@@ -17,11 +18,10 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"webherdr/internal/brand"
 
 	"github.com/hashicorp/yamux"
 
-	"webherdr/internal/agentproto"
+	"herdr-ide/internal/agentproto"
 )
 
 // Agent serves streams opened by the core.

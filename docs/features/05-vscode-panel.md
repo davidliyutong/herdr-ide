@@ -22,9 +22,9 @@ settings between machines.
 
 - code-server release per machine platform, resolved on the core host
   ([09](09-air-gapped-installs.md)), uploaded through the agent and unpacked
-  into `~/.webherdr/code-server/<version>` (shared by instances).
+  into `~/.herdr-ide/code-server/<version>` (shared by instances).
 - The bundled Node is run once after unpacking; if it fails (old glibc), the
-  error is reported and the rest of webherdr keeps working.
+  error is reported and the rest of herdr-ide keeps working.
 - Extensions are installed from VSIX files uploaded by the core: the
   embedded bridge extension and the default extensions (Git Graph). Markers
   in the extensions directory skip reinstallation.
@@ -43,10 +43,10 @@ settings between machines.
 - The panel is a same-origin iframe, one per machine, kept while used;
   `?folder=` selects the workspace folder (the focused pane's cwd).
 
-**Bridge** (`extensions/webherdr-bridge`, `internal/server/bridge.go`)
+**Bridge** (`extensions/herdr-ide-bridge`, `internal/server/bridge.go`)
 
 - The extension runs in code-server's extension host on the machine and
-  connects to `$WEBHERDR_BRIDGE_SOCKET`, which the agent tunnels to the core.
+  connects to `$HERDR_IDE_BRIDGE_SOCKET`, which the agent tunnels to the core.
   It announces its window id and workspace folders.
 - The core routes UI commands to the window that shows the requested folder
   (waiting up to 60 s for the iframe to load, accepting a containing folder

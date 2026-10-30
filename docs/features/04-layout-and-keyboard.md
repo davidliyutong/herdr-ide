@@ -14,7 +14,7 @@ Goals: the same topology as herdr (changes in either UI show up in the
 other); the user's own herdr bindings work unchanged; nothing important
 depends on browser-reserved shortcuts.
 
-Non-goals: a separate webherdr layout model; arbitrary docking of panes.
+Non-goals: a separate herdr-ide layout model; arbitrary docking of panes.
 
 ## Design
 
@@ -40,7 +40,7 @@ Non-goals: a separate webherdr layout model; arbitrary docking of panes.
 - Custom commands take precedence over built-in bindings with the same key.
   `plugin_action` commands call `plugin.action.invoke` on the pane's machine;
   `pane`/`popup`/`shell` commands run in a new pane.
-- webherdr adds bindings for its own features (VS Code `prefix e`, diff
+- herdr-ide adds bindings for its own features (VS Code `prefix e`, diff
   `prefix d`, Git Graph `prefix shift+g`, palette `prefix space`).
 - The command palette lists commands with their keys, workspaces and agents
   on every machine, agent kinds to start, and UI languages.

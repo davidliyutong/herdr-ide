@@ -7,9 +7,9 @@ changes.
 
 ## What this is
 
-A Go server (`cmd/webherdr`) that serves a React terminal UI and drives
+A Go server (`cmd/herdr-ide`) that serves a React terminal UI and drives
 [herdr](https://herdr.dev) on several machines through a per-machine Go agent
-(`cmd/webherdr-agent`) over ssh; code-server provides VS Code panels. One
+(`cmd/herdr-ide-agent`) over ssh; code-server provides VS Code panels. One
 binary embeds the UI, the agents for 4 platforms and a VS Code extension.
 
 ## Commands
@@ -28,8 +28,8 @@ Run `make check test` before finishing a change.
 ## Rules
 
 1. **Never touch the user's real herdr session or state.** Experiments,
-   tests and dev servers use `herdr --session webherdr-dev` (or the
-   integration test's `webherdr-it`) and `--instance dev`. Do not run
+   tests and dev servers use `herdr --session herdr-ide-dev` (or the
+   integration test's `herdr-ide-it`) and `--instance dev`. Do not run
    `herdr server stop` without `--session`, and do not attach to panes of
    the default session in control mode.
 2. **No hardcoded product name.** Use `brand.*` (Go), `APP_NAME`/`APP_SLUG`/

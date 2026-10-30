@@ -20,7 +20,7 @@ Non-goals: managing ssh keys or herdr installations; Windows machines.
 
 ## Design
 
-- **Agent.** `cmd/webherdr-agent` is a static Go binary (`CGO_ENABLED=0`)
+- **Agent.** `cmd/herdr-ide-agent` is a static Go binary (`CGO_ENABLED=0`)
   built for linux/darwin × amd64/arm64 and embedded gzipped in the core
   (`internal/embedded`). Its version is the content hash, so a changed build
   is always re-uploaded and core and agent can never disagree on the
@@ -28,7 +28,7 @@ Non-goals: managing ssh keys or herdr installations; Windows machines.
 - **Connect** (`internal/transport/ssh.go`):
   1. probe `uname -s`, `uname -m`, `$HOME` through `/bin/sh -c` (works with
      any login shell);
-  2. if `~/.webherdr/agent/<hash>/webherdr-agent` is missing, upload it with
+  2. if `~/.herdr-ide/agent/<hash>/herdr-ide-agent` is missing, upload it with
      `cat >` to a temporary name and rename atomically;
   3. `exec` it with `serve --instance NAME` and speak yamux over the ssh
      session's stdin/stdout.
@@ -46,7 +46,7 @@ Non-goals: managing ssh keys or herdr installations; Windows machines.
   auth_required, error, disabled; reconnect backoff 0.5 s doubling to 120 s;
   auth failures retry every 30 s or immediately after the UI's
   authentication terminal closes.
-- **Instances.** `--instance NAME` makes agents use `~/.webherdr-NAME` for
+- **Instances.** `--instance NAME` makes agents use `~/.herdr-ide-NAME` for
   sockets, code-server process and settings, so two cores (daily and
   development) can share machines safely. Agent builds and code-server
   releases are shared between instances.
@@ -71,7 +71,7 @@ Non-goals: managing ssh keys or herdr installations; Windows machines.
   ([10](10-remote-resource-lifecycle.md)); the core reconnects with backoff.
 - **Unsupported platform** → no embedded agent for the `uname` pair; the
   machine shows the error.
-- **Hijacked control directory** → refused: `/tmp/webherdr-<uid>/s` must be
+- **Hijacked control directory** → refused: `/tmp/herdr-ide-<uid>/s` must be
   a real directory owned by the user with no group/other access
   ([08](08-web-access-and-security.md)).
 

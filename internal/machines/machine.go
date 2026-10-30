@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"webherdr/internal/agentproto"
-	"webherdr/internal/herdr"
-	"webherdr/internal/transport"
+	"herdr-ide/internal/agentproto"
+	"herdr-ide/internal/herdr"
+	"herdr-ide/internal/transport"
 )
 
 // Status of a machine connection.

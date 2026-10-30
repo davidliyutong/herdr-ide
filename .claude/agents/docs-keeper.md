@@ -11,7 +11,7 @@ You keep this repository's documentation accurate. Edit only Markdown files
 Where things belong:
 - flags, shortcuts, environment variables, files → `docs/reference.md`
   (single source; `scripts/check.sh` fails on undocumented flags — get the
-  list from `go run ./cmd/webherdr serve -h` and `fetch-assets -h`);
+  list from `go run ./cmd/herdr-ide serve -h` and `fetch-assets -h`);
 - components and protocols → `docs/architecture.md`;
 - operations (proxies, air-gap, resources, services) → `docs/deployment.md`;
 - reasoning per feature → `docs/features/NN-*.md` (sections: Context,

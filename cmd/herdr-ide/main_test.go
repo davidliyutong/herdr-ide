@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"webherdr/internal/machines"
+	"herdr-ide/internal/machines"
 )
 
 func TestSelectSpecsDedup(t *testing.T) {

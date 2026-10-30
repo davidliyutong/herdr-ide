@@ -1,4 +1,4 @@
-# webherdr
+# herdr-ide
 
 [English](README.md) | 简体中文
 
@@ -33,19 +33,19 @@
 
 ```bash
 make deps && make build
-./dist/webherdr-$(go env GOOS)-$(go env GOARCH)
+./dist/herdr-ide-$(go env GOOS)-$(go env GOARCH)
 ```
 
 打开 <http://127.0.0.1:7780>。`ctrl+b space` 打开命令面板，`ctrl+b ?` 查看快捷键。全部参数见 [docs/reference.md](docs/reference.md)。
 
 ## 远程访问
 
-webherdr 本身不带登录：让它只监听 `127.0.0.1`，前面放一个负责登录和 HTTPS 的反向代理（Tailscale、Caddy、nginx），再用 `--allowed-origin` 告诉它代理的对外地址。另外还有几项可选的安全围栏：反代密钥头、只读模式、审计日志。详见 [docs/deployment.md](docs/deployment.md) 和 [SECURITY.md](SECURITY.md)。
+herdr-ide 本身不带登录：让它只监听 `127.0.0.1`，前面放一个负责登录和 HTTPS 的反向代理（Tailscale、Caddy、nginx），再用 `--allowed-origin` 告诉它代理的对外地址。另外还有几项可选的安全围栏：反代密钥头、只读模式、审计日志。详见 [docs/deployment.md](docs/deployment.md) 和 [SECURITY.md](SECURITY.md)。
 
 ## 离线（air-gap）环境
 
-各台机器永远不需要下载任何东西。如果运行 webherdr 的主机也不能联网：
-1. 在一台能联网的机器上运行 `webherdr fetch-assets DIR`；
+各台机器永远不需要下载任何东西。如果运行 herdr-ide 的主机也不能联网：
+1. 在一台能联网的机器上运行 `herdr-ide fetch-assets DIR`；
 2. 把 `DIR` 拷进内网；
 3. 用 `--offline --seed-dir DIR` 启动。
 
@@ -62,7 +62,7 @@ webherdr 本身不带登录：让它只监听 `127.0.0.1`，前面放一个负�
 ## 开发
 
 ```bash
-herdr --session webherdr-dev server &   # 隔离的 herdr session
+herdr --session herdr-ide-dev server &   # 隔离的 herdr session
 make dev-core                            # 在 :7790 以 --instance dev 运行 core
 make dev-web                             # 前端热更新，端口 5173
 make check test                          # 提交 PR 之前运行

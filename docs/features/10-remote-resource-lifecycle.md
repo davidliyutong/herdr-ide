@@ -2,7 +2,7 @@
 
 ## Context
 
-webherdr starts processes and writes files on shared machines that it does
+herdr-ide starts processes and writes files on shared machines that it does
 not otherwise manage. Several cores may connect to the same machine, agents
 can be killed abruptly, browsers keep hidden iframes open, and code-server
 holds hundreds of megabytes per instance. Left alone, this exhausts memory

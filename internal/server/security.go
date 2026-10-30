@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"webherdr/internal/brand"
-	"webherdr/internal/machines"
+	"herdr-ide/internal/brand"
+	"herdr-ide/internal/machines"
 )
 
 // Security model (see SECURITY.md): the core has no login of its own. It

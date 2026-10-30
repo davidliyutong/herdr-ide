@@ -4,8 +4,8 @@ web/dist/*
 !web/dist/.gitkeep
 internal/embedded/agents/*.gz
 internal/embedded/ext/*.vsix
-extensions/webherdr-bridge/dist/
-extensions/webherdr-bridge/*.vsix
+extensions/herdr-ide-bridge/dist/
+extensions/herdr-ide-bridge/*.vsix
 .DS_Store
 /bundle/
 coverage/

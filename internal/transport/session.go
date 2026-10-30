@@ -1,4 +1,4 @@
-// Package transport establishes yamux sessions to webherdr agents: in-process
+// Package transport establishes yamux sessions to herdr-ide agents: in-process
 // for the local machine, over ssh stdio for remote machines.
 package transport
 
@@ -16,8 +16,8 @@ import (
 
 	"github.com/hashicorp/yamux"
 
-	"webherdr/internal/agent"
-	"webherdr/internal/agentproto"
+	"herdr-ide/internal/agent"
+	"herdr-ide/internal/agentproto"
 )
 
 // Session is a live connection to one agent.

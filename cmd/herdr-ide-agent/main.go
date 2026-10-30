@@ -1,4 +1,4 @@
-// Command webherdr-agent is the per-machine helper started by webherdr over
+// Command herdr-ide-agent is the per-machine helper started by herdr-ide over
 // ssh. It speaks yamux on stdin/stdout; logs go to stderr.
 package main
 
@@ -6,14 +6,14 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"herdr-ide/internal/brand"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
-	"webherdr/internal/brand"
 
-	"webherdr/internal/agent"
-	"webherdr/internal/agentproto"
+	"herdr-ide/internal/agent"
+	"herdr-ide/internal/agentproto"
 )
 
 type stdio struct{}

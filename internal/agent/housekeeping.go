@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"webherdr/internal/brand"
+	"herdr-ide/internal/brand"
 )
 
 // Retention for files the agent creates on machines.

@@ -19,7 +19,7 @@ body:
     id: version
     attributes:
       label: Versions / 版本
-      description: "`webherdr version`, `herdr --version`, browser, OS/arch of core and machines"
+      description: "`herdr-ide version`, `herdr --version`, browser, OS/arch of core and machines"
     validations:
       required: true
   - type: textarea

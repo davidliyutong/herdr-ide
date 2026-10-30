@@ -15,7 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	"webherdr/internal/agentproto"
+	"herdr-ide/internal/agentproto"
 )
 
 // handleTerm runs `herdr terminal session control|observe` and connects its

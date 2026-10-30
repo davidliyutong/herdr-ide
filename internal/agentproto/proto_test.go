@@ -23,7 +23,7 @@ func TestReadLineLeavesFollowingBytes(t *testing.T) {
 }
 
 func TestChunkRoundTrip(t *testing.T) {
-	payload := bytes.Repeat([]byte("webherdr-"), 300000) // > 1 MiB, several chunks
+	payload := bytes.Repeat([]byte("herdr-ide-"), 300000) // > 1 MiB, several chunks
 	var buf bytes.Buffer
 	cw := ChunkWriter{W: &buf}
 	if _, err := cw.Write(payload); err != nil {

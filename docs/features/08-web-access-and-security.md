@@ -25,7 +25,7 @@ API and the code-server proxy on `127.0.0.1:7780` by default.
 1. Security headers on every response (`nosniff`, `no-referrer`,
    `Cross-Origin-Opener-Policy`).
 2. **Proxy secret** (`--proxy-secret-file`): requests not from a same-host
-   browser must carry `X-webherdr-Proxy-Secret` (constant-time compare). A
+   browser must carry `X-herdr-ide-Proxy-Secret` (constant-time compare). A
    same-host proxy is recognized by its non-loopback Host or
    `X-Forwarded-For`, so it cannot skip the secret.
 3. **Host / Origin allowlist**: loopback plus `--allowed-origin`, against DNS
@@ -41,7 +41,7 @@ API and the code-server proxy on `127.0.0.1:7780` by default.
    uploads, VS Code and bridge use, ssh authentication and denials, with the
    user from `--user-header` or common proxy headers.
 
-**Startup checks** (`cmd/webherdr`): a non-loopback `--listen` is refused
+**Startup checks** (`cmd/herdr-ide`): a non-loopback `--listen` is refused
 unless a proxy secret is configured or `--insecure-listen` is given; the ssh
 control directory must be private ([02](02-multi-machine-transport.md)).
 

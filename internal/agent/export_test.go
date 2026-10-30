@@ -1,6 +1,6 @@
 package agent
 
-import "webherdr/internal/brand"
+import "herdr-ide/internal/brand"
 
 // brandLegacy temporarily sets brand.LegacyDataDirNames.
 func brandLegacy(names ...string) (restore func()) {

@@ -1,10 +1,10 @@
 # Architecture
 
 ```
-browser (React + xterm.js)  ──WebSocket + HTTP──▶  core (Go, `webherdr`)
+browser (React + xterm.js)  ──WebSocket + HTTP──▶  core (Go, `herdr-ide`)
                                                      ├─ machines: registry + connection state machine
                                                      ├─ server: WS hub, pane arbiter, files, code-server proxy, bridge hub
-                                                     └─ one ssh session per machine ──yamux──▶ agent (`webherdr-agent`)
+                                                     └─ one ssh session per machine ──yamux──▶ agent (`herdr-ide-agent`)
                                                                                                  ├─ herdr API socket (raw pipe)
                                                                                                  ├─ `herdr terminal session` processes
                                                                                                  ├─ files (stat/list/range read/upload)
@@ -14,8 +14,8 @@ browser (React + xterm.js)  ──WebSocket + HTTP──▶  core (Go, `webherdr
 
 | Directory | Role |
 | --- | --- |
-| `cmd/webherdr` | Core entry point: flags, `serve`, `fetch-assets`. |
-| `cmd/webherdr-agent` | Agent entry point (`serve` over stdio). |
+| `cmd/herdr-ide` | Core entry point: flags, `serve`, `fetch-assets`. |
+| `cmd/herdr-ide-agent` | Agent entry point (`serve` over stdio). |
 | `internal/brand` | Product names; the only place they are defined in Go. |
 | `internal/agentproto` | Stream protocol shared by core and agent. |
 | `internal/agent` | Agent: herdr, terminals, files, code-server supervision, bridge listener, housekeeping. |
@@ -26,7 +26,7 @@ browser (React + xterm.js)  ──WebSocket + HTTP──▶  core (Go, `webherdr
 | `internal/server` | HTTP/WS front: guards, arbiter, files, proxy, bridge, audit. |
 | `internal/embedded` | Build artifacts compiled into the core (agents, bridge VSIX). |
 | `web` | Browser UI (Vite, React, zustand, xterm.js); `web/embed.go` embeds `web/dist`. |
-| `extensions/webherdr-bridge` | VS Code extension installed into code-server. |
+| `extensions/herdr-ide-bridge` | VS Code extension installed into code-server. |
 
 ## herdr facts the design relies on
 
@@ -112,7 +112,7 @@ without WebSocket connections through its proxy. See
 ## Names, renames and migration
 
 All runtime identifiers derive from `internal/brand` (Go),
-`web/src/brand.ts` and `extensions/webherdr-bridge/src/brand.ts`;
+`web/src/brand.ts` and `extensions/herdr-ide-bridge/src/brand.ts`;
 `internal/brand/brand_test.go` keeps the three in sync and
 `scripts/check.sh` rejects new hardcoded occurrences. `scripts/rename.sh NEW`
 renames the project (files, directories, module path) and appends the old

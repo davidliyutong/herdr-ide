@@ -1,4 +1,4 @@
-module webherdr
+module herdr-ide
 
 go 1.27.1
 

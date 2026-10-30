@@ -26,7 +26,7 @@ Cutting a release:
 3. Tag `vX.Y.Z` (semantic versioning; the version is injected from
    `git describe` by `scripts/build.sh`).
 4. Build: `TARGETS="linux/amd64 linux/arm64 darwin/amd64 darwin/arm64" scripts/build.sh`;
-   write `dist/SHA256SUMS` with `shasum -a 256 dist/webherdr-*`.
+   write `dist/SHA256SUMS` with `shasum -a 256 dist/herdr-ide-*`.
 5. Smoke test the host binary: `version`, start with `--local-only`, open
    the UI.
 

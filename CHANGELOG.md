@@ -31,3 +31,11 @@ All notable changes are documented here. The format follows
   pane input contract tests (browser and herdr key encodings), reproducible
   builds, third-party notices, CI, release workflow with
   checksums and build provenance, Dependabot.
+
+### Changed
+
+- Renamed from webherdr to herdr-ide: binaries, Go module, `~/.herdr-ide`,
+  `HERDR_IDE_*` variables and the `herdr-ide.herdr-ide-bridge` extension.
+  Existing installs migrate on first start: machines move `~/.webherdr` to
+  `~/.herdr-ide`, browsers move their stored preferences, code-server drops
+  the old bridge extension and the core removes the old download cache.

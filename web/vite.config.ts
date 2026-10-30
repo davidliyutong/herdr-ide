@@ -2,7 +2,7 @@ import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { APP_NAME } from './src/brand';
 
-const core = process.env.WEBHERDR_CORE ?? 'http://127.0.0.1:7780';
+const core = process.env.HERDR_IDE_CORE ?? 'http://127.0.0.1:7780';
 
 // index.html title and the PWA manifest come from src/brand.ts.
 function brand(): Plugin {

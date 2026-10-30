@@ -7,16 +7,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"herdr-ide/internal/brand"
 	"io"
 	"log"
 	"net"
 	"os"
 	"path/filepath"
 	"sync"
-	"webherdr/internal/brand"
 
-	"webherdr/internal/agentproto"
-	"webherdr/internal/machines"
+	"herdr-ide/internal/agentproto"
+	"herdr-ide/internal/machines"
 )
 
 // DefaultVersion is the code-server release installed on machines.

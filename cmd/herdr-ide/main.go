@@ -1,10 +1,10 @@
-// Command webherdr is the terminal-first, multi-machine, agent-native web IDE
+// Command herdr-ide is the terminal-first, multi-machine, agent-native web IDE
 // for herdr. It serves the web UI and orchestrates agents on every machine.
 //
-//	webherdr [serve] [flags]       run the server (default)
-//	webherdr fetch-assets DIR      download code-server and extensions for
+//	herdr-ide [serve] [flags]       run the server (default)
+//	herdr-ide fetch-assets DIR      download code-server and extensions for
 //	                               air-gapped installs (use with --seed-dir)
-//	webherdr version
+//	herdr-ide version
 package main
 
 import (
@@ -25,14 +25,14 @@ import (
 	"syscall"
 	"time"
 
-	"webherdr/internal/agentproto"
-	"webherdr/internal/brand"
-	"webherdr/internal/codeserver"
-	"webherdr/internal/embedded"
-	"webherdr/internal/machines"
-	"webherdr/internal/server"
-	"webherdr/internal/transport"
-	"webherdr/web"
+	"herdr-ide/internal/agentproto"
+	"herdr-ide/internal/brand"
+	"herdr-ide/internal/codeserver"
+	"herdr-ide/internal/embedded"
+	"herdr-ide/internal/machines"
+	"herdr-ide/internal/server"
+	"herdr-ide/internal/transport"
+	"herdr-ide/web"
 )
 
 type listFlag []string

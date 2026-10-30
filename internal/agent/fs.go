@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"herdr-ide/internal/brand"
 	"io"
 	"io/fs"
 	"net"
@@ -12,9 +13,8 @@ import (
 	"path/filepath"
 	"sort"
 	"time"
-	"webherdr/internal/brand"
 
-	"webherdr/internal/agentproto"
+	"herdr-ide/internal/agentproto"
 )
 
 const maxListEntries = 20000

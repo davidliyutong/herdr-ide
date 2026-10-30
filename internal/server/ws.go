@@ -11,8 +11,8 @@ import (
 
 	"github.com/coder/websocket"
 
-	"webherdr/internal/herdr"
-	"webherdr/internal/machines"
+	"herdr-ide/internal/herdr"
+	"herdr-ide/internal/machines"
 )
 
 // inMsg is any message from the browser.

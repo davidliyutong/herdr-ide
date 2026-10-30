@@ -16,7 +16,7 @@ Web UI (`web/src/i18n/`):
 - Keys are grouped by area (`app.`, `pane.`, `dock.`, …) and named for their
   meaning, not their wording.
 
-Extension (`extensions/webherdr-bridge/`): `package.nls*.json` for manifest
+Extension (`extensions/herdr-ide-bridge/`): `package.nls*.json` for manifest
 titles, `l10n/bundle.l10n.<locale>.json` for `vscode.l10n.t` strings (the key
 is the English text).
 

@@ -11,8 +11,8 @@ import (
 	"runtime"
 	"testing"
 
-	"webherdr/internal/agentproto"
-	"webherdr/internal/transport"
+	"herdr-ide/internal/agentproto"
+	"herdr-ide/internal/transport"
 )
 
 func dialAgent(t *testing.T) (*transport.Session, string) {
@@ -35,7 +35,7 @@ func TestHelloAndPrivateRunDir(t *testing.T) {
 	if rep.Info.OS != runtime.GOOS || rep.Info.Home != home {
 		t.Fatalf("info = %+v", rep.Info)
 	}
-	st, err := os.Stat(filepath.Join(home, ".webherdr", "run"))
+	st, err := os.Stat(filepath.Join(home, ".herdr-ide", "run"))
 	if err != nil || st.Mode().Perm() != 0o700 {
 		t.Fatalf("run dir perms: %v %v", st.Mode(), err)
 	}
@@ -85,7 +85,7 @@ func TestExecAndDialRestriction(t *testing.T) {
 	if err != nil || rep.Exec.ExitCode != 3 || rep.Exec.Stdout != "out\n" || rep.Exec.Stderr != "err\n" {
 		t.Fatalf("exec = %+v %v", rep, err)
 	}
-	// Only sockets inside ~/.webherdr/run may be dialed.
+	// Only sockets inside ~/.herdr-ide/run may be dialed.
 	ln, err := net.Listen("unix", filepath.Join(t.TempDir(), "x.sock"))
 	if err != nil {
 		t.Fatal(err)

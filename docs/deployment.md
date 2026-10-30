@@ -1,6 +1,6 @@
 # Deployment
 
-webherdr runs on one host (your laptop or an always-on machine) and is used
+herdr-ide runs on one host (your laptop or an always-on machine) and is used
 from browsers. It reaches herdr machines over ssh; nothing listens on the
 machines.
 
@@ -15,11 +15,11 @@ machines.
 
 ```bash
 scripts/build.sh
-./dist/webherdr-$(go env GOOS)-$(go env GOARCH)    # http://127.0.0.1:7780
+./dist/herdr-ide-$(go env GOOS)-$(go env GOARCH)    # http://127.0.0.1:7780
 ```
 
 Machines come from herdr's saved SSH machines (`herdr machine list`); add
-others with `--ssh`. webherdr uses OpenSSH with your `~/.ssh/config`
+others with `--ssh`. herdr-ide uses OpenSSH with your `~/.ssh/config`
 (ProxyJump, agent, keys) in BatchMode. A machine that needs a password, 2FA or
 a host-key confirmation shows **Authentication required**; **Authenticate…**
 opens a terminal for it, and later connections reuse that ssh ControlMaster.
@@ -32,16 +32,16 @@ webviews (Git Graph, media preview) need service workers, and the clipboard
 and notification APIs need a secure context (plain `http://localhost` is the
 only exception).
 
-Tell webherdr the public origin so its Host/Origin checks accept it:
+Tell herdr-ide the public origin so its Host/Origin checks accept it:
 
 ```bash
-webherdr --allowed-origin https://ide.example.com
+herdr-ide --allowed-origin https://ide.example.com
 ```
 
 **Tailscale** (tailnet only, automatic certificates):
 
 ```bash
-webherdr --allowed-origin https://mac.your-tailnet.ts.net --user-header Tailscale-User-Login
+herdr-ide --allowed-origin https://mac.your-tailnet.ts.net --user-header Tailscale-User-Login
 tailscale serve --bg --https=443 http://127.0.0.1:7780
 ```
 
@@ -54,7 +54,7 @@ ide.example.com {
 		copy_headers Remote-User
 	}
 	reverse_proxy 127.0.0.1:7780 {
-		header_up X-webherdr-Proxy-Secret {env.WEBHERDR_PROXY_SECRET}
+		header_up X-herdr-ide-Proxy-Secret {env.HERDR_IDE_PROXY_SECRET}
 	}
 }
 ```
@@ -69,15 +69,15 @@ location / {
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
     proxy_set_header Host $host;
-    proxy_set_header X-webherdr-Proxy-Secret "<secret>";
+    proxy_set_header X-herdr-ide-Proxy-Secret "<secret>";
     proxy_read_timeout 1d;
 }
 ```
 
 ### Guardrails
 
-- **Proxy secret** – `--proxy-secret-file FILE` makes webherdr require the
-  `X-webherdr-Proxy-Secret` header on every request that does not come from a
+- **Proxy secret** – `--proxy-secret-file FILE` makes herdr-ide require the
+  `X-herdr-ide-Proxy-Secret` header on every request that does not come from a
   browser on the same host, so only your proxy can talk to it. With a secret,
   `--listen` may use a non-loopback address (e.g. a proxy in a container);
   without one, that needs the explicit `--insecure-listen`.
@@ -99,15 +99,15 @@ resolved on the core host and pushed through the agent. When the core host is
 offline too, prepare a bundle on a connected machine:
 
 ```bash
-webherdr fetch-assets ./bundle                          # all platforms
-webherdr fetch-assets --platforms linux-amd64 ./bundle  # only what you need
+herdr-ide fetch-assets ./bundle                          # all platforms
+herdr-ide fetch-assets --platforms linux-amd64 ./bundle  # only what you need
 ```
 
-Copy `./bundle` (tarballs, VSIXs and `.sha256` files) and the webherdr binary
+Copy `./bundle` (tarballs, VSIXs and `.sha256` files) and the herdr-ide binary
 into the network, then run:
 
 ```bash
-webherdr --offline --seed-dir ./bundle
+herdr-ide --offline --seed-dir ./bundle
 ```
 
 Lookup order: `--seed-dir` directories, then the cache, then (unless
@@ -127,11 +127,11 @@ npm packages (vendor or mirror them for offline builds).
 
 ## Remote resources
 
-What webherdr starts on a machine and how it is reclaimed:
+What herdr-ide starts on a machine and how it is reclaimed:
 
 | Resource | Started | Reclaimed |
 | --- | --- | --- |
-| `webherdr-agent` | one per core while connected | Exits when its ssh session ends; a dead link is detected by keepalives within about 45 s. |
+| `herdr-ide-agent` | one per core while connected | Exits when its ssh session ends; a dead link is detected by keepalives within about 45 s. |
 | `herdr terminal session` processes | one per pane being viewed | Ends when the pane is no longer shown, or with the agent. |
 | code-server | on first VS Code use | Stopped after `--code-server-idle` (default 20 min) without VS Code connections, when the agent exits (if that agent started it), or by the stop button in the VS Code panel. Hidden VS Code panels disconnect after 10 min. A process left behind by a killed agent is stopped by the next agent, and code-server exits by itself after 1 h without connections. |
 | VS Code extension hosts | one per VS Code window | Disposed 5 min after the window disconnects. |
@@ -140,31 +140,31 @@ What webherdr starts on a machine and how it is reclaimed:
 
 ## Running as a service
 
-macOS (launchd), `~/Library/LaunchAgents/dev.webherdr.plist`:
+macOS (launchd), `~/Library/LaunchAgents/dev.herdr-ide.plist`:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>Label</key><string>dev.webherdr</string>
+  <key>Label</key><string>dev.herdr-ide</string>
   <key>ProgramArguments</key><array>
-    <string>/usr/local/bin/webherdr</string>
+    <string>/usr/local/bin/herdr-ide</string>
     <string>--allowed-origin</string><string>https://ide.example.com</string>
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
-  <key>StandardErrorPath</key><string>/tmp/webherdr.log</string>
+  <key>StandardErrorPath</key><string>/tmp/herdr-ide.log</string>
 </dict></plist>
 ```
 
-Linux (systemd user unit), `~/.config/systemd/user/webherdr.service`:
+Linux (systemd user unit), `~/.config/systemd/user/herdr-ide.service`:
 
 ```ini
 [Unit]
-Description=webherdr
+Description=herdr-ide
 
 [Service]
-ExecStart=%h/.local/bin/webherdr --allowed-origin https://ide.example.com
+ExecStart=%h/.local/bin/herdr-ide --allowed-origin https://ide.example.com
 Restart=on-failure
 
 [Install]
@@ -177,10 +177,10 @@ The service must run as the user who owns the herdr sessions and the ssh keys.
 
 Two cores that connect to the same machine share one agent build directory
 but nothing else unless they use the same instance. Give each one its own
-`--instance` (state in `~/.webherdr-<instance>`); for development also use an
+`--instance` (state in `~/.herdr-ide-<instance>`); for development also use an
 isolated herdr session:
 
 ```bash
-herdr --session webherdr-dev server &
-make dev-core     # go run ./cmd/webherdr --instance dev --local-only --local-session webherdr-dev --listen 127.0.0.1:7790
+herdr --session herdr-ide-dev server &
+make dev-core     # go run ./cmd/herdr-ide --instance dev --local-only --local-session herdr-ide-dev --listen 127.0.0.1:7790
 ```

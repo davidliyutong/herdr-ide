@@ -11,11 +11,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"herdr-ide/internal/brand"
 	"net"
 	"strconv"
 	"sync/atomic"
 	"time"
-	"webherdr/internal/brand"
 )
 
 // Client issues API requests over connections produced by Dial.

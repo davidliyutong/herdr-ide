@@ -1,5 +1,5 @@
 // Package server exposes the web UI, the WebSocket protocol and the HTTP
-// endpoints (files, code-server proxy) of the webherdr core.
+// endpoints (files, code-server proxy) of the herdr-ide core.
 package server
 
 import (
@@ -16,10 +16,10 @@ import (
 	"sync"
 	"time"
 
-	"webherdr/internal/agentproto"
-	"webherdr/internal/brand"
-	"webherdr/internal/codeserver"
-	"webherdr/internal/machines"
+	"herdr-ide/internal/agentproto"
+	"herdr-ide/internal/brand"
+	"herdr-ide/internal/codeserver"
+	"herdr-ide/internal/machines"
 )
 
 // Options configures the server.

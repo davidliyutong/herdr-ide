@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"webherdr/internal/machines"
+	"herdr-ide/internal/machines"
 )
 
 // codeServerProxy serves /m/{id}/code/... from the machine's code-server,

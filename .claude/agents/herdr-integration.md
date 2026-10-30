@@ -20,8 +20,8 @@ Verify, don't assume:
   installed version; diff it against the methods and subscriptions used in
   `internal/machines/machine.go` and the allowlist in
   `internal/server/security.go`.
-- Experiment only in an isolated session: `herdr --session webherdr-dev server`
-  (stop it with `herdr --session webherdr-dev server stop`). Never use the
+- Experiment only in an isolated session: `herdr --session herdr-ide-dev server`
+  (stop it with `herdr --session herdr-ide-dev server stop`). Never use the
   default session, never attach in control mode to panes you did not create,
   never run `herdr server stop` without `--session`.
 
