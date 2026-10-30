@@ -51,6 +51,13 @@ Verified against herdr 0.9.5 (protocol 22):
 - That stream drops OSC 52, bell, keyboard-protocol negotiation and Kitty
   graphics. A native client of herdr's private protocol could keep them but
   would be tied to its exact protocol version.
+- Panes report their scroll position (`scroll`: `offset_from_bottom`,
+  `max_offset_from_bottom`, `viewport_rows`) in `pane.get` and the snapshot.
+  `pane.scroll` sets an absolute offset (clamped) and replies with the pane;
+  the position is shared by every client of the pane, a scrolled-back view
+  stays on its lines while output arrives, and stream input returns it to
+  the bottom. `pane.selection.read` returns the text between two cells in
+  absolute rows (row 0 is the oldest line kept), both included.
 
 ## Core ↔ agent protocol (`internal/agentproto`)
 

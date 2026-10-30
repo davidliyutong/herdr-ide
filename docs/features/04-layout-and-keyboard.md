@@ -34,6 +34,12 @@ Non-goals: a separate herdr-ide layout model; arbitrary docking of panes.
   is herdr's order. `Tab.number` is not a position: it stays with a tab when
   the tab moves (workspace numbers are positions). `prefix 1..9` picks tabs
   by position.
+- Tabs that do not fit on one row continue on more rows and the tab bar
+  grows, as with VS Code's wrapped tabs: every tab stays visible and the bar
+  never scrolls. The sidebar toggle and the breadcrumb stay on the first
+  row, `+` follows the last tab, and a label longer than 16em is cut with
+  an ellipsis (the tooltip has it in full). The sidebar lists every
+  workspace of a machine one below the other.
 
 **Rearranging and renaming** (`web/src/drag.ts`, `paneDrag.ts`,
 `reorderDrag.ts`, `InlineEdit.tsx`)
@@ -55,7 +61,10 @@ Non-goals: a separate herdr-ide layout model; arbitrary docking of panes.
   in the sidebar, shows an insertion bar and reorders it (`tab.move`,
   `workspace.move`). Their `insert_index` is a slot in the current order (0
   before the first item, n after the last); the two slots beside the dragged
-  item change nothing and show no bar. A tab stays in its workspace and a
+  item change nothing and show no bar. On a tab bar with several rows the
+  row under the pointer (or the nearest) is picked first, then the slot
+  within it; the end of one row and the start of the next are the same
+  slot, drawn on the row the pointer is on. A tab stays in its workspace and a
   workspace on its machine: a tab can be dropped anywhere along its tab bar,
   a workspace only on or next to its machine's list, so dropping it on
   another machine's list does nothing. The reply (the moved group in its new order) is
@@ -124,6 +133,9 @@ Non-goals: a separate herdr-ide layout model; arbitrary docking of panes.
 | Option | Why not |
 | --- | --- |
 | Reordering tabs and workspaces in the browser only | The order would differ from herdr's TUI and from other browsers. |
+| A tab bar that scrolls sideways (with auto-scroll while dragging) | Tabs out of view are hidden with no sign that they exist. |
+| Tabs that shrink to fit, as in Chrome | Labels become unreadable with many tabs. |
+| A "more tabs" menu for the tabs that do not fit | Hides tabs again and costs a click. |
 | Bindings to move tabs and workspaces | herdr has no such bindings to mirror; the context menu's move items work from the keyboard. |
 | A "⋯" button on every header, tab and workspace row | Takes room on every tab and row; right-click covers desktop browsers. |
 | Desktop shell (Electron/Tauri) to own all shortcuts | Electron was replaced by browser access so the IDE works remotely; Tauri's WKWebView on macOS lacks service workers, which VS Code webviews need. |
@@ -143,8 +155,8 @@ Non-goals: a separate herdr-ide layout model; arbitrary docking of panes.
 `internal/server/server_test.go` (`TestLoadKeyConfig`),
 `web/src/__tests__/core.test.ts` (pane geometry for directional focus),
 `web/src/__tests__/settings.test.ts` (drop zones, key labels),
-`web/src/__tests__/menus.test.ts` (insertion slots, the area a drop counts
-in, applying a move reply, menu items and their commands, moves from the
+`web/src/__tests__/menus.test.ts` (insertion slots, also on wrapped rows,
+the area a drop counts in, applying a move reply, menu items and their commands, moves from the
 current position, read-only, keyboard, focus and closing of the menu);
 `internal/server/server_test.go` (`TestAPIAllowlist`: moves are refused in
 read-only mode). The `set_split_ratio` path semantics, the `pane.swap` /

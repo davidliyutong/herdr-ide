@@ -92,7 +92,7 @@ export function Workspace() {
                     }}
                   />
                 ) : (
-                  <span>{tab.label}</span>
+                  <span className="tab-label ellipsis">{tab.label}</span>
                 )}
                 {tab.pane_count > 1 && (
                   <span className="tab-count" title={t('workspace.paneCount', { n: tab.pane_count })}>
