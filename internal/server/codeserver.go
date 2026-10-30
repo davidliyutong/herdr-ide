@@ -113,7 +113,28 @@ func (p *codeServerProxy) proxy(mc *machines.Machine) *httputil.ReverseProxy {
 	return rp
 }
 
+// portProxyPath reports whether path, below /m/{id}/code, is one of
+// code-server's port proxy routes. They would serve whatever listens on a
+// port of the machine with our origin, where its scripts could drive every
+// pane, so they are refused even if a code-server started without
+// --disable-proxy (by an earlier build) is still running. Express matches
+// routes case-insensitively.
+func portProxyPath(path string) bool {
+	path = strings.ToLower(path)
+	for _, route := range []string{"/proxy", "/absproxy"} {
+		if path == route || strings.HasPrefix(path, route+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 func (p *codeServerProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if portProxyPath(strings.TrimPrefix(r.URL.Path, "/m/"+r.PathValue("id")+"/code")) {
+		p.s.audit.log(r, "denied.port_proxy", map[string]any{"machine": r.PathValue("id"), "path": r.URL.Path})
+		http.Error(w, "code-server port proxy disabled", http.StatusForbidden)
+		return
+	}
 	mc := p.s.machine(w, r)
 	if mc == nil {
 		return
