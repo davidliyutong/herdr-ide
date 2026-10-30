@@ -20,6 +20,7 @@ shortcuts, paths) lives in [reference.md](../reference.md).
 | 10 | [Remote resource lifecycle](10-remote-resource-lifecycle.md) | Ownership and reclamation of every process and file created on machines. |
 | 11 | [Naming and renames](11-naming-and-renames.md) | Centralized product names, one-step renames and migration of persisted state. |
 | 12 | [Internationalization](12-internationalization.md) | English and Chinese UI, translated extension, codes instead of server prose. |
+| 13 | [Settings and appearance](13-settings-and-appearance.md) | Settings generated from definitions in the browser and the core; themes, font sizes, panel position. |
 
 ## Writing a feature document
 

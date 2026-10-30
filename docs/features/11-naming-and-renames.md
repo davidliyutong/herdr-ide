@@ -54,6 +54,11 @@ identifiers (herdr session names, herdr paths).
 
 - **Both old and new data directories exist** → the agent keeps the new one;
   the old one is left for manual inspection.
+- **The previous version is still running** → its code-server would keep
+  answering on the moved socket while its files are gone (every page 404),
+  so the agent stops whatever listens on the old directory's `cs.sock` before
+  moving it. Stop the previous core before starting the renamed one: its
+  agent loses its directory.
 - **Command ids in user keybindings** (`<slug>.sendToAgent`) change with the
   slug; users rebind them.
 

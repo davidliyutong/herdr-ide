@@ -11,7 +11,8 @@ browser tab, with VS Code (code-server) one keystroke away.
 - **Speaks herdr's protocol.** Workspaces, tabs, split layouts and agent
   states come from herdr's socket API; every pane is an xterm.js terminal fed
   by herdr's own renderer, with input, mouse, scrollback, IME and resizable
-  splits. Keyboard shortcuts follow your herdr configuration (prefix
+  splits. Drag a pane by its header to swap or move it, click its title to
+  rename it. Keyboard shortcuts follow your herdr configuration (prefix
   `ctrl+b`).
 - **Multi-machine.** Uses the SSH machines saved in herdr. One ssh connection
   per machine runs a small static agent (linux/macOS × amd64/arm64, uploaded
@@ -22,15 +23,18 @@ browser tab, with VS Code (code-server) one keystroke away.
   sending code from VS Code to the focused agent, pasting images into agent
   prompts.
 - **VS Code on demand.** code-server is installed per machine from the core
-  host (no internet needed on machines), with Git Graph and a bridge
+  host (no internet needed on machines), downloaded by the machines
+  themselves, or taken from an existing install, with Git Graph and a bridge
   extension: open a pane's folder, its diff or Git Graph with one key; jump
-  from a `path:line` in the terminal to the editor. Idle instances are
-  stopped.
+  from a `path:line` in the terminal to the editor. The panel sits beside or
+  below the terminals. Idle instances are stopped.
 - **Quick Look.** ⌘/Ctrl-click a path in a terminal to preview images, GIFs,
   videos (with seeking), audio, PDFs, text or directories.
 - **Several browsers at once.** The active browser controls a pane; others
   watch at the same size and take over by typing.
-- **English and Chinese UI.**
+- **Settings.** Language (English, Chinese), light/dark theme followed by
+  VS Code, interface and terminal font sizes, panel position and the
+  code-server installation method, in one dialog (`ctrl+b ,`).
 
 ## Quick start
 

@@ -75,6 +75,14 @@ type Header struct {
 	Action  string   `json:"action,omitempty"`
 	Version string   `json:"version,omitempty"`
 	Args    []string `json:"args,omitempty"`
+	// Bin selects a code-server already installed on the machine instead of
+	// the release in the agent's directory: an absolute or "~/" path, or
+	// "auto" to search PATH and the usual install locations.
+	Bin string `json:"bin,omitempty"`
+	// URL (action download) is fetched by the machine itself; Digest is the
+	// expected SHA-256, "" when unknown (the reply then reports it).
+	URL    string `json:"url,omitempty"`
+	Digest string `json:"digest,omitempty"`
 }
 
 // Reply is the first line written back by the acceptor.
@@ -130,6 +138,10 @@ type CSStatus struct {
 	Running   bool   `json:"running"`
 	Socket    string `json:"socket,omitempty"`
 	Error     string `json:"error,omitempty"`
+	// Bin is the code-server executable in use.
+	Bin string `json:"bin,omitempty"`
+	// Digest is the SHA-256 of a release the machine downloaded.
+	Digest string `json:"digest,omitempty"`
 }
 
 type BridgeInfo struct {

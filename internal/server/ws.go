@@ -40,6 +40,9 @@ type inMsg struct {
 	Action string `json:"action"`
 	Button string `json:"button"`
 
+	// theme: "dark" or "light"
+	Kind string `json:"kind"`
+
 	RID    int64           `json:"rid"`
 	Method string          `json:"method"`
 	Params json.RawMessage `json:"params"`
@@ -211,6 +214,12 @@ func (c *wsClient) dispatch(m *inMsg) {
 		}
 	case "ping":
 		c.sendJSON(map[string]any{"t": "pong", "rid": m.RID})
+	case "theme":
+		// VS Code windows follow the theme chosen in the browser; watchers
+		// cannot use VS Code and do not change it.
+		if !c.s.opts.ReadOnly {
+			c.s.bridge.setTheme(m.Kind)
+		}
 	}
 }
 

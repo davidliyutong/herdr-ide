@@ -1,6 +1,6 @@
 // Bridge: lets the web IDE drive this code-server window (open files at a
-// position, multi-file diff, Git Graph, media preview) and sends editor
-// selections back to the agent pane focused in the web IDE.
+// position, multi-file diff, Git Graph, media preview, light/dark theme) and
+// sends editor selections back to the agent pane focused in the web IDE.
 //
 // The extension host runs on the machine itself and connects to the agent's
 // unix socket, which the agent tunnels to the core. The agent passes the
@@ -59,7 +59,9 @@ function connect() {
       } catch {
         continue;
       }
-      if (msg.type === 'command') {
+      if (msg.type === 'theme') {
+        applyTheme(msg.kind).catch((e) => log.appendLine(`theme ${msg.kind} failed: ${e}`));
+      } else if (msg.type === 'command') {
         run(msg)
           .then(() => send({ type: 'ack', id: msg.id, ok: true }))
           .catch((e) => {
@@ -83,6 +85,21 @@ function connect() {
   };
   s.on('error', () => again());
   s.on('close', () => again());
+}
+
+/** Follows the web IDE's light/dark choice with the user's preferred light or
+ * dark VS Code theme, leaving a theme of the right kind alone. */
+async function applyTheme(kind: unknown) {
+  if (kind !== 'dark' && kind !== 'light') return;
+  const k = vscode.window.activeColorTheme.kind;
+  const isDark = k === vscode.ColorThemeKind.Dark || k === vscode.ColorThemeKind.HighContrast;
+  if (isDark === (kind === 'dark')) return;
+  const wb = vscode.workspace.getConfiguration('workbench');
+  const theme =
+    kind === 'dark'
+      ? wb.get<string>('preferredDarkColorTheme') || 'Default Dark Modern'
+      : wb.get<string>('preferredLightColorTheme') || 'Default Light Modern';
+  await wb.update('colorTheme', theme, vscode.ConfigurationTarget.Global);
 }
 
 async function focusWorkbench() {

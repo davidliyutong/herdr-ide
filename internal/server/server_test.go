@@ -1,7 +1,10 @@
 package server
 
 import (
+	"bufio"
+	"flag"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +15,7 @@ import (
 	"time"
 
 	"herdr-ide/internal/machines"
+	"herdr-ide/internal/settings"
 )
 
 func TestParseRange(t *testing.T) {
@@ -239,5 +243,90 @@ func TestCodeServerIdleTracking(t *testing.T) {
 	}
 	if ids := p.idleAmong([]string{"m2"}, time.Minute); len(ids) != 0 {
 		t.Fatalf("machine without traffic yet must get a grace period: %v", ids)
+	}
+}
+
+func TestSettingsAPI(t *testing.T) {
+	s := newTestServer()
+	st := settings.New("", settings.Def{Key: "mode", Kind: settings.KindEnum, Default: "a", Options: []string{"a", "b"}},
+		settings.Def{Key: "locked", Kind: settings.KindString})
+	fs := flag.NewFlagSet("x", flag.ContinueOnError)
+	st.RegisterFlags(fs)
+	fs.Parse([]string{"--locked", "x"})
+	s.opts.Settings = st
+	h := s.Handler()
+	do := func(method, body string) (int, string) {
+		r := httptest.NewRequest(method, "/api/settings", strings.NewReader(body))
+		r.RemoteAddr, r.Host = "127.0.0.1:5555", "127.0.0.1:7780"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w.Code, w.Body.String()
+	}
+	if c, b := do("GET", ""); c != 200 || !strings.Contains(b, `"key":"mode"`) || !strings.Contains(b, `"source":"flag"`) {
+		t.Fatalf("GET = %d %s", c, b)
+	}
+	for _, c := range []struct {
+		body, code string
+		status     int
+	}{
+		{`{"key":"mode","value":"b"}`, "", 200},
+		{`{"key":"mode","value":"z"}`, `"error":"invalid"`, 400},
+		{`{"key":"locked","value":"y"}`, `"error":"locked"`, 409},
+		{`{"key":"nope","value":"y"}`, `"error":"unknown"`, 404},
+		{`not json`, `"error":"invalid"`, 400},
+	} {
+		if code, b := do("PUT", c.body); code != c.status || !strings.Contains(b, c.code) {
+			t.Errorf("PUT %s = %d %s", c.body, code, b)
+		}
+	}
+	if st.Get("mode") != "b" {
+		t.Errorf("mode = %q", st.Get("mode"))
+	}
+	s.opts.ReadOnly = true
+	if code, _ := do("PUT", `{"key":"mode","value":"a"}`); code != 403 || st.Get("mode") != "b" {
+		t.Errorf("read-only PUT = %d, mode %q", code, st.Get("mode"))
+	}
+}
+
+// VS Code windows get the browser's theme kind when they connect and when it
+// changes.
+func TestBridgeTheme(t *testing.T) {
+	s := newTestServer()
+	h := s.bridge
+	a, b := net.Pipe()
+	defer a.Close()
+	w := &bridgeWindow{m: "m", conn: a}
+	h.mu.Lock()
+	h.windows[w] = true
+	h.mu.Unlock()
+	got := make(chan string, 4)
+	go func() {
+		r := bufio.NewReader(b)
+		for {
+			line, err := r.ReadString('\n')
+			if err != nil {
+				return
+			}
+			got <- strings.TrimSpace(line)
+		}
+	}()
+	h.setTheme("light")
+	h.setTheme("light") // unchanged: not resent
+	h.setTheme("purple")
+	h.setTheme("dark")
+	for _, want := range []string{`{"kind":"light","type":"theme"}`, `{"kind":"dark","type":"theme"}`} {
+		select {
+		case line := <-got:
+			if line != want {
+				t.Fatalf("got %s, want %s", line, want)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("no %s", want)
+		}
+	}
+	select {
+	case line := <-got:
+		t.Fatalf("unexpected %s", line)
+	case <-time.After(100 * time.Millisecond):
 	}
 }

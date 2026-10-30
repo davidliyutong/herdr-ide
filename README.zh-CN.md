@@ -8,7 +8,7 @@
 
 ## 功能
 
-- **直接讲 herdr 协议**：workspace、tab、分屏布局和 agent 状态都来自 herdr 的 socket API；每个 pane 都是一个 xterm.js 终端，画面由 herdr 自己渲染，支持输入、鼠标、滚动回看、中文输入法和拖动调整分屏。快捷键沿用你的 herdr 配置（前缀 `ctrl+b`）。
+- **直接讲 herdr 协议**：workspace、tab、分屏布局和 agent 状态都来自 herdr 的 socket API；每个 pane 都是一个 xterm.js 终端，画面由 herdr 自己渲染，支持输入、鼠标、滚动回看、中文输入法和拖动调整分屏。拖动 pane 标题栏可交换或移动 pane，点击标题即可重命名。快捷键沿用你的 herdr 配置（前缀 `ctrl+b`）。
 - **多机器**：直接使用 herdr 里保存的 SSH 机器。每台机器只开一条 ssh 连接，在上面运行一个自动上传的静态 agent（linux/macOS × amd64/arm64），所有通信都在这条连接里多路复用；机器上不监听任何端口。
 - **为 agent 设计**：
   - 汇总所有机器上 blocked 和 done 的 agent，并发浏览器通知；
@@ -16,12 +16,13 @@
   - 可以从 VS Code 把代码发给当前聚焦的 agent；
   - 可以把图片直接粘贴进 agent 的输入框。
 - **按需打开 VS Code**：
-  - code-server 由本机下载后推送到各机器，机器本身不需要外网；会一并装好 Git Graph 和桥接扩展。
+  - code-server 默认由本机下载后推送到各机器，机器本身不需要外网；也可以让机器自行下载，或直接使用机器上已安装的 code-server。会一并装好 Git Graph 和桥接扩展。
   - 一个快捷键就能打开 pane 所在的目录、它的 Diff 或 Git Graph；终端里的 `path:line` 可以直接跳到编辑器。
+  - 面板可以放在终端右侧或下方。
   - 长时间不用的 code-server 会自动停止。
 - **快速预览**：在终端里 ⌘/Ctrl+点击路径，即可预览图片、GIF、视频（可拖动进度）、音频、PDF、文本和目录。
 - **多浏览器同时使用**：最近操作的浏览器控制 pane，其他浏览器以相同尺寸观看，按键即可接管。
-- **中英文界面**。
+- **设置**：界面语言（中文、英文）、浅色/深色主题（VS Code 同步切换）、界面与终端字号、面板位置和 code-server 安装方式，集中在一个设置对话框里（`ctrl+b ,`）。
 
 ## 快速开始
 

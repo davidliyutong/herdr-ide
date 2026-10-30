@@ -26,6 +26,7 @@ Non-goals: CPU or memory quotas; managing processes started by herdr panes.
 | `herdr terminal session` | the agent's stream | the pane stops being displayed (stdin closed → herdr releases control), or the agent exits (process group killed) |
 | code-server | the agent recorded in `run/cs.pid` | idle for `--code-server-idle` (default 20 min, counted by the core's proxy: no WebSocket open), the owning agent exits, the user presses stop, or 1 h without connections (code-server's own `--idle-timeout-seconds`) |
 | VS Code extension host | code-server | 5 min after its window disconnects (`--reconnection-grace-time`) |
+| curl / wget (machine downloads) | the agent's `download` request | the download finishes, fails, or runs 20 min |
 | ssh ControlMaster | OpenSSH | 10 min unused (`ControlPersist`) |
 
 - **Ownership** (`internal/agent/codeserver.go`): `cs.pid` holds the process
@@ -44,7 +45,9 @@ Non-goals: CPU or memory quotas; managing processes started by herdr panes.
 | `cs-data/logs/` | 7 days |
 | `agent/<build>/` | removed after 14 days unused; running agents touch their directory |
 | `code-server/<version>/` | removed after 14 days unused; touched on start |
+| `code-server/.download-*`, `.install-*` | removed when the download or install ends; left by a killed agent, removed with unused versions after 14 days |
 | download cache (core host) | kept; legacy caches after renames are removed |
+| settings file (core host) | one file per instance, replaced on change |
 
 Directories are per instance except `agent/` and `code-server/`, which are
 shared and therefore never deleted while recently used.
@@ -62,6 +65,12 @@ shared and therefore never deleted while recently used.
 
 - **Agent killed with SIGKILL** → its code-server survives until the next
   agent reaps it or its own 1 h idle timeout.
+- **Core stopped** → remote agents end with their ssh sessions; the local
+  agent runs inside the core, so the core waits (up to 15 s) for it to stop
+  the code-server it started before exiting.
+- **A code-server nobody tracks answers on the socket** (pid file lost, data
+  directory moved under it) → replaced when VS Code is next opened
+  ([05](05-vscode-panel.md)).
 - **Two cores, same instance** → one code-server; either core's idle stop
   affects both, and the other restarts it on its next request.
 

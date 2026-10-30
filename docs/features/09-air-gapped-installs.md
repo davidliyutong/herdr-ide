@@ -26,7 +26,11 @@ proxy or vendoring); offline herdr installation.
   3. download from `--code-server-url` / `--extension-url` templates, unless
      `--offline`.
 - **Pushed through the agent** to machines (chunked upload, unpacked by the
-  agent in Go — no `tar` needed on the machine).
+  agent in Go — no `tar` needed on the machine). With
+  `--code-server-install=download` machines fetch the code-server tarball
+  themselves from the same URL and verify it against the digest the core
+  knows; `--offline` turns this off, and a machine that cannot download gets
+  the upload.
 - **Verification**: default versions have SHA-256 digests compiled in
   (taken from the GitHub release API's `digest` field and a verified Open VSX
   download). Other files need a `<file>.sha256` sidecar. A mismatching seed

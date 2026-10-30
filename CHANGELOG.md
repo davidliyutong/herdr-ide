@@ -27,12 +27,38 @@ All notable changes are documented here. The format follows
 - Reclamation of remote resources: code-server idle stop, ownership and
   orphan reaping, retention of uploads, logs and old versions; `--instance`.
 - English and Simplified Chinese UI.
+- Settings dialog (`prefix ,`) rendered from setting definitions: language,
+  light/dark/system theme (VS Code panels follow it), interface and terminal
+  font sizes, VS Code panel beside or below the terminals, Option as Meta,
+  and core settings saved on the core host (`/api/settings`, flags lock them).
+- code-server installation methods (`--code-server-install`): uploaded by the
+  core, downloaded by each machine (verified), or an existing install
+  (`--code-server-path`), with fallback to uploading.
+- Dragging panes by their header to swap them, place them beside another pane
+  or move them to another or a new tab; renaming panes, tabs and workspaces
+  in place.
+- In-app dialogs for creating workspaces (folder completion on the machine,
+  optional name) and for confirming closes, instead of the browser's
+  `prompt()` and `confirm()`.
 - Project tooling: one-step rename with state migration, repository checks,
   pane input contract tests (browser and herdr key encodings), reproducible
   builds, third-party notices, CI, release workflow with
   checksums and build provenance, Dependabot.
 
+### Fixed
+
+- A finished agent opened by hand (not from the inbox) stayed marked as
+  pending: the pane focused in the UI is now focused in herdr when it is done.
+- The VS Code panel showed "Not Found" when a code-server whose installation
+  had moved (after a rename) still listened on the socket: such a process is
+  replaced, the rename migration stops the old code-server first, and the
+  core stops the local machine's code-server when it exits.
+
 ### Changed
+
+- Pane header actions use icons with larger targets and stay visible; read-only
+  mode hides actions it would refuse; the VS Code loading page follows the UI
+  language and theme.
 
 - Renamed from webherdr to herdr-ide: binaries, Go module, `~/.herdr-ide`,
   `HERDR_IDE_*` variables and the `herdr-ide.herdr-ide-bridge` extension.

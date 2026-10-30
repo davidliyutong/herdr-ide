@@ -21,12 +21,17 @@ reference documentation.
   are typed `Record<MessageKey, string>`, so a missing or extra key fails
   `tsc`. `t(key, vars)` substitutes `{placeholders}`; a test checks that every
   translation uses the same placeholders. The locale comes from the saved
-  preference, then `navigator.languages`, then English; `<html lang>` is set
-  accordingly. The palette switches language (reloads the page).
+  setting, then `navigator.languages`, then English; `<html lang>` is set
+  accordingly. The settings dialog and the palette switch language (reloads
+  the page). Settings defined by the core are labelled with keys built from
+  their names (`settings.<key>`, `.desc`, `.<option>`); a test checks that
+  the known ones exist, and an untranslated one shows its key.
 - **Server**: sends codes (code-server phases such as `download` with a
   detail, pane notices such as `taken_over`, agent statuses) that the UI
   translates. The code-server loading page, served inside the VS Code iframe,
-  carries its own small English/Chinese table for the same codes. Error
+  carries its own small English/Chinese table for the same codes and uses
+  the embedding page's language. Settings errors are codes too (`invalid`,
+  `locked`, `unknown`, `save`). Error
   messages from herdr, ssh or the OS are shown verbatim.
 - **VS Code extension**: `package.nls.json` / `package.nls.zh-cn.json` for
   contributed titles; `vscode.l10n.t` with `l10n/bundle.l10n.zh-cn.json` for

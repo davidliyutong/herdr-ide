@@ -133,10 +133,21 @@ What herdr-ide starts on a machine and how it is reclaimed:
 | --- | --- | --- |
 | `herdr-ide-agent` | one per core while connected | Exits when its ssh session ends; a dead link is detected by keepalives within about 45 s. |
 | `herdr terminal session` processes | one per pane being viewed | Ends when the pane is no longer shown, or with the agent. |
-| code-server | on first VS Code use | Stopped after `--code-server-idle` (default 20 min) without VS Code connections, when the agent exits (if that agent started it), or by the stop button in the VS Code panel. Hidden VS Code panels disconnect after 10 min. A process left behind by a killed agent is stopped by the next agent, and code-server exits by itself after 1 h without connections. |
+| code-server | on first VS Code use | Stopped after `--code-server-idle` (default 20 min) without VS Code connections, when the agent exits (if that agent started it; for the local machine, when the core stops), or by the stop button in the VS Code panel. Hidden VS Code panels disconnect after 10 min. A process left behind by a killed agent is stopped by the next agent, and code-server exits by itself after 1 h without connections. |
 | VS Code extension hosts | one per VS Code window | Disposed 5 min after the window disconnects. |
 | ssh ControlMaster | per machine | Exits after 10 min unused. |
+| curl or wget (`--code-server-install=download`) | while a machine downloads code-server | Ends with the download (20 min limit); the partial file in `~/.herdr-ide/code-server/` is removed, or with the unused versions after 14 days if the agent was killed. |
 | Disk | see [reference](reference.md#files-and-directories) | Uploads and logs after 7 days; unused agent builds and code-server versions after 14 days. |
+
+How machines get code-server is a setting (the settings dialog or
+`--code-server-install`): the core uploads the release (default; works for
+machines without internet), each machine downloads it itself (faster when the
+machines have a better connection than the path through the core; needs curl
+or wget and access to the `--code-server-url` host), or a code-server already
+installed on the machine is used (`--code-server-path`, or found on `PATH` and
+the usual locations). The last two fall back to uploading. A change applies
+the next time code-server starts on a machine; stop it from the VS Code panel
+to restart it now.
 
 ## Running as a service
 

@@ -6,6 +6,9 @@ import { Workspace } from './components/Workspace';
 import { Dock } from './components/Dock';
 import { Palette } from './components/Palette';
 import { AuthDialog } from './components/AuthDialog';
+import { SettingsDialog } from './components/SettingsDialog';
+import { Dialogs } from './components/Dialogs';
+import { usePrefs } from './prefs';
 import { getKeyConfig, handleKey, loadKeymap, onKeyConfig, onPrefixChange } from './keymap';
 import { t } from './i18n';
 import { notifyAgent, updateBadge } from './notify';
@@ -35,6 +38,7 @@ function pasteToAgent(m: string, text: string) {
 
 export function App() {
   const sidebarOpen = useStore((s) => s.sidebarOpen);
+  const dockPosition = usePrefs((s) => s.prefs.dockPosition);
   const connected = useStore((s) => s.connected);
   const toasts = useStore((s) => s.toasts);
   const [prefix, setPrefix] = useState(false);
@@ -71,12 +75,14 @@ export function App() {
   }, []);
 
   return (
-    <div className={`app ${sidebarOpen ? '' : 'no-sidebar'}`}>
+    <div className={`app ${sidebarOpen ? '' : 'no-sidebar'} dock-at-${dockPosition}`}>
       {sidebarOpen && <Sidebar />}
       <Workspace />
       <Dock />
       <StatusBar connected={connected} prefix={prefix} />
       <Palette />
+      <SettingsDialog />
+      <Dialogs />
       <AuthDialog />
       <div className="toasts">
         {toasts.map((t) => (

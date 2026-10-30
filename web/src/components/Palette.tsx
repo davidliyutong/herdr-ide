@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../state/store';
 import { actions, attentionList } from '../actions';
-import { actionLabel, defaultBindings, getKeyConfig, runAction, runCommand } from '../keymap';
-import { locales, setLocale, t } from '../i18n';
+import { actionLabel, defaultBindings, getKeyConfig, keyLabel, runAction, runCommand } from '../keymap';
+import { locales, t, type MessageKey } from '../i18n';
+import { prefDefs, usePrefs } from '../prefs';
 import { paneTitle } from '../lib/herdr';
 import { StatusDot } from './StatusDot';
 
@@ -20,10 +21,6 @@ function fuzzy(q: string, s: string): boolean {
   let i = 0;
   for (const ch of s) if (ch === q[i]) i++;
   return i === q.length;
-}
-
-function keyLabel(spec: string, prefix: string) {
-  return spec.replace(/^prefix\+/, prefix + ' ').replace('minus', '-');
 }
 
 export function Palette() {
@@ -83,7 +80,18 @@ export function Palette() {
       cmds.push({ id: `start:${k}`, label: t('action.startAgent', { kind: k }), run: () => actions.startAgent(k) });
     }
     for (const l of locales) {
-      cmds.push({ id: `locale:${l.id}`, label: t('action.language', { lang: l.label }), run: () => setLocale(l.id) });
+      cmds.push({
+        id: `locale:${l.id}`,
+        label: t('action.language', { lang: l.label }),
+        run: () => usePrefs.getState().setPref('locale', l.id),
+      });
+    }
+    for (const th of prefDefs.theme.options) {
+      cmds.push({
+        id: `theme:${th}`,
+        label: t('action.theme', { theme: t(`settings.theme.${th}` as MessageKey) }),
+        run: () => usePrefs.getState().setPref('theme', th),
+      });
     }
     if (mode === 'workspaces') return [...ws, ...agents];
     if (mode === 'help') return cmds;

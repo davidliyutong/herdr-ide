@@ -1,5 +1,6 @@
 // Minimal i18n: t(key, vars) with English fallback. The locale comes from the
-// saved preference or the browser languages; changing it reloads the page.
+// saved setting or the browser languages; changing the setting reloads the
+// page (see prefs.ts).
 
 import { en, type MessageKey, type Messages } from './en';
 import { zhCN } from './zh-CN';
@@ -37,9 +38,9 @@ export function t(key: MessageKey, vars?: Record<string, string | number>): stri
   return s;
 }
 
-export function setLocale(l: Locale) {
-  storage.set('locale', l);
-  location.reload();
+/** Whether key is a message key (for keys built at runtime). */
+export function hasMessage(key: string): key is MessageKey {
+  return key in en;
 }
 
 export type { MessageKey };

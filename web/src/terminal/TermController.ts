@@ -12,6 +12,8 @@ import { WebglAddon } from '@xterm/addon-webgl';
 import '@xterm/xterm/css/xterm.css';
 import { conn } from '../lib/conn';
 import { routeKey } from './keys';
+import { getPrefs } from '../prefs';
+import { themeKind, type ThemeKind } from '../appearance';
 
 export type TermStatus = 'connecting' | 'open' | 'observe' | 'closed' | 'error';
 
@@ -29,7 +31,7 @@ export interface TermOptions {
   linkProvider?(term: Terminal): ILinkProvider | undefined;
 }
 
-export const theme: ITheme = {
+const dark: ITheme = {
   background: '#0e1116',
   foreground: '#c9d1d9',
   cursor: '#c9d1d9',
@@ -53,6 +55,39 @@ export const theme: ITheme = {
   brightWhite: '#e6edf3',
 };
 
+const light: ITheme = {
+  background: '#ffffff',
+  foreground: '#1f2328',
+  cursor: '#1f2328',
+  cursorAccent: '#ffffff',
+  selectionBackground: '#b6d4fe',
+  black: '#24292f',
+  red: '#cf222e',
+  green: '#116329',
+  yellow: '#7d4e00',
+  blue: '#0969da',
+  magenta: '#8250df',
+  cyan: '#1b7c83',
+  white: '#6e7781',
+  brightBlack: '#57606a',
+  brightRed: '#a40e26',
+  brightGreen: '#1a7f37',
+  brightYellow: '#9a6700',
+  brightBlue: '#218bff',
+  brightMagenta: '#a475f9',
+  brightCyan: '#3192aa',
+  brightWhite: '#8c959f',
+};
+
+/** Terminal colors per UI theme; backgrounds match --bg in styles.css. */
+export const themes: Record<ThemeKind, ITheme> = { dark, light };
+
+export interface Appearance {
+  theme: ThemeKind;
+  fontSize: number;
+  optionIsMeta: boolean;
+}
+
 export const fontFamily =
   '"JetBrains Mono", "SF Mono", Menlo, Monaco, "Cascadia Code", "Fira Code", "Noto Sans Mono CJK SC", "PingFang SC", monospace';
 
@@ -62,7 +97,6 @@ function b64(binary: string): string {
 
 export { bracketedPaste } from './paste';
 import { bracketedPaste } from './paste';
-import { storage } from '../brand';
 import { t, type MessageKey } from '../i18n';
 
 export class TermController {
@@ -86,18 +120,19 @@ export class TermController {
     private el: HTMLElement,
     private opts: TermOptions,
   ) {
+    const prefs = getPrefs();
     const term = new Terminal({
       scrollback: 0,
       fontFamily,
-      fontSize: opts.fontSize ?? 13,
+      fontSize: opts.fontSize ?? prefs.termFontSize,
       lineHeight: 1.1,
-      theme,
+      theme: themes[themeKind()],
       allowProposedApi: true,
       cursorBlink: false,
       customGlyphs: true,
       rescaleOverlappingGlyphs: true,
       drawBoldTextInBrightColors: false,
-      macOptionIsMeta: storage.get('optionIsMeta') === 'true',
+      macOptionIsMeta: prefs.optionIsMeta,
       macOptionClickForcesSelection: true,
       rightClickSelectsWord: false,
       disableStdin: opts.mode === 'observe',
@@ -364,6 +399,17 @@ export class TermController {
 
   focus() {
     this.term.focus();
+  }
+
+  /** Applies changed appearance settings to the running terminal. */
+  setAppearance(a: Appearance) {
+    const o = this.term.options;
+    o.theme = themes[a.theme];
+    o.macOptionIsMeta = a.optionIsMeta;
+    if (o.fontSize !== a.fontSize) {
+      o.fontSize = a.fontSize;
+      this.scheduleResize(true);
+    }
   }
 
   dispose() {

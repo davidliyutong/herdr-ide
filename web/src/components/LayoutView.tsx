@@ -1,7 +1,12 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { LayoutExport, LayoutNode } from '../lib/herdr';
 import { conn } from '../lib/conn';
+import { useStore } from '../state/store';
 import { PaneView } from './PaneView';
+
+function paneIds(n: LayoutNode): string[] {
+  return n.type === 'pane' ? [n.pane_id] : [...paneIds(n.first), ...paneIds(n.second)];
+}
 
 interface Props {
   m: string;
@@ -9,6 +14,17 @@ interface Props {
 }
 
 export function LayoutView({ m, layout }: Props) {
+  // Showing a tab moves the UI's focus into it (herdr's focused pane of the
+  // tab, else its first), so keys and the "seen" marking apply to what is shown.
+  useEffect(() => {
+    const s = useStore.getState();
+    const ids = paneIds(layout.root);
+    if (s.focused?.m === m && ids.includes(s.focused.pane)) return;
+    const pane = layout.focused_pane_id && ids.includes(layout.focused_pane_id) ? layout.focused_pane_id : ids[0];
+    if (pane) s.focusPane({ m, pane });
+    // Runs when a tab is shown; LayoutView is keyed by machine and tab.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   if (layout.zoomed && layout.focused_pane_id) {
     return (
       <div className="layout-root">

@@ -1,6 +1,8 @@
 // Package codeserver provisions code-server on machines and keeps it
 // running. Artifacts are resolved on the core host (see artifacts.go) and
-// uploaded through the agent, so machines need no internet access.
+// uploaded through the agent, so machines need no internet access. The
+// code-server-install setting can instead let machines download the release
+// themselves or use a code-server they already have.
 package codeserver
 
 import (
@@ -13,20 +15,60 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/machines"
+	"herdr-ide/internal/settings"
 )
 
 // DefaultVersion is the code-server release installed on machines.
 const DefaultVersion = "4.144.0"
+
+// Install modes (setting code-server-install).
+const (
+	// InstallPush: the core resolves, verifies and uploads the release.
+	InstallPush = "push"
+	// InstallDownload: the machine downloads the release (verified against
+	// the core's digest); falls back to InstallPush.
+	InstallDownload = "download"
+	// InstallExisting: a code-server already installed on the machine is
+	// used; falls back to InstallPush when there is none.
+	InstallExisting = "existing"
+)
+
+// Setting keys.
+const (
+	SettingInstall = "code-server-install"
+	SettingPath    = "code-server-path"
+)
+
+// SettingDefs are the code-server settings that can be changed at runtime.
+var SettingDefs = []settings.Def{
+	{
+		Key: SettingInstall, Kind: settings.KindEnum, Default: InstallPush,
+		Options: []string{InstallPush, InstallDownload, InstallExisting},
+		Usage:   "how machines get code-server: push (the core downloads, verifies and uploads it), download (the machine downloads it, verified) or existing (use the machine's own code-server); the last two fall back to push",
+	},
+	{
+		Key: SettingPath, Kind: settings.KindString,
+		Usage: "code-server executable on machines for --" + SettingInstall + "=existing (absolute or ~/ path); empty searches PATH and the usual install locations",
+		Validate: func(v string) error {
+			if v != "" && !filepath.IsAbs(v) && !strings.HasPrefix(v, "~/") {
+				return errors.New("must be an absolute or ~/ path")
+			}
+			return nil
+		},
+	},
+}
 
 // Phases reported while code-server is prepared; the UI translates them.
 const (
 	PhaseIdle          = "idle"
 	PhaseCheck         = "check"
 	PhaseDownload      = "download"
+	PhaseMachineDL     = "machine_download"
 	PhaseUpload        = "upload"
 	PhaseInstallBridge = "install_bridge"
 	PhaseInstallExt    = "install_ext"
@@ -53,6 +95,9 @@ type machineState struct {
 	// agentSession identifies the agent session code-server was verified on;
 	// a reconnect means the process may be gone.
 	session any
+	// bin is Header.Bin for requests: "" for the release in the agent's
+	// directory, else the installed code-server in use.
+	bin string
 }
 
 // Manager tracks code-server per machine.
@@ -71,6 +116,8 @@ type Manager struct {
 	BridgeVSIX func() []byte
 	// Extensions are downloaded on the core host and installed on machines.
 	Extensions []Extension
+	// Settings holds the install mode; nil means InstallPush.
+	Settings *settings.Store
 
 	mu     sync.Mutex
 	states map[string]*machineState
@@ -184,9 +231,36 @@ func (mg *Manager) phase(id, p, detail string) {
 	mg.setStatus(id, func(s *Status) { *s = Status{Phase: p, Detail: detail} })
 }
 
-func (mg *Manager) request(ctx context.Context, m *machines.Machine, h agentproto.Header) (*agentproto.Reply, error) {
+// install returns the install mode and, for InstallExisting, the Header.Bin
+// that finds the machine's code-server.
+func (mg *Manager) install() (mode, bin string) {
+	if mg.Settings == nil {
+		return InstallPush, ""
+	}
+	mode = mg.Settings.Get(SettingInstall)
+	if mode == InstallExisting {
+		if bin = mg.Settings.Get(SettingPath); bin == "" {
+			bin = "auto"
+		}
+	}
+	return mode, bin
+}
+
+// header completes a code-server request for m.
+func (mg *Manager) header(m *machines.Machine, h agentproto.Header) agentproto.Header {
 	h.Op = agentproto.OpCodeServer
 	h.Version = mg.Version
+	if h.Bin == "" {
+		s := mg.state(m.ID())
+		mg.mu.Lock()
+		h.Bin = s.bin
+		mg.mu.Unlock()
+	}
+	return h
+}
+
+func (mg *Manager) request(ctx context.Context, m *machines.Machine, h agentproto.Header) (*agentproto.Reply, error) {
+	h = mg.header(m, h)
 	conn, rep, err := m.Open(ctx, h)
 	if err != nil {
 		return rep, err
@@ -198,8 +272,7 @@ func (mg *Manager) request(ctx context.Context, m *machines.Machine, h agentprot
 // upload sends body through a chunked stream for actions that read data
 // after the first reply and answer with a second one.
 func (mg *Manager) upload(ctx context.Context, m *machines.Machine, h agentproto.Header, body io.Reader, progress func(int64)) (*agentproto.Reply, error) {
-	h.Op = agentproto.OpCodeServer
-	h.Version = mg.Version
+	h = mg.header(m, h)
 	conn, _, err := m.Open(ctx, h)
 	if err != nil {
 		return nil, err
@@ -245,7 +318,46 @@ func (mg *Manager) ensure(ctx context.Context, m *machines.Machine) error {
 	if st.Info == nil {
 		return machines.ErrNotConnected
 	}
+	mode, bin := mg.install()
+	s := mg.state(id)
+	mg.mu.Lock()
+	s.bin = ""
+	mg.mu.Unlock()
 	mg.phase(id, PhaseCheck, mg.Version)
+	if mode == InstallExisting {
+		rep, err := mg.request(ctx, m, agentproto.Header{Action: "status", Bin: bin})
+		if err != nil {
+			return err
+		}
+		if rep.CS.Installed {
+			mg.mu.Lock()
+			s.bin = bin
+			mg.mu.Unlock()
+		} else {
+			mg.Logger.Printf("code-server on %s: %s; installing a release instead", m.Label(), rep.CS.Error)
+		}
+	}
+	if s.bin == "" {
+		if err := mg.installRelease(ctx, m, mode == InstallDownload); err != nil {
+			return err
+		}
+	}
+	if err := mg.ensureExtensions(ctx, m); err != nil {
+		// Missing extensions do not prevent using VS Code.
+		mg.Logger.Printf("code-server extensions on %s: %v", m.Label(), err)
+	}
+	mg.phase(id, PhaseStart, mg.Version)
+	if _, err := mg.request(ctx, m, agentproto.Header{Action: "start"}); err != nil {
+		return err
+	}
+	return nil
+}
+
+// installRelease makes sure the release is in the agent's directory: the
+// machine downloads it when allowed, else the core uploads it.
+func (mg *Manager) installRelease(ctx context.Context, m *machines.Machine, machineDownload bool) error {
+	id := m.ID()
+	st := m.State()
 	rep, err := mg.request(ctx, m, agentproto.Header{Action: "status"})
 	if err != nil {
 		return err
@@ -254,6 +366,13 @@ func (mg *Manager) ensure(ctx context.Context, m *machines.Machine) error {
 		asset, err := platformAsset(st.Info.OS, st.Info.Arch)
 		if err != nil {
 			return err
+		}
+		if machineDownload && !mg.Offline {
+			err := mg.machineDownload(ctx, m, asset)
+			if err == nil {
+				return nil
+			}
+			mg.Logger.Printf("code-server download on %s failed, uploading from the core instead: %v", m.Label(), err)
 		}
 		mg.phase(id, PhaseDownload, mg.Version)
 		path, err := mg.tarball(ctx, asset, func(done, total int64) {
@@ -276,13 +395,23 @@ func (mg *Manager) ensure(ctx context.Context, m *machines.Machine) error {
 			return fmt.Errorf("install code-server: %w", err)
 		}
 	}
-	if err := mg.ensureExtensions(ctx, m); err != nil {
-		// Missing extensions do not prevent using VS Code.
-		mg.Logger.Printf("code-server extensions on %s: %v", m.Label(), err)
-	}
-	mg.phase(id, PhaseStart, mg.Version)
-	if _, err := mg.request(ctx, m, agentproto.Header{Action: "start"}); err != nil {
+	return nil
+}
+
+// machineDownload has the machine fetch the release itself, verified against
+// the digest the core knows; an unknown digest is recorded on first use, as
+// for the core's own downloads.
+func (mg *Manager) machineDownload(ctx context.Context, m *machines.Machine, asset string) error {
+	file := TarballFile(mg.Version, asset)
+	want := mg.knownDigest(file)
+	mg.phase(m.ID(), PhaseMachineDL, mg.Version)
+	rep, err := mg.request(ctx, m, agentproto.Header{Action: "download", URL: mg.tarballURL(asset), Digest: want})
+	if err != nil {
 		return err
+	}
+	if want == "" && rep.CS != nil && rep.CS.Digest != "" {
+		mg.Logger.Printf("warning: no pinned checksum for %s; recorded sha256 %s downloaded by %s (trust on first use)", file, rep.CS.Digest, m.Label())
+		mg.recordDigest(file, rep.CS.Digest)
 	}
 	return nil
 }

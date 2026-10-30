@@ -26,6 +26,9 @@ func migrateLegacyDataDir(home, base string, logger *log.Logger) {
 	for _, name := range brand.LegacyDataDirNames {
 		old := filepath.Join(home, name)
 		if st, err := os.Lstat(old); err == nil && st.IsDir() {
+			// A code-server still running from the old directory would keep
+			// answering on the moved socket while its files are gone.
+			killListener(filepath.Join(old, "run", "cs.sock"))
 			if err := os.Rename(old, base); err != nil {
 				logger.Printf("migrate %s -> %s: %v", old, base, err)
 			} else {
