@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { MachineState, Pane, Snapshot } from '../lib/herdr';
+import { withOrder, type MachineState, type Pane, type Snapshot, type Tab, type Workspace } from '../lib/herdr';
 import { storage } from '../brand';
 
 export interface PaneRef {
@@ -45,6 +45,9 @@ interface UIState {
   setConnected(c: boolean): void;
   setMachines(list: MachineState[]): void;
   upsertMachine(st: MachineState): void;
+  /** Applies herdr's answer to tab.move / workspace.move (the moved group in
+   * its new order) until the next snapshot arrives. */
+  setOrder(m: string, patch: { tabs?: Tab[]; workspaces?: Workspace[] }): void;
   selectWorkspace(m: string, ws: string): void;
   selectTab(m: string, ws: string, tab: string): void;
   focusPane(ref: PaneRef | undefined): void;
@@ -102,6 +105,16 @@ export const useStore = create<UIState>((set, get) => ({
     }));
     ensureSelection(set, get);
   },
+  setOrder: (m, patch) =>
+    set((s) => {
+      const st = s.machines[m];
+      const snap = st?.snapshot;
+      if (!snap) return {};
+      const next = { ...snap };
+      if (patch.tabs) next.tabs = withOrder(snap.tabs, (x) => x.tab_id, patch.tabs);
+      if (patch.workspaces) next.workspaces = withOrder(snap.workspaces, (x) => x.workspace_id, patch.workspaces);
+      return { machines: { ...s.machines, [m]: { ...st, snapshot: next } } };
+    }),
   selectWorkspace: (m, ws) => {
     set({ machineId: m, workspaceId: ws });
     savePref('selection', { m, ws });

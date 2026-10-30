@@ -151,6 +151,7 @@ func TestAPIAllowlist(t *testing.T) {
 	s := newTestServer()
 	for m, want := range map[string]bool{
 		"pane.split": true, "agent.prompt": true, "session.snapshot": true, "plugin.action.invoke": true,
+		"tab.move": true, "workspace.move": true,
 		"server.stop": false, "server.live_handoff": false, "integration.install": false,
 		"plugin.link": false, "events.subscribe": false, "client_shell.surface.set": false,
 	} {
@@ -159,7 +160,7 @@ func TestAPIAllowlist(t *testing.T) {
 		}
 	}
 	s.opts.ReadOnly = true
-	if s.apiAllowed("pane.split") || !s.apiAllowed("pane.list") {
+	if s.apiAllowed("pane.split") || s.apiAllowed("tab.move") || s.apiAllowed("workspace.move") || !s.apiAllowed("pane.list") {
 		t.Error("read-only allowlist wrong")
 	}
 }

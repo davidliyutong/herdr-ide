@@ -8,6 +8,7 @@
 // when the pane leaves it.
 
 import { conn } from './lib/conn';
+import { trackDrag, type Box } from './drag';
 import { useStore } from './state/store';
 import { t } from './i18n';
 
@@ -28,7 +29,7 @@ export interface DragSource {
 
 /** Drop zone for a point inside a pane: the middle swaps, the rest moves the
  * pane to the nearest edge. */
-export function dropZone(r: { left: number; top: number; width: number; height: number }, x: number, y: number): Zone {
+export function dropZone(r: Box, x: number, y: number): Zone {
   const fx = (x - r.left) / r.width;
   const fy = (y - r.top) / r.height;
   if (fx > 0.3 && fx < 0.7 && fy > 0.3 && fy < 0.7) return 'center';
@@ -51,7 +52,7 @@ function findTarget(src: DragSource, x: number, y: number): DropTarget | undefin
 }
 
 /** The part of the target a drop would fill, for the highlight. */
-function markerRect(tg: DropTarget): { left: number; top: number; width: number; height: number } {
+function markerRect(tg: DropTarget): Box {
   const r = tg.rect;
   if (tg.kind !== 'pane') return r;
   switch (tg.zone) {
@@ -96,65 +97,13 @@ async function drop(src: DragSource, tg: DropTarget) {
   s.focusPane({ m, pane });
 }
 
-/** Starts tracking a possible drag from a pane header; a drag begins after
- * the pointer moved a few pixels, so a plain click stays a click. */
+/** Starts tracking a possible drag from a pane header. */
 export function startPaneDrag(ev: { clientX: number; clientY: number; pointerId: number }, src: DragSource) {
-  const x0 = ev.clientX;
-  const y0 = ev.clientY;
-  let ghost: HTMLDivElement | undefined;
-  let marker: HTMLDivElement | undefined;
-  let target: DropTarget | undefined;
-
-  const move = (e: PointerEvent) => {
-    if (e.pointerId !== ev.pointerId) return;
-    if (!ghost) {
-      if (Math.hypot(e.clientX - x0, e.clientY - y0) < 6) return;
-      document.body.classList.add('pane-dragging');
-      ghost = document.createElement('div');
-      ghost.className = 'pane-drag-ghost';
-      ghost.textContent = src.label;
-      marker = document.createElement('div');
-      marker.className = 'pane-drop-marker';
-      document.body.append(marker, ghost);
-    }
-    ghost.style.transform = `translate(${e.clientX + 12}px, ${e.clientY + 8}px)`;
-    target = findTarget(src, e.clientX, e.clientY);
-    marker!.hidden = !target;
-    if (target) {
-      const r = markerRect(target);
-      Object.assign(marker!.style, { left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px` });
-      marker!.dataset.zone = target.kind === 'pane' ? target.zone : target.kind;
-    }
-  };
-  const end = (commit: boolean) => {
-    window.removeEventListener('pointermove', move);
-    window.removeEventListener('pointerup', onUp);
-    window.removeEventListener('pointercancel', onCancel);
-    window.removeEventListener('keydown', onKey, true);
-    if (!ghost) return;
-    ghost.remove();
-    marker?.remove();
-    document.body.classList.remove('pane-dragging');
-    // The click that follows pointerup must not count as a click on the header.
-    window.addEventListener('click', swallow, true);
-    setTimeout(() => window.removeEventListener('click', swallow, true), 0);
-    if (commit && target)
-      drop(src, target).catch((e) => useStore.getState().toast(t('pane.moveFailed', { error: String(e?.message ?? e) })));
-  };
-  const swallow = (e: Event) => {
-    e.stopPropagation();
-    e.preventDefault();
-  };
-  const onUp = (e: PointerEvent) => e.pointerId === ev.pointerId && end(true);
-  const onCancel = () => end(false);
-  const onKey = (e: KeyboardEvent) => {
-    if (e.key !== 'Escape') return;
-    e.preventDefault();
-    e.stopPropagation();
-    end(false);
-  };
-  window.addEventListener('pointermove', move);
-  window.addEventListener('pointerup', onUp);
-  window.addEventListener('pointercancel', onCancel);
-  window.addEventListener('keydown', onKey, true);
+  trackDrag(ev, {
+    label: src.label,
+    find: (x, y) => findTarget(src, x, y),
+    marker: (tg) => ({ box: markerRect(tg), zone: tg.kind === 'pane' ? tg.zone : tg.kind }),
+    drop: (tg) => drop(src, tg),
+    failed: (error) => t('pane.moveFailed', { error }),
+  });
 }

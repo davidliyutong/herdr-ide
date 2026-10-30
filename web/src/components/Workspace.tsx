@@ -3,10 +3,13 @@ import { useStore, activeTabId } from '../state/store';
 import { actions } from '../actions';
 import { LayoutView } from './LayoutView';
 import { StatusDot } from './StatusDot';
-import { statusRank, type AgentStatus } from '../lib/herdr';
+import { statusRank, workspaceTabs, type AgentStatus } from '../lib/herdr';
 import { t, type MessageKey } from '../i18n';
 import { keyHint } from '../keymap';
 import { InlineEdit } from './InlineEdit';
+import { startTabDrag } from '../reorderDrag';
+import { openMenu } from '../contextMenu';
+import { tabMenu } from '../menus';
 
 export function Workspace() {
   const m = useStore((s) => s.machineId);
@@ -35,7 +38,7 @@ export function Workspace() {
   }
   const snap = machine.snapshot;
   const workspace = snap.workspaces.find((w) => w.workspace_id === ws);
-  const tabs = snap.tabs.filter((t) => t.workspace_id === ws).sort((a, b) => a.number - b.number);
+  const tabs = workspaceTabs(snap, ws);
   const layout = tabId ? machine.layouts?.[tabId] : undefined;
 
   const tabStatus = (tab: string): AgentStatus | undefined => {
@@ -60,7 +63,7 @@ export function Workspace() {
         <span className="crumb">
           <span className="muted">{machine.label}</span> / {workspace?.label}
         </span>
-        <div className="tabs">
+        <div className="tabs" data-m={m} data-ws={ws}>
           {tabs.map((tab) => {
             const st = tabStatus(tab.tab_id);
             const editing = renaming?.m === m && renaming.id === tab.tab_id;
@@ -70,6 +73,11 @@ export function Workspace() {
                 className={`tab ${tab.tab_id === tabId ? 'active' : ''}`}
                 onClick={() => selectTab(m, ws, tab.tab_id)}
                 onDoubleClick={() => !readOnly && actions.startRename('tab', m, tab.tab_id)}
+                onPointerDown={(e) => {
+                  if (e.button !== 0 || readOnly || editing || (e.target as HTMLElement).closest('button, input')) return;
+                  startTabDrag(e, { m, ws, tab: tab.tab_id, label: tab.label });
+                }}
+                onContextMenu={(e) => !editing && openMenu(e, tabMenu(m, ws, tab.tab_id))}
                 title={readOnly ? tab.label : t('workspace.tabHint', { label: tab.label })}
                 data-tab-id={tab.tab_id}
                 data-m={m}

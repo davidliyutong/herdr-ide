@@ -40,6 +40,11 @@ All notable changes are documented here. The format follows
 - In-app dialogs for creating workspaces (folder completion on the machine,
   optional name) and for confirming closes, instead of the browser's
   `prompt()` and `confirm()`.
+- Dragging tabs along the tab bar and workspaces along their machine's list
+  in the sidebar to reorder them (`tab.move`, `workspace.move`).
+- Context menus on pane headers, tabs and workspaces with their commands and
+  key bindings, usable from the keyboard; read-only mode keeps the browser's
+  menu.
 - Project tooling: one-step rename with state migration, repository checks,
   pane input contract tests (browser and herdr key encodings), reproducible
   builds, third-party notices, CI, release workflow with
@@ -53,6 +58,10 @@ All notable changes are documented here. The format follows
   had moved (after a rename) still listened on the socket: such a process is
   replaced, the rename migration stops the old code-server first, and the
   core stops the local machine's code-server when it exits.
+- Tabs were shown sorted by `Tab.number`, which herdr keeps with a tab when
+  it moves; tabs and workspaces now follow herdr's order, and `prefix 1..9`
+  picks tabs by position. A new tab created from another workspace's menu no
+  longer takes the cwd of a pane elsewhere.
 
 ### Changed
 
