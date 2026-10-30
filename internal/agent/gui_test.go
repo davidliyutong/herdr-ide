@@ -447,6 +447,21 @@ func TestShellsWithDisplay(t *testing.T) {
 		}
 		defer c.Process.Kill()
 	}
+	// /proc/<pid>/environ reads empty until exec has set it up, which can
+	// be after Start returns.
+	for _, c := range []*exec.Cmd{with, without} {
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			env, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", c.Process.Pid))
+			if err == nil && len(env) > 0 {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("environ of %d: %q, %v", c.Process.Pid, env, err)
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
 	got := g.shells([]string{fmt.Sprint(with.Process.Pid), fmt.Sprint(without.Process.Pid), "x", "1"}, ":77")
 	if len(got) != 2 || got[0].Pid != with.Process.Pid || !got[0].Display || got[1].Display {
 		t.Fatalf("shells = %+v", got)

@@ -135,8 +135,12 @@ input methods.
 - The core prepares a machine's display when the machine connects (status,
   install, start, attach; phases `installing`, `starting`, `ready`, `error`,
   `unavailable`, `unsupported`, `off`, `local`), keeps one attach stream per
-  machine and re-attaches after errors. Every `/ws` client gets `gui`
-  messages with each machine's phase and windows.
+  machine and re-attaches after errors. A display is prepared once per
+  connection of the machine; a failed preparation or an attach stream that
+  ends within a minute is retried after 5 s, doubling up to 5 minutes, and
+  a change of the GUI setting or a reconnect starts over. Turning the
+  setting off while a display is prepared leaves it detached. Every `/ws`
+  client gets `gui` messages with each machine's phase and windows.
 - Frames go to every browser window showing that window. The fastest viewer
   acknowledges frames to the agent (only frames it was sent count); a viewer
   more than four frames behind skips frames and, once it caught up, gets the
@@ -195,7 +199,8 @@ its programs keep their windows until the display idles out.
 - **No Xvfb and no apt** → phase `unavailable`; panes get no `DISPLAY`, so
   programs behave as over plain ssh.
 - **Unpacked Xvfb cannot start** (missing libraries) → phase `error` with
-  Xvfb's output (`~/.herdr-ide/xvfb.log` on the machine).
+  Xvfb's output (`~/.herdr-ide/xvfb.log` on the machine); retried with the
+  backoff, so at most one start every 5 minutes.
 - **Network interruption** → browser windows show "Reconnecting"; programs
   and windows stay; after reconnecting the windows are adopted again.
 - **Display number taken** by another user (lock file, socket or listener)
@@ -238,11 +243,12 @@ uid in a private directory), the socket directory check, capture tiles,
 staging cleanup, library ownership and package pruning.
 `internal/gui/gui_test.go` covers pane environments (also per machine),
 the export command's quoting, frame routing, forged acknowledgements and
-refresh floods, the read-only plan and the close grace period;
+refresh floods, the read-only plan, the close grace period, preparing once
+per connection and the retry backoff;
 `internal/server/server_test.go` covers malformed `env` parameters and the
 Origin check of the close request;
 `internal/agent/gui_test.go` also covers recognizing shells started with the
-display; `internal/server/server_test.go` the environment merge;
+display (a process still in exec has an empty environment and is skipped); `internal/server/server_test.go` the environment merge;
 `web/src/__tests__/gui.test.ts` keycodes, paths and unseen windows.
 matplotlib (TkAgg) and the MuJoCo viewer under `vglrun` were used end to end
 in Chrome on Ubuntu 24.04 machines, one with Xvfb installed and one where it

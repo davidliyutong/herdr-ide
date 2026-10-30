@@ -56,7 +56,9 @@ Non-goals: a separate herdr-ide layout model; arbitrary docking of panes.
   `workspace.move`). Their `insert_index` is a slot in the current order (0
   before the first item, n after the last); the two slots beside the dragged
   item change nothing and show no bar. A tab stays in its workspace and a
-  workspace on its machine. The reply (the moved group in its new order) is
+  workspace on its machine: a tab can be dropped anywhere along its tab bar,
+  a workspace only on or next to its machine's list, so dropping it on
+  another machine's list does nothing. The reply (the moved group in its new order) is
   applied to the shown snapshot at once; the snapshot that follows herdr's
   `tab.moved` / `workspace.reordered` event replaces it. Tabs are still drop
   targets for dragged panes; the two drags start from different elements.
@@ -78,13 +80,16 @@ Non-goals: a separate herdr-ide layout model; arbitrary docking of panes.
 - Items call the same commands as the buttons and bindings, and show the
   binding of the same command. Bindings act on the current tab or workspace,
   so a menu of another tab or workspace shows none for those items. Moving
-  past either end is disabled.
+  past either end is disabled. A move item uses the position the tab or
+  workspace has when it runs, which another browser or herdr itself may
+  have changed since the menu opened.
 - The menu takes the keyboard: ↑↓ (skipping disabled items), Home/End,
   Enter or Space runs, Escape or Tab closes; prefix bindings do not run
   while it is open. Running an item or closing from the keyboard gives focus
   back to what had it, before the item runs, so items that move focus
-  (rename, split) keep it. A click elsewhere, leaving the window or resizing
-  closes it.
+  (rename, split) keep it. A click elsewhere, scrolling, leaving the window
+  or resizing closes it. The menu keeps its own width next to the window's
+  right edge.
 - Read-only mode offers no items, so the browser's menu shows. The terminal
   body keeps the browser's menu (copy, paste).
 
@@ -138,8 +143,9 @@ Non-goals: a separate herdr-ide layout model; arbitrary docking of panes.
 `internal/server/server_test.go` (`TestLoadKeyConfig`),
 `web/src/__tests__/core.test.ts` (pane geometry for directional focus),
 `web/src/__tests__/settings.test.ts` (drop zones, key labels),
-`web/src/__tests__/menus.test.ts` (insertion slots, applying a move reply,
-menu items and their commands, read-only, keyboard and focus of the menu);
+`web/src/__tests__/menus.test.ts` (insertion slots, the area a drop counts
+in, applying a move reply, menu items and their commands, moves from the
+current position, read-only, keyboard, focus and closing of the menu);
 `internal/server/server_test.go` (`TestAPIAllowlist`: moves are refused in
 read-only mode). The `set_split_ratio` path semantics, the `pane.swap` /
 `pane.move` behavior (including `same_tab` and the temporary tab closing

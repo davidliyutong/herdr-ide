@@ -34,12 +34,15 @@ export function insertSlot(boxes: Box[], from: number, pos: number, axis: 'x' | 
 }
 
 /** Items of a list and their boxes, when the point is near the list. */
-function near(list: Element | null, items: string, idAttr: string, x: number, y: number, axis: 'x' | 'y') {
+export function near(list: Element | null, items: string, idAttr: string, x: number, y: number, axis: 'x' | 'y') {
   if (!list) return undefined;
   const r = list.getBoundingClientRect();
   const slack = 16;
-  // Along the list any position counts (before the first item, after the last).
-  if (axis === 'x' ? y < r.top - slack || y > r.bottom + slack : x < r.left - slack || x > r.right + slack) return undefined;
+  const outside = (p: number, lo: number, hi: number) => p < lo - slack || p > hi + slack;
+  // Across the list the point must be on it. Along a tab bar any position
+  // counts (before the first tab, after the last); a machine's workspace
+  // list is followed by the next machine's, so there it must be near too.
+  if (axis === 'x' ? outside(y, r.top, r.bottom) : outside(x, r.left, r.right) || outside(y, r.top, r.bottom)) return undefined;
   const els = [...list.querySelectorAll<HTMLElement>(items)];
   return { ids: els.map((e) => e.getAttribute(idAttr)!), boxes: els.map((e) => e.getBoundingClientRect()) };
 }

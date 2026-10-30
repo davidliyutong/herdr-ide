@@ -21,11 +21,6 @@ All notable changes are documented here. The format follows
   per-machine values, `PUT /api/settings` takes `machine`.
 - A page loaded before the core was replaced offers to reload.
 
-### Security
-
-- Pages are served with `Referrer-Policy: same-origin` instead of
-  `no-referrer`, so same-origin POSTs carry their Origin (requests from other
-  sites still get no referrer).
 - `--remote-session`: use an isolated herdr session on remote machines
   (development and tests).
 - Web IDE for herdr: workspaces, tabs and split layouts from herdr's socket
@@ -83,13 +78,6 @@ All notable changes are documented here. The format follows
   picks tabs by position. A new tab created from another workspace's menu no
   longer takes the cwd of a pane elsewhere.
 
-### Security
-
-- code-server's port proxy (`/m/<machine>/code/proxy/<port>/`) is disabled
-  and refused by the core: it served any service listening on a machine,
-  including another user's on a shared machine, with the UI's origin, where
-  its scripts could type into every pane.
-
 ### Changed
 
 - Pane header actions use icons with larger targets and stay visible; read-only
@@ -101,3 +89,13 @@ All notable changes are documented here. The format follows
   Existing installs migrate on first start: machines move `~/.webherdr` to
   `~/.herdr-ide`, browsers move their stored preferences, code-server drops
   the old bridge extension and the core removes the old download cache.
+
+### Security
+
+- code-server's port proxy (`/m/<machine>/code/proxy/<port>/`) is disabled
+  and refused by the core: it served any service listening on a machine,
+  including another user's on a shared machine, with the UI's origin, where
+  its scripts could type into every pane.
+- Pages are served with `Referrer-Policy: same-origin` instead of
+  `no-referrer`, so same-origin POSTs carry their Origin (requests from other
+  sites still get no referrer).

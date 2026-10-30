@@ -113,6 +113,14 @@ type display struct {
 	err      string
 	status   *agentproto.GUIStatus
 	ensuring bool
+	// again: a forced ensure arrived while one was running.
+	again bool
+	// prepared is the session the last preparation ran for, whatever its
+	// outcome; state changes of that session do not prepare again.
+	prepared *transport.Session
+	// failures counts failed preparations and short-lived attachments in a
+	// row, for the retry backoff.
+	failures int
 
 	sess   *transport.Session
 	stream net.Conn
@@ -160,23 +168,91 @@ func (m *Manager) get(mc *machines.Machine) *display {
 }
 
 // Ensure prepares the machine's display and attaches to it, unless that is
-// done or under way. It returns at once.
+// done, under way, or was tried for the machine's current connection (it is
+// called on every state change of the machine). It returns at once.
 func (m *Manager) Ensure(mc *machines.Machine) {
+	m.ensure(mc, false)
+}
+
+// ensure prepares the display; force also retries after a preparation that
+// did not end attached for the current connection.
+func (m *Manager) ensure(mc *machines.Machine, force bool) {
 	m.mu.Lock()
 	d := m.get(mc)
 	sess := mc.Session()
-	if d.ensuring || sess == nil || (d.stream != nil && d.sess == sess) {
-		m.mu.Unlock()
+	start := d.claim(sess, force)
+	m.mu.Unlock()
+	if !start {
 		return
 	}
-	d.ensuring = true
-	m.mu.Unlock()
 	go func() {
-		m.prepare(d, sess)
-		m.mu.Lock()
-		d.ensuring = false
-		m.mu.Unlock()
+		for {
+			m.prepare(d, sess)
+			m.mu.Lock()
+			next := d.finish(sess, mc.Session())
+			m.mu.Unlock()
+			if next == nil {
+				return
+			}
+			sess = next
+		}
 	}()
+}
+
+// claim decides, with m.mu held, whether to prepare the display for sess
+// now; true marks a preparation as running.
+func (d *display) claim(sess *transport.Session, force bool) bool {
+	if sess == nil || (d.stream != nil && d.sess == sess) {
+		return false
+	}
+	if d.ensuring {
+		d.again = d.again || force
+		return false
+	}
+	if !force && d.prepared == sess {
+		return false
+	}
+	if d.prepared != sess {
+		d.failures = 0
+	}
+	d.ensuring = true
+	return true
+}
+
+// finish records, with m.mu held, that a preparation for sess ended, and
+// returns the connection to prepare again for, if any: when a forced ensure
+// came in meanwhile, or the machine reconnected (cur).
+func (d *display) finish(sess, cur *transport.Session) *transport.Session {
+	d.prepared = sess
+	again := cur != nil && (d.again || cur != sess) && !(d.stream != nil && d.sess == cur)
+	if cur != sess {
+		d.failures = 0
+	}
+	d.again = false
+	d.ensuring = again
+	if !again {
+		return nil
+	}
+	return cur
+}
+
+// retryDelay is the wait before the next attempt after n failures in a row.
+func retryDelay(n int) time.Duration {
+	return min(5*time.Second<<min(n, 6), 5*time.Minute)
+}
+
+// retryLater prepares the display again after a backoff, if the machine is
+// still on the same connection.
+func (m *Manager) retryLater(d *display, sess *transport.Session) {
+	m.mu.Lock()
+	delay := retryDelay(d.failures)
+	d.failures++
+	m.mu.Unlock()
+	time.AfterFunc(delay, func() {
+		if d.mc.Session() == sess {
+			m.ensure(d.mc, true)
+		}
+	})
 }
 
 // Apply follows a change of the GUI setting for a machine: it detaches
@@ -185,7 +261,7 @@ func (m *Manager) Ensure(mc *machines.Machine) {
 // their windows.
 func (m *Manager) Apply(mc *machines.Machine) {
 	if m.setting(SettingGUI, mc.ID()) != "off" {
-		m.Ensure(mc)
+		m.ensure(mc, true)
 		return
 	}
 	m.mu.Lock()
@@ -267,6 +343,7 @@ func (m *Manager) prepare(d *display, sess *transport.Session) {
 	st, err := m.request(ctx, mc, "status")
 	if err != nil {
 		m.setPhase(d, PhaseError, err)
+		m.retryLater(d, sess)
 		return
 	}
 	m.mu.Lock()
@@ -282,15 +359,24 @@ func (m *Manager) prepare(d *display, sess *transport.Session) {
 		m.audit("gui."+a, map[string]any{"machine": mc.ID()})
 		if st, err = m.request(ctx, mc, a); err != nil {
 			m.setPhase(d, PhaseError, err)
+			m.retryLater(d, sess)
 			return
 		}
 	}
 	conn, rep, err := mc.Open(context.Background(), agentproto.Header{Op: agentproto.OpGUI, Action: "attach"})
 	if err != nil {
 		m.setPhase(d, PhaseError, err)
+		m.retryLater(d, sess)
 		return
 	}
 	m.mu.Lock()
+	// The setting may have been turned off while the display was prepared.
+	if m.setting(SettingGUI, mc.ID()) == "off" {
+		m.mu.Unlock()
+		conn.Close()
+		m.setPhase(d, PhaseOff, nil)
+		return
+	}
 	if rep.GUI != nil {
 		st = rep.GUI
 	}
@@ -311,7 +397,7 @@ func (m *Manager) prepare(d *display, sess *transport.Session) {
 	go writeCommands(conn, d.cmds)
 	m.mu.Unlock()
 	m.setPhase(d, PhaseReady, nil)
-	go m.read(d, conn)
+	go m.read(d, sess, conn)
 }
 
 func writeCommands(conn net.Conn, cmds <-chan []byte) {
@@ -325,8 +411,13 @@ func writeCommands(conn net.Conn, cmds <-chan []byte) {
 	}
 }
 
+// stableAttach is how long an attachment must last for its end not to count
+// as a failure in the retry backoff.
+const stableAttach = time.Minute
+
 // read handles the attach stream until it ends.
-func (m *Manager) read(d *display, conn net.Conn) {
+func (m *Manager) read(d *display, sess *transport.Session, conn net.Conn) {
+	attached := time.Now()
 	var err error
 	for {
 		var kind byte
@@ -351,12 +442,15 @@ func (m *Manager) read(d *display, conn net.Conn) {
 	d.stream = nil
 	close(d.cmds)
 	d.windows, d.order = map[uint32]*agentproto.GUIWindow{}, nil
+	if time.Since(attached) >= stableAttach {
+		d.failures = 0
+	}
 	m.mu.Unlock()
-	if d.mc.Session() == nil {
+	if d.mc.Session() != sess {
 		return // the machine reconnects and ensures again
 	}
 	m.setPhase(d, PhaseError, err)
-	time.AfterFunc(5*time.Second, func() { m.Ensure(d.mc) })
+	m.retryLater(d, sess)
 }
 
 func (m *Manager) event(d *display, payload []byte) {

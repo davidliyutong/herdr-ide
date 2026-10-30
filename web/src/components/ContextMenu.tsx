@@ -26,11 +26,16 @@ function MenuView({ menu }: { menu: MenuState }) {
   useEffect(() => {
     const outside = (e: PointerEvent) => !ref.current?.contains(e.target as Node) && closeMenu(false);
     const close = () => closeMenu(false);
+    // Scrolling a list would leave the menu away from its row; scroll events
+    // do not bubble, so they are caught on the way down.
+    const scrolled = (e: Event) => !ref.current?.contains(e.target as Node) && closeMenu(false);
     window.addEventListener('pointerdown', outside, true);
+    window.addEventListener('scroll', scrolled, true);
     window.addEventListener('blur', close);
     window.addEventListener('resize', close);
     return () => {
       window.removeEventListener('pointerdown', outside, true);
+      window.removeEventListener('scroll', scrolled, true);
       window.removeEventListener('blur', close);
       window.removeEventListener('resize', close);
     };

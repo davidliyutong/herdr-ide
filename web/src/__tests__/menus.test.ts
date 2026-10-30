@@ -7,7 +7,7 @@ const api = vi.fn((..._args: unknown[]): Promise<unknown> => Promise.resolve({})
 vi.mock('../lib/conn', () => ({ conn: { api: (...a: unknown[]) => api(...a), setTheme: () => {} } }));
 
 import { useStore } from '../state/store';
-import { insertSlot } from '../reorderDrag';
+import { insertSlot, near } from '../reorderDrag';
 import { withOrder, workspaceTabs, type MachineState } from '../lib/herdr';
 import { closeMenu, isItem, openMenu, stepIndex, tidy, useMenu, type MenuEntry, type MenuItem } from '../contextMenu';
 import { paneMenu, tabMenu, workspaceMenu } from '../menus';
@@ -44,6 +44,25 @@ describe('insertSlot', () => {
     ];
     expect(insertSlot(rows, 1, 5, 'y')).toEqual({ index: 0, box: { left: 0, top: -1, width: 200, height: 2 } });
     expect(insertSlot(rows, 0, 60, 'y')).toEqual({ index: 2, box: { left: 0, top: 63, width: 200, height: 2 } });
+  });
+});
+
+describe('near', () => {
+  const list = (r: { left: number; top: number; width: number; height: number }) => {
+    const el = document.createElement('div');
+    el.getBoundingClientRect = () => ({ ...r, right: r.left + r.width, bottom: r.top + r.height }) as DOMRect;
+    return el;
+  };
+
+  it('takes any position along a tab bar but only near a workspace list', () => {
+    const tabs = list({ left: 100, top: 0, width: 300, height: 30 });
+    expect(near(tabs, '.tab', 'data-tab-id', 900, 10, 'x')).toBeDefined();
+    expect(near(tabs, '.tab', 'data-tab-id', 200, 80, 'x')).toBeUndefined();
+    const ws = list({ left: 0, top: 100, width: 200, height: 100 });
+    expect(near(ws, '.ws', 'data-ws-id', 50, 210, 'y')).toBeDefined();
+    // Over the next machine's list.
+    expect(near(ws, '.ws', 'data-ws-id', 50, 400, 'y')).toBeUndefined();
+    expect(near(ws, '.ws', 'data-ws-id', 400, 150, 'y')).toBeUndefined();
   });
 });
 
@@ -171,6 +190,22 @@ describe('menus', () => {
     expect(api).toHaveBeenLastCalledWith('m', 'tab.move', { tab_id: 't2', insert_index: 1 });
   });
 
+  it('moves from where the item is when the menu item runs', () => {
+    const left = find(tabMenu('m', 'w1', 't2'), 'Move left');
+    const down = find(workspaceMenu('m', 'w1'), 'Move down');
+    // Another client moves t2 to the front and w1 to the end meanwhile.
+    const m = machine();
+    const snap = m.snapshot!;
+    snap.tabs = [snap.tabs[3], snap.tabs[0], snap.tabs[1], snap.tabs[2]];
+    snap.workspaces = [snap.workspaces[1], snap.workspaces[0]];
+    useStore.getState().setMachines([m]);
+    left.run();
+    down.run();
+    expect(api).not.toHaveBeenCalled();
+    find(tabMenu('m', 'w1', 't1'), 'Move left').run();
+    expect(api).toHaveBeenLastCalledWith('m', 'tab.move', { tab_id: 't1', insert_index: 0 });
+  });
+
   it('moves workspaces and reports failures', async () => {
     const w2 = workspaceMenu('m', 'w2');
     expect(find(w2, 'Move down').disabled).toBe(true);
@@ -231,6 +266,11 @@ describe('ContextMenu', () => {
     // A click elsewhere closes it without stealing focus back.
     await act(async () => openMenu(ev, [item('a')]));
     await act(async () => void document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
+    expect(useMenu.getState().menu).toBeUndefined();
+
+    // So does scrolling a list, which scroll events reach without bubbling.
+    await act(async () => openMenu(ev, [item('a')]));
+    await act(async () => void before.dispatchEvent(new Event('scroll')));
     expect(useMenu.getState().menu).toBeUndefined();
     closeMenu(false);
     await act(async () => root.unmount());

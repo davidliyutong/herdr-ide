@@ -701,6 +701,12 @@ func (g *gui) shells(args []string, display string) []agentproto.GUIProc {
 		if err != nil {
 			continue // gone, or another user's
 		}
+		if len(env) == 0 {
+			// Still in exec (the kernel sets the environment after the
+			// parent sees it start), or started without any environment:
+			// unknown, so the pane is left alone.
+			continue
+		}
 		comm, _ := os.ReadFile(dir + "/comm")
 		p := agentproto.GUIProc{Pid: pid, Comm: strings.TrimSpace(string(comm))}
 		for _, kv := range bytes.Split(env, []byte{0}) {

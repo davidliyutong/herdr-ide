@@ -15,6 +15,7 @@ import (
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/machines"
 	"herdr-ide/internal/settings"
+	"herdr-ide/internal/transport"
 )
 
 func testMachines() *machines.Manager {
@@ -356,5 +357,73 @@ func TestTypeExport(t *testing.T) {
 	failing := func(s string) error { sent = append(sent, s); return errors.New("gone") }
 	if err := typeExport(failing, "x"); err == nil || len(sent) != 1 {
 		t.Errorf("after a failed interrupt: %v, sent %q", err, sent)
+	}
+}
+
+// A display is prepared once per connection: the machine's state changes
+// (every herdr snapshot) do not start it again after a failure; forced
+// retries (backoff, setting changes) do, and one arriving while a
+// preparation runs is not lost.
+func TestEnsureOncePerSession(t *testing.T) {
+	a, b := new(transport.Session), new(transport.Session)
+	d := &display{}
+	if d.claim(nil, false) {
+		t.Fatal("prepared without a connection")
+	}
+	if !d.claim(a, false) {
+		t.Fatal("first ensure did not prepare")
+	}
+	if d.claim(a, false) {
+		t.Fatal("prepared twice at once")
+	}
+	if d.again {
+		t.Error("an unforced ensure asked to prepare again")
+	}
+	if next := d.finish(a, a); next != nil || d.ensuring {
+		t.Fatalf("finish = %v, ensuring %v", next, d.ensuring)
+	}
+	// The preparation failed (no stream): state changes leave it alone.
+	for range 3 {
+		if d.claim(a, false) {
+			t.Fatal("state change prepared again for the same connection")
+		}
+	}
+	d.failures = 2
+	if !d.claim(a, true) {
+		t.Fatal("forced retry did not prepare")
+	}
+	if d.failures != 2 {
+		t.Errorf("retry on the same connection reset failures to %d", d.failures)
+	}
+	// A forced ensure while preparing runs it again afterwards.
+	d.claim(a, true)
+	if next := d.finish(a, a); next != a || !d.ensuring {
+		t.Fatalf("forced ensure during preparation: next %v", next)
+	}
+	d.finish(a, a)
+	// A new connection is prepared, also when it came up meanwhile, and
+	// starts the backoff over.
+	if !d.claim(b, false) || d.failures != 0 {
+		t.Fatalf("new connection: failures %d", d.failures)
+	}
+	d.finish(b, b)
+	d.claim(b, true)
+	if next := d.finish(b, a); next != a {
+		t.Errorf("reconnect during preparation: next %v", next)
+	}
+	d.finish(a, nil)
+	// Attached on the connection: nothing to do even when forced.
+	d.stream, d.sess = &net.TCPConn{}, a
+	if d.claim(a, true) {
+		t.Error("prepared while attached")
+	}
+}
+
+func TestRetryDelay(t *testing.T) {
+	if retryDelay(0) != 5*time.Second || retryDelay(1) != 10*time.Second {
+		t.Errorf("delays %v %v", retryDelay(0), retryDelay(1))
+	}
+	if retryDelay(6) != 5*time.Minute || retryDelay(100) != 5*time.Minute {
+		t.Errorf("capped delays %v %v", retryDelay(6), retryDelay(100))
 	}
 }
