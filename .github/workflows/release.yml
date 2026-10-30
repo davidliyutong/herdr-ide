@@ -49,7 +49,11 @@ jobs:
             tar -C release -czf "release/$name.tar.gz" "$name"
           done
           (cd release && sha256sum *.tar.gz > SHA256SUMS)
+      # GitHub stores attestations for public repositories (private ones need
+      # GitHub Enterprise Cloud); a private repository releases without
+      # provenance.
       - uses: actions/attest-build-provenance@v4
+        if: ${{ !github.event.repository.private }}
         with:
           subject-path: release/*.tar.gz
       - name: Publish

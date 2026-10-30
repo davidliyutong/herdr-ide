@@ -18,8 +18,9 @@ match; the bridge extension is reinstalled whenever its content changes.
 6. The `release` workflow (`.github/workflows/release.yml`) builds the four
    platforms, packages each binary with `LICENSE`, `THIRD_PARTY_NOTICES.md`
    and the web UI's `licenses.md`, writes `SHA256SUMS`, attests build
-   provenance and creates the GitHub release with the changelog section as
-   notes.
+   provenance (only while the repository is public: GitHub stores no
+   attestations for private repositories outside Enterprise Cloud) and
+   creates the GitHub release with the changelog section as notes.
 7. Smoke test a downloaded archive: `sha256sum -c SHA256SUMS`, `version`,
    then start with `--local-only` and open the UI.
 

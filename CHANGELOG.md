@@ -71,7 +71,7 @@ All notable changes are documented here. The format follows
 - Project tooling: one-step rename with state migration, repository checks,
   pane input contract tests (browser and herdr key encodings), reproducible
   builds, third-party notices, CI, release workflow with
-  checksums and build provenance, Dependabot.
+  checksums and build provenance (from a public repository), Dependabot.
 
 ### Fixed
 
