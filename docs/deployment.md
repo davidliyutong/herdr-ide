@@ -5,6 +5,7 @@ from browsers. It reaches herdr machines over ssh; nothing listens on the
 machines.
 
 - [Local use](#local-use)
+- [macOS desktop app](#macos-desktop-app)
 - [Remote access through a reverse proxy](#remote-access-through-a-reverse-proxy)
 - [Air-gapped networks](#air-gapped-networks)
 - [Remote resources](#remote-resources)
@@ -15,14 +16,96 @@ machines.
 
 ```bash
 scripts/build.sh
-./dist/herdr-ide-$(go env GOOS)-$(go env GOARCH)    # http://127.0.0.1:7780
+cd dist/packages/herdr-ide-$(go env GOOS)-$(go env GOARCH)
+./herdr-ide    # http://127.0.0.1:7780
 ```
+
+Each `dist/release/` archive contains the core, a native herdr 0.9.5 beside it
+and licenses. Extract it as a directory; moving just the core loses the bundled
+herdr. Supported hosts are Linux/macOS on amd64/arm64.
+
+The bundled herdr only spares installing herdr on this host. herdr-ide uses an
+installed herdr when it finds one, otherwise its own copy of the bundled
+one, and herdr keeps its usual configuration, sessions and machine list
+either way. Start herdr's server before using the local machine: **Manage
+herdr** in the local machine's context menu (or its status when it reports a
+problem) starts and stops it and updates the application's copy of herdr;
+opening the TUI with `./herdr-ide herdr` also starts it.
+`./herdr-ide herdr <args>` runs any herdr command, such as
+`./herdr-ide herdr machine add user@host --label gpu`. SSH machines need their
+own herdr installation and running session.
 
 Machines come from herdr's saved SSH machines (`herdr machine list`); add
 others with `--ssh`. herdr-ide uses OpenSSH with your `~/.ssh/config`
 (ProxyJump, agent, keys) in BatchMode. A machine that needs a password, 2FA or
 a host-key confirmation shows **Authentication required**; **Authenticate…**
 opens a terminal for it, and later connections reuse that ssh ControlMaster.
+
+## macOS desktop app
+
+Build on a Mac with Go, Node.js 22.12+ and pnpm:
+
+```bash
+make desktop-app                       # host-architecture .app
+VERSION=0.1.0 make desktop-dmg           # .app and DMG in dist/desktop/
+ARCH=x64 make desktop-dmg               # Intel core and Electron
+ARCH=arm64 make desktop-dmg             # Apple Silicon core and Electron
+```
+
+Each command builds the UI, bridge extension, four agents and the matching
+macOS core before bundling Electron. Versions are pinned in the desktop
+lockfile. The DMG contains an app and an Applications shortcut; drag the app
+to Applications, eject the image, then launch it. The build is ad-hoc signed,
+without a Developer ID or notarization; Gatekeeper may require explicit
+approval for a downloaded copy. Public signed distribution and automatic
+updates are outside this packaging mode. Windows and Linux installers are
+not implemented. The app and disk image use the project's terminal-pane icon.
+
+Editable icon sources live in `desktop/assets/icon.svg` and
+`web/public/icon.svg` (the simpler small-size version). The 1024-pixel PNG
+and multi-resolution ICNS are committed, so ordinary builds need no graphics
+tools. After editing the sources, run `brew install librsvg` if needed, then
+`make desktop-icons` on macOS and rebuild the app/DMG.
+
+The app includes herdr (`herdr-ide.app/Contents/Resources/bin/herdr`), used
+only when no installed herdr is found; OpenSSH remains an external
+prerequisite. Finder launches include `~/.local/bin`, `/opt/homebrew/bin`,
+`/usr/local/bin` and system paths in the core's PATH. The launcher does not
+execute shell startup files, so variables exported there, such as
+`HERDR_BIN`, reach the core only when the app is started from that shell.
+Existing herdr servers and SSH configuration are reused. The app never starts
+herdr's server by itself; start it, stop it and update herdr with **Manage
+herdr** in the local machine's context menu, without a terminal.
+
+The core listens at `127.0.0.1:7781` with instance `desktop`, separate from
+the CLI default and `dev`. A fixed origin preserves UI preferences across
+launches. `HERDR_IDE_DESKTOP_PORT` overrides the port; changing it changes
+the browser storage origin. An occupied port fails visibly; the app never
+attaches to an existing listener. Opening the app twice focuses the original
+window. Closing the main window or quitting stops its core and agents;
+closing a program window leaves the main app running. HTTP(S) external links
+open in the default browser; custom URL schemes are refused.
+
+For development, start only an isolated herdr session and run:
+
+```bash
+herdr --session herdr-ide-dev server &
+make dev-desktop
+```
+
+This builds the embedded UI (no hot reload) and uses port 7791, instance
+`dev`, local-only connections and session `herdr-ide-dev`. For packaged
+smoke tests, launch the executable with `HERDR_IDE_DESKTOP_DEV=1`, e.g.:
+
+```bash
+HERDR_IDE_DESKTOP_DEV=1 dist/desktop/mac-arm64/herdr-ide.app/Contents/MacOS/herdr-ide
+```
+
+Quit other development cores using the `dev` instance first. Electron uses
+its own persistent profile (`herdr-ide-desktop`, or `herdr-ide-desktop-dev`)
+under Application Support; remove that directory manually to reset desktop
+preferences. Browser and desktop preferences are separate. Core state and
+resource retention follow [Remote resources](#remote-resources).
 
 ## Remote access through a reverse proxy
 
@@ -103,7 +186,7 @@ herdr-ide fetch-assets ./bundle                          # all platforms
 herdr-ide fetch-assets --platforms linux-amd64 ./bundle  # only what you need
 ```
 
-Copy `./bundle` (tarballs, VSIXs and `.sha256` files) and the herdr-ide binary
+Copy `./bundle` (tarballs, VSIXs and `.sha256` files) and the full application release directory
 into the network, then run:
 
 ```bash
@@ -118,12 +201,14 @@ have SHA-256 digests compiled into the binary; other versions need a
 seed is rejected, never replaced. A download without any known digest is
 accepted once and its digest recorded (logged as a warning).
 
-Bundles are for your own installations: Git Graph's license does not permit
-redistribution, so do not publish bundles that contain it.
+Bundles are for your own installations: Git Graph explicitly restricts
+derivative distribution and does not clearly grant general redistribution
+of the original, so do not publish bundles containing it without permission.
 
-The web UI, the agents and the VS Code bridge are embedded in the binary;
-nothing else is fetched at runtime. Building from source needs Go modules and
-npm packages (vendor or mirror them for offline builds).
+The web UI, agents and VS Code bridge are embedded in the core, and the
+bundled herdr is beside it; code-server and external extensions are resolved
+at runtime. Building needs Go modules, npm packages and the pinned herdr
+download (verified files in `dist/herdr/` are reused).
 
 ## Remote resources
 
@@ -131,7 +216,12 @@ What herdr-ide starts on a machine and how it is reclaimed:
 
 | Resource | Started | Reclaimed |
 | --- | --- | --- |
+| Desktop core | Electron launches its bundled binary | SIGTERM on normal quit, with a 20 s deadline before SIGKILL of that owned child; parent-stdin EOF also stops it if Electron crashes. herdr servers and pane programs remain running. |
+| Electron profile | First desktop launch | Kept until manually removed; Chromium manages its caches. Development has a separate profile. Core stderr is bounded to 16 KiB in memory; no desktop log files accumulate. |
 | `herdr-ide-agent` | one per core while connected | Exits when its ssh session ends; a dead link is detected by keepalives within about 45 s. |
+| local herdr server started from the UI | **Manage herdr**, on request | Belongs to the user like one started by the herdr TUI and outlives the core; stopped with **Manage herdr** or `herdr server stop`. |
+| `herdr update` | **Update** in **Manage herdr** | Ends with the update (15 min limit); herdr's temporary download is in `~/.herdr-ide/herdr/`. |
+| `herdr --remote` client (core host) | **Update herdr** for an SSH machine | Ends when herdr exits or the window closes. A herdr it installs on the machine (usually `~/.local/bin/herdr`) is herdr's own installation and stays until the user removes it; a server it starts there belongs to the user. |
 | `herdr terminal session` processes | one per pane being viewed | Ends when the pane is no longer shown, or with the agent. |
 | code-server | on first VS Code use | Stopped after `--code-server-idle` (default 20 min) without VS Code connections, when the agent exits (if that agent started it; for the local machine, when the core stops), or by the stop button in the VS Code panel. Hidden VS Code panels disconnect after 10 min. A process left behind by a killed agent is stopped by the next agent, and code-server exits by itself after 1 h without connections. |
 | VS Code extension hosts | one per VS Code window | Disposed 5 min after the window disconnects. |
@@ -140,6 +230,16 @@ What herdr-ide starts on a machine and how it is reclaimed:
 | `apt-get download xvfb` | when a machine has no Xvfb (never in `--read-only`) | Ends with the download (5 min limit); the package is unpacked into `~/.herdr-ide/xvfb/` and the download removed; a download left by a killed agent is removed by the next agent after 1 h. A failed install or start is retried after 5 s, doubling up to 5 min, while the machine stays connected. |
 | curl or wget (`--code-server-install=download`) | while a machine downloads code-server | Ends with the download (20 min limit); the partial file in `~/.herdr-ide/code-server/` is removed, or with the unused versions after 14 days if the agent was killed. |
 | Disk | see [reference](reference.md#files-and-directories) | Uploads and logs after 7 days; unused agent builds, code-server versions and Xvfb packages after 14 days. |
+
+herdr servers are started and stopped by the user: on SSH machines through
+herdr, on the local host also through **Manage herdr**. herdr on an SSH
+machine changes only through herdr's own `herdr --remote` flow, which
+**Update herdr** (the machine's context menu) runs in a terminal where the
+user answers herdr's questions. The bundled herdr and
+the licenses stay in the extracted release directory until the user removes
+it; the application's copy of herdr and the log of servers it started are
+described in [reference](reference.md#files-and-directories). No herdr binary
+is uploaded to SSH machines.
 
 How machines get code-server is a setting (the settings dialog or
 `--code-server-install`): the core uploads the release (default; works for
@@ -161,7 +261,7 @@ macOS (launchd), `~/Library/LaunchAgents/dev.herdr-ide.plist`:
 <plist version="1.0"><dict>
   <key>Label</key><string>dev.herdr-ide</string>
   <key>ProgramArguments</key><array>
-    <string>/usr/local/bin/herdr-ide</string>
+    <string>/opt/herdr-ide/herdr-ide</string>
     <string>--allowed-origin</string><string>https://ide.example.com</string>
   </array>
   <key>RunAtLoad</key><true/>
@@ -177,14 +277,20 @@ Linux (systemd user unit), `~/.config/systemd/user/herdr-ide.service`:
 Description=herdr-ide
 
 [Service]
-ExecStart=%h/.local/bin/herdr-ide --allowed-origin https://ide.example.com
+ExecStart=%h/.local/lib/herdr-ide/herdr-ide --allowed-origin https://ide.example.com
 Restart=on-failure
+# A herdr server started with Manage herdr must survive restarts of the service.
+KillMode=process
 
 [Install]
 WantedBy=default.target
 ```
 
-The service must run as the user who owns the herdr sessions and the ssh keys.
+Install the full release directory at the path shown above (or adjust the
+path). The service must run as the user who owns the herdr sessions and the
+ssh keys. systemd stops every process of a unit by default, including a herdr
+server started from the UI and all its terminals; `KillMode=process` stops only
+the core, whose agents then end their own processes.
 
 ## Several cores and development builds
 

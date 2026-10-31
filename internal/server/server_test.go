@@ -2,6 +2,7 @@ package server
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"flag"
 	"io"
@@ -15,6 +16,8 @@ import (
 	"testing"
 	"testing/fstest"
 	"time"
+
+	"github.com/coder/websocket"
 
 	"herdr-ide/internal/machines"
 	"herdr-ide/internal/settings"
@@ -446,5 +449,124 @@ func TestSettingsPerMachineScope(t *testing.T) {
 	}
 	if c := put(`{"key":"gui","value":"off","machine":"r1"}`); c != http.StatusOK || st.GetFor("gui", "r1") != "off" {
 		t.Errorf("remote machine: %d, %s", c, st.GetFor("gui", "r1"))
+	}
+}
+
+// Managing herdr is limited to the core host, refused in read-only mode and
+// audited (feature 17).
+func TestHerdrEndpoints(t *testing.T) {
+	specs := []machines.Spec{
+		{ID: "local", Label: "local", Kind: machines.KindLocal, Enabled: true},
+		{ID: "gpu", Label: "gpu", Kind: machines.KindSSH, Target: "gpu", Enabled: true},
+	}
+	mg := machines.NewManager(specs, nil, log.New(io.Discard, "", 0))
+	var audit strings.Builder
+	do := func(opts Options, method, path string) *httptest.ResponseRecorder {
+		opts.Logger = log.New(io.Discard, "", 0)
+		r := httptest.NewRequest(method, path, nil)
+		r.Host = "127.0.0.1:7780"
+		w := httptest.NewRecorder()
+		New(mg, opts).Handler().ServeHTTP(w, r)
+		return w
+	}
+	for _, c := range []struct {
+		opts         Options
+		method, path string
+		code         int
+		body         string
+	}{
+		{Options{}, "GET", "/api/m/gpu/herdr", 400, "not_local"},
+		{Options{}, "POST", "/api/m/gpu/herdr/update", 400, "not_local"},
+		{Options{}, "POST", "/api/m/local/herdr/uninstall", 404, ""},
+		{Options{ReadOnly: true}, "POST", "/api/m/local/herdr/start", 403, "read-only"},
+		{Options{Audit: &audit}, "POST", "/api/m/local/herdr/stop", 502, "transport"}, // not connected
+		{Options{ReadOnly: true}, "GET", "/api/m/local/herdr", 502, "transport"},
+	} {
+		w := do(c.opts, c.method, c.path)
+		if w.Code != c.code || !strings.Contains(w.Body.String(), c.body) {
+			t.Errorf("%s %s: %d %s", c.method, c.path, w.Code, w.Body)
+		}
+	}
+	if !strings.Contains(audit.String(), `"event":"herdr.stop"`) || !strings.Contains(audit.String(), `"machine":"local"`) {
+		t.Fatalf("audit: %s", audit.String())
+	}
+}
+
+func TestRemoteHerdrCommand(t *testing.T) {
+	for _, c := range []struct {
+		target, session string
+		handoff         bool
+		want            string
+	}{
+		{"gpu", "default", false, "--remote=gpu"},
+		{"user@gpu", "", false, "--remote=user@gpu"},
+		{"gpu", "herdr-ide-dev", true, "--remote=gpu --session herdr-ide-dev --handoff"},
+		{"-oProxyCommand=x", "default", false, "--remote=-oProxyCommand=x"}, // herdr rejects it; never an option
+	} {
+		if got := strings.Join(remoteHerdrArgs(c.target, c.session, c.handoff), " "); got != c.want {
+			t.Errorf("%+v: %q", c, got)
+		}
+	}
+	env := strings.Join(herdrClientEnv([]string{"HOME=/h", "HERDR_ENV=1", "HERDR_PANE_ID=p", "TERM=dumb", "HERDR_SOCKET_PATH=/s"}), " ")
+	if env != "HOME=/h HERDR_SOCKET_PATH=/s TERM=xterm-256color COLORTERM=truecolor" {
+		t.Fatalf("env %q", env)
+	}
+}
+
+// The remote update terminal is only for SSH machines, needs the local herdr
+// (whose version herdr installs there) and is refused in read-only mode.
+func TestHerdrRemoteEndpoint(t *testing.T) {
+	specs := []machines.Spec{
+		{ID: "local", Label: "local", Kind: machines.KindLocal, Enabled: true},
+		{ID: "gpu", Label: "gpu", Kind: machines.KindSSH, Target: "gpu", Enabled: true},
+	}
+	mg := machines.NewManager(specs, nil, log.New(io.Discard, "", 0))
+	for _, c := range []struct {
+		readOnly bool
+		path     string
+		code     int
+		body     string
+	}{
+		{false, "/api/m/local/herdr/remote", 400, "not_ssh"},
+		{false, "/api/m/gpu/herdr/remote", 409, "no_local_herdr"}, // the local agent has not reported herdr
+		{true, "/api/m/gpu/herdr/remote", 403, "read-only"},
+	} {
+		r := httptest.NewRequest("GET", c.path, nil)
+		r.Host = "127.0.0.1:7780"
+		w := httptest.NewRecorder()
+		New(mg, Options{ReadOnly: c.readOnly, Logger: log.New(io.Discard, "", 0)}).Handler().ServeHTTP(w, r)
+		if w.Code != c.code || !strings.Contains(w.Body.String(), c.body) {
+			t.Errorf("%s read-only=%v: %d %s", c.path, c.readOnly, w.Code, w.Body)
+		}
+	}
+}
+
+// servePTY carries the browser's keys to the command and its output back.
+func TestServePTY(t *testing.T) {
+	ran := make(chan bool, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ran <- servePTY(w, r, []string{"/bin/sh", "-c", "read l; echo got:$l"}, []string{"PATH=/usr/bin:/bin"})
+	}))
+	defer srv.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http")+"/?cols=80&rows=24", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	if err := conn.Write(ctx, websocket.MessageText, []byte("hi\r")); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	for !strings.Contains(out.String(), "got:hi") {
+		_, data, err := conn.Read(ctx)
+		if err != nil {
+			t.Fatalf("%v after %q", err, out.String())
+		}
+		out.Write(data)
+	}
+	if !<-ran {
+		t.Fatal("command not reported as run")
 	}
 }

@@ -11,16 +11,21 @@ A Go server (`cmd/herdr-ide`) that serves a React terminal UI and drives
 [herdr](https://herdr.dev) on several machines through a per-machine Go agent
 (`cmd/herdr-ide-agent`) over ssh; code-server provides VS Code panels. One
 binary embeds the UI, the agents for 4 platforms and a VS Code extension.
+Release archives also contain a native herdr and its license notices, used
+on the core host only when no herdr is installed; it keeps herdr's usual
+configuration and state. SSH machines use their installed herdr.
 
 ## Commands
 
 | Task | Command |
 | --- | --- |
 | Install JS deps | `make deps` |
-| Unit tests (Go + web) | `make test` |
+| Unit tests (Go + web + desktop) | `make test` |
 | All checks (gofmt, vet, tsc, prettier, brand/doc/README consistency) | `make check` |
 | Integration test with a real herdr | `make it` |
 | Full build into `dist/` | `make build` (or `scripts/build.sh`) |
+| macOS `.app` / DMG | `make desktop-app` / `make desktop-dmg` |
+| Isolated desktop development | `make dev-desktop` |
 | Run for development | `make dev-core` and `make dev-web` |
 
 Run `make check test` before finishing a change.

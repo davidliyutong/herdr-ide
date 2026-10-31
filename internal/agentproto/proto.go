@@ -46,6 +46,10 @@ const (
 	// OpGUI manages the virtual display (actions status, install, start,
 	// shells) and, with action attach, streams its windows (see gui.go).
 	OpGUI Op = "gui"
+	// OpHerdr manages the herdr in use and the server of Header.Session
+	// (actions status, start, stop, check, update). An empty reply comes at
+	// once; a second reply line with Herdr follows when the action is done.
+	OpHerdr Op = "herdr"
 )
 
 // Header is the first line of every stream.
@@ -93,13 +97,14 @@ type Reply struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
 
-	Info    *Info       `json:"info,omitempty"`
-	Stat    *Stat       `json:"stat,omitempty"`
-	Entries []Stat      `json:"entries,omitempty"`
-	Exec    *ExecResult `json:"exec,omitempty"`
-	CS      *CSStatus   `json:"cs,omitempty"`
-	Bridge  *BridgeInfo `json:"bridge,omitempty"`
-	GUI     *GUIStatus  `json:"gui,omitempty"`
+	Info    *Info        `json:"info,omitempty"`
+	Stat    *Stat        `json:"stat,omitempty"`
+	Entries []Stat       `json:"entries,omitempty"`
+	Exec    *ExecResult  `json:"exec,omitempty"`
+	CS      *CSStatus    `json:"cs,omitempty"`
+	Bridge  *BridgeInfo  `json:"bridge,omitempty"`
+	GUI     *GUIStatus   `json:"gui,omitempty"`
+	Herdr   *HerdrStatus `json:"herdr,omitempty"`
 }
 
 // Info describes the agent host.
@@ -146,6 +151,26 @@ type CSStatus struct {
 	Bin string `json:"bin,omitempty"`
 	// Digest is the SHA-256 of a release the machine downloaded.
 	Digest string `json:"digest,omitempty"`
+}
+
+// HerdrStatus describes the herdr an agent uses and its session's server.
+type HerdrStatus struct {
+	Bin     string `json:"bin,omitempty"`
+	Version string `json:"version,omitempty"`
+	// Managed: Bin is the copy the application keeps and may update, not an
+	// installation of the user's.
+	Managed       bool   `json:"managed"`
+	Running       bool   `json:"running"`
+	ServerVersion string `json:"server_version,omitempty"`
+	// RestartNeeded: the running server is from another herdr build.
+	RestartNeeded bool `json:"restart_needed,omitempty"`
+	// Latest is herdr's newest release (action check).
+	Latest string `json:"latest,omitempty"`
+	// Error is a code: not_found, start_failed, stop_failed, check_failed,
+	// update_failed, not_managed. Output is herdr's own text for it, or the
+	// output of an update.
+	Error  string `json:"error,omitempty"`
+	Output string `json:"output,omitempty"`
 }
 
 type BridgeInfo struct {

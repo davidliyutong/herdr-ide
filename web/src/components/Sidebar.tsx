@@ -12,6 +12,7 @@ import { InlineEdit } from './InlineEdit';
 import { startWorkspaceDrag } from '../reorderDrag';
 import { openMenu } from '../contextMenu';
 import { workspaceMenu } from '../menus';
+import { isNewer } from '../lib/localHerdr';
 
 function aggregate(statuses: AgentStatus[]): AgentStatus | undefined {
   let best: AgentStatus | undefined;
@@ -89,13 +90,30 @@ function MachineItem({ m }: { m: MachineState }) {
   const selWs = useStore((s) => s.workspaceId);
   const selectWorkspace = useStore((s) => s.selectWorkspace);
   const readOnly = useStore((s) => s.readOnly);
+  // Remote herdr older than the local one: herdr itself installs the local
+  // version there when the user attaches (RemoteHerdrDialog).
+  const localHerdr = useStore((s) => Object.values(s.machines).find((x) => x.kind === 'local')?.info?.herdr_version);
   const renaming = useStore((s) => (s.renaming?.kind === 'workspace' && s.renaming.m === m.id ? s.renaming.id : undefined));
   const setRenaming = useStore((s) => s.setRenaming);
   const snap = m.snapshot;
   const workspaces = snap?.workspaces ?? [];
   return (
     <div className="machine">
-      <div className="machine-head" onClick={() => setOpen(!open)} title={m.error || m.platform}>
+      <div
+        className="machine-head"
+        onClick={() => setOpen(!open)}
+        onContextMenu={(e) =>
+          openMenu(
+            e,
+            readOnly
+              ? []
+              : m.kind === 'local'
+                ? [{ label: t('menu.manageHerdr'), run: () => useStore.getState().openHerdr(m.id) }]
+                : [{ label: t('menu.updateRemoteHerdr'), run: () => useStore.getState().openRemoteHerdr(m.id) }],
+          )
+        }
+        title={m.error || m.platform}
+      >
         <span className={`mstatus ms-${m.status}`} />
         <span className="machine-label ellipsis">{m.label}</span>
         <span className="muted small">{m.platform}</span>
@@ -112,7 +130,20 @@ function MachineItem({ m }: { m: MachineState }) {
                   {m.status === 'auth_required' && m.kind === 'ssh' && (
                     <button onClick={() => useStore.getState().openAuth?.(m.id)}>{t('sidebar.authenticate')}</button>
                   )}
+                  {m.kind === 'local' && !readOnly && (
+                    <button onClick={() => useStore.getState().openHerdr(m.id)}>{t('sidebar.manageHerdr')}</button>
+                  )}
                   <button onClick={() => conn.retry(m.id)}>{t('sidebar.retry')}</button>
+                </div>
+              )}
+            </div>
+          )}
+          {m.kind === 'ssh' && m.status === 'ready' && isNewer(localHerdr, m.info?.herdr_version) && (
+            <div className="machine-status ms-degraded">
+              {t('sidebar.herdrOlder', { remote: m.info?.herdr_version ?? '', local: localHerdr ?? '' })}
+              {!readOnly && (
+                <div className="row">
+                  <button onClick={() => useStore.getState().openRemoteHerdr(m.id)}>{t('sidebar.updateHerdr')}</button>
                 </div>
               )}
             </div>

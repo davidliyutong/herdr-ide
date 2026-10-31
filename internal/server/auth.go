@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 
 	"github.com/coder/websocket"
@@ -28,25 +29,34 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.audit.log(r, "ssh.auth", map[string]any{"machine": mc.ID(), "target": st.Target})
+	servePTY(w, r, transport.AuthCommand(s.opts.ControlDir, st.Target), nil)
+	mc.Retry()
+}
+
+// servePTY runs argv (with env, nil for the core's own) in a PTY on the core
+// host, sized as the browser asked, and bridges it to a WebSocket until the
+// command ends or the browser leaves, which ends the command. It reports
+// whether the command ran.
+func servePTY(w http.ResponseWriter, r *http.Request, argv []string, env []string) bool {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
 	if err != nil {
-		return
+		return false
 	}
 	defer conn.CloseNow()
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
-	argv := transport.AuthCommand(s.opts.ControlDir, st.Target)
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Env = env
 	cols, _ := strconv.Atoi(r.URL.Query().Get("cols"))
 	rows, _ := strconv.Atoi(r.URL.Query().Get("rows"))
-	if cols <= 0 || rows <= 0 {
+	if cols <= 0 || rows <= 0 || cols > 1000 || rows > 1000 {
 		cols, rows = 100, 24
 	}
 	f, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
 	if err != nil {
-		conn.Write(ctx, websocket.MessageText, []byte("failed to start ssh: "+err.Error()+"\r\n"))
-		return
+		conn.Write(ctx, websocket.MessageText, []byte("failed to start "+filepath.Base(argv[0])+": "+err.Error()+"\r\n"))
+		return false
 	}
 	defer f.Close()
 	go func() {
@@ -78,6 +88,6 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 	cmd.Wait()
-	mc.Retry()
 	conn.Close(websocket.StatusNormalClosure, "done")
+	return true
 }

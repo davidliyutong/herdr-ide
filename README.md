@@ -15,6 +15,12 @@ browser tab, with VS Code (code-server) one keystroke away.
   rename it; drag tabs and workspaces to reorder them; right-click a pane
   header, tab or workspace for its commands. Keyboard shortcuts follow your
   herdr configuration (prefix `ctrl+b`).
+- **herdr included.** Release archives carry herdr 0.9.5 for Linux/macOS on
+  amd64/arm64, used when this host has no herdr installed. It behaves like an
+  installed herdr: same configuration, sessions and machines. **Manage herdr**
+  (right-click the local machine) starts and stops its server and updates
+  herdr through herdr's own updater, without a terminal; **Update herdr** on
+  an SSH machine runs herdr's own `herdr --remote` update there.
 - **Multi-machine.** Uses the SSH machines saved in herdr. One ssh connection
   per machine runs a small static agent (linux/macOS × amd64/arm64, uploaded
   automatically) that multiplexes everything; nothing listens on the
@@ -46,20 +52,50 @@ browser tab, with VS Code (code-server) one keystroke away.
 
 Requirements:
 
-- [herdr](https://herdr.dev) on every machine you want to use, with remote
-  machines saved through `herdr machine add`;
+- [herdr](https://herdr.dev) running on every machine you want to use (this
+  host can use the herdr included in the release), with remote machines saved
+  through `herdr machine add`;
 - an OpenSSH client with working access to those machines;
-- to build: Go (version in `go.mod`), Node.js 22+ and pnpm (`corepack enable`
+- to build: Go (version in `go.mod`), Node.js 22.12+ and pnpm (`corepack enable`
   picks the pinned version).
 
 ```bash
 make deps && make build
-./dist/herdr-ide-$(go env GOOS)-$(go env GOARCH)
+cd dist/packages/herdr-ide-$(go env GOOS)-$(go env GOARCH)
+./herdr-ide
 ```
+
+Or extract the matching archive from `dist/release/` (or GitHub Releases)
+and run `./herdr-ide`; keep the directory together. Without an installed
+herdr, `./herdr-ide herdr [args]` runs the included one, for example
+`./herdr-ide herdr` to open its TUI (which starts the local herdr server) or
+`./herdr-ide herdr machine add user@host --label gpu`.
 
 Open <http://127.0.0.1:7780>. Press `ctrl+b space` for the command palette and
 `ctrl+b ?` for shortcuts. All flags are listed in
 [docs/reference.md](docs/reference.md).
+
+## macOS desktop app
+
+On macOS, build an Electron app with the same embedded core, UI, agents and
+VS Code bridge:
+
+```bash
+make desktop-app                 # .app in dist/desktop/mac[-arm64]/
+make desktop-dmg                 # .app plus a drag-to-Applications .dmg
+ARCH=x64 make desktop-dmg        # Intel; default is the host Node architecture
+```
+
+The desktop and browser share a terminal-pane icon, with a multi-resolution
+macOS version for Finder and the Dock.
+
+The app starts its own core at `http://127.0.0.1:7781` with instance
+`desktop`; quitting or closing the main window stops that core. The app
+includes herdr, used when none is installed; OpenSSH must already be
+installed. These local builds use ad-hoc signing,
+without Apple notarization or automatic updates. See
+[desktop deployment](docs/deployment.md#macos-desktop-app) for paths,
+versioning and isolated development. Only macOS packaging is implemented.
 
 ## Remote access
 
@@ -107,6 +143,8 @@ Issues and pull requests are welcome, in English or Chinese. Please read
 
 [MIT](LICENSE). Third-party licenses: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
 (Go modules) and `/licenses.md` served by the binary (web UI bundle).
-code-server, Git Graph and herdr are separate projects under their own
-licenses; Git Graph's license does not allow redistribution, so it is
-downloaded by each installation rather than bundled.
+The bundled herdr is Apache-2.0; its license and dependency notices are in
+[licenses/herdr/](licenses/herdr/). code-server and Git Graph retain their
+own licenses and are downloaded at runtime. Git Graph restricts derivative
+distribution and does not clearly grant general redistribution of the original;
+it is excluded from public release packages.

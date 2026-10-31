@@ -31,6 +31,8 @@ identifiers (herdr session names, herdr paths).
   these files (imports, comments and tests excepted). Build scripts, the
   Makefile and the Vite config derive names from these files; the PWA
   manifest and page title are generated from `brand.ts`.
+  The desktop launcher imports the web brand constants; electron-builder
+  reads the same file for its app name, bundle ID and bundled core path.
 - **Rename**: `scripts/rename.sh NEW [--name "Display"] [--module PATH]
   [--dry-run]` replaces the slug, the env prefix and the module path (through
   a placeholder, so an explicit `--module` is never rewritten), moves

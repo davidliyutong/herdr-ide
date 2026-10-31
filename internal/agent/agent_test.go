@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"testing"
 
+	"herdr-ide/internal/agent"
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/transport"
 )
@@ -18,7 +19,7 @@ import (
 func dialAgent(t *testing.T) (*transport.Session, string) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	s, err := transport.DialLocal(context.Background(), "", log.New(io.Discard, "", 0))
+	s, err := transport.DialLocal(context.Background(), agent.Options{Logger: log.New(io.Discard, "", 0)})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -20,3 +20,8 @@ updates:
     schedule: { interval: weekly }
     groups:
       actions: { patterns: ['*'] }
+  - package-ecosystem: npm
+    directory: /desktop
+    schedule: { interval: weekly }
+    groups:
+      desktop: { patterns: ['*'] }

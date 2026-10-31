@@ -21,7 +21,7 @@ go vet -tags integration ./... || fail=1
 echo "==> brand literals"
 # String literals containing the slug outside the brand files, ignoring Go
 # import paths and comments.
-hits=$(grep -rnE --include='*.go' --include='*.ts' --include='*.tsx' "[\"'\`][^\"'\`]*\b${slug}\b" cmd internal web/src extensions/*/src 2>/dev/null \
+hits=$(grep -rnE --include='*.go' --include='*.ts' --include='*.tsx' "[\"'\`][^\"'\`]*\b${slug}\b" cmd internal web/src extensions/*/src desktop/src 2>/dev/null \
   | grep -vE '(internal/brand/|web/src/brand\.ts|extensions/[^/]+/src/brand\.ts|_test\.go:|__tests__/)' \
   | grep -vE "\"${module}/" \
   | grep -vE '^[^:]+:[0-9]+:\s*(//|\*)' || true)

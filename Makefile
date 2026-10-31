@@ -4,11 +4,14 @@ DEV_LISTEN ?= 127.0.0.1:7790
 SLUG := $(shell sed -n 's/^[[:space:]]*Slug = "\(.*\)"$$/\1/p' internal/brand/brand.go)
 EXT  := extensions/$(SLUG)-bridge
 
-.PHONY: deps build test check it dev-core dev-web clean
+.PHONY: deps build test check it dev-core dev-web desktop-app desktop-dmg desktop-icons dev-desktop clean
 
+# Electron's ~100 MB binary only runs or packages the macOS app; elsewhere
+# its types suffice for typecheck and the launcher tests.
 deps:
 	pnpm -C web install --frozen-lockfile
 	pnpm -C $(EXT) install --frozen-lockfile
+	$(if $(filter Darwin,$(shell uname -s)),,ELECTRON_SKIP_BINARY_DOWNLOAD=1) pnpm -C desktop install --frozen-lockfile
 
 build:
 	scripts/build.sh
@@ -16,6 +19,7 @@ build:
 test:
 	go test ./...
 	pnpm -C web test
+	pnpm -C desktop test
 
 check:
 	scripts/check.sh
@@ -23,6 +27,8 @@ check:
 	pnpm -C web format:check
 	pnpm -C $(EXT) typecheck
 	pnpm -C $(EXT) format:check
+	pnpm -C desktop typecheck
+	pnpm -C desktop format:check
 
 it:
 	go test -tags integration -count=1 ./internal/agent -run Integration -v
@@ -33,5 +39,17 @@ dev-core:
 dev-web:
 	$(shell echo $(SLUG) | tr 'a-z-' 'A-Z_')_CORE=http://$(DEV_LISTEN) pnpm -C web dev
 
+desktop-app:
+	scripts/desktop.sh app
+
+desktop-dmg:
+	scripts/desktop.sh dmg
+
+desktop-icons:
+	scripts/icons.sh
+
+dev-desktop:
+	scripts/desktop.sh dev
+
 clean:
-	rm -rf dist web/dist/assets internal/embedded/agents/*.gz internal/embedded/ext/*.vsix
+	rm -rf dist desktop/dist web/dist/assets internal/embedded/agents/*.gz internal/embedded/ext/*.vsix

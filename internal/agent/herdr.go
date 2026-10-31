@@ -12,9 +12,14 @@ import (
 	"time"
 )
 
+// systemHerdrPaths are package-manager install locations (a variable for tests).
+var systemHerdrPaths = []string{"/opt/homebrew/bin/herdr", "/usr/local/bin/herdr", "/usr/bin/herdr"}
+
 // resolveHerdr finds the herdr binary. Non-interactive ssh sessions often lack
 // ~/.local/bin in PATH, so well-known install locations and the login shell
-// are consulted as well.
+// are consulted as well. An installed herdr wins over the application's
+// managed copy of the bundled one, which only stands in for a missing
+// installation (herdrmgr.go).
 func (a *Agent) resolveHerdr(hint string) (string, error) {
 	a.herdrMu.Lock()
 	defer a.herdrMu.Unlock()
@@ -31,10 +36,8 @@ func (a *Agent) resolveHerdr(hint string) (string, error) {
 	candidates = append(candidates,
 		filepath.Join(a.home, ".local", "bin", "herdr"),
 		filepath.Join(a.home, ".cargo", "bin", "herdr"),
-		"/opt/homebrew/bin/herdr",
-		"/usr/local/bin/herdr",
-		"/usr/bin/herdr",
 	)
+	candidates = append(candidates, systemHerdrPaths...)
 	for _, c := range candidates {
 		if c == "" {
 			continue
@@ -60,6 +63,10 @@ func (a *Agent) resolveHerdr(hint string) (string, error) {
 				return line, nil
 			}
 		}
+	}
+	if bin := a.managedHerdr(); bin != "" {
+		a.herdrCache[hint] = bin
+		return bin, nil
 	}
 	return "", errors.New("herdr binary not found (set HERDR_BIN or install herdr)")
 }

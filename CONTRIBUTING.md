@@ -6,13 +6,15 @@ Chinese (中文也可以). Participation is governed by the
 
 ## Setup
 
-Requirements: Go (see `go.mod`), Node.js 22+, pnpm, and
-[herdr](https://herdr.dev) for running the app.
+Requirements: Go (see `go.mod`), Node.js 22.12+, pnpm, and
+[herdr](https://herdr.dev) for running the app. The build downloads the pinned
+herdr for release archives into `dist/herdr/`; without an installed herdr, use
+that file as `herdr` below and set `HERDR_BIN` to it for `make dev-core`.
 
 ```bash
-make deps            # pnpm install for web/ and the extension
-make build           # web UI, extension, agents for 4 platforms, core
-make test            # Go and web unit tests
+make deps            # pnpm install for web/, the extension and desktop/
+make build           # web UI, extension, agents, core; release archives with herdr
+make test            # Go, web and desktop unit tests
 make check           # formatting, vet, typecheck, brand/doc consistency
 ```
 
@@ -26,7 +28,20 @@ make dev-web         # Vite on http://localhost:5173, proxied to the dev core (D
 ```
 
 `make it` runs the integration test against a real herdr in an isolated
-session.
+session. To test the bundled executable, run
+`HERDR_TEST_BIN="$PWD/dist/packages/herdr-ide-$(go env GOOS)-$(go env GOARCH)/herdr" make it`.
+
+Release archives are in `dist/release/`; the unpacked directories are in
+`dist/packages/`. Keep each core beside its `herdr` and licenses.
+herdr upgrades require reviewing the pinned digests in `internal/herdrdist`,
+regenerating `licenses/herdr/` with `scripts/herdr-notices.py`, and rerunning
+integration tests before distributing the new release.
+
+On macOS, `make dev-desktop` builds and launches Electron with the embedded
+UI, the same isolated session and instance `dev` (port 7791). Stop other dev
+cores first. `make desktop-app` / `make desktop-dmg` build the `.app` / DMG;
+see [desktop deployment](docs/deployment.md#macos-desktop-app). Branch
+workspaces can live in the ignored `.worktrees/` directory.
 
 ## Pull requests
 
@@ -38,7 +53,7 @@ session.
   `THIRD_PARTY_NOTICES.md` (checked by CI); make sure the license is
   compatible with MIT.
 - Add or update tests with behavior changes. Go tests live next to the code;
-  web tests in `web/src/__tests__`.
+  web tests in `web/src/__tests__`, desktop tests in `desktop/src/*.test.ts`.
 - Update the docs in the same PR: flags and shortcuts in
   [docs/reference.md](docs/reference.md) (CI checks every flag is listed),
   components and protocols in [docs/architecture.md](docs/architecture.md),

@@ -26,6 +26,9 @@ reference documentation.
   the page). Settings defined by the core are labelled with keys built from
   their names (`settings.<key>`, `.desc`, `.<option>`); a test checks that
   the known ones exist, and an untranslated one shows its key.
+- **Desktop shell**: error dialogs reuse `desktop.*` keys from the web's
+  English/Chinese dictionaries and follow the OS locale. Native menu roles
+  use Electron's standard labels; the web UI keeps its own saved language.
 - **Server**: sends codes (code-server phases such as `download` with a
   detail, pane notices such as `taken_over`, agent statuses) that the UI
   translates. The code-server loading page, served inside the VS Code iframe,

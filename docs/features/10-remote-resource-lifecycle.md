@@ -23,6 +23,7 @@ Non-goals: CPU or memory quotas; managing processes started by herdr panes.
 | Process | Owner | Ends when |
 | --- | --- | --- |
 | agent | its ssh session | stdin closes, or yamux keepalive (15 s interval, 30 s timeout) fails |
+| desktop core | Electron main process | parent stdin closes (including a crash), or SIGTERM; normal quit allows 20 s for cleanup before SIGKILL |
 | `herdr terminal session` | the agent's stream | the pane stops being displayed (stdin closed → herdr releases control), or the agent exits (process group killed) |
 | code-server | the agent recorded in `run/cs.pid` | idle for `--code-server-idle` (default 20 min, counted by the core's proxy: no WebSocket open), the owning agent exits, the user presses stop, or 1 h without connections (code-server's own `--idle-timeout-seconds`) |
 | VS Code extension host | code-server | 5 min after its window disconnects (`--reconnection-grace-time`) |

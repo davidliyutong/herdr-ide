@@ -56,6 +56,8 @@ machines, reimplementing its agent detection.
   (`~/.local/state/herdr/client/endpoints.json`) plus `--ssh` targets; the
   remote herdr binary path is taken from herdr's ssh-metadata cache when
   available, else searched (`HERDR_BIN`, `PATH`, `~/.local/bin`, login shell).
+  The local machine falls back to the herdr bundled in the release
+  ([15](15-bundled-herdr.md)).
   Socket paths follow herdr's rules (named sessions under
   `sessions/<name>/`, `XDG_CONFIG_HOME`, `HERDR_SOCKET_PATH`).
 - **Sessions.** `--local-session` selects a named herdr session locally;

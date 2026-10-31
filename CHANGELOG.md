@@ -6,6 +6,36 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Release archives for Linux/macOS on amd64/arm64 include herdr 0.9.5
+  (verified at build time against pinned SHA-256 digests) with its license
+  and dependency notices. The local machine uses it when no herdr is
+  installed; it keeps herdr's usual configuration, sessions and machines.
+  SSH machines still use their own herdr.
+- `herdr-ide herdr [args]` runs the included herdr with the arguments and
+  environment unchanged.
+- **Manage herdr** (context menu of the local machine): start, stop and
+  restart the local herdr server, and check for and install herdr updates for
+  the application's copy of herdr through herdr's own updater, without a
+  terminal. The server is never started automatically; local herdr
+  installations of the user's are not updated.
+- **Update herdr** for SSH machines (context menu, and a hint when a
+  machine's herdr is older than the local one) runs herdr's own
+  `herdr --remote` in a terminal, where herdr asks before installing its
+  version there or replacing a running server.
+- Terminal-pane app icon shared by the desktop and browser, with editable
+  SVG sources, small-size artwork and a multi-resolution macOS ICNS for
+  the app and DMG; regenerate with `make desktop-icons`.
+- macOS Electron packaging: `make desktop-app` and `make desktop-dmg`
+  produce an ad-hoc signed `.app` and a drag-to-Applications DMG for arm64
+  or x64. The sandboxed desktop shell owns its bundled core, preserves the
+  web UI and supports internal program/VS Code windows and external links.
+  The app includes the bundled herdr and its notices.
+- `--parent-stdio` reports core readiness as JSON and stops on parent-pipe
+  EOF; `make dev-desktop` uses the isolated development session and instance.
+- Ignored `.worktrees/` directory for branch workspaces.
+
 ## [0.1.0] - 2026-10-31
 
 ### Added

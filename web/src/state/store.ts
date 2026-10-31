@@ -53,6 +53,10 @@ interface UIState {
   renaming?: Renaming;
   toasts: Toast[];
   auth?: string;
+  /** Machine whose herdr the herdr dialog manages (the local one). */
+  herdr?: string;
+  /** SSH machine whose herdr the remote update terminal updates. */
+  remoteHerdr?: string;
   /** The server runs with --read-only. */
   readOnly: boolean;
 
@@ -74,6 +78,8 @@ interface UIState {
   setRenaming(r: Renaming | undefined): void;
   toast(msg: string, action?: ToastAction): void;
   openAuth(m?: string): void;
+  openHerdr(m?: string): void;
+  openRemoteHerdr(m?: string): void;
   setReadOnly(v: boolean): void;
 }
 
@@ -153,6 +159,8 @@ export const useStore = create<UIState>((set, get) => ({
   openSettings: (settingsOpen) => set({ settingsOpen }),
   setRenaming: (renaming) => set({ renaming }),
   openAuth: (auth) => set({ auth }),
+  openHerdr: (herdr) => set({ herdr }),
+  openRemoteHerdr: (remoteHerdr) => set({ remoteHerdr }),
   readOnly: false,
   setReadOnly: (readOnly) => set({ readOnly }),
   toast: (msg, action) => {

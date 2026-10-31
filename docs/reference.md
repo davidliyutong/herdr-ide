@@ -9,6 +9,7 @@ here; both READMEs link to this page instead of repeating it.
 | Command | Description |
 | --- | --- |
 | `herdr-ide [serve] [flags]` | Run the server (default command). |
+| `herdr-ide herdr [args]` | Run the herdr bundled beside the core with `args` and the caller's environment unchanged (for hosts without an installed herdr), e.g. `herdr-ide herdr machine list`. |
 | `herdr-ide fetch-assets [flags] DIR` | Download and verify code-server releases and extensions into `DIR` for air-gapped installs. |
 | `herdr-ide version` | Print the version. |
 | `herdr-ide-agent serve [--instance NAME]` | Per-machine helper; started by the core over ssh, never by hand. |
@@ -73,6 +74,7 @@ setting in the UI.
 | `--agent-dir` | – | Directory with uncompressed `herdr-ide-agent-<os>-<arch>` builds, used instead of the embedded ones. |
 | `--ext-dir` | – | Directory containing `herdr-ide-bridge.vsix`, used instead of the embedded one. |
 | `--web-dir` | – | Serve the UI from this directory instead of the embedded build. |
+| `--parent-stdio` | `false` | Launcher lifecycle: write one `{"event":"ready","url":"http://host:port"}` line to stdout after binding; cancel and clean up when stdin closes. Logs remain on stderr; SIGPIPE is ignored, so a launcher that disappeared does not kill the core before its cleanup. Used by Electron; does not change HTTP guards. |
 
 ## `fetch-assets` flags
 
@@ -128,7 +130,12 @@ browser's menu shows instead.
 | --- | --- | --- |
 | `HERDR_IDE_BRIDGE_SOCKET` | set by the agent for code-server | Socket of the VS Code bridge extension. |
 | `HERDR_IDE_CORE` | `pnpm -C web dev` | Core URL the Vite dev server proxies to (default `http://127.0.0.1:7780`). |
-| `HERDR_BIN` | agent | herdr binary to use on a machine. |
+| `HERDR_IDE_DESKTOP_DEV` | Electron | `1` forces isolated development even in a packaged app: instance `dev`, local-only, local/remote session `herdr-ide-dev`, separate Electron profile. Unpackaged Electron always uses this mode. |
+| `HERDR_IDE_DESKTOP_PORT` | Electron | Loopback port (default `7781`, development `7791`); `0` chooses an ephemeral port, which gives a new browser storage origin. |
+| `ARCH` | `make desktop-app`, `make desktop-dmg` | `arm64` or `x64`; defaults to the host Node architecture. The Go core architecture is matched automatically. |
+| `VERSION` | desktop build | Semver for app metadata, DMG name and bundled core. Without it the core reports `git describe` and the app uses the `desktop/package.json` version. |
+| `HERDR_BIN` | agent | herdr binary to use on a machine. Without it, an installed herdr is searched; the local machine falls back to its copy of the bundled one. |
+| `HERDR_TEST_BIN` | `make it` | herdr executable for the integration test (for example the bundled one); otherwise found on `PATH`. |
 | `XDG_STATE_HOME`, `XDG_CONFIG_HOME`, `HERDR_CONFIG_PATH`, `HERDR_SOCKET_PATH` | core, agent | Honoured like herdr does when locating its state, configuration and sockets. |
 
 ## Files and directories
@@ -139,6 +146,8 @@ On every machine (the agent's `$HOME`):
 | --- | --- | --- |
 | `~/.herdr-ide/agent/<build>/` | Uploaded agent binaries | Builds unused for 14 days are removed. |
 | `~/.herdr-ide/code-server/<version>/` | code-server releases (shared by instances) | Versions unused for 14 days are removed. |
+| `~/.herdr-ide/herdr/herdr` | Core host only: the application's copy of the bundled herdr (shared by instances) | Replaced by **Update** and by a newer bundled herdr; kept until removed. |
+| `~/.herdr-ide/herdr/server.log` | Core host only: output of the herdr server last started from the UI | Replaced at every start from the UI. |
 | `~/.herdr-ide[-<instance>]/run/` (0700) | `cs.sock`, `cs.pid`, `bridge.sock`; `gui.json` (reserved display and Xvfb pid), `xauth` (panes' display cookie) and `xauth.server` (Xvfb's copy), both 0600 and replaced at each Xvfb start, `gui.lock` | Sockets while the agent runs; the display files are kept so panes keep a valid environment. |
 | `~/.herdr-ide/xvfb/<version>/` | Xvfb unpacked from the distribution's package (shared by instances) | Versions unused for 14 days are removed when another is unpacked. |
 | `~/.herdr-ide[-<instance>]/xvfb.log` | Output of the last Xvfb started | Replaced at each start. |
@@ -154,6 +163,26 @@ downloaded themselves), and settings changed in the UI in
 (`~/Library/Application Support/herdr-ide/` on macOS, `~/.config/herdr-ide/` on
 Linux; directory 0700, file replaced atomically).
 
+A release directory holds the core, the bundled `herdr`, `LICENSE`,
+`THIRD_PARTY_NOTICES.md`, `licenses.md` and `licenses/herdr/`; they stay until
+the user removes the directory and are not copied to SSH machines. herdr's own
+files (configuration, sessions, machine list) are where herdr puts them,
+whichever herdr is used.
+
 In the browser: preferences in `localStorage` under `herdr-ide.*` (language,
 theme, font sizes, panel position, Option as Meta, sidebar and panel sizes,
 the selected workspace).
+
+Desktop artifacts: `dist/desktop/mac-arm64/herdr-ide.app` (arm64),
+`dist/desktop/mac/herdr-ide.app` (x64), and
+`dist/desktop/herdr-ide-<version>-mac-<arch>.dmg`. Generated shell code lives
+in `desktop/dist/`; `make clean` removes these build outputs.
+Icon sources and distributable PNG/ICNS are kept in `desktop/assets/`, with
+the small SVG in `web/public/icon.svg`; `make desktop-icons` regenerates the
+PNG and ICNS on macOS with librsvg and iconutil.
+Electron's persistent profile is
+`~/Library/Application Support/herdr-ide-desktop/` (`-dev` for development).
+It holds browser preferences and Chromium data until manually removed.
+The core uses `settings-desktop.json` and `~/.herdr-ide-desktop/` state;
+development uses the existing `dev` instance. No desktop log files are kept:
+stderr is streamed and the last 16 KiB is retained in memory for error dialogs.

@@ -17,6 +17,8 @@ proxy, and output shown in terminals.
 
 | Risk | Mitigation |
 | --- | --- |
+| Web content in the desktop app reaching native APIs | Electron windows, including popups, use sandboxing, context isolation, no Node integration and no preload bridge; web security and the core CSP stay enabled. Only the exact core origin can navigate a main frame or open native windows; external HTTP(S) links open in the browser and other schemes are denied. Webviews are disabled. Permissions are denied except notifications, clipboard reads and sanitized clipboard writes from the core origin inside a core window (`desktop/src/policy.test.ts`). Clipboard reads let VS Code paste from other apps, as the browser UI allows its VS Code frame after the browser's prompt; core-origin content (VS Code, its extensions' webviews) can therefore read the clipboard without a prompt. |
+| Desktop launcher orphaning or attaching to the wrong core | The shell accepts readiness only from its own child pipe and checks its loopback URL and port. Bind failure never reuses another service. Parent-stdin EOF cancels the core; normal quit sends SIGTERM, waits for cleanup, then kills only that child after 20 s. Single-instance locking is per Electron profile. |
 | Accidental exposure of the port | Listens on loopback by default; a non-loopback `--listen` is refused unless a proxy secret is configured or `--insecure-listen` is given. |
 | Requests bypassing the proxy | `--proxy-secret-file`: requests not from a same-host browser must carry `X-herdr-ide-Proxy-Secret` (constant-time comparison); the header is stripped before reaching code-server. |
 | DNS rebinding, cross-site WebSocket hijacking | Host and Origin must be loopback or an `--allowed-origin`. |
@@ -41,6 +43,38 @@ proxy, and output shown in terminals.
 
 Not provided by herdr-ide: user authentication, TLS, rate limiting, per-user
 authorization. Use the reverse proxy for these.
+
+The desktop core has the same loopback HTTP trust boundary as CLI local use;
+the launcher does not add authentication against other processes on the
+host. Its app/DMG build uses ad-hoc signing, not Developer ID signing or
+Apple notarization. Do not treat the build as a notarized public release.
+
+## Bundled herdr
+
+Release archives include upstream herdr downloaded at build time and verified
+against SHA-256 digests pinned in `internal/herdrdist` before packaging
+(`internal/herdrdist/release_test.go` covers a corrupt download). At runtime
+the bundled herdr is trusted like an installed one and not re-verified. The
+local agent uses a copy of it in `~/.herdr-ide/herdr/` (directory 0700) only
+when no installed herdr is found (`internal/agent/herdr_test.go`), with the
+caller's environment and herdr's usual sockets, which herdr creates with mode
+0600. herdr-ide never uploads herdr to SSH machines itself. **Update herdr**
+runs the local herdr's `herdr --remote=<target>` in a terminal on the core
+host (`GET /api/m/{id}/herdr/remote`: refused in `--read-only`, audited as
+`herdr.remote`, SSH machines only, the target passed as one argument); herdr
+then asks the user before installing anything there or stopping a server.
+
+The local machine's herdr can be managed from the UI
+([17](docs/features/17-local-herdr-management.md)):
+`POST /api/m/{id}/herdr/{start|stop|check|update}` are mutations behind the
+usual guards, refused in `--read-only`, audited (`herdr.start`, `herdr.stop`,
+`herdr.update`) and accepted only for the local machine
+(`internal/server/server_test.go`). An update runs herdr's own
+`herdr update --handoff` on the application's copy only: it trusts herdr's
+release manifest on `herdr.dev` and the SHA-256 digests it publishes, like a
+user running `herdr update`, and never changes the bundled file or an
+installation of the user's. Servers are started only on request, never
+automatically.
 
 ## Supported versions
 

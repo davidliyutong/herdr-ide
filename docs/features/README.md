@@ -22,6 +22,9 @@ shortcuts, paths) lives in [reference.md](../reference.md).
 | 12 | [Internationalization](12-internationalization.md) | English and Chinese UI, translated extension, codes instead of server prose. |
 | 13 | [Settings and appearance](13-settings-and-appearance.md) | Settings generated from definitions in the browser and the core; themes, font sizes, panel position. |
 | 14 | [GUI windows](14-gui-windows.md) | Windows of programs on remote machines in browser windows: user-space Xvfb, per-window capture, VirtualGL. |
+| 15 | [Bundled herdr](15-bundled-herdr.md) | Release archives carry the native herdr, verified at build time and used when no herdr is installed. |
+| 16 | [Desktop packaging](16-desktop-packaging.md) | macOS Electron shell, owned core lifecycle, `.app` and DMG builds. |
+| 17 | [Managing herdr from the UI](17-local-herdr-management.md) | Start, stop and update the core host's herdr; a managed copy of the bundled herdr; herdr's own `--remote` update for SSH machines. |
 
 ## Writing a feature document
 

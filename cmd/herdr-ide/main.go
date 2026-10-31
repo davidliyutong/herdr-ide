@@ -2,6 +2,7 @@
 // for herdr. It serves the web UI and orchestrates agents on every machine.
 //
 //	herdr-ide [serve] [flags]       run the server (default)
+//	herdr-ide herdr [args]          run the herdr bundled in the release
 //	herdr-ide fetch-assets DIR      download code-server and extensions for
 //	                               air-gapped installs (use with --seed-dir)
 //	herdr-ide version
@@ -25,6 +26,7 @@ import (
 	"syscall"
 	"time"
 
+	"herdr-ide/internal/agent"
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/brand"
 	"herdr-ide/internal/codeserver"
@@ -104,9 +106,40 @@ func main() {
 		serve(args, logger)
 	case "fetch-assets":
 		fetchAssets(args, logger)
+	case "herdr":
+		runHerdr(args, logger)
 	default:
-		fmt.Fprintf(os.Stderr, "usage: %s [serve] [flags] | fetch-assets [flags] DIR | version\n", brand.CoreBin)
+		fmt.Fprintf(os.Stderr, "usage: %s [serve] [flags] | herdr [args] | fetch-assets [flags] DIR | version\n", brand.CoreBin)
 		os.Exit(2)
+	}
+}
+
+// bundledHerdr is the herdr shipped beside the real core executable in a
+// release directory (symlinks to the core are resolved).
+func bundledHerdr() (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	if exe, err = filepath.EvalSymlinks(exe); err != nil {
+		return "", err
+	}
+	p := filepath.Join(filepath.Dir(exe), "herdr")
+	if st, err := os.Stat(p); err != nil || !st.Mode().IsRegular() || st.Mode().Perm()&0o111 == 0 {
+		return "", fmt.Errorf("no herdr executable at %s; keep the release directory together", p)
+	}
+	return p, nil
+}
+
+// runHerdr replaces the process with the bundled herdr, passing the arguments
+// and environment through unchanged, for hosts without an installed herdr.
+func runHerdr(args []string, logger *log.Logger) {
+	bin, err := bundledHerdr()
+	if err != nil {
+		logger.Fatal(err)
+	}
+	if err := syscall.Exec(bin, append([]string{bin}, args...), os.Environ()); err != nil {
+		logger.Fatal(err)
 	}
 }
 
@@ -138,6 +171,7 @@ func serve(args []string, logger *log.Logger) {
 	fl := flag.NewFlagSet("serve", flag.ExitOnError)
 	var (
 		listen       = fl.String("listen", "127.0.0.1:7780", "address to listen on")
+		parentStdio  = fl.Bool("parent-stdio", false, "launcher lifecycle: write a ready JSON line to stdout and stop when stdin closes")
 		insecure     = fl.Bool("insecure-listen", false, "allow a non-loopback --listen without --proxy-secret-file (anyone reaching the port gets shell access)")
 		proxySecret  = fl.String("proxy-secret-file", "", "file with a secret the reverse proxy sends in the "+server.ProxySecretHeader+" header; required for requests that do not come from loopback")
 		readOnly     = fl.Bool("read-only", false, "watch only: no input, no mutating herdr calls, no uploads, no VS Code")
@@ -163,6 +197,9 @@ func serve(args []string, logger *log.Logger) {
 	csf.register(fl)
 	prefs.RegisterFlags(fl)
 	fl.Parse(args)
+	if *parentStdio {
+		ignoreBrokenPipes() // before the first log line
+	}
 
 	if !brand.ValidInstance(*instance) {
 		logger.Fatalf("--instance must be lowercase letters, digits and dashes")
@@ -219,10 +256,13 @@ func serve(args []string, logger *log.Logger) {
 	if err != nil {
 		logger.Fatal(err)
 	}
+	// Only release directories carry a bundled herdr; development builds rely
+	// on an installed one.
+	bundled, _ := bundledHerdr()
 	dial := func(ctx context.Context, spec machines.Spec) (*transport.Session, string, error) {
 		switch spec.Kind {
 		case machines.KindLocal:
-			s, err := transport.DialLocal(ctx, *instance, logger)
+			s, err := transport.DialLocal(ctx, agent.Options{Instance: *instance, Logger: logger, BundledHerdr: bundled})
 			return s, runtime.GOOS + "/" + runtime.GOARCH, err
 		case machines.KindSSH:
 			s, p, err := transport.DialSSH(ctx, transport.SSHOptions{
@@ -270,6 +310,15 @@ func serve(args []string, logger *log.Logger) {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
+	if *parentStdio {
+		go stopWithParent(os.Stdin, cancel)
+	}
+	// Bind before connecting to machines: a failed launch must not start agents.
+	ln, err := net.Listen("tcp", *listen)
+	if err != nil {
+		logger.Fatal(err)
+	}
+	defer ln.Close()
 	machinesDone := make(chan struct{})
 	go func() {
 		mg.Run(ctx)
@@ -277,10 +326,6 @@ func serve(args []string, logger *log.Logger) {
 	}()
 	go srv.Run(ctx)
 
-	ln, err := net.Listen("tcp", *listen)
-	if err != nil {
-		logger.Fatal(err)
-	}
 	hs := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 15 * time.Second}
 	go func() {
 		<-ctx.Done()
@@ -293,6 +338,12 @@ func serve(args []string, logger *log.Logger) {
 		mode = " (read-only)"
 	}
 	logger.Printf("%s %s listening on http://%s (%d machines)%s", brand.Name, agentproto.Version, ln.Addr(), len(specs), mode)
+	if *parentStdio {
+		if err := writeReady(os.Stdout, ln.Addr().String()); err != nil {
+			logger.Printf("launcher disconnected: %v", err)
+			cancel()
+		}
+	}
 	if err := hs.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		logger.Fatal(err)
 	}
