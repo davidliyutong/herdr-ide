@@ -38,6 +38,12 @@ All notable changes are documented here. The format follows
   EOF; `make dev-desktop` uses the isolated development session and instance.
 - Ignored `.worktrees/` directory for branch workspaces.
 
+### Fixed
+
+- The **Authenticate…** and **Update herdr** terminals could end before
+  showing the command's last output (for example ssh's final error): the
+  core now forwards what is left in the terminal before closing it.
+
 ## [0.1.0] - 2026-10-31
 
 ### Added
