@@ -19,19 +19,22 @@ Apache-2.0 sources and verified on real servers):
   subscribers receive `events_lost` and are closed. Agent status changes
   need one subscription entry per pane. There is no pane-output event, and
   `pane.read` returns revision 0, so output cannot be polled efficiently.
-- `herdr terminal session control|observe <target>` is a documented
-  JSON-lines CLI around herdr's private client protocol: herdr's own terminal
-  emulator (libghostty-vt) re-renders the pane and emits ANSI frames (full
-  first, then diffs). Control accepts input, resize, scroll and mouse events;
-  one controller per pane; observers do not resize.
-- That wrapper drops OSC 52 clipboard, bell, keyboard-protocol negotiation
-  and Kitty graphics messages.
+- herdr's own client-rendered shell uses the client "endpoint" protocol on
+  `herdr-client.sock`. Its generation 1 is kept available for clients of
+  any herdr build; over it herdr renders a tab into a cell grid with its
+  own terminal emulator (libghostty-vt), encodes keys and mouse events per
+  pane, and forwards OSC 52, bells and color answers
+  ([18](18-endpoint-surfaces.md)).
+- `herdr terminal session control|observe <target>` is a JSON-lines CLI
+  around the numbered private protocol that emits ANSI frames per pane; it
+  drops OSC 52 clipboard, bell, keyboard-protocol negotiation and Kitty
+  graphics messages.
 
 ## Goals / non-goals
 
 Goals: native multi-pane rendering; live workspace/tab/layout/agent state for
-every machine; full interactivity; no coupling to herdr's private protocol
-version.
+every machine; full interactivity; no coupling to herdr's build-specific
+protocol version.
 
 Non-goals: replacing herdr's server, managing herdr installation on
 machines, reimplementing its agent detection.
@@ -49,9 +52,10 @@ machines, reimplementing its agent detection.
   (through the agent, see [02](02-multi-machine-transport.md)). Mutating
   calls trigger a refetch. Browser calls go through an allowlist
   ([08](08-web-access-and-security.md)).
-- **Panes.** Each displayed pane is a `herdr terminal session` process on the
-  pane's machine, started by the agent; frames are forwarded to the browser
-  as binary WebSocket messages ([03](03-pane-rendering-and-arbitration.md)).
+- **Panes.** The core holds one endpoint connection to the shown machine's
+  herdr, through the agent; herdr renders the shown tab at the browser's size
+  and the core forwards the grid ([18](18-endpoint-surfaces.md),
+  [03](03-pane-rendering-and-input.md)).
 - **Discovery.** Machines come from herdr's saved catalog
   (`~/.local/state/herdr/client/endpoints.json`) plus `--ssh` targets; the
   remote herdr binary path is taken from herdr's ssh-metadata cache when
@@ -69,8 +73,8 @@ machines, reimplementing its agent detection.
 | --- | --- |
 | Run the herdr TUI in one web terminal per machine | Not an orchestrator: the UI could not know which pane or machine is in focus, could not render panes natively, and the machine selection in herdr is global persisted state shared with the user's own TUI clients. |
 | Poll `pane.read` ANSI snapshots per pane | No change signal (no output event, revision always 0), no cursor position, full redraws: high latency and flicker. |
-| Implement herdr's private client protocol (bincode) | Gains clipboard, bell, keyboard protocol and graphics, but must match herdr's exact protocol version on every machine and breaks on each herdr upgrade. The CLI wrapper runs the server's own binary, so it always matches. |
-| Cut panes out of the client-shell surface stream | Most stable private interface, but one tab per connection, herdr owns pane sizes, and cell grids must be decoded. |
+| herdr's numbered private protocol | Must match herdr's exact build on every machine (`PROTOCOL_VERSION`). The endpoint protocol's generation 1 carries the same surfaces and is kept for other builds. |
+| `herdr terminal session` per pane (used before the endpoint) | Drops OSC 52, bell, keyboard and mouse modes and graphics, cannot report the browser's colors, and needs one process per pane. |
 | `herdr --machine X` per request | Two ssh processes and two remote herdr processes per call, and no event streams. |
 
 ## Failure modes
@@ -80,15 +84,16 @@ machines, reimplementing its agent detection.
   subscription is rejected; refetch and retry after 2 s.
 - **herdr not running or not found** → agent reports `herdr_error`, the
   machine shows *degraded*; snapshots are retried.
-- **Pane terminal gone** (e.g. its cwd was deleted) → the stream ends with
-  herdr's reason, shown on the pane with a reconnect button.
-- **herdr protocol change** → only the public API and the documented CLI
-  stream are used; a breaking change there surfaces as request errors, not
-  as corrupted rendering.
+- **herdr without endpoint generation 1** (older than 0.9.5) → the surface
+  shows `herdr_too_old`; the rest (snapshots, actions) keeps working.
+- **herdr protocol change** → only the public API and endpoint generation 1
+  are used; the handshake checks the generation and codecs, and a malformed
+  message closes the connection instead of corrupting the rendering.
 
 ## Testing
 
 `internal/herdr/client_test.go` (one request per connection, subscription,
-`events_lost`) against a fake socket; `internal/agent/integration_test.go`
-(`make it`) against a real herdr in an isolated session: workspace creation,
-control stream, input, first frame full.
+`events_lost`) against a fake socket; `internal/herdr/endpoint` tests;
+`internal/agent/integration_test.go` (`make it`) against a real herdr in an
+isolated session: workspace creation, endpoint handshake, complete surface
+first, input and output, key encodings per keyboard mode.

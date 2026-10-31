@@ -6,6 +6,22 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Panes are drawn from the cell grid herdr renders through its endpoint
+  protocol (generation 1, on herdr's client socket) instead of one
+  `herdr terminal session` and one xterm.js terminal per pane. herdr encodes
+  keys and mouse events for each pane's modes (application cursor keys,
+  kitty keyboard protocol, mouse reporting), sends focus events, and
+  answers programs' color queries with the UI theme's colors; OSC 52 from
+  programs copies to the browser's clipboard and the bell flashes the pane
+  area. Selections stay inside their pane. Pane headers sit on the top
+  border herdr draws. Requires herdr 0.9.5 or newer on every machine.
+- One browser tab uses the session at a time, like a KVM console: another
+  tab can take it over and the previous one says so. This replaces the
+  control/observe arbitration of panes between browsers. A read-only
+  browser never takes the session from a writable one.
+
 ### Added
 
 - Release archives for Linux/macOS on amd64/arm64 include herdr 0.9.5

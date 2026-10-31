@@ -33,7 +33,16 @@ problem) starts and stops it and updates the application's copy of herdr;
 opening the TUI with `./herdr-ide herdr` also starts it.
 `./herdr-ide herdr <args>` runs any herdr command, such as
 `./herdr-ide herdr machine add user@host --label gpu`. SSH machines need their
-own herdr installation and running session.
+own herdr installation and running session. Panes need herdr 0.9.5 or newer
+on every machine (herdr's endpoint protocol, generation 1); with an older
+herdr the machine's state and actions work and its panes ask for an update
+(**Update herdr**).
+
+One browser tab uses herdr-ide at a time, like a KVM console: another tab
+offers to take the session over, and the previous one then shows that it
+was taken over. herdr-ide is herdr's foreground client while you use it:
+its window size sets the size of herdr's tabs, and herdr's own TUI, if you
+open one at the same time, follows the tab herdr-ide shows.
 
 Machines come from herdr's saved SSH machines (`herdr machine list`); add
 others with `--ssh`. herdr-ide uses OpenSSH with your `~/.ssh/config`
@@ -173,9 +182,11 @@ location / {
   browser on the same host, so only your proxy can talk to it. With a secret,
   `--listen` may use a non-loopback address (e.g. a proxy in a container);
   without one, that needs the explicit `--insecure-listen`.
-- **Read-only** – `--read-only` serves a watch-only view (observe streams, no
+- **Read-only** – `--read-only` serves a watch-only view (panes without
   input, no mutating herdr calls, no uploads, no VS Code). Run a second
-  instance with it for sharing screens or phones.
+  instance with it for sharing screens or phones; while it shows a machine it
+  is herdr's foreground client of that machine too, so its window size sets
+  the size of herdr's tabs.
 - **Audit log** – `--audit-log FILE` records connections, mutating herdr
   calls, uploads, VS Code and bridge use and refused requests as JSON lines,
   with the user from `--user-header`.
@@ -231,7 +242,7 @@ What herdr-ide starts on a machine and how it is reclaimed:
 | local herdr server started from the UI | **Manage herdr**, on request | Belongs to the user like one started by the herdr TUI and outlives the core; stopped with **Manage herdr** or `herdr server stop`. |
 | `herdr update` | **Update** in **Manage herdr** | Ends with the update (15 min limit); herdr's temporary download is in `~/.herdr-ide/herdr/`. |
 | `herdr --remote` client (core host) | **Update herdr** for an SSH machine | Ends when herdr exits or the window closes. A herdr it installs on the machine (usually `~/.local/bin/herdr`) is herdr's own installation and stays until the user removes it; a server it starts there belongs to the user. |
-| `herdr terminal session` processes | one per pane being viewed | Ends when the pane is no longer shown, or with the agent. |
+| Connection to herdr's client socket | one per core, to the machine the browser shows | Closed when another machine is shown, 10 s after the owning browser left (unless another browser takes over), or with the agent; no process is started. |
 | code-server | on first VS Code use | Stopped after `--code-server-idle` (default 20 min) without VS Code connections, when the agent exits (if that agent started it; for the local machine, when the core stops), or by the stop button in the VS Code panel. Hidden VS Code panels disconnect after 10 min. A process left behind by a killed agent is stopped by the next agent, and code-server exits by itself after 1 h without connections. |
 | VS Code extension hosts | one per VS Code window | Disposed 5 min after the window disconnects. |
 | ssh ControlMaster | per machine | Exits after 10 min unused. |

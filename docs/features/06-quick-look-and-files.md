@@ -19,10 +19,11 @@ Non-goals: a file manager; editing files (that is VS Code's job).
 
 **Links** (`web/src/terminal/links.ts`)
 
-- An xterm link provider scans each line for URLs, paths with a slash,
-  `~`-paths and bare file names with known extensions, optionally followed by
-  `:line[:col]`. Cell columns are mapped from string indices so wide
-  characters do not shift ranges.
+- With ⌘ or Ctrl held, the row under the pointer is scanned for URLs, paths
+  with a slash, `~`-paths and bare file names with known extensions,
+  optionally followed by `:line[:col]`; OSC 8 hyperlinks from the program
+  come first. Cell columns are mapped from string indices so wide characters
+  do not shift ranges ([03](03-pane-rendering-and-input.md)).
 - Relative paths resolve against the pane's `foreground_cwd` from herdr;
   `~` against the machine's home.
 - Activation requires ⌘ or Ctrl, so plain clicks still reach mouse-aware

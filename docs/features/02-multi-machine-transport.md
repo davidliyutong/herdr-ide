@@ -7,7 +7,7 @@ The user's machines are reached over ssh with their own `~/.ssh/config`
 (lab workstations, GPU servers, robots) running Linux or macOS on amd64 or
 arm64, sometimes with old userlands, sometimes without internet access. The
 core needs many concurrent channels per machine: herdr API calls and event
-streams, one terminal stream per visible pane, file reads, uploads, a
+streams, the pane surface of the shown tab, file reads, uploads, a
 code-server proxy and a reverse channel for the VS Code extension.
 
 ## Goals / non-goals

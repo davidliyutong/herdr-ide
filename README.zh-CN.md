@@ -8,7 +8,7 @@
 
 ## 功能
 
-- **直接讲 herdr 协议**：workspace、tab、分屏布局和 agent 状态都来自 herdr 的 socket API；每个 pane 都是一个 xterm.js 终端，画面由 herdr 自己渲染，支持输入、鼠标、滚动回看（拖选到边缘会自动滚动，复制整段）、中文输入法和拖动调整分屏。拖动 pane 标题栏可交换或移动 pane，点击标题即可重命名；拖动 tab 和 workspace 可调整顺序；右键 pane 标题栏、tab 或 workspace 可打开对应的命令菜单。快捷键沿用你的 herdr 配置（前缀 `ctrl+b`）。
+- **直接讲 herdr 协议**：workspace、tab、分屏布局和 agent 状态都来自 herdr 的 socket API；pane 的画面是 herdr 通过其 endpoint 协议渲染好的字符网格，每个按键都由 herdr 按 pane 里程序的模式编码（包括 kitty 键盘协议）。支持鼠标、滚动回看（选区只在所在 pane 内，拖到边缘会自动滚动，复制整段）、中文输入法、OSC 52 复制和拖动调整分屏，程序看到的终端颜色与界面主题一致。同一时间只有一个浏览器标签页使用会话，其他标签页可以接管。拖动 pane 标题栏可交换或移动 pane，点击标题即可重命名；拖动 tab 和 workspace 可调整顺序；右键 pane 标题栏、tab 或 workspace 可打开对应的命令菜单。快捷键沿用你的 herdr 配置（前缀 `ctrl+b`）。
 - **自带 herdr**：发布包附带 herdr 0.9.5（Linux/macOS × amd64/arm64），本机没装 herdr 时使用它。它和自己安装的 herdr 完全一样，使用相同的配置、会话和机器列表。右键本机选择 **管理 herdr**，即可启动、停止它的服务器，并通过 herdr 自带的更新程序更新 herdr，无需终端；右键 SSH 机器选择 **更新 herdr**，会按 herdr 自己的 `herdr --remote` 流程更新那台机器。
 - **多机器**：直接使用 herdr 里保存的 SSH 机器。每台机器只开一条 ssh 连接，在上面运行一个自动上传的静态 agent（linux/macOS × amd64/arm64），所有通信都在这条连接里多路复用；机器上不监听任何端口。
 - **为 agent 设计**：
@@ -30,7 +30,7 @@
 
 需要：
 
-- 要使用的每台机器上都运行着 [herdr](https://herdr.dev)（本机可以用发布包自带的 herdr），远程机器已用 `herdr machine add` 保存；
+- 要使用的每台机器上都运行着 [herdr](https://herdr.dev) 0.9.5 或更新版本（本机可以用发布包自带的 herdr），远程机器已用 `herdr machine add` 保存；
 - 能正常连到这些机器的 OpenSSH 客户端；
 - 构建需要：Go（版本见 `go.mod`）、Node.js 22.12+ 和 pnpm（`corepack enable` 会使用固定的版本）。
 
