@@ -16,7 +16,7 @@ browser (React + xterm.js)  ──WebSocket + HTTP──▶  core (Go, `herdr-id
 
 | Directory | Role |
 | --- | --- |
-| `cmd/herdr-ide` | Core entry point: flags, `serve`, `fetch-assets`. |
+| `cmd/herdr-ide` | Core entry point: flags, `serve`, `herdr` (runs the bundled herdr), `fetch-assets`. |
 | `cmd/herdr-ide-agent` | Agent entry point (`serve` over stdio). |
 | `internal/brand` | Product names; the only place they are defined in Go. |
 | `internal/agentproto` | Stream protocol shared by core and agent. |
@@ -24,6 +24,8 @@ browser (React + xterm.js)  ──WebSocket + HTTP──▶  core (Go, `herdr-id
 | `internal/transport` | yamux sessions: in-process for the local machine, ssh stdio for others; agent upload. |
 | `internal/machines` | Machine registry (herdr's saved machines), state machine, herdr snapshots and subscriptions. |
 | `internal/herdr` | herdr public socket API client. |
+| `internal/herdrdist` | herdr release bundled in archives: version, upstream asset names and SHA-256 digests. |
+| `internal/checksum` | SHA-256 of files, shared by code-server and herdr downloads. |
 | `internal/codeserver` | code-server provisioning (artifacts, checksums, install modes, start/stop). |
 | `internal/settings` | Core settings changeable from the UI: definitions, flags, settings file. |
 | `internal/gui` | Virtual displays on machines, their windows, frames and input between agents and browser windows. |
@@ -46,9 +48,15 @@ and waits up to 20 seconds before killing the owned core.
 The renderer reuses the browser UI with no preload or Node APIs, sandboxing
 and context isolation. Same-origin popups become equally restricted native
 windows; HTTP(S) links outside the core open in the default browser. Packaging
-and lifecycle details are in [15](features/15-desktop-packaging.md).
+and lifecycle details are in [16](features/16-desktop-packaging.md).
 
 ## herdr facts the design relies on
+
+Release archives contain the core with the matching native herdr beside it,
+plus licenses. herdr is not embedded in agents. Every agent finds an installed
+herdr the same way; the local agent falls back to the bundled one when none is
+installed. herdr keeps its usual configuration, state and sockets. See
+[feature 15](features/15-bundled-herdr.md).
 
 Verified against herdr 0.9.5 (protocol 22):
 

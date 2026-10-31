@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"herdr-ide/internal/brand"
+	"herdr-ide/internal/checksum"
 	"io"
 	"net/http"
 	"os"
@@ -77,19 +78,6 @@ func expandURL(tmpl string, vars map[string]string) string {
 	return tmpl
 }
 
-func fileSHA256(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
-}
-
 // expectedSHA returns the digest a file must have, from the pinned table or
 // a sidecar in dir; "" when unknown.
 func expectedSHA(dir, file string) string {
@@ -108,14 +96,7 @@ func verify(path, want string) error {
 	if want == "" {
 		return nil
 	}
-	got, err := fileSHA256(path)
-	if err != nil {
-		return err
-	}
-	if got != want {
-		return fmt.Errorf("%s: sha256 %s does not match expected %s", filepath.Base(path), got, want)
-	}
-	return nil
+	return checksum.Verify(path, want)
 }
 
 // artifact returns a verified local path for file, downloading from url if
@@ -264,7 +245,7 @@ func (mg *Manager) FetchAssets(ctx context.Context, dir string, assets []string)
 				return err
 			}
 		}
-		sum, err := fileSHA256(dst)
+		sum, err := checksum.File(dst)
 		if err != nil {
 			return err
 		}

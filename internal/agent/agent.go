@@ -33,8 +33,9 @@ type Agent struct {
 	runDir    string // base/run, mode 0700
 	uploadDir string // base/uploads
 
-	herdrMu    sync.Mutex
-	herdrCache map[string]string // hint -> resolved binary
+	herdrMu      sync.Mutex
+	herdrCache   map[string]string // hint -> resolved binary
+	bundledHerdr string            // last resort when no installed herdr is found
 
 	cs  *codeServer
 	gui *gui
@@ -58,6 +59,9 @@ type Options struct {
 	// Instance selects ~/<brand.DataDir(Instance)>; empty is the default.
 	Instance string
 	Logger   *log.Logger
+	// BundledHerdr is the herdr shipped beside the core, used by the local
+	// agent only when no installed herdr is found. Remote agents leave it empty.
+	BundledHerdr string
 }
 
 // Serve runs the agent over conn until the session ends.
@@ -92,13 +96,14 @@ func Serve(ctx context.Context, conn io.ReadWriteCloser, opts Options) error {
 		return err
 	}
 	a := &Agent{
-		sess:       sess,
-		logger:     logger,
-		home:       home,
-		base:       base,
-		runDir:     runDir,
-		uploadDir:  filepath.Join(base, "uploads"),
-		herdrCache: map[string]string{},
+		sess:         sess,
+		logger:       logger,
+		home:         home,
+		base:         base,
+		runDir:       runDir,
+		uploadDir:    filepath.Join(base, "uploads"),
+		herdrCache:   map[string]string{},
+		bundledHerdr: opts.BundledHerdr,
 	}
 	a.cs = newCodeServer(a)
 	defer a.cs.stopAll()

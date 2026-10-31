@@ -13,7 +13,8 @@ Goals: machines never download; the core host can work fully offline from a
 prepared bundle; internal mirrors are supported; every artifact is verified.
 
 Non-goals: offline builds from source (Go and npm dependencies need a module
-proxy or vendoring); offline herdr installation.
+proxy or vendoring); installing herdr on SSH machines. The release archive
+already contains the native local herdr and its licenses ([15](15-bundled-herdr.md)).
 
 ## Design
 
@@ -60,9 +61,11 @@ proxy or vendoring); offline herdr installation.
 ## Licensing
 
 Bundles contain third-party artifacts under their own licenses. Git Graph's
-license does not permit redistribution, which is why it is downloaded by each
-installation instead of being embedded, and why bundles are for internal use
-only.
+license explicitly restricts distribution of derivative works and does not
+clearly grant general redistribution rights for the original package. It is
+downloaded for the user's installation rather than included in application
+releases. Do not publish bundles containing it without suitable permission.
+Herdr is distributed under Apache-2.0 with notices in `licenses/herdr/`.
 
 ## Security
 

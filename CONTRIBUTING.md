@@ -7,11 +7,13 @@ Chinese (中文也可以). Participation is governed by the
 ## Setup
 
 Requirements: Go (see `go.mod`), Node.js 22.12+, pnpm, and
-[herdr](https://herdr.dev) for running the app.
+[herdr](https://herdr.dev) for running the app. The build downloads the pinned
+herdr for release archives into `dist/herdr/`; without an installed herdr, use
+that file as `herdr` below and set `HERDR_BIN` to it for `make dev-core`.
 
 ```bash
 make deps            # pnpm install for web/, the extension and desktop/
-make build           # web UI, extension, agents for 4 platforms, core
+make build           # web UI, extension, agents, core; release archives with herdr
 make test            # Go, web and desktop unit tests
 make check           # formatting, vet, typecheck, brand/doc consistency
 ```
@@ -26,7 +28,14 @@ make dev-web         # Vite on http://localhost:5173, proxied to the dev core (D
 ```
 
 `make it` runs the integration test against a real herdr in an isolated
-session.
+session. To test the bundled executable, run
+`HERDR_TEST_BIN="$PWD/dist/packages/herdr-ide-$(go env GOOS)-$(go env GOARCH)/herdr" make it`.
+
+Release archives are in `dist/release/`; the unpacked directories are in
+`dist/packages/`. Keep each core beside its `herdr` and licenses.
+herdr upgrades require reviewing the pinned digests in `internal/herdrdist`,
+regenerating `licenses/herdr/` with `scripts/herdr-notices.py`, and rerunning
+integration tests before distributing the new release.
 
 On macOS, `make dev-desktop` builds and launches Electron with the embedded
 UI, the same isolated session and instance `dev` (port 7791). Stop other dev

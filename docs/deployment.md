@@ -16,8 +16,21 @@ machines.
 
 ```bash
 scripts/build.sh
-./dist/herdr-ide-$(go env GOOS)-$(go env GOARCH)    # http://127.0.0.1:7780
+cd dist/packages/herdr-ide-$(go env GOOS)-$(go env GOARCH)
+./herdr-ide    # http://127.0.0.1:7780
 ```
+
+Each `dist/release/` archive contains the core, a native herdr 0.9.5 beside it
+and licenses. Extract it as a directory; moving just the core loses the bundled
+herdr. Supported hosts are Linux/macOS on amd64/arm64.
+
+The bundled herdr only spares installing herdr on this host. herdr-ide uses an
+installed herdr when it finds one, otherwise the bundled one, and herdr keeps
+its usual configuration, sessions and machine list either way. Start herdr
+before using the local machine, for example by opening its TUI with
+`./herdr-ide herdr`; `./herdr-ide herdr <args>` runs any herdr command, such
+as `./herdr-ide herdr machine add user@host --label gpu`. SSH machines need
+their own herdr installation and running session.
 
 Machines come from herdr's saved SSH machines (`herdr machine list`); add
 others with `--ssh`. herdr-ide uses OpenSSH with your `~/.ssh/config`
@@ -166,7 +179,7 @@ herdr-ide fetch-assets ./bundle                          # all platforms
 herdr-ide fetch-assets --platforms linux-amd64 ./bundle  # only what you need
 ```
 
-Copy `./bundle` (tarballs, VSIXs and `.sha256` files) and the herdr-ide binary
+Copy `./bundle` (tarballs, VSIXs and `.sha256` files) and the full application release directory
 into the network, then run:
 
 ```bash
@@ -181,12 +194,14 @@ have SHA-256 digests compiled into the binary; other versions need a
 seed is rejected, never replaced. A download without any known digest is
 accepted once and its digest recorded (logged as a warning).
 
-Bundles are for your own installations: Git Graph's license does not permit
-redistribution, so do not publish bundles that contain it.
+Bundles are for your own installations: Git Graph explicitly restricts
+derivative distribution and does not clearly grant general redistribution
+of the original, so do not publish bundles containing it without permission.
 
-The web UI, the agents and the VS Code bridge are embedded in the binary;
-nothing else is fetched at runtime. Building from source needs Go modules and
-npm packages (vendor or mirror them for offline builds).
+The web UI, agents and VS Code bridge are embedded in the core, and the
+bundled herdr is beside it; code-server and external extensions are resolved
+at runtime. Building needs Go modules, npm packages and the pinned herdr
+download (verified files in `dist/herdr/` are reused).
 
 ## Remote resources
 
@@ -205,6 +220,11 @@ What herdr-ide starts on a machine and how it is reclaimed:
 | `apt-get download xvfb` | when a machine has no Xvfb (never in `--read-only`) | Ends with the download (5 min limit); the package is unpacked into `~/.herdr-ide/xvfb/` and the download removed; a download left by a killed agent is removed by the next agent after 1 h. A failed install or start is retried after 5 s, doubling up to 5 min, while the machine stays connected. |
 | curl or wget (`--code-server-install=download`) | while a machine downloads code-server | Ends with the download (20 min limit); the partial file in `~/.herdr-ide/code-server/` is removed, or with the unused versions after 14 days if the agent was killed. |
 | Disk | see [reference](reference.md#files-and-directories) | Uploads and logs after 7 days; unused agent builds, code-server versions and Xvfb packages after 14 days. |
+
+herdr servers, on the local host as on SSH machines, are started and stopped
+by the user, not by herdr-ide. The bundled herdr and the licenses stay in the
+extracted release directory until the user removes it; no herdr binary is
+uploaded to SSH machines.
 
 How machines get code-server is a setting (the settings dialog or
 `--code-server-install`): the core uploads the release (default; works for
@@ -226,7 +246,7 @@ macOS (launchd), `~/Library/LaunchAgents/dev.herdr-ide.plist`:
 <plist version="1.0"><dict>
   <key>Label</key><string>dev.herdr-ide</string>
   <key>ProgramArguments</key><array>
-    <string>/usr/local/bin/herdr-ide</string>
+    <string>/opt/herdr-ide/herdr-ide</string>
     <string>--allowed-origin</string><string>https://ide.example.com</string>
   </array>
   <key>RunAtLoad</key><true/>
@@ -242,14 +262,16 @@ Linux (systemd user unit), `~/.config/systemd/user/herdr-ide.service`:
 Description=herdr-ide
 
 [Service]
-ExecStart=%h/.local/bin/herdr-ide --allowed-origin https://ide.example.com
+ExecStart=%h/.local/lib/herdr-ide/herdr-ide --allowed-origin https://ide.example.com
 Restart=on-failure
 
 [Install]
 WantedBy=default.target
 ```
 
-The service must run as the user who owns the herdr sessions and the ssh keys.
+Install the full release directory at the path shown above (or adjust the
+path). The service must run as the user who owns the herdr sessions and the
+ssh keys.
 
 ## Several cores and development builds
 

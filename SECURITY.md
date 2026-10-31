@@ -49,6 +49,18 @@ the launcher does not add authentication against other processes on the
 host. Its app/DMG build uses ad-hoc signing, not Developer ID signing or
 Apple notarization. Do not treat the build as a notarized public release.
 
+## Bundled herdr
+
+Release archives include upstream herdr downloaded at build time and verified
+against SHA-256 digests pinned in `internal/herdrdist` before packaging
+(`internal/herdrdist/release_test.go` covers a corrupt download). At runtime
+the bundled herdr is trusted like an installed one: it is not re-verified and
+herdr's own update may replace it. It is used only when no installed herdr is
+found (`internal/agent/herdr_test.go`), with the caller's environment and
+herdr's usual sockets, which herdr creates with mode 0600. herdr-ide never
+downloads herdr at runtime, never uploads it to SSH machines, and does not
+start herdr servers.
+
 ## Supported versions
 
 Security fixes go to the latest release and to `main`.
