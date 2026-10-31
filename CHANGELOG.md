@@ -31,10 +31,18 @@ All notable changes are documented here. The format follows
   produce an ad-hoc signed `.app` and a drag-to-Applications DMG for arm64
   or x64. The sandboxed desktop shell owns its bundled core, preserves the
   web UI and supports internal program/VS Code windows and external links.
-  The app includes the bundled herdr and its notices.
+  The app includes the bundled herdr and its notices. GitHub releases attach
+  arm64 and x64 DMGs, covered by `SHA256SUMS` and build provenance like the
+  archives; CI no longer uploads DMGs from `main`.
 - `--parent-stdio` reports core readiness as JSON and stops on parent-pipe
   EOF; `make dev-desktop` uses the isolated development session and instance.
 - Ignored `.worktrees/` directory for branch workspaces.
+
+### Fixed
+
+- The **Authenticate…** and **Update herdr** terminals could end before
+  showing the command's last output (for example ssh's final error): the
+  core now forwards what is left in the terminal before closing it.
 
 ## [0.1.0] - 2026-10-31
 

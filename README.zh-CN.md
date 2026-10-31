@@ -46,7 +46,7 @@ cd dist/packages/herdr-ide-$(go env GOOS)-$(go env GOARCH)
 
 ## macOS 桌面应用
 
-在 macOS 上，可将同一套 core、Web UI、agent 和 VS Code 桥接扩展打包为 Electron 应用：
+在 macOS 上，可从 GitHub Releases 下载对应的 DMG（Apple Silicon 用 `…-mac-arm64.dmg`，Intel 用 `…-mac-x64.dmg`），把应用拖入 Applications。应用未经 Apple 公证，首次启动需在“系统设置 → 隐私与安全性”中允许。也可以自行将同一套 core、Web UI、agent 和 VS Code 桥接扩展打包为 Electron 应用：
 
 ```bash
 make desktop-app                 # .app 位于 dist/desktop/mac[-arm64]/
@@ -56,7 +56,7 @@ ARCH=x64 make desktop-dmg        # Intel；默认使用当前 Node 的架构
 
 桌面版与浏览器使用统一的终端窗格图标；macOS 版包含适用于 Finder 和 Dock 的多尺寸图标。
 
-应用会以 `desktop` instance 启动自己的 core，监听 `http://127.0.0.1:7781`；退出应用或关闭主窗口时回收该 core。应用自带 herdr，本机没装 herdr 时使用它；仍需预先安装 OpenSSH。本地构建使用 ad-hoc 签名，不含 Apple 公证或自动更新。版本号、数据目录和隔离开发方式见[桌面部署说明](docs/deployment.md#macos-desktop-app)。目前仅实现 macOS 打包。
+应用会以 `desktop` instance 启动自己的 core，监听 `http://127.0.0.1:7781`；退出应用或关闭主窗口时回收该 core。应用自带 herdr，本机没装 herdr 时使用它；仍需预先安装 OpenSSH。发布版和本地构建都使用 ad-hoc 签名，不含 Apple 公证或自动更新。版本号、数据目录和隔离开发方式见[桌面部署说明](docs/deployment.md#macos-desktop-app)。目前仅实现 macOS 打包。
 
 ## 远程访问
 

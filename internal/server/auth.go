@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/coder/websocket"
 	"github.com/creack/pty"
@@ -59,7 +60,9 @@ func servePTY(w http.ResponseWriter, r *http.Request, argv []string, env []strin
 		return false
 	}
 	defer f.Close()
+	drained := make(chan struct{})
 	go func() {
+		defer close(drained)
 		buf := make([]byte, 32<<10)
 		for {
 			n, err := f.Read(buf)
@@ -88,6 +91,17 @@ func servePTY(w http.ResponseWriter, r *http.Request, argv []string, env []strin
 		}
 	}()
 	cmd.Wait()
+	// The command's last output can still be in the PTY: forward it before
+	// closing, without waiting long for descendants that keep the PTY open.
+	select {
+	case <-drained:
+	case <-time.After(ptyDrainTimeout):
+	}
 	conn.Close(websocket.StatusNormalClosure, "done")
 	return true
 }
+
+// ptyDrainTimeout bounds how long servePTY forwards output after the command
+// exited. Its session's terminal is normally hung up then, which ends the
+// forwarding at once; the bound covers platforms where it is not.
+const ptyDrainTimeout = 2 * time.Second

@@ -4,13 +4,12 @@ on:
   push:
     tags: ['v*']
 
+# Build jobs read the repository; only `publish` writes the release.
 permissions:
-  contents: write
-  id-token: write
-  attestations: write
+  contents: read
 
 jobs:
-  release:
+  archives:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -38,17 +37,71 @@ jobs:
         env:
           VERSION: ${{ github.ref_name }}
           TARGETS: linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
+      - uses: actions/upload-artifact@v7
+        with:
+          name: archives
+          path: dist/release/*.tar.gz
+          if-no-files-found: error
+
+  # Ad-hoc signed macOS DMGs; electron-builder packages x64 on the arm64
+  # runner with the Intel Electron and a cross-compiled core.
+  desktop:
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        arch: [arm64, x64]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: desktop/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: |
+            web/pnpm-lock.yaml
+            desktop/pnpm-lock.yaml
+            extensions/*/pnpm-lock.yaml
+      - run: make desktop-dmg
+        env:
+          ARCH: ${{ matrix.arch }}
+          VERSION: ${{ github.ref_name }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: desktop-${{ matrix.arch }}
+          path: dist/desktop/*.dmg
+          if-no-files-found: error
+
+  publish:
+    runs-on: ubuntu-24.04
+    needs: [archives, desktop]
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist/release
+          merge-multiple: true
+      - name: Checksums
+        run: cd dist/release && shasum -a 256 *.tar.gz *.dmg > SHA256SUMS && cat SHA256SUMS
       # GitHub stores attestations for public repositories (private ones need
       # GitHub Enterprise Cloud); a private repository releases without
       # provenance.
       - uses: actions/attest-build-provenance@v4
         if: ${{ !github.event.repository.private }}
         with:
-          subject-path: dist/release/*.tar.gz
+          subject-checksums: dist/release/SHA256SUMS
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           ver=${GITHUB_REF_NAME#v}
           awk -v v="$ver" '$0 ~ "^## \\[" v "\\]" {p=1; next} /^## \[/ {p=0} p' CHANGELOG.md > notes.md
-          gh release create "$GITHUB_REF_NAME" dist/release/*.tar.gz dist/release/SHA256SUMS --notes-file notes.md --verify-tag
+          gh release create "$GITHUB_REF_NAME" dist/release/*.tar.gz dist/release/*.dmg dist/release/SHA256SUMS --notes-file notes.md --verify-tag

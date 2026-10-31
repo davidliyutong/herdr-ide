@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Native macOS packaging. ARCH=arm64|x64; VERSION, when set, must be a semver.
+# Native macOS packaging. ARCH=arm64|x64; VERSION, when set, must be a semver,
+# optionally with the release tag's leading v (dropped for the app metadata).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

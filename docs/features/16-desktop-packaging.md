@@ -29,7 +29,16 @@ implemented independently.
   built for another architecture than the Electron app. The DMG has an
   Applications shortcut. Builds use ad-hoc signing without notarization.
   Without `VERSION` the core reports `git describe` as in `scripts/build.sh`;
-  the app metadata then uses `desktop/package.json`.
+  the app metadata then uses `desktop/package.json`. A release tag's leading
+  `v` stays in the core's version and is dropped for the app metadata, which
+  must be semver.
+- Releases publish the DMGs: the tag's release workflow builds arm64 and x64
+  in parallel on a macOS runner (x64 with the Intel Electron and a
+  cross-compiled core, so no Intel runner is needed) beside the archive
+  build, and a final job writes one `SHA256SUMS`, attests provenance for all
+  files and creates the release only after every build succeeded. Pull
+  requests and `main` only check that the `.app` packages, so CI artifacts
+  never stand in for releases.
 - `desktop/src/main.ts` owns one child core. `--parent-stdio` adds one JSON
   readiness message to stdout and cancels the core when stdin closes. Logs
   stay on stderr, and the core ignores SIGPIPE so that writing to the pipes of
@@ -119,5 +128,6 @@ readiness, ephemeral ports, unexpected exits, late child errors and idempotent
 child shutdown, using fake Node children and no network or real herdr
 sessions. `make check test` includes desktop type, format and unit checks
 (outside macOS without downloading Electron). macOS CI packages the app for
-pull requests and builds the DMG on `main`; packaged smoke tests use `HERDR_IDE_DESKTOP_DEV=1` and an
+pull requests and `main`; the release workflow builds and publishes the
+DMGs. Packaged smoke tests use `HERDR_IDE_DESKTOP_DEV=1` and an
 isolated home/session, checking load, popup restrictions and child cleanup.

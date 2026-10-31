@@ -48,6 +48,11 @@ The desktop core has the same loopback HTTP trust boundary as CLI local use;
 the launcher does not add authentication against other processes on the
 host. Its app/DMG build uses ad-hoc signing, not Developer ID signing or
 Apple notarization. Do not treat the build as a notarized public release.
+The DMGs attached to GitHub releases are built the same way by the release
+workflow; their integrity rests on `SHA256SUMS` and, for a public repository,
+GitHub build-provenance attestations, both covering archives and DMGs. Only
+the final publish job of that workflow holds write permissions; the build
+jobs read the repository.
 
 ## Bundled herdr
 
