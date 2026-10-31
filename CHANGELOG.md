@@ -39,6 +39,13 @@ All notable changes are documented here. The format follows
 - Ignored `.worktrees/` directory for branch workspaces.
 - **Terminal font weight** setting (regular or medium; medium comes close to
   Ghostty's `font-thicken`).
+- **Notification sounds**: the browser plays a chime when an agent needs
+  input and another when it finishes (not while its pane is on screen in a
+  focused window), as herdr does in its own client. On by default with
+  **Silent agents** (`droid` by default) in the new Notifications section of
+  the settings. With several browsers open, only the one used most recently
+  plays them. The sounds are synthesized; the desktop app's main window
+  allows them without a prior click.
 
 ### Changed
 

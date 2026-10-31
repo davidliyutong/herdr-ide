@@ -23,8 +23,8 @@ syncing browser settings between browsers; theming terminal applications.
 **Definitions**
 
 - Browser settings: `web/src/prefs.ts` (`prefDefs`: section, kind `enum` /
-  `number` / `bool`, default, options or range, whether a change reloads the
-  page). Values are stored as strings in `localStorage` under the setting's
+  `string` / `number` / `bool`, default, options or range, whether a change
+  reloads the page). Values are stored as strings in `localStorage` under the setting's
   key, which keeps the keys used before (`locale`, `optionIsMeta`).
 - Core settings: `internal/settings` (`Def`: key, kind `enum` / `string` /
   `bool`, default, options, validation, flag usage). The package that uses a
@@ -57,7 +57,8 @@ syncing browser settings between browsers; theming terminal applications.
 **Dialog** (`web/src/components/SettingsDialog.tsx`)
 
 - Opened from the sidebar's gear, `prefix ,` or the palette. Sections:
-  appearance, layout, terminal, VS Code (core settings whose key starts with
+  appearance, layout, terminal, notifications (sounds, see
+  [07](07-agent-native-workflow.md)), VS Code (core settings whose key starts with
   `code-server-`), program windows (`gui`, `gui-*`), server (other core
   settings).
 - Settings that can differ per machine get a table below the section's rows:

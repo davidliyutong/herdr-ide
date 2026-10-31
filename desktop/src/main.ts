@@ -4,7 +4,7 @@ import { APP_NAME, APP_SLUG } from '../../web/src/brand';
 import { en, type MessageKey } from '../../web/src/i18n/en';
 import { zhCN } from '../../web/src/i18n/zh-CN';
 import { CoreProcess, coreArgs, coreEnv, corePort, DesktopError, ENV_PREFIX } from './core';
-import { allowPermission, isExternal, isInternal, webPreferences } from './policy';
+import { allowPermission, isExternal, isInternal, mainWindowPreferences, webPreferences } from './policy';
 
 app.setName(APP_NAME);
 app.enableSandbox();
@@ -79,7 +79,7 @@ function createWindow() {
     minHeight: 500,
     show: false,
     backgroundColor: '#18181b',
-    webPreferences: { ...webPreferences },
+    webPreferences: { ...mainWindowPreferences },
   });
   mainWindow = win;
   win.once('ready-to-show', () => win.show());

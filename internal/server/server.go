@@ -206,6 +206,32 @@ func (s *Server) broadcast(v any) {
 	}
 }
 
+// maxIdle bounds the idle time a browser reports.
+const maxIdle = 30 * 24 * time.Hour
+
+// markActive records that the user used the page of c idle ago. Browsers
+// report durations rather than times, so their clocks do not matter.
+func (s *Server) markActive(c *wsClient, idle time.Duration) {
+	idle = min(max(idle, 0), maxIdle)
+	s.clientsMu.Lock()
+	c.active = time.Now().Add(-idle)
+	s.clientsMu.Unlock()
+}
+
+// soundClient returns the browser that plays notification sounds: the one
+// used most recently, so that several open browsers do not all sound.
+func (s *Server) soundClient() *wsClient {
+	s.clientsMu.Lock()
+	defer s.clientsMu.Unlock()
+	var best *wsClient
+	for c := range s.clients {
+		if best == nil || c.active.After(best.active) {
+			best = c
+		}
+	}
+	return best
+}
+
 // writable wraps handlers that change state; they are refused in read-only
 // mode.
 func (s *Server) writable(h http.HandlerFunc) http.HandlerFunc {

@@ -43,7 +43,8 @@ export class ApiError extends Error {
 type Listener = {
   onMachines(list: MachineState[]): void;
   onMachine(st: MachineState): void;
-  onAgent(machine: string, data: AgentStatusEvent): void;
+  /** sound: this page plays notification sounds (it was used most recently). */
+  onAgent(machine: string, data: AgentStatusEvent, sound: boolean): void;
   onConnection(connected: boolean): void;
   onBridgeSend(machine: string, text: string): void;
   onGui(st: GuiState): void;
@@ -61,6 +62,10 @@ class Conn {
   // request rejected on disconnect is never replayed after reconnecting.
   private queue: { data: string; rid?: number }[] = [];
   private theme?: string;
+  // When the user last used the page (opening it counts) and when the core
+  // was last told; the core lets the most recently used page play sounds.
+  private lastInput = Date.now();
+  private lastActiveSent = 0;
   connected = false;
 
   start(listener: Listener) {
@@ -77,6 +82,7 @@ class Conn {
       this.connected = true;
       this.backoff = 300;
       this.listener?.onConnection(true);
+      this.rawSend({ t: 'active', idle: Date.now() - this.lastInput });
       if (this.theme) this.rawSend({ t: 'theme', kind: this.theme });
       for (const [sid, s] of this.streams) this.rawSend({ t: 'attach', sid, ...s.params });
       for (const q of this.queue.splice(0)) ws.send(q.data);
@@ -112,7 +118,7 @@ class Conn {
         this.listener?.onMachine(m.state);
         break;
       case 'agent':
-        this.listener?.onAgent(m.m, m.data);
+        this.listener?.onAgent(m.m, m.data, m.sound === true);
         break;
       case 'bridge.send':
         this.listener?.onBridgeSend(m.m, m.text);
@@ -189,6 +195,15 @@ class Conn {
     if (kind === this.theme) return;
     this.theme = kind;
     this.rawSend({ t: 'theme', kind });
+  }
+
+  /** Records that the user is using the page (input or focus). */
+  markActive() {
+    const now = Date.now();
+    this.lastInput = now;
+    if (now - this.lastActiveSent < 2000) return;
+    this.lastActiveSent = now;
+    this.rawSend({ t: 'active', idle: 0 });
   }
 
   retry(machine: string) {

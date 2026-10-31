@@ -45,7 +45,7 @@ async function saveServer(key: string, value: string, machine?: string): Promise
   }
 }
 
-const sections: SectionId[] = ['appearance', 'layout', 'terminal', 'codeServer', 'gui', 'server'];
+const sections: SectionId[] = ['appearance', 'layout', 'terminal', 'notifications', 'codeServer', 'gui', 'server'];
 
 /** Section of a core setting, from its key. */
 export function serverSection(key: string): SectionId {
@@ -238,11 +238,41 @@ function PrefRow({ k }: { k: PrefKey }) {
     case 'bool':
       control = <Toggle k={k} value={value as boolean} onChange={(v) => setPref(k, v as never)} />;
       break;
+    case 'string':
+      control = <PrefText k={k} value={value as string} onSave={(v) => setPref(k, v as never)} />;
+      break;
   }
   return (
     <Row k={k} note={note}>
       {control}
     </Row>
+  );
+}
+
+/** A text field that saves on Enter or blur; Escape restores the value. */
+function PrefText({ k, value, onSave }: { k: string; value: string; onSave(v: string): void }) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+  const save = () => {
+    if (draft.trim() !== value) onSave(draft.trim());
+  };
+  const ph = `settings.${k}.placeholder`;
+  return (
+    <input
+      className="settings-input"
+      value={draft}
+      spellCheck={false}
+      placeholder={hasMessage(ph) ? t(ph) : undefined}
+      onChange={(e) => setDraft(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') save();
+        if (e.key === 'Escape') {
+          e.stopPropagation();
+          setDraft(value);
+        }
+      }}
+      onBlur={save}
+    />
   );
 }
 

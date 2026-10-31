@@ -108,7 +108,10 @@ implemented independently.
 
 Following [Electron's security guidance](https://www.electronjs.org/docs/latest/tutorial/security),
 renderer and child windows have no Node integration or preload bridge;
-sandboxing, context isolation and web security are enabled. Navigation and
+sandboxing, context isolation and web security are enabled. The main window
+alone allows audio without a prior user gesture, so agent notification
+sounds ([07](07-agent-native-workflow.md)) play after a restart before the
+first click. Navigation and
 native popups are restricted to the exact owned core origin; external links
 accept only credential-free HTTP(S), with other schemes refused. Permissions
 require both the requesting frame and its top window to belong to the core;

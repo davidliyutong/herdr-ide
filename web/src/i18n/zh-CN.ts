@@ -251,6 +251,7 @@ export const zhCN: Messages = {
   'settings.section.appearance': '外观',
   'settings.section.layout': '布局',
   'settings.section.terminal': '终端',
+  'settings.section.notifications': '通知',
   'settings.section.codeServer': 'VS Code（code-server）',
   'settings.section.server': '服务端',
   'settings.section.gui': '程序窗口',
@@ -286,6 +287,12 @@ export const zhCN: Messages = {
   'settings.dockPosition.bottom': '下方',
   'settings.optionIsMeta': 'Option 键作为 Meta',
   'settings.optionIsMeta.desc': 'macOS：Option+键发送 Esc+键（shell 和编辑器里的 Alt 快捷键），而不是输入特殊字符。',
+  'settings.notifySound': '提示音',
+  'settings.notifySound.desc':
+    'agent 需要输入时播放一段提示音，完成时播放另一段（其窗格显示在已聚焦的窗口中时不播放）。打开多个浏览器时，只由最近使用的那个播放。',
+  'settings.notifySoundMuted': '静音的 agent',
+  'settings.notifySoundMuted.desc': '这些 agent 不播放提示音，用逗号分隔。',
+  'settings.notifySoundMuted.placeholder': 'claude, codex',
   'settings.code-server-install': '安装方式',
   'settings.code-server-install.desc':
     '上传：服务端下载、校验后上传到机器（离线机器也可用）。机器下载：各机器自行下载，按同一校验和验证。使用已安装：直接运行机器上已有的 code-server。后两种失败时回退为上传。下次在机器上启动 code-server 时生效。',

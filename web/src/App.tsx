@@ -56,7 +56,7 @@ export function App() {
         useStore.getState().upsertMachine(st);
         updateBadge();
       },
-      onAgent: (m, data) => notifyAgent(m, data),
+      onAgent: (m, data, sound) => notifyAgent(m, data, sound),
       onConnection: (c) => useStore.getState().setConnected(c),
       onBridgeSend: (m, text) => pasteToAgent(m, text),
       onGui: (st) => useGui.getState().setState(st),
