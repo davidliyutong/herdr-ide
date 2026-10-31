@@ -68,6 +68,9 @@ type Machine struct {
 
 	refreshCh chan struct{}
 	retryCh   chan struct{}
+	// herdrHint is the herdr executable the agent tries first (from herdr's
+	// SSH metadata), guarded by mu.
+	herdrHint string
 
 	streams StreamHandler
 }
@@ -81,6 +84,7 @@ func newMachine(spec Spec, dial Dialer, logger *log.Logger, publish func(State),
 		onAgent:   onAgent,
 		refreshCh: make(chan struct{}, 1),
 		retryCh:   make(chan struct{}, 1),
+		herdrHint: spec.HerdrBin,
 	}
 	m.state = State{Spec: spec, Status: StatusConnecting}
 	if !spec.Enabled {
@@ -125,6 +129,22 @@ func (m *Machine) setStatus(s Status, err error) {
 			st.Error = err.Error()
 		}
 	})
+}
+
+// Reconnect ends the current agent session and connects again at once, so
+// that a new agent finds herdr afresh (after herdr changed on the machine).
+// A non-empty herdrBin replaces the executable the agent tries first.
+func (m *Machine) Reconnect(herdrBin string) {
+	m.mu.Lock()
+	if herdrBin != "" {
+		m.herdrHint = herdrBin
+	}
+	sess := m.sess
+	m.mu.Unlock()
+	if sess != nil {
+		sess.Close()
+	}
+	m.Retry()
 }
 
 // Retry wakes a machine waiting in backoff (e.g. after interactive auth).
@@ -255,7 +275,10 @@ func (m *Machine) Run(ctx context.Context) {
 
 func (m *Machine) serve(ctx context.Context, sess *transport.Session, platform string) error {
 	hctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	rep, err := sess.Request(hctx, agentproto.Header{Op: agentproto.OpHello, Session: m.spec.Session, HerdrBin: m.spec.HerdrBin})
+	m.mu.Lock()
+	hint := m.herdrHint
+	m.mu.Unlock()
+	rep, err := sess.Request(hctx, agentproto.Header{Op: agentproto.OpHello, Session: m.spec.Session, HerdrBin: hint})
 	cancel()
 	if err != nil {
 		return fmt.Errorf("hello: %w", err)

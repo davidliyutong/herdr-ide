@@ -15,6 +15,15 @@ All notable changes are documented here. The format follows
   SSH machines still use their own herdr.
 - `herdr-ide herdr [args]` runs the included herdr with the arguments and
   environment unchanged.
+- **Manage herdr** (context menu of the local machine): start, stop and
+  restart the local herdr server, and check for and install herdr updates for
+  the application's copy of herdr through herdr's own updater, without a
+  terminal. The server is never started automatically; local herdr
+  installations of the user's are not updated.
+- **Update herdr** for SSH machines (context menu, and a hint when a
+  machine's herdr is older than the local one) runs herdr's own
+  `herdr --remote` in a terminal, where herdr asks before installing its
+  version there or replacing a running server.
 - Terminal-pane app icon shared by the desktop and browser, with editable
   SVG sources, small-size artwork and a multi-resolution macOS ICNS for
   the app and DMG; regenerate with `make desktop-icons`.

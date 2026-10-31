@@ -36,6 +36,7 @@ type Agent struct {
 	herdrMu      sync.Mutex
 	herdrCache   map[string]string // hint -> resolved binary
 	bundledHerdr string            // last resort when no installed herdr is found
+	herdrOp      sync.Mutex        // serializes starting, stopping and updating herdr
 
 	cs  *codeServer
 	gui *gui
@@ -156,6 +157,8 @@ func (a *Agent) handle(ctx context.Context, st net.Conn) {
 		err = a.cs.handle(ctx, st, h)
 	case agentproto.OpGUI:
 		err = a.gui.handle(ctx, st, h)
+	case agentproto.OpHerdr:
+		err = a.handleHerdr(ctx, st, h)
 	default:
 		err = agentproto.Fail(st, fmt.Errorf("unknown op %q", h.Op))
 		st.Close()

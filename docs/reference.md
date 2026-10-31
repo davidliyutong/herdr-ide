@@ -134,7 +134,7 @@ browser's menu shows instead.
 | `HERDR_IDE_DESKTOP_PORT` | Electron | Loopback port (default `7781`, development `7791`); `0` chooses an ephemeral port, which gives a new browser storage origin. |
 | `ARCH` | `make desktop-app`, `make desktop-dmg` | `arm64` or `x64`; defaults to the host Node architecture. The Go core architecture is matched automatically. |
 | `VERSION` | desktop build | Semver for app metadata, DMG name and bundled core. Without it the core reports `git describe` and the app uses the `desktop/package.json` version. |
-| `HERDR_BIN` | agent | herdr binary to use on a machine. Without it, an installed herdr is searched; the local machine falls back to the bundled one. |
+| `HERDR_BIN` | agent | herdr binary to use on a machine. Without it, an installed herdr is searched; the local machine falls back to its copy of the bundled one. |
 | `HERDR_TEST_BIN` | `make it` | herdr executable for the integration test (for example the bundled one); otherwise found on `PATH`. |
 | `XDG_STATE_HOME`, `XDG_CONFIG_HOME`, `HERDR_CONFIG_PATH`, `HERDR_SOCKET_PATH` | core, agent | Honoured like herdr does when locating its state, configuration and sockets. |
 
@@ -146,6 +146,8 @@ On every machine (the agent's `$HOME`):
 | --- | --- | --- |
 | `~/.herdr-ide/agent/<build>/` | Uploaded agent binaries | Builds unused for 14 days are removed. |
 | `~/.herdr-ide/code-server/<version>/` | code-server releases (shared by instances) | Versions unused for 14 days are removed. |
+| `~/.herdr-ide/herdr/herdr` | Core host only: the application's copy of the bundled herdr (shared by instances) | Replaced by **Update** and by a newer bundled herdr; kept until removed. |
+| `~/.herdr-ide/herdr/server.log` | Core host only: output of the herdr server last started from the UI | Replaced at every start from the UI. |
 | `~/.herdr-ide[-<instance>]/run/` (0700) | `cs.sock`, `cs.pid`, `bridge.sock`; `gui.json` (reserved display and Xvfb pid), `xauth` (panes' display cookie) and `xauth.server` (Xvfb's copy), both 0600 and replaced at each Xvfb start, `gui.lock` | Sockets while the agent runs; the display files are kept so panes keep a valid environment. |
 | `~/.herdr-ide/xvfb/<version>/` | Xvfb unpacked from the distribution's package (shared by instances) | Versions unused for 14 days are removed when another is unpacked. |
 | `~/.herdr-ide[-<instance>]/xvfb.log` | Output of the last Xvfb started | Replaced at each start. |

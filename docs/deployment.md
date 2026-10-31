@@ -25,12 +25,15 @@ and licenses. Extract it as a directory; moving just the core loses the bundled
 herdr. Supported hosts are Linux/macOS on amd64/arm64.
 
 The bundled herdr only spares installing herdr on this host. herdr-ide uses an
-installed herdr when it finds one, otherwise the bundled one, and herdr keeps
-its usual configuration, sessions and machine list either way. Start herdr
-before using the local machine, for example by opening its TUI with
-`./herdr-ide herdr`; `./herdr-ide herdr <args>` runs any herdr command, such
-as `./herdr-ide herdr machine add user@host --label gpu`. SSH machines need
-their own herdr installation and running session.
+installed herdr when it finds one, otherwise its own copy of the bundled
+one, and herdr keeps its usual configuration, sessions and machine list
+either way. Start herdr's server before using the local machine: **Manage
+herdr** in the local machine's context menu (or its status when it reports a
+problem) starts and stops it and updates the application's copy of herdr;
+opening the TUI with `./herdr-ide herdr` also starts it.
+`./herdr-ide herdr <args>` runs any herdr command, such as
+`./herdr-ide herdr machine add user@host --label gpu`. SSH machines need their
+own herdr installation and running session.
 
 Machines come from herdr's saved SSH machines (`herdr machine list`); add
 others with `--ssh`. herdr-ide uses OpenSSH with your `~/.ssh/config`
@@ -71,9 +74,8 @@ prerequisite. Finder launches include `~/.local/bin`, `/opt/homebrew/bin`,
 execute shell startup files, so variables exported there, such as
 `HERDR_BIN`, reach the core only when the app is started from that shell.
 Existing herdr servers and SSH configuration are reused. The app never starts
-or stops herdr servers itself; without an installed herdr, start the local
-server once by opening the TUI with
-`/Applications/herdr-ide.app/Contents/Resources/bin/herdr`.
+herdr's server by itself; start it, stop it and update herdr with **Manage
+herdr** in the local machine's context menu, without a terminal.
 
 The core listens at `127.0.0.1:7781` with instance `desktop`, separate from
 the CLI default and `dev`. A fixed origin preserves UI preferences across
@@ -217,6 +219,9 @@ What herdr-ide starts on a machine and how it is reclaimed:
 | Desktop core | Electron launches its bundled binary | SIGTERM on normal quit, with a 20 s deadline before SIGKILL of that owned child; parent-stdin EOF also stops it if Electron crashes. herdr servers and pane programs remain running. |
 | Electron profile | First desktop launch | Kept until manually removed; Chromium manages its caches. Development has a separate profile. Core stderr is bounded to 16 KiB in memory; no desktop log files accumulate. |
 | `herdr-ide-agent` | one per core while connected | Exits when its ssh session ends; a dead link is detected by keepalives within about 45 s. |
+| local herdr server started from the UI | **Manage herdr**, on request | Belongs to the user like one started by the herdr TUI and outlives the core; stopped with **Manage herdr** or `herdr server stop`. |
+| `herdr update` | **Update** in **Manage herdr** | Ends with the update (15 min limit); herdr's temporary download is in `~/.herdr-ide/herdr/`. |
+| `herdr --remote` client (core host) | **Update herdr** for an SSH machine | Ends when herdr exits or the window closes. A herdr it installs on the machine (usually `~/.local/bin/herdr`) is herdr's own installation and stays until the user removes it; a server it starts there belongs to the user. |
 | `herdr terminal session` processes | one per pane being viewed | Ends when the pane is no longer shown, or with the agent. |
 | code-server | on first VS Code use | Stopped after `--code-server-idle` (default 20 min) without VS Code connections, when the agent exits (if that agent started it; for the local machine, when the core stops), or by the stop button in the VS Code panel. Hidden VS Code panels disconnect after 10 min. A process left behind by a killed agent is stopped by the next agent, and code-server exits by itself after 1 h without connections. |
 | VS Code extension hosts | one per VS Code window | Disposed 5 min after the window disconnects. |
@@ -226,10 +231,15 @@ What herdr-ide starts on a machine and how it is reclaimed:
 | curl or wget (`--code-server-install=download`) | while a machine downloads code-server | Ends with the download (20 min limit); the partial file in `~/.herdr-ide/code-server/` is removed, or with the unused versions after 14 days if the agent was killed. |
 | Disk | see [reference](reference.md#files-and-directories) | Uploads and logs after 7 days; unused agent builds, code-server versions and Xvfb packages after 14 days. |
 
-herdr servers, on the local host as on SSH machines, are started and stopped
-by the user, not by herdr-ide. The bundled herdr and the licenses stay in the
-extracted release directory until the user removes it; no herdr binary is
-uploaded to SSH machines.
+herdr servers are started and stopped by the user: on SSH machines through
+herdr, on the local host also through **Manage herdr**. herdr on an SSH
+machine changes only through herdr's own `herdr --remote` flow, which
+**Update herdr** (the machine's context menu) runs in a terminal where the
+user answers herdr's questions. The bundled herdr and
+the licenses stay in the extracted release directory until the user removes
+it; the application's copy of herdr and the log of servers it started are
+described in [reference](reference.md#files-and-directories). No herdr binary
+is uploaded to SSH machines.
 
 How machines get code-server is a setting (the settings dialog or
 `--code-server-install`): the core uploads the release (default; works for
@@ -269,6 +279,8 @@ Description=herdr-ide
 [Service]
 ExecStart=%h/.local/lib/herdr-ide/herdr-ide --allowed-origin https://ide.example.com
 Restart=on-failure
+# A herdr server started with Manage herdr must survive restarts of the service.
+KillMode=process
 
 [Install]
 WantedBy=default.target
@@ -276,7 +288,9 @@ WantedBy=default.target
 
 Install the full release directory at the path shown above (or adjust the
 path). The service must run as the user who owns the herdr sessions and the
-ssh keys.
+ssh keys. systemd stops every process of a unit by default, including a herdr
+server started from the UI and all its terminals; `KillMode=process` stops only
+the core, whose agents then end their own processes.
 
 ## Several cores and development builds
 

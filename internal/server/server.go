@@ -128,6 +128,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /m/{id}/gui/{win}/ws", s.handleGUIWS)
 	mux.HandleFunc("POST /m/{id}/gui/{win}/close", s.writable(s.handleGUIClose))
 	mux.HandleFunc("POST /api/m/{id}/gui/enable", s.writable(s.handleGUIEnable))
+	mux.HandleFunc("GET /api/m/{id}/herdr", s.handleHerdrStatus)
+	mux.HandleFunc("POST /api/m/{id}/herdr/{action}", s.writable(s.handleHerdrAction))
+	mux.HandleFunc("GET /api/m/{id}/herdr/remote", s.writable(s.handleHerdrRemote))
 	if s.opts.Static != nil {
 		mux.Handle("/", spaHandler(s.opts.Static))
 	}

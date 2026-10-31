@@ -9,7 +9,7 @@
 ## 功能
 
 - **直接讲 herdr 协议**：workspace、tab、分屏布局和 agent 状态都来自 herdr 的 socket API；每个 pane 都是一个 xterm.js 终端，画面由 herdr 自己渲染，支持输入、鼠标、滚动回看（拖选到边缘会自动滚动，复制整段）、中文输入法和拖动调整分屏。拖动 pane 标题栏可交换或移动 pane，点击标题即可重命名；拖动 tab 和 workspace 可调整顺序；右键 pane 标题栏、tab 或 workspace 可打开对应的命令菜单。快捷键沿用你的 herdr 配置（前缀 `ctrl+b`）。
-- **自带 herdr**：发布包附带 herdr 0.9.5（Linux/macOS × amd64/arm64），本机没装 herdr 时使用它。它和自己安装的 herdr 完全一样，使用相同的配置、会话和机器列表。
+- **自带 herdr**：发布包附带 herdr 0.9.5（Linux/macOS × amd64/arm64），本机没装 herdr 时使用它。它和自己安装的 herdr 完全一样，使用相同的配置、会话和机器列表。右键本机选择 **管理 herdr**，即可启动、停止它的服务器，并通过 herdr 自带的更新程序更新 herdr，无需终端；右键 SSH 机器选择 **更新 herdr**，会按 herdr 自己的 `herdr --remote` 流程更新那台机器。
 - **多机器**：直接使用 herdr 里保存的 SSH 机器。每台机器只开一条 ssh 连接，在上面运行一个自动上传的静态 agent（linux/macOS × amd64/arm64），所有通信都在这条连接里多路复用；机器上不监听任何端口。
 - **为 agent 设计**：
   - 汇总所有机器上 blocked 和 done 的 agent，并发浏览器通知；

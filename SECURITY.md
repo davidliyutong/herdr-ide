@@ -54,12 +54,27 @@ Apple notarization. Do not treat the build as a notarized public release.
 Release archives include upstream herdr downloaded at build time and verified
 against SHA-256 digests pinned in `internal/herdrdist` before packaging
 (`internal/herdrdist/release_test.go` covers a corrupt download). At runtime
-the bundled herdr is trusted like an installed one: it is not re-verified and
-herdr's own update may replace it. It is used only when no installed herdr is
-found (`internal/agent/herdr_test.go`), with the caller's environment and
-herdr's usual sockets, which herdr creates with mode 0600. herdr-ide never
-downloads herdr at runtime, never uploads it to SSH machines, and does not
-start herdr servers.
+the bundled herdr is trusted like an installed one and not re-verified. The
+local agent uses a copy of it in `~/.herdr-ide/herdr/` (directory 0700) only
+when no installed herdr is found (`internal/agent/herdr_test.go`), with the
+caller's environment and herdr's usual sockets, which herdr creates with mode
+0600. herdr-ide never uploads herdr to SSH machines itself. **Update herdr**
+runs the local herdr's `herdr --remote=<target>` in a terminal on the core
+host (`GET /api/m/{id}/herdr/remote`: refused in `--read-only`, audited as
+`herdr.remote`, SSH machines only, the target passed as one argument); herdr
+then asks the user before installing anything there or stopping a server.
+
+The local machine's herdr can be managed from the UI
+([17](docs/features/17-local-herdr-management.md)):
+`POST /api/m/{id}/herdr/{start|stop|check|update}` are mutations behind the
+usual guards, refused in `--read-only`, audited (`herdr.start`, `herdr.stop`,
+`herdr.update`) and accepted only for the local machine
+(`internal/server/server_test.go`). An update runs herdr's own
+`herdr update --handoff` on the application's copy only: it trusts herdr's
+release manifest on `herdr.dev` and the SHA-256 digests it publishes, like a
+user running `herdr update`, and never changes the bundled file or an
+installation of the user's. Servers are started only on request, never
+automatically.
 
 ## Supported versions
 

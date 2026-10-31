@@ -55,6 +55,20 @@ func HerdrStateDir() string {
 	return filepath.Join(home, ".local", "state", "herdr")
 }
 
+// HerdrExecutable is the herdr path herdr recorded for a saved SSH machine
+// (it updates the record when it installs herdr there); "" when unknown.
+func HerdrExecutable(id string) string {
+	b, err := os.ReadFile(filepath.Join(HerdrStateDir(), "client", "ssh-metadata", id+".json"))
+	if err != nil {
+		return ""
+	}
+	var md sshMetadata
+	if json.Unmarshal(b, &md) != nil {
+		return ""
+	}
+	return md.Metadata.Executable
+}
+
 // LoadSpecs returns the local machine followed by herdr's saved SSH machines.
 func LoadSpecs(localSession string, extra []Spec) []Spec {
 	hostname, _ := os.Hostname()
@@ -76,12 +90,7 @@ func LoadSpecs(localSession string, extra []Spec) []Spec {
 				if s.Session == "" {
 					s.Session = "default"
 				}
-				if mb, err := os.ReadFile(filepath.Join(clientDir, "ssh-metadata", e.ID+".json")); err == nil {
-					var md sshMetadata
-					if json.Unmarshal(mb, &md) == nil {
-						s.HerdrBin = md.Metadata.Executable
-					}
-				}
+				s.HerdrBin = HerdrExecutable(e.ID)
 				specs = append(specs, s)
 			}
 		}

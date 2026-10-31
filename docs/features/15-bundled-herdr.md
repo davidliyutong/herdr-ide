@@ -13,8 +13,9 @@ lifecycle and updates, exactly as if the user had installed it.
 Goals: ship the matching native herdr for Linux/macOS on amd64/arm64; verify
 upstream downloads at build time; let a host without herdr use the bundled one.
 
-Non-goals: separate herdr configuration, state or machine catalogs; starting,
-stopping or upgrading herdr servers; installing herdr on SSH machines; Windows.
+Non-goals: separate herdr configuration, state or machine catalogs;
+installing herdr on SSH machines; Windows. Starting the local server and
+updating herdr from the UI are described in [17](17-local-herdr-management.md).
 
 ## Design
 
@@ -33,21 +34,22 @@ stopping or upgrading herdr servers; installing herdr on SSH machines; Windows.
   The macOS desktop app carries the same herdr beside its core in
   `Contents/Resources/bin` ([16](16-desktop-packaging.md)).
 - The bundled executable is the `herdr` beside the real core executable
-  (symlinks to the core are resolved). The core does not verify it at runtime:
-  once extracted it is the user's herdr installation like any other, and
-  `herdr update` may replace it.
+  (symlinks to the core are resolved). The core does not verify it at runtime.
+  The local agent uses a copy of it outside the release directory, which
+  herdr's own updater may replace ([17](17-local-herdr-management.md)).
 - The local agent searches for herdr as on any machine (`HERDR_BIN`, `PATH`,
   `~/.local/bin`, `~/.cargo/bin`, package-manager locations, the login shell)
-  and uses the bundled one only when none is found (`agent.Options.BundledHerdr`,
-  `internal/agent/herdr.go`). An installed herdr wins, so the CLI the agent runs
-  matches the server the user starts with it.
+  and uses the copy of the bundled one only when none is found
+  (`agent.Options.BundledHerdr`, `internal/agent/herdr.go`). An installed herdr
+  wins, so the CLI the agent runs matches the server the user starts with it.
 - herdr uses its usual locations: configuration and sockets under
   `~/.config/herdr`, the machine catalog in
   `~/.local/state/herdr/client/endpoints.json`, both following
   `XDG_CONFIG_HOME` and `XDG_STATE_HOME`. The core sets no herdr-specific
   environment.
-- The local herdr server belongs to the user: herdr-ide connects to a running
-  session and neither starts nor stops it. Opening the herdr TUI starts it.
+- The local herdr server belongs to the user: herdr-ide never starts it on its
+  own. The user starts it from the UI ([17](17-local-herdr-management.md)) or
+  by opening the herdr TUI.
 - `herdr-ide herdr [args]` replaces the core process with the bundled herdr and
   passes arguments, environment, stdio, signals and exit status through
   unchanged (`cmd/herdr-ide/main.go`). Hosts without herdr on `PATH` use it

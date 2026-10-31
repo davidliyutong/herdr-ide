@@ -52,7 +52,8 @@ implemented independently.
   `Contents/Resources/bin/herdr` and `licenses/herdr/`, beside the core, which
   uses it only when no installed herdr is found
   ([15](15-bundled-herdr.md)). OpenSSH is user-installed. The desktop shell
-  does not start or stop herdr's servers. All inherited environment and SSH configuration
+  does not start or stop herdr's servers; the user does so, and updates herdr,
+  from the web UI ([17](17-local-herdr-management.md)). All inherited environment and SSH configuration
   remain available to the core.
 - The web brand constants and English/Chinese message dictionaries are
   imported into the shell. Build metadata reads the same brand file. Native
@@ -89,7 +90,8 @@ implemented independently.
   quit allows agent cleanup before SIGKILL; force-killed agents retain their
   existing orphan-reaping and idle-timeout protection.
 - No local herdr session running: the existing machine status UI shows the
-  error; the desktop shell does not bootstrap or alter herdr sessions.
+  error and offers **Manage herdr**; the desktop shell does not bootstrap or
+  alter herdr sessions.
 - Downloaded ad-hoc signed app blocked by Gatekeeper: explicit user approval
   can be required; this build is not a notarized distribution.
 

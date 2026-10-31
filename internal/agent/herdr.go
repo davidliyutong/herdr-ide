@@ -17,8 +17,9 @@ var systemHerdrPaths = []string{"/opt/homebrew/bin/herdr", "/usr/local/bin/herdr
 
 // resolveHerdr finds the herdr binary. Non-interactive ssh sessions often lack
 // ~/.local/bin in PATH, so well-known install locations and the login shell
-// are consulted as well. An installed herdr wins over the bundled one, which
-// only stands in for a missing installation.
+// are consulted as well. An installed herdr wins over the application's
+// managed copy of the bundled one, which only stands in for a missing
+// installation (herdrmgr.go).
 func (a *Agent) resolveHerdr(hint string) (string, error) {
 	a.herdrMu.Lock()
 	defer a.herdrMu.Unlock()
@@ -63,9 +64,9 @@ func (a *Agent) resolveHerdr(hint string) (string, error) {
 			}
 		}
 	}
-	if a.bundledHerdr != "" && isExecutable(a.bundledHerdr) {
-		a.herdrCache[hint] = a.bundledHerdr
-		return a.bundledHerdr, nil
+	if bin := a.managedHerdr(); bin != "" {
+		a.herdrCache[hint] = bin
+		return bin, nil
 	}
 	return "", errors.New("herdr binary not found (set HERDR_BIN or install herdr)")
 }
