@@ -25,7 +25,8 @@ module.exports = {
   files: ['dist/main.cjs', 'package.json'],
   extraMetadata: {
     name: `${slug}-desktop`,
-    version: process.env.VERSION || require('./package.json').version,
+    // Release tags (vX.Y.Z) stay as is in the core; app metadata takes semver.
+    version: (process.env.VERSION || require('./package.json').version).replace(/^v/, ''),
   },
   extraResources: [
     { from: core, to: `bin/${slug}` },

@@ -25,10 +25,13 @@ Cutting a release:
    with the date).
 3. Tag `vX.Y.Z` (semantic versioning; the version is injected from
    `git describe` by `scripts/build.sh`).
-4. Build: `TARGETS="linux/amd64 linux/arm64 darwin/amd64 darwin/arm64" scripts/build.sh`;
-   write `dist/SHA256SUMS` with `shasum -a 256 dist/herdr-ide-*`.
+4. Build: `TARGETS="linux/amd64 linux/arm64 darwin/amd64 darwin/arm64" scripts/build.sh`
+   writes the archives and `dist/release/SHA256SUMS`. On a Mac,
+   `ARCH=arm64 VERSION=vX.Y.Z make desktop-dmg` (and `ARCH=x64`) builds the
+   DMGs into `dist/desktop/`. Pushing the tag runs the same builds in the
+   `release` workflow, which publishes archives, DMGs and one `SHA256SUMS`.
 5. Smoke test the host binary: `version`, start with `--local-only`, open
-   the UI.
+   the UI; on a Mac, install the DMG and check that the app loads.
 
 Report the version, the changes to pinned digests, and the artifact list with
 checksums.

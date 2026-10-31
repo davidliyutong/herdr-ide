@@ -58,16 +58,8 @@ jobs:
             web/pnpm-lock.yaml
             desktop/pnpm-lock.yaml
             extensions/*/pnpm-lock.yaml
-      # Pull requests check that the app packages; main also builds the DMG.
+      # Checks that the app packages; the release workflow publishes DMGs.
       - run: make desktop-app
-        if: github.event_name == 'pull_request'
-      - run: make desktop-dmg
-        if: github.event_name != 'pull_request'
-      - uses: actions/upload-artifact@v7
-        if: github.event_name != 'pull_request'
-        with:
-          name: macos-desktop
-          path: dist/desktop/*.dmg
 
   cross-compile:
     runs-on: ubuntu-24.04

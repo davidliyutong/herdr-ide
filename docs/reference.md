@@ -133,7 +133,7 @@ browser's menu shows instead.
 | `HERDR_IDE_DESKTOP_DEV` | Electron | `1` forces isolated development even in a packaged app: instance `dev`, local-only, local/remote session `herdr-ide-dev`, separate Electron profile. Unpackaged Electron always uses this mode. |
 | `HERDR_IDE_DESKTOP_PORT` | Electron | Loopback port (default `7781`, development `7791`); `0` chooses an ephemeral port, which gives a new browser storage origin. |
 | `ARCH` | `make desktop-app`, `make desktop-dmg` | `arm64` or `x64`; defaults to the host Node architecture. The Go core architecture is matched automatically. |
-| `VERSION` | desktop build | Semver for app metadata, DMG name and bundled core. Without it the core reports `git describe` and the app uses the `desktop/package.json` version. |
+| `VERSION` | desktop build | Semver for app metadata, DMG name and bundled core; a leading `v` (release tags such as `v0.2.0`) is kept for the core and dropped for the app metadata and DMG name. Without it the core reports `git describe` and the app uses the `desktop/package.json` version. |
 | `HERDR_BIN` | agent | herdr binary to use on a machine. Without it, an installed herdr is searched; the local machine falls back to its copy of the bundled one. |
 | `HERDR_TEST_BIN` | `make it` | herdr executable for the integration test (for example the bundled one); otherwise found on `PATH`. |
 | `XDG_STATE_HOME`, `XDG_CONFIG_HOME`, `HERDR_CONFIG_PATH`, `HERDR_SOCKET_PATH` | core, agent | Honoured like herdr does when locating its state, configuration and sockets. |

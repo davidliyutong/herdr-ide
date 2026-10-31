@@ -77,8 +77,11 @@ Open <http://127.0.0.1:7780>. Press `ctrl+b space` for the command palette and
 
 ## macOS desktop app
 
-On macOS, build an Electron app with the same embedded core, UI, agents and
-VS Code bridge:
+On macOS, download the DMG for your Mac from GitHub Releases
+(`…-mac-arm64.dmg` for Apple Silicon, `…-mac-x64.dmg` for Intel) and drag
+the app to Applications. It is not notarized, so allow the first launch under
+System Settings → Privacy & Security. Or build the Electron app, with the
+same embedded core, UI, agents and VS Code bridge, yourself:
 
 ```bash
 make desktop-app                 # .app in dist/desktop/mac[-arm64]/
@@ -92,7 +95,7 @@ macOS version for Finder and the Dock.
 The app starts its own core at `http://127.0.0.1:7781` with instance
 `desktop`; quitting or closing the main window stops that core. The app
 includes herdr, used when none is installed; OpenSSH must already be
-installed. These local builds use ad-hoc signing,
+installed. Released and local builds use ad-hoc signing,
 without Apple notarization or automatic updates. See
 [desktop deployment](docs/deployment.md#macos-desktop-app) for paths,
 versioning and isolated development. Only macOS packaging is implemented.

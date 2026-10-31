@@ -43,7 +43,16 @@ opens a terminal for it, and later connections reuse that ssh ControlMaster.
 
 ## macOS desktop app
 
-Build on a Mac with Go, Node.js 22.12+ and pnpm:
+Each GitHub release attaches `herdr-ide-<version>-mac-arm64.dmg` (Apple
+Silicon) and `herdr-ide-<version>-mac-x64.dmg` (Intel), built by the release
+workflow from the tag and listed in `SHA256SUMS` with the archives. Check the
+digest (`shasum -a 256 -c SHA256SUMS --ignore-missing`) and, for a public
+repository, the provenance (`gh attestation verify <dmg> --repo <owner>/<repo>`)
+before the first launch. The released DMGs are signed ad hoc like local
+builds, so macOS blocks the first launch of the downloaded app; allow it once
+under System Settings → Privacy & Security.
+
+To build on a Mac, install Go, Node.js 22.12+ and pnpm:
 
 ```bash
 make desktop-app                       # host-architecture .app
