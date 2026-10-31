@@ -20,6 +20,9 @@ const (
 	maxGridDim   = 4096
 	maxGridCells = 1_000_000
 	maxSpans     = 4096
+	maxLinks     = 65_536
+	maxPanes     = 4096
+	maxSplits    = 4096
 )
 
 // ReadFrame reads one length-prefixed payload of at most max bytes.
@@ -438,6 +441,9 @@ func (r *reader) cells() ([]Cell, error) {
 	if err != nil {
 		return nil, err
 	}
+	if n > maxGridCells {
+		return nil, fmt.Errorf("endpoint: %d cells", n)
+	}
 	out := make([]Cell, n)
 	for i := range out {
 		if out[i], err = r.cell(); err != nil {
@@ -502,6 +508,9 @@ func (r *reader) frameData(metaOnly bool) (Frame, error) {
 	n, err := r.length(1)
 	if err != nil {
 		return f, err
+	}
+	if n > maxLinks {
+		return f, fmt.Errorf("endpoint: %d hyperlinks", n)
 	}
 	f.Links = make([]string, n)
 	for i := range f.Links {
@@ -568,6 +577,9 @@ func (r *reader) panes() ([]Pane, error) {
 	n, err := r.length(20)
 	if err != nil {
 		return nil, err
+	}
+	if n > maxPanes {
+		return nil, fmt.Errorf("endpoint: %d panes", n)
 	}
 	out := make([]Pane, n)
 	for i := range out {
@@ -777,6 +789,9 @@ func (r *reader) surface(metaOnly bool) (*Surface, error) {
 	if err != nil {
 		return nil, err
 	}
+	if n > maxSplits {
+		return nil, fmt.Errorf("endpoint: %d splits", n)
+	}
 	s.Splits = make([]Split, n)
 	for i := range s.Splits {
 		if s.Splits[i], err = r.split(); err != nil {
@@ -801,6 +816,7 @@ func (r *reader) patchRows() ([]PatchRow, error) {
 		return nil, fmt.Errorf("endpoint: %d patch rows", n)
 	}
 	out := make([]PatchRow, n)
+	total := 0
 	for i := range out {
 		if out[i].X, err = r.u16(); err != nil {
 			return nil, err
@@ -810,6 +826,9 @@ func (r *reader) patchRows() ([]PatchRow, error) {
 		}
 		if out[i].Cells, err = r.cells(); err != nil {
 			return nil, err
+		}
+		if total += len(out[i].Cells); total > maxGridCells {
+			return nil, fmt.Errorf("endpoint: patch of more than %d cells", maxGridCells)
 		}
 	}
 	return out, nil

@@ -160,7 +160,8 @@ export const en = {
   'surface.error.herdr_too_old': "This machine's herdr does not speak endpoint generation 1; herdr 0.9.5 or newer is needed.",
   'surface.error.invalid_surface': 'The window is too small or too large for herdr.',
   'surface.error.handshake': 'herdr refused the connection.',
-  'surface.clipboardBlocked': 'A program copied text, but the browser did not allow writing to the clipboard.',
+  'surface.clipboard': 'A program copied {n} characters: “{text}”',
+  'surface.copy': 'Copy',
 
   'dock.code': 'VS Code',
   'dock.preview': 'Preview',

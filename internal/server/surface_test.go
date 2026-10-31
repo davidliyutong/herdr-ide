@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"flag"
 	"os"
+	"strings"
 	"testing"
 
 	"herdr-ide/internal/herdr/endpoint"
@@ -159,5 +160,52 @@ func TestSurfaceBinaryVector(t *testing.T) {
 	}
 	if !bytes.Equal(want, both) {
 		t.Fatal("surface.json differs from the encoder (go test ./internal/server -run Vector -update)")
+	}
+}
+
+// A browser handed the session before it joined is told it owns it, and a
+// takeover by the owner repeats that.
+func TestOwnerHandedOverBeforeJoin(t *testing.T) {
+	s := newTestServer()
+	a := fakeClient(s, false)
+	s.surfJoin(a)
+	b := fakeClient(s, false) // registered, not yet joined
+	a.leaveForTest()
+	if st := lastState(t, b); st != "owner" {
+		t.Fatalf("handover: %q", st)
+	}
+	s.surfJoin(b)
+	if st := lastState(t, b); st != "owner" {
+		t.Fatalf("join after handover: %q", st)
+	}
+	s.surfTakeover(b)
+	if st := lastState(t, b); st != "owner" {
+		t.Fatalf("takeover by the owner: %q", st)
+	}
+}
+
+// OSC 52 reaches a writable owner only, and only up to the cap.
+func TestClipboardForwarding(t *testing.T) {
+	for _, c := range []struct {
+		readOnly bool
+		size     int
+		want     bool
+	}{{false, 8, true}, {true, 8, false}, {false, maxClipboard + 1, false}} {
+		s := newTestServer()
+		o := fakeClient(s, c.readOnly)
+		s.surfJoin(o)
+		ss := &surfSession{s: s, m: "m"}
+		s.surf.sessions["m"] = ss
+		lastState(t, o)
+		data := strings.Repeat("A", c.size)
+		ss.event(endpoint.Event{Clipboard: &data})
+		got := false
+		for len(o.send) > 0 {
+			m := <-o.send
+			got = got || strings.Contains(string(m.data), `"clip"`)
+		}
+		if got != c.want {
+			t.Errorf("%+v: forwarded %v", c, got)
+		}
 	}
 }

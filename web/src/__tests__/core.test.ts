@@ -24,9 +24,9 @@ describe('resolvePath', () => {
 });
 
 describe('pasteText', () => {
-  it('converts newlines and strips embedded paste markers', () => {
+  it('converts newlines and strips escapes', () => {
     expect(pasteText('a\nb\r\nc')).toBe('a\rb\rc');
-    expect(pasteText('x\x1b[201~rm -rf')).toBe('xrm -rf');
+    expect(pasteText('x\x1b[201~rm -rf')).toBe('x[201~rm -rf');
   });
 });
 

@@ -70,10 +70,20 @@ export function linkTitle(l: { kind: FoundLink['kind']; text: string }): string 
   return t(mediaExt.test(l.text) ? 'link.preview' : 'link.open');
 }
 
+/** Whether a link target may be opened: http(s) and mailto only. */
+export function safeUrl(url: string): boolean {
+  try {
+    return ['http:', 'https:', 'mailto:'].includes(new URL(url).protocol);
+  } catch {
+    return false;
+  }
+}
+
 /** Opens a URL in a new tab, or a path in Quick Look or VS Code. */
 export function openLink(l: { kind: FoundLink['kind']; text: string }, ctx: LinkContext) {
   if (l.kind === 'url') {
-    window.open(l.text, '_blank', 'noopener');
+    // Targets come from pane output (OSC 8): web links only.
+    if (safeUrl(l.text)) window.open(l.text, '_blank', 'noopener');
     return;
   }
   const r = resolvePath(l.text, ctx);

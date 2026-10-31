@@ -152,13 +152,13 @@ describe('pane input contract (testdata/keys.json)', () => {
     ]);
   });
 
-  it('pastes once, without paste markers', () => {
+  it('pastes once, without escapes', () => {
     const ev = new Event('paste', { bubbles: true, cancelable: true });
     Object.defineProperty(ev, 'clipboardData', {
       value: { files: [], getData: (t: string) => (t === 'text/plain' ? 'x\ny\x1b[201~' : '') },
     });
     textarea.dispatchEvent(ev);
-    expect(pressesSent()).toEqual([{ t: 'paste', text: 'x\ry' }]);
+    expect(pressesSent()).toEqual([{ t: 'paste', text: 'x\ry[201~' }]);
   });
 
   it('commits composed text once', () => {

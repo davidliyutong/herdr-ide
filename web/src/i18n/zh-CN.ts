@@ -158,7 +158,8 @@ export const zhCN: Messages = {
   'surface.error.herdr_too_old': '这台机器上的 herdr 不支持 endpoint 第 1 代协议，需要 herdr 0.9.5 或更新版本。',
   'surface.error.invalid_surface': '窗口对 herdr 来说太小或太大。',
   'surface.error.handshake': 'herdr 拒绝了连接。',
-  'surface.clipboardBlocked': '程序复制了文本，但浏览器不允许写入剪贴板。',
+  'surface.clipboard': '程序复制了 {n} 个字符：“{text}”',
+  'surface.copy': '复制',
 
   'dock.code': 'VS Code',
   'dock.preview': '预览',

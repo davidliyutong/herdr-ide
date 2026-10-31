@@ -84,8 +84,9 @@ from herdr.
   `ClientShellResize` when the size changes) and closes the others. When
   herdr's focused tab or pane differs from the view's, the core sends
   `pane.focus` (or `tab.focus`) as an endpoint request; it repeats this after
-  every snapshot, so herdr follows the UI. The browser never sends endpoint
-  requests itself.
+  every snapshot, so herdr follows the UI. For a read-only browser only the
+  tab is followed: herdr's focused pane is where the session's input goes.
+  The browser never sends endpoint requests itself.
 - Without an owner the connections stay open for 10 s (a page reload), then
   close.
 - herdr's output reaches the owner only: `surf` (`open`, `error` with a
@@ -134,9 +135,11 @@ shrinks the repeated cell fields.
 The client socket is reachable only through the agent, as the API socket.
 The browser cannot address herdr's endpoint directly: the core composes the
 only endpoint requests (`tab.focus`, `pane.focus`) and encodes input events
-from a closed set. A read-only browser sends no input, focus or colors and
-no request beyond what showing a tab needs; it still sets the tab size, as
-any herdr client does. See [SECURITY.md](../../SECURITY.md).
+from a closed set. A read-only browser sends no input, focus or colors,
+never moves herdr's focused pane, and gets no clipboard writes; it still
+selects the tab it shows and sets the tab size, as any herdr client does.
+Pastes are filtered in the core as well as the browser, OSC 52 writes need
+a click in the browser, and decoding is bounded per item type. See [SECURITY.md](../../SECURITY.md).
 
 ## Testing
 

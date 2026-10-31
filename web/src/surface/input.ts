@@ -121,9 +121,12 @@ export function releaseOf(press: KeyEvent): KeyEvent {
   return { ...press, kind: 2, text: undefined, shifted: press.shifted };
 }
 
-/** Pasted text as terminals send it: newlines as CR, and without bracketed
- * paste markers, so pasted text cannot end the paste early (herdr wraps it
- * in markers when the pane's program asked for that, but does not filter). */
+/** Pasted text as terminals send it: newlines as CR, and without ESC or
+ * other C0/C1 controls (tab and CR aside), so pasted text cannot end the
+ * paste early or smuggle escape sequences (herdr wraps it in markers when
+ * the pane's program asked for that, but does not filter it). The core
+ * filters again. */
 export function pasteText(text: string): string {
-  return text.replace(/\r?\n/g, '\r').replace(/\x1b\[20[01]~/g, '');
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/\r?\n/g, '\r').replace(/[\x00-\x08\x0a-\x0c\x0e-\x1f\x7f-\x9f]/g, '');
 }

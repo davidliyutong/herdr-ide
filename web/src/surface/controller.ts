@@ -15,7 +15,7 @@ import { routeKey } from './keys';
 import { pasteText, releaseOf, type InputEvent, type KeyEvent, type MouseEvent as PaneMouse } from './input';
 import { Selection, stepLines, viewTop, wordAt, type Point } from './selection';
 import type { SurfaceMeta, SurfacePane, SurfaceSplit } from './protocol';
-import { findLinks, openLink, linkTitle, type LinkContext } from '../terminal/links';
+import { findLinks, openLink, linkTitle, safeUrl, type LinkContext } from '../terminal/links';
 import { themes } from '../terminal/options';
 import { termFontFamily } from '../terminal/fonts';
 import type { Appearance } from '../appearance';
@@ -596,7 +596,7 @@ export class SurfaceController {
     const p = (ev.metaKey || ev.ctrlKey) && this.paneAt(x, y);
     if (p && y >= p.inner.y && y < p.inner.y + p.inner.h && x >= p.inner.x && x < p.inner.x + p.inner.w) {
       const cell = grid.cell(x, y);
-      if (cell.link >= 0 && this.meta?.links[cell.link]) {
+      if (cell.link >= 0 && this.meta?.links[cell.link] && safeUrl(this.meta.links[cell.link])) {
         // OSC 8 hyperlink: the run of cells with the same target.
         let a = x;
         let b = x + 1;

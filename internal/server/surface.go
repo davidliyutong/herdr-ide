@@ -24,6 +24,9 @@ import (
 // then told it was taken over. A read-only browser never takes over a
 // writable one.
 
+// maxClipboard bounds an OSC 52 write forwarded to the browser (base64).
+const maxClipboard = 1 << 20
+
 // sessionGrace keeps endpoint connections open briefly after the owner left,
 // so that a page reload does not resize herdr's tabs twice.
 const sessionGrace = 10 * time.Second
@@ -83,11 +86,15 @@ func (s *Server) surfJoin(c *wsClient) {
 	st := &s.surf
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	if st.owner == nil {
+	switch st.owner {
+	case nil:
 		s.setOwnerLocked(c)
-		return
+	case c:
+		// Handed over before joining (the previous owner left meanwhile).
+		s.sendSessionState(c, "owner")
+	default:
+		s.sendSessionState(c, "busy")
 	}
-	s.sendSessionState(c, "busy")
 }
 
 // surfTakeover makes c the owner unless a read-only browser would displace a
@@ -97,6 +104,7 @@ func (s *Server) surfTakeover(c *wsClient) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	if st.owner == c {
+		s.sendSessionState(c, "owner")
 		return
 	}
 	if prev := st.owner; prev != nil {
@@ -180,6 +188,11 @@ func (s *Server) surfView(c *wsClient, v viewMsg) {
 			ss.cancel()
 			delete(st.sessions, m)
 		}
+	}
+	if c.readOnly {
+		// herdr's focused pane is where the session's input goes; a watcher
+		// only selects the tab it shows.
+		v.Pane = ""
 	}
 	ss := st.sessions[v.M]
 	if ss == nil {
@@ -474,7 +487,8 @@ func (ss *surfSession) event(e endpoint.Event) {
 			o.enqueue(outMsg{binary: true, data: encodePatch(ss.gen, e.Moves, e.Patch)})
 		}
 	case e.Clipboard != nil:
-		if o != nil && !o.readOnly {
+		// The browser asks the user before writing its clipboard.
+		if o != nil && !o.readOnly && len(*e.Clipboard) <= maxClipboard {
 			o.sendJSON(map[string]any{"t": "clip", "m": ss.m, "data": *e.Clipboard})
 		}
 	case e.Bell > 0:

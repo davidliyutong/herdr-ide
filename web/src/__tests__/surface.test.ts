@@ -5,7 +5,7 @@ import { symbolWidth } from '../surface/width';
 import { color, palette } from '../surface/colors';
 import { Selection, readRange, span, stepLines, viewTop, wordAt } from '../surface/selection';
 import { keyEvent, pasteText, releaseOf } from '../surface/input';
-import { findLinks } from '../terminal/links';
+import { findLinks, safeUrl } from '../terminal/links';
 import vectorData from './testdata/surface.json';
 import { themes } from '../terminal/options';
 
@@ -189,8 +189,18 @@ describe('keyEvent', () => {
   it('releases without text', () => {
     expect(releaseOf({ code: 'Char', char: 'a', mods: 2, kind: 0, tracksRelease: true })).toMatchObject({ kind: 2, text: undefined });
   });
-  it('strips paste markers', () => {
-    expect(pasteText('a\x1b[200~b\nc')).toBe('ab\rc');
+  it('strips paste markers and every escape', () => {
+    expect(pasteText('a\x1b[200~b\nc')).toBe('a[200~b\rc');
+    for (const evil of ['\x1b[201~id\n', '\x1b[20\x1b[201~1~\nid', '\u009b201~id']) expect(pasteText(evil)).not.toMatch(/[\x1b\u009b]/);
+    expect(pasteText('x\ty é')).toBe('x\ty é');
+  });
+});
+
+describe('safeUrl', () => {
+  it('opens only web links from pane output', () => {
+    expect(safeUrl('https://x.dev/a')).toBe(true);
+    expect(safeUrl('mailto:a@b.c')).toBe(true);
+    for (const bad of ['javascript:alert(1)', 'file:///etc/passwd', 'vscode://x', 'ssh://h', 'not a url']) expect(safeUrl(bad)).toBe(false);
   });
 });
 

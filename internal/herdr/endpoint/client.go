@@ -2,6 +2,7 @@ package endpoint
 
 import (
 	"fmt"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -139,11 +140,33 @@ func (w *writer) inputEvent(e InputEvent) error {
 		w.u16(m.Lines)
 	case "paste":
 		w.variant(3)
-		w.string(e.Text)
+		w.string(SanitizePaste(e.Text))
 	default:
 		return fmt.Errorf("endpoint: unknown input event %q", e.T)
 	}
 	return nil
+}
+
+// MaxInputText bounds the text of one text or paste event.
+const MaxInputText = 1 << 20
+
+// SanitizePaste removes ESC and C0/C1 controls other than tab and CR from
+// pasted text. herdr wraps a paste in bracketed-paste markers when the
+// program asked for them but does not filter the text, so a pasted marker
+// (or any escape sequence) could end the paste early and run the rest as
+// typed input.
+func SanitizePaste(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r == '\t' || r == '\r':
+			return r
+		case r == '\n':
+			return '\r'
+		case r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f):
+			return -1
+		}
+		return r
+	}, s)
 }
 
 // EncodePaneInput builds a framed ClientShellPaneInput.
@@ -156,6 +179,9 @@ func EncodePaneInput(paneID string, events []InputEvent) ([]byte, error) {
 	w.string(paneID)
 	w.varint(uint64(len(events)))
 	for _, e := range events {
+		if len(e.Text) > MaxInputText {
+			return nil, fmt.Errorf("endpoint: input text of %d bytes", len(e.Text))
+		}
 		if err := w.inputEvent(e); err != nil {
 			return nil, err
 		}

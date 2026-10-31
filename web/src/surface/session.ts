@@ -7,6 +7,8 @@
 
 import { create } from 'zustand';
 import { conn } from '../lib/conn';
+import { useStore } from '../state/store';
+import { t } from '../i18n';
 import { Grid } from './grid';
 import { decodeUpdate, type SurfaceMeta } from './protocol';
 import type { InputEvent } from './input';
@@ -46,12 +48,11 @@ interface SurfaceState {
   /** The tab herdr currently renders for this connection. */
   shown?: { m: string; tab: string; ws: string };
   bell: number;
-  clipFailed: number;
   /** Counts complete surfaces received. */
   fulls: number;
 }
 
-export const useSurface = create<SurfaceState>(() => ({ ownership: 'pending', bell: 0, clipFailed: 0, fulls: 0 }));
+export const useSurface = create<SurfaceState>(() => ({ ownership: 'pending', bell: 0, fulls: 0 }));
 
 /** The grid of the shown surface. */
 export const grid = new Grid();
@@ -131,9 +132,17 @@ export function handleSurfaceMessage(m: { t: string } & Record<string, any>) {
       useSurface.setState({ shown: { m: m.m, tab: m.tab, ws: m.ws } });
       break;
     case 'clip': {
-      // OSC 52 from a pane program: copy to the browser's clipboard.
+      // OSC 52 from a pane program: pane output is not trusted, so the user
+      // confirms before it replaces the clipboard (the click is also the
+      // gesture browsers want).
       const text = decodeBase64(m.data);
-      navigator.clipboard?.writeText(text).catch(() => useSurface.setState((s) => ({ clipFailed: s.clipFailed + 1 })));
+      if (!text) break;
+      const preview = text.length > 60 ? `${text.slice(0, 60)}…` : text;
+      useStore.getState().toast(t('surface.clipboard', { n: text.length, text: preview.replace(/\s+/g, ' ') }), {
+        label: t('surface.copy'),
+        sticky: true,
+        run: () => void navigator.clipboard?.writeText(text).catch(() => {}),
+      });
       break;
     }
     case 'bell':

@@ -583,3 +583,59 @@ func TestRequestAndEvents(t *testing.T) {
 	}
 	<-conn.Done()
 }
+
+func TestPasteCannotEndItself(t *testing.T) {
+	for _, in := range []string{"\x1b[201~id\n", "\x1b[20\x1b[201~1~\nid", "\u009b201~id", "a\x00b\x07c"} {
+		out := SanitizePaste(in)
+		if strings.ContainsAny(out, "\x1b\u009b\x00\x07\n") {
+			t.Errorf("%q -> %q", in, out)
+		}
+		b, err := EncodePaneInput("p", []InputEvent{{T: "paste", Text: in}})
+		if err != nil || bytes.Contains(b, []byte("\x1b[201~")) {
+			t.Errorf("%q encodes %q (%v)", in, b, err)
+		}
+	}
+	if got := SanitizePaste("x\ty\r\nz é"); got != "x\ty\r\rz é" {
+		t.Errorf("got %q", got)
+	}
+	if _, err := EncodePaneInput("p", []InputEvent{{T: "paste", Text: strings.Repeat("a", MaxInputText+1)}}); err == nil {
+		t.Error("oversized paste accepted")
+	}
+}
+
+// Counts the payload could hold but herdr never sends are refused before
+// allocating per item.
+func TestDecoderCountCaps(t *testing.T) {
+	big := func(fill func(w *writer)) []byte {
+		w := &writer{}
+		fill(w)
+		return w.b
+	}
+	// A frame of 2M minimal links.
+	links := big(func(w *writer) {
+		w.variant(13)
+		w.string("b")
+		w.varint(1)
+		w.varint(1)
+		w.varint(0) // cells of an empty frame
+		w.u16(0)
+		w.u16(0)
+		w.u8(0)
+		w.varint(2_000_000)
+		w.b = append(w.b, make([]byte, 2_000_000)...)
+	})
+	if _, err := DecodeMessage(links); err == nil || !strings.Contains(err.Error(), "hyperlinks") {
+		t.Fatalf("links: %v", err)
+	}
+	cells := big(func(w *writer) {
+		w.variant(13)
+		w.string("b")
+		w.varint(1)
+		w.varint(1)
+		w.varint(maxGridCells + 1)
+		w.b = append(w.b, make([]byte, (maxGridCells+1)*minCell)...)
+	})
+	if _, err := DecodeMessage(cells); err == nil || !strings.Contains(err.Error(), "cells") {
+		t.Fatalf("cells: %v", err)
+	}
+}

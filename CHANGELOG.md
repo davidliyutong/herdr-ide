@@ -14,8 +14,8 @@ All notable changes are documented here. The format follows
   keys and mouse events for each pane's modes (application cursor keys,
   kitty keyboard protocol, mouse reporting), sends focus events, and
   answers programs' color queries with the UI theme's colors; OSC 52 from
-  programs copies to the browser's clipboard and the bell flashes the pane
-  area. Selections stay inside their pane. Pane headers sit on the top
+  programs offers a **Copy** button (pane output never writes the clipboard
+  by itself) and the bell flashes the pane area. Selections stay inside their pane. Pane headers sit on the top
   border herdr draws. Requires herdr 0.9.5 or newer on every machine.
 - One browser tab uses the session at a time, like a KVM console: another
   tab can take it over and the previous one says so. This replaces the

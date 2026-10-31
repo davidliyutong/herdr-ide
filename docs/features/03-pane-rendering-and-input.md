@@ -53,7 +53,7 @@ received, the popup itself is not drawn).
 | keydown | `Key` with code, modifiers, the text it types, and the shifted alternate for letters; herdr encodes it for the pane (legacy, application cursor and keypad, kitty keyboard protocol, modifyOtherKeys) |
 | keyup of a key that types no text | `Key` release (herdr encodes it only for programs that asked for release events) |
 | IME composition end, other text input | `TextCommit` |
-| paste | `Paste` with newlines as CR and paste markers removed; herdr brackets it if the program enabled bracketed paste |
+| paste | `Paste` with newlines as CR and ESC and other controls removed (by the core too); herdr brackets it if the program enabled bracketed paste |
 | wheel | `Mouse` scroll with a line count; herdr routes it to the program or to its scrollback |
 | mouse down/drag/up in a pane whose program reports the mouse (without Shift) | `Mouse` with the cell inside the pane |
 | focus and blur of the pane surface | `ClientShellFocus` (focus events for programs that ask) |
@@ -112,16 +112,17 @@ What the table records about herdr 0.9.5:
 
 **Links** (`terminal/links.ts`)
 
-With ⌘/Ctrl held, OSC 8 hyperlinks of the grid and URLs or paths found in
-the row's text are underlined; a click opens URLs in a new tab and paths in
+With ⌘/Ctrl held, OSC 8 hyperlinks of the grid (`http`, `https` and
+`mailto` targets only) and URLs or paths found in the row's text are
+underlined; a click opens URLs in a new tab and paths in
 Quick Look or VS Code ([06](06-quick-look-and-files.md)).
 
 **Clipboard and bell**
 
-OSC 52 from a pane program reaches the owning browser (not in read-only
-mode) and is written with `navigator.clipboard`; when the browser refuses
-(no recent user activation) a toast says so. A bell flashes the surface's
-edge.
+OSC 52 from a pane program (up to 1 MiB) reaches the owning browser, not in
+read-only mode. Pane output is not trusted, so a toast shows the text's
+length and start and only its **Copy** button writes the clipboard; the click
+is also the user gesture browsers want. A bell flashes the surface's edge.
 
 ## Alternatives considered
 
@@ -139,7 +140,7 @@ edge.
   surface after reconnecting is complete.
 - **A patch for an older generation** (a new connection's surface is
   already shown) → dropped by generation number.
-- **Clipboard write refused** → toast; the program's text is lost, as in a
+- **Clipboard toast dismissed** → the program's text is not copied, as in a
   terminal without clipboard permission.
 - **Output arrives while a selection is shown** → at the live bottom new
   lines move the text under the highlight until the next scroll; the copied

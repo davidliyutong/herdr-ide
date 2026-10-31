@@ -32,7 +32,6 @@ export function SurfaceView({ m, tabId, layout }: Props) {
   const meta = useSurface((s) => s.meta);
   const shown = useSurface((s) => s.shown);
   const bell = useSurface((s) => s.bell);
-  const clipFailed = useSurface((s) => s.clipFailed);
   const fulls = useSurface((s) => s.fulls);
   const [cell, setCell] = useState({ cols: 0, rows: 0, cw: 8, ch: 16 });
   const [splitDrag, setSplitDrag] = useState<{ split: SurfaceSplit; ratio: number }>();
@@ -115,10 +114,6 @@ export function SurfaceView({ m, tabId, layout }: Props) {
     const id = setTimeout(() => setFlash(false), 150);
     return () => clearTimeout(id);
   }, [bell]);
-
-  useEffect(() => {
-    if (clipFailed) useStore.getState().toast(t('surface.clipboardBlocked'));
-  }, [clipFailed]);
 
   const dpr = window.devicePixelRatio || 1;
   const cw = cell.cw / dpr;
