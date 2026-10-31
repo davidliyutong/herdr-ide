@@ -87,8 +87,9 @@ The desktop and browser share a terminal-pane icon, with a multi-resolution
 macOS version for Finder and the Dock.
 
 The app starts its own core at `http://127.0.0.1:7781` with instance
-`desktop`; quitting or closing the main window stops that core. herdr and
-OpenSSH must already be installed. These local builds use ad-hoc signing,
+`desktop`; quitting or closing the main window stops that core. The app
+includes herdr, used when none is installed; OpenSSH must already be
+installed. These local builds use ad-hoc signing,
 without Apple notarization or automatic updates. See
 [desktop deployment](docs/deployment.md#macos-desktop-app) for paths,
 versioning and isolated development. Only macOS packaging is implemented.

@@ -14,8 +14,7 @@ Goals: reproducible dependency resolution, native macOS arm64/x64 `.app`
 and DMG builds, automatic core ownership and cleanup, safe renderer windows,
 and a development mode that cannot connect to the default herdr session.
 
-Non-goals: Windows/Linux installers, universal binaries, bundling herdr,
-automatic updates, Developer ID signing/notarization,
+Non-goals: Windows/Linux installers, universal binaries, automatic updates, Developer ID signing/notarization,
 or replacing browser access. The shell and packaging configuration are
 separate from the Go/Web application so additional platform targets can be
 implemented independently.
@@ -39,8 +38,11 @@ implemented independently.
   opt into it. Both modes have separate Electron profiles and single-instance
   locks. Closing the main window quits; a second launch focuses it.
 - Finder PATH gains common binary locations without executing a shell.
-  herdr and OpenSSH are user-installed; the desktop shell does not start or
-  stop herdr's servers. All inherited environment and SSH configuration
+  The app carries the release's herdr and its notices in
+  `Contents/Resources/bin/herdr` and `licenses/herdr/`, beside the core, which
+  uses it only when no installed herdr is found
+  ([15](15-bundled-herdr.md)). OpenSSH is user-installed. The desktop shell
+  does not start or stop herdr's servers. All inherited environment and SSH configuration
   remain available to the core.
 - The web brand constants and English/Chinese message dictionaries are
   imported into the shell. Build metadata reads the same brand file. Native
@@ -76,7 +78,7 @@ implemented independently.
 - Electron crash: the pipe closes and Go cancels its context. A normal
   quit allows agent cleanup before SIGKILL; force-killed agents retain their
   existing orphan-reaping and idle-timeout protection.
-- herdr missing or unavailable: the existing machine status UI shows the
+- No local herdr session running: the existing machine status UI shows the
   error; the desktop shell does not bootstrap or alter herdr sessions.
 - Downloaded ad-hoc signed app blocked by Gatekeeper: explicit user approval
   can be required; this build is not a notarized distribution.

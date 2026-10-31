@@ -22,6 +22,7 @@ All notable changes are documented here. The format follows
   produce an ad-hoc signed `.app` and a drag-to-Applications DMG for arm64
   or x64. The sandboxed desktop shell owns its bundled core, preserves the
   web UI and supports internal program/VS Code windows and external links.
+  The app includes the bundled herdr and its notices.
 - `--parent-stdio` reports core readiness as JSON and stops on parent-pipe
   EOF; `make dev-desktop` uses the isolated development session and instance.
 - Ignored `.worktrees/` directory for branch workspaces.

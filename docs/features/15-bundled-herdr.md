@@ -30,6 +30,8 @@ stopping or upgrading herdr servers; installing herdr on SSH machines; Windows.
   and the application and herdr license notices (`licenses/herdr/`, generated
   by `scripts/herdr-notices.py`). The four remote agents stay embedded in the
   core without herdr. No upstream binary is executed while cross-compiling.
+  The macOS desktop app carries the same herdr beside its core in
+  `Contents/Resources/bin` ([16](16-desktop-packaging.md)).
 - The bundled executable is the `herdr` beside the real core executable
   (symlinks to the core are resolved). The core does not verify it at runtime:
   once extracted it is the user's herdr installation like any other, and

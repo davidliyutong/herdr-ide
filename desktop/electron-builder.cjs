@@ -26,6 +26,9 @@ module.exports = {
   },
   extraResources: [
     { from: `../dist/${slug}-darwin-${goArch}`, to: `bin/${slug}` },
+    // Beside the core, where it finds the bundled herdr (docs/features/15).
+    { from: `../dist/herdr/herdr-darwin-${goArch}`, to: 'bin/herdr' },
+    { from: '../licenses/herdr', to: 'licenses/herdr' },
     { from: '../LICENSE', to: 'LICENSE' },
     { from: '../THIRD_PARTY_NOTICES.md', to: 'THIRD_PARTY_NOTICES.md' },
   ],

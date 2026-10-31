@@ -64,11 +64,16 @@ and multi-resolution ICNS are committed, so ordinary builds need no graphics
 tools. After editing the sources, run `brew install librsvg` if needed, then
 `make desktop-icons` on macOS and rebuild the app/DMG.
 
-herdr and OpenSSH remain external prerequisites. Finder launches include
-`~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin` and system paths in the
-core's PATH; `HERDR_BIN` can select another herdr binary. The launcher does
-not execute shell startup files. Existing herdr servers and SSH configuration are reused.
-The app never starts or stops herdr servers itself.
+The app includes herdr (`herdr-ide.app/Contents/Resources/bin/herdr`), used
+only when no installed herdr is found; OpenSSH remains an external
+prerequisite. Finder launches include `~/.local/bin`, `/opt/homebrew/bin`,
+`/usr/local/bin` and system paths in the core's PATH. The launcher does not
+execute shell startup files, so variables exported there, such as
+`HERDR_BIN`, reach the core only when the app is started from that shell.
+Existing herdr servers and SSH configuration are reused. The app never starts
+or stops herdr servers itself; without an installed herdr, start the local
+server once by opening the TUI with
+`/Applications/herdr-ide.app/Contents/Resources/bin/herdr`.
 
 The core listens at `127.0.0.1:7781` with instance `desktop`, separate from
 the CLI default and `dev`. A fixed origin preserves UI preferences across
