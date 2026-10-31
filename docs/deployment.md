@@ -5,6 +5,7 @@ from browsers. It reaches herdr machines over ssh; nothing listens on the
 machines.
 
 - [Local use](#local-use)
+- [macOS desktop app](#macos-desktop-app)
 - [Remote access through a reverse proxy](#remote-access-through-a-reverse-proxy)
 - [Air-gapped networks](#air-gapped-networks)
 - [Remote resources](#remote-resources)
@@ -23,6 +24,68 @@ others with `--ssh`. herdr-ide uses OpenSSH with your `~/.ssh/config`
 (ProxyJump, agent, keys) in BatchMode. A machine that needs a password, 2FA or
 a host-key confirmation shows **Authentication required**; **Authenticate…**
 opens a terminal for it, and later connections reuse that ssh ControlMaster.
+
+## macOS desktop app
+
+Build on a Mac with Go, Node.js 22.12+ and pnpm:
+
+```bash
+make desktop-app                       # host-architecture .app
+VERSION=0.1.0 make desktop-dmg           # .app and DMG in dist/desktop/
+ARCH=x64 make desktop-dmg               # Intel core and Electron
+ARCH=arm64 make desktop-dmg             # Apple Silicon core and Electron
+```
+
+Each command builds the UI, bridge extension, four agents and the matching
+macOS core before bundling Electron. Versions are pinned in the desktop
+lockfile. The DMG contains an app and an Applications shortcut; drag the app
+to Applications, eject the image, then launch it. The build is ad-hoc signed,
+without a Developer ID or notarization; Gatekeeper may require explicit
+approval for a downloaded copy. Public signed distribution and automatic
+updates are outside this packaging mode. Windows and Linux installers are
+not implemented. The app and disk image use the project's terminal-pane icon.
+
+Editable icon sources live in `desktop/assets/icon.svg` and
+`web/public/icon.svg` (the simpler small-size version). The 1024-pixel PNG
+and multi-resolution ICNS are committed, so ordinary builds need no graphics
+tools. After editing the sources, run `brew install librsvg` if needed, then
+`make desktop-icons` on macOS and rebuild the app/DMG.
+
+herdr and OpenSSH remain external prerequisites. Finder launches include
+`~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin` and system paths in the
+core's PATH; `HERDR_BIN` can select another herdr binary. The launcher does
+not execute shell startup files. Existing herdr servers and SSH configuration are reused.
+The app never starts or stops herdr servers itself.
+
+The core listens at `127.0.0.1:7781` with instance `desktop`, separate from
+the CLI default and `dev`. A fixed origin preserves UI preferences across
+launches. `HERDR_IDE_DESKTOP_PORT` overrides the port; changing it changes
+the browser storage origin. An occupied port fails visibly; the app never
+attaches to an existing listener. Opening the app twice focuses the original
+window. Closing the main window or quitting stops its core and agents;
+closing a program window leaves the main app running. HTTP(S) external links
+open in the default browser; custom URL schemes are refused.
+
+For development, start only an isolated herdr session and run:
+
+```bash
+herdr --session herdr-ide-dev server &
+make dev-desktop
+```
+
+This builds the embedded UI (no hot reload) and uses port 7791, instance
+`dev`, local-only connections and session `herdr-ide-dev`. For packaged
+smoke tests, launch the executable with `HERDR_IDE_DESKTOP_DEV=1`, e.g.:
+
+```bash
+HERDR_IDE_DESKTOP_DEV=1 dist/desktop/mac-arm64/herdr-ide.app/Contents/MacOS/herdr-ide
+```
+
+Quit other development cores using the `dev` instance first. Electron uses
+its own persistent profile (`herdr-ide-desktop`, or `herdr-ide-desktop-dev`)
+under Application Support; remove that directory manually to reset desktop
+preferences. Browser and desktop preferences are separate. Core state and
+resource retention follow [Remote resources](#remote-resources).
 
 ## Remote access through a reverse proxy
 
@@ -131,6 +194,8 @@ What herdr-ide starts on a machine and how it is reclaimed:
 
 | Resource | Started | Reclaimed |
 | --- | --- | --- |
+| Desktop core | Electron launches its bundled binary | SIGTERM on normal quit, with a 20 s deadline before SIGKILL of that owned child; parent-stdin EOF also stops it if Electron crashes. herdr servers and pane programs remain running. |
+| Electron profile | First desktop launch | Kept until manually removed; Chromium manages its caches. Development has a separate profile. Core stderr is bounded to 16 KiB in memory; no desktop log files accumulate. |
 | `herdr-ide-agent` | one per core while connected | Exits when its ssh session ends; a dead link is detected by keepalives within about 45 s. |
 | `herdr terminal session` processes | one per pane being viewed | Ends when the pane is no longer shown, or with the agent. |
 | code-server | on first VS Code use | Stopped after `--code-server-idle` (default 20 min) without VS Code connections, when the agent exits (if that agent started it; for the local machine, when the core stops), or by the stop button in the VS Code panel. Hidden VS Code panels disconnect after 10 min. A process left behind by a killed agent is stopped by the next agent, and code-server exits by itself after 1 h without connections. |

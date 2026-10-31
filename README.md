@@ -49,7 +49,7 @@ Requirements:
 - [herdr](https://herdr.dev) on every machine you want to use, with remote
   machines saved through `herdr machine add`;
 - an OpenSSH client with working access to those machines;
-- to build: Go (version in `go.mod`), Node.js 22+ and pnpm (`corepack enable`
+- to build: Go (version in `go.mod`), Node.js 22.12+ and pnpm (`corepack enable`
   picks the pinned version).
 
 ```bash
@@ -60,6 +60,27 @@ make deps && make build
 Open <http://127.0.0.1:7780>. Press `ctrl+b space` for the command palette and
 `ctrl+b ?` for shortcuts. All flags are listed in
 [docs/reference.md](docs/reference.md).
+
+## macOS desktop app
+
+On macOS, build an Electron app with the same embedded core, UI, agents and
+VS Code bridge:
+
+```bash
+make desktop-app                 # .app in dist/desktop/mac[-arm64]/
+make desktop-dmg                 # .app plus a drag-to-Applications .dmg
+ARCH=x64 make desktop-dmg        # Intel; default is the host Node architecture
+```
+
+The desktop and browser share a terminal-pane icon, with a multi-resolution
+macOS version for Finder and the Dock.
+
+The app starts its own core at `http://127.0.0.1:7781` with instance
+`desktop`; quitting or closing the main window stops that core. herdr and
+OpenSSH must already be installed. These local builds use ad-hoc signing,
+without Apple notarization or automatic updates. See
+[desktop deployment](docs/deployment.md#macos-desktop-app) for paths,
+versioning and isolated development. Only macOS packaging is implemented.
 
 ## Remote access
 

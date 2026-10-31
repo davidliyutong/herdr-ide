@@ -31,7 +31,7 @@
 
 - 要使用的每台机器上都装好 [herdr](https://herdr.dev)，远程机器已用 `herdr machine add` 保存；
 - 能正常连到这些机器的 OpenSSH 客户端；
-- 构建需要：Go（版本见 `go.mod`）、Node.js 22+ 和 pnpm（`corepack enable` 会使用固定的版本）。
+- 构建需要：Go（版本见 `go.mod`）、Node.js 22.12+ 和 pnpm（`corepack enable` 会使用固定的版本）。
 
 ```bash
 make deps && make build
@@ -39,6 +39,20 @@ make deps && make build
 ```
 
 打开 <http://127.0.0.1:7780>。`ctrl+b space` 打开命令面板，`ctrl+b ?` 查看快捷键。全部参数见 [docs/reference.md](docs/reference.md)。
+
+## macOS 桌面应用
+
+在 macOS 上，可将同一套 core、Web UI、agent 和 VS Code 桥接扩展打包为 Electron 应用：
+
+```bash
+make desktop-app                 # .app 位于 dist/desktop/mac[-arm64]/
+make desktop-dmg                 # .app 和可拖入 Applications 安装的 .dmg
+ARCH=x64 make desktop-dmg        # Intel；默认使用当前 Node 的架构
+```
+
+桌面版与浏览器使用统一的终端窗格图标；macOS 版包含适用于 Finder 和 Dock 的多尺寸图标。
+
+应用会以 `desktop` instance 启动自己的 core，监听 `http://127.0.0.1:7781`；退出应用或关闭主窗口时回收该 core。仍需预先安装 herdr 和 OpenSSH。本地构建使用 ad-hoc 签名，不含 Apple 公证或自动更新。版本号、数据目录和隔离开发方式见[桌面部署说明](docs/deployment.md#macos-desktop-app)。目前仅实现 macOS 打包。
 
 ## 远程访问
 

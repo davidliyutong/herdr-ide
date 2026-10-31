@@ -55,7 +55,7 @@ with 0600 modes.
 
 | Option | Why not |
 | --- | --- |
-| Electron desktop app | Local-only; the user wanted browser access from other devices. |
+| Electron as the only delivery format | Would exclude access from other devices. The optional [desktop shell](15-desktop-packaging.md) wraps the same web core; browser delivery remains available. |
 | Tauri desktop app | macOS WKWebView does not provide service workers to arbitrary origins; VS Code webviews (Git Graph, media preview) break. |
 | Built-in password login | Duplicates what proxies do better (SSO, 2FA, device trust); authentication is delegated to the proxy by design. |
 | Blocklist of dangerous herdr methods | New herdr methods would be exposed by default. |

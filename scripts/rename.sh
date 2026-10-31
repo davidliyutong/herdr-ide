@@ -49,7 +49,7 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 else
   files=$(find . -type f -not -path './.git/*' | sed 's#^\./##')
 fi
-files=$(echo "$files" | grep -vE '(^|/)(node_modules|dist)/|pnpm-lock\.yaml$|go\.sum$|\.(gz|vsix|png|ico|woff2?)$' || true)
+files=$(echo "$files" | grep -vE '(^|/)(node_modules|dist)/|pnpm-lock\.yaml$|go\.sum$|\.(gz|vsix|png|ico|icns|woff2?)$' || true)
 
 if [[ -n "$dry" ]]; then
   echo "files that would change:"

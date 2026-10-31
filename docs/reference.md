@@ -73,6 +73,7 @@ setting in the UI.
 | `--agent-dir` | – | Directory with uncompressed `herdr-ide-agent-<os>-<arch>` builds, used instead of the embedded ones. |
 | `--ext-dir` | – | Directory containing `herdr-ide-bridge.vsix`, used instead of the embedded one. |
 | `--web-dir` | – | Serve the UI from this directory instead of the embedded build. |
+| `--parent-stdio` | `false` | Launcher lifecycle: write one `{"event":"ready","url":"http://host:port"}` line to stdout after binding; cancel and clean up when stdin closes. Logs remain on stderr. Used by Electron; does not change HTTP guards. |
 
 ## `fetch-assets` flags
 
@@ -128,6 +129,10 @@ browser's menu shows instead.
 | --- | --- | --- |
 | `HERDR_IDE_BRIDGE_SOCKET` | set by the agent for code-server | Socket of the VS Code bridge extension. |
 | `HERDR_IDE_CORE` | `pnpm -C web dev` | Core URL the Vite dev server proxies to (default `http://127.0.0.1:7780`). |
+| `HERDR_IDE_DESKTOP_DEV` | Electron | `1` forces isolated development even in a packaged app: instance `dev`, local-only, local/remote session `herdr-ide-dev`, separate Electron profile. Unpackaged Electron always uses this mode. |
+| `HERDR_IDE_DESKTOP_PORT` | Electron | Loopback port (default `7781`, development `7791`); `0` chooses an ephemeral port, which gives a new browser storage origin. |
+| `ARCH` | `make desktop-app`, `make desktop-dmg` | `arm64` or `x64`; defaults to the host Node architecture. The Go core architecture is matched automatically. |
+| `VERSION` | desktop build | Semver for app metadata, DMG name and bundled core; default `desktop/package.json` version. |
 | `HERDR_BIN` | agent | herdr binary to use on a machine. |
 | `XDG_STATE_HOME`, `XDG_CONFIG_HOME`, `HERDR_CONFIG_PATH`, `HERDR_SOCKET_PATH` | core, agent | Honoured like herdr does when locating its state, configuration and sockets. |
 
@@ -157,3 +162,17 @@ Linux; directory 0700, file replaced atomically).
 In the browser: preferences in `localStorage` under `herdr-ide.*` (language,
 theme, font sizes, panel position, Option as Meta, sidebar and panel sizes,
 the selected workspace).
+
+Desktop artifacts: `dist/desktop/mac-arm64/herdr-ide.app` (arm64),
+`dist/desktop/mac/herdr-ide.app` (x64), and
+`dist/desktop/herdr-ide-<version>-mac-<arch>.dmg`. Generated shell code lives
+in `desktop/dist/`; `make clean` removes these build outputs.
+Icon sources and distributable PNG/ICNS are kept in `desktop/assets/`, with
+the small SVG in `web/public/icon.svg`; `make desktop-icons` regenerates the
+PNG and ICNS on macOS with librsvg and iconutil.
+Electron's persistent profile is
+`~/Library/Application Support/herdr-ide-desktop/` (`-dev` for development).
+It holds browser preferences and Chromium data until manually removed.
+The core uses `settings-desktop.json` and `~/.herdr-ide-desktop/` state;
+development uses the existing `dev` instance. No desktop log files are kept:
+stderr is streamed and the last 16 KiB is retained in memory for error dialogs.

@@ -3,6 +3,10 @@
 // Placeholders: {name}.
 
 export const en = {
+  'desktop.failed': 'The desktop app could not start or lost its server.',
+  'desktop.failureHelp': 'Quit and reopen the app. Check that its local port is free and the bundled server can run. Details:',
+  'desktop.quit': 'Quit',
+
   'app.connected': '● Connected',
   'app.reconnecting': '○ Reconnecting…',
   'app.machines': 'Machines {n}',

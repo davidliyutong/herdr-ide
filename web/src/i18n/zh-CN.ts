@@ -1,6 +1,10 @@
 import type { Messages } from './en';
 
 export const zhCN: Messages = {
+  'desktop.failed': '桌面应用启动失败或与服务器的连接已中断。',
+  'desktop.failureHelp': '请退出后重新打开，检查本地端口是否被占用，以及内置服务器能否运行。详情：',
+  'desktop.quit': '退出',
+
   'app.connected': '● 已连接',
   'app.reconnecting': '○ 重连中…',
   'app.machines': '机器 {n}',

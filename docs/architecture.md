@@ -30,7 +30,23 @@ browser (React + xterm.js)  ──WebSocket + HTTP──▶  core (Go, `herdr-id
 | `internal/server` | HTTP/WS front: guards, arbiter, files, proxy, bridge, audit. |
 | `internal/embedded` | Build artifacts compiled into the core (agents, bridge VSIX). |
 | `web` | Browser UI (Vite, React, zustand, xterm.js); `web/embed.go` embeds `web/dist`. |
+| `desktop` | Electron main process and electron-builder config; macOS `.app`/DMG wrapping the embedded core. |
 | `extensions/herdr-ide-bridge` | VS Code extension installed into code-server. |
+
+## Desktop launcher
+
+The optional Electron shell (`desktop/src/main.ts`) spawns the bundled core
+from `Contents/Resources/bin/` with `--parent-stdio`, loopback port 7781 and
+instance `desktop`. The core writes one `{ "event": "ready", "url": "…" }`
+line to stdout after binding its listener; stderr carries logs. The shell
+loads only that owned core's URL. Closing the parent stdin pipe cancels the
+core's context, including when Electron crashes. Normal quit sends SIGTERM
+and waits up to 20 seconds before killing the owned core.
+
+The renderer reuses the browser UI with no preload or Node APIs, sandboxing
+and context isolation. Same-origin popups become equally restricted native
+windows; HTTP(S) links outside the core open in the default browser. Packaging
+and lifecycle details are in [15](features/15-desktop-packaging.md).
 
 ## herdr facts the design relies on
 

@@ -6,6 +6,19 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Terminal-pane app icon shared by the desktop and browser, with editable
+  SVG sources, small-size artwork and a multi-resolution macOS ICNS for
+  the app and DMG; regenerate with `make desktop-icons`.
+- macOS Electron packaging: `make desktop-app` and `make desktop-dmg`
+  produce an ad-hoc signed `.app` and a drag-to-Applications DMG for arm64
+  or x64. The sandboxed desktop shell owns its bundled core, preserves the
+  web UI and supports internal program/VS Code windows and external links.
+- `--parent-stdio` reports core readiness as JSON and stops on parent-pipe
+  EOF; `make dev-desktop` uses the isolated development session and instance.
+- Ignored `.worktrees/` directory for branch workspaces.
+
 ## [0.1.0] - 2026-10-31
 
 ### Added

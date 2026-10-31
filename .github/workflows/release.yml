@@ -28,6 +28,7 @@ jobs:
           cache: pnpm
           cache-dependency-path: |
             web/pnpm-lock.yaml
+            desktop/pnpm-lock.yaml
             extensions/*/pnpm-lock.yaml
       - run: make deps
       - run: make check
