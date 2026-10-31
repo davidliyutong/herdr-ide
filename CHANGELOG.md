@@ -37,6 +37,17 @@ All notable changes are documented here. The format follows
 - `--parent-stdio` reports core readiness as JSON and stops on parent-pipe
   EOF; `make dev-desktop` uses the isolated development session and instance.
 - Ignored `.worktrees/` directory for branch workspaces.
+- **Terminal font weight** setting (regular or medium; medium comes close to
+  Ghostty's `font-thicken`).
+
+### Changed
+
+- Terminals draw with JetBrains Mono 2.304, shipped in the UI (SIL Open Font
+  License, listed in `licenses.md`), instead of the first monospace font a
+  system happens to have (often SF Mono or Menlo), and rows are a little
+  taller. The dark terminal palette is now GitHub Dark Default: brighter text
+  and colors made for its background; black and dim text were nearly
+  invisible before.
 
 ### Fixed
 

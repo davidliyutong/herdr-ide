@@ -3,9 +3,8 @@ import { X } from 'lucide-react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { useStore } from '../state/store';
-import { fontFamily, themes } from '../terminal/TermController';
-import { themeKind } from '../appearance';
-import { getPrefs } from '../prefs';
+import { termOptions } from '../terminal/options';
+import { currentAppearance } from '../appearance';
 import { t } from '../i18n';
 
 /** Updates herdr on an SSH machine the way herdr does it: a terminal on the
@@ -28,7 +27,7 @@ export function RemoteHerdrDialog() {
 
   useEffect(() => {
     if (!m || !running || !hostRef.current) return;
-    const term = new Terminal({ fontFamily, fontSize: getPrefs().termFontSize, theme: themes[themeKind()], scrollback: 2000 });
+    const term = new Terminal({ ...termOptions(currentAppearance()), scrollback: 2000 });
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(hostRef.current);

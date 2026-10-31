@@ -6,7 +6,7 @@
 // the pane's application or to herdr's scrollback. Selections that go past
 // the visible rows are handled by LongSelection.
 
-import { Terminal, type ILinkProvider, type ITheme } from '@xterm/xterm';
+import { Terminal, type ILinkProvider } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { WebglAddon } from '@xterm/addon-webgl';
@@ -14,8 +14,9 @@ import '@xterm/xterm/css/xterm.css';
 import { conn } from '../lib/conn';
 import { routeKey } from './keys';
 import { LongSelection } from './longSelection';
-import { getPrefs } from '../prefs';
-import { themeKind, type ThemeKind } from '../appearance';
+import { currentAppearance, type Appearance } from '../appearance';
+import { termFontFamily, whenTermFont, type TermFontWeight } from './fonts';
+import { termOptions, themes } from './options';
 
 export type TermStatus = 'connecting' | 'open' | 'observe' | 'closed' | 'error';
 
@@ -32,66 +33,6 @@ export interface TermOptions {
   onPasteFiles?(files: File[]): Promise<string | undefined>;
   linkProvider?(term: Terminal): ILinkProvider | undefined;
 }
-
-const dark: ITheme = {
-  background: '#0e1116',
-  foreground: '#c9d1d9',
-  cursor: '#c9d1d9',
-  cursorAccent: '#0e1116',
-  selectionBackground: '#3b4a6b',
-  black: '#1b1f27',
-  red: '#f7768e',
-  green: '#9ece6a',
-  yellow: '#e0af68',
-  blue: '#7aa2f7',
-  magenta: '#bb9af7',
-  cyan: '#7dcfff',
-  white: '#a9b1d6',
-  brightBlack: '#565f89',
-  brightRed: '#ff7a93',
-  brightGreen: '#b9f27c',
-  brightYellow: '#ff9e64',
-  brightBlue: '#7da6ff',
-  brightMagenta: '#c0a8ff',
-  brightCyan: '#a4daff',
-  brightWhite: '#e6edf3',
-};
-
-const light: ITheme = {
-  background: '#ffffff',
-  foreground: '#1f2328',
-  cursor: '#1f2328',
-  cursorAccent: '#ffffff',
-  selectionBackground: '#b6d4fe',
-  black: '#24292f',
-  red: '#cf222e',
-  green: '#116329',
-  yellow: '#7d4e00',
-  blue: '#0969da',
-  magenta: '#8250df',
-  cyan: '#1b7c83',
-  white: '#6e7781',
-  brightBlack: '#57606a',
-  brightRed: '#a40e26',
-  brightGreen: '#1a7f37',
-  brightYellow: '#9a6700',
-  brightBlue: '#218bff',
-  brightMagenta: '#a475f9',
-  brightCyan: '#3192aa',
-  brightWhite: '#8c959f',
-};
-
-/** Terminal colors per UI theme; backgrounds match --bg in styles.css. */
-export const themes: Record<ThemeKind, ITheme> = { dark, light };
-
-export interface Appearance {
-  theme: ThemeKind;
-  fontSize: number;
-  optionIsMeta: boolean;
-}
-
-export const fontFamily =
-  '"JetBrains Mono", "SF Mono", Menlo, Monaco, "Cascadia Code", "Fira Code", "Noto Sans Mono CJK SC", "PingFang SC", monospace';
 
 function b64(binary: string): string {
   return btoa(binary);
@@ -118,24 +59,23 @@ export class TermController {
   private queued: Array<Record<string, unknown>> = [];
   private claimed = false;
   private long: LongSelection;
+  private weight: TermFontWeight;
+  private unfollowFont: () => void;
 
   constructor(
     private el: HTMLElement,
     private opts: TermOptions,
   ) {
-    const prefs = getPrefs();
+    const a = currentAppearance();
     const term = new Terminal({
+      ...termOptions({ ...a, fontSize: opts.fontSize ?? a.fontSize }),
       scrollback: 0,
-      fontFamily,
-      fontSize: opts.fontSize ?? prefs.termFontSize,
-      lineHeight: 1.1,
-      theme: themes[themeKind()],
       allowProposedApi: true,
       cursorBlink: false,
       customGlyphs: true,
       rescaleOverlappingGlyphs: true,
       drawBoldTextInBrightColors: false,
-      macOptionIsMeta: prefs.optionIsMeta,
+      macOptionIsMeta: a.optionIsMeta,
       macOptionClickForcesSelection: true,
       rightClickSelectsWord: false,
       disableStdin: opts.mode === 'observe',
@@ -173,6 +113,8 @@ export class TermController {
     this.attach();
     this.ro = new ResizeObserver(() => this.scheduleResize());
     this.ro.observe(el);
+    this.weight = a.fontWeight;
+    this.unfollowFont = whenTermFont(a.fontWeight, () => this.useFont(a.fontWeight));
   }
 
   private dims(): { cols: number; rows: number } {
@@ -434,10 +376,27 @@ export class TermController {
       o.fontSize = a.fontSize;
       this.scheduleResize(true);
     }
+    // A new weight waits for its faces, so the text never shows a fallback.
+    if (a.fontWeight !== this.weight) {
+      const w = (this.weight = a.fontWeight);
+      this.unfollowFont();
+      this.unfollowFont = whenTermFont(w, () => this.useFont(w));
+    }
+  }
+
+  /** Draws with the bundled font at weight w (its faces are loaded). */
+  private useFont(w: TermFontWeight) {
+    const o = this.term.options;
+    const family = termFontFamily(w);
+    if (this.disposed || (o.fontWeight === w && o.fontFamily === family)) return;
+    o.fontWeight = w;
+    o.fontFamily = family;
+    this.scheduleResize(true);
   }
 
   dispose() {
     this.disposed = true;
+    this.unfollowFont();
     window.clearTimeout(this.resizeTimer);
     window.removeEventListener('mousemove', this.onMouseMove);
     window.removeEventListener('mouseup', this.onMouseUp);

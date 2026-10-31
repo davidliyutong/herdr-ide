@@ -13,7 +13,7 @@ keep arriving, so adding a setting must not mean writing new UI.
 Goals: one dialog for every setting; each setting defined once, with the
 dialog generated from the definitions; core settings changeable at runtime
 without losing the command line as the authority; a light theme that VS Code
-follows.
+follows; terminals that look the same in every browser.
 
 Non-goals: per-user settings on a shared core (the core has no users);
 syncing browser settings between browsers; theming terminal applications.
@@ -77,11 +77,39 @@ syncing browser settings between browsers; theming terminal applications.
   `prefers-color-scheme` as it changes. The resolved kind sets
   `<html data-theme>`, whose CSS variables restyle the UI (`styles.css` has
   no other colors), the terminal palette of every xterm (`themes` in
-  `TermController.ts`, backgrounds equal to `--bg`) and `theme-color`. The
-  kind is sent to the core, which switches VS Code ([05](05-vscode-panel.md)).
+  `web/src/terminal/options.ts`, backgrounds equal to `--bg`) and
+  `theme-color`. The kind is sent to the core, which switches VS Code
+  ([05](05-vscode-panel.md)).
+- Terminal palettes: dark is GitHub Dark Default (Ghostty's theme of that
+  name: foreground `#e6edf3`, colors made for a near-black background) on
+  the UI's `--bg`; light is GitHub Light Default except for brighter
+  yellows. The palette only colors what programs leave to the terminal
+  (default colors and the 16 ANSI colors); programs that use 24-bit colors
+  look the same everywhere. Programs that ask the terminal for its
+  background (OSC 11) get herdr's answer, which follows the last herdr TUI
+  client and not the browser ([architecture](../architecture.md#herdr-facts-the-design-relies-on)),
+  and keep the colors they derive from it until they restart.
+- Terminal font: JetBrains Mono 2.304, the official web fonts (regular,
+  medium, bold, each upright and italic) in `web/src/terminal/fonts/` with
+  their license (SIL OFL 1.1, appended to the generated `licenses.md`) and
+  checksums. Shipping it means every browser draws panes with the same
+  glyphs and cell size; before, the stack named a font few systems have and
+  most fell back to SF Mono or Menlo. Characters it lacks (CJK, some
+  symbols) come from the fallbacks: SF Mono, Menlo, …, PingFang SC.
+  Rows are 1.05 times the font's own line height (1.32 em).
+- Fonts and xterm.js: xterm measures the cell when its font family changes
+  and caches each glyph the first time it draws it, so a terminal must not
+  use the font before it is loaded. `fonts.ts` registers the faces with the
+  `FontFace` API and loads them on demand; the page waits up to 1.5 s for
+  the faces of the chosen weight before rendering, terminals opened earlier
+  use only the fallbacks and switch (and refit) once the faces arrive, and a
+  new weight is applied when its faces are loaded.
+- Terminal font weight: regular (400) or medium (500); bold text is 700.
+  Medium gives the heavier strokes native terminals produce with stroke
+  thickening (Ghostty's `font-thicken`), which canvas text does not get.
 - Interface font size sets the root font size; the chrome is sized in `rem`,
-  so it scales with it. Terminal font size and Option as Meta are applied to
-  running terminals, which refit and resize their panes.
+  so it scales with it. Terminal font size and weight and Option as Meta are
+  applied to running terminals, which refit and resize their panes.
 - Panel position (`right` or `bottom`) changes the grid: below the panes the
   panel spans the workspace column and is resized by its top edge.
 
@@ -95,6 +123,10 @@ syncing browser settings between browsers; theming terminal applications.
 | Core-side storage for browser settings | Every browser would get the same font size and theme; the core has no notion of users. |
 | CSS `zoom` for the font size | Distorts xterm.js mouse coordinates and canvas sharpness. |
 | `window.autoDetectColorScheme` in VS Code | Follows the OS inside the iframe, not the theme chosen in the UI. |
+| Relying on installed fonts for terminals | Cell size and glyphs differ per system; most browsers ended up with SF Mono or Menlo. |
+| `@fontsource/jetbrains-mono` | Split into language subsets without the symbol ranges terminal programs draw (❯, ⏺, ✻, arrows), which would fall back glyph by glyph. |
+| The variable font (one file per style) | Only published as TTF (300 KB each); three static weights as WOFF2 are about as large and load per weight. |
+| Tokyo Night colors on the GitHub background (before) | Made for a navy background: pale on near-black, black at 1.1:1 and dim text at 3.1:1 contrast. |
 
 ## Failure modes
 
@@ -104,6 +136,16 @@ syncing browser settings between browsers; theming terminal applications.
   shows the error.
 - **No VS Code window connected** → the theme is sent when one connects.
 - **Two browsers choose different themes** → VS Code follows the last one.
+- **A program derives its colors from the wrong theme** (Codex's input box
+  is dark on the light theme after a herdr TUI ran in a dark terminal, or
+  unfilled when no TUI client has reported colors) → herdr answered its
+  background query; the browser cannot. Restarting the program after a herdr
+  TUI in a terminal of the same kind reported its colors gives matching
+  ones.
+- **The terminal font loads slowly or not at all** (a slow link to the core,
+  a browser without `FontFace`) → the page renders after 1.5 s with the
+  fallback fonts; terminals switch when the font arrives, or keep the
+  fallbacks.
 - **A page loaded before the core was replaced** has no labels for new
   settings and lacks new features. After every reconnect the page compares
   its entry script with the one the core serves and offers to reload
@@ -121,6 +163,9 @@ proxy-secret guards, refused in read-only mode, audited. See
 locked flags, per-machine values), `cmd/herdr-ide/main_test.go` (every core
 setting has a label, description and option labels), `internal/server/server_test.go` (`TestSettingsAPI`,
 `TestBridgeTheme`), `web/src/__tests__/settings.test.ts` (parsing and
-clamping, labels for every setting, theme resolution). The dialog, live theme
-and font changes and both panel positions were checked in Chrome in both
-themes and languages.
+clamping, labels for every setting, theme resolution),
+`web/src/__tests__/termOptions.test.ts` (palette contrast, font fallback,
+weight mapping). The dialog, live theme and font changes and both panel
+positions were checked in Chrome in both themes and languages; the bundled
+font (all weights loaded, live weight changes, `font/woff2` with immutable
+caching) in Chrome against the core.

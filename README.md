@@ -45,8 +45,10 @@ browser tab, with VS Code (code-server) one keystroke away.
 - **Several browsers at once.** The active browser controls a pane; others
   watch at the same size and take over by typing.
 - **Settings.** Language (English, Chinese), light/dark theme followed by
-  VS Code, interface and terminal font sizes, panel position and the
-  code-server installation method, in one dialog (`ctrl+b ,`).
+  VS Code, interface and terminal font sizes, terminal font weight, panel
+  position and the code-server installation method, in one dialog
+  (`ctrl+b ,`). Terminals use the included JetBrains Mono font in every
+  browser.
 
 ## Quick start
 

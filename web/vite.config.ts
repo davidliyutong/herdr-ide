@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { APP_NAME } from './src/brand';
@@ -37,8 +38,25 @@ function brand(): Plugin {
   };
 }
 
+// The bundled terminal font is not an npm package, so Vite's license list
+// leaves it out (src/terminal/fonts/README.md).
+function fontLicense(): Plugin {
+  return {
+    name: 'font-license',
+    generateBundle: {
+      order: 'post',
+      handler(_, bundle) {
+        const out = bundle['licenses.md'];
+        if (out?.type !== 'asset') return;
+        const ofl = readFileSync(new URL('./src/terminal/fonts/OFL.txt', import.meta.url), 'utf8').trim();
+        out.source = `${String(out.source).trimEnd()}\n\n## JetBrains Mono - 2.304 (OFL-1.1)\n\n${ofl}\n`;
+      },
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), brand()],
+  plugins: [react(), brand(), fontLicense()],
   build: {
     outDir: 'dist',
     emptyOutDir: true,

@@ -1,11 +1,20 @@
 // Applies the appearance settings: light/dark theme (also sent to the core,
-// which switches VS Code windows to match), UI and terminal font sizes.
+// which switches VS Code windows to match), UI and terminal fonts.
 
 import { getPrefs, usePrefs, type Prefs } from './prefs';
 import { conn } from './lib/conn';
 import { allTerms } from './terminal/registry';
+import type { TermFontWeight } from './terminal/fonts';
 
 export type ThemeKind = 'dark' | 'light';
+
+/** What terminals take from the settings. */
+export interface Appearance {
+  theme: ThemeKind;
+  fontSize: number;
+  fontWeight: TermFontWeight;
+  optionIsMeta: boolean;
+}
 
 const darkQuery = typeof matchMedia === 'undefined' ? undefined : matchMedia('(prefers-color-scheme: dark)');
 
@@ -19,6 +28,20 @@ export function themeKind(): ThemeKind {
   return resolveTheme(getPrefs().theme);
 }
 
+export function appearanceOf(p: Prefs): Appearance {
+  return {
+    theme: resolveTheme(p.theme),
+    fontSize: p.termFontSize,
+    fontWeight: p.termFontWeight === 'medium' ? 500 : 400,
+    optionIsMeta: p.optionIsMeta,
+  };
+}
+
+/** The terminal appearance the settings ask for. */
+export function currentAppearance(): Appearance {
+  return appearanceOf(getPrefs());
+}
+
 function apply(p: Prefs) {
   const kind = resolveTheme(p.theme);
   const root = document.documentElement;
@@ -26,7 +49,8 @@ function apply(p: Prefs) {
   root.style.fontSize = `${p.uiFontSize}px`;
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', getComputedStyle(root).getPropertyValue('--bg').trim());
   conn.setTheme(kind);
-  for (const t of allTerms()) t.setAppearance({ theme: kind, fontSize: p.termFontSize, optionIsMeta: p.optionIsMeta });
+  const a = appearanceOf(p);
+  for (const t of allTerms()) t.setAppearance(a);
 }
 
 /** Applies the current settings and follows later changes. */
