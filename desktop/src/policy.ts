@@ -18,9 +18,14 @@ export function isExternal(url: string): boolean {
   }
 }
 
+// Clipboard reads match what the browser UI grants VS Code's frame
+// (allow="clipboard-read" in web/src/components/Dock.tsx), where a browser
+// asks once; the desktop app has no prompt, so it grants them to the core.
 export function allowPermission(permission: string, requestingURL: string, topURL: string, origin: string): boolean {
   return (
-    isInternal(requestingURL, origin) && isInternal(topURL, origin) && ['notifications', 'clipboard-sanitized-write'].includes(permission)
+    isInternal(requestingURL, origin) &&
+    isInternal(topURL, origin) &&
+    ['notifications', 'clipboard-read', 'clipboard-sanitized-write'].includes(permission)
   );
 }
 

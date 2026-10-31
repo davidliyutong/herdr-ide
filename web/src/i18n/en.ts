@@ -6,6 +6,12 @@ export const en = {
   'desktop.failed': 'The desktop app could not start or lost its server.',
   'desktop.failureHelp': 'Quit and reopen the app. Check that its local port is free and the bundled server can run. Details:',
   'desktop.quit': 'Quit',
+  'desktop.badPort': 'The configured port is not valid.',
+  'desktop.coreTimeout': 'The server did not start within 30 seconds.',
+  'desktop.coreExited': 'The server exited while starting.',
+  'desktop.coreBadReady': 'The server reported an unexpected address.',
+  'desktop.coreLost': 'The server stopped unexpectedly.',
+  'desktop.rendererGone': 'The window’s page stopped.',
 
   'app.connected': '● Connected',
   'app.reconnecting': '○ Reconnecting…',

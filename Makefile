@@ -6,10 +6,12 @@ EXT  := extensions/$(SLUG)-bridge
 
 .PHONY: deps build test check it dev-core dev-web desktop-app desktop-dmg desktop-icons dev-desktop clean
 
+# Electron's ~100 MB binary only runs or packages the macOS app; elsewhere
+# its types suffice for typecheck and the launcher tests.
 deps:
 	pnpm -C web install --frozen-lockfile
 	pnpm -C $(EXT) install --frozen-lockfile
-	pnpm -C desktop install --frozen-lockfile
+	$(if $(filter Darwin,$(shell uname -s)),,ELECTRON_SKIP_BINARY_DOWNLOAD=1) pnpm -C desktop install --frozen-lockfile
 
 build:
 	scripts/build.sh

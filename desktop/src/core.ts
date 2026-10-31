@@ -1,16 +1,32 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { delimiter, join } from 'node:path';
 import { APP_SLUG } from '../../web/src/brand';
+import type { MessageKey } from '../../web/src/i18n/en';
 
 export const ENV_PREFIX = APP_SLUG.toUpperCase().replaceAll('-', '_') + '_';
 
-export function coreArgs(dev: boolean, port: string): string[] {
-  if (!/^\d+$/.test(port) || Number(port) > 65535) throw new Error('Invalid desktop port');
+// A failure the launcher explains in the UI language; detail is technical
+// (an exit code, a port) and shown as is.
+export class DesktopError extends Error {
+  constructor(
+    readonly key: MessageKey,
+    readonly detail = '',
+  ) {
+    super(detail ? `${key} (${detail})` : key);
+  }
+}
+
+export function corePort(port: string): number {
+  if (!/^\d+$/.test(port) || Number(port) > 65535) throw new DesktopError('desktop.badPort', port);
+  return Number(port);
+}
+
+export function coreArgs(dev: boolean, port: number): string[] {
   return [
     'serve',
     '--parent-stdio',
     '--listen',
-    `127.0.0.1:${Number(port)}`,
+    `127.0.0.1:${port}`,
     '--instance',
     dev ? 'dev' : 'desktop',
     ...(dev ? ['--local-only', '--local-session', `${APP_SLUG}-dev`, '--remote-session', `${APP_SLUG}-dev`] : []),
@@ -34,7 +50,8 @@ export class CoreProcess {
     return this.stderr;
   }
 
-  async start(binary: string, args: string[], env: NodeJS.ProcessEnv, cwd: string, onExit: () => void): Promise<string> {
+  // port is the one passed in --listen; 0 accepts the port the core chose.
+  async start(binary: string, args: string[], port: number, env: NodeJS.ProcessEnv, cwd: string, onExit: () => void): Promise<string> {
     const child = spawn(binary, args, { env, cwd, stdio: 'pipe', shell: false });
     this.child = child;
     child.stdin.on('error', () => {});
@@ -45,48 +62,58 @@ export class CoreProcess {
     return new Promise((resolve, reject) => {
       let ready = false;
       let buffer = '';
-      const timer = setTimeout(() => reject(new Error('Core startup timed out')), 30_000);
+      const timer = setTimeout(() => reject(new DesktopError('desktop.coreTimeout')), 30_000);
       const fail = (error: Error) => {
         clearTimeout(timer);
         reject(error);
       };
-      child.once('error', fail);
+      // Permanent: an 'error' without a listener (e.g. a failed kill during
+      // stop) would crash the Electron main process.
+      child.on('error', (error) => {
+        if (ready) console.error(error);
+        else fail(error);
+      });
       child.once('exit', (code, signal) => {
         clearTimeout(timer);
-        if (!ready) reject(new Error(`Core exited (${code ?? signal})`));
+        if (!ready) reject(new DesktopError('desktop.coreExited', String(code ?? signal)));
         else if (!this.stopping) onExit();
       });
       child.stdout.on('data', (data: Buffer) => {
         if (ready) return;
         buffer += data.toString();
         if (buffer.length > 4096) {
-          fail(new Error('Invalid core ready message'));
+          fail(new DesktopError('desktop.coreBadReady'));
           return;
         }
         const newline = buffer.indexOf('\n');
         if (newline < 0) return;
+        let url: URL;
+        let event: unknown;
         try {
           const message = JSON.parse(buffer.slice(0, newline));
-          const url = new URL(message.url);
-          const requested = args[args.indexOf('--listen') + 1].split(':')[1];
-          if (
-            message.event !== 'ready' ||
-            url.protocol !== 'http:' ||
-            url.hostname !== '127.0.0.1' ||
-            url.username ||
-            url.password ||
-            url.pathname !== '/' ||
-            url.search ||
-            url.hash ||
-            (requested !== '0' && (url.port || '80') !== requested)
-          )
-            throw new Error('Invalid core URL');
-          ready = true;
-          clearTimeout(timer);
-          resolve(url.origin);
-        } catch (error) {
-          fail(error as Error);
+          event = message.event;
+          url = new URL(message.url);
+        } catch {
+          fail(new DesktopError('desktop.coreBadReady'));
+          return;
         }
+        if (
+          event !== 'ready' ||
+          url.protocol !== 'http:' ||
+          url.hostname !== '127.0.0.1' ||
+          url.username ||
+          url.password ||
+          url.pathname !== '/' ||
+          url.search ||
+          url.hash ||
+          (port !== 0 && Number(url.port || '80') !== port)
+        ) {
+          fail(new DesktopError('desktop.coreBadReady', url.origin));
+          return;
+        }
+        ready = true;
+        clearTimeout(timer);
+        resolve(url.origin);
       });
     });
   }

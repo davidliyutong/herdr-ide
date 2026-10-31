@@ -24,13 +24,23 @@ implemented independently.
 - `scripts/desktop.sh` builds the existing embedded application and matches
   the Go core architecture to Electron (`x64` maps to Go `amd64`).
   `desktop/electron-builder.cjs` packages the core as an executable resource
-  outside ASAR, with licenses; the shell lives inside ASAR. The DMG has an
+  outside ASAR, with licenses (including the web bundle's `licenses.md`); the
+  shell lives inside ASAR. Its `beforePack` hook refuses to package binaries
+  built for another architecture than the Electron app. The DMG has an
   Applications shortcut. Builds use ad-hoc signing without notarization.
+  Without `VERSION` the core reports `git describe` as in `scripts/build.sh`;
+  the app metadata then uses `desktop/package.json`.
 - `desktop/src/main.ts` owns one child core. `--parent-stdio` adds one JSON
   readiness message to stdout and cancels the core when stdin closes. Logs
-  stay on stderr. Failed binding never connects the UI to an unrelated
-  listener. The shell has a 30 s startup timeout and a 20 s shutdown deadline;
-  core cleanup retains its existing agent and code-server behavior.
+  stay on stderr, and the core ignores SIGPIPE so that writing to the pipes of
+  a crashed launcher fails instead of killing it before cleanup. Failed
+  binding never connects the UI to an unrelated listener. The shell has a
+  30 s startup timeout and a 20 s shutdown deadline; core cleanup retains its
+  existing agent and code-server behavior. When macOS logs out, restarts or
+  shuts down, the shell signals the core and quits without waiting, because
+  delaying the quit would cancel the system's request.
+- Startup and core failures are reported with English/Chinese messages from
+  the web dictionaries; exit codes and similar details are appended as is.
 - Production uses loopback port 7781 and instance `desktop`. A stable origin
   preserves browser settings; an explicit port override is available. Dev
   uses port 7791, instance `dev`, local-only and local/remote session
@@ -91,16 +101,21 @@ sandboxing, context isolation and web security are enabled. Navigation and
 native popups are restricted to the exact owned core origin; external links
 accept only credential-free HTTP(S), with other schemes refused. Permissions
 require both the requesting frame and its top window to belong to the core;
-only notifications and sanitized clipboard writes are allowed. The existing
+only notifications, clipboard reads and sanitized clipboard writes are
+allowed. Clipboard reads let VS Code paste text copied in other apps; the
+browser UI grants its frame the same permission, where the browser asks once,
+while the desktop app has no prompt. The existing
 HTTP guards, API allowlist, read-only behavior and CSP remain in force.
 See [SECURITY.md](../../SECURITY.md) for the local HTTP trust boundary.
 
 ## Testing
 
-`cmd/herdr-ide/parent_test.go` covers readiness and pipe EOF/error cancellation.
-`desktop/src/*.test.ts` cover isolation arguments, URL and permission policy,
-spawn failures, malformed readiness, unexpected exits and idempotent child
-shutdown, using fake Node children and no network or real herdr sessions.
-`make check test` includes desktop type, format and unit checks. macOS CI
-builds the DMG; packaged smoke tests use `HERDR_IDE_DESKTOP_DEV=1` and an
+`cmd/herdr-ide/parent_test.go` covers readiness, pipe EOF/error cancellation
+and surviving writes to broken stdout pipes. `desktop/src/*.test.ts` cover
+isolation arguments, URL and permission policy, spawn failures, malformed
+readiness, ephemeral ports, unexpected exits, late child errors and idempotent
+child shutdown, using fake Node children and no network or real herdr
+sessions. `make check test` includes desktop type, format and unit checks
+(outside macOS without downloading Electron). macOS CI packages the app for
+pull requests and builds the DMG on `main`; packaged smoke tests use `HERDR_IDE_DESKTOP_DEV=1` and an
 isolated home/session, checking load, popup restrictions and child cleanup.

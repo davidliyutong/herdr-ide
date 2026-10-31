@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Native macOS packaging. ARCH=arm64|x64; VERSION must be a semver.
+# Native macOS packaging. ARCH=arm64|x64; VERSION, when set, must be a semver.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -17,18 +17,15 @@ if [[ "$mode" == dev && "$DESKTOP_ARCH" != "$(node -p process.arch)" ]]; then
   exit 2
 fi
 export DESKTOP_ARCH
-export VERSION=${VERSION:-$(node -p 'require("./desktop/package.json").version')}
+# VERSION is optional. Without it the core reports `git describe` like
+# scripts/build.sh, and the app metadata uses desktop/package.json.
 
 pnpm -C desktop install --frozen-lockfile
 TARGETS="darwin/$go_arch" scripts/build.sh
 pnpm -C desktop build
 
 case "$mode" in
-  dev)
-    slug=$(sed -n 's/^[[:space:]]*Slug = "\(.*\)"$/\1/p' internal/brand/brand.go)
-    prefix=$(echo "$slug" | tr 'a-z-' 'A-Z_')
-    env "${prefix}_DESKTOP_DEV=1" pnpm -C desktop start
-    ;;
+  dev) pnpm -C desktop start ;; # unpackaged Electron always runs in development mode
   app) pnpm -C desktop exec electron-builder --mac --dir "--$DESKTOP_ARCH" --publish never ;;
   dmg) pnpm -C desktop exec electron-builder --mac dmg "--$DESKTOP_ARCH" --publish never ;;
 esac

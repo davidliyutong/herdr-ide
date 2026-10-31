@@ -1,5 +1,6 @@
-const { readFileSync } = require('node:fs');
+const { existsSync, readFileSync } = require('node:fs');
 const { join } = require('node:path');
+const { Arch } = require('electron-builder');
 
 // Packaging reads the same brand definitions imported by the launcher.
 const source = readFileSync(join(__dirname, '../web/src/brand.ts'), 'utf8');
@@ -13,6 +14,8 @@ const name = brand('APP_NAME');
 const arch = process.env.DESKTOP_ARCH || process.arch;
 if (!['arm64', 'x64'].includes(arch)) throw new Error(`Unsupported macOS architecture: ${arch}`);
 const goArch = arch === 'x64' ? 'amd64' : 'arm64';
+const core = `../dist/${slug}-darwin-${goArch}`;
+const herdr = `../dist/herdr/herdr-darwin-${goArch}`;
 
 module.exports = {
   appId: `dev.${slug}.desktop`,
@@ -25,13 +28,25 @@ module.exports = {
     version: process.env.VERSION || require('./package.json').version,
   },
   extraResources: [
-    { from: `../dist/${slug}-darwin-${goArch}`, to: `bin/${slug}` },
+    { from: core, to: `bin/${slug}` },
     // Beside the core, where it finds the bundled herdr (docs/features/15).
-    { from: `../dist/herdr/herdr-darwin-${goArch}`, to: 'bin/herdr' },
+    { from: herdr, to: 'bin/herdr' },
     { from: '../licenses/herdr', to: 'licenses/herdr' },
     { from: '../LICENSE', to: 'LICENSE' },
     { from: '../THIRD_PARTY_NOTICES.md', to: 'THIRD_PARTY_NOTICES.md' },
+    { from: '../web/dist/licenses.md', to: 'licenses.md' },
   ],
+  // The Go binaries above are built for DESKTOP_ARCH; refuse to put them into
+  // an Electron app for another architecture (e.g. a manual --x64 run).
+  beforePack: async (context) => {
+    const packing = Arch[context.arch];
+    if (packing !== arch) {
+      throw new Error(`Packaging ${packing} with ${goArch} binaries; set DESKTOP_ARCH=${packing} (scripts/desktop.sh does)`);
+    }
+    for (const file of [core, herdr, '../web/dist/licenses.md']) {
+      if (!existsSync(join(__dirname, file))) throw new Error(`Missing ${file}; build it with scripts/desktop.sh`);
+    }
+  },
   asar: true,
   npmRebuild: false,
   mac: {

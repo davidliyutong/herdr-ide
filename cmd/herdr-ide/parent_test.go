@@ -5,6 +5,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"os/exec"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -32,6 +35,32 @@ func TestStopWithParent(t *testing.T) {
 		}
 		r.Close()
 		cancel()
+	}
+}
+
+// A launcher that crashed leaves stdout and stderr as pipes without readers.
+// The core must keep running (and clean up) instead of dying of SIGPIPE.
+func TestBrokenPipesDoNotKill(t *testing.T) {
+	if os.Getenv("PARENT_PIPE_CHILD") == "1" {
+		ignoreBrokenPipes()
+		for i := 0; i < 3; i++ {
+			if _, err := os.Stdout.WriteString("log line\n"); !errors.Is(err, syscall.EPIPE) {
+				os.Exit(3)
+			}
+		}
+		os.Exit(0)
+	}
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Close()
+	defer w.Close()
+	cmd := exec.Command(os.Args[0], "-test.run=^TestBrokenPipesDoNotKill$")
+	cmd.Env = append(os.Environ(), "PARENT_PIPE_CHILD=1")
+	cmd.Stdout = w
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("child with a broken stdout: %v", err)
 	}
 }
 

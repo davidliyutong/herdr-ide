@@ -197,6 +197,9 @@ func serve(args []string, logger *log.Logger) {
 	csf.register(fl)
 	prefs.RegisterFlags(fl)
 	fl.Parse(args)
+	if *parentStdio {
+		ignoreBrokenPipes() // before the first log line
+	}
 
 	if !brand.ValidInstance(*instance) {
 		logger.Fatalf("--instance must be lowercase letters, digits and dashes")

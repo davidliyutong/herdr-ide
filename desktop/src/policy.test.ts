@@ -36,13 +36,13 @@ test('OS external opens accept only credential-free HTTP(S)', () => {
 });
 
 test('permissions require both the requesting frame and top window to belong to the core', () => {
-  for (const permission of ['notifications', 'clipboard-sanitized-write']) {
+  for (const permission of ['notifications', 'clipboard-read', 'clipboard-sanitized-write']) {
     assert.ok(allowPermission(permission, origin + '/m/local/code/', origin, origin));
     assert.equal(allowPermission(permission, 'https://example.com', origin, origin), false);
     assert.equal(allowPermission(permission, origin, 'https://example.com', origin), false);
     assert.equal(allowPermission(permission, '', origin, origin), false);
   }
-  for (const permission of ['media', 'geolocation', 'clipboard-read', 'clipboard-read-write', 'openExternal', 'unknown']) {
+  for (const permission of ['media', 'geolocation', 'clipboard-read-write', 'openExternal', 'unknown']) {
     assert.equal(allowPermission(permission, origin, origin, origin), false);
   }
   assert.equal(webPreferences.sandbox, true);

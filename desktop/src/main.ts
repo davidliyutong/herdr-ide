@@ -1,9 +1,9 @@
-import { app, BrowserWindow, dialog, Menu, session, shell } from 'electron';
+import { app, BrowserWindow, dialog, Menu, powerMonitor, session, shell } from 'electron';
 import { join } from 'node:path';
 import { APP_NAME, APP_SLUG } from '../../web/src/brand';
 import { en, type MessageKey } from '../../web/src/i18n/en';
 import { zhCN } from '../../web/src/i18n/zh-CN';
-import { CoreProcess, coreArgs, coreEnv, ENV_PREFIX } from './core';
+import { CoreProcess, coreArgs, coreEnv, corePort, DesktopError, ENV_PREFIX } from './core';
 import { allowPermission, isExternal, isInternal, webPreferences } from './policy';
 
 app.setName(APP_NAME);
@@ -16,10 +16,16 @@ let mainWindow: BrowserWindow | undefined;
 let origin = '';
 let quitting = false;
 let stopped = false;
+let systemShutdown = false;
 let reportingError = false;
 
 function t(key: MessageKey): string {
   return (app.getLocale().toLowerCase().startsWith('zh') ? zhCN : en)[key];
+}
+
+function describe(error: unknown): string {
+  if (error instanceof DesktopError) return t(error.key) + (error.detail ? ` (${error.detail})` : '');
+  return String(error);
 }
 
 async function fail(error: unknown) {
@@ -33,7 +39,7 @@ async function fail(error: unknown) {
     type: 'error',
     title: APP_NAME,
     message: t('desktop.failed'),
-    detail: `${t('desktop.failureHelp')}\n\n${String(error)}\n${core.diagnostics}`,
+    detail: `${t('desktop.failureHelp')}\n\n${describe(error)}\n${core.diagnostics}`,
     buttons: [t('desktop.quit')],
   });
   app.quit();
@@ -82,7 +88,7 @@ function createWindow() {
     app.quit();
   });
   win.webContents.on('render-process-gone', (_event, details) => {
-    if (!quitting) void fail(new Error(`Renderer exited: ${details.reason}`));
+    if (!quitting) void fail(new DesktopError('desktop.rendererGone', details.reason));
   });
   void win.loadURL(origin).catch(fail);
 }
@@ -90,13 +96,19 @@ function createWindow() {
 app.on('before-quit', (event) => {
   quitting = true;
   if (stopped) return;
+  if (systemShutdown) {
+    // Delaying a logout, restart or shutdown would cancel it. Signal the core
+    // and let it clean up on its own; the closed stdin pipe stops it as well.
+    void core.stop();
+    return;
+  }
   event.preventDefault();
   void core.stop().then(() => {
     stopped = true;
     app.quit();
   });
 });
-app.on('window-all-closed', () => app.quit());
+// Closing the main window quits (its 'closed' handler); program windows do not.
 app.on('second-instance', () => {
   if (mainWindow?.isMinimized()) mainWindow.restore();
   mainWindow?.show();
@@ -118,11 +130,14 @@ if (!app.requestSingleInstanceLock()) {
     .whenReady()
     .then(async () => {
       if (quitting) return;
+      powerMonitor.on('shutdown', () => {
+        systemShutdown = true;
+      });
       if (!app.isPackaged) app.dock?.setIcon(join(app.getAppPath(), 'assets', 'icon.png'));
       Menu.setApplicationMenu(
         Menu.buildFromTemplate([{ role: 'appMenu' }, { role: 'editMenu' }, { role: 'viewMenu' }, { role: 'windowMenu' }]),
       );
-      const port = process.env[`${ENV_PREFIX}DESKTOP_PORT`] || (dev ? '7791' : '7781');
+      const port = corePort(process.env[`${ENV_PREFIX}DESKTOP_PORT`] || (dev ? '7791' : '7781'));
       const goArch = process.arch === 'x64' ? 'amd64' : process.arch;
       const binary = app.isPackaged
         ? join(process.resourcesPath, 'bin', APP_SLUG)
@@ -130,9 +145,10 @@ if (!app.requestSingleInstanceLock()) {
       origin = await core.start(
         binary,
         coreArgs(dev, port),
+        port,
         coreEnv(process.env, app.getPath('home')),
         app.getPath('home'),
-        () => void fail(new Error('Core exited unexpectedly')),
+        () => void fail(new DesktopError('desktop.coreLost')),
       );
       if (quitting) return;
       const ses = session.defaultSession;

@@ -4,6 +4,12 @@ export const zhCN: Messages = {
   'desktop.failed': '桌面应用启动失败或与服务器的连接已中断。',
   'desktop.failureHelp': '请退出后重新打开，检查本地端口是否被占用，以及内置服务器能否运行。详情：',
   'desktop.quit': '退出',
+  'desktop.badPort': '配置的端口无效。',
+  'desktop.coreTimeout': '服务器未能在 30 秒内启动。',
+  'desktop.coreExited': '服务器在启动过程中退出。',
+  'desktop.coreBadReady': '服务器报告了意外的地址。',
+  'desktop.coreLost': '服务器意外停止。',
+  'desktop.rendererGone': '窗口页面已停止运行。',
 
   'app.connected': '● 已连接',
   'app.reconnecting': '○ 重连中…',
