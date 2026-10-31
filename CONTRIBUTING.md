@@ -28,7 +28,7 @@ make dev-web         # Vite on http://localhost:5173, proxied to the dev core (D
 ```
 
 `make it` runs the integration test against a real herdr in an isolated
-session. To test the bundled executable, run
+session (`herdr-ide-it`), which it deletes before and after the run. To test the bundled executable, run
 `HERDR_TEST_BIN="$PWD/dist/packages/herdr-ide-$(go env GOOS)-$(go env GOARCH)/herdr" make it`.
 
 Release archives are in `dist/release/`; the unpacked directories are in

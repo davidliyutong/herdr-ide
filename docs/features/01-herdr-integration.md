@@ -91,4 +91,7 @@ machines, reimplementing its agent detection.
 `internal/herdr/client_test.go` (one request per connection, subscription,
 `events_lost`) against a fake socket; `internal/agent/integration_test.go`
 (`make it`) against a real herdr in an isolated session: workspace creation,
-control stream, input, first frame full.
+control stream, input, first frame full. herdr restores a session's saved
+workspaces when its server starts, so the test deletes the isolated session
+before and after a run and closes each workspace it creates; repeated runs
+do not accumulate workspaces.

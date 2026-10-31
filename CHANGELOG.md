@@ -54,6 +54,10 @@ All notable changes are documented here. The format follows
 - The **Authenticate…** and **Update herdr** terminals could end before
   showing the command's last output (for example ssh's final error): the
   core now forwards what is left in the terminal before closing it.
+- `make it` no longer leaves workspaces in the isolated `herdr-ide-it`
+  session, where herdr restored them (each with a shell) on every later run:
+  the test closes the workspaces it creates and deletes the session before
+  and after the run.
 
 ## [0.1.0] - 2026-10-31
 
