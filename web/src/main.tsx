@@ -5,7 +5,8 @@ import './styles.css';
 import { getTerm } from './terminal/registry';
 import { useStore } from './state/store';
 import { APP_SLUG } from './brand';
-import { initAppearance } from './appearance';
+import { currentAppearance, initAppearance } from './appearance';
+import { loadTermFont } from './terminal/fonts';
 import { initSeen } from './seen';
 import { initGuiAuto } from './gui/auto';
 import { initUpdateCheck } from './update';
@@ -24,7 +25,13 @@ if (guiPage) {
   initSeen();
   initGuiAuto();
   initUpdateCheck();
-  createRoot(document.getElementById('root')!).render(<App />);
+  // Terminals measure their cells when they open: give the bundled font a
+  // moment to load (it comes from the core). Terminals opened before it is
+  // loaded switch to it later.
+  const font = loadTermFont(currentAppearance().fontWeight);
+  void Promise.race([font, new Promise((r) => setTimeout(r, 1500))]).then(() =>
+    createRoot(document.getElementById('root')!).render(<App />),
+  );
   // Notification permission needs a user gesture.
   window.addEventListener('pointerdown', requestNotifyPermission, { once: true });
 }

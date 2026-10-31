@@ -75,6 +75,14 @@ Verified against herdr 0.9.5 (protocol 22):
 - That stream drops OSC 52, bell, keyboard-protocol negotiation and Kitty
   graphics. A native client of herdr's private protocol could keep them but
   would be tied to its exact protocol version.
+- herdr answers color queries from pane programs itself; they never reach
+  the browser. OSC 10/11 (default foreground and background) and `CSI ?996n`
+  (light or dark) are answered with the colors of the last herdr TUI client
+  that was in the foreground, for every pane of the server, new panes
+  included, and kept after that client disconnects; until a TUI client has
+  reported colors, OSC 10/11 get no reply. OSC 4 is answered from the
+  palette. A `terminal session` stream and the socket API cannot report
+  colors, so the browser's theme does not change these answers.
 - Panes report their scroll position (`scroll`: `offset_from_bottom`,
   `max_offset_from_bottom`, `viewport_rows`) in `pane.get` and the snapshot.
   `pane.scroll` sets an absolute offset (clamped) and replies with the pane;

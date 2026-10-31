@@ -26,6 +26,7 @@ export const prefDefs = {
   theme: { section: 'appearance', kind: 'enum', default: 'system', options: ['system', 'dark', 'light'] },
   uiFontSize: { section: 'appearance', kind: 'number', default: 13, min: 11, max: 20 },
   termFontSize: { section: 'appearance', kind: 'number', default: 13, min: 9, max: 24 },
+  termFontWeight: { section: 'appearance', kind: 'enum', default: 'regular', options: ['regular', 'medium'] },
   dockPosition: { section: 'layout', kind: 'enum', default: 'right', options: ['right', 'bottom'] },
   optionIsMeta: { section: 'terminal', kind: 'bool', default: false },
 } satisfies Record<string, PrefDef>;

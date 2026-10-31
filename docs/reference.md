@@ -170,8 +170,8 @@ files (configuration, sessions, machine list) are where herdr puts them,
 whichever herdr is used.
 
 In the browser: preferences in `localStorage` under `herdr-ide.*` (language,
-theme, font sizes, panel position, Option as Meta, sidebar and panel sizes,
-the selected workspace).
+theme, font sizes, terminal font weight, panel position, Option as Meta,
+sidebar and panel sizes, the selected workspace).
 
 Desktop artifacts: `dist/desktop/mac-arm64/herdr-ide.app` (arm64),
 `dist/desktop/mac/herdr-ide.app` (x64), and
