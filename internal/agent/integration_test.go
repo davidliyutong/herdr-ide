@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"herdr-ide/internal/agent"
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/herdr"
 	"herdr-ide/internal/transport"
@@ -30,10 +31,15 @@ const itSession = "herdr-ide-it"
 // session and an API client for it.
 func startHerdr(t *testing.T) (*transport.Session, *herdr.Client) {
 	t.Helper()
-	bin, err := exec.LookPath("herdr")
-	if err != nil {
-		t.Skip("herdr not installed")
+	// HERDR_TEST_BIN selects another herdr, such as the bundled one.
+	bin := os.Getenv("HERDR_TEST_BIN")
+	if bin == "" {
+		var err error
+		if bin, err = exec.LookPath("herdr"); err != nil {
+			t.Skip("herdr not installed")
+		}
 	}
+	t.Setenv("HERDR_BIN", bin) // the agent must use the same herdr
 	srv := exec.Command(bin, "--session", itSession, "server")
 	if err := srv.Start(); err != nil {
 		t.Fatal(err)
@@ -44,7 +50,7 @@ func startHerdr(t *testing.T) (*transport.Session, *herdr.Client) {
 		srv.Wait()
 	})
 
-	s, err := transport.DialLocal(context.Background(), "", log.New(io.Discard, "", 0))
+	s, err := transport.DialLocal(context.Background(), agent.Options{Logger: log.New(io.Discard, "", 0)})
 	if err != nil {
 		t.Fatal(err)
 	}

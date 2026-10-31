@@ -9,6 +9,7 @@ here; both READMEs link to this page instead of repeating it.
 | Command | Description |
 | --- | --- |
 | `herdr-ide [serve] [flags]` | Run the server (default command). |
+| `herdr-ide herdr [args]` | Run the herdr bundled beside the core with `args` and the caller's environment unchanged (for hosts without an installed herdr), e.g. `herdr-ide herdr machine list`. |
 | `herdr-ide fetch-assets [flags] DIR` | Download and verify code-server releases and extensions into `DIR` for air-gapped installs. |
 | `herdr-ide version` | Print the version. |
 | `herdr-ide-agent serve [--instance NAME]` | Per-machine helper; started by the core over ssh, never by hand. |
@@ -128,7 +129,8 @@ browser's menu shows instead.
 | --- | --- | --- |
 | `HERDR_IDE_BRIDGE_SOCKET` | set by the agent for code-server | Socket of the VS Code bridge extension. |
 | `HERDR_IDE_CORE` | `pnpm -C web dev` | Core URL the Vite dev server proxies to (default `http://127.0.0.1:7780`). |
-| `HERDR_BIN` | agent | herdr binary to use on a machine. |
+| `HERDR_BIN` | agent | herdr binary to use on a machine. Without it, an installed herdr is searched; the local machine falls back to the bundled one. |
+| `HERDR_TEST_BIN` | `make it` | herdr executable for the integration test (for example the bundled one); otherwise found on `PATH`. |
 | `XDG_STATE_HOME`, `XDG_CONFIG_HOME`, `HERDR_CONFIG_PATH`, `HERDR_SOCKET_PATH` | core, agent | Honoured like herdr does when locating its state, configuration and sockets. |
 
 ## Files and directories
@@ -153,6 +155,12 @@ downloaded themselves), and settings changed in the UI in
 `settings[-<instance>].json` in the user configuration directory
 (`~/Library/Application Support/herdr-ide/` on macOS, `~/.config/herdr-ide/` on
 Linux; directory 0700, file replaced atomically).
+
+A release directory holds the core, the bundled `herdr`, `LICENSE`,
+`THIRD_PARTY_NOTICES.md`, `licenses.md` and `licenses/herdr/`; they stay until
+the user removes the directory and are not copied to SSH machines. herdr's own
+files (configuration, sessions, machine list) are where herdr puts them,
+whichever herdr is used.
 
 In the browser: preferences in `localStorage` under `herdr-ide.*` (language,
 theme, font sizes, panel position, Option as Meta, sidebar and panel sizes,

@@ -9,6 +9,7 @@
 ## 功能
 
 - **直接讲 herdr 协议**：workspace、tab、分屏布局和 agent 状态都来自 herdr 的 socket API；每个 pane 都是一个 xterm.js 终端，画面由 herdr 自己渲染，支持输入、鼠标、滚动回看（拖选到边缘会自动滚动，复制整段）、中文输入法和拖动调整分屏。拖动 pane 标题栏可交换或移动 pane，点击标题即可重命名；拖动 tab 和 workspace 可调整顺序；右键 pane 标题栏、tab 或 workspace 可打开对应的命令菜单。快捷键沿用你的 herdr 配置（前缀 `ctrl+b`）。
+- **自带 herdr**：发布包附带 herdr 0.9.5（Linux/macOS × amd64/arm64），本机没装 herdr 时使用它。它和自己安装的 herdr 完全一样，使用相同的配置、会话和机器列表。
 - **多机器**：直接使用 herdr 里保存的 SSH 机器。每台机器只开一条 ssh 连接，在上面运行一个自动上传的静态 agent（linux/macOS × amd64/arm64），所有通信都在这条连接里多路复用；机器上不监听任何端口。
 - **为 agent 设计**：
   - 汇总所有机器上 blocked 和 done 的 agent，并发浏览器通知；
@@ -29,14 +30,17 @@
 
 需要：
 
-- 要使用的每台机器上都装好 [herdr](https://herdr.dev)，远程机器已用 `herdr machine add` 保存；
+- 要使用的每台机器上都运行着 [herdr](https://herdr.dev)（本机可以用发布包自带的 herdr），远程机器已用 `herdr machine add` 保存；
 - 能正常连到这些机器的 OpenSSH 客户端；
 - 构建需要：Go（版本见 `go.mod`）、Node.js 22+ 和 pnpm（`corepack enable` 会使用固定的版本）。
 
 ```bash
 make deps && make build
-./dist/herdr-ide-$(go env GOOS)-$(go env GOARCH)
+cd dist/packages/herdr-ide-$(go env GOOS)-$(go env GOARCH)
+./herdr-ide
 ```
+
+也可以解压 `dist/release/` 或 GitHub Releases 中对应平台的压缩包，运行 `./herdr-ide`；请保持目录完整。本机没装 herdr 时，用 `./herdr-ide herdr [参数]` 运行自带的 herdr，例如 `./herdr-ide herdr` 打开它的 TUI（同时启动本地 herdr server），或 `./herdr-ide herdr machine add user@host --label gpu`。
 
 打开 <http://127.0.0.1:7780>。`ctrl+b space` 打开命令面板，`ctrl+b ?` 查看快捷键。全部参数见 [docs/reference.md](docs/reference.md)。
 
@@ -78,4 +82,4 @@ make check test                          # 提交 PR 之前运行
 
 ## 许可证
 
-[MIT](LICENSE)。第三方许可证：Go 依赖见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)，前端打包的依赖见程序提供的 `/licenses.md`。code-server、Git Graph 和 herdr 是独立的项目，各自使用自己的许可证；Git Graph 的许可证不允许再分发，因此由每个安装各自下载，不随程序打包。
+[MIT](LICENSE)。第三方许可证：Go 依赖见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)，前端打包的依赖见程序提供的 `/licenses.md`。附带的 herdr 使用 Apache-2.0，其许可证及依赖声明见 [licenses/herdr/](licenses/herdr/)。code-server 和 Git Graph 使用各自的许可证，在运行时下载。Git Graph 明确限制衍生作品分发，对原版的一般再分发授权不明确，因此不纳入公开发布包。

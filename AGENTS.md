@@ -11,6 +11,9 @@ A Go server (`cmd/herdr-ide`) that serves a React terminal UI and drives
 [herdr](https://herdr.dev) on several machines through a per-machine Go agent
 (`cmd/herdr-ide-agent`) over ssh; code-server provides VS Code panels. One
 binary embeds the UI, the agents for 4 platforms and a VS Code extension.
+Release archives also contain a native herdr and its license notices, used
+on the core host only when no herdr is installed; it keeps herdr's usual
+configuration and state. SSH machines use their installed herdr.
 
 ## Commands
 

@@ -70,5 +70,5 @@ jobs:
           TARGETS: linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
       - uses: actions/upload-artifact@v7
         with:
-          name: binaries
-          path: dist/*-*-*
+          name: release-packages
+          path: dist/release/*

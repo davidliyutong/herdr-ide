@@ -37,29 +37,17 @@ jobs:
         env:
           VERSION: ${{ github.ref_name }}
           TARGETS: linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
-      - name: Package
-        run: |
-          slug=$(sed -n 's/^[[:space:]]*Slug = "\(.*\)"$/\1/p' internal/brand/brand.go)
-          mkdir -p release
-          for f in dist/"$slug"-*-*; do
-            name=$(basename "$f")
-            mkdir -p "release/$name"
-            cp "$f" "release/$name/$slug"
-            cp LICENSE THIRD_PARTY_NOTICES.md web/dist/licenses.md "release/$name/"
-            tar -C release -czf "release/$name.tar.gz" "$name"
-          done
-          (cd release && sha256sum *.tar.gz > SHA256SUMS)
       # GitHub stores attestations for public repositories (private ones need
       # GitHub Enterprise Cloud); a private repository releases without
       # provenance.
       - uses: actions/attest-build-provenance@v4
         if: ${{ !github.event.repository.private }}
         with:
-          subject-path: release/*.tar.gz
+          subject-path: dist/release/*.tar.gz
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           ver=${GITHUB_REF_NAME#v}
           awk -v v="$ver" '$0 ~ "^## \\[" v "\\]" {p=1; next} /^## \[/ {p=0} p' CHANGELOG.md > notes.md
-          gh release create "$GITHUB_REF_NAME" release/*.tar.gz release/SHA256SUMS --notes-file notes.md --verify-tag
+          gh release create "$GITHUB_REF_NAME" dist/release/*.tar.gz dist/release/SHA256SUMS --notes-file notes.md --verify-tag

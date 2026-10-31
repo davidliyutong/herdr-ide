@@ -6,6 +6,16 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Release archives for Linux/macOS on amd64/arm64 include herdr 0.9.5
+  (verified at build time against pinned SHA-256 digests) with its license
+  and dependency notices. The local machine uses it when no herdr is
+  installed; it keeps herdr's usual configuration, sessions and machines.
+  SSH machines still use their own herdr.
+- `herdr-ide herdr [args]` runs the included herdr with the arguments and
+  environment unchanged.
+
 ## [0.1.0] - 2026-10-31
 
 ### Added

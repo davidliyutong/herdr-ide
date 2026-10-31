@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Builds the web UI, the VS Code bridge extension, the per-platform agents
-# (embedded gzip), then the core for TARGETS (default: host platform). Names
-# come from internal/brand and the module path from go.mod.
+# (embedded gzip), then the core for TARGETS (default: host platform), packaged
+# beside native herdr and license notices. Names come from internal/brand.
 #
-#   scripts/build.sh                       # host binary in dist/
+#   scripts/build.sh                       # host archive in dist/release/
 #   TARGETS="linux/amd64 darwin/arm64" scripts/build.sh
 #   SKIP_WEB=1 scripts/build.sh            # reuse web/dist
 set -euo pipefail
@@ -15,6 +15,9 @@ SLUG=$(sed -n 's/^[[:space:]]*Slug = "\(.*\)"$/\1/p' internal/brand/brand.go)
 LDFLAGS="-s -w -X ${MODULE}/internal/agentproto.Version=${VERSION}"
 AGENT_PLATFORMS=${AGENT_PLATFORMS:-"linux/amd64 linux/arm64 darwin/amd64 darwin/arm64"}
 TARGETS=${TARGETS:-"$(go env GOOS)/$(go env GOARCH)"}
+
+echo "==> native herdr companions"
+go run ./scripts/fetch-herdr $TARGETS
 
 if [[ -z "${SKIP_WEB:-}" ]]; then
   echo "==> web"
@@ -49,3 +52,6 @@ for p in $TARGETS; do
   CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -ldflags "$LDFLAGS" -o "$out" "./cmd/${SLUG}"
   echo "    $out $(du -h "$out" | cut -f1)"
 done
+
+echo "==> release packages"
+TARGETS="$TARGETS" scripts/package.sh

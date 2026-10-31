@@ -128,8 +128,13 @@ func (s *Session) Accept() (net.Conn, error) {
 }
 
 // DialLocal starts an in-process agent connected through a socketpair, so the
-// local machine uses exactly the same protocol as remote machines.
-func DialLocal(ctx context.Context, instance string, logger *log.Logger) (*Session, error) {
+// local machine uses exactly the same protocol as remote machines. A nil
+// opts.Logger logs to stderr.
+func DialLocal(ctx context.Context, opts agent.Options) (*Session, error) {
+	logger := opts.Logger
+	if logger == nil {
+		logger = log.New(os.Stderr, "", log.LstdFlags)
+	}
 	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
 	if err != nil {
 		return nil, err
@@ -152,7 +157,8 @@ func DialLocal(ctx context.Context, instance string, logger *log.Logger) (*Sessi
 	served := make(chan struct{})
 	go func() {
 		defer close(served)
-		if err := agent.Serve(actx, c1, agent.Options{Instance: instance, Logger: log.New(logger.Writer(), "agent[local]: ", log.LstdFlags)}); err != nil {
+		opts.Logger = log.New(logger.Writer(), "agent[local]: ", log.LstdFlags)
+		if err := agent.Serve(actx, c1, opts); err != nil {
 			logger.Printf("local agent: %v", err)
 		}
 		c1.Close()

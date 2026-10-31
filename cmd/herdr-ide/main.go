@@ -2,6 +2,7 @@
 // for herdr. It serves the web UI and orchestrates agents on every machine.
 //
 //	herdr-ide [serve] [flags]       run the server (default)
+//	herdr-ide herdr [args]          run the herdr bundled in the release
 //	herdr-ide fetch-assets DIR      download code-server and extensions for
 //	                               air-gapped installs (use with --seed-dir)
 //	herdr-ide version
@@ -25,6 +26,7 @@ import (
 	"syscall"
 	"time"
 
+	"herdr-ide/internal/agent"
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/brand"
 	"herdr-ide/internal/codeserver"
@@ -104,9 +106,40 @@ func main() {
 		serve(args, logger)
 	case "fetch-assets":
 		fetchAssets(args, logger)
+	case "herdr":
+		runHerdr(args, logger)
 	default:
-		fmt.Fprintf(os.Stderr, "usage: %s [serve] [flags] | fetch-assets [flags] DIR | version\n", brand.CoreBin)
+		fmt.Fprintf(os.Stderr, "usage: %s [serve] [flags] | herdr [args] | fetch-assets [flags] DIR | version\n", brand.CoreBin)
 		os.Exit(2)
+	}
+}
+
+// bundledHerdr is the herdr shipped beside the real core executable in a
+// release directory (symlinks to the core are resolved).
+func bundledHerdr() (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	if exe, err = filepath.EvalSymlinks(exe); err != nil {
+		return "", err
+	}
+	p := filepath.Join(filepath.Dir(exe), "herdr")
+	if st, err := os.Stat(p); err != nil || !st.Mode().IsRegular() || st.Mode().Perm()&0o111 == 0 {
+		return "", fmt.Errorf("no herdr executable at %s; keep the release directory together", p)
+	}
+	return p, nil
+}
+
+// runHerdr replaces the process with the bundled herdr, passing the arguments
+// and environment through unchanged, for hosts without an installed herdr.
+func runHerdr(args []string, logger *log.Logger) {
+	bin, err := bundledHerdr()
+	if err != nil {
+		logger.Fatal(err)
+	}
+	if err := syscall.Exec(bin, append([]string{bin}, args...), os.Environ()); err != nil {
+		logger.Fatal(err)
 	}
 }
 
@@ -219,10 +252,13 @@ func serve(args []string, logger *log.Logger) {
 	if err != nil {
 		logger.Fatal(err)
 	}
+	// Only release directories carry a bundled herdr; development builds rely
+	// on an installed one.
+	bundled, _ := bundledHerdr()
 	dial := func(ctx context.Context, spec machines.Spec) (*transport.Session, string, error) {
 		switch spec.Kind {
 		case machines.KindLocal:
-			s, err := transport.DialLocal(ctx, *instance, logger)
+			s, err := transport.DialLocal(ctx, agent.Options{Instance: *instance, Logger: logger, BundledHerdr: bundled})
 			return s, runtime.GOOS + "/" + runtime.GOARCH, err
 		case machines.KindSSH:
 			s, p, err := transport.DialSSH(ctx, transport.SSHOptions{
