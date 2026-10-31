@@ -3,8 +3,7 @@
 //
 // Every yamux stream starts with one JSON header line written by the opener,
 // answered by one JSON reply line. After a successful reply the stream carries
-// op-specific raw bytes (a socket pipe, a JSON-lines terminal session, file
-// contents, ...).
+// op-specific raw bytes (a socket pipe, file contents, ...).
 package agentproto
 
 import (
@@ -24,8 +23,9 @@ const (
 	OpHello Op = "hello"
 	// OpHerdrAPI dials the herdr public API socket and pipes raw bytes.
 	OpHerdrAPI Op = "herdr-api"
-	// OpTerm spawns `herdr terminal session <mode>` and pipes its stdio.
-	OpTerm Op = "term"
+	// OpHerdrClient dials herdr's client socket (the endpoint protocol used
+	// by client-rendered shells) and pipes raw bytes.
+	OpHerdrClient Op = "herdr-client"
 	// OpExec runs a command and returns buffered output in the reply.
 	OpExec Op = "exec"
 	// OpFsStat, OpFsList return metadata in the reply.
@@ -59,13 +59,6 @@ type Header struct {
 	// herdr selection
 	Session  string `json:"session,omitempty"`
 	HerdrBin string `json:"herdr_bin,omitempty"`
-
-	// term
-	Mode     string `json:"mode,omitempty"` // control | observe
-	Target   string `json:"target,omitempty"`
-	Cols     int    `json:"cols,omitempty"`
-	Rows     int    `json:"rows,omitempty"`
-	Takeover bool   `json:"takeover,omitempty"`
 
 	// exec
 	Argv    []string `json:"argv,omitempty"`

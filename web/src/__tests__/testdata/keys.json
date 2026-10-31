@@ -9,9 +9,21 @@
         "charCode": 97
       }
     ],
-    "bytes": "a",
-    "herdr": {
-      "key": "a"
+    "events": [
+      {
+        "t": "key",
+        "key": {
+          "code": "Char",
+          "char": "a",
+          "mods": 0,
+          "kind": 0,
+          "text": "a",
+          "tracksRelease": false
+        }
+      }
+    ],
+    "bytes": {
+      "legacy": "a"
     }
   },
   {
@@ -25,7 +37,105 @@
         "shiftKey": true
       }
     ],
-    "bytes": "A"
+    "events": [
+      {
+        "t": "key",
+        "key": {
+          "code": "Char",
+          "char": "a",
+          "mods": 1,
+          "kind": 0,
+          "shifted": 65,
+          "text": "A",
+          "tracksRelease": false
+        }
+      }
+    ],
+    "bytes": {
+      "legacy": "A"
+    }
+  },
+  {
+    "name": "Shift+1",
+    "keys": [
+      {
+        "key": "!",
+        "code": "Digit1",
+        "keyCode": 49,
+        "charCode": 33,
+        "shiftKey": true
+      }
+    ],
+    "events": [
+      {
+        "t": "key",
+        "key": {
+          "code": "Char",
+          "char": "!",
+          "mods": 1,
+          "kind": 0,
+          "text": "!",
+          "tracksRelease": false
+        }
+      }
+    ],
+    "bytes": {
+      "legacy": "!"
+    }
+  },
+  {
+    "name": "Alt+B",
+    "keys": [
+      {
+        "key": "b",
+        "code": "KeyB",
+        "keyCode": 66,
+        "charCode": 98,
+        "altKey": true
+      }
+    ],
+    "events": [
+      {
+        "t": "key",
+        "key": {
+          "code": "Char",
+          "char": "b",
+          "mods": 4,
+          "kind": 0,
+          "tracksRelease": true
+        }
+      }
+    ],
+    "bytes": {
+      "legacy": "\u001bb",
+      "kitty": "\u001b[98;3u"
+    }
+  },
+  {
+    "name": "Ctrl+Shift+Left",
+    "keys": [
+      {
+        "key": "ArrowLeft",
+        "code": "ArrowLeft",
+        "keyCode": 37,
+        "ctrlKey": true,
+        "shiftKey": true
+      }
+    ],
+    "events": [
+      {
+        "t": "key",
+        "key": {
+          "code": "Left",
+          "mods": 3,
+          "kind": 0,
+          "tracksRelease": true
+        }
+      }
+    ],
+    "bytes": {
+      "legacy": "\u001b[1;6D"
+    }
   },
   {
     "name": "Enter",
@@ -37,9 +147,19 @@
         "charCode": 13
       }
     ],
-    "bytes": "\r",
-    "herdr": {
-      "key": "enter"
+    "events": [
+      {
+        "t": "key",
+        "key": {
+          "code": "Enter",
+          "mods": 0,
+          "kind": 0,
+          "tracksRelease": true
+        }
+      }
+    ],
+    "bytes": {
+      "legacy": "\r"
     }
   },
   {
@@ -53,12 +173,22 @@
         "shiftKey": true
       }
     ],
-    "bytes": "\u001b\r",
-    "herdr": {
-      "key": "shift+enter",
-      "legacy": "\r"
+    "events": [
+      {
+        "t": "key",
+        "key": {
+          "code": "Enter",
+          "mods": 1,
+          "kind": 0,
+          "tracksRelease": true
+        }
+      }
+    ],
+    "bytes": {
+      "legacy": "\r",
+      "kitty": "\u001b[13;2u"
     },
-    "note": "Deliberate: herdr's legacy encoding is CR, the same as Enter; ESC CR inserts a newline in Claude Code and Codex prompts."
+    "note": "herdr encodes it per pane mode: CR in a legacy pane (like Enter), CSI 13;2u once the program enables the kitty keyboard protocol (Claude Code and Codex do, and then insert a newline)."
   },
   {
     "name": "Alt+Enter",
@@ -71,9 +201,20 @@
         "altKey": true
       }
     ],
-    "bytes": "\u001b\r",
-    "herdr": {
-      "key": "alt+enter"
+    "events": [
+      {
+        "t": "key",
+        "key": {
+          "code": "Enter",
+          "mods": 4,
+          "kind": 0,
+          "tracksRelease": true
+        }
+      }
+    ],
+    "bytes": {
+      "legacy": "\u001b\r",
+      "kitty": "\u001b[13;3u"
     }
   },
   {
@@ -87,9 +228,20 @@
         "ctrlKey": true
       }
     ],
-    "bytes": "\r",
-    "herdr": {
-      "key": "ctrl+enter"
+    "events": [
+      {
+        "t": "key",
+        "key": {
+          "code": "Enter",
+          "mods": 2,
+          "kind": 0,
+          "tracksRelease": true
+        }
+      }
+    ],
+    "bytes": {
+      "legacy": "\r",
+      "kitty": "\u001b[13;5u"
     }
   },
   {
@@ -101,9 +253,19 @@
         "keyCode": 9
       }
     ],
-    "bytes": "\t",
-    "herdr": {
-      "key": "tab"
+    "events": [
+      {
+        "t": "key",
+        "key": {
+          "code": "Tab",
+          "mods": 0,
+          "kind": 0,
+          "tracksRelease": true
+        }
+      }
+    ],
+    "bytes": {
+      "legacy": "\t"
     }
   },
   {
@@ -116,9 +278,20 @@
         "shiftKey": true
       }
     ],
-    "bytes": "\u001b[Z",
-    "herdr": {
-      "key": "shift+tab"
+    "events": [
+      {
+        "t": "key",
+        "key": {
+          "code": "BackTab",
+          "mods": 1,
+          "kind": 0,
+          "tracksRelease": true
+        }
+      }
+    ],
+    "bytes": {
+      "legacy": "\u001b[Z",
+      "kitty": "\u001b[9;2u"
     }
   },
   {
@@ -130,10 +303,16 @@
         "keyCode": 8
       }
     ],
-    "bytes": "\u007f",
-    "herdr": {
-      "key": "backspace"
-    }
+    "events": [
+      {
+        "t": "text",
+        "text": ""
+      }
+    ],
+    "bytes": {
+      "legacy": ""
+    },
+    "note": "herdr 0.9.5 encodes no bytes for a Backspace key event; like herdr's own client, the browser sends DEL as text."
   },
   {
     "name": "Ctrl+Backspace",
@@ -145,9 +324,20 @@
         "ctrlKey": true
       }
     ],
-    "bytes": "\b",
-    "herdr": {
-      "key": "ctrl+backspace"
+    "events": [
+      {
+        "t": "key",
+        "key": {
+          "code": "Backspace",
+          "mods": 2,
+          "kind": 0,
+          "tracksRelease": true
+        }
+      }
+    ],
+    "bytes": {
+      "legacy": "\b",
+      "kitty": "\u001b[127;5u"
     }
   },
   {
@@ -160,10 +350,16 @@
         "altKey": true
       }
     ],
-    "bytes": "\u001b\u007f",
-    "herdr": {
-      "key": "alt+backspace"
-    }
+    "events": [
+      {
+        "t": "text",
+        "text": "\u001b"
+      }
+    ],
+    "bytes": {
+      "legacy": "\u001b"
+    },
+    "note": "See Backspace."
   },
   {
     "name": "Escape",
@@ -174,9 +370,20 @@
         "keyCode": 27
       }
     ],
-    "bytes": "\u001b",
-    "herdr": {
-      "key": "esc"
+    "events": [
+      {
+        "t": "key",
+        "key": {
+          "code": "Esc",
+          "mods": 0,
+          "kind": 0,
+          "tracksRelease": true
+        }
+      }
+    ],
+    "bytes": {
+      "legacy": "\u001b",
+      "kitty": "\u001b[27u"
     }
   },
   {
@@ -188,12 +395,22 @@
         "keyCode": 38
       }
     ],
-    "bytes": "\u001b[A",
-    "herdr": {
-      "key": "up",
+    "events": [
+      {
+        "t": "key",
+        "key": {
+          "code": "Up",
+          "mods": 0,
+          "kind": 0,
+          "tracksRelease": true
+        }
+      }
+    ],
+    "bytes": {
+      "legacy": "\u001b[A",
       "app": "\u001bOA"
     },
-    "note": "Known gap: herdr frames do not carry the pane's input modes, so in application cursor mode (vim, less, zsh line editor) the browser still sends the normal-mode sequence."
+    "note": "Application cursor mode (vim, less, zsh's line editor) gets SS3 sequences, as in herdr's own client."
   },
   {
     "name": "Down",
@@ -204,12 +421,21 @@
         "keyCode": 40
       }
     ],
-    "bytes": "\u001b[B",
-    "herdr": {
-      "key": "down",
+    "events": [
+      {
+        "t": "key",
+        "key": {
+          "code": "Down",
+          "mods": 0,
+          "kind": 0,
+          "tracksRelease": true
+        }
+      }
+    ],
+    "bytes": {
+      "legacy": "\u001b[B",
       "app": "\u001bOB"
-    },
-    "note": "See Up."
+    }
   },
   {
     "name": "Shift+Up",
@@ -221,9 +447,19 @@
         "shiftKey": true
       }
     ],
-    "bytes": "\u001b[1;2A",
-    "herdr": {
-      "key": "shift+up"
+    "events": [
+      {
+        "t": "key",
+        "key": {
+          "code": "Up",
+          "mods": 1,
+          "kind": 0,
+          "tracksRelease": true
+        }
+      }
+    ],
+    "bytes": {
+      "legacy": "\u001b[1;2A"
     }
   },
   {
@@ -236,9 +472,19 @@
         "ctrlKey": true
       }
     ],
-    "bytes": "\u001b[1;5D",
-    "herdr": {
-      "key": "ctrl+left"
+    "events": [
+      {
+        "t": "key",
+        "key": {
+          "code": "Left",
+          "mods": 2,
+          "kind": 0,
+          "tracksRelease": true
+        }
+      }
+    ],
+    "bytes": {
+      "legacy": "\u001b[1;5D"
     }
   },
   {
@@ -250,7 +496,21 @@
         "keyCode": 36
       }
     ],
-    "bytes": "\u001b[H"
+    "events": [
+      {
+        "t": "key",
+        "key": {
+          "code": "Home",
+          "mods": 0,
+          "kind": 0,
+          "tracksRelease": true
+        }
+      }
+    ],
+    "bytes": {
+      "legacy": "\u001b[H",
+      "app": "\u001bOH"
+    }
   },
   {
     "name": "End",
@@ -261,7 +521,21 @@
         "keyCode": 35
       }
     ],
-    "bytes": "\u001b[F"
+    "events": [
+      {
+        "t": "key",
+        "key": {
+          "code": "End",
+          "mods": 0,
+          "kind": 0,
+          "tracksRelease": true
+        }
+      }
+    ],
+    "bytes": {
+      "legacy": "\u001b[F",
+      "app": "\u001bOF"
+    }
   },
   {
     "name": "Delete",
@@ -272,7 +546,20 @@
         "keyCode": 46
       }
     ],
-    "bytes": "\u001b[3~"
+    "events": [
+      {
+        "t": "key",
+        "key": {
+          "code": "Delete",
+          "mods": 0,
+          "kind": 0,
+          "tracksRelease": true
+        }
+      }
+    ],
+    "bytes": {
+      "legacy": "\u001b[3~"
+    }
   },
   {
     "name": "PageUp",
@@ -283,7 +570,22 @@
         "keyCode": 33
       }
     ],
-    "bytes": "\u001b[5~"
+    "events": [
+      {
+        "t": "key",
+        "key": {
+          "code": "PageUp",
+          "mods": 0,
+          "kind": 0,
+          "tracksRelease": true
+        }
+      }
+    ],
+    "bytes": {
+      "legacy": "",
+      "app": "\u001b[5~"
+    },
+    "note": "Outside the alternate screen and application modes herdr scrolls its own scrollback instead of sending the key."
   },
   {
     "name": "F1",
@@ -294,9 +596,21 @@
         "keyCode": 112
       }
     ],
-    "bytes": "\u001bOP",
-    "herdr": {
-      "key": "f1"
+    "events": [
+      {
+        "t": "key",
+        "key": {
+          "code": "F",
+          "f": 1,
+          "mods": 0,
+          "kind": 0,
+          "tracksRelease": true
+        }
+      }
+    ],
+    "bytes": {
+      "legacy": "\u001bOP",
+      "kitty": "\u001b[P"
     }
   },
   {
@@ -308,9 +622,20 @@
         "keyCode": 116
       }
     ],
-    "bytes": "\u001b[15~",
-    "herdr": {
-      "key": "f5"
+    "events": [
+      {
+        "t": "key",
+        "key": {
+          "code": "F",
+          "f": 5,
+          "mods": 0,
+          "kind": 0,
+          "tracksRelease": true
+        }
+      }
+    ],
+    "bytes": {
+      "legacy": "\u001b[15~"
     }
   },
   {
@@ -323,9 +648,21 @@
         "ctrlKey": true
       }
     ],
-    "bytes": "\u0000",
-    "herdr": {
-      "key": "ctrl+space"
+    "events": [
+      {
+        "t": "key",
+        "key": {
+          "code": "Char",
+          "char": " ",
+          "mods": 2,
+          "kind": 0,
+          "tracksRelease": true
+        }
+      }
+    ],
+    "bytes": {
+      "legacy": "\u0000",
+      "kitty": "\u001b[32;5u"
     }
   },
   {
@@ -338,9 +675,21 @@
         "ctrlKey": true
       }
     ],
-    "bytes": "\u0003",
-    "herdr": {
-      "key": "ctrl+c"
+    "events": [
+      {
+        "t": "key",
+        "key": {
+          "code": "Char",
+          "char": "c",
+          "mods": 2,
+          "kind": 0,
+          "tracksRelease": true
+        }
+      }
+    ],
+    "bytes": {
+      "legacy": "\u0003",
+      "kitty": "\u001b[99;5u"
     }
   },
   {
@@ -353,7 +702,7 @@
         "metaKey": true
       }
     ],
-    "bytes": "",
+    "events": [],
     "browserDefault": true,
     "note": "Copy is left to the browser."
   },
@@ -367,7 +716,7 @@
         "metaKey": true
       }
     ],
-    "bytes": "",
+    "events": [],
     "browserDefault": true,
     "note": "The browser pastes through the paste event."
   },
@@ -387,7 +736,15 @@
         "ctrlKey": true
       }
     ],
-    "bytes": "\u0002",
+    "events": [
+      {
+        "t": "text",
+        "text": "\u0002"
+      }
+    ],
+    "bytes": {
+      "legacy": "\u0002"
+    },
     "note": "The prefix pressed twice sends itself to the pane."
   },
   {
@@ -406,7 +763,7 @@
         "charCode": 122
       }
     ],
-    "bytes": "",
+    "events": [],
     "note": "Keymap actions send nothing to the pane."
   },
   {
@@ -420,7 +777,7 @@
         "isComposing": true
       }
     ],
-    "bytes": "",
+    "events": [],
     "note": "IME composition belongs to the input method."
   }
 ]

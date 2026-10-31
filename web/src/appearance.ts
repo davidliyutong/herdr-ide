@@ -1,9 +1,9 @@
 // Applies the appearance settings: light/dark theme (also sent to the core,
-// which switches VS Code windows to match), UI and terminal fonts.
+// which switches VS Code windows to match) and the UI font. The pane surface
+// follows the terminal settings itself (components/SurfaceView.tsx).
 
 import { getPrefs, usePrefs, type Prefs } from './prefs';
 import { conn } from './lib/conn';
-import { allTerms } from './terminal/registry';
 import type { TermFontWeight } from './terminal/fonts';
 
 export type ThemeKind = 'dark' | 'light';
@@ -49,8 +49,6 @@ function apply(p: Prefs) {
   root.style.fontSize = `${p.uiFontSize}px`;
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', getComputedStyle(root).getPropertyValue('--bg').trim());
   conn.setTheme(kind);
-  const a = appearanceOf(p);
-  for (const t of allTerms()) t.setAppearance(a);
 }
 
 /** Applies the current settings and follows later changes. */
