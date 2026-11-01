@@ -37,9 +37,10 @@ browser tab, with VS Code (code-server) one keystroke away.
 - **VS Code on demand.** code-server is installed per machine from the core
   host (no internet needed on machines), downloaded by the machines
   themselves, or taken from an existing install, with Git Graph and a bridge
-  extension: open a pane's folder, its diff or Git Graph with one key; jump
-  from a `path:line` in the terminal to the editor. The panel sits beside or
-  below the terminals. Idle instances are stopped.
+  extension: open a pane's folder, its diff or Git Graph with one key or
+  from the toolbar above the panes; jump from a `path:line` in the terminal
+  to the editor. The panel sits beside or below the terminals. Idle
+  instances are stopped.
 - **Program windows.** Windows that programs on remote Linux machines open
   (matplotlib, the MuJoCo viewer, Qt tools) appear in browser windows, one
   per program window, with mouse and keyboard. Panes get a virtual display

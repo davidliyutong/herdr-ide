@@ -74,35 +74,68 @@ export function PaneHeader({ m, paneId, zoomed, style, floating }: Props) {
       <span className="pane-cwd" title={cwd}>
         <bdi>{shortPath(cwd, home)}</bdi>
       </span>
-      <span className="pane-actions">
-        <PaneGuiButton m={m} pane={paneId} />
-        {!readOnly && (
-          <>
-            <button title={t('pane.openCode', { key: keyHint('open_code') })} onClick={() => actions.openCode(m, cwd)}>
-              <SquareCode />
-            </button>
-            <button title={t('pane.diff', { key: keyHint('open_diff') })} onClick={() => actions.openDiff(m, cwd)}>
-              <FileDiff />
-            </button>
-            <button title={t('pane.gitGraph', { key: keyHint('open_git_graph') })} onClick={() => actions.openGitGraph(m, cwd)}>
-              <GitGraph />
-            </button>
-            <span className="sep" />
-            <button title={t('pane.splitRight', { key: keyHint('split_vertical') })} onClick={() => actions.split(m, paneId, 'right')}>
-              <Columns2 />
-            </button>
-            <button title={t('pane.splitDown', { key: keyHint('split_horizontal') })} onClick={() => actions.split(m, paneId, 'down')}>
-              <Rows2 />
-            </button>
-            <button title={t(zoomed ? 'pane.restore' : 'pane.zoom', { key: keyHint('zoom') })} onClick={() => actions.zoom(m, paneId)}>
-              {zoomed ? <Minimize2 /> : <Maximize2 />}
-            </button>
-            <button className="danger" title={t('pane.close', { key: keyHint('close_pane') })} onClick={() => actions.closePane(m, paneId)}>
-              <X />
-            </button>
-          </>
-        )}
-      </span>
+      <PaneActions m={m} paneId={paneId} cwd={cwd} zoomed={zoomed} />
     </div>
+  );
+}
+
+/** A pane's commands: its program windows, its folder in VS Code (folder,
+ * changes, Git Graph), split, zoom and close. Without `paneId` (no pane of
+ * the shown tab is focused) the buttons are shown disabled. */
+export function PaneActions({ m, paneId, cwd, zoomed }: { m: string; paneId?: string; cwd?: string; zoomed?: boolean }) {
+  const readOnly = useStore((s) => s.readOnly);
+  const off = !paneId;
+  const pane = paneId ?? '';
+  return (
+    <span className="pane-actions">
+      {paneId && <PaneGuiButton m={m} pane={paneId} />}
+      {!readOnly && (
+        <>
+          <button disabled={off} title={t('pane.openCode', { key: keyHint('open_code') })} onClick={() => actions.openCode(m, cwd)}>
+            <SquareCode />
+          </button>
+          <button disabled={off} title={t('pane.diff', { key: keyHint('open_diff') })} onClick={() => actions.openDiff(m, cwd)}>
+            <FileDiff />
+          </button>
+          <button
+            disabled={off}
+            title={t('pane.gitGraph', { key: keyHint('open_git_graph') })}
+            onClick={() => actions.openGitGraph(m, cwd)}
+          >
+            <GitGraph />
+          </button>
+          <span className="sep" />
+          <button
+            disabled={off}
+            title={t('pane.splitRight', { key: keyHint('split_vertical') })}
+            onClick={() => actions.split(m, pane, 'right')}
+          >
+            <Columns2 />
+          </button>
+          <button
+            disabled={off}
+            title={t('pane.splitDown', { key: keyHint('split_horizontal') })}
+            onClick={() => actions.split(m, pane, 'down')}
+          >
+            <Rows2 />
+          </button>
+          <button
+            disabled={off}
+            title={t(zoomed ? 'pane.restore' : 'pane.zoom', { key: keyHint('zoom') })}
+            onClick={() => actions.zoom(m, pane)}
+          >
+            {zoomed ? <Minimize2 /> : <Maximize2 />}
+          </button>
+          <button
+            disabled={off}
+            className="danger"
+            title={t('pane.close', { key: keyHint('close_pane') })}
+            onClick={() => actions.closePane(m, pane)}
+          >
+            <X />
+          </button>
+        </>
+      )}
+    </span>
   );
 }

@@ -51,6 +51,14 @@ received, the popup itself is not drawn).
   herdr draws for each pane (between `rect` and `inner_rect`). A pane
   without a border row (a lone pane, unless herdr draws outer borders) gets
   a floating header at its top right that shows on hover.
+- A toolbar above the grid (`components/PaneToolbar.tsx`) shows the focused
+  pane's title and folder with the buttons of its header (`PaneActions`):
+  VS Code, changes and Git Graph of the folder, split right / down, zoom
+  and close. It is outside herdr's grid, so the grid only becomes one bar
+  shorter and the buttons stay visible for a lone pane. It is always there
+  while a tab is shown (its buttons are disabled while no pane of the tab
+  is focused), so focus changes never resize the grid; read-only browsers
+  do not show it.
 
 **Input mapping** (`surface/input.ts`, `surface/controller.ts`)
 

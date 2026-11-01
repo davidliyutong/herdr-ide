@@ -486,6 +486,46 @@ select,
   width: 10em;
   padding: 0 4px;
 }
+/* The focused pane's folder and its VS Code commands, above herdr's grid:
+ * always visible, also for a lone pane whose header shows only on hover. */
+.pane-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 2.4rem;
+  padding: 0 8px 0 12px;
+  font-size: var(--fs-md);
+  line-height: 1;
+  color: var(--fg-dim);
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--line);
+  user-select: none;
+  flex: none;
+}
+.pane-toolbar .pane-title {
+  color: var(--fg);
+}
+.pane-toolbar .pane-actions {
+  gap: 2px;
+  opacity: 1;
+}
+.pane-toolbar .pane-actions button {
+  width: 1.85rem;
+  height: 1.85rem;
+  border-radius: 5px;
+}
+.pane-toolbar .pane-actions .lucide {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+.pane-toolbar .pane-actions .sep {
+  height: 1.2rem;
+  margin: 0 4px;
+}
+.pane-actions button:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
 .workspace-body {
   flex: 1;
   min-height: 0;
