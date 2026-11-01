@@ -162,9 +162,16 @@ describe('pane input contract (testdata/keys.json)', () => {
   });
 
   it('commits composed text once', () => {
+    const preedit = document.querySelector<HTMLElement>('.surface-compose')!;
     textarea.dispatchEvent(new CompositionEvent('compositionstart', { data: '' }));
     press(textarea, { key: 'n', code: 'KeyN', keyCode: 229, isComposing: true });
+    textarea.dispatchEvent(new CompositionEvent('compositionupdate', { data: 'ni hao' }));
+    // The text being composed shows at the cursor; herdr gets nothing yet.
+    expect(preedit.textContent).toBe('ni hao');
+    expect(preedit.style.display).toBe('block');
+    expect(pressesSent()).toEqual([]);
     textarea.dispatchEvent(new CompositionEvent('compositionend', { data: '你好' }));
     expect(pressesSent()).toEqual([{ t: 'text', text: '你好' }]);
+    expect(preedit.style.display).toBe('none');
   });
 });

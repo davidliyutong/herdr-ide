@@ -5,7 +5,6 @@
 
 import type { Grid } from './grid';
 import { color, type Palette } from './colors';
-import { symbolWidth } from './width';
 
 // Modifier bits (ratatui) and herdr's underline style in bits 12-15.
 export const MOD = {
@@ -229,16 +228,9 @@ export function paintRows(ctx: CanvasRenderingContext2D, g: Grid, st: PaintState
     // Backgrounds.
     ctx.fillStyle = p.bg;
     ctx.fillRect(0, top, g.w * cw, ch);
-    for (let x = 0; x < g.w; x++) {
-      const c = g.cell(x, y);
-      let bg = c.mod & MOD.reversed ? (color(p, c.fg) ?? p.fg) : color(p, c.bg);
-      if (inHl(x)) bg = p.selection;
-      if (bg) {
-        ctx.fillStyle = bg;
-        ctx.fillRect(x * cw, top, cw, ch);
-      }
-    }
-    // Text and decorations.
+    // A wide character's style covers the cells it spans: herdr leaves
+    // those cells in the grid with their own (default) style, and its
+    // renderer never draws them, so neither does this one.
     let cover = 0;
     for (let x = 0; x < g.w; x++) {
       if (cover > 0) {
@@ -247,8 +239,27 @@ export function paintRows(ctx: CanvasRenderingContext2D, g: Grid, st: PaintState
       }
       const c = g.cell(x, y);
       if (c.skip) continue;
+      const wdt = g.width(x, y);
+      cover = wdt - 1;
+      const bg = c.mod & MOD.reversed ? (color(p, c.fg) ?? p.fg) : color(p, c.bg);
+      for (let i = 0; i < wdt && x + i < g.w; i++) {
+        const fill = inHl(x + i) ? p.selection : bg;
+        if (!fill) continue;
+        ctx.fillStyle = fill;
+        ctx.fillRect((x + i) * cw, top, cw, ch);
+      }
+    }
+    // Text and decorations.
+    cover = 0;
+    for (let x = 0; x < g.w; x++) {
+      if (cover > 0) {
+        cover--;
+        continue;
+      }
+      const c = g.cell(x, y);
+      if (c.skip) continue;
       const sym = c.symbol;
-      const wdt = symbolWidth(sym || ' ');
+      const wdt = g.width(x, y);
       cover = wdt - 1;
       let fg = c.mod & MOD.reversed ? (color(p, c.bg) ?? p.bg) : (color(p, c.fg) ?? p.fg);
       const cur = g.cursor;
@@ -307,7 +318,7 @@ export function paintRows(ctx: CanvasRenderingContext2D, g: Grid, st: PaintState
     const cur = g.cursor;
     if (cur && cur.visible && cur.y === y) {
       const left = cur.x * cw;
-      const wdt = symbolWidth(g.cell(cur.x, y).symbol || ' ');
+      const wdt = g.width(cur.x, y);
       const thick = Math.max(1, Math.round(cw / 8));
       ctx.fillStyle = p.cursor;
       ctx.strokeStyle = p.cursor;

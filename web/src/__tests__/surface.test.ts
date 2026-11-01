@@ -8,6 +8,7 @@ import { keyEvent, pasteText, releaseOf } from '../surface/input';
 import { findLinks, safeUrl } from '../terminal/links';
 import vectorData from './testdata/surface.json';
 import { themes } from '../terminal/options';
+import { paintRows } from '../surface/paint';
 
 /** The messages internal/server's TestSurfaceBinaryVector pins. */
 function vectors(): ArrayBuffer[] {
@@ -82,6 +83,42 @@ describe('Grid', () => {
   });
 });
 
+describe('paintRows', () => {
+  it('gives a wide character its background over every cell it covers', () => {
+    const p = palette(themes.light);
+    const fills: Array<{ style: string; x: number; w: number }> = [];
+    const ctx = {
+      fillStyle: '',
+      fillRect(x: number, _y: number, w: number) {
+        fills.push({ style: this.fillStyle, x, w });
+      },
+      fillText() {},
+      save() {},
+      restore() {},
+      beginPath() {},
+      rect() {},
+      clip() {},
+    };
+    const g = new Grid();
+    const band = 0x023c3c3c;
+    // herdr leaves the covered cell with the default style.
+    g.apply({
+      full: true,
+      gen: 1,
+      w: 4,
+      h: 1,
+      moves: [],
+      spans: [{ x: 0, y: 0, cells: [{ ...cell('宽'), bg: band }, cell(' '), { ...cell('x'), bg: band }, cell(' ')] }],
+    });
+    const metrics = { cw: 10, ch: 20, fontPx: 16, family: 'mono', weight: 400, baseline: 15 };
+    paintRows(ctx as unknown as CanvasRenderingContext2D, g, { palette: p, metrics, focused: false }, [0]);
+    // After the row's base fill, column 1 is painted only with the band.
+    const bgs = fills.slice(1).filter((f) => f.x < 40 && f.w === 10);
+    expect(bgs.filter((f) => f.x === 10).map((f) => f.style)).toEqual(['#3c3c3c']);
+    expect(bgs.map((f) => f.x)).toEqual([0, 10, 20]);
+  });
+});
+
 describe('symbolWidth', () => {
   it('counts wide and emoji symbols as two columns', () => {
     expect(symbolWidth('a')).toBe(1);
@@ -91,6 +128,25 @@ describe('symbolWidth', () => {
     expect(symbolWidth('❤️')).toBe(2);
     expect(symbolWidth('─')).toBe(1);
     expect(symbolWidth('é')).toBe(1);
+    // A flag, a lone regional indicator, text presentation, a blanked wide cell.
+    expect(symbolWidth('\u{1f1e8}\u{1f1f3}')).toBe(2);
+    expect(symbolWidth('\u{1f1e8}')).toBe(1);
+    expect(symbolWidth('\u231a\ufe0e')).toBe(1);
+    expect(symbolWidth('  ')).toBe(2);
+    // Ranges unicode-width counts as wide: Yijing, Khitan, Kana Extended-B, folk-religion symbols.
+    for (const cp of [0x268a, 0x2630, 0x18b00, 0x1aff0, 0x1f260]) expect(symbolWidth(String.fromCodePoint(cp))).toBe(2);
+  });
+});
+
+describe('Grid.width', () => {
+  it('counts a cell before a wide spacer as two columns', () => {
+    const g = new Grid();
+    // herdr pane content: a wide cell is followed by an empty spacer.
+    g.apply(full(5, 1, []));
+    const sym = String.fromCodePoint(0x16ff0);
+    g.apply({ full: false, gen: 1, w: 0, h: 0, moves: [], spans: [{ x: 0, y: 0, cells: [sym, '', 'a', '', ' '].map(cell) }] });
+    expect([0, 2, 4].map((x) => g.width(x, 0))).toEqual([2, 2, 1]);
+    expect(g.rowText(0).text).toBe(`${sym}a `);
   });
 });
 

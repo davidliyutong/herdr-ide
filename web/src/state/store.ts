@@ -20,6 +20,8 @@ export interface ToastAction {
   run(): void;
   /** Stays until clicked or dismissed. */
   sticky?: boolean;
+  /** Closes after this many milliseconds instead of the default. */
+  ttl?: number;
 }
 
 export interface Toast {
@@ -167,7 +169,8 @@ export const useStore = create<UIState>((set, get) => ({
     const id = ++toastSeq;
     set((s) => ({ toasts: [...s.toasts, { id, msg, action }] }));
     // A toast with an action waits longer for the click.
-    if (!action?.sticky) setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), action ? 15000 : 5000);
+    if (!action?.sticky)
+      setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), action?.ttl ?? (action ? 15000 : 5000));
   },
 }));
 

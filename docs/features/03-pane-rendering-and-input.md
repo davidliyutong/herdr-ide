@@ -32,8 +32,14 @@ received, the popup itself is not drawn).
   pixels per cell: backgrounds, text in the bundled terminal font, bold,
   dim, italic, underline styles, strikethrough, reverse and hidden cells,
   the cursor (block, underline, bar; hollow without focus) and the
-  selection. herdr sends no widths: a wide symbol (`width.ts`, herdr's
-  unicode-width rules) covers the next cell, which is not drawn.
+  selection. herdr sends no widths: a wide symbol covers the next cell,
+  which is not drawn: herdr leaves it with the default style, and the wide
+  symbol's background and reverse video span both columns, as in herdr's
+  own renderer. A symbol is wide by herdr's unicode-width rules
+  (`width.ts`: East Asian Wide and Fullwidth, emoji presentation, flags) or
+  when the next cell is the empty spacer herdr puts after a wide character
+  in pane content (`Grid.width`), so grapheme clusters the table does not
+  know still take the columns herdr gave them.
   Box-drawing and block characters are drawn as shapes, so borders join at
   any cell size.
 - Colors use herdr's packing (named, palette index, true color) resolved
@@ -62,6 +68,11 @@ received, the popup itself is not drawn).
 
 Text goes to the pane that has the UI's focus; herdr's focused pane follows
 it ([18](18-endpoint-surfaces.md)).
+
+While an input method composes, its text (pinyin such as `zi fu`) is shown
+underlined over the cells at the cursor, in the terminal font and colors;
+the hidden textarea that receives it also sits at the cursor, so the
+candidate window opens there. herdr receives only the committed text.
 
 **Key routing** (`surface/keys.ts`)
 
@@ -122,7 +133,9 @@ Quick Look or VS Code ([06](06-quick-look-and-files.md)).
 OSC 52 from a pane program (up to 1 MiB) reaches the owning browser, not in
 read-only mode. Pane output is not trusted, so a toast shows the text's
 length and start and only its **Copy** button writes the clipboard; the click
-is also the user gesture browsers want. A bell flashes the surface's edge.
+is also the user gesture browsers want. The toast closes after 5 s, so
+programs that copy often (agent CLIs on every selection) leave no pile of
+toasts; nothing is copied unless the button was clicked. A bell flashes the surface's edge.
 
 ## Alternatives considered
 

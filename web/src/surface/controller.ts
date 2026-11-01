@@ -19,7 +19,6 @@ import { findLinks, openLink, linkTitle, safeUrl, type LinkContext } from '../te
 import { themes } from '../terminal/options';
 import { termFontFamily } from '../terminal/fonts';
 import type { Appearance } from '../appearance';
-import { symbolWidth } from './width';
 
 export interface ControllerOptions {
   m(): string;
@@ -49,6 +48,8 @@ export class SurfaceController {
   private ro: ResizeObserver;
   private pressed = new Map<string, { pane: string; key: KeyEvent }>();
   private composing = false;
+  /** The input method's text being composed, shown at the cursor. */
+  private preedit: HTMLDivElement;
   private focused = false;
   private sel?: Selection;
   /** The drag in progress. */
@@ -69,6 +70,9 @@ export class SurfaceController {
     appearance: Appearance,
   ) {
     this.ctx = canvas.getContext('2d', { alpha: false })!;
+    this.preedit = document.createElement('div');
+    this.preedit.className = 'surface-compose';
+    host.appendChild(this.preedit);
     this.setAppearance(appearance);
     onPaint(() => this.schedule());
     this.ro = new ResizeObserver(() => this.measureSize());
@@ -254,7 +258,8 @@ export class SurfaceController {
     const ta = this.textarea;
     ta.addEventListener('keydown', this.onKeyDown);
     ta.addEventListener('keyup', this.onKeyUp);
-    ta.addEventListener('compositionstart', () => (this.composing = true));
+    ta.addEventListener('compositionstart', this.onComposition);
+    ta.addEventListener('compositionupdate', this.onComposition);
     ta.addEventListener('compositionend', this.onCompositionEnd);
     ta.addEventListener('input', this.onInput);
     ta.addEventListener('paste', this.onPaste);
@@ -292,8 +297,43 @@ export class SurfaceController {
     this.send(p.pane, [{ t: 'key', key: releaseOf(p.key) }]);
   };
 
+  private onComposition = (ev: CompositionEvent) => {
+    this.composing = true;
+    this.showPreedit(ev.data ?? '');
+  };
+
+  /** Shows the composed text over the cells at the cursor, in the
+   * terminal's font and colors; herdr receives only the committed text. */
+  private showPreedit(text: string) {
+    const el = this.preedit;
+    // Without a cursor, the start of the focused pane.
+    const inner = this.paneById(this.targetPane() ?? '')?.inner;
+    const c = grid.cursor ?? (inner && { x: inner.x, y: inner.y });
+    if (!text || !c) {
+      el.style.display = 'none';
+      el.textContent = '';
+      return;
+    }
+    const dpr = window.devicePixelRatio || 1;
+    const { cw, ch, fontPx, family, weight } = this.metrics;
+    el.textContent = text;
+    Object.assign(el.style, {
+      display: 'block',
+      top: `${(c.y * ch) / dpr}px`,
+      height: `${ch / dpr}px`,
+      font: `${weight} ${fontPx / dpr}px ${family}`,
+      lineHeight: `${ch / dpr}px`,
+      color: this.palette.fg,
+      background: this.palette.bg,
+    });
+    // Keep it inside the surface near the right edge.
+    const left = (c.x * cw) / dpr;
+    el.style.left = `${Math.max(0, Math.min(left, this.host.clientWidth - el.offsetWidth))}px`;
+  }
+
   private onCompositionEnd = (ev: CompositionEvent) => {
     this.composing = false;
+    this.showPreedit('');
     if (ev.data) this.send(this.targetPane(), [{ t: 'text', text: ev.data }]);
     this.textarea.value = '';
   };
@@ -338,6 +378,7 @@ export class SurfaceController {
     const f = document.activeElement === this.textarea;
     if (f === this.focused) return;
     this.focused = f;
+    if (!f) this.showPreedit('');
     if (!this.o.readOnly()) sendFocus(this.o.m(), f);
     if (grid.cursor) grid.dirty.add(grid.cursor.y);
     this.schedule();
@@ -608,7 +649,7 @@ export class SurfaceController {
         for (const l of findLinks(text)) {
           const from = colOf[l.start];
           const last = colOf[l.end - 1];
-          const to = last + symbolWidth(grid.cell(last, y).symbol);
+          const to = last + grid.width(last, y);
           if (x >= from && x < to) next = { y, from, to, link: l, pane: p.id };
         }
       }
@@ -655,6 +696,7 @@ export class SurfaceController {
 
   dispose() {
     this.disposed = true;
+    this.preedit.remove();
     onPaint(undefined);
     if (this.frame !== undefined) cancelAnimationFrame(this.frame);
     window.clearTimeout(this.stepTimer);
