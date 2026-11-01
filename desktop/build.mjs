@@ -8,3 +8,13 @@ await build({
   target: 'node22',
   external: ['electron'],
 });
+
+// Sandboxed preloads may require only a few electron modules, so bundle it.
+await build({
+  entryPoints: ['src/preload.ts'],
+  outfile: 'dist/preload.cjs',
+  bundle: true,
+  platform: 'node',
+  target: 'node22',
+  external: ['electron'],
+});

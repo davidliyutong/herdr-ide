@@ -12,6 +12,10 @@ export const en = {
   'desktop.coreBadReady': 'The server reported an unexpected address.',
   'desktop.coreLost': 'The server stopped unexpectedly.',
   'desktop.rendererGone': 'The window’s page stopped.',
+  'desktop.menu.tab': 'Tab',
+  'desktop.menu.newTab': 'New Tab',
+  'desktop.menu.closeTab': 'Close Tab',
+  'desktop.menu.closeWindow': 'Close Window',
 
   'app.connected': '● Connected',
   'app.reconnecting': '○ Reconnecting…',
@@ -107,6 +111,7 @@ export const en = {
   'action.open_settings': 'Settings',
 
   'confirm.closeWorkingPane': '{agent} is still working in this pane. Its process ends when the pane closes.',
+  'confirm.closeTabPanes': 'The {n} pane(s) of this tab and the programs running in them end.',
   'confirm.closeWorkingTab': '{n} agent(s) in this tab are still working. Their processes end when the tab closes.',
   'confirm.closeWorkspace': 'All panes of “{label}” and the processes in them end.',
   'confirm.closePaneTitle': 'Close this pane?',
@@ -260,6 +265,7 @@ export const en = {
   'settings.section.layout': 'Layout',
   'settings.section.terminal': 'Terminal',
   'settings.section.notifications': 'Notifications',
+  'settings.section.shortcuts': 'Shortcuts',
   'settings.section.codeServer': 'VS Code (code-server)',
   'settings.section.gui': 'Program windows',
   'settings.section.server': 'Server',
@@ -293,6 +299,16 @@ export const en = {
   'settings.dockPosition.desc': 'Beside the terminals or below them.',
   'settings.dockPosition.right': 'Right',
   'settings.dockPosition.bottom': 'Bottom',
+  'settings.desktop-new-tab-key': 'New tab',
+  'settings.desktop-new-tab-key.desc': 'Works wherever focus is, also in VS Code. The prefix binding keeps working.',
+  'settings.desktop-close-tab-key': 'Close tab',
+  'settings.desktop-close-tab-key.desc':
+    'Replaces closing the window with this key. Remove the shortcut to give the key back to the window.',
+  'settings.shortcut.none': 'None',
+  'settings.shortcut.taken': 'Already the shortcut for “{action}”.',
+  'settings.shortcut.prefix': 'This is herdr’s prefix key.',
+  'settings.shortcut.altOnly': 'Option/Alt shortcuts take keys that type characters and act as Meta in terminals.',
+  'settings.shortcut.press': 'Press keys… (Backspace removes, Esc cancels)',
   'settings.optionIsMeta': 'Use Option as Meta',
   'settings.optionIsMeta.desc':
     'macOS: Option+key sends Esc+key (Alt shortcuts in shells and editors) instead of typing special characters.',

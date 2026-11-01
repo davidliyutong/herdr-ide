@@ -125,14 +125,19 @@ export const actions = {
     }
   },
 
-  async closeTab(m: string, tab: string) {
+  /** Closes a tab, asking first when an agent in it is working, or always
+   * with `confirm` (the desktop app's close-tab shortcut). */
+  async closeTab(m: string, tab: string, opts: { confirm?: boolean } = {}) {
     const snap = useStore.getState().machines[m]?.snapshot;
-    const busy = snap?.panes.filter((p) => p.tab_id === tab && p.agent && p.agent_status === 'working') ?? [];
+    const panes = snap?.panes.filter((p) => p.tab_id === tab) ?? [];
+    const busy = panes.filter((p) => p.agent && p.agent_status === 'working');
     if (
-      busy.length &&
+      (busy.length || opts.confirm) &&
       !(await confirmDialog({
         title: t('confirm.closeTabTitle'),
-        message: t('confirm.closeWorkingTab', { n: busy.length }),
+        message: busy.length
+          ? t('confirm.closeWorkingTab', { n: busy.length })
+          : t('confirm.closeTabPanes', { n: Math.max(panes.length, 1) }),
         confirm: t('confirm.close'),
         danger: true,
       }))

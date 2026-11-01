@@ -64,6 +64,18 @@ implemented independently.
   does not start or stop herdr's servers; the user does so, and updates herdr,
   from the web UI ([17](17-local-herdr-management.md)). All inherited environment and SSH configuration
   remain available to the core.
+- The main window has a preload (`desktop/src/preload.ts`, sandboxed) that
+  exposes one object, `desktopShell`, for direct shortcuts
+  ([04](04-layout-and-keyboard.md)): the shell tells the page which action a
+  shortcut runs, the page reports that the shortcut settings changed (the
+  shell then reads them from the core itself) and turns recording on and
+  off; while it records, the shell sends the page the spec of each key with
+  `cmd`, `ctrl` or `alt`. Messages count only from the top frame of the
+  main window showing the core's origin. Program windows have no preload.
+  The menu gains **Tab** (New Tab, Close Tab) between Edit and View, and
+  **Window** lists Minimize, Zoom, Close Window (`cmd+w`) and Bring All to
+  Front; Close Window does not close the main window for a shortcut key
+  left to VS Code.
 - The web brand constants and English/Chinese message dictionaries are
   imported into the shell. Build metadata reads the same brand file. Native
   error dialogs follow the OS locale; UI language still follows web settings.
@@ -107,11 +119,12 @@ implemented independently.
 ## Security
 
 Following [Electron's security guidance](https://www.electronjs.org/docs/latest/tutorial/security),
-renderer and child windows have no Node integration or preload bridge;
-sandboxing, context isolation and web security are enabled. The main window
-alone allows audio without a prior user gesture, so agent notification
-sounds ([07](07-agent-native-workflow.md)) play after a restart before the
-first click. Navigation and
+renderer and child windows have no Node integration; only the main window
+has a preload, whose bridge carries shortcut actions and recorded key
+specs to the page and two signals without data beyond a boolean from it; sandboxing, context isolation and web security are
+enabled. The main window alone allows audio without a prior user gesture,
+so agent notification sounds ([07](07-agent-native-workflow.md)) play after
+a restart before the first click. Navigation and
 native popups are restricted to the exact owned core origin; external links
 accept only credential-free HTTP(S), with other schemes refused. Permissions
 require both the requesting frame and its top window to belong to the core;
@@ -126,7 +139,7 @@ See [SECURITY.md](../../SECURITY.md) for the local HTTP trust boundary.
 
 `cmd/herdr-ide/parent_test.go` covers readiness, pipe EOF/error cancellation
 and surviving writes to broken stdout pipes. `desktop/src/*.test.ts` cover
-isolation arguments, URL and permission policy, spawn failures, malformed
+isolation arguments, URL and permission policy, shortcut matching, spawn failures, malformed
 readiness, ephemeral ports, unexpected exits, late child errors and idempotent
 child shutdown, using fake Node children and no network or real herdr
 sessions. `make check test` includes desktop type, format and unit checks

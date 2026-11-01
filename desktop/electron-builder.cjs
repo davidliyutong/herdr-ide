@@ -22,7 +22,7 @@ module.exports = {
   productName: name,
   artifactName: '${productName}-${version}-mac-${arch}.${ext}',
   directories: { output: '../dist/desktop' },
-  files: ['dist/main.cjs', 'package.json'],
+  files: ['dist/main.cjs', 'dist/preload.cjs', 'package.json'],
   extraMetadata: {
     name: `${slug}-desktop`,
     // Release tags (vX.Y.Z) stay as is in the core; app metadata takes semver.

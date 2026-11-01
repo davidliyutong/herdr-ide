@@ -4,14 +4,15 @@
 // a core setting without translations shows its key. Core settings that can
 // differ per machine get a table with one row per machine.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Lock, Minus, Plus, RotateCcw, X } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../state/store';
 import { GuiEnableButton, GuiMachineStatus } from '../gui/GuiMenus';
 import { prefDefs, usePrefs, type PrefDef, type PrefKey, type SectionId } from '../prefs';
 import { hasMessage, locales, t, type MessageKey } from '../i18n';
-import { keyHint } from '../keymap';
+import { actionLabel, keyHint, keyLabel } from '../keymap';
+import { altOnly, desktopShell, isShortcutSetting, shortcutConflict, shortcutsSaved } from '../desktop';
 
 /** A core setting as listed by /api/settings. */
 export interface ServerSetting {
@@ -45,11 +46,12 @@ async function saveServer(key: string, value: string, machine?: string): Promise
   }
 }
 
-const sections: SectionId[] = ['appearance', 'layout', 'terminal', 'notifications', 'codeServer', 'gui', 'server'];
+const sections: SectionId[] = ['appearance', 'layout', 'terminal', 'notifications', 'shortcuts', 'codeServer', 'gui', 'server'];
 
 /** Section of a core setting, from its key. */
 export function serverSection(key: string): SectionId {
   if (key.startsWith('code-server-')) return 'codeServer';
+  if (isShortcutSetting(key)) return 'shortcuts';
   return key === 'gui' || key.startsWith('gui-') ? 'gui' : 'server';
 }
 
@@ -106,19 +108,21 @@ export function SettingsDialog() {
         <div className="settings-body">
           {sections.map((sec) => {
             const prefRows = (Object.keys(prefDefs) as PrefKey[]).filter((k) => prefDefs[k].section === sec);
+            // Direct shortcuts exist only in the desktop app.
+            if (sec === 'shortcuts' && !desktopShell) return null;
             const serverRows = (server ?? []).filter((s) => serverSection(s.key) === sec);
             if (prefRows.length === 0 && serverRows.length === 0 && !(sec === 'codeServer' && serverError)) return null;
             return (
               <section key={sec} className="settings-section">
                 <h3>{t(`settings.section.${sec}` as MessageKey)}</h3>
-                {(sec === 'codeServer' || sec === 'gui' || sec === 'server') && (
+                {(sec === 'shortcuts' || sec === 'codeServer' || sec === 'gui' || sec === 'server') && (
                   <p className="settings-note">{t(readOnly ? 'settings.serverReadOnly' : 'settings.serverNote')}</p>
                 )}
                 {prefRows.map((k) => (
                   <PrefRow key={k} k={k} />
                 ))}
                 {serverRows.map((s) => (
-                  <ServerRow key={s.key} s={s} readOnly={readOnly} onSaved={setServer} />
+                  <ServerRow key={s.key} s={s} all={server ?? []} readOnly={readOnly} onSaved={setServer} />
                 ))}
                 {serverRows.some((s) => s.per_machine) && (
                   <MachineSettings
@@ -276,7 +280,17 @@ function PrefText({ k, value, onSave }: { k: string; value: string; onSave(v: st
   );
 }
 
-function ServerRow({ s, readOnly, onSaved }: { s: ServerSetting; readOnly: boolean; onSaved(list: ServerSetting[]): void }) {
+function ServerRow({
+  s,
+  all,
+  readOnly,
+  onSaved,
+}: {
+  s: ServerSetting;
+  all: ServerSetting[];
+  readOnly: boolean;
+  onSaved(list: ServerSetting[]): void;
+}) {
   const [draft, setDraft] = useState(s.value);
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
@@ -286,18 +300,28 @@ function ServerRow({ s, readOnly, onSaved }: { s: ServerSetting; readOnly: boole
 
   const save = async (value: string) => {
     if (value === s.value) return;
-    setBusy(true);
     setError(undefined);
+    const conflict = isShortcutSetting(s.key) ? shortcutConflict(s.key, value, all) : undefined;
+    if (conflict) {
+      setError(t(conflict.message, { action: conflict.action ? actionLabel(conflict.action) : '' }));
+      return;
+    }
+    setBusy(true);
     const res = await saveServer(s.key, value);
     setBusy(false);
     if (typeof res === 'string') {
       setError(res);
       setDraft(s.value);
-    } else onSaved(res);
+    } else {
+      onSaved(res);
+      if (isShortcutSetting(s.key)) shortcutsSaved(res);
+    }
   };
 
   let control: React.ReactNode;
-  if (s.kind === 'enum' && s.options) {
+  if (isShortcutSetting(s.key)) {
+    control = <ShortcutInput s={s} disabled={disabled} onChange={save} />;
+  } else if (s.kind === 'enum' && s.options) {
     control =
       s.options.length > 3 ? (
         <select value={s.value} disabled={disabled} onChange={(e) => save(e.target.value)}>
@@ -341,12 +365,65 @@ function ServerRow({ s, readOnly, onSaved }: { s: ServerSetting; readOnly: boole
         </div>
       )}
       {error && <div className="error small">{error}</div>}
+      {isShortcutSetting(s.key) && altOnly(s.value) && <div className="muted small">{t('settings.shortcut.altOnly')}</div>}
     </>
   );
   return (
     <Row k={s.key} note={note}>
       {control}
     </Row>
+  );
+}
+
+/** Records a shortcut: focus it and press the keys. The desktop shell takes
+ * keys with cmd, ctrl or alt while it records (so neither the menu nor a
+ * shortcut acts on them) and reports them; Backspace removes the shortcut,
+ * Escape keeps the current one; the reset button restores the default. */
+function ShortcutInput({ s, disabled, onChange }: { s: ServerSetting; disabled: boolean; onChange(v: string): void }) {
+  const [recording, setRecording] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+  const change = useRef(onChange);
+  change.current = onChange;
+  useEffect(() => {
+    if (!recording || !desktopShell) return;
+    desktopShell.recordShortcut(true);
+    const off = desktopShell.onRecordedKey((spec) => {
+      change.current(spec);
+      input.current?.blur();
+    });
+    return () => {
+      off();
+      desktopShell?.recordShortcut(false);
+    };
+  }, [recording]);
+  const shown = s.value === 'none' ? t('settings.shortcut.none') : keyLabel(s.value);
+  return (
+    <div className="stepper">
+      <input
+        ref={input}
+        className="settings-input settings-shortcut"
+        readOnly
+        value={recording ? t('settings.shortcut.press') : shown}
+        disabled={disabled}
+        aria-label={label(s.key)}
+        onFocus={() => setRecording(true)}
+        onBlur={() => setRecording(false)}
+        onKeyDown={(e) => {
+          const plain = !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey;
+          if (e.key === 'Tab' && !e.metaKey && !e.ctrlKey && !e.altKey) return;
+          e.preventDefault();
+          e.stopPropagation();
+          if (plain && e.key === 'Escape') return e.currentTarget.blur();
+          if (plain && (e.key === 'Backspace' || e.key === 'Delete')) {
+            onChange('none');
+            return e.currentTarget.blur();
+          }
+        }}
+      />
+      <button className="icon" title={t('settings.reset')} disabled={disabled || s.source === 'default'} onClick={() => onChange('')}>
+        <RotateCcw />
+      </button>
+    </div>
   );
 }
 

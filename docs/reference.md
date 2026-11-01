@@ -59,6 +59,13 @@ here; both READMEs link to this page instead of repeating it.
 | `--gui` | `on` | Show windows of programs on remote Linux machines in browser windows: new panes get a virtual display (`DISPLAY`, `XAUTHORITY`); Xvfb is fetched in user space when missing. Applies to panes created afterwards. Also a setting in the UI. |
 | `--gui-gpu` | `vglrun` | OpenGL on machines with VirtualGL: `vglrun` (programs started with `vglrun` render on the GPU) or `all` (every program in new panes runs under VirtualGL). Also a setting in the UI. |
 
+### Desktop app shortcuts
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--desktop-new-tab-key` | `cmd+t` (macOS), `ctrl+shift+t` | Desktop app: shortcut for a new tab. Modifiers (`cmd`, `ctrl`, `alt`, `shift`, at least one of the first three) and a key joined by `+`, or `none`. Also a setting in the UI (desktop app only). |
+| `--desktop-close-tab-key` | `cmd+w` (macOS), `ctrl+shift+w` | Desktop app: shortcut that closes the current tab, after a confirmation; same format. Also a setting in the UI (desktop app only). |
+
 Settings marked "also a setting in the UI" can be changed in the settings
 dialog; the value is saved on the core host. code-server settings apply from
 the next code-server start on each machine, GUI settings to panes created
@@ -102,6 +109,16 @@ run on the pane's machine.
 | `prefix b` | Toggle sidebar | `prefix ?` | Shortcut list |
 | `prefix shift+t` | Rename tab | `prefix ,` | Settings |
 | `prefix prefix` | Send the prefix key itself | | |
+
+The desktop app adds direct shortcuts, without the prefix: `cmd+t` new tab
+and `cmd+w` close tab, which asks first (`ctrl+shift+t` / `ctrl+shift+w` on
+other systems). They work wherever focus is except in VS Code, which keeps
+its own `cmd+t` / `cmd+w`, and are changed or removed under
+**Settings → Shortcuts** (or `--desktop-new-tab-key`,
+`--desktop-close-tab-key`); a removed shortcut gives the key back to the
+window (`cmd+w` closes it again). Keys follow the keyboard layout's
+characters. Browsers keep `cmd+t` / `cmd+w` for themselves and use the
+prefix bindings.
 
 Default prefix: `ctrl+b`. In panes: Shift+Enter sends `ESC CR` (newline in
 Claude Code and similar prompts; the bytes of every key are listed in

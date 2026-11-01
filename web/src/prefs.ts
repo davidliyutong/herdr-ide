@@ -7,7 +7,7 @@
 import { create } from 'zustand';
 import { storage } from './brand';
 
-export type SectionId = 'appearance' | 'layout' | 'terminal' | 'notifications' | 'codeServer' | 'gui' | 'server';
+export type SectionId = 'appearance' | 'layout' | 'terminal' | 'notifications' | 'shortcuts' | 'codeServer' | 'gui' | 'server';
 
 interface Base {
   section: SectionId;

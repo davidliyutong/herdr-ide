@@ -22,6 +22,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -35,6 +36,7 @@ import (
 	"herdr-ide/internal/machines"
 	"herdr-ide/internal/server"
 	"herdr-ide/internal/settings"
+	"herdr-ide/internal/shortcuts"
 	"herdr-ide/internal/transport"
 	"herdr-ide/web"
 )
@@ -189,7 +191,7 @@ func serve(args []string, logger *log.Logger) {
 		origins      listFlag
 		extraSSH     listFlag
 		csf          codeServerFlags
-		prefs        = settings.New("", append(append([]settings.Def{}, codeserver.SettingDefs...), gui.SettingDefs...)...)
+		prefs        = settings.New("", slices.Concat(codeserver.SettingDefs, gui.SettingDefs, shortcuts.SettingDefs)...)
 	)
 	fl.Var(&origins, "allowed-origin", "browser origin of the reverse proxy, e.g. https://ide.example.com (repeatable)")
 	fl.Var(&only, "machine", "connect only these machines, by id, label or ssh target (repeatable)")
