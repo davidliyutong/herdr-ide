@@ -33,7 +33,9 @@ received, the popup itself is not drawn).
   dim, italic, underline styles, strikethrough, reverse and hidden cells,
   the cursor (block, underline, bar; hollow without focus) and the
   selection. herdr sends no widths: a wide symbol (`width.ts`, herdr's
-  unicode-width rules) covers the next cell, which is not drawn.
+  unicode-width rules) covers the next cell, which is not drawn: herdr
+  leaves it with the default style, and the wide symbol's background and
+  reverse video span both columns, as in herdr's own renderer.
   Box-drawing and block characters are drawn as shapes, so borders join at
   any cell size.
 - Colors use herdr's packing (named, palette index, true color) resolved

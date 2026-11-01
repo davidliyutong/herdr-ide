@@ -8,6 +8,7 @@ import { keyEvent, pasteText, releaseOf } from '../surface/input';
 import { findLinks, safeUrl } from '../terminal/links';
 import vectorData from './testdata/surface.json';
 import { themes } from '../terminal/options';
+import { paintRows } from '../surface/paint';
 
 /** The messages internal/server's TestSurfaceBinaryVector pins. */
 function vectors(): ArrayBuffer[] {
@@ -79,6 +80,42 @@ describe('Grid', () => {
     g.apply(full(4, 1, ['宽 x']));
     expect(g.rowText(0).text).toBe('宽x ');
     expect(g.rowText(0).colOf).toEqual([0, 2, 3, 4]);
+  });
+});
+
+describe('paintRows', () => {
+  it('gives a wide character its background over every cell it covers', () => {
+    const p = palette(themes.light);
+    const fills: Array<{ style: string; x: number; w: number }> = [];
+    const ctx = {
+      fillStyle: '',
+      fillRect(x: number, _y: number, w: number) {
+        fills.push({ style: this.fillStyle, x, w });
+      },
+      fillText() {},
+      save() {},
+      restore() {},
+      beginPath() {},
+      rect() {},
+      clip() {},
+    };
+    const g = new Grid();
+    const band = 0x023c3c3c;
+    // herdr leaves the covered cell with the default style.
+    g.apply({
+      full: true,
+      gen: 1,
+      w: 4,
+      h: 1,
+      moves: [],
+      spans: [{ x: 0, y: 0, cells: [{ ...cell('宽'), bg: band }, cell(' '), { ...cell('x'), bg: band }, cell(' ')] }],
+    });
+    const metrics = { cw: 10, ch: 20, fontPx: 16, family: 'mono', weight: 400, baseline: 15 };
+    paintRows(ctx as unknown as CanvasRenderingContext2D, g, { palette: p, metrics, focused: false }, [0]);
+    // After the row's base fill, column 1 is painted only with the band.
+    const bgs = fills.slice(1).filter((f) => f.x < 40 && f.w === 10);
+    expect(bgs.filter((f) => f.x === 10).map((f) => f.style)).toEqual(['#3c3c3c']);
+    expect(bgs.map((f) => f.x)).toEqual([0, 10, 20]);
   });
 });
 
