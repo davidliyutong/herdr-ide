@@ -1,16 +1,29 @@
-import type { TermController } from './TermController';
+// Pane handles for the rest of the UI: focusing a pane and typing or pasting
+// into it. Panes are drawn by surface/SurfaceView; input goes to herdr as
+// semantic input events.
 
-const terms = new Map<string, TermController>();
+import { sendInput } from '../surface/session';
+import { pasteText } from '../surface/input';
 
-export function registerTerm(key: string, c: TermController | undefined) {
-  if (c) terms.set(key, c);
-  else terms.delete(key);
+export interface PaneHandle {
+  focus(): void;
+  /** Types text as if committed by an input method. */
+  input(text: string): void;
+  /** Pastes text; herdr brackets it if the pane's program asked for that. */
+  paste(text: string): void;
 }
 
-export function getTerm(m: string, pane: string): TermController | undefined {
-  return terms.get(`${m}|${pane}`);
+let focusSurface: (() => void) | undefined;
+
+/** Set by the surface view: moves keyboard focus to it. */
+export function setSurfaceFocus(fn: (() => void) | undefined) {
+  focusSurface = fn;
 }
 
-export function allTerms(): Iterable<TermController> {
-  return terms.values();
+export function getTerm(m: string, pane: string): PaneHandle {
+  return {
+    focus: () => focusSurface?.(),
+    input: (text) => text && sendInput(m, pane, [{ t: 'text', text }]),
+    paste: (text) => text && sendInput(m, pane, [{ t: 'paste', text: pasteText(text) }]),
+  };
 }

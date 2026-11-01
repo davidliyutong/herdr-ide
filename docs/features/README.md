@@ -8,9 +8,9 @@ shortcuts, paths) lives in [reference.md](../reference.md).
 
 | # | Feature | Summary |
 | --- | --- | --- |
-| 01 | [herdr integration](01-herdr-integration.md) | Talk to herdr through its public socket API and terminal-session streams instead of embedding its TUI. |
+| 01 | [herdr integration](01-herdr-integration.md) | Talk to herdr through its public socket API and its endpoint protocol instead of embedding its TUI. |
 | 02 | [Multi-machine transport](02-multi-machine-transport.md) | One ssh session per machine running a static agent; yamux multiplexing; platform detection and upload. |
-| 03 | [Pane rendering and arbitration](03-pane-rendering-and-arbitration.md) | xterm.js per pane fed by herdr frames; input mapping; one controller per pane across browsers. |
+| 03 | [Pane rendering and input](03-pane-rendering-and-input.md) | herdr's cell grid on a canvas; semantic input herdr encodes per pane; selections, links, clipboard. |
 | 04 | [Layout and keyboard](04-layout-and-keyboard.md) | herdr's split tree rendered natively; herdr-compatible prefix keymap; command palette. |
 | 05 | [VS Code panel](05-vscode-panel.md) | code-server per machine behind the core's proxy; bridge extension; Git Graph and diffs. |
 | 06 | [Quick Look and files](06-quick-look-and-files.md) | Path detection in terminals, media preview with range streaming, uploads for agents. |
@@ -25,6 +25,7 @@ shortcuts, paths) lives in [reference.md](../reference.md).
 | 15 | [Bundled herdr](15-bundled-herdr.md) | Release archives carry the native herdr, verified at build time and used when no herdr is installed. |
 | 16 | [Desktop packaging](16-desktop-packaging.md) | macOS Electron shell, owned core lifecycle, `.app` and DMG builds. |
 | 17 | [Managing herdr from the UI](17-local-herdr-management.md) | Start, stop and update the core host's herdr; a managed copy of the bundled herdr; herdr's own `--remote` update for SSH machines. |
+| 18 | [Pane surfaces through herdr's endpoint](18-endpoint-surfaces.md) | One connection per shown machine to herdr's client socket; endpoint protocol generation 1; one browser owns the session at a time. |
 
 ## Writing a feature document
 

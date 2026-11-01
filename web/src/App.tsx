@@ -18,7 +18,7 @@ import { notifyAgent, updateBadge } from './notify';
 import { paneCwd, shortPath } from './lib/herdr';
 import { findPane } from './state/store';
 import { getTerm } from './terminal/registry';
-import { bracketedPaste } from './terminal/TermController';
+import { initSurface, surfaceDisconnected } from './surface/session';
 import { useGui } from './gui/state';
 import { GuiTray } from './gui/GuiMenus';
 
@@ -37,7 +37,7 @@ function pasteToAgent(m: string, text: string) {
     s.toast(t('app.noAgentPane'));
     return;
   }
-  term.input(bracketedPaste(text));
+  term.paste(text);
   term.focus();
 }
 
@@ -50,6 +50,7 @@ export function App() {
 
   useEffect(() => {
     const s = useStore.getState();
+    initSurface();
     conn.start({
       onMachines: (list) => s.setMachines(list),
       onMachine: (st) => {
@@ -57,7 +58,10 @@ export function App() {
         updateBadge();
       },
       onAgent: (m, data, sound) => notifyAgent(m, data, sound),
-      onConnection: (c) => useStore.getState().setConnected(c),
+      onConnection: (c) => {
+        useStore.getState().setConnected(c);
+        if (!c) surfaceDisconnected();
+      },
       onBridgeSend: (m, text) => pasteToAgent(m, text),
       onGui: (st) => useGui.getState().setState(st),
     });
@@ -70,7 +74,7 @@ export function App() {
     // The prefix key also works when focus is outside a terminal.
     const onKey = (ev: KeyboardEvent) => {
       const t = ev.target as HTMLElement | null;
-      if (t?.closest('.xterm') || t?.closest('input, textarea, iframe, [contenteditable]')) return;
+      if (t?.closest('.surface-host') || t?.closest('input, textarea, iframe, [contenteditable]')) return;
       handleKey(ev);
     };
     window.addEventListener('keydown', onKey);

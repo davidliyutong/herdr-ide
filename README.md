@@ -9,9 +9,13 @@ browser tab, with VS Code (code-server) one keystroke away.
 ## Features
 
 - **Speaks herdr's protocol.** Workspaces, tabs, split layouts and agent
-  states come from herdr's socket API; every pane is an xterm.js terminal fed
-  by herdr's own renderer, with input, mouse, scrollback (selections scroll
-  past the edge and copy whole), IME and resizable splits. Drag a pane by its header to swap or move it, click its title to
+  states come from herdr's socket API; panes are drawn from the cell grid
+  herdr renders through its endpoint protocol, and herdr encodes every key
+  for the program in the pane (kitty keyboard protocol included). Mouse,
+  scrollback (selections stay in their pane, scroll past the edge and copy
+  whole), IME, OSC 52 copy, resizable splits, and programs see the UI
+  theme's colors. One browser tab uses the session at a time; another tab
+  can take it over. Drag a pane by its header to swap or move it, click its title to
   rename it; drag tabs and workspaces to reorder them; right-click a pane
   header, tab or workspace for its commands. Keyboard shortcuts follow your
   herdr configuration (prefix `ctrl+b`).
@@ -55,9 +59,9 @@ browser tab, with VS Code (code-server) one keystroke away.
 
 Requirements:
 
-- [herdr](https://herdr.dev) running on every machine you want to use (this
-  host can use the herdr included in the release), with remote machines saved
-  through `herdr machine add`;
+- [herdr](https://herdr.dev) 0.9.5 or newer running on every machine you
+  want to use (this host can use the herdr included in the release), with
+  remote machines saved through `herdr machine add`;
 - an OpenSSH client with working access to those machines;
 - to build: Go (version in `go.mod`), Node.js 22.12+ and pnpm (`corepack enable`
   picks the pinned version).

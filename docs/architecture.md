@@ -1,13 +1,13 @@
 # Architecture
 
 ```
-browser (React + xterm.js)  ──WebSocket + HTTP──▶  core (Go, `herdr-ide`)
+browser (React, canvas)     ──WebSocket + HTTP──▶  core (Go, `herdr-ide`)
                                                      ├─ machines: registry + connection state machine
-                                                     ├─ server: WS hub, pane arbiter, files, code-server proxy, bridge hub
+                                                     ├─ server: WS hub, session owner + pane surfaces, files, code-server proxy, bridge hub
                                                      ├─ gui: virtual displays per machine, window list, frame routing
                                                      └─ one ssh session per machine ──yamux──▶ agent (`herdr-ide-agent`)
                                                                                                  ├─ herdr API socket (raw pipe)
-                                                                                                 ├─ `herdr terminal session` processes
+                                                                                                 ├─ herdr client socket (raw pipe, endpoint protocol)
                                                                                                  ├─ files (stat/list/range read/upload)
                                                                                                  ├─ code-server (unix socket only)
                                                                                                  ├─ Xvfb + window manager (programs' windows)
@@ -23,15 +23,15 @@ browser (React + xterm.js)  ──WebSocket + HTTP──▶  core (Go, `herdr-id
 | `internal/agent` | Agent: herdr, terminals, files, code-server supervision, bridge listener, housekeeping. |
 | `internal/transport` | yamux sessions: in-process for the local machine, ssh stdio for others; agent upload. |
 | `internal/machines` | Machine registry (herdr's saved machines), state machine, herdr snapshots and subscriptions. |
-| `internal/herdr` | herdr public socket API client. |
+| `internal/herdr` | herdr public socket API client; `endpoint`: client of herdr's endpoint protocol (generation 1). |
 | `internal/herdrdist` | herdr release bundled in archives: version, upstream asset names and SHA-256 digests. |
 | `internal/checksum` | SHA-256 of files, shared by code-server and herdr downloads. |
 | `internal/codeserver` | code-server provisioning (artifacts, checksums, install modes, start/stop). |
 | `internal/settings` | Core settings changeable from the UI: definitions, flags, settings file. |
 | `internal/gui` | Virtual displays on machines, their windows, frames and input between agents and browser windows. |
-| `internal/server` | HTTP/WS front: guards, arbiter, files, proxy, bridge, audit. |
+| `internal/server` | HTTP/WS front: guards, session ownership and pane surfaces, files, proxy, bridge, audit. |
 | `internal/embedded` | Build artifacts compiled into the core (agents, bridge VSIX). |
-| `web` | Browser UI (Vite, React, zustand, xterm.js); `web/embed.go` embeds `web/dist`. |
+| `web` | Browser UI (Vite, React, zustand; panes on a canvas, xterm.js for the PTY dialogs); `web/embed.go` embeds `web/dist`. |
 | `desktop` | Electron main process and electron-builder config; macOS `.app`/DMG wrapping the embedded core. |
 | `extensions/herdr-ide-bridge` | VS Code extension installed into code-server. |
 
@@ -67,22 +67,21 @@ Verified against herdr 0.9.5 (protocol 22):
   subscriber gets `events_lost` and is closed; resubscribe and refetch
   `session.snapshot`. Agent status needs per-pane subscriptions. There is no
   pane output event.
-- `herdr terminal session control|observe <pane> --cols N --rows N` is a
-  documented JSON-lines stream of `terminal.frame` records (base64 ANSI,
-  full or delta, re-rendered by herdr's terminal emulator; the first frame is
-  full). Control accepts `terminal.input|resize|scroll|mouse|release`, resizes
-  the PTY and allows one controller per pane; observers do not resize.
-- That stream drops OSC 52, bell, keyboard-protocol negotiation and Kitty
-  graphics. A native client of herdr's private protocol could keep them but
-  would be tied to its exact protocol version.
-- herdr answers color queries from pane programs itself; they never reach
-  the browser. OSC 10/11 (default foreground and background) and `CSI ?996n`
-  (light or dark) are answered with the colors of the last herdr TUI client
-  that was in the foreground, for every pane of the server, new panes
-  included, and kept after that client disconnects; until a TUI client has
-  reported colors, OSC 10/11 get no reply. OSC 4 is answered from the
-  palette. A `terminal session` stream and the socket API cannot report
-  colors, so the browser's theme does not change these answers.
+- `herdr-client.sock` (beside the API socket, mode 0600) speaks the client
+  endpoint protocol; generation 1 is kept for clients of any herdr build
+  (0.9.5 and newer). Frames are a u32 little-endian length and a bincode 2
+  value; the client says hello (generation, codecs, surface size), herdr
+  welcomes it and sends a JSON snapshot, then complete surfaces and patches
+  of the connection's focused tab, rendered by herdr at the client's size
+  with borders and split lines. Keys, text, pastes and mouse events are
+  sent per pane and encoded by herdr for the pane's modes. The client that
+  interacted last is the foreground client: it receives OSC 52, bells and
+  titles, and its reported colors answer OSC 10/11/4 and `CSI ?996n` for
+  every pane. With a single client its size resizes every tab; a client
+  connecting to a session without a workspace makes herdr create one. See
+  [18](features/18-endpoint-surfaces.md).
+- herdr 0.9.5 encodes no bytes for a Backspace key event without Ctrl; its
+  own client sends the DEL byte as text, and so does the browser.
 - Panes report their scroll position (`scroll`: `offset_from_bottom`,
   `max_offset_from_bottom`, `viewport_rows`) in `pane.get` and the snapshot.
   `pane.scroll` sets an absolute offset (clamped) and replies with the pane;
@@ -102,7 +101,7 @@ after a successful reply it carries op-specific bytes.
 | --- | --- | --- |
 | `hello` | core → agent | – (reply has host info, herdr binary, data dirs) |
 | `herdr-api` | core → agent | raw pipe to the herdr socket |
-| `term` | core → agent | JSON lines of `herdr terminal session` |
+| `herdr-client` | core → agent | raw pipe to herdr's client socket (endpoint protocol) |
 | `fs.stat`, `fs.list` | core → agent | – |
 | `fs.read` | core → agent | `Length` bytes from `Offset` |
 | `fs.write` | core → agent | chunked upload, then a second reply |
@@ -120,15 +119,16 @@ negotiation. Keep it that way when adding ops (add fields, don't reuse them).
 
 ## Browser ↔ core protocol (`/ws`)
 
-Text frames are JSON with a `t` field; binary frames are terminal output
-`[sid u32][flags u8][cols u16][rows u16][ANSI bytes]` (flags bit 0 = full).
+Text frames are JSON with a `t` field; binary frames are pane surface updates
+(complete or patch: generation, size, cursor, row moves, spans of cells; see
+`web/src/surface/protocol.ts`).
 
 | Browser → core | Core → browser |
 | --- | --- |
-| `attach {sid, m, pane, cols, rows, mode: auto\|observe, takeover}` | `machines {list}`, `machine {state}` |
-| `detach`, `claim`, `resize`, `in`, `inb`, `scroll`, `mouse` | `term {sid, ev: open\|closed\|error\|notice, mode, cols, rows, code}` |
+| `view {m, tab, pane, cols, rows, cw, ch}`, `takeover` | `session {state: owner\|busy\|taken_over}` |
+| `in {m, pane, ev}` (key, text, paste, mouse events), `focus {m, focused}`, `host {host}` (terminal colors) | `surf {m, gen, ev: open\|error\|notice, code}`, `surf.tab`, `surf.meta` (panes, splits, links), `clip` (OSC 52), `bell` |
 | `api {rid, m, method, params}` (allowlisted herdr calls) | `api.res {rid, result\|error}` |
-| `retry {m}`, `ping` | `agent {m, data}` (status change), `bridge.send {m, text}` |
+| `retry {m}`, `ping` | `machines {list}`, `machine {state}`, `agent {m, data}` (status change), `bridge.send {m, text}` |
 | `theme {kind: dark\|light}` (VS Code follows it) | `gui {state: {m, phase, gpu, windows}}` (program windows per machine) |
 | `active {idle}` (ms since the user last used the page) | `agent {…, sound}`: `sound` is true only for the most recently used page, which plays the notification sound |
 
@@ -150,15 +150,16 @@ herdr's `herdr --remote` for an SSH machine in a PTY, see
 User-facing text is never produced by the server: it sends codes (phases,
 notices) that the UI translates.
 
-## Pane arbitration (`internal/server/arbiter.go`)
+## Session ownership and surfaces (`internal/server/surface.go`)
 
-Within one core, the most recently active browser controls a pane (its size
-becomes the PTY size); every other viewer gets its own observe stream at the
-controller's size, scaled to fit. Typing or clicking claims control. When the
-controller leaves, control passes to the most recently active remaining
-viewer. A takeover by something outside the core turns the viewer into an
-observer with a notice. Each stream switch opens a fresh stream, which starts
-with a full frame.
+One browser connection owns the core's session, like a KVM console: it
+chooses the shown machine, tab and size, and only its input reaches herdr.
+Another browser is told the session is busy and may take it over; the
+previous owner is then told it was taken over. A read-only browser never
+takes over a writable one. The core keeps one endpoint connection to the
+shown machine's herdr, decodes its surfaces into a grid and forwards changed
+spans; when the owner changes, the new owner gets the current surface. See
+[18](features/18-endpoint-surfaces.md).
 
 ## code-server lifecycle
 

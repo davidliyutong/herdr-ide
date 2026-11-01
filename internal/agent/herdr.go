@@ -87,6 +87,22 @@ func (a *Agent) herdrSocket(session string) string {
 	return filepath.Join(cfg, "sessions", session, "herdr.sock")
 }
 
+// herdrClientSocket mirrors herdr's client_socket_path: a named session's
+// socket sits beside its API socket; otherwise HERDR_SOCKET_PATH's stem plus
+// "-client.sock", then HERDR_CLIENT_SOCKET_PATH, then the config dir.
+func (a *Agent) herdrClientSocket(session string) string {
+	if session == "" || session == "default" {
+		if p := os.Getenv("HERDR_SOCKET_PATH"); p != "" {
+			stem := strings.TrimSuffix(filepath.Base(p), filepath.Ext(p))
+			return filepath.Join(filepath.Dir(p), stem+"-client.sock")
+		}
+		if p := os.Getenv("HERDR_CLIENT_SOCKET_PATH"); p != "" {
+			return p
+		}
+	}
+	return filepath.Join(filepath.Dir(a.herdrSocket(session)), "herdr-client.sock")
+}
+
 // herdrArgs prefixes global session selection for a herdr invocation.
 func herdrArgs(session string, args ...string) []string {
 	if session == "" || session == "default" {

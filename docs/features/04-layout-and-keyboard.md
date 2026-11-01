@@ -18,17 +18,21 @@ Non-goals: a separate herdr-ide layout model; arbitrary docking of panes.
 
 ## Design
 
-**Layout** (`web/src/components/LayoutView.tsx`)
+**Layout** (`web/src/components/SurfaceView.tsx`)
 
-- The split tree comes from `layout.export` per tab; `zoomed` shows only the
-  focused pane. Pixel sizes are computed in the browser, so each browser
-  lays out at its own size while sharing herdr's ratios.
-- Dragging a divider calls `layout.set_split_ratio` with the path from the
-  root (`false` = first child, `true` = second; `[]` is the root split).
+- herdr lays out the shown tab itself, at the browser's size in cells: the
+  surface carries each pane's rectangle, the split lines and their handles
+  ([18](18-endpoint-surfaces.md)); `zoomed` tabs show one pane. The split
+  tree from `layout.export` still names panes for actions, directional focus
+  and the tab list.
+- Dragging a split handle calls `layout.set_split_ratio` with herdr's path
+  from the root (`false` = first child, `true` = second; `[]` is the root
+  split); a line follows the pointer until herdr's next surface.
 - Split, close, zoom, new tab and new workspace call the corresponding herdr
   methods with the focused pane's cwd.
-- Tab and workspace selection is local to each browser (it does not move the
-  focus of herdr TUI clients); opening an agent from the inbox calls
+- The owning browser's tab and focused pane become herdr's focus (herdr
+  renders the focused tab of its client), so herdr's TUI, if one is
+  attached, follows the browser; opening an agent from the inbox calls
   `pane.focus` so herdr marks it as seen.
 - Tabs and workspaces are shown in the order of the snapshot's arrays, which
   is herdr's order. `Tab.number` is not a position: it stays with a tab when
@@ -99,8 +103,9 @@ Non-goals: a separate herdr-ide layout model; arbitrary docking of panes.
   (rename, split) keep it. A click elsewhere, scrolling, leaving the window
   or resizing closes it. The menu keeps its own width next to the window's
   right edge.
-- Read-only mode offers no items, so the browser's menu shows. The terminal
-  body keeps the browser's menu (copy, paste).
+- Read-only mode offers no items, so the browser's menu shows. The pane
+  surface keeps the browser's menu (copy, paste) unless the pane's program
+  reports the mouse.
 
 **Dialogs** (`web/src/dialog.ts`, `Dialogs.tsx`)
 

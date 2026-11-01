@@ -33,12 +33,16 @@ API and the code-server proxy on `127.0.0.1:7780` by default.
    `X-Forwarded-For`, so it cannot skip the secret.
 3. **Host / Origin allowlist**: loopback plus `--allowed-origin`, against DNS
    rebinding and cross-site WebSocket hijacking.
-4. **Read-only mode** (`--read-only`): observe-only panes; uploads, ssh
+4. **Read-only mode** (`--read-only`): panes are shown but get no input,
+   focus or colors from the browser, and a read-only browser never takes the
+   session from a writable one ([18](18-endpoint-surfaces.md)); uploads, ssh
    authentication, bridge commands and VS Code refused; herdr calls limited
    to reads.
 5. **herdr API allowlist**: workspace/tab/pane/agent/layout/worktree methods,
    snapshot and plugin actions; no `server.*`, integrations, plugin
-   installation, event streams or client-shell calls.
+   installation, event streams or client-shell calls. The browser never
+   sends endpoint requests: the core composes `tab.focus` and `pane.focus`
+   for the shown tab.
 6. **CSP** on the UI (`script-src 'self'`, `frame-ancestors 'self'`, …).
 7. **Audit log** (`--audit-log`): JSON lines for connections, mutating calls,
    uploads, VS Code and bridge use, ssh authentication and denials, with the

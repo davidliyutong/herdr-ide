@@ -6,7 +6,6 @@
 package agent_test
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"io"
@@ -22,6 +21,7 @@ import (
 	"herdr-ide/internal/agent"
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/herdr"
+	"herdr-ide/internal/herdr/endpoint"
 	"herdr-ide/internal/transport"
 )
 
@@ -119,72 +119,155 @@ func newPane(ctx context.Context, t *testing.T, api *herdr.Client) string {
 	return created.RootPane.PaneID
 }
 
-func TestIntegrationTerminalStream(t *testing.T) {
+// openEndpoint connects to herdr's client socket through the agent.
+func openEndpoint(ctx context.Context, t *testing.T, s *transport.Session, cols, rows uint16) *endpoint.Conn {
+	t.Helper()
+	raw, _, err := s.Open(ctx, agentproto.Header{Op: agentproto.OpHerdrClient, Session: itSession})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := endpoint.Handshake(ctx, raw, endpoint.Options{Size: endpoint.Size{Cols: cols, Rows: rows, CellW: 8, CellH: 16}, Active: true})
+	if err != nil {
+		raw.Close()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { conn.Close() })
+	return conn
+}
+
+// surfaceText returns the rows of pane's inner rectangle.
+func surfaceText(s *endpoint.Surface, pane string) string {
+	var b strings.Builder
+	for _, p := range s.Panes {
+		if p.ID != pane {
+			continue
+		}
+		for y := p.Inner.Y; y < p.Inner.Y+p.Inner.H; y++ {
+			for x := p.Inner.X; x < p.Inner.X+p.Inner.W; x++ {
+				c := s.Frame.Cells[int(y)*int(s.Frame.W)+int(x)]
+				if !c.Skip {
+					b.WriteString(c.Symbol)
+				}
+			}
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
+}
+
+// The endpoint protocol through the agent: handshake, the first complete
+// surface, patches after output, input, and surfaces equal to what a second
+// connection receives from scratch.
+func TestIntegrationEndpoint(t *testing.T) {
 	s, api := startHerdr(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	pane := newPane(ctx, t, api)
 
-	conn, _, err := s.Open(ctx, agentproto.Header{Op: agentproto.OpTerm, Session: itSession, Mode: "control", Target: pane, Cols: 90, Rows: 20, Takeover: true})
+	conn := openEndpoint(ctx, t, s, 90, 20)
+	if conn.Welcome.Generation != 1 || !conn.Has("surface_interest") {
+		t.Fatalf("welcome %+v", conn.Welcome)
+	}
+	type update struct {
+		full bool
+		text string
+	}
+	updates := make(chan update, 1024)
+	go conn.Run(ctx, func(e endpoint.Event) {
+		switch {
+		case e.Surface != nil:
+			updates <- update{true, surfaceText(e.Surface, pane)}
+		case e.Patch != nil:
+			updates <- update{false, surfaceText(e.Current, pane)}
+		}
+	})
+	if first := <-updates; !first.full {
+		t.Fatal("first update was not a complete surface")
+	}
+	// The connection shows the tab herdr focuses; select the new pane's.
+	if _, err := conn.Request(ctx, "pane.focus", map[string]string{"pane_id": pane}); err != nil {
+		t.Fatal(err)
+	}
+	if snap := conn.Snapshot(); snap.BootID == "" {
+		t.Fatalf("snapshot %+v", snap)
+	}
+	b, err := endpoint.EncodePaneInput(pane, []endpoint.InputEvent{{T: "text", Text: "echo it-$((40+2))-ok"}, {T: "key", Key: &endpoint.KeyEvent{Code: "Enter"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
-	agentproto.WriteLine(conn, map[string]any{"type": "terminal.input", "text": "echo it-$((40+2))-ok\r"})
-
-	r := bufio.NewReader(conn)
-	var screen strings.Builder
-	sawFull := false
-	deadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) {
-		conn.SetReadDeadline(deadline)
-		line, err := r.ReadBytes('\n')
-		if err != nil {
-			t.Fatalf("stream ended: %v (screen %q)", err, screen.String())
-		}
-		var f struct {
-			Type   string `json:"type"`
-			Full   bool   `json:"full"`
-			Width  int    `json:"width"`
-			Height int    `json:"height"`
-			Bytes  []byte `json:"bytes"`
-		}
-		json.Unmarshal(line, &f)
-		if f.Type != "terminal.frame" {
-			continue
-		}
-		if f.Width != 90 || f.Height != 20 {
-			t.Fatalf("frame size %dx%d", f.Width, f.Height)
-		}
-		sawFull = sawFull || f.Full
-		screen.Write(f.Bytes)
-		if strings.Contains(screen.String(), "it-42-ok") {
-			if !sawFull {
-				t.Fatal("first frame was not a full frame")
-			}
-			return
+	if err := conn.Send(b); err != nil {
+		t.Fatal(err)
+	}
+	var last string
+	for !strings.Contains(last, "\nit-42-ok") {
+		select {
+		case u := <-updates:
+			last = u.text
+		case <-ctx.Done():
+			t.Fatalf("output never appeared: %q", last)
 		}
 	}
-	t.Fatal("command output never appeared")
+
+	// A second connection starts from a complete surface with the same text.
+	other := openEndpoint(ctx, t, s, 90, 20)
+	got := make(chan string, 1)
+	go other.Run(ctx, func(e endpoint.Event) {
+		if e.Surface != nil {
+			select {
+			case got <- surfaceText(e.Surface, pane):
+			default:
+			}
+		}
+	})
+	if g := <-got; !strings.Contains(g, "\nit-42-ok") {
+		t.Fatalf("second connection: %q", g)
+	}
+}
+
+// herdr refuses another generation with a code the core maps for the UI.
+func TestIntegrationEndpointRejectsGeneration(t *testing.T) {
+	s, _ := startHerdr(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	raw, _, err := s.Open(ctx, agentproto.Header{Op: agentproto.OpHerdrClient, Session: itSession})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	// Bypass the client's own size check with a raw hello.
+	hello := `{"generation":2,"cell_width_px":8,"cell_height_px":16,"surface_size":{"cols":80,"rows":24},"pixel_mouse":false,"direct_graphics":false,"endpoint_keybindings":false,"mouse_capture":false,"snapshot_codecs":["shell.snapshot.v1"],"surface_codecs":["shell.surface.v1"],"input_codecs":["shell.input.semantic.v1"],"blob_codecs":["shell.blob.v1"]}`
+	raw.Write(endpoint.EncodeControl(endpoint.HelloKind, hello))
+	p, err := endpoint.ReadFrame(raw, endpoint.MaxHandshakeFrame)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := endpoint.DecodeMessage(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, ok := m.(endpoint.Control)
+	if !ok || c.Kind != endpoint.WelcomeKind || !strings.Contains(c.Data, "unsupported_generation") {
+		t.Fatalf("reply %+v", m)
+	}
 }
 
 // keyRow is one entry of the pane input contract shared with the web tests.
 type keyRow struct {
-	Name  string `json:"name"`
-	Bytes string `json:"bytes"`
-	Herdr *struct {
-		Key    string  `json:"key"`
-		Legacy *string `json:"legacy"`
-		App    *string `json:"app"`
-	} `json:"herdr"`
+	Name   string                `json:"name"`
+	Events []endpoint.InputEvent `json:"events"`
+	// Bytes herdr writes to the pane per keyboard mode: legacy, application
+	// cursor and keypad, and the kitty keyboard protocol (disambiguate).
+	Bytes map[string]string `json:"bytes"`
 }
 
-// TestIntegrationKeyParity compares herdr's own key encoding (pane.send_keys,
-// which follows the pane's input modes) with the bytes the browser sends
-// (web/src/__tests__/testdata/keys.json), in normal mode and in application
-// cursor/keypad mode. Differences must be listed in the table.
+// TestIntegrationKeyParity sends each row's pane input events
+// (web/src/__tests__/testdata/keys.json, the events the browser sends) to a
+// raw reader through herdr's endpoint, in each keyboard mode, and compares
+// the bytes herdr encodes with the table. KEYS_RECORD=1 prints the table's
+// bytes from what herdr sends instead.
 func TestIntegrationKeyParity(t *testing.T) {
-	data, err := os.ReadFile("../../web/src/__tests__/testdata/keys.json")
+	path := "../../web/src/__tests__/testdata/keys.json"
+	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,16 +275,23 @@ func TestIntegrationKeyParity(t *testing.T) {
 	if err := json.Unmarshal(data, &rows); err != nil {
 		t.Fatal(err)
 	}
-	_, api := startHerdr(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	s, api := startHerdr(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
+	conn := openEndpoint(ctx, t, s, 100, 30)
+	go conn.Run(ctx, func(endpoint.Event) {})
+	recorded := map[string]map[string]string{}
 
 	for _, mode := range []struct{ name, setup string }{
 		{"legacy", ""},
 		{"app", `printf '\033[?1h\033='; `},
+		{"kitty", `printf '\033[>1u'; `},
 	} {
 		t.Run(mode.name, func(t *testing.T) {
 			pane := newPane(ctx, t, api)
+			if _, err := conn.Request(ctx, "pane.focus", map[string]string{"pane_id": pane}); err != nil {
+				t.Fatal(err)
+			}
 			out := filepath.Join(t.TempDir(), "keys")
 			cmd := mode.setup + "stty raw -echo; cat > " + out
 			if _, err := api.Call(ctx, "pane.send_text", map[string]any{"pane_id": pane, "text": cmd}); err != nil {
@@ -218,19 +308,23 @@ func TestIntegrationKeyParity(t *testing.T) {
 				}
 				time.Sleep(100 * time.Millisecond)
 			}
-			// Each key is followed by a separator that no encoding contains.
+			time.Sleep(200 * time.Millisecond)
+			// Each row is followed by a separator that no encoding contains.
 			var sent []keyRow
 			for _, r := range rows {
-				if r.Herdr == nil {
+				if len(r.Events) == 0 {
 					continue
 				}
-				if _, err := api.Call(ctx, "pane.send_keys", map[string]any{"pane_id": pane, "keys": []string{r.Herdr.Key}}); err != nil {
+				evs := append(append([]endpoint.InputEvent{}, r.Events...), endpoint.InputEvent{T: "text", Text: "|"})
+				b, err := endpoint.EncodePaneInput(pane, evs)
+				if err != nil {
 					t.Fatalf("%s: %v", r.Name, err)
 				}
-				if _, err := api.Call(ctx, "pane.send_text", map[string]any{"pane_id": pane, "text": "|"}); err != nil {
+				if err := conn.Send(b); err != nil {
 					t.Fatal(err)
 				}
 				sent = append(sent, r)
+				time.Sleep(20 * time.Millisecond)
 			}
 			var got []string
 			for i := 0; ; i++ {
@@ -243,18 +337,23 @@ func TestIntegrationKeyParity(t *testing.T) {
 				time.Sleep(100 * time.Millisecond)
 			}
 			for i, r := range sent {
-				want := r.Bytes
-				if r.Herdr.Legacy != nil {
-					want = *r.Herdr.Legacy
+				if recorded[r.Name] == nil {
+					recorded[r.Name] = map[string]string{}
 				}
-				if mode.name == "app" && r.Herdr.App != nil {
-					want = *r.Herdr.App
+				recorded[r.Name][mode.name] = got[i]
+				want, ok := r.Bytes[mode.name]
+				if !ok {
+					want = r.Bytes["legacy"]
 				}
-				if got[i] != want {
-					t.Errorf("%s: herdr sends %q in %s mode, keys.json expects %q; update the table (and the browser mapping if the browser should follow)", r.Name, got[i], mode.name, want)
+				if os.Getenv("KEYS_RECORD") == "" && got[i] != want {
+					t.Errorf("%s: herdr sends %q in %s mode, keys.json expects %q", r.Name, got[i], mode.name, want)
 				}
 			}
 		})
+	}
+	if os.Getenv("KEYS_RECORD") != "" {
+		b, _ := json.Marshal(recorded)
+		t.Logf("recorded: %s", b)
 	}
 }
 

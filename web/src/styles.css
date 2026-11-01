@@ -491,82 +491,105 @@ select,
   min-height: 0;
   position: relative;
 }
-.layout-root {
+/* The shown tab as herdr renders it: one canvas, pane headers over the top
+ * border rows herdr draws, and a hidden textarea for keys and IME. */
+.surface-host {
   position: absolute;
   inset: 0;
-  display: flex;
-  padding: 4px;
-}
-
-.split {
-  display: flex;
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-}
-.split-h {
-  flex-direction: row;
-}
-.split-v {
-  flex-direction: column;
-}
-.split-child {
-  display: flex;
-  min-width: 0;
-  min-height: 0;
-  flex-grow: 0;
-  flex-shrink: 1;
-}
-.split-divider {
-  flex: none;
-  background: transparent;
-  position: relative;
-}
-.split-h > .split-divider {
-  width: 5px;
-  cursor: col-resize;
-}
-.split-v > .split-divider {
-  height: 5px;
-  cursor: row-resize;
-}
-.split-divider:hover,
-.split-divider:active {
-  background: var(--line-2);
-}
-
-.pane {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
   overflow: hidden;
   background: var(--bg);
 }
-.pane {
-  container-type: inline-size;
+.surface-host.bell {
+  box-shadow: inset 0 0 0 2px var(--accent);
 }
-.pane.focused {
-  border-color: var(--focus-ring);
+.surface-canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: block;
 }
+.surface-input {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1em;
+  padding: 0;
+  border: 0;
+  margin: 0;
+  opacity: 0;
+  resize: none;
+  overflow: hidden;
+  white-space: pre;
+  z-index: -1;
+  caret-color: transparent;
+}
+/* An input method's text being composed, at the cursor (controller.ts). */
+.surface-compose {
+  position: absolute;
+  display: none;
+  white-space: pre;
+  pointer-events: none;
+  text-decoration: underline;
+  z-index: 3;
+}
+/* Drop targets for dragged panes (body.dragging, see drag.ts). */
+.pane-area {
+  position: absolute;
+  pointer-events: none;
+}
+body.dragging .pane-area {
+  pointer-events: auto;
+}
+.split-ghost {
+  position: absolute;
+  pointer-events: none;
+  background: var(--accent);
+  z-index: 2;
+}
+.split-ghost.h {
+  width: 2px;
+}
+.split-ghost.v {
+  height: 2px;
+}
+
 .pane-header {
+  position: absolute;
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 2.3rem;
-  padding: 0 4px 0 8px;
-  font-size: var(--fs-md);
+  padding: 0 4px 0 6px;
+  font-size: var(--fs-sm);
+  line-height: 1;
   background: var(--bg-1);
-  border-bottom: 1px solid var(--line);
   color: var(--fg-dim);
-  flex: none;
   user-select: none;
+  z-index: 1;
+  container-type: inline-size;
+  overflow: hidden;
+  border-radius: 3px;
+}
+/* A pane without a border row: its header floats over the top right and
+ * shows on hover. */
+.pane-header.floating {
+  left: auto !important;
+  right: 0;
+  width: auto !important;
+  max-width: 70%;
+  opacity: 0;
+  transition: opacity 0.1s;
+  box-shadow: 0 2px 8px var(--shadow);
+}
+.pane-header.floating:hover,
+.surface-host:hover .pane-header.floating.focused {
+  opacity: 1;
 }
 .pane-header.draggable {
   cursor: grab;
+}
+.pane-header.focused {
+  color: var(--fg);
 }
 .pane-title.editable {
   cursor: text;
@@ -582,9 +605,6 @@ select,
   width: 14em;
   max-width: 50%;
   padding: 1px 4px;
-}
-.pane.focused .pane-header {
-  color: var(--fg);
 }
 .pane-title {
   overflow: hidden;
@@ -617,16 +637,17 @@ select,
   opacity: 0.55;
   transition: opacity 0.1s;
 }
-.pane:hover .pane-actions,
-.pane.focused .pane-actions {
+.pane-header:hover .pane-actions,
+.pane-header.focused .pane-actions {
   opacity: 1;
 }
 .pane-actions button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.95rem;
-  height: 1.85rem;
+  width: 1.6rem;
+  height: 100%;
+  min-height: 1rem;
   padding: 0;
   background: none;
   border: none;
@@ -634,8 +655,8 @@ select,
   color: var(--fg-dim);
 }
 .pane-actions .lucide {
-  width: 1.25rem;
-  height: 1.25rem;
+  width: 1em;
+  height: 1em;
 }
 .pane-actions button:hover {
   color: var(--fg);
@@ -764,31 +785,7 @@ body.dragging * {
   margin: 4px 6px;
   background: var(--line);
 }
-.pane-body {
-  flex: 1;
-  min-height: 0;
-  position: relative;
-}
-.term-wrap {
-  position: absolute;
-  inset: 0;
-  padding: 2px 0 0 4px;
-}
-.term-host {
-  width: 100%;
-  height: 100%;
-}
-.term-host .xterm {
-  height: 100%;
-}
-.term-host .xterm-viewport {
-  overflow-y: hidden !important;
-  background-color: var(--bg) !important;
-}
-.term-host .xterm {
-  background-color: var(--bg);
-}
-.term-overlay {
+.surface-overlay {
   position: absolute;
   inset: 0;
   display: flex;
@@ -799,28 +796,17 @@ body.dragging * {
   background: var(--overlay);
   color: var(--fg-dim);
   font-size: var(--fs-md);
+  z-index: 4;
 }
-.term-overlay.connecting {
+/* Waiting for the first surface: a small note, not a curtain. */
+.surface-overlay.soft {
   background: transparent;
   pointer-events: none;
   align-items: flex-end;
   justify-content: flex-start;
   padding: 6px 10px;
 }
-.term-overlay.observe {
-  background: transparent;
-  inset: auto 8px 8px auto;
-  flex-direction: row;
-  padding: 4px 6px 4px 10px;
-  border-radius: 6px;
-  background: var(--float);
-  border: 1px solid var(--line-2);
-  z-index: 3;
-}
-.term-overlay.observe .term-overlay-msg {
-  display: none;
-}
-.term-overlay-msg {
+.surface-overlay-msg {
   max-width: 80%;
   text-align: center;
   color: var(--fg-mute);

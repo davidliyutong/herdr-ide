@@ -68,8 +68,7 @@ type Server struct {
 	clientsMu sync.Mutex
 	clients   map[*wsClient]bool
 
-	panesMu sync.Mutex
-	panes   map[paneKey]*paneState
+	surf surfaces
 
 	audit *auditor
 }
@@ -77,7 +76,8 @@ type Server struct {
 // New creates a server for the machine manager.
 func New(mg *machines.Manager, opts Options) *Server {
 	s := &Server{opts: opts, mg: mg, logger: opts.Logger, origins: map[string]bool{}, hosts: map[string]bool{},
-		cs: opts.CodeServer, clients: map[*wsClient]bool{}, panes: map[paneKey]*paneState{}}
+		cs: opts.CodeServer, clients: map[*wsClient]bool{}}
+	s.surf.sessions = map[string]*surfSession{}
 	if s.cs == nil {
 		s.cs = codeserver.New(opts.Logger)
 	}
