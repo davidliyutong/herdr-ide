@@ -19,7 +19,6 @@ import { findLinks, openLink, linkTitle, safeUrl, type LinkContext } from '../te
 import { themes } from '../terminal/options';
 import { termFontFamily } from '../terminal/fonts';
 import type { Appearance } from '../appearance';
-import { symbolWidth } from './width';
 
 export interface ControllerOptions {
   m(): string;
@@ -608,7 +607,7 @@ export class SurfaceController {
         for (const l of findLinks(text)) {
           const from = colOf[l.start];
           const last = colOf[l.end - 1];
-          const to = last + symbolWidth(grid.cell(last, y).symbol);
+          const to = last + grid.width(last, y);
           if (x >= from && x < to) next = { y, from, to, link: l, pane: p.id };
         }
       }

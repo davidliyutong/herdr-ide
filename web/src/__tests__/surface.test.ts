@@ -128,6 +128,25 @@ describe('symbolWidth', () => {
     expect(symbolWidth('❤️')).toBe(2);
     expect(symbolWidth('─')).toBe(1);
     expect(symbolWidth('é')).toBe(1);
+    // A flag, a lone regional indicator, text presentation, a blanked wide cell.
+    expect(symbolWidth('\u{1f1e8}\u{1f1f3}')).toBe(2);
+    expect(symbolWidth('\u{1f1e8}')).toBe(1);
+    expect(symbolWidth('\u231a\ufe0e')).toBe(1);
+    expect(symbolWidth('  ')).toBe(2);
+    // Ranges unicode-width counts as wide: Yijing, Khitan, Kana Extended-B, folk-religion symbols.
+    for (const cp of [0x268a, 0x2630, 0x18b00, 0x1aff0, 0x1f260]) expect(symbolWidth(String.fromCodePoint(cp))).toBe(2);
+  });
+});
+
+describe('Grid.width', () => {
+  it('counts a cell before a wide spacer as two columns', () => {
+    const g = new Grid();
+    // herdr pane content: a wide cell is followed by an empty spacer.
+    g.apply(full(5, 1, []));
+    const sym = String.fromCodePoint(0x16ff0);
+    g.apply({ full: false, gen: 1, w: 0, h: 0, moves: [], spans: [{ x: 0, y: 0, cells: [sym, '', 'a', '', ' '].map(cell) }] });
+    expect([0, 2, 4].map((x) => g.width(x, 0))).toEqual([2, 2, 1]);
+    expect(g.rowText(0).text).toBe(`${sym}a `);
   });
 });
 

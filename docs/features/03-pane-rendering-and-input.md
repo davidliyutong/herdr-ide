@@ -32,10 +32,14 @@ received, the popup itself is not drawn).
   pixels per cell: backgrounds, text in the bundled terminal font, bold,
   dim, italic, underline styles, strikethrough, reverse and hidden cells,
   the cursor (block, underline, bar; hollow without focus) and the
-  selection. herdr sends no widths: a wide symbol (`width.ts`, herdr's
-  unicode-width rules) covers the next cell, which is not drawn: herdr
-  leaves it with the default style, and the wide symbol's background and
-  reverse video span both columns, as in herdr's own renderer.
+  selection. herdr sends no widths: a wide symbol covers the next cell,
+  which is not drawn: herdr leaves it with the default style, and the wide
+  symbol's background and reverse video span both columns, as in herdr's
+  own renderer. A symbol is wide by herdr's unicode-width rules
+  (`width.ts`: East Asian Wide and Fullwidth, emoji presentation, flags) or
+  when the next cell is the empty spacer herdr puts after a wide character
+  in pane content (`Grid.width`), so grapheme clusters the table does not
+  know still take the columns herdr gave them.
   Box-drawing and block characters are drawn as shapes, so borders join at
   any cell size.
 - Colors use herdr's packing (named, palette index, true color) resolved

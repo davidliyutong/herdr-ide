@@ -4,9 +4,7 @@
 // that borders join without gaps at any cell size.
 
 import type { Grid } from './grid';
-import type { Cell } from './protocol';
 import { color, type Palette } from './colors';
-import { symbolWidth } from './width';
 
 // Modifier bits (ratatui) and herdr's underline style in bits 12-15.
 export const MOD = {
@@ -217,11 +215,6 @@ export function drawShape(ctx: CanvasRenderingContext2D, ch: string, x: number, 
   return false;
 }
 
-/** Columns a cell's symbol takes (herdr's cell_width). */
-function cellWidth(c: Cell): number {
-  return symbolWidth(c.symbol || ' ');
-}
-
 /** Paints the dirty rows of g. */
 export function paintRows(ctx: CanvasRenderingContext2D, g: Grid, st: PaintState, rows: Iterable<number>) {
   const { cw, ch, fontPx, family, weight, baseline } = st.metrics;
@@ -246,7 +239,7 @@ export function paintRows(ctx: CanvasRenderingContext2D, g: Grid, st: PaintState
       }
       const c = g.cell(x, y);
       if (c.skip) continue;
-      const wdt = cellWidth(c);
+      const wdt = g.width(x, y);
       cover = wdt - 1;
       const bg = c.mod & MOD.reversed ? (color(p, c.fg) ?? p.fg) : color(p, c.bg);
       for (let i = 0; i < wdt && x + i < g.w; i++) {
@@ -266,7 +259,7 @@ export function paintRows(ctx: CanvasRenderingContext2D, g: Grid, st: PaintState
       const c = g.cell(x, y);
       if (c.skip) continue;
       const sym = c.symbol;
-      const wdt = cellWidth(c);
+      const wdt = g.width(x, y);
       cover = wdt - 1;
       let fg = c.mod & MOD.reversed ? (color(p, c.bg) ?? p.bg) : (color(p, c.fg) ?? p.fg);
       const cur = g.cursor;
@@ -325,7 +318,7 @@ export function paintRows(ctx: CanvasRenderingContext2D, g: Grid, st: PaintState
     const cur = g.cursor;
     if (cur && cur.visible && cur.y === y) {
       const left = cur.x * cw;
-      const wdt = cellWidth(g.cell(cur.x, y));
+      const wdt = g.width(cur.x, y);
       const thick = Math.max(1, Math.round(cw / 8));
       ctx.fillStyle = p.cursor;
       ctx.strokeStyle = p.cursor;

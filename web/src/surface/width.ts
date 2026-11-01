@@ -1,7 +1,10 @@
-// Display width of a cell's symbol, as herdr counts it (unicode-width:
-// East Asian Wide and Fullwidth characters and emoji presentation take two
-// columns). herdr sends no width: the cell after a wide symbol is either
-// marked skip or holds a space that must not be drawn.
+// Display width of a cell's symbol, as herdr's renderer counts it
+// (unicode-width 0.2's str width: East Asian Wide and Fullwidth characters,
+// emoji presentation and flags take two columns). herdr sends no width; the
+// cells a wide symbol covers are not drawn. Grid.width also counts a cell
+// followed by a wide character's empty spacer as two columns, which is what
+// herdr's pane content guarantees (a wide cell's symbol is two columns wide
+// or replaced by two spaces).
 
 // Sorted, inclusive ranges of wide code points.
 const wide: Array<[number, number]> = [
@@ -13,8 +16,10 @@ const wide: Array<[number, number]> = [
   [0x23f3, 0x23f3],
   [0x25fd, 0x25fe],
   [0x2614, 0x2615],
+  [0x2630, 0x2637],
   [0x2648, 0x2653],
   [0x267f, 0x267f],
+  [0x268a, 0x268f],
   [0x2693, 0x2693],
   [0x26a1, 0x26a1],
   [0x26aa, 0x26ab],
@@ -53,13 +58,19 @@ const wide: Array<[number, number]> = [
   [0xff00, 0xff60],
   [0xffe0, 0xffe6],
   [0x16fe0, 0x16fe4],
-  [0x17000, 0x18aff],
+  [0x16ff0, 0x16ff1],
+  [0x17000, 0x18cd5],
+  [0x18cff, 0x18d08],
+  [0x1aff0, 0x1aff3],
+  [0x1aff5, 0x1affb],
+  [0x1affd, 0x1affe],
   [0x1b000, 0x1b2ff],
   [0x1f004, 0x1f004],
   [0x1f0cf, 0x1f0cf],
   [0x1f18e, 0x1f18e],
   [0x1f191, 0x1f19a],
   [0x1f200, 0x1f251],
+  [0x1f260, 0x1f265],
   [0x1f300, 0x1f320],
   [0x1f32d, 0x1f335],
   [0x1f337, 0x1f37c],
@@ -108,16 +119,27 @@ function isWide(cp: number): boolean {
   return false;
 }
 
-/** Columns a cell's symbol occupies (1 or 2). */
+const VS16 = '\ufe0f';
+const VS15 = '\ufe0e';
+const isRegional = (cp: number) => cp >= 0x1f1e6 && cp <= 0x1f1ff;
+
+/** Columns a symbol occupies (1 or 2). */
 export function symbolWidth(symbol: string): number {
   if (symbol.length === 0) return 1;
   const c0 = symbol.charCodeAt(0);
   if (c0 < 0x1100) {
+    // Two spaces stand for a wide cell herdr blanked.
+    if (symbol === '  ') return 2;
     // Emoji presentation selector after a narrow symbol (e.g. "❤️").
-    return symbol.length > 1 && symbol.includes('️') ? 2 : 1;
+    return symbol.length > 1 && symbol.includes(VS16) ? 2 : 1;
   }
   const cp = symbol.codePointAt(0)!;
-  if (isWide(cp) || symbol.includes('️')) return 2;
+  if (symbol.includes(VS16)) return 2;
+  // Text presentation selector after an emoji (e.g. "⌚︎").
+  if (symbol.includes(VS15)) return 1;
+  if (isWide(cp)) return 2;
+  // A flag: two regional indicators.
+  if (isRegional(cp)) return isRegional(symbol.codePointAt(2) ?? 0) ? 2 : 1;
   // Halfwidth katakana with a voiced mark (herdr counts these as two).
   if (cp >= 0xff66 && cp <= 0xff9d && /[ﾞﾟ]/.test(symbol)) return 2;
   return 1;

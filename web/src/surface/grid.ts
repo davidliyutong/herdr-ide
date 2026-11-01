@@ -68,6 +68,16 @@ export class Grid {
     return this.cells[y * this.w + x] ?? blankCell;
   }
 
+  /** Columns the cell at (x, y) takes, as herdr's renderer counts them:
+   * its symbol's width, and two when the next cell is the empty spacer
+   * that follows a wide character. */
+  width(x: number, y: number): number {
+    const c = this.cell(x, y);
+    const w = symbolWidth(c.symbol || ' ');
+    if (w > 1 || !c.symbol || x + 1 >= this.w) return w;
+    return this.cell(x + 1, y).symbol === '' ? 2 : w;
+  }
+
   /** The text of columns [x0, x1) of row y, and the column of each UTF-16
    * code unit (plus one past the end). The cells a wide character covers
    * after its first, and skipped cells, contribute nothing. */
@@ -85,7 +95,7 @@ export class Grid {
       const s = c.symbol || ' ';
       for (let i = 0; i < s.length; i++) colOf.push(x);
       text += s;
-      cover = symbolWidth(s) - 1;
+      cover = this.width(x, y) - 1;
     }
     colOf.push(x1);
     return { text, colOf };
