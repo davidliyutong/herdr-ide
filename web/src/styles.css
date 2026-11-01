@@ -619,6 +619,42 @@ select,
   text-decoration: underline;
   z-index: 3;
 }
+/* A pane's close button: a circle at its top right corner, shown while the
+ * pointer is over the pane (SurfaceView). Hidden, it lets clicks through to
+ * the terminal under it. */
+.pane-close {
+  position: absolute;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--line-2);
+  border-radius: 50%;
+  background: var(--bg-2);
+  color: var(--fg-dim);
+  box-shadow: 0 1px 4px var(--shadow);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s;
+}
+.pane-close.shown {
+  opacity: 1;
+  pointer-events: auto;
+}
+body.dragging .pane-close {
+  opacity: 0;
+  pointer-events: none;
+}
+.pane-close:hover {
+  color: #fff;
+  background: var(--error);
+  border-color: var(--error);
+}
+.pane-close .lucide {
+  width: 65%;
+  height: 65%;
+}
 /* Drop targets for dragged panes (body.dragging, see drag.ts). */
 .pane-area {
   position: absolute;
@@ -655,6 +691,8 @@ body.dragging .pane-area {
   container-type: inline-size;
   overflow: hidden;
   border-radius: 3px;
+  /* Room for the pane's close button at the right end of the row. */
+  padding-right: 26px;
 }
 .pane-header.draggable {
   cursor: grab;

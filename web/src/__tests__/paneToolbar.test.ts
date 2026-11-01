@@ -11,7 +11,7 @@ vi.mock('../lib/bridge', () => ({ bridge: { command: (...a: unknown[]) => comman
 import { useStore } from '../state/store';
 import type { MachineState } from '../lib/herdr';
 import { PaneToolbar } from '../components/PaneToolbar';
-import { PaneHeader } from '../components/PaneHeader';
+import { PaneCloseButton, PaneHeader } from '../components/PaneHeader';
 import { useMenu } from '../contextMenu';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -130,6 +130,34 @@ describe('PaneHeader', () => {
     expect(host.querySelector('.pane-title')?.textContent).toBe('build');
     expect(host.querySelector('.pane-cwd')?.textContent).toBe('~/src');
     expect(host.querySelectorAll('button')).toHaveLength(0);
+    await act(async () => root.unmount());
+    host.remove();
+  });
+});
+
+describe('PaneCloseButton', () => {
+  it('lets clicks through until the pointer is over its pane, then closes the pane', async () => {
+    api.mockClear();
+    useStore.getState().setMachines([machine()]);
+    const host = document.createElement('div');
+    document.body.append(host);
+    const root = createRoot(host);
+    const render = (shown: boolean) =>
+      act(async () => root.render(createElement(PaneCloseButton, { m: 'm', paneId: 'p1', style: {}, shown })));
+    await render(false);
+    const button = host.querySelector('button.pane-close') as HTMLButtonElement;
+    expect(button.classList.contains('shown')).toBe(false);
+    expect(button.getAttribute('aria-hidden')).toBe('true');
+    expect(button.tabIndex).toBe(-1);
+
+    await render(true);
+    expect(button.classList.contains('shown')).toBe(true);
+    expect(button.title).toMatch(/^Close pane/);
+    const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+    button.dispatchEvent(down);
+    expect(down.defaultPrevented).toBe(true); // keyboard focus stays in the terminal
+    await act(async () => button.click());
+    expect(api).toHaveBeenCalledWith('m', 'pane.close', { pane_id: 'p1' });
     await act(async () => root.unmount());
     host.remove();
   });

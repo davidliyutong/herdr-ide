@@ -69,6 +69,16 @@ received, the popup itself is not drawn).
   focuses its pane, and it renames, drags and has a menu like the toolbar.
   A pane without a border row (a lone pane, unless herdr draws outer
   borders) has no header: the toolbar shows the same.
+- Every pane has a round close button at its top right corner, shown only
+  while the pointer is over the pane (`PaneCloseButton`, placed by
+  `SurfaceView`): at the right end of the border row, where the header
+  leaves room for it, or just inside the corner of a pane without one.
+  Closing a pane is the one command kept on the pane itself, since the
+  toolbar's buttons act on the focused pane only. Hidden, it lets clicks
+  through to the terminal; the surface controller ignores mouse presses on
+  buttons, so a click on it never reaches the program under it. It closes
+  like the toolbar (asking while an agent works) and leaves keyboard focus
+  in the terminal. Read-only browsers do not show it.
 
 **Input mapping** (`surface/input.ts`, `surface/controller.ts`)
 
@@ -186,8 +196,10 @@ widths, colors, selections in absolute rows and the read range, key events,
 paste filtering, links); the key contract above (`input.test.ts`,
 `TestIntegrationKeyParity`); `web/src/__tests__/paneToolbar.test.ts` (the
 toolbar's buttons act on the focused pane, disabled outside the shown tab,
-rename and menu, read-only, headers without buttons). The toolbar's
-narrow-width steps were checked in Chromium. Rendering, headers over borders, IME, vim
+rename and menu, read-only, headers without buttons, the close button);
+`input.test.ts` (a press on a button over the grid reaches no program).
+The toolbar's narrow-width steps and the close button were checked in
+Chromium. Rendering, headers over borders, IME, vim
 mouse, wheel, selections and copying, tab switches, takeover between two
 tabs and host colors (OSC 11 answered with the theme's background) were
 checked in Chromium against a dev herdr session.
