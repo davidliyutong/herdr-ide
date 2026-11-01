@@ -6,6 +6,8 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-01
+
 ### Changed
 
 - Panes are drawn from the cell grid herdr renders through its endpoint
