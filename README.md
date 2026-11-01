@@ -100,9 +100,10 @@ ARCH=x64 make desktop-dmg        # Intel; default is the host Node architecture
 The desktop and browser share a terminal-pane icon, with a multi-resolution
 macOS version for Finder and the Dock.
 
-In the app, `cmd+t` opens a tab and `cmd+w` closes it, also while VS Code
-has focus; change or remove them under **Settings → Shortcuts**. Prefix
-bindings keep working, and browsers keep their own `cmd+t` / `cmd+w`.
+In the app, `cmd+t` opens a tab and `cmd+w` closes it after asking; while
+VS Code has focus, both keys stay VS Code's. Change or remove them under
+**Settings → Shortcuts**. Prefix bindings keep working, and browsers keep
+their own `cmd+t` / `cmd+w`.
 
 The app starts its own core at `http://127.0.0.1:7781` with instance
 `desktop`; quitting or closing the main window stops that core. The app

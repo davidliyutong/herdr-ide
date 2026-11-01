@@ -21,7 +21,7 @@ func TestValidate(t *testing.T) {
 }
 
 func TestDefaults(t *testing.T) {
-	for goos, want := range map[string][2]string{"darwin": {"cmd+t", "cmd+w"}, "linux": {"ctrl+t", "ctrl+w"}, "windows": {"ctrl+t", "ctrl+w"}} {
+	for goos, want := range map[string][2]string{"darwin": {"cmd+t", "cmd+w"}, "linux": {"ctrl+shift+t", "ctrl+shift+w"}, "windows": {"ctrl+shift+t", "ctrl+shift+w"}} {
 		d := defs(goos)
 		if d[0].Key != SettingNewTab || d[0].Default != want[0] || d[1].Key != SettingCloseTab || d[1].Default != want[1] {
 			t.Errorf("%s: defaults %q, %q", goos, d[0].Default, d[1].Default)

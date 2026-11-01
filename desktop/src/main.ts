@@ -6,7 +6,16 @@ import { zhCN } from '../../web/src/i18n/zh-CN';
 import { CoreProcess, coreArgs, coreEnv, corePort, DesktopError, ENV_PREFIX } from './core';
 import { channels } from './bridge';
 import { allowPermission, isExternal, isInternal, mainWindowPreferences, webPreferences } from './policy';
-import { shortcutFor, shortcutsFromSettings, toAccelerator, type ShortcutAction, type Shortcuts } from './shortcuts';
+import {
+  defaultShortcuts,
+  isCodeFrame,
+  recordedSpec,
+  shortcutFor,
+  shortcutsFromSettings,
+  toAccelerator,
+  type ShortcutAction,
+  type Shortcuts,
+} from './shortcuts';
 
 app.setName(APP_NAME);
 app.enableSandbox();
@@ -20,9 +29,15 @@ let quitting = false;
 let stopped = false;
 let systemShutdown = false;
 let reportingError = false;
-let shortcuts: Shortcuts = {};
-// The settings dialog is recording a key: shortcuts reach the page instead.
+// The platform's defaults until the core's settings are read, so a key never
+// falls through to closing the window while they load.
+let shortcuts: Shortcuts = defaultShortcuts(process.platform);
+// The settings dialog is recording a key: the shell reports keys to it
+// instead of running shortcuts.
 let recording = false;
+// The last key-down matched a shortcut but was left to VS Code, which has
+// focus; if VS Code does not take it, the menu must not act on it either.
+let leftToCode = false;
 
 function t(key: MessageKey): string {
   return (app.getLocale().toLowerCase().startsWith('zh') ? zhCN : en)[key];
@@ -84,6 +99,8 @@ function runShortcut(action: ShortcutAction) {
 
 // The menu shows the shortcuts; before-input-event runs them, so the menu does
 // not register them (it would also catch keys meant for program windows).
+// Window → Close closes program windows with cmd+w; the main window only when
+// cmd+w is not a shortcut left to VS Code (closing it quits the app).
 function buildMenu() {
   const item = (action: ShortcutAction, label: MessageKey) => ({
     label: t(label),
@@ -97,22 +114,53 @@ function buildMenu() {
       { role: 'editMenu' },
       { label: t('desktop.menu.tab'), submenu: [item('new_tab', 'desktop.menu.newTab'), item('close_tab', 'desktop.menu.closeTab')] },
       { role: 'viewMenu' },
-      { role: 'windowMenu' },
+      {
+        role: 'window',
+        submenu: [
+          { role: 'minimize' },
+          { role: 'zoom' },
+          { type: 'separator' },
+          {
+            label: t('desktop.menu.closeWindow'),
+            accelerator: 'CommandOrControl+W',
+            click: (_item, win, ev) => {
+              if (win === mainWindow && ev.triggeredByAccelerator && leftToCode) return;
+              win?.close();
+            },
+          },
+          { type: 'separator' },
+          { role: 'front' },
+        ],
+      },
     ]),
   );
 }
 
 // Shortcuts are core settings; the page reports changes, the shell reads them
-// from the core itself.
-async function loadShortcuts() {
-  try {
-    const r = await fetch(new URL('/api/settings', origin));
-    if (!r.ok) throw new Error(`/api/settings: ${r.status}`);
-    shortcuts = shortcutsFromSettings(await r.json());
-  } catch (error) {
-    console.error(error);
+// from the core itself. A failed read keeps the current ones and is retried.
+async function loadShortcuts(attempts = 3) {
+  for (let i = 1; ; i++) {
+    try {
+      const r = await fetch(new URL('/api/settings', origin));
+      if (!r.ok) throw new Error(`/api/settings: ${r.status}`);
+      shortcuts = shortcutsFromSettings(await r.json());
+      break;
+    } catch (error) {
+      console.error(error);
+      if (i >= attempts) break;
+      await new Promise((resolve) => setTimeout(resolve, 1000 * i));
+    }
   }
   buildMenu();
+}
+
+/** Whether keyboard focus is in a VS Code frame of win (or a webview inside
+ * it): its keys, cmd+w closing an editor included, belong to VS Code. */
+function focusInCode(win: BrowserWindow): boolean {
+  let frame = win.webContents.focusedFrame;
+  if (!frame?.parent) return false;
+  while (frame.parent?.parent) frame = frame.parent;
+  return isCodeFrame(frame.url, origin);
 }
 
 // Messages count only from the top frame of the main window showing the core.
@@ -142,17 +190,32 @@ function createWindow() {
     webPreferences: { ...mainWindowPreferences, preload: join(__dirname, 'preload.cjs') },
   });
   mainWindow = win;
-  // Before the page and every frame in it (VS Code's too), and before the menu.
+  // Before the page and every frame in it, and before the menu.
   win.webContents.on('before-input-event', (event, input) => {
-    if (recording) return;
+    if (input.type !== 'keyDown') return;
+    leftToCode = false;
+    if (recording) {
+      // Taken here, so the menu (cmd+w, cmd+q) never acts on a recorded key.
+      const spec = recordedSpec(input);
+      if (!spec) return;
+      event.preventDefault();
+      if (!input.isAutoRepeat) win.webContents.send(channels.recorded, spec);
+      return;
+    }
     const action = shortcutFor(shortcuts, input);
     if (!action) return;
+    if (focusInCode(win)) {
+      leftToCode = true;
+      return;
+    }
     event.preventDefault();
     if (!input.isAutoRepeat) runShortcut(action);
   });
-  win.webContents.on('did-navigate', () => {
+  const stopRecording = () => {
     recording = false;
-  });
+  };
+  win.webContents.on('did-navigate', stopRecording);
+  win.webContents.on('render-process-gone', stopRecording);
   win.once('ready-to-show', () => win.show());
   win.on('closed', () => {
     mainWindow = undefined;

@@ -2,7 +2,10 @@
 // Cmd+T). Their specs are core settings (internal/shortcuts); the shell reads
 // them from /api/settings, intercepts matching keys before the page sees them
 // (so a pane never receives them, whichever frame has focus) and asks the page
-// to run the action.
+// to run the action. Keys are named by web/src/shortcutKey.ts, after the
+// character the keyboard layout gives them.
+
+import { acceleratorKey, isKeyName, keyName } from '../../web/src/shortcutKey';
 
 /** Actions the page runs for a shortcut; the core setting that holds its keys. */
 export const shortcutSettings = {
@@ -21,48 +24,12 @@ export interface Shortcut {
   key: string;
 }
 
-const named: Record<string, { code: string; accelerator: string }> = {
-  tab: { code: 'Tab', accelerator: 'Tab' },
-  space: { code: 'Space', accelerator: 'Space' },
-  enter: { code: 'Enter', accelerator: 'Enter' },
-  escape: { code: 'Escape', accelerator: 'Escape' },
-  backspace: { code: 'Backspace', accelerator: 'Backspace' },
-  delete: { code: 'Delete', accelerator: 'Delete' },
-  left: { code: 'ArrowLeft', accelerator: 'Left' },
-  right: { code: 'ArrowRight', accelerator: 'Right' },
-  up: { code: 'ArrowUp', accelerator: 'Up' },
-  down: { code: 'ArrowDown', accelerator: 'Down' },
-  home: { code: 'Home', accelerator: 'Home' },
-  end: { code: 'End', accelerator: 'End' },
-  pageup: { code: 'PageUp', accelerator: 'PageUp' },
-  pagedown: { code: 'PageDown', accelerator: 'PageDown' },
-  minus: { code: 'Minus', accelerator: '-' },
-  equal: { code: 'Equal', accelerator: '=' },
-  comma: { code: 'Comma', accelerator: ',' },
-  period: { code: 'Period', accelerator: '.' },
-  slash: { code: 'Slash', accelerator: '/' },
-  backslash: { code: 'Backslash', accelerator: '\\' },
-  semicolon: { code: 'Semicolon', accelerator: ';' },
-  quote: { code: 'Quote', accelerator: "'" },
-  backtick: { code: 'Backquote', accelerator: '`' },
-  bracketleft: { code: 'BracketLeft', accelerator: '[' },
-  bracketright: { code: 'BracketRight', accelerator: ']' },
-};
-
-/** The physical key (KeyboardEvent.code) of a spec's key. */
-function codeOf(key: string): string | undefined {
-  if (/^[a-z]$/.test(key)) return 'Key' + key.toUpperCase();
-  if (/^[0-9]$/.test(key)) return 'Digit' + key;
-  if (/^f([1-9]|1[0-9]|2[0-4])$/.test(key)) return key.toUpperCase();
-  return named[key]?.code;
-}
-
 /** Parses a spec such as "cmd+shift+t"; undefined for "none" and invalid specs. */
 export function parseShortcut(spec: string | undefined): Shortcut | undefined {
   if (!spec || spec === 'none') return;
   const parts = spec.split('+');
   const key = parts.pop()!;
-  if (!codeOf(key)) return;
+  if (!isKeyName(key)) return;
   const sc: Shortcut = { cmd: false, ctrl: false, alt: false, shift: false, key };
   for (const p of parts) {
     if (p !== 'cmd' && p !== 'ctrl' && p !== 'alt' && p !== 'shift') return;
@@ -76,6 +43,7 @@ export function parseShortcut(spec: string | undefined): Shortcut | undefined {
 /** The fields of Electron's before-input-event Input used for matching. */
 export interface KeyInput {
   type: string;
+  key: string;
   code: string;
   meta: boolean;
   control: boolean;
@@ -83,11 +51,12 @@ export interface KeyInput {
   shift: boolean;
 }
 
-/** Whether a key-down matches; physical keys, so layouts and Shift do not change letters. */
+/** Whether a key-down matches: the key by its character on the current
+ * layout (so AZERTY's Cmd+Z is not cmd+w), and exactly the spec's modifiers. */
 export function matchesInput(sc: Shortcut, input: KeyInput): boolean {
   return (
     input.type === 'keyDown' &&
-    input.code === codeOf(sc.key) &&
+    keyName(input) === sc.key &&
     input.meta === sc.cmd &&
     input.control === sc.ctrl &&
     input.alt === sc.alt &&
@@ -108,8 +77,7 @@ export function toAccelerator(spec: string | undefined): string | undefined {
   const sc = parseShortcut(spec);
   if (!sc) return;
   const mods = [sc.cmd && 'Super', sc.ctrl && 'Control', sc.alt && 'Alt', sc.shift && 'Shift'].filter(Boolean);
-  const key = named[sc.key]?.accelerator ?? sc.key.toUpperCase();
-  return [...mods, key].join('+');
+  return [...mods, acceleratorKey(sc.key)].join('+');
 }
 
 /** The shortcuts in a /api/settings reply; settings that are missing stay unset. */
@@ -122,4 +90,32 @@ export function shortcutsFromSettings(reply: unknown): Shortcuts {
     if (typeof e?.value === 'string' && parseShortcut(e.value)) out[action] = e.value;
   }
   return out;
+}
+
+/** The default shortcuts, as internal/shortcuts sets them: cmd+t / cmd+w on
+ * macOS; elsewhere ctrl+shift+t / ctrl+shift+w, as in terminal emulators,
+ * since ctrl+w deletes a word in shells. Used until the core's are read. */
+export function defaultShortcuts(platform: string): Shortcuts {
+  return platform === 'darwin' ? { new_tab: 'cmd+t', close_tab: 'cmd+w' } : { new_tab: 'ctrl+shift+t', close_tab: 'ctrl+shift+w' };
+}
+
+/** The spec of a key-down while the settings dialog records a shortcut, e.g.
+ * "cmd+shift+t"; undefined for keys without cmd, ctrl or alt (those reach the
+ * page: Escape cancels, Backspace removes) and for lone modifiers. */
+export function recordedSpec(input: KeyInput): string | undefined {
+  if (input.type !== 'keyDown' || !(input.meta || input.control || input.alt)) return;
+  const key = keyName(input);
+  if (!key) return;
+  const mods = [input.meta && 'cmd', input.control && 'ctrl', input.alt && 'alt', input.shift && 'shift'].filter(Boolean);
+  return [...mods, key].join('+');
+}
+
+/** Whether url is a VS Code (code-server) frame of the core, /m/<machine>/code/…. */
+export function isCodeFrame(url: string, origin: string): boolean {
+  try {
+    const u = new URL(url);
+    return u.origin === origin && !u.username && !u.password && /^\/m\/[^/]+\/code\//.test(u.pathname);
+  } catch {
+    return false;
+  }
 }

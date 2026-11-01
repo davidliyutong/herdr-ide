@@ -13,6 +13,7 @@ export const zhCN: Messages = {
   'desktop.menu.tab': '标签页',
   'desktop.menu.newTab': '新建标签页',
   'desktop.menu.closeTab': '关闭标签页',
+  'desktop.menu.closeWindow': '关闭窗口',
 
   'app.connected': '● 已连接',
   'app.reconnecting': '○ 重连中…',
@@ -108,6 +109,7 @@ export const zhCN: Messages = {
   'action.open_settings': '设置',
 
   'confirm.closeWorkingPane': '{agent} 仍在这个 pane 里工作，关闭后它的进程会结束。',
+  'confirm.closeTabPanes': '这个 tab 的 {n} 个 pane 及其中运行的程序都会结束。',
   'confirm.closeWorkingTab': '这个 tab 里有 {n} 个 agent 仍在工作，关闭后它们的进程会结束。',
   'confirm.closeWorkspace': '“{label}”中的所有 pane 及其中的进程都会结束。',
   'confirm.closePaneTitle': '关闭这个 pane？',
@@ -300,6 +302,9 @@ export const zhCN: Messages = {
   'settings.desktop-close-tab-key': '关闭标签页',
   'settings.desktop-close-tab-key.desc': '此按键不再关闭窗口。移除该快捷键后，按键恢复为关闭窗口。',
   'settings.shortcut.none': '无',
+  'settings.shortcut.taken': '已是“{action}”的快捷键。',
+  'settings.shortcut.prefix': '这是 herdr 的前缀键。',
+  'settings.shortcut.altOnly': 'Option/Alt 快捷键会占用输入字符的按键，在终端里也用作 Meta 键。',
   'settings.shortcut.press': '请按下按键…（Backspace 移除，Esc 取消）',
   'settings.optionIsMeta': 'Option 键作为 Meta',
   'settings.optionIsMeta.desc': 'macOS：Option+键发送 Esc+键（shell 和编辑器里的 Alt 快捷键），而不是输入特殊字符。',

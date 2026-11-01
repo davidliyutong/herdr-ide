@@ -67,7 +67,7 @@ export function App() {
       onGui: (st) => useGui.getState().setState(st),
     });
     loadKeymap();
-    initDesktop();
+    const offDesktop = initDesktop();
     fetch('/api/config')
       .then((r) => r.json())
       .then((c) => useStore.getState().setReadOnly(!!c.read_only))
@@ -82,6 +82,7 @@ export function App() {
     window.addEventListener('keydown', onKey);
     return () => {
       off();
+      offDesktop();
       window.removeEventListener('keydown', onKey);
     };
   }, []);

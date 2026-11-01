@@ -23,12 +23,13 @@ const (
 // None disables a shortcut.
 const None = "none"
 
-// modifier is cmd on macOS, ctrl elsewhere (cmd there is the Super key).
-func modifier(goos string) string {
+// modifiers is cmd on macOS; elsewhere ctrl+shift, as in terminal emulators,
+// since ctrl+w deletes a word and ctrl+t transposes characters in shells.
+func modifiers(goos string) string {
 	if goos == "darwin" {
 		return "cmd"
 	}
-	return "ctrl"
+	return "ctrl+shift"
 }
 
 var namedKeys = map[string]bool{
@@ -72,7 +73,7 @@ func Validate(spec string) error {
 }
 
 func defs(goos string) []settings.Def {
-	mod := modifier(goos)
+	mod := modifiers(goos)
 	return []settings.Def{
 		{
 			Key: SettingNewTab, Kind: settings.KindString, Default: mod + "+t", Validate: Validate,
@@ -86,5 +87,5 @@ func defs(goos string) []settings.Def {
 }
 
 // SettingDefs are the shortcut settings for this platform: cmd+t and cmd+w
-// on macOS, ctrl+t and ctrl+w elsewhere.
+// on macOS, ctrl+shift+t and ctrl+shift+w elsewhere.
 var SettingDefs = defs(runtime.GOOS)

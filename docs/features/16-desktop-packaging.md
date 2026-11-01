@@ -68,10 +68,14 @@ implemented independently.
   exposes one object, `desktopShell`, for direct shortcuts
   ([04](04-layout-and-keyboard.md)): the shell tells the page which action a
   shortcut runs, the page reports that the shortcut settings changed (the
-  shell then reads them from the core itself) and pauses them while it
-  records a key. Messages count only from the top frame of the main window
-  showing the core's origin. Program windows have no preload. The menu
-  gains **Tab** (New Tab, Close Tab) between Edit and View.
+  shell then reads them from the core itself) and turns recording on and
+  off; while it records, the shell sends the page the spec of each key with
+  `cmd`, `ctrl` or `alt`. Messages count only from the top frame of the
+  main window showing the core's origin. Program windows have no preload.
+  The menu gains **Tab** (New Tab, Close Tab) between Edit and View, and
+  **Window** lists Minimize, Zoom, Close Window (`cmd+w`) and Bring All to
+  Front; Close Window does not close the main window for a shortcut key
+  left to VS Code.
 - The web brand constants and English/Chinese message dictionaries are
   imported into the shell. Build metadata reads the same brand file. Native
   error dialogs follow the OS locale; UI language still follows web settings.
@@ -116,8 +120,8 @@ implemented independently.
 
 Following [Electron's security guidance](https://www.electronjs.org/docs/latest/tutorial/security),
 renderer and child windows have no Node integration; only the main window
-has a preload, whose bridge carries shortcut actions and two signals without
-data beyond a boolean; sandboxing, context isolation and web security are
+has a preload, whose bridge carries shortcut actions and recorded key
+specs to the page and two signals without data beyond a boolean from it; sandboxing, context isolation and web security are
 enabled. The main window alone allows audio without a prior user gesture,
 so agent notification sounds ([07](07-agent-native-workflow.md)) play after
 a restart before the first click. Navigation and
