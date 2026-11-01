@@ -258,6 +258,7 @@ export const en = {
   'settings.section.appearance': 'Appearance',
   'settings.section.layout': 'Layout',
   'settings.section.terminal': 'Terminal',
+  'settings.section.notifications': 'Notifications',
   'settings.section.codeServer': 'VS Code (code-server)',
   'settings.section.gui': 'Program windows',
   'settings.section.server': 'Server',
@@ -294,6 +295,12 @@ export const en = {
   'settings.optionIsMeta': 'Use Option as Meta',
   'settings.optionIsMeta.desc':
     'macOS: Option+key sends Esc+key (Alt shortcuts in shells and editors) instead of typing special characters.',
+  'settings.notifySound': 'Notification sounds',
+  'settings.notifySound.desc':
+    'A chime when an agent needs input, another when it finishes (not while its pane is on screen in a focused window). With several browsers open, the one used most recently plays it.',
+  'settings.notifySoundMuted': 'Silent agents',
+  'settings.notifySoundMuted.desc': 'Agents that never play a sound, separated by commas.',
+  'settings.notifySoundMuted.placeholder': 'claude, codex',
   'settings.code-server-install': 'Installation',
   'settings.code-server-install.desc':
     'Upload: the server downloads, verifies and uploads it (works for offline machines). Machine downloads: each machine fetches it itself, verified against the same checksum. Use installed: run the code-server already on the machine. The last two fall back to uploading. Applies the next time code-server starts on a machine.',

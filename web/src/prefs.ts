@@ -7,7 +7,7 @@
 import { create } from 'zustand';
 import { storage } from './brand';
 
-export type SectionId = 'appearance' | 'layout' | 'terminal' | 'codeServer' | 'gui' | 'server';
+export type SectionId = 'appearance' | 'layout' | 'terminal' | 'notifications' | 'codeServer' | 'gui' | 'server';
 
 interface Base {
   section: SectionId;
@@ -19,6 +19,7 @@ export type PrefDef = Base &
     | { kind: 'enum'; default: string; options: readonly string[] }
     | { kind: 'number'; default: number; min: number; max: number }
     | { kind: 'bool'; default: boolean }
+    | { kind: 'string'; default: string }
   );
 
 export const prefDefs = {
@@ -29,16 +30,20 @@ export const prefDefs = {
   termFontWeight: { section: 'appearance', kind: 'enum', default: 'regular', options: ['regular', 'medium'] },
   dockPosition: { section: 'layout', kind: 'enum', default: 'right', options: ['right', 'bottom'] },
   optionIsMeta: { section: 'terminal', kind: 'bool', default: false },
+  // On by default, and droid muted, as in herdr's [ui.sound].
+  notifySound: { section: 'notifications', kind: 'bool', default: true },
+  notifySoundMuted: { section: 'notifications', kind: 'string', default: 'droid' },
 } satisfies Record<string, PrefDef>;
 
 export type PrefKey = keyof typeof prefDefs;
 type ValueOf<D> = D extends { kind: 'number' } ? number : D extends { kind: 'bool' } ? boolean : string;
 export type Prefs = { [K in PrefKey]: ValueOf<(typeof prefDefs)[K]> };
 
-/** Parses a stored value; invalid or missing values give the default. */
+/** Parses a stored value; invalid or missing values give the default. An
+ * empty text is a value of its own. */
 export function parsePref<K extends PrefKey>(key: K, raw: string | null): Prefs[K] {
   const d: PrefDef = prefDefs[key];
-  if (raw === null || raw === '') return d.default as Prefs[K];
+  if (raw === null || (raw === '' && d.kind !== 'string')) return d.default as Prefs[K];
   switch (d.kind) {
     case 'number': {
       const n = Number(raw);
@@ -48,6 +53,8 @@ export function parsePref<K extends PrefKey>(key: K, raw: string | null): Prefs[
       return (raw === 'true') as Prefs[K];
     case 'enum':
       return (d.options.includes(raw) ? raw : d.default) as Prefs[K];
+    case 'string':
+      return raw.trim() as Prefs[K];
   }
 }
 

@@ -96,4 +96,7 @@ machines, reimplementing its agent detection.
 `events_lost`) against a fake socket; `internal/herdr/endpoint` tests;
 `internal/agent/integration_test.go` (`make it`) against a real herdr in an
 isolated session: workspace creation, endpoint handshake, complete surface
-first, input and output, key encodings per keyboard mode.
+first, input and output, key encodings per keyboard mode. herdr restores a
+session's saved workspaces when its server starts, so the test deletes the
+isolated session before and after a run and closes each workspace it
+creates; repeated runs do not accumulate workspaces.

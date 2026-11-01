@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { allowPermission, isExternal, isInternal, webPreferences } from './policy';
+import { allowPermission, isExternal, isInternal, mainWindowPreferences, webPreferences } from './policy';
 
 const origin = 'http://127.0.0.1:7781';
 test('only the exact core origin may navigate or open native windows', () => {
@@ -49,4 +49,8 @@ test('permissions require both the requesting frame and top window to belong to 
   assert.equal(webPreferences.contextIsolation, true);
   assert.equal(webPreferences.nodeIntegration, false);
   assert.equal(webPreferences.webSecurity, true);
+  // The main window only relaxes autoplay (notification sounds).
+  assert.deepEqual({ ...mainWindowPreferences, autoplayPolicy: undefined }, { ...webPreferences, autoplayPolicy: undefined });
+  assert.equal(mainWindowPreferences.autoplayPolicy, 'no-user-gesture-required');
+  assert.equal('autoplayPolicy' in webPreferences, false);
 });

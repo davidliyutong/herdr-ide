@@ -40,6 +40,11 @@ func startHerdr(t *testing.T) (*transport.Session, *herdr.Client) {
 		}
 	}
 	t.Setenv("HERDR_BIN", bin) // the agent must use the same herdr
+	// herdr restores a session's saved workspaces when its server starts, so
+	// the test starts from an empty session and deletes it again afterwards.
+	// This also clears what an interrupted earlier run left behind.
+	exec.Command(bin, "--session", itSession, "server", "stop").Run()
+	deleteSession(t, bin)
 	srv := exec.Command(bin, "--session", itSession, "server")
 	if err := srv.Start(); err != nil {
 		t.Fatal(err)
@@ -48,6 +53,7 @@ func startHerdr(t *testing.T) (*transport.Session, *herdr.Client) {
 		exec.Command(bin, "--session", itSession, "server", "stop").Run()
 		srv.Process.Kill()
 		srv.Wait()
+		deleteSession(t, bin)
 	})
 
 	s, err := transport.DialLocal(context.Background(), agent.Options{Logger: log.New(io.Discard, "", 0)})
@@ -72,10 +78,29 @@ func startHerdr(t *testing.T) (*transport.Session, *herdr.Client) {
 	return s, api
 }
 
-// newPane creates a workspace and returns its pane.
+// deleteSession removes the isolated session's saved state. herdr refuses
+// while the session's server is still shutting down, so it retries briefly.
+func deleteSession(t *testing.T, bin string) {
+	t.Helper()
+	var out []byte
+	var err error
+	for range 50 {
+		if out, err = exec.Command(bin, "session", "delete", itSession).CombinedOutput(); err == nil {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Errorf("herdr session delete %s: %v: %s", itSession, err, out)
+}
+
+// newPane creates a workspace and returns its pane. The workspace is closed
+// when the test ends, before the server stops.
 func newPane(ctx context.Context, t *testing.T, api *herdr.Client) string {
 	t.Helper()
 	var created struct {
+		Workspace struct {
+			WorkspaceID string `json:"workspace_id"`
+		} `json:"workspace"`
 		RootPane struct {
 			PaneID string `json:"pane_id"`
 		} `json:"root_pane"`
@@ -83,6 +108,14 @@ func newPane(ctx context.Context, t *testing.T, api *herdr.Client) string {
 	if err := api.CallInto(ctx, "workspace.create", map[string]any{"cwd": t.TempDir()}, &created); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		// ctx belongs to the test body and may be cancelled by now.
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if _, err := api.Call(ctx, "workspace.close", map[string]any{"workspace_id": created.Workspace.WorkspaceID}); err != nil {
+			t.Errorf("workspace.close %s: %v", created.Workspace.WorkspaceID, err)
+		}
+	})
 	return created.RootPane.PaneID
 }
 

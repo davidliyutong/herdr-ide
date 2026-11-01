@@ -30,7 +30,8 @@ browser tab, with VS Code (code-server) one keystroke away.
   automatically) that multiplexes everything; nothing listens on the
   machines.
 - **Agent-native.** An inbox of agents that are blocked or done across all
-  machines, browser notifications, starting agents from the command palette,
+  machines, browser notifications and sounds when an agent needs input or
+  finishes, starting agents from the command palette,
   sending code from VS Code to the focused agent, pasting images into agent
   prompts.
 - **VS Code on demand.** code-server is installed per machine from the core

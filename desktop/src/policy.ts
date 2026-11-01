@@ -39,3 +39,7 @@ export const webPreferences = {
   webviewTag: false,
   allowRunningInsecureContent: false,
 };
+
+// The main window may play notification sounds before the first click
+// (after a restart, for example); other windows keep the default policy.
+export const mainWindowPreferences = { ...webPreferences, autoplayPolicy: 'no-user-gesture-required' as const };

@@ -7,13 +7,17 @@
 import { conn } from './lib/conn';
 import { activeTabId, findPane, useStore } from './state/store';
 
-/** Whether the pane focused in the UI is on screen (selected workspace and tab). */
+/** Whether a pane is on screen: in the selected workspace and tab. */
+export function paneOnScreen(s: ReturnType<typeof useStore.getState>, m: string, pane: string): boolean {
+  const p = findPane(s, { m, pane });
+  const snap = s.machines[m]?.snapshot;
+  if (!p || !snap || s.machineId !== m || s.workspaceId !== p.workspace_id) return false;
+  return activeTabId(s, m, snap, p.workspace_id) === p.tab_id;
+}
+
+/** Whether the pane focused in the UI is on screen. */
 function onScreen(s: ReturnType<typeof useStore.getState>): boolean {
-  const f = s.focused;
-  const p = findPane(s, f);
-  const snap = f ? s.machines[f.m]?.snapshot : undefined;
-  if (!f || !p || !snap || s.machineId !== f.m || s.workspaceId !== p.workspace_id) return false;
-  return activeTabId(s, f.m, snap, p.workspace_id) === p.tab_id;
+  return !!s.focused && paneOnScreen(s, s.focused.m, s.focused.pane);
 }
 
 export function initSeen() {

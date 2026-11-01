@@ -55,6 +55,13 @@ All notable changes are documented here. The format follows
 - Ignored `.worktrees/` directory for branch workspaces.
 - **Terminal font weight** setting (regular or medium; medium comes close to
   Ghostty's `font-thicken`).
+- **Notification sounds**: the browser plays a chime when an agent needs
+  input and another when it finishes (not while its pane is on screen in a
+  focused window), as herdr does in its own client. On by default with
+  **Silent agents** (`droid` by default) in the new Notifications section of
+  the settings. With several browsers open, only the one used most recently
+  plays them. The sounds are synthesized; the desktop app's main window
+  allows them without a prior click.
 
 ### Changed
 
@@ -70,6 +77,10 @@ All notable changes are documented here. The format follows
 - The **Authenticate…** and **Update herdr** terminals could end before
   showing the command's last output (for example ssh's final error): the
   core now forwards what is left in the terminal before closing it.
+- `make it` no longer leaves workspaces in the isolated `herdr-ide-it`
+  session, where herdr restored them (each with a shell) on every later run:
+  the test closes the workspaces it creates and deletes the session before
+  and after the run.
 
 ## [0.1.0] - 2026-10-31
 

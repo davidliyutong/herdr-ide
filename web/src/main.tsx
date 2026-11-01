@@ -11,6 +11,9 @@ import { initSeen } from './seen';
 import { initGuiAuto } from './gui/auto';
 import { initUpdateCheck } from './update';
 import { parseGuiPath, useGui } from './gui/state';
+import { conn } from './lib/conn';
+import { unlockAudio } from './sound';
+import { getPrefs } from './prefs';
 import { GuiWindowPage } from './gui/GuiWindowPage';
 
 // Debug handle for the browser console (also used by end-to-end tests).
@@ -34,4 +37,12 @@ if (guiPage) {
   );
   // Notification permission needs a user gesture.
   window.addEventListener('pointerdown', requestNotifyPermission, { once: true });
+  // Input tells the core which page is in use (it plays the sounds), and
+  // lets the page start audio.
+  const onInput = () => {
+    conn.markActive();
+    if (getPrefs().notifySound) unlockAudio();
+  };
+  for (const ev of ['pointerdown', 'keydown']) window.addEventListener(ev, onInput, { capture: true, passive: true });
+  window.addEventListener('focus', () => conn.markActive());
 }

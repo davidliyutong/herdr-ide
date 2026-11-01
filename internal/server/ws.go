@@ -38,6 +38,9 @@ type inMsg struct {
 	// theme: "dark" or "light"
 	Kind string `json:"kind"`
 
+	// active: milliseconds since the user last used the page.
+	Idle int64 `json:"idle"`
+
 	RID    int64           `json:"rid"`
 	Method string          `json:"method"`
 	Params json.RawMessage `json:"params"`
@@ -58,6 +61,10 @@ type wsClient struct {
 	req *http.Request
 	// readOnly browsers watch: no input, and no takeover from a writable one.
 	readOnly bool
+
+	// active is when the user last used this page (guarded by
+	// Server.clientsMu); the most recently used page plays sounds.
+	active time.Time
 }
 
 const sendQueue = 8192
@@ -78,6 +85,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	defer s.audit.log(r, "ws.disconnect", nil)
 	defer c.close()
 	s.clientsMu.Lock()
+	c.active = time.Now()
 	s.clients[c] = true
 	s.clientsMu.Unlock()
 	defer func() {
@@ -94,7 +102,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	unsub := s.mg.Subscribe(func(st machines.State) {
 		c.sendJSON(map[string]any{"t": "machine", "state": st})
 	}, func(ev machines.AgentEvent) {
-		c.sendJSON(map[string]any{"t": "agent", "m": ev.Machine, "data": ev.Data})
+		c.sendJSON(map[string]any{"t": "agent", "m": ev.Machine, "data": ev.Data, "sound": s.soundClient() == c})
 	})
 	defer unsub()
 	s.surfJoin(c)
@@ -184,6 +192,8 @@ func (c *wsClient) dispatch(m *inMsg) {
 		}
 	case "ping":
 		c.sendJSON(map[string]any{"t": "pong", "rid": m.RID})
+	case "active":
+		c.s.markActive(c, time.Duration(m.Idle)*time.Millisecond)
 	case "theme":
 		// VS Code windows follow the theme chosen in the browser; watchers
 		// cannot use VS Code and do not change it.

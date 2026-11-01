@@ -130,6 +130,7 @@ Text frames are JSON with a `t` field; binary frames are pane surface updates
 | `api {rid, m, method, params}` (allowlisted herdr calls) | `api.res {rid, result\|error}` |
 | `retry {m}`, `ping` | `machines {list}`, `machine {state}`, `agent {m, data}` (status change), `bridge.send {m, text}` |
 | `theme {kind: dark\|light}` (VS Code follows it) | `gui {state: {m, phase, gpu, windows}}` (program windows per machine) |
+| `active {idle}` (ms since the user last used the page) | `agent {…, sound}`: `sound` is true only for the most recently used page, which plays the notification sound |
 
 HTTP endpoints besides files, uploads and the code-server proxy:
 `GET /api/config`, `GET /api/keymap`, `GET /api/machines`, and

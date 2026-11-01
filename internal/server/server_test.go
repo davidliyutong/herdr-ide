@@ -570,3 +570,30 @@ func TestServePTY(t *testing.T) {
 		t.Fatal("command not reported as run")
 	}
 }
+
+func TestSoundClientMostRecentlyActive(t *testing.T) {
+	s := newTestServer()
+	if s.soundClient() != nil {
+		t.Fatal("picked a client without clients")
+	}
+	a, b := &wsClient{s: s}, &wsClient{s: s}
+	s.clients[a], s.clients[b] = true, true
+	s.markActive(a, time.Minute)
+	s.markActive(b, time.Hour)
+	if s.soundClient() != a {
+		t.Fatal("the page used a minute ago should play, not the one used an hour ago")
+	}
+	s.markActive(b, 0)
+	if s.soundClient() != b {
+		t.Fatal("input on another page should move sounds there")
+	}
+	// Negative or huge idle times from a browser are clamped.
+	s.markActive(a, -time.Hour)
+	if s.soundClient() != a || a.active.After(time.Now()) {
+		t.Fatal("negative idle time")
+	}
+	s.markActive(a, 1<<62)
+	if s.soundClient() != b {
+		t.Fatal("huge idle time")
+	}
+}

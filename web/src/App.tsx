@@ -57,7 +57,7 @@ export function App() {
         useStore.getState().upsertMachine(st);
         updateBadge();
       },
-      onAgent: (m, data) => notifyAgent(m, data),
+      onAgent: (m, data, sound) => notifyAgent(m, data, sound),
       onConnection: (c) => {
         useStore.getState().setConnected(c);
         if (!c) surfaceDisconnected();
