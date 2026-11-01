@@ -45,8 +45,12 @@ loads only that owned core's URL. Closing the parent stdin pipe cancels the
 core's context, including when Electron crashes. Normal quit sends SIGTERM
 and waits up to 20 seconds before killing the owned core.
 
-The renderer reuses the browser UI with no preload or Node APIs, sandboxing
-and context isolation. Same-origin popups become equally restricted native
+The renderer reuses the browser UI with no Node APIs, sandboxing and context
+isolation. The main window's preload exposes only `desktopShell` for direct
+shortcuts (`cmd+t`/`cmd+w`): the shell intercepts them in
+`before-input-event`, reading their keys from the core settings
+`desktop-new-tab-key` / `desktop-close-tab-key`, and the page runs the
+action ([04](features/04-layout-and-keyboard.md)). Same-origin popups become equally restricted native
 windows; HTTP(S) links outside the core open in the default browser. Packaging
 and lifecycle details are in [16](features/16-desktop-packaging.md).
 

@@ -11,7 +11,8 @@ import { useStore } from '../state/store';
 import { GuiEnableButton, GuiMachineStatus } from '../gui/GuiMenus';
 import { prefDefs, usePrefs, type PrefDef, type PrefKey, type SectionId } from '../prefs';
 import { hasMessage, locales, t, type MessageKey } from '../i18n';
-import { keyHint } from '../keymap';
+import { keyHint, keyLabel } from '../keymap';
+import { desktopShell, isShortcutSetting, shortcutsSaved, specOf } from '../desktop';
 
 /** A core setting as listed by /api/settings. */
 export interface ServerSetting {
@@ -45,11 +46,12 @@ async function saveServer(key: string, value: string, machine?: string): Promise
   }
 }
 
-const sections: SectionId[] = ['appearance', 'layout', 'terminal', 'notifications', 'codeServer', 'gui', 'server'];
+const sections: SectionId[] = ['appearance', 'layout', 'terminal', 'notifications', 'shortcuts', 'codeServer', 'gui', 'server'];
 
 /** Section of a core setting, from its key. */
 export function serverSection(key: string): SectionId {
   if (key.startsWith('code-server-')) return 'codeServer';
+  if (isShortcutSetting(key)) return 'shortcuts';
   return key === 'gui' || key.startsWith('gui-') ? 'gui' : 'server';
 }
 
@@ -106,12 +108,14 @@ export function SettingsDialog() {
         <div className="settings-body">
           {sections.map((sec) => {
             const prefRows = (Object.keys(prefDefs) as PrefKey[]).filter((k) => prefDefs[k].section === sec);
+            // Direct shortcuts exist only in the desktop app.
+            if (sec === 'shortcuts' && !desktopShell) return null;
             const serverRows = (server ?? []).filter((s) => serverSection(s.key) === sec);
             if (prefRows.length === 0 && serverRows.length === 0 && !(sec === 'codeServer' && serverError)) return null;
             return (
               <section key={sec} className="settings-section">
                 <h3>{t(`settings.section.${sec}` as MessageKey)}</h3>
-                {(sec === 'codeServer' || sec === 'gui' || sec === 'server') && (
+                {(sec === 'shortcuts' || sec === 'codeServer' || sec === 'gui' || sec === 'server') && (
                   <p className="settings-note">{t(readOnly ? 'settings.serverReadOnly' : 'settings.serverNote')}</p>
                 )}
                 {prefRows.map((k) => (
@@ -293,11 +297,16 @@ function ServerRow({ s, readOnly, onSaved }: { s: ServerSetting; readOnly: boole
     if (typeof res === 'string') {
       setError(res);
       setDraft(s.value);
-    } else onSaved(res);
+    } else {
+      onSaved(res);
+      if (isShortcutSetting(s.key)) shortcutsSaved(res);
+    }
   };
 
   let control: React.ReactNode;
-  if (s.kind === 'enum' && s.options) {
+  if (isShortcutSetting(s.key)) {
+    control = <ShortcutInput s={s} disabled={disabled} onChange={save} />;
+  } else if (s.kind === 'enum' && s.options) {
     control =
       s.options.length > 3 ? (
         <select value={s.value} disabled={disabled} onChange={(e) => save(e.target.value)}>
@@ -347,6 +356,50 @@ function ServerRow({ s, readOnly, onSaved }: { s: ServerSetting; readOnly: boole
     <Row k={s.key} note={note}>
       {control}
     </Row>
+  );
+}
+
+/** Records a shortcut: focus it and press the keys. Backspace removes the
+ * shortcut, Escape keeps the current one; the reset button restores the
+ * default. The desktop shell lets keys through while it records. */
+function ShortcutInput({ s, disabled, onChange }: { s: ServerSetting; disabled: boolean; onChange(v: string): void }) {
+  const [recording, setRecording] = useState(false);
+  const record = (on: boolean) => {
+    setRecording(on);
+    desktopShell?.recordShortcut(on);
+  };
+  useEffect(() => () => desktopShell?.recordShortcut(false), []);
+  const shown = s.value === 'none' ? t('settings.shortcut.none') : keyLabel(s.value);
+  return (
+    <div className="stepper">
+      <input
+        className="settings-input settings-shortcut"
+        readOnly
+        value={recording ? t('settings.shortcut.press') : shown}
+        disabled={disabled}
+        aria-label={label(s.key)}
+        onFocus={() => record(true)}
+        onBlur={() => record(false)}
+        onKeyDown={(e) => {
+          const plain = !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey;
+          if (e.key === 'Tab' && !e.metaKey && !e.ctrlKey && !e.altKey) return;
+          e.preventDefault();
+          e.stopPropagation();
+          if (plain && e.key === 'Escape') return e.currentTarget.blur();
+          if (plain && (e.key === 'Backspace' || e.key === 'Delete')) {
+            onChange('none');
+            return e.currentTarget.blur();
+          }
+          const spec = specOf(e.nativeEvent);
+          if (!spec) return;
+          onChange(spec);
+          e.currentTarget.blur();
+        }}
+      />
+      <button className="icon" title={t('settings.reset')} disabled={disabled || s.source === 'default'} onClick={() => onChange('')}>
+        <RotateCcw />
+      </button>
+    </div>
   );
 }
 

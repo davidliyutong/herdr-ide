@@ -32,6 +32,11 @@ All notable changes are documented here. The format follows
   border row since panes are drawn from herdr's grid, no longer gets a
   header that shows on hover. In narrow workspaces the toolbar drops the
   folder, the title and less used buttons instead of overflowing.
+- Desktop app: `cmd+t` opens a tab and `cmd+w` closes the current tab
+  (`ctrl+t` / `ctrl+w` on other systems), wherever focus is. They are core
+  settings (`--desktop-new-tab-key`, `--desktop-close-tab-key`), recorded or
+  removed under **Settings → Shortcuts**, and shown in the new **Tab** menu.
+  Browsers are unchanged.
 - Release archives for Linux/macOS on amd64/arm64 include herdr 0.9.5
   (verified at build time against pinned SHA-256 digests) with its license
   and dependency notices. The local machine uses it when no herdr is

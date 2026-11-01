@@ -4,7 +4,8 @@ import { resolveTheme } from '../appearance';
 import { dropZone } from '../paneDrag';
 import { serverSection } from '../components/SettingsDialog';
 import { hasMessage } from '../i18n';
-import { keyLabel } from '../keymap';
+import { keyHint, keyLabel, setDirectShortcuts } from '../keymap';
+import { shortcutsFrom, specOf } from '../desktop';
 
 describe('parsePref', () => {
   it('falls back to the default for missing or invalid values', () => {
@@ -58,6 +59,48 @@ describe('server settings', () => {
     expect(serverSection('something-else')).toBe('server');
     for (const k of ['code-server-install', 'code-server-path']) expect(hasMessage(`settings.${k}`), k).toBe(true);
     for (const o of ['push', 'download', 'existing']) expect(hasMessage(`settings.code-server-install.${o}`), o).toBe(true);
+  });
+
+  it('groups the desktop shortcuts and translates them', () => {
+    for (const k of ['desktop-new-tab-key', 'desktop-close-tab-key']) {
+      expect(serverSection(k)).toBe('shortcuts');
+      expect(hasMessage(`settings.${k}`), k).toBe(true);
+    }
+  });
+});
+
+describe('desktop shortcuts', () => {
+  const ev = (code: string, mods: Partial<Record<'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey', boolean>> = {}) => ({
+    code,
+    metaKey: false,
+    ctrlKey: false,
+    altKey: false,
+    shiftKey: false,
+    ...mods,
+  });
+
+  it('records keys as specs the core accepts', () => {
+    expect(specOf(ev('KeyT', { metaKey: true }))).toBe('cmd+t');
+    expect(specOf(ev('KeyW', { ctrlKey: true, shiftKey: true }))).toBe('ctrl+shift+w');
+    expect(specOf(ev('BracketLeft', { altKey: true }))).toBe('alt+bracketleft');
+    expect(specOf(ev('F4', { altKey: true }))).toBe('alt+f4');
+    expect(specOf(ev('Digit1', { metaKey: true }))).toBe('cmd+1');
+    // Without cmd, ctrl or alt the key would type text; modifiers alone wait.
+    expect(specOf(ev('KeyT', { shiftKey: true }))).toBeUndefined();
+    expect(specOf(ev('MetaLeft', { metaKey: true }))).toBeUndefined();
+  });
+
+  it('reads the shortcuts from the settings and shows them as key hints', () => {
+    const map = shortcutsFrom([
+      { key: 'desktop-new-tab-key', value: 'cmd+t' },
+      { key: 'desktop-close-tab-key', value: 'none' },
+    ]);
+    expect(map).toEqual({ new_tab: 'cmd+t' });
+    setDirectShortcuts(map);
+    expect(keyHint('new_tab')).toBe('cmd+t');
+    expect(keyHint('close_tab')).toBe('ctrl+b shift+x');
+    setDirectShortcuts({});
+    expect(keyHint('new_tab')).toBe('ctrl+b c');
   });
 });
 

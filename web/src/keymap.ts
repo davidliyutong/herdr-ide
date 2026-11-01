@@ -1,6 +1,7 @@
 // herdr-compatible prefix keymap. The browser owns Cmd+W/T/N, so window-level
 // commands use herdr's prefix (default ctrl+b) exactly like the herdr TUI;
 // bindings are loaded from the host's herdr config.toml when available.
+// The desktop app adds direct shortcuts on top (desktop.ts).
 
 import { actions } from './actions';
 import { conn } from './lib/conn';
@@ -115,8 +116,18 @@ export function keyLabel(spec: string, prefix = config.prefix): string {
   return parts.join('+').replace(/^prefix\+/, prefix + ' ');
 }
 
+// Direct shortcuts of the desktop app (desktop.ts), shown instead of the
+// prefix binding of the same action.
+let direct: Record<string, string> = {};
+
+export function setDirectShortcuts(map: Record<string, string>) {
+  direct = map;
+  configListeners.forEach((f) => f());
+}
+
 /** Human-readable key for an action, e.g. "ctrl+b v". */
 export function keyHint(action: string): string {
+  if (direct[action]) return keyLabel(direct[action]);
   const spec = config.bindings[action];
   return spec ? keyLabel(spec) : '';
 }

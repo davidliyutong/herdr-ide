@@ -135,6 +135,35 @@ Non-goals: a separate herdr-ide layout model; arbitrary docking of panes.
 - The PWA manifest allows installing the app in its own window, where fewer
   shortcuts are taken by browser chrome.
 
+**Desktop shortcuts** (`internal/shortcuts`, `desktop/src/shortcuts.ts`,
+`web/src/desktop.ts`)
+
+- The desktop app owns its keys, so it adds direct shortcuts without the
+  prefix: new tab (`cmd+t` on macOS, `ctrl+t` elsewhere) and close tab
+  (`cmd+w` / `ctrl+w`). Prefix bindings keep working; browsers get none of
+  this and behave as before.
+- They are core settings (`desktop-new-tab-key`, `desktop-close-tab-key`), so
+  they survive restarts and the profile; the settings dialog shows them under
+  **Shortcuts** only in the desktop app. A spec is modifiers (`cmd`, `ctrl`,
+  `alt`, `shift`, at least one of the first three so a shortcut never takes
+  a typing key) and a physical key joined by `+`, or `none`. The dialog
+  records a key press; Backspace removes the shortcut, reset restores the
+  default.
+- The shell reads them from `/api/settings` at start and when the page
+  reports a change, and matches them in `before-input-event` of the main
+  window: before the page, every frame in it (VS Code's included) and the
+  menu. A match is not passed on; the shell asks the page to run the action
+  (the same `runAction` as the prefix bindings, so closing a tab with a
+  working agent still asks). Held keys do not repeat the action.
+- The **Tab** menu lists both actions with their keys; it does not register
+  them itself, so in program windows `cmd+w` still closes the window. The
+  main window's `cmd+w` closes the tab instead; with the shortcut removed it
+  closes the window again.
+- While the dialog records a key, the shell lets every key through to the
+  page.
+- Key hints (tooltips, context menus) show the direct shortcut instead of
+  the prefix binding.
+
 ## Alternatives considered
 
 | Option | Why not |
@@ -146,7 +175,10 @@ Non-goals: a separate herdr-ide layout model; arbitrary docking of panes.
 | Bindings to move tabs and workspaces | herdr has no such bindings to mirror; the context menu's move items work from the keyboard. |
 | A "⋯" button on every header, tab and workspace row | Takes room on every tab and row; right-click covers desktop browsers. |
 | Desktop shell (Electron/Tauri) to own all shortcuts | Electron was replaced by browser access so the IDE works remotely; Tauri's WKWebView on macOS lacks service workers, which VS Code webviews need. |
-| Browser-specific bindings (`Cmd+…`) | Conflict with the browser and with muscle memory from herdr. |
+| Browser-specific bindings (`Cmd+…`) | Conflict with the browser and with muscle memory from herdr; browsers do not deliver `Cmd+T`/`Cmd+W` to pages. The desktop app has them (above). |
+| Desktop shortcuts in herdr's `config.toml` | herdr's TUI cannot see Cmd and would read the entries as its own bindings. |
+| Desktop shortcuts as registered menu accelerators | Would also take the keys in program windows; the page's key handlers and frames (VS Code) would need their own exceptions. |
+| Desktop shortcuts per browser profile (localStorage) | The shell needs them before and outside the page; core settings also keep one set for all windows. |
 | Keyboard Lock API | Fullscreen-only and Chromium-only. |
 
 ## Failure modes
@@ -161,7 +193,10 @@ Non-goals: a separate herdr-ide layout model; arbitrary docking of panes.
 
 `internal/server/server_test.go` (`TestLoadKeyConfig`),
 `web/src/__tests__/core.test.ts` (pane geometry for directional focus),
-`web/src/__tests__/settings.test.ts` (drop zones, key labels),
+`web/src/__tests__/settings.test.ts` (drop zones, key labels, recording
+desktop shortcuts and their hints), `internal/shortcuts/shortcuts_test.go`
+(spec validation, platform defaults), `desktop/src/shortcuts.test.ts`
+(matching inputs, menu accelerators, reading the settings),
 `web/src/__tests__/menus.test.ts` (insertion slots, also on wrapped rows,
 the area a drop counts in, applying a move reply, menu items and their commands, moves from the
 current position, read-only, keyboard, focus and closing of the menu);

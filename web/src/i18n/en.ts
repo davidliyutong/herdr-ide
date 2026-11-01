@@ -12,6 +12,9 @@ export const en = {
   'desktop.coreBadReady': 'The server reported an unexpected address.',
   'desktop.coreLost': 'The server stopped unexpectedly.',
   'desktop.rendererGone': 'The window’s page stopped.',
+  'desktop.menu.tab': 'Tab',
+  'desktop.menu.newTab': 'New Tab',
+  'desktop.menu.closeTab': 'Close Tab',
 
   'app.connected': '● Connected',
   'app.reconnecting': '○ Reconnecting…',
@@ -260,6 +263,7 @@ export const en = {
   'settings.section.layout': 'Layout',
   'settings.section.terminal': 'Terminal',
   'settings.section.notifications': 'Notifications',
+  'settings.section.shortcuts': 'Shortcuts',
   'settings.section.codeServer': 'VS Code (code-server)',
   'settings.section.gui': 'Program windows',
   'settings.section.server': 'Server',
@@ -293,6 +297,13 @@ export const en = {
   'settings.dockPosition.desc': 'Beside the terminals or below them.',
   'settings.dockPosition.right': 'Right',
   'settings.dockPosition.bottom': 'Bottom',
+  'settings.desktop-new-tab-key': 'New tab',
+  'settings.desktop-new-tab-key.desc': 'Works wherever focus is, also in VS Code. The prefix binding keeps working.',
+  'settings.desktop-close-tab-key': 'Close tab',
+  'settings.desktop-close-tab-key.desc':
+    'Replaces closing the window with this key. Remove the shortcut to give the key back to the window.',
+  'settings.shortcut.none': 'None',
+  'settings.shortcut.press': 'Press keys… (Backspace removes, Esc cancels)',
   'settings.optionIsMeta': 'Use Option as Meta',
   'settings.optionIsMeta.desc':
     'macOS: Option+key sends Esc+key (Alt shortcuts in shells and editors) instead of typing special characters.',

@@ -12,6 +12,7 @@ import { SettingsDialog } from './components/SettingsDialog';
 import { Dialogs } from './components/Dialogs';
 import { ContextMenu } from './components/ContextMenu';
 import { usePrefs } from './prefs';
+import { initDesktop } from './desktop';
 import { getKeyConfig, handleKey, loadKeymap, onKeyConfig, onPrefixChange } from './keymap';
 import { t } from './i18n';
 import { notifyAgent, updateBadge } from './notify';
@@ -66,6 +67,7 @@ export function App() {
       onGui: (st) => useGui.getState().setState(st),
     });
     loadKeymap();
+    initDesktop();
     fetch('/api/config')
       .then((r) => r.json())
       .then((c) => useStore.getState().setReadOnly(!!c.read_only))
