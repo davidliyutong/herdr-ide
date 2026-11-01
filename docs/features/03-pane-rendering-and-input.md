@@ -47,18 +47,28 @@ received, the popup itself is not drawn).
 - The cell size comes from the terminal font's metrics (5% more than its
   line height); the grid that fits the tab area, and the cell size in
   device pixels, is the size herdr renders.
+- Each tab has one toolbar (`components/PaneToolbar.tsx`), a single row
+  between the tab bar and herdr's grid whatever the number of panes. It
+  shows the focused pane's agent state, title, agent and folder and its
+  buttons: program windows ([14](14-gui-windows.md)), VS Code, changes and
+  Git Graph of the folder, split right / down, zoom and close. It is also
+  the focused pane's header: clicking the title renames the pane,
+  right-clicking opens the pane's menu, dragging moves the pane. It is
+  outside herdr's grid, so the grid is just one bar shorter, and it stays
+  while the tab is shown (buttons disabled while no pane of the tab is
+  focused), so focus changes never resize the grid. Read-only browsers see
+  the title, folder and program windows without the other buttons.
+- In a narrow workspace the toolbar keeps one row: it drops the folder and
+  agent, then shrinks the buttons, then drops the VS Code buttons, the title
+  and the split buttons (the dropped commands stay in its menu and key
+  bindings). It clips nothing, so the program windows' menu can hang below
+  it; when narrow, that menu opens rightwards.
 - Pane headers (`components/PaneHeader.tsx`) sit over the top border row
-  herdr draws for each pane (between `rect` and `inner_rect`). A pane
-  without a border row (a lone pane, unless herdr draws outer borders) gets
-  a floating header at its top right that shows on hover.
-- A toolbar above the grid (`components/PaneToolbar.tsx`) shows the focused
-  pane's title and folder with the buttons of its header (`PaneActions`):
-  VS Code, changes and Git Graph of the folder, split right / down, zoom
-  and close. It is outside herdr's grid, so the grid only becomes one bar
-  shorter and the buttons stay visible for a lone pane. It is always there
-  while a tab is shown (its buttons are disabled while no pane of the tab
-  is focused), so focus changes never resize the grid; read-only browsers
-  do not show it.
+  herdr draws for each pane (between `rect` and `inner_rect`) with the
+  pane's agent state, title, agent and folder, and no buttons; clicking one
+  focuses its pane, and it renames, drags and has a menu like the toolbar.
+  A pane without a border row (a lone pane, unless herdr draws outer
+  borders) has no header: the toolbar shows the same.
 
 **Input mapping** (`surface/input.ts`, `surface/controller.ts`)
 
@@ -174,7 +184,10 @@ toasts; nothing is copied unless the button was clicked. A bell flashes the surf
 pinned vectors in `testdata/surface.json`, grid moves and generations,
 widths, colors, selections in absolute rows and the read range, key events,
 paste filtering, links); the key contract above (`input.test.ts`,
-`TestIntegrationKeyParity`). Rendering, headers over borders, IME, vim
+`TestIntegrationKeyParity`); `web/src/__tests__/paneToolbar.test.ts` (the
+toolbar's buttons act on the focused pane, disabled outside the shown tab,
+rename and menu, read-only, headers without buttons). The toolbar's
+narrow-width steps were checked in Chromium. Rendering, headers over borders, IME, vim
 mouse, wheel, selections and copying, tab switches, takeover between two
 tabs and host colors (OSC 11 answered with the theme's background) were
 checked in Chromium against a dev herdr session.

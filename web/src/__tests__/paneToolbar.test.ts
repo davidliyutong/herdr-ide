@@ -11,6 +11,8 @@ vi.mock('../lib/bridge', () => ({ bridge: { command: (...a: unknown[]) => comman
 import { useStore } from '../state/store';
 import type { MachineState } from '../lib/herdr';
 import { PaneToolbar } from '../components/PaneToolbar';
+import { PaneHeader } from '../components/PaneHeader';
+import { useMenu } from '../contextMenu';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -95,9 +97,40 @@ describe('PaneToolbar', () => {
     expect(buttons().every((b) => b.disabled)).toBe(true);
   });
 
-  it('is not shown in read-only mode', async () => {
+  it('renames the focused pane from its title and has its menu', async () => {
+    await render();
+    await act(async () => (host.querySelector('.pane-title') as HTMLElement).click());
+    expect(useStore.getState().renaming).toEqual({ kind: 'pane', m: 'm', id: 'p1' });
+    expect(host.querySelector('.pane-title-edit')).not.toBeNull();
+    useStore.getState().setRenaming(undefined);
+
+    await act(async () => {
+      host.querySelector('.pane-toolbar')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 5, clientY: 5 }));
+    });
+    expect(useMenu.getState().menu).toBeDefined();
+  });
+
+  it('keeps the title, folder and program windows in read-only mode, without commands', async () => {
     useStore.getState().setReadOnly(true);
     await render();
-    expect(host.querySelector('.pane-toolbar')).toBeNull();
+    expect(host.querySelector('.pane-toolbar')).not.toBeNull();
+    expect(host.querySelector('.pane-title')?.textContent).toBe('build');
+    expect(buttons()).toHaveLength(0);
+  });
+});
+
+describe('PaneHeader', () => {
+  it('has no buttons: the commands are in the toolbar', async () => {
+    useStore.getState().setReadOnly(false);
+    useStore.getState().setMachines([machine()]);
+    const host = document.createElement('div');
+    document.body.append(host);
+    const root = createRoot(host);
+    await act(async () => root.render(createElement(PaneHeader, { m: 'm', paneId: 'p1', style: {} })));
+    expect(host.querySelector('.pane-title')?.textContent).toBe('build');
+    expect(host.querySelector('.pane-cwd')?.textContent).toBe('~/src');
+    expect(host.querySelectorAll('button')).toHaveLength(0);
+    await act(async () => root.unmount());
+    host.remove();
   });
 });

@@ -119,7 +119,8 @@ that pane (edges), onto a tab to move it there, or onto `+` to move it into a
 new tab; drag a tab along the tab bar, or a workspace along its machine's
 list, to reorder it. Escape cancels a drag.
 
-Right-click a pane header, a tab or a workspace for a menu of its commands
+Right-click a pane header, the toolbar above the panes (for the focused
+pane), a tab or a workspace for a menu of its commands
 (rename, split, zoom, VS Code, new tab, move, close) with their bindings;
 ↑↓ Home End select, Enter runs, Escape closes. In read-only mode the
 browser's menu shows instead.

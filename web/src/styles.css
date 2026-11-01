@@ -486,13 +486,18 @@ select,
   width: 10em;
   padding: 0 4px;
 }
-/* The focused pane's folder and its VS Code commands, above herdr's grid:
- * always visible, also for a lone pane whose header shows only on hover. */
+/* The shown tab's toolbar: one row above herdr's grid whatever the number of
+ * panes, with the focused pane's title, folder and commands. Narrow
+ * workspaces drop the folder, then the title, then shrink the buttons and
+ * drop the VS Code and split ones (they stay in the toolbar's menu), so the
+ * rest fits down to about 110px. Nothing is clipped: the program windows'
+ * menu hangs below the bar. */
 .pane-toolbar {
   display: flex;
   align-items: center;
   gap: 8px;
   height: 2.4rem;
+  min-width: 0;
   padding: 0 8px 0 12px;
   font-size: var(--fs-md);
   line-height: 1;
@@ -501,13 +506,19 @@ select,
   border-bottom: 1px solid var(--line);
   user-select: none;
   flex: none;
+  container: pane-toolbar / inline-size;
+}
+.pane-toolbar.draggable {
+  cursor: grab;
 }
 .pane-toolbar .pane-title {
   color: var(--fg);
+  flex: 0 1 auto;
+  min-width: 0;
 }
 .pane-toolbar .pane-actions {
   gap: 2px;
-  opacity: 1;
+  margin-left: auto;
 }
 .pane-toolbar .pane-actions button {
   width: 1.85rem;
@@ -525,6 +536,41 @@ select,
 .pane-actions button:disabled {
   opacity: 0.4;
   pointer-events: none;
+}
+@container pane-toolbar (max-width: 480px) {
+  .pane-toolbar .pane-cwd,
+  .pane-toolbar .pane-agent {
+    display: none;
+  }
+}
+@container pane-toolbar (max-width: 300px) {
+  .pane-toolbar .pane-actions .sep {
+    display: none;
+  }
+  .pane-toolbar .pane-actions button {
+    width: 1.5rem;
+  }
+  /* The program windows' menu opens rightwards, over the panes. */
+  .pane-toolbar .gui-menu {
+    right: auto;
+    left: 0;
+  }
+}
+@container pane-toolbar (max-width: 240px) {
+  .pane-toolbar .pane-actions .code {
+    display: none;
+  }
+}
+@container pane-toolbar (max-width: 200px) {
+  .pane-toolbar .pane-title,
+  .pane-toolbar .pane-title-edit {
+    display: none;
+  }
+}
+@container pane-toolbar (max-width: 170px) {
+  .pane-toolbar .pane-actions .split {
+    display: none;
+  }
 }
 .workspace-body {
   flex: 1;
@@ -610,21 +656,6 @@ body.dragging .pane-area {
   overflow: hidden;
   border-radius: 3px;
 }
-/* A pane without a border row: its header floats over the top right and
- * shows on hover. */
-.pane-header.floating {
-  left: auto !important;
-  right: 0;
-  width: auto !important;
-  max-width: 70%;
-  opacity: 0;
-  transition: opacity 0.1s;
-  box-shadow: 0 2px 8px var(--shadow);
-}
-.pane-header.floating:hover,
-.surface-host:hover .pane-header.floating.focused {
-  opacity: 1;
-}
 .pane-header.draggable {
   cursor: grab;
 }
@@ -674,12 +705,6 @@ body.dragging .pane-area {
   align-items: center;
   gap: 1px;
   flex: none;
-  opacity: 0.55;
-  transition: opacity 0.1s;
-}
-.pane-header:hover .pane-actions,
-.pane-header.focused .pane-actions {
-  opacity: 1;
 }
 .pane-actions button {
   display: inline-flex;
@@ -711,15 +736,14 @@ body.dragging .pane-area {
   background: var(--line-2);
   margin: 0 3px;
 }
-/* Narrow panes keep the title and the most used buttons. */
+/* Narrow panes keep the title. */
 @container (max-width: 420px) {
-  .pane-cwd {
+  .pane-header .pane-cwd {
     display: none;
   }
 }
 @container (max-width: 300px) {
-  .pane-agent,
-  .pane-actions .sep {
+  .pane-header .pane-agent {
     display: none;
   }
 }
