@@ -207,6 +207,7 @@ export const en = {
   'workspace.moveFailed': 'Could not move the tab: {error}',
   'workspace.closeTab': 'Close tab ({key})',
   'workspace.paneCount': '{n} panes',
+  'workspace.paneToolbar': 'Focused pane',
 
   'auth.title': 'SSH authentication · {machine}',
   'herdr.title': 'herdr on this computer',

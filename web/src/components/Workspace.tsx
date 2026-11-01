@@ -2,6 +2,7 @@ import { PanelLeft, Plus, X } from 'lucide-react';
 import { useStore, activeTabId } from '../state/store';
 import { actions } from '../actions';
 import { SurfaceView } from './SurfaceView';
+import { PaneToolbar } from './PaneToolbar';
 import { StatusDot } from './StatusDot';
 import { statusRank, workspaceTabs, type AgentStatus } from '../lib/herdr';
 import { t, type MessageKey } from '../i18n';
@@ -127,6 +128,7 @@ export function Workspace() {
           )}
         </div>
       </div>
+      {tabId && <PaneToolbar m={m} tabId={tabId} zoomed={layout?.zoomed} />}
       <div className="workspace-body">
         {tabId ? <SurfaceView m={m} tabId={tabId} layout={layout} /> : <div className="muted pad">{t('workspace.loadingLayout')}</div>}
       </div>

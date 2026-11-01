@@ -121,18 +121,16 @@ export function SurfaceView({ m, tabId, layout }: Props) {
   const current = fulls > 0 && meta && meta.m === m && shown?.m === m && shown.tab === tabId && grid.ready;
   const headers = useMemo(() => {
     if (!current || !meta) return [];
-    return meta.panes.map((p) => {
-      const border = p.inner.y > p.rect.y;
-      const style = border
-        ? { left: (p.rect.x + 1) * cw, top: p.rect.y * ch, width: Math.max(0, p.rect.w - 2) * cw, height: ch }
-        : { left: p.inner.x * cw, top: p.inner.y * ch, width: p.inner.w * cw, height: ch };
-      return {
-        id: p.id,
-        style,
-        floating: !border,
-        box: { left: p.rect.x * cw, top: p.rect.y * ch, width: p.rect.w * cw, height: p.rect.h * ch },
-      };
-    });
+    // A header sits on the top border row herdr draws for a pane; a pane
+    // without one (a lone pane) has none, the tab's toolbar stands in for it.
+    return meta.panes.map((p) => ({
+      id: p.id,
+      style:
+        p.inner.y > p.rect.y
+          ? { left: (p.rect.x + 1) * cw, top: p.rect.y * ch, width: Math.max(0, p.rect.w - 2) * cw, height: ch }
+          : undefined,
+      box: { left: p.rect.x * cw, top: p.rect.y * ch, width: p.rect.w * cw, height: p.rect.h * ch },
+    }));
   }, [current, meta, cw, ch]);
 
   let overlay: { text: string; detail?: string; action?: { label: string; run(): void }; soft?: boolean } | undefined;
@@ -159,9 +157,7 @@ export function SurfaceView({ m, tabId, layout }: Props) {
       {headers.map((h) => (
         <div key={`box-${h.id}`} className="pane-area" style={h.box} data-pane-id={h.id} data-tab-id={tabId} data-m={m} />
       ))}
-      {headers.map((h) => (
-        <PaneHeader key={h.id} m={m} paneId={h.id} zoomed={layout?.zoomed} style={h.style} floating={h.floating} />
-      ))}
+      {headers.map((h) => h.style && <PaneHeader key={h.id} m={m} paneId={h.id} zoomed={layout?.zoomed} style={h.style} />)}
       {splitDrag && (
         <div
           className={`split-ghost ${splitDrag.split.vertical ? 'v' : 'h'}`}

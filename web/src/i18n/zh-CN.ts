@@ -205,6 +205,7 @@ export const zhCN: Messages = {
   'workspace.moveFailed': '移动 tab 失败：{error}',
   'workspace.closeTab': '关闭 tab（{key}）',
   'workspace.paneCount': '{n} 个 pane',
+  'workspace.paneToolbar': '当前 pane',
 
   'auth.title': 'SSH 认证 · {machine}',
   'herdr.title': '本机的 herdr',

@@ -1,16 +1,13 @@
 import type { CSSProperties } from 'react';
-import { Columns2, FileDiff, GitGraph, Maximize2, Minimize2, Rows2, SquareCode, X } from 'lucide-react';
 import { useStore } from '../state/store';
-import { paneCwd, paneTitle, shortPath } from '../lib/herdr';
+import { paneCwd, paneTitle, shortPath, type Pane } from '../lib/herdr';
 import { actions } from '../actions';
-import { keyHint } from '../keymap';
 import { StatusDot } from './StatusDot';
 import { InlineEdit } from './InlineEdit';
 import { startPaneDrag } from '../paneDrag';
 import { openMenu } from '../contextMenu';
 import { paneMenu } from '../menus';
 import { t } from '../i18n';
-import { PaneGuiButton } from '../gui/GuiMenus';
 
 interface Props {
   m: string;
@@ -18,91 +15,74 @@ interface Props {
   zoomed?: boolean;
   /** Position over herdr's surface, in CSS pixels. */
   style: CSSProperties;
-  /** The pane has no border row: the header floats over its top right
-   * corner and shows on hover. */
-  floating?: boolean;
 }
 
-/** The header of one pane, drawn over the top border row herdr draws for
- * it (its title, agent, working directory and actions). */
-export function PaneHeader({ m, paneId, zoomed, style, floating }: Props) {
+/** The header of one pane, drawn over the top border row herdr draws for it:
+ * its title, agent and working directory; dragging it moves the pane, its
+ * menu has the pane's commands. The buttons are in the tab's toolbar
+ * (PaneToolbar), for the focused pane. A pane without a border row (a lone
+ * pane) has no header; the toolbar stands in for it. */
+export function PaneHeader({ m, paneId, zoomed, style }: Props) {
   const pane = useStore((s) => s.machines[m]?.snapshot?.panes.find((p) => p.pane_id === paneId));
   const home = useStore((s) => s.machines[m]?.info?.home);
   const focused = useStore((s) => s.focused?.m === m && s.focused?.pane === paneId);
   const readOnly = useStore((s) => s.readOnly);
-  const renaming = useStore((s) => s.renaming?.kind === 'pane' && s.renaming.m === m && s.renaming.id === paneId);
-  const setRenaming = useStore((s) => s.setRenaming);
 
   const cwd = paneCwd(pane);
-  const title = pane ? paneTitle(pane) : paneId;
-  const onHeaderPointerDown = (ev: React.PointerEvent) => {
-    if (ev.button !== 0 || readOnly || zoomed || (ev.target as HTMLElement).closest('button, input')) return;
-    if (pane) startPaneDrag(ev, { m, pane: paneId, tab: pane.tab_id, ws: pane.workspace_id, label: title });
-  };
   return (
     <div
-      className={`pane-header ${readOnly || zoomed ? '' : 'draggable'} ${focused ? 'focused' : ''} ${floating ? 'floating' : ''}`}
+      className={`pane-header ${readOnly || zoomed ? '' : 'draggable'} ${focused ? 'focused' : ''}`}
       style={style}
       data-pane-id={paneId}
       data-tab-id={pane?.tab_id}
       data-m={m}
-      onPointerDown={onHeaderPointerDown}
+      onPointerDown={(ev) => paneDragStart(ev, m, paneId, pane, zoomed)}
       onMouseDown={() => useStore.getState().focusPane({ m, pane: paneId })}
       onContextMenu={(e) => !(e.target as HTMLElement).closest('input') && openMenu(e, paneMenu(m, paneId, !!zoomed))}
     >
       {pane?.agent && <StatusDot status={pane.agent_status} />}
-      {renaming ? (
-        <InlineEdit
-          className="pane-title-edit"
-          value={pane?.label ?? title}
-          placeholder={t('pane.renamePlaceholder')}
-          onDone={(v) => {
-            setRenaming(undefined);
-            if (v !== undefined && v !== (pane?.label ?? '')) actions.renamePane(m, paneId, v);
-          }}
-        />
-      ) : (
-        <span
-          className={`pane-title ${readOnly ? '' : 'editable'}`}
-          title={readOnly ? title : t('pane.rename')}
-          onClick={() => !readOnly && setRenaming({ kind: 'pane', m, id: paneId })}
-        >
-          {title}
-        </span>
-      )}
+      <PaneTitle m={m} paneId={paneId} pane={pane} />
       {pane?.agent && <span className="pane-agent">{pane.agent}</span>}
       <span className="pane-cwd" title={cwd}>
         <bdi>{shortPath(cwd, home)}</bdi>
       </span>
-      <span className="pane-actions">
-        <PaneGuiButton m={m} pane={paneId} />
-        {!readOnly && (
-          <>
-            <button title={t('pane.openCode', { key: keyHint('open_code') })} onClick={() => actions.openCode(m, cwd)}>
-              <SquareCode />
-            </button>
-            <button title={t('pane.diff', { key: keyHint('open_diff') })} onClick={() => actions.openDiff(m, cwd)}>
-              <FileDiff />
-            </button>
-            <button title={t('pane.gitGraph', { key: keyHint('open_git_graph') })} onClick={() => actions.openGitGraph(m, cwd)}>
-              <GitGraph />
-            </button>
-            <span className="sep" />
-            <button title={t('pane.splitRight', { key: keyHint('split_vertical') })} onClick={() => actions.split(m, paneId, 'right')}>
-              <Columns2 />
-            </button>
-            <button title={t('pane.splitDown', { key: keyHint('split_horizontal') })} onClick={() => actions.split(m, paneId, 'down')}>
-              <Rows2 />
-            </button>
-            <button title={t(zoomed ? 'pane.restore' : 'pane.zoom', { key: keyHint('zoom') })} onClick={() => actions.zoom(m, paneId)}>
-              {zoomed ? <Minimize2 /> : <Maximize2 />}
-            </button>
-            <button className="danger" title={t('pane.close', { key: keyHint('close_pane') })} onClick={() => actions.closePane(m, paneId)}>
-              <X />
-            </button>
-          </>
-        )}
-      </span>
     </div>
+  );
+}
+
+/** Starts dragging a pane from its header or the toolbar (not from its
+ * buttons or the title being edited). */
+export function paneDragStart(ev: React.PointerEvent, m: string, paneId: string, pane: Pane | undefined, zoomed?: boolean) {
+  const { readOnly } = useStore.getState();
+  if (ev.button !== 0 || readOnly || zoomed || !pane || (ev.target as HTMLElement).closest('button, input')) return;
+  startPaneDrag(ev, { m, pane: paneId, tab: pane.tab_id, ws: pane.workspace_id, label: paneTitle(pane) });
+}
+
+/** A pane's title; clicking it renames the pane (unless read-only). */
+export function PaneTitle({ m, paneId, pane }: { m: string; paneId: string; pane?: Pane }) {
+  const readOnly = useStore((s) => s.readOnly);
+  const renaming = useStore((s) => s.renaming?.kind === 'pane' && s.renaming.m === m && s.renaming.id === paneId);
+  const setRenaming = useStore((s) => s.setRenaming);
+  const title = pane ? paneTitle(pane) : paneId;
+  if (renaming)
+    return (
+      <InlineEdit
+        className="pane-title-edit"
+        value={pane?.label ?? title}
+        placeholder={t('pane.renamePlaceholder')}
+        onDone={(v) => {
+          setRenaming(undefined);
+          if (v !== undefined && v !== (pane?.label ?? '')) actions.renamePane(m, paneId, v);
+        }}
+      />
+    );
+  return (
+    <span
+      className={`pane-title ${readOnly ? '' : 'editable'}`}
+      title={readOnly ? title : t('pane.rename')}
+      onClick={() => !readOnly && setRenaming({ kind: 'pane', m, id: paneId })}
+    >
+      {title}
+    </span>
   );
 }

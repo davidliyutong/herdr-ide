@@ -18,7 +18,7 @@
   - 可以把图片直接粘贴进 agent 的输入框。
 - **按需打开 VS Code**：
   - code-server 默认由本机下载后推送到各机器，机器本身不需要外网；也可以让机器自行下载，或直接使用机器上已安装的 code-server。会一并装好 Git Graph 和桥接扩展。
-  - 一个快捷键就能打开 pane 所在的目录、它的 Diff 或 Git Graph；终端里的 `path:line` 可以直接跳到编辑器。
+  - 一个快捷键或 pane 上方工具栏里的按钮就能打开 pane 所在的目录、它的 Diff 或 Git Graph；终端里的 `path:line` 可以直接跳到编辑器。
   - 面板可以放在终端右侧或下方。
   - 长时间不用的 code-server 会自动停止。
 - **程序窗口**：远端 Linux 机器上程序打开的窗口（matplotlib、MuJoCo 查看器、Qt 工具等）会以浏览器窗口的形式出现，一个程序窗口对应一个浏览器窗口，支持鼠标和键盘。pane 会自动获得虚拟显示；机器上没有 Xvfb 时会以普通用户身份获取，无需 root；装有 VirtualGL 的机器可用 GPU 渲染 OpenGL。

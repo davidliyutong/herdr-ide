@@ -52,7 +52,8 @@ Non-goals: a separate herdr-ide layout model; arbitrary docking of panes.
   pixels (so a click stays a click), a ghost follows the pointer, a marker
   shows where the drop lands, and Escape cancels.
 
-- Dragging a pane header (after a few pixels, so a click stays a click)
+- Dragging a pane header or the tab's toolbar (the focused pane; after a
+  few pixels, so a click stays a click)
   shows a highlight of where the pane will go. The middle of another pane
   swaps the two (`pane.swap`); an edge places the pane beside it
   (`pane.move` with `split` right/down and `target_pane_id`; left/top add a
@@ -84,9 +85,10 @@ Non-goals: a separate herdr-ide layout model; arbitrary docking of panes.
 **Context menus** (`web/src/contextMenu.ts`, `menus.tsx`,
 `components/ContextMenu.tsx`)
 
-- Right-clicking a pane header, a tab or a workspace in the sidebar opens an
-  in-app menu at the pointer instead of the browser's:
-  - pane header: rename, split right / down, zoom or restore, VS Code /
+- Right-clicking a pane header (or the tab's toolbar, for the focused pane),
+  a tab or a workspace in the sidebar opens an in-app menu at the pointer
+  instead of the browser's:
+  - pane header and toolbar: rename, split right / down, zoom or restore, VS Code /
     changes / Git Graph of the pane's folder, close;
   - tab: rename, new tab, move left / right, close;
   - workspace: rename, new tab in it, move up / down, close.
