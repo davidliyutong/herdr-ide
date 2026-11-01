@@ -122,7 +122,9 @@ Quick Look or VS Code ([06](06-quick-look-and-files.md)).
 OSC 52 from a pane program (up to 1 MiB) reaches the owning browser, not in
 read-only mode. Pane output is not trusted, so a toast shows the text's
 length and start and only its **Copy** button writes the clipboard; the click
-is also the user gesture browsers want. A bell flashes the surface's edge.
+is also the user gesture browsers want. The toast closes after 5 s, so
+programs that copy often (agent CLIs on every selection) leave no pile of
+toasts; nothing is copied unless the button was clicked. A bell flashes the surface's edge.
 
 ## Alternatives considered
 

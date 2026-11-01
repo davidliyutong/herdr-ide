@@ -140,7 +140,7 @@ export function handleSurfaceMessage(m: { t: string } & Record<string, any>) {
       const preview = text.length > 60 ? `${text.slice(0, 60)}…` : text;
       useStore.getState().toast(t('surface.clipboard', { n: text.length, text: preview.replace(/\s+/g, ' ') }), {
         label: t('surface.copy'),
-        sticky: true,
+        ttl: 5000,
         run: () => void navigator.clipboard?.writeText(text).catch(() => {}),
       });
       break;
