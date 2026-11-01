@@ -524,6 +524,15 @@ select,
   z-index: -1;
   caret-color: transparent;
 }
+/* An input method's text being composed, at the cursor (controller.ts). */
+.surface-compose {
+  position: absolute;
+  display: none;
+  white-space: pre;
+  pointer-events: none;
+  text-decoration: underline;
+  z-index: 3;
+}
 /* Drop targets for dragged panes (body.dragging, see drag.ts). */
 .pane-area {
   position: absolute;

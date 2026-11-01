@@ -69,6 +69,11 @@ received, the popup itself is not drawn).
 Text goes to the pane that has the UI's focus; herdr's focused pane follows
 it ([18](18-endpoint-surfaces.md)).
 
+While an input method composes, its text (pinyin such as `zi fu`) is shown
+underlined over the cells at the cursor, in the terminal font and colors;
+the hidden textarea that receives it also sits at the cursor, so the
+candidate window opens there. herdr receives only the committed text.
+
 **Key routing** (`surface/keys.ts`)
 
 Every keydown in the surface passes through `routeKey`, with three outcomes:
