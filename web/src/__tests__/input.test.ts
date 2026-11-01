@@ -56,6 +56,7 @@ function press(target: HTMLElement, k: KeyInit): boolean {
 }
 
 let textarea: HTMLTextAreaElement;
+let host: HTMLDivElement;
 let ctl: import('../surface/controller').SurfaceController;
 
 /** Events sent so far, without key releases. */
@@ -92,7 +93,7 @@ beforeAll(async () => {
   const { handleKey } = await import('../keymap');
   const { appearanceOf } = await import('../appearance');
   const { getPrefs } = await import('../prefs');
-  const host = document.createElement('div');
+  host = document.createElement('div');
   const canvas = document.createElement('canvas');
   textarea = document.createElement('textarea');
   host.append(canvas, textarea);
@@ -173,5 +174,41 @@ describe('pane input contract (testdata/keys.json)', () => {
     textarea.dispatchEvent(new CompositionEvent('compositionend', { data: '你好' }));
     expect(pressesSent()).toEqual([{ t: 'text', text: '你好' }]);
     expect(preedit.style.display).toBe('none');
+  });
+});
+
+describe('buttons over the grid', () => {
+  it('do not pass their clicks to the program under them', async () => {
+    const { useSurface } = await import('../surface/session');
+    const r = { x: 0, y: 0, w: 80, h: 24 };
+    const meta = (mouse: boolean) =>
+      ctl.setMeta({
+        m: 'local',
+        gen: 1,
+        w: 80,
+        h: 24,
+        panes: [{ id: 'w1:p1', rect: r, inner: r, focused: true, mouse, alt: false }],
+        splits: [],
+        links: [],
+      });
+    useSurface.setState({ ownership: 'owner' });
+    meta(true);
+    try {
+      host.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 4, clientY: 4 }));
+      window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: 4, clientY: 4 }));
+      expect(pressesSent().some((e) => e.t === 'mouse')).toBe(true);
+      sent.length = 0;
+
+      const button = document.createElement('button');
+      button.className = 'pane-close';
+      button.append(document.createElementNS('http://www.w3.org/2000/svg', 'svg'));
+      host.append(button);
+      button.firstChild!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 4, clientY: 4 }));
+      window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: 4, clientY: 4 }));
+      expect(pressesSent()).toEqual([]);
+      button.remove();
+    } finally {
+      meta(false);
+    }
   });
 });

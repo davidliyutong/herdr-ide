@@ -397,6 +397,9 @@ export class SurfaceController {
   };
 
   private onMouseDown = (ev: MouseEvent) => {
+    // Buttons over the grid (a pane's close button) handle their own clicks;
+    // the program under them must not get one.
+    if ((ev.target as Element | null)?.closest?.('button')) return;
     if (useSurface.getState().ownership !== 'owner' || !this.meta) return;
     const { x, y } = this.cellAt(ev.clientX, ev.clientY);
     // Keep keyboard focus in the textarea.

@@ -6,6 +6,11 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Each pane has a round close button at its top right corner that shows
+  while the pointer is over the pane, also when the pane is not focused.
+
 ## [0.2.0] - 2026-11-01
 
 ### Changed
