@@ -145,8 +145,8 @@ func (a *Agent) handle(ctx context.Context, st net.Conn) {
 		st.Close()
 	case agentproto.OpHerdrAPI:
 		err = a.handleHerdrAPI(st, h)
-	case agentproto.OpTerm:
-		err = a.handleTerm(ctx, st, h)
+	case agentproto.OpHerdrClient:
+		err = a.handleHerdrClient(st, h)
 	case agentproto.OpExec:
 		err = a.handleExec(ctx, st, h)
 	case agentproto.OpFsStat, agentproto.OpFsList, agentproto.OpFsRead, agentproto.OpFsWrite:
@@ -216,8 +216,17 @@ func pipe(a, b net.Conn) {
 }
 
 func (a *Agent) handleHerdrAPI(st net.Conn, h agentproto.Header) error {
+	return a.pipeUnix(st, a.herdrSocket(h.Session))
+}
+
+// handleHerdrClient pipes herdr's client socket. The core speaks the endpoint
+// protocol over it; the connection ends with the stream.
+func (a *Agent) handleHerdrClient(st net.Conn, h agentproto.Header) error {
+	return a.pipeUnix(st, a.herdrClientSocket(h.Session))
+}
+
+func (a *Agent) pipeUnix(st net.Conn, path string) error {
 	defer st.Close()
-	path := a.herdrSocket(h.Session)
 	c, err := net.DialTimeout("unix", path, 5*time.Second)
 	if err != nil {
 		return agentproto.Fail(st, fmt.Errorf("herdr socket %s: %w", path, err))

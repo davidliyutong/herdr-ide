@@ -6,39 +6,34 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/coder/websocket"
 
 	"herdr-ide/internal/herdr"
+	"herdr-ide/internal/herdr/endpoint"
 	"herdr-ide/internal/machines"
 )
 
 // inMsg is any message from the browser.
 type inMsg struct {
 	T    string `json:"t"`
-	SID  uint32 `json:"sid"`
 	M    string `json:"m"`
 	Pane string `json:"pane"`
 
-	Cols     int    `json:"cols"`
-	Rows     int    `json:"rows"`
-	CellW    int    `json:"cw"`
-	CellH    int    `json:"ch"`
-	Mode     string `json:"mode"`
-	Takeover bool   `json:"takeover"`
+	// view
+	Tab  string `json:"tab"`
+	Cols int    `json:"cols"`
+	Rows int    `json:"rows"`
+	CW   int    `json:"cw"`
+	CH   int    `json:"ch"`
 
-	D string `json:"d"`
-	B []byte `json:"b"`
-
-	Dir    string `json:"dir"`
-	Lines  int    `json:"lines"`
-	Col    *int   `json:"col"`
-	Row    *int   `json:"row"`
-	Mods   int    `json:"mods"`
-	Action string `json:"action"`
-	Button string `json:"button"`
+	// in: pane input events
+	Ev []endpoint.InputEvent `json:"ev"`
+	// focus
+	Focused bool `json:"focused"`
+	// host: the browser's terminal colors
+	Host *hostMsg `json:"host"`
 
 	// theme: "dark" or "light"
 	Kind string `json:"kind"`
@@ -61,9 +56,8 @@ type wsClient struct {
 	send   chan outMsg
 	// req is the upgrade request (identity for the audit log).
 	req *http.Request
-
-	mu      sync.Mutex
-	viewers map[uint32]*viewer
+	// readOnly browsers watch: no input, and no takeover from a writable one.
+	readOnly bool
 }
 
 const sendQueue = 8192
@@ -79,7 +73,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	conn.SetReadLimit(64 << 20)
 	ctx, cancel := context.WithCancel(context.Background())
-	c := &wsClient{s: s, conn: conn, ctx: ctx, cancel: cancel, send: make(chan outMsg, sendQueue), viewers: map[uint32]*viewer{}, req: r}
+	c := &wsClient{s: s, conn: conn, ctx: ctx, cancel: cancel, send: make(chan outMsg, sendQueue), req: r, readOnly: s.opts.ReadOnly}
 	s.audit.log(r, "ws.connect", nil)
 	defer s.audit.log(r, "ws.disconnect", nil)
 	defer c.close()
@@ -103,6 +97,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		c.sendJSON(map[string]any{"t": "agent", "m": ev.Machine, "data": ev.Data})
 	})
 	defer unsub()
+	s.surfJoin(c)
 
 	for {
 		typ, data, err := conn.Read(ctx)
@@ -122,13 +117,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 func (c *wsClient) close() {
 	c.cancel()
-	c.mu.Lock()
-	viewers := c.viewers
-	c.viewers = map[uint32]*viewer{}
-	c.mu.Unlock()
-	for _, v := range viewers {
-		c.s.leave(v)
-	}
+	c.s.surfLeave(c)
 	c.conn.Close(websocket.StatusNormalClosure, "")
 }
 
@@ -173,41 +162,19 @@ func (c *wsClient) sendJSON(v any) {
 	c.enqueue(outMsg{data: b})
 }
 
-func (c *wsClient) viewer(sid uint32) *viewer {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.viewers[sid]
-}
-
 func (c *wsClient) dispatch(m *inMsg) {
 	switch m.T {
-	case "attach":
-		c.attach(m)
-	case "detach":
-		c.mu.Lock()
-		v := c.viewers[m.SID]
-		delete(c.viewers, m.SID)
-		c.mu.Unlock()
-		if v != nil {
-			c.s.leave(v)
-		}
-	case "claim":
-		if c.s.opts.ReadOnly {
-			return
-		}
-		if v := c.viewer(m.SID); v != nil {
-			if m.Cols > 0 && m.Rows > 0 {
-				c.s.resize(v, m.Cols, m.Rows, m.CellW, m.CellH)
-			}
-			c.s.claim(v)
-		}
-	case "resize":
-		if v := c.viewer(m.SID); v != nil && m.Cols > 0 && m.Rows > 0 {
-			c.s.resize(v, m.Cols, m.Rows, m.CellW, m.CellH)
-		}
-	case "in", "inb", "scroll", "mouse":
-		if v := c.viewer(m.SID); v != nil {
-			c.s.command(v, m)
+	case "view":
+		c.s.surfView(c, viewMsg{M: m.M, Tab: m.Tab, Pane: m.Pane, Cols: m.Cols, Rows: m.Rows, CW: m.CW, CH: m.CH})
+	case "takeover":
+		c.s.surfTakeover(c)
+	case "in":
+		c.s.surfInput(c, m.M, m.Pane, m.Ev)
+	case "focus":
+		c.s.surfFocus(c, m.M, m.Focused)
+	case "host":
+		if m.Host != nil {
+			c.s.surfHost(c, *m.Host)
 		}
 	case "api":
 		go c.api(m)
@@ -220,36 +187,9 @@ func (c *wsClient) dispatch(m *inMsg) {
 	case "theme":
 		// VS Code windows follow the theme chosen in the browser; watchers
 		// cannot use VS Code and do not change it.
-		if !c.s.opts.ReadOnly {
+		if !c.readOnly {
 			c.s.bridge.setTheme(m.Kind)
 		}
-	}
-}
-
-// attach starts (or restarts) the viewer for sid. mode "observe" never
-// takes control; anything else lets the arbiter decide.
-func (c *wsClient) attach(m *inMsg) {
-	if m.M == "" || m.Pane == "" {
-		return
-	}
-	c.mu.Lock()
-	old := c.viewers[m.SID]
-	delete(c.viewers, m.SID)
-	c.mu.Unlock()
-	if old != nil {
-		c.s.leave(old)
-	}
-	if c.ctx.Err() != nil {
-		return
-	}
-	v := &viewer{c: c, sid: m.SID, key: paneKey{m.M, m.Pane}, cols: m.Cols, rows: m.Rows, cellW: m.CellW, cellH: m.CellH}
-	c.mu.Lock()
-	c.viewers[m.SID] = v
-	c.mu.Unlock()
-	observe := m.Mode == "observe" || c.s.opts.ReadOnly
-	c.s.join(v, observe)
-	if m.Takeover && !observe {
-		c.s.claim(v)
 	}
 }
 

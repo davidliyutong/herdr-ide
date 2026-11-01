@@ -24,7 +24,7 @@ here; both READMEs link to this page instead of repeating it.
 | `--allowed-origin` | – | Public origin of the reverse proxy, e.g. `https://ide.example.com` (repeatable). Host and Origin headers are checked against loopback plus these. |
 | `--proxy-secret-file` | – | File with a secret (≥ 16 characters) that the reverse proxy sends in `X-herdr-ide-Proxy-Secret`. Required for requests not coming from loopback. |
 | `--insecure-listen` | `false` | Accept a non-loopback `--listen` without a proxy secret. Anyone reaching the port gets shell access to every machine. |
-| `--read-only` | `false` | Watch only: panes are observed, mutating herdr calls, uploads, ssh authentication and VS Code are refused. |
+| `--read-only` | `false` | Watch only: panes get no input, mutating herdr calls, uploads, ssh authentication and VS Code are refused. |
 | `--audit-log` | – | Append security-relevant events (connections, mutating API calls, uploads, VS Code and bridge use, denials) as JSON lines. |
 | `--user-header` | – | Header holding the authenticated user for the audit log. Without it, `Tailscale-User-Login`, `X-Forwarded-User`, `X-Auth-Request-User`, `Remote-User` and `X-Forwarded-Email` are tried. |
 

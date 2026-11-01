@@ -9,7 +9,8 @@ changes.
 
 A Go server (`cmd/herdr-ide`) that serves a React terminal UI and drives
 [herdr](https://herdr.dev) on several machines through a per-machine Go agent
-(`cmd/herdr-ide-agent`) over ssh; code-server provides VS Code panels. One
+(`cmd/herdr-ide-agent`) over ssh, with panes drawn from herdr's endpoint
+protocol; code-server provides VS Code panels. One
 binary embeds the UI, the agents for 4 platforms and a VS Code extension.
 Release archives also contain a native herdr and its license notices, used
 on the core host only when no herdr is installed; it keeps herdr's usual
@@ -87,14 +88,17 @@ playbooks):
 
 ## Gotchas
 
-- Key events in panes go through `routeKey` (`web/src/terminal/keys.ts`),
-  which cancels what it consumes; an uncancelled keydown makes xterm.js send
-  the key again on keypress. Any key the UI translates or swallows needs a row
-  in `web/src/__tests__/testdata/keys.json`.
+- Key events in panes go through `routeKey` (`web/src/surface/keys.ts`),
+  which cancels what it consumes; an uncancelled keydown is followed by a
+  keypress and an input event that would send the text again. Any key the UI
+  translates or swallows needs a row in
+  `web/src/__tests__/testdata/keys.json`; its `bytes` come from herdr
+  (`KEYS_RECORD=1 make it` prints them).
 - yamux streams cannot be half-closed: use `agentproto.ChunkWriter` for
   uploads that expect a reply.
-- Frames from herdr are diffs against the previous frame of the same stream;
-  never splice two streams into one xterm without `term.reset()`.
+- herdr's surface patches apply only to the revision before them, and the
+  browser's to the generation of the last complete surface; anything that
+  changes the grid outside that order must start from a complete surface.
 - `web/dist` is embedded at build time; run `pnpm -C web build` (or
   `make build`) before `go build` if the UI changed. The build keeps
   `web/dist/.gitkeep`, which `go:embed` needs in a clean checkout.

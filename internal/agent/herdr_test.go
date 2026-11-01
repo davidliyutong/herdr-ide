@@ -193,3 +193,26 @@ func TestUpdateOnlyTheManagedCopy(t *testing.T) {
 		t.Fatalf("unknown action accepted: %+v %v", rep, err)
 	}
 }
+
+// The client socket follows herdr's client_socket_path rules.
+func TestHerdrClientSocket(t *testing.T) {
+	a := testAgent(t)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HERDR_SOCKET_PATH", "")
+	t.Setenv("HERDR_CLIENT_SOCKET_PATH", "")
+	cfg := filepath.Join(a.home, ".config", "herdr")
+	for _, c := range []struct{ session, env, legacy, want string }{
+		{"", "", "", filepath.Join(cfg, "herdr-client.sock")},
+		{"default", "", "", filepath.Join(cfg, "herdr-client.sock")},
+		{"dev", "", "", filepath.Join(cfg, "sessions", "dev", "herdr-client.sock")},
+		{"", "/x/foo.sock", "/y/c.sock", "/x/foo-client.sock"},
+		{"", "", "/y/c.sock", "/y/c.sock"},
+		{"dev", "/x/foo.sock", "/y/c.sock", filepath.Join(cfg, "sessions", "dev", "herdr-client.sock")},
+	} {
+		t.Setenv("HERDR_SOCKET_PATH", c.env)
+		t.Setenv("HERDR_CLIENT_SOCKET_PATH", c.legacy)
+		if got := a.herdrClientSocket(c.session); got != c.want {
+			t.Errorf("%+v: got %s", c, got)
+		}
+	}
+}

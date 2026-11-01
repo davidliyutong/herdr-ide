@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { resolvePath, mediaExt } from '../terminal/links';
-import { bracketedPaste } from '../terminal/paste';
-import { routeKey } from '../terminal/keys';
+import { pasteText } from '../surface/input';
+import { routeKey } from '../surface/keys';
 import { paneRects } from '../actions';
 import type { LayoutNode } from '../lib/herdr';
 
@@ -23,10 +23,10 @@ describe('resolvePath', () => {
   });
 });
 
-describe('bracketedPaste', () => {
-  it('wraps, converts newlines and strips embedded markers', () => {
-    expect(bracketedPaste('a\nb\r\nc')).toBe('\x1b[200~a\rb\rc\x1b[201~');
-    expect(bracketedPaste('x\x1b[201~rm -rf')).toBe('\x1b[200~xrm -rf\x1b[201~');
+describe('pasteText', () => {
+  it('converts newlines and strips escapes', () => {
+    expect(pasteText('a\nb\r\nc')).toBe('a\rb\rc');
+    expect(pasteText('x\x1b[201~rm -rf')).toBe('x[201~rm -rf');
   });
 });
 
@@ -57,38 +57,32 @@ describe('routeKey', () => {
     ({
       type: 'keydown',
       key: 'Enter',
+      code: 'Enter',
       shiftKey: false,
       ctrlKey: false,
       altKey: false,
       metaKey: false,
+      repeat: false,
       isComposing: false,
       keyCode: 13,
       preventDefault: vi.fn(),
       ...init,
     }) as unknown as KeyboardEvent;
   const none = () => false;
-  it('cancels every event it keeps from xterm.js, except browser shortcuts', () => {
+  it('cancels every event it handles, and leaves browser shortcuts alone', () => {
     const send = vi.fn();
     const shiftEnter = key({ shiftKey: true });
-    expect(routeKey(shiftEnter, none, send)).toBe(false);
-    expect(send).toHaveBeenCalledWith('\x1b\r');
+    expect(routeKey(shiftEnter, none, send)).toBe('pane');
+    expect(send).toHaveBeenCalledWith({ t: 'key', key: { code: 'Enter', mods: 1, kind: 0, tracksRelease: true } });
     expect(shiftEnter.preventDefault).toHaveBeenCalled();
-    const prefix = key({ key: 'b', ctrlKey: true });
-    expect(routeKey(prefix, () => true, send)).toBe(false);
+    const prefix = key({ key: 'b', code: 'KeyB', ctrlKey: true });
+    expect(routeKey(prefix, () => true, send)).toBe('app');
     expect(prefix.preventDefault).toHaveBeenCalled();
-    const copy = key({ key: 'c', metaKey: true });
-    expect(routeKey(copy, none, send)).toBe(false);
+    const copy = key({ key: 'c', code: 'KeyC', metaKey: true });
+    expect(routeKey(copy, none, send)).toBe('browser');
     expect(copy.preventDefault).not.toHaveBeenCalled();
-  });
-  it('leaves other keys, keypress events and IME composition to xterm.js', () => {
-    for (const ev of [
-      key({}),
-      key({ shiftKey: true, type: 'keypress' }),
-      key({ shiftKey: true, isComposing: true }),
-      key({ shiftKey: true, keyCode: 229 }),
-    ]) {
-      expect(routeKey(ev, none, () => {})).toBe(true);
-      expect(ev.preventDefault).not.toHaveBeenCalled();
-    }
+    const composing = key({ isComposing: true, keyCode: 229 });
+    expect(routeKey(composing, none, send)).toBe('browser');
+    expect(send).toHaveBeenCalledTimes(1);
   });
 });

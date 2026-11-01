@@ -1,7 +1,7 @@
 import { PanelLeft, Plus, X } from 'lucide-react';
 import { useStore, activeTabId } from '../state/store';
 import { actions } from '../actions';
-import { LayoutView } from './LayoutView';
+import { SurfaceView } from './SurfaceView';
 import { StatusDot } from './StatusDot';
 import { statusRank, workspaceTabs, type AgentStatus } from '../lib/herdr';
 import { t, type MessageKey } from '../i18n';
@@ -128,11 +128,7 @@ export function Workspace() {
         </div>
       </div>
       <div className="workspace-body">
-        {layout ? (
-          <LayoutView key={`${m}|${tabId}`} m={m} layout={layout} />
-        ) : (
-          <div className="muted pad">{t('workspace.loadingLayout')}</div>
-        )}
+        {tabId ? <SurfaceView m={m} tabId={tabId} layout={layout} /> : <div className="muted pad">{t('workspace.loadingLayout')}</div>}
       </div>
     </main>
   );

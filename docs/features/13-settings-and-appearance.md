@@ -76,8 +76,9 @@ syncing browser settings between browsers; theming terminal applications.
 - Theme `system`, `dark` or `light`; `system` follows
   `prefers-color-scheme` as it changes. The resolved kind sets
   `<html data-theme>`, whose CSS variables restyle the UI (`styles.css` has
-  no other colors), the terminal palette of every xterm (`themes` in
-  `web/src/terminal/options.ts`, backgrounds equal to `--bg`) and
+  no other colors), the terminal palette of the pane surface and the dialogs'
+  terminals (`themes` in `web/src/terminal/options.ts`, backgrounds equal to
+  `--bg`) and
   `theme-color`. The kind is sent to the core, which switches VS Code
   ([05](05-vscode-panel.md)).
 - Terminal palettes: dark is GitHub Dark Default (Ghostty's theme of that
@@ -85,10 +86,11 @@ syncing browser settings between browsers; theming terminal applications.
   the UI's `--bg`; light is GitHub Light Default except for brighter
   yellows. The palette only colors what programs leave to the terminal
   (default colors and the 16 ANSI colors); programs that use 24-bit colors
-  look the same everywhere. Programs that ask the terminal for its
-  background (OSC 11) get herdr's answer, which follows the last herdr TUI
-  client and not the browser ([architecture](../architecture.md#herdr-facts-the-design-relies-on)),
-  and keep the colors they derive from it until they restart.
+  look the same everywhere. The owning browser reports the palette's
+  foreground, background, 16 colors and dark or light to herdr
+  ([18](18-endpoint-surfaces.md)), so programs that ask the terminal for its
+  colors (OSC 10/11/4, `CSI ?996n`) get the UI theme's; programs keep the
+  colors they derived until they ask again or restart.
 - Terminal font: JetBrains Mono 2.304, the official web fonts (regular,
   medium, bold, each upright and italic) in `web/src/terminal/fonts/` with
   their license (SIL OFL 1.1, appended to the generated `licenses.md`) and
@@ -97,19 +99,19 @@ syncing browser settings between browsers; theming terminal applications.
   most fell back to SF Mono or Menlo. Characters it lacks (CJK, some
   symbols) come from the fallbacks: SF Mono, Menlo, …, PingFang SC.
   Rows are 1.05 times the font's own line height (1.32 em).
-- Fonts and xterm.js: xterm measures the cell when its font family changes
-  and caches each glyph the first time it draws it, so a terminal must not
-  use the font before it is loaded. `fonts.ts` registers the faces with the
-  `FontFace` API and loads them on demand; the page waits up to 1.5 s for
-  the faces of the chosen weight before rendering, terminals opened earlier
-  use only the fallbacks and switch (and refit) once the faces arrive, and a
-  new weight is applied when its faces are loaded.
+- Fonts and cell size: the pane surface measures the cell from the font, so
+  it must not use the font before it is loaded. `fonts.ts` registers the
+  faces with the `FontFace` API and loads them on demand; the page waits up
+  to 1.5 s for the faces of the chosen weight before rendering, a surface
+  shown earlier uses only the fallbacks and measures again (resizing herdr's
+  panes) once the faces arrive, and a new weight is applied when its faces
+  are loaded.
 - Terminal font weight: regular (400) or medium (500); bold text is 700.
   Medium gives the heavier strokes native terminals produce with stroke
   thickening (Ghostty's `font-thicken`), which canvas text does not get.
 - Interface font size sets the root font size; the chrome is sized in `rem`,
   so it scales with it. Terminal font size and weight and Option as Meta are
-  applied to running terminals, which refit and resize their panes.
+  applied at once; a new cell size resizes herdr's panes.
 - Panel position (`right` or `bottom`) changes the grid: below the panes the
   panel spans the workspace column and is resized by its top edge.
 
@@ -121,7 +123,7 @@ syncing browser settings between browsers; theming terminal applications.
 | Settings only as flags | Needs a restart and shell access to change how VS Code is installed. |
 | Settings file overriding flags | Breaks service definitions and scripts that rely on their flags. |
 | Core-side storage for browser settings | Every browser would get the same font size and theme; the core has no notion of users. |
-| CSS `zoom` for the font size | Distorts xterm.js mouse coordinates and canvas sharpness. |
+| CSS `zoom` for the font size | Distorts mouse coordinates and canvas sharpness. |
 | `window.autoDetectColorScheme` in VS Code | Follows the OS inside the iframe, not the theme chosen in the UI. |
 | Relying on installed fonts for terminals | Cell size and glyphs differ per system; most browsers ended up with SF Mono or Menlo. |
 | `@fontsource/jetbrains-mono` | Split into language subsets without the symbol ranges terminal programs draw (❯, ⏺, ✻, arrows), which would fall back glyph by glyph. |
