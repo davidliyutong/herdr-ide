@@ -203,6 +203,8 @@ export const en = {
   'sidebar.working': ' · {n} working',
   'sidebar.pending': ' · {n} need you',
   'sidebar.noPending': 'No agent is waiting for you',
+  'sidebar.dropFolders': 'Drop folders to create a workspace for each on {machine}',
+  'sidebar.dropFoldersOnly': 'Only folders become workspaces; {n} other dropped item(s) skipped.',
   'sidebar.authenticate': 'Authenticate…',
   'sidebar.retry': 'Retry',
   'sidebar.manageHerdr': 'Manage herdr',

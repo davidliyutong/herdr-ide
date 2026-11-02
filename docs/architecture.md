@@ -52,8 +52,10 @@ shortcuts (`cmd+t`/`cmd+w`): the shell intercepts them in
 `desktop-new-tab-key` / `desktop-close-tab-key`, leaves them to VS Code
 while one of its frames has focus, and the page runs the action; the
 settings dialog records keys through the same bridge
-([04](features/04-layout-and-keyboard.md)), and the page reports its theme
-setting, which the native title bar follows. Same-origin popups become equally restricted native
+([04](features/04-layout-and-keyboard.md)), the page reports its theme
+setting, which the native title bar follows, and it asks the bridge where a
+folder dropped from Finder is on disk, to create a workspace there on the
+local machine. Same-origin popups become equally restricted native
 windows; HTTP(S) links outside the core open in the default browser. Packaging
 and lifecycle details are in [16](features/16-desktop-packaging.md).
 

@@ -8,6 +8,8 @@ All notable changes are documented here. The format follows
 
 ### Added
 
+- Desktop app: drag folders from Finder onto the sidebar to create a
+  workspace for each on the local machine.
 - Right-clicking a pane opens a menu to copy the selection, paste, and
   preview, open in VS Code or copy the path (or URL) under the pointer or
   selected. A program that reports the mouse keeps the right button;

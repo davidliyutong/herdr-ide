@@ -80,6 +80,12 @@ implemented independently.
   appearance (a dark UI on a light macOS no longer has a white title bar);
   `system` keeps following macOS. Messages count only from the top frame of
   the main window showing the core's origin. Program windows have no preload.
+- The bridge's `pathForFile` returns where a file the user dropped on the page
+  is on disk (`webUtils.getPathForFile`; Electron removed `File.path`), and an
+  empty string for a File made in JavaScript or anything else. Folders
+  dropped from Finder on the sidebar thus become workspaces on the local
+  machine, whose core runs on the same Mac ([04](04-layout-and-keyboard.md)).
+  It is answered in the preload; nothing goes to the main process.
   The menu gains **Tab** (New Tab, Close Tab) between Edit and View, and
   **Window** lists Minimize, Zoom, Close Window (`cmd+w`) and Bring All to
   Front; Close Window does not close the main window for a shortcut key
@@ -130,7 +136,9 @@ Following [Electron's security guidance](https://www.electronjs.org/docs/latest/
 renderer and child windows have no Node integration; only the main window
 has a preload, whose bridge carries shortcut actions and recorded key
 specs to the page and, from it, two signals without data beyond a boolean
-and the theme setting (one of three values); sandboxing, context isolation and web security are
+and the theme setting (one of three values); it also tells the page the disk
+path of a file the user dropped on it, which a browser keeps from pages but
+which reveals nothing the user did not hand over; sandboxing, context isolation and web security are
 enabled. The main window alone allows audio without a prior user gesture,
 so agent notification sounds ([07](07-agent-native-workflow.md)) play after
 a restart before the first click. Navigation and
@@ -148,7 +156,9 @@ See [SECURITY.md](../../SECURITY.md) for the local HTTP trust boundary.
 
 `cmd/herdr-ide/parent_test.go` covers readiness, pipe EOF/error cancellation
 and surviving writes to broken stdout pipes. `desktop/src/*.test.ts` cover
-isolation arguments, URL and permission policy, the accepted theme values, shortcut matching, spawn failures, malformed
+isolation arguments, URL and permission policy, the accepted theme values, the
+preload's functions (`preload.test.ts`, against a stand-in for Electron) and
+dropped files' paths, shortcut matching, spawn failures, malformed
 readiness, ephemeral ports, unexpected exits, late child errors and idempotent
 child shutdown, using fake Node children and no network or real herdr
 sessions. `make check test` includes desktop type, format and unit checks

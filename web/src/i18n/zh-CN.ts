@@ -200,6 +200,8 @@ export const zhCN: Messages = {
   'sidebar.working': ' · {n} 工作中',
   'sidebar.pending': ' · {n} 待处理',
   'sidebar.noPending': '没有等待处理的 agent',
+  'sidebar.dropFolders': '松开即可在 {machine} 上为每个文件夹新建 workspace',
+  'sidebar.dropFoldersOnly': '只有文件夹能新建 workspace，已跳过 {n} 个其他项目。',
   'sidebar.authenticate': '认证…',
   'sidebar.retry': '重试',
   'sidebar.manageHerdr': '管理 herdr',

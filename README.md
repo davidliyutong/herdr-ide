@@ -103,6 +103,9 @@ ARCH=x64 make desktop-dmg        # Intel; default is the host Node architecture
 The desktop and browser share a terminal-pane icon, with a multi-resolution
 macOS version for Finder and the Dock.
 
+Drag folders from Finder onto the sidebar to create a workspace for each on
+the local machine.
+
 In the app, `cmd+t` opens a tab and `cmd+w` closes it after asking; while
 VS Code has focus, both keys stay VS Code's. Change or remove them under
 **Settings → Shortcuts**. Prefix bindings keep working, and browsers keep
