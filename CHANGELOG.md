@@ -11,6 +11,12 @@ All notable changes are documented here. The format follows
 - Each pane has a round close button at its top right corner that shows
   while the pointer is over the pane, also when the pane is not focused.
 
+### Fixed
+
+- Moving the window to a display with another pixel density (for example
+  from a Retina screen to a 1x external monitor) no longer changes the
+  terminal text's size: the cell is measured again for the new display.
+
 ## [0.2.0] - 2026-11-01
 
 ### Changed

@@ -29,8 +29,9 @@ export interface ControllerOptions {
   readOnly(): boolean;
   onPasteFiles?(files: File[]): Promise<string | undefined>;
   linkContext(pane: string): LinkContext;
-  /** The grid size that fits, in cells, and the cell size in device pixels. */
-  onSize(cols: number, rows: number, cw: number, ch: number): void;
+  /** The grid size that fits, in cells, the cell size in device pixels and
+   * the device pixel ratio it was measured at. */
+  onSize(cols: number, rows: number, cw: number, ch: number, dpr: number): void;
   onSplitDrag?(split: SurfaceSplit, ratio: number | undefined): void;
   setTitle(title: string): void;
 }
@@ -46,6 +47,10 @@ export class SurfaceController {
   private meta?: SurfaceMeta;
   private frame?: number;
   private ro: ResizeObserver;
+  /** The device pixel ratio the metrics were measured at. */
+  private dpr = 1;
+  /** Matches while the device pixel ratio is still `dpr`. */
+  private dprQuery?: MediaQueryList;
   private pressed = new Map<string, { pane: string; key: KeyEvent }>();
   private composing = false;
   /** The input method's text being composed, shown at the cursor. */
@@ -94,6 +99,10 @@ export class SurfaceController {
   /** Cell size from the terminal font, in whole device pixels. */
   private measureCell() {
     const dpr = window.devicePixelRatio || 1;
+    if (dpr !== this.dpr || !this.dprQuery) {
+      this.dpr = dpr;
+      this.watchDpr();
+    }
     const a = this.appearance;
     const family = termFontFamily(a.fontWeight);
     const fontPx = Math.round(a.fontSize * dpr);
@@ -114,16 +123,33 @@ export class SurfaceController {
     this.setAppearance(this.appearance);
   }
 
+  /** The window moved to a display with another pixel density, or the page
+   * was zoomed: the same font size is another number of device pixels, so
+   * the cell is measured again. Otherwise the canvas, sized in the old
+   * device pixels, would be shown scaled by the ratio of the two densities
+   * (text twice as large on a 1x display after a 2x one). */
+  private watchDpr() {
+    this.dprQuery?.removeEventListener('change', this.onDprChange);
+    this.dprQuery = undefined;
+    if (this.disposed || typeof window.matchMedia !== 'function') return;
+    this.dprQuery = window.matchMedia(`(resolution: ${this.dpr}dppx)`);
+    this.dprQuery.addEventListener('change', this.onDprChange);
+  }
+
+  private onDprChange = () => {
+    if ((window.devicePixelRatio || 1) !== this.dpr) this.setAppearance(this.appearance);
+  };
+
   private measureSize() {
     if (this.disposed) return;
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = this.dpr;
     const w = this.host.clientWidth * dpr;
     const h = this.host.clientHeight * dpr;
     if (w <= 0 || h <= 0) return;
     const { cw, ch } = this.metrics;
     const cols = Math.max(2, Math.floor(w / cw));
     const rows = Math.max(1, Math.floor(h / ch));
-    this.o.onSize(cols, rows, cw, ch);
+    this.o.onSize(cols, rows, cw, ch, dpr);
   }
 
   setMeta(meta: SurfaceMeta | undefined) {
@@ -150,7 +176,7 @@ export class SurfaceController {
     const g = grid;
     if (!g.ready) return;
     const { cw, ch } = this.metrics;
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = this.dpr;
     const W = g.w * cw;
     const H = g.h * ch;
     if (this.canvas.width !== W || this.canvas.height !== H) {
@@ -191,7 +217,7 @@ export class SurfaceController {
   private placeTextarea() {
     const c = grid.cursor;
     if (!c) return;
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = this.dpr;
     const { cw, ch } = this.metrics;
     this.textarea.style.left = `${(c.x * cw) / dpr}px`;
     this.textarea.style.top = `${(c.y * ch) / dpr}px`;
@@ -214,7 +240,7 @@ export class SurfaceController {
   private cellAt(clientX: number, clientY: number): { x: number; y: number; fx: number } {
     const r = this.canvas.getBoundingClientRect();
     const { cw, ch } = this.metrics;
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = this.dpr;
     const fx = ((clientX - r.left) * dpr) / cw;
     return { x: Math.floor(fx), y: Math.floor(((clientY - r.top) * dpr) / ch), fx };
   }
@@ -314,7 +340,7 @@ export class SurfaceController {
       el.textContent = '';
       return;
     }
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = this.dpr;
     const { cw, ch, fontPx, family, weight } = this.metrics;
     el.textContent = text;
     Object.assign(el.style, {
@@ -577,7 +603,7 @@ export class SurfaceController {
       this.stepTimer = undefined;
       return;
     }
-    const lines = stepLines(past * (this.metrics.ch / (window.devicePixelRatio || 1)), this.metrics.ch / (window.devicePixelRatio || 1));
+    const lines = stepLines(past * (this.metrics.ch / this.dpr), this.metrics.ch / this.dpr);
     const offset = Math.min(s.max_offset_from_bottom, Math.max(0, s.offset_from_bottom - dir * lines));
     const next = () => {
       this.stepTimer = undefined;
@@ -605,7 +631,7 @@ export class SurfaceController {
     const { x, y } = this.cellAt(ev.clientX, ev.clientY);
     const p = this.paneAt(x, y);
     if (!p) return;
-    const ch = this.metrics.ch / (window.devicePixelRatio || 1);
+    const ch = this.metrics.ch / this.dpr;
     let delta = ev.deltaY;
     if (ev.deltaMode === WheelEvent.DOM_DELTA_LINE) delta *= ch;
     else if (ev.deltaMode === WheelEvent.DOM_DELTA_PAGE) delta *= ch * p.inner.h;
@@ -699,6 +725,8 @@ export class SurfaceController {
 
   dispose() {
     this.disposed = true;
+    this.dprQuery?.removeEventListener('change', this.onDprChange);
+    this.dprQuery = undefined;
     this.preedit.remove();
     onPaint(undefined);
     if (this.frame !== undefined) cancelAnimationFrame(this.frame);

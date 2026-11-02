@@ -33,7 +33,7 @@ export function SurfaceView({ m, tabId, layout }: Props) {
   const shown = useSurface((s) => s.shown);
   const bell = useSurface((s) => s.bell);
   const fulls = useSurface((s) => s.fulls);
-  const [cell, setCell] = useState({ cols: 0, rows: 0, cw: 8, ch: 16 });
+  const [cell, setCell] = useState({ cols: 0, rows: 0, cw: 8, ch: 16, dpr: 1 });
   const [splitDrag, setSplitDrag] = useState<{ split: SurfaceSplit; ratio: number }>();
   const [title, setTitle] = useState('');
   const [flash, setFlash] = useState(false);
@@ -61,7 +61,7 @@ export function SurfaceView({ m, tabId, layout }: Props) {
           const st = s.machines[live.current.m];
           return { m: live.current.m, cwd: paneCwd(st?.snapshot?.panes.find((p) => p.pane_id === pane)), home: st?.info?.home };
         },
-        onSize: (cols, rows, cw, ch) => setCell({ cols, rows, cw, ch }),
+        onSize: (cols, rows, cw, ch, dpr) => setCell({ cols, rows, cw, ch, dpr }),
         onSplitDrag: (split, ratio) => setSplitDrag(ratio === undefined ? undefined : { split, ratio }),
         setTitle,
       },
@@ -118,9 +118,9 @@ export function SurfaceView({ m, tabId, layout }: Props) {
     return () => clearTimeout(id);
   }, [bell]);
 
-  const dpr = window.devicePixelRatio || 1;
-  const cw = cell.cw / dpr;
-  const ch = cell.ch / dpr;
+  // CSS pixels per cell, at the pixel ratio the cell was measured at.
+  const cw = cell.cw / cell.dpr;
+  const ch = cell.ch / cell.dpr;
   const current = fulls > 0 && meta && meta.m === m && shown?.m === m && shown.tab === tabId && grid.ready;
   const headers = useMemo(() => {
     if (!current || !meta) return [];

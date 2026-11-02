@@ -46,7 +46,13 @@ received, the popup itself is not drawn).
   against the UI theme's palette (`colors.ts`, `terminal/options.ts`).
 - The cell size comes from the terminal font's metrics (5% more than its
   line height); the grid that fits the tab area, and the cell size in
-  device pixels, is the size herdr renders.
+  device pixels, is the size herdr renders. The cell is measured again when
+  the device pixel ratio changes (a `resolution` media query on the ratio it
+  was measured at): moving the window to a display with another pixel
+  density, or zooming the page, keeps the text's size in CSS pixels and
+  sends herdr the new grid. Positions over the canvas (headers, input
+  method, mouse) convert with the ratio the cell was measured at, so they
+  match the canvas until it is measured again.
 - Each tab has one toolbar (`components/PaneToolbar.tsx`), a single row
   between the tab bar and herdr's grid whatever the number of panes. It
   shows the focused pane's agent state, title, agent and folder and its
@@ -187,6 +193,9 @@ toasts; nothing is copied unless the button was clicked. A bell flashes the surf
   lines move the text under the highlight until the next scroll; the copied
   text is the range read at release.
 - **`pane.selection.read` fails** → copying falls back to the visible part.
+- **The window moves to a display with another pixel density** → the cell
+  is measured again and herdr renders the new grid; until then the canvas
+  keeps its CSS size, scaled by the browser.
 
 ## Testing
 
@@ -197,7 +206,8 @@ paste filtering, links); the key contract above (`input.test.ts`,
 `TestIntegrationKeyParity`); `web/src/__tests__/paneToolbar.test.ts` (the
 toolbar's buttons act on the focused pane, disabled outside the shown tab,
 rename and menu, read-only, headers without buttons, the close button);
-`input.test.ts` (a press on a button over the grid reaches no program).
+`input.test.ts` (a press on a button over the grid reaches no program);
+`surfaceDpr.test.ts` (a device pixel ratio change measures the cell again).
 The toolbar's narrow-width steps and the close button were checked in
 Chromium. Rendering, headers over borders, IME, vim
 mouse, wheel, selections and copying, tab switches, takeover between two
