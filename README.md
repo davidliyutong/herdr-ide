@@ -94,6 +94,7 @@ same embedded core, UI, agents and VS Code bridge, yourself:
 ```bash
 make desktop-app                 # .app in dist/desktop/mac[-arm64]/
 make desktop-dmg                 # .app plus a drag-to-Applications .dmg
+make desktop-install             # .app, copied into /Applications
 ARCH=x64 make desktop-dmg        # Intel; default is the host Node architecture
 ```
 

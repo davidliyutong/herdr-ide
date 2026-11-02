@@ -40,7 +40,9 @@ integration tests before distributing the new release.
 On macOS, `make dev-desktop` builds and launches Electron with the embedded
 UI, the same isolated session and instance `dev` (port 7791). Stop other dev
 cores first. `make desktop-app` / `make desktop-dmg` build the `.app` / DMG;
-see [desktop deployment](docs/deployment.md#macos-desktop-app). Branch
+`make desktop-install` builds the `.app` and replaces the one in
+`/Applications`, quitting and reopening it if it runs; see
+[desktop deployment](docs/deployment.md#macos-desktop-app). Branch
 workspaces can live in the ignored `.worktrees/` directory.
 
 ## Pull requests

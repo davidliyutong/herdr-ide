@@ -28,6 +28,9 @@ implemented independently.
   shell lives inside ASAR. Its `beforePack` hook refuses to package binaries
   built for another architecture than the Electron app. The DMG has an
   Applications shortcut. Builds use ad-hoc signing without notarization.
+  Its `install` mode (`make desktop-install`) copies the `.app` into
+  `/Applications` for development: a copy running from there gets SIGTERM,
+  which quits it like the menu, so its core stops before the files change.
   Without `VERSION` the core reports `git describe` as in `scripts/build.sh`;
   the app metadata then uses `desktop/package.json`. A release tag's leading
   `v` stays in the core's version and is dropped for the app metadata, which

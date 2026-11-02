@@ -51,6 +51,7 @@ cd dist/packages/herdr-ide-$(go env GOOS)-$(go env GOARCH)
 ```bash
 make desktop-app                 # .app 位于 dist/desktop/mac[-arm64]/
 make desktop-dmg                 # .app 和可拖入 Applications 安装的 .dmg
+make desktop-install             # .app，并复制到 /Applications
 ARCH=x64 make desktop-dmg        # Intel；默认使用当前 Node 的架构
 ```
 

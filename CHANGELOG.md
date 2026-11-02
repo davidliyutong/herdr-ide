@@ -10,6 +10,8 @@ All notable changes are documented here. The format follows
 
 - Each pane has a round close button at its top right corner that shows
   while the pointer is over the pane, also when the pane is not focused.
+- `make desktop-install` builds the macOS app and installs it into
+  `/Applications`, quitting and reopening a running copy.
 
 ### Changed
 
