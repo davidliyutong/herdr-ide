@@ -1,11 +1,11 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, powerMonitor, session, shell, type IpcMainEvent } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, powerMonitor, session, shell, type IpcMainEvent } from 'electron';
 import { join } from 'node:path';
 import { APP_NAME, APP_SLUG } from '../../web/src/brand';
 import { en, type MessageKey } from '../../web/src/i18n/en';
 import { zhCN } from '../../web/src/i18n/zh-CN';
 import { CoreProcess, coreArgs, coreEnv, corePort, DesktopError, ENV_PREFIX } from './core';
 import { channels } from './bridge';
-import { allowPermission, isExternal, isInternal, mainWindowPreferences, webPreferences } from './policy';
+import { allowPermission, isExternal, isInternal, mainWindowPreferences, themeSource, webPreferences } from './policy';
 import {
   defaultShortcuts,
   isCodeFrame,
@@ -177,6 +177,17 @@ ipcMain.on(channels.shortcutsChanged, (event) => {
 ipcMain.on(channels.recording, (event, active: unknown) => {
   if (fromMainPage(event)) recording = active === true;
 });
+// The title bar, native controls and the windows' background follow the
+// page's theme setting, also when it differs from the system's appearance.
+ipcMain.on(channels.theme, (event, value: unknown) => {
+  const source = themeSource(value);
+  if (fromMainPage(event) && source) nativeTheme.themeSource = source;
+});
+
+/** The page's background (--bg in web/src/styles.css), shown before it paints. */
+function windowBackground(): string {
+  return nativeTheme.shouldUseDarkColors ? '#0e1116' : '#ffffff';
+}
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -186,10 +197,13 @@ function createWindow() {
     minWidth: 800,
     minHeight: 500,
     show: false,
-    backgroundColor: '#18181b',
+    backgroundColor: windowBackground(),
     webPreferences: { ...mainWindowPreferences, preload: join(__dirname, 'preload.cjs') },
   });
   mainWindow = win;
+  const onTheme = () => win.setBackgroundColor(windowBackground());
+  nativeTheme.on('updated', onTheme);
+  win.on('closed', () => nativeTheme.off('updated', onTheme));
   // Before the page and every frame in it, and before the menu.
   win.webContents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown') return;

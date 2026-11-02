@@ -29,6 +29,12 @@ export function allowPermission(permission: string, requestingURL: string, topUR
   );
 }
 
+/** The page's theme setting as Electron's nativeTheme.themeSource; anything
+ * else is ignored. */
+export function themeSource(value: unknown): 'system' | 'light' | 'dark' | undefined {
+  return value === 'system' || value === 'light' || value === 'dark' ? value : undefined;
+}
+
 export const webPreferences = {
   nodeIntegration: false,
   nodeIntegrationInWorker: false,

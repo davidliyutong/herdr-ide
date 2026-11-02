@@ -6,6 +6,7 @@ export const channels = {
   shortcutsChanged: 'desktop:shortcuts-changed',
   recording: 'desktop:shortcut-recording',
   recorded: 'desktop:shortcut-recorded',
+  theme: 'desktop:theme',
 } as const;
 
 export interface DesktopShell {
@@ -20,4 +21,7 @@ export interface DesktopShell {
   /** Calls fn with the spec of each key recorded ("cmd+shift+t"); returns a
    * function that stops it. */
   onRecordedKey(fn: (spec: string) => void): () => void;
+  /** The theme setting ("system", "dark" or "light"): the window's title
+   * bar and native controls follow it. */
+  setTheme(theme: string): void;
 }

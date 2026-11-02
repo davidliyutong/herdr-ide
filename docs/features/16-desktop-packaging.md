@@ -70,8 +70,13 @@ implemented independently.
   shortcut runs, the page reports that the shortcut settings changed (the
   shell then reads them from the core itself) and turns recording on and
   off; while it records, the shell sends the page the spec of each key with
-  `cmd`, `ctrl` or `alt`. Messages count only from the top frame of the
-  main window showing the core's origin. Program windows have no preload.
+  `cmd`, `ctrl` or `alt`. The page also reports its theme setting
+  (`system`, `dark` or `light`), which becomes Electron's
+  `nativeTheme.themeSource`: the title bar, native controls and the window
+  background follow the UI's theme, also when it differs from the system's
+  appearance (a dark UI on a light macOS no longer has a white title bar);
+  `system` keeps following macOS. Messages count only from the top frame of
+  the main window showing the core's origin. Program windows have no preload.
   The menu gains **Tab** (New Tab, Close Tab) between Edit and View, and
   **Window** lists Minimize, Zoom, Close Window (`cmd+w`) and Bring All to
   Front; Close Window does not close the main window for a shortcut key
@@ -121,7 +126,8 @@ implemented independently.
 Following [Electron's security guidance](https://www.electronjs.org/docs/latest/tutorial/security),
 renderer and child windows have no Node integration; only the main window
 has a preload, whose bridge carries shortcut actions and recorded key
-specs to the page and two signals without data beyond a boolean from it; sandboxing, context isolation and web security are
+specs to the page and, from it, two signals without data beyond a boolean
+and the theme setting (one of three values); sandboxing, context isolation and web security are
 enabled. The main window alone allows audio without a prior user gesture,
 so agent notification sounds ([07](07-agent-native-workflow.md)) play after
 a restart before the first click. Navigation and
@@ -139,7 +145,7 @@ See [SECURITY.md](../../SECURITY.md) for the local HTTP trust boundary.
 
 `cmd/herdr-ide/parent_test.go` covers readiness, pipe EOF/error cancellation
 and surviving writes to broken stdout pipes. `desktop/src/*.test.ts` cover
-isolation arguments, URL and permission policy, shortcut matching, spawn failures, malformed
+isolation arguments, URL and permission policy, the accepted theme values, shortcut matching, spawn failures, malformed
 readiness, ephemeral ports, unexpected exits, late child errors and idempotent
 child shutdown, using fake Node children and no network or real herdr
 sessions. `make check test` includes desktop type, format and unit checks

@@ -1,7 +1,8 @@
 // Preload of the main window (sandboxed, context-isolated). It gives the page
-// a narrow bridge for direct shortcuts and nothing else: the page learns which
-// action a shortcut runs, reports that the shortcut settings changed, and
-// records a new key through the shell while the settings dialog asks for one.
+// a narrow bridge for direct shortcuts and the theme, and nothing else: the
+// page learns which action a shortcut runs, reports that the shortcut settings
+// changed, records a new key through the shell while the settings dialog asks
+// for one, and reports its theme setting for the native title bar.
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import { channels, type DesktopShell } from './bridge';
 
@@ -25,6 +26,9 @@ const shell: DesktopShell = {
     ipcRenderer.send(channels.recording, !!active);
   },
   onRecordedKey: (fn) => listen(channels.recorded, fn),
+  setTheme(theme) {
+    ipcRenderer.send(channels.theme, theme);
+  },
 };
 
 contextBridge.exposeInMainWorld('desktopShell', shell);

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { allowPermission, isExternal, isInternal, mainWindowPreferences, webPreferences } from './policy';
+import { allowPermission, isExternal, isInternal, mainWindowPreferences, themeSource, webPreferences } from './policy';
 
 const origin = 'http://127.0.0.1:7781';
 test('only the exact core origin may navigate or open native windows', () => {
@@ -53,4 +53,9 @@ test('permissions require both the requesting frame and top window to belong to 
   assert.deepEqual({ ...mainWindowPreferences, autoplayPolicy: undefined }, { ...webPreferences, autoplayPolicy: undefined });
   assert.equal(mainWindowPreferences.autoplayPolicy, 'no-user-gesture-required');
   assert.equal('autoplayPolicy' in webPreferences, false);
+});
+
+test('the page sets only the three theme sources', () => {
+  for (const v of ['system', 'light', 'dark'] as const) assert.equal(themeSource(v), v);
+  for (const v of ['Dark', '', 'auto', 1, null, undefined, { toString: () => 'dark' }]) assert.equal(themeSource(v), undefined);
 });

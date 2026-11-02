@@ -31,6 +31,8 @@ All notable changes are documented here. The format follows
   are copied on the canvas instead of painted again, text is painted about
   three times faster, and scrolling past the edge keeps its speed (and
   speeds up while held) however long herdr takes to answer.
+- The desktop app's title bar follows the UI's theme: a dark UI on a light
+  macOS no longer has a white title bar.
 
 ## [0.2.0] - 2026-11-01
 
