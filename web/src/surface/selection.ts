@@ -1,8 +1,9 @@
 // Text selections in a pane, kept in herdr's absolute rows (row 0 is the
 // oldest line kept), so a selection survives scrolling and can be longer than
 // the pane: a drag held past the top or bottom edge scrolls the pane with
-// pane.scroll, as herdr's own client does, and the text is read from herdr
-// with pane.selection.read on release. A selection never leaves its pane.
+// pane.scroll, as herdr's own client does, at a speed set by time (not by
+// herdr's replies), and the text is read from herdr with
+// pane.selection.read on release. A selection never leaves its pane.
 
 import type { Grid } from './grid';
 import type { ScrollInfo, SurfacePane } from './protocol';
@@ -32,10 +33,15 @@ export function readRange(a: Point, b: Point, cols: number) {
   return { anchor: cell(s), cursor: cell(e - 1) };
 }
 
-/** Lines per scroll step with the pointer `px` pixels past the edge: one at
- * the edge, faster further away. */
-export function stepLines(px: number, cellHeight: number): number {
-  return Math.min(15, 1 + Math.floor(px / Math.max(1, cellHeight)));
+/** Lines per second to scroll while a selection drag is `px` pixels past
+ * the pane's edge and has been for `ms`: 20 at the edge, 20 more for each
+ * row's height further, and up to four times that the longer it is held
+ * (a pane at the bottom of the window leaves little room below it). The
+ * speed does not depend on how fast herdr answers. */
+export function scrollRate(px: number, cellHeight: number, ms: number): number {
+  const distance = 1 + Math.max(0, px) / Math.max(1, cellHeight);
+  const held = Math.min(4, 1 + Math.max(0, ms) / 2000);
+  return Math.min(2000, 20 * distance * held);
 }
 
 export class Selection {

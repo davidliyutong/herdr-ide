@@ -1,6 +1,7 @@
 // The browser's copy of the surface grid: complete surfaces replace it,
 // patches move rows (scrolling) and overwrite spans. Rows that changed are
-// marked dirty for the painter.
+// marked dirty for the painter, and row moves are kept for it as well: it
+// copies the pixels of moved rows instead of painting them again.
 
 import type { Cell, Cursor, Move, SurfaceUpdate } from './protocol';
 import { symbolWidth } from './width';
@@ -14,6 +15,9 @@ export class Grid {
   cells: Cell[] = [];
   cursor?: Cursor;
   dirty = new Set<number>();
+  /** Row moves since the last paint, in order. Rows outside `dirty` hold
+   * their painted pixels at their place before these moves. */
+  moves: Move[] = [];
   /** Whether a complete surface arrived for the current generation. */
   ready = false;
 
@@ -26,10 +30,12 @@ export class Grid {
       this.h = u.h;
       this.cells = new Array(u.w * u.h).fill(blankCell);
       this.ready = true;
-      for (let y = 0; y < u.h; y++) this.dirty.add(y);
+      this.invalidate();
     } else if (!this.ready || u.gen !== this.gen) {
       return false;
     }
+    // Before the moves, which carry the old cursor's pixels along.
+    if (this.cursor) this.dirty.add(this.cursor.y);
     for (const m of u.moves) this.move(m);
     for (const s of u.spans) {
       if (s.y >= this.h || s.x + s.cells.length > this.w) continue;
@@ -37,14 +43,16 @@ export class Grid {
       for (let i = 0; i < s.cells.length; i++) this.cells[at + i] = s.cells[i];
       this.dirty.add(s.y);
     }
-    if (this.cursor) this.dirty.add(this.cursor.y);
     this.cursor = u.cursor;
     if (u.cursor) this.dirty.add(u.cursor.y);
     return true;
   }
 
   /** Moves rows inside a region with herdr's swap order
-   * (src/protocol/surface_scroll.rs), so both sides agree. */
+   * (src/protocol/surface_scroll.rs), so both sides agree. The painter
+   * moves the painted rows the same way; rows still to paint take their
+   * stale pixels along (both places stay dirty), and the rows the move
+   * vacates are dirty. */
   move(m: Move) {
     const { x, y, w, h } = m.rect;
     if (!m.shift || Math.abs(m.shift) >= h || x + w > this.w || y + h > this.h) return;
@@ -61,7 +69,10 @@ export class Grid {
     const d = Math.abs(m.shift);
     if (m.shift > 0) for (let r = 0; r < h - d; r++) swap(r, r + d);
     else for (let r = h - 1; r >= d; r--) swap(r, r - d);
-    for (let r = 0; r < h; r++) this.dirty.add(y + r);
+    for (const r of [...this.dirty]) if (r >= y && r < y + h && r - m.shift >= y && r - m.shift < y + h) this.dirty.add(r - m.shift);
+    const vacated = m.shift > 0 ? y + h - d : y;
+    for (let r = 0; r < d; r++) this.dirty.add(vacated + r);
+    this.moves.push(m);
   }
 
   cell(x: number, y: number): Cell {
@@ -101,7 +112,9 @@ export class Grid {
     return { text, colOf };
   }
 
+  /** Every row needs painting (moves are then of no use). */
   invalidate() {
     for (let y = 0; y < this.h; y++) this.dirty.add(y);
+    this.moves = [];
   }
 }

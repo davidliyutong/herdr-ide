@@ -16,6 +16,11 @@ All notable changes are documented here. The format follows
 - Moving the window to a display with another pixel density (for example
   from a Retina screen to a 1x external monitor) no longer changes the
   terminal text's size: the cell is measured again for the new display.
+- Selecting text by dragging is smooth, also while the drag scrolls past a
+  pane's edge: only rows whose highlight changed are painted, scrolled rows
+  are copied on the canvas instead of painted again, text is painted about
+  three times faster, and scrolling past the edge keeps its speed (and
+  speeds up while held) however long herdr takes to answer.
 
 ## [0.2.0] - 2026-11-01
 
