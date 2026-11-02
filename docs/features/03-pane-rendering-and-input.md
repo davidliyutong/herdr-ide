@@ -179,9 +179,25 @@ What the table records about herdr 0.9.5:
 **Links** (`terminal/links.ts`)
 
 With ⌘/Ctrl held, OSC 8 hyperlinks of the grid (`http`, `https` and
-`mailto` targets only) and URLs or paths found in the row's text are
+`mailto` targets only) and URLs or paths found in the pane's text are
 underlined; a click opens URLs in a new tab and paths in
-Quick Look or VS Code ([06](06-quick-look-and-files.md)).
+Quick Look or VS Code ([06](06-quick-look-and-files.md)). A row whose text
+reaches the pane's last column goes on in the next row after its
+indentation, so a path the terminal or a program (Claude Code, Codex)
+wrapped is one link, underlined on each of its rows.
+
+**Context menu**
+
+A right click on a pane opens its menu, unless the pane's program reports
+the mouse (Shift+right click opens it there) or, on macOS, the right click
+is the Ctrl+click that opened a link: **Copy** (the selection, as
+⌘/Ctrl+C copies it), **Paste** (not in read-only mode, and only where the
+browser offers the clipboard API: localhost, HTTPS or the desktop app), and
+for a URL or path, opening and copying it. The link is the one under the
+pointer; over the selection, the selection's text when it is one URL or
+path (line breaks and the indentation after them dropped), so a path wrapped
+in a way detection does not join can be selected and opened. Path items
+name the file, which shows a path cut short.
 
 **Clipboard and bell**
 

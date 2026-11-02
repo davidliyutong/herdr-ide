@@ -1,15 +1,21 @@
-// Context menus of pane headers, tabs and workspaces. They call the same
-// commands as the buttons and bindings; read-only mode has no menu items, so
-// the browser's menu shows there.
+// Context menus of pane headers, tabs, workspaces and the panes' text. They
+// call the same commands as the buttons and bindings; read-only mode has no
+// items that change anything (the panes' text keeps copying and opening
+// links), so elsewhere the browser's menu shows there.
 
 import {
   ArrowDown,
   ArrowLeft,
   ArrowRight,
   ArrowUp,
+  ClipboardPaste,
   Columns2,
+  Copy,
+  ExternalLink,
+  Eye,
   FileDiff,
   GitGraph,
+  Link,
   Maximize2,
   Minimize2,
   Pencil,
@@ -23,6 +29,7 @@ import type { MenuEntry } from './contextMenu';
 import { t } from './i18n';
 import { keyHint } from './keymap';
 import { paneCwd, workspaceTabs } from './lib/herdr';
+import { mediaExt, openLink, resolvePath, safeUrl, type LinkContext } from './terminal/links';
 import { activeTabId, useStore } from './state/store';
 
 /** Bindings act on the current tab or workspace, so other targets show none. */
@@ -67,6 +74,38 @@ export function paneMenu(m: string, pane: string, zoomed: boolean): MenuEntry[] 
     'sep',
     { label: t('action.close_pane'), hint: keyHint('close_pane'), icon: <X />, danger: true, run: () => actions.closePane(m, pane) },
   ];
+}
+
+const copyText = (text: string) => void navigator.clipboard?.writeText(text).catch(() => {});
+
+/** The menu of a pane's text: copy the selection, paste, and open or copy
+ * the URL or path under the pointer or selected. Paths open in the preview
+ * panel or in VS Code; the item names the file, so a path detection cut
+ * short shows. */
+export function surfaceMenu(o: {
+  ctx: LinkContext;
+  link?: { kind: 'url' | 'path'; text: string };
+  copy?: () => void;
+  paste?: () => void;
+}): MenuEntry[] {
+  const out: MenuEntry[] = [{ label: t('surface.copy'), icon: <Copy />, disabled: !o.copy, run: () => o.copy?.() }];
+  if (o.paste) out.push({ label: t('surface.paste'), icon: <ClipboardPaste />, run: o.paste });
+  const l = o.link;
+  if (l?.kind === 'url' && safeUrl(l.text)) {
+    out.push(
+      'sep',
+      { label: t('link.menuOpenUrl', { url: l.text }), icon: <ExternalLink />, run: () => openLink(l, o.ctx) },
+      { label: t('link.menuCopyUrl'), icon: <Link />, run: () => copyText(l.text) },
+    );
+  } else if (l?.kind === 'path') {
+    const r = resolvePath(l.text, o.ctx);
+    const name = r.path.split('/').pop() || r.path;
+    out.push('sep', { label: t('link.menuPreview', { name }), icon: <Eye />, run: () => actions.openPreview(o.ctx.m, r.path) });
+    if (!mediaExt.test(r.path))
+      out.push({ label: t('link.menuCode', { name }), icon: <SquareCode />, run: () => actions.openPath(o.ctx.m, r.path, r.line, r.col) });
+    out.push({ label: t('link.menuCopyPath'), icon: <Copy />, run: () => copyText(r.path) });
+  }
+  return out;
 }
 
 export function tabMenu(m: string, ws: string, tab: string): MenuEntry[] {

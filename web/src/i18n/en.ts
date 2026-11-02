@@ -135,6 +135,11 @@ export const en = {
   'link.openUrl': '⌘/Ctrl+click to open {url}',
   'link.preview': '⌘/Ctrl+click to preview',
   'link.open': '⌘/Ctrl+click to open',
+  'link.menuOpenUrl': 'Open {url}',
+  'link.menuCopyUrl': 'Copy link',
+  'link.menuPreview': 'Preview {name}',
+  'link.menuCode': 'Open {name} in VS Code',
+  'link.menuCopyPath': 'Copy full path',
 
   'menu.renamePane': 'Rename pane',
   'menu.zoom': 'Zoom',
@@ -172,6 +177,7 @@ export const en = {
   'surface.error.handshake': 'herdr refused the connection.',
   'surface.clipboard': 'A program copied {n} characters: “{text}”',
   'surface.copy': 'Copy',
+  'surface.paste': 'Paste',
 
   'dock.code': 'VS Code',
   'dock.preview': 'Preview',

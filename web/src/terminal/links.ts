@@ -1,6 +1,7 @@
-// Path and URL detection in pane output. Cmd/Ctrl+click opens media in Quick
-// Look and code files in VS Code, resolving relative paths against the pane's
-// working directory.
+// Path and URL detection in pane output, also over rows a long path was
+// wrapped on. Cmd/Ctrl+click (or the pane's context menu) opens media in
+// Quick Look and code files in VS Code, resolving relative paths against the
+// pane's working directory.
 
 import { actions } from '../actions';
 import { t } from '../i18n';
@@ -62,6 +63,83 @@ export function findLinks(text: string): FoundLink[] {
     add(m.index!, m.index! + m[0].length, 'path');
   }
   return out;
+}
+
+/** A row of a pane as Grid.rowText returns it: the column of each UTF-16
+ * index of the text, then the column after the row. */
+export interface RowText {
+  text: string;
+  colOf: number[];
+}
+
+/** The cells [from, to) of row y. */
+export interface Cells {
+  y: number;
+  from: number;
+  to: number;
+}
+
+export interface WrappedLink {
+  kind: FoundLink['kind'];
+  text: string;
+  /** Per row, in order. */
+  cells: Cells[];
+}
+
+/** Rows a link may extend over above and below the row searched. */
+const WRAP_ROWS = 20;
+
+/** Whether a row's text reaches its last column. */
+function reachesEnd(r: RowText): boolean {
+  const n = r.text.replace(/\s+$/, '').length;
+  return n > 0 && r.colOf[n] === r.colOf[r.colOf.length - 1];
+}
+
+/** URLs and paths on row y of a pane whose rows are top to bottom
+ * (exclusive), with the cells they cover. A row whose text reaches the last
+ * column goes on in the next row after that row's indentation: the
+ * terminal, or a program that wraps its own text (Claude Code, Codex), split
+ * a long path or URL there. */
+export function linksAround(y: number, top: number, bottom: number, row: (y: number) => RowText): WrappedLink[] {
+  const rows = new Map<number, RowText>();
+  const at = (r: number) => {
+    let v = rows.get(r);
+    if (!v) rows.set(r, (v = row(r)));
+    return v;
+  };
+  let a = y;
+  while (a > top && y - a < WRAP_ROWS && reachesEnd(at(a - 1))) a--;
+  let b = y;
+  while (b + 1 < bottom && b - y < WRAP_ROWS && reachesEnd(at(b))) b++;
+  let text = '';
+  const cellOf: Cells[] = [];
+  for (let r = a; r <= b; r++) {
+    const { text: t, colOf } = at(r);
+    const start = r === a ? 0 : t.length - t.trimStart().length;
+    for (let i = start; i < t.length; i++) cellOf.push({ y: r, from: colOf[i], to: colOf[i + 1] });
+    text += t.slice(start);
+  }
+  const out: WrappedLink[] = [];
+  for (const l of findLinks(text)) {
+    const cells: Cells[] = [];
+    for (let i = l.start; i < l.end; i++) {
+      const c = cellOf[i];
+      const last = cells[cells.length - 1];
+      if (last?.y === c.y) last.to = Math.max(last.to, c.to);
+      else cells.push({ ...c });
+    }
+    if (cells.some((c) => c.y === y)) out.push({ kind: l.kind, text: l.text, cells });
+  }
+  return out;
+}
+
+/** The URL or path a selection holds, when it holds nothing else but quotes
+ * or punctuation around it. Line breaks and the indentation after them are
+ * dropped, as for a path wrapped over several rows. */
+export function selectedLink(text: string): Pick<FoundLink, 'kind' | 'text'> | undefined {
+  const s = text.replace(/[ \t]*\r?\n[ \t]*/g, '').trim();
+  const l = findLinks(s).find((l) => /^["'`([{<]*$/.test(s.slice(0, l.start)) && /^["'`)\]}>.,;:!?]*$/.test(s.slice(l.end)));
+  return l && { kind: l.kind, text: l.text };
 }
 
 /** Tooltip for a link. */

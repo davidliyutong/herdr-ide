@@ -112,9 +112,10 @@ Non-goals: a separate herdr-ide layout model; arbitrary docking of panes.
   (rename, split) keep it. A click elsewhere, scrolling, leaving the window
   or resizing closes it. The menu keeps its own width next to the window's
   right edge.
-- Read-only mode offers no items, so the browser's menu shows. The pane
-  surface keeps the browser's menu (copy, paste) unless the pane's program
-  reports the mouse.
+- Read-only mode offers no items, so the browser's menu shows. A pane's
+  text has its own menu (copy, paste, open a path or URL;
+  [03](03-pane-rendering-and-input.md)), which keeps copying and opening in
+  read-only mode.
 
 **Dialogs** (`web/src/dialog.ts`, `Dialogs.tsx`)
 

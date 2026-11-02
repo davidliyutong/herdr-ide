@@ -132,6 +132,11 @@ export const zhCN: Messages = {
   'link.openUrl': '⌘/Ctrl+点击打开 {url}',
   'link.preview': '⌘/Ctrl+点击预览',
   'link.open': '⌘/Ctrl+点击打开',
+  'link.menuOpenUrl': '打开 {url}',
+  'link.menuCopyUrl': '复制链接',
+  'link.menuPreview': '预览 {name}',
+  'link.menuCode': '在 VS Code 中打开 {name}',
+  'link.menuCopyPath': '复制完整路径',
 
   'menu.renamePane': '重命名 pane',
   'menu.zoom': '最大化',
@@ -169,6 +174,7 @@ export const zhCN: Messages = {
   'surface.error.handshake': 'herdr 拒绝了连接。',
   'surface.clipboard': '程序复制了 {n} 个字符：“{text}”',
   'surface.copy': '复制',
+  'surface.paste': '粘贴',
 
   'dock.code': 'VS Code',
   'dock.preview': '预览',

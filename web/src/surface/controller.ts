@@ -10,6 +10,10 @@
 // Painting is incremental: rows herdr changed, rows whose selection
 // highlight changed, and the rows a scroll uncovers; rows herdr moved are
 // copied on the canvas.
+//
+// A right click opens the pane's menu (copy, paste, and opening the path or
+// URL under the pointer or selected) unless the pane's program reports the
+// mouse; Shift+right click opens it there.
 
 import { conn } from '../lib/conn';
 import { grid, onPaint, sendFocus, sendInput, useSurface } from './session';
@@ -19,7 +23,9 @@ import { routeKey } from './keys';
 import { pasteText, releaseOf, type InputEvent, type KeyEvent, type MouseEvent as PaneMouse } from './input';
 import { Selection, scrollRate, viewTop, wordAt, type Point } from './selection';
 import type { ScrollInfo, SurfaceMeta, SurfacePane, SurfaceSplit } from './protocol';
-import { findLinks, openLink, linkTitle, safeUrl, type LinkContext } from '../terminal/links';
+import { linksAround, openLink, linkTitle, safeUrl, selectedLink, type Cells, type LinkContext } from '../terminal/links';
+import { openMenu } from '../contextMenu';
+import { surfaceMenu } from '../menus';
 import { themes } from '../terminal/options';
 import { termFontFamily } from '../terminal/fonts';
 import type { Appearance } from '../appearance';
@@ -43,6 +49,15 @@ export interface ControllerOptions {
 /** Least pause between scroll requests while a selection drag is past an
  * edge; one request is in flight at a time. */
 const STEP_MS = 40;
+
+/** A link in a pane and the cells it covers, one range per row. */
+interface PaneLink {
+  cells: Cells[];
+  link: { kind: 'url' | 'path'; text: string };
+  pane: string;
+}
+
+const linkKey = (l: PaneLink | undefined) => (l ? `${l.pane} ${l.cells.map((c) => `${c.y}:${c.from}-${c.to}`).join(' ')}` : '');
 
 export class SurfaceController {
   private ctx: CanvasRenderingContext2D;
@@ -80,7 +95,8 @@ export class SurfaceController {
   /** herdr's answer to the last one, and the metadata count then. */
   private scrollReply?: { pane: string; scroll: ScrollInfo; meta: number };
   private wheelAccum = 0;
-  private hover?: { y: number; from: number; to: number; link: { kind: 'url' | 'path'; text: string }; pane: string };
+  /** The link under the pointer while Cmd/Ctrl is held, with its cells. */
+  private hover?: PaneLink;
   private disposed = false;
 
   constructor(
@@ -224,7 +240,7 @@ export class SurfaceController {
         metrics: this.metrics,
         focused: this.focused,
         highlight: (y) => (this.painted[y] = this.highlight(y)),
-        hover: this.hover,
+        hover: this.hover?.cells,
       },
       rows,
     );
@@ -248,11 +264,13 @@ export class SurfaceController {
       const r = moveRanges(this.painted, m);
       this.painted = r.painted;
       for (const row of r.repaint) g.dirty.add(row);
-      // A hovered link's underline moved with its row: drop it.
+      // A hovered link's underline moved with its rows: drop it.
       const hv = this.hover;
-      if (hv && hv.y >= y && hv.y < y + h && hv.to > x && hv.from < x + w) {
-        g.dirty.add(hv.y);
-        if (hv.y - m.shift >= y && hv.y - m.shift < y + h) g.dirty.add(hv.y - m.shift);
+      if (hv?.cells.some((c) => c.y >= y && c.y < y + h && c.to > x && c.from < x + w)) {
+        for (const c of hv.cells) {
+          g.dirty.add(c.y);
+          if (c.y - m.shift >= y && c.y - m.shift < y + h) g.dirty.add(c.y - m.shift);
+        }
         this.hover = undefined;
         this.host.style.cursor = '';
         this.o.setTitle('');
@@ -447,14 +465,28 @@ export class SurfaceController {
     const p = sel && this.paneById(sel.pane);
     if (!sel || !p || sel.empty) return;
     ev.preventDefault();
-    const text = sel.text ?? sel.visibleText(p, grid);
-    ev.clipboardData?.setData('text/plain', text);
-    // Copied right after the release: all of it once herdr's text arrives.
-    if (sel.text === undefined)
-      void sel.reading?.then((t) => {
-        if (t) navigator.clipboard?.writeText(t).catch(() => {});
-      });
+    ev.clipboardData?.setData('text/plain', sel.text ?? sel.visibleText(p, grid));
+    copyWhenRead(sel);
   };
+
+  /** Copies the selection (the menu's Copy). */
+  copySelection() {
+    const sel = this.sel;
+    const p = sel && this.paneById(sel.pane);
+    if (!sel || !p || sel.empty) return;
+    writeClipboard(sel.text ?? sel.visibleText(p, grid));
+    copyWhenRead(sel);
+  }
+
+  /** Pastes the clipboard's text into a pane (the menu's Paste). */
+  pasteClipboard(pane: string) {
+    void navigator.clipboard
+      ?.readText()
+      .then((text) => {
+        if (text) this.send(pane, [{ t: 'paste', text: pasteText(text) }]);
+      })
+      .catch(() => {});
+  }
 
   private onFocusChange = () => {
     const f = document.activeElement === this.textarea;
@@ -471,11 +503,34 @@ export class SurfaceController {
   }
 
   private onContextMenu = (ev: MouseEvent) => {
-    // The browser's menu (Copy) for selections; programs reporting the mouse
-    // get the right button instead.
+    if ((ev.target as Element | null)?.closest?.('button') || !this.meta) return;
     const { x, y } = this.cellAt(ev.clientX, ev.clientY);
     const p = this.paneAt(x, y);
-    if (p?.mouse && !ev.shiftKey) ev.preventDefault();
+    if (!p) return;
+    const readOnly = this.o.readOnly();
+    // Programs reporting the mouse get the right button instead; on macOS
+    // Ctrl+click is also a right click, which opened the link under it.
+    if ((p.mouse && !ev.shiftKey && !readOnly) || (ev.ctrlKey && ev.button === 0 && this.hover)) {
+      ev.preventDefault();
+      return;
+    }
+    const sel = this.sel?.pane === p.id && !this.sel.empty ? this.sel : undefined;
+    const fromSel = sel && selectedLink(sel.text ?? sel.visibleText(p, grid));
+    const atPointer = this.linkAt(p, x, y)?.link;
+    // Over the selection, a selected path wins over a part of it detected
+    // under the pointer (a path wrapped in a way detection does not join).
+    const c = sel?.columns(p, y);
+    const inSel = !!c && x >= c[0] && x < c[1];
+    const link = inSel ? (fromSel ?? atPointer) : (atPointer ?? fromSel);
+    openMenu(
+      ev,
+      surfaceMenu({
+        ctx: this.o.linkContext(p.id),
+        link,
+        copy: sel ? () => this.copySelection() : undefined,
+        paste: readOnly || !navigator.clipboard?.readText ? undefined : () => this.pasteClipboard(p.id),
+      }),
+    );
   };
 
   private onMouseDown = (ev: MouseEvent) => {
@@ -755,34 +810,35 @@ export class SurfaceController {
       this.updateHover({ clientX: this.lastPointer.x, clientY: this.lastPointer.y, metaKey: ev.metaKey, ctrlKey: ev.ctrlKey });
   };
 
+  /** The link at cell (x, y) of a pane: an OSC 8 hyperlink, or a URL or
+   * path in the text, also one wrapped over several rows. */
+  private linkAt(p: SurfacePane, x: number, y: number): PaneLink | undefined {
+    const x0 = p.inner.x;
+    const x1 = p.inner.x + p.inner.w;
+    if (y < p.inner.y || y >= p.inner.y + p.inner.h || x < x0 || x >= x1) return;
+    const cell = grid.cell(x, y);
+    const target = cell.link >= 0 ? this.meta?.links[cell.link] : undefined;
+    if (target && safeUrl(target)) {
+      // OSC 8 hyperlink: the run of cells with the same target.
+      let a = x;
+      let b = x + 1;
+      while (a > x0 && grid.cell(a - 1, y).link === cell.link) a--;
+      while (b < x1 && grid.cell(b, y).link === cell.link) b++;
+      return { cells: [{ y, from: a, to: b }], link: { kind: 'url', text: target }, pane: p.id };
+    }
+    for (const l of linksAround(y, p.inner.y, p.inner.y + p.inner.h, (r) => grid.rowText(r, x0, x1)))
+      if (l.cells.some((c) => c.y === y && x >= c.from && x < c.to))
+        return { cells: l.cells, link: { kind: l.kind, text: l.text }, pane: p.id };
+  }
+
   private updateHover(ev: { clientX: number; clientY: number; metaKey: boolean; ctrlKey: boolean }) {
     this.lastPointer = { x: ev.clientX, y: ev.clientY, meta: ev.metaKey || ev.ctrlKey };
-    let next: SurfaceController['hover'];
     const { x, y } = this.cellAt(ev.clientX, ev.clientY);
     const p = (ev.metaKey || ev.ctrlKey) && this.paneAt(x, y);
-    if (p && y >= p.inner.y && y < p.inner.y + p.inner.h && x >= p.inner.x && x < p.inner.x + p.inner.w) {
-      const cell = grid.cell(x, y);
-      if (cell.link >= 0 && this.meta?.links[cell.link] && safeUrl(this.meta.links[cell.link])) {
-        // OSC 8 hyperlink: the run of cells with the same target.
-        let a = x;
-        let b = x + 1;
-        while (a > p.inner.x && grid.cell(a - 1, y).link === cell.link) a--;
-        while (b < p.inner.x + p.inner.w && grid.cell(b, y).link === cell.link) b++;
-        next = { y, from: a, to: b, link: { kind: 'url', text: this.meta.links[cell.link] }, pane: p.id };
-      } else {
-        const { text, colOf } = grid.rowText(y, p.inner.x, p.inner.x + p.inner.w);
-        for (const l of findLinks(text)) {
-          const from = colOf[l.start];
-          const last = colOf[l.end - 1];
-          const to = last + grid.width(last, y);
-          if (x >= from && x < to) next = { y, from, to, link: l, pane: p.id };
-        }
-      }
-    }
-    const same = next?.y === this.hover?.y && next?.from === this.hover?.from && next?.to === this.hover?.to;
-    if (same) return;
-    if (this.hover) grid.dirty.add(this.hover.y);
-    if (next) grid.dirty.add(next.y);
+    const next = p ? this.linkAt(p, x, y) : undefined;
+    if (linkKey(next) === linkKey(this.hover)) return;
+    for (const c of this.hover?.cells ?? []) grid.dirty.add(c.y);
+    for (const c of next?.cells ?? []) grid.dirty.add(c.y);
     this.hover = next;
     this.host.style.cursor = next ? 'pointer' : '';
     this.o.setTitle(next ? linkTitle(next.link) : '');
@@ -836,4 +892,17 @@ export class SurfaceController {
     window.removeEventListener('keydown', this.onModifier);
     window.removeEventListener('keyup', this.onModifier);
   }
+}
+
+function writeClipboard(text: string) {
+  void navigator.clipboard?.writeText(text).catch(() => {});
+}
+
+/** A copy right after the release copied the visible part: all of it goes
+ * on the clipboard once herdr's text arrives. */
+function copyWhenRead(sel: Selection) {
+  if (sel.text === undefined)
+    void sel.reading?.then((t) => {
+      if (t) writeClipboard(t);
+    });
 }

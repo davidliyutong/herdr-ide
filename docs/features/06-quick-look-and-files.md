@@ -9,7 +9,8 @@ hand screenshots and files to agents running on remote machines.
 
 ## Goals / non-goals
 
-Goals: ⌘/Ctrl-click any path or URL in a pane; preview images, GIFs, video
+Goals: ⌘/Ctrl-click (or right-click) any path or URL in a pane, also one
+wrapped over several rows; preview images, GIFs, video
 (with seeking), audio, PDF, text and directories; step through sibling media;
 paste or drop files into a pane to upload them and type their paths.
 
@@ -24,6 +25,18 @@ Non-goals: a file manager; editing files (that is VS Code's job).
   optionally followed by `:line[:col]`; OSC 8 hyperlinks from the program
   come first. Cell columns are mapped from string indices so wide characters
   do not shift ranges ([03](03-pane-rendering-and-input.md)).
+- Long paths wrap. A row whose text reaches the pane's last column is
+  joined with the next row, after that row's indentation (a program that
+  wraps its own text may indent continued lines), up to 20 rows either
+  way. A path that happens to end exactly at the last
+  column joins the next row too; the underline shows what a click opens.
+  herdr's grid has no soft-wrap marks, so this is the only signal for both
+  terminal and program wrapping.
+- A right click offers the same for the path or URL under the pointer, or
+  for the selection when it is one: **Preview**, **Open in VS Code** (not for
+  media) and **Copy full path**, or **Open** and **Copy link** for URLs. A
+  path wrapped in a way detection does not join (a margin before the last
+  column, a diff's `+` in front of the next row) is opened by selecting it.
 - Relative paths resolve against the pane's `foreground_cwd` from herdr;
   `~` against the machine's home.
 - Activation requires ⌘ or Ctrl, so plain clicks still reach mouse-aware
@@ -71,4 +84,6 @@ limited to 4 GiB and refused in read-only mode; uploads expire after 7 days
 
 `internal/server/server_test.go` (range parsing, content types, upload
 names), `internal/agent/agent_test.go` (ranged reads, chunked writes),
-`web/src/__tests__/core.test.ts` (path resolution, media detection).
+`web/src/__tests__/core.test.ts` (path resolution, media detection, wrapped
+links, selected links), `web/src/__tests__/surfaceSelect.test.ts` (wrapped
+link underline, the pane menu's items, copy, paste and opening).
