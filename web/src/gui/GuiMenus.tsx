@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { AppWindow, MonitorUp, MonitorX } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../state/store';
@@ -65,6 +65,67 @@ export function PaneGuiButton({ m, pane }: { m: string; pane: string }) {
   return <WindowsButton entries={entries} />;
 }
 
+/** Closes a popup on a press outside ref's element or on Escape. */
+function useDismiss(open: boolean, ref: RefObject<HTMLElement | null>, close: () => void) {
+  useEffect(() => {
+    if (!open) return;
+    const outside = (e: PointerEvent) => !ref.current?.contains(e.target as Node) && close();
+    const key = (e: KeyboardEvent) => e.key === 'Escape' && close();
+    document.addEventListener('pointerdown', outside);
+    document.addEventListener('keydown', key);
+    return () => {
+      document.removeEventListener('pointerdown', outside);
+      document.removeEventListener('keydown', key);
+    };
+  }, [open, ref, close]);
+}
+
+/** A machine's failed display in the status bar: clicking shows the error
+ * the core reported (the agent's or Xvfb's message); the core retries on
+ * its own. */
+export function GuiErrorNote({ label, error }: { label: string; error?: string }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLSpanElement>(null);
+  const close = useCallback(() => setOpen(false), []);
+  useDismiss(open, ref, close);
+  const title = t('gui.phase.error', { m: label });
+  return (
+    <span className="gui-menu-anchor" ref={ref}>
+      <button className="gui-note error" aria-expanded={open} title={t('gui.errorShow')} onClick={() => setOpen(!open)}>
+        <MonitorX />
+        {title}
+      </button>
+      {open && (
+        <div className="gui-menu gui-error" role="dialog" aria-label={title}>
+          <div className="gui-error-title">{title}</div>
+          <pre className="gui-error-text">{error || t('gui.errorNoDetail')}</pre>
+          <div className="muted small">{t('gui.errorRetry')}</div>
+          <div className="gui-error-actions">
+            {error && (
+              <button
+                onClick={() => {
+                  void navigator.clipboard?.writeText(error).catch(() => {});
+                  setOpen(false);
+                }}
+              >
+                {t('gui.copyError')}
+              </button>
+            )}
+            <button
+              onClick={() => {
+                setOpen(false);
+                useStore.getState().openSettings(true);
+              }}
+            >
+              {t('action.open_settings')}
+            </button>
+          </div>
+        </div>
+      )}
+    </span>
+  );
+}
+
 /** Status bar entry: every program window, and displays being prepared or
  * failing. */
 export function GuiTray() {
@@ -77,12 +138,15 @@ export function GuiTray() {
   const labels = useStore(useShallow((s) => Object.fromEntries(Object.entries(s.machines).map(([id, st]) => [id, st.label]))));
   return (
     <>
-      {notes.map((n) => (
-        <span key={n.m} className={`gui-note ${n.phase}`} title={n.error}>
-          {n.phase === 'error' && <MonitorX />}
-          {t(`gui.phase.${n.phase}` as 'gui.phase.error', { m: labels[n.m] ?? n.m })}
-        </span>
-      ))}
+      {notes.map((n) =>
+        n.phase === 'error' ? (
+          <GuiErrorNote key={n.m} label={labels[n.m] ?? n.m} error={n.error} />
+        ) : (
+          <span key={n.m} className={`gui-note ${n.phase}`}>
+            {t(`gui.phase.${n.phase}` as 'gui.phase.installing', { m: labels[n.m] ?? n.m })}
+          </span>
+        ),
+      )}
       <WindowsButton entries={entries} className="gui-tray" label={String(entries.length)} />
     </>
   );

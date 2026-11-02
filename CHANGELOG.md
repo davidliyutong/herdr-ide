@@ -17,6 +17,9 @@ All notable changes are documented here. The format follows
   drag (of a tab, workspace or pane) starts only after the pointer moved on
   the screen. In macOS full screen the menu bar sliding down moved the page
   under the pointer, so clicking a tab often started reordering it instead.
+- Clicking "Display on … failed" in the status bar shows the error, how it
+  is retried, and buttons to copy it or open the settings; before, the error
+  was only in a tooltip.
 
 ### Fixed
 
