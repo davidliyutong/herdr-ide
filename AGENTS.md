@@ -26,6 +26,7 @@ configuration and state. SSH machines use their installed herdr.
 | Integration test with a real herdr | `make it` |
 | Full build into `dist/` | `make build` (or `scripts/build.sh`) |
 | macOS `.app` / DMG | `make desktop-app` / `make desktop-dmg` |
+| Build the `.app` and install it into `/Applications` | `make desktop-install` |
 | Isolated desktop development | `make dev-desktop` |
 | Run for development | `make dev-core` and `make dev-web` |
 

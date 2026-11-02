@@ -8,6 +8,7 @@ vi.mock('../lib/conn', () => ({ conn: { api: (...a: unknown[]) => api(...a), set
 
 import { useStore } from '../state/store';
 import { insertSlot, near } from '../reorderDrag';
+import { dragBegins, trackDrag } from '../drag';
 import { withOrder, workspaceTabs, type MachineState } from '../lib/herdr';
 import { closeMenu, isItem, openMenu, stepIndex, tidy, useMenu, type MenuEntry, type MenuItem } from '../contextMenu';
 import { paneMenu, tabMenu, workspaceMenu } from '../menus';
@@ -60,6 +61,36 @@ describe('insertSlot', () => {
     // Outside the rows, the nearest row counts.
     expect(insertSlot(wrapped, 0, 120, 300, 'x')?.index).toBe(4);
     expect(insertSlot(wrapped, 4, 120, -50, 'x')?.index).toBe(1);
+  });
+});
+
+describe('drag start', () => {
+  it('counts pointer movement on the screen, not in the page', () => {
+    const at = { screenX: 100, screenY: 5 };
+    expect(dragBegins(at, { screenX: 103, screenY: 8 })).toBe(false);
+    expect(dragBegins(at, { screenX: 106, screenY: 5 })).toBe(true);
+  });
+
+  it('starts no drag when the page moves under a pointer standing still', () => {
+    // macOS full screen: the menu bar slides down and moves the page.
+    const find = vi.fn(() => 1);
+    trackDrag(
+      { clientX: 100, clientY: 5, screenX: 100, screenY: 5, pointerId: 1 },
+      {
+        label: 'tab',
+        find,
+        marker: () => ({ box: { left: 0, top: 0, width: 1, height: 1 }, zone: 'slot' }),
+        drop: () => Promise.resolve(),
+      },
+    );
+    const move = (clientY: number, screenY: number) =>
+      window.dispatchEvent(Object.assign(new Event('pointermove'), { pointerId: 1, clientX: 100, clientY, screenX: 100, screenY }));
+    move(-24, 5);
+    expect(document.querySelector('.drag-ghost')).toBeNull();
+    move(-24, 40);
+    expect(document.querySelector('.drag-ghost')).not.toBeNull();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    expect(document.querySelector('.drag-ghost')).toBeNull();
   });
 });
 

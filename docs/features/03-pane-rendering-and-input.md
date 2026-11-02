@@ -27,7 +27,10 @@ received, the popup itself is not drawn).
 - `protocol.ts` decodes the core's binary surface messages (complete
   surfaces and patches: row moves, changed spans, cursor) and `grid.ts`
   keeps the grid, moving rows with herdr's own swap order and marking the
-  rows that changed.
+  rows that changed. Row moves (scrolling) are kept for the painter, which
+  copies the moved rows on the canvas (`drawImage` of the canvas on itself)
+  and paints only the rows a move uncovers; a row not yet painted takes its
+  stale pixels along, so both its places are painted.
 - `paint.ts` repaints dirty rows on one canvas per tab, at whole device
   pixels per cell: backgrounds, text in the bundled terminal font, bold,
   dim, italic, underline styles, strikethrough, reverse and hidden cells,
@@ -41,7 +44,18 @@ received, the popup itself is not drawn).
   in pane content (`Grid.width`), so grapheme clusters the table does not
   know still take the columns herdr gave them.
   Box-drawing and block characters are drawn as shapes, so borders join at
-  any cell size.
+  any cell size. Text is clipped to its row; only symbols that may be wider
+  than their cells (not printable ASCII, wide, or italic) are clipped to
+  their cells, and the font is set once per style: a complete repaint of a
+  220 × 60 grid at ratio 2 takes about 10 ms of script time in Chromium
+  instead of 28 ms with a clip per symbol.
+- The controller paints only rows that changed: rows herdr changed, rows a
+  move uncovers, and rows whose selection highlight differs from the one
+  they were painted with (it remembers each row's highlight and moves it
+  with copied rows). Moving the pointer during a selection therefore paints
+  one or two rows, not the whole tab. Pane metadata is applied when it
+  arrives, before the patch the core sends after it, so a scroll and its
+  highlight are painted in the same frame.
 - Colors use herdr's packing (named, palette index, true color) resolved
   against the UI theme's palette (`colors.ts`, `terminal/options.ts`).
 - The cell size comes from the terminal font's metrics (5% more than its
@@ -147,9 +161,16 @@ What the table records about herdr 0.9.5:
   metrics in the surface). Double click selects a word, triple click a line,
   Shift+click extends.
 - A drag held past the top or bottom edge scrolls the pane with
-  `pane.scroll` every 40 ms, 1 line per step at the edge and up to 15 further
-  away; herdr clamps the offset. The highlight follows the rows as the view
-  moves.
+  `pane.scroll`. The speed is set by time, not by herdr's replies (over ssh
+  each one takes a round trip): 20 lines per second at the edge, 20 more for
+  each row's height further away, times up to four the longer the drag is
+  held (×2 after 2 s, ×4 after 6 s; a pane at the bottom of the window
+  leaves little room below it), at most 2000. One request is in flight at a
+  time, at most every 40 ms; the lines owed meanwhile (at most half a
+  second's worth) go in the next request, which starts from the offset
+  herdr last reported (its reply, or newer metadata). herdr clamps the
+  offset. The selection's end and highlight follow the rows when the
+  scrolled surface arrives.
 - On release `pane.selection.read` returns the text (both end cells
   included, soft-wrapped lines joined as herdr does). Copying puts that
   text on the clipboard; a copy before it arrived copies the visible part
@@ -193,6 +214,9 @@ toasts; nothing is copied unless the button was clicked. A bell flashes the surf
   lines move the text under the highlight until the next scroll; the copied
   text is the range read at release.
 - **`pane.selection.read` fails** → copying falls back to the visible part.
+- **herdr answers `pane.scroll` slowly** (a distant machine) → the view
+  moves in larger steps at the same speed; the selection follows what is
+  shown.
 - **The window moves to a display with another pixel density** → the cell
   is measured again and herdr renders the new grid; until then the canvas
   keeps its CSS size, scaled by the browser.
@@ -207,7 +231,10 @@ paste filtering, links); the key contract above (`input.test.ts`,
 toolbar's buttons act on the focused pane, disabled outside the shown tab,
 rename and menu, read-only, headers without buttons, the close button);
 `input.test.ts` (a press on a button over the grid reaches no program);
-`surfaceDpr.test.ts` (a device pixel ratio change measures the cell again).
+`surfaceDpr.test.ts` (a device pixel ratio change measures the cell again);
+`surfaceSelect.test.ts` (a selection drag paints only the rows whose
+highlight changed, moved rows are copied, and the scroll past an edge keeps
+its speed while herdr is slow to answer).
 The toolbar's narrow-width steps and the close button were checked in
 Chromium. Rendering, headers over borders, IME, vim
 mouse, wheel, selections and copying, tab switches, takeover between two

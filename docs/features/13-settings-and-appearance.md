@@ -81,7 +81,9 @@ syncing browser settings between browsers; theming terminal applications.
   terminals (`themes` in `web/src/terminal/options.ts`, backgrounds equal to
   `--bg`) and
   `theme-color`. The kind is sent to the core, which switches VS Code
-  ([05](05-vscode-panel.md)).
+  ([05](05-vscode-panel.md)); in the desktop app the setting is also sent
+  to the shell, whose title bar follows it
+  ([16](16-desktop-packaging.md)).
 - Terminal palettes: dark is GitHub Dark Default (Ghostty's theme of that
   name: foreground `#e6edf3`, colors made for a near-black background) on
   the UI's `--bg`; light is GitHub Light Default except for brighter

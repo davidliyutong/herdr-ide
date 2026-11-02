@@ -13,6 +13,7 @@ export interface DesktopShell {
   shortcutsChanged(): void;
   recordShortcut(active: boolean): void;
   onRecordedKey(fn: (spec: string) => void): () => void;
+  setTheme(theme: string): void;
 }
 
 export const desktopShell: DesktopShell | undefined = (globalThis as { desktopShell?: DesktopShell }).desktopShell;

@@ -10,12 +10,31 @@ All notable changes are documented here. The format follows
 
 - Each pane has a round close button at its top right corner that shows
   while the pointer is over the pane, also when the pane is not focused.
+- `make desktop-install` builds the macOS app and installs it into
+  `/Applications`, quitting and reopening a running copy.
+
+### Changed
+
+- A tab is shown when it is pressed, not when the click is released, and a
+  drag (of a tab, workspace or pane) starts only after the pointer moved on
+  the screen. In macOS full screen the menu bar sliding down moved the page
+  under the pointer, so clicking a tab often started reordering it instead.
+- Clicking "Display on … failed" in the status bar shows the error, how it
+  is retried, and buttons to copy it or open the settings; before, the error
+  was only in a tooltip.
 
 ### Fixed
 
 - Moving the window to a display with another pixel density (for example
   from a Retina screen to a 1x external monitor) no longer changes the
   terminal text's size: the cell is measured again for the new display.
+- Selecting text by dragging is smooth, also while the drag scrolls past a
+  pane's edge: only rows whose highlight changed are painted, scrolled rows
+  are copied on the canvas instead of painted again, text is painted about
+  three times faster, and scrolling past the edge keeps its speed (and
+  speeds up while held) however long herdr takes to answer.
+- The desktop app's title bar follows the UI's theme: a dark UI on a light
+  macOS no longer has a white title bar.
 
 ## [0.2.0] - 2026-11-01
 

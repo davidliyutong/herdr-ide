@@ -5,7 +5,7 @@
 // nothing, so they show no marker.
 
 import { actions } from './actions';
-import { trackDrag, type Box } from './drag';
+import { trackDrag, type Box, type DragStart } from './drag';
 
 export interface Slot {
   index: number;
@@ -64,7 +64,7 @@ export function near(list: Element | null, items: string, idAttr: string, x: num
 }
 
 function startReorder(
-  ev: { clientX: number; clientY: number; pointerId: number },
+  ev: DragStart,
   // move() reports its own failures.
   o: {
     label: string;
@@ -88,10 +88,7 @@ function startReorder(
 }
 
 /** Starts tracking a possible drag of a tab within its tab bar. */
-export function startTabDrag(
-  ev: { clientX: number; clientY: number; pointerId: number },
-  src: { m: string; ws: string; tab: string; label: string },
-) {
+export function startTabDrag(ev: DragStart, src: { m: string; ws: string; tab: string; label: string }) {
   startReorder(ev, {
     label: src.label,
     id: src.tab,
@@ -104,10 +101,7 @@ export function startTabDrag(
 }
 
 /** Starts tracking a possible drag of a workspace within its machine's list. */
-export function startWorkspaceDrag(
-  ev: { clientX: number; clientY: number; pointerId: number },
-  src: { m: string; ws: string; label: string },
-) {
+export function startWorkspaceDrag(ev: DragStart, src: { m: string; ws: string; label: string }) {
   startReorder(ev, {
     label: src.label,
     id: src.ws,

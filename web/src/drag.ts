@@ -1,6 +1,9 @@
 // Pointer dragging shared by panes, tabs and workspaces: a drag begins after
-// the pointer moved a few pixels (so a click stays a click), shows a ghost
-// with a label and a marker where the drop would land, and Escape cancels.
+// the pointer moved a few pixels on the screen (so a click stays a click),
+// shows a ghost with a label and a marker where the drop would land, and
+// Escape cancels. The distance is measured on the screen, not in the page:
+// in macOS full screen the menu bar slides down when the pointer nears the
+// top and moves the page under a pointer that stands still.
 
 import { useStore } from './state/store';
 
@@ -23,9 +26,24 @@ export interface DragOps<T> {
   failed?(error: string): string;
 }
 
-export function trackDrag<T>(ev: { clientX: number; clientY: number; pointerId: number }, ops: DragOps<T>) {
-  const x0 = ev.clientX;
-  const y0 = ev.clientY;
+/** The pointer position a drag starts from. */
+export interface DragStart {
+  clientX: number;
+  clientY: number;
+  screenX: number;
+  screenY: number;
+  pointerId: number;
+}
+
+/** Pixels the pointer must move on the screen before a drag begins. */
+export const DRAG_THRESHOLD = 6;
+
+/** Whether the pointer moved far enough from where it was pressed. */
+export function dragBegins(start: { screenX: number; screenY: number }, now: { screenX: number; screenY: number }): boolean {
+  return Math.hypot(now.screenX - start.screenX, now.screenY - start.screenY) >= DRAG_THRESHOLD;
+}
+
+export function trackDrag<T>(ev: DragStart, ops: DragOps<T>) {
   let ghost: HTMLDivElement | undefined;
   let marker: HTMLDivElement | undefined;
   let target: T | undefined;
@@ -33,7 +51,7 @@ export function trackDrag<T>(ev: { clientX: number; clientY: number; pointerId: 
   const move = (e: PointerEvent) => {
     if (e.pointerId !== ev.pointerId) return;
     if (!ghost) {
-      if (Math.hypot(e.clientX - x0, e.clientY - y0) < 6) return;
+      if (!dragBegins(ev, e)) return;
       document.body.classList.add('dragging');
       ghost = document.createElement('div');
       ghost.className = 'drag-ghost';

@@ -8,7 +8,7 @@
 // when the pane leaves it.
 
 import { conn } from './lib/conn';
-import { trackDrag, type Box } from './drag';
+import { trackDrag, type Box, type DragStart } from './drag';
 import { useStore } from './state/store';
 import { t } from './i18n';
 
@@ -98,7 +98,7 @@ async function drop(src: DragSource, tg: DropTarget) {
 }
 
 /** Starts tracking a possible drag from a pane header. */
-export function startPaneDrag(ev: { clientX: number; clientY: number; pointerId: number }, src: DragSource) {
+export function startPaneDrag(ev: DragStart, src: DragSource) {
   trackDrag(ev, {
     label: src.label,
     find: (x, y) => findTarget(src, x, y),

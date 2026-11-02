@@ -6,15 +6,19 @@
 // the cell size from the terminal font, and maps keys, text, pastes, mouse
 // and wheel events to the pane under them. Selections are local to one pane
 // (see selection.ts) unless the pane's program reports the mouse.
+//
+// Painting is incremental: rows herdr changed, rows whose selection
+// highlight changed, and the rows a scroll uncovers; rows herdr moved are
+// copied on the canvas.
 
 import { conn } from '../lib/conn';
 import { grid, onPaint, sendFocus, sendInput, useSurface } from './session';
 import { palette as makePalette, rgb, type Palette } from './colors';
-import { paintRows, type Metrics } from './paint';
+import { moveRanges, paintRows, sameRanges, type Metrics, type Ranges } from './paint';
 import { routeKey } from './keys';
 import { pasteText, releaseOf, type InputEvent, type KeyEvent, type MouseEvent as PaneMouse } from './input';
-import { Selection, stepLines, viewTop, wordAt, type Point } from './selection';
-import type { SurfaceMeta, SurfacePane, SurfaceSplit } from './protocol';
+import { Selection, scrollRate, viewTop, wordAt, type Point } from './selection';
+import type { ScrollInfo, SurfaceMeta, SurfacePane, SurfaceSplit } from './protocol';
 import { findLinks, openLink, linkTitle, safeUrl, type LinkContext } from '../terminal/links';
 import { themes } from '../terminal/options';
 import { termFontFamily } from '../terminal/fonts';
@@ -36,7 +40,8 @@ export interface ControllerOptions {
   setTitle(title: string): void;
 }
 
-/** Pause between scroll steps while a selection drag is past an edge. */
+/** Least pause between scroll requests while a selection drag is past an
+ * edge; one request is in flight at a time. */
 const STEP_MS = 40;
 
 export class SurfaceController {
@@ -45,7 +50,12 @@ export class SurfaceController {
   private palette!: Palette;
   private appearance!: Appearance;
   private meta?: SurfaceMeta;
+  /** Counts metadata received, to tell whether a scroll reply is newer. */
+  private metaCount = 0;
+  private unsubscribe: () => void;
   private frame?: number;
+  /** The highlight each canvas row was painted with. */
+  private painted: Array<Ranges | undefined> = [];
   private ro: ResizeObserver;
   /** The device pixel ratio the metrics were measured at. */
   private dpr = 1;
@@ -62,7 +72,13 @@ export class SurfaceController {
     | { kind: 'mouse'; pane: string; button: number; last: string }
     | { kind: 'select'; pane: string; x: number; y: number; mode: 1 | 2 | 3; origin: [Point, Point] }
     | { kind: 'split'; split: SurfaceSplit };
-  private stepTimer?: number;
+  /** Scrolling while a selection drag is past the pane's top (-1) or
+   * bottom (1) edge: lines are owed at scrollRate since `since`. */
+  private auto?: { pane: string; dir: number; since: number; last: number; owed: number; timer?: number };
+  /** A pane.scroll request is in flight. */
+  private scrolling = false;
+  /** herdr's answer to the last one, and the metadata count then. */
+  private scrollReply?: { pane: string; scroll: ScrollInfo; meta: number };
   private wheelAccum = 0;
   private hover?: { y: number; from: number; to: number; link: { kind: 'url' | 'path'; text: string }; pane: string };
   private disposed = false;
@@ -80,6 +96,11 @@ export class SurfaceController {
     host.appendChild(this.preedit);
     this.setAppearance(appearance);
     onPaint(() => this.schedule());
+    // Metadata comes right before the surface patch it belongs to; taking it
+    // at once (not after React renders) paints both together.
+    this.unsubscribe = useSurface.subscribe((st, prev) => {
+      if (st.meta !== prev.meta) this.setMeta(st.meta && st.meta.m === this.o.m() ? st.meta : undefined);
+    });
     this.ro = new ResizeObserver(() => this.measureSize());
     this.ro.observe(host);
     this.install();
@@ -154,11 +175,14 @@ export class SurfaceController {
 
   setMeta(meta: SurfaceMeta | undefined) {
     const prev = this.meta;
+    if (meta === prev) return;
     this.meta = meta;
+    this.metaCount++;
     if (this.sel && !this.paneById(this.sel.pane)) this.clearSelection();
     if (prev?.w !== meta?.w || prev?.h !== meta?.h) grid.invalidate();
-    // Scroll positions move a selection's rows.
-    if (this.sel) grid.invalidate();
+    // A scroll moved the rows past the edge a selection drag is held at.
+    if (this.drag?.kind === 'select') this.trackSelection();
+    // Scroll positions move a selection's rows (paint compares them).
     this.schedule();
   }
 
@@ -186,6 +210,9 @@ export class SurfaceController {
       this.canvas.style.height = `${H / dpr}px`;
       g.invalidate();
     }
+    this.copyMoves();
+    // Rows whose selection highlight changed.
+    for (let y = 0; y < g.h; y++) if (!sameRanges(this.painted[y], this.highlight(y))) g.dirty.add(y);
     if (!g.dirty.size) return;
     const rows = [...g.dirty];
     g.dirty.clear();
@@ -196,12 +223,41 @@ export class SurfaceController {
         palette: this.palette,
         metrics: this.metrics,
         focused: this.focused,
-        highlight: (y) => this.highlight(y),
+        highlight: (y) => (this.painted[y] = this.highlight(y)),
         hover: this.hover,
       },
       rows,
     );
     this.placeTextarea();
+  }
+
+  /** Copies the rows herdr moved (scrolling) on the canvas, with what was
+   * painted on them; Grid.move marked the rows that still need painting. */
+  private copyMoves() {
+    const g = grid;
+    const moves = g.moves;
+    if (!moves.length) return;
+    g.moves = [];
+    const { cw, ch } = this.metrics;
+    for (const m of moves) {
+      const { x, y, w, h } = m.rect;
+      const d = Math.abs(m.shift);
+      const [from, to] = m.shift > 0 ? [y + d, y] : [y, y + d];
+      // A canvas drawn on itself is copied first, so the areas may overlap.
+      this.ctx.drawImage(this.canvas, x * cw, from * ch, w * cw, (h - d) * ch, x * cw, to * ch, w * cw, (h - d) * ch);
+      const r = moveRanges(this.painted, m);
+      this.painted = r.painted;
+      for (const row of r.repaint) g.dirty.add(row);
+      // A hovered link's underline moved with its row: drop it.
+      const hv = this.hover;
+      if (hv && hv.y >= y && hv.y < y + h && hv.to > x && hv.from < x + w) {
+        g.dirty.add(hv.y);
+        if (hv.y - m.shift >= y && hv.y - m.shift < y + h) g.dirty.add(hv.y - m.shift);
+        this.hover = undefined;
+        this.host.style.cursor = '';
+        this.o.setTitle('');
+      }
+    }
   }
 
   private highlight(y: number): Array<[number, number]> | undefined {
@@ -520,8 +576,7 @@ export class SurfaceController {
     const d = this.drag;
     if (!d) return;
     this.drag = undefined;
-    window.clearTimeout(this.stepTimer);
-    this.stepTimer = undefined;
+    this.stopAutoScroll();
     if (d.kind === 'split') {
       const { y, fx } = this.cellAt(ev.clientX, ev.clientY);
       const a = d.split.area;
@@ -586,44 +641,85 @@ export class SurfaceController {
       sel.cursor = end;
     }
     this.selectionChanged();
-    if (edge && this.stepTimer === undefined && !this.o.readOnly()) this.stepTimer = window.setTimeout(() => this.step(edge), STEP_MS);
+    if (edge && p.scroll && !this.o.readOnly()) this.startAutoScroll(p.id, edge);
+    else this.stopAutoScroll();
   }
 
-  private step = (dir: number) => {
+  private startAutoScroll(pane: string, dir: number) {
+    if (this.auto?.pane === pane && this.auto.dir === dir) return;
+    this.stopAutoScroll();
+    const now = performance.now();
+    // One line owed: the first step scrolls at once.
+    this.auto = { pane, dir, since: now, last: now, owed: 1 };
+    this.auto.timer = window.setTimeout(this.autoScroll, STEP_MS);
+  }
+
+  private stopAutoScroll() {
+    if (!this.auto) return;
+    window.clearTimeout(this.auto.timer);
+    this.auto = undefined;
+  }
+
+  /** Pixels from the pane's top (dir -1) or bottom (1) edge to a client
+   * position past it; negative inside the pane. */
+  private pastEdge(p: SurfacePane, clientY: number, dir: number): number {
+    const top = this.canvas.getBoundingClientRect().top;
+    const ch = this.metrics.ch / this.dpr;
+    return dir < 0 ? top + p.inner.y * ch - clientY : clientY - (top + (p.inner.y + p.inner.h) * ch);
+  }
+
+  /** One step of scrolling while a selection drag is past an edge: the lines
+   * owed since the last step go in one pane.scroll request, from the latest
+   * position herdr reported. The selection follows when the scrolled
+   * surface arrives (setMeta). */
+  private autoScroll = () => {
+    const a = this.auto;
+    if (!a) return;
+    a.timer = undefined;
     const d = this.drag;
-    const p = d && d.kind === 'select' ? this.paneById(d.pane) : undefined;
-    const s = p?.scroll;
-    if (!d || d.kind !== 'select' || !p || !s) {
-      this.stepTimer = undefined;
-      return;
+    const p = this.paneById(a.pane);
+    const px = d?.kind === 'select' && p ? this.pastEdge(p, d.y, a.dir) : -1;
+    if (!p?.scroll || px < 0) return this.stopAutoScroll();
+    const now = performance.now();
+    const rate = scrollRate(px, this.metrics.ch / this.dpr, now - a.since);
+    // At most half a second's worth, should herdr be slow to answer.
+    a.owed = Math.min(a.owed + (rate * (now - a.last)) / 1000, Math.max(1, rate / 2));
+    a.last = now;
+    const lines = Math.floor(a.owed);
+    if (lines > 0 && !this.scrolling) {
+      const r = this.scrollReply;
+      const s = r && r.pane === p.id && r.meta === this.metaCount ? r.scroll : p.scroll;
+      const offset = Math.min(s.max_offset_from_bottom, Math.max(0, s.offset_from_bottom - a.dir * lines));
+      if (offset === s.offset_from_bottom) {
+        // At the end of the scrollback.
+        a.owed = 0;
+      } else {
+        a.owed -= lines;
+        this.scrollTo(p.id, offset);
+      }
     }
-    const { y } = this.cellAt(d.x, d.y);
-    const past = dir < 0 ? p.inner.y - y : y - (p.inner.y + p.inner.h - 1);
-    if (past <= 0) {
-      this.stepTimer = undefined;
-      return;
-    }
-    const lines = stepLines(past * (this.metrics.ch / this.dpr), this.metrics.ch / this.dpr);
-    const offset = Math.min(s.max_offset_from_bottom, Math.max(0, s.offset_from_bottom - dir * lines));
-    const next = () => {
-      this.stepTimer = undefined;
-      if (this.drag === d) this.trackSelection();
-    };
-    if (offset === s.offset_from_bottom) {
-      this.stepTimer = window.setTimeout(next, STEP_MS);
-      return;
-    }
+    a.timer = window.setTimeout(this.autoScroll, STEP_MS);
+  };
+
+  private scrollTo(pane: string, offset: number) {
+    this.scrolling = true;
+    const sent = performance.now();
     void conn
-      .api<{ pane?: { scroll?: SurfacePane['scroll'] } }>(this.o.m(), 'pane.scroll', { pane_id: p.id, offset_from_bottom: offset })
+      .api<{ pane?: { scroll?: ScrollInfo } }>(this.o.m(), 'pane.scroll', { pane_id: pane, offset_from_bottom: offset })
       .then((res) => {
-        // The surface's metadata follows; use the reply meanwhile.
-        if (res.pane?.scroll && this.paneById(p.id)) this.paneById(p.id)!.scroll = res.pane.scroll;
+        if (res.pane?.scroll) this.scrollReply = { pane, scroll: res.pane.scroll, meta: this.metaCount };
       })
       .catch(() => {})
       .finally(() => {
-        this.stepTimer = window.setTimeout(next, STEP_MS);
+        this.scrolling = false;
+        // After a slow answer the next step need not wait for the timer.
+        const a = this.auto;
+        if (a && performance.now() - sent >= STEP_MS) {
+          window.clearTimeout(a.timer);
+          this.autoScroll();
+        }
       });
-  };
+  }
 
   private onWheel = (ev: WheelEvent) => {
     ev.preventDefault();
@@ -693,26 +789,25 @@ export class SurfaceController {
     this.schedule();
   }
 
+  /** Paint compares the rows' highlights with what they were painted with. */
   private selectionChanged() {
     const sel = this.sel;
     if (sel) {
       sel.text = undefined;
       sel.reading = undefined;
     }
-    grid.invalidate();
     this.schedule();
   }
 
   /** The view may have moved under a selection (typing returns herdr to
    * the live bottom); the metadata that follows repaints it. */
   private selectionMoved() {
-    if (this.sel) grid.invalidate();
+    if (this.sel) this.schedule();
   }
 
   clearSelection() {
     if (!this.sel) return;
     this.sel = undefined;
-    grid.invalidate();
     this.schedule();
   }
 
@@ -729,8 +824,9 @@ export class SurfaceController {
     this.dprQuery = undefined;
     this.preedit.remove();
     onPaint(undefined);
+    this.unsubscribe();
     if (this.frame !== undefined) cancelAnimationFrame(this.frame);
-    window.clearTimeout(this.stepTimer);
+    this.stopAutoScroll();
     this.ro.disconnect();
     this.host.removeEventListener('mousedown', this.onMouseDown);
     this.host.removeEventListener('wheel', this.onWheel);

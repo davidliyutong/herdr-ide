@@ -41,6 +41,11 @@ export const en = {
   'gui.phase.installing': 'Fetching Xvfb on {m}',
   'gui.phase.starting': 'Starting the display on {m}',
   'gui.phase.error': 'Display on {m} failed',
+  'gui.errorShow': 'Show the error',
+  'gui.errorNoDetail': 'No details were reported.',
+  'gui.errorRetry':
+    'Retried automatically: first after 5 seconds, then at doubling intervals up to 5 minutes. Reconnecting the machine or changing its program windows setting retries at once.',
+  'gui.copyError': 'Copy error',
   'gui.state.off': 'Off',
   'gui.state.local': 'Own screen',
   'gui.state.unsupported': 'Not supported',

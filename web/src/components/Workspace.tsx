@@ -72,11 +72,13 @@ export function Workspace() {
               <div
                 key={tab.tab_id}
                 className={`tab ${tab.tab_id === tabId ? 'active' : ''}`}
-                onClick={() => selectTab(m, ws, tab.tab_id)}
                 onDoubleClick={() => !readOnly && actions.startRename('tab', m, tab.tab_id)}
                 onPointerDown={(e) => {
-                  if (e.button !== 0 || readOnly || editing || (e.target as HTMLElement).closest('button, input')) return;
-                  startTabDrag(e, { m, ws, tab: tab.tab_id, label: tab.label });
+                  if (e.button !== 0 || editing || (e.target as HTMLElement).closest('button, input')) return;
+                  // A tab is shown on press, as in browsers: a press that turns
+                  // into a drag (or whose release lands elsewhere) still switches.
+                  selectTab(m, ws, tab.tab_id);
+                  if (!readOnly) startTabDrag(e, { m, ws, tab: tab.tab_id, label: tab.label });
                 }}
                 onContextMenu={(e) => !editing && openMenu(e, tabMenu(m, ws, tab.tab_id))}
                 title={readOnly ? tab.label : t('workspace.tabHint', { label: tab.label })}

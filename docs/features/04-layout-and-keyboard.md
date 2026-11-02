@@ -48,9 +48,16 @@ Non-goals: a separate herdr-ide layout model; arbitrary docking of panes.
 **Rearranging and renaming** (`web/src/drag.ts`, `paneDrag.ts`,
 `reorderDrag.ts`, `InlineEdit.tsx`)
 
-- All drags share `drag.ts`: a drag starts after the pointer moved a few
-  pixels (so a click stays a click), a ghost follows the pointer, a marker
-  shows where the drop lands, and Escape cancels.
+- All drags share `drag.ts`: a drag starts after the pointer moved 6
+  pixels on the screen (so a click stays a click), a ghost follows the
+  pointer, a marker shows where the drop lands, and Escape cancels. The
+  distance is measured in screen coordinates: in macOS full screen the menu
+  bar slides down when the pointer nears the top edge and moves the page
+  under a pointer that stands still, which page coordinates would count as
+  a drag of the tab under it.
+- A tab is shown when it is pressed, as in browsers, not on release: a press
+  that turns into a drag, or whose release lands elsewhere because the page
+  moved, still switches to it.
 
 - Dragging a pane header or the tab's toolbar (the focused pane; after a
   few pixels, so a click stays a click)

@@ -68,6 +68,7 @@ make desktop-app                       # host-architecture .app
 VERSION=0.1.0 make desktop-dmg           # .app and DMG in dist/desktop/
 ARCH=x64 make desktop-dmg               # Intel core and Electron
 ARCH=arm64 make desktop-dmg             # Apple Silicon core and Electron
+make desktop-install                    # host-architecture .app into /Applications
 ```
 
 Each command builds the UI, bridge extension, four agents and the matching
@@ -78,6 +79,14 @@ without a Developer ID or notarization; Gatekeeper may require explicit
 approval for a downloaded copy. Public signed distribution and automatic
 updates are outside this packaging mode. Windows and Linux installers are
 not implemented. The app and disk image use the project's terminal-pane icon.
+
+`make desktop-install` builds the `.app` like `make desktop-app` and copies it
+over `/Applications/herdr-ide.app` (`INSTALL_DIR=~/Applications` picks another
+folder). If that copy is running, it is quit first, which stops its core and
+agents but not herdr's sessions, and opened again after the copy. An app that
+does not quit within 30 s is left as is and nothing is installed. The new
+copy is assembled next to the old one, so a failed copy leaves the old app in
+place.
 
 Editable icon sources live in `desktop/assets/icon.svg` and
 `web/public/icon.svg` (the simpler small-size version). The 1024-pixel PNG

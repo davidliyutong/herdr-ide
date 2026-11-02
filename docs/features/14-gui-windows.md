@@ -202,6 +202,11 @@ its programs keep their windows until the display idles out.
 - **Unpacked Xvfb cannot start** (missing libraries) → phase `error` with
   Xvfb's output (`~/.herdr-ide/xvfb.log` on the machine); retried with the
   backoff, so at most one start every 5 minutes.
+- **Any preparation or attach error** → the status bar shows that the
+  machine's display failed; clicking it shows the error the core reported
+  (the agent's or Xvfb's message), how it is retried, a button to copy it
+  and one to open the settings, where the machine's program windows can be
+  turned off.
 - **Network interruption** → browser windows show "Reconnecting"; programs
   and windows stay; after reconnecting the windows are adopted again.
 - **Display number taken** by another user (lock file, socket or listener)

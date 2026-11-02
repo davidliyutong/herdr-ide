@@ -4,7 +4,7 @@ DEV_LISTEN ?= 127.0.0.1:7790
 SLUG := $(shell sed -n 's/^[[:space:]]*Slug = "\(.*\)"$$/\1/p' internal/brand/brand.go)
 EXT  := extensions/$(SLUG)-bridge
 
-.PHONY: deps build test check it dev-core dev-web desktop-app desktop-dmg desktop-icons dev-desktop clean
+.PHONY: deps build test check it dev-core dev-web desktop-app desktop-dmg desktop-install desktop-icons dev-desktop clean
 
 # Electron's ~100 MB binary only runs or packages the macOS app; elsewhere
 # its types suffice for typecheck and the launcher tests.
@@ -44,6 +44,9 @@ desktop-app:
 
 desktop-dmg:
 	scripts/desktop.sh dmg
+
+desktop-install:
+	scripts/desktop.sh install
 
 desktop-icons:
 	scripts/icons.sh

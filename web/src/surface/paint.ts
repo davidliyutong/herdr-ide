@@ -1,7 +1,9 @@
 // Draws a Grid on a canvas. Rows marked dirty are repainted completely
 // (backgrounds, text, decorations, selection and cursor), one animation
 // frame at a time. Box-drawing and block characters are drawn as shapes so
-// that borders join without gaps at any cell size.
+// that borders join without gaps at any cell size. Text is clipped to its
+// row; only glyphs that may be wider than their cells (not plain ASCII, or
+// italic) are clipped to their cells, which keeps a full repaint cheap.
 
 import type { Grid } from './grid';
 import { color, type Palette } from './colors';
@@ -31,8 +33,40 @@ export interface Metrics {
   baseline: number;
 }
 
-/** A highlighted range per row: columns [from, to). */
-export type Highlight = (y: number) => Array<[number, number]> | undefined;
+/** Highlighted ranges of a row: columns [from, to). */
+export type Ranges = Array<[number, number]>;
+
+/** A row's highlighted ranges. */
+export type Highlight = (y: number) => Ranges | undefined;
+
+export function sameRanges(a: Ranges | undefined, b: Ranges | undefined): boolean {
+  if (!a?.length || !b?.length) return !a?.length && !b?.length;
+  return a.length === b.length && a.every(([x, y], i) => x === b[i][0] && y === b[i][1]);
+}
+
+/** The highlights painted per row after the painter copied a row move
+ * (Grid.move) on its canvas: ranges inside the moved columns come from the
+ * row the content came from, the others stay. Returns them and the rows
+ * whose ranges straddle the moved columns (to paint again). */
+export function moveRanges(
+  painted: Array<Ranges | undefined>,
+  m: { rect: { x: number; y: number; w: number; h: number }; shift: number },
+): { painted: Array<Ranges | undefined>; repaint: number[] } {
+  const { x, y, w, h } = m.rect;
+  const out = painted.slice();
+  const repaint: number[] = [];
+  const inside = ([a, b]: [number, number]) => a >= x && b <= x + w;
+  const outside = ([a, b]: [number, number]) => b <= x || a >= x + w;
+  for (let r = y; r < y + h; r++) {
+    const from = r + m.shift;
+    const moved = from >= y && from < y + h ? (painted[from] ?? []) : [];
+    const kept = painted[r] ?? [];
+    if (!moved.every((g) => inside(g) || outside(g)) || !kept.every((g) => inside(g) || outside(g))) repaint.push(r);
+    const next = [...kept.filter(outside), ...moved.filter(inside)];
+    out[r] = next.length ? next : undefined;
+  }
+  return { painted: out, repaint };
+}
 
 export interface PaintState {
   palette: Palette;
@@ -220,6 +254,8 @@ export function paintRows(ctx: CanvasRenderingContext2D, g: Grid, st: PaintState
   const { cw, ch, fontPx, family, weight, baseline } = st.metrics;
   const p = st.palette;
   ctx.textBaseline = 'alphabetic';
+  // Setting the font parses it; most cells share one.
+  let font = '';
   for (const y of rows) {
     if (y < 0 || y >= g.h) continue;
     const top = y * ch;
@@ -249,7 +285,11 @@ export function paintRows(ctx: CanvasRenderingContext2D, g: Grid, st: PaintState
         ctx.fillRect((x + i) * cw, top, cw, ch);
       }
     }
-    // Text and decorations.
+    // Text and decorations, inside the row.
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, top, g.w * cw, ch);
+    ctx.clip();
     cover = 0;
     for (let x = 0; x < g.w; x++) {
       if (cover > 0) {
@@ -280,13 +320,18 @@ export function paintRows(ctx: CanvasRenderingContext2D, g: Grid, st: PaintState
         if (!drawShape(ctx, sym, left, top, cw, ch)) {
           const bold = c.mod & MOD.bold ? 700 : weight;
           const italic = c.mod & MOD.italic ? 'italic ' : '';
-          ctx.font = `${italic}${bold} ${fontPx}px ${family}`;
-          ctx.save();
-          ctx.beginPath();
-          ctx.rect(left, top, cw * wdt, ch);
-          ctx.clip();
-          ctx.fillText(sym, left, top + baseline);
-          ctx.restore();
+          const f = `${italic}${bold} ${fontPx}px ${family}`;
+          if (f !== font) ctx.font = font = f;
+          if (wdt === 1 && !italic && sym.length === 1 && sym.charCodeAt(0) < 0x7f) {
+            ctx.fillText(sym, left, top + baseline);
+          } else {
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(left, top, cw * wdt, ch);
+            ctx.clip();
+            ctx.fillText(sym, left, top + baseline);
+            ctx.restore();
+          }
         }
       }
       const thin = Math.max(1, Math.round(ch / 16));
@@ -329,5 +374,8 @@ export function paintRows(ctx: CanvasRenderingContext2D, g: Grid, st: PaintState
         ctx.strokeRect(left + thick / 2, top + thick / 2, cw * wdt - thick, ch - thick);
       }
     }
+    // Restoring also restores the font set before the row.
+    ctx.restore();
+    font = '';
   }
 }

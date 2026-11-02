@@ -3,12 +3,12 @@ import { decodeUpdate, type SurfacePane, type SurfaceUpdate } from '../surface/p
 import { Grid } from '../surface/grid';
 import { symbolWidth } from '../surface/width';
 import { color, palette } from '../surface/colors';
-import { Selection, readRange, span, stepLines, viewTop, wordAt } from '../surface/selection';
+import { Selection, readRange, scrollRate, span, viewTop, wordAt } from '../surface/selection';
 import { keyEvent, pasteText, releaseOf } from '../surface/input';
 import { findLinks, safeUrl } from '../terminal/links';
 import vectorData from './testdata/surface.json';
 import { themes } from '../terminal/options';
-import { paintRows } from '../surface/paint';
+import { moveRanges, paintRows, sameRanges } from '../surface/paint';
 
 /** The messages internal/server's TestSurfaceBinaryVector pins. */
 function vectors(): ArrayBuffer[] {
@@ -68,11 +68,28 @@ describe('Grid', () => {
     });
     expect(text(g).slice(0, 3)).toEqual(['c', 'd', 'e']);
     expect(text(g)[4]).toBe('f');
-    expect([...g.dirty].sort()).toEqual([0, 1, 2, 3, 4]);
+    // The painter copies the moved rows; only the vacated ones are painted.
+    expect([...g.dirty].sort()).toEqual([3, 4]);
+    expect(g.moves).toEqual([{ rect: { x: 0, y: 0, w: 3, h: 5 }, shift: 2 }]);
     g.apply({ full: false, gen: 1, w: 0, h: 0, moves: [{ rect: { x: 0, y: 0, w: 3, h: 5 }, shift: -1 }], spans: [] });
     expect(text(g).slice(1, 3)).toEqual(['c', 'd']);
+    // Rows not yet painted take their stale pixels along: 3 and 4 moved to
+    // 4 (and off the region), and row 0 is vacated.
+    expect([...g.dirty].sort()).toEqual([0, 3, 4]);
+    expect(g.moves).toHaveLength(2);
+    g.invalidate();
+    expect(g.moves).toEqual([]);
     // Patches of an older generation are dropped.
     expect(g.apply({ full: false, gen: 0, w: 0, h: 0, moves: [], spans: [{ x: 0, y: 0, cells: [cell('z')] }] })).toBe(false);
+  });
+
+  it('marks the old cursor row where its pixels moved', () => {
+    const g = new Grid();
+    g.apply({ ...full(3, 4, ['a', 'b', 'c', 'd']), cursor: { x: 0, y: 3, visible: true, shape: 0 } });
+    g.dirty.clear();
+    g.apply({ full: false, gen: 1, w: 0, h: 0, moves: [{ rect: { x: 0, y: 0, w: 3, h: 4 }, shift: 1 }], spans: [] });
+    // Row 3 is vacated; the cursor's pixels moved up to row 2.
+    expect([...g.dirty].sort()).toEqual([2, 3]);
   });
 
   it('reads text without the cells wide characters cover', () => {
@@ -116,6 +133,79 @@ describe('paintRows', () => {
     const bgs = fills.slice(1).filter((f) => f.x < 40 && f.w === 10);
     expect(bgs.filter((f) => f.x === 10).map((f) => f.style)).toEqual(['#3c3c3c']);
     expect(bgs.map((f) => f.x)).toEqual([0, 10, 20]);
+  });
+
+  it('clips text to its row, and only glyphs that may overflow to their cells', () => {
+    const p = palette(themes.light);
+    const clips: Array<[number, number]> = [];
+    const fonts: string[] = [];
+    let depth = 0;
+    const ctx = {
+      fillStyle: '',
+      set font(f: string) {
+        fonts.push(f);
+      },
+      fillRect() {},
+      fillText() {},
+      save() {
+        depth++;
+      },
+      restore() {
+        depth--;
+      },
+      beginPath() {},
+      rect(x: number, _y: number, w: number) {
+        clips.push([x, w]);
+      },
+      clip() {},
+    };
+    const g = new Grid();
+    g.apply({
+      full: true,
+      gen: 1,
+      w: 5,
+      h: 1,
+      moves: [],
+      spans: [{ x: 0, y: 0, cells: [cell('a'), cell('b'), cell('宽'), cell(''), { ...cell('c'), mod: 4 }] }],
+    });
+    const metrics = { cw: 10, ch: 20, fontPx: 16, family: 'mono', weight: 400, baseline: 15 };
+    paintRows(ctx as unknown as CanvasRenderingContext2D, g, { palette: p, metrics, focused: false }, [0]);
+    // The row, the wide character (two cells) and the italic one.
+    expect(clips).toEqual([
+      [0, 50],
+      [20, 20],
+      [40, 10],
+    ]);
+    expect(depth).toBe(0);
+    // Set once per style, not per glyph.
+    expect(fonts).toEqual(['400 16px mono', 'italic 400 16px mono']);
+  });
+});
+
+describe('painted highlights', () => {
+  it('compares ranges', () => {
+    expect(sameRanges(undefined, [])).toBe(true);
+    expect(sameRanges([[1, 3]], [[1, 3]])).toBe(true);
+    expect(sameRanges([[1, 3]], [[1, 4]])).toBe(false);
+    expect(sameRanges([[1, 3]], undefined)).toBe(false);
+  });
+  it('move with the rows copied, inside the moved columns only', () => {
+    // A pane in columns 0-4 scrolled up one row; another pane in 5-9 kept
+    // its highlight on row 1.
+    const painted = [
+      [[0, 5]],
+      [
+        [2, 5],
+        [6, 8],
+      ],
+      undefined,
+      undefined,
+    ] as Array<Array<[number, number]> | undefined>;
+    const r = moveRanges(painted, { rect: { x: 0, y: 0, w: 5, h: 3 }, shift: 1 });
+    expect(r.painted).toEqual([[[2, 5]], [[6, 8]], undefined, undefined]);
+    expect(r.repaint).toEqual([]);
+    // A range across the moved columns cannot be kept.
+    expect(moveRanges([[[3, 7]], undefined], { rect: { x: 0, y: 0, w: 5, h: 2 }, shift: -1 }).repaint).toEqual([0, 1]);
   });
 });
 
@@ -187,8 +277,12 @@ describe('selection', () => {
     expect(span({ row: 2, col: 3 }, { row: 1, col: 0 }, 10)).toEqual([10, 23]);
     expect(readRange({ row: 1, col: 0 }, { row: 2, col: 3 }, 10)).toEqual({ anchor: { row: 1, col: 0 }, cursor: { row: 2, col: 2 } });
     expect(readRange({ row: 1, col: 4 }, { row: 1, col: 4 }, 10)).toBeUndefined();
-    expect(stepLines(0, 16)).toBe(1);
-    expect(stepLines(1000, 16)).toBe(15);
+    // Lines per second past an edge: by distance and by time held.
+    expect(scrollRate(0, 16, 0)).toBe(20);
+    expect(scrollRate(32, 16, 0)).toBe(60);
+    expect(scrollRate(0, 16, 2000)).toBe(40);
+    expect(scrollRate(0, 16, 60000)).toBe(80);
+    expect(scrollRate(100000, 16, 60000)).toBe(2000);
   });
   it('asks herdr for the text, clamped to the lines it has', async () => {
     const s = new Selection('p', 10, { row: 3, col: 0 });
