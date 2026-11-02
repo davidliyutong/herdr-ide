@@ -11,6 +11,13 @@ All notable changes are documented here. The format follows
 - Each pane has a round close button at its top right corner that shows
   while the pointer is over the pane, also when the pane is not focused.
 
+### Changed
+
+- A tab is shown when it is pressed, not when the click is released, and a
+  drag (of a tab, workspace or pane) starts only after the pointer moved on
+  the screen. In macOS full screen the menu bar sliding down moved the page
+  under the pointer, so clicking a tab often started reordering it instead.
+
 ### Fixed
 
 - Moving the window to a display with another pixel density (for example
