@@ -24,6 +24,7 @@ export const en = {
   'app.readOnly': 'READ-ONLY',
   'app.noAgentPane': 'No pane to receive it: focus an agent pane first',
   'app.uploadFailed': 'Upload failed: {error}',
+  'app.uploadDirFailed': 'Could not save into {dir} ({error}); uploading to the upload folder instead.',
   'app.updated': 'The server was updated. Reload the page to use the new version.',
   'app.reload': 'Reload',
 
@@ -178,6 +179,12 @@ export const en = {
   'surface.clipboard': 'A program copied {n} characters: “{text}”',
   'surface.copy': 'Copy',
   'surface.paste': 'Paste',
+  'surface.dropHere': 'Drop to paste the paths here',
+  'surface.dropUpload': 'Drop to upload to {machine} and paste the paths',
+  'surface.dropUploadInto': 'Drop to upload into {dir} on {machine} and paste the paths',
+  'surface.uploading': 'Uploading {n} file(s) to {machine}…',
+  'surface.uploadingInto': 'Uploading {n} file(s) into {dir} on {machine}…',
+  'surface.dropNoFolders': 'Folders cannot be uploaded; {n} skipped.',
 
   'dock.code': 'VS Code',
   'dock.preview': 'Preview',

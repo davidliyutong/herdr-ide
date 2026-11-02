@@ -50,6 +50,9 @@ browser tab, with VS Code (code-server) one keystroke away.
 - **Quick Look.** ⌘/Ctrl-click or right-click a path in a terminal, also one
   wrapped over several lines, to preview images, GIFs, videos (with
   seeking), audio, PDFs, text or directories.
+- **Files to agents.** Paste or drop files into a pane to paste their paths;
+  files that are not on the pane's machine are uploaded to it first, dropped
+  ones into the pane's directory (an existing file there is never replaced).
 - **Several browsers at once.** The active browser controls a pane; others
   watch at the same size and take over by typing.
 - **Settings.** Language (English, Chinese), light/dark theme followed by
@@ -104,7 +107,8 @@ The desktop and browser share a terminal-pane icon, with a multi-resolution
 macOS version for Finder and the Dock.
 
 Drag folders from Finder onto the sidebar to create a workspace for each on
-the local machine.
+the local machine. Files and folders dropped on a pane of the local machine
+are pasted as their own paths, without uploading.
 
 In the app, `cmd+t` opens a tab and `cmd+w` closes it after asking; while
 VS Code has focus, both keys stay VS Code's. Change or remove them under

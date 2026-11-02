@@ -84,7 +84,9 @@ implemented independently.
   is on disk (`webUtils.getPathForFile`; Electron removed `File.path`), and an
   empty string for a File made in JavaScript or anything else. Folders
   dropped from Finder on the sidebar thus become workspaces on the local
-  machine, whose core runs on the same Mac ([04](04-layout-and-keyboard.md)).
+  machine, whose core runs on the same Mac ([04](04-layout-and-keyboard.md)),
+  and files or folders dropped on a pane of the local machine are pasted as
+  their own paths instead of being uploaded ([06](06-quick-look-and-files.md)).
   It is answered in the preload; nothing goes to the main process.
   The menu gains **Tab** (New Tab, Close Tab) between Edit and View, and
   **Window** lists Minimize, Zoom, Close Window (`cmd+w`) and Bring All to

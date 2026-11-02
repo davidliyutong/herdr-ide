@@ -22,6 +22,7 @@ export const zhCN: Messages = {
   'app.readOnly': '只读',
   'app.noAgentPane': '没有可接收的 pane：先聚焦一个 agent pane',
   'app.uploadFailed': '上传失败：{error}',
+  'app.uploadDirFailed': '无法保存到 {dir}（{error}），改为上传到上传目录。',
   'app.updated': '服务端已更新，请刷新页面以使用新版本。',
   'app.reload': '刷新',
 
@@ -175,6 +176,12 @@ export const zhCN: Messages = {
   'surface.clipboard': '程序复制了 {n} 个字符：“{text}”',
   'surface.copy': '复制',
   'surface.paste': '粘贴',
+  'surface.dropHere': '松开即可在此粘贴路径',
+  'surface.dropUpload': '松开即可上传到 {machine} 并粘贴路径',
+  'surface.dropUploadInto': '松开即可上传到 {machine} 的 {dir} 并粘贴路径',
+  'surface.uploading': '正在上传 {n} 个文件到 {machine}…',
+  'surface.uploadingInto': '正在上传 {n} 个文件到 {machine} 的 {dir}…',
+  'surface.dropNoFolders': '文件夹无法上传，已跳过 {n} 个。',
 
   'dock.code': 'VS Code',
   'dock.preview': '预览',

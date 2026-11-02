@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"herdr-ide/internal/agentproto"
@@ -143,6 +144,9 @@ func (a *Agent) handleFS(st net.Conn, h agentproto.Header) error {
 		if cerr == nil {
 			cerr = os.Chmod(tmp.Name(), mode)
 		}
+		if cerr == nil && h.Unique {
+			path, cerr = freeName(path)
+		}
 		if cerr == nil {
 			cerr = os.Rename(tmp.Name(), path)
 		}
@@ -158,6 +162,32 @@ func (a *Agent) handleFS(st net.Conn, h agentproto.Header) error {
 		return agentproto.WriteLine(st, agentproto.Reply{OK: true, Stat: &s})
 	}
 	return agentproto.Fail(st, fmt.Errorf("unknown fs op %q", h.Op))
+}
+
+// freeName claims path, or the first free name with -1, -2… before its
+// extension, by creating it exclusively (a symlink there counts as taken);
+// the upload is then renamed over the empty file it claimed.
+func freeName(path string) (string, error) {
+	dir, base := filepath.Split(path)
+	ext := filepath.Ext(base)
+	if ext == base {
+		ext = "" // .env
+	}
+	stem := strings.TrimSuffix(base, ext)
+	for i := 0; i < 1000; i++ {
+		p := path
+		if i > 0 {
+			p = filepath.Join(dir, fmt.Sprintf("%s-%d%s", stem, i, ext))
+		}
+		f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if err == nil {
+			return p, f.Close()
+		}
+		if !errors.Is(err, fs.ErrExist) {
+			return "", err
+		}
+	}
+	return "", fmt.Errorf("no free name for %s", base)
 }
 
 const maxExecOutput = 8 << 20

@@ -10,6 +10,13 @@ All notable changes are documented here. The format follows
 
 - Desktop app: drag folders from Finder onto the sidebar to create a
   workspace for each on the local machine.
+- Files dragged onto a pane are pasted as their paths. Files not on the
+  pane's machine are uploaded into the pane's directory there first, under
+  their own names (`-1`, `-2`… when taken; nothing is replaced); in the
+  desktop app, files dropped on a pane of the local machine are pasted where
+  they are. The pane shows what a drop does while files are over it.
+  Before, only pasting files uploaded them, and a file dropped on the page
+  replaced it in a browser.
 - Right-clicking a pane opens a menu to copy the selection, paste, and
   preview, open in VS Code or copy the path (or URL) under the pointer or
   selected. A program that reports the mouse keeps the right button;
@@ -22,6 +29,8 @@ All notable changes are documented here. The format follows
 
 ### Changed
 
+- Pasted files' paths reach the pane as a paste instead of typed text, the
+  way a terminal delivers dropped files.
 - A tab is shown when it is pressed, not when the click is released, and a
   drag (of a tab, workspace or pane) starts only after the pointer moved on
   the screen. In macOS full screen the menu bar sliding down moved the page

@@ -4,7 +4,8 @@
 // rows herdr moved are copied on the canvas instead of painted again, and a
 // drag held past a pane's edge scrolls at a speed set by time, not by how
 // fast herdr answers pane.scroll. A path wrapped over two rows is one link,
-// and the pane's menu copies, pastes and opens paths.
+// the pane's menu copies, pastes and opens paths, and files dropped on a
+// pane are pasted as their paths.
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -74,6 +75,10 @@ function write(y: number, text: string) {
 
 const range = (a: number, b: number) => [...Array(b - a).keys()].map((i) => a + i);
 
+let readOnly = false;
+const dropFiles = vi.fn((_pane: string, _items: DataTransferItemList) => Promise.resolve<string | undefined>("'/tmp/my shot.png' "));
+const dropTarget = vi.fn((_pane: string | undefined) => {});
+
 beforeAll(async () => {
   globalThis.ResizeObserver ??= class {
     observe() {}
@@ -127,7 +132,9 @@ beforeAll(async () => {
       focusedPane: () => 'p1',
       focusPane: () => {},
       appKey: () => false,
-      readOnly: () => false,
+      readOnly: () => readOnly,
+      onDropFiles: (pane, items) => dropFiles(pane, items),
+      onDropTarget: (pane) => dropTarget(pane),
       linkContext: () => ({ m: 'm1' }),
       onSize: () => {},
       setTitle: () => {},
@@ -309,5 +316,48 @@ describe('pane menu', () => {
     expect(plain.entries).toEqual([]);
     // Shift+right click opens the menu there.
     expect(open(7, 3, { shiftKey: true }).entries.length).toBeGreaterThan(0);
+  });
+});
+
+describe('dropped files', () => {
+  const items = [] as unknown as DataTransferItemList;
+  const drag = (type: string, types = ['Files']) => {
+    const ev = new MouseEvent(type, { clientX: 5 * CW + 1, clientY: 4 * CH + 1, bubbles: true, cancelable: true });
+    Object.defineProperty(ev, 'dataTransfer', { value: { types, items, dropEffect: 'none' } });
+    host.dispatchEvent(ev);
+    return ev as MouseEvent & { dataTransfer: { dropEffect: string } };
+  };
+  beforeEach(() => {
+    readOnly = false;
+    dropFiles.mockClear();
+    dropTarget.mockClear();
+    sent.length = 0;
+  });
+
+  it('are pasted as their paths into the pane under the pointer', async () => {
+    const over = drag('dragover');
+    expect(over.defaultPrevented).toBe(true);
+    expect(over.dataTransfer.dropEffect).toBe('copy');
+    expect(dropTarget).toHaveBeenLastCalledWith('p1');
+    const drop = drag('drop');
+    expect(drop.defaultPrevented).toBe(true);
+    expect(dropTarget).toHaveBeenLastCalledWith(undefined);
+    // The items are handed over during the drop event.
+    expect(dropFiles).toHaveBeenCalledWith('p1', items);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(sent.flatMap((m) => m.ev ?? [])).toEqual([{ t: 'paste', text: "'/tmp/my shot.png' " }]);
+  });
+
+  it('are not taken in read-only mode, by a page not using the session, or without files', () => {
+    readOnly = true;
+    expect(drag('dragover').defaultPrevented).toBe(false);
+    expect(drag('drop').defaultPrevented).toBe(false);
+    readOnly = false;
+    session.useSurface.setState({ ownership: 'busy' });
+    expect(drag('dragover').defaultPrevented).toBe(false);
+    session.useSurface.setState({ ownership: 'owner' });
+    expect(drag('dragover', ['text/plain']).defaultPrevented).toBe(false);
+    expect(dropTarget.mock.calls.every(([p]) => p === undefined)).toBe(true);
+    expect(dropFiles).not.toHaveBeenCalled();
   });
 });

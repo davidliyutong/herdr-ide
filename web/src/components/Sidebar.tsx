@@ -13,7 +13,7 @@ import { startWorkspaceDrag } from '../reorderDrag';
 import { openMenu } from '../contextMenu';
 import { workspaceMenu } from '../menus';
 import { isNewer } from '../lib/localHerdr';
-import { carriesFiles, dropFolders, folderDropTarget } from '../folderDrop';
+import { carriesFiles, dropFolders, folderDropTarget } from '../drop';
 
 function aggregate(statuses: AgentStatus[]): AgentStatus | undefined {
   let best: AgentStatus | undefined;

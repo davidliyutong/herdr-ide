@@ -4,7 +4,8 @@ import { usePrefs } from '../prefs';
 import { appearanceOf } from '../appearance';
 import { handleKey } from '../keymap';
 import { uploadPasted } from '../lib/files';
-import { paneCwd, type LayoutExport } from '../lib/herdr';
+import { droppedItems, droppedPaths, filesAreOn } from '../drop';
+import { paneCwd, shortPath, type LayoutExport } from '../lib/herdr';
 import { SurfaceController } from '../surface/controller';
 import { grid, setHostColors, setView, takeOver, useSurface } from '../surface/session';
 import type { SurfaceSplit } from '../surface/protocol';
@@ -12,6 +13,20 @@ import { setSurfaceFocus } from '../terminal/registry';
 import { whenTermFont } from '../terminal/fonts';
 import { PaneCloseButton, PaneHeader } from './PaneHeader';
 import { t, type MessageKey } from '../i18n';
+
+/** A pane's working directory, as herdr reports it. */
+function paneDir(m: string, pane: string): string | undefined {
+  return paneCwd(useStore.getState().machines[m]?.snapshot?.panes.find((p) => p.pane_id === pane));
+}
+
+/** What dropping files on a pane does. */
+function dropLabel(m: string, pane: string): string {
+  if (filesAreOn(m)) return t('surface.dropHere');
+  const st = useStore.getState().machines[m];
+  const dir = paneDir(m, pane);
+  const machine = st?.label ?? m;
+  return dir ? t('surface.dropUploadInto', { machine, dir: shortPath(dir, st?.info?.home) }) : t('surface.dropUpload', { machine });
+}
 
 interface Props {
   m: string;
@@ -41,6 +56,8 @@ export function SurfaceView({ m, tabId, layout }: Props) {
   const readOnly = useStore((s) => s.readOnly);
   // The pane under the pointer: its close button shows.
   const [hovered, setHovered] = useState<string>();
+  // The pane files dragged from outside the page would be dropped on.
+  const [dropOn, setDropOn] = useState<string>();
   const live = useRef({ m, tabId, focusedPane });
   live.current = { m, tabId, focusedPane };
 
@@ -56,11 +73,13 @@ export function SurfaceView({ m, tabId, layout }: Props) {
         appKey: (ev) => handleKey(ev),
         readOnly: () => useStore.getState().readOnly,
         onPasteFiles: (files) => uploadPasted(live.current.m, files),
-        linkContext: (pane) => {
-          const s = useStore.getState();
-          const st = s.machines[live.current.m];
-          return { m: live.current.m, cwd: paneCwd(st?.snapshot?.panes.find((p) => p.pane_id === pane)), home: st?.info?.home };
-        },
+        onDropFiles: (pane, items) => droppedPaths(live.current.m, droppedItems(items), paneDir(live.current.m, pane)),
+        onDropTarget: setDropOn,
+        linkContext: (pane) => ({
+          m: live.current.m,
+          cwd: paneDir(live.current.m, pane),
+          home: useStore.getState().machines[live.current.m]?.info?.home,
+        }),
         onSize: (cols, rows, cw, ch, dpr) => setCell({ cols, rows, cw, ch, dpr }),
         onSplitDrag: (split, ratio) => setSplitDrag(ratio === undefined ? undefined : { split, ratio }),
         setTitle,
@@ -182,6 +201,14 @@ export function SurfaceView({ m, tabId, layout }: Props) {
       {headers.map((h) => h.style && <PaneHeader key={h.id} m={m} paneId={h.id} zoomed={layout?.zoomed} style={h.style} />)}
       {!readOnly &&
         headers.map((h) => <PaneCloseButton key={`close-${h.id}`} m={m} paneId={h.id} style={h.close} shown={hovered === h.id} />)}
+      {dropOn &&
+        headers
+          .filter((h) => h.id === dropOn)
+          .map((h) => (
+            <div key="drop" className="pane-drop" style={h.box}>
+              <span>{dropLabel(m, h.id)}</span>
+            </div>
+          ))}
       {splitDrag && (
         <div
           className={`split-ghost ${splitDrag.split.vertical ? 'v' : 'h'}`}

@@ -14,8 +14,12 @@
 // A right click opens the pane's menu (copy, paste, and opening the path or
 // URL under the pointer or selected) unless the pane's program reports the
 // mouse; Shift+right click opens it there.
+//
+// Files pasted, or dragged from outside the page onto a pane, are pasted as
+// their paths (see drop.ts); the drag shows which pane takes them.
 
 import { conn } from '../lib/conn';
+import { carriesFiles } from '../drop';
 import { grid, onPaint, sendFocus, sendInput, useSurface } from './session';
 import { palette as makePalette, rgb, type Palette } from './colors';
 import { moveRanges, paintRows, sameRanges, type Metrics, type Ranges } from './paint';
@@ -38,6 +42,12 @@ export interface ControllerOptions {
   appKey(ev: KeyboardEvent): boolean;
   readOnly(): boolean;
   onPasteFiles?(files: File[]): Promise<string | undefined>;
+  /** Files from outside the page dropped on a pane: the text to paste. The
+   * items are read before anything is awaited; they are empty after the
+   * drop event. */
+  onDropFiles?(pane: string, items: DataTransferItemList): Promise<string | undefined>;
+  /** The pane files dragged over the surface would be dropped on, or none. */
+  onDropTarget?(pane: string | undefined): void;
   linkContext(pane: string): LinkContext;
   /** The grid size that fits, in cells, the cell size in device pixels and
    * the device pixel ratio it was measured at. */
@@ -369,6 +379,9 @@ export class SurfaceController {
     this.host.addEventListener('mousedown', this.onMouseDown);
     this.host.addEventListener('wheel', this.onWheel, { passive: false });
     this.host.addEventListener('contextmenu', this.onContextMenu);
+    this.host.addEventListener('dragover', this.onDragOver);
+    this.host.addEventListener('dragleave', this.onDragLeave);
+    this.host.addEventListener('drop', this.onDrop);
     window.addEventListener('mousemove', this.onMouseMove);
     window.addEventListener('mouseup', this.onMouseUp);
     window.addEventListener('keydown', this.onModifier);
@@ -453,11 +466,48 @@ export class SurfaceController {
     if (!dt || !pane) return;
     const files = Array.from(dt.files);
     if (files.length && this.o.onPasteFiles) {
-      void this.o.onPasteFiles(files).then((text) => text && this.send(pane, [{ t: 'text', text }]));
+      this.pasteWhenReady(pane, this.o.onPasteFiles(files));
       return;
     }
     const text = dt.getData('text/plain');
     if (text) this.send(pane, [{ t: 'paste', text: pasteText(text) }]);
+  };
+
+  /** Pastes files' paths once known (uploads take a while), as a paste: the
+   * way a terminal delivers dropped files. */
+  private pasteWhenReady(pane: string, text: Promise<string | undefined>) {
+    void text.then((t) => t && this.send(pane, [{ t: 'paste', text: pasteText(t) }]));
+  }
+
+  /** The pane under a drag of files from outside the page, when it may take
+   * them: not in read-only mode, and while this page uses the session. */
+  private dropPane(ev: DragEvent): SurfacePane | undefined {
+    if (!this.o.onDropFiles || this.o.readOnly() || useSurface.getState().ownership !== 'owner') return;
+    if (!carriesFiles(ev.dataTransfer)) return;
+    const { x, y } = this.cellAt(ev.clientX, ev.clientY);
+    return this.paneAt(x, y);
+  }
+
+  private onDragOver = (ev: DragEvent) => {
+    const p = this.dropPane(ev);
+    this.o.onDropTarget?.(p?.id);
+    if (!p) return;
+    ev.preventDefault();
+    ev.dataTransfer!.dropEffect = 'copy';
+  };
+
+  private onDragLeave = (ev: DragEvent) => {
+    if (!this.host.contains(ev.relatedTarget as Node | null)) this.o.onDropTarget?.(undefined);
+  };
+
+  private onDrop = (ev: DragEvent) => {
+    this.o.onDropTarget?.(undefined);
+    const p = this.dropPane(ev);
+    if (!p) return;
+    ev.preventDefault();
+    this.o.focusPane(p.id);
+    this.focus();
+    this.pasteWhenReady(p.id, this.o.onDropFiles!(p.id, ev.dataTransfer!.items));
   };
 
   private onCopy = (ev: ClipboardEvent) => {
@@ -887,6 +937,9 @@ export class SurfaceController {
     this.host.removeEventListener('mousedown', this.onMouseDown);
     this.host.removeEventListener('wheel', this.onWheel);
     this.host.removeEventListener('contextmenu', this.onContextMenu);
+    this.host.removeEventListener('dragover', this.onDragOver);
+    this.host.removeEventListener('dragleave', this.onDragLeave);
+    this.host.removeEventListener('drop', this.onDrop);
     window.removeEventListener('mousemove', this.onMouseMove);
     window.removeEventListener('mouseup', this.onMouseUp);
     window.removeEventListener('keydown', this.onModifier);

@@ -127,7 +127,7 @@ Non-goals: a separate herdr-ide layout model; arbitrary docking of panes.
   selected); the sidebar shows where they go while they are over it, and
   dropped files that are not folders are skipped with a note. Browsers do
   not tell the page where a dropped folder is, so they do not offer this, nor
-  does read-only mode (`web/src/folderDrop.ts`,
+  does read-only mode (`web/src/drop.ts`,
   [16](16-desktop-packaging.md)). Closing a pane or tab with a working agent,
   and closing a workspace, ask for confirmation; Enter cancels these unless
   the user moves to the confirm button. The browser's `prompt()` and

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"herdr-ide/internal/agent"
@@ -76,6 +77,54 @@ func TestFileOps(t *testing.T) {
 	}
 	if _, err := s.Request(ctx, agentproto.Header{Op: agentproto.OpFsStat, Path: "~/missing"}); err == nil {
 		t.Fatal("stat of missing file succeeded")
+	}
+}
+
+func TestWriteKeepsExistingFiles(t *testing.T) {
+	s, home := dialAgent(t)
+	ctx := context.Background()
+	write := func(path, body string) (*agentproto.Reply, error) {
+		conn, _, err := s.Open(ctx, agentproto.Header{Op: agentproto.OpFsWrite, Path: path, Unique: true})
+		if err != nil {
+			return nil, err
+		}
+		defer conn.Close()
+		cw := agentproto.ChunkWriter{W: conn}
+		cw.Write([]byte(body))
+		cw.Finish()
+		var rep agentproto.Reply
+		return &rep, agentproto.ReadLine(conn, &rep)
+	}
+	proj := filepath.Join(home, "proj")
+	os.MkdirAll(proj, 0o755)
+	os.WriteFile(filepath.Join(proj, "shot.png"), []byte("mine"), 0o644)
+	os.Symlink("/nonexistent", filepath.Join(proj, "shot-1.png"))
+	rep, err := write("~/proj/shot.png", "new")
+	if err != nil || !rep.OK || rep.Stat.Path != filepath.Join(proj, "shot-2.png") {
+		t.Fatalf("write = %+v %v", rep, err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(proj, "shot.png")); string(b) != "mine" {
+		t.Fatalf("existing file replaced: %q", b)
+	}
+	if b, _ := os.ReadFile(filepath.Join(proj, "shot-2.png")); string(b) != "new" {
+		t.Fatalf("upload = %q", b)
+	}
+	rep, err = write("~/proj/.env", "x")
+	if err != nil || rep.Stat.Path != filepath.Join(proj, ".env") {
+		t.Fatalf("dotfile = %+v %v", rep, err)
+	}
+	if rep, err = write("~/proj/.env", "y"); err != nil || rep.Stat.Path != filepath.Join(proj, ".env-1") {
+		t.Fatalf("second dotfile = %+v %v", rep, err)
+	}
+	// Without Mkdirs the directory must exist; no temporary file is left.
+	if _, err := write("~/missing/a.txt", "z"); err == nil {
+		t.Fatal("wrote into a missing directory")
+	}
+	ents, _ := os.ReadDir(proj)
+	for _, e := range ents {
+		if strings.HasPrefix(e.Name(), ".herdr-ide-upload-") {
+			t.Fatalf("temporary file left: %s", e.Name())
+		}
 	}
 }
 
