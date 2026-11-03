@@ -5,7 +5,8 @@
 //   encoder -w W -h H -kinds avc1,vp8 [-quality Q]
 //
 // It opens the first encoder that works for the kinds, in order (avc1:
-// h264_nvenc; vp8: libvpx) and writes one line to stdout:
+// h264_nvenc, then h264_vaapi on the first render node that takes it; vp8:
+// libvpx) and writes one line to stdout:
 //
 //   ok <encoder> <coded width> <coded height>
 //
@@ -22,8 +23,12 @@
 #include <unistd.h>
 
 #include <libavcodec/avcodec.h>
+#include <libavutil/hwcontext.h>
 #include <libavutil/opt.h>
 #include <libswscale/swscale.h>
+
+// VA-API frames are uploaded from NV12 frames of this pool.
+static AVBufferRef *hw_frames;
 
 static int read_full(void *buf, size_t n) {
   uint8_t *p = buf;
@@ -82,6 +87,14 @@ static AVCodecContext *open_encoder(const char *name, int w, int h, int quality)
     c->bit_rate = 0;
     c->rc_max_rate = 40000000;
     c->rc_buffer_size = 4000000;
+  } else if (!strcmp(name, "h264_vaapi")) {
+    c->pix_fmt = AV_PIX_FMT_VAAPI;
+    c->hw_frames_ctx = av_buffer_ref(hw_frames);
+    av_opt_set(c->priv_data, "rc_mode", "CQP", 0);
+    av_opt_set_int(c->priv_data, "qp", quality, 0);
+    // One frame in the GPU at a time: each frame's packet comes back
+    // before the next frame is read.
+    av_opt_set_int(c->priv_data, "async_depth", 1, 0);
   } else if (!strcmp(name, "libvpx")) {
     c->pix_fmt = AV_PIX_FMT_YUV420P;
     long n = sysconf(_SC_NPROCESSORS_ONLN);
@@ -106,6 +119,33 @@ static AVCodecContext *open_encoder(const char *name, int w, int h, int quality)
   return c;
 }
 
+// open_vaapi opens h264_vaapi on the first render node whose driver can
+// encode H.264.
+static AVCodecContext *open_vaapi(int w, int h, int quality) {
+  if (!avcodec_find_encoder_by_name("h264_vaapi")) return NULL;
+  for (int n = 0; n < 8; n++) {
+    char path[32];
+    snprintf(path, sizeof path, "/dev/dri/renderD%d", 128 + n);
+    if (access(path, R_OK | W_OK) != 0) continue;
+    AVBufferRef *dev = NULL;
+    if (av_hwdevice_ctx_create(&dev, AV_HWDEVICE_TYPE_VAAPI, path, NULL, 0) < 0) continue;
+    hw_frames = av_hwframe_ctx_alloc(dev);
+    av_buffer_unref(&dev);
+    if (!hw_frames) continue;
+    AVHWFramesContext *fc = (AVHWFramesContext *)hw_frames->data;
+    fc->format = AV_PIX_FMT_VAAPI;
+    fc->sw_format = AV_PIX_FMT_NV12;
+    fc->width = (w + 1) & ~1;
+    fc->height = (h + 1) & ~1;
+    fc->initial_pool_size = 4;
+    AVCodecContext *c = NULL;
+    if (av_hwframe_ctx_init(hw_frames) == 0) c = open_encoder("h264_vaapi", w, h, quality);
+    if (c) return c;
+    av_buffer_unref(&hw_frames);
+  }
+  return NULL;
+}
+
 int main(int argc, char **argv) {
   int w = 0, h = 0, quality = 0;
   const char *kinds = "avc1";
@@ -126,12 +166,18 @@ int main(int argc, char **argv) {
   char list[64];
   snprintf(list, sizeof list, "%s", kinds);
   for (char *k = strtok(list, ","); k && !c; k = strtok(NULL, ",")) {
-    if (!strcmp(k, "avc1")) name = "h264_nvenc";
-    else if (!strcmp(k, "vp8")) name = "libvpx";
-    else continue;
-    int q = quality;
-    if (q <= 0) q = !strcmp(name, "libvpx") ? 10 : 26;
-    c = open_encoder(name, w, h, q);
+    if (!strcmp(k, "avc1")) {
+      int q = quality > 0 ? quality : 26;
+      name = "h264_nvenc";
+      c = open_encoder(name, w, h, q);
+      if (!c) {
+        name = "h264_vaapi";
+        c = open_vaapi(w, h, q);
+      }
+    } else if (!strcmp(k, "vp8")) {
+      name = "libvpx";
+      c = open_encoder(name, w, h, quality > 0 ? quality : 10);
+    }
   }
   if (!c) {
     printf("error no encoder for %s\n", kinds);
@@ -140,27 +186,33 @@ int main(int argc, char **argv) {
   printf("ok %s %d %d\n", name, c->width, c->height);
   fflush(stdout);
 
+  // f is what the encoder reads (or, for VA-API, what is uploaded).
   AVFrame *f = av_frame_alloc();
-  f->format = c->pix_fmt;
+  f->format = hw_frames ? AV_PIX_FMT_NV12 : c->pix_fmt;
   f->width = c->width;
   f->height = c->height;
   if (av_frame_get_buffer(f, 0) < 0) return 1;
   struct SwsContext *sws = NULL;
   AVFrame *bgr = NULL;
-  if (c->pix_fmt != AV_PIX_FMT_BGR0) {
+  if (f->format != AV_PIX_FMT_BGR0) {
     bgr = av_frame_alloc();
     bgr->format = AV_PIX_FMT_BGR0;
     bgr->width = c->width;
     bgr->height = c->height;
     if (av_frame_get_buffer(bgr, 0) < 0) return 1;
-    sws = sws_getContext(c->width, c->height, AV_PIX_FMT_BGR0, c->width, c->height, c->pix_fmt, SWS_POINT, NULL, NULL, NULL);
+    // Converted in slices on up to 8 threads (sws_scale_frame).
+    sws = sws_alloc_context();
     if (!sws) return 1;
+    long n = sysconf(_SC_NPROCESSORS_ONLN);
+    sws->threads = n > 8 ? 8 : (n < 1 ? 1 : (int)n);
+    sws->flags = SWS_POINT;
   }
   AVFrame *in = bgr ? bgr : f;
   size_t size = (size_t)w * h * 4;
   uint8_t *buf = malloc(size);
   AVPacket *pkt = av_packet_alloc();
-  if (!buf || !pkt) return 1;
+  AVFrame *hw = hw_frames ? av_frame_alloc() : NULL;
+  if (!buf || !pkt || (hw_frames && !hw)) return 1;
 
   for (int64_t pts = 0;; pts++) {
     uint8_t hdr[8];
@@ -176,7 +228,7 @@ int main(int argc, char **argv) {
     }
     if (sws) {
       if (av_frame_make_writable(f) < 0) return 1;
-      sws_scale(sws, (const uint8_t *const *)in->data, in->linesize, 0, c->height, f->data, f->linesize);
+      if (sws_scale_frame(sws, f, in) < 0) return 1;
     }
     f->pts = pts;
     if (flags & 1) {
@@ -186,7 +238,16 @@ int main(int argc, char **argv) {
       f->pict_type = AV_PICTURE_TYPE_NONE;
       f->flags &= ~AV_FRAME_FLAG_KEY;
     }
-    if (avcodec_send_frame(c, f) < 0) return 1;
+    AVFrame *send = f;
+    if (hw) {
+      av_frame_unref(hw);
+      if (av_hwframe_get_buffer(hw_frames, hw, 0) < 0 || av_hwframe_transfer_data(hw, f, 0) < 0) return 1;
+      hw->pts = f->pts;
+      hw->pict_type = f->pict_type;
+      hw->flags = f->flags;
+      send = hw;
+    }
+    if (avcodec_send_frame(c, send) < 0) return 1;
     for (;;) {
       int r = avcodec_receive_packet(c, pkt);
       if (r == AVERROR(EAGAIN)) break;

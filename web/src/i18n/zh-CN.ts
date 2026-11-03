@@ -40,7 +40,7 @@ export const zhCN: Messages = {
   'gui.stats.browser': '浏览器：{fps} 帧/s · {kb} kB/帧 · {mbps} Mbit/s · 解码 {decode} ms · 绘制 {draw} ms · 跳过 {skipped}/s',
   'gui.stats.machine':
     '机器：{ups} 次更新/s（{fps} 帧/s，{mpx} Mpx/s）· 每次更新：截取 {capture} ms · 转换 {convert} ms · 编码 {encode} ms · JPEG {jpeg} · PNG {png}',
-  'gui.stats.flow': '截取到绘制：{latency} ms · 等待确认 {waits}/s',
+  'gui.stats.flow': '截取到绘制：{latency} ms · 最短 {rtt} ms · 在途上限 {budget} kB · 等待确认 {waits}/s',
   'gui.stats.noMachine': '正在等待机器的数据…',
   'gui.stats.video': '视频：{encoder}，{fps} 帧/s',
   'gui.stats.fallback': '以图片代替视频：{reason}',
@@ -363,4 +363,9 @@ export const zhCN: Messages = {
     '适用于装有 VirtualGL 的机器。使用 vglrun 时：以“vglrun 程序”启动的程序在 GPU 上渲染。所有程序：新建 pane 中的所有程序都在 VirtualGL 下运行。',
   'settings.gui-gpu.vglrun': '使用 vglrun 时',
   'settings.gui-gpu.all': '所有程序',
+  'settings.gui-video': '变化中的窗口用视频传输',
+  'settings.gui-video.desc':
+    '持续变化的窗口（仿真器、旋转中的图）以视频传输：有 NVIDIA、Intel 或 AMD 显卡的机器用 H.264，否则在 CPU 上编码 VP8。需要浏览器支持 WebCodecs，并通过 localhost 或 HTTPS 访问。静止的窗口始终以精确的图片传输；无法使用视频时改用图片。',
+  'settings.gui-video.on': '开',
+  'settings.gui-video.off': '关',
 };

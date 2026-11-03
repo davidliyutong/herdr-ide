@@ -160,8 +160,12 @@ type GUIStats struct {
 	Convert int64 `json:"convert_us"`
 	Encode  int64 `json:"encode_us"`
 	// Waits counts ticks whose changes were held back because the window
-	// had as many frames unacknowledged as allowed.
+	// had as many bytes (or frames) unacknowledged as allowed.
 	Waits int `json:"waits"`
+	// Budget is the bytes the window may have unacknowledged, RTT the
+	// shortest round trip measured (capture to drawn) it is based on.
+	Budget int64 `json:"budget,omitempty"`
+	RTT    int64 `json:"rtt_us,omitempty"`
 	// Latency is the total time from capture to acknowledgement (drawn by
 	// a browser, or dropped by the core) of the Acked frames.
 	Latency int64 `json:"latency_us"`

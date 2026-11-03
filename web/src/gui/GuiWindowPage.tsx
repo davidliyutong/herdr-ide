@@ -120,7 +120,14 @@ function StatsPanel({ s }: { s: StatsView }) {
               png: m.png,
             })}
           </div>
-          <div>{t('gui.stats.flow', { latency: f1(m.latencyMs), waits: f1(m.waits) })}</div>
+          <div>
+            {t('gui.stats.flow', {
+              latency: f1(m.latencyMs),
+              rtt: f1(m.rttMs),
+              budget: Math.round(m.budgetKb),
+              waits: f1(m.waits),
+            })}
+          </div>
           {m.encoder && <div>{t('gui.stats.video', { encoder: m.encoder, fps: f1(m.video) })}</div>}
           {m.fallback && <div>{t('gui.stats.fallback', { reason: t(`gui.stats.fallback.${m.fallback}`) })}</div>}
         </>

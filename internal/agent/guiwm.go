@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"image"
-	"image/jpeg"
 	"image/png"
 	"io"
 	"log"
@@ -63,6 +62,10 @@ type windowManager struct {
 	tools func() (string, []string)
 	// retired encoders are closed by the pump after its current frames.
 	retired []*videoEncoder
+
+	// Capturing through MIT-SHM (guishm.go); used by the pump only.
+	shmOK bool
+	seg   *shmBuf
 }
 
 type rect struct{ x, y, w, h int }
@@ -110,10 +113,9 @@ type managedWin struct {
 	watched             bool
 	seq, acked          uint32
 	layers              []xproto.Window
-	// inflight holds when each unacknowledged frame was captured.
-	inflight []sentFrame
-	stats    agentproto.GUIStats
-	since    time.Time // start of the stats interval
+	stats               agentproto.GUIStats
+	since               time.Time // start of the stats interval
+	flow
 
 	// Video: the stream kinds all viewers decode, the encoder while the
 	// window is sent as video (set by the pump), which recent ticks changed
@@ -128,20 +130,12 @@ type managedWin struct {
 	fallback  string
 }
 
-type sentFrame struct {
-	seq uint32
-	at  time.Time
-}
-
 type layerWin struct {
 	xwin
 	owner xproto.Window
 }
 
 const (
-	// guiInflight bounds frames sent but not yet shown per window, which
-	// adapts the frame rate to the connection.
-	guiInflight = 3
 	// guiTick is the shortest interval between frames (60 per second).
 	guiTick = 16 * time.Millisecond
 	// guiSettle is how long a window must stay unchanged before areas sent
@@ -206,6 +200,7 @@ func newWindowManager(x *xgb.Conn, out io.ReadWriter, logger *log.Logger) (*wind
 		done:    make(chan struct{}),
 	}
 	wm.resOK = res.Init(x) == nil
+	wm.shmOK = shmInit(x)
 	for _, name := range wmAtoms {
 		r, err := xproto.InternAtom(x, false, uint16(len(name)), name).Reply()
 		if err != nil {
@@ -800,10 +795,11 @@ func (wm *windowManager) command(c agentproto.GUICommand) {
 	}
 	switch c.Cmd {
 	case "watch":
-		// A first viewer: nothing is on its way to anyone.
+		// A first viewer: nothing is on its way to anyone, and what was
+		// learned about the connection was about another.
 		m.watched = true
 		m.acked = m.seq
-		m.inflight = nil
+		m.flow = flow{}
 		m.stats = agentproto.GUIStats{}
 		m.since = time.Now()
 		m.codecs = c.Codecs
@@ -920,299 +916,6 @@ func (wm *windowManager) releaseAll() {
 	for b := range wm.buttons {
 		wm.fake(false, false, b)
 	}
-}
-
-// ackedAt takes the frames up to seq off the inflight list, counting the
-// latency of seq itself.
-func (m *managedWin) ackedAt(seq uint32, now time.Time) {
-	n := 0
-	for _, f := range m.inflight {
-		if int32(f.seq-seq) > 0 {
-			break
-		}
-		if f.seq == seq {
-			m.stats.Latency += now.Sub(f.at).Microseconds()
-			m.stats.Acked++
-		}
-		n++
-	}
-	m.inflight = m.inflight[n:]
-}
-
-type capture struct {
-	window, layer xproto.Window
-	r             rect
-	lossless      bool
-	seq           uint32
-	// A video frame of the whole window: with the window's encoder, or a
-	// new stream of one of kinds when nil; key asks for a key frame.
-	video bool
-	vid   *videoEncoder
-	kinds []string
-	key   bool
-}
-
-// frameCost is what capturing and encoding one frame took.
-type frameCost struct {
-	window                   xproto.Window
-	capture, convert, encode time.Duration
-	pixels, bytes            int
-	enc                      byte
-	// Video: the encoder used, one that was started for the frame, or
-	// the error that ended the window's video.
-	vid, started *videoEncoder
-	vidErr       error
-}
-
-// pump sends changed areas of watched windows at most every guiTick, with
-// at most guiInflight frames per window waiting to be shown.
-func (wm *windowManager) pump() {
-	t := time.NewTicker(guiTick)
-	defer t.Stop()
-	// Encoders end with the stream.
-	defer func() {
-		wm.mu.Lock()
-		for _, m := range wm.wins {
-			if m.vid != nil {
-				wm.retired = append(wm.retired, m.vid)
-				m.vid = nil
-			}
-		}
-		retired := wm.retired
-		wm.retired = nil
-		wm.mu.Unlock()
-		for _, e := range retired {
-			e.close()
-		}
-	}()
-	for {
-		select {
-		case <-wm.done:
-			return
-		case <-t.C:
-		}
-		wm.mu.Lock()
-		jobs := wm.collect(time.Now())
-		wm.mu.Unlock()
-		costs := make([]frameCost, 0, len(jobs))
-		for _, j := range jobs {
-			c, err := wm.send(j)
-			if err != nil {
-				if isClosedErr(err) {
-					wm.close()
-					return
-				}
-			}
-			if c.enc != 0 || c.vidErr != nil || c.started != nil {
-				costs = append(costs, c)
-			}
-		}
-		wm.mu.Lock()
-		wm.account(costs, time.Now())
-		retired := wm.retired
-		wm.retired = nil
-		wm.mu.Unlock()
-		for _, e := range retired {
-			e.close()
-		}
-	}
-}
-
-// account adds frame costs to their windows' stats and reports the stats
-// of watched windows every guiStatsEvery.
-func (wm *windowManager) account(costs []frameCost, now time.Time) {
-	for _, c := range costs {
-		m := wm.wins[c.window]
-		wm.videoResult(m, c, now)
-		if m == nil || c.enc == 0 {
-			continue
-		}
-		st := &m.stats
-		st.Frames++
-		switch c.enc {
-		case agentproto.GUIEncJPEG:
-			st.JPEG++
-		case agentproto.GUIEncPNG:
-			st.PNG++
-		default:
-			st.Video++
-		}
-		st.Pixels += int64(c.pixels)
-		st.Bytes += int64(c.bytes)
-		st.Capture += c.capture.Microseconds()
-		st.Convert += c.convert.Microseconds()
-		st.Encode += c.encode.Microseconds()
-	}
-	for _, m := range wm.wins {
-		if !m.watched || now.Sub(m.since) < guiStatsEvery {
-			continue
-		}
-		st := m.stats
-		st.Window = uint32(m.id)
-		st.Interval = now.Sub(m.since).Microseconds()
-		if m.vid != nil {
-			st.Encoder = m.vid.name
-		}
-		st.Fallback = m.fallback
-		wm.emit(agentproto.GUIEvent{Ev: "stats", Stats: &st})
-		m.stats = agentproto.GUIStats{}
-		m.since = now
-	}
-}
-
-// tiles splits r into rectangles of at most guiTile×guiTile, row by row.
-func tiles(r rect) []rect {
-	var out []rect
-	for y := r.y; y < r.y+r.h; y += guiTile {
-		for x := r.x; x < r.x+r.w; x += guiTile {
-			out = append(out, rect{x, y, min(guiTile, r.x+r.w-x), min(guiTile, r.y+r.h-y)})
-		}
-	}
-	return out
-}
-
-func (wm *windowManager) collect(now time.Time) []capture {
-	var jobs []capture
-	for _, m := range wm.wins {
-		budget := guiInflight - int(m.seq-m.acked)
-		if !m.watched {
-			wm.stopVideo(m)
-			continue
-		}
-		wm.trackMotion(m)
-		if budget <= 0 {
-			if wm.changed(m) {
-				m.stats.Waits++
-			}
-			continue
-		}
-		sent := false
-		ws := []*xwin{&m.xwin}
-		if j, ok := wm.videoJob(m, now); ok {
-			jobs = append(jobs, j)
-			budget--
-			sent = true
-			m.stats.Updates++
-			ws = ws[:0] // only its layers, as pictures
-		}
-		for _, id := range m.layers {
-			if l := wm.layers[id]; l != nil {
-				ws = append(ws, &l.xwin)
-			}
-		}
-		for _, w := range ws {
-			if budget <= 0 {
-				break
-			}
-			r, lossless := w.dirty.clip(w.w, w.h), false
-			if r.empty() {
-				// Settled: replace what was sent as JPEG.
-				if w.lossy.empty() || now.Sub(w.changed) < guiSettle {
-					continue
-				}
-				r, lossless = w.lossy.clip(w.w, w.h), true
-				if r.empty() {
-					w.lossy = rect{}
-					continue
-				}
-			}
-			ts := tiles(r)
-			if !sent {
-				sent = true
-				m.stats.Updates++
-			}
-			var rest rect
-			if len(ts) > budget {
-				for _, t := range ts[budget:] {
-					rest = rest.union(t)
-				}
-				ts = ts[:budget]
-			}
-			// What is left is sent at the next tick.
-			if lossless {
-				w.lossy = rest
-			} else {
-				w.dirty = rest
-			}
-			if w.damage != 0 {
-				damage.Subtract(wm.x, w.damage, 0, 0)
-			}
-			for _, t := range ts {
-				m.seq++
-				budget--
-				m.inflight = append(m.inflight, sentFrame{m.seq, now})
-				jobs = append(jobs, capture{window: m.id, layer: w.id, r: t, lossless: lossless, seq: m.seq})
-				if !lossless && t.w*t.h >= guiPNGArea {
-					w.lossy = w.lossy.union(t)
-				}
-			}
-		}
-	}
-	return jobs
-}
-
-// changed reports whether a window or one of its layers has changes not
-// sent yet.
-func (wm *windowManager) changed(m *managedWin) bool {
-	if !m.dirty.empty() {
-		return true
-	}
-	for _, id := range m.layers {
-		if l := wm.layers[id]; l != nil && !l.dirty.empty() {
-			return true
-		}
-	}
-	return false
-}
-
-// send captures one rectangle and writes it as a frame. The cost has no
-// encoding when nothing was sent.
-func (wm *windowManager) send(j capture) (frameCost, error) {
-	if j.video {
-		return wm.sendVideo(j)
-	}
-	c := frameCost{window: j.window, pixels: j.r.w * j.r.h}
-	t0 := time.Now()
-	img, err := xproto.GetImage(wm.x, xproto.ImageFormatZPixmap, xproto.Drawable(j.layer),
-		int16(j.r.x), int16(j.r.y), uint16(j.r.w), uint16(j.r.h), 0xffffffff).Reply()
-	if err != nil || img == nil || len(img.Data) < j.r.w*j.r.h*4 {
-		return frameCost{}, nil // the window went away
-	}
-	t1 := time.Now()
-	rgba := bgrxToRGBA(img.Data, j.r.w, j.r.h)
-	t2 := time.Now()
-	var buf bytes.Buffer
-	enc := agentproto.GUIEncJPEG
-	if j.lossless || j.r.w*j.r.h < guiPNGArea {
-		enc = agentproto.GUIEncPNG
-		e := png.Encoder{CompressionLevel: png.BestSpeed}
-		err = e.Encode(&buf, rgba)
-	} else {
-		err = jpeg.Encode(&buf, rgba, &jpeg.Options{Quality: 85})
-	}
-	if err != nil {
-		return frameCost{}, nil
-	}
-	c.capture, c.convert, c.encode = t1.Sub(t0), t2.Sub(t1), time.Since(t2)
-	c.bytes, c.enc = buf.Len(), enc
-	h := agentproto.GUIFrameHeader{
-		Window: uint32(j.window), Layer: uint32(j.layer),
-		X: int16(j.r.x), Y: int16(j.r.y), W: uint16(j.r.w), H: uint16(j.r.h),
-		Enc: enc, Seq: j.seq,
-	}
-	wm.writeMu.Lock()
-	defer wm.writeMu.Unlock()
-	return c, agentproto.WriteGUI(wm.out, agentproto.GUIFrame, h.Marshal(), buf.Bytes())
-}
-
-// bgrxToRGBA converts a 32 bits per pixel ZPixmap of a depth 24 visual.
-func bgrxToRGBA(data []byte, w, h int) *image.RGBA {
-	img := image.NewRGBA(image.Rect(0, 0, w, h))
-	p := img.Pix
-	for i := 0; i < w*h*4; i += 4 {
-		p[i], p[i+1], p[i+2], p[i+3] = data[i+2], data[i+1], data[i], 0xff
-	}
-	return img
 }
 
 // sendCursor sends the current pointer image.

@@ -33,6 +33,7 @@ module.exports = {
     // Beside the core, where it finds the bundled herdr (docs/features/15).
     { from: herdr, to: 'bin/herdr' },
     { from: '../licenses/herdr', to: 'licenses/herdr' },
+    { from: '../licenses/encoder', to: 'licenses/encoder' },
     { from: '../LICENSE', to: 'LICENSE' },
     { from: '../THIRD_PARTY_NOTICES.md', to: 'THIRD_PARTY_NOTICES.md' },
     { from: '../web/dist/licenses.md', to: 'licenses.md' },

@@ -43,7 +43,7 @@ export const en = {
     'Browser: {fps} frames/s · {kb} kB/frame · {mbps} Mbit/s · decode {decode} ms · draw {draw} ms · skipped {skipped}/s',
   'gui.stats.machine':
     'Machine: {ups} updates/s ({fps} frames/s, {mpx} Mpx/s) · per update: capture {capture} ms · convert {convert} ms · encode {encode} ms · JPEG {jpeg} · PNG {png}',
-  'gui.stats.flow': 'Capture to drawn: {latency} ms · held back {waits}/s',
+  'gui.stats.flow': 'Capture to drawn: {latency} ms · shortest {rtt} ms · up to {budget} kB on the way · held back {waits}/s',
   'gui.stats.noMachine': 'Waiting for the machine’s figures…',
   'gui.stats.video': 'Video: {encoder}, {fps} frames/s',
   'gui.stats.fallback': 'Pictures instead of video: {reason}',
@@ -369,6 +369,11 @@ export const en = {
     'On machines with VirtualGL. With vglrun: programs started as “vglrun program” render on the GPU. All programs: every program in new panes runs under VirtualGL.',
   'settings.gui-gpu.vglrun': 'With vglrun',
   'settings.gui-gpu.all': 'All programs',
+  'settings.gui-video': 'Video for moving windows',
+  'settings.gui-video.desc':
+    'Windows that keep changing (a simulator, a rotating plot) are sent as video: H.264 on machines with an NVIDIA, Intel or AMD GPU, else VP8 on the CPU. Needs a browser with WebCodecs on localhost or HTTPS. Still windows are always sent as exact pictures; when video is not possible, pictures are used.',
+  'settings.gui-video.on': 'On',
+  'settings.gui-video.off': 'Off',
 } as const;
 
 export type MessageKey = keyof typeof en;

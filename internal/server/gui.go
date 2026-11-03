@@ -26,7 +26,6 @@ import (
 func (s *Server) initGUI() {
 	s.gui = gui.New(s.opts.Settings, s.logger)
 	s.gui.ReadOnly = s.opts.ReadOnly
-	s.gui.Video = s.opts.GUIVideo
 	s.gui.Audit = func(event string, fields map[string]any) { s.audit.log(nil, event, fields) }
 	s.gui.OnState = func(st gui.State) {
 		s.broadcast(map[string]any{"t": "gui", "state": st})
@@ -40,7 +39,7 @@ func (s *Server) initGUI() {
 	}, func(machines.AgentEvent) {})
 	if s.opts.Settings != nil {
 		s.opts.Settings.OnChange(func(key, machine, _ string) {
-			if key != gui.SettingGUI {
+			if key != gui.SettingGUI && key != gui.SettingVideo {
 				return
 			}
 			// A global change affects every machine without its own value.
@@ -49,7 +48,11 @@ func (s *Server) initGUI() {
 					continue
 				}
 				if mc := s.mg.Get(st.ID); mc != nil && (st.Status == machines.StatusReady || st.Status == machines.StatusDegraded) {
-					s.gui.Apply(mc)
+					if key == gui.SettingVideo {
+						s.gui.ApplyVideo(mc)
+					} else {
+						s.gui.Apply(mc)
+					}
 				}
 			}
 		})

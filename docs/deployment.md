@@ -24,6 +24,13 @@ Each `dist/release/` archive contains the core, a native herdr 0.9.5 beside it
 and licenses. Extract it as a directory; moving just the core loses the bundled
 herdr. Supported hosts are Linux/macOS on amd64/arm64.
 
+The core embeds the video encoder it puts on Linux machines to send program
+windows as video ([14](features/14-gui-windows.md)). `scripts/build.sh`
+embeds it when `scripts/build-ffmpeg.sh` (Docker) built it into
+`dist/ffmpeg/`; the release workflow builds it on native amd64 and arm64
+runners and requires it (`REQUIRE_ENCODER=1`). A build without it sends
+program windows as pictures.
+
 The bundled herdr only spares installing herdr on this host. herdr-ide uses an
 installed herdr when it finds one, otherwise its own copy of the bundled
 one, and herdr keeps its usual configuration, sessions and machine list
@@ -255,10 +262,12 @@ What herdr-ide starts on a machine and how it is reclaimed:
 | code-server | on first VS Code use | Stopped after `--code-server-idle` (default 20 min) without VS Code connections, when the agent exits (if that agent started it; for the local machine, when the core stops), or by the stop button in the VS Code panel. Hidden VS Code panels disconnect after 10 min. A process left behind by a killed agent is stopped by the next agent, and code-server exits by itself after 1 h without connections. |
 | VS Code extension hosts | one per VS Code window | Disposed 5 min after the window disconnects. |
 | ssh ControlMaster | per machine | Exits after 10 min unused. |
-| Xvfb (virtual display) | when a remote Linux machine connects with the GUI setting on | Runs in its own session so programs keep their windows across disconnects; exits 6 h after its last client (programs and the agent's window manager) disconnected; the agent connects once after starting it, so this also holds when nothing attaches. With xorg-server before 21.1 it exits as soon as its last client leaves, and one that never got a client stays until an agent attaches. |
+| Xvfb (virtual display) | when a remote Linux machine connects with the GUI setting on | Runs in its own session so programs keep their windows across disconnects; exits 1 min after its last client (programs, the agent's window manager, the display keeper) disconnected, so soon after the herdr server stops and its programs exit; the agent connects once after starting it, so this also holds when nothing attaches. With xorg-server before 21.1 it exits as soon as its last client leaves, and one that never got a client stays until an agent attaches. |
+| Display keeper (`herdr-ide-agent gui-keep`) | when a display is ready (never in `--read-only`), and when herdr's server is started from the UI | One per instance (`run/gui-keep.lock`), in its own session; holds a connection to the display while the session's herdr server runs (checked every 5 s by its socket's peer process and start time), follows a server restarted within 30 s, and exits otherwise or when the display ends. |
 | `apt-get download xvfb` | when a machine has no Xvfb (never in `--read-only`) | Ends with the download (5 min limit); the package is unpacked into `~/.herdr-ide/xvfb/` and the download removed; a download left by a killed agent is removed by the next agent after 1 h. A failed install or start is retried after 5 s, doubling up to 5 min, while the machine stays connected. |
-| Video encoder (`--gui-video`) | one per program window sent as video | Started by the agent's window manager while a watched window keeps changing; ends after 5 s without changes, when the window is no longer watched, resized or gone, when its viewers change to another stream, or with the agent (own process group, killed with the agent). With NVENC each holds one GPU encode session; consumer NVIDIA cards allow 8 per machine for all users together, and a session that cannot open sends the window as pictures. |
-| Pushing the video encoder (`--gui-video`) | when a machine's display is ready (never in `--read-only`) | One upload of about 1.5 MB per build and machine, verified by SHA-256 and kept in `~/.herdr-ide/video/`; unused builds are removed after 14 days. |
+| Video encoder (`gui-video`, on by default) | one per program window sent as video | Started by the agent's window manager while a watched window keeps changing; ends after 5 s without changes, when the window is no longer watched, resized or gone, when its viewers change to another stream, when video is turned off for the machine, or with the agent (own process group, killed with the agent). With NVENC each holds one GPU encode session; consumer NVIDIA cards allow 8 per machine for all users together, and a stream that cannot open one uses VA-API or VP8, else pictures. VA-API holds a context on the render node while it runs. |
+| Pushing the video encoder (`gui-video`) | when a Linux machine's display is ready and video is on for it (never in `--read-only`) | One upload of about 2 MB per build and machine, verified by SHA-256 and kept in `~/.herdr-ide/video/`; unused builds are removed after 14 days. |
+| Shared memory for captures | while the agent's window manager runs | One System V segment of at most 64 MB, 0600, marked for removal as soon as Xvfb attached it: it disappears when the agent's connection to the display closes, also when the agent is killed. |
 | curl or wget (`--code-server-install=download`) | while a machine downloads code-server | Ends with the download (20 min limit); the partial file in `~/.herdr-ide/code-server/` is removed, or with the unused versions after 14 days if the agent was killed. |
 | Disk | see [reference](reference.md#files-and-directories) | Uploads and logs after 7 days; unused agent builds, code-server versions, Xvfb packages and video encoders after 14 days. Files dropped on a pane are written into the pane's directory and belong to the user, like files copied there by hand. |
 

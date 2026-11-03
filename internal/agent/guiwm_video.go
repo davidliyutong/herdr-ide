@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/jezek/xgb/damage"
-	"github.com/jezek/xgb/xproto"
 
 	"herdr-ide/internal/agentproto"
 )
@@ -93,9 +92,7 @@ func (wm *windowManager) videoJob(m *managedWin, now time.Time) (capture, bool) 
 	if m.damage != 0 {
 		damage.Subtract(wm.x, m.damage, 0, 0)
 	}
-	m.seq++
-	m.inflight = append(m.inflight, sentFrame{m.seq, now})
-	j := capture{window: m.id, layer: m.id, r: m.all(), seq: m.seq, video: true, vid: m.vid, kinds: kinds, key: m.keyWanted || m.vid == nil}
+	j := capture{window: m.id, layer: m.id, r: m.all(), video: true, vid: m.vid, kinds: kinds, key: m.keyWanted || m.vid == nil}
 	m.keyWanted = false
 	m.lastVideo = now
 	// Sent again as PNG once the window settles.
@@ -149,48 +146,30 @@ func (wm *windowManager) videoResult(m *managedWin, c frameCost, now time.Time) 
 	m.vidFails = 0
 }
 
-// sendVideo captures the whole window and writes it as a video frame,
-// starting a stream (and announcing it) when the window has none yet.
-func (wm *windowManager) sendVideo(j capture) (frameCost, error) {
-	c := frameCost{window: j.window, pixels: j.r.w * j.r.h, vid: j.vid}
-	t0 := time.Now()
-	img, err := xproto.GetImage(wm.x, xproto.ImageFormatZPixmap, xproto.Drawable(j.layer),
-		0, 0, uint16(j.r.w), uint16(j.r.h), 0xffffffff).Reply()
-	if err != nil || img == nil || len(img.Data) < j.r.w*j.r.h*4 {
-		return frameCost{}, nil // the window went away
-	}
-	t1 := time.Now()
+// encodeVideo encodes the captured window as the next frame of its
+// stream, starting a stream when the window has none yet.
+func (wm *windowManager) encodeVideo(j capture, pix []byte, f *frame) {
+	t := time.Now()
 	e, key := j.vid, j.key
 	if e == nil {
 		bin, _ := wm.tools()
-		e, err = startEncoder(bin, j.r.w, j.r.h, j.kinds)
-		if err != nil {
-			c.vidErr = err
-			return c, nil
+		var err error
+		if e, err = startEncoder(bin, j.r.w, j.r.h, j.kinds); err != nil {
+			f.cost.vidErr = err
+			return
 		}
-		c.started, key = e, true
+		f.cost.started, key = e, true
 	}
-	data, isKey, err := e.encode(img.Data, key)
+	data, isKey, err := e.encode(pix, key)
 	if err != nil {
-		c.vidErr = err
-		return c, nil
+		f.cost.vidErr = err
+		return
 	}
-	c.capture, c.encode = t1.Sub(t0), time.Since(t1)
-	c.bytes = len(data)
-	c.enc = agentproto.GUIEncVideo
+	f.cost.encode = time.Since(t)
+	f.cost.bytes = len(data)
+	f.cost.enc = agentproto.GUIEncVideo
 	if isKey {
-		c.enc = agentproto.GUIEncVideoKey
+		f.cost.enc = agentproto.GUIEncVideoKey
 	}
-	if c.started != nil {
-		wm.emit(agentproto.GUIEvent{Ev: "video", Video: &agentproto.GUIVideo{
-			Window: uint32(j.window), Codec: e.codec(data), Encoder: e.name, W: e.cw, H: e.ch,
-		}})
-	}
-	h := agentproto.GUIFrameHeader{
-		Window: uint32(j.window), Layer: uint32(j.layer),
-		W: uint16(j.r.w), H: uint16(j.r.h), Enc: c.enc, Seq: j.seq,
-	}
-	wm.writeMu.Lock()
-	defer wm.writeMu.Unlock()
-	return c, agentproto.WriteGUI(wm.out, agentproto.GUIFrame, h.Marshal(), data)
+	f.data = data
 }

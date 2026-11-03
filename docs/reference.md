@@ -13,6 +13,7 @@ here; both READMEs link to this page instead of repeating it.
 | `herdr-ide fetch-assets [flags] DIR` | Download and verify code-server releases and extensions into `DIR` for air-gapped installs. |
 | `herdr-ide version` | Print the version. |
 | `herdr-ide-agent serve [--instance NAME]` | Per-machine helper; started by the core over ssh, never by hand. |
+| `herdr-ide-agent gui-keep --instance NAME --session S` | Holds a machine's virtual display while the herdr server of session `S` runs; started by the agent, never by hand. |
 
 ## `serve` flags
 
@@ -58,7 +59,7 @@ here; both READMEs link to this page instead of repeating it.
 | --- | --- | --- |
 | `--gui` | `on` | Show windows of programs on remote Linux machines in browser windows: new panes get a virtual display (`DISPLAY`, `XAUTHORITY`); Xvfb is fetched in user space when missing. Applies to panes created afterwards. Also a setting in the UI. |
 | `--gui-gpu` | `vglrun` | OpenGL on machines with VirtualGL: `vglrun` (programs started with `vglrun` render on the GPU) or `all` (every program in new panes runs under VirtualGL). Also a setting in the UI. |
-| `--gui-video` | `off` | Experimental: `on` sends program windows that keep changing as video (H.264 through NVENC, else VP8 on the CPU) to browsers that decode it with WebCodecs, encoded on the machine by the encoder this build brings; pictures otherwise. Needs a build that embeds the encoder (`scripts/build-ffmpeg.sh` before `make build`). |
+| `--gui-video` | `on` | Send program windows that keep changing as video (H.264 on machines with an NVIDIA, Intel or AMD GPU, else VP8 on the CPU) to browsers that decode it with WebCodecs, encoded on the machine by the encoder the core brings; pictures otherwise, and always with `off`. Release builds embed the encoder; a build without it (no `scripts/build-ffmpeg.sh` before `make build`) sends pictures. Also a setting in the UI. |
 
 ### Desktop app shortcuts
 
@@ -70,7 +71,7 @@ here; both READMEs link to this page instead of repeating it.
 Settings marked "also a setting in the UI" can be changed in the settings
 dialog; the value is saved on the core host. code-server settings apply from
 the next code-server start on each machine, GUI settings to panes created
-afterwards. `--gui` and `--gui-gpu` can also be set per remote machine in the
+afterwards, video from the next frame. `--gui`, `--gui-gpu` and `--gui-video` can also be set per remote machine in the
 dialog ("Per machine"); a machine without its own value uses the global one.
 A flag given on the command line wins, for every machine, and locks the
 setting in the UI.
@@ -168,10 +169,11 @@ On every machine (the agent's `$HOME`):
 | `~/.herdr-ide/code-server/<version>/` | code-server releases (shared by instances) | Versions unused for 14 days are removed. |
 | `~/.herdr-ide/herdr/herdr` | Core host only: the application's copy of the bundled herdr (shared by instances) | Replaced by **Update** and by a newer bundled herdr; kept until removed. |
 | `~/.herdr-ide/herdr/server.log` | Core host only: output of the herdr server last started from the UI | Replaced at every start from the UI. |
-| `~/.herdr-ide[-<instance>]/run/` (0700) | `cs.sock`, `cs.pid`, `bridge.sock`; `gui.json` (reserved display and Xvfb pid), `xauth` (panes' display cookie) and `xauth.server` (Xvfb's copy), both 0600 and replaced at each Xvfb start, `gui.lock` | Sockets while the agent runs; the display files are kept so panes keep a valid environment. |
+| `~/.herdr-ide[-<instance>]/run/` (0700) | `cs.sock`, `cs.pid`, `bridge.sock`; `gui.json` (reserved display and Xvfb pid), `xauth` (panes' display cookie) and `xauth.server` (Xvfb's copy), both 0600 and replaced at each Xvfb start, `gui.lock`, `gui-keep.lock` (held by the display keeper) | Sockets while the agent runs; the display files are kept so panes keep a valid environment. |
 | `~/.herdr-ide/xvfb/<version>/` | Xvfb unpacked from the distribution's package (shared by instances) | Versions unused for 14 days are removed when another is unpacked. |
 | `~/.herdr-ide/video/<sha256 prefix>/encoder` | Video encoder pushed by the core (`--gui-video`, shared by instances), run only while its SHA-256 matches | Builds unused for 14 days are removed when another is installed; unfinished installs after 1 h. |
 | `~/.herdr-ide[-<instance>]/xvfb.log` | Output of the last Xvfb started | Replaced at each start. |
+| `~/.herdr-ide[-<instance>]/gui-keep.log` | Output of the last display keeper | Replaced at each start. |
 | `~/.herdr-ide[-<instance>]/cs-data/`, `cs-ext/` | VS Code settings, extensions | Kept; logs older than 7 days are pruned. |
 | `~/.herdr-ide[-<instance>]/uploads/` | Pasted and dropped files | Files older than 7 days are pruned. |
 

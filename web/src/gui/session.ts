@@ -207,16 +207,19 @@ export class GuiSession {
       return;
     }
     const blob = new Blob([new Uint8Array(buf, FRAME_HEADER)], { type: enc === ENC_JPEG ? 'image/jpeg' : 'image/png' });
-    // Frames are drawn in order; decoding is asynchronous.
+    // Pictures decode at the same time, as they arrive; they are drawn in
+    // order.
+    const t0 = performance.now();
+    const decoded = createImageBitmap(blob).then((bmp) => ({ bmp, at: performance.now() }));
+    decoded.catch(() => undefined); // handled below, in order
     this.drawing = this.drawing.then(async () => {
       try {
-        const t0 = performance.now();
-        const bmp = await createImageBitmap(blob);
+        const { bmp, at } = await decoded;
         const t1 = performance.now();
         const canvas = layer === this.id ? this.base : this.layers.get(layer)?.el;
         if (canvas) this.context(canvas)?.drawImage(bmp, x, y);
         bmp.close();
-        this.stats.drawn(t1 - t0, performance.now() - t1);
+        this.stats.drawn(at - t0, performance.now() - t1);
       } catch {
         // A corrupt image only costs that rectangle.
       }

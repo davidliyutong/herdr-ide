@@ -1,0 +1,43 @@
+name: encoder
+
+# Builds the video encoder of Linux machines (scripts/build-ffmpeg.sh) on
+# native runners: when it changes, and for releases, which embed it.
+on:
+  pull_request:
+    paths: ['scripts/build-ffmpeg.sh', 'scripts/encoder/**', '.github/workflows/encoder.yml']
+  push:
+    branches: [main]
+    paths: ['scripts/build-ffmpeg.sh', 'scripts/encoder/**', '.github/workflows/encoder.yml']
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - platform: linux-amd64
+            runner: ubuntu-24.04
+          - platform: linux-arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      # The pinned sources and the libraries built from them; encoder.c is
+      # compiled every time.
+      - uses: actions/cache@v6
+        with:
+          path: |
+            dist/ffmpeg/src
+            dist/ffmpeg/build-${{ matrix.platform }}
+          key: encoder-${{ matrix.platform }}-${{ hashFiles('scripts/build-ffmpeg.sh') }}
+      - run: scripts/build-ffmpeg.sh
+        env:
+          FFMPEG_PLATFORMS: linux/${{ matrix.platform == 'linux-amd64' && 'amd64' || 'arm64' }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: encoder-${{ matrix.platform }}
+          path: dist/ffmpeg/${{ matrix.platform }}/encoder.gz
+          if-no-files-found: error

@@ -193,6 +193,7 @@ func TestVideoDecision(t *testing.T) {
 		jobs := wm.collect(now)
 		for _, j := range jobs {
 			m.acked = j.seq
+			m.ackedAt(j.seq, now)
 		}
 		return jobs
 	}

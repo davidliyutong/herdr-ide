@@ -18,11 +18,12 @@ for p in $TARGETS; do
   test -f "dist/$name"
   test -f "dist/herdr/herdr-$os-$arch"
   rm -rf "$dir"
-  mkdir -p "$dir/licenses/herdr"
+  mkdir -p "$dir/licenses/herdr" "$dir/licenses/encoder"
   cp "dist/$name" "$dir/$SLUG"
   cp "dist/herdr/herdr-$os-$arch" "$dir/herdr"
   cp LICENSE THIRD_PARTY_NOTICES.md web/dist/licenses.md "$dir/"
   cp licenses/herdr/* "$dir/licenses/herdr/"
+  cp licenses/encoder/* "$dir/licenses/encoder/"
   cat > "$dir/README.txt" <<EOF
 $SLUG release for $p
 
@@ -38,7 +39,7 @@ machines). Run it directly or through $SLUG, for example:
 
 Remote machines need their own installed herdr.
 
-Licenses: LICENSE, THIRD_PARTY_NOTICES.md, licenses.md, licenses/herdr/.
+Licenses: LICENSE, THIRD_PARTY_NOTICES.md, licenses.md, licenses/herdr/, licenses/encoder/.
 EOF
   tar -C dist/packages -czf "dist/release/$name.tar.gz" "$name"
   echo "    dist/release/$name.tar.gz"

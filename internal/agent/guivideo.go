@@ -35,7 +35,8 @@ import (
 const videoMaxBinary = 256 << 20
 
 // videoKinds are the stream kinds the encoder can make, in the order they
-// are probed: avc1 (H.264 through NVENC) and vp8 (libvpx, on the CPU).
+// are probed: avc1 (H.264 through NVENC, else VA-API on Intel and AMD GPUs)
+// and vp8 (libvpx, on the CPU).
 var videoKinds = []string{"avc1", "vp8"}
 
 func (g *gui) videoRoot() string { return filepath.Join(g.a.home, brand.DataDirName, "video") }
@@ -222,14 +223,14 @@ type videoEncoder struct {
 	out    *os.File
 	rd     *bufio.Reader
 	stderr *limitedBuffer
-	name   string   // h264_nvenc, libvpx
+	name   string   // h264_nvenc, h264_vaapi, libvpx
 	kind   string   // avc1, vp8
 	kinds  []string // what it was started for, in order
 	w, h   int      // window size
 	cw, ch int      // coded size
 }
 
-// videoStart bounds starting an encoder (NVENC initialization) and
+// videoStart bounds starting an encoder (GPU initialization) and
 // videoFrameTimeout encoding one frame.
 const (
 	videoStart        = 15 * time.Second
@@ -277,7 +278,7 @@ func startEncoder(bin string, w, h int, kinds []string) (*videoEncoder, error) {
 		e.cw, _ = strconv.Atoi(f[2])
 		e.ch, _ = strconv.Atoi(f[3])
 	}
-	e.kind = map[string]string{"h264_nvenc": "avc1", "libvpx": "vp8"}[e.name]
+	e.kind = map[string]string{"h264_nvenc": "avc1", "h264_vaapi": "avc1", "libvpx": "vp8"}[e.name]
 	return e, nil
 }
 

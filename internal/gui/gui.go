@@ -27,8 +27,9 @@ import (
 
 // Settings.
 const (
-	SettingGUI = "gui"
-	SettingGPU = "gui-gpu"
+	SettingGUI   = "gui"
+	SettingGPU   = "gui-gpu"
+	SettingVideo = "gui-video"
 
 	GPUVglrun = "vglrun"
 	GPUAll    = "all"
@@ -44,6 +45,11 @@ var SettingDefs = []settings.Def{
 	{
 		Key: SettingGPU, Kind: settings.KindEnum, Default: GPUVglrun, Options: []string{GPUVglrun, GPUAll},
 		Usage:      "OpenGL on machines with VirtualGL: vglrun (programs started with vglrun render on the GPU) or all (every program in new panes runs under VirtualGL); also per machine in the UI",
+		PerMachine: settings.ScopeRemote,
+	},
+	{
+		Key: SettingVideo, Kind: settings.KindEnum, Default: "on", Options: []string{"on", "off"},
+		Usage:      "send program windows that keep changing as video (H.264 on NVIDIA, Intel or AMD GPUs, else VP8 on the CPU) to browsers that decode it, encoded on the machine by the encoder the core brings; pictures otherwise (off: always pictures); also per machine in the UI",
 		PerMachine: settings.ScopeRemote,
 	},
 }
@@ -80,9 +86,9 @@ type Viewer struct {
 	// "vp8"); none means pictures only.
 	Codecs []string
 
-	sent      []uint32  // frames sent and not acknowledged
-	stale     bool      // frames were dropped: needs the whole window again
-	refreshed time.Time // last refresh this viewer asked for
+	sent      []sentFrame // frames sent and not acknowledged
+	stale     bool        // frames were dropped: needs the whole window again
+	refreshed time.Time   // last refresh this viewer asked for
 	// needKey: video frames were dropped (or none came yet), so the
 	// viewer cannot decode until the next key frame.
 	needKey  bool
@@ -92,9 +98,27 @@ type Viewer struct {
 // refreshEvery bounds how often one viewer may have a window sent in full.
 const refreshEvery = 500 * time.Millisecond
 
-// viewerBacklog bounds frames sent to a viewer and not yet shown; frames
-// beyond it are dropped for that viewer.
-const viewerBacklog = 4
+type sentFrame struct {
+	seq uint32
+	at  time.Time
+}
+
+// A viewer skips frames while the oldest frame it has not shown was shown
+// by another viewer and sent viewerLag ago (the agent goes at the pace of
+// the fastest viewer), or while it has viewerMaxFrames unshown.
+const (
+	viewerLag       = 250 * time.Millisecond
+	viewerMaxFrames = 64
+)
+
+// behind reports whether v should skip frames of a window whose frames up
+// to acked were shown by some viewer.
+func (v *Viewer) behind(acked uint32, now time.Time) bool {
+	if len(v.sent) >= viewerMaxFrames {
+		return true
+	}
+	return len(v.sent) > 0 && v.sent[0].seq <= acked && now.Sub(v.sent[0].at) > viewerLag
+}
 
 // closeGrace lets a viewer that is reloading come back before its window
 // is closed.
@@ -111,12 +135,8 @@ type Manager struct {
 	ReadOnly bool
 	// Audit records installing and starting displays.
 	Audit func(event string, fields map[string]any)
-	// Video lets machines send windows that keep changing as video to
-	// browsers that decode it (--gui-video).
-	Video bool
-
-	mu sync.Mutex
-	ds map[string]*display
+	mu    sync.Mutex
+	ds    map[string]*display
 }
 
 type display struct {
@@ -415,8 +435,46 @@ func (m *Manager) prepare(d *display, sess *transport.Session) {
 	m.mu.Unlock()
 	m.setPhase(d, PhaseReady, nil)
 	go m.read(d, sess, conn)
-	if m.Video && !m.ReadOnly {
+	if !m.ReadOnly {
+		go m.keep(d)
+	}
+	if m.setting(SettingVideo, mc.ID()) != "off" && !m.ReadOnly {
 		go m.prepareVideo(d)
+	}
+}
+
+// ApplyVideo follows a change of the video setting for a machine: viewed
+// windows get the streams their viewers share (none when off), and turning
+// it on puts the encoder on the machine.
+func (m *Manager) ApplyVideo(mc *machines.Machine) {
+	m.mu.Lock()
+	d := m.ds[mc.ID()]
+	if d == nil || d.stream == nil {
+		m.mu.Unlock()
+		return
+	}
+	for id, vs := range d.viewers {
+		if len(vs) == 0 {
+			continue
+		}
+		old := d.codecs[id]
+		if c := m.updateCodecsLocked(d, id); d.codecs[id] != old {
+			m.sendLocked(d, agentproto.GUICommand{Cmd: "codecs", ID: id, Codecs: c})
+		}
+	}
+	m.mu.Unlock()
+	if m.setting(SettingVideo, mc.ID()) != "off" && !m.ReadOnly {
+		go m.prepareVideo(d)
+	}
+}
+
+// keep has the machine keep its display while its herdr server runs, also
+// after this connection ends.
+func (m *Manager) keep(d *display) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	if _, err := m.request(ctx, d.mc, "keep"); err != nil {
+		m.Logger.Printf("gui %s: keeping the display: %v", d.mc.Label(), err)
 	}
 }
 
@@ -658,13 +716,14 @@ func (m *Manager) frame(d *display, payload []byte) {
 	defer m.mu.Unlock()
 	delivered := false
 	video := h.Enc == agentproto.GUIEncVideo || h.Enc == agentproto.GUIEncVideoKey
+	now := time.Now()
 	for v := range d.viewers[h.Window] {
 		if video && v.needKey && h.Enc != agentproto.GUIEncVideoKey {
 			// Undecodable without the frames it missed.
 			m.askKeyLocked(d, h.Window, v)
 			continue
 		}
-		if len(v.sent) >= viewerBacklog || !v.Send(agentproto.GUIFrame, payload) {
+		if v.behind(d.acked[h.Window], now) || !v.Send(agentproto.GUIFrame, payload) {
 			if video {
 				v.needKey = true
 			} else {
@@ -675,7 +734,7 @@ func (m *Manager) frame(d *display, payload []byte) {
 		if h.Enc == agentproto.GUIEncVideoKey {
 			v.needKey = false
 		}
-		v.sent = append(v.sent, h.Seq)
+		v.sent = append(v.sent, sentFrame{h.Seq, now})
 		delivered = true
 	}
 	// A frame nobody got will not be acknowledged by a viewer; the agent
@@ -704,7 +763,7 @@ var codecPreference = []string{"avc1", "vp8"}
 // codecsLocked returns the video streams every viewer of window id
 // decodes, in codecPreference order.
 func (m *Manager) codecsLocked(d *display, id uint32) []string {
-	if !m.Video {
+	if m.setting(SettingVideo, d.mc.ID()) == "off" {
 		return nil
 	}
 	var out []string
@@ -913,10 +972,10 @@ func (m *Manager) Command(machine string, id uint32, v *Viewer, c agentproto.GUI
 		// Only frames this viewer was sent count; anything else would let
 		// a viewer stall or speed up the window for everyone.
 		i := 0
-		for i < len(v.sent) && v.sent[i] <= c.Seq {
+		for i < len(v.sent) && v.sent[i].seq <= c.Seq {
 			i++
 		}
-		if i == 0 || v.sent[i-1] != c.Seq {
+		if i == 0 || v.sent[i-1].seq != c.Seq {
 			return
 		}
 		v.sent = v.sent[i:]

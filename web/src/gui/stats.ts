@@ -17,6 +17,8 @@ export interface MachineStats {
   convert_us: number;
   encode_us: number;
   waits: number;
+  budget?: number;
+  rtt_us?: number;
   latency_us: number;
   acked: number;
   video?: number;
@@ -48,6 +50,9 @@ export interface StatsView {
     latencyMs: number;
     /** Ticks per second held back by unacknowledged frames. */
     waits: number;
+    /** What may be on its way (kB), from the shortest round trip (ms). */
+    budgetKb: number;
+    rttMs: number;
     jpeg: number;
     png: number;
     /** Video frames per second and their encoder. */
@@ -128,6 +133,8 @@ export class FrameStats {
         encodeMs: each(m.encode_us),
         latencyMs: m.acked ? m.latency_us / m.acked / 1000 : 0,
         waits: m.waits / mSecs,
+        budgetKb: (m.budget ?? 0) / 1000,
+        rttMs: (m.rtt_us ?? 0) / 1000,
         jpeg: m.jpeg,
         png: m.png,
         video: (m.video ?? 0) / mSecs,

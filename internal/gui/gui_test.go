@@ -80,8 +80,8 @@ func TestPaneEnv(t *testing.T) {
 
 // attached returns a manager with a display whose agent side is the
 // returned connection, and one window (id 7).
-func attached(t *testing.T) (*Manager, *display, net.Conn) {
-	m := testManager(t)
+func attached(t *testing.T, flags ...string) (*Manager, *display, net.Conn) {
+	m := testManager(t, flags...)
 	mc := testMachines().Get("m1")
 	core, agent := net.Pipe()
 	t.Cleanup(func() { core.Close(); agent.Close() })
@@ -161,12 +161,24 @@ func TestFrameRouting(t *testing.T) {
 			t.Fatalf("ack %d forwarded as %+v", seq, c)
 		}
 	}
-	if len(fast.frames) != 6 || len(slow.frames) != viewerBacklog || !sv.stale {
+	// A viewer a few frames behind gets them all.
+	if len(fast.frames) != 6 || len(slow.frames) != 6 || sv.stale {
+		t.Fatalf("fast got %v, slow got %v (stale %v)", fast.frames, slow.frames, sv.stale)
+	}
+	// Once what it has not shown was shown elsewhere viewerLag ago, it
+	// skips frames.
+	for i := range sv.sent {
+		sv.sent[i].at = sv.sent[i].at.Add(-2 * viewerLag)
+	}
+	m.frame(d, frame(7))
+	m.Command("m1", 7, fv, agentproto.GUICommand{Cmd: "ack", Seq: 7}, true)
+	readCmd(t, agent)
+	if len(fast.frames) != 7 || len(slow.frames) != 6 || !sv.stale {
 		t.Fatalf("fast got %v, slow got %v (stale %v)", fast.frames, slow.frames, sv.stale)
 	}
 	// Acks behind the fastest viewer are not forwarded; catching up asks
 	// for the whole window.
-	m.Command("m1", 7, sv, agentproto.GUICommand{Cmd: "ack", Seq: 4}, true)
+	m.Command("m1", 7, sv, agentproto.GUICommand{Cmd: "ack", Seq: 6}, true)
 	if c := readCmd(t, agent); c.Cmd != "refresh" || c.ID != 7 {
 		t.Fatalf("caught up: %+v", c)
 	}
@@ -200,7 +212,6 @@ func TestStatsRouting(t *testing.T) {
 // once it caught up.
 func TestVideoRouting(t *testing.T) {
 	m, d, agent := attached(t)
-	m.Video = true
 	var a, b recorder
 	av, bv := a.viewer(), b.viewer()
 	av.Codecs, bv.Codecs = []string{"vp8", "avc1"}, []string{"vp8"}
@@ -274,13 +285,38 @@ func TestVideoRouting(t *testing.T) {
 
 // Without --gui-video agents are told no viewer decodes video.
 func TestVideoOff(t *testing.T) {
-	m, _, agent := attached(t)
+	m, _, agent := attached(t, "--gui-video=off")
 	var r recorder
 	v := r.viewer()
 	v.Codecs = []string{"avc1"}
 	m.Attach("m1", 7, v)
 	if c := readCmd(t, agent); c.Cmd != "watch" || len(c.Codecs) != 0 {
 		t.Fatalf("watch: %+v", c)
+	}
+}
+
+// Turning video off or on for a machine tells its agent at once which
+// streams the viewers of each window share.
+func TestVideoSettingChange(t *testing.T) {
+	m, d, agent := attached(t)
+	var r recorder
+	v := r.viewer()
+	v.Codecs = []string{"avc1"}
+	m.Attach("m1", 7, v)
+	if c := readCmd(t, agent); c.Cmd != "watch" || strings.Join(c.Codecs, ",") != "avc1" {
+		t.Fatalf("watch: %+v", c)
+	}
+	if err := m.Settings.SetFor(SettingVideo, "m1", "off"); err != nil {
+		t.Fatal(err)
+	}
+	m.ApplyVideo(d.mc)
+	if c := readCmd(t, agent); c.Cmd != "codecs" || c.ID != 7 || len(c.Codecs) != 0 {
+		t.Fatalf("off: %+v", c)
+	}
+	m.Settings.SetFor(SettingVideo, "m1", "")
+	m.ApplyVideo(d.mc)
+	if c := readCmd(t, agent); c.Cmd != "codecs" || strings.Join(c.Codecs, ",") != "avc1" {
+		t.Fatalf("back on: %+v", c)
 	}
 }
 
