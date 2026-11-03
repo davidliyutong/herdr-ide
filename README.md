@@ -17,7 +17,8 @@ browser tab, with VS Code (code-server) one keystroke away.
   theme's colors. One browser tab uses the session at a time; another tab
   can take it over. Drag a pane by its header to swap or move it, click its title to
   rename it; drag tabs and workspaces to reorder them; right-click a pane
-  header, tab or workspace for its commands. Keyboard shortcuts follow your
+  header, tab or workspace for its commands, or a pane's text to copy,
+  paste or open a path. Keyboard shortcuts follow your
   herdr configuration (prefix `ctrl+b`).
 - **herdr included.** Release archives carry herdr 0.9.5 for Linux/macOS on
   amd64/arm64, used when this host has no herdr installed. It behaves like an
@@ -46,8 +47,12 @@ browser tab, with VS Code (code-server) one keystroke away.
   per program window, with mouse and keyboard. Panes get a virtual display
   automatically; Xvfb is fetched without root when a machine lacks it, and
   VirtualGL renders OpenGL on the GPU where it is installed.
-- **Quick Look.** ⌘/Ctrl-click a path in a terminal to preview images, GIFs,
-  videos (with seeking), audio, PDFs, text or directories.
+- **Quick Look.** ⌘/Ctrl-click or right-click a path in a terminal, also one
+  wrapped over several lines, to preview images, GIFs, videos (with
+  seeking), audio, PDFs, text or directories.
+- **Files to agents.** Paste or drop files into a pane to paste their paths;
+  files that are not on the pane's machine are uploaded to it first, dropped
+  ones into the pane's directory (an existing file there is never replaced).
 - **Several browsers at once.** The active browser controls a pane; others
   watch at the same size and take over by typing.
 - **Settings.** Language (English, Chinese), light/dark theme followed by
@@ -100,6 +105,10 @@ ARCH=x64 make desktop-dmg        # Intel; default is the host Node architecture
 
 The desktop and browser share a terminal-pane icon, with a multi-resolution
 macOS version for Finder and the Dock.
+
+Drag folders from Finder onto the sidebar to create a workspace for each on
+the local machine. Files and folders dropped on a pane of the local machine
+are pasted as their own paths, without uploading.
 
 In the app, `cmd+t` opens a tab and `cmd+w` closes it after asking; while
 VS Code has focus, both keys stay VS Code's. Change or remove them under

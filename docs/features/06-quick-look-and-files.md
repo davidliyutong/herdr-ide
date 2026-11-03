@@ -9,9 +9,12 @@ hand screenshots and files to agents running on remote machines.
 
 ## Goals / non-goals
 
-Goals: ⌘/Ctrl-click any path or URL in a pane; preview images, GIFs, video
+Goals: ⌘/Ctrl-click (or right-click) any path or URL in a pane, also one
+wrapped over several rows; preview images, GIFs, video
 (with seeking), audio, PDF, text and directories; step through sibling media;
-paste or drop files into a pane to upload them and type their paths.
+paste or drop files into a pane to paste their paths, uploading them to the
+pane's machine when they are not there (dropped files into the pane's
+directory).
 
 Non-goals: a file manager; editing files (that is VS Code's job).
 
@@ -24,6 +27,18 @@ Non-goals: a file manager; editing files (that is VS Code's job).
   optionally followed by `:line[:col]`; OSC 8 hyperlinks from the program
   come first. Cell columns are mapped from string indices so wide characters
   do not shift ranges ([03](03-pane-rendering-and-input.md)).
+- Long paths wrap. A row whose text reaches the pane's last column is
+  joined with the next row, after that row's indentation (a program that
+  wraps its own text may indent continued lines), up to 20 rows either
+  way. A path that happens to end exactly at the last
+  column joins the next row too; the underline shows what a click opens.
+  herdr's grid has no soft-wrap marks, so this is the only signal for both
+  terminal and program wrapping.
+- A right click offers the same for the path or URL under the pointer, or
+  for the selection when it is one: **Preview**, **Open in VS Code** (not for
+  media) and **Copy full path**, or **Open** and **Copy link** for URLs. A
+  path wrapped in a way detection does not join (a margin before the last
+  column, a diff's `+` in front of the next row) is opened by selecting it.
 - Relative paths resolve against the pane's `foreground_cwd` from herdr;
   `~` against the machine's home.
 - Activation requires ⌘ or Ctrl, so plain clicks still reach mouse-aware
@@ -42,13 +57,40 @@ Non-goals: a file manager; editing files (that is VS Code's job).
 - A video codec the browser cannot decode shows a hint with download and
   VS Code options.
 
-**Uploads**
+**Pasted and dropped files** (`web/src/drop.ts`, `web/src/lib/files.ts`)
 
-- Pasted or dropped files are `POST`ed to `/api/m/<machine>/upload?name=`.
-  The server picks the destination in the machine's upload directory with a
-  timestamp and random suffix (several clipboard images are all called
-  `image.png`), streams it with chunk framing, and returns the path, which
-  the UI types into the pane, shell-quoted.
+- Files pasted into a pane, or dragged from outside the page onto one, end
+  up as their paths in the pane, shell-quoted and separated by spaces, sent
+  as a paste, the way a terminal delivers dropped files: herdr brackets it
+  when the program asked for that, so programs that tell pastes from typing
+  (shells, coding agents) handle it as a paste. The paths go to the pane
+  under the drop, which gets the focus.
+- While files are dragged over a pane, it is outlined with what a drop does
+  there. Read-only mode and a page that does not use the session (another
+  browser has it) take no drop. Drops that nothing on the page takes are
+  refused, so a file dropped beside a target is not opened by the browser in
+  place of the app.
+- In the desktop app, files dropped on a pane of the local machine are
+  already there: their own paths are pasted, folders too, and nothing is
+  copied. The shell's bridge says where a dropped file is on disk
+  ([16](16-desktop-packaging.md)); browsers do not tell a page, so there
+  every file is uploaded.
+- Other files are `POST`ed to `/api/m/<machine>/upload?name=` of the pane's
+  machine, one after the other, streamed with chunk framing; the reply holds
+  the path. Folders are not uploaded; they are skipped with a note. A failed
+  upload shows its error, and the paths of the others are still pasted.
+- Dropped files go into the pane's working directory (herdr's
+  `foreground_cwd`, so the directory of the agent running there), given as
+  `&dir=`: the user put them there on purpose, and the agent finds them next
+  to its project. Each keeps its own name (without control characters); a
+  name already taken gets `-1`, `-2`… before the extension, so nothing there
+  is replaced. The overlay and the note name that directory. When it does
+  not take the file (not writable, gone) or herdr reports none, the file
+  goes to the upload directory instead, with a note.
+- Pasted files (mostly clipboard screenshots) go to the machine's upload
+  directory, where the server adds a timestamp and random suffix (several
+  clipboard images are all called `image.png`) and files expire after 7 days
+  ([10](10-remote-resource-lifecycle.md)).
 
 ## Alternatives considered
 
@@ -57,18 +99,29 @@ Non-goals: a file manager; editing files (that is VS Code's job).
 | Preview only inside VS Code | Heavy for a glance; needs code-server running. |
 | Inline terminal images (sixel, Kitty) | Not carried by herdr's terminal-session stream. |
 | `ssh … cat` / `dd` per range request | One process per range; POSIX tool differences across platforms. |
-| Client-chosen upload paths | Collisions and path injection; the server owns naming. |
+| Client-chosen upload paths | Collisions and path injection. The browser names at most an existing directory; the server owns the file name and the agent never replaces a file. |
+| Upload to the upload directory, then move | Two steps and a copy across file systems; writing in the target directory renames within it. |
 
 ## Security
 
 Files are served with `X-Content-Type-Options: nosniff`, a sandboxing CSP
 (except PDFs, whose viewer refuses sandboxed frames) and HTML/JavaScript as
 `text/plain`, so a file cannot run script on the app's origin. Uploads are
-limited to 4 GiB and refused in read-only mode; uploads expire after 7 days
-([10](10-remote-resource-lifecycle.md)).
+limited to 4 GiB and refused in read-only mode; uploads in the upload
+directory expire after 7 days ([10](10-remote-resource-lifecycle.md)).
+Uploads into a pane's directory must name an absolute directory; the core
+takes only the file's base name, and the agent claims the name exclusively,
+so an upload replaces no file and follows no symlink there. Such files are
+the user's and stay.
 
 ## Testing
 
 `internal/server/server_test.go` (range parsing, content types, upload
-names), `internal/agent/agent_test.go` (ranged reads, chunked writes),
-`web/src/__tests__/core.test.ts` (path resolution, media detection).
+names, uploads into a directory), `internal/agent/agent_test.go` (ranged
+reads, chunked writes, writes that keep existing files),
+`web/src/__tests__/core.test.ts` (path resolution, media detection, wrapped
+links, selected links), `web/src/__tests__/surfaceSelect.test.ts` (wrapped
+link underline, the pane menu's items, copy, paste and opening; which drags
+a pane takes and pasting dropped files' paths), `web/src/__tests__/drop.test.ts`
+(dropped files' paths on the local machine, uploads and skipped folders for
+another, refused stray drops).

@@ -8,6 +8,20 @@ All notable changes are documented here. The format follows
 
 ### Added
 
+- Desktop app: drag folders from Finder onto the sidebar to create a
+  workspace for each on the local machine.
+- Files dragged onto a pane are pasted as their paths. Files not on the
+  pane's machine are uploaded into the pane's directory there first, under
+  their own names (`-1`, `-2`… when taken; nothing is replaced); in the
+  desktop app, files dropped on a pane of the local machine are pasted where
+  they are. The pane shows what a drop does while files are over it.
+  Before, only pasting files uploaded them, and a file dropped on the page
+  replaced it in a browser.
+- Right-clicking a pane opens a menu to copy the selection, paste, and
+  preview, open in VS Code or copy the path (or URL) under the pointer or
+  selected. A program that reports the mouse keeps the right button;
+  Shift+right click opens the menu there. Before, the desktop app showed no
+  menu at all.
 - Each pane has a round close button at its top right corner that shows
   while the pointer is over the pane, also when the pane is not focused.
 - `make desktop-install` builds the macOS app and installs it into
@@ -15,6 +29,8 @@ All notable changes are documented here. The format follows
 
 ### Changed
 
+- Pasted files' paths reach the pane as a paste instead of typed text, the
+  way a terminal delivers dropped files.
 - A tab is shown when it is pressed, not when the click is released, and a
   drag (of a tab, workspace or pane) starts only after the pointer moved on
   the screen. In macOS full screen the menu bar sliding down moved the page
@@ -35,6 +51,9 @@ All notable changes are documented here. The format follows
   speeds up while held) however long herdr takes to answer.
 - The desktop app's title bar follows the UI's theme: a dark UI on a light
   macOS no longer has a white title bar.
+- A path or URL wrapped over several rows, by the terminal or by a program
+  such as Claude Code, is one link: ⌘/Ctrl+click opened only the part on
+  the row under the pointer.
 
 ## [0.2.0] - 2026-11-01
 

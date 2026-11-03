@@ -13,6 +13,7 @@ import { startWorkspaceDrag } from '../reorderDrag';
 import { openMenu } from '../contextMenu';
 import { workspaceMenu } from '../menus';
 import { isNewer } from '../lib/localHerdr';
+import { carriesFiles, dropFolders, folderDropTarget } from '../drop';
 
 function aggregate(statuses: AgentStatus[]): AgentStatus | undefined {
   let best: AgentStatus | undefined;
@@ -24,8 +25,29 @@ export function Sidebar() {
   const order = useStore((s) => s.order);
   const machines = useStore((s) => s.machines);
   const readOnly = useStore((s) => s.readOnly);
+  // The local machine while folders from Finder are dragged over the sidebar
+  // (desktop app only): dropping them creates workspaces there.
+  const [dropOn, setDropOn] = useState<string>();
   return (
-    <aside className="sidebar">
+    <aside
+      className="sidebar"
+      onDragOver={(e) => {
+        const local = carriesFiles(e.dataTransfer) ? folderDropTarget() : undefined;
+        if (!local) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+        if (dropOn !== local.label) setDropOn(local.label);
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropOn(undefined);
+      }}
+      onDrop={(e) => {
+        setDropOn(undefined);
+        if (!carriesFiles(e.dataTransfer) || !folderDropTarget()) return;
+        e.preventDefault();
+        void dropFolders(e.dataTransfer);
+      }}
+    >
       <div className="sidebar-head">
         <span className="brand">{APP_NAME}</span>
         {!readOnly && (
@@ -47,6 +69,7 @@ export function Sidebar() {
       </div>
       <Inbox />
       <div className="sidebar-scroll">{order.map((id) => machines[id] && <MachineItem key={id} m={machines[id]} />)}</div>
+      {dropOn && <div className="sidebar-drop">{t('sidebar.dropFolders', { machine: dropOn })}</div>}
     </aside>
   );
 }

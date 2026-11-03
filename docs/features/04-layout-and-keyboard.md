@@ -112,15 +112,23 @@ Non-goals: a separate herdr-ide layout model; arbitrary docking of panes.
   (rename, split) keep it. A click elsewhere, scrolling, leaving the window
   or resizing closes it. The menu keeps its own width next to the window's
   right edge.
-- Read-only mode offers no items, so the browser's menu shows. The pane
-  surface keeps the browser's menu (copy, paste) unless the pane's program
-  reports the mouse.
+- Read-only mode offers no items, so the browser's menu shows. A pane's
+  text has its own menu (copy, paste, open a path or URL;
+  [03](03-pane-rendering-and-input.md)), which keeps copying and opening in
+  read-only mode.
 
 **Dialogs** (`web/src/dialog.ts`, `Dialogs.tsx`)
 
 - Creating a workspace asks for its directory, with completion of folders on
   the machine (Tab, ↑↓; the folder must exist) and an optional name
-  (`workspace.create` `label`). Closing a pane or tab with a working agent,
+  (`workspace.create` `label`). In the desktop app, folders dragged from
+  Finder onto the sidebar create a workspace each on the local machine,
+  without the dialog (herdr names them after the folder; the last one is
+  selected); the sidebar shows where they go while they are over it, and
+  dropped files that are not folders are skipped with a note. Browsers do
+  not tell the page where a dropped folder is, so they do not offer this, nor
+  does read-only mode (`web/src/drop.ts`,
+  [16](16-desktop-packaging.md)). Closing a pane or tab with a working agent,
   and closing a workspace, ask for confirmation; Enter cancels these unless
   the user moves to the confirm button. The browser's `prompt()` and
   `confirm()` are not used.

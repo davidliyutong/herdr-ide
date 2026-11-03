@@ -15,11 +15,13 @@ import { conn } from './lib/conn';
 import { unlockAudio } from './sound';
 import { getPrefs } from './prefs';
 import { GuiWindowPage } from './gui/GuiWindowPage';
+import { refuseStrayFileDrops } from './drop';
 
 // Debug handle for the browser console (also used by end-to-end tests).
 (window as unknown as Record<string, unknown>)[`__${APP_SLUG}`] = { getTerm, store: useStore, gui: useGui };
 
 initAppearance();
+refuseStrayFileDrops();
 // A browser window showing one program window (see gui/).
 const guiPage = parseGuiPath(location.pathname);
 if (guiPage) {

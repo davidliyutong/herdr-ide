@@ -3,7 +3,9 @@
 // Selecting with the pointer paints only the rows whose highlight changed,
 // rows herdr moved are copied on the canvas instead of painted again, and a
 // drag held past a pane's edge scrolls at a speed set by time, not by how
-// fast herdr answers pane.scroll.
+// fast herdr answers pane.scroll. A path wrapped over two rows is one link,
+// the pane's menu copies, pastes and opens paths, and files dropped on a
+// pane are pasted as their paths.
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -13,10 +15,11 @@ interface Call {
   resolve(v: unknown): void;
 }
 const calls: Call[] = [];
+const sent: Array<{ ev?: Array<{ t: string; text?: string }> }> = [];
 
 vi.mock('../lib/conn', () => ({
   conn: {
-    sendNow: () => {},
+    sendNow: (msg: (typeof sent)[number]) => sent.push(msg),
     send: () => {},
     api: (_m: string, method: string, params: Record<string, unknown>) => new Promise((resolve) => calls.push({ method, params, resolve })),
     setSurfaceHandler: () => {},
@@ -30,8 +33,10 @@ const CH = 14;
 const W = 20;
 const H = 10;
 
-/** Rows painted (each starts with a fill of the whole row) and copies. */
+/** Rows painted (each starts with a fill of the whole row), underlined
+ * cells ([x, y]) and copies. */
 let rows: number[] = [];
+let lines: number[][] = [];
 let copies: number[][] = [];
 let frames: FrameRequestCallback[] = [];
 
@@ -59,8 +64,20 @@ function setMeta(offset: number) {
   session.useSurface.setState({ meta: { m: 'm1', gen: 1, w: W, h: H, panes: [pane(offset)], splits: [], links: [] } });
 }
 
-const mouse = (type: string, row: number, col = 3) =>
-  new MouseEvent(type, { clientX: col * CW + 1, clientY: row * CH + 1, button: 0, buttons: 1, detail: 1, bubbles: true });
+const mouse = (type: string, row: number, col = 3, init: MouseEventInit = {}) =>
+  new MouseEvent(type, { clientX: col * CW + 1, clientY: row * CH + 1, button: 0, buttons: 1, detail: 1, bubbles: true, ...init });
+
+/** Writes a row of text (padded with blanks). */
+function write(y: number, text: string) {
+  const cells = Array.from(text.padEnd(W), (ch) => ({ symbol: ch, fg: 0, bg: 0, mod: 0, skip: false, link: -1 }));
+  session.grid.apply({ full: false, gen: 1, w: 0, h: 0, moves: [], spans: [{ x: 0, y, cells }] });
+}
+
+const range = (a: number, b: number) => [...Array(b - a).keys()].map((i) => a + i);
+
+let readOnly = false;
+const dropFiles = vi.fn((_pane: string, _items: DataTransferItemList) => Promise.resolve<string | undefined>("'/tmp/my shot.png' "));
+const dropTarget = vi.fn((_pane: string | undefined) => {});
 
 beforeAll(async () => {
   globalThis.ResizeObserver ??= class {
@@ -79,8 +96,9 @@ beforeAll(async () => {
         const px = Number(/(\d+)px/.exec(ctx.font)?.[1] ?? 10);
         return { width: px * 0.6, fontBoundingBoxAscent: px * 0.8, fontBoundingBoxDescent: px * 0.2 };
       },
-      fillRect(x: number, y: number, w: number) {
+      fillRect(x: number, y: number, w: number, h: number) {
         if (x === 0 && w === W * CW) rows.push(y / CH);
+        else if (h < CH / 2) lines.push([x / CW, Math.floor(y / CH)]);
       },
       drawImage(_c: unknown, ...a: number[]) {
         copies.push(a.map((v, i) => v / (i % 2 ? CH : CW)));
@@ -114,7 +132,9 @@ beforeAll(async () => {
       focusedPane: () => 'p1',
       focusPane: () => {},
       appKey: () => false,
-      readOnly: () => false,
+      readOnly: () => readOnly,
+      onDropFiles: (pane, items) => dropFiles(pane, items),
+      onDropTarget: (pane) => dropTarget(pane),
       linkContext: () => ({ m: 'm1' }),
       onSize: () => {},
       setTitle: () => {},
@@ -202,5 +222,142 @@ describe('selection drag past an edge', () => {
     // Released: the text is read, and scrolling stopped.
     expect(calls.map((c) => c.method)).toEqual(['pane.scroll', 'pane.scroll', 'pane.selection.read']);
     vi.useRealTimers();
+  });
+});
+
+describe('links', () => {
+  it('underlines a path wrapped over two rows on both while Cmd is held', () => {
+    ctl.clearSelection();
+    write(6, 'x /tmp/shots/abcdefg');
+    write(7, 'hij/pose.png');
+    setMeta(500);
+    flush();
+    lines = [];
+    window.dispatchEvent(mouse('mousemove', 7, 3, { buttons: 0, metaKey: true }));
+    flush();
+    expect(lines.filter(([, y]) => y === 6).map(([x]) => x)).toEqual(range(2, W));
+    expect(lines.filter(([, y]) => y === 7).map(([x]) => x)).toEqual(range(0, 12));
+    window.dispatchEvent(mouse('mousemove', 7, 3, { buttons: 0 }));
+    flush();
+  });
+});
+
+describe('pane menu', () => {
+  const clipboard = { writeText: vi.fn(() => Promise.resolve()), readText: vi.fn(() => Promise.resolve('pasted')) };
+  let menus: typeof import('../contextMenu');
+  let actions: typeof import('../actions').actions;
+  beforeAll(async () => {
+    Object.defineProperty(navigator, 'clipboard', { value: clipboard, configurable: true });
+    menus = await import('../contextMenu');
+    actions = (await import('../actions')).actions;
+  });
+  const open = (row: number, col: number, init: MouseEventInit = {}) => {
+    menus.useMenu.setState({ menu: undefined });
+    const ev = new MouseEvent('contextmenu', {
+      clientX: col * CW + 1,
+      clientY: row * CH + 1,
+      button: 2,
+      bubbles: true,
+      cancelable: true,
+      ...init,
+    });
+    host.dispatchEvent(ev);
+    const entries = menus.useMenu.getState().menu?.entries ?? [];
+    return { ev, entries, labels: entries.map((e) => (e === 'sep' ? '-' : e.label + (e.disabled ? ' (off)' : ''))) };
+  };
+  const item = (entries: import('../contextMenu').MenuEntry[], label: string) =>
+    entries.find((e): e is import('../contextMenu').MenuItem => e !== 'sep' && e.label === label)!;
+
+  it('opens a wrapped path under the pointer', () => {
+    ctl.clearSelection();
+    write(6, 'x /tmp/shots/abcdefg');
+    write(7, 'hij/pose.png');
+    const preview = vi.spyOn(actions, 'openPreview').mockImplementation(() => {});
+    const { ev, entries, labels } = open(7, 3);
+    expect(ev.defaultPrevented).toBe(true);
+    expect(labels).toEqual(['Copy (off)', 'Paste', '-', 'Preview pose.png', 'Copy full path']);
+    item(entries, 'Preview pose.png').run();
+    expect(preview).toHaveBeenCalledWith('m1', '/tmp/shots/abcdefghij/pose.png');
+    item(entries, 'Copy full path').run();
+    expect(clipboard.writeText).toHaveBeenLastCalledWith('/tmp/shots/abcdefghij/pose.png');
+    // On macOS Ctrl+click opens the link and is a right click as well: no menu.
+    window.dispatchEvent(mouse('mousemove', 7, 3, { buttons: 0, ctrlKey: true }));
+    expect(open(7, 3, { button: 0, ctrlKey: true }).entries).toEqual([]);
+    window.dispatchEvent(mouse('mousemove', 7, 3, { buttons: 0 }));
+    preview.mockRestore();
+  });
+
+  it('copies, pastes and opens a selected path that detection does not join', async () => {
+    // The first row stops short of the last column (a program's margin).
+    write(6, 'x /tmp/shots/abcde');
+    write(7, 'hij/main.go');
+    host.dispatchEvent(mouse('mousedown', 6, 2));
+    window.dispatchEvent(mouse('mousemove', 7, 11));
+    window.dispatchEvent(mouse('mouseup', 7, 11));
+    const { entries, labels } = open(7, 5);
+    // The selected path wins over the part of it found under the pointer.
+    expect(labels).toEqual(['Copy', 'Paste', '-', 'Preview main.go', 'Open main.go in VS Code', 'Copy full path']);
+    const openPath = vi.spyOn(actions, 'openPath').mockImplementation(() => {});
+    item(entries, 'Open main.go in VS Code').run();
+    expect(openPath).toHaveBeenCalledWith('m1', '/tmp/shots/abcdehij/main.go', undefined, undefined);
+    openPath.mockRestore();
+    item(entries, 'Copy').run();
+    expect(clipboard.writeText).toHaveBeenLastCalledWith('/tmp/shots/abcde\nhij/main.go');
+    sent.length = 0;
+    item(entries, 'Paste').run();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(sent.flatMap((m) => m.ev ?? [])).toEqual([{ t: 'paste', text: 'pasted' }]);
+  });
+
+  it('leaves the right button to a program that reports the mouse', () => {
+    session.useSurface.setState({ meta: { m: 'm1', gen: 1, w: W, h: H, panes: [{ ...pane(500), mouse: true }], splits: [], links: [] } });
+    const plain = open(7, 3);
+    expect(plain.ev.defaultPrevented).toBe(true);
+    expect(plain.entries).toEqual([]);
+    // Shift+right click opens the menu there.
+    expect(open(7, 3, { shiftKey: true }).entries.length).toBeGreaterThan(0);
+  });
+});
+
+describe('dropped files', () => {
+  const items = [] as unknown as DataTransferItemList;
+  const drag = (type: string, types = ['Files']) => {
+    const ev = new MouseEvent(type, { clientX: 5 * CW + 1, clientY: 4 * CH + 1, bubbles: true, cancelable: true });
+    Object.defineProperty(ev, 'dataTransfer', { value: { types, items, dropEffect: 'none' } });
+    host.dispatchEvent(ev);
+    return ev as MouseEvent & { dataTransfer: { dropEffect: string } };
+  };
+  beforeEach(() => {
+    readOnly = false;
+    dropFiles.mockClear();
+    dropTarget.mockClear();
+    sent.length = 0;
+  });
+
+  it('are pasted as their paths into the pane under the pointer', async () => {
+    const over = drag('dragover');
+    expect(over.defaultPrevented).toBe(true);
+    expect(over.dataTransfer.dropEffect).toBe('copy');
+    expect(dropTarget).toHaveBeenLastCalledWith('p1');
+    const drop = drag('drop');
+    expect(drop.defaultPrevented).toBe(true);
+    expect(dropTarget).toHaveBeenLastCalledWith(undefined);
+    // The items are handed over during the drop event.
+    expect(dropFiles).toHaveBeenCalledWith('p1', items);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(sent.flatMap((m) => m.ev ?? [])).toEqual([{ t: 'paste', text: "'/tmp/my shot.png' " }]);
+  });
+
+  it('are not taken in read-only mode, by a page not using the session, or without files', () => {
+    readOnly = true;
+    expect(drag('dragover').defaultPrevented).toBe(false);
+    expect(drag('drop').defaultPrevented).toBe(false);
+    readOnly = false;
+    session.useSurface.setState({ ownership: 'busy' });
+    expect(drag('dragover').defaultPrevented).toBe(false);
+    session.useSurface.setState({ ownership: 'owner' });
+    expect(drag('dragover', ['text/plain']).defaultPrevented).toBe(false);
+    expect(dropTarget.mock.calls.every(([p]) => p === undefined)).toBe(true);
+    expect(dropFiles).not.toHaveBeenCalled();
   });
 });

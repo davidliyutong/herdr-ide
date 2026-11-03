@@ -52,8 +52,10 @@ shortcuts (`cmd+t`/`cmd+w`): the shell intercepts them in
 `desktop-new-tab-key` / `desktop-close-tab-key`, leaves them to VS Code
 while one of its frames has focus, and the page runs the action; the
 settings dialog records keys through the same bridge
-([04](features/04-layout-and-keyboard.md)), and the page reports its theme
-setting, which the native title bar follows. Same-origin popups become equally restricted native
+([04](features/04-layout-and-keyboard.md)), the page reports its theme
+setting, which the native title bar follows, and it asks the bridge where a
+file or folder dropped from Finder is on disk, to create a workspace there
+or paste its path into a pane of the local machine. Same-origin popups become equally restricted native
 windows; HTTP(S) links outside the core open in the default browser. Packaging
 and lifecycle details are in [16](features/16-desktop-packaging.md).
 
@@ -111,7 +113,7 @@ after a successful reply it carries op-specific bytes.
 | `herdr-client` | core → agent | raw pipe to herdr's client socket (endpoint protocol) |
 | `fs.stat`, `fs.list` | core → agent | – |
 | `fs.read` | core → agent | `Length` bytes from `Offset` |
-| `fs.write` | core → agent | chunked upload, then a second reply |
+| `fs.write` | core → agent | chunked upload, then a second reply; `unique` keeps existing files (`-1`, `-2`… names) |
 | `exec` | core → agent | – (buffered output in the reply) |
 | `dial-unix` | core → agent | raw pipe to a socket in the agent's run directory |
 | `code-server` | core → agent | actions `status`, `install` (chunked tarball), `download` (the machine fetches `URL`, checked against `Digest`), `start`, `stop`, `install-ext`, `uninstall-ext`, `marker`; `Bin` selects an installed code-server |

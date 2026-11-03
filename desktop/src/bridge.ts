@@ -24,4 +24,8 @@ export interface DesktopShell {
   /** The theme setting ("system", "dark" or "light"): the window's title
    * bar and native controls follow it. */
   setTheme(theme: string): void;
+  /** Where a file the user dropped on the page (or picked) is on disk; empty
+   * for anything else. Browsers keep this from pages; the desktop app uses
+   * it for folders dropped to create workspaces. */
+  pathForFile(file: File): string;
 }

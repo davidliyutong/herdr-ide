@@ -70,6 +70,9 @@ type Header struct {
 	Offset int64  `json:"offset,omitempty"`
 	Length int64  `json:"length,omitempty"`
 	Mkdirs bool   `json:"mkdirs,omitempty"`
+	// Unique (fs.write) keeps existing files: the file gets path's name if it
+	// is free, else the first free one with -1, -2… before the extension.
+	Unique bool `json:"unique,omitempty"`
 
 	// code-server
 	Action  string   `json:"action,omitempty"`

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { resolvePath, mediaExt } from '../terminal/links';
+import { linksAround, mediaExt, resolvePath, selectedLink, type RowText } from '../terminal/links';
 import { pasteText } from '../surface/input';
 import { routeKey } from '../surface/keys';
 import { paneRects } from '../actions';
@@ -20,6 +20,76 @@ describe('resolvePath', () => {
     expect(mediaExt.test('/a/b.MP4')).toBe(true);
     expect(mediaExt.test('/a/b.gif')).toBe(true);
     expect(mediaExt.test('/a/b.ts')).toBe(false);
+  });
+});
+
+describe('linksAround', () => {
+  // Rows of a pane 20 columns wide starting at column 5, as Grid.rowText
+  // returns them (one column per character here).
+  const W = 20;
+  const rows = (...lines: string[]) => {
+    const out = lines.map((l): RowText => {
+      const text = l.padEnd(W);
+      return { text, colOf: [...Array(W + 1).keys()].map((i) => 5 + i) };
+    });
+    return (y: number) => out[y];
+  };
+  const found = (y: number, r: (y: number) => RowText, top = 0, bottom = 3) =>
+    linksAround(y, top, bottom, r).map((l) => ({ text: l.text, cells: l.cells.map((c) => [c.y, c.from, c.to]) }));
+
+  it('joins a path that reaches the last column with the next row', () => {
+    const r = rows('see /tmp/abc/defghij', 'kl/out.png and more', 'next');
+    const want = [
+      {
+        text: '/tmp/abc/defghijkl/out.png',
+        cells: [
+          [0, 9, 25],
+          [1, 5, 15],
+        ],
+      },
+    ];
+    expect(found(0, r)).toEqual(want);
+    expect(found(1, r)).toEqual(want);
+    expect(found(2, r)).toEqual([]);
+  });
+  it('skips the indentation of the continued row', () => {
+    const r = rows('  ⎿ /tmp/abc/defghij', '    kl/out.png', '');
+    expect(found(1, r)).toEqual([
+      {
+        text: '/tmp/abc/defghijkl/out.png',
+        cells: [
+          [0, 9, 25],
+          [1, 9, 19],
+        ],
+      },
+    ]);
+  });
+  it('keeps rows apart when the text stops before the last column', () => {
+    const r = rows('see /tmp/abc/def', 'ghi.png', '');
+    expect(found(0, r).map((l) => l.text)).toEqual(['/tmp/abc/def']);
+    expect(found(1, r).map((l) => l.text)).toEqual(['ghi.png']);
+  });
+  it('stays inside the pane', () => {
+    const r = rows('see /tmp/abc/defghij', 'kl/out.png', '');
+    expect(found(1, r, 1).map((l) => l.text)).toEqual(['kl/out.png']);
+    expect(found(0, r, 0, 1).map((l) => l.text)).toEqual(['/tmp/abc/defghij']);
+  });
+});
+
+describe('selectedLink', () => {
+  it('joins the rows of a wrapped path', () => {
+    expect(selectedLink('/tmp/claude/932adc89\n-d9ae/shots/3_pose.png')).toEqual({
+      kind: 'path',
+      text: '/tmp/claude/932adc89-d9ae/shots/3_pose.png',
+    });
+    expect(selectedLink('https://example.com/a\n  b')).toEqual({ kind: 'url', text: 'https://example.com/ab' });
+  });
+  it('ignores quotes and punctuation around it', () => {
+    expect(selectedLink(' "~/x/y.ts:12", ')).toEqual({ kind: 'path', text: '~/x/y.ts:12' });
+  });
+  it('is nothing when the selection holds other text', () => {
+    expect(selectedLink('see /tmp/x')).toBeUndefined();
+    expect(selectedLink('hello')).toBeUndefined();
   });
 });
 

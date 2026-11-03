@@ -9,11 +9,14 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/machines"
@@ -207,8 +210,43 @@ func uploadName(original string, now time.Time) string {
 	return now.Format("20060102-150405") + "-" + hex.EncodeToString(rnd[:]) + "-" + base
 }
 
+// keptName is the name of an upload placed in a directory the user chose:
+// its own base name without control characters (at most 200 bytes, keeping
+// the end), or "upload".
+func keptName(original string) string {
+	base := strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, filepath.Base(original))
+	base = strings.TrimSpace(base)
+	if base == "." || base == ".." || base == "/" || base == "" {
+		base = "upload"
+	}
+	for len(base) > 200 {
+		_, n := utf8.DecodeRuneInString(base)
+		base = base[n:]
+	}
+	return base
+}
+
+// uploadHeader is the agent request that writes an upload named name: into
+// the upload directory under a unique name, or with dir (absolute or ~/)
+// into that existing directory under its own name, never replacing a file.
+func uploadHeader(q url.Values, uploadDir string, now time.Time) (agentproto.Header, error) {
+	dir := q.Get("dir")
+	if dir == "" {
+		return agentproto.Header{Op: agentproto.OpFsWrite, Path: filepath.Join(uploadDir, uploadName(q.Get("name"), now)), Mkdirs: true}, nil
+	}
+	if !filepath.IsAbs(dir) && dir != "~" && !strings.HasPrefix(dir, "~/") {
+		return agentproto.Header{}, errors.New("dir must be absolute")
+	}
+	return agentproto.Header{Op: agentproto.OpFsWrite, Path: filepath.Join(dir, keptName(q.Get("name"))), Unique: true}, nil
+}
+
 // handleUpload writes the request body to a file on the machine (used for
-// drag-and-drop and pasted images handed to agents).
+// dropped files and pasted images handed to agents; see uploadHeader).
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	mc := s.machine(w, r)
 	if mc == nil {
@@ -219,9 +257,13 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "machine not connected"})
 		return
 	}
-	p := filepath.Join(st.Info.UploadDir, uploadName(r.URL.Query().Get("name"), time.Now()))
-	s.audit.log(r, "file.upload", map[string]any{"machine": mc.ID(), "path": p, "size": r.ContentLength})
-	conn, _, err := mc.Open(r.Context(), agentproto.Header{Op: agentproto.OpFsWrite, Path: p, Mkdirs: true})
+	h, err := uploadHeader(r.URL.Query(), st.Info.UploadDir, time.Now())
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	s.audit.log(r, "file.upload", map[string]any{"machine": mc.ID(), "path": h.Path, "size": r.ContentLength})
+	conn, _, err := mc.Open(r.Context(), h)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return

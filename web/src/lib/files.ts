@@ -24,10 +24,13 @@ export async function listDir(m: string, path: string): Promise<{ dir: RemoteSta
   return j;
 }
 
-/** Upload into the machine's upload directory; the server picks a unique
- * file name derived from name. */
-export async function uploadFile(m: string, name: string, body: Blob): Promise<RemoteStat> {
-  const r = await fetch(`/api/m/${encodeURIComponent(m)}/upload?${new URLSearchParams({ name })}`, {
+/** Upload into the machine's upload directory, where the server picks a
+ * unique file name derived from name, or into the existing directory dir
+ * under name, or name-1, name-2… when that is taken. */
+export async function uploadFile(m: string, name: string, body: Blob, dir?: string): Promise<RemoteStat> {
+  const q = new URLSearchParams({ name });
+  if (dir) q.set('dir', dir);
+  const r = await fetch(`/api/m/${encodeURIComponent(m)}/upload?${q}`, {
     method: 'POST',
     body,
   });
@@ -36,22 +39,41 @@ export async function uploadFile(m: string, name: string, body: Blob): Promise<R
   return j;
 }
 
-function shellQuote(p: string): string {
+export function shellQuote(p: string): string {
   return /^[\w@%+=:,./~-]+$/.test(p) ? p : `'${p.replace(/'/g, `'\\''`)}'`;
 }
 
-/** Upload pasted or dropped files to the machine's upload directory and
- * return their paths, ready to be typed into an agent prompt. */
+const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/** Uploads a pasted or dropped file into dir on the machine, or its upload
+ * directory, and returns its path there. When dir does not take it (not
+ * writable, gone), the upload directory does; failures are shown as toasts. */
+export async function uploadAs(m: string, f: File, dir?: string): Promise<string | undefined> {
+  const ext = f.name.includes('.') ? '' : f.type.startsWith('image/') ? '.' + f.type.slice(6).replace('jpeg', 'jpg') : '';
+  const name = (f.name || 'paste') + ext;
+  const { toast } = useStore.getState();
+  if (dir) {
+    try {
+      return (await uploadFile(m, name, f, dir)).path;
+    } catch (e) {
+      // The cause only ("permission denied"): the rest repeats the path.
+      toast(t('app.uploadDirFailed', { dir, error: message(e).split(': ').pop()! }));
+    }
+  }
+  try {
+    return (await uploadFile(m, name, f)).path;
+  } catch (e) {
+    toast(t('app.uploadFailed', { error: message(e) }));
+  }
+}
+
+/** Upload pasted files to the machine's upload directory and return their
+ * paths, ready to be pasted into an agent prompt. */
 export async function uploadPasted(m: string, files: File[]): Promise<string | undefined> {
   const paths: string[] = [];
   for (const f of files) {
-    const ext = f.name.includes('.') ? '' : f.type.startsWith('image/') ? '.' + f.type.slice(6).replace('jpeg', 'jpg') : '';
-    try {
-      const st = await uploadFile(m, (f.name || 'paste') + ext, f);
-      if (st.path) paths.push(shellQuote(st.path));
-    } catch (e) {
-      useStore.getState().toast(t('app.uploadFailed', { error: e instanceof Error ? e.message : String(e) }));
-    }
+    const p = await uploadAs(m, f);
+    if (p) paths.push(shellQuote(p));
   }
   return paths.length ? paths.join(' ') + ' ' : undefined;
 }

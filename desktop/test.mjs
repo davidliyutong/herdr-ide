@@ -7,16 +7,18 @@ import { spawnSync } from 'node:child_process';
 const dir = await mkdtemp(join(tmpdir(), 'desktop-tests-'));
 try {
   await build({
-    entryPoints: ['src/core.test.ts', 'src/policy.test.ts', 'src/shortcuts.test.ts'],
+    entryPoints: ['src/core.test.ts', 'src/policy.test.ts', 'src/preload.test.ts', 'src/shortcuts.test.ts'],
     outdir: dir,
     bundle: true,
+    // The preload's test runs it against a stand-in for Electron.
+    alias: { electron: './src/fakeElectron.ts' },
     platform: 'node',
     format: 'cjs',
     outExtension: { '.js': '.cjs' },
   });
   const result = spawnSync(
     process.execPath,
-    ['--test', join(dir, 'core.test.cjs'), join(dir, 'policy.test.cjs'), join(dir, 'shortcuts.test.cjs')],
+    ['--test', ...['core', 'policy', 'preload', 'shortcuts'].map((name) => join(dir, `${name}.test.cjs`))],
     { stdio: 'inherit' },
   );
   process.exitCode = result.status ?? 1;

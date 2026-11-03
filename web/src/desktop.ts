@@ -14,6 +14,7 @@ export interface DesktopShell {
   recordShortcut(active: boolean): void;
   onRecordedKey(fn: (spec: string) => void): () => void;
   setTheme(theme: string): void;
+  pathForFile(file: File): string;
 }
 
 export const desktopShell: DesktopShell | undefined = (globalThis as { desktopShell?: DesktopShell }).desktopShell;

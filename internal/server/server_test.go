@@ -10,12 +10,14 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
+	"unicode/utf8"
 
 	"github.com/coder/websocket"
 
@@ -149,6 +151,39 @@ func TestUploadNameUniqueAndSafe(t *testing.T) {
 	}
 	if n := uploadName("../../etc/pa ss;wd", now); strings.ContainsAny(n, "/ ;") {
 		t.Fatalf("unsafe name %q", n)
+	}
+}
+
+func TestUploadIntoDirectory(t *testing.T) {
+	now := time.Date(2026, 10, 30, 2, 15, 0, 0, time.UTC)
+	h, err := uploadHeader(url.Values{"name": {"shot.png"}}, "/home/u/.herdr-ide/uploads", now)
+	if err != nil || !h.Mkdirs || h.Unique || filepath.Dir(h.Path) != "/home/u/.herdr-ide/uploads" {
+		t.Fatalf("upload directory: %+v %v", h, err)
+	}
+	// Into a pane's directory under the file's own name, without replacing.
+	for name, want := range map[string]string{
+		"my shot.png":       "/home/u/proj/my shot.png",
+		"../../etc/passwd":  "/home/u/proj/passwd",
+		"a\x00\nb.txt":      "/home/u/proj/ab.txt",
+		"..":                "/home/u/proj/upload",
+		"":                  "/home/u/proj/upload",
+		"截图 2026-11-03.png": "/home/u/proj/截图 2026-11-03.png",
+	} {
+		h, err := uploadHeader(url.Values{"name": {name}, "dir": {"/home/u/proj"}}, "/up", now)
+		if err != nil || h.Path != want || !h.Unique || h.Mkdirs {
+			t.Errorf("%q: %+v %v, want %s", name, h, err, want)
+		}
+	}
+	if h, _ := uploadHeader(url.Values{"name": {"a"}, "dir": {"~/proj"}}, "/up", now); h.Path != "~/proj/a" {
+		t.Errorf("~ dir: %+v", h)
+	}
+	for _, dir := range []string{"proj", "./proj", "~user/proj"} {
+		if _, err := uploadHeader(url.Values{"name": {"a"}, "dir": {dir}}, "/up", now); err == nil {
+			t.Errorf("relative dir %q accepted", dir)
+		}
+	}
+	if n := keptName(strings.Repeat("é", 150) + ".png"); len(n) > 200 || !strings.HasSuffix(n, "é.png") || !utf8.ValidString(n) {
+		t.Errorf("long name kept as %q", n)
 	}
 }
 
