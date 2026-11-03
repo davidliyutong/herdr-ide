@@ -216,7 +216,7 @@ func TestVideoDecision(t *testing.T) {
 		t.Fatalf("starting video: %+v", j)
 	}
 	// The pump started an encoder for it.
-	enc := &videoEncoder{w: 640, h: 480, kind: "vp8", name: "libvpx"}
+	enc := &videoEncoder{w: 640, h: 480, kind: "vp8", kinds: []string{"vp8"}, name: "libvpx"}
 	wm.account([]frameCost{{window: 1, enc: agentproto.GUIEncVideoKey, started: enc}}, now)
 	if m.vid != enc {
 		t.Fatal("encoder not kept")
@@ -249,7 +249,7 @@ func TestVideoDecision(t *testing.T) {
 		t.Fatalf("after the retry delay: %+v", j)
 	}
 	// Still for videoIdle: the stream ends.
-	enc2 := &videoEncoder{w: 800, h: 600, kind: "vp8"}
+	enc2 := &videoEncoder{w: 800, h: 600, kind: "vp8", kinds: []string{"vp8"}}
 	wm.account([]frameCost{{window: 1, enc: agentproto.GUIEncVideoKey, started: enc2}}, now)
 	now = now.Add(videoIdle + time.Second)
 	tick()
@@ -258,11 +258,19 @@ func TestVideoDecision(t *testing.T) {
 	}
 	// The viewers now all decode a preferred stream: it replaces this one.
 	kinds = []string{"avc1", "vp8"}
-	enc3 := &videoEncoder{w: 800, h: 600, kind: "vp8"}
+	enc3 := &videoEncoder{w: 800, h: 600, kind: "vp8", kinds: []string{"vp8"}}
 	m.vid = enc3
 	moving()
 	if j := tick(); len(j) != 1 || j[0].vid != nil || j[0].kinds[0] != "avc1" || !slices.Contains(wm.retired, enc3) {
 		t.Fatalf("preferred stream: %+v", j)
+	}
+	// H.264 would not open (all NVENC sessions in use) and the encoder made
+	// VP8: the stream is kept, not restarted for H.264 on every frame.
+	enc4 := &videoEncoder{w: 800, h: 600, kind: "vp8", kinds: []string{"avc1", "vp8"}}
+	wm.account([]frameCost{{window: 1, enc: agentproto.GUIEncVideoKey, started: enc4}}, now)
+	moving()
+	if j := tick(); len(j) != 1 || j[0].vid != enc4 || slices.Contains(wm.retired, enc4) {
+		t.Fatalf("stream of a later kind: %+v", j)
 	}
 	// No encoder on the machine.
 	bin = ""

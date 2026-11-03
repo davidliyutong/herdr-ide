@@ -64,9 +64,11 @@ func (wm *windowManager) videoKindsFor(m *managedWin) []string {
 // sent as video and has changed.
 func (wm *windowManager) videoJob(m *managedWin, now time.Time) (capture, bool) {
 	kinds := wm.videoKindsFor(m)
-	if m.vid != nil && (m.vid.w != m.w || m.vid.h != m.h || len(kinds) == 0 || kinds[0] != m.vid.kind) {
-		// Resized, or the viewers now decode a preferred stream, or a
-		// viewer does not decode this one.
+	if m.vid != nil && (m.vid.w != m.w || m.vid.h != m.h || !slices.Equal(kinds, m.vid.kinds)) {
+		// Resized, or the kinds changed: the viewers now decode a preferred
+		// stream, or a viewer does not decode this one. A stream of a later
+		// kind because the first would not open (all NVENC sessions in use)
+		// is kept until it ends.
 		wm.stopVideo(m)
 	}
 	if len(kinds) == 0 {

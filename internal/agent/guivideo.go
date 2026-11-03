@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -221,10 +222,11 @@ type videoEncoder struct {
 	out    *os.File
 	rd     *bufio.Reader
 	stderr *limitedBuffer
-	name   string // h264_nvenc, libvpx
-	kind   string // avc1, vp8
-	w, h   int    // window size
-	cw, ch int    // coded size
+	name   string   // h264_nvenc, libvpx
+	kind   string   // avc1, vp8
+	kinds  []string // what it was started for, in order
+	w, h   int      // window size
+	cw, ch int      // coded size
 }
 
 // videoStart bounds starting an encoder (NVENC initialization) and
@@ -258,7 +260,7 @@ func startEncoder(bin string, w, h int, kinds []string) (*videoEncoder, error) {
 		return nil, err
 	}
 	pw.Close()
-	e := &videoEncoder{cmd: cmd, in: in, out: pr, rd: bufio.NewReaderSize(pr, 1<<20), stderr: stderr, w: w, h: h}
+	e := &videoEncoder{cmd: cmd, in: in, out: pr, rd: bufio.NewReaderSize(pr, 1<<20), stderr: stderr, w: w, h: h, kinds: slices.Clone(kinds)}
 	pr.SetReadDeadline(time.Now().Add(videoStart))
 	line, err := e.rd.ReadString('\n')
 	f := strings.Fields(line)

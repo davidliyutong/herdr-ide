@@ -166,8 +166,11 @@ input methods.
 - A stream starts with a `video` event (codec string, coded size) and a key
   frame; frames carry `Enc` 3, or 4 for key frames, and are paced by
   acknowledgements like pictures. The agent starts a new stream when the
-  window is resized or its viewers now all decode a preferred kind, and
-  makes a key frame when a viewer asks (`keyframe`, `refresh`).
+  window is resized or the kinds its viewers and the encoder share change
+  (a preferred kind, or one a viewer does not decode), and makes a key
+  frame when a viewer asks (`keyframe`, `refresh`). The encoder makes the
+  first kind it can open, so a stream is VP8 while all NVENC sessions are
+  in use, and stays VP8 until it ends.
 - The core routes video frames like pictures, except that a viewer that
   missed one (it was behind, or joined during a stream) gets no frames of
   the stream until the next key frame, which the core asks for once the
@@ -287,10 +290,13 @@ its programs keep their windows until the display idles out.
   from a campus machine.
 - **VirtualGL's EGL device not accessible** → `VGL_DISPLAY` is not set;
   OpenGL programs render with Mesa on the CPU.
-- **Video encoder cannot start or stops** (no NVIDIA driver, all NVENC
-  sessions in use, killed) → the window is sent as pictures and video is
-  tried again after 5 s, doubling up to 5 minutes; VP8 is used where
-  H.264 is not available and the viewers decode it.
+- **Video encoder cannot start or stops** (no NVIDIA driver, killed) → the
+  window is sent as pictures and video is tried again after 5 s, doubling
+  up to 5 minutes; VP8 is used where H.264 is not available and the
+  viewers decode it.
+- **All NVENC sessions in use** (GeForce cards allow 8 per system, shared
+  by all users) → new streams are VP8 on the CPU when the viewers decode
+  it, else pictures.
 - **Browser without WebCodecs or not in a secure context** (plain HTTP on a
   LAN) → it asks for no video and gets pictures; so does every viewer of a
   window one of whose viewers does not decode the stream.
