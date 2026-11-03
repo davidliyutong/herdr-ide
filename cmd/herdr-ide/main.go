@@ -187,6 +187,7 @@ func serve(args []string, logger *log.Logger) {
 		agentDir     = fl.String("agent-dir", "", "directory with uncompressed "+brand.AgentBin+"-<os>-<arch> builds (development)")
 		extDir       = fl.String("ext-dir", "", "directory containing "+brand.BridgeExt+".vsix (development)")
 		webDir       = fl.String("web-dir", "", "serve the UI from this directory instead of the embedded build (development)")
+		guiVideo     = fl.String("gui-video", "off", "experimental: send program windows that keep changing as video (on) to browsers that decode it, encoded on the machine with the ffmpeg the core brings; pictures otherwise (off)")
 		only         listFlag
 		origins      listFlag
 		extraSSH     listFlag
@@ -205,6 +206,9 @@ func serve(args []string, logger *log.Logger) {
 
 	if !brand.ValidInstance(*instance) {
 		logger.Fatalf("--instance must be lowercase letters, digits and dashes")
+	}
+	if *guiVideo != "on" && *guiVideo != "off" {
+		logger.Fatalf("--gui-video must be on or off")
 	}
 	if p, err := settingsPath(*instance); err != nil {
 		logger.Printf("settings are not saved: %v", err)
@@ -304,6 +308,7 @@ func serve(args []string, logger *log.Logger) {
 		CodeServer:     cs,
 		CodeServerIdle: *csIdle,
 		ReadOnly:       *readOnly,
+		GUIVideo:       *guiVideo == "on",
 		ProxySecret:    secret,
 		Audit:          audit,
 		UserHeader:     *userHeader,

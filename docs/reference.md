@@ -58,6 +58,7 @@ here; both READMEs link to this page instead of repeating it.
 | --- | --- | --- |
 | `--gui` | `on` | Show windows of programs on remote Linux machines in browser windows: new panes get a virtual display (`DISPLAY`, `XAUTHORITY`); Xvfb is fetched in user space when missing. Applies to panes created afterwards. Also a setting in the UI. |
 | `--gui-gpu` | `vglrun` | OpenGL on machines with VirtualGL: `vglrun` (programs started with `vglrun` render on the GPU) or `all` (every program in new panes runs under VirtualGL). Also a setting in the UI. |
+| `--gui-video` | `off` | Experimental: `on` sends program windows that keep changing as video (H.264 through NVENC, else VP8 on the CPU) to browsers that decode it with WebCodecs, encoded on the machine by the encoder this build brings; pictures otherwise. Needs a build that embeds the encoder (`scripts/build-ffmpeg.sh` before `make build`). |
 
 ### Desktop app shortcuts
 
@@ -169,6 +170,7 @@ On every machine (the agent's `$HOME`):
 | `~/.herdr-ide/herdr/server.log` | Core host only: output of the herdr server last started from the UI | Replaced at every start from the UI. |
 | `~/.herdr-ide[-<instance>]/run/` (0700) | `cs.sock`, `cs.pid`, `bridge.sock`; `gui.json` (reserved display and Xvfb pid), `xauth` (panes' display cookie) and `xauth.server` (Xvfb's copy), both 0600 and replaced at each Xvfb start, `gui.lock` | Sockets while the agent runs; the display files are kept so panes keep a valid environment. |
 | `~/.herdr-ide/xvfb/<version>/` | Xvfb unpacked from the distribution's package (shared by instances) | Versions unused for 14 days are removed when another is unpacked. |
+| `~/.herdr-ide/video/<sha256 prefix>/encoder` | Video encoder pushed by the core (`--gui-video`, shared by instances), run only while its SHA-256 matches | Builds unused for 14 days are removed when another is installed; unfinished installs after 1 h. |
 | `~/.herdr-ide[-<instance>]/xvfb.log` | Output of the last Xvfb started | Replaced at each start. |
 | `~/.herdr-ide[-<instance>]/cs-data/`, `cs-ext/` | VS Code settings, extensions | Kept; logs older than 7 days are pruned. |
 | `~/.herdr-ide[-<instance>]/uploads/` | Pasted and dropped files | Files older than 7 days are pruned. |

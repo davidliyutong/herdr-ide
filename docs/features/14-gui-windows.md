@@ -113,6 +113,11 @@ input methods.
   window wait for acknowledgement; the frame rate follows what the browser
   can show. Captures are split into tiles of at most 1024×1024, so a huge
   window costs bounded memory per frame.
+- While a window is watched, the agent reports once a second what its
+  frames cost (`stats` event): updates (ticks that sent frames) and frames,
+  pixels and bytes, time spent capturing, converting and encoding, ticks
+  held back by unacknowledged frames, and the time from capture to
+  acknowledgement. The core passes it to the window's browser windows.
 - A new window takes the keyboard focus only when nothing has it or it is a
   dialog of the focused window; a click focuses its window first, and before
   each key press the window manager checks where the focus is and moves it
@@ -129,6 +134,53 @@ input methods.
   characters. Closing asks the program with `WM_DELETE_WINDOW`, or
   disconnects it when it does not support that. The pointer image follows
   XFIXES cursor changes.
+
+**Video** (experimental, `--gui-video on`; agent
+`internal/agent/guiwm_video.go`, `guivideo.go`, encoder `scripts/encoder/`)
+
+- A window that keeps changing (a simulator, a rotating plot) costs a whole
+  JPEG per frame. With video on, a watched window is sent as frames of a
+  video stream of the whole window instead, while all its viewers decode
+  one kind of stream the machine can make and at least 8 of the last 12
+  ticks changed a quarter of it or more. Each change is then one video
+  frame, small ones too. Once the window is unchanged for 400 ms it is sent
+  again as PNG (video blurs colored text, 4:2:0), and after 5 s unchanged
+  the stream ends. Layers stay pictures. Windows under 64 pixels a side are
+  never video.
+- Browsers name the streams they decode in the WebSocket's `?video=`:
+  `avc1` (H.264) and `vp8`, probed with WebCodecs' `isConfigSupported`, and
+  only in a secure context (localhost, HTTPS, the desktop app). The core
+  passes the kinds every viewer of the window decodes to the agent with
+  `watch` and `refresh`, ordered H.264 before VP8, and `codecs` when viewers
+  leave; without `--gui-video` it passes none.
+- The encoder is a small program on ffmpeg's libraries (LGPL build, static
+  except for glibc 2.28) that the core embeds and pushes to each machine
+  when its display is ready: `~/.herdr-ide/video/<sha256 prefix>/encoder`,
+  verified by its SHA-256, shared by instances. The agent then runs it once
+  per stream kind on a small frame to learn what works: H.264 through
+  NVENC (the NVIDIA driver's libraries, driver 550.54 or newer), VP8
+  through libvpx on the CPU. It reads raw frames from a pipe and writes one
+  packet per frame, a key frame when asked, so frames are not held back (a
+  muxer, as in the ffmpeg program, keeps each frame until the next one
+  arrives). One encoder runs per window sent as video.
+- A stream starts with a `video` event (codec string, coded size) and a key
+  frame; frames carry `Enc` 3, or 4 for key frames, and are paced by
+  acknowledgements like pictures. The agent starts a new stream when the
+  window is resized or its viewers now all decode a preferred kind, and
+  makes a key frame when a viewer asks (`keyframe`, `refresh`).
+- The core routes video frames like pictures, except that a viewer that
+  missed one (it was behind, or joined during a stream) gets no frames of
+  the stream until the next key frame, which the core asks for once the
+  viewer has nothing in flight, at most twice a second. A viewer joining
+  gets the stream's `video` event first.
+- The browser decodes with one `VideoDecoder` per window
+  (`optimizeForLatency`), in the order frames arrive (pictures included),
+  draws each frame on the window's canvas and then acknowledges it. A
+  decoding error drops the decoder and asks for a key frame.
+- Anything failing sends the window as pictures: no encoder in the build or
+  on the machine, no stream kind in common, the encoder not starting or
+  exiting (then pictures for 5 s, doubling up to 5 minutes, before trying
+  again). `#stats` shows the encoder in use or why pictures are sent.
 
 **Routing** (`internal/gui/gui.go`)
 
@@ -165,13 +217,18 @@ input methods.
   those without a pane. A dialog of a window (`WM_TRANSIENT_FOR`) is opened
   by the browser window of its parent, which may still do so after the click
   that caused it; if blocked, that window shows a button for it.
+- With `#stats` at the end of its address, a browser window shows these
+  figures next to its own: frames and bytes received, decode and draw time,
+  frames the core skipped for it. They tell whether the machine, the
+  connection or the browser limits the frame rate.
 - Closing the browser window closes the program window: the page sends a
   `keepalive` POST to `/m/{machine}/gui/{window}/close` (audited), and the
   core closes the window
   two seconds later unless a viewer is showing it again (a reload) or another
   browser window still shows it. Losing the connection closes nothing.
 
-**Settings**: `gui` (`on`, `off`) and `gui-gpu` (`vglrun`, `all`), in the
+**Settings**: `--gui-video` (`off`, `on`) is a flag only while video is
+experimental. `gui` (`on`, `off`) and `gui-gpu` (`vglrun`, `all`), in the
 settings dialog's "Program windows" section and as flags
 ([13](13-settings-and-appearance.md)). Both can be set per remote machine
 ("Per machine" in the same section, which also shows each machine's
@@ -190,7 +247,14 @@ its programs keep their windows until the display idles out.
 | Terminal graphics (sixel, Kitty) | herdr's terminal-session stream drops them ([01](01-herdr-integration.md)); not interactive. |
 | Starting the display on the first connection (socket activation) | Xvfb cannot take a listening socket; relaying through the agent would end every program's connection when the agent exits. |
 | A display per pane or per workspace | Many X servers for windows that rarely exist; one display with per-window capture separates windows anyway. |
-| H.264 video | Needs an encoder on the machine; JPEG with acknowledgement-paced frames works without one. |
+| Only pictures (no video) | Measured with a 1706×960 MuJoCo viewer: 29 frames per second at 30 Mbit/s directly and 8 on a 10 Mbit/s link with 50 ms more round trip, against 49 at 1.6 Mbit/s and 31 with H.264 from NVENC; per frame the machine spends a third of the CPU time. Pictures stay for windows that rarely change, where they are exact and need no encoder. |
+| The ffmpeg program as the encoder | Its muxers write a frame when the next one arrives (Annex B ends a frame at the next delimiter, fragmented MP4 at the next fragment); with acknowledgement-paced frames the stream stalls. IVF writes at once but carries only VP8, VP9 and AV1. |
+| The machine's own ffmpeg | Missing on some machines (one of seven tried) and of varying versions and builds. |
+| NVENC from the agent through the driver's API (purego, without cgo) | Bindings for NVENC's and CUDA's C structures written by hand, no VP8 fallback, and loading libraries this way makes the agent a dynamically linked program, so it depends on the machine's libc. |
+| WebRTC to the browser | Needs ICE and connections outside the guarded WebSocket; frames already reach the browser over it and WebCodecs decodes them there. |
+| AV1 (av1_nvenc) | Smallest frames, but NVENC encodes AV1 only from Ada GPUs on (not the A40), and Safari decodes it only with hardware support. |
+| HEVC | Browsers decode it only with hardware support. |
+| WebP pictures | No encoder in Go's standard library; a library would be loaded like the video encoder for less gain. |
 | `DISPLAY` only when asked | MuJoCo and matplotlib would need setup in every pane. With a display, `plt.show()` blocks until its window is closed, which is visible in the browser; machines where that is unwanted are turned off individually. |
 | Restarting herdr's server with `DISPLAY` set, or `terminal.default_shell` pointing at a wrapper | Restarting ends every pane and agent; a wrapper means editing the user's herdr configuration. |
 | Typing the export into every pane | Would land in agents' prompts and editors; only shells at their prompt are typed into. |
@@ -223,6 +287,17 @@ its programs keep their windows until the display idles out.
   from a campus machine.
 - **VirtualGL's EGL device not accessible** → `VGL_DISPLAY` is not set;
   OpenGL programs render with Mesa on the CPU.
+- **Video encoder cannot start or stops** (no NVIDIA driver, all NVENC
+  sessions in use, killed) → the window is sent as pictures and video is
+  tried again after 5 s, doubling up to 5 minutes; VP8 is used where
+  H.264 is not available and the viewers decode it.
+- **Browser without WebCodecs or not in a secure context** (plain HTTP on a
+  LAN) → it asks for no video and gets pictures; so does every viewer of a
+  window one of whose viewers does not decode the stream.
+- **Slow connection with video** → frames are paced by acknowledgements
+  like pictures; three in flight per window limit the frame rate to about
+  three per round trip (31 per second with 87 ms from capture to drawing
+  on a 10 Mbit/s link), well below the bandwidth.
 
 ## Security
 
@@ -235,7 +310,9 @@ created earlier keeps `DISPLAY` after its display ended. Window contents and
 input travel the same guarded paths as terminals: same-origin pages,
 Host/Origin checks, proxy secret. In read-only mode nothing is installed or
 started, browser windows show windows but send no input, and closing is
-refused. Xvfb packages are fetched through apt, which verifies them. See
+refused. Xvfb packages are fetched through apt, which verifies them. The video
+encoder is run only as pushed by the core and verified by its SHA-256; it
+reads frames from a pipe and writes packets to one. See
 [SECURITY.md](../../SECURITY.md).
 
 ## Testing
@@ -254,8 +331,26 @@ per connection and the retry backoff;
 `internal/server/server_test.go` covers malformed `env` parameters and the
 Origin check of the close request;
 `internal/agent/gui_test.go` also covers recognizing shells started with the
-display (a process still in exec has an empty environment and is skipped); `internal/server/server_test.go` the environment merge;
-`web/src/__tests__/gui.test.ts` keycodes, paths and unseen windows.
+display (a process still in exec has an empty environment and is skipped)
+and frame statistics; `internal/gui/gui_test.go` that they reach only the
+window's viewers; `internal/server/server_test.go` the environment merge;
+`web/src/__tests__/gui.test.ts` keycodes, paths, unseen windows and the
+statistics shown. Video: `internal/agent/guivideo_test.go` runs the
+encoder's protocol against a stand-in process (key frames on request,
+codec strings, an encoder that exits), installs with a wrong and the right
+digest and prunes old builds, and decides when a window becomes video,
+changes stream and goes back to pictures; `internal/gui/gui_test.go` routes
+streams (common kinds in order of preference, viewers behind waiting for a
+key frame, joining mid-stream, the stream's end, video off);
+`web/src/__tests__/guiVideo.test.ts` decodes from key frames and starts
+over after errors, and asks for video only with WebCodecs in a secure
+context. The encoder was measured with MuJoCo and matplotlib windows on
+NVIDIA machines (RTX PRO 6000, RTX 5090), checked on an A40 machine without
+ffmpeg and an Intel-only machine (VP8), and killed while streaming. `BenchmarkGUICapture` (`go test ./internal/agent -run '^$'
+-bench GUICapture` on Linux with Xvfb) times capturing, converting and
+encoding a 1706×960 window, a rendered scene and a plot, in tiles as the
+window manager does; on a Core Ultra 9 285K a frame takes about 3 ms to
+capture, 1.4 ms to convert and 12–14 ms as JPEG (160–170 kB).
 matplotlib (TkAgg) and the MuJoCo viewer under `vglrun` were used end to end
 in Chrome on Ubuntu 24.04 machines, one with Xvfb installed and one where it
 was fetched without privileges. Enabling open panes was checked in an

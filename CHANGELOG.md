@@ -8,6 +8,20 @@ All notable changes are documented here. The format follows
 
 ### Added
 
+- Program windows, experimental (`--gui-video on`): a window that keeps
+  changing (a simulator, a rotating 3D plot) is sent as video, H.264
+  through NVENC on machines with an NVIDIA GPU, else VP8 on the CPU, and
+  decoded in the browser with WebCodecs; once it settles it is sent again
+  as an exact picture. The core brings the encoder (built with
+  `scripts/build-ffmpeg.sh`) and pushes it to machines; without it, without
+  WebCodecs (plain HTTP on a LAN) or when encoding fails, windows are sent
+  as pictures as before. Measured with the MuJoCo viewer: 49 instead of 29
+  frames per second at 1.6 instead of 30 Mbit/s, and 31 instead of 8 on a
+  10 Mbit/s link.
+- Program windows: `#stats` at the end of a program window's address shows
+  frame statistics: what the machine spent capturing and encoding, the
+  frames and bytes the browser received and how long it took to decode and
+  draw them, and the time from capture to the picture being drawn.
 - Desktop app: drag folders from Finder onto the sidebar to create a
   workspace for each on the local machine.
 - Files dragged onto a pane are pasted as their paths. Files not on the

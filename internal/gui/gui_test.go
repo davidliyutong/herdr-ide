@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -174,6 +175,112 @@ func TestFrameRouting(t *testing.T) {
 	m.Command("m1", 7, fv, agentproto.GUICommand{Cmd: "key", Keycode: 39, Down: true, ID: 99}, true)
 	if c := readCmd(t, agent); c.Cmd != "key" || c.Keycode != 39 || c.ID != 7 {
 		t.Fatalf("input: %+v", c)
+	}
+}
+
+// A window's stats go to the browser windows showing it, not to others.
+func TestStatsRouting(t *testing.T) {
+	m, d, agent := attached(t)
+	var r recorder
+	m.Attach("m1", 7, r.viewer())
+	readCmd(t, agent) // watch
+	stats := func(win uint32) []byte {
+		b, _ := json.Marshal(agentproto.GUIEvent{Ev: "stats", Stats: &agentproto.GUIStats{Window: win, Frames: 3}})
+		return b
+	}
+	m.event(d, stats(8))
+	m.event(d, stats(7))
+	if len(r.events) != 2 || r.events[1] != "stats" {
+		t.Fatalf("events %v", r.events)
+	}
+}
+
+// Video goes to windows whose viewers all decode it; a viewer that missed a
+// frame of the stream gets nothing until a key frame, which is asked for
+// once it caught up.
+func TestVideoRouting(t *testing.T) {
+	m, d, agent := attached(t)
+	m.Video = true
+	var a, b recorder
+	av, bv := a.viewer(), b.viewer()
+	av.Codecs, bv.Codecs = []string{"vp8", "avc1"}, []string{"vp8"}
+	m.Attach("m1", 7, av)
+	if c := readCmd(t, agent); c.Cmd != "watch" || strings.Join(c.Codecs, ",") != "avc1,vp8" {
+		t.Fatalf("watch: %+v", c)
+	}
+	m.Attach("m1", 7, bv)
+	if c := readCmd(t, agent); c.Cmd != "refresh" || strings.Join(c.Codecs, ",") != "vp8" {
+		t.Fatalf("second viewer: %+v", c)
+	}
+	ev, _ := json.Marshal(agentproto.GUIEvent{Ev: "video", Video: &agentproto.GUIVideo{Window: 7, Codec: "vp8", W: 640, H: 480}})
+	m.event(d, ev)
+	if a.events[len(a.events)-1] != "video" || b.events[len(b.events)-1] != "video" {
+		t.Fatalf("stream start: %v / %v", a.events, b.events)
+	}
+	vframe := func(seq uint32, key bool) []byte {
+		enc := agentproto.GUIEncVideo
+		if key {
+			enc = agentproto.GUIEncVideoKey
+		}
+		return agentproto.GUIFrameHeader{Window: 7, Layer: 7, W: 640, H: 480, Enc: enc, Seq: seq}.Marshal()
+	}
+	ack := func(v *Viewer, seq uint32) {
+		m.Command("m1", 7, v, agentproto.GUICommand{Cmd: "ack", Seq: seq}, true)
+	}
+	m.frame(d, vframe(1, true))
+	ack(av, 1)
+	readCmd(t, agent) // ack 1
+	b.full = true
+	m.frame(d, vframe(2, false)) // b misses it
+	b.full = false
+	ack(av, 2)
+	readCmd(t, agent) // ack 2
+	m.frame(d, vframe(3, false))
+	ack(av, 3)
+	readCmd(t, agent) // ack 3
+	if fmt.Sprint(b.frames) != "[1]" {
+		t.Fatalf("b got %v after missing frame 2", b.frames)
+	}
+	ack(bv, 1) // caught up: a key frame is asked for
+	if c := readCmd(t, agent); c.Cmd != "keyframe" || c.ID != 7 {
+		t.Fatalf("after catching up: %+v", c)
+	}
+	m.frame(d, vframe(4, true))
+	m.frame(d, vframe(5, false))
+	if fmt.Sprint(b.frames) != "[1 4 5]" || fmt.Sprint(a.frames) != "[1 2 3 4 5]" {
+		t.Fatalf("frames a %v b %v", a.frames, b.frames)
+	}
+
+	// The viewer left decodes more.
+	m.Detach("m1", 7, bv)
+	if c := readCmd(t, agent); c.Cmd != "codecs" || strings.Join(c.Codecs, ",") != "avc1,vp8" {
+		t.Fatalf("after detach: %+v", c)
+	}
+	// A viewer joining a running stream starts with it.
+	var late recorder
+	lv := late.viewer()
+	lv.Codecs = []string{"vp8"}
+	m.Attach("m1", 7, lv)
+	if late.events[len(late.events)-1] != "video" || !lv.needKey {
+		t.Fatalf("late viewer: %v", late.events)
+	}
+	// The stream ends: viewers joining later get pictures.
+	end, _ := json.Marshal(agentproto.GUIEvent{Ev: "video", Video: &agentproto.GUIVideo{Window: 7}})
+	m.event(d, end)
+	if d.video[7] != nil {
+		t.Error("ended stream kept")
+	}
+}
+
+// Without --gui-video agents are told no viewer decodes video.
+func TestVideoOff(t *testing.T) {
+	m, _, agent := attached(t)
+	var r recorder
+	v := r.viewer()
+	v.Codecs = []string{"avc1"}
+	m.Attach("m1", 7, v)
+	if c := readCmd(t, agent); c.Cmd != "watch" || len(c.Codecs) != 0 {
+		t.Fatalf("watch: %+v", c)
 	}
 }
 

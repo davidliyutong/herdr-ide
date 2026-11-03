@@ -55,6 +55,11 @@ type gui struct {
 
 	vglOnce sync.Once
 	vgl     vglInfo
+
+	// The encoder for video (guivideo.go) and the stream kinds it makes.
+	videoMu    sync.Mutex
+	videoBin   string
+	videoKinds []string
 }
 
 const (
@@ -739,6 +744,17 @@ func (g *gui) handle(ctx context.Context, st net.Conn, h agentproto.Header) erro
 		gs := g.status()
 		gs.Procs = g.shells(h.Args, gs.Display)
 		return agentproto.WriteLine(st, agentproto.Reply{OK: true, GUI: gs})
+	case "video":
+		return agentproto.WriteLine(st, agentproto.Reply{OK: true, GUI: g.videoStatus(h.Digest)})
+	case "video-install":
+		// The stream carries the gzip-compressed ffmpeg (chunked).
+		if err := agentproto.WriteLine(st, agentproto.Reply{OK: true}); err != nil {
+			return err
+		}
+		if err := g.installVideo(h.Digest, &agentproto.ChunkReader{R: st}); err != nil {
+			return agentproto.Fail(st, err)
+		}
+		return agentproto.WriteLine(st, agentproto.Reply{OK: true, GUI: g.videoStatus(h.Digest)})
 	case "attach":
 		return g.attach(st)
 	default:
@@ -769,6 +785,7 @@ func (g *gui) attach(st net.Conn) error {
 	if err != nil {
 		return agentproto.Fail(st, err)
 	}
+	wm.tools = g.videoTools
 	g.wmMu.Lock()
 	g.wm = wm
 	g.wmMu.Unlock()

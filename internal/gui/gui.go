@@ -11,6 +11,7 @@ import (
 	"errors"
 	"log"
 	"net"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"herdr-ide/internal/agentproto"
+	"herdr-ide/internal/embedded"
 	"herdr-ide/internal/machines"
 	"herdr-ide/internal/settings"
 	"herdr-ide/internal/transport"
@@ -74,10 +76,17 @@ type Viewer struct {
 	// Send queues a message (agentproto.GUIJSON or GUIFrame payload) without
 	// blocking; false means the viewer's queue is full.
 	Send func(kind byte, payload []byte) bool
+	// Codecs are the kinds of video streams the browser decodes ("avc1",
+	// "vp8"); none means pictures only.
+	Codecs []string
 
 	sent      []uint32  // frames sent and not acknowledged
 	stale     bool      // frames were dropped: needs the whole window again
 	refreshed time.Time // last refresh this viewer asked for
+	// needKey: video frames were dropped (or none came yet), so the
+	// viewer cannot decode until the next key frame.
+	needKey  bool
+	keyAsked time.Time
 }
 
 // refreshEvery bounds how often one viewer may have a window sent in full.
@@ -102,6 +111,9 @@ type Manager struct {
 	ReadOnly bool
 	// Audit records installing and starting displays.
 	Audit func(event string, fields map[string]any)
+	// Video lets machines send windows that keep changing as video to
+	// browsers that decode it (--gui-video).
+	Video bool
 
 	mu sync.Mutex
 	ds map[string]*display
@@ -130,6 +142,10 @@ type display struct {
 	order   []uint32
 	layers  map[uint32]agentproto.GUILayer
 	cursor  []byte
+	// video holds each window's current stream (its "video" event), for
+	// viewers that join; codecs what its viewers were last said to decode.
+	video   map[uint32][]byte
+	codecs  map[uint32]string
 	viewers map[uint32]map[*Viewer]bool
 	acked   map[uint32]uint32
 	closing map[uint32]*time.Timer
@@ -161,6 +177,7 @@ func (m *Manager) get(mc *machines.Machine) *display {
 	d := m.ds[mc.ID()]
 	if d == nil {
 		d = &display{mc: mc, windows: map[uint32]*agentproto.GUIWindow{}, layers: map[uint32]agentproto.GUILayer{},
+			video: map[uint32][]byte{}, codecs: map[uint32]string{},
 			viewers: map[uint32]map[*Viewer]bool{}, acked: map[uint32]uint32{}, closing: map[uint32]*time.Timer{}, typed: map[string]string{}}
 		m.ds[mc.ID()] = d
 	}
@@ -398,6 +415,71 @@ func (m *Manager) prepare(d *display, sess *transport.Session) {
 	m.mu.Unlock()
 	m.setPhase(d, PhaseReady, nil)
 	go m.read(d, sess, conn)
+	if m.Video && !m.ReadOnly {
+		go m.prepareVideo(d)
+	}
+}
+
+// prepareVideo puts the video encoder this build brings on the machine, so that
+// its windows can be sent as video. Without it, or when it fails, windows
+// are sent as pictures.
+func (m *Manager) prepareVideo(d *display) {
+	mc := d.mc
+	info := mc.State().Info
+	if info == nil {
+		return
+	}
+	gz, digest, err := embedded.Encoder(info.OS, info.Arch)
+	if err != nil {
+		m.Logger.Printf("gui %s: video: %v", mc.Label(), err)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	conn, rep, err := mc.Open(ctx, agentproto.Header{Op: agentproto.OpGUI, Action: "video", Digest: digest})
+	if err == nil {
+		conn.Close()
+	}
+	if err == nil && (rep.GUI == nil || !rep.GUI.Video) {
+		m.audit("gui.video", map[string]any{"machine": mc.ID(), "sha256": digest})
+		rep, err = upload(ctx, mc, agentproto.Header{Op: agentproto.OpGUI, Action: "video-install", Digest: digest}, gz)
+	}
+	if err != nil {
+		m.Logger.Printf("gui %s: video: %v", mc.Label(), err)
+		return
+	}
+	if rep.GUI != nil {
+		m.Logger.Printf("gui %s: video encoders %v", mc.Label(), rep.GUI.VideoEncoders)
+	}
+}
+
+// upload sends body through a chunked stream for an action that answers
+// after reading it.
+func upload(ctx context.Context, mc *machines.Machine, h agentproto.Header, body []byte) (*agentproto.Reply, error) {
+	conn, _, err := mc.Open(ctx, h)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	cw := agentproto.ChunkWriter{W: conn}
+	for len(body) > 0 {
+		n := min(len(body), 256<<10)
+		if _, err := cw.Write(body[:n]); err != nil {
+			return nil, err
+		}
+		body = body[n:]
+	}
+	if err := cw.Finish(); err != nil {
+		return nil, err
+	}
+	var rep agentproto.Reply
+	if err := agentproto.ReadLine(conn, &rep); err != nil {
+		return nil, err
+	}
+	if !rep.OK {
+		return &rep, errors.New(rep.Error)
+	}
+	return &rep, nil
 }
 
 func writeCommands(conn net.Conn, cmds <-chan []byte) {
@@ -497,6 +579,8 @@ func (m *Manager) event(d *display, payload []byte) {
 		targets = viewersOf(d, w.ID)
 	case "gone":
 		delete(d.windows, ev.ID)
+		delete(d.video, ev.ID)
+		delete(d.codecs, ev.ID)
 		for i, id := range d.order {
 			if id == ev.ID {
 				d.order = append(d.order[:i], d.order[i+1:]...)
@@ -530,6 +614,21 @@ func (m *Manager) event(d *display, payload []byte) {
 		for id := range d.viewers {
 			targets = append(targets, viewersOf(d, id)...)
 		}
+	case "stats":
+		if ev.Stats != nil {
+			targets = viewersOf(d, ev.Stats.Window)
+		}
+	case "video":
+		// A new stream, which starts with a key frame, or (no codec) the
+		// end of the window's stream.
+		if ev.Video != nil && d.windows[ev.Video.Window] != nil {
+			if ev.Video.Codec == "" {
+				delete(d.video, ev.Video.Window)
+			} else {
+				d.video[ev.Video.Window] = payload
+			}
+			targets = viewersOf(d, ev.Video.Window)
+		}
 	}
 	for _, v := range targets {
 		v.Send(agentproto.GUIJSON, payload)
@@ -558,10 +657,23 @@ func (m *Manager) frame(d *display, payload []byte) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delivered := false
+	video := h.Enc == agentproto.GUIEncVideo || h.Enc == agentproto.GUIEncVideoKey
 	for v := range d.viewers[h.Window] {
-		if len(v.sent) >= viewerBacklog || !v.Send(agentproto.GUIFrame, payload) {
-			v.stale = true
+		if video && v.needKey && h.Enc != agentproto.GUIEncVideoKey {
+			// Undecodable without the frames it missed.
+			m.askKeyLocked(d, h.Window, v)
 			continue
+		}
+		if len(v.sent) >= viewerBacklog || !v.Send(agentproto.GUIFrame, payload) {
+			if video {
+				v.needKey = true
+			} else {
+				v.stale = true
+			}
+			continue
+		}
+		if h.Enc == agentproto.GUIEncVideoKey {
+			v.needKey = false
 		}
 		v.sent = append(v.sent, h.Seq)
 		delivered = true
@@ -572,6 +684,60 @@ func (m *Manager) frame(d *display, payload []byte) {
 		d.acked[h.Window] = h.Seq
 		m.sendLocked(d, agentproto.GUICommand{Cmd: "ack", ID: h.Window, Seq: h.Seq})
 	}
+}
+
+// askKeyLocked asks the agent for a key frame for a viewer that cannot
+// decode the window's video, once it has nothing in flight and at most
+// every refreshEvery.
+func (m *Manager) askKeyLocked(d *display, id uint32, v *Viewer) {
+	if len(v.sent) > 0 || time.Since(v.keyAsked) < refreshEvery {
+		return
+	}
+	v.keyAsked = time.Now()
+	m.sendLocked(d, agentproto.GUICommand{Cmd: "keyframe", ID: id})
+}
+
+// codecPreference orders the video streams agents are offered: H.264
+// (encoded on the GPU) before VP8 (on the CPU); others after, by name.
+var codecPreference = []string{"avc1", "vp8"}
+
+// codecsLocked returns the video streams every viewer of window id
+// decodes, in codecPreference order.
+func (m *Manager) codecsLocked(d *display, id uint32) []string {
+	if !m.Video {
+		return nil
+	}
+	var out []string
+	first := true
+	for v := range d.viewers[id] {
+		if first {
+			out = append([]string(nil), v.Codecs...)
+			first = false
+			continue
+		}
+		out = slices.DeleteFunc(out, func(c string) bool { return !slices.Contains(v.Codecs, c) })
+	}
+	rank := func(c string) int {
+		if i := slices.Index(codecPreference, c); i >= 0 {
+			return i
+		}
+		return len(codecPreference)
+	}
+	slices.SortStableFunc(out, func(a, b string) int {
+		if r := rank(a) - rank(b); r != 0 {
+			return r
+		}
+		return strings.Compare(a, b)
+	})
+	return out
+}
+
+// updateCodecsLocked tells the agent when what the viewers of window id
+// decode changed.
+func (m *Manager) updateCodecsLocked(d *display, id uint32) []string {
+	c := m.codecsLocked(d, id)
+	d.codecs[id] = strings.Join(c, ",")
+	return c
 }
 
 func (m *Manager) audit(event string, fields map[string]any) {
@@ -671,15 +837,21 @@ func (m *Manager) Attach(machine string, id uint32, v *Viewer) bool {
 	if d.cursor != nil {
 		v.Send(agentproto.GUIJSON, d.cursor)
 	}
+	if b := d.video[id]; b != nil {
+		v.Send(agentproto.GUIJSON, b)
+		v.needKey = true
+	}
 	first := len(d.viewers[id]) == 0
 	if first {
 		d.viewers[id] = map[*Viewer]bool{}
 	}
 	d.viewers[id][v] = true
+	codecs := m.updateCodecsLocked(d, id)
 	if first {
-		m.sendLocked(d, agentproto.GUICommand{Cmd: "watch", ID: id})
+		m.sendLocked(d, agentproto.GUICommand{Cmd: "watch", ID: id, Codecs: codecs})
 	} else {
-		m.sendLocked(d, agentproto.GUICommand{Cmd: "refresh", ID: id})
+		// The whole window, and a key frame to start decoding with.
+		m.sendLocked(d, agentproto.GUICommand{Cmd: "refresh", ID: id, Codecs: codecs})
 	}
 	return true
 }
@@ -694,9 +866,15 @@ func (m *Manager) Detach(machine string, id uint32, v *Viewer) {
 	}
 	delete(d.viewers[id], v)
 	if len(d.viewers[id]) > 0 {
+		// Those left may decode more.
+		old := d.codecs[id]
+		if c := m.updateCodecsLocked(d, id); strings.Join(c, ",") != old {
+			m.sendLocked(d, agentproto.GUICommand{Cmd: "codecs", ID: id, Codecs: c})
+		}
 		return
 	}
 	delete(d.viewers, id)
+	delete(d.codecs, id)
 	m.sendLocked(d, agentproto.GUICommand{Cmd: "release", ID: id})
 	m.sendLocked(d, agentproto.GUICommand{Cmd: "unwatch", ID: id})
 }
@@ -749,6 +927,15 @@ func (m *Manager) Command(machine string, id uint32, v *Viewer, c agentproto.GUI
 		if v.stale && len(v.sent) == 0 {
 			v.stale = false
 			m.sendLocked(d, agentproto.GUICommand{Cmd: "refresh", ID: id})
+		}
+		if v.needKey && d.video[id] != nil {
+			m.askKeyLocked(d, id, v)
+		}
+	case "keyframe":
+		// The browser could not decode the stream.
+		if d.video[id] != nil {
+			v.needKey = true
+			m.askKeyLocked(d, id, v)
 		}
 	case "refresh":
 		if time.Since(v.refreshed) >= refreshEvery {

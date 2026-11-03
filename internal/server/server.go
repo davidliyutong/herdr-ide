@@ -42,6 +42,9 @@ type Options struct {
 	CodeServerIdle time.Duration
 	// ReadOnly allows watching only (see SECURITY.md).
 	ReadOnly bool
+	// GUIVideo lets machines send program windows that keep changing as
+	// video (--gui-video).
+	GUIVideo bool
 	// ProxySecret, when set, must be sent by the reverse proxy in
 	// ProxySecretHeader on requests that do not come from loopback.
 	ProxySecret string

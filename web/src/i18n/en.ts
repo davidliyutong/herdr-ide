@@ -39,6 +39,17 @@ export const en = {
   'gui.status.open': 'Connected',
   'gui.status.reconnecting': 'Reconnecting…',
   'gui.status.gone': 'The window was closed',
+  'gui.stats.browser':
+    'Browser: {fps} frames/s · {kb} kB/frame · {mbps} Mbit/s · decode {decode} ms · draw {draw} ms · skipped {skipped}/s',
+  'gui.stats.machine':
+    'Machine: {ups} updates/s ({fps} frames/s, {mpx} Mpx/s) · per update: capture {capture} ms · convert {convert} ms · encode {encode} ms · JPEG {jpeg} · PNG {png}',
+  'gui.stats.flow': 'Capture to drawn: {latency} ms · held back {waits}/s',
+  'gui.stats.noMachine': 'Waiting for the machine’s figures…',
+  'gui.stats.video': 'Video: {encoder}, {fps} frames/s',
+  'gui.stats.fallback': 'Pictures instead of video: {reason}',
+  'gui.stats.fallback.unavailable': 'the machine has no encoder',
+  'gui.stats.fallback.no_codec': 'no encoder on the machine makes what this browser decodes',
+  'gui.stats.fallback.failed': 'the encoder failed; trying again later',
   'gui.phase.installing': 'Fetching Xvfb on {m}',
   'gui.phase.starting': 'Starting the display on {m}',
   'gui.phase.error': 'Display on {m} failed',

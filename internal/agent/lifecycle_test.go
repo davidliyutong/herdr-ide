@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-func testAgent(t *testing.T) *Agent {
+func testAgent(t testing.TB) *Agent {
 	home := t.TempDir()
 	base := filepath.Join(home, ".x")
 	run := filepath.Join(base, "run")

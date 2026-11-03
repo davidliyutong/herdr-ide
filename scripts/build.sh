@@ -45,6 +45,16 @@ for p in $AGENT_PLATFORMS; do
   echo "    $os/$arch $(du -h "$out" | cut -f1)"
 done
 
+# The encoder machines send program windows as video with (--gui-video),
+# when built by scripts/build-ffmpeg.sh; without it windows are pictures.
+rm -f internal/embedded/encoder/*.gz
+for f in dist/ffmpeg/*/encoder.gz; do
+  [[ -f "$f" ]] || continue
+  plat=$(basename "$(dirname "$f")")
+  cp "$f" "internal/embedded/encoder/encoder-$plat.gz"
+  echo "==> video encoder $plat embedded"
+done
+
 echo "==> ${SLUG}"
 for p in $TARGETS; do
   os=${p%/*}; arch=${p#*/}

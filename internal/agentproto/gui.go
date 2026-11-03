@@ -30,6 +30,11 @@ type GUIStatus struct {
 	// Procs (action shells, Header.Args = pids): the given processes of
 	// this user that exist.
 	Procs []GUIProc `json:"procs,omitempty"`
+	// Video (actions video and video-install, Header.Digest = the
+	// ffmpeg's SHA-256): the ffmpeg is installed, and the encoders that
+	// work with it on this machine.
+	Video         bool     `json:"video,omitempty"`
+	VideoEncoders []string `json:"video_encoders,omitempty"`
 }
 
 // GUIProc describes a pane's shell process for enabling the display in it.
@@ -124,23 +129,71 @@ type GUICursor struct {
 	YHot int    `json:"yhot"`
 }
 
+// GUIVideo starts a window's video stream: the codec of the GUIEncVideo
+// frames that follow (a WebCodecs codec string) and their coded size, which
+// may exceed the window's (padding to even sizes).
+type GUIVideo struct {
+	Window  uint32 `json:"window"`
+	Codec   string `json:"codec"`
+	Encoder string `json:"encoder"`
+	W       int    `json:"w"`
+	H       int    `json:"h"`
+}
+
+// GUIStats is what sending a watched window's frames (its layers'
+// included) cost on the machine since the last report, sent about once a
+// second. Durations are totals in microseconds.
+type GUIStats struct {
+	Window   uint32 `json:"window"`
+	Interval int64  `json:"interval_us"`
+	// Updates counts ticks that sent frames: how often the browser's
+	// picture changed. A large change is several frames (tiles).
+	Updates int   `json:"updates"`
+	Frames  int   `json:"frames"`
+	JPEG    int   `json:"jpeg"`
+	PNG     int   `json:"png"`
+	Pixels  int64 `json:"pixels"`
+	Bytes   int64 `json:"bytes"`
+	// Capture is reading pixels from the X server, Convert turning them
+	// into an image, Encode compressing it.
+	Capture int64 `json:"capture_us"`
+	Convert int64 `json:"convert_us"`
+	Encode  int64 `json:"encode_us"`
+	// Waits counts ticks whose changes were held back because the window
+	// had as many frames unacknowledged as allowed.
+	Waits int `json:"waits"`
+	// Latency is the total time from capture to acknowledgement (drawn by
+	// a browser, or dropped by the core) of the Acked frames.
+	Latency int64 `json:"latency_us"`
+	Acked   int   `json:"acked"`
+	// Video frames among Frames, the encoder used, and why the window is
+	// sent as pictures although its viewers decode video (empty when not).
+	Video    int    `json:"video,omitempty"`
+	Encoder  string `json:"encoder,omitempty"`
+	Fallback string `json:"fallback,omitempty"`
+}
+
 // GUIEvent is sent by the agent.
 type GUIEvent struct {
 	// Ev: window (new or changed), gone, layer (new or changed),
-	// layer_gone, cursor. The core adds child (a new dialog of the viewed
-	// window) for browsers.
+	// layer_gone, cursor, stats, video. The core adds child (a new dialog
+	// of the viewed window) for browsers.
 	Ev     string     `json:"ev"`
 	Window *GUIWindow `json:"window,omitempty"`
 	Layer  *GUILayer  `json:"layer,omitempty"`
 	ID     uint32     `json:"id,omitempty"`
 	Cursor *GUICursor `json:"cursor,omitempty"`
+	Stats  *GUIStats  `json:"stats,omitempty"`
+	Video  *GUIVideo  `json:"video,omitempty"`
 }
 
 // GUICommand is sent by the core. Coordinates are relative to window ID.
 type GUICommand struct {
 	// Cmd: watch, unwatch (frames wanted or not), ack (frames up to Seq
-	// were shown), refresh (send the whole window again), focus, close,
-	// pointer, button, wheel, key, release (all pressed keys and buttons).
+	// were shown), refresh (send the whole window again), codecs (the
+	// viewers changed), keyframe (the next video frame starts anew), focus,
+	// close, pointer, button, wheel, key, release (all pressed keys and
+	// buttons).
 	Cmd     string `json:"cmd"`
 	ID      uint32 `json:"id"`
 	Seq     uint32 `json:"seq,omitempty"`
@@ -151,12 +204,19 @@ type GUICommand struct {
 	Keycode int    `json:"keycode,omitempty"`
 	DX      int    `json:"dx,omitempty"`
 	DY      int    `json:"dy,omitempty"`
+	// Codecs (watch, refresh, codecs) are the video codecs every viewer of
+	// the window decodes ("avc1", "vp8"); none means pictures only.
+	Codecs []string `json:"codecs,omitempty"`
 }
 
-// Frame encodings.
+// Frame encodings. A video frame is the whole window (X, Y 0) in the
+// window's current stream (GUIVideo); decoding it needs the frames before
+// it back to the last key frame.
 const (
-	GUIEncJPEG byte = 1
-	GUIEncPNG  byte = 2
+	GUIEncJPEG     byte = 1
+	GUIEncPNG      byte = 2
+	GUIEncVideo    byte = 3
+	GUIEncVideoKey byte = 4
 )
 
 // GUIFrameHeader precedes the image of a GUIFrame message. The core relays

@@ -6,8 +6,10 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/coder/websocket"
@@ -24,6 +26,7 @@ import (
 func (s *Server) initGUI() {
 	s.gui = gui.New(s.opts.Settings, s.logger)
 	s.gui.ReadOnly = s.opts.ReadOnly
+	s.gui.Video = s.opts.GUIVideo
 	s.gui.Audit = func(event string, fields map[string]any) { s.audit.log(nil, event, fields) }
 	s.gui.OnState = func(st gui.State) {
 		s.broadcast(map[string]any{"t": "gui", "state": st})
@@ -183,7 +186,7 @@ func (s *Server) handleGUIWS(w http.ResponseWriter, r *http.Request) {
 		default:
 			return false
 		}
-	}}
+	}, Codecs: videoCodecs(r.URL.Query().Get("video"))}
 	go func() {
 		for {
 			select {
@@ -228,6 +231,19 @@ func (s *Server) handleGUIWS(w http.ResponseWriter, r *http.Request) {
 	}
 	s.gui.Detach(mc.ID(), id, v)
 	conn.Close(websocket.StatusNormalClosure, "")
+}
+
+// videoCodecs parses the video streams a browser window decodes
+// (?video=avc1,vp8): at most four short lowercase names.
+func videoCodecs(q string) []string {
+	var out []string
+	for _, c := range strings.Split(q, ",") {
+		if len(out) == 4 || c == "" || len(c) > 8 || strings.Trim(c, "abcdefghijklmnopqrstuvwxyz0123456789") != "" || slices.Contains(out, c) {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
 }
 
 // handleGUIClose is sent (as a beacon) when a browser window showing a
