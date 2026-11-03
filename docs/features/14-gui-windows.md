@@ -64,7 +64,9 @@ input methods.
   checks every 5 s that the session's herdr server (the process listening
   on its socket, by peer credentials and start time) still runs; a server
   restarted within 30 s is followed, otherwise it exits. The core asks the
-  agent for one (action `keep`) once the display is ready, except in
+  agent for one (action `keep`, audited as `gui.keep`) once the display is
+  ready and each time the machine's herdr server becomes reachable again
+  (a keeper started while the server was down has left), except in
   read-only mode, and the agent starts one after starting herdr's server
   from the UI. One runs per instance (`run/gui-keep.lock`); it logs to
   `~/.herdr-ide/gui-keep.log`. The agent connects once right after starting
@@ -125,7 +127,8 @@ input methods.
   1024×1024, so a huge window costs bounded memory per frame.
 - Capturing and encoding (`guiframes.go`): the tiles of a tick are read
   through MIT-SHM into one System V shared memory segment (0600, marked for
-  removal as soon as Xvfb attached it, at most 64 MB), all requests sent
+  removal as soon as the agent attached it, which Linux allows Xvfb to
+  attach afterwards; at most 64 MB), all requests sent
   before the first reply is read; without MIT-SHM, or once it failed, with
   `GetImage`. The captures are then encoded at the same time and written in
   order. JPEG is encoded straight from the captured BGRX pixels by
@@ -183,8 +186,10 @@ input methods.
   ticks changed a quarter of it or more. Each change is then one video
   frame, small ones too. Once the window is unchanged for 400 ms it is sent
   again as PNG (video blurs colored text, 4:2:0), and after 5 s unchanged
-  the stream ends. Layers stay pictures. Windows under 64 pixels a side are
-  never video.
+  the stream ends, also when the window's flow holds frames back (a viewer
+  stopped acknowledging). Layers stay pictures. Windows under 64 or over
+  4096 pixels a side are never video (over: `#stats` says why), so a
+  capture of the whole window stays bounded.
 - Browsers name the streams they decode in the WebSocket's `?video=`:
   `avc1` (H.264) and `vp8`, probed with WebCodecs' `isConfigSupported`, and
   only in a secure context (localhost, HTTPS, the desktop app). The core
@@ -246,10 +251,12 @@ input methods.
 - Frames go to every browser window showing that window. The fastest viewer
   acknowledges frames to the agent (only frames it was sent count), so the
   window's flow follows it. A viewer whose oldest unshown frame was shown
-  by another viewer and sent more than 250 ms ago, or that has 64 frames
-  unshown, skips frames and, once it caught up, gets the whole window again;
-  a frame no viewer got is acknowledged by the core. A viewer may ask for
-  the whole window at most twice a second.
+  by another viewer and sent more than 250 ms ago, or that has 64 frames or
+  16 MB unshown, skips frames and, once it caught up, gets the whole window
+  again; a frame no viewer got is acknowledged by the core. A viewer may ask
+  for the whole window at most twice a second. Commands to the agent are
+  built by the core from a viewer's message: a refresh carries the streams
+  all viewers decode, an acknowledgement only its number.
 - In read-only mode the core attaches only to a display that already runs
   (phase `not_running` otherwise): nothing is installed or started. Installs
   and starts are audited (`gui.install`, `gui.start`).
@@ -361,9 +368,12 @@ turning it on pushes the encoder if needed.
   → captures go through the X connection (2.4 ms instead of 0.4 ms for a
   1706×960 window); logged once.
 - **Keeper not running** (killed, or herdr's server restarted more than
-  30 s later) → the display ends a minute after its last client; the next
-  connection of the core starts it again on the same number if it is still
-  free, with a new cookie that panes read from `run/xauth`.
+  30 s later while the core was away; while connected the core asks for a
+  new one when the server is back) → the display ends a minute after its
+  last client; the next connection of the core starts it again on the same
+  number if it is still free, with a new cookie that panes read from
+  `run/xauth`, otherwise panes created earlier point at a number another
+  server may hold (see Security).
 - **Browser without WebCodecs or not in a secure context** (plain HTTP on a
   LAN) → it asks for no video and gets pictures; so does every viewer of a
   window one of whose viewers does not decode the stream.
@@ -412,12 +422,15 @@ inflate the rate, a round trip measured with a queue is measured again);
 `internal/jpegstrip` that one row group gives `image/jpeg`'s bytes and any
 number of groups its pixels; `internal/agent/guikeep_test.go` that the
 keeper follows a server that restarts, leaves once it is gone, holds the
-display meanwhile and runs once per instance; `internal/gui/gui_test.go` that they reach only the
+display meanwhile and runs once per instance; `internal/gui/gui_test.go`
+that the keeper is asked for again when herdr's server comes back and
+never in read-only mode (nor is the encoder pushed), and that commands to
+the agent are the core's; `internal/gui/gui_test.go` that they reach only the
 window's viewers; `internal/server/server_test.go` the environment merge;
 `web/src/__tests__/gui.test.ts` keycodes, paths, unseen windows and the
 statistics shown. Video: `internal/agent/guivideo_test.go` runs the
 encoder's protocol against a stand-in process (key frames on request,
-codec strings, an encoder that exits), installs with a wrong and the right
+codec strings, an encoder that exits or stops reading), installs with a wrong and the right
 digest and prunes old builds, and decides when a window becomes video,
 changes stream and goes back to pictures; `internal/gui/gui_test.go` routes
 streams (common kinds in order of preference, viewers behind waiting for a

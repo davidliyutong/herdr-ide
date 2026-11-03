@@ -9,6 +9,11 @@ on:
     branches: [main]
     paths: ['scripts/build-ffmpeg.sh', 'scripts/encoder/**', '.github/workflows/encoder.yml']
   workflow_call:
+    inputs:
+      cache:
+        description: Reuse the libraries built from the pinned sources (releases build them anew).
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -26,8 +31,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       # The pinned sources and the libraries built from them; encoder.c is
-      # compiled every time.
+      # compiled every time. Not for releases, which build everything.
       - uses: actions/cache@v6
+        # inputs.cache is empty outside workflow_call.
+        if: ${{ format('{0}', inputs.cache) != 'false' }}
         with:
           path: |
             dist/ffmpeg/src

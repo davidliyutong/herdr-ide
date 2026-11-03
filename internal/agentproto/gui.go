@@ -171,7 +171,8 @@ type GUIStats struct {
 	Latency int64 `json:"latency_us"`
 	Acked   int   `json:"acked"`
 	// Video frames among Frames, the encoder used, and why the window is
-	// sent as pictures although its viewers decode video (empty when not).
+	// sent as pictures although its viewers decode video (empty when not):
+	// unavailable (no encoder), no_codec, failed, too_large.
 	Video    int    `json:"video,omitempty"`
 	Encoder  string `json:"encoder,omitempty"`
 	Fallback string `json:"fallback,omitempty"`

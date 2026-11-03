@@ -66,7 +66,7 @@ export interface StatsView {
 const STALE_MS = 3000;
 
 /** Why a window is sent as pictures although video was asked for. */
-const FALLBACKS = ['unavailable', 'no_codec', 'failed'] as const;
+const FALLBACKS = ['unavailable', 'no_codec', 'failed', 'too_large'] as const;
 export type Fallback = (typeof FALLBACKS)[number];
 
 export class FrameStats {

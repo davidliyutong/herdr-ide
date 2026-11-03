@@ -50,6 +50,7 @@ export const en = {
   'gui.stats.fallback.unavailable': 'the machine has no encoder',
   'gui.stats.fallback.no_codec': 'no encoder on the machine makes what this browser decodes',
   'gui.stats.fallback.failed': 'the encoder failed; trying again later',
+  'gui.stats.fallback.too_large': 'the window is larger than 4096 pixels on a side',
   'gui.phase.installing': 'Fetching Xvfb on {m}',
   'gui.phase.starting': 'Starting the display on {m}',
   'gui.phase.error': 'Display on {m} failed',

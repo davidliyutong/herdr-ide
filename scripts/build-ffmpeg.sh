@@ -33,6 +33,15 @@ LIBDRM_SHA256=ac5e74d157830eb8bee44c6a6bf3ad49774ef0dd2a72bdad74a8f20308b52a95
 # Builds libdrm (installed from this wheel, without the network).
 MESON=1.12.1
 MESON_SHA256=930bc7542cbd9f57009e182fd014eba48cf1a0180a7b9006d2d32d8f168d8b02
+# The build image, pinned per platform (almalinux:8's manifests; Docker may
+# refuse to pull a second platform of one multi-platform digest).
+image() {
+  case $1 in
+    linux/amd64) echo almalinux:8@sha256:1965cb10f9c392766b2d544d3c1b997eb008d0e413c808e6a20086e87c802a80 ;;
+    linux/arm64) echo almalinux:8@sha256:29fdedeed8a6707558c9e03b5d3e8f09eac5307cdd0811218d7d55a2cc9ae522 ;;
+    *) echo "no build image for $1" >&2; exit 1 ;;
+  esac
+}
 PLATFORMS=${FFMPEG_PLATFORMS:-linux/amd64 linux/arm64}
 
 src=dist/ffmpeg/src
@@ -52,19 +61,21 @@ for p in $PLATFORMS; do
   plat=${p/\//-}
   out=dist/ffmpeg/$plat
   build=dist/ffmpeg/build-$plat
+  img=$(image "$p")
   mkdir -p "$out" "$build"
   docker run --rm --platform "$p" -v "$PWD/$src:/src:ro" -v "$PWD/scripts/encoder:/encoder:ro" \
     -v "$PWD/$build:/b" -v "$PWD/$out:/out" \
     -e FFMPEG="$FFMPEG" -e NVHEADERS="$NVHEADERS" -e LIBVPX="$LIBVPX" -e LIBVA="$LIBVA" -e LIBDRM="$LIBDRM" -e MESON="$MESON" \
     -e RECIPE="$(shasum -a 256 "$0" | cut -c1-12)" \
-    almalinux:8 bash -euo pipefail -c '
+    "$img" bash -euo pipefail -c '
     dnf -y -q install dnf-plugins-core >/dev/null && dnf config-manager --set-enabled powertools
     dnf -y -q install gcc gcc-c++ make diffutils pkgconf-pkg-config xz bzip2 perl nasm python3.11 python3.11-pip ninja-build libatomic-static >/dev/null
     python3.11 -m pip install -q --no-index /src/meson-$MESON-py3-none-any.whl
     triplet=$(uname -m)-linux-gnu
     # Where distributions put VA-API drivers (Debian and Ubuntu, Fedora and
-    # RHEL, Arch, local builds); LIBVA_DRIVERS_PATH still overrides it.
-    drivers=/usr/lib/$triplet/dri:/usr/lib64/dri:/usr/lib/dri:/usr/local/lib/$triplet/dri:/usr/local/lib/dri
+    # RHEL, Arch): directories of root only, not /usr/local, which a group
+    # may write. LIBVA_DRIVERS_PATH, set by the user, overrides it.
+    drivers=/usr/lib/$triplet/dri:/usr/lib64/dri:/usr/lib/dri
     export PKG_CONFIG_PATH=/b/deps/lib/pkgconfig
     cd /b
     # Any change to this script rebuilds the libraries.

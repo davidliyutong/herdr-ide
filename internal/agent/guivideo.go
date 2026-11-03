@@ -219,7 +219,7 @@ func (g *gui) videoTools() (string, []string) {
 // videoEncoder is a running encoder process for one window size.
 type videoEncoder struct {
 	cmd    *exec.Cmd
-	in     io.WriteCloser
+	in     *os.File
 	out    *os.File
 	rd     *bufio.Reader
 	stderr *limitedBuffer
@@ -231,12 +231,13 @@ type videoEncoder struct {
 }
 
 // videoStart bounds starting an encoder (GPU initialization) and
-// videoFrameTimeout encoding one frame.
+// videoFrameTimeout writing a frame to it and reading its packet back.
 const (
-	videoStart        = 15 * time.Second
-	videoFrameTimeout = 3 * time.Second
-	videoMaxPacket    = 64 << 20
+	videoStart     = 15 * time.Second
+	videoMaxPacket = 64 << 20
 )
+
+var videoFrameTimeout = 3 * time.Second
 
 // startEncoder starts bin for a w×h window, making the first of kinds it
 // can. The process dies with the agent.
@@ -244,22 +245,27 @@ func startEncoder(bin string, w, h int, kinds []string) (*videoEncoder, error) {
 	cmd := exec.Command(bin, "-w", strconv.Itoa(w), "-h", strconv.Itoa(h), "-kinds", strings.Join(kinds, ","))
 	cmd.Env = cleanEnv()
 	cmd.SysProcAttr = encoderProcAttr()
-	in, err := cmd.StdinPipe()
+	// Pipes of our own (not StdinPipe) take deadlines both ways.
+	ir, in, err := os.Pipe()
 	if err != nil {
 		return nil, err
 	}
 	pr, pw, err := os.Pipe()
 	if err != nil {
+		ir.Close()
+		in.Close()
 		return nil, err
 	}
-	cmd.Stdout = pw
+	cmd.Stdin, cmd.Stdout = ir, pw
 	stderr := &limitedBuffer{n: 4096}
 	cmd.Stderr = stderr
 	if err := cmd.Start(); err != nil {
-		pr.Close()
-		pw.Close()
+		for _, f := range []*os.File{ir, in, pr, pw} {
+			f.Close()
+		}
 		return nil, err
 	}
+	ir.Close()
 	pw.Close()
 	e := &videoEncoder{cmd: cmd, in: in, out: pr, rd: bufio.NewReaderSize(pr, 1<<20), stderr: stderr, w: w, h: h, kinds: slices.Clone(kinds)}
 	pr.SetReadDeadline(time.Now().Add(videoStart))
@@ -288,13 +294,15 @@ func (e *videoEncoder) encode(bgrx []byte, key bool) ([]byte, bool, error) {
 	if key {
 		hdr[0] = 1
 	}
+	deadline := time.Now().Add(videoFrameTimeout)
+	e.in.SetWriteDeadline(deadline)
 	if _, err := e.in.Write(hdr[:4]); err != nil {
 		return nil, false, err
 	}
 	if _, err := e.in.Write(bgrx[:e.w*e.h*4]); err != nil {
 		return nil, false, err
 	}
-	e.out.SetReadDeadline(time.Now().Add(videoFrameTimeout))
+	e.out.SetReadDeadline(deadline)
 	if _, err := io.ReadFull(e.rd, hdr[:]); err != nil {
 		return nil, false, fmt.Errorf("encoder: %v %s", err, e.stderr.String())
 	}

@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"runtime"
+
 	"github.com/jezek/xgb"
 	"github.com/jezek/xgb/shm"
 	"golang.org/x/sys/unix"
@@ -9,9 +11,10 @@ import (
 // Capturing through MIT-SHM: the X server copies window contents into a
 // System V shared memory segment instead of sending them over the socket,
 // about ten times faster for a whole window. The segment is private to
-// this user (0600) and marked for removal as soon as the server has
-// attached it, so it goes away with the agent's connection, however that
-// ends.
+// this user (0600) and marked for removal as soon as the agent attached it
+// (Linux lets the server attach it afterwards; elsewhere once the server
+// attached it), so it goes away with the agent's and the server's
+// attachments however they end.
 
 type shmBuf struct {
 	id   shm.Seg
@@ -34,21 +37,25 @@ func newShmBuf(x *xgb.Conn, size int) (*shmBuf, error) {
 		return nil, err
 	}
 	data, err := unix.SysvShmAttach(id, 0, 0)
-	if err == nil {
-		var seg shm.Seg
-		if seg, err = shm.NewSegId(x); err == nil {
-			err = shm.AttachChecked(x, seg, uint32(id), false).Check()
-		}
-		// Attached by both: removed once both detach.
+	early := runtime.GOOS == "linux"
+	if err != nil || early {
 		unix.SysvShmCtl(id, unix.IPC_RMID, nil)
-		if err == nil {
-			return &shmBuf{id: seg, data: data}, nil
-		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	var seg shm.Seg
+	if seg, err = shm.NewSegId(x); err == nil {
+		err = shm.AttachChecked(x, seg, uint32(id), false).Check()
+	}
+	if !early {
+		unix.SysvShmCtl(id, unix.IPC_RMID, nil)
+	}
+	if err != nil {
 		unix.SysvShmDetach(data)
 		return nil, err
 	}
-	unix.SysvShmCtl(id, unix.IPC_RMID, nil)
-	return nil, err
+	return &shmBuf{id: seg, data: data}, nil
 }
 
 func (b *shmBuf) free(x *xgb.Conn) {

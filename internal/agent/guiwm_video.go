@@ -63,6 +63,9 @@ func (wm *windowManager) videoKindsFor(m *managedWin) []string {
 // sent as video and has changed.
 func (wm *windowManager) videoJob(m *managedWin, now time.Time) (capture, bool) {
 	kinds := wm.videoKindsFor(m)
+	if len(kinds) > 0 && (m.w > videoMaxSide || m.h > videoMaxSide) {
+		kinds, m.fallback = nil, "too_large"
+	}
 	if m.vid != nil && (m.vid.w != m.w || m.vid.h != m.h || !slices.Equal(kinds, m.vid.kinds)) {
 		// Resized, or the kinds changed: the viewers now decode a preferred
 		// stream, or a viewer does not decode this one. A stream of a later
@@ -98,6 +101,15 @@ func (wm *windowManager) videoJob(m *managedWin, now time.Time) (capture, bool) 
 	// Sent again as PNG once the window settles.
 	m.dirty, m.lossy = rect{}, m.all()
 	return j, true
+}
+
+// idleVideo ends the window's stream after videoIdle without frames, also
+// while its flow holds frames back (a viewer that stopped acknowledging
+// must not keep an encoder and its GPU session).
+func (wm *windowManager) idleVideo(m *managedWin, now time.Time) {
+	if m.vid != nil && now.Sub(m.lastVideo) > videoIdle {
+		wm.stopVideo(m)
+	}
 }
 
 // stopVideo ends the window's stream: the pump closes the encoder, browsers

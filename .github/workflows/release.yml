@@ -11,6 +11,8 @@ permissions:
 jobs:
   encoder:
     uses: ./.github/workflows/encoder.yml
+    with:
+      cache: false
 
   archives:
     runs-on: ubuntu-24.04

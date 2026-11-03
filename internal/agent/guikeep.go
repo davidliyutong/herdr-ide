@@ -48,20 +48,36 @@ func lockKeeper(path string) *os.File {
 }
 
 // keep starts a keeper for the session's server unless one runs or the
-// display does not.
+// display does not. A keeper may be about to leave (its server was gone
+// for keepGrace) as the request comes: then it is tried once more after
+// keepPoll.
 func (g *gui) keep(session string) error {
+	started, err := g.startKeeper(session)
+	if err == nil && !started {
+		time.AfterFunc(keepPoll+time.Second, func() {
+			if _, err := g.startKeeper(session); err != nil {
+				g.a.logger.Printf("gui: keeping the display: %v", err)
+			}
+		})
+	}
+	return err
+}
+
+// startKeeper starts a keeper unless one runs (false) or the display does
+// not (true: nothing to try again).
+func (g *gui) startKeeper(session string) (bool, error) {
 	st := g.readState()
 	if st.Display == 0 || !g.running(st.Display) {
-		return nil
+		return true, nil
 	}
 	f := lockKeeper(g.keepLockPath())
 	if f == nil {
-		return nil // one runs
+		return false, nil // one runs
 	}
 	f.Close()
 	exe, err := os.Executable()
 	if err != nil {
-		return err
+		return true, err
 	}
 	cmd := exec.Command(exe, "gui-keep", "--instance", g.a.instance, "--session", session)
 	cmd.Env = cleanEnv()
@@ -73,10 +89,10 @@ func (g *gui) keep(session string) error {
 		defer lf.Close()
 	}
 	if err := cmd.Start(); err != nil {
-		return err
+		return true, err
 	}
 	go cmd.Wait()
-	return nil
+	return true, nil
 }
 
 // KeepDisplay is the "gui-keep" command: it holds a connection to the

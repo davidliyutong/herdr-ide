@@ -34,6 +34,7 @@ func (s *Server) initGUI() {
 		if st.Status == machines.StatusReady || st.Status == machines.StatusDegraded {
 			if mc := s.mg.Get(st.ID); mc != nil {
 				s.gui.Ensure(mc)
+				s.gui.HerdrReady(mc, st.Status == machines.StatusReady)
 			}
 		}
 	}, func(machines.AgentEvent) {})

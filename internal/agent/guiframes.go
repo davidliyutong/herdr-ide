@@ -524,6 +524,7 @@ func (wm *windowManager) collect(now time.Time) []capture {
 			if wm.changed(m) {
 				m.stats.Waits++
 			}
+			wm.idleVideo(m, now)
 			continue
 		}
 		take := func(j capture, est int) {

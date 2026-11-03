@@ -24,7 +24,7 @@ import (
 // speaks the encoder's protocol (scripts/encoder/encoder.c). Each packet
 // is "<kind> <frame number> <first pixel byte>"; key frames start with an
 // H.264 sequence parameter set. GUI_TEST_ENCODER_DIE=n exits after n
-// frames.
+// frames; GUI_TEST_ENCODER_STALL stops reading frames.
 func TestHelperEncoder(t *testing.T) {
 	if os.Getenv("GUI_TEST_ENCODER") == "" {
 		t.Skip("helper process")
@@ -48,6 +48,10 @@ func TestHelperEncoder(t *testing.T) {
 		os.Exit(1)
 	}
 	fmt.Printf("ok %s %d %d\n", name, (w+1)&^1, (h+1)&^1)
+	if os.Getenv("GUI_TEST_ENCODER_STALL") != "" {
+		time.Sleep(time.Minute)
+		os.Exit(0)
+	}
 	die := -1
 	fmt.Sscan(os.Getenv("GUI_TEST_ENCODER_DIE"), &die)
 	frame := make([]byte, w*h*4)
@@ -133,6 +137,27 @@ func gzipped(b []byte) (*bytes.Buffer, string) {
 	zw.Close()
 	sum := sha256.Sum256(b)
 	return &buf, hex.EncodeToString(sum[:])
+}
+
+// An encoder that stops reading frames fails the frame within
+// videoFrameTimeout instead of holding the pump.
+func TestEncoderStall(t *testing.T) {
+	old := videoFrameTimeout
+	videoFrameTimeout = 300 * time.Millisecond
+	defer func() { videoFrameTimeout = old }()
+	e, err := startEncoder(fakeEncoder(t, "GUI_TEST_ENCODER_STALL=1"), 256, 144, []string{"avc1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.close()
+	start := time.Now()
+	// More than a pipe holds: the write blocks.
+	if _, _, err := e.encode(make([]byte, 256*144*4), true); err == nil {
+		t.Fatal("a stalled encoder took the frame")
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Errorf("failed after %v", d)
+	}
 }
 
 // The encoder the core pushes is used only with its digest; other builds
@@ -273,6 +298,25 @@ func TestVideoDecision(t *testing.T) {
 	if j := tick(); len(j) != 1 || j[0].vid != enc4 || slices.Contains(wm.retired, enc4) {
 		t.Fatalf("stream of a later kind: %+v", j)
 	}
+	// Larger than encoders take: pictures.
+	m.vid = nil
+	m.w, m.h = 5000, 600
+	moving()
+	if j := tick(); len(j) == 0 || j[0].video || m.fallback != "too_large" {
+		t.Fatalf("large window: %+v (%s)", j, m.fallback)
+	}
+	m.w, m.h = 800, 600
+	// A viewer stopped acknowledging: the stream still ends when idle.
+	enc5 := &videoEncoder{w: 800, h: 600, kind: "vp8", kinds: kinds}
+	m.vid, m.lastVideo = enc5, now
+	m.flow.bytes = m.flow.budget() // nothing more may be sent
+	now = now.Add(videoIdle + time.Second)
+	moving()
+	wm.collect(now)
+	if m.vid != nil || !slices.Contains(wm.retired, enc5) {
+		t.Error("stream kept while held back")
+	}
+	m.flow = flow{}
 	// No encoder on the machine.
 	bin = ""
 	moving()

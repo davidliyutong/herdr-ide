@@ -47,6 +47,7 @@ export const zhCN: Messages = {
   'gui.stats.fallback.unavailable': '机器上没有编码器',
   'gui.stats.fallback.no_codec': '机器上的编码器都不能生成此浏览器可解码的格式',
   'gui.stats.fallback.failed': '编码器出错，稍后重试',
+  'gui.stats.fallback.too_large': '窗口的边长超过 4096 像素',
   'gui.phase.installing': '正在为 {m} 获取 Xvfb',
   'gui.phase.starting': '正在启动 {m} 的虚拟显示',
   'gui.phase.error': '{m} 的虚拟显示出错',

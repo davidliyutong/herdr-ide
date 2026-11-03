@@ -320,6 +320,91 @@ func TestVideoSettingChange(t *testing.T) {
 	}
 }
 
+// Read-only mode neither starts a display keeper nor pushes the encoder;
+// otherwise the keeper always, the encoder with video on.
+func TestAfterAttach(t *testing.T) {
+	for _, c := range []struct {
+		readOnly, video, keep, push bool
+	}{{true, true, false, false}, {true, false, false, false}, {false, true, true, true}, {false, false, true, false}} {
+		if keep, push := afterAttach(c.readOnly, c.video); keep != c.keep || push != c.push {
+			t.Errorf("readOnly %v video %v: keep %v push %v", c.readOnly, c.video, keep, push)
+		}
+	}
+}
+
+// A keeper started while herdr's server was down leaves; the machine is
+// asked again each time the server is reachable again, not on every state
+// change, and never in read-only mode.
+func TestHerdrReadyKeeps(t *testing.T) {
+	for _, readOnly := range []bool{false, true} {
+		m, d, _ := attached(t)
+		m.ReadOnly = readOnly
+		kept := make(chan string, 8)
+		m.keeper = func(d *display) { kept <- d.mc.ID() }
+		count := func() int {
+			time.Sleep(20 * time.Millisecond)
+			return len(kept)
+		}
+		m.HerdrReady(d.mc, false)
+		m.HerdrReady(d.mc, true)
+		m.HerdrReady(d.mc, true)
+		want := 1
+		if readOnly {
+			want = 0
+		}
+		if n := count(); n != want {
+			t.Fatalf("read-only %v: %d keep requests after herdr came up", readOnly, n)
+		}
+		m.HerdrReady(d.mc, false)
+		m.HerdrReady(d.mc, true)
+		if n := count(); n != 2*want {
+			t.Fatalf("read-only %v: %d keep requests after herdr came back", readOnly, n)
+		}
+	}
+}
+
+// Commands reaching the agent are the core's: a viewer's refresh carries
+// the streams all viewers decode, not its own list, an acknowledgement
+// only its number, and the refresh after catching up the streams too.
+func TestViewerCommands(t *testing.T) {
+	m, d, agent := attached(t)
+	var a, b recorder
+	av, bv := a.viewer(), b.viewer()
+	av.Codecs, bv.Codecs = []string{"avc1", "vp8"}, []string{"vp8"}
+	m.Attach("m1", 7, av)
+	readCmd(t, agent) // watch
+	m.Attach("m1", 7, bv)
+	readCmd(t, agent) // refresh
+	m.Command("m1", 7, av, agentproto.GUICommand{Cmd: "refresh", Codecs: []string{"avc1"}}, true)
+	if c := readCmd(t, agent); c.Cmd != "refresh" || strings.Join(c.Codecs, ",") != "vp8" {
+		t.Fatalf("refresh: %+v", c)
+	}
+	m.frame(d, frame(1))
+	m.Command("m1", 7, av, agentproto.GUICommand{Cmd: "ack", Seq: 1, Codecs: []string{"avc1"}, X: 5}, true)
+	if c := readCmd(t, agent); c.Cmd != "ack" || c.Seq != 1 || len(c.Codecs) != 0 || c.X != 0 {
+		t.Fatalf("ack: %+v", c)
+	}
+	// b fell behind: it skips frames, then catches up.
+	for i := range bv.sent {
+		bv.sent[i].at = bv.sent[i].at.Add(-2 * viewerLag)
+	}
+	m.frame(d, frame(2))
+	if !bv.stale {
+		t.Fatal("viewer behind not marked")
+	}
+	m.Command("m1", 7, av, agentproto.GUICommand{Cmd: "ack", Seq: 2}, true)
+	readCmd(t, agent) // ack 2
+	m.Command("m1", 7, bv, agentproto.GUICommand{Cmd: "ack", Seq: 1}, true)
+	if c := readCmd(t, agent); c.Cmd != "refresh" || strings.Join(c.Codecs, ",") != "vp8" {
+		t.Fatalf("refresh after catching up: %+v", c)
+	}
+	// A viewer holding viewerMaxBytes unshown skips frames.
+	bv.sentBytes = viewerMaxBytes
+	if !bv.behind(0, time.Now()) {
+		t.Error("a viewer over the byte limit is not behind")
+	}
+}
+
 // Closing a browser window closes the program window after a grace period,
 // unless the browser window comes back (a reload).
 func TestCloseGrace(t *testing.T) {

@@ -155,6 +155,9 @@ const (
 	videoMotionShare = 4
 	videoIdle        = 5 * time.Second
 	videoMinSide     = 64
+	// Larger windows stay pictures: a capture of the whole window would
+	// be unbounded, and encoders take at most 4096 (NVENC's H.264).
+	videoMaxSide = 4096
 	// After the encoder failed, pictures for videoRetry, doubling up to
 	// videoRetryMax.
 	videoRetry    = 5 * time.Second

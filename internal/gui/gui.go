@@ -87,6 +87,7 @@ type Viewer struct {
 	Codecs []string
 
 	sent      []sentFrame // frames sent and not acknowledged
+	sentBytes int         // their size
 	stale     bool        // frames were dropped: needs the whole window again
 	refreshed time.Time   // last refresh this viewer asked for
 	// needKey: video frames were dropped (or none came yet), so the
@@ -99,22 +100,25 @@ type Viewer struct {
 const refreshEvery = 500 * time.Millisecond
 
 type sentFrame struct {
-	seq uint32
-	at  time.Time
+	seq   uint32
+	at    time.Time
+	bytes int
 }
 
 // A viewer skips frames while the oldest frame it has not shown was shown
 // by another viewer and sent viewerLag ago (the agent goes at the pace of
-// the fastest viewer), or while it has viewerMaxFrames unshown.
+// the fastest viewer), or while it has viewerMaxFrames or viewerMaxBytes
+// unshown.
 const (
 	viewerLag       = 250 * time.Millisecond
 	viewerMaxFrames = 64
+	viewerMaxBytes  = 16 << 20
 )
 
 // behind reports whether v should skip frames of a window whose frames up
 // to acked were shown by some viewer.
 func (v *Viewer) behind(acked uint32, now time.Time) bool {
-	if len(v.sent) >= viewerMaxFrames {
+	if len(v.sent) >= viewerMaxFrames || v.sentBytes >= viewerMaxBytes {
 		return true
 	}
 	return len(v.sent) > 0 && v.sent[0].seq <= acked && now.Sub(v.sent[0].at) > viewerLag
@@ -137,11 +141,16 @@ type Manager struct {
 	Audit func(event string, fields map[string]any)
 	mu    sync.Mutex
 	ds    map[string]*display
+	// keeper asks a machine to keep its display (tests replace it).
+	keeper func(d *display)
 }
 
 type display struct {
-	mc       *machines.Machine
-	phase    string
+	mc    *machines.Machine
+	phase string
+	// herdrUp: the machine's herdr server was reachable at the last state
+	// change seen while the display was attached.
+	herdrUp  bool
 	err      string
 	status   *agentproto.GUIStatus
 	ensuring bool
@@ -176,7 +185,9 @@ type display struct {
 
 // New returns a manager; settings may be nil (GUI on, vglrun).
 func New(st *settings.Store, logger *log.Logger) *Manager {
-	return &Manager{Settings: st, Logger: logger, ds: map[string]*display{}}
+	m := &Manager{Settings: st, Logger: logger, ds: map[string]*display{}}
+	m.keeper = m.keep
+	return m
 }
 
 // setting returns a setting's value for a machine.
@@ -422,23 +433,28 @@ func (m *Manager) prepare(d *display, sess *transport.Session) {
 		close(d.cmds)
 	}
 	d.status, d.sess, d.stream = st, sess, conn
+	// The keeper is asked for below; the next state change with herdr
+	// reachable asks again, in case herdr was down meanwhile.
+	d.herdrUp = false
 	d.cmds = make(chan []byte, 256)
 	d.windows, d.order, d.layers = map[uint32]*agentproto.GUIWindow{}, nil, map[uint32]agentproto.GUILayer{}
-	// The new window manager numbers frames from the start.
+	// The new window manager numbers frames from the start and has no
+	// video streams yet.
 	d.acked = map[uint32]uint32{}
+	d.video, d.codecs = map[uint32][]byte{}, map[uint32]string{}
 	for _, vs := range d.viewers {
 		for v := range vs {
-			v.sent, v.stale = nil, false
+			v.sent, v.sentBytes, v.stale, v.needKey = nil, 0, false, false
 		}
 	}
 	go writeCommands(conn, d.cmds)
 	m.mu.Unlock()
 	m.setPhase(d, PhaseReady, nil)
 	go m.read(d, sess, conn)
-	if !m.ReadOnly {
-		go m.keep(d)
+	if keep, _ := afterAttach(m.ReadOnly, false); keep {
+		go m.keeper(d)
 	}
-	if m.setting(SettingVideo, mc.ID()) != "off" && !m.ReadOnly {
+	if _, push := afterAttach(m.ReadOnly, m.setting(SettingVideo, mc.ID()) != "off"); push {
 		go m.prepareVideo(d)
 	}
 }
@@ -463,8 +479,37 @@ func (m *Manager) ApplyVideo(mc *machines.Machine) {
 		}
 	}
 	m.mu.Unlock()
-	if m.setting(SettingVideo, mc.ID()) != "off" && !m.ReadOnly {
+	if _, push := afterAttach(m.ReadOnly, m.setting(SettingVideo, mc.ID()) != "off"); push {
 		go m.prepareVideo(d)
+	}
+}
+
+// afterAttach is what the core does on a machine once its display is
+// ready: start the display keeper, push the video encoder (when video is
+// on for it). Read-only mode starts and pushes nothing.
+func afterAttach(readOnly, video bool) (keep, push bool) {
+	if readOnly {
+		return false, false
+	}
+	return true, video
+}
+
+// HerdrReady follows the machine's herdr server: each time it is reachable
+// again (or for the first time) while the display is attached, the machine
+// is asked to keep the display while that server runs, since a keeper
+// started while the server was down has left.
+func (m *Manager) HerdrReady(mc *machines.Machine, ready bool) {
+	m.mu.Lock()
+	d := m.ds[mc.ID()]
+	if d == nil {
+		m.mu.Unlock()
+		return
+	}
+	start := ready && !d.herdrUp && d.stream != nil && d.phase == PhaseReady
+	d.herdrUp = ready && (d.herdrUp || start)
+	m.mu.Unlock()
+	if keep, _ := afterAttach(m.ReadOnly, false); start && keep {
+		go m.keeper(d)
 	}
 }
 
@@ -473,6 +518,7 @@ func (m *Manager) ApplyVideo(mc *machines.Machine) {
 func (m *Manager) keep(d *display) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
+	m.audit("gui.keep", map[string]any{"machine": d.mc.ID()})
 	if _, err := m.request(ctx, d.mc, "keep"); err != nil {
 		m.Logger.Printf("gui %s: keeping the display: %v", d.mc.Label(), err)
 	}
@@ -734,7 +780,8 @@ func (m *Manager) frame(d *display, payload []byte) {
 		if h.Enc == agentproto.GUIEncVideoKey {
 			v.needKey = false
 		}
-		v.sent = append(v.sent, sentFrame{h.Seq, now})
+		v.sent = append(v.sent, sentFrame{h.Seq, now, len(payload)})
+		v.sentBytes += len(payload)
 		delivered = true
 	}
 	// A frame nobody got will not be acknowledged by a viewer; the agent
@@ -966,7 +1013,9 @@ func (m *Manager) Command(machine string, id uint32, v *Viewer, c agentproto.GUI
 	if d == nil || !d.viewers[id][v] {
 		return
 	}
-	c.ID = id
+	// Commands for the agent are built here, not passed on: a viewer only
+	// chooses which and with which input fields.
+	c.ID, c.Codecs = id, nil
 	switch c.Cmd {
 	case "ack":
 		// Only frames this viewer was sent count; anything else would let
@@ -978,14 +1027,17 @@ func (m *Manager) Command(machine string, id uint32, v *Viewer, c agentproto.GUI
 		if i == 0 || v.sent[i-1].seq != c.Seq {
 			return
 		}
+		for _, f := range v.sent[:i] {
+			v.sentBytes -= f.bytes
+		}
 		v.sent = v.sent[i:]
 		if c.Seq > d.acked[id] {
 			d.acked[id] = c.Seq
-			m.sendLocked(d, c)
+			m.sendLocked(d, agentproto.GUICommand{Cmd: "ack", ID: id, Seq: c.Seq})
 		}
 		if v.stale && len(v.sent) == 0 {
 			v.stale = false
-			m.sendLocked(d, agentproto.GUICommand{Cmd: "refresh", ID: id})
+			m.sendLocked(d, agentproto.GUICommand{Cmd: "refresh", ID: id, Codecs: m.updateCodecsLocked(d, id)})
 		}
 		if v.needKey && d.video[id] != nil {
 			m.askKeyLocked(d, id, v)
@@ -999,7 +1051,7 @@ func (m *Manager) Command(machine string, id uint32, v *Viewer, c agentproto.GUI
 	case "refresh":
 		if time.Since(v.refreshed) >= refreshEvery {
 			v.refreshed = time.Now()
-			m.sendLocked(d, c)
+			m.sendLocked(d, agentproto.GUICommand{Cmd: "refresh", ID: id, Codecs: m.updateCodecsLocked(d, id)})
 		}
 	case "focus", "close", "pointer", "button", "wheel", "key", "release":
 		if input {
