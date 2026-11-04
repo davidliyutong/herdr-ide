@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -321,6 +322,11 @@ func (a *Agent) handleHerdr(ctx context.Context, st net.Conn, h agentproto.Heade
 		case "start":
 			if out, err := a.startHerdrServer(ctx, bin, h.Session); err != nil {
 				code, output = "start_failed", joinOutput(out, err)
+			} else if runtime.GOOS == "linux" {
+				// Its panes may use the display: keep it while it runs.
+				if err := a.gui.keep(h.Session); err != nil {
+					a.logger.Printf("gui: keeping the display: %v", err)
+				}
 			}
 		case "stop":
 			if out, err := a.stopHerdrServer(ctx, bin, h.Session); err != nil {

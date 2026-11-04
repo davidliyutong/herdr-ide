@@ -13,3 +13,4 @@ extensions/herdr-ide-bridge/*.vsix
 coverage/
 .claude/settings.local.json
 CLAUDE.local.md
+internal/embedded/encoder/*.gz

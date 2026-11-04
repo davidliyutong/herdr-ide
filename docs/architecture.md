@@ -119,7 +119,7 @@ after a successful reply it carries op-specific bytes.
 | `code-server` | core → agent | actions `status`, `install` (chunked tarball), `download` (the machine fetches `URL`, checked against `Digest`), `start`, `stop`, `install-ext`, `uninstall-ext`, `marker`; `Bin` selects an installed code-server |
 | `herdr` | core → agent | – (an empty reply at once, then a second reply with `Herdr` when the action is done); actions `status`, `start`, `stop` (the server of `Session`), `check` (herdr's newest release), `update` (only the application's managed copy) |
 | `bridge` | agent → core | JSON lines between the VS Code extension and the core |
-| `gui` | core → agent | actions `status`, `install` (fetch Xvfb in user space), `start`, `shells` (which of the pids in `Args` were started with the display) (reply `GUI`); `attach`: messages `[kind u8][len u32][payload]`, JSON events (`window`, `gone`, `layer`, `layer_gone`, `cursor`) and frames (`GUIFrameHeader` + JPEG/PNG) from the agent, JSON commands (`watch`, `ack`, `refresh`, input, `close`) from the core |
+| `gui` | core → agent | actions `status`, `install` (fetch Xvfb in user space), `start`, `keep` (start the display keeper for `Session`'s herdr server), `shells` (which of the pids in `Args` were started with the display) (reply `GUI`); `video` and `video-install` (`Digest`: the video encoder's SHA-256; the second streams the gzip-compressed encoder, chunked) reply whether it is installed and the stream kinds it makes here (`GUI.Video`, `GUI.VideoEncoders`); `attach`: messages `[kind u8][len u32][payload]`, JSON events (`window`, `gone`, `layer`, `layer_gone`, `cursor`, `stats`, `video` (a window's stream starts, or ends without a codec)) and frames (`GUIFrameHeader` + JPEG/PNG, or a video frame of the whole window, `Enc` 3, 4 for key frames) from the agent, JSON commands (`watch`, `ack`, `refresh`, `codecs` (the stream kinds all viewers decode, also sent with `watch` and `refresh`), `keyframe`, input, `close`) from the core |
 
 yamux streams cannot be half-closed, so uploads use `ChunkWriter` framing
 (`[u32 length][data]…[0]`). Core and agent always come from the same build:
@@ -146,7 +146,8 @@ HTTP endpoints besides files, uploads and the code-server proxy:
 `GET`/`PUT /api/settings` (core settings with their definitions, see
 [13](features/13-settings-and-appearance.md)). A program window is shown by
 the app at `GET /m/{id}/gui/{win}`, streamed over the WebSocket
-`/m/{id}/gui/{win}/ws` (JSON events and binary frames out, JSON commands in)
+`/m/{id}/gui/{win}/ws` (JSON events and binary frames out, JSON commands in;
+`?video=avc1,vp8` names the video streams the browser decodes)
 and closed through `POST /m/{id}/gui/{win}/close`;
 `POST /api/m/{id}/gui/enable` gives open panes the display, see
 [14](features/14-gui-windows.md). `PUT /api/settings` takes an optional

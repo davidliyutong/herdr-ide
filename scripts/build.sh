@@ -45,6 +45,23 @@ for p in $AGENT_PLATFORMS; do
   echo "    $os/$arch $(du -h "$out" | cut -f1)"
 done
 
+# The encoder Linux machines send program windows as video with, built by
+# scripts/build-ffmpeg.sh; without it windows are always pictures.
+# REQUIRE_ENCODER=1 (release builds) fails when one is missing.
+rm -f internal/embedded/encoder/*.gz
+for plat in linux-amd64 linux-arm64; do
+  f=dist/ffmpeg/$plat/encoder.gz
+  if [[ -f "$f" ]]; then
+    cp "$f" "internal/embedded/encoder/encoder-$plat.gz"
+    echo "==> video encoder $plat embedded"
+  elif [[ "${REQUIRE_ENCODER:-}" == 1 ]]; then
+    echo "missing $f: run scripts/build-ffmpeg.sh" >&2
+    exit 1
+  else
+    echo "==> no video encoder for $plat (scripts/build-ffmpeg.sh): its machines get pictures"
+  fi
+done
+
 echo "==> ${SLUG}"
 for p in $TARGETS; do
   os=${p%/*}; arch=${p#*/}

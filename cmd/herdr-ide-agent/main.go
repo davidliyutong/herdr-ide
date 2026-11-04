@@ -44,6 +44,20 @@ func main() {
 			logger.Printf("exit: %v", err)
 			os.Exit(1)
 		}
+	case "gui-keep":
+		// Started by the agent: holds the virtual display while the herdr
+		// server of the session runs.
+		logger := log.New(os.Stderr, brand.AgentBin+" gui-keep: ", log.LstdFlags)
+		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+		defer cancel()
+		fs := flag.NewFlagSet("gui-keep", flag.ExitOnError)
+		instance := fs.String("instance", "", "state directory instance")
+		session := fs.String("session", "", "herdr session")
+		fs.Parse(os.Args[2:])
+		if err := agent.KeepDisplay(ctx, *instance, *session, logger); err != nil {
+			logger.Printf("exit: %v", err)
+			os.Exit(1)
+		}
 	default:
 		fmt.Fprintln(os.Stderr, "unknown command", os.Args[1])
 		os.Exit(2)

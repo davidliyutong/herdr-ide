@@ -3,12 +3,16 @@
 // fit; pointer and keyboard input goes back with window coordinates.
 //
 // Messages from the core: JSON events {ev: window | gone | layer |
-// layer_gone | cursor | child} and binary frames
-// [window u32][layer u32][x i16][y i16][w u16][h u16][enc u8][seq u32][image]
-// (enc 1 JPEG, 2 PNG). Each frame is acknowledged once drawn.
+// layer_gone | cursor | child | stats | video} and binary frames
+// [window u32][layer u32][x i16][y i16][w u16][h u16][enc u8][seq u32][data]
+// (enc 1 JPEG, 2 PNG, 3 video, 4 video key frame). Each frame is
+// acknowledged once drawn. The WebSocket's ?video= says which video streams
+// this browser decodes (./video.ts).
 
 import { xKeycode } from './keycodes';
 import type { GuiWindow } from './state';
+import { FrameStats, type StatsView } from './stats';
+import { videoCodecs, VideoStream, type VideoConfig } from './video';
 
 interface Layer {
   id: number;
@@ -26,9 +30,14 @@ export interface SessionEvents {
   window(w: GuiWindow): void;
   /** A dialog of this window appeared. */
   child(w: GuiWindow): void;
+  /** Frame statistics, once a second. */
+  stats?(s: StatsView): void;
 }
 
 const FRAME_HEADER = 21;
+const ENC_JPEG = 1;
+const ENC_VIDEO = 3;
+const ENC_VIDEO_KEY = 4;
 // Wheel distance (pixels) per scroll step sent to the program.
 const WHEEL_STEP = 50;
 // Browser buttons (0 main, 1 middle, 2 secondary, 3 back, 4 forward) to X.
@@ -48,6 +57,9 @@ export class GuiSession {
   private wheel = { x: 0, y: 0 };
   private pending?: { x: number; y: number };
   private cleanup: (() => void)[] = [];
+  private stats = new FrameStats(performance.now());
+  private video?: VideoStream;
+  private ctx = new WeakMap<HTMLCanvasElement, CanvasRenderingContext2D | null>();
 
   constructor(
     private m: string,
@@ -69,13 +81,18 @@ export class GuiSession {
       if (input) void fetch(`/m/${encodeURIComponent(m)}/gui/${id}/close`, { method: 'POST', keepalive: true }).catch(() => {});
     });
     if (input) this.bindInput();
-    this.connect();
+    if (on.stats) {
+      const timer = setInterval(() => on.stats!(this.stats.take(performance.now())), 1000);
+      this.cleanup.push(() => clearInterval(timer));
+    }
+    void this.connect();
   }
 
   dispose() {
     this.disposed = true;
     for (const f of this.cleanup) f();
     this.ws?.close();
+    this.video?.close();
     this.stage.remove();
   }
 
@@ -89,19 +106,23 @@ export class GuiSession {
     this.cleanup.push(() => target.removeEventListener(type, fn as EventListener, opts));
   }
 
-  private connect() {
+  private async connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${proto}//${location.host}/m/${encodeURIComponent(this.m)}/gui/${this.id}/ws`);
+    const codecs = await videoCodecs();
+    if (this.disposed) return;
+    const query = codecs.length ? `?video=${codecs.join(',')}` : '';
+    const ws = new WebSocket(`${proto}//${location.host}/m/${encodeURIComponent(this.m)}/gui/${this.id}/ws${query}`);
     ws.binaryType = 'arraybuffer';
     this.ws = ws;
     ws.onopen = () => {
       this.backoff = 500;
+      this.stats.reconnected();
     };
     ws.onmessage = (e) => this.message(e);
     ws.onclose = () => {
       if (this.disposed || this.gone) return;
       this.on.status('reconnecting');
-      setTimeout(() => !this.disposed && this.connect(), this.backoff);
+      setTimeout(() => !this.disposed && void this.connect(), this.backoff);
       this.backoff = Math.min(this.backoff * 2, 5000);
     };
   }
@@ -145,6 +166,12 @@ export class GuiSession {
       case 'child':
         this.on.child(ev.window);
         break;
+      case 'stats':
+        if (ev.stats?.window === this.id) this.stats.reported(ev.stats, performance.now());
+        break;
+      case 'video':
+        if (ev.video?.window === this.id) this.startVideo(ev.video);
+        break;
     }
   }
 
@@ -174,19 +201,69 @@ export class GuiSession {
     const y = dv.getInt16(10);
     const enc = dv.getUint8(16);
     const seq = dv.getUint32(17);
-    const blob = new Blob([new Uint8Array(buf, FRAME_HEADER)], { type: enc === 1 ? 'image/jpeg' : 'image/png' });
-    // Frames are drawn in order; decoding is asynchronous.
+    this.stats.received(seq, buf.byteLength);
+    if (enc === ENC_VIDEO || enc === ENC_VIDEO_KEY) {
+      this.videoFrame(new Uint8Array(buf, FRAME_HEADER), enc === ENC_VIDEO_KEY, seq);
+      return;
+    }
+    const blob = new Blob([new Uint8Array(buf, FRAME_HEADER)], { type: enc === ENC_JPEG ? 'image/jpeg' : 'image/png' });
+    // Pictures decode at the same time, as they arrive; they are drawn in
+    // order.
+    const t0 = performance.now();
+    const decoded = createImageBitmap(blob).then((bmp) => ({ bmp, at: performance.now() }));
+    decoded.catch(() => undefined); // handled below, in order
     this.drawing = this.drawing.then(async () => {
       try {
-        const bmp = await createImageBitmap(blob);
+        const { bmp, at } = await decoded;
+        const t1 = performance.now();
         const canvas = layer === this.id ? this.base : this.layers.get(layer)?.el;
-        canvas?.getContext('2d')?.drawImage(bmp, x, y);
+        if (canvas) this.context(canvas)?.drawImage(bmp, x, y);
         bmp.close();
+        this.stats.drawn(at - t0, performance.now() - t1);
       } catch {
         // A corrupt image only costs that rectangle.
       }
       this.send({ cmd: 'ack', seq });
     });
+  }
+
+  /** A new video stream of this window: frames after it belong to it. */
+  private startVideo(c: VideoConfig) {
+    const old = this.video;
+    // Frames of the old stream still queued are decoded with it.
+    this.drawing = this.drawing.then(() => old?.close());
+    this.video = new VideoStream(c, () => this.send({ cmd: 'keyframe' }));
+  }
+
+  private videoFrame(data: Uint8Array, key: boolean, seq: number) {
+    const v = this.video;
+    // In the order of arrival, like pictures, so a later picture is not
+    // drawn under an earlier video frame.
+    this.drawing = this.drawing.then(async () => {
+      const t0 = performance.now();
+      const f = await v?.decode(data, key, seq);
+      const t1 = performance.now();
+      if (f) {
+        const { w, h } = this.size;
+        // The coded size is padded; the window is its top left part.
+        this.context(this.base)?.drawImage(f, 0, 0, w, h, 0, 0, w, h);
+        f.close();
+        this.stats.drawn(t1 - t0, performance.now() - t1);
+      } else if (v?.needKey) {
+        // Joined or fell behind mid-stream: the core sends a key frame.
+        this.send({ cmd: 'keyframe' });
+      }
+      this.send({ cmd: 'ack', seq });
+    });
+  }
+
+  private context(canvas: HTMLCanvasElement) {
+    let c = this.ctx.get(canvas);
+    if (c === undefined) {
+      c = canvas.getContext('2d');
+      this.ctx.set(canvas, c);
+    }
+    return c;
   }
 
   private resize(w: number, h: number) {

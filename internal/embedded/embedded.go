@@ -1,5 +1,7 @@
 // Package embedded carries build artifacts compiled into the herdr-ide binary:
-// the per-platform agents (gzip) and the VS Code bridge extension.
+// the per-platform agents (gzip), the VS Code bridge extension and, when
+// built (scripts/build-ffmpeg.sh), the encoder machines send program
+// windows as video with.
 package embedded
 
 import (
@@ -85,4 +87,43 @@ func BridgeVSIX() []byte {
 	}
 	b, _ := fs.ReadFile(extFS, "ext/"+brand.BridgeExt+".vsix")
 	return b
+}
+
+//go:embed all:encoder
+var encoderFS embed.FS
+
+type encoderEntry struct {
+	gz     []byte
+	digest string
+}
+
+var (
+	encoderMu    sync.Mutex
+	encoderCache = map[string]encoderEntry{}
+)
+
+// Encoder returns the gzip-compressed video encoder for goos/goarch and the
+// SHA-256 of the uncompressed binary; an error when this build has none.
+func Encoder(goos, goarch string) ([]byte, string, error) {
+	key := goos + "-" + goarch
+	encoderMu.Lock()
+	defer encoderMu.Unlock()
+	if e, ok := encoderCache[key]; ok {
+		return e.gz, e.digest, nil
+	}
+	gz, err := fs.ReadFile(encoderFS, "encoder/encoder-"+key+".gz")
+	if err != nil {
+		return nil, "", fmt.Errorf("no video encoder for %s in this build", key)
+	}
+	zr, err := gzip.NewReader(bytes.NewReader(gz))
+	if err != nil {
+		return nil, "", err
+	}
+	h := sha256.New()
+	if _, err := io.Copy(h, zr); err != nil {
+		return nil, "", err
+	}
+	e := encoderEntry{gz: gz, digest: hex.EncodeToString(h.Sum(nil))}
+	encoderCache[key] = e
+	return e.gz, e.digest, nil
 }

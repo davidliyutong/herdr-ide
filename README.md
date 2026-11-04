@@ -46,7 +46,9 @@ browser tab, with VS Code (code-server) one keystroke away.
   (matplotlib, the MuJoCo viewer, Qt tools) appear in browser windows, one
   per program window, with mouse and keyboard. Panes get a virtual display
   automatically; Xvfb is fetched without root when a machine lacks it, and
-  VirtualGL renders OpenGL on the GPU where it is installed.
+  VirtualGL renders OpenGL on the GPU where it is installed. Windows that
+  keep changing are sent as video (H.264 on NVIDIA, Intel and AMD GPUs, VP8
+  otherwise) to browsers that decode it, still ones as exact pictures.
 - **Quick Look.** ⌘/Ctrl-click or right-click a path in a terminal, also one
   wrapped over several lines, to preview images, GIFs, videos (with
   seeking), audio, PDFs, text or directories.

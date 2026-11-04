@@ -8,22 +8,28 @@ import (
 	"encoding/json"
 	"fmt"
 	"image"
-	_ "image/jpeg"
+	_ "image/jpeg" // frames are decoded with image.Decode
 	_ "image/png"
+	"io"
+	"log"
+	"math"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/jezek/xgb"
+	"github.com/jezek/xgb/composite"
 	"github.com/jezek/xgb/xproto"
 
 	"herdr-ide/internal/agentproto"
+	"herdr-ide/internal/jpegstrip"
 )
 
 // Each start writes a new cookie for the display, to Xvfb's file and the
@@ -228,7 +234,7 @@ func TestHelperXClient(t *testing.T) {
 
 // guiTestXvfb starts a display for a test agent, or skips when the machine
 // has no Xvfb (GUI_TEST_INSTALL=1 fetches the distribution package).
-func guiTestXvfb(t *testing.T) *gui {
+func guiTestXvfb(t testing.TB) *gui {
 	t.Helper()
 	if runtime.GOOS != "linux" {
 		t.Skip("virtual displays are provided on Linux only")
@@ -472,15 +478,17 @@ func TestShellsWithDisplay(t *testing.T) {
 	}
 }
 
-// A huge window is captured in bounded tiles, no more per tick than may be
-// in flight; the rest follows.
+// A huge window is captured in bounded tiles, no more per tick than its
+// budget allows; the rest follows once frames are acknowledged.
 func TestCaptureTiles(t *testing.T) {
 	m := &managedWin{xwin: xwin{id: 1, w: 20000, h: 20000}, watched: true}
 	m.dirty = m.all()
 	wm := &windowManager{wins: map[xproto.Window]*managedWin{1: m}, layers: map[xproto.Window]*layerWin{}}
-	jobs := wm.collect(time.Now())
-	if len(jobs) != guiInflight {
-		t.Fatalf("%d captures in one tick", len(jobs))
+	now := time.Now()
+	jobs := wm.collect(now)
+	tile := m.flow.estimate(rect{0, 0, guiTile, guiTile})
+	if len(jobs) == 0 || len(jobs) > guiMinBudget/tile+1 || m.flow.bytes < guiMinBudget {
+		t.Fatalf("%d captures in one tick, %d bytes expected", len(jobs), m.flow.bytes)
 	}
 	for _, j := range jobs {
 		if j.r.w > guiTile || j.r.h > guiTile || j.r.empty() {
@@ -490,16 +498,396 @@ func TestCaptureTiles(t *testing.T) {
 	if m.dirty.empty() {
 		t.Error("the rest of the window was dropped")
 	}
-	if more := wm.collect(time.Now()); len(more) != 0 {
-		t.Errorf("%d captures beyond the in-flight bound", len(more))
+	if more := wm.collect(now); len(more) != 0 {
+		t.Errorf("%d captures beyond the budget", len(more))
 	}
-	m.acked = m.seq
-	if more := wm.collect(time.Now()); len(more) == 0 {
+	m.ackedAt(m.seq, now.Add(20*time.Millisecond))
+	if m.flow.bytes != 0 || len(m.inflight) != 0 {
+		t.Fatalf("after the acknowledgement: %d bytes, %d frames", m.flow.bytes, len(m.inflight))
+	}
+	if more := wm.collect(now); len(more) == 0 {
 		t.Error("nothing sent after acknowledgement")
 	}
 	if got := tiles(rect{0, 0, 2500, 1000}); len(got) != 3 || got[2] != (rect{2048, 0, 452, 1000}) {
 		t.Errorf("tiles = %v", got)
 	}
+}
+
+// The budget follows what acknowledgements measure: the bytes delivered in
+// the shortest round trip plus a bounded queue, so small frames are not
+// held back by a frame count and large ones do not queue for long.
+func TestFlowBudget(t *testing.T) {
+	m := &managedWin{xwin: xwin{id: 1, w: 640, h: 480}, watched: true}
+	wm := &windowManager{wins: map[xproto.Window]*managedWin{1: m}, layers: map[xproto.Window]*layerWin{}}
+	now := time.Now()
+	send := func(size int) {
+		m.dirty = rect{0, 0, 200, 200}
+		jobs := wm.collect(now)
+		for _, j := range jobs {
+			wm.encoded(j, frame{data: make([]byte, size), cost: frameCost{enc: agentproto.GUIEncJPEG}})
+		}
+	}
+	// A link of 1.25 MB/s (10 Mbit/s) with 50 ms round trips, offered
+	// 40 kB every tick (2.5 MB/s): frames queue for the link, and each is
+	// acknowledged a round trip after it went through.
+	const rate, rtt = 1.25e6, 50 * time.Millisecond
+	type ack struct {
+		seq uint32
+		at  time.Time
+	}
+	var acks []ack
+	var free time.Time
+	queued := 0
+	for i := 0; i < 500; i++ {
+		for len(acks) > 0 && !acks[0].at.After(now) {
+			m.ackedAt(acks[0].seq, acks[0].at)
+			acks = acks[1:]
+		}
+		n := len(m.inflight)
+		send(40000)
+		for _, f := range m.inflight[n:] {
+			start := f.at
+			if free.After(start) {
+				start = free
+			}
+			free = start.Add(time.Duration(float64(f.bytes) / rate * float64(time.Second)))
+			acks = append(acks, ack{f.seq, free.Add(rtt)})
+		}
+		if i > 250 {
+			queued = max(queued, m.flow.bytes)
+		}
+		now = now.Add(guiTick)
+	}
+	// The shortest round trip includes sending one frame (32 ms).
+	if m.flow.minRTT < rtt || m.flow.minRTT > rtt+40*time.Millisecond {
+		t.Errorf("shortest round trip %v", m.flow.minRTT)
+	}
+	bdp := rate * m.flow.minRTT.Seconds()
+	t.Logf("round trip %v, rate %.0f, budget %d, bdp %.0f, most in flight %d", m.flow.minRTT, m.flow.maxRate, m.flow.budget(), bdp, queued)
+	// 82 ms: a queue of 30 ms more.
+	if b := m.flow.budget(); float64(b) < 1.2*bdp || float64(b) > 1.5*bdp {
+		t.Errorf("budget %d for a bandwidth-delay product of %.0f", b, bdp)
+	}
+	if float64(queued) > 1.5*bdp+40000 {
+		t.Errorf("%d bytes in flight", queued)
+	}
+
+	// A round trip measured while a queue built up (the first frames, a
+	// busy link) is measured again: frames go one at a time until one is
+	// drawn.
+	m.flow = flow{minRTT: 400 * time.Millisecond, minRTTAt: now.Add(-guiRTTProbe - time.Second), maxRate: rate, rateAt: now}
+	acks, free = nil, time.Time{}
+	for i := 0; i < 60; i++ {
+		for len(acks) > 0 && !acks[0].at.After(now) {
+			m.ackedAt(acks[0].seq, acks[0].at)
+			acks = acks[1:]
+		}
+		n := len(m.inflight)
+		send(40000)
+		for _, f := range m.inflight[n:] {
+			start := f.at
+			if free.After(start) {
+				start = free
+			}
+			free = start.Add(time.Duration(float64(f.bytes) / rate * float64(time.Second)))
+			acks = append(acks, ack{f.seq, free.Add(rtt)})
+		}
+		now = now.Add(guiTick)
+	}
+	if m.flow.probing || m.flow.minRTT > rtt+40*time.Millisecond {
+		t.Errorf("after probing: shortest round trip %v (probing %v)", m.flow.minRTT, m.flow.probing)
+	}
+
+	// The browser acknowledges in bursts (it draws in order, and a large
+	// picture holds up the ones decoded after it): every second frame
+	// brings the acknowledgements of two. The rate measured must not exceed
+	// what the link takes, nor fall far below it.
+	m.flow = flow{}
+	acks, free = nil, time.Time{}
+	for i := 0; i < 500; i++ {
+		for len(acks) > 0 && !acks[0].at.After(now) {
+			m.ackedAt(acks[0].seq, acks[0].at)
+			acks = acks[1:]
+		}
+		n := len(m.inflight)
+		send(40000)
+		for _, f := range m.inflight[n:] {
+			start := f.at
+			if free.After(start) {
+				start = free
+			}
+			free = start.Add(time.Duration(float64(f.bytes) / rate * float64(time.Second)))
+			at := free.Add(rtt)
+			if f.seq%2 != 0 {
+				at = at.Add(32 * time.Millisecond)
+			}
+			acks = append(acks, ack{f.seq, at})
+		}
+		slices.SortStableFunc(acks, func(a, b ack) int { return a.at.Compare(b.at) })
+		now = now.Add(guiTick)
+	}
+	t.Logf("bursts: rate %.0f", m.flow.maxRate)
+	if m.flow.maxRate > 1.3*rate || m.flow.maxRate < 0.7*rate {
+		t.Errorf("rate %.0f measured from acknowledgements in bursts, link %.0f", m.flow.maxRate, rate)
+	}
+	// Small frames on an idle link: the budget's floor allows many.
+	if guiMinBudget/4000 < 10 {
+		t.Error("the smallest budget holds back small frames")
+	}
+	// A frame that was not sent leaves the flow.
+	m.flow = flow{}
+	m.dirty = rect{0, 0, 200, 200}
+	jobs := wm.collect(now)
+	wm.encoded(jobs[0], frame{})
+	if len(m.inflight) != 0 || m.flow.bytes != 0 {
+		t.Errorf("unsent frame kept: %+v", m.flow)
+	}
+}
+
+// A watched window reports what its frames cost once a second: counts,
+// sizes, times, ticks held back and the latency of acknowledged frames.
+func TestFrameStats(t *testing.T) {
+	var out bytes.Buffer
+	m := &managedWin{xwin: xwin{id: 1, w: 20000, h: 20000}, watched: true}
+	m.dirty = m.all()
+	wm := &windowManager{out: &out, wins: map[xproto.Window]*managedWin{1: m}, layers: map[xproto.Window]*layerWin{}}
+	t0 := time.Now()
+	m.since = t0
+	// A budget of 300 kB: three tiles' worth.
+	m.flow = flow{minRTT: 100 * time.Millisecond, minRTTAt: t0, maxRate: 2.3e6, rateAt: t0}
+	jobs := wm.collect(t0)
+	wm.collect(t0) // held back: nothing acknowledged yet
+	costs := []frameCost{}
+	for _, j := range jobs {
+		costs = append(costs, frameCost{window: j.window, capture: time.Millisecond, convert: 2 * time.Millisecond,
+			encode: 3 * time.Millisecond, pixels: j.r.w * j.r.h, bytes: 1000, enc: agentproto.GUIEncJPEG})
+	}
+	wm.account(costs, t0.Add(10*time.Millisecond))
+	if out.Len() != 0 {
+		t.Fatal("stats sent before a second passed")
+	}
+	m.ackedAt(2, t0.Add(40*time.Millisecond)) // acknowledges frames 1 and 2
+	m.acked = 2
+	if len(m.inflight) != 1 || m.inflight[0].seq != 3 {
+		t.Fatalf("in flight %+v", m.inflight)
+	}
+	wm.account(nil, t0.Add(time.Second))
+	kind, p, err := agentproto.ReadGUI(&out)
+	if err != nil || kind != agentproto.GUIJSON {
+		t.Fatalf("read: %v", err)
+	}
+	var ev agentproto.GUIEvent
+	json.Unmarshal(p, &ev)
+	st := ev.Stats
+	if ev.Ev != "stats" || st == nil || st.Window != 1 || st.Updates != 1 || st.Frames != 3 || st.JPEG != 3 || st.Bytes != 3000 ||
+		st.Capture != 3000 || st.Encode != 9000 || st.Waits != 1 || st.Acked != 1 || st.Latency != 40000 ||
+		st.Interval != 1000000 || st.Pixels != 3*guiTile*guiTile {
+		t.Fatalf("stats %+v", st)
+	}
+	if m.stats != (agentproto.GUIStats{}) {
+		t.Error("stats not reset after the report")
+	}
+}
+
+// BenchmarkGUICapture measures the steps of sending a 1706×960 window (a
+// MuJoCo viewer's size) the way the window manager does, in tiles: reading
+// the pixels from Xvfb, converting and encoding them, for a rendered scene
+// and a plot. It needs Linux with Xvfb:
+//
+//	go test ./internal/agent -run '^$' -bench GUICapture
+func BenchmarkGUICapture(b *testing.B) {
+	g := guiTestXvfb(b)
+	n, _ := g.display()
+	cookie, _ := g.serverCookie()
+	conn, err := net.Dial("unix", xSocket(n))
+	if err != nil {
+		b.Fatal(err)
+	}
+	x, err := xgb.NewConnNetWithCookieHex(conn, hex.EncodeToString(cookie))
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer x.Close()
+	if err := composite.Init(x); err != nil {
+		b.Fatal(err)
+	}
+	scr := xproto.Setup(x).DefaultScreen(x)
+	composite.RedirectSubwindows(x, scr.Root, composite.RedirectAutomatic)
+	const w, h = 1706, 960
+	win, _ := xproto.NewWindowId(x)
+	xproto.CreateWindow(x, scr.RootDepth, win, scr.Root, 0, 0, w, h, 0, xproto.WindowClassInputOutput, scr.RootVisual, xproto.CwBackPixel, []uint32{0})
+	xproto.MapWindow(x, win)
+	gc, _ := xproto.NewGcontextId(x)
+	xproto.CreateGC(x, gc, xproto.Drawable(win), 0, nil)
+	var jobs []capture
+	for _, t := range tiles(rect{0, 0, w, h}) {
+		jobs = append(jobs, capture{window: win, layer: win, r: t})
+	}
+	logger := log.New(io.Discard, "", 0)
+	wm := &windowManager{x: x, logger: logger, shmOK: shmInit(x)}
+	defer func() {
+		if wm.seg != nil {
+			wm.seg.free(x)
+		}
+	}()
+	if !wm.shmOK {
+		b.Log("the display has no MIT-SHM")
+	}
+	plain := &windowManager{x: x, logger: logger}
+
+	for _, c := range []struct {
+		name string
+		img  *image.RGBA
+	}{{"scene", benchScene(w, h)}, {"plot", benchPlot(w, h)}} {
+		putRGBA(x, win, gc, c.img)
+		var grabs []grabbed
+		for _, v := range []struct {
+			name string
+			wm   *windowManager
+		}{{"capture", plain}, {"capture-shm", wm}} {
+			b.Run(c.name+"/"+v.name, func(b *testing.B) {
+				b.SetBytes(w * h * 4)
+				for b.Loop() {
+					grabs = v.wm.grab(jobs)
+				}
+			})
+			if p := grabs[0].pix; p == nil || p[0] != c.img.Pix[2] || p[2] != c.img.Pix[0] {
+				b.Fatal("captured pixels differ from the drawn ones")
+			}
+		}
+		encode := func(name string, lossless bool, groups int) {
+			b.Run(c.name+"/"+name, func(b *testing.B) {
+				var size int
+				for b.Loop() {
+					size = 0
+					for k, j := range jobs {
+						j.lossless = lossless
+						var f frame
+						if groups == 1 {
+							data, err := jpegstrip.Encode(nil, grabs[k].pix, j.r.w*4, j.r.w, j.r.h, guiJPEGQuality, 1)
+							if err != nil {
+								b.Fatal(err)
+							}
+							f.data = data
+						} else {
+							f = wm.encode(j, grabs[k])
+						}
+						size += len(f.data)
+					}
+				}
+				b.ReportMetric(float64(size), "bytes/frame")
+			})
+		}
+		encode("jpeg-serial", false, 1)
+		encode("jpeg", false, 0)
+		encode("png", true, 0)
+	}
+}
+
+// putRGBA draws img into win in strips small enough for one request.
+func putRGBA(x *xgb.Conn, win xproto.Window, gc xproto.Gcontext, img *image.RGBA) {
+	w, h := img.Rect.Dx(), img.Rect.Dy()
+	const rows = 32
+	buf := make([]byte, w*rows*4)
+	for y := 0; y < h; y += rows {
+		n := min(rows, h-y)
+		for i := 0; i < w*n; i++ {
+			p := img.Pix[y*img.Stride+i*4:]
+			buf[i*4], buf[i*4+1], buf[i*4+2], buf[i*4+3] = p[2], p[1], p[0], 0
+		}
+		xproto.PutImage(x, xproto.ImageFormatZPixmap, xproto.Drawable(win), gc, uint16(w), uint16(n), 0, int16(y), 0, 24, buf[:w*n*4])
+	}
+	xproto.GetInputFocus(x).Reply() // wait until drawn
+}
+
+// benchScene is a rendered 3D scene's kind of picture: a sky gradient, a
+// checkered floor in perspective and shaded balls.
+func benchScene(w, h int) *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	horizon := h * 2 / 5
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			var r, g, b float64
+			if y < horizon {
+				f := float64(y) / float64(horizon)
+				r, g, b = 90+80*f, 140+70*f, 220-20*f
+			} else {
+				d := float64(y-horizon+1) / float64(h-horizon)
+				u := (float64(x) - float64(w)/2) / (d * 200)
+				v := 1 / d * 4
+				shade := 0.4 + 0.6*d
+				if (int(math.Floor(u))+int(math.Floor(v)))%2 == 0 {
+					r, g, b = 200*shade, 200*shade, 210*shade
+				} else {
+					r, g, b = 60*shade, 70*shade, 90*shade
+				}
+			}
+			for _, s := range [][4]float64{{0.3, 0.6, 0.12, 0}, {0.55, 0.7, 0.09, 1}, {0.75, 0.55, 0.06, 2}} {
+				cx, cy, rad := s[0]*float64(w), s[1]*float64(h), s[2]*float64(w)
+				dx, dy := (float64(x)-cx)/rad, (float64(y)-cy)/rad
+				if q := dx*dx + dy*dy; q < 1 {
+					l := math.Max(0, -0.5*dx-0.6*dy+0.6*math.Sqrt(1-q))
+					base := [3][3]float64{{220, 60, 50}, {60, 180, 90}, {230, 200, 60}}[int(s[3])]
+					r, g, b = base[0]*(0.2+0.8*l), base[1]*(0.2+0.8*l), base[2]*(0.2+0.8*l)
+				}
+			}
+			i := y*img.Stride + x*4
+			img.Pix[i], img.Pix[i+1], img.Pix[i+2], img.Pix[i+3] = uint8(r), uint8(g), uint8(b), 0xff
+		}
+	}
+	return img
+}
+
+// benchPlot is a plot's kind of picture: white, with a grid, axes, curves
+// and blocks of text.
+func benchPlot(w, h int) *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	set := func(x, y int, c [3]uint8) {
+		if x >= 0 && y >= 0 && x < w && y < h {
+			i := y*img.Stride + x*4
+			img.Pix[i], img.Pix[i+1], img.Pix[i+2], img.Pix[i+3] = c[0], c[1], c[2], 0xff
+		}
+	}
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			set(x, y, [3]uint8{255, 255, 255})
+			if (x-120)%100 == 0 || (y-60)%80 == 0 {
+				set(x, y, [3]uint8{225, 225, 225})
+			}
+		}
+	}
+	for x := 120; x < w-40; x++ {
+		set(x, h-80, [3]uint8{0, 0, 0})
+	}
+	for y := 40; y < h-80; y++ {
+		set(120, y, [3]uint8{0, 0, 0})
+	}
+	colors := [][3]uint8{{31, 119, 180}, {255, 127, 14}, {44, 160, 44}}
+	for k, c := range colors {
+		for x := 121; x < w-40; x++ {
+			y := float64(h-80) / 2 * (1 + 0.8*math.Sin(float64(x)/(60+20*float64(k))+float64(k)))
+			for d := 0; d < 2; d++ {
+				set(x, int(y)+d, c)
+			}
+		}
+	}
+	// Text: rows of glyph-sized marks under the axis and in a legend.
+	for row, y0 := range []int{h - 60, 50, 70, 90} {
+		x0 := 140
+		if row > 0 {
+			x0 = w - 260
+		}
+		for g := 0; g < 30; g++ {
+			for y := y0; y < y0+10; y++ {
+				for x := x0 + g*7; x < x0+g*7+5; x++ {
+					if (x*7+y*3+g)%5 != 0 {
+						set(x, y, [3]uint8{30, 30, 30})
+					}
+				}
+			}
+		}
+	}
+	return img
 }
 
 // Downloads left by a killed agent go away after an hour; libraries are

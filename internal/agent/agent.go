@@ -28,6 +28,7 @@ import (
 type Agent struct {
 	sess      *yamux.Session
 	logger    *log.Logger
+	instance  string
 	home      string
 	base      string // ~/<brand.DataDir(instance)>
 	runDir    string // base/run, mode 0700
@@ -99,6 +100,7 @@ func Serve(ctx context.Context, conn io.ReadWriteCloser, opts Options) error {
 	a := &Agent{
 		sess:         sess,
 		logger:       logger,
+		instance:     opts.Instance,
 		home:         home,
 		base:         base,
 		runDir:       runDir,

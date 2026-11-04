@@ -632,3 +632,18 @@ func TestSoundClientMostRecentlyActive(t *testing.T) {
 		t.Fatal("huge idle time")
 	}
 }
+
+// Browsers name the video streams they decode; anything else is dropped.
+func TestVideoCodecsParam(t *testing.T) {
+	for q, want := range map[string]string{
+		"":                       "",
+		"avc1,vp8":               "avc1,vp8",
+		"vp8,vp8,AVC1,../x,a b":  "vp8",
+		"a,b,c,d,e":              "a,b,c,d",
+		"averyverylongcodecname": "",
+	} {
+		if got := strings.Join(videoCodecs(q), ","); got != want {
+			t.Errorf("videoCodecs(%q) = %q, want %q", q, got, want)
+		}
+	}
+}

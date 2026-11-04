@@ -8,6 +8,20 @@ All notable changes are documented here. The format follows
 
 ### Added
 
+- Program windows that keep changing (a simulator, a rotating 3D plot) are
+  sent as video: H.264 through NVENC on NVIDIA GPUs or VA-API on Intel and
+  AMD GPUs, else VP8 on the CPU, decoded in the browser with WebCodecs; once
+  a window settles it is sent again as an exact picture. On by default
+  (`gui-video`, also per machine in the settings). The core brings the
+  encoder for linux/amd64 and linux/arm64 machines and pushes it to them;
+  without WebCodecs (plain HTTP on a LAN) or when encoding fails, windows
+  are sent as pictures. Measured with the MuJoCo viewer: 58 frames per
+  second at 1.7 Mbit/s, against 29 pictures at 30 Mbit/s before, and 58
+  instead of 8 on a 10 Mbit/s link.
+- Program windows: `#stats` at the end of a program window's address shows
+  frame statistics: what the machine spent capturing and encoding, the
+  frames and bytes the browser received and how long it took to decode and
+  draw them, and the time from capture to the picture being drawn.
 - Desktop app: drag folders from Finder onto the sidebar to create a
   workspace for each on the local machine.
 - Files dragged onto a pane are pasted as their paths. Files not on the
@@ -29,6 +43,13 @@ All notable changes are documented here. The format follows
 
 ### Changed
 
+- Program windows are captured through shared memory and encoded on
+  several cores: a 1706×960 window takes about 4 ms to capture and encode
+  as JPEG instead of 15–17 ms. How much a window may have on its way follows
+  the connection (about twice what it delivers in a round trip) instead of
+  three frames. The MuJoCo viewer's pictures are drawn at 48 whole windows
+  per second instead of 29, 36 ms instead of 46 ms after capture; on a link
+  they fill, they arrive as before.
 - Pasted files' paths reach the pane as a paste instead of typed text, the
   way a terminal delivers dropped files.
 - A tab is shown when it is pressed, not when the click is released, and a
@@ -41,6 +62,9 @@ All notable changes are documented here. The format follows
 
 ### Fixed
 
+- Stopping herdr's server on a machine no longer leaves its virtual
+  display (Xvfb) running for six hours: the display lasts while the server
+  runs, programs use it or the core is connected, and ends a minute after.
 - Moving the window to a display with another pixel density (for example
   from a Retina screen to a 1x external monitor) no longer changes the
   terminal text's size: the cell is measured again for the new display.

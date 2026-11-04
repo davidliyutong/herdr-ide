@@ -39,7 +39,8 @@ import (
 // a new cookie to run/xauth.server (Xvfb's) and run/xauth (the panes'). Xvfb
 // runs in its own session and outlives the agent (programs would die with
 // their display); it exits by itself guiIdleSeconds after its last client
-// disconnected (-terminate).
+// disconnected (-terminate). The display keeper (guikeep.go) is a client
+// while the herdr server runs.
 //
 // Other users can bind X sockets in /tmp, abstract ones included, and X
 // clients cannot tell which server they reach. So a display number is only
@@ -55,12 +56,18 @@ type gui struct {
 
 	vglOnce sync.Once
 	vgl     vglInfo
+
+	// The encoder for video (guivideo.go) and the stream kinds it makes.
+	videoMu    sync.Mutex
+	videoBin   string
+	videoKinds []string
 }
 
 const (
 	// guiIdleSeconds: Xvfb exits this long after its last client left. The
-	// window manager is a client while an agent is connected.
-	guiIdleSeconds = 6 * 3600
+	// window manager is a client while an agent is connected, the keeper
+	// while the herdr server runs.
+	guiIdleSeconds = 60
 	// guiScreen is the size of the virtual screen; windows larger than it
 	// still work, but input reaches only the part on the screen.
 	guiScreen = "2560x1440x24"
@@ -739,6 +746,21 @@ func (g *gui) handle(ctx context.Context, st net.Conn, h agentproto.Header) erro
 		gs := g.status()
 		gs.Procs = g.shells(h.Args, gs.Display)
 		return agentproto.WriteLine(st, agentproto.Reply{OK: true, GUI: gs})
+	case "video":
+		return agentproto.WriteLine(st, agentproto.Reply{OK: true, GUI: g.videoStatus(h.Digest)})
+	case "video-install":
+		// The stream carries the gzip-compressed ffmpeg (chunked).
+		if err := agentproto.WriteLine(st, agentproto.Reply{OK: true}); err != nil {
+			return err
+		}
+		if err := g.installVideo(h.Digest, &agentproto.ChunkReader{R: st}); err != nil {
+			return agentproto.Fail(st, err)
+		}
+		return agentproto.WriteLine(st, agentproto.Reply{OK: true, GUI: g.videoStatus(h.Digest)})
+	case "keep":
+		if err := g.keep(h.Session); err != nil {
+			return agentproto.Fail(st, err)
+		}
 	case "attach":
 		return g.attach(st)
 	default:
@@ -769,6 +791,7 @@ func (g *gui) attach(st net.Conn) error {
 	if err != nil {
 		return agentproto.Fail(st, err)
 	}
+	wm.tools = g.videoTools
 	g.wmMu.Lock()
 	g.wm = wm
 	g.wmMu.Unlock()

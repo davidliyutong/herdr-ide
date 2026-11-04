@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -79,8 +80,8 @@ func TestPaneEnv(t *testing.T) {
 
 // attached returns a manager with a display whose agent side is the
 // returned connection, and one window (id 7).
-func attached(t *testing.T) (*Manager, *display, net.Conn) {
-	m := testManager(t)
+func attached(t *testing.T, flags ...string) (*Manager, *display, net.Conn) {
+	m := testManager(t, flags...)
 	mc := testMachines().Get("m1")
 	core, agent := net.Pipe()
 	t.Cleanup(func() { core.Close(); agent.Close() })
@@ -160,12 +161,24 @@ func TestFrameRouting(t *testing.T) {
 			t.Fatalf("ack %d forwarded as %+v", seq, c)
 		}
 	}
-	if len(fast.frames) != 6 || len(slow.frames) != viewerBacklog || !sv.stale {
+	// A viewer a few frames behind gets them all.
+	if len(fast.frames) != 6 || len(slow.frames) != 6 || sv.stale {
+		t.Fatalf("fast got %v, slow got %v (stale %v)", fast.frames, slow.frames, sv.stale)
+	}
+	// Once what it has not shown was shown elsewhere viewerLag ago, it
+	// skips frames.
+	for i := range sv.sent {
+		sv.sent[i].at = sv.sent[i].at.Add(-2 * viewerLag)
+	}
+	m.frame(d, frame(7))
+	m.Command("m1", 7, fv, agentproto.GUICommand{Cmd: "ack", Seq: 7}, true)
+	readCmd(t, agent)
+	if len(fast.frames) != 7 || len(slow.frames) != 6 || !sv.stale {
 		t.Fatalf("fast got %v, slow got %v (stale %v)", fast.frames, slow.frames, sv.stale)
 	}
 	// Acks behind the fastest viewer are not forwarded; catching up asks
 	// for the whole window.
-	m.Command("m1", 7, sv, agentproto.GUICommand{Cmd: "ack", Seq: 4}, true)
+	m.Command("m1", 7, sv, agentproto.GUICommand{Cmd: "ack", Seq: 6}, true)
 	if c := readCmd(t, agent); c.Cmd != "refresh" || c.ID != 7 {
 		t.Fatalf("caught up: %+v", c)
 	}
@@ -174,6 +187,221 @@ func TestFrameRouting(t *testing.T) {
 	m.Command("m1", 7, fv, agentproto.GUICommand{Cmd: "key", Keycode: 39, Down: true, ID: 99}, true)
 	if c := readCmd(t, agent); c.Cmd != "key" || c.Keycode != 39 || c.ID != 7 {
 		t.Fatalf("input: %+v", c)
+	}
+}
+
+// A window's stats go to the browser windows showing it, not to others.
+func TestStatsRouting(t *testing.T) {
+	m, d, agent := attached(t)
+	var r recorder
+	m.Attach("m1", 7, r.viewer())
+	readCmd(t, agent) // watch
+	stats := func(win uint32) []byte {
+		b, _ := json.Marshal(agentproto.GUIEvent{Ev: "stats", Stats: &agentproto.GUIStats{Window: win, Frames: 3}})
+		return b
+	}
+	m.event(d, stats(8))
+	m.event(d, stats(7))
+	if len(r.events) != 2 || r.events[1] != "stats" {
+		t.Fatalf("events %v", r.events)
+	}
+}
+
+// Video goes to windows whose viewers all decode it; a viewer that missed a
+// frame of the stream gets nothing until a key frame, which is asked for
+// once it caught up.
+func TestVideoRouting(t *testing.T) {
+	m, d, agent := attached(t)
+	var a, b recorder
+	av, bv := a.viewer(), b.viewer()
+	av.Codecs, bv.Codecs = []string{"vp8", "avc1"}, []string{"vp8"}
+	m.Attach("m1", 7, av)
+	if c := readCmd(t, agent); c.Cmd != "watch" || strings.Join(c.Codecs, ",") != "avc1,vp8" {
+		t.Fatalf("watch: %+v", c)
+	}
+	m.Attach("m1", 7, bv)
+	if c := readCmd(t, agent); c.Cmd != "refresh" || strings.Join(c.Codecs, ",") != "vp8" {
+		t.Fatalf("second viewer: %+v", c)
+	}
+	ev, _ := json.Marshal(agentproto.GUIEvent{Ev: "video", Video: &agentproto.GUIVideo{Window: 7, Codec: "vp8", W: 640, H: 480}})
+	m.event(d, ev)
+	if a.events[len(a.events)-1] != "video" || b.events[len(b.events)-1] != "video" {
+		t.Fatalf("stream start: %v / %v", a.events, b.events)
+	}
+	vframe := func(seq uint32, key bool) []byte {
+		enc := agentproto.GUIEncVideo
+		if key {
+			enc = agentproto.GUIEncVideoKey
+		}
+		return agentproto.GUIFrameHeader{Window: 7, Layer: 7, W: 640, H: 480, Enc: enc, Seq: seq}.Marshal()
+	}
+	ack := func(v *Viewer, seq uint32) {
+		m.Command("m1", 7, v, agentproto.GUICommand{Cmd: "ack", Seq: seq}, true)
+	}
+	m.frame(d, vframe(1, true))
+	ack(av, 1)
+	readCmd(t, agent) // ack 1
+	b.full = true
+	m.frame(d, vframe(2, false)) // b misses it
+	b.full = false
+	ack(av, 2)
+	readCmd(t, agent) // ack 2
+	m.frame(d, vframe(3, false))
+	ack(av, 3)
+	readCmd(t, agent) // ack 3
+	if fmt.Sprint(b.frames) != "[1]" {
+		t.Fatalf("b got %v after missing frame 2", b.frames)
+	}
+	ack(bv, 1) // caught up: a key frame is asked for
+	if c := readCmd(t, agent); c.Cmd != "keyframe" || c.ID != 7 {
+		t.Fatalf("after catching up: %+v", c)
+	}
+	m.frame(d, vframe(4, true))
+	m.frame(d, vframe(5, false))
+	if fmt.Sprint(b.frames) != "[1 4 5]" || fmt.Sprint(a.frames) != "[1 2 3 4 5]" {
+		t.Fatalf("frames a %v b %v", a.frames, b.frames)
+	}
+
+	// The viewer left decodes more.
+	m.Detach("m1", 7, bv)
+	if c := readCmd(t, agent); c.Cmd != "codecs" || strings.Join(c.Codecs, ",") != "avc1,vp8" {
+		t.Fatalf("after detach: %+v", c)
+	}
+	// A viewer joining a running stream starts with it.
+	var late recorder
+	lv := late.viewer()
+	lv.Codecs = []string{"vp8"}
+	m.Attach("m1", 7, lv)
+	if late.events[len(late.events)-1] != "video" || !lv.needKey {
+		t.Fatalf("late viewer: %v", late.events)
+	}
+	// The stream ends: viewers joining later get pictures.
+	end, _ := json.Marshal(agentproto.GUIEvent{Ev: "video", Video: &agentproto.GUIVideo{Window: 7}})
+	m.event(d, end)
+	if d.video[7] != nil {
+		t.Error("ended stream kept")
+	}
+}
+
+// Without --gui-video agents are told no viewer decodes video.
+func TestVideoOff(t *testing.T) {
+	m, _, agent := attached(t, "--gui-video=off")
+	var r recorder
+	v := r.viewer()
+	v.Codecs = []string{"avc1"}
+	m.Attach("m1", 7, v)
+	if c := readCmd(t, agent); c.Cmd != "watch" || len(c.Codecs) != 0 {
+		t.Fatalf("watch: %+v", c)
+	}
+}
+
+// Turning video off or on for a machine tells its agent at once which
+// streams the viewers of each window share.
+func TestVideoSettingChange(t *testing.T) {
+	m, d, agent := attached(t)
+	var r recorder
+	v := r.viewer()
+	v.Codecs = []string{"avc1"}
+	m.Attach("m1", 7, v)
+	if c := readCmd(t, agent); c.Cmd != "watch" || strings.Join(c.Codecs, ",") != "avc1" {
+		t.Fatalf("watch: %+v", c)
+	}
+	if err := m.Settings.SetFor(SettingVideo, "m1", "off"); err != nil {
+		t.Fatal(err)
+	}
+	m.ApplyVideo(d.mc)
+	if c := readCmd(t, agent); c.Cmd != "codecs" || c.ID != 7 || len(c.Codecs) != 0 {
+		t.Fatalf("off: %+v", c)
+	}
+	m.Settings.SetFor(SettingVideo, "m1", "")
+	m.ApplyVideo(d.mc)
+	if c := readCmd(t, agent); c.Cmd != "codecs" || strings.Join(c.Codecs, ",") != "avc1" {
+		t.Fatalf("back on: %+v", c)
+	}
+}
+
+// Read-only mode neither starts a display keeper nor pushes the encoder;
+// otherwise the keeper always, the encoder with video on.
+func TestAfterAttach(t *testing.T) {
+	for _, c := range []struct {
+		readOnly, video, keep, push bool
+	}{{true, true, false, false}, {true, false, false, false}, {false, true, true, true}, {false, false, true, false}} {
+		if keep, push := afterAttach(c.readOnly, c.video); keep != c.keep || push != c.push {
+			t.Errorf("readOnly %v video %v: keep %v push %v", c.readOnly, c.video, keep, push)
+		}
+	}
+}
+
+// A keeper started while herdr's server was down leaves; the machine is
+// asked again each time the server is reachable again, not on every state
+// change, and never in read-only mode.
+func TestHerdrReadyKeeps(t *testing.T) {
+	for _, readOnly := range []bool{false, true} {
+		m, d, _ := attached(t)
+		m.ReadOnly = readOnly
+		kept := make(chan string, 8)
+		m.keeper = func(d *display) { kept <- d.mc.ID() }
+		count := func() int {
+			time.Sleep(20 * time.Millisecond)
+			return len(kept)
+		}
+		m.HerdrReady(d.mc, false)
+		m.HerdrReady(d.mc, true)
+		m.HerdrReady(d.mc, true)
+		want := 1
+		if readOnly {
+			want = 0
+		}
+		if n := count(); n != want {
+			t.Fatalf("read-only %v: %d keep requests after herdr came up", readOnly, n)
+		}
+		m.HerdrReady(d.mc, false)
+		m.HerdrReady(d.mc, true)
+		if n := count(); n != 2*want {
+			t.Fatalf("read-only %v: %d keep requests after herdr came back", readOnly, n)
+		}
+	}
+}
+
+// Commands reaching the agent are the core's: a viewer's refresh carries
+// the streams all viewers decode, not its own list, an acknowledgement
+// only its number, and the refresh after catching up the streams too.
+func TestViewerCommands(t *testing.T) {
+	m, d, agent := attached(t)
+	var a, b recorder
+	av, bv := a.viewer(), b.viewer()
+	av.Codecs, bv.Codecs = []string{"avc1", "vp8"}, []string{"vp8"}
+	m.Attach("m1", 7, av)
+	readCmd(t, agent) // watch
+	m.Attach("m1", 7, bv)
+	readCmd(t, agent) // refresh
+	m.Command("m1", 7, av, agentproto.GUICommand{Cmd: "refresh", Codecs: []string{"avc1"}}, true)
+	if c := readCmd(t, agent); c.Cmd != "refresh" || strings.Join(c.Codecs, ",") != "vp8" {
+		t.Fatalf("refresh: %+v", c)
+	}
+	m.frame(d, frame(1))
+	m.Command("m1", 7, av, agentproto.GUICommand{Cmd: "ack", Seq: 1, Codecs: []string{"avc1"}, X: 5}, true)
+	if c := readCmd(t, agent); c.Cmd != "ack" || c.Seq != 1 || len(c.Codecs) != 0 || c.X != 0 {
+		t.Fatalf("ack: %+v", c)
+	}
+	// b fell behind: it skips frames, then catches up.
+	for i := range bv.sent {
+		bv.sent[i].at = bv.sent[i].at.Add(-2 * viewerLag)
+	}
+	m.frame(d, frame(2))
+	if !bv.stale {
+		t.Fatal("viewer behind not marked")
+	}
+	m.Command("m1", 7, av, agentproto.GUICommand{Cmd: "ack", Seq: 2}, true)
+	readCmd(t, agent) // ack 2
+	m.Command("m1", 7, bv, agentproto.GUICommand{Cmd: "ack", Seq: 1}, true)
+	if c := readCmd(t, agent); c.Cmd != "refresh" || strings.Join(c.Codecs, ",") != "vp8" {
+		t.Fatalf("refresh after catching up: %+v", c)
+	}
+	// A viewer holding viewerMaxBytes unshown skips frames.
+	bv.sentBytes = viewerMaxBytes
+	if !bv.behind(0, time.Now()) {
+		t.Error("a viewer over the byte limit is not behind")
 	}
 }
 

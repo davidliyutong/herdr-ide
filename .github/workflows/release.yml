@@ -9,8 +9,14 @@ permissions:
   contents: read
 
 jobs:
+  encoder:
+    uses: ./.github/workflows/encoder.yml
+    with:
+      cache: false
+
   archives:
     runs-on: ubuntu-24.04
+    needs: encoder
     steps:
       - uses: actions/checkout@v7
         with:
@@ -32,11 +38,18 @@ jobs:
       - run: make deps
       - run: make check
       - run: go test ./...
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: encoder-*
+          path: dist/ffmpeg
+      - name: Place the video encoders
+        run: for d in dist/ffmpeg/encoder-*; do mv "$d" "dist/ffmpeg/${d#dist/ffmpeg/encoder-}"; done
       - name: Build
         run: scripts/build.sh
         env:
           VERSION: ${{ github.ref_name }}
           TARGETS: linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
+          REQUIRE_ENCODER: 1
       - uses: actions/upload-artifact@v7
         with:
           name: archives
@@ -47,6 +60,7 @@ jobs:
   # runner with the Intel Electron and a cross-compiled core.
   desktop:
     runs-on: macos-latest
+    needs: encoder
     strategy:
       matrix:
         arch: [arm64, x64]
@@ -66,10 +80,17 @@ jobs:
             web/pnpm-lock.yaml
             desktop/pnpm-lock.yaml
             extensions/*/pnpm-lock.yaml
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: encoder-*
+          path: dist/ffmpeg
+      - name: Place the video encoders
+        run: for d in dist/ffmpeg/encoder-*; do mv "$d" "dist/ffmpeg/${d#dist/ffmpeg/encoder-}"; done
       - run: make desktop-dmg
         env:
           ARCH: ${{ matrix.arch }}
           VERSION: ${{ github.ref_name }}
+          REQUIRE_ENCODER: 1
       - uses: actions/upload-artifact@v7
         with:
           name: desktop-${{ matrix.arch }}

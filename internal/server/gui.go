@@ -6,8 +6,10 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/coder/websocket"
@@ -32,12 +34,13 @@ func (s *Server) initGUI() {
 		if st.Status == machines.StatusReady || st.Status == machines.StatusDegraded {
 			if mc := s.mg.Get(st.ID); mc != nil {
 				s.gui.Ensure(mc)
+				s.gui.HerdrReady(mc, st.Status == machines.StatusReady)
 			}
 		}
 	}, func(machines.AgentEvent) {})
 	if s.opts.Settings != nil {
 		s.opts.Settings.OnChange(func(key, machine, _ string) {
-			if key != gui.SettingGUI {
+			if key != gui.SettingGUI && key != gui.SettingVideo {
 				return
 			}
 			// A global change affects every machine without its own value.
@@ -46,7 +49,11 @@ func (s *Server) initGUI() {
 					continue
 				}
 				if mc := s.mg.Get(st.ID); mc != nil && (st.Status == machines.StatusReady || st.Status == machines.StatusDegraded) {
-					s.gui.Apply(mc)
+					if key == gui.SettingVideo {
+						s.gui.ApplyVideo(mc)
+					} else {
+						s.gui.Apply(mc)
+					}
 				}
 			}
 		})
@@ -183,7 +190,7 @@ func (s *Server) handleGUIWS(w http.ResponseWriter, r *http.Request) {
 		default:
 			return false
 		}
-	}}
+	}, Codecs: videoCodecs(r.URL.Query().Get("video"))}
 	go func() {
 		for {
 			select {
@@ -228,6 +235,19 @@ func (s *Server) handleGUIWS(w http.ResponseWriter, r *http.Request) {
 	}
 	s.gui.Detach(mc.ID(), id, v)
 	conn.Close(websocket.StatusNormalClosure, "")
+}
+
+// videoCodecs parses the video streams a browser window decodes
+// (?video=avc1,vp8): at most four short lowercase names.
+func videoCodecs(q string) []string {
+	var out []string
+	for _, c := range strings.Split(q, ",") {
+		if len(out) == 4 || c == "" || len(c) > 8 || strings.Trim(c, "abcdefghijklmnopqrstuvwxyz0123456789") != "" || slices.Contains(out, c) {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
 }
 
 // handleGUIClose is sent (as a beacon) when a browser window showing a
