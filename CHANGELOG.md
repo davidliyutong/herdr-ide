@@ -62,6 +62,17 @@ All notable changes are documented here. The format follows
 
 ### Fixed
 
+- Machines no longer stay *degraded* on slow or congested links: herdr
+  drops an API connection whose request has not arrived within 5 s, and the
+  core now sends the request with the stream instead of after the agent's
+  reply, which could queue behind pane surfaces and program windows.
+- **Retry** on a *degraded* machine reconnects it; before, it did nothing
+  while the agent stayed connected. Read-only browsers cannot retry, and a
+  session younger than 5 s is kept.
+- After the network changed or the computer slept, a machine reconnects
+  without waiting a minute for the old ssh connection: the core tells an
+  ssh control master whose connection stopped answering to take no new
+  sessions, so the next connection opens a new one.
 - Stopping herdr's server on a machine no longer leaves its virtual
   display (Xvfb) running for six hours: the display lasts while the server
   runs, programs use it or the core is connected, and ends a minute after.

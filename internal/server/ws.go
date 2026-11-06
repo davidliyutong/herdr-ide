@@ -187,8 +187,18 @@ func (c *wsClient) dispatch(m *inMsg) {
 	case "api":
 		go c.api(m)
 	case "retry":
-		if mc := c.s.mg.Get(m.M); mc != nil {
-			mc.Retry()
+		// Retrying replaces a degraded machine's session, which ends every
+		// browser's surfaces, uploads and VS Code there: not for watchers.
+		mc := c.s.mg.Get(m.M)
+		if mc == nil {
+			break
+		}
+		if c.readOnly {
+			c.s.audit.log(c.req, "denied.retry", map[string]any{"machine": m.M})
+			break
+		}
+		if mc.Retry() {
+			c.s.audit.log(c.req, "machine.retry", map[string]any{"machine": m.M})
 		}
 	case "ping":
 		c.sendJSON(map[string]any{"t": "pong", "rid": m.RID})

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -104,5 +105,38 @@ func TestSubscribeEventsAndLost(t *testing.T) {
 	}
 	if !started || len(got) != 2 || got[0] != "pane.agent_status_changed" {
 		t.Fatalf("started=%v events=%v", started, got)
+	}
+}
+
+// DialRequest gets the request line with the dial and nothing is written
+// after it, for calls and subscriptions alike.
+func TestDialRequestCarriesTheRequest(t *testing.T) {
+	dial, conns := fakeHerdr(t, func(id string, w *bufio.Writer) {
+		w.WriteString(`{"id":"` + id + `","error":{"code":"events_lost","message":"lagging"}}` + "\n")
+	})
+	var lines []string
+	c := &Client{DialRequest: func(ctx context.Context, request []byte) (net.Conn, error) {
+		lines = append(lines, string(request))
+		conn, err := dial(ctx)
+		if err != nil {
+			return nil, err
+		}
+		_, err = conn.Write(request)
+		return conn, err
+	}}
+	if _, err := c.Call(context.Background(), "ping", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Subscribe(context.Background(), []map[string]any{{"type": "layout.updated"}}, nil, func(Event) error { return nil }); !errors.Is(err, ErrEventsLost) {
+		t.Fatalf("subscribe: %v", err)
+	}
+	if len(lines) != 2 || conns.Load() != 2 {
+		t.Fatalf("requests %q over %d connections", lines, conns.Load())
+	}
+	for _, l := range lines {
+		var req struct{ Method string }
+		if !strings.HasSuffix(l, "\n") || strings.Count(l, "\n") != 1 || json.Unmarshal([]byte(l), &req) != nil {
+			t.Fatalf("request line %q", l)
+		}
 	}
 }

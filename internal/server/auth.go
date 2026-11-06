@@ -31,7 +31,7 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
 	}
 	s.audit.log(r, "ssh.auth", map[string]any{"machine": mc.ID(), "target": st.Target})
 	servePTY(w, r, transport.AuthCommand(s.opts.ControlDir, st.Target), nil)
-	mc.Retry()
+	mc.Wake()
 }
 
 // servePTY runs argv (with env, nil for the core's own) in a PTY on the core

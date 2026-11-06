@@ -27,7 +27,7 @@ Non-goals: CPU or memory quotas; managing processes started by herdr panes.
 | code-server | the agent recorded in `run/cs.pid` | idle for `--code-server-idle` (default 20 min, counted by the core's proxy: no WebSocket open), the owning agent exits, the user presses stop, or 1 h without connections (code-server's own `--idle-timeout-seconds`) |
 | VS Code extension host | code-server | 5 min after its window disconnects (`--reconnection-grace-time`) |
 | curl / wget (machine downloads) | the agent's `download` request | the download finishes, fails, or runs 20 min |
-| ssh ControlMaster | OpenSSH | 10 min unused (`ControlPersist`) |
+| ssh ControlMaster | OpenSSH | 10 min unused (`ControlPersist`), or its ServerAlive checks fail (1 min). When a session through it lost the agent while ssh kept running, or a connection probe through it timed out, the core tells it to take no new sessions (`ssh -O stop`); it then ends with the sessions still open through it, which may belong to other instances of the user |
 | Xvfb | itself (own session, see [14](14-gui-windows.md)) | 6 h after its last client disconnected (`-terminate`, armed by one connection right after start); not with the agent, so programs survive disconnects. xorg-server before 21.1: when its last client leaves; a server that never got a client stays until an agent attaches |
 | `apt-get download xvfb` | the agent's `install` request | the download finishes, fails, or runs 5 min |
 

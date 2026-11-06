@@ -68,6 +68,10 @@ type Machine struct {
 
 	refreshCh chan struct{}
 	retryCh   chan struct{}
+	// sessStart is when the live session became usable; reconnect asks Run
+	// to connect again at once after the session it closed (both under mu).
+	sessStart time.Time
+	reconnect bool
 	// herdrHint is the herdr executable the agent tries first (from herdr's
 	// SSH metadata), guarded by mu.
 	herdrHint string
@@ -139,20 +143,46 @@ func (m *Machine) Reconnect(herdrBin string) {
 	if herdrBin != "" {
 		m.herdrHint = herdrBin
 	}
-	sess := m.sess
 	m.mu.Unlock()
-	if sess != nil {
-		sess.Close()
-	}
-	m.Retry()
+	m.restart(true)
 }
 
-// Retry wakes a machine waiting in backoff (e.g. after interactive auth).
-func (m *Machine) Retry() {
+// Wake ends a backoff wait at once (after an interactive authentication);
+// a connected machine is not affected.
+func (m *Machine) Wake() {
 	select {
 	case m.retryCh <- struct{}{}:
 	default:
 	}
+}
+
+// Retry connects a machine that is not ready again at once: it ends a
+// backoff wait, and replaces a connected session whose herdr does not answer
+// (degraded) with a new one, whose agent finds herdr afresh, unless that
+// session started less than minRetryAge ago. It reports whether it ended a
+// session. A ready machine is left alone.
+func (m *Machine) Retry() bool {
+	return m.restart(false)
+}
+
+// minRetryAge keeps repeated retries from replacing every new session.
+var minRetryAge = 5 * time.Second
+
+func (m *Machine) restart(force bool) bool {
+	m.Wake()
+	m.mu.Lock()
+	sess := m.sess
+	ok := sess != nil && (force || (m.state.Status != StatusReady && time.Since(m.sessStart) >= minRetryAge))
+	if ok {
+		m.reconnect = true
+	}
+	m.mu.Unlock()
+	if ok {
+		// Closing also ends a snapshot fetch waiting for herdr; it may wait
+		// for the local agent's cleanup, so the caller does not.
+		go sess.Close()
+	}
+	return ok
 }
 
 // Session returns the live agent session, if any.
@@ -262,6 +292,14 @@ func (m *Machine) Run(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		m.mu.Lock()
+		again := m.reconnect
+		m.reconnect = false
+		m.mu.Unlock()
+		if again {
+			m.logger.Printf("machine %s: reconnecting on request", m.spec.Label)
+			continue
+		}
 		m.setStatus(StatusError, err)
 		m.logger.Printf("machine %s: session ended: %v", m.spec.Label, err)
 		select {
@@ -284,13 +322,17 @@ func (m *Machine) serve(ctx context.Context, sess *transport.Session, platform s
 		return fmt.Errorf("hello: %w", err)
 	}
 	info := rep.Info
-	api := &herdr.Client{Dial: func(ctx context.Context) (net.Conn, error) {
-		st, _, err := sess.Open(ctx, agentproto.Header{Op: agentproto.OpHerdrAPI, Session: m.spec.Session})
+	// The request travels with the stream's header: herdr wants it within
+	// 5 s of the agent connecting, and the agent's reply may queue behind
+	// pane surfaces and program windows on a slow link.
+	api := &herdr.Client{DialRequest: func(ctx context.Context, request []byte) (net.Conn, error) {
+		st, _, err := sess.OpenWith(ctx, agentproto.Header{Op: agentproto.OpHerdrAPI, Session: m.spec.Session}, request)
 		return st, err
 	}}
 	m.mu.Lock()
 	m.sess = sess
 	m.api = api
+	m.sessStart = time.Now()
 	m.mu.Unlock()
 	m.update(func(st *State) {
 		st.Info = info
@@ -310,7 +352,7 @@ func (m *Machine) serve(ctx context.Context, sess *transport.Session, platform s
 	go m.agentStatusLoop(sctx, api)
 
 	failures := 0
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	m.Refresh()
 	for {
@@ -345,6 +387,10 @@ func (m *Machine) serve(ctx context.Context, sess *transport.Session, platform s
 		failures = 0
 	}
 }
+
+// pollInterval is how often a connected machine refetches herdr's snapshot
+// without events (and retries while herdr does not answer).
+var pollInterval = 5 * time.Second
 
 type snapshotResult struct {
 	Snapshot json.RawMessage `json:"snapshot"`
