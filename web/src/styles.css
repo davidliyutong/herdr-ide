@@ -637,42 +637,6 @@ select,
   text-decoration: underline;
   z-index: 3;
 }
-/* A pane's close button: a circle at its top right corner, shown while the
- * pointer is over the pane (SurfaceView). Hidden, it lets clicks through to
- * the terminal under it. */
-.pane-close {
-  position: absolute;
-  z-index: 2;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border: 1px solid var(--line-2);
-  border-radius: 50%;
-  background: var(--bg-2);
-  color: var(--fg-dim);
-  box-shadow: 0 1px 4px var(--shadow);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.12s;
-}
-.pane-close.shown {
-  opacity: 1;
-  pointer-events: auto;
-}
-body.dragging .pane-close {
-  opacity: 0;
-  pointer-events: none;
-}
-.pane-close:hover {
-  color: #fff;
-  background: var(--error);
-  border-color: var(--error);
-}
-.pane-close .lucide {
-  width: 65%;
-  height: 65%;
-}
 /* Drop targets for dragged panes (body.dragging, see drag.ts). */
 .pane-area {
   position: absolute;
@@ -727,10 +691,25 @@ body.dragging .pane-area {
   user-select: none;
   z-index: 1;
   container-type: inline-size;
-  overflow: hidden;
   border-radius: 3px;
-  /* Room for the pane's close button at the right end of the row. */
-  padding-right: 26px;
+}
+/* Nothing is clipped, so the program windows' menu hangs below the header,
+ * over the panes under it. */
+.pane-header:has(.gui-menu) {
+  z-index: 5;
+}
+.pane-header .pane-title {
+  min-width: 0;
+}
+.pane-header .pane-actions {
+  height: 100%;
+  margin-left: auto;
+}
+.pane-header .pane-actions button {
+  width: 1.5rem;
+}
+.pane-header .pane-actions .sep {
+  height: 60%;
 }
 .pane-header.draggable {
   cursor: grab;
@@ -812,14 +791,37 @@ body.dragging .pane-area {
   background: var(--line-2);
   margin: 0 3px;
 }
-/* Narrow panes keep the title. */
+/* Narrow panes drop the folder, the agent, the VS Code buttons (still in
+ * the pane's menu and key bindings), the split buttons, the title and zoom,
+ * in this order; the close button stays. */
 @container (max-width: 420px) {
   .pane-header .pane-cwd {
     display: none;
   }
 }
-@container (max-width: 300px) {
+@container (max-width: 320px) {
   .pane-header .pane-agent {
+    display: none;
+  }
+}
+@container (max-width: 260px) {
+  .pane-header .pane-actions .code {
+    display: none;
+  }
+}
+@container (max-width: 170px) {
+  .pane-header .pane-actions .split {
+    display: none;
+  }
+}
+@container (max-width: 130px) {
+  .pane-header .pane-title,
+  .pane-header .pane-title-edit {
+    display: none;
+  }
+}
+@container (max-width: 90px) {
+  .pane-header .pane-actions .zoom {
     display: none;
   }
 }

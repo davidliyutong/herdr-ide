@@ -185,6 +185,7 @@ export const zhCN: Messages = {
   'surface.error.invalid_surface': '窗口对 herdr 来说太小或太大。',
   'surface.error.handshake': 'herdr 拒绝了连接。',
   'surface.clipboard': '程序复制了 {n} 个字符：“{text}”',
+  'surface.copied': '已复制 {n} 个字符：“{text}”',
   'surface.copy': '复制',
   'surface.paste': '粘贴',
   'surface.dropHere': '松开即可在此粘贴路径',
@@ -338,6 +339,12 @@ export const zhCN: Messages = {
   'settings.shortcut.press': '请按下按键…（Backspace 移除，Esc 取消）',
   'settings.optionIsMeta': 'Option 键作为 Meta',
   'settings.optionIsMeta.desc': 'macOS：Option+键发送 Esc+键（shell 和编辑器里的 Alt 快捷键），而不是输入特殊字符。',
+  'settings.programClipboard': '程序写入剪贴板',
+  'settings.programClipboard.desc':
+    'pane 里的程序复制文本（OSC 52）时怎么办，比如在 Claude Code 里选中文字。“自动”在你刚在 pane 里按键或点击后直接复制，其他时候先询问。',
+  'settings.programClipboard.auto': '自动',
+  'settings.programClipboard.ask': '询问',
+  'settings.programClipboard.off': '关闭',
   'settings.notifySound': '提示音',
   'settings.notifySound.desc':
     'agent 需要输入时播放一段提示音，完成时播放另一段（其窗格显示在已聚焦的窗口中时不播放）。打开多个浏览器时，只由最近使用的那个播放。',

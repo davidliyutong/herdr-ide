@@ -309,12 +309,11 @@ describe('pane menu', () => {
     expect(sent.flatMap((m) => m.ev ?? [])).toEqual([{ t: 'paste', text: 'pasted' }]);
   });
 
-  it('leaves the right button to a program that reports the mouse', () => {
+  it('opens the menu where the program reports the mouse too', () => {
     session.useSurface.setState({ meta: { m: 'm1', gen: 1, w: W, h: H, panes: [{ ...pane(500), mouse: true }], splits: [], links: [] } });
     const plain = open(7, 3);
     expect(plain.ev.defaultPrevented).toBe(true);
-    expect(plain.entries).toEqual([]);
-    // Shift+right click opens the menu there.
+    expect(plain.entries.length).toBeGreaterThan(0);
     expect(open(7, 3, { shiftKey: true }).entries.length).toBeGreaterThan(0);
   });
 });

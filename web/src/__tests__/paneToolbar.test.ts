@@ -11,7 +11,8 @@ vi.mock('../lib/bridge', () => ({ bridge: { command: (...a: unknown[]) => comman
 import { useStore } from '../state/store';
 import type { MachineState } from '../lib/herdr';
 import { PaneToolbar } from '../components/PaneToolbar';
-import { PaneCloseButton, PaneHeader } from '../components/PaneHeader';
+import { PaneHeader } from '../components/PaneHeader';
+import { toolbarShown } from '../components/Workspace';
 import { useMenu } from '../contextMenu';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -120,45 +121,74 @@ describe('PaneToolbar', () => {
 });
 
 describe('PaneHeader', () => {
-  it('has no buttons: the commands are in the toolbar', async () => {
-    useStore.getState().setReadOnly(false);
-    useStore.getState().setMachines([machine()]);
-    const host = document.createElement('div');
+  let host: HTMLDivElement;
+  let root: Root;
+  const buttons = () => [...host.querySelectorAll('button')];
+  const render = () => act(async () => root.render(createElement(PaneHeader, { m: 'm', paneId: 'p1', style: {} })));
+
+  beforeEach(() => {
+    api.mockClear();
+    command.mockClear();
+    const s = useStore.getState();
+    s.setReadOnly(false);
+    s.setMachines([machine()]);
+    // The focus is elsewhere: a header's buttons act on its own pane.
+    s.focusPane({ m: 'm', pane: 'p2' });
+    host = document.createElement('div');
     document.body.append(host);
-    const root = createRoot(host);
-    await act(async () => root.render(createElement(PaneHeader, { m: 'm', paneId: 'p1', style: {} })));
-    expect(host.querySelector('.pane-title')?.textContent).toBe('build');
-    expect(host.querySelector('.pane-cwd')?.textContent).toBe('~/src');
-    expect(host.querySelectorAll('button')).toHaveLength(0);
+    root = createRoot(host);
+  });
+  afterEach(async () => {
     await act(async () => root.unmount());
     host.remove();
   });
+
+  it("has its pane's own buttons, which act on that pane", async () => {
+    await render();
+    expect(host.querySelector('.pane-title')?.textContent).toBe('build');
+    expect(host.querySelector('.pane-cwd')?.textContent).toBe('~/src');
+    expect(buttons().map((b) => b.title.replace(/ \(.*\)$/, ''))).toEqual([
+      'Open folder in VS Code',
+      'Changes of the repository',
+      'Git Graph',
+      'Split right',
+      'Split down',
+      'Zoom',
+      'Close pane',
+    ]);
+    expect(buttons().some((b) => b.disabled)).toBe(false);
+    await act(async () => buttons()[1].click());
+    expect(command).toHaveBeenLastCalledWith('m', '/home/u/src', { cmd: 'openDiff', repo: '/home/u/src' });
+    await act(async () => buttons()[4].click());
+    expect(api).toHaveBeenCalledWith('m', 'pane.split', { target_pane_id: 'p1', direction: 'down', cwd: '/home/u/src', focus: false });
+    await act(async () => buttons()[6].click());
+    expect(api).toHaveBeenCalledWith('m', 'pane.close', { pane_id: 'p1' });
+  });
+
+  it('keeps keyboard focus in the terminal when a button is pressed', async () => {
+    await render();
+    const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+    buttons()[0].dispatchEvent(down);
+    expect(down.defaultPrevented).toBe(true);
+  });
+
+  it('has no commands in read-only mode', async () => {
+    useStore.getState().setReadOnly(true);
+    await render();
+    expect(host.querySelector('.pane-title')?.textContent).toBe('build');
+    expect(buttons()).toHaveLength(0);
+  });
 });
 
-describe('PaneCloseButton', () => {
-  it('lets clicks through until the pointer is over its pane, then closes the pane', async () => {
-    api.mockClear();
-    useStore.getState().setMachines([machine()]);
-    const host = document.createElement('div');
-    document.body.append(host);
-    const root = createRoot(host);
-    const render = (shown: boolean) =>
-      act(async () => root.render(createElement(PaneCloseButton, { m: 'm', paneId: 'p1', style: {}, shown })));
-    await render(false);
-    const button = host.querySelector('button.pane-close') as HTMLButtonElement;
-    expect(button.classList.contains('shown')).toBe(false);
-    expect(button.getAttribute('aria-hidden')).toBe('true');
-    expect(button.tabIndex).toBe(-1);
-
-    await render(true);
-    expect(button.classList.contains('shown')).toBe(true);
-    expect(button.title).toMatch(/^Close pane/);
-    const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
-    button.dispatchEvent(down);
-    expect(down.defaultPrevented).toBe(true); // keyboard focus stays in the terminal
-    await act(async () => button.click());
-    expect(api).toHaveBeenCalledWith('m', 'pane.close', { pane_id: 'p1' });
-    await act(async () => root.unmount());
-    host.remove();
+describe('toolbar above the grid', () => {
+  it('is shown for a pane without a border row, from the rendered surface when there is one', () => {
+    expect(toolbarShown(true, 1)).toBe(true);
+    // herdr draws outer borders: the lone pane has its own header.
+    expect(toolbarShown(false, 1)).toBe(false);
+    // Split (and zoomed) panes have border rows.
+    expect(toolbarShown(false, 3)).toBe(false);
+    // Before herdr rendered the tab: only a lone pane.
+    expect(toolbarShown(undefined, 1)).toBe(true);
+    expect(toolbarShown(undefined, 2)).toBe(false);
   });
 });

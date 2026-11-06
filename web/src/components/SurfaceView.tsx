@@ -8,10 +8,10 @@ import { droppedItems, droppedPaths, filesAreOn } from '../drop';
 import { paneCwd, shortPath, type LayoutExport } from '../lib/herdr';
 import { SurfaceController } from '../surface/controller';
 import { grid, setHostColors, setView, takeOver, useSurface } from '../surface/session';
-import type { SurfaceSplit } from '../surface/protocol';
+import type { SurfacePane, SurfaceSplit } from '../surface/protocol';
 import { setSurfaceFocus } from '../terminal/registry';
 import { whenTermFont } from '../terminal/fonts';
-import { PaneCloseButton, PaneHeader } from './PaneHeader';
+import { PaneHeader } from './PaneHeader';
 import { t, type MessageKey } from '../i18n';
 
 /** A pane's working directory, as herdr reports it. */
@@ -34,6 +34,12 @@ interface Props {
   layout?: LayoutExport;
 }
 
+/** Whether herdr drew a border row above the pane's terminal, where its
+ * header goes. */
+export function hasBorderRow(p: SurfacePane): boolean {
+  return p.inner.y > p.rect.y;
+}
+
 /** The shown tab, as herdr renders it: one canvas for the tab's panes,
  * borders and split lines, with each pane's header over its top border. */
 export function SurfaceView({ m, tabId, layout }: Props) {
@@ -53,9 +59,6 @@ export function SurfaceView({ m, tabId, layout }: Props) {
   const [title, setTitle] = useState('');
   const [flash, setFlash] = useState(false);
   const focusedPane = useStore((s) => (s.focused?.m === m ? s.focused.pane : undefined));
-  const readOnly = useStore((s) => s.readOnly);
-  // The pane under the pointer: its close button shows.
-  const [hovered, setHovered] = useState<string>();
   // The pane files dragged from outside the page would be dropped on.
   const [dropOn, setDropOn] = useState<string>();
   const live = useRef({ m, tabId, focusedPane });
@@ -143,22 +146,16 @@ export function SurfaceView({ m, tabId, layout }: Props) {
   const current = fulls > 0 && meta && meta.m === m && shown?.m === m && shown.tab === tabId && grid.ready;
   const headers = useMemo(() => {
     if (!current || !meta) return [];
-    // A header sits on the top border row herdr draws for a pane; a pane
-    // without one (a lone pane) has none, the tab's toolbar stands in for it.
-    // The close button sits at the right end of the border row, or inside the
-    // top right corner of a pane without one.
-    const size = Math.round(Math.min(20, Math.max(14, ch - 2)));
-    return meta.panes.map((p) => {
-      const border = p.inner.y > p.rect.y;
-      return {
-        id: p.id,
-        style: border ? { left: (p.rect.x + 1) * cw, top: p.rect.y * ch, width: Math.max(0, p.rect.w - 2) * cw, height: ch } : undefined,
-        box: { left: p.rect.x * cw, top: p.rect.y * ch, width: p.rect.w * cw, height: p.rect.h * ch },
-        close: border
-          ? { left: (p.rect.x + p.rect.w - 1) * cw - size - 2, top: p.rect.y * ch + (ch - size) / 2, width: size, height: size }
-          : { left: (p.inner.x + p.inner.w) * cw - size - 6, top: p.inner.y * ch + 4, width: size, height: size },
-      };
-    });
+    // A header, with the pane's buttons, sits on the top border row herdr
+    // draws for a pane; a pane without one (a lone pane) has none,
+    // the toolbar above the grid is its header (Workspace).
+    return meta.panes.map((p) => ({
+      id: p.id,
+      style: hasBorderRow(p)
+        ? { left: (p.rect.x + 1) * cw, top: p.rect.y * ch, width: Math.max(0, p.rect.w - 2) * cw, height: ch }
+        : undefined,
+      box: { left: p.rect.x * cw, top: p.rect.y * ch, width: p.rect.w * cw, height: p.rect.h * ch },
+    }));
   }, [current, meta, cw, ch]);
 
   let overlay: { text: string; detail?: string; action?: { label: string; run(): void }; soft?: boolean } | undefined;
@@ -170,20 +167,7 @@ export function SurfaceView({ m, tabId, layout }: Props) {
   else if (!current) overlay = { text: t('surface.connecting'), soft: true };
 
   return (
-    <div
-      className={`surface-host ${flash ? 'bell' : ''}`}
-      ref={hostRef}
-      title={title}
-      onMouseMove={(e) => {
-        const r = hostRef.current?.getBoundingClientRect();
-        if (!r) return;
-        const x = e.clientX - r.left;
-        const y = e.clientY - r.top;
-        const h = headers.find((h) => x >= h.box.left && x < h.box.left + h.box.width && y >= h.box.top && y < h.box.top + h.box.height);
-        if (h?.id !== hovered) setHovered(h?.id);
-      }}
-      onMouseLeave={() => setHovered(undefined)}
-    >
+    <div className={`surface-host ${flash ? 'bell' : ''}`} ref={hostRef} title={title}>
       <canvas ref={canvasRef} className="surface-canvas" />
       <textarea
         ref={inputRef}
@@ -199,8 +183,6 @@ export function SurfaceView({ m, tabId, layout }: Props) {
         <div key={`box-${h.id}`} className="pane-area" style={h.box} data-pane-id={h.id} data-tab-id={tabId} data-m={m} />
       ))}
       {headers.map((h) => h.style && <PaneHeader key={h.id} m={m} paneId={h.id} zoomed={layout?.zoomed} style={h.style} />)}
-      {!readOnly &&
-        headers.map((h) => <PaneCloseButton key={`close-${h.id}`} m={m} paneId={h.id} style={h.close} shown={hovered === h.id} />)}
       {dropOn &&
         headers
           .filter((h) => h.id === dropOn)

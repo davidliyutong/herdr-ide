@@ -1,7 +1,8 @@
 import { PanelLeft, Plus, X } from 'lucide-react';
 import { useStore, activeTabId } from '../state/store';
 import { actions } from '../actions';
-import { SurfaceView } from './SurfaceView';
+import { SurfaceView, hasBorderRow } from './SurfaceView';
+import { useSurface } from '../surface/session';
 import { PaneToolbar } from './PaneToolbar';
 import { StatusDot } from './StatusDot';
 import { statusRank, workspaceTabs, type AgentStatus } from '../lib/herdr';
@@ -24,6 +25,11 @@ export function Workspace() {
   const renaming = useStore((s) => (s.renaming?.kind === 'tab' ? s.renaming : undefined));
   const setRenaming = useStore((s) => s.setRenaming);
   const readOnly = useStore((s) => s.readOnly);
+  // Whether the shown surface of this tab has a pane without a border row,
+  // once herdr rendered it.
+  const headerless = useSurface((s) =>
+    s.meta && s.meta.m === m && s.shown?.m === m && s.shown.tab === tabId ? s.meta.panes.some((p) => !hasBorderRow(p)) : undefined,
+  );
 
   if (!m || !ws || !machine?.snapshot) {
     return (
@@ -130,10 +136,21 @@ export function Workspace() {
           )}
         </div>
       </div>
-      {tabId && <PaneToolbar m={m} tabId={tabId} zoomed={layout?.zoomed} />}
+      {tabId && toolbarShown(headerless, tabs.find((x) => x.tab_id === tabId)?.pane_count ?? 1) && (
+        <PaneToolbar m={m} tabId={tabId} zoomed={layout?.zoomed} />
+      )}
       <div className="workspace-body">
         {tabId ? <SurfaceView m={m} tabId={tabId} layout={layout} /> : <div className="muted pad">{t('workspace.loadingLayout')}</div>}
       </div>
     </main>
   );
+}
+
+/** Whether the toolbar above the grid is shown: it is the header of a pane
+ * without a border row (a lone pane, unless herdr draws outer borders),
+ * whose commands would have no other place; panes with a border row,
+ * including a zoomed one, have their own header there. Until herdr rendered
+ * the tab, only a lone pane is assumed to have none. */
+export function toolbarShown(headerless: boolean | undefined, paneCount: number): boolean {
+  return headerless ?? paneCount <= 1;
 }

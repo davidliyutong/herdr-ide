@@ -20,11 +20,20 @@
 
 import { conn } from '../lib/conn';
 import { carriesFiles } from '../drop';
-import { grid, onPaint, sendFocus, sendInput, useSurface } from './session';
+import {
+  forgetProgramClipboard,
+  grid,
+  onPaint,
+  programClipboard,
+  programClipboardCopied,
+  sendFocus,
+  sendInput,
+  useSurface,
+} from './session';
 import { palette as makePalette, rgb, type Palette } from './colors';
 import { moveRanges, paintRows, sameRanges, type Metrics, type Ranges } from './paint';
 import { routeKey } from './keys';
-import { pasteText, releaseOf, type InputEvent, type KeyEvent, type MouseEvent as PaneMouse } from './input';
+import { isMac, pasteText, releaseOf, type InputEvent, type KeyEvent, type MouseEvent as PaneMouse } from './input';
 import { Selection, scrollRate, viewTop, wordAt, type Point } from './selection';
 import type { ScrollInfo, SurfaceMeta, SurfacePane, SurfaceSplit } from './protocol';
 import { linksAround, openLink, linkTitle, safeUrl, selectedLink, type Cells, type LinkContext } from '../terminal/links';
@@ -513,7 +522,15 @@ export class SurfaceController {
   private onCopy = (ev: ClipboardEvent) => {
     const sel = this.sel;
     const p = sel && this.paneById(sel.pane);
-    if (!sel || !p || sel.empty) return;
+    if (!sel || !p || sel.empty) {
+      const program = programClipboard(this.o.m());
+      if (program) {
+        ev.preventDefault();
+        ev.clipboardData?.setData('text/plain', program);
+        programClipboardCopied(program);
+      }
+      return;
+    }
     ev.preventDefault();
     ev.clipboardData?.setData('text/plain', sel.text ?? sel.visibleText(p, grid));
     copyWhenRead(sel);
@@ -558,13 +575,17 @@ export class SurfaceController {
     const p = this.paneAt(x, y);
     if (!p) return;
     const readOnly = this.o.readOnly();
-    // Programs reporting the mouse get the right button instead; on macOS
-    // Ctrl+click is also a right click, which opened the link under it.
-    if ((p.mouse && !ev.shiftKey && !readOnly) || (ev.ctrlKey && ev.button === 0 && this.hover)) {
+    // The right button opens the menu in every pane, also where the program
+    // reports the mouse (it never gets right clicks). On macOS Ctrl+click is
+    // also a right click, which opened the link under it.
+    if (ev.ctrlKey && ev.button === 0 && this.hover) {
       ev.preventDefault();
       return;
     }
     const sel = this.sel?.pane === p.id && !this.sel.empty ? this.sel : undefined;
+    // Without a selection of the page, Copy copies what the pane's program
+    // copied from its own selection (OSC 52).
+    const program = sel ? undefined : programClipboard(this.o.m());
     const fromSel = sel && selectedLink(sel.text ?? sel.visibleText(p, grid));
     const atPointer = this.linkAt(p, x, y)?.link;
     // Over the selection, a selected path wins over a part of it detected
@@ -577,7 +598,14 @@ export class SurfaceController {
       surfaceMenu({
         ctx: this.o.linkContext(p.id),
         link,
-        copy: sel ? () => this.copySelection() : undefined,
+        copy: sel
+          ? () => this.copySelection()
+          : program
+            ? () => {
+                writeClipboard(program);
+                programClipboardCopied(program);
+              }
+            : undefined,
         paste: readOnly || !navigator.clipboard?.readText ? undefined : () => this.pasteClipboard(p.id),
       }),
     );
@@ -606,15 +634,21 @@ export class SurfaceController {
       return;
     }
     const c = this.inner(p, x, y);
+    // The right button, and Ctrl+click on macOS, is for the pane's menu
+    // (onContextMenu); the press keeps the selection, the page's or the
+    // program's.
+    if (ev.button === 2 || (isMac && ev.ctrlKey && ev.button === 0)) return;
+    // Any other press ends the program's selection, also where the page
+    // selects instead.
+    forgetProgramClipboard();
     if (p.mouse && !ev.shiftKey && !this.o.readOnly()) {
       this.clearSelection();
-      // herdr's buttons: 0 left, 1 right, 2 middle.
-      const button = ev.button === 1 ? 2 : ev.button === 2 ? 1 : 0;
+      // herdr's buttons: 0 left, 2 middle.
+      const button = ev.button === 1 ? 2 : 0;
       this.drag = { kind: 'mouse', pane: p.id, button, last: `${c.col},${c.row}` };
       this.send(p.id, [{ t: 'mouse', mouse: { kind: 'down', button, col: c.col, row: c.row, mods: this.mods(ev) } }]);
       return;
     }
-    if (ev.button === 2) return; // keeps the selection for the browser's menu
     if (ev.button !== 0) return;
     const top = viewTop(p.scroll);
     const fx = this.cellAt(ev.clientX, ev.clientY).fx - p.inner.x;

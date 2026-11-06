@@ -189,6 +189,7 @@ export const en = {
   'surface.error.invalid_surface': 'The window is too small or too large for herdr.',
   'surface.error.handshake': 'herdr refused the connection.',
   'surface.clipboard': 'A program copied {n} characters: “{text}”',
+  'surface.copied': 'Copied {n} characters: “{text}”',
   'surface.copy': 'Copy',
   'surface.paste': 'Paste',
   'surface.dropHere': 'Drop to paste the paths here',
@@ -344,6 +345,12 @@ export const en = {
   'settings.optionIsMeta': 'Use Option as Meta',
   'settings.optionIsMeta.desc':
     'macOS: Option+key sends Esc+key (Alt shortcuts in shells and editors) instead of typing special characters.',
+  'settings.programClipboard': 'Programs copying to the clipboard',
+  'settings.programClipboard.desc':
+    'What happens when a program in a pane copies text (OSC 52), such as Claude Code when you select text in it. Automatic copies at once right after your own key or click in a pane and asks otherwise.',
+  'settings.programClipboard.auto': 'Automatic',
+  'settings.programClipboard.ask': 'Ask',
+  'settings.programClipboard.off': 'Off',
   'settings.notifySound': 'Notification sounds',
   'settings.notifySound.desc':
     'A chime when an agent needs input, another when it finishes (not while its pane is on screen in a focused window). With several browsers open, the one used most recently plays it.',

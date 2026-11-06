@@ -138,8 +138,10 @@ only endpoint requests (`tab.focus`, `pane.focus`) and encodes input events
 from a closed set. A read-only browser sends no input, focus or colors,
 never moves herdr's focused pane, and gets no clipboard writes; it still
 selects the tab it shows and sets the tab size, as any herdr client does.
-Pastes are filtered in the core as well as the browser, OSC 52 writes need
-a click in the browser, and decoding is bounded per item type. See [SECURITY.md](../../SECURITY.md).
+Pastes are filtered in the core as well as the browser, OSC 52 writes reach
+the clipboard only after a click or, with the browser's automatic setting,
+right after the user's input to a pane ([03](03-pane-rendering-and-input.md)),
+and decoding is bounded per item type. See [SECURITY.md](../../SECURITY.md).
 
 ## Testing
 

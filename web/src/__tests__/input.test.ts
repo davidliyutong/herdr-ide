@@ -200,7 +200,7 @@ describe('buttons over the grid', () => {
       sent.length = 0;
 
       const button = document.createElement('button');
-      button.className = 'pane-close';
+      button.className = 'pane-actions-button';
       button.append(document.createElementNS('http://www.w3.org/2000/svg', 'svg'));
       host.append(button);
       button.firstChild!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 4, clientY: 4 }));
@@ -208,6 +208,61 @@ describe('buttons over the grid', () => {
       expect(pressesSent()).toEqual([]);
       button.remove();
     } finally {
+      meta(false);
+    }
+  });
+});
+
+describe('the right button', () => {
+  it('opens the pane menu where the program reports the mouse, sending it nothing', async () => {
+    const { useSurface, handleSurfaceMessage } = await import('../surface/session');
+    const { useMenu } = await import('../contextMenu');
+    const r = { x: 0, y: 0, w: 80, h: 24 };
+    const meta = (mouse: boolean) =>
+      ctl.setMeta({
+        m: 'local',
+        gen: 1,
+        w: 80,
+        h: 24,
+        panes: [{ id: 'w1:p1', rect: r, inner: r, focused: true, mouse, alt: false }],
+        splits: [],
+        links: [],
+      });
+    useSurface.setState({ ownership: 'owner' });
+    meta(true);
+    try {
+      // The program selects on a left drag and copies it (OSC 52).
+      host.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 4, clientY: 4 }));
+      window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: 20, clientY: 4 }));
+      handleSurfaceMessage({ t: 'clip', m: 'local', data: btoa('selected in the program') });
+      sent.length = 0;
+
+      useMenu.setState({ menu: undefined });
+      host.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 2, clientX: 4, clientY: 4 }));
+      window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 2, clientX: 4, clientY: 4 }));
+      const ctx = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 4, clientY: 4 });
+      host.dispatchEvent(ctx);
+      expect(pressesSent()).toEqual([]);
+      expect(ctx.defaultPrevented).toBe(true);
+      const entries = useMenu.getState().menu?.entries ?? [];
+      const copy = entries.find((e) => typeof e === 'object' && e.label === 'Copy');
+      expect(copy && typeof copy === 'object' && !copy.disabled).toBe(true);
+
+      // Copy writes what the program copied.
+      const writeText = vi.fn(() => Promise.resolve());
+      Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+      (copy as { run(): void }).run();
+      expect(writeText).toHaveBeenCalledWith('selected in the program');
+
+      // A key ends the program's selection: Copy has nothing left.
+      press(textarea, { key: 'a', code: 'KeyA', keyCode: 65, charCode: 97 });
+      useMenu.setState({ menu: undefined });
+      host.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 4, clientY: 4 }));
+      const after = (useMenu.getState().menu?.entries ?? []).find((e) => typeof e === 'object' && e.label === 'Copy');
+      expect(after && typeof after === 'object' && after.disabled).toBe(true);
+    } finally {
+      Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
+      useMenu.setState({ menu: undefined });
       meta(false);
     }
   });

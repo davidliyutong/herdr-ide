@@ -1,5 +1,4 @@
 import type { CSSProperties } from 'react';
-import { X } from 'lucide-react';
 import { useStore } from '../state/store';
 import { paneCwd, paneTitle, shortPath, type Pane } from '../lib/herdr';
 import { actions } from '../actions';
@@ -8,7 +7,7 @@ import { InlineEdit } from './InlineEdit';
 import { startPaneDrag } from '../paneDrag';
 import { openMenu } from '../contextMenu';
 import { paneMenu } from '../menus';
-import { keyHint } from '../keymap';
+import { PaneActions } from './PaneActions';
 import { t } from '../i18n';
 
 interface Props {
@@ -20,10 +19,11 @@ interface Props {
 }
 
 /** The header of one pane, drawn over the top border row herdr draws for it:
- * its title, agent and working directory; dragging it moves the pane, its
- * menu has the pane's commands. The buttons are in the tab's toolbar
- * (PaneToolbar), for the focused pane. A pane without a border row (a lone
- * pane) has no header; the toolbar stands in for it. */
+ * its title, agent and working directory, and the pane's own buttons
+ * (PaneActions: program windows, VS Code, changes, Git Graph, split, zoom,
+ * close); dragging it moves the pane, its menu has the pane's commands. A
+ * pane without a border row (a lone pane) has no header; the
+ * toolbar above the grid (PaneToolbar) is its header. */
 export function PaneHeader({ m, paneId, zoomed, style }: Props) {
   const pane = useStore((s) => s.machines[m]?.snapshot?.panes.find((p) => p.pane_id === paneId));
   const home = useStore((s) => s.machines[m]?.info?.home);
@@ -48,6 +48,7 @@ export function PaneHeader({ m, paneId, zoomed, style }: Props) {
       <span className="pane-cwd" title={cwd}>
         <bdi>{shortPath(cwd, home)}</bdi>
       </span>
+      <PaneActions m={m} paneId={paneId} cwd={cwd} zoomed={zoomed} keepFocus />
     </div>
   );
 }
@@ -86,26 +87,5 @@ export function PaneTitle({ m, paneId, pane }: { m: string; paneId: string; pane
     >
       {title}
     </span>
-  );
-}
-
-/** A round close button at a pane's top right corner, over the grid; it
- * shows while the pointer is over the pane (`shown`). Clicking it closes
- * the pane, asking first while an agent works in it, and leaves keyboard
- * focus in the terminal. */
-export function PaneCloseButton({ m, paneId, style, shown }: { m: string; paneId: string; style: CSSProperties; shown: boolean }) {
-  return (
-    <button
-      className={`pane-close ${shown ? 'shown' : ''}`}
-      style={style}
-      tabIndex={-1}
-      aria-hidden={!shown}
-      title={t('pane.close', { key: keyHint('close_pane') })}
-      data-pane-id={paneId}
-      onMouseDown={(e) => e.preventDefault()}
-      onClick={() => actions.closePane(m, paneId)}
-    >
-      <X />
-    </button>
   );
 }
