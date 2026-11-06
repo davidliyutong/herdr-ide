@@ -1,9 +1,17 @@
 package machines
 
 import (
+	"context"
+	"io"
+	"log"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	"herdr-ide/internal/agent"
+	"herdr-ide/internal/transport"
 )
 
 func TestLoadSpecsFromHerdrCatalog(t *testing.T) {
@@ -40,4 +48,64 @@ func TestIsReadOnly(t *testing.T) {
 			t.Errorf("isReadOnly(%s) != %v", m, want)
 		}
 	}
+}
+
+// A machine whose herdr does not answer is degraded while its agent stays
+// connected; Retry replaces the session at once instead of waiting for it
+// to end, but not one that has just started.
+func TestRetryReconnectsADegradedMachine(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("HERDR_SOCKET_PATH", "")
+	old := pollInterval
+	pollInterval = 50 * time.Millisecond
+	t.Cleanup(func() { pollInterval = old })
+
+	logger := log.New(io.Discard, "", 0)
+	var dials atomic.Int32
+	dial := func(ctx context.Context, spec Spec) (*transport.Session, string, error) {
+		dials.Add(1)
+		s, err := transport.DialLocal(ctx, agent.Options{Logger: logger})
+		return s, "test/test", err
+	}
+	m := newMachine(Spec{ID: "x", Label: "x", Kind: KindSSH, Session: "herdr-ide-none", Enabled: true}, dial, logger, func(State) {}, func(AgentEvent) {})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		m.Run(ctx)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+	waitFor := func(what string, ok func() bool) {
+		t.Helper()
+		for deadline := time.Now().Add(10 * time.Second); !ok(); time.Sleep(10 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("timed out waiting for %s (status %s, %d dials)", what, m.State().Status, dials.Load())
+			}
+		}
+	}
+	waitFor("degraded", func() bool { return m.State().Status == StatusDegraded })
+	first := m.Session()
+	// A session younger than minRetryAge stays.
+	oldAge := minRetryAge
+	t.Cleanup(func() { minRetryAge = oldAge })
+	minRetryAge = time.Hour
+	if m.Retry() || m.Session() != first {
+		t.Fatal("Retry replaced a session that had just started")
+	}
+	minRetryAge = 0
+	if !m.Retry() {
+		t.Fatal("Retry did not replace the degraded session")
+	}
+	waitFor("a new session", func() bool { s := m.Session(); return dials.Load() == 2 && s != nil && s != first })
+	select {
+	case <-first.Done():
+	default:
+		t.Fatal("the first session is still open")
+	}
+	waitFor("degraded again", func() bool { return m.State().Status == StatusDegraded })
 }

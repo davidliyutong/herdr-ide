@@ -156,7 +156,7 @@ function MachineItem({ m }: { m: MachineState }) {
                   {m.kind === 'local' && !readOnly && (
                     <button onClick={() => useStore.getState().openHerdr(m.id)}>{t('sidebar.manageHerdr')}</button>
                   )}
-                  <button onClick={() => conn.retry(m.id)}>{t('sidebar.retry')}</button>
+                  {!readOnly && <button onClick={() => conn.retry(m.id)}>{t('sidebar.retry')}</button>}
                 </div>
               )}
             </div>

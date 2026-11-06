@@ -270,8 +270,8 @@ input methods.
 - A window that appears while its pane is on screen opens at once
   (`window.open`). Browsers block pop-ups not caused by a click unless the
   site is allowed to open them; then a toast offers to open it. Other new
-  windows are marked on the program windows button of the tab's toolbar
-  ([03](03-pane-rendering-and-input.md)) while their pane is focused, until
+  windows are marked on the program windows button of their pane's header
+  or of the toolbar above a lone pane ([03](03-pane-rendering-and-input.md)), until
   opened; the button lists the pane's windows, and the status bar lists every window, including
   those without a pane. A dialog of a window (`WM_TRANSIENT_FOR`) is opened
   by the browser window of its parent, which may still do so after the click

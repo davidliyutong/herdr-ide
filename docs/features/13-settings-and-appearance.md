@@ -57,7 +57,8 @@ syncing browser settings between browsers; theming terminal applications.
 **Dialog** (`web/src/components/SettingsDialog.tsx`)
 
 - Opened from the sidebar's gear, `prefix ,` or the palette. Sections:
-  appearance, layout, terminal, notifications (sounds, see
+  appearance, layout, terminal (Option as Meta; what programs copying to
+  the clipboard do, see [03](03-pane-rendering-and-input.md)), notifications (sounds, see
   [07](07-agent-native-workflow.md)), VS Code (core settings whose key starts with
   `code-server-`), program windows (`gui`, `gui-*`), server (other core
   settings).

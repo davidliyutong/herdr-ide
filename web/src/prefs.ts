@@ -30,6 +30,8 @@ export const prefDefs = {
   termFontWeight: { section: 'appearance', kind: 'enum', default: 'regular', options: ['regular', 'medium'] },
   dockPosition: { section: 'layout', kind: 'enum', default: 'right', options: ['right', 'bottom'] },
   optionIsMeta: { section: 'terminal', kind: 'bool', default: false },
+  // What a pane program's clipboard write (OSC 52) does (surface/session.ts).
+  programClipboard: { section: 'terminal', kind: 'enum', default: 'auto', options: ['auto', 'ask', 'off'] },
   // On by default, and droid muted, as in herdr's [ui.sound].
   notifySound: { section: 'notifications', kind: 'bool', default: true },
   notifySoundMuted: { section: 'notifications', kind: 'string', default: 'droid' },

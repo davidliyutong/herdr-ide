@@ -78,7 +78,9 @@ interface UIState {
   setPalette(p: UIState['palette']): void;
   openSettings(open: boolean): void;
   setRenaming(r: Renaming | undefined): void;
-  toast(msg: string, action?: ToastAction): void;
+  /** Shows a toast for ttl ms (default: 5 s, 15 s with an action, or the
+   * action's own) and returns its id. */
+  toast(msg: string, action?: ToastAction, ttl?: number): number;
   openAuth(m?: string): void;
   openHerdr(m?: string): void;
   openRemoteHerdr(m?: string): void;
@@ -165,12 +167,13 @@ export const useStore = create<UIState>((set, get) => ({
   openRemoteHerdr: (remoteHerdr) => set({ remoteHerdr }),
   readOnly: false,
   setReadOnly: (readOnly) => set({ readOnly }),
-  toast: (msg, action) => {
+  toast: (msg, action, ttl) => {
     const id = ++toastSeq;
     set((s) => ({ toasts: [...s.toasts, { id, msg, action }] }));
     // A toast with an action waits longer for the click.
     if (!action?.sticky)
-      setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), action?.ttl ?? (action ? 15000 : 5000));
+      setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), action?.ttl ?? ttl ?? (action ? 15000 : 5000));
+    return id;
   },
 }));
 

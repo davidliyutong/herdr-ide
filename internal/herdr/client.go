@@ -21,7 +21,37 @@ import (
 // Client issues API requests over connections produced by Dial.
 type Client struct {
 	Dial func(ctx context.Context) (net.Conn, error)
-	seq  atomic.Uint64
+	// DialRequest, when set, is used instead of Dial: it opens a connection
+	// with request (one JSON line) already sent. herdr drops a connection
+	// whose request has not arrived 5 s after it accepted it, which a dialer
+	// that reaches the socket over a slow link avoids by sending the request
+	// along with the connection setup instead of a round trip later.
+	DialRequest func(ctx context.Context, request []byte) (net.Conn, error)
+	seq         atomic.Uint64
+}
+
+// open connects and sends one request line.
+func (c *Client) open(ctx context.Context, req request) (net.Conn, error) {
+	b, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	b = append(b, '\n')
+	if c.DialRequest != nil {
+		return c.DialRequest(ctx, b)
+	}
+	conn, err := c.Dial(ctx)
+	if err != nil {
+		return nil, err
+	}
+	stop := watchContext(ctx, conn)
+	_, err = conn.Write(b)
+	stop()
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+	return conn, nil
 }
 
 // APIError is an error response from herdr.
@@ -93,7 +123,7 @@ func (c *Client) Call(ctx context.Context, method string, params any) (json.RawM
 		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 	}
-	conn, err := c.Dial(ctx)
+	conn, err := c.open(ctx, request{ID: c.nextID(), Method: method, Params: params})
 	if err != nil {
 		return nil, err
 	}
@@ -101,14 +131,6 @@ func (c *Client) Call(ctx context.Context, method string, params any) (json.RawM
 	stop := watchContext(ctx, conn)
 	defer stop()
 
-	req := request{ID: c.nextID(), Method: method, Params: params}
-	b, err := json.Marshal(req)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := conn.Write(append(b, '\n')); err != nil {
-		return nil, err
-	}
 	line, err := readLine(bufio.NewReaderSize(conn, 64<<10))
 	if err != nil && len(line) == 0 {
 		if ctx.Err() != nil {
@@ -148,7 +170,7 @@ var ErrEventsLost = errors.New("herdr: events lost")
 // Subscribe opens an event stream. fn is called for every event until the
 // stream ends, ctx is cancelled or fn returns an error.
 func (c *Client) Subscribe(ctx context.Context, subs []map[string]any, onStarted func(), fn func(Event) error) error {
-	conn, err := c.Dial(ctx)
+	conn, err := c.open(ctx, request{ID: c.nextID(), Method: "events.subscribe", Params: map[string]any{"subscriptions": subs}})
 	if err != nil {
 		return err
 	}
@@ -156,11 +178,6 @@ func (c *Client) Subscribe(ctx context.Context, subs []map[string]any, onStarted
 	stop := watchContext(ctx, conn)
 	defer stop()
 
-	req := request{ID: c.nextID(), Method: "events.subscribe", Params: map[string]any{"subscriptions": subs}}
-	b, _ := json.Marshal(req)
-	if _, err := conn.Write(append(b, '\n')); err != nil {
-		return err
-	}
 	r := bufio.NewReaderSize(conn, 64<<10)
 	line, err := readLine(r)
 	if err != nil {

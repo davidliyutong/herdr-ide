@@ -2,7 +2,6 @@ import { useEffect, useRef } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { useStore } from '../state/store';
-import { conn } from '../lib/conn';
 import { termOptions } from '../terminal/options';
 import { currentAppearance } from '../appearance';
 import { t } from '../i18n';
@@ -31,10 +30,8 @@ export function AuthDialog() {
     const ws = new WebSocket(`${proto}//${location.host}/api/m/${encodeURIComponent(m)}/auth?cols=${term.cols}&rows=${term.rows}`);
     ws.binaryType = 'arraybuffer';
     ws.onmessage = (e) => term.write(typeof e.data === 'string' ? e.data : new Uint8Array(e.data));
-    ws.onclose = () => {
-      term.write(`\r\n\x1b[2m${t('auth.ended')}\x1b[0m\r\n`);
-      conn.retry(m);
-    };
+    // The core connects the machine again when the terminal ends.
+    ws.onclose = () => term.write(`\r\n\x1b[2m${t('auth.ended')}\x1b[0m\r\n`);
     const d = term.onData((s) => ws.readyState === WebSocket.OPEN && ws.send(s));
     term.focus();
     return () => {

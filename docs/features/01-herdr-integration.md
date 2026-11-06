@@ -83,7 +83,8 @@ machines, reimplementing its agent detection.
 - **Pane closed between snapshot and subscribe** → the whole agent-status
   subscription is rejected; refetch and retry after 2 s.
 - **herdr not running or not found** → agent reports `herdr_error`, the
-  machine shows *degraded*; snapshots are retried.
+  machine shows *degraded*; snapshots are retried, and **Retry** connects
+  a new agent ([02](02-multi-machine-transport.md)).
 - **herdr without endpoint generation 1** (older than 0.9.5) → the surface
   shows `herdr_too_old`; the rest (snapshots, actions) keeps working.
 - **herdr protocol change** → only the public API and endpoint generation 1

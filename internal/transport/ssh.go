@@ -171,8 +171,14 @@ const agentDir = brand.AgentDir
 func DialSSH(ctx context.Context, o SSHOptions) (*Session, *Platform, error) {
 	probeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	out, err := o.run(probeCtx, nil, `uname -s; uname -m; echo "$HOME"`)
+	timedOut := errors.Is(probeCtx.Err(), context.DeadlineExceeded)
 	cancel()
 	if err != nil {
+		if timedOut && ctx.Err() == nil {
+			// The control master may hold a connection that died without
+			// a word; the next attempt should not wait for it again.
+			o.stopMaster()
+		}
 		return nil, nil, err
 	}
 	lines := strings.Split(strings.TrimSpace(out), "\n")
@@ -223,31 +229,68 @@ func DialSSH(ctx context.Context, o SSHOptions) (*Session, *Platform, error) {
 		return nil, p, err
 	}
 	conn := &stdioConn{r: stdout, w: stdin}
-	var waitOnce sync.Once
+	exited := make(chan struct{})
 	var waitErr error
-	wait := func() error {
-		waitOnce.Do(func() { waitErr = cmd.Wait() })
-		return waitErr
-	}
+	go func() {
+		waitErr = cmd.Wait()
+		close(exited)
+	}()
 	closer := closerFunc(func() error {
 		stdin.Close()
 		if cmd.Process != nil {
 			_ = cmd.Process.Signal(os.Interrupt)
 			time.AfterFunc(3*time.Second, func() { _ = cmd.Process.Kill() })
 		}
-		go wait()
 		return nil
 	})
-	s, err := newSession(conn, closer, o.Logger)
+	lost := stopMasterIfStuck(exited, lostGrace, func() {
+		o.Logger.Printf("ssh %s: no answer from the agent; the control master takes no new sessions", o.Target)
+		go o.stopMaster()
+	})
+	s, err := newSession(conn, closer, o.Logger, lost)
 	if err != nil {
 		closer.Close()
 		return nil, p, err
 	}
 	go func() {
-		err := wait()
-		s.finish(classifySSHError(stderr.tail(), err))
+		<-exited
+		s.finish(classifySSHError(stderr.tail(), waitErr), nil)
 	}()
 	return s, p, nil
+}
+
+// lostGrace is how long ssh may take to exit after the session it carried
+// ended on its own before its control master is considered stuck.
+var lostGrace = 2 * time.Second
+
+// stopMasterIfStuck returns the hook for a session that ended on its own.
+// When the agent or the connection ended, ssh exits too (exited closes);
+// when it keeps running for grace, yamux's keepalive got no answer through
+// it, so the control master's connection is likely dead and stop runs.
+func stopMasterIfStuck(exited <-chan struct{}, grace time.Duration, stop func()) func() {
+	return func() {
+		select {
+		case <-exited:
+		case <-time.After(grace):
+			stop()
+		}
+	}
+}
+
+// stopMaster tells the target's control master to take no new sessions
+// (`ssh -O stop`): it removes its socket, so the next connection starts a
+// new master instead of hanging on one whose connection died silently (the
+// network changed, the computer slept) until its ServerAlive checks give up
+// about a minute later. Sessions already open through it, also those of
+// other instances of this user, which share the control directory, keep
+// running until they end or the master's checks end them.
+func (o SSHOptions) stopMaster() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	args := []string{"-o", "ControlPath=" + filepath.Join(o.ControlDir, "%C"), "-O", "stop", o.Target}
+	if out, err := exec.CommandContext(ctx, "ssh", args...).CombinedOutput(); err != nil {
+		o.Logger.Printf("ssh %s: stopping the control master: %v: %s", o.Target, err, strings.TrimSpace(string(out)))
+	}
 }
 
 type stdioConn struct {

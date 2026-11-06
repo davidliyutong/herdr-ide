@@ -109,7 +109,7 @@ after a successful reply it carries op-specific bytes.
 | Op | Direction | Payload after the reply |
 | --- | --- | --- |
 | `hello` | core → agent | – (reply has host info, herdr binary, data dirs) |
-| `herdr-api` | core → agent | raw pipe to the herdr socket |
+| `herdr-api` | core → agent | raw pipe to the herdr socket; the core sends the request line right after the header, without waiting for the reply (herdr wants it within 5 s) |
 | `herdr-client` | core → agent | raw pipe to herdr's client socket (endpoint protocol) |
 | `fs.stat`, `fs.list` | core → agent | – |
 | `fs.read` | core → agent | `Length` bytes from `Offset` |

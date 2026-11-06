@@ -30,7 +30,10 @@ type Session struct {
 	err    error
 }
 
-func newSession(conn io.ReadWriteCloser, closer io.Closer, logger *log.Logger) (*Session, error) {
+// newSession starts yamux over conn. lost, if not nil, runs when the session
+// ends on its own (the connection failed or yamux's keepalive timed out),
+// before closer; not when it is closed with Close.
+func newSession(conn io.ReadWriteCloser, closer io.Closer, logger *log.Logger, lost func()) (*Session, error) {
 	ys, err := yamux.Client(conn, agent.YamuxConfig(logger))
 	if err != nil {
 		return nil, err
@@ -38,16 +41,20 @@ func newSession(conn io.ReadWriteCloser, closer io.Closer, logger *log.Logger) (
 	s := &Session{ys: ys, closer: closer, done: make(chan struct{})}
 	go func() {
 		<-ys.CloseChan()
-		s.finish(errors.New("agent session closed"))
+		s.finish(errors.New("agent session closed"), lost)
 	}()
 	return s, nil
 }
 
-func (s *Session) finish(err error) {
+// finish ends the session once; before is run only by the call that ends it.
+func (s *Session) finish(err error, before func()) {
 	s.once.Do(func() {
 		s.errMu.Lock()
 		s.err = err
 		s.errMu.Unlock()
+		if before != nil {
+			before()
+		}
 		s.ys.Close()
 		if s.closer != nil {
 			s.closer.Close()
@@ -58,7 +65,7 @@ func (s *Session) finish(err error) {
 
 // Close tears the session down.
 func (s *Session) Close() error {
-	s.finish(errors.New("closed"))
+	s.finish(errors.New("closed"), nil)
 	return nil
 }
 
@@ -74,6 +81,16 @@ func (s *Session) Err() error {
 
 // Open starts a stream with header h and waits for the agent's reply.
 func (s *Session) Open(ctx context.Context, h agentproto.Header) (net.Conn, *agentproto.Reply, error) {
+	return s.OpenWith(ctx, h, nil)
+}
+
+// OpenWith is Open that also sends first right after the header, without
+// waiting for the reply: the agent finds it on the stream as soon as it has
+// set the stream up. Peers that must hear from the core within a deadline of
+// their own (herdr's API wants the request 5 s after accepting) get it one
+// round trip earlier, which matters on slow or congested links. If the agent
+// refuses the stream, first is discarded with it.
+func (s *Session) OpenWith(ctx context.Context, h agentproto.Header, first []byte) (net.Conn, *agentproto.Reply, error) {
 	st, err := s.ys.OpenStream()
 	if err != nil {
 		return nil, nil, err
@@ -95,6 +112,12 @@ func (s *Session) Open(ctx context.Context, h agentproto.Header) (net.Conn, *age
 	if err := agentproto.WriteLine(st, h); err != nil {
 		st.Close()
 		return nil, nil, err
+	}
+	if len(first) > 0 {
+		if _, err := st.Write(first); err != nil {
+			st.Close()
+			return nil, nil, err
+		}
 	}
 	var rep agentproto.Reply
 	if err := agentproto.ReadLine(st, &rep); err != nil {
@@ -174,7 +197,7 @@ func DialLocal(ctx context.Context, opts agent.Options) (*Session, error) {
 			logger.Printf("local agent did not finish cleaning up")
 		}
 		return err
-	}), logger)
+	}), logger, nil)
 	if err != nil {
 		cancel()
 		c0.Close()

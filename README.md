@@ -13,7 +13,8 @@ browser tab, with VS Code (code-server) one keystroke away.
   herdr renders through its endpoint protocol, and herdr encodes every key
   for the program in the pane (kitty keyboard protocol included). Mouse,
   scrollback (selections stay in their pane, scroll past the edge and copy
-  whole), IME, OSC 52 copy, resizable splits, and programs see the UI
+  whole), IME, OSC 52 copy (a selection in Claude Code goes straight to the
+  clipboard), resizable splits, and programs see the UI
   theme's colors. One browser tab uses the session at a time; another tab
   can take it over. Drag a pane by its header to swap or move it, click its title to
   rename it; drag tabs and workspaces to reorder them; right-click a pane
@@ -39,7 +40,7 @@ browser tab, with VS Code (code-server) one keystroke away.
   host (no internet needed on machines), downloaded by the machines
   themselves, or taken from an existing install, with Git Graph and a bridge
   extension: open a pane's folder, its diff or Git Graph with one key or
-  from the toolbar above the panes; jump from a `path:line` in the terminal
+  from the buttons in the pane's header; jump from a `path:line` in the terminal
   to the editor. The panel sits beside or below the terminals. Idle
   instances are stopped.
 - **Program windows.** Windows that programs on remote Linux machines open

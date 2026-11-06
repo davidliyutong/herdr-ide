@@ -33,11 +33,16 @@ All notable changes are documented here. The format follows
   replaced it in a browser.
 - Right-clicking a pane opens a menu to copy the selection, paste, and
   preview, open in VS Code or copy the path (or URL) under the pointer or
-  selected. A program that reports the mouse keeps the right button;
-  Shift+right click opens the menu there. Before, the desktop app showed no
-  menu at all.
-- Each pane has a round close button at its top right corner that shows
-  while the pointer is over the pane, also when the pane is not focused.
+  selected, also in programs that report the mouse such as Claude Code
+  (programs no longer get the right button). Without a selection of the
+  page, Copy (and ⌘/Ctrl+C) copies what the pane's program copied from its
+  own selection. Before, the desktop app showed no menu at all.
+- Every pane of a split tab has its own buttons in its header: program
+  windows, VS Code, changes, Git Graph, split right / down, zoom and close,
+  acting on that pane. The toolbar above the panes is shown only for a lone
+  pane, as its header. Nothing is drawn over a pane's terminal any more.
+- Setting **Programs copying to the clipboard** (terminal section):
+  automatic, ask or off.
 - `make desktop-install` builds the macOS app and installs it into
   `/Applications`, quitting and reopening a running copy.
 
@@ -50,6 +55,11 @@ All notable changes are documented here. The format follows
   three frames. The MuJoCo viewer's pictures are drawn at 48 whole windows
   per second instead of 29, 36 ms instead of 46 ms after capture; on a link
   they fill, they arrive as before.
+- A program's copy (OSC 52) goes on the clipboard at once when it follows
+  your own key or click in a pane within 10 s, such as selecting text in
+  Claude Code, with a short toast saying what was copied; other copies, or
+  ones the browser refuses, still wait for the toast's **Copy** button.
+  Before, every copy needed that click.
 - Pasted files' paths reach the pane as a paste instead of typed text, the
   way a terminal delivers dropped files.
 - A tab is shown when it is pressed, not when the click is released, and a
@@ -62,6 +72,17 @@ All notable changes are documented here. The format follows
 
 ### Fixed
 
+- Machines no longer stay *degraded* on slow or congested links: herdr
+  drops an API connection whose request has not arrived within 5 s, and the
+  core now sends the request with the stream instead of after the agent's
+  reply, which could queue behind pane surfaces and program windows.
+- **Retry** on a *degraded* machine reconnects it; before, it did nothing
+  while the agent stayed connected. Read-only browsers cannot retry, and a
+  session younger than 5 s is kept.
+- After the network changed or the computer slept, a machine reconnects
+  without waiting a minute for the old ssh connection: the core tells an
+  ssh control master whose connection stopped answering to take no new
+  sessions, so the next connection opens a new one.
 - Stopping herdr's server on a machine no longer leaves its virtual
   display (Xvfb) running for six hours: the display lasts while the server
   runs, programs use it or the core is connected, and ends a minute after.

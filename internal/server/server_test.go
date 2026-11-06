@@ -21,8 +21,10 @@ import (
 
 	"github.com/coder/websocket"
 
+	"herdr-ide/internal/agent"
 	"herdr-ide/internal/machines"
 	"herdr-ide/internal/settings"
+	"herdr-ide/internal/transport"
 )
 
 func TestParseRange(t *testing.T) {
@@ -645,5 +647,54 @@ func TestVideoCodecsParam(t *testing.T) {
 		if got := strings.Join(videoCodecs(q), ","); got != want {
 			t.Errorf("videoCodecs(%q) = %q, want %q", q, got, want)
 		}
+	}
+}
+
+// A read-only browser cannot make a machine reconnect: its retry is refused
+// and audited, and the machine keeps its session.
+func TestReadOnlyRetryKeepsTheSession(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("HERDR_SOCKET_PATH", "")
+	logger := log.New(io.Discard, "", 0)
+	dial := func(ctx context.Context, spec machines.Spec) (*transport.Session, string, error) {
+		s, err := transport.DialLocal(ctx, agent.Options{Logger: logger})
+		return s, "test/test", err
+	}
+	mg := machines.NewManager([]machines.Spec{{ID: "x", Label: "x", Kind: machines.KindSSH, Session: "herdr-ide-none", Enabled: true}}, dial, logger)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		mg.Run(ctx)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+	mc := mg.Get("x")
+	for deadline := time.Now().Add(10 * time.Second); mc.Session() == nil; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("machine did not connect")
+		}
+	}
+	first := mc.Session()
+
+	var audit strings.Builder
+	s := New(mg, Options{ReadOnly: true, Audit: &audit, Logger: logger})
+	c := &wsClient{s: s, readOnly: true, req: httptest.NewRequest("GET", "/ws", nil)}
+	c.dispatch(&inMsg{T: "retry", M: "x"})
+	time.Sleep(100 * time.Millisecond)
+	select {
+	case <-first.Done():
+		t.Fatal("a read-only retry ended the session")
+	default:
+	}
+	if mc.Session() != first {
+		t.Fatal("a read-only retry replaced the session")
+	}
+	if !strings.Contains(audit.String(), `"event":"denied.retry"`) {
+		t.Fatalf("audit: %s", audit.String())
 	}
 }
