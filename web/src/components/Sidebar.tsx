@@ -11,7 +11,7 @@ import { APP_NAME } from '../brand';
 import { InlineEdit } from './InlineEdit';
 import { startWorkspaceDrag } from '../reorderDrag';
 import { openMenu } from '../contextMenu';
-import { workspaceMenu } from '../menus';
+import { machineMenu, workspaceMenu } from '../menus';
 import { isNewer } from '../lib/localHerdr';
 import { carriesFiles, dropFolders, folderDropTarget } from '../drop';
 
@@ -125,16 +125,7 @@ function MachineItem({ m }: { m: MachineState }) {
       <div
         className="machine-head"
         onClick={() => setOpen(!open)}
-        onContextMenu={(e) =>
-          openMenu(
-            e,
-            readOnly
-              ? []
-              : m.kind === 'local'
-                ? [{ label: t('menu.manageHerdr'), run: () => useStore.getState().openHerdr(m.id) }]
-                : [{ label: t('menu.updateRemoteHerdr'), run: () => useStore.getState().openRemoteHerdr(m.id) }],
-          )
-        }
+        onContextMenu={(e) => openMenu(e, machineMenu(m.id))}
         title={m.error || m.platform}
       >
         <span className={`mstatus ms-${m.status}`} />
@@ -148,6 +139,11 @@ function MachineItem({ m }: { m: MachineState }) {
             <div className={`machine-status ms-${m.status}`}>
               {t(`machine.${m.status}` as MessageKey)}
               {m.error && <div className="small ellipsis2">{m.error}</div>}
+              {m.status === 'disabled' && !readOnly && (
+                <div className="row">
+                  <button onClick={() => void actions.setMachineEnabled(m.id, true)}>{t('menu.enableMachine')}</button>
+                </div>
+              )}
               {(m.status === 'auth_required' || m.status === 'error' || m.status === 'degraded') && (
                 <div className="row">
                   {m.status === 'auth_required' && m.kind === 'ssh' && (

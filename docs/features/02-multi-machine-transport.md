@@ -61,6 +61,17 @@ Non-goals: managing ssh keys or herdr installations; Windows machines.
   after the agent's reply, so the request does not wait for a round trip
   through the reply direction, where pane surfaces and program windows may
   be queued on a slow link.
+- **Enabling and disabling.** Machines come from herdr's saved machines
+  with herdr's enabled flag. The sidebar's machine menu (and the **Enable**
+  button of a disabled machine) changes it for herdr-ide only:
+  `PUT /api/m/{id}/enabled` saves the choice in the core's
+  `machines[-<instance>].json` (beside its settings file; entries of
+  machines not configured at the moment are kept) and applies it at once,
+  so herdr's catalog is never written. Disabling ends the session (the
+  agent exits and stops the code-server it started; panes keep running in
+  herdr), drops the machine's snapshot and shows it as *disabled*; enabling
+  connects it. Disabling a connected machine asks first. Read-only browsers
+  cannot do either.
 - **Instances.** `--instance NAME` makes agents use `~/.herdr-ide-NAME` for
   sockets, code-server process and settings, so two cores (daily and
   development) can share machines safely. Agent builds and code-server
@@ -118,9 +129,13 @@ request sent with the header reaches the agent before its reply, the
 lost-session hook runs only when the session ends by itself, the control
 master is stopped (`-O stop`) only while ssh stays up),
 `internal/machines/machines_test.go` (Retry replaces the session of a
-degraded machine, not one younger than 5 s),
+degraded machine, not one younger than 5 s; the enabled overrides are saved
+and applied; disabling at runtime ends the session and forgets the snapshot,
+enabling connects again),
 `internal/server/server_test.go` (a read-only browser's retry is refused
-and audited), `internal/herdr/client_test.go` (requests sent with the
+and audited; enabling and disabling is refused read-only, checked, audited
+and saved), `web/src/__tests__/menus.test.ts` (the machine menu asks before
+disabling), `internal/herdr/client_test.go` (requests sent with the
 dial),
 `make it` for herdr streams. Verified manually against eight Ubuntu x86_64
 hosts and an arm64 Ubuntu VM.

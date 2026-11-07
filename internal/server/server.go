@@ -98,6 +98,11 @@ func New(mg *machines.Manager, opts Options) *Server {
 	}
 	s.csProxy = newCodeServerProxy(s)
 	s.initGUI()
+	mg.Subscribe(func(st machines.State) {
+		if st.Status == machines.StatusReady || st.Status == machines.StatusDegraded {
+			s.wakeSurface(st.ID)
+		}
+	}, func(machines.AgentEvent) {})
 	return s
 }
 
@@ -110,6 +115,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/settings", s.writable(s.handleSetSetting))
 	mux.HandleFunc("GET /api/machines", s.handleMachines)
 	mux.HandleFunc("GET /api/keymap", s.handleKeymap)
+	mux.HandleFunc("PUT /api/m/{id}/enabled", s.writable(s.handleMachineEnabled))
 	mux.HandleFunc("GET /api/m/{id}/auth", s.writable(s.handleAuth))
 	mux.HandleFunc("POST /api/m/{id}/bridge", s.writable(s.handleBridge))
 	mux.HandleFunc("GET /api/m/{id}/file", s.handleFile)
@@ -342,6 +348,36 @@ func (s *Server) handleSetSetting(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleMachines(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.mg.States())
+}
+
+// handleMachineEnabled enables or disables a machine ({"enabled": bool}):
+// saved in the core's own file over herdr's catalog, applied at once. The
+// reply is the machine's state.
+func (s *Server) handleMachineEnabled(w http.ResponseWriter, r *http.Request) {
+	mc := s.machine(w, r)
+	if mc == nil {
+		return
+	}
+	var body struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<10)).Decode(&body); err != nil || body.Enabled == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid"})
+		return
+	}
+	event := "machine.disable"
+	if *body.Enabled {
+		event = "machine.enable"
+	}
+	ev := map[string]any{"machine": mc.ID()}
+	if err := s.mg.SetEnabled(mc.ID(), *body.Enabled); err != nil {
+		ev["error"] = err.Error()
+		s.audit.log(r, event, ev)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "save", "detail": err.Error()})
+		return
+	}
+	s.audit.log(r, event, ev)
+	writeJSON(w, http.StatusOK, mc.State())
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

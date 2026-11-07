@@ -43,6 +43,11 @@ All notable changes are documented here. The format follows
   pane, as its header. Nothing is drawn over a pane's terminal any more.
 - Setting **Programs copying to the clipboard** (terminal section):
   automatic, ask or off.
+- Right-click a machine in the sidebar to disable or enable it (a disabled
+  machine also has an **Enable** button). The choice is saved by herdr-ide
+  (`machines.json` beside its settings) over herdr's saved machines and
+  applies at once; disabling a connected machine asks first and keeps its
+  panes running in herdr.
 - `make desktop-install` builds the macOS app and installs it into
   `/Applications`, quitting and reopening a running copy.
 
@@ -95,6 +100,9 @@ All notable changes are documented here. The format follows
   three times faster, and scrolling past the edge keeps its speed (and
   speeds up while held) however long herdr takes to answer.
 - The desktop app's title bar follows the UI's theme: a dark UI on a light
+- The panes of a machine that reconnects (after a network loss, or when it
+  is enabled again) show again within seconds, instead of after the
+  surface's reconnect backoff of up to 16 s.
   macOS no longer has a white title bar.
 - A path or URL wrapped over several rows, by the terminal or by a program
   such as Claude Code, is one link: ⌘/Ctrl+click opened only the part on

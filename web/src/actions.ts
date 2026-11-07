@@ -146,6 +146,34 @@ export const actions = {
     await conn.api(m, 'tab.close', { tab_id: tab }).catch(report);
   },
 
+  /** Enables or disables a machine (saved by the core over herdr's catalog).
+   * Disabling a connected machine asks first: its agent disconnects and
+   * VS Code there stops; its panes keep running in herdr. */
+  async setMachineEnabled(m: string, enabled: boolean) {
+    const st = useStore.getState().machines[m];
+    if (
+      !enabled &&
+      st?.status !== 'disabled' &&
+      !(await confirmDialog({
+        title: t('confirm.disableMachineTitle', { machine: st?.label ?? m }),
+        message: t('confirm.disableMachine'),
+        confirm: t('menu.disableMachine'),
+        danger: true,
+      }))
+    )
+      return;
+    try {
+      const res = await fetch(`/api/m/${encodeURIComponent(m)}/enabled`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      });
+      if (!res.ok) throw new Error(t('machine.enableFailed', { detail: (await res.text()).trim() || String(res.status) }));
+    } catch (e) {
+      report(e);
+    }
+  },
+
   async newWorkspace(m?: string, cwd?: string) {
     const c = current();
     m ??= c?.m;

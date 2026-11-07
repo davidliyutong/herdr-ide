@@ -698,3 +698,41 @@ func TestReadOnlyRetryKeepsTheSession(t *testing.T) {
 		t.Fatalf("audit: %s", audit.String())
 	}
 }
+
+// Enabling and disabling machines is a mutation: refused in read-only mode,
+// checked, audited and saved in the core's own file.
+func TestMachineEnabled(t *testing.T) {
+	specs := []machines.Spec{{ID: "gpu", Label: "gpu", Kind: machines.KindSSH, Target: "gpu", Enabled: true}}
+	mg := machines.NewManager(specs, nil, log.New(io.Discard, "", 0))
+	path := filepath.Join(t.TempDir(), "machines.json")
+	mg.UseOverrides(machines.LoadOverrides(path))
+	var audit strings.Builder
+	do := func(opts Options, path, body string) *httptest.ResponseRecorder {
+		opts.Logger = log.New(io.Discard, "", 0)
+		opts.Audit = &audit
+		r := httptest.NewRequest("PUT", path, strings.NewReader(body))
+		r.Host = "127.0.0.1:7780"
+		w := httptest.NewRecorder()
+		New(mg, opts).Handler().ServeHTTP(w, r)
+		return w
+	}
+	if w := do(Options{ReadOnly: true}, "/api/m/gpu/enabled", `{"enabled":false}`); w.Code != 403 || !mg.Get("gpu").State().Enabled {
+		t.Fatalf("read-only: %d", w.Code)
+	}
+	if w := do(Options{}, "/api/m/nope/enabled", `{"enabled":false}`); w.Code != 404 {
+		t.Fatalf("unknown machine: %d", w.Code)
+	}
+	if w := do(Options{}, "/api/m/gpu/enabled", `{}`); w.Code != 400 {
+		t.Fatalf("no value: %d", w.Code)
+	}
+	w := do(Options{}, "/api/m/gpu/enabled", `{"enabled":false}`)
+	if w.Code != 200 || mg.Get("gpu").State().Status != machines.StatusDisabled {
+		t.Fatalf("disable: %d %s", w.Code, w.Body)
+	}
+	if b, err := os.ReadFile(path); err != nil || !strings.Contains(string(b), `"gpu": false`) {
+		t.Fatalf("saved: %s %v", b, err)
+	}
+	if !strings.Contains(audit.String(), `"event":"machine.disable"`) || !strings.Contains(audit.String(), `"machine":"gpu"`) {
+		t.Fatalf("audit: %s", audit.String())
+	}
+}

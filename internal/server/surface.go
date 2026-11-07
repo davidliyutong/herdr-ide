@@ -56,6 +56,9 @@ type surfSession struct {
 	pane     string // pane of that tab with the UI's focus
 	lastMeta []byte
 	focusing bool
+	// wake ends a reconnect wait when the machine's agent session came
+	// (back), since the backoff may have grown while it was away.
+	wake chan struct{}
 }
 
 // viewMsg is the owner's choice of machine, tab and surface size.
@@ -198,7 +201,7 @@ func (s *Server) surfView(c *wsClient, v viewMsg) {
 	if ss == nil {
 		st.gen++
 		ctx, cancel := context.WithCancel(context.Background())
-		ss = &surfSession{s: s, m: v.M, gen: st.gen, ctx: ctx, cancel: cancel, size: size, tab: v.Tab, pane: v.Pane}
+		ss = &surfSession{s: s, m: v.M, gen: st.gen, ctx: ctx, cancel: cancel, size: size, tab: v.Tab, pane: v.Pane, wake: make(chan struct{}, 1)}
 		st.sessions[v.M] = ss
 		st.mu.Unlock()
 		go ss.run()
@@ -359,6 +362,26 @@ func handshakeCode(err error) string {
 	return ""
 }
 
+// wakeSurface makes the endpoint connection to machine m try again at once
+// when it is waiting to reconnect: the machine's agent session came (back).
+func (s *Server) wakeSurface(m string) {
+	s.surf.mu.Lock()
+	ss := s.surf.sessions[m]
+	s.surf.mu.Unlock()
+	if ss == nil {
+		return
+	}
+	ss.mu.Lock()
+	waiting := ss.conn == nil
+	ss.mu.Unlock()
+	if waiting {
+		select {
+		case ss.wake <- struct{}{}:
+		default:
+		}
+	}
+}
+
 // run keeps the endpoint connection up while the session is wanted.
 func (ss *surfSession) run() {
 	backoff := time.Second
@@ -379,6 +402,9 @@ func (ss *surfSession) run() {
 		select {
 		case <-ss.ctx.Done():
 			return
+		case <-ss.wake:
+			backoff = time.Second
+			continue
 		case <-time.After(backoff):
 		}
 		if backoff < 8*time.Second {

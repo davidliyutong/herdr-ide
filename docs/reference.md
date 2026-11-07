@@ -181,10 +181,11 @@ On the core host: ssh control sockets in `/tmp/herdr-ide-<uid>/s` (must be
 owned by you, mode 0700), downloads in the user cache directory
 (`~/Library/Caches/herdr-ide/code-server` on macOS, `~/.cache/herdr-ide/code-server`
 on Linux) with `.sha256` sidecars (also recorded for releases that machines
-downloaded themselves), and settings changed in the UI in
-`settings[-<instance>].json` in the user configuration directory
+downloaded themselves), settings changed in the UI in
+`settings[-<instance>].json` and machines enabled or disabled in the sidebar
+in `machines[-<instance>].json`, both in the user configuration directory
 (`~/Library/Application Support/herdr-ide/` on macOS, `~/.config/herdr-ide/` on
-Linux; directory 0700, file replaced atomically).
+Linux; directory 0700, files replaced atomically).
 
 A release directory holds the core, the bundled `herdr`, `LICENSE`,
 `THIRD_PARTY_NOTICES.md`, `licenses.md` and `licenses/herdr/`; they stay until

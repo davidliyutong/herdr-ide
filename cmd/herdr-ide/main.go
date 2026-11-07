@@ -72,6 +72,13 @@ func (f *codeServerFlags) manager(logger *log.Logger) *codeserver.Manager {
 	return cs
 }
 
+// machinesPath is the file beside the settings file (settingsPath) holding
+// the machines enabled or disabled in the UI: machines.json, or
+// machines-<instance>.json.
+func machinesPath(settings string) string {
+	return filepath.Join(filepath.Dir(settings), strings.Replace(filepath.Base(settings), "settings", "machines", 1))
+}
+
 // settingsPath is the file holding settings changed in the UI, on the core
 // host. A directory left by a previous product name is moved first.
 func settingsPath(instance string) (string, error) {
@@ -206,6 +213,7 @@ func serve(args []string, logger *log.Logger) {
 	if !brand.ValidInstance(*instance) {
 		logger.Fatalf("--instance must be lowercase letters, digits and dashes")
 	}
+	overridesFile := ""
 	if p, err := settingsPath(*instance); err != nil {
 		logger.Printf("settings are not saved: %v", err)
 	} else {
@@ -213,6 +221,7 @@ func serve(args []string, logger *log.Logger) {
 		if err := prefs.Load(); err != nil {
 			logger.Printf("ignoring settings: %v", err)
 		}
+		overridesFile = machinesPath(p)
 	}
 	embedded.AgentDir = *agentDir
 	embedded.ExtDir = *extDir
@@ -279,6 +288,8 @@ func serve(args []string, logger *log.Logger) {
 		return nil, "", errors.New("unknown machine kind " + spec.Kind)
 	}
 	mg := machines.NewManager(specs, dial, logger)
+	// Machines enabled or disabled in the UI, over herdr's catalog.
+	mg.UseOverrides(machines.LoadOverrides(overridesFile))
 
 	var static fs.FS = web.Dist()
 	if *webDir != "" {
