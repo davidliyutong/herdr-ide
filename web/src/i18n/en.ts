@@ -298,6 +298,9 @@ export const en = {
   'herdr.error.update_failed': 'The update failed.',
   'herdr.error.not_managed': 'This herdr is your own installation; update it the way you installed it.',
   'herdr.error.not_local': 'Only the herdr on this computer is updated here.',
+  'herdr.error.foreign_server': "Another user's process listens on herdr's socket; nothing was started or stopped.",
+  'herdr.error.server_unresponsive':
+    'The herdr server takes no connections; end it with herdr server stop or by its process on that machine.',
   'herdr.error.transport': 'The request failed.',
   'remoteHerdr.title': 'Update herdr on {machine}',
   'remoteHerdr.versions': 'herdr there: {remote}. herdr on this computer: {local}.',

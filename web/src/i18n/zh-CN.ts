@@ -293,6 +293,8 @@ export const zhCN: Messages = {
   'herdr.error.update_failed': '更新失败。',
   'herdr.error.not_managed': '这是你自己安装的 herdr，请用原来的安装方式更新。',
   'herdr.error.not_local': '这里只能更新本机的 herdr。',
+  'herdr.error.foreign_server': 'herdr 的 socket 上监听的是其他用户的进程，没有启动或停止任何东西。',
+  'herdr.error.server_unresponsive': 'herdr 服务器不接受连接；请在那台机器上用 herdr server stop 或结束它的进程。',
   'herdr.error.transport': '请求失败。',
   'remoteHerdr.title': '更新 {machine} 上的 herdr',
   'remoteHerdr.versions': '那台机器上是 herdr {remote}，本机是 herdr {local}。',

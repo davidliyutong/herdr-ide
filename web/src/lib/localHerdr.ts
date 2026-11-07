@@ -15,7 +15,8 @@ export interface MachineHerdr {
   /** herdr's newest release, after a check. */
   latest?: string;
   /** A code: not_found, start_failed, stop_failed, check_failed,
-   * update_failed, not_managed, not_local, transport. */
+   * update_failed, not_managed, not_local, foreign_server,
+   * server_unresponsive, transport. */
   error?: string;
   /** herdr's own output for the error, or of an update. */
   output?: string;

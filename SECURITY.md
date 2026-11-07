@@ -32,7 +32,7 @@ proxy, and output shown in terminals.
 | Links in pane output (OSC 8) | Only `http:`, `https:` and `mailto:` targets are underlined or opened, with ⌘/Ctrl+click; the tooltip shows the real target. |
 | Malformed or oversized data from herdr's endpoint | Frames are capped (2 MiB for the handshake, 32 MiB after); sequence lengths are checked against the bytes left before allocating, and cells (one million), hyperlinks (65,536), panes and splits (4096 each) and the cells of one patch are capped before allocating, so memory stays a small multiple of the frame; grids are limited to herdr's own bounds; trailing bytes, unknown variants and revisions that do not follow the retained surface close the connection (`internal/herdr/endpoint` tests). |
 | Other users on the core host hijacking ssh | ssh control sockets live in `/tmp/herdr-ide-<uid>/s`, which must be a directory owned by the user with no group/other access, or the core refuses to start. |
-| Other users on a machine | Agent state is in `~/.herdr-ide` (0700); code-server and the bridge listen only on unix sockets there (0600); nothing listens on TCP. |
+| Other users on a machine | Agent state is in `~/.herdr-ide` (0700); code-server and the bridge listen only on unix sockets there (0600); nothing listens on TCP. Starting, stopping and restarting herdr's server from the UI first checks the peer credentials of whatever listens on the session's socket: another user's process gets no command and is not reported as the user's server (`foreign_server`, `internal/agent/herdr_test.go`). Residual: the pane connections to herdr's sockets (`herdr-api`, `herdr-client`) do not check the peer; herdr's default sockets are in the user's own config directory. |
 | Tampered downloads | code-server releases and extensions are verified against pinned SHA-256 digests or `.sha256` sidecars; mismatches are refused. |
 | Archive path traversal | Tarball extraction rejects absolute paths, `..` and links leaving the install directory. |
 | Downloads made by machines (`--code-server-install=download`) | The machine fetches only `http(s)` URLs built from the core's `--code-server-url` template, with curl or wget and no shell; the tarball is checked against the digest the core knows before it is unpacked. A digest learnt on first use is recorded on the core like the core's own downloads. |
@@ -84,11 +84,18 @@ herdr can be managed from the UI
 `POST /api/m/{id}/herdr/{start|stop|restart|check|update}` are mutations
 behind the usual guards, refused in `--read-only` and audited
 (`herdr.start`, `herdr.stop`, `herdr.restart`, `herdr.update`). The server
-actions accept every configured machine, local or SSH, and run only
-`herdr [--session S] server` or `herdr [--session S] server stop` there as
-the user, with the herdr the agent found; the UI asks before stopping or
-restarting, which ends every terminal on that machine. `check` and `update`
-are accepted only for the local machine (`internal/server/server_test.go`).
+actions accept every configured machine, local or SSH. There they run, as
+the user and with the herdr the agent found, `herdr [--session S] server`
+or `herdr [--session S] server stop` (bounded to 30 s), plus the read
+commands of the status (`herdr --version`,
+`herdr [--session S] status server --json`) and, on Linux, the display
+keeper. No argument comes from the request and nothing runs through a
+shell. A listener of another user, or one that takes no connections (a
+hung server), is neither stopped nor replaced. The UI asks before stopping
+or restarting, which ends the terminals of that herdr session. The status
+(`GET /api/m/{id}/herdr`) runs only the read commands and is allowed in
+`--read-only`, for SSH machines too. `check` and `update` are accepted only
+for the local machine (`internal/server/server_test.go`).
 An update runs herdr's own
 `herdr update --handoff` on the application's copy only: it trusts herdr's
 release manifest on `herdr.dev` and the SHA-256 digests it publishes, like a

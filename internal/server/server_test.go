@@ -529,7 +529,7 @@ func TestHerdrEndpoints(t *testing.T) {
 			t.Errorf("%s %s: %d %s", c.method, c.path, w.Code, w.Body)
 		}
 	}
-	for _, want := range []string{`"event":"herdr.stop"`, `"machine":"local"`, `"event":"herdr.restart"`, `"machine":"gpu"`} {
+	for _, want := range []string{`"event":"herdr.stop"`, `"machine":"local"`, `"event":"herdr.restart"`, `"machine":"gpu"`, `"session":`} {
 		if !strings.Contains(audit.String(), want) {
 			t.Fatalf("audit lacks %s: %s", want, audit.String())
 		}

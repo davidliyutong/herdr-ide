@@ -137,12 +137,70 @@ func versionParts(v string) [3]int {
 	return out
 }
 
-func dialable(socket string) bool {
-	c, err := net.DialTimeout("unix", socket, 200*time.Millisecond)
-	if err == nil {
+// serverState is what listens on a session's herdr socket.
+type serverState int
+
+const (
+	serverAbsent       serverState = iota // no socket, or nothing listening
+	serverOurs                            // a process of this user
+	serverForeign                         // another user's process
+	serverUnresponsive                    // a listener that takes no connections
+)
+
+// socketPeer reports the process at the other end of a unix connection (a
+// variable for tests).
+var socketPeer = peerCred
+
+var (
+	errForeignServer = errors.New("another user's process listens on the herdr socket")
+	errUnresponsive  = errors.New("the herdr socket takes no connections")
+)
+
+// probeServer tells what listens on socket. Only a missing socket or a
+// refused connection mean that no server runs: a listener whose backlog is
+// full (EAGAIN on Linux) or that times out may be a hung server that still
+// owns its panes, and must not be replaced.
+// A peer that is not identified, which on macOS also happens when the
+// listener closed the connection first, counts as another user's after a
+// few tries.
+func probeServer(socket string) serverState {
+	for try := 0; ; try++ {
+		c, err := net.DialTimeout("unix", socket, 200*time.Millisecond)
+		if err != nil {
+			return dialState(err)
+		}
+		_, uid, err := socketPeer(c.(*net.UnixConn))
 		c.Close()
+		switch {
+		case err == nil && uid == os.Getuid():
+			return serverOurs
+		case err == nil || try == 2:
+			return serverForeign
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
-	return err == nil
+}
+
+func dialState(err error) serverState {
+	switch {
+	case errors.Is(err, syscall.ENOENT), errors.Is(err, syscall.ENOTDIR), errors.Is(err, syscall.ECONNREFUSED):
+		return serverAbsent
+	case errors.Is(err, syscall.EACCES), errors.Is(err, syscall.EPERM):
+		return serverForeign
+	}
+	return serverUnresponsive
+}
+
+// probeErr is the error for a state in which nothing may be started or
+// stopped, nil otherwise.
+func probeErr(st serverState) error {
+	switch st {
+	case serverForeign:
+		return errForeignServer
+	case serverUnresponsive:
+		return errUnresponsive
+	}
+	return nil
 }
 
 func (a *Agent) herdrStatus(ctx context.Context, h agentproto.Header) *agentproto.HerdrStatus {
@@ -169,7 +227,7 @@ func (a *Agent) herdrStatus(ctx context.Context, h agentproto.Header) *agentprot
 		}
 		st.RestartNeeded = server.RestartNeeded
 	} else {
-		st.Running = dialable(a.herdrSocket(h.Session))
+		st.Running = probeServer(a.herdrSocket(h.Session)) == serverOurs
 	}
 	return st
 }
@@ -179,8 +237,11 @@ func (a *Agent) herdrStatus(ctx context.Context, h agentproto.Header) *agentprot
 // Its output goes to a log replaced at every start; herdr keeps its own logs.
 func (a *Agent) startHerdrServer(ctx context.Context, bin, session string) (string, error) {
 	socket := a.herdrSocket(session)
-	if dialable(socket) {
+	switch st := probeServer(socket); st {
+	case serverOurs:
 		return "", nil
+	case serverForeign, serverUnresponsive:
+		return "", probeErr(st)
 	}
 	if err := os.MkdirAll(a.managedHerdrDir(), 0o700); err != nil {
 		return "", err
@@ -203,6 +264,9 @@ func (a *Agent) startHerdrServer(ctx context.Context, bin, session string) (stri
 	}
 	exited := make(chan error, 1)
 	go func() { exited <- cmd.Wait() }()
+	// The server leads its own session and process group: a server that
+	// did not come up is ended with what it started.
+	kill := func() { _ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	deadline := time.NewTimer(15 * time.Second)
 	defer deadline.Stop()
 	tick := time.NewTicker(100 * time.Millisecond)
@@ -210,19 +274,23 @@ func (a *Agent) startHerdrServer(ctx context.Context, bin, session string) (stri
 	for {
 		select {
 		case err := <-exited:
-			if dialable(socket) { // another client started the server first
+			if probeServer(socket) == serverOurs { // another client started the server first
 				return "", nil
 			}
 			return fileTail(logPath), fmt.Errorf("herdr server exited: %v", err)
 		case <-tick.C:
-			if dialable(socket) {
+			switch probeServer(socket) {
+			case serverOurs:
 				return "", nil
+			case serverForeign:
+				kill()
+				return "", errForeignServer
 			}
 		case <-deadline.C:
-			_ = cmd.Process.Kill()
+			kill()
 			return fileTail(logPath), errors.New("herdr server did not open its socket within 15 s")
 		case <-ctx.Done():
-			_ = cmd.Process.Kill()
+			kill()
 			return "", ctx.Err()
 		}
 	}
@@ -234,7 +302,7 @@ func (a *Agent) startHerdrServer(ctx context.Context, bin, session string) (stri
 func (a *Agent) startHerdr(ctx context.Context, bin, session string) (code, output string) {
 	out, err := a.startHerdrServer(ctx, bin, session)
 	if err != nil {
-		return "start_failed", joinOutput(out, err)
+		return probeCode(err, "start_failed"), joinOutput(out, err)
 	}
 	if runtime.GOOS == "linux" {
 		if err := a.gui.keep(session); err != nil {
@@ -244,27 +312,71 @@ func (a *Agent) startHerdr(ctx context.Context, bin, session string) (code, outp
 	return "", ""
 }
 
-// undialableWithin waits up to d until nothing accepts on socket.
-func undialableWithin(ctx context.Context, socket string, d time.Duration) bool {
-	deadline := time.Now().Add(d)
-	for dialable(socket) {
-		if time.Now().After(deadline) {
-			return false
-		}
-		select {
-		case <-ctx.Done():
-			return false
-		case <-time.After(100 * time.Millisecond):
-		}
+// probeCode is the status code for err: the probe's own codes, else code.
+func probeCode(err error, code string) string {
+	switch {
+	case errors.Is(err, errForeignServer):
+		return "foreign_server"
+	case errors.Is(err, errUnresponsive):
+		return "server_unresponsive"
 	}
-	return true
+	return code
 }
 
+// herdrStopTimeout bounds `herdr server stop`, which waits for a server that
+// may hang; herdrStopWait is how long a restart waits for the stopped
+// server's socket to go away (variables for tests).
+var (
+	herdrStopTimeout = 30 * time.Second
+	herdrStopWait    = 10 * time.Second
+)
+
+// restartHerdr stops the session's server, if this user's server runs, and
+// starts one. A server that is not running is only started (herdr's stop
+// fails without one); nothing is started after a failed stop, or while the
+// socket belongs to another user or takes no connections.
+func (a *Agent) restartHerdr(ctx context.Context, bin, session string) (code, output string) {
+	socket := a.herdrSocket(session)
+	switch st := probeServer(socket); st {
+	case serverForeign, serverUnresponsive:
+		return probeCode(probeErr(st), ""), ""
+	case serverOurs:
+		if out, err := a.stopHerdrServer(ctx, bin, session); err != nil {
+			return probeCode(err, "stop_failed"), joinOutput(out, err)
+		}
+		// herdr's stop returns once the server has exited; one that still
+		// answered would turn the start into a no-op.
+		deadline := time.Now().Add(herdrStopWait)
+		for probeServer(socket) != serverAbsent {
+			if time.Now().After(deadline) {
+				return "stop_failed", "herdr server still answers after stop"
+			}
+			select {
+			case <-ctx.Done():
+				return "stop_failed", ctx.Err().Error()
+			case <-time.After(100 * time.Millisecond):
+			}
+		}
+	}
+	return a.startHerdr(ctx, bin, session)
+}
+
+// stopHerdrServer runs herdr's stop for the session's server, but sends
+// nothing to a socket of another user.
 func (a *Agent) stopHerdrServer(ctx context.Context, bin, session string) (string, error) {
+	if st := probeServer(a.herdrSocket(session)); st == serverForeign {
+		return "", errForeignServer
+	}
+	ctx, cancel := context.WithTimeout(ctx, herdrStopTimeout)
+	defer cancel()
 	var out tailBuffer
 	cmd := a.herdrCommand(ctx, bin, herdrArgs(session, "server", "stop")...)
 	cmd.Stdout, cmd.Stderr = &out, &out
+	cmd.WaitDelay = time.Second
 	err := cmd.Run()
+	if ctx.Err() == context.DeadlineExceeded {
+		err = fmt.Errorf("herdr server stop did not return within %s", herdrStopTimeout)
+	}
 	return out.String(), err
 }
 
@@ -355,25 +467,10 @@ func (a *Agent) handleHerdr(ctx context.Context, st net.Conn, h agentproto.Heade
 			code, output = a.startHerdr(ctx, bin, h.Session)
 		case "stop":
 			if out, err := a.stopHerdrServer(ctx, bin, h.Session); err != nil {
-				code, output = "stop_failed", joinOutput(out, err)
+				code, output = probeCode(err, "stop_failed"), joinOutput(out, err)
 			}
 		case "restart":
-			// A server that is not running is only started: herdr's stop
-			// fails without one.
-			socket := a.herdrSocket(h.Session)
-			if dialable(socket) {
-				if out, err := a.stopHerdrServer(ctx, bin, h.Session); err != nil {
-					code, output = "stop_failed", joinOutput(out, err)
-					break
-				}
-				// herdr's stop returns once the server has exited; one that
-				// still answered would turn the start into a no-op.
-				if !undialableWithin(ctx, socket, 10*time.Second) {
-					code, output = "stop_failed", "herdr server still answers after stop"
-					break
-				}
-			}
-			code, output = a.startHerdr(ctx, bin, h.Session)
+			code, output = a.restartHerdr(ctx, bin, h.Session)
 		case "update":
 			if bin != a.managedHerdrPath() {
 				code = "not_managed"

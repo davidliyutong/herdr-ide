@@ -55,15 +55,25 @@ user's confirmation; choosing herdr's preview channel.
     without the pane context of a herdr the core may run in, and waits up to
     15 s for the socket. The server belongs to the user and outlives the
     core, as when the herdr TUI starts it. Its output goes to
-    `~/.herdr-ide/herdr/server.log` on that machine, replaced at every start;
-    a failed start reports the log's tail. On Linux the agent then starts the
-    display keeper for the server ([14](14-gui-windows.md)).
+    `~/.herdr-ide/herdr/server.log` on that machine, replaced at every start
+    (of any session or instance); a failed start reports the log's tail, and
+    a server that did not come up is killed with its process group. On Linux
+    the agent then starts the display keeper for the server
+    ([14](14-gui-windows.md)). The server inherits the agent's environment
+    without herdr's pane variables, as one started from an ssh login does:
+    with the user's ssh configuration forwarding the agent to that machine,
+    its panes get the forwarded `SSH_AUTH_SOCK` while the connection lasts.
   - `stop` runs `herdr [--session S] server stop`, which returns once the
-    server has exited.
-  - `restart` stops the server when one answers on the session's socket,
-    waits up to 10 s until none does, and starts one as `start` does. A
-    server that is not running is only started (herdr's stop fails without
-    one); a failed stop starts nothing.
+    server has exited, within 30 s (`stop_failed` otherwise).
+  - `restart` stops the server when one of this user answers on the
+    session's socket, waits up to 10 s until nothing listens there, and
+    starts one as `start` does. A server that is not running is only started
+    (herdr's stop fails without one); a failed stop starts nothing.
+  - Before any of these, the agent probes the socket: only a missing socket
+    or a refused connection mean that no server runs. A listener of another
+    user (peer credentials) gets no command (`foreign_server`), and one that
+    takes no connections (a full backlog: a hung server that may still own
+    its panes) is neither stopped nor replaced (`server_unresponsive`).
   - `check` reads `version` from `https://herdr.dev/latest.json`, the manifest
     `herdr update` uses, accepting only a version-shaped value.
   - `update` runs `herdr update --handoff` on the managed copy only (an
@@ -82,8 +92,9 @@ user's confirmation; choosing herdr's preview channel.
   machine's pane surface reconnects at once instead of waiting for its
   backoff ([18](18-endpoint-surfaces.md)). Failures are codes (`not_found`,
   `start_failed`, `stop_failed`, `check_failed`, `update_failed`,
-  `not_managed`, `not_local`, `transport`) with herdr's own output as
-  detail.
+  `not_managed`, `not_local`, `foreign_server`, `server_unresponsive`,
+  `transport`) with herdr's own output as detail. The audit records the
+  machine, the session and the error code.
 - **SSH machines.** Their server is started, stopped and restarted like the
   local one, with the herdr the agent found there; nothing is uploaded.
   herdr updates a remote machine only when the user
@@ -138,8 +149,17 @@ user's confirmation; choosing herdr's preview channel.
   *degraded*; its status block offers **Manage herdr** with **Start
   server**, and the context menu **Restart herdr…**. herdr restores the
   workspaces it saved at shutdown, with new shells.
-- Restart: herdr's stop fails, or a server still answers 10 s after it →
-  `stop_failed` with herdr's output, and nothing is started.
+- Restart: herdr's stop fails or does not return within 30 s (a hung
+  server), or a server still answers 10 s after it → `stop_failed` with
+  herdr's output, and nothing is started; the user ends that server on the
+  machine.
+- The socket takes no connections → `server_unresponsive`; another user's
+  process listens there (a socket path in a shared directory) →
+  `foreign_server`. Nothing is started or stopped.
+- The machine ends user processes at logout (logind `KillUserProcesses=yes`)
+  → a server started over the agent's ssh login ends when that login does,
+  at the latest 10 min after the core disconnects; `loginctl enable-linger`
+  keeps it.
 - The machine's agent is not connected → `transport`; the menu items are
   disabled for SSH machines.
 - No network or herdr.dev unavailable → `check_failed` or `update_failed`
@@ -156,11 +176,20 @@ user's confirmation; choosing herdr's preview channel.
 
 ## Security
 
-The endpoints are mutations behind the existing Host/Origin and proxy-secret
+The actions are mutations behind the existing Host/Origin and proxy-secret
 guards, refused in `--read-only` and audited. The server actions accept
-every configured machine and run only `herdr [--session S] server` and
-`herdr [--session S] server stop` there, as the user, with the herdr the
-agent resolved; check and update are limited to the local machine.
+every configured machine; there, as the user and with the herdr the agent
+resolved, they run `herdr [--session S] server` or
+`herdr [--session S] server stop`, as well as `herdr --version` and
+`herdr [--session S] status server --json` for the status, and on Linux the
+display keeper ([14](14-gui-windows.md)). Arguments are fixed or come from
+the core's machine list, never from the request, and nothing runs through a
+shell. Stopping and restarting end the terminals of that herdr session on
+that machine, so the UI asks first. Nothing is started or stopped while
+another user's process listens on the socket. The status
+(`GET /api/m/{id}/herdr`) runs only the two read commands and is allowed in
+read-only mode, for SSH machines too. Check and update are limited to the
+local machine.
 Updates trust herdr's release manifest at `herdr.dev` and the SHA-256 digests
 it publishes, the same trust as running `herdr update`; they replace only the
 application's copy, never the bundled file or an installation of the user's.
@@ -175,8 +204,9 @@ See [SECURITY.md](../../SECURITY.md).
 `internal/agent/herdr_test.go` covers resolution order, the managed copy
 following newer bundles but not older ones, version comparison, the manifest
 check (including a malformed version), that only the managed copy is
-updated, and that a restart stops only a running server and starts nothing
-after a failed stop. `internal/server/server_test.go` covers which actions
+updated, that a restart stops only a running server and starts nothing
+after a failed, hanging or ineffective stop, that another user's listener
+gets no command, and how socket probes classify connection errors. `internal/server/server_test.go` covers which actions
 SSH machines accept, read-only and audit behavior of the endpoints, the
 `herdr --remote` command line and environment, the remote terminal's guards
 and the PTY bridge. `TestIntegrationHerdrManage` starts, stops and restarts

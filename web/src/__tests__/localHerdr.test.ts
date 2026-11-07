@@ -45,6 +45,8 @@ describe('herdrRequest', () => {
       'update_failed',
       'not_managed',
       'not_local',
+      'foreign_server',
+      'server_unresponsive',
       'transport',
     ]) {
       expect(hasMessage(`herdr.error.${code}`)).toBe(true);

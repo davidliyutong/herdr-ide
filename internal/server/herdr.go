@@ -17,11 +17,11 @@ import (
 	"herdr-ide/internal/machines"
 )
 
-// herdrActions are the actions of POST /api/m/{id}/herdr/{action}; true
-// marks those only the local machine accepts: an update replaces the
-// application's copy of herdr, and SSH machines update herdr through
-// herdr's own `herdr --remote` (handleHerdrRemote).
-var herdrActions = map[string]bool{"start": false, "stop": false, "restart": false, "check": true, "update": true}
+// herdrActions are the actions of POST /api/m/{id}/herdr/{action}, with
+// whether machines other than the core host accept them. Only the server's
+// are: an update replaces the application's copy of herdr, and SSH machines
+// update herdr through herdr's own `herdr --remote` (handleHerdrRemote).
+var herdrActions = map[string]bool{"start": true, "stop": true, "restart": true, "check": false, "update": false}
 
 func (s *Server) handleHerdrStatus(w http.ResponseWriter, r *http.Request) {
 	s.herdrRequest(w, r, "status")
@@ -41,7 +41,7 @@ func (s *Server) herdrRequest(w http.ResponseWriter, r *http.Request, action str
 	if mc == nil {
 		return
 	}
-	if herdrActions[action] && !mc.Local() {
+	if action != "status" && !herdrActions[action] && !mc.Local() {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "not_local"})
 		return
 	}
@@ -49,7 +49,7 @@ func (s *Server) herdrRequest(w http.ResponseWriter, r *http.Request, action str
 	defer cancel()
 	st, err := herdrOp(ctx, mc, action)
 	if action != "status" && action != "check" {
-		ev := map[string]any{"machine": mc.ID()}
+		ev := map[string]any{"machine": mc.ID(), "session": mc.State().Session}
 		if err != nil {
 			ev["error"] = err.Error()
 		} else if st.Error != "" {
