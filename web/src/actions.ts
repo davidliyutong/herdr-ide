@@ -9,6 +9,7 @@ import { mediaExt } from './terminal/links';
 import { bridge } from './lib/bridge';
 import { t } from './i18n';
 import { confirmDialog, newWorkspaceDialog } from './dialog';
+import { herdrError, herdrRequest } from './lib/localHerdr';
 
 export interface AttentionItem {
   m: string;
@@ -172,6 +173,27 @@ export const actions = {
     } catch (e) {
       report(e);
     }
+  },
+
+  /** Restarts a machine's herdr server after asking, since every terminal
+   * there closes; one that is not running is started (docs/features/17). */
+  async restartHerdr(m: string) {
+    const st = useStore.getState().machines[m];
+    const machine = st?.label ?? m;
+    if (
+      !(await confirmDialog({
+        title: t('herdr.restartTitleMachine', { machine }),
+        message: st?.kind === 'local' ? t('herdr.stopMessage') : t('herdr.stopMessageMachine', { machine }),
+        confirm: t('herdr.restart'),
+        danger: true,
+      }))
+    )
+      return;
+    const { toast } = useStore.getState();
+    toast(t('herdr.restarting', { machine }));
+    const res = await herdrRequest(m, 'restart');
+    if (res.error) report(new Error(t('herdr.restartFailed', { machine, error: [herdrError(res), res.output].filter(Boolean).join(' ') })));
+    else toast(t('herdr.restarted', { machine }));
   },
 
   async newWorkspace(m?: string, cwd?: string) {

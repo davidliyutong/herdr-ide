@@ -149,7 +149,7 @@ function MachineItem({ m }: { m: MachineState }) {
                   {m.status === 'auth_required' && m.kind === 'ssh' && (
                     <button onClick={() => useStore.getState().openAuth?.(m.id)}>{t('sidebar.authenticate')}</button>
                   )}
-                  {m.kind === 'local' && !readOnly && (
+                  {(m.kind === 'local' || m.status === 'degraded') && !readOnly && (
                     <button onClick={() => useStore.getState().openHerdr(m.id)}>{t('sidebar.manageHerdr')}</button>
                   )}
                   {!readOnly && <button onClick={() => conn.retry(m.id)}>{t('sidebar.retry')}</button>}

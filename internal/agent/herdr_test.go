@@ -4,13 +4,16 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"herdr-ide/internal/agentproto"
 )
@@ -192,6 +195,173 @@ func TestUpdateOnlyTheManagedCopy(t *testing.T) {
 	if err := agentproto.ReadLine(c1, &rep); err != nil || rep.OK {
 		t.Fatalf("unknown action accepted: %+v %v", rep, err)
 	}
+}
+
+// Restarting stops a running server before starting one, only starts a
+// server that is not running (herdr's stop fails without one), and starts
+// none when the stop failed.
+func TestRestartHerdrServer(t *testing.T) {
+	noInstalledHerdr(t)
+	a := testAgent(t)
+	cfg, err := os.MkdirTemp("/tmp", "hr-") // short: macOS socket paths
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(cfg) })
+	t.Setenv("XDG_CONFIG_HOME", cfg)
+	t.Setenv("HERDR_SOCKET_PATH", "")
+	socket := a.herdrSocket("")
+	if err := os.MkdirAll(filepath.Dir(socket), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(a.home, ".local", "bin", "herdr")
+	os.MkdirAll(filepath.Dir(bin), 0o755)
+	// The stand-in's server exits at once, so every start fails; its stop
+	// removes the socket, or refuses. PATH is empty: commands need a path.
+	fake := func(stop string) {
+		t.Helper()
+		os.Remove(bin + ".args")
+		script := `#!/bin/sh
+echo "$@" >> "$0.args"
+case "$*" in
+  --version) echo "herdr 0.9.5" ;;
+  "status server --json") echo '{"running":false}' ;;
+  "server stop") ` + stop + ` ;;
+esac
+`
+		if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	calls := func() []string {
+		b, _ := os.ReadFile(bin + ".args")
+		var out []string
+		for _, l := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+			if strings.HasPrefix(l, "server") {
+				out = append(out, l)
+			}
+		}
+		return out
+	}
+	serve := func() { serveUnix(t, socket) }
+
+	fake(`/bin/rm -f '` + socket + `'`)
+	st := herdrOp(t, a, agentproto.Header{Action: "restart"})
+	if got := calls(); st.Error != "start_failed" || strings.Join(got, ",") != "server" {
+		t.Fatalf("not running: %+v %q", st, got)
+	}
+
+	serve()
+	fake(`/bin/rm -f '` + socket + `'`)
+	st = herdrOp(t, a, agentproto.Header{Action: "restart"})
+	if got := calls(); st.Error != "start_failed" || strings.Join(got, ",") != "server stop,server" {
+		t.Fatalf("running: %+v %q", st, got)
+	}
+
+	os.Remove(socket)
+	serve()
+	fake(`echo refused; exit 1`)
+	st = herdrOp(t, a, agentproto.Header{Action: "restart"})
+	if got := calls(); st.Error != "stop_failed" || !strings.Contains(st.Output, "refused") || strings.Join(got, ",") != "server stop" {
+		t.Fatalf("stop refused: %+v %q", st, got)
+	}
+
+	// A stop that leaves the server answering, or that hangs, fails the
+	// restart without a start.
+	savedWait, savedTimeout := herdrStopWait, herdrStopTimeout
+	herdrStopWait, herdrStopTimeout = 300*time.Millisecond, 300*time.Millisecond
+	t.Cleanup(func() { herdrStopWait, herdrStopTimeout = savedWait, savedTimeout })
+	fake(`exit 0`)
+	st = herdrOp(t, a, agentproto.Header{Action: "restart"})
+	if got := calls(); st.Error != "stop_failed" || !strings.Contains(st.Output, "still answers") || strings.Join(got, ",") != "server stop" {
+		t.Fatalf("still answering: %+v %q", st, got)
+	}
+	fake(`/bin/sleep 5`)
+	began := time.Now()
+	st = herdrOp(t, a, agentproto.Header{Action: "restart"})
+	if got := calls(); st.Error != "stop_failed" || !strings.Contains(st.Output, "did not return") || strings.Join(got, ",") != "server stop" {
+		t.Fatalf("hanging stop: %+v %q", st, got)
+	}
+	if d := time.Since(began); d > 3*time.Second {
+		t.Fatalf("hanging stop took %s", d)
+	}
+
+	// Another user's listener gets no herdr command at all.
+	savedPeer := socketPeer
+	socketPeer = func(*net.UnixConn) (int, int, error) { return 1, os.Getuid() + 1, nil }
+	t.Cleanup(func() { socketPeer = savedPeer })
+	fake(`/bin/rm -f '` + socket + `'`)
+	for _, action := range []string{"restart", "stop", "start"} {
+		st = herdrOp(t, a, agentproto.Header{Action: action})
+		if got := calls(); st.Error != "foreign_server" || st.Running || len(got) != 0 {
+			t.Fatalf("%s with a foreign listener: %+v %q", action, st, got)
+		}
+	}
+}
+
+// Only a missing socket or a refused connection mean that no server runs;
+// a listener that takes no connections may be a hung server.
+func TestProbeServer(t *testing.T) {
+	opErr := func(e syscall.Errno) error {
+		return &net.OpError{Op: "dial", Net: "unix", Err: os.NewSyscallError("connect", e)}
+	}
+	for _, c := range []struct {
+		err  error
+		want serverState
+	}{
+		{opErr(syscall.ENOENT), serverAbsent},
+		{opErr(syscall.ECONNREFUSED), serverAbsent},
+		{opErr(syscall.EAGAIN), serverUnresponsive},
+		{opErr(syscall.ETIMEDOUT), serverUnresponsive},
+		{opErr(syscall.EACCES), serverForeign},
+	} {
+		if got := dialState(c.err); got != c.want {
+			t.Errorf("%v: %d, want %d", c.err, got, c.want)
+		}
+	}
+	dir, err := os.MkdirTemp("/tmp", "hp-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	socket := filepath.Join(dir, "s.sock")
+	if st := probeServer(socket); st != serverAbsent {
+		t.Fatalf("no socket: %d", st)
+	}
+	serveUnix(t, socket)
+	if st := probeServer(socket); st != serverOurs {
+		t.Fatalf("own listener: %d", st)
+	}
+	saved := socketPeer
+	defer func() { socketPeer = saved }()
+	tries := 0
+	socketPeer = func(*net.UnixConn) (int, int, error) { tries++; return 0, 0, syscall.ENOTCONN }
+	if st := probeServer(socket); st != serverForeign || tries != 3 {
+		t.Fatalf("unidentified peer: %d after %d tries", st, tries)
+	}
+}
+
+// serveUnix listens on socket like herdr: a connection stays open until the
+// client closes it.
+func serveUnix(t *testing.T, socket string) {
+	t.Helper()
+	ln, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				io.Copy(io.Discard, c)
+				c.Close()
+			}()
+		}
+	}()
 }
 
 // The client socket follows herdr's client_socket_path rules.

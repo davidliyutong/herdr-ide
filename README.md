@@ -24,9 +24,11 @@ browser tab, with VS Code (code-server) one keystroke away.
 - **herdr included.** Release archives carry herdr 0.9.5 for Linux/macOS on
   amd64/arm64, used when this host has no herdr installed. It behaves like an
   installed herdr: same configuration, sessions and machines. **Manage herdr**
-  (right-click the local machine) starts and stops its server and updates
-  herdr through herdr's own updater, without a terminal; **Update herdr** on
-  an SSH machine runs herdr's own `herdr --remote` update there.
+  (right-click a machine) starts, stops and restarts its herdr server, and on
+  the local machine updates herdr through herdr's own updater, without a
+  terminal; **Restart herdr…** restarts a machine's server directly, or
+  starts it after the machine rebooted. **Update herdr** on an SSH machine
+  runs herdr's own `herdr --remote` update there.
 - **Multi-machine.** Uses the SSH machines saved in herdr; right-click a
   machine in the sidebar to disable or enable it here. One ssh connection
   per machine runs a small static agent (linux/macOS × amd64/arm64, uploaded

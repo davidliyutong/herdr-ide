@@ -9,7 +9,7 @@
 ## 功能
 
 - **直接讲 herdr 协议**：workspace、tab、分屏布局和 agent 状态都来自 herdr 的 socket API；pane 的画面是 herdr 通过其 endpoint 协议渲染好的字符网格，每个按键都由 herdr 按 pane 里程序的模式编码（包括 kitty 键盘协议）。支持鼠标、滚动回看（选区只在所在 pane 内，拖到边缘会自动滚动，复制整段）、中文输入法、OSC 52 复制（在 Claude Code 里选中的文字直接进剪贴板）和拖动调整分屏，程序看到的终端颜色与界面主题一致。同一时间只有一个浏览器标签页使用会话，其他标签页可以接管。拖动 pane 标题栏可交换或移动 pane，点击标题即可重命名；拖动 tab 和 workspace 可调整顺序；右键 pane 标题栏、tab 或 workspace 可打开对应的命令菜单，右键 pane 里的文字可复制、粘贴或打开路径。快捷键沿用你的 herdr 配置（前缀 `ctrl+b`）。
-- **自带 herdr**：发布包附带 herdr 0.9.5（Linux/macOS × amd64/arm64），本机没装 herdr 时使用它。它和自己安装的 herdr 完全一样，使用相同的配置、会话和机器列表。右键本机选择 **管理 herdr**，即可启动、停止它的服务器，并通过 herdr 自带的更新程序更新 herdr，无需终端；右键 SSH 机器选择 **更新 herdr**，会按 herdr 自己的 `herdr --remote` 流程更新那台机器。
+- **自带 herdr**：发布包附带 herdr 0.9.5（Linux/macOS × amd64/arm64），本机没装 herdr 时使用它。它和自己安装的 herdr 完全一样，使用相同的配置、会话和机器列表。右键任一机器选择 **管理 herdr**，即可启动、停止、重启它的 herdr 服务器，本机还能通过 herdr 自带的更新程序更新 herdr，无需终端；**重启 herdr** 直接重启那台机器的服务器，机器重启后也可用它把服务器启动起来。右键 SSH 机器选择 **更新 herdr**，会按 herdr 自己的 `herdr --remote` 流程更新那台机器。
 - **多机器**：直接使用 herdr 里保存的 SSH 机器，在侧栏右键机器可以在这里禁用或启用它。每台机器只开一条 ssh 连接，在上面运行一个自动上传的静态 agent（linux/macOS × amd64/arm64），所有通信都在这条连接里多路复用；机器上不监听任何端口。
 - **为 agent 设计**：
   - 汇总所有机器上 blocked 和 done 的 agent，agent 需要输入或完成时发浏览器通知并播放提示音；

@@ -23,6 +23,7 @@ import {
   Power,
   PowerOff,
   RefreshCw,
+  RotateCw,
   Wrench,
   Rows2,
   SquareCode,
@@ -113,20 +114,26 @@ export function surfaceMenu(o: {
 }
 
 /** A machine's menu in the sidebar: enable or disable it, and manage its
- * herdr (the local machine's server, or herdr's own update of a remote one). */
+ * herdr: its server (needs the agent connected), and on an SSH machine
+ * herdr's own update. */
 export function machineMenu(m: string): MenuEntry[] {
   const s = useStore.getState();
   const st = s.machines[m];
   if (s.readOnly || !st) return [];
   const out: MenuEntry[] = [];
   if (st.status !== 'disabled') {
+    const connected = st.status === 'ready' || st.status === 'degraded';
     out.push(
-      st.kind === 'local'
-        ? { label: t('menu.manageHerdr'), icon: <Wrench />, run: () => s.openHerdr(m) }
-        : { label: t('menu.updateRemoteHerdr'), icon: <RefreshCw />, run: () => s.openRemoteHerdr(m) },
-      'sep',
-      { label: t('menu.disableMachine'), icon: <PowerOff />, danger: true, run: () => void actions.setMachineEnabled(m, false) },
+      { label: t('menu.manageHerdr'), icon: <Wrench />, disabled: st.kind !== 'local' && !connected, run: () => s.openHerdr(m) },
+      { label: t('menu.restartHerdr'), icon: <RotateCw />, disabled: !connected, run: () => void actions.restartHerdr(m) },
     );
+    if (st.kind !== 'local') out.push({ label: t('menu.updateRemoteHerdr'), icon: <RefreshCw />, run: () => s.openRemoteHerdr(m) });
+    out.push('sep', {
+      label: t('menu.disableMachine'),
+      icon: <PowerOff />,
+      danger: true,
+      run: () => void actions.setMachineEnabled(m, false),
+    });
   } else {
     out.push({ label: t('menu.enableMachine'), icon: <Power />, run: () => void actions.setMachineEnabled(m, true) });
   }

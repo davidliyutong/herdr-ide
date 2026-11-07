@@ -489,8 +489,9 @@ func TestSettingsPerMachineScope(t *testing.T) {
 	}
 }
 
-// Managing herdr is limited to the core host, refused in read-only mode and
-// audited (feature 17).
+// Every machine's herdr server can be started, stopped and restarted; only
+// the core host's herdr is checked and updated. Actions are refused in
+// read-only mode and audited (feature 17).
 func TestHerdrEndpoints(t *testing.T) {
 	specs := []machines.Spec{
 		{ID: "local", Label: "local", Kind: machines.KindLocal, Enabled: true},
@@ -512,11 +513,15 @@ func TestHerdrEndpoints(t *testing.T) {
 		code         int
 		body         string
 	}{
-		{Options{}, "GET", "/api/m/gpu/herdr", 400, "not_local"},
+		{Options{}, "GET", "/api/m/gpu/herdr", 502, "transport"}, // not connected
 		{Options{}, "POST", "/api/m/gpu/herdr/update", 400, "not_local"},
+		{Options{}, "POST", "/api/m/gpu/herdr/check", 400, "not_local"},
 		{Options{}, "POST", "/api/m/local/herdr/uninstall", 404, ""},
+		{Options{}, "POST", "/api/m/nope/herdr/restart", 404, ""},
 		{Options{ReadOnly: true}, "POST", "/api/m/local/herdr/start", 403, "read-only"},
-		{Options{Audit: &audit}, "POST", "/api/m/local/herdr/stop", 502, "transport"}, // not connected
+		{Options{ReadOnly: true}, "POST", "/api/m/gpu/herdr/restart", 403, "read-only"},
+		{Options{Audit: &audit}, "POST", "/api/m/local/herdr/stop", 502, "transport"},
+		{Options{Audit: &audit}, "POST", "/api/m/gpu/herdr/restart", 502, "transport"},
 		{Options{ReadOnly: true}, "GET", "/api/m/local/herdr", 502, "transport"},
 	} {
 		w := do(c.opts, c.method, c.path)
@@ -524,8 +529,10 @@ func TestHerdrEndpoints(t *testing.T) {
 			t.Errorf("%s %s: %d %s", c.method, c.path, w.Code, w.Body)
 		}
 	}
-	if !strings.Contains(audit.String(), `"event":"herdr.stop"`) || !strings.Contains(audit.String(), `"machine":"local"`) {
-		t.Fatalf("audit: %s", audit.String())
+	for _, want := range []string{`"event":"herdr.stop"`, `"machine":"local"`, `"event":"herdr.restart"`, `"machine":"gpu"`, `"session":`} {
+		if !strings.Contains(audit.String(), want) {
+			t.Fatalf("audit lacks %s: %s", want, audit.String())
+		}
 	}
 }
 

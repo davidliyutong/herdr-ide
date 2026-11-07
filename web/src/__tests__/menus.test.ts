@@ -336,8 +336,8 @@ describe('machineMenu', () => {
       useStore.getState().setReadOnly(false);
       useStore.getState().setMachines([ssh('ready')]);
       const entries = machineMenu('gpu');
-      expect(labels(entries)).toEqual(['Update herdr…', '-', 'Disable machine']);
-      (entries[2] as MenuItem).run();
+      expect(labels(entries)).toEqual(['Manage herdr…', 'Restart herdr…', 'Update herdr…', '-', 'Disable machine']);
+      (entries[4] as MenuItem).run();
       const req = useDialog.getState().current;
       expect(req?.kind).toBe('confirm');
       if (req?.kind === 'confirm') req.resolve(true);
@@ -359,6 +359,55 @@ describe('machineMenu', () => {
       expect(machineMenu('gpu')).toEqual([]);
     } finally {
       useStore.getState().setReadOnly(false);
+      useDialog.setState({ current: undefined });
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('restarts herdr on a connected machine after asking', async () => {
+    const { useDialog } = await import('../dialog');
+    const fetchMock = vi.fn((_url: string, _init?: RequestInit) =>
+      Promise.resolve(new Response(JSON.stringify({ managed: false, running: true }), { status: 200 })),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const toast = vi.spyOn(useStore.getState(), 'toast');
+    try {
+      useStore.getState().setReadOnly(false);
+      useStore.getState().setMachines([ssh('degraded')]);
+      const restart = machineMenu('gpu')[1] as MenuItem;
+      expect(restart.disabled).toBe(false);
+      restart.run();
+      const req = useDialog.getState().current;
+      expect(req?.kind).toBe('confirm');
+      if (req?.kind === 'confirm') req.resolve(true);
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+      expect(fetchMock.mock.calls[0][0]).toBe('/api/m/gpu/herdr/restart');
+      expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST' });
+      await vi.waitFor(() => expect(toast).toHaveBeenLastCalledWith('herdr restarted on gpu.'));
+
+      // A failure names the machine and herdr's output.
+      fetchMock.mockResolvedValueOnce(
+        new Response(JSON.stringify({ managed: false, running: false, error: 'start_failed', output: 'no tty' }), { status: 200 }),
+      );
+      useDialog.setState({ current: undefined });
+      (machineMenu('gpu')[1] as MenuItem).run();
+      const again = useDialog.getState().current;
+      if (again?.kind === 'confirm') again.resolve(true);
+      await vi.waitFor(() => expect(toast).toHaveBeenLastCalledWith('Could not restart herdr on gpu: The server did not start. no tty'));
+
+      // Declining sends nothing; without the agent there is nothing to ask.
+      useDialog.setState({ current: undefined });
+      (machineMenu('gpu')[1] as MenuItem).run();
+      const no = useDialog.getState().current;
+      if (no?.kind === 'confirm') no.resolve(false);
+      await Promise.resolve();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      useStore.getState().setMachines([ssh('error')]);
+      const entries = machineMenu('gpu') as MenuItem[];
+      expect(entries[0].disabled).toBe(true);
+      expect(entries[1].disabled).toBe(true);
+    } finally {
+      toast.mockRestore();
       useDialog.setState({ current: undefined });
       vi.unstubAllGlobals();
     }

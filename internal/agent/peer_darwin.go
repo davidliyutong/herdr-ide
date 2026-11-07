@@ -1,9 +1,10 @@
 package agent
 
 import (
-	"errors"
 	"net"
 	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 // peerPid returns the process at the other end of a unix socket connection.
@@ -24,12 +25,26 @@ func peerPid(c *net.UnixConn) (int, error) {
 	return pid, serr
 }
 
-// peerCred is peerPid with the peer's user; macOS has no virtual displays,
-// so the user is not needed there and not reported.
+// peerCred returns the process and user at the other end of a unix socket
+// connection (for a connected client: the process that listens).
 func peerCred(c *net.UnixConn) (pid, uid int, err error) {
 	pid, err = peerPid(c)
 	if err != nil {
 		return 0, 0, err
 	}
-	return pid, -1, errors.New("peer user not available on darwin")
+	raw, err := c.SyscallConn()
+	if err != nil {
+		return 0, 0, err
+	}
+	var cred *unix.Xucred
+	var serr error
+	if err := raw.Control(func(fd uintptr) {
+		cred, serr = unix.GetsockoptXucred(int(fd), unix.SOL_LOCAL, unix.LOCAL_PEERCRED)
+	}); err != nil {
+		return 0, 0, err
+	}
+	if serr != nil {
+		return 0, 0, serr
+	}
+	return pid, int(cred.Uid), nil
 }

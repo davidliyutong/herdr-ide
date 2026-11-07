@@ -119,7 +119,7 @@ after a successful reply it carries op-specific bytes.
 | `exec` | core → agent | – (buffered output in the reply) |
 | `dial-unix` | core → agent | raw pipe to a socket in the agent's run directory |
 | `code-server` | core → agent | actions `status`, `install` (chunked tarball), `download` (the machine fetches `URL`, checked against `Digest`), `start`, `stop`, `install-ext`, `uninstall-ext`, `marker`; `Bin` selects an installed code-server |
-| `herdr` | core → agent | – (an empty reply at once, then a second reply with `Herdr` when the action is done); actions `status`, `start`, `stop` (the server of `Session`), `check` (herdr's newest release), `update` (only the application's managed copy) |
+| `herdr` | core → agent | – (an empty reply at once, then a second reply with `Herdr` when the action is done); actions `status`, `start`, `stop`, `restart` (the server of `Session`; nothing is started or stopped while another user's process or an unresponsive listener holds its socket; a restart stops only this user's answering server, then starts one), `check` (herdr's newest release), `update` (only the application's managed copy) |
 | `bridge` | agent → core | JSON lines between the VS Code extension and the core |
 | `gui` | core → agent | actions `status`, `install` (fetch Xvfb in user space), `start`, `keep` (start the display keeper for `Session`'s herdr server), `shells` (which of the pids in `Args` were started with the display) (reply `GUI`); `video` and `video-install` (`Digest`: the video encoder's SHA-256; the second streams the gzip-compressed encoder, chunked) reply whether it is installed and the stream kinds it makes here (`GUI.Video`, `GUI.VideoEncoders`); `attach`: messages `[kind u8][len u32][payload]`, JSON events (`window`, `gone`, `layer`, `layer_gone`, `cursor`, `stats`, `video` (a window's stream starts, or ends without a codec)) and frames (`GUIFrameHeader` + JPEG/PNG, or a video frame of the whole window, `Enc` 3, 4 for key frames) from the agent, JSON commands (`watch`, `ack`, `refresh`, `codecs` (the stream kinds all viewers decode, also sent with `watch` and `refresh`), `keyframe`, input, `close`) from the core |
 
@@ -156,8 +156,9 @@ and closed through `POST /m/{id}/gui/{win}/close`;
 `POST /api/m/{id}/gui/enable` gives open panes the display, see
 [14](features/14-gui-windows.md). `PUT /api/settings` takes an optional
 `machine` for settings that can differ per machine. `GET /api/m/{id}/herdr`
-and `POST /api/m/{id}/herdr/{start|stop|check|update}` manage the local
-machine's herdr; the WebSocket `GET /api/m/{id}/herdr/remote` runs the local
+and `POST /api/m/{id}/herdr/{start|stop|restart}` manage a machine's herdr
+server, `POST /api/m/{id}/herdr/{check|update}` the local machine's copy of
+herdr; the WebSocket `GET /api/m/{id}/herdr/remote` runs the local
 herdr's `herdr --remote` for an SSH machine in a PTY, see
 [17](features/17-local-herdr-management.md).
 

@@ -2,15 +2,17 @@ import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import { useStore } from '../state/store';
 import { confirmDialog } from '../dialog';
-import { herdrRequest, isNewer, type HerdrAction, type LocalHerdr } from '../lib/localHerdr';
+import { herdrError, herdrRequest, isNewer, type HerdrAction, type MachineHerdr } from '../lib/localHerdr';
 import { APP_NAME } from '../brand';
-import { hasMessage, t, type MessageKey } from '../i18n';
+import { t } from '../i18n';
 
-/** Manages the core host's herdr: its server and, for the application's own
- * copy, updates through herdr's updater (docs/features/17). */
+/** Manages a machine's herdr: its server and, for the application's own copy
+ * on the core host, updates through herdr's updater (docs/features/17). */
 export function HerdrDialog() {
   const m = useStore((s) => s.herdr);
-  const [st, setSt] = useState<LocalHerdr>();
+  const machine = useStore((s) => (s.herdr ? s.machines[s.herdr] : undefined));
+  const local = machine?.kind === 'local';
+  const [st, setSt] = useState<MachineHerdr>();
   const [busy, setBusy] = useState<HerdrAction | 'status'>();
   const close = () => useStore.getState().openHerdr(undefined);
 
@@ -26,13 +28,12 @@ export function HerdrDialog() {
   const stop = async (restart: boolean) => {
     const ok = await confirmDialog({
       title: t(restart ? 'herdr.restartTitle' : 'herdr.stopTitle'),
-      message: t('herdr.stopMessage'),
+      message: local ? t('herdr.stopMessage') : t('herdr.stopMessageMachine', { machine: machine?.label ?? m ?? '' }),
       confirm: t(restart ? 'herdr.restart' : 'herdr.stop'),
       danger: true,
     });
     if (!ok) return;
-    await run('stop');
-    if (restart) await run('start');
+    await run(restart ? 'restart' : 'stop');
   };
 
   useEffect(() => {
@@ -41,25 +42,25 @@ export function HerdrDialog() {
   }, [m]);
 
   if (!m) return null;
-  const error = st?.error
-    ? hasMessage(`herdr.error.${st.error}`)
-      ? t(`herdr.error.${st.error}` as MessageKey)
-      : t('herdr.error.transport')
-    : '';
-  const updatable = !!st?.managed && isNewer(st.latest, st.version);
+  const error = herdrError(st);
+  // Only the core host's own copy is updated here; SSH machines update
+  // through herdr --remote (the machine's Update herdr).
+  const managed = local && !!st?.managed;
+  const updatable = managed && isNewer(st?.latest, st?.version);
+  const title = local ? t('herdr.title') : t('herdr.titleMachine', { machine: machine?.label ?? m });
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && !busy && close()}>
       <div
         className="modal dialog"
         role="dialog"
-        aria-label={t('herdr.title')}
+        aria-label={title}
         onKeyDown={(e) => {
           e.stopPropagation();
           if (e.key === 'Escape' && !busy) close();
         }}
       >
         <div className="modal-head">
-          <span className="modal-title">{t('herdr.title')}</span>
+          <span className="modal-title">{title}</span>
           <span className="spacer" />
           <button className="icon" title={t('dialog.cancel')} disabled={!!busy} onClick={close}>
             <X />
@@ -76,7 +77,7 @@ export function HerdrDialog() {
                   <div className="small muted ellipsis" title={st.bin}>
                     {st.bin}
                   </div>
-                  <div className="small muted">{st.managed ? t('herdr.managed', { app: APP_NAME }) : t('herdr.installed')}</div>
+                  {local && <div className="small muted">{managed ? t('herdr.managed', { app: APP_NAME }) : t('herdr.installed')}</div>}
                 </div>
               )}
               {st.bin && (
@@ -89,7 +90,7 @@ export function HerdrDialog() {
                   {st.restart_needed && <div className="small warn">{t('herdr.restartNeeded')}</div>}
                 </div>
               )}
-              {st.managed && st.latest && !st.error && (
+              {managed && st.latest && !st.error && (
                 <div>{updatable ? t('herdr.available', { version: st.latest }) : t('herdr.upToDate')}</div>
               )}
               {busy && busy !== 'status' && <div className="muted">{t(`herdr.busy.${busy}`)}</div>}
@@ -99,7 +100,7 @@ export function HerdrDialog() {
           )}
         </div>
         <div className="dialog-actions">
-          {st?.managed && (
+          {managed && (
             <button disabled={!!busy} onClick={() => void run('check')}>
               {t('herdr.check')}
             </button>
@@ -112,11 +113,9 @@ export function HerdrDialog() {
           {st?.bin &&
             (st.running ? (
               <>
-                {st.restart_needed && (
-                  <button disabled={!!busy} onClick={() => void stop(true)}>
-                    {t('herdr.restart')}
-                  </button>
-                )}
+                <button className={st.restart_needed ? 'primary' : undefined} disabled={!!busy} onClick={() => void stop(true)}>
+                  {t('herdr.restart')}
+                </button>
                 <button disabled={!!busy} onClick={() => void stop(false)}>
                   {t('herdr.stop')}
                 </button>

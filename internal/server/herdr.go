@@ -1,8 +1,9 @@
 package server
 
-// Managing the local machine's herdr from the UI (docs/features/17): its
-// status, starting and stopping its server, and updating the application's
-// copy of herdr through herdr's own updater.
+// Managing a machine's herdr from the UI (docs/features/17): its status and
+// starting, stopping and restarting its server on any machine, and, on the
+// local machine, updating the application's copy of herdr through herdr's
+// own updater.
 
 import (
 	"context"
@@ -16,20 +17,11 @@ import (
 	"herdr-ide/internal/machines"
 )
 
-var herdrActions = map[string]bool{"start": true, "stop": true, "check": true, "update": true}
-
-// localMachine is the machine named in the path, if it is the core host.
-func (s *Server) localMachine(w http.ResponseWriter, r *http.Request) *machines.Machine {
-	mc := s.machine(w, r)
-	if mc == nil {
-		return nil
-	}
-	if !mc.Local() {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "not_local"})
-		return nil
-	}
-	return mc
-}
+// herdrActions are the actions of POST /api/m/{id}/herdr/{action}, with
+// whether machines other than the core host accept them. Only the server's
+// are: an update replaces the application's copy of herdr, and SSH machines
+// update herdr through herdr's own `herdr --remote` (handleHerdrRemote).
+var herdrActions = map[string]bool{"start": true, "stop": true, "restart": true, "check": false, "update": false}
 
 func (s *Server) handleHerdrStatus(w http.ResponseWriter, r *http.Request) {
 	s.herdrRequest(w, r, "status")
@@ -37,7 +29,7 @@ func (s *Server) handleHerdrStatus(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleHerdrAction(w http.ResponseWriter, r *http.Request) {
 	action := r.PathValue("action")
-	if !herdrActions[action] {
+	if _, ok := herdrActions[action]; !ok {
 		http.Error(w, "unknown action", http.StatusNotFound)
 		return
 	}
@@ -45,15 +37,19 @@ func (s *Server) handleHerdrAction(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) herdrRequest(w http.ResponseWriter, r *http.Request, action string) {
-	mc := s.localMachine(w, r)
+	mc := s.machine(w, r)
 	if mc == nil {
+		return
+	}
+	if action != "status" && !herdrActions[action] && !mc.Local() {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "not_local"})
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Minute)
 	defer cancel()
 	st, err := herdrOp(ctx, mc, action)
-	if action == "start" || action == "stop" || action == "update" {
-		ev := map[string]any{"machine": mc.ID()}
+	if action != "status" && action != "check" {
+		ev := map[string]any{"machine": mc.ID(), "session": mc.State().Session}
 		if err != nil {
 			ev["error"] = err.Error()
 		} else if st.Error != "" {
@@ -61,6 +57,10 @@ func (s *Server) herdrRequest(w http.ResponseWriter, r *http.Request, action str
 		}
 		s.audit.log(r, "herdr."+action, ev)
 		mc.Refresh()
+		if err == nil && st.Running {
+			// Panes show again without waiting for the surface's backoff.
+			s.wakeSurface(mc.ID())
+		}
 	}
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "transport", "detail": err.Error()})

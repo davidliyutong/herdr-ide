@@ -255,7 +255,7 @@ What herdr-ide starts on a machine and how it is reclaimed:
 | Desktop core | Electron launches its bundled binary | SIGTERM on normal quit, with a 20 s deadline before SIGKILL of that owned child; parent-stdin EOF also stops it if Electron crashes. herdr servers and pane programs remain running. |
 | Electron profile | First desktop launch | Kept until manually removed; Chromium manages its caches. Development has a separate profile. Core stderr is bounded to 16 KiB in memory; no desktop log files accumulate. |
 | `herdr-ide-agent` | one per core while connected | Exits when its ssh session ends; a dead link is detected by keepalives within about 45 s. |
-| local herdr server started from the UI | **Manage herdr**, on request | Belongs to the user like one started by the herdr TUI and outlives the core; stopped with **Manage herdr** or `herdr server stop`. |
+| herdr server started from the UI (local or SSH machine) | **Manage herdr** or **Restart herdr…**, on request | Belongs to the user like one started by the herdr TUI and outlives the core and the agent; stopped with **Manage herdr** or `herdr server stop`, and with the machine. On a machine whose logind ends user processes at logout (`KillUserProcesses=yes`) it ends with the agent's ssh login unless the user enabled lingering (`loginctl enable-linger`). Its output goes to `~/.herdr-ide/herdr/server.log` there, replaced at every start from the UI of any session. |
 | `herdr update` | **Update** in **Manage herdr** | Ends with the update (15 min limit); herdr's temporary download is in `~/.herdr-ide/herdr/`. |
 | `herdr --remote` client (core host) | **Update herdr** for an SSH machine | Ends when herdr exits or the window closes. A herdr it installs on the machine (usually `~/.local/bin/herdr`) is herdr's own installation and stays until the user removes it; a server it starts there belongs to the user. |
 | Connection to herdr's client socket | one per core, to the machine the browser shows | Closed when another machine is shown, 10 s after the owning browser left (unless another browser takes over), or with the agent; no process is started. |
@@ -271,8 +271,10 @@ What herdr-ide starts on a machine and how it is reclaimed:
 | curl or wget (`--code-server-install=download`) | while a machine downloads code-server | Ends with the download (20 min limit); the partial file in `~/.herdr-ide/code-server/` is removed, or with the unused versions after 14 days if the agent was killed. |
 | Disk | see [reference](reference.md#files-and-directories) | Uploads and logs after 7 days; agent builds and code-server versions unused for 14 days; Xvfb packages and video encoders unused for 14 days when another one is installed. Files dropped on a pane are written into the pane's directory and belong to the user, like files copied there by hand. |
 
-herdr servers are started and stopped by the user: on SSH machines through
-herdr, on the local host also through **Manage herdr**. herdr on an SSH
+herdr servers are started and stopped by the user: through herdr, or
+through **Manage herdr** and **Restart herdr…** in a machine's context menu
+(an SSH machine that rebooted is *degraded* until its server is started
+again; **Retry** does not start it). herdr on an SSH
 machine changes only through herdr's own `herdr --remote` flow, which
 **Update herdr** (the machine's context menu) runs in a terminal where the
 user answers herdr's questions. The bundled herdr and
