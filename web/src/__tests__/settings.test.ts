@@ -62,7 +62,13 @@ describe('server settings', () => {
   });
 
   it('groups the desktop shortcuts and translates them', () => {
-    for (const k of ['desktop-new-tab-key', 'desktop-close-tab-key']) {
+    for (const k of [
+      'desktop-new-tab-key',
+      'desktop-close-tab-key',
+      'desktop-settings-key',
+      'desktop-new-workspace-key',
+      'desktop-toggle-code-key',
+    ]) {
       expect(serverSection(k)).toBe('shortcuts');
       expect(hasMessage(`settings.${k}`), k).toBe(true);
     }

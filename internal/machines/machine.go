@@ -72,6 +72,12 @@ type Machine struct {
 	// to connect again at once after the session it closed (both under mu).
 	sessStart time.Time
 	reconnect bool
+	// enabled is the spec's flag as the user last set it; stopRun ends the
+	// connection loop of an enabled machine; enableCh wakes a disabled one
+	// (under mu).
+	enabled  bool
+	stopRun  context.CancelFunc
+	enableCh chan struct{}
 	// herdrHint is the herdr executable the agent tries first (from herdr's
 	// SSH metadata), guarded by mu.
 	herdrHint string
@@ -89,6 +95,8 @@ func newMachine(spec Spec, dial Dialer, logger *log.Logger, publish func(State),
 		refreshCh: make(chan struct{}, 1),
 		retryCh:   make(chan struct{}, 1),
 		herdrHint: spec.HerdrBin,
+		enabled:   spec.Enabled,
+		enableCh:  make(chan struct{}, 1),
 	}
 	m.state = State{Spec: spec, Status: StatusConnecting}
 	if !spec.Enabled {
@@ -251,11 +259,81 @@ func (m *Machine) Refresh() {
 	}
 }
 
-// Run keeps the machine connected until ctx ends.
+// Run keeps the machine connected while it is enabled, until ctx ends.
 func (m *Machine) Run(ctx context.Context) {
-	if !m.spec.Enabled {
+	for ctx.Err() == nil {
+		m.mu.Lock()
+		on := m.enabled
+		var rctx context.Context
+		if on {
+			var cancel context.CancelFunc
+			rctx, cancel = context.WithCancel(ctx)
+			m.stopRun = cancel
+		}
+		m.mu.Unlock()
+		if !on {
+			select {
+			case <-ctx.Done():
+				return
+			case <-m.enableCh:
+			}
+			continue
+		}
+		m.connect(rctx)
+		m.mu.Lock()
+		m.stopRun()
+		m.stopRun = nil
+		on = m.enabled
+		m.mu.Unlock()
+		if !on {
+			// The session's last steps may have published a status since.
+			m.markDisabled()
+		}
+	}
+}
+
+// setEnabled enables or disables the machine. Disabling ends its session
+// (the agent exits and stops what it started, such as code-server) and drops
+// what was learnt from herdr; panes keep running in herdr.
+func (m *Machine) setEnabled(on bool) {
+	m.mu.Lock()
+	changed := m.enabled != on
+	m.enabled = on
+	stop := m.stopRun
+	m.mu.Unlock()
+	if !changed {
 		return
 	}
+	if on {
+		m.update(func(st *State) {
+			st.Enabled = true
+			st.Status = StatusConnecting
+			st.Error = ""
+		})
+		select {
+		case m.enableCh <- struct{}{}:
+		default:
+		}
+		return
+	}
+	if stop != nil {
+		stop()
+	}
+	m.markDisabled()
+}
+
+func (m *Machine) markDisabled() {
+	m.update(func(st *State) {
+		st.Enabled = false
+		st.Status = StatusDisabled
+		st.Error = ""
+		st.Snapshot = nil
+		st.Layouts = nil
+	})
+}
+
+// connect keeps the machine connected until ctx ends.
+func (m *Machine) connect(ctx context.Context) {
 	backoff := 500 * time.Millisecond
 	for ctx.Err() == nil {
 		m.setStatus(StatusConnecting, nil)

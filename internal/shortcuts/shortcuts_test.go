@@ -21,10 +21,25 @@ func TestValidate(t *testing.T) {
 }
 
 func TestDefaults(t *testing.T) {
-	for goos, want := range map[string][2]string{"darwin": {"cmd+t", "cmd+w"}, "linux": {"ctrl+shift+t", "ctrl+shift+w"}, "windows": {"ctrl+shift+t", "ctrl+shift+w"}} {
+	keys := []string{SettingNewTab, SettingCloseTab, SettingSettings, SettingNewWS, SettingCode}
+	for goos, want := range map[string][]string{
+		"darwin":  {"cmd+t", "cmd+w", "cmd+comma", "cmd+n", "cmd+j"},
+		"linux":   {"ctrl+shift+t", "ctrl+shift+w", "ctrl+comma", "ctrl+shift+n", "ctrl+shift+j"},
+		"windows": {"ctrl+shift+t", "ctrl+shift+w", "ctrl+comma", "ctrl+shift+n", "ctrl+shift+j"},
+	} {
 		d := defs(goos)
-		if d[0].Key != SettingNewTab || d[0].Default != want[0] || d[1].Key != SettingCloseTab || d[1].Default != want[1] {
-			t.Errorf("%s: defaults %q, %q", goos, d[0].Default, d[1].Default)
+		if len(d) != len(keys) {
+			t.Fatalf("%s: %d settings", goos, len(d))
+		}
+		for i := range d {
+			if d[i].Key != keys[i] || d[i].Default != want[i] {
+				t.Errorf("%s: %s = %q, want %s = %q", goos, d[i].Key, d[i].Default, keys[i], want[i])
+			}
+		}
+		for _, def := range d {
+			if err := Validate(def.Default); err != nil {
+				t.Errorf("%s: default %q: %v", def.Key, def.Default, err)
+			}
 		}
 	}
 }

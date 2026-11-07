@@ -88,8 +88,21 @@ implemented independently.
   and files or folders dropped on a pane of the local machine are pasted as
   their own paths instead of being uploaded ([06](06-quick-look-and-files.md)).
   It is answered in the preload; nothing goes to the main process.
-  The menu gains **Tab** (New Tab, Close Tab) between Edit and View, and
-  **Window** lists Minimize, Zoom, Close Window (`cmd+w`) and Bring All to
+- The app's Info.plist declares folders (`public.folder`, rank `None`: the
+  Dock accepts dropped folders, but the app never becomes Finder's opener for
+  them), so folders dropped on the Dock icon arrive as `open-file`, also the
+  ones that launch the app. The shell takes only directories, keeps them
+  (`desktop/src/folders.ts`) until the page asks for them through the
+  bridge's `onOpenFolder`, which the page does on load and the shell forgets
+  when the page navigates or its renderer goes, then sends each path to the
+  main page and brings the window forward; the page creates the workspaces as
+  for folders dropped on the sidebar ([04](04-layout-and-keyboard.md)).
+  Unpackaged development runs use Electron's own Info.plist and get no Dock
+  drops; `open -a` still reports folders there.
+  The menus are the app menu (with **Settings…**), **File** (New
+  Workspace, New Tab, Close Tab), Edit, **View** (Show or Hide VS Code, then
+  Electron's reload, developer tools, zoom and full screen items), and
+  **Window**, which lists Minimize, Zoom, Close Window (`cmd+w`) and Bring All to
   Front; Close Window does not close the main window for a shortcut key
   left to VS Code.
 - The web brand constants and English/Chinese message dictionaries are

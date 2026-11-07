@@ -146,6 +146,34 @@ export const actions = {
     await conn.api(m, 'tab.close', { tab_id: tab }).catch(report);
   },
 
+  /** Enables or disables a machine (saved by the core over herdr's catalog).
+   * Disabling a connected machine asks first: its agent disconnects and
+   * VS Code there stops; its panes keep running in herdr. */
+  async setMachineEnabled(m: string, enabled: boolean) {
+    const st = useStore.getState().machines[m];
+    if (
+      !enabled &&
+      st?.status !== 'disabled' &&
+      !(await confirmDialog({
+        title: t('confirm.disableMachineTitle', { machine: st?.label ?? m }),
+        message: t('confirm.disableMachine'),
+        confirm: t('menu.disableMachine'),
+        danger: true,
+      }))
+    )
+      return;
+    try {
+      const res = await fetch(`/api/m/${encodeURIComponent(m)}/enabled`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      });
+      if (!res.ok) throw new Error(t('machine.enableFailed', { detail: (await res.text()).trim() || String(res.status) }));
+    } catch (e) {
+      report(e);
+    }
+  },
+
   async newWorkspace(m?: string, cwd?: string) {
     const c = current();
     m ??= c?.m;
@@ -329,6 +357,25 @@ export const actions = {
 
   toggleSidebar() {
     useStore.getState().toggleSidebar();
+  },
+
+  /** Shows or hides the VS Code panel: an open panel (VS Code or preview)
+   * closes and the terminal gets the keys again; otherwise the VS Code panel
+   * shown last comes back while it is of the focused pane's machine (its
+   * window is kept for a while, so it is back at once), else the focused
+   * pane's folder opens in VS Code. */
+  toggleCode() {
+    const s = useStore.getState();
+    if (s.dock) {
+      s.openDock(undefined);
+      const c = actions.focusedContext();
+      if (c?.pane) getTerm(c.m, c.pane).focus();
+      return;
+    }
+    const c = actions.focusedContext();
+    const last = s.lastCode;
+    if (last && (!c || last.m === c.m)) s.openDock(last);
+    else if (c) actions.openCode(c.m, c.cwd);
   },
 
   currentTab() {

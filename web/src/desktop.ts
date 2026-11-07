@@ -15,6 +15,7 @@ export interface DesktopShell {
   onRecordedKey(fn: (spec: string) => void): () => void;
   setTheme(theme: string): void;
   pathForFile(file: File): string;
+  onOpenFolder(fn: (path: string) => void): () => void;
 }
 
 export const desktopShell: DesktopShell | undefined = (globalThis as { desktopShell?: DesktopShell }).desktopShell;
@@ -23,6 +24,9 @@ export const desktopShell: DesktopShell | undefined = (globalThis as { desktopSh
 export const shortcutSettings: Record<string, string> = {
   new_tab: 'desktop-new-tab-key',
   close_tab: 'desktop-close-tab-key',
+  open_settings: 'desktop-settings-key',
+  new_workspace: 'desktop-new-workspace-key',
+  toggle_code: 'desktop-toggle-code-key',
 };
 
 export function isShortcutSetting(key: string): boolean {

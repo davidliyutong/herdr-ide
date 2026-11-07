@@ -36,8 +36,9 @@ API and the code-server proxy on `127.0.0.1:7780` by default.
 4. **Read-only mode** (`--read-only`): panes are shown but get no input,
    focus or colors from the browser, and a read-only browser never takes the
    session from a writable one ([18](18-endpoint-surfaces.md)); uploads, ssh
-   authentication, bridge commands, VS Code and retrying machines
-   (`denied.retry`) refused; herdr calls limited to reads.
+   authentication, bridge commands, VS Code, retrying machines
+   (`denied.retry`) and enabling or disabling them refused; herdr calls
+   limited to reads.
 5. **herdr API allowlist**: workspace/tab/pane/agent/layout/worktree methods,
    snapshot and plugin actions; no `server.*`, integrations, plugin
    installation, event streams or client-shell calls. The browser never

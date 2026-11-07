@@ -22,8 +22,10 @@ All notable changes are documented here. The format follows
   frame statistics: what the machine spent capturing and encoding, the
   frames and bytes the browser received and how long it took to decode and
   draw them, and the time from capture to the picture being drawn.
-- Desktop app: drag folders from Finder onto the sidebar to create a
-  workspace for each on the local machine.
+- Desktop app: drag folders from Finder onto the sidebar or the app's Dock
+  icon to create a workspace for each on the local machine. A drop on the
+  Dock icon also launches the app, and the workspaces appear once the local
+  machine is connected.
 - Files dragged onto a pane are pasted as their paths. Files not on the
   pane's machine are uploaded into the pane's directory there first, under
   their own names (`-1`, `-2`… when taken; nothing is replaced); in the
@@ -43,6 +45,18 @@ All notable changes are documented here. The format follows
   pane, as its header. Nothing is drawn over a pane's terminal any more.
 - Setting **Programs copying to the clipboard** (terminal section):
   automatic, ask or off.
+- Right-click a machine in the sidebar to disable or enable it (a disabled
+  machine also has an **Enable** button). The choice is saved by herdr-ide
+  (`machines.json` beside its settings) over herdr's saved machines and
+  applies at once; disabling a connected machine asks first and keeps its
+  panes running in herdr.
+- Desktop app: `cmd+,` and **Settings…** in the app menu open the settings,
+  `cmd+n` (File → New Workspace) creates a workspace, and `cmd+j` (View →
+  Show or Hide VS Code) hides the VS Code panel or shows the last one again,
+  also from inside VS Code (`desktop-settings-key`,
+  `desktop-new-workspace-key`, `desktop-toggle-code-key`, changeable under
+  Settings → Shortcuts; VS Code keeps its own `cmd+,` and `cmd+n`). The
+  Tab menu is now the File menu.
 - `make desktop-install` builds the macOS app and installs it into
   `/Applications`, quitting and reopening a running copy.
 
@@ -83,6 +97,9 @@ All notable changes are documented here. The format follows
   without waiting a minute for the old ssh connection: the core tells an
   ssh control master whose connection stopped answering to take no new
   sessions, so the next connection opens a new one.
+- The panes of a machine that reconnects (after a network loss, or when it
+  is enabled again) show again within seconds, instead of after the
+  surface's reconnect backoff of up to 16 s.
 - Stopping herdr's server on a machine no longer leaves its virtual
   display (Xvfb) running for six hours: the display lasts while the server
   runs, programs use it or the core is connected, and ends a minute after.

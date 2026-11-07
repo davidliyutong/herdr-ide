@@ -20,6 +20,10 @@ import {
   Minimize2,
   Pencil,
   Plus,
+  Power,
+  PowerOff,
+  RefreshCw,
+  Wrench,
   Rows2,
   SquareCode,
   X,
@@ -104,6 +108,27 @@ export function surfaceMenu(o: {
     if (!mediaExt.test(r.path))
       out.push({ label: t('link.menuCode', { name }), icon: <SquareCode />, run: () => actions.openPath(o.ctx.m, r.path, r.line, r.col) });
     out.push({ label: t('link.menuCopyPath'), icon: <Copy />, run: () => copyText(r.path) });
+  }
+  return out;
+}
+
+/** A machine's menu in the sidebar: enable or disable it, and manage its
+ * herdr (the local machine's server, or herdr's own update of a remote one). */
+export function machineMenu(m: string): MenuEntry[] {
+  const s = useStore.getState();
+  const st = s.machines[m];
+  if (s.readOnly || !st) return [];
+  const out: MenuEntry[] = [];
+  if (st.status !== 'disabled') {
+    out.push(
+      st.kind === 'local'
+        ? { label: t('menu.manageHerdr'), icon: <Wrench />, run: () => s.openHerdr(m) }
+        : { label: t('menu.updateRemoteHerdr'), icon: <RefreshCw />, run: () => s.openRemoteHerdr(m) },
+      'sep',
+      { label: t('menu.disableMachine'), icon: <PowerOff />, danger: true, run: () => void actions.setMachineEnabled(m, false) },
+    );
+  } else {
+    out.push({ label: t('menu.enableMachine'), icon: <Power />, run: () => void actions.setMachineEnabled(m, true) });
   }
   return out;
 }

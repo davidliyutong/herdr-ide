@@ -121,8 +121,11 @@ shrinks the repeated cell fields.
   is missing or refused; the UI shows `herdr_too_old` and the core retries
   every 15 s (after updating herdr, the next try connects).
 - **Connection lost** (agent or herdr restart) → `surf error disconnected`,
-  reconnect with backoff (1 s doubling to 8 s); the first surface is
-  complete.
+  reconnect with backoff (1 s doubling to 16 s); when the machine's agent
+  session comes (back), ready or degraded, a waiting connection tries again
+  at once with the backoff reset (`wakeSurface`), so a machine back from a
+  network loss or re-enabled shows its panes within seconds. The first
+  surface is complete.
 - **Revision mismatch or malformed message** → the connection is closed and
   reopened.
 - **Endpoint request refused** (`tab.focus` of a closed tab) → a `notice`;
@@ -151,6 +154,7 @@ whose patches and scroll controls must reproduce herdr's next complete
 surface, delta and patch validation, bounds on hostile lengths, handshake
 errors, chunked request replies); `internal/server/surface_test.go`
 (ownership: busy, takeover, read-only rules, handover; the binary encoding
-shared with the web tests); `TestIntegrationEndpoint` and
+shared with the web tests; a waiting connection is woken when its machine
+connects); `TestIntegrationEndpoint` and
 `TestIntegrationKeyParity` (`make it`) against a real herdr through the
 agent.

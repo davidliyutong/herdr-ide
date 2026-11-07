@@ -56,6 +56,13 @@ settings between machines.
   `?folder=` selects the workspace folder (the focused pane's cwd). It sits
   beside the terminals or below them (a setting, also toggled from the
   panel's header); width and height are remembered per browser.
+- In the desktop app `cmd+j` (`desktop-toggle-code-key`,
+  [04](04-layout-and-keyboard.md)) shows or hides the panel: an open panel
+  (VS Code or preview) closes and the terminal gets the keys again; a closed
+  one shows the VS Code panel shown last, as it was, while it belongs to the
+  focused pane's machine (its window is kept for 10 minutes, so it is back at
+  once), else the focused pane's folder opens. It works while VS Code has
+  focus too, so VS Code's own `cmd+j` (its panel) is not available there.
 
 **Theme** (`theme` WebSocket message, `bridgeHub.setTheme`)
 

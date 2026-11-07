@@ -109,3 +109,99 @@ func TestRetryReconnectsADegradedMachine(t *testing.T) {
 	}
 	waitFor("degraded again", func() bool { return m.State().Status == StatusDegraded })
 }
+
+func TestOverridesSaveAndApply(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "conf", "machines.json")
+	o := LoadOverrides(path)
+	if err := o.SetEnabled("gpu", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.SetEnabled("robot", true); err != nil {
+		t.Fatal(err)
+	}
+	specs := []Spec{{ID: "gpu", Enabled: true}, {ID: "robot"}, {ID: "other", Enabled: true}}
+	LoadOverrides(path).Apply(specs)
+	if specs[0].Enabled || !specs[1].Enabled || !specs[2].Enabled {
+		t.Fatalf("applied: %+v", specs)
+	}
+	if st, err := os.Stat(path); err != nil || st.Mode().Perm()&0o077 != 0 {
+		t.Fatalf("file: %v %v", st, err)
+	}
+	// A missing or broken file gives none.
+	os.WriteFile(path, []byte("{"), 0o600)
+	specs = []Spec{{ID: "gpu", Enabled: true}}
+	LoadOverrides(path).Apply(specs)
+	if !specs[0].Enabled {
+		t.Fatal("a broken file disabled a machine")
+	}
+}
+
+// Disabling a connected machine ends its session at once and forgets its
+// herdr state; enabling it connects again.
+func TestDisableAndEnableAtRuntime(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("HERDR_SOCKET_PATH", "")
+	logger := log.New(io.Discard, "", 0)
+	var dials atomic.Int32
+	dial := func(ctx context.Context, spec Spec) (*transport.Session, string, error) {
+		dials.Add(1)
+		s, err := transport.DialLocal(ctx, agent.Options{Logger: logger})
+		return s, "test/test", err
+	}
+	mg := NewManager([]Spec{{ID: "x", Label: "x", Kind: KindSSH, Session: "herdr-ide-none", Enabled: true}}, dial, logger)
+	path := filepath.Join(t.TempDir(), "machines.json")
+	mg.UseOverrides(LoadOverrides(path))
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		mg.Run(ctx)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+	m := mg.Get("x")
+	waitFor := func(what string, ok func() bool) {
+		t.Helper()
+		for deadline := time.Now().Add(10 * time.Second); !ok(); time.Sleep(10 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("timed out waiting for %s (status %s, %d dials)", what, m.State().Status, dials.Load())
+			}
+		}
+	}
+	waitFor("a session", func() bool { return m.Session() != nil })
+	first := m.Session()
+
+	if err := mg.SetEnabled("x", false); err != nil {
+		t.Fatal(err)
+	}
+	waitFor("the session to end", func() bool {
+		select {
+		case <-first.Done():
+			return m.Session() == nil
+		default:
+			return false
+		}
+	})
+	time.Sleep(100 * time.Millisecond)
+	if st := m.State(); st.Status != StatusDisabled || st.Enabled || st.Snapshot != nil || dials.Load() != 1 {
+		t.Fatalf("disabled: status %s enabled %v, %d dials", st.Status, st.Enabled, dials.Load())
+	}
+	if specs := []Spec{{ID: "x", Enabled: true}}; func() bool { LoadOverrides(path).Apply(specs); return specs[0].Enabled }() {
+		t.Fatal("the choice was not saved")
+	}
+
+	if err := mg.SetEnabled("x", true); err != nil {
+		t.Fatal(err)
+	}
+	waitFor("a new session", func() bool { s := m.Session(); return s != nil && s != first && dials.Load() == 2 })
+	if !m.State().Enabled {
+		t.Fatal("not enabled")
+	}
+	if err := mg.SetEnabled("nope", true); err != ErrUnknownMachine {
+		t.Fatalf("unknown machine: %v", err)
+	}
+}

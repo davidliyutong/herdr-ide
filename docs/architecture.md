@@ -22,7 +22,7 @@ browser (React, canvas)     ──WebSocket + HTTP──▶  core (Go, `herdr-id
 | `internal/agentproto` | Stream protocol shared by core and agent. |
 | `internal/agent` | Agent: herdr, terminals, files, code-server supervision, bridge listener, housekeeping. |
 | `internal/transport` | yamux sessions: in-process for the local machine, ssh stdio for others; agent upload. |
-| `internal/machines` | Machine registry (herdr's saved machines), state machine, herdr snapshots and subscriptions. |
+| `internal/machines` | Machine registry (herdr's saved machines, enabled or disabled over it from the UI), state machine, herdr snapshots and subscriptions. |
 | `internal/herdr` | herdr public socket API client; `endpoint`: client of herdr's endpoint protocol (generation 1). |
 | `internal/herdrdist` | herdr release bundled in archives: version, upstream asset names and SHA-256 digests. |
 | `internal/checksum` | SHA-256 of files, shared by code-server and herdr downloads. |
@@ -47,15 +47,17 @@ and waits up to 20 seconds before killing the owned core.
 
 The renderer reuses the browser UI with no Node APIs, sandboxing and context
 isolation. The main window's preload exposes only `desktopShell` for direct
-shortcuts (`cmd+t`/`cmd+w`): the shell intercepts them in
+shortcuts (`cmd+t`/`cmd+w`/`cmd+,`/`cmd+n`/`cmd+j`): the shell intercepts them in
 `before-input-event`, reading their keys from the core settings
-`desktop-new-tab-key` / `desktop-close-tab-key`, leaves them to VS Code
-while one of its frames has focus, and the page runs the action; the
+`desktop-*-key`, leaves them to VS Code while one of its frames has focus
+(except showing or hiding the VS Code panel), and the page runs the action; the
 settings dialog records keys through the same bridge
 ([04](features/04-layout-and-keyboard.md)), the page reports its theme
 setting, which the native title bar follows, and it asks the bridge where a
 file or folder dropped from Finder is on disk, to create a workspace there
-or paste its path into a pane of the local machine. Same-origin popups become equally restricted native
+or paste its path into a pane of the local machine; folders dropped on the
+Dock icon reach the page through the same bridge, also when the drop
+launched the app. Same-origin popups become equally restricted native
 windows; HTTP(S) links outside the core open in the default browser. Packaging
 and lifecycle details are in [16](features/16-desktop-packaging.md).
 
@@ -144,7 +146,9 @@ Text frames are JSON with a `t` field; binary frames are pane surface updates
 HTTP endpoints besides files, uploads and the code-server proxy:
 `GET /api/config`, `GET /api/keymap`, `GET /api/machines`, and
 `GET`/`PUT /api/settings` (core settings with their definitions, see
-[13](features/13-settings-and-appearance.md)). A program window is shown by
+[13](features/13-settings-and-appearance.md)), and `PUT /api/m/{id}/enabled`
+(`{"enabled": bool}`: enables or disables a machine, see
+[02](features/02-multi-machine-transport.md)). A program window is shown by
 the app at `GET /m/{id}/gui/{win}`, streamed over the WebSocket
 `/m/{id}/gui/{win}/ws` (JSON events and binary frames out, JSON commands in;
 `?video=avc1,vp8` names the video streams the browser decodes)

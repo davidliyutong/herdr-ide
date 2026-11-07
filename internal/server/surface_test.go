@@ -209,3 +209,25 @@ func TestClipboardForwarding(t *testing.T) {
 		}
 	}
 }
+
+// A connection waiting to reconnect tries again as soon as its machine's
+// agent session is up, instead of after a backoff that grew meanwhile.
+func TestSurfaceWakesWhenTheMachineConnects(t *testing.T) {
+	s := newTestServer()
+	ss := &surfSession{s: s, m: "m", wake: make(chan struct{}, 1)}
+	s.surf.sessions["m"] = ss
+	s.wakeSurface("m")
+	select {
+	case <-ss.wake:
+	default:
+		t.Fatal("a waiting connection was not woken")
+	}
+	s.wakeSurface("other")
+	ss.conn = &endpoint.Conn{}
+	s.wakeSurface("m")
+	select {
+	case <-ss.wake:
+		t.Fatal("a live connection was woken")
+	default:
+	}
+}

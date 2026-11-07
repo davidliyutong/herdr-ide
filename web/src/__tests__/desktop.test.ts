@@ -117,6 +117,44 @@ describe('runShortcut', () => {
     expect(api).not.toHaveBeenCalled();
   });
 
+  it('opens the settings', () => {
+    useStore.getState().openSettings(false);
+    runShortcut('open_settings');
+    expect(useStore.getState().settingsOpen).toBe(true);
+    useStore.getState().openSettings(false);
+  });
+
+  it('asks for a new workspace', () => {
+    runShortcut('new_workspace');
+    expect(useDialog.getState().current?.kind).toBe('newWorkspace');
+  });
+
+  it('shows and hides the VS Code panel, coming back to the one shown last', () => {
+    const s = useStore.getState();
+    s.openDock(undefined);
+    useStore.setState({ lastCode: undefined });
+    // Nothing shown before: the focused pane's folder opens.
+    runShortcut('toggle_code');
+    expect(useStore.getState().dock).toEqual({ kind: 'code', m: 'm', folder: undefined });
+    runShortcut('toggle_code');
+    expect(useStore.getState().dock).toBeUndefined();
+    // The panel shown last comes back, as it was.
+    s.openDock({ kind: 'code', m: 'm', folder: '/srv/app' });
+    runShortcut('toggle_code');
+    expect(useStore.getState().dock).toBeUndefined();
+    runShortcut('toggle_code');
+    expect(useStore.getState().dock).toEqual({ kind: 'code', m: 'm', folder: '/srv/app' });
+    // A preview panel hides too.
+    s.openDock({ kind: 'preview', m: 'm', path: '/srv/a.png' });
+    runShortcut('toggle_code');
+    expect(useStore.getState().dock).toBeUndefined();
+    // Another machine's last panel is not brought back.
+    useStore.setState({ lastCode: { kind: 'code', m: 'other', folder: '/x' } });
+    runShortcut('toggle_code');
+    expect(useStore.getState().dock).toEqual({ kind: 'code', m: 'm', folder: undefined });
+    s.openDock(undefined);
+  });
+
   it('ignores unknown actions', () => {
     runShortcut('close_workspace');
     expect(useDialog.getState().current).toBeUndefined();

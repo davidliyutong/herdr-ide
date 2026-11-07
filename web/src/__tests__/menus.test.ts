@@ -11,7 +11,7 @@ import { insertSlot, near } from '../reorderDrag';
 import { dragBegins, trackDrag } from '../drag';
 import { withOrder, workspaceTabs, type MachineState } from '../lib/herdr';
 import { closeMenu, isItem, openMenu, stepIndex, tidy, useMenu, type MenuEntry, type MenuItem } from '../contextMenu';
-import { paneMenu, tabMenu, workspaceMenu } from '../menus';
+import { machineMenu, paneMenu, tabMenu, workspaceMenu } from '../menus';
 import { actions } from '../actions';
 import { ContextMenu } from '../components/ContextMenu';
 
@@ -321,5 +321,46 @@ describe('ContextMenu', () => {
     expect(useMenu.getState().menu).toBeUndefined();
     closeMenu(false);
     await act(async () => root.unmount());
+  });
+});
+
+describe('machineMenu', () => {
+  const labels = (entries: MenuEntry[]) => entries.map((e) => (isItem(e) ? e.label : '-'));
+  const ssh = (status: string) => ({ id: 'gpu', label: 'gpu', kind: 'ssh', status }) as unknown as MachineState;
+
+  it('disables a connected machine after asking, and enables a disabled one', async () => {
+    const { useDialog } = await import('../dialog');
+    const fetchMock = vi.fn((_url: string, _init?: RequestInit) => Promise.resolve(new Response('{}', { status: 200 })));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      useStore.getState().setReadOnly(false);
+      useStore.getState().setMachines([ssh('ready')]);
+      const entries = machineMenu('gpu');
+      expect(labels(entries)).toEqual(['Update herdr…', '-', 'Disable machine']);
+      (entries[2] as MenuItem).run();
+      const req = useDialog.getState().current;
+      expect(req?.kind).toBe('confirm');
+      if (req?.kind === 'confirm') req.resolve(true);
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+      expect(fetchMock.mock.calls[0][0]).toBe('/api/m/gpu/enabled');
+      expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'PUT', body: JSON.stringify({ enabled: false }) });
+
+      // Enabling does not ask.
+      useDialog.setState({ current: undefined });
+      useStore.getState().setMachines([ssh('disabled')]);
+      const off = machineMenu('gpu');
+      expect(labels(off)).toEqual(['Enable machine']);
+      (off[0] as MenuItem).run();
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+      expect(fetchMock.mock.calls[1][1]).toMatchObject({ body: JSON.stringify({ enabled: true }) });
+      expect(useDialog.getState().current).toBeUndefined();
+
+      useStore.getState().setReadOnly(true);
+      expect(machineMenu('gpu')).toEqual([]);
+    } finally {
+      useStore.getState().setReadOnly(false);
+      useDialog.setState({ current: undefined });
+      vi.unstubAllGlobals();
+    }
   });
 });

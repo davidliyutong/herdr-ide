@@ -125,7 +125,10 @@ Non-goals: a separate herdr-ide layout model; arbitrary docking of panes.
   Finder onto the sidebar create a workspace each on the local machine,
   without the dialog (herdr names them after the folder; the last one is
   selected); the sidebar shows where they go while they are over it, and
-  dropped files that are not folders are skipped with a note. Browsers do
+  dropped files that are not folders are skipped with a note. Folders
+  dropped on the app's Dock icon do the same; when the drop launched the app,
+  they wait up to 30 s for the local machine to connect, else a note says
+  they were not opened. Browsers do
   not tell the page where a dropped folder is, so they do not offer this, nor
   does read-only mode (`web/src/drop.ts`,
   [16](16-desktop-packaging.md)). Closing a pane or tab with a working agent,
@@ -154,11 +157,17 @@ Non-goals: a separate herdr-ide layout model; arbitrary docking of panes.
 `web/src/desktop.ts`)
 
 - The desktop app owns its keys, so it adds direct shortcuts without the
-  prefix: new tab (`cmd+t` on macOS, `ctrl+shift+t` elsewhere) and close
+  prefix: new tab (`cmd+t` on macOS, `ctrl+shift+t` elsewhere), close
   tab (`cmd+w` / `ctrl+shift+w`; outside macOS, as in terminal emulators,
-  since `ctrl+w` deletes a word in shells). Prefix bindings keep working;
-  browsers get none of this and behave as before.
-- They are core settings (`desktop-new-tab-key`, `desktop-close-tab-key`), so
+  since `ctrl+w` deletes a word in shells), settings (`cmd+,` /
+  `ctrl+,`, the usual key for an application's settings), new workspace
+  (`cmd+n` / `ctrl+shift+n`, asking for its folder) and show or hide the
+  VS Code panel (`cmd+j` / `ctrl+shift+j`, [05](05-vscode-panel.md)).
+  Prefix bindings keep working; browsers get none of this and behave as
+  before.
+- They are core settings (`desktop-new-tab-key`, `desktop-close-tab-key`,
+  `desktop-settings-key`, `desktop-new-workspace-key`,
+  `desktop-toggle-code-key`), so
   they survive restarts and the profile; the settings dialog shows them under
   **Shortcuts** only in the desktop app. A spec is modifiers (`cmd`, `ctrl`,
   `alt`, `shift`, at least one of the first three so a shortcut never takes
@@ -175,7 +184,7 @@ Non-goals: a separate herdr-ide layout model; arbitrary docking of panes.
   `before-input-event` (so neither the menu, e.g. `cmd+w` or `cmd+q`, nor a
   shortcut acts on it) and sends its spec to the page; plain keys reach the
   field, where Escape cancels and Backspace removes the shortcut. Reset
-  restores the default. The dialog refuses the other action's key and
+  restores the default. The dialog refuses the other actions' keys and
   herdr's prefix key, and notes that `alt` shortcuts without `cmd` or `ctrl`
   take keys that type characters and act as Meta in terminals. Recording
   stops when the field loses focus, the page navigates or its renderer
@@ -188,8 +197,11 @@ Non-goals: a separate herdr-ide layout model; arbitrary docking of panes.
   not repeat the action.
 - While VS Code has focus (the focused frame, or the frame containing it,
   is a `/m/<machine>/code/` frame of the core), its keys belong to it: the
-  shell leaves matching keys to VS Code, so `cmd+w` closes the editor and
-  `cmd+t` opens VS Code's symbol search. If VS Code does not take such a
+  shell leaves matching keys to VS Code, so `cmd+w` closes the editor,
+  `cmd+t` opens VS Code's symbol search, `cmd+,` VS Code's settings and
+  `cmd+n` a new file. Showing or hiding the VS Code panel is the exception:
+  hiding it from inside VS Code is what the key is for, so VS Code loses its
+  own `cmd+j` (its bottom panel) in the desktop app. If VS Code does not take such a
   key, the menu's Close Window does not act on it either, since closing the
   main window quits the app.
 - The page ignores shortcuts while a dialog or the palette is open. Closing
@@ -197,8 +209,9 @@ Non-goals: a separate herdr-ide layout model; arbitrary docking of panes.
   programs end (Cancel has focus): the key is easy to press by habit, and
   unlike closing a browser tab it ends programs. Closing from the tab bar or
   with the prefix binding asks only when an agent is working.
-- The **Tab** menu lists both actions with their keys; it does not register
-  them itself, so in program windows `cmd+w` (Window → Close Window) still
+- The **File** menu lists new workspace, new tab and close tab with their
+  keys, **View** shows or hides VS Code, the app menu has **Settings…**; the
+  menu does not register them itself, so in program windows `cmd+w` (Window → Close Window) still
   closes the window. The main window's `cmd+w` closes the tab instead; with
   the shortcut removed it closes the window again.
 - Key hints (tooltips, context menus) show the direct shortcut instead of

@@ -11,9 +11,17 @@ import { acceleratorKey, isKeyName, keyName } from '../../web/src/shortcutKey';
 export const shortcutSettings = {
   new_tab: 'desktop-new-tab-key',
   close_tab: 'desktop-close-tab-key',
+  open_settings: 'desktop-settings-key',
+  new_workspace: 'desktop-new-workspace-key',
+  toggle_code: 'desktop-toggle-code-key',
 } as const;
 
 export type ShortcutAction = keyof typeof shortcutSettings;
+
+/** Actions whose shortcut runs also while VS Code has focus: hiding the
+ * VS Code panel from inside it is the point. Other shortcuts leave their key
+ * to VS Code there. */
+export const overCode: ReadonlySet<ShortcutAction> = new Set<ShortcutAction>(['toggle_code']);
 export type Shortcuts = Partial<Record<ShortcutAction, string>>;
 
 export interface Shortcut {
@@ -92,11 +100,20 @@ export function shortcutsFromSettings(reply: unknown): Shortcuts {
   return out;
 }
 
-/** The default shortcuts, as internal/shortcuts sets them: cmd+t / cmd+w on
- * macOS; elsewhere ctrl+shift+t / ctrl+shift+w, as in terminal emulators,
- * since ctrl+w deletes a word in shells. Used until the core's are read. */
+/** The default shortcuts, as internal/shortcuts sets them: cmd+t / cmd+w /
+ * cmd+, / cmd+n / cmd+j on macOS; elsewhere ctrl+shift with the same letters,
+ * as in terminal emulators, since ctrl+w, ctrl+n and ctrl+j are keys of
+ * shells and editors, and ctrl+,. Used until the core's are read. */
 export function defaultShortcuts(platform: string): Shortcuts {
-  return platform === 'darwin' ? { new_tab: 'cmd+t', close_tab: 'cmd+w' } : { new_tab: 'ctrl+shift+t', close_tab: 'ctrl+shift+w' };
+  return platform === 'darwin'
+    ? { new_tab: 'cmd+t', close_tab: 'cmd+w', open_settings: 'cmd+comma', new_workspace: 'cmd+n', toggle_code: 'cmd+j' }
+    : {
+        new_tab: 'ctrl+shift+t',
+        close_tab: 'ctrl+shift+w',
+        open_settings: 'ctrl+comma',
+        new_workspace: 'ctrl+shift+n',
+        toggle_code: 'ctrl+shift+j',
+      };
 }
 
 /** The spec of a key-down while the settings dialog records a shortcut, e.g.

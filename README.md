@@ -27,7 +27,8 @@ browser tab, with VS Code (code-server) one keystroke away.
   (right-click the local machine) starts and stops its server and updates
   herdr through herdr's own updater, without a terminal; **Update herdr** on
   an SSH machine runs herdr's own `herdr --remote` update there.
-- **Multi-machine.** Uses the SSH machines saved in herdr. One ssh connection
+- **Multi-machine.** Uses the SSH machines saved in herdr; right-click a
+  machine in the sidebar to disable or enable it here. One ssh connection
   per machine runs a small static agent (linux/macOS × amd64/arm64, uploaded
   automatically) that multiplexes everything; nothing listens on the
   machines.
@@ -109,14 +110,15 @@ ARCH=x64 make desktop-dmg        # Intel; default is the host Node architecture
 The desktop and browser share a terminal-pane icon, with a multi-resolution
 macOS version for Finder and the Dock.
 
-Drag folders from Finder onto the sidebar to create a workspace for each on
-the local machine. Files and folders dropped on a pane of the local machine
-are pasted as their own paths, without uploading.
+Drag folders from Finder onto the sidebar or the app's Dock icon to create a
+workspace for each on the local machine. Files and folders dropped on a pane
+of the local machine are pasted as their own paths, without uploading.
 
-In the app, `cmd+t` opens a tab and `cmd+w` closes it after asking; while
-VS Code has focus, both keys stay VS Code's. Change or remove them under
-**Settings → Shortcuts**. Prefix bindings keep working, and browsers keep
-their own `cmd+t` / `cmd+w`.
+In the app, `cmd+t` opens a tab, `cmd+w` closes it after asking, `cmd+n`
+creates a workspace, `cmd+,` opens the settings and `cmd+j` shows or hides
+the VS Code panel; while VS Code has focus, all but `cmd+j` stay VS Code's.
+Change or remove them under **Settings → Shortcuts**. Prefix bindings keep
+working, and browsers keep their own `cmd+t` / `cmd+w`.
 
 The app starts its own core at `http://127.0.0.1:7781` with instance
 `desktop`; quitting or closing the main window stops that core. The app

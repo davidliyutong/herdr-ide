@@ -16,6 +16,38 @@ type Manager struct {
 	subs    map[int]func(State)
 	agentFn map[int]func(AgentEvent)
 	nextSub int
+
+	// overrides keep the user's enabled and disabled machines (UseOverrides).
+	overrides *Overrides
+}
+
+// UseOverrides applies the user's enabled and disabled machines and keeps
+// later changes in o. Call before Run.
+func (mg *Manager) UseOverrides(o *Overrides) {
+	mg.overrides = o
+	for _, id := range mg.order {
+		m := mg.byID[id]
+		specs := []Spec{m.spec}
+		o.Apply(specs)
+		m.setEnabled(specs[0].Enabled)
+	}
+}
+
+// SetEnabled enables or disables machine id from the UI: it is saved over
+// herdr's catalog, and the machine connects or ends its session at once. A
+// disabled machine's panes keep running in its herdr.
+func (mg *Manager) SetEnabled(id string, on bool) error {
+	m := mg.byID[id]
+	if m == nil {
+		return ErrUnknownMachine
+	}
+	if mg.overrides != nil {
+		if err := mg.overrides.SetEnabled(id, on); err != nil {
+			return err
+		}
+	}
+	m.setEnabled(on)
+	return nil
 }
 
 // NewManager creates machines for specs; call Run to connect them.
