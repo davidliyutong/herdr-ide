@@ -8,6 +8,12 @@ All notable changes are documented here. The format follows
 
 ### Added
 
+- **Manage herdr** and the new **Restart herdr…** work for SSH machines:
+  start, stop or restart a machine's herdr server from its context menu,
+  without an ssh terminal. A machine that rebooted stays *degraded* because
+  its herdr server is gone and **Retry** only reconnects the agent; its
+  status block now offers **Manage herdr** to start the server again.
+
 - Program windows that keep changing (a simulator, a rotating 3D plot) are
   sent as video: H.264 through NVENC on NVIDIA GPUs or VA-API on Intel and
   AMD GPUs, else VP8 on the CPU, decoded in the browser with WebCodecs; once

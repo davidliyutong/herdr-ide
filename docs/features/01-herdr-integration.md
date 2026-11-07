@@ -84,7 +84,9 @@ machines, reimplementing its agent detection.
   subscription is rejected; refetch and retry after 2 s.
 - **herdr not running or not found** → agent reports `herdr_error`, the
   machine shows *degraded*; snapshots are retried, and **Retry** connects
-  a new agent ([02](02-multi-machine-transport.md)).
+  a new agent ([02](02-multi-machine-transport.md)); a server that is not
+  running is started with **Manage herdr** or **Restart herdr…**
+  ([17](17-local-herdr-management.md)).
 - **herdr without endpoint generation 1** (older than 0.9.5) → the surface
   shows `herdr_too_old`; the rest (snapshots, actions) keeps working.
 - **herdr protocol change** → only the public API and endpoint generation 1

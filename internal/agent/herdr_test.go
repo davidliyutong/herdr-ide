@@ -194,6 +194,92 @@ func TestUpdateOnlyTheManagedCopy(t *testing.T) {
 	}
 }
 
+// Restarting stops a running server before starting one, only starts a
+// server that is not running (herdr's stop fails without one), and starts
+// none when the stop failed.
+func TestRestartHerdrServer(t *testing.T) {
+	noInstalledHerdr(t)
+	a := testAgent(t)
+	cfg, err := os.MkdirTemp("/tmp", "hr-") // short: macOS socket paths
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(cfg) })
+	t.Setenv("XDG_CONFIG_HOME", cfg)
+	t.Setenv("HERDR_SOCKET_PATH", "")
+	socket := a.herdrSocket("")
+	if err := os.MkdirAll(filepath.Dir(socket), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(a.home, ".local", "bin", "herdr")
+	os.MkdirAll(filepath.Dir(bin), 0o755)
+	// The stand-in's server exits at once, so every start fails; its stop
+	// removes the socket, or refuses. PATH is empty: commands need a path.
+	fake := func(stop string) {
+		t.Helper()
+		os.Remove(bin + ".args")
+		script := `#!/bin/sh
+echo "$@" >> "$0.args"
+case "$*" in
+  --version) echo "herdr 0.9.5" ;;
+  "status server --json") echo '{"running":false}' ;;
+  "server stop") ` + stop + ` ;;
+esac
+`
+		if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	calls := func() []string {
+		b, _ := os.ReadFile(bin + ".args")
+		var out []string
+		for _, l := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+			if strings.HasPrefix(l, "server") {
+				out = append(out, l)
+			}
+		}
+		return out
+	}
+	serve := func() {
+		t.Helper()
+		ln, err := net.Listen("unix", socket)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { ln.Close() })
+		go func() {
+			for {
+				c, err := ln.Accept()
+				if err != nil {
+					return
+				}
+				c.Close()
+			}
+		}()
+	}
+
+	fake(`/bin/rm -f '` + socket + `'`)
+	st := herdrOp(t, a, agentproto.Header{Action: "restart"})
+	if got := calls(); st.Error != "start_failed" || strings.Join(got, ",") != "server" {
+		t.Fatalf("not running: %+v %q", st, got)
+	}
+
+	serve()
+	fake(`/bin/rm -f '` + socket + `'`)
+	st = herdrOp(t, a, agentproto.Header{Action: "restart"})
+	if got := calls(); st.Error != "start_failed" || strings.Join(got, ",") != "server stop,server" {
+		t.Fatalf("running: %+v %q", st, got)
+	}
+
+	os.Remove(socket)
+	serve()
+	fake(`echo refused; exit 1`)
+	st = herdrOp(t, a, agentproto.Header{Action: "restart"})
+	if got := calls(); st.Error != "stop_failed" || !strings.Contains(st.Output, "refused") || strings.Join(got, ",") != "server stop" {
+		t.Fatalf("stop refused: %+v %q", st, got)
+	}
+}
+
 // The client socket follows herdr's client_socket_path rules.
 func TestHerdrClientSocket(t *testing.T) {
 	a := testAgent(t)

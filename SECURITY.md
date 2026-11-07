@@ -79,12 +79,17 @@ host (`GET /api/m/{id}/herdr/remote`: refused in `--read-only`, audited as
 `herdr.remote`, SSH machines only, the target passed as one argument); herdr
 then asks the user before installing anything there or stopping a server.
 
-The local machine's herdr can be managed from the UI
+herdr can be managed from the UI
 ([17](docs/features/17-local-herdr-management.md)):
-`POST /api/m/{id}/herdr/{start|stop|check|update}` are mutations behind the
-usual guards, refused in `--read-only`, audited (`herdr.start`, `herdr.stop`,
-`herdr.update`) and accepted only for the local machine
-(`internal/server/server_test.go`). An update runs herdr's own
+`POST /api/m/{id}/herdr/{start|stop|restart|check|update}` are mutations
+behind the usual guards, refused in `--read-only` and audited
+(`herdr.start`, `herdr.stop`, `herdr.restart`, `herdr.update`). The server
+actions accept every configured machine, local or SSH, and run only
+`herdr [--session S] server` or `herdr [--session S] server stop` there as
+the user, with the herdr the agent found; the UI asks before stopping or
+restarting, which ends every terminal on that machine. `check` and `update`
+are accepted only for the local machine (`internal/server/server_test.go`).
+An update runs herdr's own
 `herdr update --handoff` on the application's copy only: it trusts herdr's
 release manifest on `herdr.dev` and the SHA-256 digests it publishes, like a
 user running `herdr update`, and never changes the bundled file or an

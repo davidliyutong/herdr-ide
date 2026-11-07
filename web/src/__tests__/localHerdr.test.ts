@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { herdrRequest, isNewer } from '../lib/localHerdr';
+import { herdrError, herdrRequest, isNewer } from '../lib/localHerdr';
 import { hasMessage } from '../i18n';
 
 describe('isNewer', () => {
@@ -37,8 +37,20 @@ describe('herdrRequest', () => {
   });
 
   it('has a message for every error code the agent sends', () => {
-    for (const code of ['not_found', 'start_failed', 'stop_failed', 'check_failed', 'update_failed', 'not_managed', 'transport']) {
+    for (const code of [
+      'not_found',
+      'start_failed',
+      'stop_failed',
+      'check_failed',
+      'update_failed',
+      'not_managed',
+      'not_local',
+      'transport',
+    ]) {
       expect(hasMessage(`herdr.error.${code}`)).toBe(true);
     }
+    expect(herdrError({ managed: false, running: false, error: 'stop_failed' })).toBe('The server did not stop.');
+    expect(herdrError({ managed: false, running: false, error: 'mystery' })).toBe('The request failed.');
+    expect(herdrError({ managed: false, running: true })).toBe('');
   });
 });

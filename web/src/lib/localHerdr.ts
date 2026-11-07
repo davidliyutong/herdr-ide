@@ -1,7 +1,10 @@
-// The core host's herdr as the UI manages it (docs/features/17): its status,
-// starting and stopping its server, and updating the application's copy.
+// A machine's herdr as the UI manages it (docs/features/17): its status and
+// starting, stopping and restarting its server on every machine, and, on the
+// core host, updating the application's copy.
 
-export interface LocalHerdr {
+import { hasMessage, t } from '../i18n';
+
+export interface MachineHerdr {
   bin?: string;
   version?: string;
   /** The application's copy of herdr, which it may update. */
@@ -12,24 +15,32 @@ export interface LocalHerdr {
   /** herdr's newest release, after a check. */
   latest?: string;
   /** A code: not_found, start_failed, stop_failed, check_failed,
-   * update_failed, not_managed, transport. */
+   * update_failed, not_managed, not_local, transport. */
   error?: string;
   /** herdr's own output for the error, or of an update. */
   output?: string;
 }
 
-export type HerdrAction = 'start' | 'stop' | 'check' | 'update';
+/** check and update are for the core host only. */
+export type HerdrAction = 'start' | 'stop' | 'restart' | 'check' | 'update';
 
-export async function herdrRequest(m: string, action?: HerdrAction): Promise<LocalHerdr> {
+export async function herdrRequest(m: string, action?: HerdrAction): Promise<MachineHerdr> {
   const url = `/api/m/${encodeURIComponent(m)}/herdr${action ? '/' + action : ''}`;
   try {
     const res = await fetch(url, action ? { method: 'POST' } : undefined);
     const body = await res.json().catch(() => ({}));
-    if (res.ok) return body as LocalHerdr;
+    if (res.ok) return body as MachineHerdr;
     return { managed: false, running: false, error: 'transport', output: [body.error, body.detail].filter(Boolean).join(': ') };
   } catch (e) {
     return { managed: false, running: false, error: 'transport', output: String(e) };
   }
+}
+
+/** The message for a status's error code, empty without one. */
+export function herdrError(st?: MachineHerdr): string {
+  if (!st?.error) return '';
+  const key = `herdr.error.${st.error}`;
+  return hasMessage(key) ? t(key) : t('herdr.error.transport');
 }
 
 function parts(v: string): number[] {

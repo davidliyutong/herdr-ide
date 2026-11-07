@@ -412,4 +412,22 @@ func TestIntegrationHerdrManage(t *testing.T) {
 	if st := op("stop"); st.Error != "" || st.Running {
 		t.Fatalf("stop: %+v", st)
 	}
+	// Restarting starts a stopped server and replaces a running one.
+	socket := filepath.Join(root, "config", "herdr", "sessions", itSession, "herdr.sock")
+	if st := op("restart"); st.Error != "" || !st.Running {
+		t.Fatalf("restart stopped: %+v", st)
+	}
+	before, err := os.Stat(socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st := op("restart"); st.Error != "" || !st.Running {
+		t.Fatalf("restart running: %+v", st)
+	}
+	if after, err := os.Stat(socket); err != nil || os.SameFile(before, after) {
+		t.Fatalf("server not replaced: %v", err)
+	}
+	if st := op("stop"); st.Error != "" || st.Running {
+		t.Fatalf("stop after restart: %+v", st)
+	}
 }

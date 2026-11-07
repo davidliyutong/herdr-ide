@@ -363,7 +363,8 @@ func handshakeCode(err error) string {
 }
 
 // wakeSurface makes the endpoint connection to machine m try again at once
-// when it is waiting to reconnect: the machine's agent session came (back).
+// when it is waiting to reconnect: the machine's agent session came (back),
+// or its herdr server was started from the UI.
 func (s *Server) wakeSurface(m string) {
 	s.surf.mu.Lock()
 	ss := s.surf.sessions[m]

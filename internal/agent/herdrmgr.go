@@ -228,6 +228,38 @@ func (a *Agent) startHerdrServer(ctx context.Context, bin, session string) (stri
 	}
 }
 
+// startHerdr starts the session's server and, on Linux, keeps the display
+// while it runs, since its panes may use it. It returns an error code and
+// herdr's output.
+func (a *Agent) startHerdr(ctx context.Context, bin, session string) (code, output string) {
+	out, err := a.startHerdrServer(ctx, bin, session)
+	if err != nil {
+		return "start_failed", joinOutput(out, err)
+	}
+	if runtime.GOOS == "linux" {
+		if err := a.gui.keep(session); err != nil {
+			a.logger.Printf("gui: keeping the display: %v", err)
+		}
+	}
+	return "", ""
+}
+
+// undialableWithin waits up to d until nothing accepts on socket.
+func undialableWithin(ctx context.Context, socket string, d time.Duration) bool {
+	deadline := time.Now().Add(d)
+	for dialable(socket) {
+		if time.Now().After(deadline) {
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	return true
+}
+
 func (a *Agent) stopHerdrServer(ctx context.Context, bin, session string) (string, error) {
 	var out tailBuffer
 	cmd := a.herdrCommand(ctx, bin, herdrArgs(session, "server", "stop")...)
@@ -292,7 +324,7 @@ func (a *Agent) handleHerdr(ctx context.Context, st net.Conn, h agentproto.Heade
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 	defer cancel()
 	switch h.Action {
-	case "status", "check", "start", "stop", "update":
+	case "status", "check", "start", "stop", "restart", "update":
 	default:
 		return agentproto.Fail(st, fmt.Errorf("unknown herdr action %q", h.Action))
 	}
@@ -310,7 +342,7 @@ func (a *Agent) handleHerdr(ctx context.Context, st net.Conn, h agentproto.Heade
 			code, output = "check_failed", err.Error()
 		}
 		latest = v
-	case "start", "stop", "update":
+	case "start", "stop", "restart", "update":
 		a.herdrOp.Lock()
 		defer a.herdrOp.Unlock()
 		bin, err := a.resolveHerdr(h.HerdrBin)
@@ -320,18 +352,28 @@ func (a *Agent) handleHerdr(ctx context.Context, st net.Conn, h agentproto.Heade
 		}
 		switch h.Action {
 		case "start":
-			if out, err := a.startHerdrServer(ctx, bin, h.Session); err != nil {
-				code, output = "start_failed", joinOutput(out, err)
-			} else if runtime.GOOS == "linux" {
-				// Its panes may use the display: keep it while it runs.
-				if err := a.gui.keep(h.Session); err != nil {
-					a.logger.Printf("gui: keeping the display: %v", err)
-				}
-			}
+			code, output = a.startHerdr(ctx, bin, h.Session)
 		case "stop":
 			if out, err := a.stopHerdrServer(ctx, bin, h.Session); err != nil {
 				code, output = "stop_failed", joinOutput(out, err)
 			}
+		case "restart":
+			// A server that is not running is only started: herdr's stop
+			// fails without one.
+			socket := a.herdrSocket(h.Session)
+			if dialable(socket) {
+				if out, err := a.stopHerdrServer(ctx, bin, h.Session); err != nil {
+					code, output = "stop_failed", joinOutput(out, err)
+					break
+				}
+				// herdr's stop returns once the server has exited; one that
+				// still answered would turn the start into a no-op.
+				if !undialableWithin(ctx, socket, 10*time.Second) {
+					code, output = "stop_failed", "herdr server still answers after stop"
+					break
+				}
+			}
+			code, output = a.startHerdr(ctx, bin, h.Session)
 		case "update":
 			if bin != a.managedHerdrPath() {
 				code = "not_managed"

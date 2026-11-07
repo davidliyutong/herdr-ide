@@ -47,8 +47,9 @@ const (
 	// shells) and, with action attach, streams its windows (see gui.go).
 	OpGUI Op = "gui"
 	// OpHerdr manages the herdr in use and the server of Header.Session
-	// (actions status, start, stop, check, update). An empty reply comes at
-	// once; a second reply line with Herdr follows when the action is done.
+	// (actions status, start, stop, restart, check, update). An empty reply
+	// comes at once; a second reply line with Herdr follows when the action
+	// is done.
 	OpHerdr Op = "herdr"
 )
 

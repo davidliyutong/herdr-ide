@@ -111,7 +111,10 @@ Non-goals: managing ssh keys or herdr installations; Windows machines.
   the machine does not turn *degraded* only because replies queue behind
   surfaces and program windows.
 - **herdr does not answer while the agent is connected** → *degraded* with
-  the error; fetches retry every 5 s and **Retry** reconnects.
+  the error; fetches retry every 5 s and **Retry** reconnects. Retry starts
+  no herdr server: when none runs (after the machine rebooted), the status
+  block's **Manage herdr** or the menu's **Restart herdr…** starts it
+  ([17](17-local-herdr-management.md)).
 - **Retries in a row** (two clicks, a script) → a session younger than 5 s
   is kept, so retries cannot keep a machine disconnected.
 - **Unsupported platform** → no embedded agent for the `uname` pair; the
