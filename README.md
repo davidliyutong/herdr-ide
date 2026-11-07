@@ -6,6 +6,8 @@ A terminal-first, multi-machine, agent-native web IDE for
 [herdr](https://herdr.dev): your herdr workspaces on every machine in one
 browser tab, with VS Code (code-server) one keystroke away.
 
+![Two SSH machines in one tab: Claude Code waiting for confirmation and codex done in the agent inbox, with git history and a GPU monitor in split panes](docs/images/overview.png)
+
 ## Features
 
 - **Speaks herdr's protocol.** Workspaces, tabs, split layouts and agent
@@ -66,6 +68,24 @@ browser tab, with VS Code (code-server) one keystroke away.
   position and the code-server installation method, in one dialog
   (`ctrl+b ,`). Terminals use the included JetBrains Mono font in every
   browser.
+
+## Screenshots
+
+**VS Code beside the terminals.** An agent's `path:line` opens in VS Code
+on the machine where the pane runs; the pane header opens its folder, its
+diff or Git Graph.
+
+![codex's review in a pane, with model.py opened at the line it names in VS Code](docs/images/vscode.png)
+
+**Program windows.** A matplotlib window on a remote Linux machine opens in
+a browser window of its own, with mouse and keyboard.
+
+![An animated matplotlib plot from the workstation in its own browser window, over the pane that started it](docs/images/windows.png)
+
+**Quick Look.** Right-click or ⌘/Ctrl-click a path in a terminal to preview
+it; the arrows step through the other files of the folder.
+
+![A training loss curve previewed from a file listing](docs/images/quicklook.png)
 
 ## Quick start
 
