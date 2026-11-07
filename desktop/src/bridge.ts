@@ -7,6 +7,8 @@ export const channels = {
   recording: 'desktop:shortcut-recording',
   recorded: 'desktop:shortcut-recorded',
   theme: 'desktop:theme',
+  openFolder: 'desktop:open-folder',
+  foldersWanted: 'desktop:folders-wanted',
 } as const;
 
 export interface DesktopShell {
@@ -28,4 +30,8 @@ export interface DesktopShell {
    * for anything else. Browsers keep this from pages; the desktop app uses
    * it for folders dropped to create workspaces. */
   pathForFile(file: File): string;
+  /** Calls fn with each folder opened with the app (dropped on its Dock
+   * icon), also those opened while it started; returns a function that
+   * stops it. */
+  onOpenFolder(fn: (path: string) => void): () => void;
 }

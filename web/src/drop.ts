@@ -7,7 +7,8 @@
 //   machine first (lib/files.ts), keeping files already there; folders cannot
 //   be uploaded and are skipped with a note.
 // - On the desktop app's sidebar, folders become workspaces on the local
-//   machine, one per folder, as if created in the new workspace dialog.
+//   machine, one per folder, as if created in the new workspace dialog. So
+//   do folders dropped on the app's Dock icon, which the shell reports.
 //
 // Browsers never tell a page where a dropped file is; the desktop shell's
 // bridge does (webUtils.getPathForFile). Drops of files nothing on the page
@@ -78,6 +79,74 @@ export async function dropFolders(dt: DataTransfer) {
   const folders = items.filter((i) => i.folder && i.path).map((i) => i.path);
   if (items.length > folders.length) useStore.getState().toast(t('sidebar.dropFoldersOnly', { n: items.length - folders.length }));
   for (const cwd of folders) await actions.newWorkspace(local.id, cwd);
+}
+
+// ---- the Dock icon ----
+
+/** How long folders dropped on the Dock icon wait for the local machine,
+ * which connects after the app starts. */
+export const OPEN_WAIT_MS = 30_000;
+
+const opened: string[] = [];
+let opening = false;
+
+/** The local machine once it takes requests; undefined when it does not
+ * within ms, or cannot (disabled, read-only mode, a browser). */
+function readyLocal(ms = OPEN_WAIT_MS): Promise<MachineState | undefined> {
+  // undefined: not yet; null: never.
+  const check = (): MachineState | null | undefined => {
+    const s = useStore.getState();
+    if (!desktopShell || s.readOnly) return null;
+    const m = folderDropTarget();
+    if (m?.status === 'disabled') return null;
+    return m?.status === 'ready' || m?.status === 'degraded' ? m : undefined;
+  };
+  const now = check();
+  if (now !== undefined) return Promise.resolve(now ?? undefined);
+  return new Promise((resolve) => {
+    const done = (m: MachineState | undefined) => {
+      clearTimeout(timer);
+      off();
+      resolve(m);
+    };
+    const timer = setTimeout(() => done(undefined), ms);
+    const off = useStore.subscribe(() => {
+      const m = check();
+      if (m !== undefined) done(m ?? undefined);
+    });
+  });
+}
+
+/** Creates a workspace on the local machine for a folder dropped on the
+ * app's Dock icon, as for one dropped on the sidebar; the last one is
+ * selected. When the app was launched by the drop, it waits for the local
+ * machine to connect. */
+export function openFolder(path: string) {
+  opened.push(path);
+  if (!opening) void openWaiting();
+}
+
+async function openWaiting() {
+  opening = true;
+  try {
+    while (opened.length) {
+      const local = await readyLocal();
+      if (!local) {
+        useStore.getState().toast(t('sidebar.openFoldersFailed', { n: opened.length }));
+        opened.length = 0;
+        return;
+      }
+      await actions.newWorkspace(local.id, opened.shift()!);
+    }
+  } finally {
+    opening = false;
+  }
+}
+
+/** Takes the folders the desktop shell reports; returns a function that
+ * stops it. */
+export function takeOpenedFolders(): () => void {
+  return desktopShell?.onOpenFolder(openFolder) ?? (() => {});
 }
 
 // ---- panes ----

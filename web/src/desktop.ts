@@ -15,6 +15,7 @@ export interface DesktopShell {
   onRecordedKey(fn: (spec: string) => void): () => void;
   setTheme(theme: string): void;
   pathForFile(file: File): string;
+  onOpenFolder(fn: (path: string) => void): () => void;
 }
 
 export const desktopShell: DesktopShell | undefined = (globalThis as { desktopShell?: DesktopShell }).desktopShell;

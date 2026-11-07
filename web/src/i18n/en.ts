@@ -236,6 +236,7 @@ export const en = {
   'sidebar.noPending': 'No agent is waiting for you',
   'sidebar.dropFolders': 'Drop folders to create a workspace for each on {machine}',
   'sidebar.dropFoldersOnly': 'Only folders become workspaces; {n} other dropped item(s) skipped.',
+  'sidebar.openFoldersFailed': '{n} folder(s) dropped on the Dock icon not opened: the local machine is not connected.',
   'sidebar.authenticate': 'Authenticate…',
   'sidebar.retry': 'Retry',
   'sidebar.manageHerdr': 'Manage herdr',

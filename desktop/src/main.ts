@@ -1,10 +1,12 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, powerMonitor, session, shell, type IpcMainEvent } from 'electron';
+import { statSync } from 'node:fs';
 import { join } from 'node:path';
 import { APP_NAME, APP_SLUG } from '../../web/src/brand';
 import { en, type MessageKey } from '../../web/src/i18n/en';
 import { zhCN } from '../../web/src/i18n/zh-CN';
 import { CoreProcess, coreArgs, coreEnv, corePort, DesktopError, ENV_PREFIX } from './core';
 import { channels } from './bridge';
+import { OpenedFolders } from './folders';
 import { allowPermission, isExternal, isInternal, mainWindowPreferences, themeSource, webPreferences } from './policy';
 import {
   defaultShortcuts,
@@ -39,6 +41,8 @@ let recording = false;
 // The last key-down matched a shortcut but was left to VS Code, which has
 // focus; if VS Code does not take it, the menu must not act on it either.
 let leftToCode = false;
+// Folders dropped on the Dock icon, until the page takes them.
+const openedFolders = new OpenedFolders();
 
 function t(key: MessageKey): string {
   return (app.getLocale().toLowerCase().startsWith('zh') ? zhCN : en)[key];
@@ -213,6 +217,11 @@ function fromMainPage(event: IpcMainEvent): boolean {
 ipcMain.on(channels.shortcutsChanged, (event) => {
   if (fromMainPage(event)) void loadShortcuts();
 });
+ipcMain.on(channels.foldersWanted, (event, wanted: unknown) => {
+  if (!fromMainPage(event)) return;
+  const contents = event.sender;
+  openedFolders.takenBy(wanted === true ? (path) => contents.send(channels.openFolder, path) : undefined);
+});
 ipcMain.on(channels.recording, (event, active: unknown) => {
   if (fromMainPage(event)) recording = active === true;
 });
@@ -269,6 +278,12 @@ function createWindow() {
   };
   win.webContents.on('did-navigate', stopRecording);
   win.webContents.on('render-process-gone', stopRecording);
+  // Folders opened from now on wait for the next page, which asks for them;
+  // this runs before that page can.
+  win.webContents.on('did-start-navigation', (details) => {
+    if (details.isMainFrame && !details.isSameDocument) openedFolders.takenBy(undefined);
+  });
+  win.webContents.on('render-process-gone', () => openedFolders.takenBy(undefined));
   win.once('ready-to-show', () => win.show());
   win.on('closed', () => {
     mainWindow = undefined;
@@ -297,6 +312,21 @@ app.on('before-quit', (event) => {
 });
 // Closing the main window quits (its 'closed' handler); program windows do not.
 app.on('second-instance', () => {
+  if (mainWindow?.isMinimized()) mainWindow.restore();
+  mainWindow?.show();
+  mainWindow?.focus();
+});
+// A folder dropped on the Dock icon or opened with the app, also the one it
+// was launched with (before ready). Anything else is not taken: the Dock offers
+// only folders, `open -a` passes any file.
+app.on('open-file', (event, path) => {
+  event.preventDefault();
+  let folder = false;
+  try {
+    folder = statSync(path).isDirectory();
+  } catch {}
+  if (!folder) return;
+  openedFolders.add(path);
   if (mainWindow?.isMinimized()) mainWindow.restore();
   mainWindow?.show();
   mainWindow?.focus();

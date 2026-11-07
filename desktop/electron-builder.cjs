@@ -58,6 +58,13 @@ module.exports = {
     identity: '-',
     notarize: false,
     hardenedRuntime: true,
+    // Folders dropped on the Dock icon become workspaces (src/folders.ts). Rank
+    // None: the app accepts dropped folders but never becomes their opener.
+    extendInfo: {
+      CFBundleDocumentTypes: [
+        { CFBundleTypeName: 'Folder', CFBundleTypeRole: 'Viewer', LSHandlerRank: 'None', LSItemContentTypes: ['public.folder'] },
+      ],
+    },
   },
   dmg: {
     icon: 'assets/icon.icns',

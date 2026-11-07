@@ -3,7 +3,8 @@
 // nothing else: the page learns which action a shortcut runs, reports that the
 // shortcut settings changed, records a new key through the shell while the
 // settings dialog asks for one, reports its theme setting for the native title
-// bar, and asks where a file the user dropped is on disk.
+// bar, asks where a file the user dropped is on disk, and learns which folders
+// were opened with the app.
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
 import { channels, type DesktopShell } from './bridge';
 
@@ -37,6 +38,14 @@ const shell: DesktopShell = {
     } catch {
       return '';
     }
+  },
+  onOpenFolder(fn) {
+    const off = listen(channels.openFolder, fn);
+    ipcRenderer.send(channels.foldersWanted, true);
+    return () => {
+      off();
+      ipcRenderer.send(channels.foldersWanted, false);
+    };
   },
 };
 

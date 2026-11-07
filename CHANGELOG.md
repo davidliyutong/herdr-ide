@@ -22,8 +22,10 @@ All notable changes are documented here. The format follows
   frame statistics: what the machine spent capturing and encoding, the
   frames and bytes the browser received and how long it took to decode and
   draw them, and the time from capture to the picture being drawn.
-- Desktop app: drag folders from Finder onto the sidebar to create a
-  workspace for each on the local machine.
+- Desktop app: drag folders from Finder onto the sidebar or the app's Dock
+  icon to create a workspace for each on the local machine. A drop on the
+  Dock icon also launches the app, and the workspaces appear once the local
+  machine is connected.
 - Files dragged onto a pane are pasted as their paths. Files not on the
   pane's machine are uploaded into the pane's directory there first, under
   their own names (`-1`, `-2`… when taken; nothing is replaced); in the

@@ -231,6 +231,7 @@ export const zhCN: Messages = {
   'sidebar.noPending': '没有等待处理的 agent',
   'sidebar.dropFolders': '松开即可在 {machine} 上为每个文件夹新建 workspace',
   'sidebar.dropFoldersOnly': '只有文件夹能新建 workspace，已跳过 {n} 个其他项目。',
+  'sidebar.openFoldersFailed': '拖到 Dock 图标上的 {n} 个文件夹未能打开：本机未连接。',
   'sidebar.authenticate': '认证…',
   'sidebar.retry': '重试',
   'sidebar.manageHerdr': '管理 herdr',

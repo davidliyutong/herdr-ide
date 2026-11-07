@@ -5,7 +5,9 @@
 // are skipped with a note, and read-only mode or a browser (no desktop
 // bridge) takes no drop. Files dropped on a pane become the paths to paste:
 // where they are for the desktop app's local machine, else uploaded to the
-// pane's machine. Drops nothing takes are refused.
+// pane's machine. Drops nothing takes are refused. Folders dropped on the
+// desktop app's Dock icon become workspaces on the local machine too, once it
+// is connected.
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
@@ -28,7 +30,15 @@ vi.mock('../lib/conn', () => ({
 
 /** Files the fake desktop bridge knows the paths of. */
 const onDisk = new Map<File, string>();
+/** What the page gave the bridge for folders dropped on the Dock icon. */
+let openFolder: ((path: string) => void) | undefined;
 const shell = {
+  onOpenFolder: (fn: (path: string) => void) => {
+    openFolder = fn;
+    return () => {
+      openFolder = undefined;
+    };
+  },
   onShortcut: () => () => {},
   shortcutsChanged() {},
   recordShortcut() {},
@@ -162,6 +172,49 @@ describe('dropped folders', () => {
     expect(drop.filesAreOn('local')).toBe(true);
     expect(browser.filesAreOn('local')).toBe(false);
     (globalThis as { desktopShell?: unknown }).desktopShell = shell;
+  });
+});
+
+describe('folders dropped on the Dock icon', () => {
+  const creates = () => calls.filter((c) => c.method === 'workspace.create').map((c) => [c.m, c.params.cwd]);
+  const toasts = () => store.useStore.getState().toasts.map((t) => t.msg);
+  const local = (status: string) => ({ id: 'local', label: 'Mac', kind: 'local', session: 'default', enabled: true, status });
+
+  afterEach(() => vi.useRealTimers());
+
+  it('become workspaces on the local machine once it connects, in order', async () => {
+    // Launched by the drop: the page does not know its machines yet.
+    store.useStore.setState({ machines: {}, order: [] });
+    const off = drop.takeOpenedFolders();
+    openFolder!('/Users/u/Projects/app');
+    openFolder!('/Users/u/Projects/lib');
+    await act(async () => store.useStore.setState({ machines: { local: local('connecting') } as never, order: ['local'] }));
+    expect(creates()).toEqual([]);
+    await act(async () => store.useStore.setState({ machines: { local: local('ready') } as never }));
+    expect(creates()).toEqual([
+      ['local', '/Users/u/Projects/app'],
+      ['local', '/Users/u/Projects/lib'],
+    ]);
+    expect(toasts()).toEqual([]);
+    off();
+    expect(openFolder).toBeUndefined();
+  });
+
+  it('are not opened, with a note, when the local machine does not connect or is disabled', async () => {
+    vi.useFakeTimers();
+    store.useStore.setState({ machines: { local: local('connecting') } as never });
+    drop.openFolder('/Users/u/app');
+    await vi.advanceTimersByTimeAsync(drop.OPEN_WAIT_MS - 1);
+    expect(toasts()).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(toasts()).toEqual(['1 folder(s) dropped on the Dock icon not opened: the local machine is not connected.']);
+
+    store.useStore.setState({ toasts: [], machines: { local: local('disabled') } as never });
+    drop.openFolder('/Users/u/app');
+    drop.openFolder('/Users/u/lib');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(toasts()).toHaveLength(1);
+    expect(creates()).toEqual([]);
   });
 });
 

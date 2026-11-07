@@ -55,7 +55,9 @@ settings dialog records keys through the same bridge
 ([04](features/04-layout-and-keyboard.md)), the page reports its theme
 setting, which the native title bar follows, and it asks the bridge where a
 file or folder dropped from Finder is on disk, to create a workspace there
-or paste its path into a pane of the local machine. Same-origin popups become equally restricted native
+or paste its path into a pane of the local machine; folders dropped on the
+Dock icon reach the page through the same bridge, also when the drop
+launched the app. Same-origin popups become equally restricted native
 windows; HTTP(S) links outside the core open in the default browser. Packaging
 and lifecycle details are in [16](features/16-desktop-packaging.md).
 

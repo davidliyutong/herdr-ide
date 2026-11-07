@@ -13,6 +13,7 @@ import { Dialogs } from './components/Dialogs';
 import { ContextMenu } from './components/ContextMenu';
 import { usePrefs } from './prefs';
 import { initDesktop } from './desktop';
+import { takeOpenedFolders } from './drop';
 import { getKeyConfig, handleKey, loadKeymap, onKeyConfig, onPrefixChange } from './keymap';
 import { t } from './i18n';
 import { notifyAgent, updateBadge } from './notify';
@@ -68,6 +69,7 @@ export function App() {
     });
     loadKeymap();
     const offDesktop = initDesktop();
+    const offFolders = takeOpenedFolders();
     fetch('/api/config')
       .then((r) => r.json())
       .then((c) => useStore.getState().setReadOnly(!!c.read_only))
@@ -83,6 +85,7 @@ export function App() {
     return () => {
       off();
       offDesktop();
+      offFolders();
       window.removeEventListener('keydown', onKey);
     };
   }, []);

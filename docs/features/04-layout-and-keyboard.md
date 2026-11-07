@@ -125,7 +125,10 @@ Non-goals: a separate herdr-ide layout model; arbitrary docking of panes.
   Finder onto the sidebar create a workspace each on the local machine,
   without the dialog (herdr names them after the folder; the last one is
   selected); the sidebar shows where they go while they are over it, and
-  dropped files that are not folders are skipped with a note. Browsers do
+  dropped files that are not folders are skipped with a note. Folders
+  dropped on the app's Dock icon do the same; when the drop launched the app,
+  they wait up to 30 s for the local machine to connect, else a note says
+  they were not opened. Browsers do
   not tell the page where a dropped folder is, so they do not offer this, nor
   does read-only mode (`web/src/drop.ts`,
   [16](16-desktop-packaging.md)). Closing a pane or tab with a working agent,
