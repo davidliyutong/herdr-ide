@@ -47,6 +47,8 @@ interface UIState {
 
   sidebarOpen: boolean;
   dock?: DockView;
+  /** The VS Code panel shown last, which toggling the panel shows again. */
+  lastCode?: Extract<DockView, { kind: 'code' }>;
   dockWidth: number;
   /** Height of the dock when it sits below the panes. */
   dockHeight: number;
@@ -150,7 +152,7 @@ export const useStore = create<UIState>((set, get) => ({
     savePref('sidebarOpen', v);
     set({ sidebarOpen: v });
   },
-  openDock: (dock) => set({ dock }),
+  openDock: (dock) => set(dock?.kind === 'code' ? { dock, lastCode: dock } : { dock }),
   setDockWidth: (w) => {
     savePref('dockWidth', w);
     set({ dockWidth: w });

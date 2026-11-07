@@ -337,6 +337,9 @@ export function runAction(action: string, index?: number) {
     case 'open_code':
       if (ctx) actions.openCode(ctx.m, ctx.cwd);
       break;
+    case 'toggle_code':
+      actions.toggleCode();
+      break;
     case 'open_diff':
       if (ctx) actions.openDiff(ctx.m, ctx.cwd);
       break;

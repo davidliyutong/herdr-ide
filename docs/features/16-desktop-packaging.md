@@ -88,8 +88,10 @@ implemented independently.
   and files or folders dropped on a pane of the local machine are pasted as
   their own paths instead of being uploaded ([06](06-quick-look-and-files.md)).
   It is answered in the preload; nothing goes to the main process.
-  The menu gains **Tab** (New Tab, Close Tab) between Edit and View, and
-  **Window** lists Minimize, Zoom, Close Window (`cmd+w`) and Bring All to
+  The menus are the app menu (with **Settings…**), **File** (New
+  Workspace, New Tab, Close Tab), Edit, **View** (Show or Hide VS Code, then
+  Electron's reload, developer tools, zoom and full screen items), and
+  **Window**, which lists Minimize, Zoom, Close Window (`cmd+w`) and Bring All to
   Front; Close Window does not close the main window for a shortcut key
   left to VS Code.
 - The web brand constants and English/Chinese message dictionaries are

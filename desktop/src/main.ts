@@ -9,6 +9,7 @@ import { allowPermission, isExternal, isInternal, mainWindowPreferences, themeSo
 import {
   defaultShortcuts,
   isCodeFrame,
+  overCode,
   recordedSpec,
   shortcutFor,
   shortcutsFromSettings,
@@ -110,10 +111,48 @@ function buildMenu() {
   });
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
-      { role: 'appMenu' },
+      {
+        role: 'appMenu',
+        submenu: [
+          { role: 'about' },
+          { type: 'separator' },
+          item('open_settings', 'desktop.menu.settings'),
+          { type: 'separator' },
+          { role: 'services' },
+          { type: 'separator' },
+          { role: 'hide' },
+          { role: 'hideOthers' },
+          { role: 'unhide' },
+          { type: 'separator' },
+          { role: 'quit' },
+        ],
+      },
+      {
+        label: t('desktop.menu.file'),
+        submenu: [
+          item('new_workspace', 'desktop.menu.newWorkspace'),
+          item('new_tab', 'desktop.menu.newTab'),
+          { type: 'separator' },
+          item('close_tab', 'desktop.menu.closeTab'),
+        ],
+      },
       { role: 'editMenu' },
-      { label: t('desktop.menu.tab'), submenu: [item('new_tab', 'desktop.menu.newTab'), item('close_tab', 'desktop.menu.closeTab')] },
-      { role: 'viewMenu' },
+      {
+        label: t('desktop.menu.view'),
+        submenu: [
+          item('toggle_code', 'desktop.menu.toggleCode'),
+          { type: 'separator' },
+          { role: 'reload' },
+          { role: 'forceReload' },
+          { role: 'toggleDevTools' },
+          { type: 'separator' },
+          { role: 'resetZoom' },
+          { role: 'zoomIn' },
+          { role: 'zoomOut' },
+          { type: 'separator' },
+          { role: 'togglefullscreen' },
+        ],
+      },
       {
         role: 'window',
         submenu: [
@@ -218,7 +257,7 @@ function createWindow() {
     }
     const action = shortcutFor(shortcuts, input);
     if (!action) return;
-    if (focusInCode(win)) {
+    if (!overCode.has(action) && focusInCode(win)) {
       leftToCode = true;
       return;
     }

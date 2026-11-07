@@ -359,6 +359,25 @@ export const actions = {
     useStore.getState().toggleSidebar();
   },
 
+  /** Shows or hides the VS Code panel: an open panel (VS Code or preview)
+   * closes and the terminal gets the keys again; otherwise the VS Code panel
+   * shown last comes back while it is of the focused pane's machine (its
+   * window is kept for a while, so it is back at once), else the focused
+   * pane's folder opens in VS Code. */
+  toggleCode() {
+    const s = useStore.getState();
+    if (s.dock) {
+      s.openDock(undefined);
+      const c = actions.focusedContext();
+      if (c?.pane) getTerm(c.m, c.pane).focus();
+      return;
+    }
+    const c = actions.focusedContext();
+    const last = s.lastCode;
+    if (last && (!c || last.m === c.m)) s.openDock(last);
+    else if (c) actions.openCode(c.m, c.cwd);
+  },
+
   currentTab() {
     const c = current();
     if (!c?.tab) return undefined;

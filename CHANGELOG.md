@@ -48,6 +48,13 @@ All notable changes are documented here. The format follows
   (`machines.json` beside its settings) over herdr's saved machines and
   applies at once; disabling a connected machine asks first and keeps its
   panes running in herdr.
+- Desktop app: `cmd+,` and **Settings…** in the app menu open the settings,
+  `cmd+n` (File → New Workspace) creates a workspace, and `cmd+j` (View →
+  Show or Hide VS Code) hides the VS Code panel or shows the last one again,
+  also from inside VS Code (`desktop-settings-key`,
+  `desktop-new-workspace-key`, `desktop-toggle-code-key`, changeable under
+  Settings → Shortcuts; VS Code keeps its own `cmd+,` and `cmd+n`). The
+  Tab menu is now the File menu.
 - `make desktop-install` builds the macOS app and installs it into
   `/Applications`, quitting and reopening a running copy.
 
@@ -88,6 +95,9 @@ All notable changes are documented here. The format follows
   without waiting a minute for the old ssh connection: the core tells an
   ssh control master whose connection stopped answering to take no new
   sessions, so the next connection opens a new one.
+- The panes of a machine that reconnects (after a network loss, or when it
+  is enabled again) show again within seconds, instead of after the
+  surface's reconnect backoff of up to 16 s.
 - Stopping herdr's server on a machine no longer leaves its virtual
   display (Xvfb) running for six hours: the display lasts while the server
   runs, programs use it or the core is connected, and ends a minute after.
@@ -100,9 +110,6 @@ All notable changes are documented here. The format follows
   three times faster, and scrolling past the edge keeps its speed (and
   speeds up while held) however long herdr takes to answer.
 - The desktop app's title bar follows the UI's theme: a dark UI on a light
-- The panes of a machine that reconnects (after a network loss, or when it
-  is enabled again) show again within seconds, instead of after the
-  surface's reconnect backoff of up to 16 s.
   macOS no longer has a white title bar.
 - A path or URL wrapped over several rows, by the terminal or by a program
   such as Claude Code, is one link: ⌘/Ctrl+click opened only the part on

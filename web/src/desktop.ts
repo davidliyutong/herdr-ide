@@ -23,6 +23,9 @@ export const desktopShell: DesktopShell | undefined = (globalThis as { desktopSh
 export const shortcutSettings: Record<string, string> = {
   new_tab: 'desktop-new-tab-key',
   close_tab: 'desktop-close-tab-key',
+  open_settings: 'desktop-settings-key',
+  new_workspace: 'desktop-new-workspace-key',
+  toggle_code: 'desktop-toggle-code-key',
 };
 
 export function isShortcutSetting(key: string): boolean {

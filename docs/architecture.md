@@ -47,10 +47,10 @@ and waits up to 20 seconds before killing the owned core.
 
 The renderer reuses the browser UI with no Node APIs, sandboxing and context
 isolation. The main window's preload exposes only `desktopShell` for direct
-shortcuts (`cmd+t`/`cmd+w`): the shell intercepts them in
+shortcuts (`cmd+t`/`cmd+w`/`cmd+,`/`cmd+n`/`cmd+j`): the shell intercepts them in
 `before-input-event`, reading their keys from the core settings
-`desktop-new-tab-key` / `desktop-close-tab-key`, leaves them to VS Code
-while one of its frames has focus, and the page runs the action; the
+`desktop-*-key`, leaves them to VS Code while one of its frames has focus
+(except showing or hiding the VS Code panel), and the page runs the action; the
 settings dialog records keys through the same bridge
 ([04](features/04-layout-and-keyboard.md)), the page reports its theme
 setting, which the native title bar follows, and it asks the bridge where a

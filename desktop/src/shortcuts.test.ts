@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { defaultShortcuts, isCodeFrame, parseShortcut, recordedSpec, shortcutFor, shortcutsFromSettings, toAccelerator } from './shortcuts';
+import {
+  defaultShortcuts,
+  isCodeFrame,
+  overCode,
+  parseShortcut,
+  recordedSpec,
+  shortcutFor,
+  shortcutsFromSettings,
+  toAccelerator,
+} from './shortcuts';
 
 type Mods = Partial<{ meta: boolean; control: boolean; alt: boolean; shift: boolean }>;
 
@@ -55,8 +64,25 @@ test('keys match by their character on the current layout', () => {
 });
 
 test('default shortcuts per platform', () => {
-  assert.deepEqual(defaultShortcuts('darwin'), { new_tab: 'cmd+t', close_tab: 'cmd+w' });
-  assert.deepEqual(defaultShortcuts('linux'), { new_tab: 'ctrl+shift+t', close_tab: 'ctrl+shift+w' });
+  assert.deepEqual(defaultShortcuts('darwin'), {
+    new_tab: 'cmd+t',
+    close_tab: 'cmd+w',
+    open_settings: 'cmd+comma',
+    new_workspace: 'cmd+n',
+    toggle_code: 'cmd+j',
+  });
+  assert.deepEqual(defaultShortcuts('linux'), {
+    new_tab: 'ctrl+shift+t',
+    close_tab: 'ctrl+shift+w',
+    open_settings: 'ctrl+comma',
+    new_workspace: 'ctrl+shift+n',
+    toggle_code: 'ctrl+shift+j',
+  });
+  // Only showing or hiding VS Code works while VS Code has focus.
+  assert.deepEqual([...overCode], ['toggle_code']);
+  // Cmd+, by the character the layout types.
+  assert.equal(shortcutFor(defaultShortcuts('darwin'), typed(',', 'Comma', { meta: true })), 'open_settings');
+  assert.equal(toAccelerator('cmd+comma'), 'Super+,');
 });
 
 test('recorded keys', () => {

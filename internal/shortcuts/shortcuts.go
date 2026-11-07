@@ -18,6 +18,9 @@ import (
 const (
 	SettingNewTab   = "desktop-new-tab-key"
 	SettingCloseTab = "desktop-close-tab-key"
+	SettingSettings = "desktop-settings-key"
+	SettingNewWS    = "desktop-new-workspace-key"
+	SettingCode     = "desktop-toggle-code-key"
 )
 
 // None disables a shortcut.
@@ -83,9 +86,32 @@ func defs(goos string) []settings.Def {
 			Key: SettingCloseTab, Kind: settings.KindString, Default: mod + "+w", Validate: Validate,
 			Usage: "desktop app: shortcut that closes the current tab, as modifiers and a key joined by + (cmd, ctrl, alt, shift), or none",
 		},
+		{
+			Key: SettingSettings, Kind: settings.KindString, Default: settingsKey(goos), Validate: Validate,
+			Usage: "desktop app: shortcut that opens the settings, as modifiers and a key joined by + (cmd, ctrl, alt, shift), or none",
+		},
+		{
+			Key: SettingNewWS, Kind: settings.KindString, Default: mod + "+n", Validate: Validate,
+			Usage: "desktop app: shortcut for a new workspace, as modifiers and a key joined by + (cmd, ctrl, alt, shift), or none",
+		},
+		{
+			Key: SettingCode, Kind: settings.KindString, Default: mod + "+j", Validate: Validate,
+			Usage: "desktop app: shortcut that shows or hides the VS Code panel, also while VS Code has focus, as modifiers and a key joined by + (cmd, ctrl, alt, shift), or none",
+		},
 	}
 }
 
-// SettingDefs are the shortcut settings for this platform: cmd+t and cmd+w
-// on macOS, ctrl+shift+t and ctrl+shift+w elsewhere.
+// settingsKey is the usual key for an application's settings: cmd+, on
+// macOS, ctrl+, elsewhere (no shell or editor binds it).
+func settingsKey(goos string) string {
+	if goos == "darwin" {
+		return "cmd+comma"
+	}
+	return "ctrl+comma"
+}
+
+// SettingDefs are the shortcut settings for this platform: cmd+t, cmd+w,
+// cmd+,, cmd+n and cmd+j on macOS; ctrl+shift+t, ctrl+shift+w, ctrl+,,
+// ctrl+shift+n and ctrl+shift+j elsewhere (ctrl+n and ctrl+j are keys of
+// shells and editors there).
 var SettingDefs = defs(runtime.GOOS)
