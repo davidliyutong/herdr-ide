@@ -110,7 +110,7 @@ after a successful reply it carries op-specific bytes.
 
 | Op | Direction | Payload after the reply |
 | --- | --- | --- |
-| `hello` | core → agent | – (reply has host info, herdr binary, data dirs) |
+| `hello` | core → agent | – (reply has host info, herdr binary, data dirs; without a herdr binary, `herdr_error` and still the socket) |
 | `herdr-api` | core → agent | raw pipe to the herdr socket; the core sends the request line right after the header, without waiting for the reply (herdr wants it within 5 s) |
 | `herdr-client` | core → agent | raw pipe to herdr's client socket (endpoint protocol) |
 | `fs.stat`, `fs.list` | core → agent | – |
@@ -119,7 +119,7 @@ after a successful reply it carries op-specific bytes.
 | `exec` | core → agent | – (buffered output in the reply) |
 | `dial-unix` | core → agent | raw pipe to a socket in the agent's run directory |
 | `code-server` | core → agent | actions `status`, `install` (chunked tarball), `download` (the machine fetches `URL`, checked against `Digest`), `start`, `stop`, `install-ext`, `uninstall-ext`, `marker`; `Bin` selects an installed code-server |
-| `herdr` | core → agent | – (an empty reply at once, then a second reply with `Herdr` when the action is done); actions `status`, `start`, `stop`, `restart` (the server of `Session`; nothing is started or stopped while another user's process or an unresponsive listener holds its socket; a restart stops only this user's answering server, then starts one), `check` (herdr's newest release), `update` (only the application's managed copy) |
+| `herdr` | core → agent | – (an empty reply at once, then a second reply with `Herdr` when the action is done); actions `status`, `start`, `stop`, `restart` (the server of `Session`; nothing is started or stopped while another user's process or an unresponsive listener holds its socket; a restart stops only this user's answering server, then starts one), `check` (herdr's newest release), `update` (only the application's managed copy); each looks herdr up again (a path that is no longer executable gives way to the usual search) and without one replies `not_found` with whether a server still answers on the socket; the core then shows that herdr for the machine |
 | `bridge` | agent → core | JSON lines between the VS Code extension and the core |
 | `gui` | core → agent | actions `status`, `install` (fetch Xvfb in user space), `start`, `keep` (start the display keeper for `Session`'s herdr server), `shells` (which of the pids in `Args` were started with the display) (reply `GUI`); `video` and `video-install` (`Digest`: the video encoder's SHA-256; the second streams the gzip-compressed encoder, chunked) reply whether it is installed and the stream kinds it makes here (`GUI.Video`, `GUI.VideoEncoders`); `attach`: messages `[kind u8][len u32][payload]`, JSON events (`window`, `gone`, `layer`, `layer_gone`, `cursor`, `stats`, `video` (a window's stream starts, or ends without a codec)) and frames (`GUIFrameHeader` + JPEG/PNG, or a video frame of the whole window, `Enc` 3, 4 for key frames) from the agent, JSON commands (`watch`, `ack`, `refresh`, `codecs` (the stream kinds all viewers decode, also sent with `watch` and `refresh`), `keyframe`, input, `close`) from the core |
 

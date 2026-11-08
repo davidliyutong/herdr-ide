@@ -187,13 +187,15 @@ func (a *Agent) info(h agentproto.Header) *agentproto.Info {
 		RunDir:    a.runDir,
 		UploadDir: a.uploadDir,
 	}
+	// The socket does not depend on the executable: a server may still run
+	// after its herdr was removed.
+	inf.HerdrSocket = a.herdrSocket(h.Session)
 	bin, err := a.resolveHerdr(h.HerdrBin)
 	if err != nil {
 		inf.HerdrError = err.Error()
 		return inf
 	}
 	inf.HerdrBin = bin
-	inf.HerdrSocket = a.herdrSocket(h.Session)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if out, err := runOutput(ctx, bin, "--version"); err == nil {

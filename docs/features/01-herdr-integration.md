@@ -86,7 +86,10 @@ machines, reimplementing its agent detection.
   machine shows *degraded*; snapshots are retried, and **Retry** connects
   a new agent ([02](02-multi-machine-transport.md)); a server that is not
   running is started with **Manage herdr** or **Restart herdr…**
-  ([17](17-local-herdr-management.md)).
+  ([17](17-local-herdr-management.md)); an SSH machine whose herdr was
+  removed or moved offers **Install herdr** (herdr's `--remote` flow).
+  Every herdr status looks herdr up again, so a herdr removed, reinstalled
+  or moved while the agent runs is noticed without reconnecting.
 - **herdr without endpoint generation 1** (older than 0.9.5) → the surface
   shows `herdr_too_old`; the rest (snapshots, actions) keeps working.
 - **herdr protocol change** → only the public API and endpoint generation 1

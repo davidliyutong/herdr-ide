@@ -104,14 +104,20 @@ type Reply struct {
 	Herdr   *HerdrStatus `json:"herdr,omitempty"`
 }
 
+// ErrHerdrNotFound: the agent found no herdr executable on its host (not
+// installed, or removed or moved since).
+var ErrHerdrNotFound = errors.New("herdr binary not found (set HERDR_BIN or install herdr)")
+
 // Info describes the agent host.
 type Info struct {
-	Version      string `json:"version"`
-	OS           string `json:"os"`
-	Arch         string `json:"arch"`
-	Hostname     string `json:"hostname"`
-	Home         string `json:"home"`
-	User         string `json:"user"`
+	Version  string `json:"version"`
+	OS       string `json:"os"`
+	Arch     string `json:"arch"`
+	Hostname string `json:"hostname"`
+	Home     string `json:"home"`
+	User     string `json:"user"`
+	// HerdrBin is the herdr executable in use, with its version. Without
+	// one, HerdrError tells why; HerdrSocket is set either way.
 	HerdrBin     string `json:"herdr_bin,omitempty"`
 	HerdrVersion string `json:"herdr_version,omitempty"`
 	HerdrSocket  string `json:"herdr_socket,omitempty"`
@@ -156,7 +162,9 @@ type HerdrStatus struct {
 	Version string `json:"version,omitempty"`
 	// Managed: Bin is the copy the application keeps and may update, not an
 	// installation of the user's.
-	Managed       bool   `json:"managed"`
+	Managed bool `json:"managed"`
+	// Running is reported without Bin too: a server can outlive the removal
+	// of its herdr.
 	Running       bool   `json:"running"`
 	ServerVersion string `json:"server_version,omitempty"`
 	// RestartNeeded: the running server is from another herdr build.

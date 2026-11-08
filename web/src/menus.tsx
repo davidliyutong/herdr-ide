@@ -34,6 +34,7 @@ import type { MenuEntry } from './contextMenu';
 import { t } from './i18n';
 import { keyHint } from './keymap';
 import { paneCwd, workspaceTabs } from './lib/herdr';
+import { herdrMissing } from './lib/localHerdr';
 import { mediaExt, openLink, resolvePath, safeUrl, type LinkContext } from './terminal/links';
 import { activeTabId, useStore } from './state/store';
 
@@ -123,11 +124,19 @@ export function machineMenu(m: string): MenuEntry[] {
   const out: MenuEntry[] = [];
   if (st.status !== 'disabled') {
     const connected = st.status === 'ready' || st.status === 'degraded';
+    // Without a herdr executable there, a restart would stop nothing and
+    // start nothing; herdr --remote installs one on an SSH machine.
+    const missing = herdrMissing(st);
     out.push(
       { label: t('menu.manageHerdr'), icon: <Wrench />, disabled: st.kind !== 'local' && !connected, run: () => s.openHerdr(m) },
-      { label: t('menu.restartHerdr'), icon: <RotateCw />, disabled: !connected, run: () => void actions.restartHerdr(m) },
+      { label: t('menu.restartHerdr'), icon: <RotateCw />, disabled: !connected || missing, run: () => void actions.restartHerdr(m) },
     );
-    if (st.kind !== 'local') out.push({ label: t('menu.updateRemoteHerdr'), icon: <RefreshCw />, run: () => s.openRemoteHerdr(m) });
+    if (st.kind !== 'local')
+      out.push({
+        label: t(missing ? 'menu.installRemoteHerdr' : 'menu.updateRemoteHerdr'),
+        icon: <RefreshCw />,
+        run: () => s.openRemoteHerdr(m),
+      });
     out.push('sep', {
       label: t('menu.disableMachine'),
       icon: <PowerOff />,

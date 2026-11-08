@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { herdrError, herdrRequest, isNewer } from '../lib/localHerdr';
+import { herdrError, herdrMissing, herdrRequest, isNewer } from '../lib/localHerdr';
 import { hasMessage } from '../i18n';
+import type { MachineState } from '../lib/herdr';
 
 describe('isNewer', () => {
   it('compares major.minor.patch numerically', () => {
@@ -11,6 +12,23 @@ describe('isNewer', () => {
     expect(isNewer('v1.0.0', '0.9.5')).toBe(true);
     expect(isNewer(undefined, '0.9.5')).toBe(false);
     expect(isNewer('0.9.6', undefined)).toBe(false);
+  });
+});
+
+describe('herdrMissing', () => {
+  const machine = (status: string, herdr_bin?: string) =>
+    ({ id: 'gpu', kind: 'ssh', status, info: { os: 'linux', herdr_bin } }) as unknown as MachineState;
+  it('tells a connected agent that finds no herdr there', () => {
+    expect(herdrMissing(machine('degraded'))).toBe(true);
+    // A server that outlived its herdr still answers.
+    expect(herdrMissing(machine('ready'))).toBe(true);
+    expect(herdrMissing(machine('ready', '/usr/bin/herdr'))).toBe(false);
+  });
+  it('knows nothing without a connected agent', () => {
+    expect(herdrMissing(machine('error'))).toBe(false);
+    expect(herdrMissing(machine('connecting'))).toBe(false);
+    expect(herdrMissing({ id: 'gpu', kind: 'ssh', status: 'degraded' } as unknown as MachineState)).toBe(false);
+    expect(herdrMissing(undefined)).toBe(false);
   });
 });
 

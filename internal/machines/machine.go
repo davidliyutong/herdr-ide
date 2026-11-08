@@ -155,6 +155,29 @@ func (m *Machine) Reconnect(herdrBin string) {
 	m.restart(true)
 }
 
+// NoteHerdr records the herdr executable and version a herdr status of the
+// current session reported ("" when none was found). herdr can be removed,
+// reinstalled or moved while the agent runs, and the session's first reply
+// would otherwise stand until the next connection.
+func (m *Machine) NoteHerdr(bin, version string) {
+	m.mu.Lock()
+	info := m.state.Info
+	if info == nil || m.sess == nil || (info.HerdrBin == bin && info.HerdrVersion == version) {
+		m.mu.Unlock()
+		return
+	}
+	next := *info // the published state may still hold the old Info
+	next.HerdrBin, next.HerdrVersion, next.HerdrError = bin, version, ""
+	if bin == "" {
+		next.HerdrError = agentproto.ErrHerdrNotFound.Error()
+	}
+	m.state.Info = &next
+	m.state.UpdatedAt = time.Now().UnixMilli()
+	st := m.state
+	m.mu.Unlock()
+	m.publish(st)
+}
+
 // Wake ends a backoff wait at once (after an interactive authentication);
 // a connected machine is not affected.
 func (m *Machine) Wake() {

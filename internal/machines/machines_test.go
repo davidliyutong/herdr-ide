@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"herdr-ide/internal/agent"
+	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/transport"
 )
 
@@ -203,5 +204,62 @@ func TestDisableAndEnableAtRuntime(t *testing.T) {
 	}
 	if err := mg.SetEnabled("nope", true); err != ErrUnknownMachine {
 		t.Fatalf("unknown machine: %v", err)
+	}
+}
+
+// The herdr a status found replaces the one of the session's first reply:
+// herdr can be removed, reinstalled or moved while the agent runs.
+func TestNoteHerdrFollowsTheMachine(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("HERDR_SOCKET_PATH", "")
+	logger := log.New(io.Discard, "", 0)
+	dial := func(ctx context.Context, spec Spec) (*transport.Session, string, error) {
+		s, err := transport.DialLocal(ctx, agent.Options{Logger: logger})
+		return s, "test/test", err
+	}
+	var published atomic.Bool // the reinstalled herdr reached the UI
+	m := newMachine(Spec{ID: "x", Label: "x", Kind: KindSSH, Session: "herdr-ide-none", Enabled: true}, dial, logger, func(st State) {
+		if st.Info != nil && st.Info.HerdrBin == "/opt/herdr" {
+			published.Store(true)
+		}
+	}, func(AgentEvent) {})
+
+	m.NoteHerdr("/opt/herdr", "0.9.5") // not connected: nothing to note
+	if m.State().Info != nil {
+		t.Fatal("noted herdr without a session")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		m.Run(ctx)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+	for deadline := time.Now().Add(10 * time.Second); m.Session() == nil || m.State().Info == nil; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for the session")
+		}
+	}
+
+	first := m.State().Info
+	m.NoteHerdr("", "")
+	if info := m.State().Info; info.HerdrBin != "" || info.HerdrVersion != "" || info.HerdrError != agentproto.ErrHerdrNotFound.Error() || info.Hostname != first.Hostname {
+		t.Fatalf("removed: %+v", info)
+	}
+	m.NoteHerdr("/opt/herdr", "0.10.0")
+	if info := m.State().Info; info.HerdrBin != "/opt/herdr" || info.HerdrVersion != "0.10.0" || info.HerdrError != "" {
+		t.Fatalf("reinstalled: %+v", info)
+	}
+	if first.HerdrBin == "/opt/herdr" {
+		t.Fatal("changed an Info already published")
+	}
+	if !published.Load() {
+		t.Fatal("the new herdr was not published")
 	}
 }

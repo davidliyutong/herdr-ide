@@ -207,7 +207,11 @@ func (a *Agent) herdrStatus(ctx context.Context, h agentproto.Header) *agentprot
 	st := &agentproto.HerdrStatus{}
 	bin, err := a.resolveHerdr(h.HerdrBin)
 	if err != nil {
+		// herdr was removed or moved, or never installed: a server started
+		// before still runs (its executable stays open) and keeps its panes,
+		// but nothing can start, stop or restart it here.
 		st.Error = "not_found"
+		st.Running = probeServer(a.herdrSocket(h.Session)) == serverOurs
 		return st
 	}
 	st.Bin = bin

@@ -3,13 +3,14 @@ package agent
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"herdr-ide/internal/agentproto"
 )
 
 // systemHerdrPaths are package-manager install locations (a variable for tests).
@@ -68,7 +69,7 @@ func (a *Agent) resolveHerdr(hint string) (string, error) {
 		a.herdrCache[hint] = bin
 		return bin, nil
 	}
-	return "", errors.New("herdr binary not found (set HERDR_BIN or install herdr)")
+	return "", agentproto.ErrHerdrNotFound
 }
 
 // herdrSocket mirrors herdr's api_socket_path_for: the default session lives
