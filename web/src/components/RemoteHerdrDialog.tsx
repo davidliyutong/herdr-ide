@@ -6,8 +6,10 @@ import { useStore } from '../state/store';
 import { termOptions } from '../terminal/options';
 import { currentAppearance } from '../appearance';
 import { t } from '../i18n';
+import { herdrMissing } from '../lib/localHerdr';
 
-/** Updates herdr on an SSH machine the way herdr does it: a terminal on the
+/** Updates herdr on an SSH machine the way herdr does it, or installs it
+ * where it is missing (removed, moved or never installed): a terminal on the
  * core host runs the local herdr's `herdr --remote <target>`, which asks
  * before installing its version there and before replacing a running server,
  * then attaches (docs/features/17). */
@@ -48,11 +50,13 @@ export function RemoteHerdrDialog() {
   }, [m, running]);
 
   if (!m || !machine) return null;
+  const missing = herdrMissing(machine);
+  const title = t(missing ? 'remoteHerdr.titleInstall' : 'remoteHerdr.title', { machine: machine.label });
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && !running && close()}>
-      <div className={running ? 'modal' : 'modal dialog'} role="dialog" aria-label={t('remoteHerdr.title', { machine: machine.label })}>
+      <div className={running ? 'modal' : 'modal dialog'} role="dialog" aria-label={title}>
         <div className="modal-head">
-          <span className="modal-title">{t('remoteHerdr.title', { machine: machine.label })}</span>
+          <span className="modal-title">{title}</span>
           <span className="spacer" />
           <button className="icon" title={t('dialog.cancel')} onClick={close}>
             <X />
@@ -74,15 +78,22 @@ export function RemoteHerdrDialog() {
             >
               <div>
                 {t('remoteHerdr.versions', {
-                  remote: machine.info?.herdr_version || t('remoteHerdr.unknown'),
+                  remote: missing ? t('remoteHerdr.missing') : machine.info?.herdr_version || t('remoteHerdr.unknown'),
                   local: localVersion || t('remoteHerdr.unknown'),
                 })}
               </div>
-              <div>{t('remoteHerdr.explain', { version: localVersion || t('remoteHerdr.unknown') })}</div>
-              <label className="row">
-                <input type="checkbox" checked={handoff} onChange={(e) => setHandoff(e.target.checked)} />
-                <span>{t('remoteHerdr.handoff')}</span>
-              </label>
+              <div>
+                {t(missing ? 'remoteHerdr.explainInstall' : 'remoteHerdr.explain', {
+                  version: localVersion || t('remoteHerdr.unknown'),
+                })}
+              </div>
+              {/* Only a running server has terminals to keep. */}
+              {(!missing || machine.status === 'ready') && (
+                <label className="row">
+                  <input type="checkbox" checked={handoff} onChange={(e) => setHandoff(e.target.checked)} />
+                  <span>{t('remoteHerdr.handoff')}</span>
+                </label>
+              )}
               {!localVersion && <div className="error-text">{t('remoteHerdr.noLocal')}</div>}
             </div>
             <div className="dialog-actions">

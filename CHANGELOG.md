@@ -6,6 +6,19 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- An SSH machine whose herdr was removed, moved or lost with a reinstalled
+  system was only *degraded* with a socket error, **Manage herdr** said
+  "herdr was not found" without a way on, and **Restart herdr…** failed. The
+  machine now says that herdr is missing there and offers **Install herdr**
+  (herdr's own `herdr --remote` flow) in its status block, its context menu
+  and **Manage herdr**; a server that outlived its herdr is shown as running,
+  with a warning, and is left alone. Every herdr status looks herdr up
+  again, so a herdr removed, reinstalled or moved while connected is
+  noticed without reconnecting, and **Check again** picks up one installed
+  by hand.
+
 ## [0.3.0] - 2026-11-08
 
 ### Added

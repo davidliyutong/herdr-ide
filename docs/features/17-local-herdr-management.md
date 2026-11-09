@@ -16,14 +16,21 @@ connects again but finds no server: the machine stays *degraded*, and
 ([02](02-multi-machine-transport.md)), cannot help. Starting it meant an ssh
 terminal on that machine.
 
+herdr can also disappear from an SSH machine: removed by accident, moved to
+another install location, or gone with a reinstalled system. herdr's SSH
+metadata then still names the old path, and a server started before keeps
+running and answering (its executable stays open), but no server can be
+started or restarted there until herdr is installed again.
+
 ## Goals / non-goals
 
 Goals: start, stop and restart the herdr server of every machine, local or
 SSH, from the UI; show which herdr is in use and the server's version;
 check for and install
 herdr updates for the copy the application provides, without stopping
-running terminals where herdr supports it; update herdr on SSH machines
-exactly the way herdr does, with the user answering herdr's own questions.
+running terminals where herdr supports it; update herdr on SSH machines,
+or install it again where it went missing, exactly the way herdr does, with
+the user answering herdr's own questions.
 
 Non-goals: starting the server automatically (also not from **Retry**);
 updating a local installation
@@ -50,7 +57,13 @@ user's confirmation; choosing herdr's preview channel.
   `update` are serialized.
   - `status` runs `herdr status server --json` and reports the herdr in use,
     its version, whether it is the managed copy, and the server's running
-    state, version and `restart_needed`.
+    state, version and `restart_needed`. Every action looks herdr up
+    again: the path in use is kept only while it is still executable, else
+    the usual search runs (past the core's last path and herdr's SSH
+    metadata), and the version is read anew, so a herdr removed, reinstalled
+    or moved since the agent started is noticed. Without any herdr the
+    status is `not_found` and still tells, from a probe of the session's
+    socket, whether a server runs.
   - `start` runs `herdr [--session S] server` in its own session (`setsid`),
     without the pane context of a herdr the core may run in, and waits up to
     15 s for the socket. The server belongs to the user and outlives the
@@ -82,7 +95,9 @@ user's confirmation; choosing herdr's preview channel.
     hands running servers over to the new build where they support it.
 - **Core.** `GET /api/m/{id}/herdr` returns the status;
   `POST /api/m/{id}/herdr/{start|stop|restart|check|update}` runs an action
-  (`internal/server/herdr.go`). The status and the server actions accept
+  (`internal/server/herdr.go`). Every reply also replaces the herdr path and
+  version the machine shows (`Machine.NoteHerdr`), which otherwise come from
+  the session's first reply. The status and the server actions accept
   every machine whose agent is connected; `check` and `update` concern the
   application's copy and accept only the local machine (`not_local`
   otherwise). Actions are refused in read-only mode, audited as
@@ -115,6 +130,17 @@ user's confirmation; choosing herdr's preview channel.
   sidebar shows a machine whose herdr is older than the local one, with an
   **Update herdr** button; the SSH machine's context menu always offers it.
   The installed version is the local herdr's: update the local one first.
+- **herdr missing on an SSH machine** (the agent found no executable there:
+  removed, moved or never installed). herdr's `--remote` flow above also
+  installs it, so the same terminal is offered as **Install herdr**: in the
+  status block of the *degraded* machine (whose detail says herdr is
+  missing instead of the socket error), in a banner while a server that
+  outlived its herdr keeps the machine *ready*, in the context menu (in
+  place of **Update herdr…**) and in **Manage herdr**, which also shows
+  whether a server still runs and offers **Check again** for a herdr the
+  user installed by hand. **Restart herdr…** is disabled meanwhile: it
+  would stop nothing and start nothing. When the terminal ends, the
+  machine reconnects with the path herdr recorded.
 - **UI** (not in read-only mode). **Manage herdr…** in a machine's context
   menu (for an SSH machine while its agent is connected) opens
   `web/src/components/HerdrDialog.tsx`, and so does the button in a
@@ -162,6 +188,13 @@ user's confirmation; choosing herdr's preview channel.
   keeps it.
 - The machine's agent is not connected → `transport`; the menu items are
   disabled for SSH machines.
+- herdr removed, moved or reinstalled on an SSH machine → a new agent, or
+  the next status or action of the connected one, finds the herdr there
+  now. Without one the machine is *degraded* with "herdr is not installed
+  here" (or stays *ready* with a warning while its old server runs), every
+  server action returns `not_found` and starts or stops nothing, and
+  **Install herdr** runs `herdr --remote`; a herdr installed by hand is
+  picked up by **Check again** in **Manage herdr** or by **Retry**.
 - No network or herdr.dev unavailable → `check_failed` or `update_failed`
   with herdr's message; the installed copy stays as it was.
 - A server older than the new herdr → `restart_needed`; the dialog offers a
@@ -206,12 +239,19 @@ following newer bundles but not older ones, version comparison, the manifest
 check (including a malformed version), that only the managed copy is
 updated, that a restart stops only a running server and starts nothing
 after a failed, hanging or ineffective stop, that another user's listener
-gets no command, and how socket probes classify connection errors. `internal/server/server_test.go` covers which actions
+gets no command, how socket probes classify connection errors, that a herdr
+removed while its server runs gives `not_found` with the server still
+running and nothing started or stopped, and that a herdr installed
+elsewhere replaces the stale path. `internal/machines/machines_test.go`
+covers that a status's herdr replaces the machine's, as a new published
+Info.
+`internal/server/server_test.go` covers which actions
 SSH machines accept, read-only and audit behavior of the endpoints, the
 `herdr --remote` command line and environment, the remote terminal's guards
 and the PTY bridge. `TestIntegrationHerdrManage` starts, stops and restarts
 (stopped and running) a real server in the isolated `herdr-ide-it` session
 with temporary `HOME` and herdr directories.
-`web/src/__tests__/localHerdr.test.ts` covers requests, version comparison
-and messages for every error code; `menus.test.ts` covers the machine
-menu's entries and the confirmed restart.
+`web/src/__tests__/localHerdr.test.ts` covers requests, version comparison,
+messages for every error code and when a machine's herdr counts as missing;
+`menus.test.ts` covers the machine menu's entries, the confirmed restart and
+**Install herdr…** with the restart disabled where herdr is missing.

@@ -48,6 +48,11 @@ func (s *Server) herdrRequest(w http.ResponseWriter, r *http.Request, action str
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Minute)
 	defer cancel()
 	st, err := herdrOp(ctx, mc, action)
+	if err == nil {
+		// The machine shows the herdr found now, which may have been
+		// removed, reinstalled or moved since its agent connected.
+		mc.NoteHerdr(st.Bin, st.Version)
+	}
 	if action != "status" && action != "check" {
 		ev := map[string]any{"machine": mc.ID(), "session": mc.State().Session}
 		if err != nil {

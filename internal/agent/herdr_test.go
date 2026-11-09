@@ -299,6 +299,56 @@ esac
 	}
 }
 
+// herdr removed, moved or reinstalled while the agent runs: every status
+// resolves it afresh, reports a server that outlived its executable, and
+// nothing is started or stopped without one.
+func TestHerdrRemovedAndReinstalled(t *testing.T) {
+	noInstalledHerdr(t)
+	a := testAgent(t)
+	cfg, err := os.MkdirTemp("/tmp", "hm-") // short: macOS socket paths
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(cfg) })
+	t.Setenv("XDG_CONFIG_HOME", cfg)
+	t.Setenv("HERDR_SOCKET_PATH", "")
+	socket := a.herdrSocket("")
+	if err := os.MkdirAll(filepath.Dir(socket), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	installed := filepath.Join(a.home, ".local", "bin", "herdr")
+	fakeHerdr(t, installed, "0.9.5")
+	if st := herdrOp(t, a, agentproto.Header{Action: "status"}); st.Error != "" || st.Bin != installed {
+		t.Fatalf("installed: %+v", st)
+	}
+
+	// Removed while its server runs: the server is still reported.
+	serveUnix(t, socket)
+	os.Remove(installed)
+	st := herdrOp(t, a, agentproto.Header{Action: "status", HerdrBin: installed})
+	if st.Error != "not_found" || st.Bin != "" || st.Version != "" || !st.Running {
+		t.Fatalf("removed: %+v", st)
+	}
+	for _, action := range []string{"start", "stop", "restart"} {
+		if st := herdrOp(t, a, agentproto.Header{Action: action, HerdrBin: installed}); st.Error != "not_found" || !st.Running {
+			t.Fatalf("%s without herdr: %+v", action, st)
+		}
+	}
+	inf := a.info(agentproto.Header{HerdrBin: installed})
+	if inf.HerdrBin != "" || inf.HerdrError != agentproto.ErrHerdrNotFound.Error() || inf.HerdrSocket != socket {
+		t.Fatalf("hello without herdr: %+v", inf)
+	}
+
+	// Installed again elsewhere: the stale path (the core's last one, or
+	// herdr's SSH metadata) gives way to it.
+	moved := filepath.Join(a.home, ".cargo", "bin", "herdr")
+	fakeHerdr(t, moved, "0.10.0")
+	if st := herdrOp(t, a, agentproto.Header{Action: "status", HerdrBin: installed}); st.Error != "" || st.Bin != moved || st.Version != "0.10.0" {
+		t.Fatalf("moved: %+v", st)
+	}
+}
+
 // Only a missing socket or a refused connection mean that no server runs;
 // a listener that takes no connections may be a hung server.
 func TestProbeServer(t *testing.T) {

@@ -12,7 +12,7 @@ import { InlineEdit } from './InlineEdit';
 import { startWorkspaceDrag } from '../reorderDrag';
 import { openMenu } from '../contextMenu';
 import { machineMenu, workspaceMenu } from '../menus';
-import { isNewer } from '../lib/localHerdr';
+import { herdrMissing, isNewer } from '../lib/localHerdr';
 import { carriesFiles, dropFolders, folderDropTarget } from '../drop';
 
 function aggregate(statuses: AgentStatus[]): AgentStatus | undefined {
@@ -120,6 +120,10 @@ function MachineItem({ m }: { m: MachineState }) {
   const setRenaming = useStore((s) => s.setRenaming);
   const snap = m.snapshot;
   const workspaces = snap?.workspaces ?? [];
+  // herdr removed or moved on an SSH machine (or never installed there):
+  // herdr --remote installs it.
+  const missing = m.kind === 'ssh' && herdrMissing(m);
+  const install = !readOnly && <button onClick={() => useStore.getState().openRemoteHerdr(m.id)}>{t('sidebar.installHerdr')}</button>;
   return (
     <div className="machine">
       <div
@@ -138,7 +142,11 @@ function MachineItem({ m }: { m: MachineState }) {
           {m.status !== 'ready' && (
             <div className={`machine-status ms-${m.status}`}>
               {t(`machine.${m.status}` as MessageKey)}
-              {m.error && <div className="small ellipsis2">{m.error}</div>}
+              {missing ? (
+                <div className="small">{t('sidebar.herdrMissing')}</div>
+              ) : (
+                m.error && <div className="small ellipsis2">{m.error}</div>
+              )}
               {m.status === 'disabled' && !readOnly && (
                 <div className="row">
                   <button onClick={() => void actions.setMachineEnabled(m.id, true)}>{t('menu.enableMachine')}</button>
@@ -149,12 +157,19 @@ function MachineItem({ m }: { m: MachineState }) {
                   {m.status === 'auth_required' && m.kind === 'ssh' && (
                     <button onClick={() => useStore.getState().openAuth?.(m.id)}>{t('sidebar.authenticate')}</button>
                   )}
-                  {(m.kind === 'local' || m.status === 'degraded') && !readOnly && (
-                    <button onClick={() => useStore.getState().openHerdr(m.id)}>{t('sidebar.manageHerdr')}</button>
-                  )}
+                  {missing
+                    ? install
+                    : (m.kind === 'local' || m.status === 'degraded') &&
+                      !readOnly && <button onClick={() => useStore.getState().openHerdr(m.id)}>{t('sidebar.manageHerdr')}</button>}
                   {!readOnly && <button onClick={() => conn.retry(m.id)}>{t('sidebar.retry')}</button>}
                 </div>
               )}
+            </div>
+          )}
+          {missing && m.status === 'ready' && (
+            <div className="machine-status ms-degraded">
+              {t('sidebar.herdrGone')}
+              {install && <div className="row">{install}</div>}
             </div>
           )}
           {m.kind === 'ssh' && m.status === 'ready' && isNewer(localHerdr, m.info?.herdr_version) && (

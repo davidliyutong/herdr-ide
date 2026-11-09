@@ -412,4 +412,21 @@ describe('machineMenu', () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it('offers to install herdr where it was removed', () => {
+    useStore.getState().setReadOnly(false);
+    const gone = (status: string) => ({ ...ssh(status), info: { os: 'linux' } }) as unknown as MachineState;
+    for (const status of ['degraded', 'ready']) {
+      useStore.getState().setMachines([gone(status)]);
+      const entries = machineMenu('gpu');
+      expect(labels(entries)).toEqual(['Manage herdr…', 'Restart herdr…', 'Install herdr…', '-', 'Disable machine']);
+      // Without herdr there, a restart would end nothing and start nothing.
+      expect((entries[1] as MenuItem).disabled).toBe(true);
+      (entries[2] as MenuItem).run();
+      expect(useStore.getState().remoteHerdr).toBe('gpu');
+      useStore.getState().openRemoteHerdr(undefined);
+    }
+    useStore.getState().setMachines([{ ...ssh('ready'), info: { os: 'linux', herdr_bin: '/usr/bin/herdr' } } as unknown as MachineState]);
+    expect(labels(machineMenu('gpu'))[2]).toBe('Update herdr…');
+  });
 });

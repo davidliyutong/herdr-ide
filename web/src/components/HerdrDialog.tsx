@@ -42,7 +42,14 @@ export function HerdrDialog() {
   }, [m]);
 
   if (!m) return null;
-  const error = herdrError(st);
+  // No herdr executable there (removed, moved or never installed): nothing
+  // can start or stop a server; on an SSH machine herdr --remote installs it.
+  const missing = !!st && !st.bin && st.error === 'not_found';
+  const install = () => {
+    close();
+    useStore.getState().openRemoteHerdr(m);
+  };
+  const error = missing && !local ? t('herdr.notFoundMachine', { machine: machine?.label ?? m }) : herdrError(st);
   // Only the core host's own copy is updated here; SSH machines update
   // through herdr --remote (the machine's Update herdr).
   const managed = local && !!st?.managed;
@@ -90,6 +97,12 @@ export function HerdrDialog() {
                   {st.restart_needed && <div className="small warn">{t('herdr.restartNeeded')}</div>}
                 </div>
               )}
+              {missing && st.running && (
+                <div>
+                  {t('herdr.runningAny')}
+                  <div className="small warn">{t('herdr.runningWithoutBin')}</div>
+                </div>
+              )}
               {managed && st.latest && !st.error && (
                 <div>{updatable ? t('herdr.available', { version: st.latest }) : t('herdr.upToDate')}</div>
               )}
@@ -100,6 +113,16 @@ export function HerdrDialog() {
           )}
         </div>
         <div className="dialog-actions">
+          {missing && (
+            <button disabled={!!busy} onClick={() => void run()}>
+              {t('herdr.recheck')}
+            </button>
+          )}
+          {missing && !local && (
+            <button className="primary" autoFocus disabled={!!busy} onClick={install}>
+              {t('herdr.install')}
+            </button>
+          )}
           {managed && (
             <button disabled={!!busy} onClick={() => void run('check')}>
               {t('herdr.check')}

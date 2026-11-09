@@ -277,7 +277,8 @@ through **Manage herdr** and **Restart herdr…** in a machine's context menu
 again; **Retry** does not start it). herdr on an SSH
 machine changes only through herdr's own `herdr --remote` flow, which
 **Update herdr** (the machine's context menu) runs in a terminal where the
-user answers herdr's questions. The bundled herdr and
+user answers herdr's questions; where herdr was removed or moved (or a
+reinstalled system lost it) the same flow is offered as **Install herdr**. The bundled herdr and
 the licenses stay in the extracted release directory until the user removes
 it; the application's copy of herdr and the log of servers it started are
 described in [reference](reference.md#files-and-directories). No herdr binary

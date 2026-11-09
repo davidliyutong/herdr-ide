@@ -30,7 +30,8 @@ browser tab, with VS Code (code-server) one keystroke away.
   the local machine updates herdr through herdr's own updater, without a
   terminal; **Restart herdr…** restarts a machine's server directly, or
   starts it after the machine rebooted. **Update herdr** on an SSH machine
-  runs herdr's own `herdr --remote` update there.
+  runs herdr's own `herdr --remote` update there, and **Install herdr** the
+  same flow where herdr was removed or moved.
 - **Multi-machine.** Uses the SSH machines saved in herdr; right-click a
   machine in the sidebar to disable or enable it here. One ssh connection
   per machine runs a small static agent (linux/macOS × amd64/arm64, uploaded
