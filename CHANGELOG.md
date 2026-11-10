@@ -22,6 +22,12 @@ All notable changes are documented here. The format follows
   removed, enabled or disabled with herdr's own commands while the core
   runs.
 
+- An uploads panel for pasted and dropped files, opened from the status
+  bar: each upload's progress, speed and time left, **Cancel** for running
+  and waiting uploads (a cancelled upload leaves nothing on the machine),
+  and the history of the last 50 finished uploads in this browser, which
+  can be previewed or have their path copied.
+
 ### Fixed
 
 - With the theme set to **System**, the panes stayed dark after switching

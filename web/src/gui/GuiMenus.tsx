@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppWindow, MonitorUp, MonitorX } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../state/store';
 import { t } from '../i18n';
 import { guiKey, openGuiWindow, paneWindows, useGui, type GuiWindow } from './state';
 import { enableGui } from './enable';
+import { useDismiss } from '../components/useDismiss';
 
 interface Entry {
   m: string;
@@ -63,21 +64,6 @@ export function PaneGuiButton({ m, pane }: { m: string; pane: string }) {
   const windows = useGui(useShallow((g) => paneWindows(g, m, pane)));
   const entries = useMemo(() => windows.map((w) => ({ m, w })), [windows, m]);
   return <WindowsButton entries={entries} />;
-}
-
-/** Closes a popup on a press outside ref's element or on Escape. */
-function useDismiss(open: boolean, ref: RefObject<HTMLElement | null>, close: () => void) {
-  useEffect(() => {
-    if (!open) return;
-    const outside = (e: PointerEvent) => !ref.current?.contains(e.target as Node) && close();
-    const key = (e: KeyboardEvent) => e.key === 'Escape' && close();
-    document.addEventListener('pointerdown', outside);
-    document.addEventListener('keydown', key);
-    return () => {
-      document.removeEventListener('pointerdown', outside);
-      document.removeEventListener('keydown', key);
-    };
-  }, [open, ref, close]);
 }
 
 /** A machine's failed display in the status bar: clicking shows the error

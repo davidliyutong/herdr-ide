@@ -4,8 +4,8 @@
 //   does. Files of the pane's own machine are pasted where they are: in the
 //   desktop app, those on the local machine, since the core runs on the same
 //   Mac. Other files are uploaded into the pane's working directory on its
-//   machine first (lib/files.ts), keeping files already there; folders cannot
-//   be uploaded and are skipped with a note.
+//   machine first (transfers.ts, shown in the uploads panel), keeping files
+//   already there; folders cannot be uploaded and are skipped with a note.
 // - On the desktop app's sidebar, folders become workspaces on the local
 //   machine, one per folder, as if created in the new workspace dialog. So
 //   do folders dropped on the app's Dock icon, which the shell reports.
@@ -18,9 +18,10 @@
 import { actions } from './actions';
 import { desktopShell } from './desktop';
 import { t } from './i18n';
-import { shellQuote, uploadAs } from './lib/files';
+import { shellQuote } from './lib/files';
 import { shortPath, type MachineState } from './lib/herdr';
 import { useStore } from './state/store';
+import { uploadFiles, useTransfers } from './transfers';
 
 /** Whether a drag carries files from outside the page. */
 export function carriesFiles(dt: DataTransfer | null): boolean {
@@ -160,7 +161,7 @@ export function filesAreOn(m: string): boolean {
 /** The text to paste for files dropped on a pane of machine m: their paths
  * on that machine, shell-quoted, uploading the files that are not there
  * into dir (the pane's working directory), else into the upload directory.
- * Undefined when there is none. */
+ * Undefined when there is none, also when every upload was cancelled. */
 export async function droppedPaths(m: string, items: Dropped[], dir?: string): Promise<string | undefined> {
   const here = filesAreOn(m);
   const s = useStore.getState();
@@ -168,20 +169,20 @@ export async function droppedPaths(m: string, items: Dropped[], dir?: string): P
   const there = (i: Dropped) => here && !!i.path;
   const folders = items.filter((i) => i.folder && !there(i)).length;
   if (folders) s.toast(t('surface.dropNoFolders', { n: folders }));
-  const uploads = items.filter((i) => !i.folder && !there(i)).length;
-  if (uploads)
+  const uploads = items.filter((i) => !i.folder && !there(i));
+  if (uploads.length)
     s.toast(
       dir
-        ? t('surface.uploadingInto', { n: uploads, machine, dir: shortPath(dir, s.machines[m]?.info?.home) })
-        : t('surface.uploading', { n: uploads, machine }),
+        ? t('surface.uploadingInto', { n: uploads.length, machine, dir: shortPath(dir, s.machines[m]?.info?.home) })
+        : t('surface.uploading', { n: uploads.length, machine }),
+      { label: t('transfers.show'), run: () => useTransfers.getState().setPanel(true), ttl: 5000 },
     );
-  const paths: string[] = [];
-  for (const i of items) {
-    if (there(i)) paths.push(i.path);
-    else if (!i.folder) {
-      const p = await uploadAs(m, i.file, dir);
-      if (p) paths.push(p);
-    }
-  }
+  const uploaded = await uploadFiles(
+    m,
+    uploads.map((i) => i.file),
+    dir,
+  );
+  const at = new Map(uploads.map((i, k) => [i, uploaded[k]]));
+  const paths = items.map((i) => (there(i) ? i.path : at.get(i))).filter((p): p is string => !!p);
   return paths.length ? paths.map(shellQuote).join(' ') + ' ' : undefined;
 }

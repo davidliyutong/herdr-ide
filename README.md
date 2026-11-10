@@ -64,6 +64,8 @@ browser tab, with VS Code (code-server) one keystroke away.
 - **Files to agents.** Paste or drop files into a pane to paste their paths;
   files that are not on the pane's machine are uploaded to it first, dropped
   ones into the pane's directory (an existing file there is never replaced).
+  The uploads panel in the status bar shows each upload's progress and
+  speed, cancels uploads and lists the recent ones.
 - **Several browsers at once.** The active browser controls a pane; others
   watch at the same size and take over by typing.
 - **Settings.** Language (English, Chinese), light/dark theme followed by

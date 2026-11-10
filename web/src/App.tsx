@@ -24,6 +24,7 @@ import { getTerm } from './terminal/registry';
 import { initSurface, surfaceDisconnected } from './surface/session';
 import { useGui } from './gui/state';
 import { GuiTray } from './gui/GuiMenus';
+import { TransfersTray } from './components/Transfers';
 
 /** Text sent from VS Code ("Send to agent") is pasted, not submitted, into the
  * focused pane when it is on the same machine, else that machine's most
@@ -153,6 +154,7 @@ function StatusBar({ connected, prefix }: { connected: boolean; prefix: boolean 
         </span>
       )}
       <span className="spacer" />
+      <TransfersTray />
       <GuiTray />
       {prefix && <span className="prefix-badge">PREFIX</span>}
       <span className="muted small">{t('app.hint', { prefix: keyPrefix })}</span>

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, ExternalLink, PanelBottom, PanelRight, Power, X } from 'lucide-react';
 import { useStore, type DockView } from '../state/store';
 import { usePrefs } from '../prefs';
-import { fileUrl, listDir, type RemoteStat } from '../lib/files';
+import { fileUrl, formatSize, listDir, type RemoteStat } from '../lib/files';
 import { mediaExt } from '../terminal/links';
 import { actions } from '../actions';
 import { shortPath } from '../lib/herdr';
@@ -280,11 +280,4 @@ function Preview({ m, path }: { m: string; path: string }) {
       </div>
     </div>
   );
-}
-
-function formatSize(n: number) {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  if (n < 1024 ** 3) return `${(n / 1024 / 1024).toFixed(1)} MB`;
-  return `${(n / 1024 ** 3).toFixed(1)} GB`;
 }
