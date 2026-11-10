@@ -3,6 +3,7 @@
 // whose title bar follows it) and the UI font. The pane surface follows the
 // terminal settings itself (components/SurfaceView.tsx).
 
+import { create } from 'zustand';
 import { getPrefs, usePrefs, type Prefs } from './prefs';
 import { conn } from './lib/conn';
 import type { TermFontWeight } from './terminal/fonts';
@@ -20,7 +21,15 @@ export interface Appearance {
 
 const darkQuery = typeof matchMedia === 'undefined' ? undefined : matchMedia('(prefers-color-scheme: dark)');
 
-export function resolveTheme(pref: Prefs['theme'], systemDark = darkQuery?.matches ?? true): ThemeKind {
+/** Whether the system asks for a dark theme, which the "system" setting
+ * follows. In the desktop app it is Electron's nativeTheme.themeSource,
+ * which the setting itself changes (apply): after switching from "dark" to
+ * "system" it turns light only once the shell has been told. Components
+ * that draw with the theme (the pane surface) subscribe to it, as they do
+ * to the settings. */
+export const useSystemDark = create<{ dark: boolean }>(() => ({ dark: darkQuery?.matches ?? true }));
+
+export function resolveTheme(pref: Prefs['theme'], systemDark = useSystemDark.getState().dark): ThemeKind {
   if (pref === 'dark' || pref === 'light') return pref;
   return systemDark ? 'dark' : 'light';
 }
@@ -28,6 +37,14 @@ export function resolveTheme(pref: Prefs['theme'], systemDark = darkQuery?.match
 /** The theme kind in use. */
 export function themeKind(): ThemeKind {
   return resolveTheme(getPrefs().theme);
+}
+
+/** The theme kind in use, for components: it changes with the setting and,
+ * for "system", with the system's theme. */
+export function useThemeKind(): ThemeKind {
+  const pref = usePrefs((s) => s.prefs.theme);
+  const dark = useSystemDark((s) => s.dark);
+  return resolveTheme(pref, dark);
 }
 
 export function appearanceOf(p: Prefs): Appearance {
@@ -61,5 +78,8 @@ export function initAppearance() {
   usePrefs.subscribe((s, prev) => {
     if (s.prefs !== prev.prefs) apply(s.prefs);
   });
-  darkQuery?.addEventListener('change', () => apply(getPrefs()));
+  useSystemDark.subscribe((s, prev) => {
+    if (s.dark !== prev.dark) apply(getPrefs());
+  });
+  darkQuery?.addEventListener('change', (e) => useSystemDark.setState({ dark: e.matches }));
 }

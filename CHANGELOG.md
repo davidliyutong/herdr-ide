@@ -8,6 +8,10 @@ All notable changes are documented here. The format follows
 
 ### Fixed
 
+- With the theme set to **System**, the panes stayed dark after switching
+  from **Dark** in the desktop app (and did not follow a later change of the
+  system's theme) while the rest of the UI turned light.
+
 - An SSH machine whose herdr was removed, moved or lost with a reinstalled
   system was only *degraded* with a socket error, **Manage herdr** said
   "herdr was not found" without a way on, and **Restart herdr…** failed. The
