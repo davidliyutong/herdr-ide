@@ -22,7 +22,8 @@ browser (React, canvas)     ──WebSocket + HTTP──▶  core (Go, `herdr-id
 | `internal/agentproto` | Stream protocol shared by core and agent. |
 | `internal/agent` | Agent: herdr, terminals, files, code-server supervision, bridge listener, housekeeping. |
 | `internal/transport` | yamux sessions: in-process for the local machine, ssh stdio for others; agent upload. |
-| `internal/machines` | Machine registry (herdr's saved machines, enabled or disabled over it from the UI), state machine, herdr snapshots and subscriptions. |
+| `internal/machines` | Machine registry (herdr's saved machines, enabled or disabled over it from the UI, added, removed and relabelled at runtime after herdr's `machine add`,
+`remove` and `rename` or a reload), state machine, herdr snapshots and subscriptions. |
 | `internal/herdr` | herdr public socket API client; `endpoint`: client of herdr's endpoint protocol (generation 1). |
 | `internal/herdrdist` | herdr release bundled in archives: version, upstream asset names and SHA-256 digests. |
 | `internal/checksum` | SHA-256 of files, shared by code-server and herdr downloads. |
@@ -148,7 +149,15 @@ HTTP endpoints besides files, uploads and the code-server proxy:
 `GET`/`PUT /api/settings` (core settings with their definitions, see
 [13](features/13-settings-and-appearance.md)), and `PUT /api/m/{id}/enabled`
 (`{"enabled": bool}`: enables or disables a machine, see
-[02](features/02-multi-machine-transport.md)). A program window is shown by
+[02](features/02-multi-machine-transport.md)). The WebSocket
+`GET /api/machines/add?target=&label=&session=` runs the local herdr's
+`herdr machine add` in a PTY and closes with `added <id>` or `none`;
+`DELETE /api/m/{id}` removes a saved machine with `herdr machine remove`,
+`PUT /api/m/{id}/label` (`{"label": "…"}`) renames one with
+`herdr machine rename`, and `POST /api/machines/refresh` reloads herdr's
+machines (reply: the ids `added`, `removed` and `updated`). When machines
+come or go the core sends every browser a new `machines {list}`; a renamed
+machine arrives as its `machine {state}`. A program window is shown by
 the app at `GET /m/{id}/gui/{win}`, streamed over the WebSocket
 `/m/{id}/gui/{win}/ws` (JSON events and binary frames out, JSON commands in;
 `?video=avc1,vp8` names the video streams the browser decodes)

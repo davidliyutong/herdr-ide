@@ -2,6 +2,9 @@ package machines
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,12 +21,15 @@ const LocalID = "local"
 
 // Spec describes one machine.
 type Spec struct {
-	ID       string `json:"id"`
-	Label    string `json:"label"`
-	Kind     string `json:"kind"`
-	Target   string `json:"target,omitempty"`
-	Session  string `json:"session"`
-	Enabled  bool   `json:"enabled"`
+	ID      string `json:"id"`
+	Label   string `json:"label"`
+	Kind    string `json:"kind"`
+	Target  string `json:"target,omitempty"`
+	Session string `json:"session"`
+	Enabled bool   `json:"enabled"`
+	// Saved: the machine is one of herdr's saved machines (not an --ssh
+	// target), which `herdr machine remove` removes.
+	Saved    bool   `json:"saved,omitempty"`
 	HerdrBin string `json:"-"`
 }
 
@@ -69,6 +75,37 @@ func HerdrExecutable(id string) string {
 	return md.Metadata.Executable
 }
 
+// SavedSpecs returns herdr's saved SSH machines, as herdr's catalog has
+// them now (herdr's `herdr machine add`, `remove` and `rename` change it).
+// No catalog means none; one that cannot be read is an error, so that the
+// machines are not taken for removed.
+func SavedSpecs() ([]Spec, error) {
+	b, err := os.ReadFile(filepath.Join(HerdrStateDir(), "client", "endpoints.json"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var cat endpointCatalog
+	if err := json.Unmarshal(b, &cat); err != nil {
+		return nil, fmt.Errorf("herdr's machines: %w", err)
+	}
+	var specs []Spec
+	for _, e := range cat.SSH {
+		s := Spec{ID: e.ID, Label: e.Label, Kind: KindSSH, Target: e.Target, Session: e.Session, Enabled: e.Enabled, Saved: true}
+		if s.Label == "" {
+			s.Label = s.Target
+		}
+		if s.Session == "" {
+			s.Session = "default"
+		}
+		s.HerdrBin = HerdrExecutable(e.ID)
+		specs = append(specs, s)
+	}
+	return specs, nil
+}
+
 // LoadSpecs returns the local machine followed by herdr's saved SSH machines.
 func LoadSpecs(localSession string, extra []Spec) []Spec {
 	hostname, _ := os.Hostname()
@@ -77,24 +114,8 @@ func LoadSpecs(localSession string, extra []Spec) []Spec {
 		localSession = "default"
 	}
 	specs := []Spec{{ID: LocalID, Label: hostname + " (local)", Kind: KindLocal, Session: localSession, Enabled: true}}
-
-	clientDir := filepath.Join(HerdrStateDir(), "client")
-	if b, err := os.ReadFile(filepath.Join(clientDir, "endpoints.json")); err == nil {
-		var cat endpointCatalog
-		if json.Unmarshal(b, &cat) == nil {
-			for _, e := range cat.SSH {
-				s := Spec{ID: e.ID, Label: e.Label, Kind: KindSSH, Target: e.Target, Session: e.Session, Enabled: e.Enabled}
-				if s.Label == "" {
-					s.Label = s.Target
-				}
-				if s.Session == "" {
-					s.Session = "default"
-				}
-				s.HerdrBin = HerdrExecutable(e.ID)
-				specs = append(specs, s)
-			}
-		}
-	}
+	saved, _ := SavedSpecs() // as before: an unreadable catalog has no machines
+	specs = append(specs, saved...)
 	seen := map[string]bool{}
 	for _, s := range specs {
 		seen[s.ID] = true

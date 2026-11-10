@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../state/store';
 import { usePrefs } from '../prefs';
-import { appearanceOf } from '../appearance';
+import { appearanceOf, useThemeKind } from '../appearance';
 import { handleKey } from '../keymap';
 import { uploadPasted } from '../lib/files';
 import { droppedItems, droppedPaths, filesAreOn } from '../drop';
@@ -48,6 +48,8 @@ export function SurfaceView({ m, tabId, layout }: Props) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const ctlRef = useRef<SurfaceController>(undefined);
   const prefs = usePrefs((s) => s.prefs);
+  // The "system" theme changes without the settings changing.
+  const theme = useThemeKind();
   const ownership = useSurface((s) => s.ownership);
   const status = useSurface((s) => s.status);
   const meta = useSurface((s) => s.meta);
@@ -109,7 +111,7 @@ export function SurfaceView({ m, tabId, layout }: Props) {
     ctl.setAppearance(a);
     setHostColors(ctl.hostColors());
     return whenTermFont(a.fontWeight, () => ctl.fontChanged());
-  }, [prefs]);
+  }, [prefs, theme]);
 
   // Showing a tab moves the UI's focus into it (herdr's focused pane of the
   // tab, else its first), so keys and the "seen" marking apply to what is shown.

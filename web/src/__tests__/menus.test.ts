@@ -11,7 +11,7 @@ import { insertSlot, near } from '../reorderDrag';
 import { dragBegins, trackDrag } from '../drag';
 import { withOrder, workspaceTabs, type MachineState } from '../lib/herdr';
 import { closeMenu, isItem, openMenu, stepIndex, tidy, useMenu, type MenuEntry, type MenuItem } from '../contextMenu';
-import { machineMenu, paneMenu, tabMenu, workspaceMenu } from '../menus';
+import { machineMenu, paneMenu, sidebarMenu, tabMenu, workspaceMenu } from '../menus';
 import { actions } from '../actions';
 import { ContextMenu } from '../components/ContextMenu';
 
@@ -336,7 +336,16 @@ describe('machineMenu', () => {
       useStore.getState().setReadOnly(false);
       useStore.getState().setMachines([ssh('ready')]);
       const entries = machineMenu('gpu');
-      expect(labels(entries)).toEqual(['Manage herdr…', 'Restart herdr…', 'Update herdr…', '-', 'Disable machine']);
+      expect(labels(entries)).toEqual([
+        'Manage herdr…',
+        'Restart herdr…',
+        'Update herdr…',
+        '-',
+        'Disable machine',
+        '-',
+        'Add machine…',
+        'Reload machines from herdr',
+      ]);
       (entries[4] as MenuItem).run();
       const req = useDialog.getState().current;
       expect(req?.kind).toBe('confirm');
@@ -349,7 +358,7 @@ describe('machineMenu', () => {
       useDialog.setState({ current: undefined });
       useStore.getState().setMachines([ssh('disabled')]);
       const off = machineMenu('gpu');
-      expect(labels(off)).toEqual(['Enable machine']);
+      expect(labels(off)).toEqual(['Enable machine', '-', 'Add machine…', 'Reload machines from herdr']);
       (off[0] as MenuItem).run();
       await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
       expect(fetchMock.mock.calls[1][1]).toMatchObject({ body: JSON.stringify({ enabled: true }) });
@@ -419,7 +428,16 @@ describe('machineMenu', () => {
     for (const status of ['degraded', 'ready']) {
       useStore.getState().setMachines([gone(status)]);
       const entries = machineMenu('gpu');
-      expect(labels(entries)).toEqual(['Manage herdr…', 'Restart herdr…', 'Install herdr…', '-', 'Disable machine']);
+      expect(labels(entries)).toEqual([
+        'Manage herdr…',
+        'Restart herdr…',
+        'Install herdr…',
+        '-',
+        'Disable machine',
+        '-',
+        'Add machine…',
+        'Reload machines from herdr',
+      ]);
       // Without herdr there, a restart would end nothing and start nothing.
       expect((entries[1] as MenuItem).disabled).toBe(true);
       (entries[2] as MenuItem).run();
@@ -428,5 +446,130 @@ describe('machineMenu', () => {
     }
     useStore.getState().setMachines([{ ...ssh('ready'), info: { os: 'linux', herdr_bin: '/usr/bin/herdr' } } as unknown as MachineState]);
     expect(labels(machineMenu('gpu'))[2]).toBe('Update herdr…');
+  });
+
+  it('removes a saved machine after asking, with herdr, and reports why it could not', async () => {
+    const { useDialog } = await import('../dialog');
+    const fetchMock = vi.fn((_url: string, _init?: RequestInit) => Promise.resolve(new Response('{}', { status: 200 })));
+    vi.stubGlobal('fetch', fetchMock);
+    const toast = vi.spyOn(useStore.getState(), 'toast');
+    try {
+      useStore.getState().setReadOnly(false);
+      const saved = (status: string) => ({ ...ssh(status), saved: true, target: 'u@gpu' }) as unknown as MachineState;
+      // Machines given with --ssh and the local machine are not herdr's.
+      useStore
+        .getState()
+        .setMachines([ssh('ready'), { id: 'local', label: 'mac', kind: 'local', status: 'ready' } as unknown as MachineState]);
+      for (const id of ['gpu', 'local']) {
+        expect(labels(machineMenu(id))).not.toContain('Remove machine…');
+        expect(labels(machineMenu(id))).not.toContain('Rename machine');
+      }
+
+      for (const status of ['ready', 'disabled']) {
+        useStore.getState().setMachines([saved(status)]);
+        expect(labels(machineMenu('gpu')).slice(-6)).toEqual([
+          '-',
+          'Rename machine',
+          'Remove machine…',
+          '-',
+          'Add machine…',
+          'Reload machines from herdr',
+        ]);
+      }
+      const remove = machineMenu('gpu').find((e) => isItem(e) && e.label === 'Remove machine…') as MenuItem;
+      expect(remove.danger).toBe(true);
+
+      // Declining sends nothing.
+      remove.run();
+      let req = useDialog.getState().current;
+      expect(req?.kind === 'confirm' && req.message).toContain('u@gpu');
+      if (req?.kind === 'confirm') req.resolve(false);
+      await Promise.resolve();
+      expect(fetchMock).not.toHaveBeenCalled();
+
+      useDialog.setState({ current: undefined });
+      remove.run();
+      req = useDialog.getState().current;
+      if (req?.kind === 'confirm') req.resolve(true);
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+      expect(fetchMock.mock.calls[0][0]).toBe('/api/m/gpu');
+      expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'DELETE' });
+      await vi.waitFor(() => expect(toast).toHaveBeenLastCalledWith('Removed gpu.'));
+
+      fetchMock.mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: 'herdr', detail: 'machine profile was not found' }), { status: 502 }),
+      );
+      useDialog.setState({ current: undefined });
+      remove.run();
+      req = useDialog.getState().current;
+      if (req?.kind === 'confirm') req.resolve(true);
+      await vi.waitFor(() => expect(toast).toHaveBeenLastCalledWith('Could not remove gpu: machine profile was not found'));
+    } finally {
+      toast.mockRestore();
+      useDialog.setState({ current: undefined });
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("offers to add a machine and to reload them in the sidebar's free space, except read-only", () => {
+    useStore.getState().setReadOnly(false);
+    const entries = sidebarMenu();
+    expect(labels(entries)).toEqual(['Add machine…', 'Reload machines from herdr']);
+    (entries[0] as MenuItem).run();
+    expect(useStore.getState().addMachine).toBe(true);
+    useStore.getState().openAddMachine(false);
+    useStore.getState().setReadOnly(true);
+    expect(sidebarMenu()).toEqual([]);
+    useStore.getState().setReadOnly(false);
+  });
+
+  it('renames a saved machine in place with herdr, and says why it could not', async () => {
+    const fetchMock = vi.fn((_url: string, _init?: RequestInit) => Promise.resolve(new Response('{}', { status: 200 })));
+    vi.stubGlobal('fetch', fetchMock);
+    const toast = vi.spyOn(useStore.getState(), 'toast');
+    try {
+      useStore.getState().setReadOnly(false);
+      useStore.getState().setMachines([{ ...ssh('ready'), saved: true } as unknown as MachineState]);
+      (machineMenu('gpu').find((e) => isItem(e) && e.label === 'Rename machine') as MenuItem).run();
+      expect(useStore.getState().renaming).toEqual({ kind: 'machine', m: 'gpu', id: 'gpu' });
+      useStore.getState().setRenaming(undefined);
+
+      // An unchanged or empty name sends nothing.
+      await actions.renameMachine('gpu', 'gpu');
+      await actions.renameMachine('gpu', '');
+      expect(fetchMock).not.toHaveBeenCalled();
+      await actions.renameMachine('gpu', 'GPU box');
+      expect(fetchMock.mock.calls[0][0]).toBe('/api/m/gpu/label');
+      expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'PUT', body: JSON.stringify({ label: 'GPU box' }) });
+
+      fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: 'label_taken' }), { status: 409 }));
+      await actions.renameMachine('gpu', 'robot');
+      expect(toast).toHaveBeenLastCalledWith('Could not rename gpu: another saved machine has this name.');
+    } finally {
+      toast.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('reloads the machines and says what changed', async () => {
+    const reply = (body: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(body), { status }));
+    const fetchMock = vi.fn((_url: string, _init?: RequestInit) => reply({ added: null, removed: null, updated: null }));
+    vi.stubGlobal('fetch', fetchMock);
+    const toast = vi.spyOn(useStore.getState(), 'toast');
+    try {
+      await actions.refreshMachines();
+      expect(fetchMock.mock.calls[0][0]).toBe('/api/machines/refresh');
+      expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST' });
+      expect(toast).toHaveBeenLastCalledWith('herdr’s machines are unchanged.');
+      fetchMock.mockReturnValueOnce(reply({ added: ['a'], removed: null, updated: ['b', 'c'] }));
+      await actions.refreshMachines();
+      expect(toast).toHaveBeenLastCalledWith('Reloaded herdr’s machines: 1 added, 0 removed, 2 changed.');
+      fetchMock.mockReturnValueOnce(reply({ error: 'catalog', detail: 'bad json' }, 502));
+      await actions.refreshMachines();
+      expect(toast).toHaveBeenLastCalledWith('Could not reload herdr’s machines: bad json');
+    } finally {
+      toast.mockRestore();
+      vi.unstubAllGlobals();
+    }
   });
 });

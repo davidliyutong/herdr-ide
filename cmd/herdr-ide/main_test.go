@@ -26,6 +26,11 @@ func TestSelectSpecsDedup(t *testing.T) {
 	if len(got) != 2 || got[1].ID != "x" {
 		t.Fatalf("--local-only with --ssh = %+v", got)
 	}
+	// A machine a reload finds in herdr's catalog is taken the same way.
+	if selectSpec(specs[2], false, true, nil, nil) || !selectSpec(specs[2], false, false, nil, nil) ||
+		!selectSpec(specs[1], false, false, nil, []string{"gpu"}) || selectSpec(specs[2], false, false, nil, []string{"gpu"}) {
+		t.Fatal("selectSpec disagrees with --local-only or --machine")
+	}
 }
 
 // Every core setting has a label, a description and option labels in the

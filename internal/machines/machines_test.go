@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -32,13 +33,13 @@ func TestLoadSpecsFromHerdrCatalog(t *testing.T) {
 	if specs[0].ID != LocalID || specs[0].Session != "dev" {
 		t.Fatalf("local = %+v", specs[0])
 	}
-	if s := specs[1]; s.Target != "gpu-host" || s.HerdrBin != "/home/u/.local/bin/herdr" || !s.Enabled {
+	if s := specs[1]; s.Target != "gpu-host" || s.HerdrBin != "/home/u/.local/bin/herdr" || !s.Enabled || !s.Saved {
 		t.Fatalf("gpu = %+v", s)
 	}
 	if s := specs[2]; s.Label != "robot" || s.Session != "default" || s.Enabled {
 		t.Fatalf("robot = %+v", s)
 	}
-	if s := specs[3]; s.ID != "extra" || s.Kind != KindSSH {
+	if s := specs[3]; s.ID != "extra" || s.Kind != KindSSH || s.Saved {
 		t.Fatalf("extra = %+v", s)
 	}
 }
@@ -261,5 +262,135 @@ func TestNoteHerdrFollowsTheMachine(t *testing.T) {
 	}
 	if !published.Load() {
 		t.Fatal("the new herdr was not published")
+	}
+}
+
+// Machines saved in herdr's catalog from the UI join a running manager and
+// connect; removing one ends its session, forgets its enabled choice and
+// publishes nothing more for it. The local machine cannot be removed.
+func TestAddAndRemoveAtRuntime(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("HERDR_SOCKET_PATH", "")
+	logger := log.New(io.Discard, "", 0)
+	dial := func(ctx context.Context, spec Spec) (*transport.Session, string, error) {
+		s, err := transport.DialLocal(ctx, agent.Options{Logger: logger})
+		return s, "test/test", err
+	}
+	mg := NewManager([]Spec{{ID: LocalID, Label: "local", Kind: KindLocal, Session: "herdr-ide-none", Enabled: true}}, dial, logger)
+	path := filepath.Join(t.TempDir(), "machines.json")
+	o := LoadOverrides(path)
+	mg.UseOverrides(o)
+	var afterRemove atomic.Int32
+	var removed atomic.Bool
+	mg.Subscribe(func(st State) {
+		if st.ID == "x" && removed.Load() {
+			afterRemove.Add(1)
+		}
+	}, func(AgentEvent) {})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		mg.Run(ctx)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+	waitFor := func(what string, ok func() bool) {
+		t.Helper()
+		for deadline := time.Now().Add(10 * time.Second); !ok(); time.Sleep(10 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("timed out waiting for %s", what)
+			}
+		}
+	}
+
+	spec := Spec{ID: "x", Label: "x", Kind: KindSSH, Target: "x", Session: "herdr-ide-none", Enabled: true, Saved: true}
+	if err := mg.Add(spec); err != nil {
+		t.Fatal(err)
+	}
+	if err := mg.Add(spec); err != ErrMachineExists {
+		t.Fatalf("added twice: %v", err)
+	}
+	m := mg.Get("x")
+	waitFor("the added machine's session", func() bool { return m.Session() != nil })
+	if st := mg.States(); len(st) != 2 || st[1].ID != "x" || !st[1].Saved {
+		t.Fatalf("states = %+v", st)
+	}
+	sess := m.Session()
+	if err := mg.SetEnabled("x", true); err != nil {
+		t.Fatal(err)
+	}
+
+	removed.Store(true)
+	if err := mg.Remove("x"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-sess.Done():
+	case <-time.After(10 * time.Second):
+		t.Fatal("the session did not end")
+	}
+	if mg.Get("x") != nil || len(mg.States()) != 1 {
+		t.Fatalf("still there: %+v", mg.States())
+	}
+	if n := afterRemove.Load(); n != 0 {
+		t.Fatalf("%d states published after the removal", n)
+	}
+	if b, _ := os.ReadFile(path); strings.Contains(string(b), `"x"`) {
+		t.Fatalf("the enabled choice was kept: %s", b)
+	}
+	if err := mg.Remove("x"); err != ErrUnknownMachine {
+		t.Fatalf("removed twice: %v", err)
+	}
+	if err := mg.Remove(LocalID); err != ErrLocalMachine {
+		t.Fatalf("removed the local machine: %v", err)
+	}
+
+	// A disabled choice made before for the id applies when it comes back.
+	if err := o.SetEnabled("y", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := mg.Add(Spec{ID: "y", Label: "y", Kind: KindSSH, Session: "herdr-ide-none", Enabled: true, Saved: true}); err != nil {
+		t.Fatal(err)
+	}
+	if st := mg.Get("y").State(); st.Status != StatusDisabled || st.Enabled {
+		t.Fatalf("y = %s enabled %v", st.Status, st.Enabled)
+	}
+}
+
+// A reload applies herdr's new label and enabled flag, but not the flag of
+// a machine the user enabled or disabled here.
+func TestUpdateFromCatalog(t *testing.T) {
+	var labels []string
+	mg := NewManager([]Spec{
+		{ID: "a", Label: "a", Kind: KindSSH, Enabled: true, Saved: true},
+		{ID: "b", Label: "b", Kind: KindSSH, Enabled: true, Saved: true},
+	}, nil, log.New(io.Discard, "", 0))
+	o := LoadOverrides("")
+	o.SetEnabled("b", true)
+	mg.UseOverrides(o)
+	mg.Subscribe(func(st State) { labels = append(labels, st.Label) }, func(AgentEvent) {})
+
+	if changed, err := mg.Update(Spec{ID: "a", Label: "a", Enabled: true}); err != nil || changed {
+		t.Fatalf("unchanged: %v %v", changed, err)
+	}
+	if changed, _ := mg.Update(Spec{ID: "a", Label: "GPU", Enabled: false}); !changed {
+		t.Fatal("not changed")
+	}
+	if st := mg.Get("a").State(); st.Label != "GPU" || st.Status != StatusDisabled || mg.Get("a").Label() != "GPU" {
+		t.Fatalf("a = %s %s", st.Label, st.Status)
+	}
+	if len(labels) == 0 || labels[0] != "GPU" {
+		t.Fatalf("published %v", labels)
+	}
+	if changed, _ := mg.Update(Spec{ID: "b", Label: "b", Enabled: false}); changed || mg.Get("b").State().Status == StatusDisabled {
+		t.Fatal("herdr's flag replaced the user's choice")
+	}
+	if _, err := mg.Update(Spec{ID: "nope"}); err != ErrUnknownMachine {
+		t.Fatalf("unknown: %v", err)
 	}
 }

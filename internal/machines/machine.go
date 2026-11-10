@@ -108,8 +108,12 @@ func newMachine(spec Spec, dial Dialer, logger *log.Logger, publish func(State),
 // ID returns the machine id.
 func (m *Machine) ID() string { return m.spec.ID }
 
-// Label returns the display label.
-func (m *Machine) Label() string { return m.spec.Label }
+// Label returns the display label (herdr's, which a rename changes).
+func (m *Machine) Label() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.state.Label
+}
 
 // Local reports whether this is the machine the core runs on.
 func (m *Machine) Local() bool { return m.spec.Kind == KindLocal }
@@ -315,17 +319,31 @@ func (m *Machine) Run(ctx context.Context) {
 	}
 }
 
-// setEnabled enables or disables the machine. Disabling ends its session
-// (the agent exits and stops what it started, such as code-server) and drops
-// what was learnt from herdr; panes keep running in herdr.
-func (m *Machine) setEnabled(on bool) {
+// setLabel shows the machine under a new label (renamed in herdr) and
+// reports whether it changed.
+func (m *Machine) setLabel(label string) bool {
+	m.mu.Lock()
+	same := m.state.Label == label
+	m.mu.Unlock()
+	if same {
+		return false
+	}
+	m.update(func(st *State) { st.Label = label })
+	return true
+}
+
+// setEnabled enables or disables the machine and reports whether that
+// changed it. Disabling ends its session (the agent exits and stops what it
+// started, such as code-server) and drops what was learnt from herdr; panes
+// keep running in herdr.
+func (m *Machine) setEnabled(on bool) bool {
 	m.mu.Lock()
 	changed := m.enabled != on
 	m.enabled = on
 	stop := m.stopRun
 	m.mu.Unlock()
 	if !changed {
-		return
+		return false
 	}
 	if on {
 		m.update(func(st *State) {
@@ -337,12 +355,13 @@ func (m *Machine) setEnabled(on bool) {
 		case m.enableCh <- struct{}{}:
 		default:
 		}
-		return
+		return true
 	}
 	if stop != nil {
 		stop()
 	}
 	m.markDisabled()
+	return true
 }
 
 func (m *Machine) markDisabled() {
@@ -373,7 +392,7 @@ func (m *Machine) connect(ctx context.Context) {
 				m.setStatus(StatusError, err)
 				backoff = min(backoff*2, 120*time.Second)
 			}
-			m.logger.Printf("machine %s: %v (retry in %s)", m.spec.Label, err, wait)
+			m.logger.Printf("machine %s: %v (retry in %s)", m.Label(), err, wait)
 			select {
 			case <-ctx.Done():
 				return
@@ -398,11 +417,11 @@ func (m *Machine) connect(ctx context.Context) {
 		m.reconnect = false
 		m.mu.Unlock()
 		if again {
-			m.logger.Printf("machine %s: reconnecting on request", m.spec.Label)
+			m.logger.Printf("machine %s: reconnecting on request", m.Label())
 			continue
 		}
 		m.setStatus(StatusError, err)
-		m.logger.Printf("machine %s: session ended: %v", m.spec.Label, err)
+		m.logger.Printf("machine %s: session ended: %v", m.Label(), err)
 		select {
 		case <-ctx.Done():
 			return
@@ -620,7 +639,7 @@ func (m *Machine) lifecycleLoop(ctx context.Context, api *herdr.Client) {
 		if ctx.Err() != nil {
 			return
 		}
-		m.logger.Printf("machine %s: lifecycle subscription: %v", m.spec.Label, err)
+		m.logger.Printf("machine %s: lifecycle subscription: %v", m.Label(), err)
 		m.Refresh()
 		select {
 		case <-ctx.Done():
@@ -692,7 +711,7 @@ func (m *Machine) agentStatusLoop(ctx context.Context, api *herdr.Client) {
 			}
 			// A pane that closed between snapshot and subscribe makes the
 			// whole request fail; refetch and retry shortly.
-			m.logger.Printf("machine %s: agent status subscription: %v", m.spec.Label, err)
+			m.logger.Printf("machine %s: agent status subscription: %v", m.Label(), err)
 			m.Refresh()
 			select {
 			case <-ctx.Done():

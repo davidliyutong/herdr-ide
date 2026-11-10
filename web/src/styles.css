@@ -1285,6 +1285,10 @@ button.primary:hover {
   border-color: var(--accent);
   outline: none;
 }
+.machine-head .inline-edit {
+  flex: 1;
+  font-weight: 500;
+}
 .ws-item .inline-edit {
   flex: 1;
 }

@@ -51,6 +51,14 @@ type Options struct {
 	UserHeader string
 	// Settings are the core settings the UI can change; nil disables them.
 	Settings *settings.Store
+	// Catalog returns herdr's saved SSH machines as the core configures
+	// them, read again after the UI adds, removes or renames one and when
+	// it reloads them; nil disables all of that.
+	Catalog func() ([]machines.Spec, error)
+	// Selected reports whether the core's machine selection (--machine,
+	// --local-only) takes a saved machine that a reload finds; nil takes
+	// all. Machines added from the UI are taken whatever it says.
+	Selected func(machines.Spec) bool
 }
 
 // Server is the HTTP front of the core.
@@ -64,6 +72,9 @@ type Server struct {
 	cs      *codeserver.Manager
 	bridge  *bridgeHub
 	gui     *gui.Manager
+	// herdrCLI is the herdr that runs herdr's machine commands on the core
+	// host ("" when unknown): the local machine's (tests replace it).
+	herdrCLI func() string
 
 	clientsMu sync.Mutex
 	clients   map[*wsClient]bool
@@ -97,6 +108,7 @@ func New(mg *machines.Manager, opts Options) *Server {
 		s.hosts[strings.ToLower(u.Hostname())] = true
 	}
 	s.csProxy = newCodeServerProxy(s)
+	s.herdrCLI = s.localHerdr
 	s.initGUI()
 	mg.Subscribe(func(st machines.State) {
 		if st.Status == machines.StatusReady || st.Status == machines.StatusDegraded {
@@ -114,6 +126,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/settings", s.handleSettings)
 	mux.HandleFunc("PUT /api/settings", s.writable(s.handleSetSetting))
 	mux.HandleFunc("GET /api/machines", s.handleMachines)
+	mux.HandleFunc("GET /api/machines/add", s.writable(s.handleMachineAdd))
+	mux.HandleFunc("POST /api/machines/refresh", s.writable(s.handleMachinesRefresh))
+	mux.HandleFunc("DELETE /api/m/{id}", s.writable(s.handleMachineRemove))
+	mux.HandleFunc("PUT /api/m/{id}/label", s.writable(s.handleMachineRename))
 	mux.HandleFunc("GET /api/keymap", s.handleKeymap)
 	mux.HandleFunc("PUT /api/m/{id}/enabled", s.writable(s.handleMachineEnabled))
 	mux.HandleFunc("GET /api/m/{id}/auth", s.writable(s.handleAuth))

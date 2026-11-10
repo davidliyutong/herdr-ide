@@ -112,7 +112,7 @@ func (s *Server) handleHerdrRemote(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "not_ssh"})
 		return
 	}
-	bin := s.localHerdr()
+	bin := s.herdrCLI()
 	if bin == "" {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "no_local_herdr"})
 		return

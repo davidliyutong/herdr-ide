@@ -8,6 +8,7 @@ import { Palette } from './components/Palette';
 import { AuthDialog } from './components/AuthDialog';
 import { HerdrDialog } from './components/HerdrDialog';
 import { RemoteHerdrDialog } from './components/RemoteHerdrDialog';
+import { AddMachineDialog } from './components/AddMachineDialog';
 import { SettingsDialog } from './components/SettingsDialog';
 import { Dialogs } from './components/Dialogs';
 import { ContextMenu } from './components/ContextMenu';
@@ -100,6 +101,7 @@ export function App() {
       <SettingsDialog />
       <HerdrDialog />
       <RemoteHerdrDialog />
+      <AddMachineDialog />
       <Dialogs />
       <AuthDialog />
       <ContextMenu />

@@ -78,7 +78,12 @@ syncing browser settings between browsers; theming terminal applications.
 **Appearance** (`web/src/appearance.ts`)
 
 - Theme `system`, `dark` or `light`; `system` follows
-  `prefers-color-scheme` as it changes. The resolved kind sets
+  `prefers-color-scheme` as it changes (`useSystemDark`, a store that
+  components drawing with the theme subscribe to besides the settings: in
+  the desktop app the query reads the shell's `nativeTheme.themeSource`,
+  which turns from dark to system only after the setting did, so switching
+  from `dark` to `system` changes the resolved kind without changing the
+  settings). The resolved kind sets
   `<html data-theme>`, whose CSS variables restyle the UI (`styles.css` has
   no other colors), the terminal palette of the pane surface and the dialogs'
   terminals (`themes` in `web/src/terminal/options.ts`, backgrounds equal to
@@ -173,7 +178,8 @@ setting has a label, description and option labels), `internal/server/server_tes
 `TestBridgeTheme`), `web/src/__tests__/settings.test.ts` (parsing and
 clamping, labels for every setting, theme resolution),
 `web/src/__tests__/termOptions.test.ts` (palette contrast, font fallback,
-weight mapping). The dialog, live theme and font changes and both panel
+weight mapping), `web/src/__tests__/theme.test.ts` (the theme kind follows
+the system's change after switching from `dark` to `system`). The dialog, live theme and font changes and both panel
 positions were checked in Chrome in both themes and languages; the bundled
 font (all weights loaded, live weight changes, `font/woff2` with immutable
 caching) in Chrome against the core.
