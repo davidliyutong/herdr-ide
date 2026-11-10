@@ -602,11 +602,16 @@ func TestServePTY(t *testing.T) {
 	if err := conn.Write(ctx, websocket.MessageText, []byte("hi\r")); err != nil {
 		t.Fatal(err)
 	}
+	// Read until the socket closes, as a browser does: it answers the close
+	// frame, which carries the reason.
 	var out strings.Builder
-	for !strings.Contains(out.String(), "got:hi") {
+	for {
 		_, data, err := conn.Read(ctx)
 		if err != nil {
-			t.Fatalf("%v after %q", err, out.String())
+			if !strings.Contains(out.String(), "got:hi") || websocket.CloseStatus(err) != websocket.StatusNormalClosure || closeReason(err) != "done" {
+				t.Fatalf("%v after %q", err, out.String())
+			}
+			break
 		}
 		out.Write(data)
 	}

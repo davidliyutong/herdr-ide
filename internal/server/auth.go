@@ -39,13 +39,24 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
 // command ends or the browser leaves, which ends the command. It reports
 // whether the command ran.
 func servePTY(w http.ResponseWriter, r *http.Request, argv []string, env []string) bool {
+	return servePTYThen(w, r, argv, env, nil)
+}
+
+// servePTYThen is servePTY with finish, when not nil, called once the
+// command ran and ended; what it returns is the reason the WebSocket closes
+// with (at most 123 bytes), which tells the browser the outcome.
+func servePTYThen(w http.ResponseWriter, r *http.Request, argv []string, env []string, finish func() string) bool {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
 	if err != nil {
 		return false
 	}
 	defer conn.CloseNow()
+	// ctx is the command's. Reading has its own: a cancelled read closes the
+	// socket at once, without the close frame that carries the reason.
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
+	readCtx, stopRead := context.WithCancel(r.Context())
+	defer stopRead()
 
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Env = env
@@ -79,7 +90,7 @@ func servePTY(w http.ResponseWriter, r *http.Request, argv []string, env []strin
 	}()
 	go func() {
 		for {
-			_, data, err := conn.Read(ctx)
+			_, data, err := conn.Read(readCtx)
 			if err != nil {
 				cancel()
 				return
@@ -97,7 +108,11 @@ func servePTY(w http.ResponseWriter, r *http.Request, argv []string, env []strin
 	case <-drained:
 	case <-time.After(ptyDrainTimeout):
 	}
-	conn.Close(websocket.StatusNormalClosure, "done")
+	reason := "done"
+	if finish != nil {
+		reason = finish()
+	}
+	conn.Close(websocket.StatusNormalClosure, reason)
 	return true
 }
 

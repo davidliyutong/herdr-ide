@@ -27,6 +27,7 @@ import {
   Wrench,
   Rows2,
   SquareCode,
+  Trash2,
   X,
 } from 'lucide-react';
 import { actions } from './actions';
@@ -114,9 +115,29 @@ export function surfaceMenu(o: {
   return out;
 }
 
-/** A machine's menu in the sidebar: enable or disable it, and manage its
+/** Adds a machine to herdr's saved machines (AddMachineDialog). */
+const addMachineItem = (): MenuEntry => ({
+  label: t('menu.addMachine'),
+  icon: <Plus />,
+  run: () => useStore.getState().openAddMachine(true),
+});
+
+/** Reloads herdr's saved machines (also the sidebar's button). */
+const refreshMachinesItem = (): MenuEntry => ({
+  label: t('menu.refreshMachines'),
+  icon: <RefreshCw />,
+  run: () => void actions.refreshMachines(),
+});
+
+/** The menu of the sidebar's free space: add a machine, reload them. */
+export function sidebarMenu(): MenuEntry[] {
+  return useStore.getState().readOnly ? [] : [addMachineItem(), refreshMachinesItem()];
+}
+
+/** A machine's menu in the sidebar: enable or disable it, manage its
  * herdr: its server (needs the agent connected), and on an SSH machine
- * herdr's own update. */
+ * herdr's own update; rename or remove it in herdr's saved machines, add
+ * one or reload them. */
 export function machineMenu(m: string): MenuEntry[] {
   const s = useStore.getState();
   const st = s.machines[m];
@@ -146,6 +167,14 @@ export function machineMenu(m: string): MenuEntry[] {
   } else {
     out.push({ label: t('menu.enableMachine'), icon: <Power />, run: () => void actions.setMachineEnabled(m, true) });
   }
+  // Machines given with --ssh are not herdr's to rename or remove.
+  if (st.saved)
+    out.push(
+      'sep',
+      { label: t('menu.renameMachine'), icon: <Pencil />, run: () => actions.startRename('machine', m, m) },
+      { label: t('menu.removeMachine'), icon: <Trash2 />, danger: true, run: () => void actions.removeMachine(m) },
+    );
+  out.push('sep', addMachineItem(), refreshMachinesItem());
   return out;
 }
 

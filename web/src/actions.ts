@@ -65,6 +65,14 @@ function focusPane(m: string, pane: string) {
   setTimeout(() => getTerm(m, pane)?.focus(), 30);
 }
 
+/** The reason a machine request failed, from the core's error code. */
+async function machineError(res: Response): Promise<string> {
+  const body = (await res.json().catch(() => ({}))) as { error?: string; detail?: string };
+  if (body.error === 'no_local_herdr') return t('remoteHerdr.noLocal');
+  if (body.error === 'label_taken') return t('machine.labelTaken');
+  return body.detail || body.error || String(res.status);
+}
+
 function report(e: unknown) {
   console.warn(e);
   const msg = e instanceof Error ? e.message : String(e);
@@ -175,6 +183,62 @@ export const actions = {
     }
   },
 
+  /** Removes one of herdr's saved machines after asking, with herdr's own
+   * herdr machine remove; the core then forgets it (docs/features/02). */
+  async removeMachine(m: string) {
+    const st = useStore.getState().machines[m];
+    const machine = st?.label ?? m;
+    if (
+      !(await confirmDialog({
+        title: t('confirm.removeMachineTitle', { machine }),
+        message: t('confirm.removeMachine', { target: st?.target ?? machine }),
+        confirm: t('confirm.remove'),
+        danger: true,
+      }))
+    )
+      return;
+    try {
+      const res = await fetch(`/api/m/${encodeURIComponent(m)}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(t('machine.removeFailed', { machine, detail: await machineError(res) }));
+      useStore.getState().toast(t('machine.removed', { machine }));
+    } catch (e) {
+      report(e);
+    }
+  },
+
+  /** Renames one of herdr's saved machines with herdr's own
+   * herdr machine rename (docs/features/02). */
+  async renameMachine(m: string, label: string) {
+    const st = useStore.getState().machines[m];
+    if (!label || !st || label === st.label) return;
+    try {
+      const res = await fetch(`/api/m/${encodeURIComponent(m)}/label`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label }),
+      });
+      if (!res.ok) throw new Error(t('machine.renameFailed', { machine: st.label, detail: await machineError(res) }));
+    } catch (e) {
+      report(e);
+    }
+  },
+
+  /** Reloads herdr's saved machines, for changes made with herdr's own
+   * commands or TUI, and says what changed. */
+  async refreshMachines() {
+    try {
+      const res = await fetch('/api/machines/refresh', { method: 'POST' });
+      if (!res.ok) throw new Error(t('machine.refreshFailed', { detail: await machineError(res) }));
+      const c = (await res.json()) as Partial<Record<'added' | 'removed' | 'updated', string[] | null>>;
+      const added = c.added?.length ?? 0;
+      const removed = c.removed?.length ?? 0;
+      const updated = c.updated?.length ?? 0;
+      useStore.getState().toast(added + removed + updated ? t('machine.refreshed', { added, removed, updated }) : t('machine.refreshNone'));
+    } catch (e) {
+      report(e);
+    }
+  },
+
   /** Restarts a machine's herdr server after asking, since every terminal
    * there closes; one that is not running is started (docs/features/17). */
   async restartHerdr(m: string) {
@@ -255,9 +319,9 @@ export const actions = {
   },
 
   /** Starts renaming in place; the tab, workspace or pane header shows an editor. */
-  startRename(kind: 'pane' | 'tab' | 'workspace', m: string, id: string) {
+  startRename(kind: 'pane' | 'tab' | 'workspace' | 'machine', m: string, id: string) {
     const s = useStore.getState();
-    if (kind === 'workspace' && !s.sidebarOpen) s.toggleSidebar();
+    if ((kind === 'workspace' || kind === 'machine') && !s.sidebarOpen) s.toggleSidebar();
     s.setRenaming({ kind, m, id });
   },
 

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronDown, ChevronRight, Plus, Settings } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, RefreshCw, Settings } from 'lucide-react';
 import { useStore } from '../state/store';
 import { conn } from '../lib/conn';
 import { actions, attentionList } from '../actions';
@@ -11,7 +11,7 @@ import { APP_NAME } from '../brand';
 import { InlineEdit } from './InlineEdit';
 import { startWorkspaceDrag } from '../reorderDrag';
 import { openMenu } from '../contextMenu';
-import { machineMenu, workspaceMenu } from '../menus';
+import { machineMenu, sidebarMenu, workspaceMenu } from '../menus';
 import { herdrMissing, isNewer } from '../lib/localHerdr';
 import { carriesFiles, dropFolders, folderDropTarget } from '../drop';
 
@@ -28,6 +28,12 @@ export function Sidebar() {
   // The local machine while folders from Finder are dragged over the sidebar
   // (desktop app only): dropping them creates workspaces there.
   const [dropOn, setDropOn] = useState<string>();
+  const [refreshing, setRefreshing] = useState(false);
+  const refresh = async () => {
+    setRefreshing(true);
+    await actions.refreshMachines();
+    setRefreshing(false);
+  };
   return (
     <aside
       className="sidebar"
@@ -59,6 +65,11 @@ export function Sidebar() {
             <Plus />
           </button>
         )}
+        {!readOnly && (
+          <button className="icon" title={t('sidebar.refreshMachines')} disabled={refreshing} onClick={() => void refresh()}>
+            <RefreshCw />
+          </button>
+        )}
         <button
           className="icon"
           title={t('settings.open', { key: keyHint('open_settings') })}
@@ -68,7 +79,14 @@ export function Sidebar() {
         </button>
       </div>
       <Inbox />
-      <div className="sidebar-scroll">{order.map((id) => machines[id] && <MachineItem key={id} m={machines[id]} />)}</div>
+      {/* Right-clicking free space (or a part of a machine without its own
+          menu) offers to add a machine. */}
+      <div
+        className="sidebar-scroll"
+        onContextMenu={(e) => !(e.target as HTMLElement).closest('input, textarea') && openMenu(e, sidebarMenu())}
+      >
+        {order.map((id) => machines[id] && <MachineItem key={id} m={machines[id]} />)}
+      </div>
       {dropOn && <div className="sidebar-drop">{t('sidebar.dropFolders', { machine: dropOn })}</div>}
     </aside>
   );
@@ -117,6 +135,7 @@ function MachineItem({ m }: { m: MachineState }) {
   // version there when the user attaches (RemoteHerdrDialog).
   const localHerdr = useStore((s) => Object.values(s.machines).find((x) => x.kind === 'local')?.info?.herdr_version);
   const renaming = useStore((s) => (s.renaming?.kind === 'workspace' && s.renaming.m === m.id ? s.renaming.id : undefined));
+  const renamingMachine = useStore((s) => s.renaming?.kind === 'machine' && s.renaming.m === m.id);
   const setRenaming = useStore((s) => s.setRenaming);
   const snap = m.snapshot;
   const workspaces = snap?.workspaces ?? [];
@@ -128,12 +147,22 @@ function MachineItem({ m }: { m: MachineState }) {
     <div className="machine">
       <div
         className="machine-head"
-        onClick={() => setOpen(!open)}
-        onContextMenu={(e) => openMenu(e, machineMenu(m.id))}
+        onClick={() => !renamingMachine && setOpen(!open)}
+        onContextMenu={(e) => !renamingMachine && openMenu(e, machineMenu(m.id))}
         title={m.error || m.platform}
       >
         <span className={`mstatus ms-${m.status}`} />
-        <span className="machine-label ellipsis">{m.label}</span>
+        {renamingMachine ? (
+          <InlineEdit
+            value={m.label}
+            onDone={(v) => {
+              setRenaming(undefined);
+              if (v && v !== m.label) void actions.renameMachine(m.id, v);
+            }}
+          />
+        ) : (
+          <span className="machine-label ellipsis">{m.label}</span>
+        )}
         <span className="muted small">{m.platform}</span>
         <span className="caret">{open ? <ChevronDown /> : <ChevronRight />}</span>
       </div>

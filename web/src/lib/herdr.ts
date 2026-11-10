@@ -83,6 +83,8 @@ export interface MachineState {
   target?: string;
   session: string;
   enabled: boolean;
+  /** One of herdr's saved machines, which herdr machine remove removes. */
+  saved?: boolean;
   status: MachineStatus;
   error?: string;
   platform?: string;

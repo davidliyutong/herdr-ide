@@ -263,6 +263,20 @@ func serve(args []string, logger *log.Logger) {
 			}
 		}
 	}
+	// herdr's saved machines as configured here, for machines added,
+	// removed, renamed or reloaded from the UI (--remote-session applies to
+	// new ones too; a reload adds only those --local-only and --machine
+	// take).
+	catalog := func() ([]machines.Spec, error) {
+		saved, err := machines.SavedSpecs()
+		if *remoteSess != "" {
+			for i := range saved {
+				saved[i].Session = *remoteSess
+			}
+		}
+		return saved, err
+	}
+	selected := func(s machines.Spec) bool { return selectSpec(s, false, *localOnly, extraSSH, only) }
 	controlDir, err := transport.ControlDir()
 	if err != nil {
 		logger.Fatal(err)
@@ -319,6 +333,8 @@ func serve(args []string, logger *log.Logger) {
 		Audit:          audit,
 		UserHeader:     *userHeader,
 		Settings:       prefs,
+		Catalog:        catalog,
+		Selected:       selected,
 	})
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -379,7 +395,19 @@ func extraSpecs(targets []string) []machines.Spec {
 
 // selectSpecs applies --local-only and --machine; each machine appears once.
 func selectSpecs(specs []machines.Spec, localOnly bool, extraSSH, only []string) []machines.Spec {
-	in := func(list []string, s machines.Spec) bool {
+	var out []machines.Spec
+	for i, s := range specs {
+		if selectSpec(s, i == 0, localOnly, extraSSH, only) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// selectSpec reports whether --local-only and --machine take machine s;
+// local tells whether s is the local machine.
+func selectSpec(s machines.Spec, local, localOnly bool, extraSSH, only []string) bool {
+	in := func(list []string) bool {
 		for _, v := range list {
 			if v == s.ID || v == s.Label || v == s.Target {
 				return true
@@ -387,15 +415,8 @@ func selectSpecs(specs []machines.Spec, localOnly bool, extraSSH, only []string)
 		}
 		return false
 	}
-	var out []machines.Spec
-	for i, s := range specs {
-		if localOnly && i > 0 && !in(extraSSH, s) {
-			continue
-		}
-		if len(only) > 0 && !in(only, s) {
-			continue
-		}
-		out = append(out, s)
+	if localOnly && !local && !in(extraSSH) {
+		return false
 	}
-	return out
+	return len(only) == 0 || in(only)
 }

@@ -32,11 +32,13 @@ browser tab, with VS Code (code-server) one keystroke away.
   starts it after the machine rebooted. **Update herdr** on an SSH machine
   runs herdr's own `herdr --remote` update there, and **Install herdr** the
   same flow where herdr was removed or moved.
-- **Multi-machine.** Uses the SSH machines saved in herdr; right-click a
-  machine in the sidebar to disable or enable it here. One ssh connection
-  per machine runs a small static agent (linux/macOS × amd64/arm64, uploaded
-  automatically) that multiplexes everything; nothing listens on the
-  machines.
+- **Multi-machine.** Uses the SSH machines saved in herdr; right-click the
+  sidebar to add one (herdr's own `herdr machine add`, in a terminal), or a
+  machine to rename it or remove it from herdr, or to disable or enable it
+  here; the sidebar's reload button picks up changes made with herdr's own
+  commands. One ssh connection per machine runs a small static agent
+  (linux/macOS × amd64/arm64, uploaded automatically) that multiplexes
+  everything; nothing listens on the machines.
 - **Agent-native.** An inbox of agents that are blocked or done across all
   machines, browser notifications and sounds when an agent needs input or
   finishes, starting agents from the command palette,

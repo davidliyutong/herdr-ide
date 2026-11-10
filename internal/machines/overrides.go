@@ -55,6 +55,23 @@ func (o *Overrides) SetEnabled(id string, on bool) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.enabled[id] = on
+	return o.save()
+}
+
+// Forget drops the choice for machine id (a machine removed from herdr's
+// catalog) and saves the file if there was one.
+func (o *Overrides) Forget(id string) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if _, ok := o.enabled[id]; !ok {
+		return nil
+	}
+	delete(o.enabled, id)
+	return o.save()
+}
+
+// save writes the file atomically; o.mu is held.
+func (o *Overrides) save() error {
 	if o.path == "" {
 		return nil
 	}
@@ -82,3 +99,9 @@ func (o *Overrides) SetEnabled(id string, on bool) error {
 
 // ErrUnknownMachine is returned for a machine the core does not know.
 var ErrUnknownMachine = errors.New("unknown machine")
+
+// ErrMachineExists is returned when adding a machine the core has already.
+var ErrMachineExists = errors.New("machine exists")
+
+// ErrLocalMachine is returned when removing the machine the core runs on.
+var ErrLocalMachine = errors.New("the local machine cannot be removed")

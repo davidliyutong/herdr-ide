@@ -7,9 +7,10 @@ export interface PaneRef {
   pane: string;
 }
 
-/** Something being renamed in place (pane title, tab or workspace). */
+/** Something being renamed in place (pane title, tab, workspace or one of
+ * herdr's saved machines, whose id is the machine's). */
 export interface Renaming {
-  kind: 'pane' | 'tab' | 'workspace';
+  kind: 'pane' | 'tab' | 'workspace' | 'machine';
   m: string;
   id: string;
 }
@@ -61,6 +62,8 @@ interface UIState {
   herdr?: string;
   /** SSH machine whose herdr the remote update terminal updates. */
   remoteHerdr?: string;
+  /** The terminal adding a machine with herdr machine add is open. */
+  addMachine: boolean;
   /** The server runs with --read-only. */
   readOnly: boolean;
 
@@ -86,6 +89,7 @@ interface UIState {
   openAuth(m?: string): void;
   openHerdr(m?: string): void;
   openRemoteHerdr(m?: string): void;
+  openAddMachine(open: boolean): void;
   setReadOnly(v: boolean): void;
 }
 
@@ -121,7 +125,15 @@ export const useStore = create<UIState>((set, get) => ({
   setMachines: (list) => {
     const machines: Record<string, MachineState> = {};
     for (const m of list) machines[m.id] = m;
-    set({ machines, order: list.map((m) => m.id) });
+    // A machine removed from herdr's catalog takes what showed it along.
+    const { dock, lastCode, focused } = get();
+    set({
+      machines,
+      order: list.map((m) => m.id),
+      ...(dock && !machines[dock.m] ? { dock: undefined } : {}),
+      ...(lastCode && !machines[lastCode.m] ? { lastCode: undefined } : {}),
+      ...(focused && !machines[focused.m] ? { focused: undefined } : {}),
+    });
     ensureSelection(set, get);
   },
   upsertMachine: (st) => {
@@ -167,6 +179,8 @@ export const useStore = create<UIState>((set, get) => ({
   openAuth: (auth) => set({ auth }),
   openHerdr: (herdr) => set({ herdr }),
   openRemoteHerdr: (remoteHerdr) => set({ remoteHerdr }),
+  addMachine: false,
+  openAddMachine: (addMachine) => set({ addMachine }),
   readOnly: false,
   setReadOnly: (readOnly) => set({ readOnly }),
   toast: (msg, action, ttl) => {

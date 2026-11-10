@@ -6,6 +6,22 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Add machine…**, **Rename machine** and **Remove machine…** in the
+  sidebar. Right-click the sidebar's free space or a machine to add an SSH
+  machine: herdr's own `herdr machine add` runs in a terminal (it may ask
+  for a password, a host key, a session or approval to install herdr
+  there), and the machine appears and connects without restarting.
+  Renaming edits the machine's name in place (`herdr machine rename`;
+  names must stay unique). Removing one of herdr's saved machines runs
+  `herdr machine remove` after asking; its herdr and terminals on that
+  machine keep running.
+
+- A **Reload** button in the sidebar picks up machines added, renamed,
+  removed, enabled or disabled with herdr's own commands while the core
+  runs.
+
 ### Fixed
 
 - With the theme set to **System**, the panes stayed dark after switching
