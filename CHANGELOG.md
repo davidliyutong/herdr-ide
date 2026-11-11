@@ -1,12 +1,12 @@
 # Changelog
 
-All notable changes are documented here. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
-[Semantic Versioning](https://semver.org/).
+All notable changes are documented here, newest version first, and the
+project uses [Semantic Versioning](https://semver.org/). A version's changes
+are one list without subsections; each change adds its entry at the end of
+`[Unreleased]`. Versions up to 0.3.0 group theirs under Added, Changed and
+Fixed, after [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
-
-### Added
 
 - **Add machine…**, **Rename machine** and **Remove machine…** in the
   sidebar. Right-click the sidebar's free space or a machine to add an SSH
@@ -27,8 +27,6 @@ All notable changes are documented here. The format follows
   and waiting uploads (a cancelled upload leaves nothing on the machine),
   and the history of the last 50 finished uploads in this browser, which
   can be previewed or have their path copied.
-
-### Fixed
 
 - With the theme set to **System**, the panes stayed dark after switching
   from **Dark** in the desktop app (and did not follow a later change of the

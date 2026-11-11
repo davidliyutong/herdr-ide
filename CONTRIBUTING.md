@@ -61,7 +61,8 @@ workspaces can live in the ignored `.worktrees/` directory.
   components and protocols in [docs/architecture.md](docs/architecture.md),
   feature behavior and its reasoning in [docs/features/](docs/features/README.md),
   operations in [docs/deployment.md](docs/deployment.md), notable changes in
-  [CHANGELOG.md](CHANGELOG.md).
+  [CHANGELOG.md](CHANGELOG.md) (one entry at the end of `[Unreleased]`, which
+  is a list without subsections).
 - Commit messages: short imperative subject (`server: stop idle code-server`),
   optional scope prefix by area (`agent:`, `web:`, `docs:`, …).
 

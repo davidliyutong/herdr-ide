@@ -6,6 +6,7 @@
 #   3. every command-line flag is documented in docs/reference.md
 #   4. THIRD_PARTY_NOTICES.md matches the linked Go modules
 #   5. README.md and README.zh-CN.md have the same section structure
+#   6. CHANGELOG.md's [Unreleased] is one list without subsections
 set -euo pipefail
 cd "$(dirname "$0")/.."
 fail=0
@@ -42,5 +43,13 @@ scripts/notices.sh --check || fail=1
 echo "==> README translations in sync"
 a=$(grep -c '^## ' README.md); b=$(grep -c '^## ' README.zh-CN.md)
 if [[ "$a" != "$b" ]]; then echo "README.md has $a sections, README.zh-CN.md has $b"; fail=1; fi
+
+echo "==> changelog"
+# CHANGELOG.md merges with the union driver (.gitattributes), which keeps
+# both sides' lines; a subsection heading would be kept twice.
+if awk '/^## \[Unreleased\]/ {p=1; next} /^## \[/ {p=0} p' CHANGELOG.md | grep -n '^#'; then
+  echo "CHANGELOG.md: [Unreleased] is one list, without headings"
+  fail=1
+fi
 
 exit $fail
