@@ -52,9 +52,14 @@ dropped (`\{` printed as `{`, `\\` as `\`).
   rendered formula below it, or above it without room below, within the
   panes, scrolling when it is larger than 60 % of their height. It has a
   button that copies the LaTeX source. Moving off the formula hides it
-  after 250 ms, so the pointer can reach the popover, which keeps it shown;
-  typing, clicking, scrolling, a modifier showing links (⌘/Ctrl) and rows
-  herdr moves under it hide it at once. When the text under a shown
+  after 250 ms, so the pointer can reach the popover, which keeps it shown.
+  On the way there the pointer crosses rows of other formulas (display
+  formulas printed one after the other, with the popover below them): while
+  the pointer moves inside the triangle between its last position and the
+  popover's nearest edge, the formula shown stays and is not replaced by the
+  ones crossed; it goes after 800 ms if the pointer stops there. Typing,
+  clicking, scrolling and rows herdr moves under it hide it at once, and so
+  does a modifier showing links (⌘/Ctrl). When the text under a shown
   formula changes, the formula under the pointer is looked for again.
 - **KaTeX** (`web/src/terminal/mathRender.ts`) is a separate chunk with its
   stylesheet, imported the first time a formula is shown; the last 200
