@@ -46,6 +46,11 @@ Fixed, after [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Disabled machines are folded in the sidebar instead of showing an
   **Enable machine** button; open one, or use its menu, to enable it.
 
+- Closing a tab (`cmd+w` in the desktop app, the tab bar, the prefix
+  binding) no longer asks when each of its panes only has a shell waiting
+  at its prompt; otherwise it asks and names the programs that would end,
+  also when they are not agents (`vim`, a build, `ssh`).
+
 ## [0.3.0] - 2026-11-08
 
 ### Added

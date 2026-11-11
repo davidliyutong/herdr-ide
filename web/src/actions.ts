@@ -83,6 +83,72 @@ function cwdOf(snap: Snapshot | undefined, pane?: string) {
   return paneCwd(snap?.panes.find((p) => p.pane_id === pane));
 }
 
+/** Shells a pane waits at the prompt in. A pane started with another
+ * program as its shell process counts as running it. */
+const SHELLS = new Set([
+  'sh',
+  'bash',
+  'zsh',
+  'fish',
+  'dash',
+  'ash',
+  'ksh',
+  'mksh',
+  'yash',
+  'csh',
+  'tcsh',
+  'nu',
+  'xonsh',
+  'elvish',
+  'osh',
+  'pwsh',
+  'powershell',
+  'cmd',
+]);
+/** How long closing a tab waits for herdr to tell what runs in its panes
+ * before asking anyway. */
+export const PROCESS_INFO_TIMEOUT_MS = 1500;
+
+interface ProcessInfo {
+  shell_pid?: number | null;
+  foreground_process_group_id?: number | null;
+  foreground_processes?: Array<{ pid: number; name: string }>;
+}
+
+const procName = (n: string) => n.replace(/^-/, '').replace(/\.exe$/i, '');
+
+/** What runs in a pane in front of its shell (herdr's pane.process_info,
+ * the terminal's foreground process group): the program's name (the
+ * agent's for an agent), '' when only the shell is there waiting at its
+ * prompt or the pane has no terminal any more, undefined when herdr cannot
+ * tell in time. A job sent to the background does not count. */
+export async function paneProgram(m: string, p: Pane): Promise<string | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<undefined>((resolve) => (timer = setTimeout(resolve, PROCESS_INFO_TIMEOUT_MS)));
+  const ask = conn.api<{ process_info?: ProcessInfo }>(m, 'pane.process_info', { pane_id: p.pane_id }).then(
+    (r) => {
+      const info = r?.process_info;
+      const fg = info?.foreground_process_group_id;
+      const procs = info?.foreground_processes ?? [];
+      const leader = procs.find((x) => x.pid === fg) ?? procs[0];
+      if (fg == null || !leader) return undefined;
+      const name = procName(leader.name);
+      if (fg === info?.shell_pid && SHELLS.has(name.toLowerCase())) return '';
+      return p.agent || name;
+    },
+    (e: unknown) => ((e as { code?: string })?.code === 'pane_not_found' ? '' : undefined),
+  );
+  try {
+    return await Promise.race([ask, late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Tabs being closed: a second close-tab key while the first still asks
+ * herdr or shows its dialog does nothing. */
+const closing = new Set<string>();
+
 export const actions = {
   async split(m: string, pane: string, direction: 'right' | 'down') {
     const snap = useStore.getState().machines[m]?.snapshot;
@@ -134,25 +200,38 @@ export const actions = {
     }
   },
 
-  /** Closes a tab, asking first when an agent in it is working, or always
-   * with `confirm` (the desktop app's close-tab shortcut). */
-  async closeTab(m: string, tab: string, opts: { confirm?: boolean } = {}) {
-    const snap = useStore.getState().machines[m]?.snapshot;
-    const panes = snap?.panes.filter((p) => p.tab_id === tab) ?? [];
-    const busy = panes.filter((p) => p.agent && p.agent_status === 'working');
-    if (
-      (busy.length || opts.confirm) &&
-      !(await confirmDialog({
-        title: t('confirm.closeTabTitle'),
-        message: busy.length
-          ? t('confirm.closeWorkingTab', { n: busy.length })
-          : t('confirm.closeTabPanes', { n: Math.max(panes.length, 1) }),
-        confirm: t('confirm.close'),
-        danger: true,
-      }))
-    )
-      return;
-    await conn.api(m, 'tab.close', { tab_id: tab }).catch(report);
+  /** Closes a tab at once when each of its panes only has its shell waiting
+   * at the prompt; otherwise asks first, naming the programs that would end
+   * (an agent counts even while it waits for input). */
+  async closeTab(m: string, tab: string) {
+    const key = `${m} ${tab}`;
+    if (closing.has(key)) return;
+    closing.add(key);
+    try {
+      const snap = useStore.getState().machines[m]?.snapshot;
+      const panes = snap?.panes.filter((p) => p.tab_id === tab) ?? [];
+      const programs = await Promise.all(panes.map((p) => paneProgram(m, p)));
+      const running = [...new Set(programs.filter((x): x is string => !!x))];
+      const unknown = !panes.length || programs.includes(undefined);
+      const busy = panes.filter((p) => p.agent && p.agent_status === 'working').length;
+      if (
+        (running.length || unknown) &&
+        !(await confirmDialog({
+          title: t('confirm.closeTabTitle'),
+          message: running.length
+            ? t('confirm.closeTabPrograms', { programs: running.join(', ') })
+            : busy
+              ? t('confirm.closeWorkingTab', { n: busy })
+              : t('confirm.closeTabPanes', { n: Math.max(panes.length, 1) }),
+          confirm: t('confirm.close'),
+          danger: true,
+        }))
+      )
+        return;
+      await conn.api(m, 'tab.close', { tab_id: tab }).catch(report);
+    } finally {
+      closing.delete(key);
+    }
   },
 
   /** Enables or disables a machine (saved by the core over herdr's catalog).

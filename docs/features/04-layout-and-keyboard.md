@@ -131,8 +131,9 @@ Non-goals: a separate herdr-ide layout model; arbitrary docking of panes.
   they were not opened. Browsers do
   not tell the page where a dropped folder is, so they do not offer this, nor
   does read-only mode (`web/src/drop.ts`,
-  [16](16-desktop-packaging.md)). Closing a pane or tab with a working agent,
-  and closing a workspace, ask for confirmation; Enter cancels these unless
+  [16](16-desktop-packaging.md)). Closing a pane with a working agent, a
+  tab where a program runs (below) and a workspace ask for confirmation;
+  Enter cancels these unless
   the user moves to the confirm button. The browser's `prompt()` and
   `confirm()` are not used.
 
@@ -204,11 +205,19 @@ Non-goals: a separate herdr-ide layout model; arbitrary docking of panes.
   own `cmd+j` (its bottom panel) in the desktop app. If VS Code does not take such a
   key, the menu's Close Window does not act on it either, since closing the
   main window quits the app.
-- The page ignores shortcuts while a dialog or the palette is open. Closing
-  a tab by shortcut always asks first, naming the number of panes whose
-  programs end (Cancel has focus): the key is easy to press by habit, and
-  unlike closing a browser tab it ends programs. Closing from the tab bar or
-  with the prefix binding asks only when an agent is working.
+- The page ignores shortcuts while a dialog or the palette is open.
+  Closing a tab (the shortcut, the tab bar, the prefix binding, menus)
+  first asks herdr what runs in each of its panes (`pane.process_info`,
+  read-only, one request per pane at once). A pane counts as idle only when
+  the terminal's foreground process group is the pane's shell and that
+  shell is a known one (zsh, bash, fish, sh…), that is, the shell waits at
+  its prompt; a pane whose terminal is gone counts as idle too. When every
+  pane is idle the tab closes at once. Otherwise a confirmation names the
+  programs that end (an agent by its name, also while it waits for input;
+  Cancel has focus): the key is easy to press by habit, and unlike closing
+  a browser tab it ends programs. When herdr cannot tell within 1.5 s
+  (an older herdr, a slow link) it asks anyway, naming the number of panes.
+  Jobs sent to the background with `&` are not seen; they end with the tab.
 - The **File** menu lists new workspace, new tab and close tab with their
   keys, **View** shows or hides VS Code, the app menu has **Settings…**; the
   menu does not register them itself, so in program windows `cmd+w` (Window → Close Window) still
@@ -248,7 +257,8 @@ Non-goals: a separate herdr-ide layout model; arbitrary docking of panes.
 `web/src/__tests__/core.test.ts` (pane geometry for directional focus),
 `web/src/__tests__/settings.test.ts` (drop zones, key labels, desktop
 shortcuts as key hints), `web/src/__tests__/desktop.test.ts` (key names on
-other layouts, shortcut conflicts, the close-tab confirmation, no shortcuts
+other layouts, shortcut conflicts, closing idle tabs at once and asking
+for running programs, unknown answers and timeouts, no shortcuts
 under dialogs), `internal/shortcuts/shortcuts_test.go` (spec validation,
 platform defaults), `desktop/src/shortcuts.test.ts` (matching inputs on
 AZERTY, Dvorak and non-Latin layouts, recorded keys, VS Code frames,

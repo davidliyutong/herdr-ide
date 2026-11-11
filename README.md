@@ -141,9 +141,9 @@ Drag folders from Finder onto the sidebar or the app's Dock icon to create a
 workspace for each on the local machine. Files and folders dropped on a pane
 of the local machine are pasted as their own paths, without uploading.
 
-In the app, `cmd+t` opens a tab, `cmd+w` closes it after asking, `cmd+n`
-creates a workspace, `cmd+,` opens the settings and `cmd+j` shows or hides
-the VS Code panel; while VS Code has focus, all but `cmd+j` stay VS Code's.
+In the app, `cmd+t` opens a tab, `cmd+w` closes it (asking first when a
+program runs in it), `cmd+n` creates a workspace, `cmd+,` opens the
+settings and `cmd+j` shows or hides the VS Code panel; while VS Code has focus, all but `cmd+j` stay VS Code's.
 Change or remove them under **Settings → Shortcuts**. Prefix bindings keep
 working, and browsers keep their own `cmd+t` / `cmd+w`.
 

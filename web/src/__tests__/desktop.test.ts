@@ -7,6 +7,7 @@ vi.mock('../lib/conn', () => ({ conn: { api: (...a: unknown[]) => api(...a), set
 import { keyName } from '../shortcutKey';
 import { altOnly, runShortcut, shortcutConflict } from '../desktop';
 import { useDialog } from '../dialog';
+import { PROCESS_INFO_TIMEOUT_MS } from '../actions';
 import { useStore } from '../state/store';
 import type { MachineState } from '../lib/herdr';
 
@@ -90,21 +91,90 @@ describe('runShortcut', () => {
     document.body.innerHTML = '';
   });
 
-  it('asks before closing a tab, even without working agents', async () => {
+  // herdr's pane.process_info for a pane: its shell waiting at the prompt,
+  // or a program in front of it.
+  const shell = { process_info: { shell_pid: 10, foreground_process_group_id: 10, foreground_processes: [{ pid: 10, name: '-zsh' }] } };
+  const running = (name: string) => ({
+    process_info: {
+      shell_pid: 10,
+      foreground_process_group_id: 20,
+      foreground_processes: [
+        { pid: 21, name: 'cat' },
+        { pid: 20, name },
+      ],
+    },
+  });
+  const answer = (byPane: Record<string, unknown>) =>
+    api.mockImplementation((_m, method, params) => {
+      if (method !== 'pane.process_info') return Promise.resolve({});
+      const r = byPane[(params as { pane_id: string }).pane_id];
+      return r instanceof Error ? Promise.reject(r) : Promise.resolve(r);
+    });
+  const dialog = () => useDialog.getState().current;
+  /** Answers the confirmation shown, as Dialogs.tsx does, and returns its
+   * message. */
+  const reply = async (ok: boolean) => {
+    await vi.waitFor(() => expect(dialog()?.kind).toBe('confirm'));
+    const req = dialog()!;
+    useDialog.setState({ current: undefined });
+    if (req.kind !== 'confirm') throw new Error(req.kind);
+    req.resolve(ok);
+    await new Promise((r) => setTimeout(r));
+    return req.message;
+  };
+  afterEach(() => api.mockImplementation(() => Promise.resolve({})));
+
+  it('closes a tab at once when its panes only have shells at the prompt', async () => {
+    answer({ p1: shell, p2: Object.assign(new Error('pane not found'), { code: 'pane_not_found' }) });
     runShortcut('close_tab');
-    const req = useDialog.getState().current;
-    expect(req?.kind).toBe('confirm');
-    if (req?.kind === 'confirm') {
-      expect(req.message).toContain('2');
-      req.resolve(false);
-    }
-    await Promise.resolve();
+    await vi.waitFor(() => expect(api).toHaveBeenCalledWith('m', 'tab.close', { tab_id: 't1' }));
+    expect(dialog()).toBeUndefined();
+  });
+
+  it('asks before closing a tab with a program running, naming it', async () => {
+    answer({ p1: shell, p2: running('vim') });
+    runShortcut('close_tab');
+    expect(await reply(false)).toBe('Closing this tab ends the programs still running in it: vim.');
     expect(api).not.toHaveBeenCalledWith('m', 'tab.close', expect.anything());
 
+    // An agent waiting for input still runs: it goes by its name.
+    const mach = machine();
+    mach.snapshot!.panes[0] = { ...mach.snapshot!.panes[0], agent: 'claude', agent_status: 'idle' };
+    useStore.getState().upsertMachine(mach);
+    answer({ p1: running('node'), p2: shell });
     runShortcut('close_tab');
-    const again = useDialog.getState().current;
-    if (again?.kind === 'confirm') again.resolve(true);
+    expect(await reply(true)).toContain(': claude.');
     await vi.waitFor(() => expect(api).toHaveBeenCalledWith('m', 'tab.close', { tab_id: 't1' }));
+  });
+
+  it('asks when herdr cannot tell what runs, or a pane was started with another program', async () => {
+    answer({ p1: shell, p2: new Error('unknown method') });
+    runShortcut('close_tab');
+    expect(await reply(false)).toContain('2');
+    expect(api).not.toHaveBeenCalledWith('m', 'tab.close', expect.anything());
+
+    answer({
+      p1: shell,
+      p2: { process_info: { shell_pid: 30, foreground_process_group_id: 30, foreground_processes: [{ pid: 30, name: 'htop' }] } },
+    });
+    runShortcut('close_tab');
+    expect(await reply(false)).toContain(': htop.');
+  });
+
+  it('asks when herdr does not answer in time', async () => {
+    vi.useFakeTimers();
+    try {
+      api.mockImplementation((_m, method) => (method === 'pane.process_info' ? new Promise(() => {}) : Promise.resolve({})));
+      runShortcut('close_tab');
+      // A second key while the first is pending does nothing.
+      runShortcut('close_tab');
+      await vi.advanceTimersByTimeAsync(PROCESS_INFO_TIMEOUT_MS);
+      expect(dialog()?.kind).toBe('confirm');
+      expect(api.mock.calls.filter((c) => c[1] === 'pane.process_info')).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+    await reply(false);
   });
 
   it('does nothing while a dialog is open', () => {

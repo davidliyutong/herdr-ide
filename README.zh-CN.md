@@ -113,7 +113,7 @@ macOS 版包含适用于 Finder 和 Dock 的多尺寸图标。
 从 Finder 把文件夹拖到侧边栏或应用的 Dock 图标上，即可在本机为每个文件夹新建一个 workspace。
 拖到本机 pane 上的文件和文件夹直接粘贴原路径，不会上传。
 
-在桌面应用中，`cmd+t` 新建标签页，`cmd+w` 确认后关闭标签页，`cmd+n` 新建 workspace，`cmd+,` 打开设置，`cmd+j` 显示或隐藏 VS Code 面板；
+在桌面应用中，`cmd+t` 新建标签页，`cmd+w` 关闭标签页（有程序在运行时先确认），`cmd+n` 新建 workspace，`cmd+,` 打开设置，`cmd+j` 显示或隐藏 VS Code 面板；
 焦点在 VS Code 里时，除 `cmd+j` 外这些键仍归 VS Code。
 可在**设置 → 快捷键**中修改或移除。
 前缀快捷键仍然可用；

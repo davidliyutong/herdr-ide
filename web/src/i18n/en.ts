@@ -168,6 +168,7 @@ export const en = {
 
   'confirm.closeWorkingPane': '{agent} is still working in this pane. Its process ends when the pane closes.',
   'confirm.closeTabPanes': 'The {n} pane(s) of this tab and the programs running in them end.',
+  'confirm.closeTabPrograms': 'Closing this tab ends the programs still running in it: {programs}.',
   'confirm.closeWorkingTab': '{n} agent(s) in this tab are still working. Their processes end when the tab closes.',
   'confirm.closeWorkspace': 'All panes of “{label}” and the processes in them end.',
   'confirm.closePaneTitle': 'Close this pane?',
