@@ -8,6 +8,8 @@ Fixed, after [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-11
+
 - **Add machine…**, **Rename machine** and **Remove machine…** in the
   sidebar. Right-click the sidebar's free space or a machine to add an SSH
   machine: herdr's own `herdr machine add` runs in a terminal (it may ask
