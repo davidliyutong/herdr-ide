@@ -37,6 +37,8 @@ import { isMac, pasteText, releaseOf, type InputEvent, type KeyEvent, type Mouse
 import { Selection, scrollRate, viewTop, wordAt, type Point } from './selection';
 import type { ScrollInfo, SurfaceMeta, SurfacePane, SurfaceSplit } from './protocol';
 import { linksAround, openLink, linkTitle, safeUrl, selectedLink, type Cells, type LinkContext } from '../terminal/links';
+import { mathAt } from '../terminal/math';
+import { renderMath } from '../terminal/mathRender';
 import { openMenu } from '../contextMenu';
 import { surfaceMenu } from '../menus';
 import { themes } from '../terminal/options';
@@ -63,7 +65,33 @@ export interface ControllerOptions {
   onSize(cols: number, rows: number, cw: number, ch: number, dpr: number): void;
   onSplitDrag?(split: SurfaceSplit, ratio: number | undefined): void;
   setTitle(title: string): void;
+  /** The formula under the pointer, rendered, or none any more. */
+  onMath?(math: ShownMath | undefined): void;
+  /** Whether formulas under the pointer are shown. */
+  mathHover?(): boolean;
 }
+
+/** A formula in a pane and the cells it covers, one range per row. */
+export interface PaneMath {
+  pane: string;
+  cells: Cells[];
+  tex: string;
+  display: boolean;
+}
+
+/** A formula shown rendered: KaTeX's HTML. */
+export interface ShownMath extends PaneMath {
+  html: string;
+}
+
+/** How long the pointer rests on a formula before it is shown, and how long
+ * the formula stays after the pointer left it, so that it can reach the
+ * popover (whose element has the class math-popover). */
+export const MATH_SHOW_MS = 300;
+export const MATH_LEAVE_MS = 250;
+
+const mathKey = (m: PaneMath | undefined) => (m ? `${m.pane} ${m.cells.map((c) => `${c.y}:${c.from}-${c.to}`).join(' ')} ${m.tex}` : '');
+const overPopover = (target: EventTarget | null | undefined) => !!(target as Element | null)?.closest?.('.math-popover');
 
 /** Least pause between scroll requests while a selection drag is past an
  * edge; one request is in flight at a time. */
@@ -116,6 +144,11 @@ export class SurfaceController {
   private wheelAccum = 0;
   /** The link under the pointer while Cmd/Ctrl is held, with its cells. */
   private hover?: PaneLink;
+  /** The formula shown rendered, the one the pointer is on (shown after
+   * MATH_SHOW_MS), and the timer showing or hiding one. */
+  private math?: ShownMath;
+  private mathWant?: PaneMath;
+  private mathTimer?: number;
   private disposed = false;
 
   constructor(
@@ -260,9 +293,14 @@ export class SurfaceController {
         focused: this.focused,
         highlight: (y) => (this.painted[y] = this.highlight(y)),
         hover: this.hover?.cells,
+        math: this.math?.cells,
       },
       rows,
     );
+    // The text under a shown formula changed: look again at the pointer.
+    const shown = this.math;
+    if (shown && this.lastPointer && !this.lastPointer.popover && shown.cells.some((c) => rows.includes(c.y)))
+      queueMicrotask(() => this.lastPointer && this.updateMath({ clientX: this.lastPointer.x, clientY: this.lastPointer.y }));
     this.placeTextarea();
   }
 
@@ -294,6 +332,7 @@ export class SurfaceController {
         this.host.style.cursor = '';
         this.o.setTitle('');
       }
+      if (this.math?.cells.some((c) => c.y >= y && c.y < y + h && c.to > x && c.from < x + w)) this.hideMath();
     }
   }
 
@@ -391,6 +430,7 @@ export class SurfaceController {
     this.host.addEventListener('dragover', this.onDragOver);
     this.host.addEventListener('dragleave', this.onDragLeave);
     this.host.addEventListener('drop', this.onDrop);
+    this.host.addEventListener('mouseleave', this.onMouseLeave);
     window.addEventListener('mousemove', this.onMouseMove);
     window.addEventListener('mouseup', this.onMouseUp);
     window.addEventListener('keydown', this.onModifier);
@@ -398,6 +438,7 @@ export class SurfaceController {
   }
 
   private onKeyDown = (ev: KeyboardEvent) => {
+    this.hideMath();
     const pane = this.targetPane();
     const route = routeKey(
       ev,
@@ -614,7 +655,8 @@ export class SurfaceController {
   private onMouseDown = (ev: MouseEvent) => {
     // Buttons over the grid (a pane's close button) handle their own clicks;
     // the program under them must not get one.
-    if ((ev.target as Element | null)?.closest?.('button')) return;
+    if ((ev.target as Element | null)?.closest?.('button, .math-popover')) return;
+    this.hideMath();
     if (useSurface.getState().ownership !== 'owner' || !this.meta) return;
     const { x, y } = this.cellAt(ev.clientX, ev.clientY);
     // Keep keyboard focus in the textarea.
@@ -686,6 +728,7 @@ export class SurfaceController {
     const d = this.drag;
     if (!d) {
       this.updateHover(ev);
+      this.updateMath(ev);
       return;
     }
     const { x, y, fx } = this.cellAt(ev.clientX, ev.clientY);
@@ -862,6 +905,7 @@ export class SurfaceController {
 
   private onWheel = (ev: WheelEvent) => {
     ev.preventDefault();
+    this.hideMath();
     if (useSurface.getState().ownership !== 'owner' || this.o.readOnly()) return;
     const { x, y } = this.cellAt(ev.clientX, ev.clientY);
     const p = this.paneAt(x, y);
@@ -887,11 +931,14 @@ export class SurfaceController {
   };
 
   /** Shows links under the pointer while Cmd/Ctrl is held. */
-  private lastPointer?: { x: number; y: number; meta: boolean };
+  private lastPointer?: { x: number; y: number; meta: boolean; popover?: boolean };
   private onModifier = (ev: KeyboardEvent) => {
     if (ev.key !== 'Meta' && ev.key !== 'Control') return;
-    if (this.lastPointer)
-      this.updateHover({ clientX: this.lastPointer.x, clientY: this.lastPointer.y, metaKey: ev.metaKey, ctrlKey: ev.ctrlKey });
+    if (this.lastPointer) {
+      const at = { clientX: this.lastPointer.x, clientY: this.lastPointer.y, metaKey: ev.metaKey, ctrlKey: ev.ctrlKey };
+      this.updateHover(at);
+      if (!this.lastPointer.popover) this.updateMath(at);
+    }
   };
 
   /** The link at cell (x, y) of a pane: an OSC 8 hyperlink, or a URL or
@@ -915,8 +962,8 @@ export class SurfaceController {
         return { cells: l.cells, link: { kind: l.kind, text: l.text }, pane: p.id };
   }
 
-  private updateHover(ev: { clientX: number; clientY: number; metaKey: boolean; ctrlKey: boolean }) {
-    this.lastPointer = { x: ev.clientX, y: ev.clientY, meta: ev.metaKey || ev.ctrlKey };
+  private updateHover(ev: { clientX: number; clientY: number; metaKey: boolean; ctrlKey: boolean; target?: EventTarget | null }) {
+    this.lastPointer = { x: ev.clientX, y: ev.clientY, meta: ev.metaKey || ev.ctrlKey, popover: overPopover(ev.target) };
     const { x, y } = this.cellAt(ev.clientX, ev.clientY);
     const p = (ev.metaKey || ev.ctrlKey) && this.paneAt(x, y);
     const next = p ? this.linkAt(p, x, y) : undefined;
@@ -928,6 +975,70 @@ export class SurfaceController {
     this.o.setTitle(next ? linkTitle(next.link) : '');
     this.schedule();
   }
+
+  /** Shows the formula under the pointer, rendered, once the pointer rests
+   * on it; not while Cmd/Ctrl shows links. Over the popover the formula
+   * stays; moving off it hides it after MATH_LEAVE_MS. */
+  private updateMath(ev: { clientX: number; clientY: number; metaKey?: boolean; ctrlKey?: boolean; target?: EventTarget | null }) {
+    if (!this.o.onMath) return;
+    if (overPopover(ev.target)) {
+      window.clearTimeout(this.mathTimer);
+      this.mathWant = this.math;
+      return;
+    }
+    const { x, y } = this.cellAt(ev.clientX, ev.clientY);
+    const p = !ev.metaKey && !ev.ctrlKey && this.o.mathHover?.() !== false && this.paneAt(x, y);
+    const next = p ? this.formulaAt(p, x, y) : undefined;
+    if (mathKey(next) === mathKey(this.mathWant)) return;
+    if (!next) return this.leaveMath();
+    this.mathWant = next;
+    window.clearTimeout(this.mathTimer);
+    if (mathKey(next) === mathKey(this.math)) return;
+    // From one formula to the next at once; the first after a pause.
+    this.mathTimer = window.setTimeout(() => void this.showMath(next), this.math ? 0 : MATH_SHOW_MS);
+  }
+
+  /** The pointer left the formula: it goes after MATH_LEAVE_MS. */
+  private leaveMath() {
+    this.mathWant = undefined;
+    window.clearTimeout(this.mathTimer);
+    if (this.math) this.mathTimer = window.setTimeout(() => this.setMath(undefined), MATH_LEAVE_MS);
+  }
+
+  private formulaAt(p: SurfacePane, x: number, y: number): PaneMath | undefined {
+    const x0 = p.inner.x;
+    const x1 = p.inner.x + p.inner.w;
+    if (y < p.inner.y || y >= p.inner.y + p.inner.h || x < x0 || x >= x1) return;
+    const m = mathAt(x, y, p.inner.y, p.inner.y + p.inner.h, (r) => grid.rowText(r, x0, x1));
+    return m && { pane: p.id, cells: m.cells, tex: m.tex, display: m.display };
+  }
+
+  private async showMath(want: PaneMath) {
+    const html = await renderMath(want.tex, want.display);
+    if (this.disposed || mathKey(this.mathWant) !== mathKey(want)) return;
+    // Not a formula after all (KaTeX cannot read it): nothing is shown.
+    this.setMath(html ? { ...want, html } : undefined);
+  }
+
+  private setMath(m: ShownMath | undefined) {
+    if (mathKey(m) === mathKey(this.math)) return;
+    for (const c of this.math?.cells ?? []) grid.dirty.add(c.y);
+    for (const c of m?.cells ?? []) grid.dirty.add(c.y);
+    this.math = m;
+    this.o.onMath?.(m);
+    this.schedule();
+  }
+
+  /** Hides the formula shown: typing, clicking and scrolling move on. */
+  private hideMath() {
+    window.clearTimeout(this.mathTimer);
+    this.mathWant = undefined;
+    this.setMath(undefined);
+  }
+
+  private onMouseLeave = (ev: MouseEvent) => {
+    if (!overPopover(ev.relatedTarget)) this.leaveMath();
+  };
 
   /** Paint compares the rows' highlights with what they were painted with. */
   private selectionChanged() {
@@ -974,6 +1085,8 @@ export class SurfaceController {
     this.host.removeEventListener('dragover', this.onDragOver);
     this.host.removeEventListener('dragleave', this.onDragLeave);
     this.host.removeEventListener('drop', this.onDrop);
+    this.host.removeEventListener('mouseleave', this.onMouseLeave);
+    window.clearTimeout(this.mathTimer);
     window.removeEventListener('mousemove', this.onMouseMove);
     window.removeEventListener('mouseup', this.onMouseUp);
     window.removeEventListener('keydown', this.onModifier);

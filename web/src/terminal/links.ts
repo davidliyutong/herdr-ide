@@ -90,7 +90,7 @@ export interface WrappedLink {
 const WRAP_ROWS = 20;
 
 /** Whether a row's text reaches its last column. */
-function reachesEnd(r: RowText): boolean {
+export function reachesEnd(r: RowText): boolean {
   const n = r.text.replace(/\s+$/, '').length;
   return n > 0 && r.colOf[n] === r.colOf[r.colOf.length - 1];
 }

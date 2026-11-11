@@ -4,8 +4,9 @@
 // rows herdr moved are copied on the canvas instead of painted again, and a
 // drag held past a pane's edge scrolls at a speed set by time, not by how
 // fast herdr answers pane.scroll. A path wrapped over two rows is one link,
-// the pane's menu copies, pastes and opens paths, and files dropped on a
-// pane are pasted as their paths.
+// the pane's menu copies, pastes and opens paths, files dropped on a pane
+// are pasted as their paths, and a formula under the resting pointer is
+// shown rendered.
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -78,6 +79,8 @@ const range = (a: number, b: number) => [...Array(b - a).keys()].map((i) => a + 
 let readOnly = false;
 const dropFiles = vi.fn((_pane: string, _items: DataTransferItemList) => Promise.resolve<string | undefined>("'/tmp/my shot.png' "));
 const dropTarget = vi.fn((_pane: string | undefined) => {});
+let shownMath: import('../surface/controller').ShownMath | undefined;
+let mathOn = true;
 
 beforeAll(async () => {
   globalThis.ResizeObserver ??= class {
@@ -138,6 +141,8 @@ beforeAll(async () => {
       linkContext: () => ({ m: 'm1' }),
       onSize: () => {},
       setTitle: () => {},
+      onMath: (m) => (shownMath = m),
+      mathHover: () => mathOn,
     },
     { ...appearanceOf(getPrefs()), fontSize: 13, fontWeight: 400 },
   );
@@ -239,6 +244,61 @@ describe('links', () => {
     expect(lines.filter(([, y]) => y === 7).map(([x]) => x)).toEqual(range(0, 12));
     window.dispatchEvent(mouse('mousemove', 7, 3, { buttons: 0 }));
     flush();
+  });
+});
+
+describe('formulas', () => {
+  const rest = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const move = (row: number, col: number, init: MouseEventInit = {}) => {
+    window.dispatchEvent(mouse('mousemove', row, col, { buttons: 0, ...init }));
+    flush();
+  };
+
+  it('shows the formula the pointer rests on, rendered, and dots it', async () => {
+    const { MATH_SHOW_MS, MATH_LEAVE_MS } = await import('../surface/controller');
+    ctl.clearSelection();
+    write(3, 'y $a_1^2$ z');
+    write(4, 'q $\\frac{a$ r');
+    setMeta(500);
+    flush();
+    lines = [];
+    move(3, 4);
+    expect(shownMath).toBeUndefined();
+    await vi.waitFor(() => expect(shownMath?.tex).toBe('a_1^2'), { timeout: 5000 });
+    expect(shownMath).toMatchObject({ pane: 'p1', display: false, cells: [{ y: 3, from: 2, to: 9 }] });
+    expect(shownMath!.html).toContain('class="katex"');
+    flush();
+    const dots = lines.filter(([, y]) => y === 3).map(([x]) => x);
+    expect(Math.min(...dots)).toBe(2);
+    expect(Math.max(...dots)).toBeLessThan(9);
+
+    // Off the formula it goes, after a moment.
+    move(3, 0);
+    expect(shownMath).toBeDefined();
+    await vi.waitFor(() => expect(shownMath).toBeUndefined());
+
+    // KaTeX cannot read it: nothing is shown.
+    move(4, 5);
+    await rest(MATH_SHOW_MS + 200);
+    expect(shownMath).toBeUndefined();
+
+    // Not while Cmd shows links, nor with the setting off.
+    move(3, 4, { metaKey: true });
+    await rest(MATH_SHOW_MS + 100);
+    expect(shownMath).toBeUndefined();
+    mathOn = false;
+    move(3, 5);
+    await rest(MATH_SHOW_MS + 100);
+    expect(shownMath).toBeUndefined();
+    mathOn = true;
+
+    // Typing hides it.
+    move(3, 6);
+    await vi.waitFor(() => expect(shownMath).toBeDefined());
+    host.querySelector('textarea')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', bubbles: true }));
+    expect(shownMath).toBeUndefined();
+    move(0, 0);
+    await rest(MATH_LEAVE_MS);
   });
 });
 

@@ -55,8 +55,22 @@ function fontLicense(): Plugin {
   };
 }
 
+// KaTeX's stylesheet offers each font as woff2, woff and ttf. Every browser
+// the UI runs in reads woff2, so the others stay out of the bundle (and the
+// binary that embeds it). Runs before Vite resolves the stylesheet's URLs.
+function katexWoff2(): Plugin {
+  return {
+    name: 'katex-woff2',
+    enforce: 'pre',
+    transform(code, id) {
+      if (!/[\\/]katex[\\/]dist[\\/]katex(\.min)?\.css$/.test(id)) return;
+      return code.replace(/,\s*url\([^)]*\.(?:woff|ttf)\)\s*format\("(?:woff|truetype)"\)/g, '');
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), brand(), fontLicense()],
+  plugins: [react(), brand(), fontLicense(), katexWoff2()],
   build: {
     outDir: 'dist',
     emptyOutDir: true,

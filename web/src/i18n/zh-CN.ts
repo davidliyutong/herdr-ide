@@ -446,6 +446,11 @@ export const zhCN: Messages = {
   'settings.programClipboard.auto': '自动',
   'settings.programClipboard.ask': '询问',
   'settings.programClipboard.off': '关闭',
+  'settings.mathHover': '鼠标悬停显示公式',
+  'settings.mathHover.desc': '鼠标停在 pane 里的 LaTeX 公式上（$…$、$$…$$、\\(…\\)、\\[…\\]，比如 agent 写的公式）时，显示渲染后的公式。',
+  'math.title': '公式',
+  'math.copy': '复制 LaTeX',
+  'math.copied': '已复制 LaTeX 源码',
   'settings.notifySound': '提示音',
   'settings.notifySound.desc':
     'agent 需要输入时播放一段提示音，完成时播放另一段（其窗格显示在已聚焦的窗口中时不播放）。打开多个浏览器时，只由最近使用的那个播放。',

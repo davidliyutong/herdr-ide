@@ -51,6 +51,13 @@ Fixed, after [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   at its prompt; otherwise it asks and names the programs that would end,
   also when they are not agents (`vim`, a build, `ssh`).
 
+- Formulas: rest the pointer on a LaTeX formula in a pane (`$…$`,
+  `$$…$$`, `\(…\)`, `\[…\]`, also as agents' markdown renderers print
+  them, without some backslashes) to see it typeset by KaTeX
+  in a popover, with a button that copies its source. KaTeX loads the
+  first time a formula is shown; **Settings → Terminal → Show formulas
+  under the pointer** turns it off.
+
 ## [0.3.0] - 2026-11-08
 
 ### Added
