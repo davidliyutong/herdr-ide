@@ -43,6 +43,9 @@ Fixed, after [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   noticed without reconnecting, and **Check again** picks up one installed
   by hand.
 
+- Disabled machines are folded in the sidebar instead of showing an
+  **Enable machine** button; open one, or use its menu, to enable it.
+
 ## [0.3.0] - 2026-11-08
 
 ### Added

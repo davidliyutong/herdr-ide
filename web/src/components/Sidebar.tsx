@@ -126,7 +126,16 @@ function Inbox() {
 }
 
 function MachineItem({ m }: { m: MachineState }) {
-  const [open, setOpen] = useState(true);
+  // Disabled machines start folded: their body only holds the Enable button
+  // (also in the machine's menu). Disabling folds a machine and enabling
+  // unfolds it; clicking the header toggles it in between.
+  const disabled = m.status === 'disabled';
+  const [open, setOpen] = useState(!disabled);
+  const [wasDisabled, setWasDisabled] = useState(disabled);
+  if (disabled !== wasDisabled) {
+    setWasDisabled(disabled);
+    setOpen(!disabled);
+  }
   const selM = useStore((s) => s.machineId);
   const selWs = useStore((s) => s.workspaceId);
   const selectWorkspace = useStore((s) => s.selectWorkspace);

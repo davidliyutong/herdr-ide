@@ -71,7 +71,9 @@ Non-goals: managing ssh keys or herdr installations; Windows machines.
   agent exits and stops the code-server it started; panes keep running in
   herdr), drops the machine's snapshot and shows it as *disabled*; enabling
   connects it. Disabling a connected machine asks first. Read-only browsers
-  cannot do either.
+  cannot do either. The sidebar folds disabled machines, so their Enable
+  button shows only when the user opens one; disabling a machine folds it
+  and enabling it unfolds it.
 - **Adding, removing, renaming and reloading.** Machines are herdr's saved
   machines, so they are added, removed and renamed with herdr's own
   commands, run with the local machine's herdr on the core host; the core
