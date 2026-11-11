@@ -48,6 +48,31 @@ describe('Sidebar machines', () => {
     expect(host.querySelector('button[title^="Reload machines"]')).toBeNull();
   });
 
+  it('folds disabled machines until opened, and unfolds them once enabled', async () => {
+    const head = () => host.querySelector<HTMLElement>('.machine-head')!;
+    const enable = () => Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Enable machine');
+    expect(host.querySelector('.machine-body')).toBeNull();
+    expect(enable()).toBeUndefined();
+    await act(async () => head().click());
+    expect(enable()).toBeDefined();
+    await act(async () => head().click());
+    expect(host.querySelector('.machine-body')).toBeNull();
+
+    const setStatus = (status: string) =>
+      act(async () =>
+        useStore.getState().setMachines([{ id: 'gpu', label: 'gpu', kind: 'ssh', status, saved: true } as unknown as MachineState]),
+      );
+    await setStatus('connecting');
+    expect(host.querySelector('.machine-body')).not.toBeNull();
+    // Folding an enabled machine sticks while it connects.
+    await act(async () => head().click());
+    await setStatus('ready');
+    expect(host.querySelector('.machine-body')).toBeNull();
+    await act(async () => head().click());
+    await setStatus('disabled');
+    expect(host.querySelector('.machine-body')).toBeNull();
+  });
+
   it('renames a machine in its header', async () => {
     await act(async () => useStore.getState().setRenaming({ kind: 'machine', m: 'gpu', id: 'gpu' }));
     const input = host.querySelector<HTMLInputElement>('.machine-head input');
