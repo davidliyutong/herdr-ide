@@ -300,6 +300,40 @@ describe('formulas', () => {
     move(0, 0);
     await rest(MATH_LEAVE_MS);
   });
+
+  it('keeps the formula while the pointer crosses the next one towards the popover', async () => {
+    const { MATH_LEAVE_MS } = await import('../surface/controller');
+    ctl.clearSelection();
+    write(3, '$$x^2$$');
+    write(4, '$$y^2$$');
+    setMeta(501);
+    flush();
+    const popover = document.createElement('div');
+    popover.className = 'math-popover';
+    popover.getBoundingClientRect = () => new DOMRect(0, 7 * CH, 40 * CW, 3 * CH);
+    document.body.appendChild(popover);
+    try {
+      move(3, 2);
+      await vi.waitFor(() => expect(shownMath?.tex).toBe('x^2'), { timeout: 5000 });
+      // Down onto the next formula, on the way to the popover: x^2 stays.
+      move(4, 2);
+      await new Promise((r) => setTimeout(r, 50));
+      expect(shownMath?.tex).toBe('x^2');
+      move(5, 2);
+      expect(shownMath?.tex).toBe('x^2');
+
+      // Away from the popover: the next formula is shown.
+      move(3, 2);
+      move(2, 2);
+      move(4, 30);
+      move(4, 2);
+      await vi.waitFor(() => expect(shownMath?.tex).toBe('y^2'));
+    } finally {
+      popover.remove();
+    }
+    move(0, 0);
+    await new Promise((r) => setTimeout(r, MATH_LEAVE_MS + 50));
+  });
 });
 
 describe('pane menu', () => {

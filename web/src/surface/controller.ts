@@ -89,8 +89,21 @@ export interface ShownMath extends PaneMath {
  * popover (whose element has the class math-popover). */
 export const MATH_SHOW_MS = 300;
 export const MATH_LEAVE_MS = 250;
+/** How long the formula stays while the pointer is on its way to the
+ * popover but has stopped. */
+export const MATH_APPROACH_MS = 800;
 
 const mathKey = (m: PaneMath | undefined) => (m ? `${m.pane} ${m.cells.map((c) => `${c.y}:${c.from}-${c.to}`).join(' ')} ${m.tex}` : '');
+
+/** Whether (px, py) lies in the triangle a, b, c. */
+function inTriangle(px: number, py: number, a: [number, number], b: [number, number], c: [number, number]) {
+  const side = (p: [number, number], q: [number, number]) => (q[0] - p[0]) * (py - p[1]) - (q[1] - p[1]) * (px - p[0]);
+  const d1 = side(a, b);
+  const d2 = side(b, c);
+  const d3 = side(c, a);
+  return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0));
+}
+
 const overPopover = (target: EventTarget | null | undefined) => !!(target as Element | null)?.closest?.('.math-popover');
 
 /** Least pause between scroll requests while a selection drag is past an
@@ -149,6 +162,8 @@ export class SurfaceController {
   private math?: ShownMath;
   private mathWant?: PaneMath;
   private mathTimer?: number;
+  /** Where the pointer was at the last move over the panes. */
+  private mathFrom?: { x: number; y: number };
   private disposed = false;
 
   constructor(
@@ -981,9 +996,20 @@ export class SurfaceController {
    * stays; moving off it hides it after MATH_LEAVE_MS. */
   private updateMath(ev: { clientX: number; clientY: number; metaKey?: boolean; ctrlKey?: boolean; target?: EventTarget | null }) {
     if (!this.o.onMath) return;
+    const from = this.mathFrom;
+    this.mathFrom = { x: ev.clientX, y: ev.clientY };
     if (overPopover(ev.target)) {
       window.clearTimeout(this.mathTimer);
       this.mathWant = this.math;
+      return;
+    }
+    // On the way to the popover the pointer crosses rows of other formulas
+    // (consecutive display formulas): the one shown stays, as long as the
+    // pointer keeps heading for the popover.
+    if (this.math && from && this.towardPopover(from, ev.clientX, ev.clientY)) {
+      window.clearTimeout(this.mathTimer);
+      this.mathWant = this.math;
+      this.mathTimer = window.setTimeout(() => this.hideMath(), MATH_APPROACH_MS);
       return;
     }
     const { x, y } = this.cellAt(ev.clientX, ev.clientY);
@@ -996,6 +1022,38 @@ export class SurfaceController {
     if (mathKey(next) === mathKey(this.math)) return;
     // From one formula to the next at once; the first after a pause.
     this.mathTimer = window.setTimeout(() => void this.showMath(next), this.math ? 0 : MATH_SHOW_MS);
+  }
+
+  /** Whether a move from `from` to (x, y) stays within the triangle between
+   * `from` and the edge of the popover that faces it. */
+  private towardPopover(from: { x: number; y: number }, x: number, y: number): boolean {
+    const el = this.host.parentElement?.querySelector('.math-popover');
+    if (!el) return false;
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 && r.height === 0) return false;
+    let a: [number, number];
+    let b: [number, number];
+    if (from.y < r.top)
+      [a, b] = [
+        [r.left, r.top],
+        [r.right, r.top],
+      ];
+    else if (from.y > r.bottom)
+      [a, b] = [
+        [r.left, r.bottom],
+        [r.right, r.bottom],
+      ];
+    else if (from.x < r.left)
+      [a, b] = [
+        [r.left, r.top],
+        [r.left, r.bottom],
+      ];
+    else
+      [a, b] = [
+        [r.right, r.top],
+        [r.right, r.bottom],
+      ];
+    return inTriangle(x, y, [from.x, from.y], a, b);
   }
 
   /** The pointer left the formula: it goes after MATH_LEAVE_MS. */

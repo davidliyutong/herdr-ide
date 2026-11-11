@@ -58,6 +58,10 @@ Fixed, after [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   first time a formula is shown; **Settings → Terminal → Show formulas
   under the pointer** turns it off.
 
+- Formulas: the popover stays while the pointer moves towards it across
+  the rows of other formulas, so the copy button can be reached when
+  display formulas follow one another.
+
 ## [0.3.0] - 2026-11-08
 
 ### Added
