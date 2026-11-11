@@ -61,6 +61,9 @@ browser tab, with VS Code (code-server) one keystroke away.
 - **Quick Look.** ⌘/Ctrl-click or right-click a path in a terminal, also one
   wrapped over several lines, to preview images, GIFs, videos (with
   seeking), audio, PDFs, text or directories.
+- **Formulas.** Rest the pointer on a LaTeX formula an agent wrote in a
+  pane (`$…$`, `$$…$$`, `\(…\)`, `\[…\]`, also with the backslashes its
+  markdown dropped) to see it typeset, and copy its source.
 - **Files to agents.** Paste or drop files into a pane to paste their paths;
   files that are not on the pane's machine are uploaded to it first, dropped
   ones into the pane's directory (an existing file there is never replaced).

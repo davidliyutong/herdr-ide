@@ -6,12 +6,13 @@ import { handleKey } from '../keymap';
 import { uploadPasted } from '../transfers';
 import { droppedItems, droppedPaths, filesAreOn } from '../drop';
 import { paneCwd, shortPath, type LayoutExport } from '../lib/herdr';
-import { SurfaceController } from '../surface/controller';
+import { SurfaceController, type ShownMath } from '../surface/controller';
 import { grid, setHostColors, setView, takeOver, useSurface } from '../surface/session';
 import type { SurfacePane, SurfaceSplit } from '../surface/protocol';
 import { setSurfaceFocus } from '../terminal/registry';
 import { whenTermFont } from '../terminal/fonts';
 import { PaneHeader } from './PaneHeader';
+import { MathPopover } from './MathPopover';
 import { t, type MessageKey } from '../i18n';
 
 /** A pane's working directory, as herdr reports it. */
@@ -63,6 +64,8 @@ export function SurfaceView({ m, tabId, layout }: Props) {
   const focusedPane = useStore((s) => (s.focused?.m === m ? s.focused.pane : undefined));
   // The pane files dragged from outside the page would be dropped on.
   const [dropOn, setDropOn] = useState<string>();
+  // The formula under the pointer, rendered.
+  const [math, setMath] = useState<ShownMath>();
   const live = useRef({ m, tabId, focusedPane });
   live.current = { m, tabId, focusedPane };
 
@@ -88,6 +91,8 @@ export function SurfaceView({ m, tabId, layout }: Props) {
         onSize: (cols, rows, cw, ch, dpr) => setCell({ cols, rows, cw, ch, dpr }),
         onSplitDrag: (split, ratio) => setSplitDrag(ratio === undefined ? undefined : { split, ratio }),
         setTitle,
+        onMath: setMath,
+        mathHover: () => usePrefs.getState().prefs.mathHover,
       },
       appearanceOf(prefs),
     );
@@ -211,6 +216,7 @@ export function SurfaceView({ m, tabId, layout }: Props) {
           }
         />
       )}
+      {math && current && <MathPopover math={math} cw={cw} ch={ch} />}
       {overlay && (
         <div className={`surface-overlay ${overlay.soft ? 'soft' : ''}`}>
           <span>{overlay.text}</span>

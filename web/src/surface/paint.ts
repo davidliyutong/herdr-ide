@@ -75,6 +75,8 @@ export interface PaintState {
   highlight?: Highlight;
   /** Cells under the hovered link, underlined (one range per row). */
   hover?: Array<{ y: number; from: number; to: number }>;
+  /** Cells of the formula shown rendered, dotted underneath. */
+  math?: Array<{ y: number; from: number; to: number }>;
 }
 
 // Line weights per box-drawing character: up, right, down, left.
@@ -262,6 +264,7 @@ export function paintRows(ctx: CanvasRenderingContext2D, g: Grid, st: PaintState
     const hl = st.highlight?.(y);
     const inHl = (x: number) => !!hl?.some(([a, b]) => x >= a && x < b);
     const hv = st.hover?.find((c) => c.y === y);
+    const mh = st.math?.find((c) => c.y === y);
     // Backgrounds.
     ctx.fillStyle = p.bg;
     ctx.fillRect(0, top, g.w * cw, ch);
@@ -337,8 +340,10 @@ export function paintRows(ctx: CanvasRenderingContext2D, g: Grid, st: PaintState
       }
       const thin = Math.max(1, Math.round(ch / 16));
       const linked = hv && x >= hv.from && x < hv.to;
-      if (c.mod & MOD.underline || linked) {
-        const style = (c.mod >> 12) & 0xf;
+      const formula = mh && x >= mh.from && x < mh.to;
+      if (c.mod & MOD.underline || linked || formula) {
+        // A formula's cells get a dotted line unless already underlined.
+        const style = c.mod & MOD.underline || linked ? (c.mod >> 12) & 0xf : 4;
         const uy = top + baseline + thin;
         if (style === 2) {
           ctx.fillRect(left, uy, cw * wdt, thin);

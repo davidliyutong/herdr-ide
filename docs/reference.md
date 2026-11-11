@@ -209,6 +209,7 @@ In the browser, in `localStorage` under `herdr-ide.*`:
 - panel position
 - Option as Meta
 - what programs copying to the clipboard do
+- whether formulas under the pointer are shown
 - sidebar and panel sizes
 - the selected workspace
 - the upload history (the last 50 finished uploads: file names, machines

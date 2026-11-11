@@ -456,6 +456,12 @@ export const en = {
   'settings.programClipboard.auto': 'Automatic',
   'settings.programClipboard.ask': 'Ask',
   'settings.programClipboard.off': 'Off',
+  'settings.mathHover': 'Show formulas under the pointer',
+  'settings.mathHover.desc':
+    'Rest the pointer on a LaTeX formula in a pane ($…$, $$…$$, \\(…\\), \\[…\\]), such as one an agent wrote, to see it rendered.',
+  'math.title': 'Formula',
+  'math.copy': 'Copy LaTeX',
+  'math.copied': 'Copied the LaTeX source',
   'settings.notifySound': 'Notification sounds',
   'settings.notifySound.desc':
     'A chime when an agent needs input, another when it finishes (not while its pane is on screen in a focused window). With several browsers open, the one used most recently plays it.',

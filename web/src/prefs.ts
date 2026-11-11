@@ -32,6 +32,8 @@ export const prefDefs = {
   optionIsMeta: { section: 'terminal', kind: 'bool', default: false },
   // What a pane program's clipboard write (OSC 52) does (surface/session.ts).
   programClipboard: { section: 'terminal', kind: 'enum', default: 'auto', options: ['auto', 'ask', 'off'] },
+  // LaTeX formulas in panes shown rendered under the pointer (terminal/math.ts).
+  mathHover: { section: 'terminal', kind: 'bool', default: true },
   // On by default, and droid muted, as in herdr's [ui.sound].
   notifySound: { section: 'notifications', kind: 'bool', default: true },
   notifySoundMuted: { section: 'notifications', kind: 'string', default: 'droid' },
