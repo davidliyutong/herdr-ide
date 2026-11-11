@@ -3,7 +3,7 @@ import { useStore } from '../state/store';
 import { usePrefs } from '../prefs';
 import { appearanceOf, useThemeKind } from '../appearance';
 import { handleKey } from '../keymap';
-import { uploadPasted } from '../lib/files';
+import { uploadPasted } from '../transfers';
 import { droppedItems, droppedPaths, filesAreOn } from '../drop';
 import { paneCwd, shortPath, type LayoutExport } from '../lib/herdr';
 import { SurfaceController } from '../surface/controller';

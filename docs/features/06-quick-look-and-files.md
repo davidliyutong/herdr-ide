@@ -14,7 +14,8 @@ wrapped over several rows; preview images, GIFs, video
 (with seeking), audio, PDF, text and directories; step through sibling media;
 paste or drop files into a pane to paste their paths, uploading them to the
 pane's machine when they are not there (dropped files into the pane's
-directory).
+directory); follow uploads (progress, speed, time left), cancel them and see
+the recent ones.
 
 Non-goals: a file manager; editing files (that is VS Code's job).
 
@@ -78,7 +79,8 @@ Non-goals: a file manager; editing files (that is VS Code's job).
 - Other files are `POST`ed to `/api/m/<machine>/upload?name=` of the pane's
   machine, one after the other, streamed with chunk framing; the reply holds
   the path. Folders are not uploaded; they are skipped with a note. A failed
-  upload shows its error, and the paths of the others are still pasted.
+  or cancelled upload shows in the uploads panel (a failure also as a note),
+  and the paths of the others are still pasted.
 - Dropped files go into the pane's working directory (herdr's
   `foreground_cwd`, so the directory of the agent running there), given as
   `&dir=`: the user put them there on purpose, and the agent finds them next
@@ -92,6 +94,33 @@ Non-goals: a file manager; editing files (that is VS Code's job).
   clipboard images are all called `image.png`) and files expire after 7 days
   ([10](10-remote-resource-lifecycle.md)).
 
+**Uploads panel** (`web/src/transfers.ts`, `web/src/components/Transfers.tsx`)
+
+- Every upload of a pasted or dropped file is listed in a panel opened from
+  the status bar, where a button appears once the browser has uploaded
+  something; while files go it shows how many and how far they are
+  together. The note of a drop that uploads has a **Show** button for it.
+- The files of one paste or drop are queued together. A running upload
+  shows the bytes sent of its size, its speed over the last 3 seconds and
+  the time left; a waiting one shows that it waits. The browser sends the
+  body with `XMLHttpRequest`, whose upload events report the bytes sent;
+  the core streams the body to the agent as it arrives, so these are close
+  to what has reached the machine.
+- **Cancel** (and **Cancel all**) stops a running upload by aborting its
+  request; the core then closes its stream to the agent, which removes the
+  temporary file it was writing, so nothing of the file is left on the
+  machine. A waiting upload is never sent, and the paths of the others in
+  the drop are still pasted. Once the whole body is sent, the agent is
+  saving the file (moving it to its name); the upload then shows as saving
+  and can no longer be cancelled, since the file would arrive anyway.
+- Finished uploads (done, failed or cancelled) move to the history, newest
+  first: the machine, where the file is (or the directory it was going to),
+  its size, time and average speed, or the error. A done upload can be
+  opened in the preview panel and its path copied. The browser keeps the
+  last 50 in `localStorage` (names, machines and paths, not contents);
+  opening the panel shows the ones other tabs finished. Entries can be
+  removed one by one or all at once; this does not touch the files.
+
 ## Alternatives considered
 
 | Option | Why not |
@@ -101,6 +130,9 @@ Non-goals: a file manager; editing files (that is VS Code's job).
 | `ssh … cat` / `dd` per range request | One process per range; POSIX tool differences across platforms. |
 | Client-chosen upload paths | Collisions and path injection. The browser names at most an existing directory; the server owns the file name and the agent never replaces a file. |
 | Upload to the upload directory, then move | Two steps and a copy across file systems; writing in the target directory renames within it. |
+| `fetch` with a streamed request body for upload progress | Streaming request bodies (`duplex: 'half'`) need HTTP/2 and are not in every browser; the core serves HTTP/1.1. `fetch` reports no upload progress otherwise. |
+| Progress reported by the core over `/ws` | Another message type for what the browser already knows; the core streams the body as it arrives, so the bytes sent are close to the bytes written. |
+| Cancelling during saving | The agent may already have renamed the file; a cancel that leaves the file would be misleading. |
 
 ## Security
 
@@ -112,7 +144,10 @@ directory expire after 7 days ([10](10-remote-resource-lifecycle.md)).
 Uploads into a pane's directory must name an absolute directory; the core
 takes only the file's base name, and the agent claims the name exclusively,
 so an upload replaces no file and follows no symlink there. Such files are
-the user's and stay.
+the user's and stay. A cancelled or interrupted upload leaves no partial
+file: the agent writes to a temporary file in the target directory and
+removes it when the stream ends before its last chunk. The upload history
+is per browser and holds names and paths only.
 
 ## Testing
 
@@ -124,4 +159,8 @@ links, selected links), `web/src/__tests__/surfaceSelect.test.ts` (wrapped
 link underline, the pane menu's items, copy, paste and opening; which drags
 a pane takes and pasting dropped files' paths), `web/src/__tests__/drop.test.ts`
 (dropped files' paths on the local machine, uploads and skipped folders for
-another, refused stray drops).
+another, refused stray drops), `web/src/__tests__/transfers.test.ts`
+(progress and speed, cancelling running and waiting uploads, the fallback
+to the upload directory, the kept history, the panel), and
+`TestCancelledUploadLeavesNoFile` in `internal/server/server_test.go` (an
+aborted upload through a real agent leaves no file; a complete one arrives).

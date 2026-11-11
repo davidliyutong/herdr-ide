@@ -12,6 +12,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { FakeXhr } from './fakeXhr';
 
 const calls: Array<{ m: string; method: string; params: Record<string, unknown> }> = [];
 vi.mock('../lib/conn', () => ({
@@ -65,19 +66,15 @@ function dragEvent(type: string, items: DataTransferItem[]) {
   return ev as Event & { dataTransfer: { dropEffect: string } };
 }
 
-/** Upload requests; a directory named /readonly takes no file. */
-const uploads: string[] = [];
-vi.stubGlobal(
-  'fetch',
-  vi.fn(async (url: string) => {
-    uploads.push(url);
-    const q = new URL(url, 'http://core').searchParams;
-    const dir = q.get('dir') ?? '/home/u/uploads';
-    if (dir === '/readonly')
-      return { ok: false, json: async () => ({ error: 'agent fs.write: open /readonly/.tmp-1: permission denied' }) };
-    return { ok: true, json: async () => ({ name: q.get('name'), size: 0, path: `${dir}/${q.get('name')}` }) };
-  }),
-);
+/** Upload replies; a directory named /readonly takes no file. */
+vi.stubGlobal('XMLHttpRequest', FakeXhr);
+function answer(url: string): [number, unknown] {
+  const q = new URL(url, 'http://core').searchParams;
+  const dir = q.get('dir') ?? '/home/u/uploads';
+  if (dir === '/readonly') return [502, { error: 'agent fs.write: open /readonly/.tmp-1: permission denied' }];
+  return [200, { name: q.get('name'), size: 0, path: `${dir}/${q.get('name')}` }];
+}
+const uploads = () => FakeXhr.requests.map((r) => r.url);
 
 let store: typeof import('../state/store');
 let drop: typeof import('../drop');
@@ -94,7 +91,8 @@ beforeAll(async () => {
 
 beforeEach(() => {
   calls.length = 0;
-  uploads.length = 0;
+  FakeXhr.reset();
+  FakeXhr.reply = answer;
   store.useStore.setState({
     readOnly: false,
     toasts: [],
@@ -229,13 +227,13 @@ describe('files dropped on a pane', () => {
 
   it('of the local machine are pasted where they are, folders too', async () => {
     expect(await drop.droppedPaths('local', dropped())).toBe(`'/Users/u/My Project' /Users/u/a.png '/Users/u/it'\\''s.txt' `);
-    expect(uploads).toEqual([]);
+    expect(uploads()).toEqual([]);
     expect(toasts()).toEqual([]);
   });
 
   it("of another machine are uploaded into the pane's directory there; folders are skipped", async () => {
     expect(await drop.droppedPaths('ws2', dropped(), '/home/u/proj')).toBe(`/home/u/proj/a.png '/home/u/proj/it'\\''s.txt' `);
-    expect(uploads).toEqual([
+    expect(uploads()).toEqual([
       '/api/m/ws2/upload?name=a.png&dir=%2Fhome%2Fu%2Fproj',
       '/api/m/ws2/upload?name=it%27s.txt&dir=%2Fhome%2Fu%2Fproj',
     ]);
@@ -246,7 +244,7 @@ describe('files dropped on a pane', () => {
     const file = () => drop.droppedItems([item('a.png', '/Users/u/a.png', false)]);
     expect(await drop.droppedPaths('ws2', file())).toBe('/home/u/uploads/a.png ');
     expect(await drop.droppedPaths('ws2', file(), '/readonly')).toBe('/home/u/uploads/a.png ');
-    expect(uploads).toEqual([
+    expect(uploads()).toEqual([
       '/api/m/ws2/upload?name=a.png',
       '/api/m/ws2/upload?name=a.png&dir=%2Freadonly',
       '/api/m/ws2/upload?name=a.png',

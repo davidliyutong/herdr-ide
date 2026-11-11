@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"io"
 	"log"
@@ -22,6 +23,7 @@ import (
 	"github.com/coder/websocket"
 
 	"herdr-ide/internal/agent"
+	"herdr-ide/internal/brand"
 	"herdr-ide/internal/machines"
 	"herdr-ide/internal/settings"
 	"herdr-ide/internal/transport"
@@ -662,9 +664,10 @@ func TestVideoCodecsParam(t *testing.T) {
 	}
 }
 
-// A read-only browser cannot make a machine reconnect: its retry is refused
-// and audited, and the machine keeps its session.
-func TestReadOnlyRetryKeepsTheSession(t *testing.T) {
+// agentMachine runs machine "x" with an in-process agent (HOME is a temp
+// dir; no herdr session exists) and waits until it is connected.
+func agentMachine(t *testing.T) (*machines.Manager, *machines.Machine, *log.Logger) {
+	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
@@ -686,11 +689,18 @@ func TestReadOnlyRetryKeepsTheSession(t *testing.T) {
 		<-done
 	})
 	mc := mg.Get("x")
-	for deadline := time.Now().Add(10 * time.Second); mc.Session() == nil; time.Sleep(10 * time.Millisecond) {
+	for deadline := time.Now().Add(10 * time.Second); mc.Session() == nil || mc.State().Info == nil; time.Sleep(10 * time.Millisecond) {
 		if time.Now().After(deadline) {
 			t.Fatal("machine did not connect")
 		}
 	}
+	return mg, mc, logger
+}
+
+// A read-only browser cannot make a machine reconnect: its retry is refused
+// and audited, and the machine keeps its session.
+func TestReadOnlyRetryKeepsTheSession(t *testing.T) {
+	mg, mc, logger := agentMachine(t)
 	first := mc.Session()
 
 	var audit strings.Builder
@@ -708,6 +718,62 @@ func TestReadOnlyRetryKeepsTheSession(t *testing.T) {
 	}
 	if !strings.Contains(audit.String(), `"event":"denied.retry"`) {
 		t.Fatalf("audit: %s", audit.String())
+	}
+}
+
+// An upload the browser cancels (its request ends before the body does)
+// leaves nothing in the directory; a complete one arrives under its name.
+func TestCancelledUploadLeavesNoFile(t *testing.T) {
+	mg, _, logger := agentMachine(t)
+	srv := httptest.NewServer(New(mg, Options{Logger: logger}).Handler())
+	defer srv.Close()
+	dir := t.TempDir()
+	target := srv.URL + "/api/m/x/upload?" + url.Values{"name": {"big.bin"}, "dir": {dir}}.Encode()
+	names := func() []string {
+		ents, _ := os.ReadDir(dir)
+		var out []string
+		for _, e := range ents {
+			out = append(out, e.Name())
+		}
+		return out
+	}
+	waitFor := func(what string, ok func([]string) bool) {
+		t.Helper()
+		for deadline := time.Now().Add(10 * time.Second); !ok(names()); time.Sleep(10 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("%s: %v", what, names())
+			}
+		}
+	}
+
+	body, w := io.Pipe()
+	req, _ := http.NewRequest("POST", target, body)
+	req.ContentLength = 1 << 20
+	failed := make(chan error, 1)
+	go func() {
+		res, err := http.DefaultClient.Do(req)
+		if err == nil {
+			res.Body.Close()
+		}
+		failed <- err
+	}()
+	w.Write(make([]byte, 64<<10))
+	waitFor("no temporary file while uploading", func(n []string) bool { return len(n) == 1 && strings.HasPrefix(n[0], "."+brand.Slug+"-upload-") })
+	w.CloseWithError(errors.New("cancelled"))
+	if err := <-failed; err == nil {
+		t.Fatal("the cancelled request succeeded")
+	}
+	waitFor("the cancelled upload left files", func(n []string) bool { return len(n) == 0 })
+
+	res, err := http.Post(target, "application/octet-stream", strings.NewReader("whole"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var st struct{ Path string }
+	json.NewDecoder(res.Body).Decode(&st)
+	res.Body.Close()
+	if b, _ := os.ReadFile(filepath.Join(dir, "big.bin")); res.StatusCode != 200 || st.Path != filepath.Join(dir, "big.bin") || string(b) != "whole" {
+		t.Fatalf("upload: %d %+v %q (%v)", res.StatusCode, st, b, names())
 	}
 }
 
