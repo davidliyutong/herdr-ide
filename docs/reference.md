@@ -200,11 +200,19 @@ the user removes the directory and are not copied to SSH machines. herdr's own
 files (configuration, sessions, machine list) are where herdr puts them,
 whichever herdr is used.
 
-In the browser: preferences in `localStorage` under `herdr-ide.*` (language,
-theme, font sizes, terminal font weight, panel position, Option as Meta,
-what programs copying to the clipboard do, sidebar and panel sizes, the
-selected workspace) and the upload history (the last 50 finished uploads:
-file names, machines and paths on them).
+In the browser, in `localStorage` under `herdr-ide.*`:
+
+- language
+- theme
+- font sizes
+- terminal font weight
+- panel position
+- Option as Meta
+- what programs copying to the clipboard do
+- sidebar and panel sizes
+- the selected workspace
+- the upload history (the last 50 finished uploads: file names, machines
+  and paths on them)
 
 Desktop artifacts: `dist/desktop/mac-arm64/herdr-ide.app` (arm64),
 `dist/desktop/mac/herdr-ide.app` (x64), and

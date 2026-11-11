@@ -1,0 +1,2 @@
+# Both sides of a merge add entries at the same place; keep both.
+CHANGELOG.md merge=union

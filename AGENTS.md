@@ -53,7 +53,8 @@ Run `make check test` before finishing a change.
    a new document following `docs/features/README.md`); operations →
    `docs/deployment.md`; user-facing summary → `README.md` and
    `README.zh-CN.md` (same sections); notable changes → `CHANGELOG.md`
-   (`[Unreleased]`).
+   (one entry at the end of `[Unreleased]`, a list without `###`
+   subsections).
    Documents describe the system as it is: no TODO, TBD or open questions in
    files or code comments. Report open items to the user so they are tracked
    in the issue tracker.
@@ -105,6 +106,11 @@ playbooks):
   `web/dist/.gitkeep`, which `go:embed` needs in a clean checkout.
 - Adding a Go dependency changes `THIRD_PARTY_NOTICES.md`; run
   `scripts/notices.sh`.
+- Files every change touches are laid out so that parallel branches merge:
+  `CHANGELOG.md` uses git's union merge (`.gitattributes`; both sides'
+  entries are kept, so look at it after a merge or rebase),
+  `README.zh-CN.md` has one sentence per line, and enumerations in the docs
+  that grow with features are lists with one item per line.
 - macOS limits unix socket paths to 104 bytes; keep socket paths short.
 - code-server's webviews need a secure context; test VS Code features on
   `http://localhost` or HTTPS, not a LAN IP.
