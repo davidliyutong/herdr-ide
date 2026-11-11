@@ -66,7 +66,7 @@ here; both READMEs link to this page instead of repeating it.
 | Flag | Default | Description |
 | --- | --- | --- |
 | `--desktop-new-tab-key` | `cmd+t` (macOS), `ctrl+shift+t` | Desktop app: shortcut for a new tab. Modifiers (`cmd`, `ctrl`, `alt`, `shift`, at least one of the first three) and a key joined by `+`, or `none`. Also a setting in the UI (desktop app only). |
-| `--desktop-close-tab-key` | `cmd+w` (macOS), `ctrl+shift+w` | Desktop app: shortcut that closes the current tab, after a confirmation; same format. Also a setting in the UI (desktop app only). |
+| `--desktop-close-tab-key` | `cmd+w` (macOS), `ctrl+shift+w` | Desktop app: shortcut that closes the current tab, asking first when a program runs in it; same format. Also a setting in the UI (desktop app only). |
 | `--desktop-settings-key` | `cmd+comma` (macOS), `ctrl+comma` | Desktop app: shortcut that opens the settings; same format. Also a setting in the UI (desktop app only). |
 | `--desktop-new-workspace-key` | `cmd+n` (macOS), `ctrl+shift+n` | Desktop app: shortcut for a new workspace (asks for its folder); same format. Also a setting in the UI (desktop app only). |
 | `--desktop-toggle-code-key` | `cmd+j` (macOS), `ctrl+shift+j` | Desktop app: shortcut that shows or hides the VS Code panel, also while VS Code has focus; same format. Also a setting in the UI (desktop app only). |
@@ -116,7 +116,7 @@ run on the pane's machine.
 | `prefix prefix` | Send the prefix key itself | | |
 
 The desktop app adds direct shortcuts, without the prefix: `cmd+t` new tab,
-`cmd+w` close tab, which asks first, `cmd+,` settings, `cmd+n` new
+`cmd+w` close tab, which asks first when a program runs in it, `cmd+,` settings, `cmd+n` new
 workspace and `cmd+j` show or hide the VS Code panel (`ctrl+shift+t` /
 `ctrl+shift+w` / `ctrl+,` / `ctrl+shift+n` / `ctrl+shift+j` on other
 systems). They work wherever focus is except in VS Code, which keeps its own

@@ -164,6 +164,7 @@ export const zhCN: Messages = {
 
   'confirm.closeWorkingPane': '{agent} 仍在这个 pane 里工作，关闭后它的进程会结束。',
   'confirm.closeTabPanes': '这个 tab 的 {n} 个 pane 及其中运行的程序都会结束。',
+  'confirm.closeTabPrograms': '关闭这个 tab 会结束其中仍在运行的程序：{programs}。',
   'confirm.closeWorkingTab': '这个 tab 里有 {n} 个 agent 仍在工作，关闭后它们的进程会结束。',
   'confirm.closeWorkspace': '“{label}”中的所有 pane 及其中的进程都会结束。',
   'confirm.closePaneTitle': '关闭这个 pane？',

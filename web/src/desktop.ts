@@ -86,14 +86,14 @@ export function altOnly(spec: string): boolean {
 
 /** Runs a shortcut the shell reports. Nothing runs while a dialog is open
  * (settings, confirmations, the palette…): the key belongs to it. Closing a
- * tab by shortcut always asks first, since it ends the programs in its panes
- * and the key is easy to press by habit. */
+ * tab asks first unless its panes only have shells waiting at their prompt
+ * (actions.closeTab). */
 export function runShortcut(action: string) {
   if (!Object.hasOwn(shortcutSettings, action)) return;
   if (document.querySelector('.modal-backdrop, .palette-backdrop')) return;
   if (action === 'close_tab') {
     const c = actions.currentTab();
-    if (c) void actions.closeTab(c.m, c.tab, { confirm: true });
+    if (c) void actions.closeTab(c.m, c.tab);
     return;
   }
   runAction(action);
