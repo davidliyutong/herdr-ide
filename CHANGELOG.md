@@ -2,9 +2,10 @@
 
 All notable changes are documented here, newest version first, and the
 project uses [Semantic Versioning](https://semver.org/). A version's changes
-are one list without subsections; each change adds its entry at the end of
-`[Unreleased]`. Versions up to 0.3.0 group theirs under Added, Changed and
-Fixed, after [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+are one list without subsections, written when the version is released from
+the pull requests merged since the previous one. Versions up to 0.3.0 group
+theirs under Added, Changed and Fixed, after
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 

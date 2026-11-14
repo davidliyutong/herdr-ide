@@ -60,9 +60,10 @@ workspaces can live in the ignored `.worktrees/` directory.
   [docs/reference.md](docs/reference.md) (CI checks every flag is listed),
   components and protocols in [docs/architecture.md](docs/architecture.md),
   feature behavior and its reasoning in [docs/features/](docs/features/README.md),
-  operations in [docs/deployment.md](docs/deployment.md), notable changes in
-  [CHANGELOG.md](CHANGELOG.md) (one entry at the end of `[Unreleased]`, which
-  is a list without subsections).
+  operations in [docs/deployment.md](docs/deployment.md). Leave
+  [CHANGELOG.md](CHANGELOG.md) alone: it is written when a release is cut
+  ([RELEASING.md](RELEASING.md)), from the pull requests' titles and
+  descriptions, so describe user-visible changes there.
 - Commit messages: short imperative subject (`server: stop idle code-server`),
   optional scope prefix by area (`agent:`, `web:`, `docs:`, …).
 
