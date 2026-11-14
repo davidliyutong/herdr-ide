@@ -11,9 +11,8 @@ updates through `herdr update`.
 
 SSH machines need the same for their server. herdr's server ends with its
 host (it saves the session first), so after a machine reboots the agent
-connects again but finds no server: the machine stays *degraded*, and
-**Retry**, which only replaces the agent session
-([02](02-multi-machine-transport.md)), cannot help. Starting it meant an ssh
+connects again but finds no server: the machine is *ready* without herdr's
+panes ([02](02-multi-machine-transport.md)). Starting it meant an ssh
 terminal on that machine.
 
 herdr can also disappear from an SSH machine: removed by accident, moved to
@@ -136,11 +135,10 @@ user's confirmation; choosing herdr's preview channel.
 - **herdr missing on an SSH machine** (the agent found no executable there:
   removed, moved or never installed). herdr's `--remote` flow above also
   installs it, so the same terminal is offered as **Install herdr**: in the
-  status block of the *degraded* machine (whose detail says herdr is
-  missing instead of the socket error), in a banner while a server that
-  outlived its herdr keeps the machine *ready*, and in the context menu (in
+  machine's status block (which says herdr is missing), also while a
+  server that outlived its herdr still answers, and in the context menu (in
   place of **Update herdr…**); a herdr the user installed by hand is picked
-  up by **Retry**. **Restart herdr…** and **Stop herdr…** are disabled
+  up by the next connection of the machine. **Restart herdr…** and **Stop herdr…** are disabled
   meanwhile: they would stop nothing and start nothing. When the terminal
   ends, the machine reconnects with the path herdr recorded.
 - **UI** (not in read-only mode), all in the machine's context menu and its
@@ -159,13 +157,12 @@ user's confirmation; choosing herdr's preview channel.
     for a restart when the running server could not be handed over); an
     up-to-date copy gets a toast. On an SSH machine the same item runs
     herdr's `--remote` flow above.
-  - **Start herdr** in the status block of a machine that reports a
-    problem (always on the local machine, on an SSH machine when it is
-    *degraded*) starts its server; a running one is left alone.
-  - **Disable machine** on an SSH machine that is *ready* (its agent
-    connected and its herdr answering) asks whether to stop its herdr
-    server too (checked by default; a *degraded* machine's server usually
-    does not run, so it is not offered there): the server is
+  - **Start herdr** in the status block of a machine where herdr does not
+    answer (`herdr_error`), or of a local machine that is not connected,
+    starts its server; a running one is left alone.
+  - **Disable machine** on an SSH machine that is *ready* with its herdr
+    answering asks whether to stop its herdr server too (checked by
+    default; where herdr does not answer it is not offered): the server is
     stopped first, while the agent can still do it, then the machine is
     disabled; a failed stop is reported and the machine is disabled all
     the same. Unchecked, and for the local machine, its panes keep running
@@ -178,7 +175,7 @@ user's confirmation; choosing herdr's preview channel.
 | Update the bundled file in place | Changes a signed app bundle; Gatekeeper may then refuse the app, and the next application upgrade would bring an old herdr back. |
 | Download and verify updates in the core with pinned digests | Updates would wait for application releases; herdr's updater already verifies its release digests and performs live handoff. |
 | Start the server automatically | herdr's own clients start it on request; an automatic start would make the application own a long-lived process and its lifetime. |
-| Let **Retry** start a missing server | Retry reconnects the agent whatever made the machine *degraded* (a hung server, a moved socket); starting a server is a separate request the user makes, as on the local machine. |
+| Let **Retry** start a missing server | Retry only ends a connection's backoff wait; starting a server is a separate request the user makes, as on the local machine. |
 | Start SSH servers only through `herdr --remote` | It attaches a client in a terminal and may offer to install herdr; a machine that rebooted only needs its installed server started. |
 | Upload and replace herdr on SSH machines from the agent | Would need herdr for every platform in the core (about 100 MB), duplicate herdr's detection of package-manager installs and its server replacement, and change machines without herdr's confirmation. |
 | Run `herdr --remote` without a terminal | herdr asks before installing and before stopping a server, and refuses without an interactive terminal; answering for the user would defeat that. |
@@ -189,7 +186,7 @@ user's confirmation; choosing herdr's preview channel.
 - Server exits or does not open its socket within 15 s → `start_failed` with
   the end of `server.log`; a server that did not come up in time is killed.
 - SSH machine rebooted → the agent connects again and the machine is
-  *degraded*; its status block offers **Start herdr**, and the context
+  *ready* without herdr's panes; its status block offers **Start herdr**, and the context
   menu **Restart herdr…**. herdr restores the
   workspaces it saved at shutdown, with new shells.
 - Restart: herdr's stop fails or does not return within 30 s (a hung
@@ -207,11 +204,10 @@ user's confirmation; choosing herdr's preview channel.
   disabled for SSH machines.
 - herdr removed, moved or reinstalled on an SSH machine → a new agent, or
   the next status or action of the connected one, finds the herdr there
-  now. Without one the machine is *degraded* with "herdr is not installed
-  here" (or stays *ready* with a warning while its old server runs), every
-  server action returns `not_found` and starts or stops nothing, and
-  **Install herdr** runs `herdr --remote`; a herdr installed by hand is
-  picked up by **Retry**.
+  now. Without one the machine's status block says "herdr is not installed
+  here", every server action returns `not_found` and starts or stops
+  nothing, and **Install herdr** runs `herdr --remote`; a herdr installed
+  by hand is picked up by the next connection.
 - No network or herdr.dev unavailable → `check_failed` or `update_failed`
   with herdr's message; the installed copy stays as it was.
 - A server older than the new herdr → `restart_needed`; the toast after the

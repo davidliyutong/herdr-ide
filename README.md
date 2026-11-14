@@ -32,11 +32,12 @@ browser tab, with VS Code (code-server) one keystroke away.
   it runs herdr's own `herdr --remote` update there, and **Install herdr**
   the same flow where herdr was removed or moved. Disabling an SSH machine
   can stop its herdr too.
-- **Multi-machine.** Uses the SSH machines saved in herdr; right-click the
-  sidebar to add one (herdr's own `herdr machine add`, in a terminal), or a
-  machine to rename it or remove it from herdr, or to disable or enable it
-  here; the sidebar's reload button picks up changes made with herdr's own
-  commands. One ssh connection per machine runs a small static agent
+- **Multi-machine.** Keeps its own list of SSH machines (the machines saved
+  in herdr are imported the first time); right-click the sidebar to add one
+  (an ssh target and a label; a password or host key is asked for in a
+  terminal), or a machine to rename, remove, disable or enable it. The
+  macOS application's machine menu also starts, restarts or stops the
+  machine's terminal core. One ssh connection per machine runs a small static agent
   (linux/macOS × amd64/arm64, uploaded automatically) that multiplexes
   everything; nothing listens on the machines.
 - **Agent-native.** An inbox of agents that are blocked or done across all
@@ -114,8 +115,7 @@ it; the arrows step through the other files of the folder.
 Requirements:
 
 - [herdr](https://herdr.dev) 0.9.5 or newer running on every machine you
-  want to use (this host can use the herdr included in the release), with
-  remote machines saved through `herdr machine add`;
+  want to use (this host can use the herdr included in the release);
 - an OpenSSH client with working access to those machines;
 - to build: Go (version in `go.mod`), Node.js 22.12+ and pnpm (`corepack enable`
   picks the pinned version).
@@ -129,8 +129,8 @@ cd dist/packages/herdr-ide-$(go env GOOS)-$(go env GOARCH)
 Or extract the matching archive from `dist/release/` (or GitHub Releases)
 and run `./herdr-ide`; keep the directory together. Without an installed
 herdr, `./herdr-ide herdr [args]` runs the included one, for example
-`./herdr-ide herdr` to open its TUI (which starts the local herdr server) or
-`./herdr-ide herdr machine add user@host --label gpu`.
+`./herdr-ide herdr` to open its TUI (which starts the local herdr server).
+Add SSH machines with **Add machine…** in the sidebar.
 
 Open <http://127.0.0.1:7780>. Press `ctrl+b space` for the command palette and
 `ctrl+b ?` for shortcuts. All flags are listed in

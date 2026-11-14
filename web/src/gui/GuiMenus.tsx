@@ -130,7 +130,7 @@ export function GuiTray() {
   const connected = useStore(
     useShallow((s) =>
       Object.entries(s.machines)
-        .filter(([, st]) => st.status === 'ready' || st.status === 'degraded')
+        .filter(([, st]) => st.status === 'ready')
         .map(([id]) => id),
     ),
   );

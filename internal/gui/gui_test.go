@@ -332,10 +332,10 @@ func TestAfterAttach(t *testing.T) {
 	}
 }
 
-// A keeper started while herdr's server was down leaves; the machine is
-// asked again each time the server is reachable again, not on every state
-// change, and never in read-only mode.
-func TestHerdrReadyKeeps(t *testing.T) {
+// A keeper started while the servers were down leaves; the machine is asked
+// again each time herdr's server or the terminal core is reachable again,
+// not on every state change, and never in read-only mode.
+func TestServerReadyKeeps(t *testing.T) {
 	for _, readOnly := range []bool{false, true} {
 		m, d, _ := attached(t)
 		m.ReadOnly = readOnly
@@ -345,9 +345,9 @@ func TestHerdrReadyKeeps(t *testing.T) {
 			time.Sleep(20 * time.Millisecond)
 			return len(kept)
 		}
-		m.HerdrReady(d.mc, false)
-		m.HerdrReady(d.mc, true)
-		m.HerdrReady(d.mc, true)
+		m.ServerReady(d.mc, ServerHerdr, false)
+		m.ServerReady(d.mc, ServerHerdr, true)
+		m.ServerReady(d.mc, ServerHerdr, true)
 		want := 1
 		if readOnly {
 			want = 0
@@ -355,10 +355,16 @@ func TestHerdrReadyKeeps(t *testing.T) {
 		if n := count(); n != want {
 			t.Fatalf("read-only %v: %d keep requests after herdr came up", readOnly, n)
 		}
-		m.HerdrReady(d.mc, false)
-		m.HerdrReady(d.mc, true)
+		m.ServerReady(d.mc, ServerHerdr, false)
+		m.ServerReady(d.mc, ServerHerdr, true)
 		if n := count(); n != 2*want {
 			t.Fatalf("read-only %v: %d keep requests after herdr came back", readOnly, n)
+		}
+		// The terminal core is followed on its own.
+		m.ServerReady(d.mc, ServerHC, true)
+		m.ServerReady(d.mc, ServerHC, true)
+		if n := count(); n != 3*want {
+			t.Fatalf("read-only %v: %d keep requests after the terminal core came up", readOnly, n)
 		}
 	}
 }

@@ -36,9 +36,11 @@ func (s *Server) initGUI() {
 		if mc == nil {
 			return
 		}
-		if st.Status == machines.StatusReady || st.Status == machines.StatusDegraded {
+		if st.Status == machines.StatusReady {
 			s.gui.Ensure(mc)
-			s.gui.HerdrReady(mc, st.Status == machines.StatusReady)
+			// A herdr server that answers (again) keeps the display, as a
+			// ready terminal core does (term.go).
+			s.gui.ServerReady(mc, gui.ServerHerdr, st.Snapshot != nil)
 			return
 		}
 		// Disabled, reconnecting or failing: no display error or windows
@@ -56,7 +58,7 @@ func (s *Server) initGUI() {
 					if c.Machine != "" && st.ID != c.Machine {
 						continue
 					}
-					if mc := s.mg.Get(st.ID); mc != nil && (st.Status == machines.StatusReady || st.Status == machines.StatusDegraded) {
+					if mc := s.mg.Get(st.ID); mc != nil && st.Status == machines.StatusReady {
 						if c.Key == gui.SettingVideo {
 							s.gui.ApplyVideo(mc)
 						} else {

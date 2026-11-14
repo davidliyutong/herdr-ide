@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var settings: SettingsWindow?
     private var programs: ProgramWindows?
     private var dialogs: WorkspaceDialogs?
+    private var machineDialogs: MachineDialogs?
     private var panelWidth: NSLayoutConstraint?
     private var panelShown = false
     private var sidebarWidth: NSLayoutConstraint?
@@ -91,6 +92,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let dialogs = WorkspaceDialogs(model: model, window: window)
         self.dialogs = dialogs
         sidebar.dialogs = dialogs
+        let machineDialogs = MachineDialogs(model: model, window: window)
+        self.machineDialogs = machineDialogs
+        sidebar.machineDialogs = machineDialogs
         let quickLook = QuickLook(core: core)
         self.quickLook = quickLook
         quickLook.onFailure = { [weak self] key, path in self?.notice(tr(key, path)) }

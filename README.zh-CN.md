@@ -26,9 +26,9 @@
   SSH 机器的 **更新 herdr** 会按 herdr 自己的 `herdr --remote` 流程更新那台机器；
   那台机器上的 herdr 被删除或移走时，同一流程以 **安装 herdr** 的形式提供。
   禁用 SSH 机器时可以一并停止它的 herdr。
-- **多机器**：直接使用 herdr 里保存的 SSH 机器。
-  在侧栏空白处右键可以添加机器（在终端里运行 herdr 自己的 `herdr machine add`），右键机器可以重命名它、把它从 herdr 中移除，或在这里禁用、启用它；
-  侧栏的刷新按钮会载入用 herdr 自己的命令所做的修改。
+- **多机器**：自己保存 SSH 机器列表（第一次启动时导入 herdr 中保存的机器）。
+  在侧栏空白处右键可以添加机器（填写 ssh 目标和名称，需要密码或确认主机指纹时会在终端里询问），右键机器可以重命名、移除、禁用或启用它；
+  macOS 应用的机器菜单还可以启动、重启或停止那台机器的终端核心。
   每台机器只开一条 ssh 连接，在上面运行一个自动上传的静态 agent（linux/macOS × amd64/arm64），所有通信都在这条连接里多路复用；
   机器上不监听任何端口。
 - **为 agent 设计**：
@@ -88,7 +88,7 @@ pane 标题栏上的按钮可以打开它的文件夹、diff 或 Git Graph。
 
 需要：
 
-- 要使用的每台机器上都运行着 [herdr](https://herdr.dev) 0.9.5 或更新版本（本机可以用发布包自带的 herdr），远程机器已用 `herdr machine add` 保存；
+- 要使用的每台机器上都运行着 [herdr](https://herdr.dev) 0.9.5 或更新版本（本机可以用发布包自带的 herdr）；
 - 能正常连到这些机器的 OpenSSH 客户端；
 - 构建需要：Go（版本见 `go.mod`）、Node.js 22.12+ 和 pnpm（`corepack enable` 会使用固定的版本）。
 
@@ -100,7 +100,8 @@ cd dist/packages/herdr-ide-$(go env GOOS)-$(go env GOARCH)
 
 也可以解压 `dist/release/` 或 GitHub Releases 中对应平台的压缩包，运行 `./herdr-ide`；
 请保持目录完整。
-本机没装 herdr 时，用 `./herdr-ide herdr [参数]` 运行自带的 herdr，例如 `./herdr-ide herdr` 打开它的 TUI（同时启动本地 herdr server），或 `./herdr-ide herdr machine add user@host --label gpu`。
+本机没装 herdr 时，用 `./herdr-ide herdr [参数]` 运行自带的 herdr，例如 `./herdr-ide herdr` 打开它的 TUI（同时启动本地 herdr server）。
+SSH 机器用侧栏的「添加机器…」添加。
 
 打开 <http://127.0.0.1:7780>。
 `ctrl+b space` 打开命令面板，`ctrl+b ?` 查看快捷键。

@@ -309,7 +309,6 @@ select,
   background: var(--working);
   animation: pulse 1.2s infinite;
 }
-.ms-degraded,
 .ms-auth_required {
   background: var(--blocked);
 }
@@ -326,7 +325,7 @@ select,
 }
 .machine-status.ms-auth_required,
 .machine-status.ms-error,
-.machine-status.ms-degraded {
+.machine-status.ms-notice {
   background: var(--bg-2);
 }
 .ws-item {

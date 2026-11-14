@@ -52,10 +52,21 @@ subscriber starts the machine's backend:
 
 A backend that fails reports `backend {state: error, code}`
 (`machine_offline`, `not_bundled`, `not_running`, `install_failed`,
-`start_failed`, `connect_failed`, `disconnected`) and tries again after
-1 s, doubling to 16 s, or at once when its machine connects. 10 s after its
+`start_failed`, `connect_failed`, `disconnected`, `stopped`) and tries
+again after 1 s, doubling to 16 s, or at once when its machine connects. 10 s after its
 last subscriber left it closes its connection; the terminal core and its
-programs keep running.
+programs keep running. The backend's state is also part of its machine's
+state on `/ws` (`hc {state, code, version}`), for clients that are not
+subscribed, while the backend runs.
+
+**Lifecycle from the UI.** `POST /api/m/{id}/hc/{start|stop|restart}`
+([02](02-multi-machine-transport.md)) starts the terminal core as a first
+subscription does (installing this build's executable when needed),
+restarts it (with `restart`, also when it runs this build: the successor
+adopts the programs), or stops it. After a stop the backend reports
+`stopped` instead of starting another core, while clients stay
+subscribed, until the core is started from the UI or a backend starts anew
+(the first subscriber after the last one left).
 
 **Calls.** `call` passes an allowlisted herdr-core method to the machine's
 terminal core and answers with its result or its error kind. Reading
@@ -189,7 +200,9 @@ See the row for terminal clients in [SECURITY.md](../../SECURITY.md).
 ## Testing
 
 `internal/server/term_test.go`, with a scripted terminal core on the
-machine's socket behind a real agent: backend states and the snapshot with
+machine's socket behind a real agent: the lifecycle from the UI (a stopped
+core kept stopped while subscribed, started and restarted, the machine's
+`hc` state), backend states and the snapshot with
 unknown fields kept, events forwarded and applied for a later subscriber,
 allowed and refused calls with their audit entries, a stream's reply before
 its first frame, input, automatic input, credit, size, focus and display

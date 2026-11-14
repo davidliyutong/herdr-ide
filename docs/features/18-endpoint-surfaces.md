@@ -131,8 +131,8 @@ shrinks the repeated cell fields.
   every 15 s (after updating herdr, the next try connects).
 - **Connection lost** (agent or herdr restart) → `surf error disconnected`,
   reconnect with backoff (1 s doubling to 16 s); when the machine's agent
-  session comes (back), ready or degraded, a waiting connection tries again
-  at once with the backoff reset (`wakeSurface`), so a machine back from a
+  session comes (back) or herdr answers again, a waiting connection tries
+  again at once with the backoff reset (`wakeSurface`), so a machine back from a
   network loss or re-enabled shows its panes within seconds. The first
   surface is complete.
 - **Revision mismatch or malformed message** → the connection is closed and

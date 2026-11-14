@@ -71,7 +71,35 @@ async function machineError(res: Response): Promise<string> {
   const body = (await res.json().catch(() => ({}))) as { error?: string; detail?: string };
   if (body.error === 'no_local_herdr') return t('remoteHerdr.noLocal');
   if (body.error === 'label_taken') return t('machine.labelTaken');
+  if (body.error === 'machine_exists') return t('machine.exists');
   return body.detail || body.error || String(res.status);
+}
+
+/** How long a new machine is watched for a login it needs. */
+const LOGIN_WAIT_MS = 2 * 60_000;
+
+/** Opens the authentication terminal once a machine just added turns
+ * auth_required; stops watching once it connected or failed otherwise. */
+function awaitLogin(m: string) {
+  /** What the machine's state decides: open the terminal, stop, or wait. */
+  const decide = (): 'login' | 'done' | undefined => {
+    // The machine may reach the store after the reply that added it.
+    const st = useStore.getState().machines[m];
+    if (st?.status === 'ready' || st?.status === 'error' || st?.status === 'disabled') return 'done';
+    return st?.status === 'auth_required' ? 'login' : undefined;
+  };
+  let off = () => {};
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const settle = (d: 'login' | 'done' | undefined) => {
+    if (!d) return false;
+    off();
+    clearTimeout(timer);
+    if (d === 'login') useStore.getState().openAuth(m);
+    return true;
+  };
+  if (settle(decide())) return;
+  off = useStore.subscribe(() => void settle(decide()));
+  timer = setTimeout(() => off(), LOGIN_WAIT_MS);
 }
 
 function report(e: unknown) {
@@ -235,9 +263,31 @@ export const actions = {
     }
   },
 
-  /** Enables or disables a machine (saved by the core over herdr's catalog).
-   * Disabling a connected machine asks first: its agent disconnects and
-   * VS Code there stops; its panes keep running in herdr. */
+  /** Adds an SSH machine to the core's machines (docs/features/02) and
+   * reports whether it was added. It connects at once; when it needs an
+   * interactive login (auth_required) the authentication terminal opens. */
+  async addMachine(form: { target: string; label: string }): Promise<boolean> {
+    const machine = form.label.trim() || form.target.trim();
+    try {
+      const res = await fetch('/api/machines', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target: form.target.trim(), label: form.label.trim() }),
+      });
+      if (!res.ok) throw new Error(t('machine.addFailed', { machine, detail: await machineError(res) }));
+      const st = (await res.json()) as { id: string };
+      useStore.getState().toast(t('addMachine.addedToast', { machine }));
+      awaitLogin(st.id);
+      return true;
+    } catch (e) {
+      report(e);
+      return false;
+    }
+  },
+
+  /** Enables or disables a machine (stored by the core). Disabling a
+   * connected machine asks first: its agent disconnects and VS Code there
+   * stops; its programs keep running there. */
   async setMachineEnabled(m: string, enabled: boolean) {
     const st = useStore.getState().machines[m];
     const machine = st?.label ?? m;
@@ -250,9 +300,8 @@ export const actions = {
         danger: true,
       };
       // An SSH machine's herdr server can go with it (checked by default)
-      // while its agent is connected and the server answers: a degraded
-      // machine's server is usually not running at all.
-      if (st?.kind === 'ssh' && st.status === 'ready' && !herdrMissing(st)) {
+      // while its agent is connected and the server answers.
+      if (st?.kind === 'ssh' && st.status === 'ready' && !herdrMissing(st) && !st.herdr_error) {
         const res = await confirmCheckDialog({
           ...ask,
           message: t('confirm.disableMachineStop'),
@@ -277,8 +326,8 @@ export const actions = {
     }
   },
 
-  /** Removes one of herdr's saved machines after asking, with herdr's own
-   * herdr machine remove; the core then forgets it (docs/features/02). */
+  /** Removes an SSH machine from the core's machines after asking
+   * (docs/features/02). */
   async removeMachine(m: string) {
     const st = useStore.getState().machines[m];
     const machine = st?.label ?? m;
@@ -300,8 +349,7 @@ export const actions = {
     }
   },
 
-  /** Renames one of herdr's saved machines with herdr's own
-   * herdr machine rename (docs/features/02). */
+  /** Renames an SSH machine (docs/features/02). */
   async renameMachine(m: string, label: string) {
     const st = useStore.getState().machines[m];
     if (!label || !st || label === st.label) return;
@@ -312,22 +360,6 @@ export const actions = {
         body: JSON.stringify({ label }),
       });
       if (!res.ok) throw new Error(t('machine.renameFailed', { machine: st.label, detail: await machineError(res) }));
-    } catch (e) {
-      report(e);
-    }
-  },
-
-  /** Reloads herdr's saved machines, for changes made with herdr's own
-   * commands or TUI, and says what changed. */
-  async refreshMachines() {
-    try {
-      const res = await fetch('/api/machines/refresh', { method: 'POST' });
-      if (!res.ok) throw new Error(t('machine.refreshFailed', { detail: await machineError(res) }));
-      const c = (await res.json()) as Partial<Record<'added' | 'removed' | 'updated', string[] | null>>;
-      const added = c.added?.length ?? 0;
-      const removed = c.removed?.length ?? 0;
-      const updated = c.updated?.length ?? 0;
-      useStore.getState().toast(added + removed + updated ? t('machine.refreshed', { added, removed, updated }) : t('machine.refreshNone'));
     } catch (e) {
       report(e);
     }

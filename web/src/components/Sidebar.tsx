@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronDown, ChevronRight, Plus, RefreshCw, Settings } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, Settings } from 'lucide-react';
 import { useStore } from '../state/store';
 import { conn } from '../lib/conn';
 import { actions, attentionList } from '../actions';
@@ -28,12 +28,6 @@ export function Sidebar() {
   // The local machine while folders from Finder are dragged over the sidebar
   // (desktop app only): dropping them creates workspaces there.
   const [dropOn, setDropOn] = useState<string>();
-  const [refreshing, setRefreshing] = useState(false);
-  const refresh = async () => {
-    setRefreshing(true);
-    await actions.refreshMachines();
-    setRefreshing(false);
-  };
   return (
     <aside
       className="sidebar"
@@ -63,11 +57,6 @@ export function Sidebar() {
             onClick={() => actions.newWorkspace()}
           >
             <Plus />
-          </button>
-        )}
-        {!readOnly && (
-          <button className="icon" title={t('sidebar.refreshMachines')} disabled={refreshing} onClick={() => void refresh()}>
-            <RefreshCw />
           </button>
         )}
         <button
@@ -191,14 +180,14 @@ function MachineItem({ m }: { m: MachineState }) {
                   <button onClick={() => void actions.setMachineEnabled(m.id, true)}>{t('menu.enableMachine')}</button>
                 </div>
               )}
-              {(m.status === 'auth_required' || m.status === 'error' || m.status === 'degraded') && (
+              {(m.status === 'auth_required' || m.status === 'error') && (
                 <div className="row">
                   {m.status === 'auth_required' && m.kind === 'ssh' && (
                     <button onClick={() => useStore.getState().openAuth?.(m.id)}>{t('sidebar.authenticate')}</button>
                   )}
                   {missing
                     ? install
-                    : (m.kind === 'local' || m.status === 'degraded') &&
+                    : m.kind === 'local' &&
                       !readOnly && (
                         <button disabled={herdrBusy} onClick={() => void actions.startHerdr(m.id)}>
                           {t('sidebar.startHerdr')}
@@ -209,14 +198,27 @@ function MachineItem({ m }: { m: MachineState }) {
               )}
             </div>
           )}
+          {!missing && m.status === 'ready' && m.herdr_error && (
+            // The machine works without herdr; its panes need herdr's server.
+            <div className="machine-status ms-notice" title={m.herdr_error}>
+              {t('sidebar.herdrDown')}
+              {!readOnly && (
+                <div className="row">
+                  <button disabled={herdrBusy} onClick={() => void actions.startHerdr(m.id)}>
+                    {t('sidebar.startHerdr')}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           {missing && m.status === 'ready' && (
-            <div className="machine-status ms-degraded">
+            <div className="machine-status ms-notice">
               {t('sidebar.herdrGone')}
               {install && <div className="row">{install}</div>}
             </div>
           )}
           {m.kind === 'ssh' && m.status === 'ready' && isNewer(localHerdr, m.info?.herdr_version) && (
-            <div className="machine-status ms-degraded">
+            <div className="machine-status ms-notice">
               {t('sidebar.herdrOlder', { remote: m.info?.herdr_version ?? '', local: localHerdr ?? '' })}
               {!readOnly && (
                 <div className="row">

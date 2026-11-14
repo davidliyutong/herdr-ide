@@ -22,8 +22,7 @@ type Status string
 
 const (
 	StatusConnecting Status = "connecting"
-	StatusReady      Status = "ready"
-	StatusDegraded   Status = "degraded" // agent connected, herdr unreachable
+	StatusReady      Status = "ready" // the agent answered
 	StatusAuth       Status = "auth_required"
 	StatusError      Status = "error"
 	StatusDisabled   Status = "disabled"
@@ -32,13 +31,40 @@ const (
 // State is what clients see for one machine.
 type State struct {
 	Spec
-	Status    Status                     `json:"status"`
-	Error     string                     `json:"error,omitempty"`
-	Platform  string                     `json:"platform,omitempty"`
-	Info      *agentproto.Info           `json:"info,omitempty"`
-	Snapshot  json.RawMessage            `json:"snapshot,omitempty"`
-	Layouts   map[string]json.RawMessage `json:"layouts,omitempty"`
-	UpdatedAt int64                      `json:"updated_at"`
+	Status   Status           `json:"status"`
+	Error    string           `json:"error,omitempty"`
+	Platform string           `json:"platform,omitempty"`
+	Info     *agentproto.Info `json:"info,omitempty"`
+	// HC is the state of the core's connection to the machine's terminal
+	// core, while it has one (internal/server/term.go).
+	HC *HCState `json:"hc,omitempty"`
+	// Snapshot and Layouts are herdr's session and tab layouts, for the
+	// browser UI's panes, while herdr answers there; HerdrError tells why it
+	// does not (the machine stays ready without herdr).
+	Snapshot   json.RawMessage            `json:"snapshot,omitempty"`
+	Layouts    map[string]json.RawMessage `json:"layouts,omitempty"`
+	HerdrError string                     `json:"herdr_error,omitempty"`
+	UpdatedAt  int64                      `json:"updated_at"`
+}
+
+// HCState is what the core's connection to a machine's terminal core is
+// doing: State "starting", "ready" or "error", Code why it is not ready,
+// Version the terminal core's.
+type HCState struct {
+	State   string `json:"state"`
+	Code    string `json:"code,omitempty"`
+	Version string `json:"version,omitempty"`
+}
+
+// SetHC publishes the state of the connection to the machine's terminal
+// core; nil when the core has none.
+func (m *Machine) SetHC(hc *HCState) {
+	m.mu.Lock()
+	same := (m.state.HC == nil && hc == nil) || (m.state.HC != nil && hc != nil && *m.state.HC == *hc)
+	m.mu.Unlock()
+	if !same {
+		m.update(func(st *State) { st.HC = hc })
+	}
 }
 
 // AgentEvent is a pane agent status transition, used for notifications.
@@ -68,9 +94,8 @@ type Machine struct {
 
 	refreshCh chan struct{}
 	retryCh   chan struct{}
-	// sessStart is when the live session became usable; reconnect asks Run
-	// to connect again at once after the session it closed (both under mu).
-	sessStart time.Time
+	// reconnect asks Run to connect again at once after the session it
+	// closed (under mu).
 	reconnect bool
 	// enabled is the spec's flag as the user last set it; stopRun ends the
 	// connection loop of an enabled machine; enableCh wakes a disabled one
@@ -78,8 +103,8 @@ type Machine struct {
 	enabled  bool
 	stopRun  context.CancelFunc
 	enableCh chan struct{}
-	// herdrHint is the herdr executable the agent tries first (from herdr's
-	// SSH metadata), guarded by mu.
+	// herdrHint is the herdr executable the agent tries first (after herdr
+	// was installed from the UI), guarded by mu.
 	herdrHint string
 
 	streams StreamHandler
@@ -94,7 +119,6 @@ func newMachine(spec Spec, dial Dialer, logger *log.Logger, publish func(State),
 		onAgent:   onAgent,
 		refreshCh: make(chan struct{}, 1),
 		retryCh:   make(chan struct{}, 1),
-		herdrHint: spec.HerdrBin,
 		enabled:   spec.Enabled,
 		enableCh:  make(chan struct{}, 1),
 	}
@@ -108,7 +132,7 @@ func newMachine(spec Spec, dial Dialer, logger *log.Logger, publish func(State),
 // ID returns the machine id.
 func (m *Machine) ID() string { return m.spec.ID }
 
-// Label returns the display label (herdr's, which a rename changes).
+// Label returns the display label.
 func (m *Machine) Label() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -156,7 +180,7 @@ func (m *Machine) Reconnect(herdrBin string) {
 		m.herdrHint = herdrBin
 	}
 	m.mu.Unlock()
-	m.restart(true)
+	m.restart()
 }
 
 // NoteHerdr records the herdr executable and version a herdr status of the
@@ -191,33 +215,19 @@ func (m *Machine) Wake() {
 	}
 }
 
-// Retry connects a machine that is not ready again at once: it ends a
-// backoff wait, and replaces a connected session whose herdr does not answer
-// (degraded) with a new one, whose agent finds herdr afresh, unless that
-// session started less than minRetryAge ago. It reports whether it ended a
-// session. A ready machine is left alone.
-func (m *Machine) Retry() bool {
-	return m.restart(false)
-}
-
-// minRetryAge keeps repeated retries from replacing every new session.
-var minRetryAge = 5 * time.Second
-
-func (m *Machine) restart(force bool) bool {
+func (m *Machine) restart() {
 	m.Wake()
 	m.mu.Lock()
 	sess := m.sess
-	ok := sess != nil && (force || (m.state.Status != StatusReady && time.Since(m.sessStart) >= minRetryAge))
-	if ok {
+	if sess != nil {
 		m.reconnect = true
 	}
 	m.mu.Unlock()
-	if ok {
+	if sess != nil {
 		// Closing also ends a snapshot fetch waiting for herdr; it may wait
 		// for the local agent's cleanup, so the caller does not.
 		go sess.Close()
 	}
-	return ok
 }
 
 // Session returns the live agent session, if any.
@@ -319,8 +329,8 @@ func (m *Machine) Run(ctx context.Context) {
 	}
 }
 
-// setLabel shows the machine under a new label (renamed in herdr) and
-// reports whether it changed.
+// setLabel shows the machine under a new label and reports whether it
+// changed.
 func (m *Machine) setLabel(label string) bool {
 	m.mu.Lock()
 	same := m.state.Label == label
@@ -334,8 +344,8 @@ func (m *Machine) setLabel(label string) bool {
 
 // setEnabled enables or disables the machine and reports whether that
 // changed it. Disabling ends its session (the agent exits and stops what it
-// started, such as code-server) and drops what was learnt from herdr; panes
-// keep running in herdr.
+// started, such as code-server) and drops what was learnt from it; programs
+// keep running in its terminal core (and in herdr).
 func (m *Machine) setEnabled(on bool) bool {
 	m.mu.Lock()
 	changed := m.enabled != on
@@ -371,6 +381,7 @@ func (m *Machine) markDisabled() {
 		st.Error = ""
 		st.Snapshot = nil
 		st.Layouts = nil
+		st.HerdrError = ""
 	})
 }
 
@@ -408,6 +419,7 @@ func (m *Machine) connect(ctx context.Context) {
 		m.mu.Lock()
 		m.sess = nil
 		m.api = nil
+		m.paneIDs = nil
 		m.mu.Unlock()
 		if ctx.Err() != nil {
 			return
@@ -452,18 +464,16 @@ func (m *Machine) serve(ctx context.Context, sess *transport.Session, platform s
 	m.mu.Lock()
 	m.sess = sess
 	m.api = api
-	m.sessStart = time.Now()
 	m.mu.Unlock()
+	// The agent answered: the machine is ready, with or without herdr.
 	m.update(func(st *State) {
 		st.Info = info
 		st.Platform = platform
 		if platform == "" && info != nil {
 			st.Platform = info.OS + "/" + info.Arch
 		}
+		st.Status, st.Error, st.HerdrError = StatusReady, "", ""
 	})
-	if info.HerdrError != "" {
-		m.setStatus(StatusDegraded, errors.New(info.HerdrError))
-	}
 
 	sctx, scancel := context.WithCancel(ctx)
 	defer scancel()
@@ -471,6 +481,8 @@ func (m *Machine) serve(ctx context.Context, sess *transport.Session, platform s
 	go m.lifecycleLoop(sctx, api)
 	go m.agentStatusLoop(sctx, api)
 
+	// herdr's snapshot, for the browser UI's panes, is optional: while
+	// herdr does not answer the machine has none, quietly.
 	failures := 0
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
@@ -496,16 +508,27 @@ func (m *Machine) serve(ctx context.Context, sess *transport.Session, platform s
 		}
 		if err := m.fetch(sctx, api); err != nil {
 			failures++
-			if failures >= 2 {
-				m.setStatus(StatusDegraded, err)
+			if failures == 2 {
+				m.herdrGone(err)
 			}
 			continue
 		}
-		if failures > 0 || m.State().Status != StatusReady {
-			m.setStatus(StatusReady, nil)
-		}
 		failures = 0
 	}
+}
+
+// herdrGone drops what was learnt from herdr after it stopped answering.
+func (m *Machine) herdrGone(err error) {
+	m.mu.Lock()
+	had := len(m.paneIDs) > 0
+	m.paneIDs = nil
+	m.mu.Unlock()
+	if had {
+		m.paneSetChanged()
+	}
+	m.update(func(st *State) {
+		st.Snapshot, st.Layouts, st.HerdrError = nil, nil, err.Error()
+	})
 }
 
 // pollInterval is how often a connected machine refetches herdr's snapshot
@@ -569,12 +592,13 @@ func (m *Machine) fetch(ctx context.Context, api *herdr.Client) error {
 	}
 
 	m.mu.Lock()
-	same := string(m.state.Snapshot) == string(res.Snapshot) && layoutsEqual(m.state.Layouts, layouts)
+	same := string(m.state.Snapshot) == string(res.Snapshot) && layoutsEqual(m.state.Layouts, layouts) && m.state.HerdrError == ""
 	m.mu.Unlock()
 	if !same {
 		m.update(func(st *State) {
 			st.Snapshot = res.Snapshot
 			st.Layouts = layouts
+			st.HerdrError = ""
 		})
 	}
 	return nil
@@ -631,20 +655,32 @@ func (m *Machine) lifecycleLoop(ctx context.Context, api *herdr.Client) {
 	for _, t := range lifecycleSubs {
 		subs = append(subs, map[string]any{"type": t})
 	}
+	// Without herdr the subscription fails at once: it is tried again
+	// after 1 s, doubling to 30 s, and only an end after it worked is logged.
+	wait := time.Second
 	for ctx.Err() == nil {
-		err := api.Subscribe(ctx, subs, m.Refresh, func(herdr.Event) error {
+		subscribed := false
+		err := api.Subscribe(ctx, subs, func() {
+			subscribed = true
+			m.Refresh()
+		}, func(herdr.Event) error {
 			m.Refresh()
 			return nil
 		})
 		if ctx.Err() != nil {
 			return
 		}
-		m.logger.Printf("machine %s: lifecycle subscription: %v", m.Label(), err)
+		if subscribed {
+			m.logger.Printf("machine %s: herdr's lifecycle subscription ended: %v", m.Label(), err)
+			wait = time.Second
+		} else {
+			wait = min(wait*2, 30*time.Second)
+		}
 		m.Refresh()
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(time.Second):
+		case <-time.After(wait):
 		}
 	}
 }

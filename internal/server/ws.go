@@ -209,8 +209,8 @@ func (c *wsClient) dispatch(m *inMsg) {
 	case "api":
 		go c.api(m)
 	case "retry":
-		// Retrying replaces a degraded machine's session, which ends every
-		// browser's surfaces, uploads and VS Code there: not for watchers.
+		// Ends the wait before a machine's next connection attempt; not for
+		// watchers, as an attempt may start an ssh login.
 		mc := c.s.mg.Get(m.M)
 		if mc == nil {
 			break
@@ -219,9 +219,7 @@ func (c *wsClient) dispatch(m *inMsg) {
 			c.s.audit.log(c.req, "denied.retry", map[string]any{"machine": m.M})
 			break
 		}
-		if mc.Retry() {
-			c.s.audit.log(c.req, "machine.retry", map[string]any{"machine": m.M})
-		}
+		mc.Wake()
 	case "download.watch":
 		// A page follows its own downloads, also in read-only mode, where
 		// it may download.

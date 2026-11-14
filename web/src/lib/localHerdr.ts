@@ -10,7 +10,7 @@ import type { MachineState } from './herdr';
  * run, but nothing can start or restart one until herdr is back; on an SSH
  * machine herdr --remote installs it (RemoteHerdrDialog). */
 export function herdrMissing(m?: MachineState): boolean {
-  return !!m?.info && !m.info.herdr_bin && (m.status === 'ready' || m.status === 'degraded');
+  return !!m?.info && !m.info.herdr_bin && m.status === 'ready';
 }
 
 export interface MachineHerdr {

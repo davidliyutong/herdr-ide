@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -192,28 +193,36 @@ func termServer(t *testing.T, opts Options, core bool) (*Server, *fakeTermCore, 
 	}
 	var f *fakeTermCore
 	if core {
-		ln, err := net.Listen("unix", filepath.Join(home, ".herdr-ide", "run", "hc.sock"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		f = &fakeTermCore{t: t, ln: ln}
-		t.Cleanup(func() { ln.Close(); f.drop() })
-		go func() {
-			for {
-				c, err := ln.Accept()
-				if err != nil {
-					return
-				}
-				f.mu.Lock()
-				f.conns = append(f.conns, c)
-				f.mu.Unlock()
-				go f.serve(c)
-			}
-		}()
+		f = listenTermCore(t, filepath.Join(home, ".herdr-ide", "run", "hc.sock"))
 	}
 	audit := &lockedWriter{w: &bytes.Buffer{}}
 	opts.Logger, opts.Audit = logger, audit
 	return New(mg, opts), f, audit
+}
+
+// listenTermCore starts a fake terminal core on socket.
+func listenTermCore(t *testing.T, socket string) *fakeTermCore {
+	t.Helper()
+	os.Remove(socket)
+	ln, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeTermCore{t: t, ln: ln}
+	t.Cleanup(func() { ln.Close(); f.drop() })
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			f.mu.Lock()
+			f.conns = append(f.conns, c)
+			f.mu.Unlock()
+			go f.serve(c)
+		}
+	}()
+	return f
 }
 
 type lockedWriter struct {
@@ -491,5 +500,93 @@ func TestTermWithoutCore(t *testing.T) {
 	}
 	if strings.Contains(audit.String(), "term.install") {
 		t.Fatal("a read-only core installed herdr-core")
+	}
+}
+
+// The terminal core is stopped, started and restarted from the UI. A
+// stopped core stays stopped while a client is subscribed (code stopped)
+// until it is started again; the machine's state shows the backend's, and
+// every action is audited.
+func TestHCLifecycle(t *testing.T) {
+	s, core, audit := termServer(t, Options{}, true)
+	home := os.Getenv("HOME")
+	socket := filepath.Join(home, ".herdr-ide", "run", "hc.sock")
+	// A stand-in executable: its server commands succeed, and a start waits
+	// until the test plays the started core.
+	bin := filepath.Join(home, ".herdr-ide", "hc", "herdr-core")
+	os.MkdirAll(filepath.Dir(bin), 0o700)
+	os.WriteFile(bin, []byte("#!/bin/sh\nif [ \"$2\" = start ]; then touch \"$HOME/starting\"; while [ ! -e \"$HOME/listening\" ]; do sleep 0.05; done; fi\nexit 0\n"), 0o700)
+	c := dialTerm(t, s)
+	c.ready()
+	mc := s.mg.Get("x")
+	waitUntil := func(what string, ok func() bool) {
+		t.Helper()
+		for deadline := time.Now().Add(10 * time.Second); !ok(); time.Sleep(10 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("timed out waiting for %s (hc %+v)", what, mc.State().HC)
+			}
+		}
+	}
+	waitUntil("the machine's state", func() bool {
+		st := mc.State().HC
+		return st != nil && st.State == termReady && st.Version == "9.9.9"
+	})
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	do := func(method, path string) (int, map[string]any) {
+		req, _ := http.NewRequest(method, srv.URL+path, nil)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		var body map[string]any
+		json.NewDecoder(res.Body).Decode(&body)
+		return res.StatusCode, body
+	}
+	if code, st := do("GET", "/api/m/x/hc"); code != 200 || st["running"] != true || st["version"] != "9.9.9" || st["digest"] == "" {
+		t.Fatalf("status: %d %v", code, st)
+	}
+
+	// Stop: the core goes away and the backend does not start another.
+	core.ln.Close()
+	core.drop()
+	if code, st := do("POST", "/api/m/x/hc/stop"); code != 200 || st["running"] != false {
+		t.Fatalf("stop: %d %v", code, st)
+	}
+	for {
+		m := c.until("backend")
+		if m["code"] == termCodeStopped {
+			break
+		}
+	}
+	waitUntil("stopped in the machine's state", func() bool { st := mc.State().HC; return st != nil && st.Code == termCodeStopped })
+
+	// Start: the stand-in starts, the test listens as the new core.
+	go func() {
+		for i := 0; i < 500; i++ {
+			if _, err := os.Stat(filepath.Join(home, "starting")); err == nil {
+				listenTermCore(t, socket)
+				os.WriteFile(filepath.Join(home, "listening"), nil, 0o600)
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+	if code, st := do("POST", "/api/m/x/hc/start"); code != 200 || st["running"] != true {
+		t.Fatalf("start: %d %v", code, st)
+	}
+	for {
+		if m := c.until("backend"); m["state"] == termReady {
+			break
+		}
+	}
+	if code, st := do("POST", "/api/m/x/hc/restart"); code != 200 || st["running"] != true {
+		t.Fatalf("restart: %d %v", code, st)
+	}
+	for _, want := range []string{`"event":"hc.stop"`, `"event":"hc.start"`, `"event":"hc.restart"`, `"event":"term.restart"`} {
+		if !strings.Contains(audit.String(), want) {
+			t.Fatalf("audit lacks %s: %s", want, audit.String())
+		}
 	}
 }

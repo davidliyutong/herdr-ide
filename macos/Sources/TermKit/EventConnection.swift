@@ -4,17 +4,21 @@ import Foundation
 public struct Machine: Equatable {
     public var id: String
     public var label: String
-    /// The core's connection state: connecting, ready, degraded,
-    /// auth_required, error or disabled.
+    /// The core's connection state: connecting, ready, auth_required,
+    /// error or disabled.
     public var status: String
     /// local (the core's own host) or ssh.
     public var kind: String
+    /// The core's connection to the machine's terminal core, while it has
+    /// one: the same as the terminal protocol's backend state.
+    public var hc: BackendState?
 
-    public init(id: String, label: String, status: String, kind: String = "") {
+    public init(id: String, label: String, status: String, kind: String = "", hc: BackendState? = nil) {
         self.id = id
         self.label = label
         self.status = status
         self.kind = kind
+        self.hc = hc
     }
 }
 
@@ -110,6 +114,11 @@ public final class EventConnection {
     private static func machine(_ raw: [String: Any]) -> Machine? {
         guard let id = raw["id"] as? String, !id.isEmpty else { return nil }
         let label = raw["label"] as? String ?? ""
-        return Machine(id: id, label: label.isEmpty ? id : label, status: raw["status"] as? String ?? "", kind: raw["kind"] as? String ?? "")
+        let hc = (raw["hc"] as? [String: Any]).map {
+            BackendState(phase: BackendState.Phase(rawValue: $0["state"] as? String ?? "") ?? .starting,
+                         code: $0["code"] as? String ?? "", version: $0["version"] as? String ?? "")
+        }
+        return Machine(id: id, label: label.isEmpty ? id : label, status: raw["status"] as? String ?? "",
+                       kind: raw["kind"] as? String ?? "", hc: hc)
     }
 }

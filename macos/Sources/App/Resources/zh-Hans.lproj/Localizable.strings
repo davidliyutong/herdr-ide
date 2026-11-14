@@ -30,6 +30,17 @@
 "backend.start_failed" = "终端核心未能启动。";
 "backend.connect_failed" = "终端核心没有响应。";
 "backend.disconnected" = "与终端的连接已断开，正在重新连接…";
+"backend.stopped" = "终端核心已停止。";
+"backend.not_installed" = "这台机器上没有安装终端核心。";
+"backend.stop_failed" = "终端核心未能停止。";
+"backend.transport" = "机器没有响应。";
+"menu.startCore" = "启动终端核心";
+"menu.restartCore" = "重启终端核心";
+"menu.stopCore" = "停止终端核心…";
+"core.stopTitle" = "停止 %@ 的终端核心？";
+"core.stopInfo" = "这台机器上的所有终端及其中的程序都会结束。终端核心会一直保持停止，直到你再次启动它。";
+"core.stop" = "停止";
+"core.failed" = "%@ 的终端核心未能完成操作";
 "empty.title" = "没有打开的终端";
 "empty.hint" = "按 ⌘T 新建一个。";
 "core.missing" = "找不到应用的核心程序：%@";

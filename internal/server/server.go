@@ -57,14 +57,6 @@ type Options struct {
 	Settings *settings.Store
 	// Keybindings are the UIs' keybindings; nil disables them.
 	Keybindings *keybindings.Store
-	// Catalog returns herdr's saved SSH machines as the core configures
-	// them, read again after the UI adds, removes or renames one and when
-	// it reloads them; nil disables all of that.
-	Catalog func() ([]machines.Spec, error)
-	// Selected reports whether the core's machine selection (--machine,
-	// --local-only) takes a saved machine that a reload finds; nil takes
-	// all. Machines added from the UI are taken whatever it says.
-	Selected func(machines.Spec) bool
 }
 
 // Server is the HTTP front of the core.
@@ -80,8 +72,8 @@ type Server struct {
 	// downloads the pages follow in their downloads panel
 	downloads downloadsHub
 	gui       *gui.Manager
-	// herdrCLI is the herdr that runs herdr's machine commands on the core
-	// host ("" when unknown): the local machine's (tests replace it).
+	// herdrCLI is the herdr that runs herdr's update flow for SSH machines
+	// on the core host ("" when unknown): the local machine's.
 	herdrCLI func() string
 
 	clientsMu sync.Mutex
@@ -121,10 +113,22 @@ func New(mg *machines.Manager, opts Options) *Server {
 	s.herdrCLI = s.localHerdr
 	s.initGUI()
 	s.initSettings()
+	// A machine that connects (again) ends the waits of its terminal
+	// backend and pane surface; herdr answering again ends the surface's.
+	type seen struct{ ready, herdr bool }
+	var seenMu sync.Mutex
+	last := map[string]seen{}
 	mg.Subscribe(func(st machines.State) {
-		if st.Status == machines.StatusReady || st.Status == machines.StatusDegraded {
-			s.wakeSurface(st.ID)
+		now := seen{st.Status == machines.StatusReady, st.Snapshot != nil}
+		seenMu.Lock()
+		prev := last[st.ID]
+		last[st.ID] = now
+		seenMu.Unlock()
+		if now.ready && !prev.ready {
 			s.term.wakeUp(st.ID)
+		}
+		if now.ready && (!prev.ready || (now.herdr && !prev.herdr)) {
+			s.wakeSurface(st.ID)
 		}
 	}, func(machines.AgentEvent) {})
 	return s
@@ -142,12 +146,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/keybindings", s.handleKeybindings)
 	mux.HandleFunc("PUT /api/keybindings", s.writable(s.handleSetKeybindings))
 	mux.HandleFunc("GET /api/machines", s.handleMachines)
-	mux.HandleFunc("GET /api/machines/add", s.writable(s.handleMachineAdd))
-	mux.HandleFunc("POST /api/machines/refresh", s.writable(s.handleMachinesRefresh))
+	mux.HandleFunc("POST /api/machines", s.writable(s.handleMachineAdd))
 	mux.HandleFunc("DELETE /api/m/{id}", s.writable(s.handleMachineRemove))
 	mux.HandleFunc("PUT /api/m/{id}/label", s.writable(s.handleMachineRename))
-	mux.HandleFunc("GET /api/keymap", s.handleKeymap)
 	mux.HandleFunc("PUT /api/m/{id}/enabled", s.writable(s.handleMachineEnabled))
+	mux.HandleFunc("GET /api/m/{id}/hc", s.handleHCStatus)
+	mux.HandleFunc("POST /api/m/{id}/hc/{action}", s.writable(s.handleHCAction))
+	mux.HandleFunc("GET /api/keymap", s.handleKeymap)
 	mux.HandleFunc("GET /api/m/{id}/auth", s.writable(s.handleAuth))
 	mux.HandleFunc("POST /api/m/{id}/bridge", s.writable(s.handleBridge))
 	mux.HandleFunc("GET /api/m/{id}/file", s.handleFile)
@@ -323,40 +328,6 @@ func (s *Server) Run(ctx context.Context) {
 			s.audit.log(nil, "code_server.idle_stop", map[string]any{"machine": id})
 		}
 	}
-}
-
-func (s *Server) handleMachines(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.mg.States())
-}
-
-// handleMachineEnabled enables or disables a machine ({"enabled": bool}):
-// saved in the core's own file over herdr's catalog, applied at once. The
-// reply is the machine's state.
-func (s *Server) handleMachineEnabled(w http.ResponseWriter, r *http.Request) {
-	mc := s.machine(w, r)
-	if mc == nil {
-		return
-	}
-	var body struct {
-		Enabled *bool `json:"enabled"`
-	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<10)).Decode(&body); err != nil || body.Enabled == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid"})
-		return
-	}
-	event := "machine.disable"
-	if *body.Enabled {
-		event = "machine.enable"
-	}
-	ev := map[string]any{"machine": mc.ID()}
-	if err := s.mg.SetEnabled(mc.ID(), *body.Enabled); err != nil {
-		ev["error"] = err.Error()
-		s.audit.log(r, event, ev)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "save", "detail": err.Error()})
-		return
-	}
-	s.audit.log(r, event, ev)
-	writeJSON(w, http.StatusOK, mc.State())
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

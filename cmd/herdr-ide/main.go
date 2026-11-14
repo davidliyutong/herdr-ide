@@ -187,8 +187,8 @@ func serve(args []string, logger *log.Logger) {
 		userHeader   = fl.String("user-header", "", "request header carrying the authenticated user, for the audit log (e.g. Tailscale-User-Login)")
 		instance     = fl.String("instance", "", "state instance: machines use ~/"+brand.DataDirName+"-<instance> (lets a development core run next to the daily one)")
 		localSession = fl.String("local-session", "default", "herdr session name on the local machine")
-		remoteSess   = fl.String("remote-session", "", "herdr session name on every remote machine instead of the one saved in herdr (development and tests)")
-		localOnly    = fl.Bool("local-only", false, "do not connect to herdr's saved SSH machines")
+		remoteSess   = fl.String("remote-session", "", "herdr session name on every remote machine instead of herdr's default (development and tests)")
+		localOnly    = fl.Bool("local-only", false, "do not connect to the stored SSH machines (only to --ssh targets)")
 		csIdle       = fl.Duration("code-server-idle", 20*time.Minute, "stop a machine's code-server after this long without VS Code connections (0 disables)")
 		agentDir     = fl.String("agent-dir", "", "directory with uncompressed "+brand.AgentBin+"-<os>-<arch> builds (development)")
 		extDir       = fl.String("ext-dir", "", "directory containing "+brand.BridgeExt+".vsix (development)")
@@ -202,7 +202,7 @@ func serve(args []string, logger *log.Logger) {
 	)
 	fl.Var(&origins, "allowed-origin", "browser origin of the reverse proxy, e.g. https://ide.example.com (repeatable)")
 	fl.Var(&only, "machine", "connect only these machines, by id, label or ssh target (repeatable)")
-	fl.Var(&extraSSH, "ssh", "extra ssh target (~/.ssh/config alias or user@host) not saved in herdr (repeatable)")
+	fl.Var(&extraSSH, "ssh", "extra ssh target (~/.ssh/config alias or user@host) for this run, not stored (repeatable)")
 	csf.register(fl)
 	prefs.RegisterFlags(fl)
 	fl.Parse(args)
@@ -213,7 +213,7 @@ func serve(args []string, logger *log.Logger) {
 	if !brand.ValidInstance(*instance) {
 		logger.Fatalf("--instance must be lowercase letters, digits and dashes")
 	}
-	overridesFile := ""
+	machinesFile := ""
 	if p, err := settingsPath(*instance); err != nil {
 		logger.Printf("settings are not saved: %v", err)
 	} else {
@@ -229,7 +229,7 @@ func serve(args []string, logger *log.Logger) {
 		if err := prefs.Load(); err != nil {
 			logger.Printf("ignoring settings: %v", err)
 		}
-		overridesFile = besideSettings(p, "machines")
+		machinesFile = besideSettings(p, "machines")
 	}
 	embedded.AgentDir = *agentDir
 	embedded.ExtDir = *extDir
@@ -259,7 +259,13 @@ func serve(args []string, logger *log.Logger) {
 		}
 	}
 
-	specs := selectSpecs(machines.LoadSpecs(*localSession, extraSpecs(extraSSH)), *localOnly, extraSSH, only)
+	// The core's own machines; herdr's saved machines are imported once,
+	// when the file does not exist yet.
+	registry, err := machines.OpenRegistry(machinesFile, machines.SavedSpecs)
+	if err != nil {
+		logger.Printf("machines are not stored: %v", err)
+	}
+	specs := selectSpecs(machines.LoadSpecs(*localSession, registry.Specs(), extraSpecs(extraSSH)), *localOnly, extraSSH, only)
 	if *remoteSess != "" {
 		// The name becomes part of paths on the machines.
 		if !brand.ValidInstance(*remoteSess) {
@@ -271,20 +277,6 @@ func serve(args []string, logger *log.Logger) {
 			}
 		}
 	}
-	// herdr's saved machines as configured here, for machines added,
-	// removed, renamed or reloaded from the UI (--remote-session applies to
-	// new ones too; a reload adds only those --local-only and --machine
-	// take).
-	catalog := func() ([]machines.Spec, error) {
-		saved, err := machines.SavedSpecs()
-		if *remoteSess != "" {
-			for i := range saved {
-				saved[i].Session = *remoteSess
-			}
-		}
-		return saved, err
-	}
-	selected := func(s machines.Spec) bool { return selectSpec(s, false, *localOnly, extraSSH, only) }
 	controlDir, err := transport.ControlDir()
 	if err != nil {
 		logger.Fatal(err)
@@ -310,8 +302,8 @@ func serve(args []string, logger *log.Logger) {
 		return nil, "", errors.New("unknown machine kind " + spec.Kind)
 	}
 	mg := machines.NewManager(specs, dial, logger)
-	// Machines enabled or disabled in the UI, over herdr's catalog.
-	mg.UseOverrides(machines.LoadOverrides(overridesFile))
+	mg.UseRegistry(registry)
+	mg.SSHSession = *remoteSess
 
 	var static fs.FS = web.Dist()
 	if *webDir != "" {
@@ -343,8 +335,6 @@ func serve(args []string, logger *log.Logger) {
 		Settings:       prefs,
 		Keybindings:    keys,
 		HC:             embedded.HC,
-		Catalog:        catalog,
-		Selected:       selected,
 	})
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

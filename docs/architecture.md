@@ -23,8 +23,7 @@ browser (React, canvas)     ──WebSocket + HTTP──▶  core (Go, `herdr-id
 | `internal/agentproto` | Stream protocol shared by core and agent. |
 | `internal/agent` | Agent: herdr, terminals, files, code-server supervision, bridge listener, housekeeping. |
 | `internal/transport` | yamux sessions: in-process for the local machine, ssh stdio for others; agent upload. |
-| `internal/machines` | Machine registry (herdr's saved machines, enabled or disabled over it from the UI, added, removed and relabelled at runtime after herdr's `machine add`,
-`remove` and `rename` or a reload), state machine, herdr snapshots and subscriptions. |
+| `internal/machines` | The core's machines (`Registry`: SSH machines in `machines[-<instance>].json`, herdr's saved machines imported once), added, removed, renamed, enabled and disabled at runtime; the connection state machine; herdr snapshots and subscriptions while herdr answers. |
 | `internal/herdr` | herdr public socket API client; `endpoint`: client of herdr's endpoint protocol (generation 1). |
 | `internal/hc` | Client of herdr-core's API (protocol generation 1): JSON-RPC calls, attached terminals as raw byte streams with credit, event subscriptions. |
 | `internal/herdrdist` | herdr release bundled in archives: version, upstream asset names and SHA-256 digests. |
@@ -130,7 +129,7 @@ after a successful reply it carries op-specific bytes.
 
 | Op | Direction | Payload after the reply |
 | --- | --- | --- |
-| `hello` | core → agent | – (reply has host info, herdr binary, data dirs; without a herdr binary, `herdr_error` and still the socket) |
+| `hello` | core → agent | – (reply has host info, herdr binary, data dirs; without a herdr binary, `herdr_error` and still the socket); the machine is ready once it answers |
 | `herdr-api` | core → agent | raw pipe to the herdr socket; the core sends the request line right after the header, without waiting for the reply (herdr wants it within 5 s) |
 | `herdr-client` | core → agent | raw pipe to herdr's client socket (endpoint protocol) |
 | `fs.stat`, `fs.list` | core → agent | – |
@@ -183,23 +182,26 @@ breaks a followed download off), uploads and the code-server proxy:
 `POST /api/m/{id}/find` (find in a pane through `pane.find`, also for
 read-only pages, see [20](features/20-find-in-panes.md)),
 `GET /api/config`, `GET /api/keymap` (herdr's custom commands from its
-`config.toml`), `GET /api/machines`, `GET /api/gui`
+`config.toml`), `GET /api/machines` (every machine's state: the record,
+`status`, the agent's `info`, `hc {state, code, version}` while the core
+has a connection to the machine's terminal core, and herdr's `snapshot`
+and `layouts` or `herdr_error`), `GET /api/gui`
 (the program windows of every machine, as the `gui` messages of `/ws`),
 `GET`/`PUT`/`DELETE /api/settings` (definitions, values, problems; one
 value set or removed) and `GET`/`PUT /api/keybindings` (commands, defaults,
 the user's rules, the bindings in effect and conflicts per platform; the
-rules replaced), see [13](features/13-settings-and-appearance.md), and
-`PUT /api/m/{id}/enabled`
-(`{"enabled": bool}`: enables or disables a machine, see
-[02](features/02-multi-machine-transport.md)). The WebSocket
-`GET /api/machines/add?target=&label=&session=` runs the local herdr's
-`herdr machine add` in a PTY and closes with `added <id>` or `none`;
-`DELETE /api/m/{id}` removes a saved machine with `herdr machine remove`,
-`PUT /api/m/{id}/label` (`{"label": "…"}`) renames one with
-`herdr machine rename`, and `POST /api/machines/refresh` reloads herdr's
-machines (reply: the ids `added`, `removed` and `updated`). When machines
-come or go the core sends every browser a new `machines {list}`; a renamed
-machine arrives as its `machine {state}`. A program window is shown by
+rules replaced), see [13](features/13-settings-and-appearance.md).
+Machines ([02](features/02-multi-machine-transport.md)):
+`POST /api/machines` (`{"target", "label"}`: adds and stores an SSH
+machine; `201` with its state, `409 machine_exists`),
+`PUT /api/m/{id}/label` (`{"label": "…"}`; `409 label_taken`),
+`PUT /api/m/{id}/enabled` (`{"enabled": bool}`) and `DELETE /api/m/{id}`
+change the core's machines file and the running machine; the WebSocket
+`GET /api/m/{id}/auth` is the interactive ssh login of an *auth_required*
+machine. `GET /api/m/{id}/hc` and `POST /api/m/{id}/hc/{start|stop|restart}`
+report, start, stop and restart its terminal core. When machines come or
+go the core sends every browser a new `machines {list}`; a renamed machine
+arrives as its `machine {state}`. A program window is shown by
 the app at `GET /m/{id}/gui/{win}`, streamed over the WebSocket
 `/m/{id}/gui/{win}/ws` (JSON events and binary frames out, JSON commands in;
 `?video=avc1,vp8` names the video streams the browser decodes)
@@ -224,7 +226,7 @@ field; binary frames are `[stream u32 LE][kind u8][payload]`.
 
 | Client → core | Core → client |
 | --- | --- |
-| `sub {m}`, `unsub {m}` (a machine's terminals) | `backend {m, state: starting\|ready\|error, code, version}`, `snapshot {m, terminals}` (herdr-core's terminal records), `event {m, type, terminal, data}` (herdr-core's events) |
+| `sub {m}`, `unsub {m}` (a machine's terminals) | `backend {m, state: starting\|ready\|error, code, version}` (also in the machine's state on `/ws` as `hc`), `snapshot {m, terminals}` (herdr-core's terminal records), `event {m, type, terminal, data}` (herdr-core's events) |
 | `call {rid, m, method, params}` (allowlisted herdr-core methods) | `res {rid, result}` or `res {rid, error: {kind, message}}` |
 | `attach {rid, m, terminal, cols, rows, history, observe, display}` | `attached {rid, s, terminal, cols, rows, observe, automatic}`, later `closed {s, reason, exit_code, signal}` |
 | `ack {s, n}` (output bytes drawn), `resize {s, cols, rows}`, `focus {s, focused}`, `facts {s, display}`, `detach {s}` | – |

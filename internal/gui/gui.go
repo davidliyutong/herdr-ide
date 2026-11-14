@@ -173,9 +173,9 @@ type Manager struct {
 type display struct {
 	mc    *machines.Machine
 	phase string
-	// herdrUp: the machine's herdr server was reachable at the last state
-	// change seen while the display was attached.
-	herdrUp  bool
+	// up: the servers of the machine (ServerHerdr, ServerHC) that were
+	// reachable at the last change seen while the display was attached.
+	up       map[string]bool
 	err      string
 	status   *agentproto.GUIStatus
 	ensuring bool
@@ -408,8 +408,7 @@ func onSession(mc *machines.Machine, sess *transport.Session) bool {
 	if mc.Session() != sess {
 		return false
 	}
-	st := mc.State().Status
-	return st == machines.StatusReady || st == machines.StatusDegraded
+	return mc.State().Status == machines.StatusReady
 }
 
 // fail shows that preparing or attaching the display over sess failed and
@@ -533,9 +532,9 @@ func (m *Manager) prepare(d *display, sess *transport.Session) {
 		close(d.cmds)
 	}
 	d.status, d.sess, d.stream = st, sess, conn
-	// The keeper is asked for below; the next state change with herdr
-	// reachable asks again, in case herdr was down meanwhile.
-	d.herdrUp = false
+	// The keeper is asked for below; the next change with a server
+	// reachable asks again, in case it was down meanwhile.
+	d.up = nil
 	d.cmds = make(chan []byte, 256)
 	d.windows, d.order, d.layers = map[uint32]*agentproto.GUIWindow{}, nil, map[uint32]agentproto.GUILayer{}
 	// The new window manager numbers frames from the start and has no
@@ -594,27 +593,37 @@ func afterAttach(readOnly, video bool) (keep, push bool) {
 	return true, video
 }
 
-// HerdrReady follows the machine's herdr server: each time it is reachable
-// again (or for the first time) while the display is attached, the machine
-// is asked to keep the display while that server runs, since a keeper
-// started while the server was down has left.
-func (m *Manager) HerdrReady(mc *machines.Machine, ready bool) {
+// Servers whose programs use the display: herdr's for the browser UI's panes
+// and the terminal core for terminals (ServerReady).
+const (
+	ServerHerdr = "herdr"
+	ServerHC    = "hc"
+)
+
+// ServerReady follows a server whose programs get the display: each time one
+// is reachable again (or for the first time) while the display is attached,
+// the machine is asked to keep the display while its servers run, since a
+// keeper started while they were down has left.
+func (m *Manager) ServerReady(mc *machines.Machine, server string, ready bool) {
 	m.mu.Lock()
 	d := m.ds[mc.ID()]
 	if d == nil {
 		m.mu.Unlock()
 		return
 	}
-	start := ready && !d.herdrUp && d.stream != nil && d.phase == PhaseReady
-	d.herdrUp = ready && (d.herdrUp || start)
+	start := ready && !d.up[server] && d.stream != nil && d.phase == PhaseReady
+	if d.up == nil {
+		d.up = map[string]bool{}
+	}
+	d.up[server] = ready && (d.up[server] || start)
 	m.mu.Unlock()
 	if keep, _ := afterAttach(m.ReadOnly, false); start && keep {
 		go m.keeper(d)
 	}
 }
 
-// keep has the machine keep its display while its herdr server runs, also
-// after this connection ends.
+// keep has the machine keep its display while its herdr server or its
+// terminal core runs, also after this connection ends.
 func (m *Manager) keep(d *display) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()

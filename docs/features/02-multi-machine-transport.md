@@ -6,9 +6,11 @@ The user's machines are reached over ssh with their own `~/.ssh/config`
 (aliases, ProxyJump, agent forwarding). Machines are shared multi-user hosts
 (lab workstations, GPU servers, robots) running Linux or macOS on amd64 or
 arm64, sometimes with old userlands, sometimes without internet access. The
-core needs many concurrent channels per machine: herdr API calls and event
-streams, the pane surface of the shown tab, file reads, uploads, a
-code-server proxy and a reverse channel for the VS Code extension.
+core needs many concurrent channels per machine: the terminal core's API
+and terminal streams ([21](21-terminal-core.md)), herdr API calls and the
+pane surface of the shown tab for the browser UI's panes, file reads,
+uploads, a code-server proxy and a reverse channel for the VS Code
+extension.
 
 ## Goals / non-goals
 
@@ -42,90 +44,89 @@ Non-goals: managing ssh keys or herdr installations; Windows machines.
   header and reply ([architecture](../architecture.md#core--agent-protocol-internalagentproto)).
   This avoids sshd's `MaxSessions` (default 10) and any dependence on
   `AllowStreamLocalForwarding`.
-- **State machine** (`internal/machines`): connecting → ready ↔ degraded,
+- **State machine** (`internal/machines`): connecting → ready,
   auth_required, error, disabled; reconnect backoff 0.5 s doubling to 120 s;
   auth failures retry every 30 s or immediately after the UI's
-  authentication terminal closes. *Degraded* means the agent is connected
-  but two snapshot fetches in a row failed; it turns *ready* with the next
-  fetch that works (every 5 s). The UI's **Retry**, offered in every state
-  but *ready* to writable browsers, ends a backoff wait, and replaces the
-  session of a machine that is connected but not *ready* (degraded) with a
-  new one, whose agent finds herdr afresh, unless that session started less
-  than 5 s ago; it is audited as `machine.retry`. Read-only browsers cannot
-  retry (`denied.retry`): a new session ends every browser's surfaces,
-  uploads and VS Code on the machine. After the authentication terminal the
-  core only ends the backoff wait.
+  authentication terminal closes. A machine is *ready* as soon as its agent
+  answers `hello`, with or without herdr. The UI's **Retry**, offered to
+  writable browsers in every state but *ready* and *disabled*, ends the
+  backoff wait; read-only browsers cannot retry (`denied.retry`), since an
+  attempt may start an ssh login.
+- **The terminal core's state.** While the core has a connection to a
+  machine's terminal core ([22](22-terminal-protocol.md)), the machine's
+  state carries it as `hc {state, code, version}` (`starting`, `ready` or
+  `error` with the backend's code), so every `/ws` client sees whether
+  terminals work there.
+- **herdr is optional.** herdr's snapshot and tab layouts, for the browser
+  UI's panes, are fetched every 5 s and after herdr's events while herdr
+  answers. When two fetches in a row fail, the machine drops them and
+  shows why (`herdr_error`) but stays *ready*; nothing is logged, and the
+  subscription to herdr's events is tried again after 1 s, doubling to
+  30 s. The sidebar then offers **Start herdr** for the panes.
 - **herdr API requests over the agent.** herdr drops an API connection whose
   request has not arrived 5 s after it accepted it. The core sends the
   request right behind the stream's header (`Session.OpenWith`) instead of
   after the agent's reply, so the request does not wait for a round trip
   through the reply direction, where pane surfaces and program windows may
   be queued on a slow link.
-- **Enabling and disabling.** Machines come from herdr's saved machines
-  with herdr's enabled flag. The sidebar's machine menu (and the **Enable**
-  button of a disabled machine) changes it for herdr-ide only:
-  `PUT /api/m/{id}/enabled` saves the choice in the core's
-  `machines[-<instance>].json` (beside its settings file; entries of
-  machines not configured at the moment are kept) and applies it at once,
-  so herdr's catalog is never written. Disabling ends the session (the
-  agent exits and stops the code-server it started; panes keep running in
-  herdr), drops the machine's snapshot and shows it as *disabled*; enabling
-  connects it. Disabling a connected machine asks first; for a *ready* SSH
-  machine the dialog also offers, checked by default, to stop its herdr
-  server before the session ends
-  ([17](17-local-herdr-management.md)). Read-only browsers cannot do
-  either. The sidebar folds disabled machines, so their Enable
-  button shows only when the user opens one; disabling a machine folds it
-  and enabling it unfolds it.
-- **Adding, removing, renaming and reloading.** Machines are herdr's saved
-  machines, so they are added, removed and renamed with herdr's own
-  commands, run with the local machine's herdr on the core host; the core
-  only reads herdr's catalog and follows it (`syncCatalog`: machines it no
-  longer has are removed, changed labels and enabled flags applied, new
-  ones added when wanted). A catalog that cannot be read changes nothing.
-  **Add machine…** (right-click the sidebar's free space or any machine)
-  asks for an SSH target, a label and the herdr session there (both
-  optional), then runs `herdr machine add [--label=L] [--remote-session=S]
-  TARGET` in a terminal (WebSocket `GET /api/machines/add`, like the update
-  terminal of [17](17-local-herdr-management.md)): herdr connects with the
-  user's ssh configuration, lets the user pick a running session, offers to
-  install or update herdr there, starts its server and saves the machine,
-  asking in the terminal for anything it needs (a password, a host key,
-  approval). When the command ends, the core follows the catalog and adds
-  the machines that appeared since the terminal opened: they join the
-  running manager (`Manager.Add`, with an earlier enabled choice for the id
-  applied), connect, and reach every browser as a new machine list; the
-  socket closes with `added <id>` or `none`, which the dialog reports. Only
-  new ids are added, so machines left out by `--machine` or `--local-only`
-  stay out; `--remote-session` applies to new machines too. Closing the
-  window ends herdr's command; whatever herdr saved by then is still added.
-  **Remove machine…**, offered for herdr's saved machines (not `--ssh`
-  targets or the local machine), asks first and then runs
-  `herdr machine remove ID` (`DELETE /api/m/{id}`, 30 s). Once the catalog
-  no longer has the id (also when herdr reports it as already gone), the
-  core ends the machine's session as disabling does (`Manager.Remove`,
-  waiting up to 15 s), forgets its enabled choice and sends the new list;
-  browsers that showed it move to another machine and close its VS Code
-  panel. herdr's removal only forgets the profile: the machine's herdr
-  server and panes keep running.
-  **Rename machine** (same menu, herdr's saved machines only) edits the
-  label in the machine's header; Enter runs `herdr machine rename ID
-  --label LABEL` (`PUT /api/m/{id}/label`, `{"label": "…"}`, trimmed, 30 s).
-  A label another saved machine has is refused first (`label_taken`):
-  herdr's rename does not check it, but `herdr --machine` selects by label.
-  The new label counts once the catalog has it (`Manager.Update`); the
-  machine keeps its session.
-  The sidebar's **Reload** button (and **Reload machines from herdr** in
-  the sidebar's menus) follows changes made with herdr's own commands or
-  TUI while the core runs (`POST /api/machines/refresh`): saved machines
-  that `--machine` and `--local-only` take are added, removed ones dropped,
-  renamed ones relabelled, and herdr's enabled flag applied to machines the
-  user did not enable or disable here; a toast counts the changes. The core
-  does not watch the catalog: reloading is on request. herdr's own clients
-  pick up changes made here from the catalog. Read-only browsers can do
-  none of this (`403`); everything is audited (`machine.add`,
-  `machine.added`, `machine.remove`, `machine.rename`, `machine.refresh`
-  when something changed).
+- **Machines.** The core keeps its own list of machines in
+  `machines[-<instance>].json` beside its settings file
+  ([reference](../reference.md#files-and-directories)): one record per SSH
+  machine (`id`, `label`, `kind: "ssh"`, `target`, `enabled`), and one of
+  the local machine (its `enabled` flag) once it was enabled or disabled.
+  Every change is written at once (atomically, 0600). The first time a core
+  of an instance starts without the file, it imports herdr's saved machines
+  (`~/.local/state/herdr/client/endpoints.json`) with their labels and
+  enabled flags, and the choices an earlier version kept in the same file;
+  after that herdr's catalog is never read. Machines given with `--ssh`
+  are not stored: changes to them last until the core stops. `--local-only`
+  and `--machine` choose which stored machines a run connects to; the file
+  keeps the others.
+- **Adding.** **Add machine…** (right-click the sidebar's free space or any
+  machine) asks for an SSH target and an optional label (the target names
+  it otherwise): `POST /api/machines {target, label}`. The target is an ssh
+  destination without spaces or control characters that does not start
+  with `-`, at most 255 bytes, and the label at most 64 characters without
+  control characters; a target or id the core has already is refused
+  (`machine_exists`). The core gives the machine a random id, stores it,
+  sends every browser the new machine list and connects it with the user's
+  ssh configuration. A machine that needs an interactive login (a password,
+  a key's passphrase, a host key to confirm) turns *auth_required*, and the
+  page that added it opens the authentication terminal for it.
+- **Renaming, removing, enabling and disabling.** The machine's menu renames
+  an SSH machine in its header (`PUT /api/m/{id}/label`, `{"label": "…"}`,
+  trimmed; a label another machine has, running or stored, is refused with
+  `label_taken`, since `--machine` selects by label; the local machine keeps
+  its host's name). **Remove machine…** asks first (`DELETE /api/m/{id}`):
+  the record goes, the machine's session ends as disabling does (waiting up
+  to 15 s), and browsers that showed it move to another machine and close
+  its VS Code panel; nothing on the machine is removed, its terminal core,
+  terminals and herdr server keep running. The local machine cannot be
+  removed. `PUT /api/m/{id}/enabled` (`{"enabled": bool}`) enables or
+  disables a machine: stored and applied at once. Disabling ends the
+  session (the agent exits and stops the code-server it started; programs
+  keep running in the terminal core and in herdr), drops the machine's
+  snapshot and shows it as *disabled*; enabling connects it. Disabling a
+  connected machine asks first; for a *ready* SSH machine whose herdr
+  answers the dialog also offers, checked by default, to stop its herdr
+  server before the session ends ([17](17-local-herdr-management.md)). The
+  sidebar folds disabled machines, so their Enable button shows only when
+  the user opens one; disabling a machine folds it and enabling it unfolds
+  it. Read-only browsers can do none of this (`403`); everything is
+  audited (`machine.add`, `machine.rename`, `machine.remove`,
+  `machine.enable`, `machine.disable`, with the error when it failed).
+- **The terminal core from the UI.** `GET /api/m/{id}/hc` reports a
+  machine's terminal core (the installed executable's digest, whether one
+  answers, its version, session and socket), and
+  `POST /api/m/{id}/hc/{start|stop|restart}` runs the agent's `hc` op from
+  the machine's menu in the macOS application: start installs this build's
+  executable when the machine has another and starts a core; restart has
+  the core's successor adopt the programs; stop ends every terminal there
+  after the user confirmed it and keeps the core stopped (the terminal
+  backend reports `stopped` instead of starting another) until it is
+  started again or a client subscribes to the machine anew. Refused
+  read-only, audited as `hc.start`, `hc.stop`, `hc.restart`
+  ([deployment](../deployment.md#remote-resources)).
 - **Instances.** `--instance NAME` makes agents use `~/.herdr-ide-NAME` for
   sockets, code-server process and settings, so two cores (daily and
   development) can share machines safely. Agent builds and code-server
@@ -139,6 +140,8 @@ Non-goals: managing ssh keys or herdr installations; Windows machines.
 | herdr's own `remote-api-bridge` per request | One ssh exec plus one remote process per call; does not cover terminals, files or code-server. |
 | Helper written in Node or Python | Not present on every machine; glibc and version constraints. |
 | Go `x/crypto/ssh` client instead of OpenSSH | Would not honour the user's ssh config (ProxyJump, Match blocks, agents, certificates). |
+| herdr's saved machines as the list (`herdr machine add`, `remove`, `rename` run by the core) | Needs herdr on the core host and its interactive add flow; machines are reached through the agent and its terminal core, not through herdr's machine profiles. |
+| Reading herdr's catalog at every start | The core's list would change with herdr's; one import keeps the user's machines without depending on herdr afterwards. |
 | Node.js core (sharing TypeScript types with the UI) | A Go core and agent cross-compile to static binaries for every platform with no runtime on the host; the UI types are generated separately. |
 
 ## Failure modes
@@ -161,28 +164,24 @@ Non-goals: managing ssh keys or herdr installations; Windows machines.
   login is needed for the new master, as for any new connection.
 - **Slow or congested link** → yamux's keepalive tolerates 30 s, while
   herdr wants each API request within 5 s of accepting the connection;
-  sending the request with the stream header keeps snapshots working, so
-  the machine does not turn *degraded* only because replies queue behind
-  surfaces and program windows.
-- **herdr does not answer while the agent is connected** → *degraded* with
-  the error; fetches retry every 5 s and **Retry** reconnects. Retry starts
-  no herdr server: when none runs (after the machine rebooted), the status
-  block's **Start herdr** or the menu's **Restart herdr…** starts it
+  sending the request with the stream header keeps snapshots working.
+- **herdr does not answer while the agent is connected** → the machine is
+  *ready* without herdr's snapshot (`herdr_error`); fetches retry every
+  5 s. Nothing starts a herdr server by itself: the status block's
+  **Start herdr** or the menu's **Restart herdr…** does
   ([17](17-local-herdr-management.md)). When the agent finds no herdr
-  executable there (removed, moved, a reinstalled system), the status
-  block says so and offers **Install herdr** instead.
-- **Retries in a row** (two clicks, a script) → a session younger than 5 s
-  is kept, so retries cannot keep a machine disconnected.
-- **Adding fails** (unknown host, authentication, the user declines an
-  install, the window closes early) → herdr saves nothing and says why in the
-  terminal; the dialog shows that nothing was saved.
-- **Removing or renaming fails** (herdr refuses, no herdr on the core
-  host) → the machine stays as it was, and the toast shows herdr's output
-  (`herdr`) or that the local herdr is unavailable (`no_local_herdr`, also
-  for adding: the local machine's agent reports the herdr to use).
-- **herdr's catalog cannot be read** (being rewritten, damaged) → reloading,
-  adding, removing and renaming report `catalog` and change no machine;
-  in particular the machines are not taken for removed.
+  executable there, the status block says so and offers **Install herdr**.
+- **Adding a machine that cannot be reached** (unknown host, refused
+  connection) → it is stored and shows *error* with ssh's message, retried
+  with the backoff; remove it or fix the ssh configuration. One that needs
+  a login shows *auth_required* and the authentication terminal.
+- **The machines file cannot be read** (damaged JSON) → the core logs it,
+  runs with the local machine and the `--ssh` targets, keeps changes in
+  memory and leaves the file alone; **herdr's catalog cannot be read at
+  the first start** → nothing is imported and no file is written, so the
+  next start imports again.
+- **Writing the file fails** (disk full, read-only directory) → the change
+  is refused with `save` and the machine stays as it was.
 - **Unsupported platform** → no embedded agent for the `uname` pair; the
   machine shows the error.
 - **Hijacked control directory** → refused: `/tmp/herdr-ide-<uid>/s` must be
@@ -197,31 +196,34 @@ classification, arch normalization, quoting, control directory checks, a
 request sent with the header reaches the agent before its reply, the
 lost-session hook runs only when the session ends by itself, the control
 master is stopped (`-O stop`) only while ssh stays up),
-`internal/machines/machines_test.go` (Retry replaces the session of a
-degraded machine, not one younger than 5 s; the enabled overrides are saved
-and applied; disabling at runtime ends the session and forgets the snapshot,
-enabling connects again; machines added at runtime connect, removed ones
-end their session, publish nothing more and lose their enabled choice, the
-local machine cannot be removed; a reload applies herdr's label and
-enabled flag, not over the user's choice),
-`internal/server/server_test.go` (a read-only browser's retry is refused
-and audited; enabling and disabling is refused read-only, checked, audited
-and saved), `internal/server/machines_test.go` (with a fake herdr: targets
-that read as options, odd labels and sessions are refused, as are read-only
-browsers, the local machine and `--ssh` machines; herdr's arguments; a
-machine herdr saved is added and named in the close reason, also outside
-the selection; a removal or rename herdr refuses keeps the machine as it
-was; a label another machine has is refused; a reload adds only selected
-machines, drops removed ones, applies labels and enabled flags, keeps the
-local and `--ssh` machines, and changes nothing with a damaged catalog;
-audit events), `cmd/herdr-ide/main_test.go` (a reload selects as
-`--local-only` and `--machine` do), `web/src/__tests__/menus.test.ts` (the machine menu asks before
-disabling and before removing, offers renaming and removal only for herdr's
-saved machines, the sidebar's free space offers adding and reloading; the
-toasts of renaming and reloading), `web/src/__tests__/sidebarMachines.test.ts`
-(the reload button, absent read-only; renaming in the machine's header),
-`web/src/__tests__/addMachine.test.ts` (the form's checks and query, a
-removed machine takes its VS Code panel and focus along), `internal/herdr/client_test.go` (requests sent with the
-dial),
-`make it` for herdr streams. Verified manually against eight Ubuntu x86_64
-hosts and an arm64 Ubuntu VM.
+`internal/machines/machines_test.go` (herdr's catalog imported once, also
+when empty, never again; the earlier file's enabled choices migrated, the
+local machine's included; records written 0600 without the herdr
+session, read back; a damaged file reported and left alone; an unreadable
+catalog imports and writes nothing; the order of the local, stored and
+`--ssh` machines; a machine is ready without herdr, drops the snapshot and
+logs nothing; disabling at runtime ends the session and forgets the
+snapshot, enabling connects again, both stored; machines added at runtime
+are stored and connect, a known id or target is refused, removed ones end
+their session, lose their record and publish nothing more, the local
+machine cannot be removed; renaming stores the label for stored machines,
+keeps it for `--ssh` ones, refuses a label another machine has and the
+local machine), `internal/server/machines_test.go` (adding, renaming,
+removing and enabling over HTTP: odd targets and labels refused, a known
+target refused, read-only browsers refused, the file and the audit log;
+the terminal core's endpoints refused read-only, for unknown actions and
+for machines without an agent), `internal/server/term_test.go`
+(`TestHCLifecycle`: status, a stopped core kept stopped while a client is
+subscribed, started and restarted again, the machine's `hc` state, audit
+entries), `cmd/herdr-ide/main_test.go` (`--local-only` and `--machine`),
+`web/src/__tests__/menus.test.ts` (the machine menu asks before disabling
+and before removing, offers renaming and removal for SSH machines, the
+sidebar's free space offers adding; adding opens the authentication
+terminal once the new machine needs a login), `web/src/__tests__/sidebarMachines.test.ts`
+(renaming in the machine's header, Start herdr where herdr does not
+answer), `web/src/__tests__/addMachine.test.ts` (the form's checks, a
+removed machine takes its VS Code panel and focus along),
+`macos/Tests/TermKitTests` (the machine state's `hc`),
+`internal/herdr/client_test.go` (requests sent with the dial), `make it`
+for herdr streams. Verified manually against eight Ubuntu x86_64 hosts and
+an arm64 Ubuntu VM.

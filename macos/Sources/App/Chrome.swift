@@ -90,6 +90,7 @@ final class SidebarView: NSView, NSTableViewDataSource, NSTableViewDelegate {
     /// A program window was chosen.
     var onProgram: ((ProgramWindow) -> Void)?
     var dialogs: WorkspaceDialogs?
+    var machineDialogs: MachineDialogs?
 
     init(model: AppModel) {
         self.model = model
@@ -172,9 +173,9 @@ final class SidebarView: NSView, NSTableViewDataSource, NSTableViewDelegate {
         switch items[row] {
         case let .machine(machine):
             var detail = ""
-            if machine.status != "ready", machine.status != "degraded" {
+            if machine.status != "ready" {
                 detail = tr("machine." + machine.status)
-            } else if let state = model.backend(of: machine.id), state.phase == .error {
+            } else if let state = model.backend(of: machine.id) ?? machine.hc, state.phase == .error {
                 detail = tr("backend." + state.code)
             }
             cell.configure(title: machine.label, detail: detail, dot: nil, level: 0, strong: true, selected: false) { [weak self] in
@@ -226,6 +227,18 @@ extension SidebarView: NSMenuDelegate {
         case let .machine(machine):
             add(tr("menu.newTerminal"), #selector(menuNew(_:)), [machine.id])
             if model.layout(of: machine.id) != nil { add(tr("menu.newWorkspace"), #selector(menuNewWorkspace(_:)), machine.id) }
+            // The machine's terminal core: started when it was stopped (or
+            // none runs), else restarted (programs keep running) or stopped.
+            if machine.status == "ready", !model.settings.readOnly {
+                menu.addItem(.separator())
+                let code = (model.backend(of: machine.id) ?? machine.hc)?.code
+                if code == "stopped" || code == "not_running" {
+                    add(tr("menu.startCore"), #selector(menuStartCore(_:)), machine.id)
+                } else {
+                    add(tr("menu.restartCore"), #selector(menuRestartCore(_:)), machine.id)
+                    add(tr("menu.stopCore"), #selector(menuStopCore(_:)), machine.id)
+                }
+            }
         case let .workspace(machine, workspace, _):
             add(tr("menu.newTerminal"), #selector(menuNew(_:)), [machine, workspace.id])
             menu.addItem(.separator())
@@ -242,6 +255,18 @@ extension SidebarView: NSMenuDelegate {
     @objc private func menuNew(_ sender: NSMenuItem) {
         guard let pair = sender.representedObject as? [String], let machine = pair.first else { return }
         model.newTerminal(on: machine, in: pair.count > 1 ? pair[1] : nil)
+    }
+
+    @objc private func menuStartCore(_ sender: NSMenuItem) {
+        if let machine = sender.representedObject as? String { machineDialogs?.core("start", on: machine) }
+    }
+
+    @objc private func menuRestartCore(_ sender: NSMenuItem) {
+        if let machine = sender.representedObject as? String { machineDialogs?.core("restart", on: machine) }
+    }
+
+    @objc private func menuStopCore(_ sender: NSMenuItem) {
+        if let machine = sender.representedObject as? String { machineDialogs?.stopCore(on: machine) }
     }
 
     @objc private func menuNewWorkspace(_ sender: NSMenuItem) {

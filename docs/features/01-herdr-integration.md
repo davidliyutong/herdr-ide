@@ -56,16 +56,17 @@ machines, reimplementing its agent detection.
   herdr, through the agent; herdr renders the shown tab at the browser's size
   and the core forwards the grid ([18](18-endpoint-surfaces.md),
   [03](03-pane-rendering-and-input.md)).
-- **Discovery.** Machines come from herdr's saved catalog
-  (`~/.local/state/herdr/client/endpoints.json`) plus `--ssh` targets; the
-  remote herdr binary path is taken from herdr's ssh-metadata cache when
-  available, else searched (`HERDR_BIN`, `PATH`, `~/.local/bin`, login shell).
+- **Discovery.** Machines are the core's own
+  ([02](02-multi-machine-transport.md)); herdr's saved catalog is imported
+  once. The remote herdr binary is searched (`HERDR_BIN`, `PATH`,
+  `~/.local/bin`, login shell), and after herdr's `--remote` flow taken from
+  the path herdr recorded.
   The local machine falls back to the herdr bundled in the release
   ([15](15-bundled-herdr.md)).
   Socket paths follow herdr's rules (named sessions under
   `sessions/<name>/`, `XDG_CONFIG_HOME`, `HERDR_SOCKET_PATH`).
 - **Sessions.** `--local-session` selects a named herdr session locally;
-  remote machines use the session saved in their herdr profile.
+  remote machines use herdr's default session, or `--remote-session`.
 
 ## Alternatives considered
 
@@ -82,9 +83,9 @@ machines, reimplementing its agent detection.
 - **Lagging subscription** (`events_lost`) → resubscribe and refetch.
 - **Pane closed between snapshot and subscribe** → the whole agent-status
   subscription is rejected; refetch and retry after 2 s.
-- **herdr not running or not found** → agent reports `herdr_error`, the
-  machine shows *degraded*; snapshots are retried, and **Retry** connects
-  a new agent ([02](02-multi-machine-transport.md)); a server that is not
+- **herdr not running or not found** → the machine is *ready* without
+  herdr's snapshot (`herdr_error`); snapshots are retried every 5 s
+  ([02](02-multi-machine-transport.md)); a server that is not
   running is started with **Start herdr** or **Restart herdr…**
   ([17](17-local-herdr-management.md)); an SSH machine whose herdr was
   removed or moved offers **Install herdr** (herdr's `--remote` flow).

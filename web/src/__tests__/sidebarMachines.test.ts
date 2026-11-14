@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 //
-// The sidebar reloads herdr's machines from its button and renames a saved
-// machine in place, in its header.
+// The sidebar folds disabled machines, renames a machine in place, in its
+// header, and offers to start herdr where it does not answer.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
@@ -19,7 +19,7 @@ describe('Sidebar machines', () => {
   let host: HTMLDivElement;
   let root: Root;
   const fetchMock = vi.fn((_url: string, _init?: RequestInit) =>
-    Promise.resolve(new Response(JSON.stringify({ added: null, removed: null, updated: null }), { status: 200 })),
+    Promise.resolve(new Response(JSON.stringify({ managed: false, running: true }), { status: 200 })),
   );
 
   beforeEach(async () => {
@@ -27,7 +27,7 @@ describe('Sidebar machines', () => {
     fetchMock.mockClear();
     const s = useStore.getState();
     s.setReadOnly(false);
-    s.setMachines([{ id: 'gpu', label: 'gpu', kind: 'ssh', status: 'disabled', saved: true } as unknown as MachineState]);
+    s.setMachines([{ id: 'gpu', label: 'gpu', kind: 'ssh', status: 'disabled' } as unknown as MachineState]);
     host = document.createElement('div');
     document.body.append(host);
     root = createRoot(host);
@@ -40,12 +40,25 @@ describe('Sidebar machines', () => {
     vi.unstubAllGlobals();
   });
 
-  it('reloads the machines from its button, which read-only browsers lack', async () => {
-    const button = host.querySelector<HTMLButtonElement>('button[title^="Reload machines from herdr"]');
-    await act(async () => button!.click());
-    expect(fetchMock).toHaveBeenCalledWith('/api/machines/refresh', { method: 'POST' });
+  it('offers to start herdr on a ready machine where it does not answer, except read-only', async () => {
+    const start = () => Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Start herdr');
+    await act(async () =>
+      useStore.getState().setMachines([
+        {
+          id: 'gpu',
+          label: 'gpu',
+          kind: 'ssh',
+          status: 'ready',
+          herdr_error: 'no server',
+          info: { herdr_bin: '/usr/bin/herdr' },
+        } as unknown as MachineState,
+      ]),
+    );
+    expect(host.textContent).toContain('herdr does not answer on this machine');
+    await act(async () => start()!.click());
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/m/gpu/herdr/start');
     await act(async () => useStore.getState().setReadOnly(true));
-    expect(host.querySelector('button[title^="Reload machines"]')).toBeNull();
+    expect(start()).toBeUndefined();
   });
 
   it('folds disabled machines until opened, and unfolds them once enabled', async () => {
@@ -59,9 +72,7 @@ describe('Sidebar machines', () => {
     expect(host.querySelector('.machine-body')).toBeNull();
 
     const setStatus = (status: string) =>
-      act(async () =>
-        useStore.getState().setMachines([{ id: 'gpu', label: 'gpu', kind: 'ssh', status, saved: true } as unknown as MachineState]),
-      );
+      act(async () => useStore.getState().setMachines([{ id: 'gpu', label: 'gpu', kind: 'ssh', status } as unknown as MachineState]));
     await setStatus('connecting');
     expect(host.querySelector('.machine-body')).not.toBeNull();
     // Folding an enabled machine sticks while it connects.

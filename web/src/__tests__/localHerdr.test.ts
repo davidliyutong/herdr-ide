@@ -19,7 +19,6 @@ describe('herdrMissing', () => {
   const machine = (status: string, herdr_bin?: string) =>
     ({ id: 'gpu', kind: 'ssh', status, info: { os: 'linux', herdr_bin } }) as unknown as MachineState;
   it('tells a connected agent that finds no herdr there', () => {
-    expect(herdrMissing(machine('degraded'))).toBe(true);
     // A server that outlived its herdr still answers.
     expect(herdrMissing(machine('ready'))).toBe(true);
     expect(herdrMissing(machine('ready', '/usr/bin/herdr'))).toBe(false);
@@ -27,7 +26,7 @@ describe('herdrMissing', () => {
   it('knows nothing without a connected agent', () => {
     expect(herdrMissing(machine('error'))).toBe(false);
     expect(herdrMissing(machine('connecting'))).toBe(false);
-    expect(herdrMissing({ id: 'gpu', kind: 'ssh', status: 'degraded' } as unknown as MachineState)).toBe(false);
+    expect(herdrMissing({ id: 'gpu', kind: 'ssh', status: 'ready' } as unknown as MachineState)).toBe(false);
     expect(herdrMissing(undefined)).toBe(false);
   });
 });

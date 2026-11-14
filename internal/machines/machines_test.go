@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -16,30 +17,139 @@ import (
 	"herdr-ide/internal/transport"
 )
 
-func TestLoadSpecsFromHerdrCatalog(t *testing.T) {
+// herdrCatalog writes herdr's catalog under a private XDG_STATE_HOME.
+func herdrCatalog(t *testing.T, json string) {
 	state := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", state)
 	client := filepath.Join(state, "herdr", "client")
-	os.MkdirAll(filepath.Join(client, "ssh-metadata"), 0o755)
-	os.WriteFile(filepath.Join(client, "endpoints.json"), []byte(`{"version":1,"selected_profile":"a1","ssh":[
-		{"id":"a1","label":"gpu","target":"gpu-host","session":"default","enabled":true},
-		{"id":"b2","label":"","target":"robot","session":"","enabled":false}]}`), 0o644)
-	os.WriteFile(filepath.Join(client, "ssh-metadata", "a1.json"), []byte(`{"version":1,"target":"gpu-host","session":"default","metadata":{"os":"linux","executable":"/home/u/.local/bin/herdr"}}`), 0o644)
+	os.MkdirAll(client, 0o755)
+	os.WriteFile(filepath.Join(client, "endpoints.json"), []byte(json), 0o644)
+}
 
-	specs := LoadSpecs("dev", []Spec{{Target: "extra"}, {ID: "a1", Target: "dup"}})
-	if len(specs) != 4 {
+const twoSaved = `{"version":1,"selected_profile":"a1","ssh":[
+	{"id":"a1","label":"gpu","target":"gpu-host","session":"work","enabled":true},
+	{"id":"b2","label":"","target":"robot","session":"","enabled":false}]}`
+
+// Without a machines file, herdr's saved machines are imported once and
+// written; afterwards herdr's catalog is not read again.
+func TestRegistryImportsHerdrOnce(t *testing.T) {
+	herdrCatalog(t, twoSaved)
+	path := filepath.Join(t.TempDir(), "conf", "machines-dev.json")
+	r, err := OpenRegistry(path, SavedSpecs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := r.Specs()
+	if len(got) != 2 || got[0] != (Spec{ID: "a1", Label: "gpu", Kind: KindSSH, Target: "gpu-host", Enabled: true}) ||
+		got[1] != (Spec{ID: "b2", Label: "robot", Kind: KindSSH, Target: "robot"}) {
+		t.Fatalf("imported %+v", got)
+	}
+	st, err := os.Stat(path)
+	if err != nil || st.Mode().Perm() != 0o600 {
+		t.Fatalf("file: %v %v", st, err)
+	}
+	b, _ := os.ReadFile(path)
+	if strings.Contains(string(b), "session") || !strings.Contains(string(b), `"version": 1`) {
+		t.Fatalf("stored: %s", b)
+	}
+	// herdr's catalog changes: the core keeps its own machines.
+	herdrCatalog(t, `{"version":1,"ssh":[{"id":"c3","label":"new","target":"new","enabled":true}]}`)
+	r, err = OpenRegistry(path, SavedSpecs)
+	if err != nil || len(r.Specs()) != 2 || r.Specs()[0].ID != "a1" {
+		t.Fatalf("reopened: %+v %v", r.Specs(), err)
+	}
+	// An empty import is written too, and not repeated either.
+	herdrCatalog(t, `{"version":1,"ssh":[]}`)
+	empty := filepath.Join(t.TempDir(), "machines.json")
+	if r, err := OpenRegistry(empty, SavedSpecs); err != nil || len(r.Specs()) != 0 {
+		t.Fatalf("empty: %+v %v", r.Specs(), err)
+	}
+	herdrCatalog(t, twoSaved)
+	if r, _ := OpenRegistry(empty, SavedSpecs); len(r.Specs()) != 0 {
+		t.Fatalf("imported again: %+v", r.Specs())
+	}
+}
+
+// The file an earlier version kept (the machines enabled or disabled over
+// herdr's catalog) is migrated: herdr's machines are imported with those
+// choices, the local machine's included.
+func TestRegistryMigratesEnabledChoices(t *testing.T) {
+	herdrCatalog(t, twoSaved)
+	path := filepath.Join(t.TempDir(), "machines.json")
+	os.WriteFile(path, []byte(`{"enabled":{"a1":false,"b2":true,"local":false,"gone":true}}`), 0o600)
+	r, err := OpenRegistry(path, SavedSpecs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := r.Specs()
+	if len(got) != 3 || got[0].Enabled || !got[1].Enabled || got[2] != (Spec{ID: LocalID, Kind: KindLocal}) {
+		t.Fatalf("migrated %+v", got)
+	}
+	specs := LoadSpecs("dev", got, nil)
+	if specs[0].ID != LocalID || specs[0].Enabled || specs[0].Session != "dev" || len(specs) != 3 {
+		t.Fatalf("specs %+v", specs)
+	}
+}
+
+// Records are written at once and read back; a broken file is reported and
+// left alone (the registry then keeps changes in memory); a catalog that
+// cannot be read imports nothing and writes nothing.
+func TestRegistryRoundTripAndErrors(t *testing.T) {
+	herdrCatalog(t, `{"version":1,"ssh":[]}`)
+	path := filepath.Join(t.TempDir(), "machines.json")
+	r, err := OpenRegistry(path, SavedSpecs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Put(Spec{ID: "x1", Label: "box", Target: "u@box", Enabled: true, Session: "s"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Put(Spec{ID: "y2", Target: "y"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Put(Spec{ID: "x1", Label: "box 2", Target: "u@box", Enabled: false}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Put(Spec{ID: "", Target: "z"}); err == nil {
+		t.Fatal("stored a record without an id")
+	}
+	if err := r.Delete("y2"); err != nil {
+		t.Fatal(err)
+	}
+	r, err = OpenRegistry(path, nil)
+	if err != nil || len(r.Specs()) != 1 || r.Specs()[0] != (Spec{ID: "x1", Label: "box 2", Kind: KindSSH, Target: "u@box"}) {
+		t.Fatalf("read back %+v %v", r.Specs(), err)
+	}
+
+	os.WriteFile(path, []byte("{"), 0o600)
+	r, err = OpenRegistry(path, SavedSpecs)
+	if err == nil {
+		t.Fatal("a broken file was accepted")
+	}
+	r.Put(Spec{ID: "z", Target: "z"})
+	if b, _ := os.ReadFile(path); string(b) != "{" {
+		t.Fatalf("the broken file was replaced: %s", b)
+	}
+
+	herdrCatalog(t, "{")
+	none := filepath.Join(t.TempDir(), "machines.json")
+	if _, err := OpenRegistry(none, SavedSpecs); err == nil {
+		t.Fatal("an unreadable catalog was imported")
+	}
+	if _, err := os.Stat(none); err == nil {
+		t.Fatal("wrote a file without herdr's machines")
+	}
+}
+
+// The local machine comes first, then the stored SSH machines and the --ssh
+// targets, each once.
+func TestLoadSpecs(t *testing.T) {
+	stored := []Spec{{ID: "a1", Label: "gpu", Kind: KindSSH, Target: "gpu-host", Enabled: true}, {ID: LocalID, Kind: KindLocal, Enabled: true}}
+	specs := LoadSpecs("", stored, []Spec{{Target: "extra"}, {ID: "a1", Target: "dup"}})
+	if len(specs) != 3 || specs[0].ID != LocalID || !specs[0].Enabled || specs[1].ID != "a1" {
 		t.Fatalf("specs = %+v", specs)
 	}
-	if specs[0].ID != LocalID || specs[0].Session != "dev" {
-		t.Fatalf("local = %+v", specs[0])
-	}
-	if s := specs[1]; s.Target != "gpu-host" || s.HerdrBin != "/home/u/.local/bin/herdr" || !s.Enabled || !s.Saved {
-		t.Fatalf("gpu = %+v", s)
-	}
-	if s := specs[2]; s.Label != "robot" || s.Session != "default" || s.Enabled {
-		t.Fatalf("robot = %+v", s)
-	}
-	if s := specs[3]; s.ID != "extra" || s.Kind != KindSSH || s.Saved {
+	if s := specs[2]; s.ID != "extra" || s.Kind != KindSSH || s.Label != "extra" {
 		t.Fatalf("extra = %+v", s)
 	}
 }
@@ -52,10 +162,9 @@ func TestIsReadOnly(t *testing.T) {
 	}
 }
 
-// A machine whose herdr does not answer is degraded while its agent stays
-// connected; Retry replaces the session at once instead of waiting for it
-// to end, but not one that has just started.
-func TestRetryReconnectsADegradedMachine(t *testing.T) {
+// A machine is ready once its agent answers, also without herdr: herdr's
+// snapshot is then missing and the reason noted, quietly.
+func TestReadyWithoutHerdr(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
@@ -64,14 +173,23 @@ func TestRetryReconnectsADegradedMachine(t *testing.T) {
 	pollInterval = 50 * time.Millisecond
 	t.Cleanup(func() { pollInterval = old })
 
-	logger := log.New(io.Discard, "", 0)
-	var dials atomic.Int32
+	var logs strings.Builder
+	var logMu sync.Mutex
+	logger := log.New(writerFunc(func(p []byte) (int, error) {
+		logMu.Lock()
+		defer logMu.Unlock()
+		return logs.Write(p)
+	}), "", 0)
 	dial := func(ctx context.Context, spec Spec) (*transport.Session, string, error) {
-		dials.Add(1)
-		s, err := transport.DialLocal(ctx, agent.Options{Logger: logger})
+		s, err := transport.DialLocal(ctx, agent.Options{Logger: log.New(io.Discard, "", 0)})
 		return s, "test/test", err
 	}
-	m := newMachine(Spec{ID: "x", Label: "x", Kind: KindSSH, Session: "herdr-ide-none", Enabled: true}, dial, logger, func(State) {}, func(AgentEvent) {})
+	var readyFirst atomic.Bool // ready was published before herdr's absence was known
+	m := newMachine(Spec{ID: "x", Label: "x", Kind: KindSSH, Session: "herdr-ide-none", Enabled: true}, dial, logger, func(st State) {
+		if st.Status == StatusReady && st.HerdrError == "" && st.Snapshot == nil {
+			readyFirst.Store(true)
+		}
+	}, func(AgentEvent) {})
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -82,61 +200,25 @@ func TestRetryReconnectsADegradedMachine(t *testing.T) {
 		cancel()
 		<-done
 	})
-	waitFor := func(what string, ok func() bool) {
-		t.Helper()
-		for deadline := time.Now().Add(10 * time.Second); !ok(); time.Sleep(10 * time.Millisecond) {
-			if time.Now().After(deadline) {
-				t.Fatalf("timed out waiting for %s (status %s, %d dials)", what, m.State().Status, dials.Load())
-			}
+	for deadline := time.Now().Add(10 * time.Second); m.State().HerdrError == ""; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out (status %s)", m.State().Status)
 		}
 	}
-	waitFor("degraded", func() bool { return m.State().Status == StatusDegraded })
-	first := m.Session()
-	// A session younger than minRetryAge stays.
-	oldAge := minRetryAge
-	t.Cleanup(func() { minRetryAge = oldAge })
-	minRetryAge = time.Hour
-	if m.Retry() || m.Session() != first {
-		t.Fatal("Retry replaced a session that had just started")
+	time.Sleep(300 * time.Millisecond)
+	if st := m.State(); st.Status != StatusReady || st.Snapshot != nil || st.Info == nil || !readyFirst.Load() {
+		t.Fatalf("state %s %+v (ready first: %v)", st.Status, st, readyFirst.Load())
 	}
-	minRetryAge = 0
-	if !m.Retry() {
-		t.Fatal("Retry did not replace the degraded session")
+	logMu.Lock()
+	defer logMu.Unlock()
+	if logs.Len() > 0 {
+		t.Fatalf("logged without herdr: %s", logs.String())
 	}
-	waitFor("a new session", func() bool { s := m.Session(); return dials.Load() == 2 && s != nil && s != first })
-	select {
-	case <-first.Done():
-	default:
-		t.Fatal("the first session is still open")
-	}
-	waitFor("degraded again", func() bool { return m.State().Status == StatusDegraded })
 }
 
-func TestOverridesSaveAndApply(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "conf", "machines.json")
-	o := LoadOverrides(path)
-	if err := o.SetEnabled("gpu", false); err != nil {
-		t.Fatal(err)
-	}
-	if err := o.SetEnabled("robot", true); err != nil {
-		t.Fatal(err)
-	}
-	specs := []Spec{{ID: "gpu", Enabled: true}, {ID: "robot"}, {ID: "other", Enabled: true}}
-	LoadOverrides(path).Apply(specs)
-	if specs[0].Enabled || !specs[1].Enabled || !specs[2].Enabled {
-		t.Fatalf("applied: %+v", specs)
-	}
-	if st, err := os.Stat(path); err != nil || st.Mode().Perm()&0o077 != 0 {
-		t.Fatalf("file: %v %v", st, err)
-	}
-	// A missing or broken file gives none.
-	os.WriteFile(path, []byte("{"), 0o600)
-	specs = []Spec{{ID: "gpu", Enabled: true}}
-	LoadOverrides(path).Apply(specs)
-	if !specs[0].Enabled {
-		t.Fatal("a broken file disabled a machine")
-	}
-}
+type writerFunc func([]byte) (int, error)
+
+func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
 
 // Disabling a connected machine ends its session at once and forgets its
 // herdr state; enabling it connects again.
@@ -152,9 +234,11 @@ func TestDisableAndEnableAtRuntime(t *testing.T) {
 		s, err := transport.DialLocal(ctx, agent.Options{Logger: logger})
 		return s, "test/test", err
 	}
-	mg := NewManager([]Spec{{ID: "x", Label: "x", Kind: KindSSH, Session: "herdr-ide-none", Enabled: true}}, dial, logger)
 	path := filepath.Join(t.TempDir(), "machines.json")
-	mg.UseOverrides(LoadOverrides(path))
+	reg, _ := OpenRegistry(path, nil)
+	reg.Put(Spec{ID: "x", Label: "x", Kind: KindSSH, Target: "x", Enabled: true})
+	mg := NewManager([]Spec{{ID: "x", Label: "x", Kind: KindSSH, Target: "x", Session: "herdr-ide-none", Enabled: true}}, dial, logger)
+	mg.UseRegistry(reg)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -192,7 +276,7 @@ func TestDisableAndEnableAtRuntime(t *testing.T) {
 	if st := m.State(); st.Status != StatusDisabled || st.Enabled || st.Snapshot != nil || dials.Load() != 1 {
 		t.Fatalf("disabled: status %s enabled %v, %d dials", st.Status, st.Enabled, dials.Load())
 	}
-	if specs := []Spec{{ID: "x", Enabled: true}}; func() bool { LoadOverrides(path).Apply(specs); return specs[0].Enabled }() {
+	if r, _ := OpenRegistry(path, nil); r.Specs()[0].Enabled {
 		t.Fatal("the choice was not saved")
 	}
 
@@ -265,9 +349,10 @@ func TestNoteHerdrFollowsTheMachine(t *testing.T) {
 	}
 }
 
-// Machines saved in herdr's catalog from the UI join a running manager and
-// connect; removing one ends its session, forgets its enabled choice and
-// publishes nothing more for it. The local machine cannot be removed.
+// Machines added at runtime are stored, join a running manager and connect;
+// removing one ends its session, deletes its record and publishes nothing
+// more for it. A target or id the core has is refused, and the local machine
+// cannot be removed.
 func TestAddAndRemoveAtRuntime(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -278,10 +363,13 @@ func TestAddAndRemoveAtRuntime(t *testing.T) {
 		s, err := transport.DialLocal(ctx, agent.Options{Logger: logger})
 		return s, "test/test", err
 	}
-	mg := NewManager([]Spec{{ID: LocalID, Label: "local", Kind: KindLocal, Session: "herdr-ide-none", Enabled: true}}, dial, logger)
 	path := filepath.Join(t.TempDir(), "machines.json")
-	o := LoadOverrides(path)
-	mg.UseOverrides(o)
+	reg, _ := OpenRegistry(path, nil)
+	// Stored, but left out of this run (--local-only).
+	reg.Put(Spec{ID: "off", Label: "elsewhere", Target: "u@elsewhere", Enabled: true})
+	mg := NewManager([]Spec{{ID: LocalID, Label: "local", Kind: KindLocal, Session: "herdr-ide-none", Enabled: true}}, dial, logger)
+	mg.UseRegistry(reg)
+	mg.SSHSession = "herdr-ide-none"
 	var afterRemove atomic.Int32
 	var removed atomic.Bool
 	mg.Subscribe(func(st State) {
@@ -308,22 +396,24 @@ func TestAddAndRemoveAtRuntime(t *testing.T) {
 		}
 	}
 
-	spec := Spec{ID: "x", Label: "x", Kind: KindSSH, Target: "x", Session: "herdr-ide-none", Enabled: true, Saved: true}
+	spec := Spec{ID: "x", Label: "x", Target: "u@x", Enabled: true}
 	if err := mg.Add(spec); err != nil {
 		t.Fatal(err)
 	}
-	if err := mg.Add(spec); err != ErrMachineExists {
-		t.Fatalf("added twice: %v", err)
+	for _, dup := range []Spec{spec, {ID: "y", Target: "u@x"}, {ID: "z", Target: "u@elsewhere"}, {ID: "off", Target: "new"}} {
+		if err := mg.Add(dup); err != ErrMachineExists {
+			t.Fatalf("added %+v: %v", dup, err)
+		}
 	}
 	m := mg.Get("x")
 	waitFor("the added machine's session", func() bool { return m.Session() != nil })
-	if st := mg.States(); len(st) != 2 || st[1].ID != "x" || !st[1].Saved {
+	if st := mg.States(); len(st) != 2 || st[1].ID != "x" || st[1].Kind != KindSSH || st[1].Session != "herdr-ide-none" {
 		t.Fatalf("states = %+v", st)
 	}
-	sess := m.Session()
-	if err := mg.SetEnabled("x", true); err != nil {
-		t.Fatal(err)
+	if r, _ := OpenRegistry(path, nil); len(r.Specs()) != 2 || r.Specs()[1].Target != "u@x" {
+		t.Fatalf("stored %+v", r.Specs())
 	}
+	sess := m.Session()
 
 	removed.Store(true)
 	if err := mg.Remove("x"); err != nil {
@@ -341,7 +431,7 @@ func TestAddAndRemoveAtRuntime(t *testing.T) {
 		t.Fatalf("%d states published after the removal", n)
 	}
 	if b, _ := os.ReadFile(path); strings.Contains(string(b), `"x"`) {
-		t.Fatalf("the enabled choice was kept: %s", b)
+		t.Fatalf("the record was kept: %s", b)
 	}
 	if err := mg.Remove("x"); err != ErrUnknownMachine {
 		t.Fatalf("removed twice: %v", err)
@@ -350,11 +440,8 @@ func TestAddAndRemoveAtRuntime(t *testing.T) {
 		t.Fatalf("removed the local machine: %v", err)
 	}
 
-	// A disabled choice made before for the id applies when it comes back.
-	if err := o.SetEnabled("y", false); err != nil {
-		t.Fatal(err)
-	}
-	if err := mg.Add(Spec{ID: "y", Label: "y", Kind: KindSSH, Session: "herdr-ide-none", Enabled: true, Saved: true}); err != nil {
+	// A machine added disabled stays so.
+	if err := mg.Add(Spec{ID: "y", Label: "y", Target: "u@y"}); err != nil {
 		t.Fatal(err)
 	}
 	if st := mg.Get("y").State(); st.Status != StatusDisabled || st.Enabled {
@@ -362,35 +449,50 @@ func TestAddAndRemoveAtRuntime(t *testing.T) {
 	}
 }
 
-// A reload applies herdr's new label and enabled flag, but not the flag of
-// a machine the user enabled or disabled here.
-func TestUpdateFromCatalog(t *testing.T) {
-	var labels []string
+// Renaming is stored for stored machines and kept in memory for --ssh ones;
+// a label another machine has (also one stored but not running) is refused,
+// and the local machine keeps its host's name. Enabling or disabling the
+// local machine stores a record of it.
+func TestSetLabelAndLocalRecord(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "machines.json")
+	reg, _ := OpenRegistry(path, nil)
+	reg.Put(Spec{ID: "a", Label: "a", Target: "a", Enabled: true})
+	reg.Put(Spec{ID: "off", Label: "elsewhere", Target: "e", Enabled: true})
 	mg := NewManager([]Spec{
-		{ID: "a", Label: "a", Kind: KindSSH, Enabled: true, Saved: true},
-		{ID: "b", Label: "b", Kind: KindSSH, Enabled: true, Saved: true},
+		{ID: LocalID, Label: "mac (local)", Kind: KindLocal, Enabled: true},
+		{ID: "a", Label: "a", Kind: KindSSH, Target: "a", Enabled: true},
+		{ID: "extra", Label: "extra", Kind: KindSSH, Target: "extra", Enabled: true},
 	}, nil, log.New(io.Discard, "", 0))
-	o := LoadOverrides("")
-	o.SetEnabled("b", true)
-	mg.UseOverrides(o)
+	mg.UseRegistry(reg)
+	var labels []string
 	mg.Subscribe(func(st State) { labels = append(labels, st.Label) }, func(AgentEvent) {})
 
-	if changed, err := mg.Update(Spec{ID: "a", Label: "a", Enabled: true}); err != nil || changed {
-		t.Fatalf("unchanged: %v %v", changed, err)
+	if err := mg.SetLabel("a", "GPU"); err != nil {
+		t.Fatal(err)
 	}
-	if changed, _ := mg.Update(Spec{ID: "a", Label: "GPU", Enabled: false}); !changed {
-		t.Fatal("not changed")
+	if mg.Get("a").Label() != "GPU" || len(labels) == 0 || labels[0] != "GPU" {
+		t.Fatalf("label %q, published %v", mg.Get("a").Label(), labels)
 	}
-	if st := mg.Get("a").State(); st.Label != "GPU" || st.Status != StatusDisabled || mg.Get("a").Label() != "GPU" {
-		t.Fatalf("a = %s %s", st.Label, st.Status)
+	for _, c := range []struct {
+		id, label string
+		want      error
+	}{{"extra", "GPU", ErrLabelTaken}, {"extra", "elsewhere", ErrLabelTaken}, {LocalID, "x", ErrLocalMachine}, {"nope", "x", ErrUnknownMachine}} {
+		if err := mg.SetLabel(c.id, c.label); err != c.want {
+			t.Fatalf("%s → %s: %v", c.id, c.label, err)
+		}
 	}
-	if len(labels) == 0 || labels[0] != "GPU" {
-		t.Fatalf("published %v", labels)
+	if err := mg.SetLabel("extra", "Extra"); err != nil || mg.Get("extra").Label() != "Extra" {
+		t.Fatalf("--ssh machine: %v", err)
 	}
-	if changed, _ := mg.Update(Spec{ID: "b", Label: "b", Enabled: false}); changed || mg.Get("b").State().Status == StatusDisabled {
-		t.Fatal("herdr's flag replaced the user's choice")
+	if err := mg.SetEnabled(LocalID, false); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := mg.Update(Spec{ID: "nope"}); err != ErrUnknownMachine {
-		t.Fatalf("unknown: %v", err)
+	r, _ := OpenRegistry(path, nil)
+	got := r.Specs()
+	if len(got) != 3 || got[0].Label != "GPU" || got[2] != (Spec{ID: LocalID, Kind: KindLocal}) {
+		t.Fatalf("stored %+v", got)
+	}
+	if mg.Get(LocalID).State().Status != StatusDisabled {
+		t.Fatal("the local machine is not disabled")
 	}
 }

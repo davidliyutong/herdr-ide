@@ -8,8 +8,9 @@ import (
 	"time"
 )
 
-// Manager owns all machines. Machines saved in herdr's catalog from the UI
-// are added and removed while it runs (Add, Remove).
+// Manager owns all machines. Machines are added, removed, renamed, enabled
+// and disabled while it runs; with a Registry (UseRegistry) those changes are
+// stored.
 type Manager struct {
 	logger *log.Logger
 	dial   Dialer
@@ -31,36 +32,92 @@ type Manager struct {
 	agentFn map[int]func(AgentEvent)
 	nextSub int
 
-	// overrides keep the user's enabled and disabled machines (UseOverrides).
-	overrides *Overrides
+	// reg stores the machines (UseRegistry); nil keeps changes in memory.
+	reg *Registry
+	// SSHSession is the herdr session of SSH machines added at runtime.
+	SSHSession string
 }
 
-// UseOverrides applies the user's enabled and disabled machines and keeps
-// later changes in o. Call before Run.
-func (mg *Manager) UseOverrides(o *Overrides) {
-	mg.overrides = o
-	for _, m := range mg.list() {
-		specs := []Spec{m.spec}
-		o.Apply(specs)
-		m.setEnabled(specs[0].Enabled)
+// UseRegistry stores later changes of the machines in r. Call before Run.
+func (mg *Manager) UseRegistry(r *Registry) {
+	mg.reg = r
+}
+
+// store writes machine s's record when the registry keeps it: a stored SSH
+// machine, or the local machine. Machines given with --ssh are not stored.
+func (mg *Manager) store(s Spec) error {
+	if mg.reg == nil {
+		return nil
 	}
+	if _, ok := mg.reg.Get(s.ID); !ok && s.ID != LocalID {
+		return nil
+	}
+	return mg.reg.Put(s)
 }
 
-// SetEnabled enables or disables machine id from the UI: it is saved over
-// herdr's catalog, and the machine connects or ends its session at once. A
-// disabled machine's panes keep running in its herdr.
+// spec is machine m's record as it is now.
+func spec(m *Machine) Spec {
+	st := m.State()
+	s := m.spec
+	s.Label, s.Enabled = st.Label, st.Enabled
+	return s
+}
+
+// SetEnabled enables or disables machine id: stored, and the machine
+// connects or ends its session at once. A disabled machine's programs keep
+// running there.
 func (mg *Manager) SetEnabled(id string, on bool) error {
 	m := mg.Get(id)
 	if m == nil {
 		return ErrUnknownMachine
 	}
-	if mg.overrides != nil {
-		if err := mg.overrides.SetEnabled(id, on); err != nil {
-			return err
-		}
+	s := spec(m)
+	s.Enabled = on
+	if err := mg.store(s); err != nil {
+		return err
 	}
 	m.setEnabled(on)
 	return nil
+}
+
+// SetLabel renames machine id. The local machine keeps its host's name; a
+// label another machine has (running or stored) is refused, since
+// --machine selects by label.
+func (mg *Manager) SetLabel(id, label string) error {
+	m := mg.Get(id)
+	if m == nil {
+		return ErrUnknownMachine
+	}
+	if m.Local() {
+		return ErrLocalMachine
+	}
+	if mg.taken(id, func(s Spec) bool { return s.Label == label }) {
+		return ErrLabelTaken
+	}
+	s := spec(m)
+	s.Label = label
+	if err := mg.store(s); err != nil {
+		return err
+	}
+	m.setLabel(label)
+	return nil
+}
+
+// taken reports whether a machine other than id, running or stored, matches.
+func (mg *Manager) taken(id string, match func(Spec) bool) bool {
+	for _, m := range mg.list() {
+		if m.ID() != id && match(spec(m)) {
+			return true
+		}
+	}
+	if mg.reg != nil {
+		for _, s := range mg.reg.Specs() {
+			if s.ID != id && match(s) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // NewManager creates machines for specs; call Run to connect them.
@@ -135,14 +192,20 @@ func (mg *Manager) start(m *Machine) {
 	}()
 }
 
-// Add adds a machine, one just saved in herdr's catalog, and connects it
-// unless it is disabled (by herdr or by the user's earlier choice for its
-// id).
+// Add adds an SSH machine, stores it and connects it unless it is
+// disabled. A machine with its id or its target exists already.
 func (mg *Manager) Add(s Spec) error {
-	if mg.overrides != nil {
-		specs := []Spec{s}
-		mg.overrides.Apply(specs)
-		s = specs[0]
+	s.Kind = KindSSH
+	if s.Session == "" {
+		s.Session = mg.SSHSession
+	}
+	if s.ID == "" || mg.taken("", func(o Spec) bool { return o.ID == s.ID || (o.Kind == KindSSH && o.Target == s.Target) }) {
+		return ErrMachineExists
+	}
+	if mg.reg != nil {
+		if err := mg.reg.Put(s); err != nil {
+			return err
+		}
 	}
 	m := mg.newMachine(s)
 	mg.mmu.Lock()
@@ -156,9 +219,9 @@ func (mg *Manager) Add(s Spec) error {
 	return nil
 }
 
-// Remove forgets a machine removed from herdr's catalog: its session ends
-// (the agent exits and stops what it started; its panes keep running in its
-// herdr) and its enabled choice is dropped. The local machine stays.
+// Remove forgets a machine: its record is deleted and its session ends (the
+// agent exits and stops what it started; programs in its terminal core keep
+// running there). The local machine stays.
 func (mg *Manager) Remove(id string) error {
 	mg.mmu.Lock()
 	m := mg.byID[id]
@@ -170,6 +233,12 @@ func (mg *Manager) Remove(id string) error {
 		mg.mmu.Unlock()
 		return ErrLocalMachine
 	}
+	if mg.reg != nil {
+		if err := mg.reg.Delete(id); err != nil {
+			mg.mmu.Unlock()
+			return err
+		}
+	}
 	delete(mg.byID, id)
 	mg.order = slices.DeleteFunc(slices.Clone(mg.order), func(x string) bool { return x == id })
 	stop := mg.stops[id]
@@ -178,31 +247,7 @@ func (mg *Manager) Remove(id string) error {
 	if stop != nil {
 		stop()
 	}
-	if mg.overrides != nil {
-		if err := mg.overrides.Forget(id); err != nil {
-			mg.logger.Printf("machine %s: %v", m.Label(), err)
-		}
-	}
 	return nil
-}
-
-// Update applies what changed in herdr's catalog for a machine the core
-// has: its label, and herdr's enabled flag unless the user enabled or
-// disabled the machine here. The target and session stay as they were. It
-// reports whether anything changed.
-func (mg *Manager) Update(s Spec) (bool, error) {
-	m := mg.Get(s.ID)
-	if m == nil {
-		return false, ErrUnknownMachine
-	}
-	if mg.overrides != nil {
-		specs := []Spec{s}
-		mg.overrides.Apply(specs)
-		s = specs[0]
-	}
-	renamed := m.setLabel(s.Label)
-	toggled := m.setEnabled(s.Enabled)
-	return renamed || toggled, nil
 }
 
 // SetStreamHandler installs the handler for agent-initiated streams. Call

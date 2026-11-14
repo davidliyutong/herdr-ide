@@ -30,8 +30,10 @@ final class EventTests: XCTestCase {
     func testDecode() {
         XCTAssertEqual(EventConnection.decode(#"{"t":"machines","list":[{"id":"local","label":"Mac","status":"ready","snapshot":{}},{"id":"b","label":"","status":"connecting"},{"label":"no id"}]}"#),
                        .machines([Machine(id: "local", label: "Mac", status: "ready"), Machine(id: "b", label: "b", status: "connecting")]))
-        XCTAssertEqual(EventConnection.decode(#"{"t":"machine","state":{"id":"b","label":"Box","status":"degraded","error":"x"}}"#),
-                       .machine(Machine(id: "b", label: "Box", status: "degraded")))
+        XCTAssertEqual(EventConnection.decode(#"{"t":"machine","state":{"id":"b","label":"Box","status":"auth_required","error":"x"}}"#),
+                       .machine(Machine(id: "b", label: "Box", status: "auth_required")))
+        XCTAssertEqual(EventConnection.decode(#"{"t":"machine","state":{"id":"b","label":"Box","kind":"ssh","status":"ready","hc":{"state":"error","code":"stopped"}}}"#),
+                       .machine(Machine(id: "b", label: "Box", status: "ready", kind: "ssh", hc: BackendState(phase: .error, code: "stopped"))))
         XCTAssertEqual(EventConnection.decode(#"{"t":"gui","state":{"m":"b","phase":"ready","windows":[{"id":3,"title":"plot","w":640,"h":480,"pid":9},{"id":4,"title":"Save","w":300,"h":200,"transient":3},{"title":"no id"}]}}"#),
                        .gui(machine: "b", windows: [ProgramWindow(machine: "b", id: 3, title: "plot", width: 640, height: 480),
                                                     ProgramWindow(machine: "b", id: 4, title: "Save", width: 300, height: 200, transient: 3)]))

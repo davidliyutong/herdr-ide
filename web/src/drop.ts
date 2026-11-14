@@ -100,7 +100,7 @@ function readyLocal(ms = OPEN_WAIT_MS): Promise<MachineState | undefined> {
     if (!desktopShell || s.readOnly) return null;
     const m = folderDropTarget();
     if (m?.status === 'disabled') return null;
-    return m?.status === 'ready' || m?.status === 'degraded' ? m : undefined;
+    return m?.status === 'ready' ? m : undefined;
   };
   const now = check();
   if (now !== undefined) return Promise.resolve(now ?? undefined);

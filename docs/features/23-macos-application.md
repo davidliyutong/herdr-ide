@@ -102,7 +102,14 @@ terminal core, which get no virtual display; Linux and Windows.
   a tab bar of the selected workspace under a transparent title bar, and
   the selected tab's panes with draggable dividers. A workspace's row
   selects it, its plus button opens a terminal in it, and its menu creates
-  terminals and renames or closes it. `Theme` holds the colors, in light
+  terminals and renames or closes it. A connected machine's menu starts its
+  terminal core when it was stopped, or restarts it (the programs keep
+  running) or stops it after asking, since every terminal there ends
+  (`MachineDialogs`, `POST /api/m/{id}/hc/{action}`,
+  [02](02-multi-machine-transport.md)); a refusal shows the core's code as
+  a sentence. A machine's row shows why its terminals are unavailable,
+  also for machines the window is not subscribed to (the machine state's
+  `hc`). `Theme` holds the colors, in light
   and dark, and the metrics, whose values are the design tokens shared with
   the web UI ([24](24-design-tokens.md)); terminals use the web UI's
   default 16-color palette.

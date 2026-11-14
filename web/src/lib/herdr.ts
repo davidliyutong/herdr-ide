@@ -74,23 +74,30 @@ export interface AgentInfo {
   herdr_error?: string;
 }
 
-export type MachineStatus = 'connecting' | 'ready' | 'degraded' | 'auth_required' | 'error' | 'disabled';
+export type MachineStatus = 'connecting' | 'ready' | 'auth_required' | 'error' | 'disabled';
+
+/** The core's connection to a machine's terminal core (docs/features/22). */
+export interface MachineHC {
+  state: 'starting' | 'ready' | 'error';
+  code?: string;
+  version?: string;
+}
 
 export interface MachineState {
   id: string;
   label: string;
   kind: 'local' | 'ssh';
   target?: string;
-  session: string;
   enabled: boolean;
-  /** One of herdr's saved machines, which herdr machine remove removes. */
-  saved?: boolean;
   status: MachineStatus;
   error?: string;
   platform?: string;
   info?: AgentInfo;
+  hc?: MachineHC;
   snapshot?: Snapshot;
   layouts?: Record<string, LayoutExport>;
+  /** Why herdr does not answer there (the machine is ready without it). */
+  herdr_error?: string;
   updated_at: number;
 }
 

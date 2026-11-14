@@ -135,37 +135,29 @@ export function surfaceMenu(o: {
   return out;
 }
 
-/** Adds a machine to herdr's saved machines (AddMachineDialog). */
+/** Adds an SSH machine (AddMachineDialog). */
 const addMachineItem = (): MenuEntry => ({
   label: t('menu.addMachine'),
   icon: <Plus />,
   run: () => useStore.getState().openAddMachine(true),
 });
 
-/** Reloads herdr's saved machines (also the sidebar's button). */
-const refreshMachinesItem = (): MenuEntry => ({
-  label: t('menu.refreshMachines'),
-  icon: <RefreshCw />,
-  run: () => void actions.refreshMachines(),
-});
-
-/** The menu of the sidebar's free space: add a machine, reload them. */
+/** The menu of the sidebar's free space: add a machine. */
 export function sidebarMenu(): MenuEntry[] {
-  return useStore.getState().readOnly ? [] : [addMachineItem(), refreshMachinesItem()];
+  return useStore.getState().readOnly ? [] : [addMachineItem()];
 }
 
 /** A machine's menu in the sidebar: enable or disable it, restart or stop
  * its herdr server (needs the agent connected), update herdr (the
  * application's copy on the local machine, herdr's own --remote flow on an
- * SSH machine); rename or remove it in herdr's saved machines, add one or
- * reload them. */
+ * SSH machine); rename or remove an SSH machine, add one. */
 export function machineMenu(m: string): MenuEntry[] {
   const s = useStore.getState();
   const st = s.machines[m];
   if (s.readOnly || !st) return [];
   const out: MenuEntry[] = [];
   if (st.status !== 'disabled') {
-    const connected = st.status === 'ready' || st.status === 'degraded';
+    const connected = st.status === 'ready';
     // Without a herdr executable there, a restart would stop nothing and
     // start nothing; herdr --remote installs one on an SSH machine.
     const missing = herdrMissing(st);
@@ -197,14 +189,14 @@ export function machineMenu(m: string): MenuEntry[] {
   } else {
     out.push({ label: t('menu.enableMachine'), icon: <Power />, run: () => void actions.setMachineEnabled(m, true) });
   }
-  // Machines given with --ssh are not herdr's to rename or remove.
-  if (st.saved)
+  // The local machine keeps its host's name and stays.
+  if (st.kind === 'ssh')
     out.push(
       'sep',
       { label: t('menu.renameMachine'), icon: <Pencil />, run: () => actions.startRename('machine', m, m) },
       { label: t('menu.removeMachine'), icon: <Trash2 />, danger: true, run: () => void actions.removeMachine(m) },
     );
-  out.push('sep', addMachineItem(), refreshMachinesItem());
+  out.push('sep', addMachineItem());
   return out;
 }
 

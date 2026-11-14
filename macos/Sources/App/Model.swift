@@ -144,6 +144,15 @@ final class AppModel {
         onChange?()
     }
 
+    /// Starts, restarts or stops a machine's terminal core
+    /// (POST /api/m/{id}/hc/{action}); `done` gets nil, or the core's error
+    /// code when it failed.
+    func terminalCore(_ action: String, on machine: String, done: @escaping (String?) -> Void) {
+        api.request("POST", "api/m/\(machine)/hc/\(action)") { status, reply in
+            done(status == 200 ? nil : reply?["error"]?.string ?? String(status))
+        }
+    }
+
     func select(machine: String) {
         guard selectedMachine != machine else { return }
         selectedMachine = machine

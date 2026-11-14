@@ -13,6 +13,7 @@ import (
 	"github.com/coder/websocket"
 
 	"herdr-ide/internal/agentproto"
+	"herdr-ide/internal/gui"
 	"herdr-ide/internal/hc"
 	"herdr-ide/internal/machines"
 )
@@ -42,6 +43,7 @@ const (
 	termCodeStart      = "start_failed"
 	termCodeConnect    = "connect_failed"
 	termCodeLost       = "disconnected"
+	termCodeStopped    = "stopped"
 )
 
 // termIdle is how long a backend's connection stays without clients.
@@ -84,6 +86,11 @@ type termBackend struct {
 	stop    context.CancelFunc
 	wake    chan struct{}
 	idle    *time.Timer
+	// stopped: the terminal core was stopped from the UI, so the backend
+	// starts none until it is started again (or the backend starts anew).
+	stopped bool
+	// pub orders the publications of the state on the machine.
+	pub sync.Mutex
 }
 
 func (h *termHub) backend(id string) *termBackend {
@@ -103,10 +110,31 @@ func (h *termHub) wakeUp(id string) {
 	b := h.backends[id]
 	h.mu.Unlock()
 	if b != nil {
-		select {
-		case b.wake <- struct{}{}:
-		default:
-		}
+		b.wakeUp()
+	}
+}
+
+func (b *termBackend) wakeUp() {
+	select {
+	case b.wake <- struct{}{}:
+	default:
+	}
+}
+
+// publish shows the backend's state in its machine's state (and the
+// display's keeper follows a ready terminal core).
+func (b *termBackend) publish() {
+	b.pub.Lock()
+	defer b.pub.Unlock()
+	b.mu.Lock()
+	var st *machines.HCState
+	if b.stop != nil {
+		st = &machines.HCState{State: b.state, Code: b.code, Version: b.version}
+	}
+	b.mu.Unlock()
+	if mc := b.s.mg.Get(b.id); mc != nil {
+		mc.SetHC(st)
+		b.s.gui.ServerReady(mc, gui.ServerHC, st != nil && st.State == termReady)
 	}
 }
 
@@ -142,6 +170,7 @@ func (b *termBackend) subscribe(c *termClient) {
 	if b.stop == nil {
 		ctx, cancel := context.WithCancel(context.Background())
 		b.stop = cancel
+		b.stopped = false
 		go b.run(ctx)
 	}
 }
@@ -160,27 +189,33 @@ func (b *termBackend) unsubscribe(c *termClient) {
 	}
 	b.idle = time.AfterFunc(termIdle, func() {
 		b.mu.Lock()
-		defer b.mu.Unlock()
-		if len(b.subs) == 0 && b.stop != nil {
+		closing := len(b.subs) == 0 && b.stop != nil
+		if closing {
 			b.stop()
 			b.stop = nil
+		}
+		b.mu.Unlock()
+		if closing {
+			b.publish()
 		}
 	})
 }
 
 func (b *termBackend) setState(state, code string) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	if state != termReady {
 		b.conn, b.terms = nil, nil
 	}
 	if b.state == state && b.code == code {
+		b.mu.Unlock()
 		return
 	}
 	b.state, b.code = state, code
 	for c := range b.subs {
 		c.sendJSON(b.stateMsg())
 	}
+	b.mu.Unlock()
+	b.publish()
 }
 
 func (b *termBackend) run(ctx context.Context) {
@@ -206,12 +241,15 @@ func (b *termBackend) run(ctx context.Context) {
 	b.mu.Lock()
 	b.conn, b.terms, b.state, b.code = nil, nil, termStarting, ""
 	b.mu.Unlock()
+	b.publish()
 }
 
 // ensure makes the machine's terminal core run the executable this build
-// carries and returns once it answers. A read-only core installs and starts
-// nothing: it uses a core that already runs.
-func (b *termBackend) ensure(ctx context.Context, mc *machines.Machine) (code string) {
+// carries and returns once it answers; with restart, a core that runs is
+// restarted (its successor adopts the programs). A read-only core installs
+// and starts nothing: it uses a core that already runs. After a stop from
+// the UI none is started until it is started again.
+func (b *termBackend) ensure(ctx context.Context, mc *machines.Machine, restart bool) (code string) {
 	sess := mc.Session()
 	info := mc.State().Info
 	if sess == nil || info == nil {
@@ -260,9 +298,9 @@ func (b *termBackend) ensure(ctx context.Context, mc *machines.Machine) (code st
 	switch {
 	case !st.Running:
 		action = "start"
-	case installed:
-		// The running core is from another build: its successor adopts the
-		// programs, which keep running.
+	case installed || restart:
+		// The running core is from another build (or a restart was asked
+		// for): its successor adopts the programs, which keep running.
 		action = "restart"
 	}
 	if action == "" {
@@ -270,6 +308,12 @@ func (b *termBackend) ensure(ctx context.Context, mc *machines.Machine) (code st
 	}
 	if readOnly {
 		return termCodeNotRunning
+	}
+	b.mu.Lock()
+	stopped := b.stopped
+	b.mu.Unlock()
+	if stopped && !st.Running {
+		return termCodeStopped
 	}
 	rep, err = sess.Request(ctx, agentproto.Header{Op: agentproto.OpHC, Action: action})
 	if err != nil || rep.HC == nil || !rep.HC.Running {
@@ -292,7 +336,7 @@ func (b *termBackend) serve(ctx context.Context) (code string) {
 		return termCodeOffline
 	}
 	b.setState(termStarting, "")
-	if code := b.ensure(ctx, mc); code != "" {
+	if code := b.ensure(ctx, mc, false); code != "" {
 		return code
 	}
 	dctx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -319,6 +363,7 @@ func (b *termBackend) serve(ctx context.Context) (code string) {
 		c.sendJSON(b.snapshotMsg())
 	}
 	b.mu.Unlock()
+	b.publish()
 
 	for {
 		// The core sends a heartbeat every 15 s without events.
@@ -754,4 +799,83 @@ func (c *termClient) pump(id uint32, st *hc.Stream) {
 		}
 		c.enqueue(outMsg{binary: true, data: frame})
 	}
+}
+
+// handleHCStatus reports a machine's terminal core: the installed
+// executable's digest, whether a core answers, its version, session and
+// socket (agentproto.HCStatus).
+func (s *Server) handleHCStatus(w http.ResponseWriter, r *http.Request) {
+	mc := s.machine(w, r)
+	if mc == nil {
+		return
+	}
+	sess := mc.Session()
+	if sess == nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": termCodeOffline})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	rep, err := sess.Request(ctx, agentproto.Header{Op: agentproto.OpHC, Action: "status"})
+	if err != nil || rep.HC == nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "transport"})
+		return
+	}
+	writeJSON(w, http.StatusOK, rep.HC)
+}
+
+// handleHCAction starts, stops or restarts a machine's terminal core from
+// the UI (POST /api/m/{id}/hc/{start|stop|restart}). Starting installs the
+// build's executable when the machine has another one; restarting keeps the
+// programs (the core's successor adopts them); stopping ends every program
+// of the core and keeps the core stopped until it is started again, also
+// while clients stay subscribed. The reply is the core's status.
+func (s *Server) handleHCAction(w http.ResponseWriter, r *http.Request) {
+	mc := s.machine(w, r)
+	if mc == nil {
+		return
+	}
+	action := r.PathValue("action")
+	if action != "start" && action != "stop" && action != "restart" {
+		http.Error(w, "unknown action", http.StatusNotFound)
+		return
+	}
+	sess := mc.Session()
+	if sess == nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": termCodeOffline})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
+	defer cancel()
+	b := s.term.backend(mc.ID())
+	b.mu.Lock()
+	b.stopped = action == "stop"
+	b.mu.Unlock()
+	ev := map[string]any{"machine": mc.ID()}
+	code := ""
+	if action == "stop" {
+		rep, err := sess.Request(ctx, agentproto.Header{Op: agentproto.OpHC, Action: "stop"})
+		if err != nil {
+			code = "transport"
+		} else if !rep.OK {
+			code = rep.Code
+		}
+	} else {
+		code = b.ensure(ctx, mc, action == "restart")
+	}
+	b.wakeUp()
+	if code != "" {
+		ev["error"] = code
+	}
+	s.audit.log(r, "hc."+action, ev)
+	if code != "" {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": code})
+		return
+	}
+	rep, err := sess.Request(ctx, agentproto.Header{Op: agentproto.OpHC, Action: "status"})
+	if err != nil || rep.HC == nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "transport"})
+		return
+	}
+	writeJSON(w, http.StatusOK, rep.HC)
 }

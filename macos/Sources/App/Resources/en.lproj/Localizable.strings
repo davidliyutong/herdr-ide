@@ -30,6 +30,17 @@
 "backend.start_failed" = "The terminal core did not start.";
 "backend.connect_failed" = "The terminal core does not answer.";
 "backend.disconnected" = "The connection to the terminals was lost. Reconnecting…";
+"backend.stopped" = "The terminal core was stopped.";
+"backend.not_installed" = "The terminal core is not installed on the machine.";
+"backend.stop_failed" = "The terminal core did not stop.";
+"backend.transport" = "The machine did not answer.";
+"menu.startCore" = "Start Terminal Core";
+"menu.restartCore" = "Restart Terminal Core";
+"menu.stopCore" = "Stop Terminal Core…";
+"core.stopTitle" = "Stop the terminal core of %@?";
+"core.stopInfo" = "Every terminal on the machine ends, with its program. The core stays stopped until you start it again.";
+"core.stop" = "Stop";
+"core.failed" = "The terminal core of %@ did not do it";
 "empty.title" = "No terminal open";
 "empty.hint" = "Press ⌘T to start one.";
 "core.missing" = "The application's core is missing: %@";

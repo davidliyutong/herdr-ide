@@ -36,16 +36,9 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
 
 // servePTY runs argv (with env, nil for the core's own) in a PTY on the core
 // host, sized as the browser asked, and bridges it to a WebSocket until the
-// command ends or the browser leaves, which ends the command. It reports
-// whether the command ran.
+// command ends or the browser leaves, which ends the command; the socket
+// closes with the reason "done". It reports whether the command ran.
 func servePTY(w http.ResponseWriter, r *http.Request, argv []string, env []string) bool {
-	return servePTYThen(w, r, argv, env, nil)
-}
-
-// servePTYThen is servePTY with finish, when not nil, called once the
-// command ran and ended; what it returns is the reason the WebSocket closes
-// with (at most 123 bytes), which tells the browser the outcome.
-func servePTYThen(w http.ResponseWriter, r *http.Request, argv []string, env []string, finish func() string) bool {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
 	if err != nil {
 		return false
@@ -108,11 +101,7 @@ func servePTYThen(w http.ResponseWriter, r *http.Request, argv []string, env []s
 	case <-drained:
 	case <-time.After(ptyDrainTimeout):
 	}
-	reason := "done"
-	if finish != nil {
-		reason = finish()
-	}
-	conn.Close(websocket.StatusNormalClosure, reason)
+	conn.Close(websocket.StatusNormalClosure, "done")
 	return true
 }
 

@@ -34,10 +34,10 @@ here; both READMEs link to this page instead of repeating it.
 | Flag | Default | Description |
 | --- | --- | --- |
 | `--local-session` | `default` | herdr session used on the local machine. |
-| `--remote-session` | – | herdr session used on every remote machine instead of the one saved in herdr (development and tests against an isolated session). |
-| `--local-only` | `false` | Do not connect to herdr's saved SSH machines (`--ssh` targets are still used). |
+| `--remote-session` | – | herdr session used on every remote machine instead of herdr's default (development and tests against an isolated session). |
+| `--local-only` | `false` | Do not connect to the stored SSH machines (`--ssh` targets are still used). |
 | `--machine` | – | Connect only these machines, by id, label or ssh target (repeatable). |
-| `--ssh` | – | Extra ssh target (`~/.ssh/config` alias or `user@host`) not saved in herdr (repeatable). |
+| `--ssh` | – | Extra ssh target (`~/.ssh/config` alias or `user@host`) for this run, not stored; renaming or disabling it in the UI lasts until the core stops (repeatable). |
 | `--instance` | – | State instance: machines use `~/.herdr-ide-<instance>` instead of `~/.herdr-ide`, with separate sockets, code-server process and settings. Lets a development core run next to the daily one. |
 
 ### code-server
@@ -226,13 +226,17 @@ owned by you, mode 0700), downloads in the user cache directory
 (`~/Library/Caches/herdr-ide/code-server` on macOS, `~/.cache/herdr-ide/code-server`
 on Linux) with `.sha256` sidecars (also recorded for releases that machines
 downloaded themselves), the settings in `settings[-<instance>].json`, the
-keybindings in `keybindings[-<instance>].json` and machines enabled or
-disabled in the sidebar in `machines[-<instance>].json`, all in the user
-configuration directory (`~/Library/Application Support/herdr-ide/` on
+keybindings in `keybindings[-<instance>].json` and the machines in
+`machines[-<instance>].json` (`{"version": 1, "machines": [{id, label,
+kind, target, enabled}]}`: the SSH machines, and the local machine's
+enabled flag once it was changed; herdr's saved machines are imported into
+it the first time a core of the instance starts without one), all in the
+user configuration directory (`~/Library/Application Support/herdr-ide/` on
 macOS, `~/.config/herdr-ide/` on Linux; directory 0700, files 0600 replaced
 atomically, kept until removed). The settings and keybindings files can be
 edited by hand: the core reads them again within two seconds, keeps entries
-it does not know and reports values it cannot use.
+it does not know and reports values it cannot use. The machines file is
+read when the core starts and written by it at every change.
 
 A release directory holds the core, the bundled `herdr`, `LICENSE`,
 `THIRD_PARTY_NOTICES.md`, `licenses.md` and `licenses/` (`herdr/`,
