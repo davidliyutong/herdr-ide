@@ -5,8 +5,8 @@
 #   app      the .app in dist/desktop/mac[-arm64]/
 #   dmg      the .app and a DMG
 #   install  the .app, copied over INSTALL_DIR/<app> (default /Applications).
-#            A copy running from there is quit first (its core stops, herdr's
-#            sessions keep running) and started again afterwards.
+#            A copy running from there is quit first (its core stops, the
+#            terminal cores keep running) and started again afterwards.
 #   dev      unpackaged Electron in development mode
 set -euo pipefail
 cd "$(dirname "$0")/.."

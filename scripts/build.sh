@@ -2,8 +2,7 @@
 # Builds the web UI, the VS Code bridge extension, the per-platform agents
 # (embedded gzip), fetches the pinned herdr-core of each agent platform
 # (embedded gzip), then builds the core for TARGETS (default: host platform),
-# packaged beside native herdr and license notices. Names come from
-# internal/brand.
+# packaged with its license notices. Names come from internal/brand.
 #
 #   scripts/build.sh                       # host archive in dist/release/
 #   TARGETS="linux/amd64 darwin/arm64" scripts/build.sh
@@ -17,9 +16,6 @@ SLUG=$(sed -n 's/^[[:space:]]*Slug = "\(.*\)"$/\1/p' internal/brand/brand.go)
 LDFLAGS="-s -w -X ${MODULE}/internal/agentproto.Version=${VERSION}"
 AGENT_PLATFORMS=${AGENT_PLATFORMS:-"linux/amd64 linux/arm64 darwin/amd64 darwin/arm64"}
 TARGETS=${TARGETS:-"$(go env GOOS)/$(go env GOARCH)"}
-
-echo "==> native herdr companions"
-go run ./scripts/fetch-herdr $TARGETS
 
 if [[ -z "${SKIP_WEB:-}" ]]; then
   echo "==> web"

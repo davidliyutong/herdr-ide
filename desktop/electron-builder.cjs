@@ -15,7 +15,6 @@ const arch = process.env.DESKTOP_ARCH || process.arch;
 if (!['arm64', 'x64'].includes(arch)) throw new Error(`Unsupported macOS architecture: ${arch}`);
 const goArch = arch === 'x64' ? 'amd64' : 'arm64';
 const core = `../dist/${slug}-darwin-${goArch}`;
-const herdr = `../dist/herdr/herdr-darwin-${goArch}`;
 
 module.exports = {
   appId: `dev.${slug}.desktop`,
@@ -30,9 +29,6 @@ module.exports = {
   },
   extraResources: [
     { from: core, to: `bin/${slug}` },
-    // Beside the core, where it finds the bundled herdr (docs/features/15).
-    { from: herdr, to: 'bin/herdr' },
-    { from: '../licenses/herdr', to: 'licenses/herdr' },
     // Written by scripts/fetch-hc from the herdr-core release the core embeds.
     { from: '../dist/hc/licenses', to: 'licenses/herdr-core' },
     { from: '../licenses/herdr-detect', to: 'licenses/herdr-detect' },
@@ -48,7 +44,7 @@ module.exports = {
     if (packing !== arch) {
       throw new Error(`Packaging ${packing} with ${goArch} binaries; set DESKTOP_ARCH=${packing} (scripts/desktop.sh does)`);
     }
-    for (const file of [core, herdr, '../dist/hc/licenses/LICENSE', '../web/dist/licenses.md']) {
+    for (const file of [core, '../dist/hc/licenses/LICENSE', '../web/dist/licenses.md']) {
       if (!existsSync(join(__dirname, file))) throw new Error(`Missing ${file}; build it with scripts/desktop.sh`);
     }
   },

@@ -45,8 +45,7 @@ if [[ -z "${SKIP_CORE:-}" ]]; then
   TARGETS="darwin/$go_arch" scripts/build.sh
 fi
 core=dist/$SLUG-darwin-$go_arch
-herdr=dist/herdr/herdr-darwin-$go_arch
-for f in "$core" "$herdr" dist/hc/licenses/LICENSE; do
+for f in "$core" dist/hc/licenses/LICENSE; do
   [[ -e "$f" ]] || { echo "missing $f: run scripts/build.sh" >&2; exit 1; }
 done
 
@@ -67,27 +66,22 @@ cp -R "$derived/Build/Products/Release/$NAME.app" "$app"
 res="$app/Contents/Resources"
 mkdir -p "$res/bin" "$res/licenses/ghostty"
 cp "$core" "$res/bin/$SLUG"
-# Beside the core, where it finds the bundled herdr (docs/features/15).
-cp "$herdr" "$res/bin/herdr"
-chmod 755 "$res/bin/"*
+chmod 755 "$res/bin/$SLUG"
 cp LICENSE THIRD_PARTY_NOTICES.md "$res/licenses/"
-cp -R licenses/herdr "$res/licenses/herdr"
 cp -R licenses/herdr-detect "$res/licenses/herdr-detect"
 cp -R dist/hc/licenses "$res/licenses/herdr-core"
 cp macos/.deps/libghostty-spm/LICENSE "$res/licenses/ghostty/LICENSE-libghostty-spm"
 cp macos/.deps/libghostty-spm/Sources/GhosttyTheme/LICENSE "$res/licenses/ghostty/LICENSE-themes"
 
-# Sign from the inside out: the executables in Resources, then the bundle,
-# which seals everything in it. SIGN_IDENTITY is a certificate's name
+# Sign from the inside out: the core in Resources, then the bundle, which
+# seals everything in it. SIGN_IDENTITY is a certificate's name
 # ("Developer ID Application: ..."); the default "-" signs ad hoc, which
 # runs on this machine and on others after the user allows it.
 identity=${SIGN_IDENTITY:--}
 echo "==> codesign ($identity)"
 stamp=(--timestamp)
 [[ "$identity" == "-" ]] && stamp=(--timestamp=none)
-for exe in "$res/bin/$SLUG" "$res/bin/herdr"; do
-  codesign --force --options runtime "${stamp[@]}" --sign "$identity" "$exe"
-done
+codesign --force --options runtime "${stamp[@]}" --sign "$identity" "$res/bin/$SLUG"
 codesign --force --options runtime "${stamp[@]}" --sign "$identity" "$app"
 codesign --verify --deep --strict "$app"
 
