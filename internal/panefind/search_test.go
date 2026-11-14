@@ -108,7 +108,8 @@ func TestWholeWord(t *testing.T) {
 	if res := Search(line, 0, 1<<15, m, false, Point{}, true); res.Total != 1 {
 		t.Errorf("rejected again and again: %d matches", res.Total)
 	}
-	if d := time.Since(began); d > 2*time.Second {
+	// Without the bound this takes minutes (quadratic in the line).
+	if d := time.Since(began); d > 2*time.Second*slowdown {
 		t.Errorf("rejected again and again: %s", d)
 	}
 }
