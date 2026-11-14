@@ -61,11 +61,23 @@ function report(e: unknown) {
   useStore.getState().toast?.(msg);
 }
 
-/** The reason a machine request failed, from the core's error code. */
+/** The translations of the core's error codes for machine requests. */
+const machineErrors: Record<string, MessageKey> = {
+  label_taken: 'machine.labelTaken',
+  machine_exists: 'machine.exists',
+  invalid: 'machine.invalid',
+  unknown: 'machine.gone',
+  local: 'machine.localOnly',
+  save: 'machine.notSaved',
+};
+
+/** The reason a machine request failed, from the core's error code (with
+ * the system's reason when the file could not be saved). */
 async function machineError(res: Response): Promise<string> {
   const body = (await res.json().catch(() => ({}))) as { error?: string; detail?: string };
-  if (body.error === 'label_taken') return t('machine.labelTaken');
-  if (body.error === 'machine_exists') return t('machine.exists');
+  const key = body.error ? machineErrors[body.error] : undefined;
+  if (body.error === 'save' && body.detail) return t('machine.notSavedBecause', { detail: body.detail });
+  if (key) return t(key);
   return body.detail || body.error || String(res.status);
 }
 
@@ -278,7 +290,7 @@ export const actions = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled }),
       });
-      if (!res.ok) throw new Error(t('machine.enableFailed', { detail: (await res.text()).trim() || String(res.status) }));
+      if (!res.ok) throw new Error(t('machine.enableFailed', { detail: await machineError(res) }));
     } catch (e) {
       report(e);
     }

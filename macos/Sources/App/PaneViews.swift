@@ -236,7 +236,9 @@ final class EmptyView: NSView {
         }
         switch model.backend(of: machine) {
         case let state? where state.phase == .ready:
-            hint.stringValue = tr("empty.hint")
+            // The key of a new tab as the keybindings have it, a direct one first.
+            let key = model.keybindings.keys(of: "tab.new").sorted { !$0.contains(" ") && $1.contains(" ") }.first
+            hint.stringValue = key.map { tr("empty.hintKey", Keys.label($0)) } ?? tr("empty.hint")
         case let state? where state.phase == .error:
             hint.stringValue = tr("backend." + state.code)
         default:

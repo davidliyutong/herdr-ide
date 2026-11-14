@@ -215,7 +215,7 @@ function DockTitle({ dock }: { dock?: DockView }) {
         {t('dock.preview')} · {label} · <span className="muted">{shortPath(dock.path, home)}</span>
       </span>
     );
-  return <span className="dock-title">Agent</span>;
+  return <span className="dock-title">{t('dock.agent')}</span>;
 }
 
 const imageExt = /\.(png|jpe?g|gif|webp|avif|svg|bmp|ico)$/i;

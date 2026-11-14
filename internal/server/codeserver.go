@@ -178,7 +178,7 @@ func (p *codeServerProxy) loadingPage(w http.ResponseWriter, mc *machines.Machin
 const machine=%q, base=%q;
 const T={
  en:{title:'Preparing VS Code on {m}',retry:'Retry',idle:'Waiting…',check:'Checking code-server {d}',download:'Downloading code-server {d}',machine_download:'{m} is downloading code-server {d}',upload:'Uploading and installing code-server {d}',install_bridge:'Installing the bridge extension',install_ext:'Installing extension {d}',start:'Starting code-server {d}',ready:'Ready',error:'Failed'},
- zh:{title:'正在 {m} 上准备 VS Code',retry:'重试',idle:'等待中…',check:'检查 code-server {d}',download:'下载 code-server {d}',machine_download:'{m} 正在下载 code-server {d}',upload:'上传并安装 code-server {d}',install_bridge:'安装桥接扩展',install_ext:'安装扩展 {d}',start:'启动 code-server {d}',ready:'就绪',error:'失败'}};
+ zh:{title:'正在 {m} 上准备 VS Code',retry:'重试',idle:'等待中…',check:'正在检查 code-server {d}',download:'正在下载 code-server {d}',machine_download:'{m} 正在下载 code-server {d}',upload:'正在上传并安装 code-server {d}',install_bridge:'正在安装桥接扩展',install_ext:'正在安装扩展 {d}',start:'正在启动 code-server {d}',ready:'就绪',error:'失败'}};
 let host={};try{host=parent.document.documentElement}catch(e){}
 const L=T[(host.lang||navigator.language||'en').toLowerCase().startsWith('zh')?'zh':'en'];
 if(host.dataset&&host.dataset.theme==='light')document.body.className='light';

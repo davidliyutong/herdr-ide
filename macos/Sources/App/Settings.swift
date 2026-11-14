@@ -198,7 +198,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
         }
         if settings.readOnly { note(tr("settings.readOnly")) }
         let fileProblems = settings.problems.filter { p in p.key == nil || settings.definition(p.key!) == nil }
-        if !fileProblems.isEmpty { problems(tr("settings.problems"), fileProblems) }
+        if !fileProblems.isEmpty { problems(tr("settings.problems"), fileProblems, codes: "settings.problem.") }
         if query.isEmpty {
             if page == Self.keysPage {
                 keysPage(query: "")
@@ -228,12 +228,14 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
         stack.addArrangedSubview(label)
     }
 
-    private func problems(_ title: String, _ list: [SettingProblem]) {
+    /// The problems of a file: those of the settings file are named by
+    /// settings.problem.<code>, the keybindings file's by keys.problem.<code>.
+    private func problems(_ title: String, _ list: [SettingProblem], codes: String) {
         let lines = list.map { p -> String in
             var parts: [String] = []
             if let index = p.index, index >= 0 { parts.append(tr("keys.problemAt", String(index + 1))) }
             if let key = p.key { parts.append(p.machine.map { "\(key) (\($0))" } ?? key) }
-            parts.append(Self.text("settings.problem." + p.code) ?? p.code)
+            parts.append(Self.text(codes + p.code) ?? p.code)
             if let detail = p.detail { parts.append(detail) }
             return parts.joined(separator: " · ")
         }
@@ -524,7 +526,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
         }
         if !query.isEmpty, commands.isEmpty { return }
         if !query.isEmpty { heading(tr("settings.section.keyboard")) } else { note(tr("keys.note")) }
-        if !keys.problems.isEmpty { problems(tr("keys.problems"), keys.problems) }
+        if !keys.problems.isEmpty { problems(tr("keys.problems"), keys.problems, codes: "keys.problem.") }
         let readOnly = model.settings.readOnly
         for section in keys.sections {
             let inSection = commands.filter { $0.section == section }

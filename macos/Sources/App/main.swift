@@ -713,6 +713,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         NSApp.mainMenu = makeMenu()
         if let model { MainActor.assumeIsolated { controllerBox?.apply(model.settings, menuKeys: Array(menuKeys.values)) } }
         settings?.refresh()
+        refresh()
     }
 
     /// The bindings the matcher handles: all but the keys menu items show.

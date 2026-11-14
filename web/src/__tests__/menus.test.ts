@@ -454,7 +454,17 @@ describe('machineMenu', () => {
       remove.run();
       req = useDialog.getState().current;
       if (req?.kind === 'confirm') req.resolve(true);
-      await vi.waitFor(() => expect(toast).toHaveBeenLastCalledWith('Could not remove gpu: read-only file system'));
+      await vi.waitFor(() =>
+        expect(toast).toHaveBeenLastCalledWith('Could not remove gpu: the machines file could not be saved (read-only file system).'),
+      );
+
+      // Every code of the core is translated.
+      fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: 'unknown' }), { status: 404 }));
+      useDialog.setState({ current: undefined });
+      remove.run();
+      req = useDialog.getState().current;
+      if (req?.kind === 'confirm') req.resolve(true);
+      await vi.waitFor(() => expect(toast).toHaveBeenLastCalledWith('Could not remove gpu: the machine is no longer there.'));
     } finally {
       toast.mockRestore();
       useDialog.setState({ current: undefined });
