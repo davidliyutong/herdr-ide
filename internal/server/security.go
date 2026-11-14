@@ -75,8 +75,11 @@ func (s *Server) apiAllowed(method string) bool {
 }
 
 // appCSP applies to the UI shell. 'unsafe-inline' styles are needed by
-// xterm.js and React inline styles; scripts come only from our origin.
-const appCSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+// React inline styles; scripts come only from our origin. 'wasm-unsafe-eval'
+// lets the page compile WebAssembly (the terminal emulator, served from our
+// origin, and the small module that hands it the page's callbacks); it does
+// not allow eval or inline scripts.
+const appCSP = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; " +
 	"img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self'; " +
 	"frame-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; form-action 'self'"
 

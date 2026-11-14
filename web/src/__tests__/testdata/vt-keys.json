@@ -1,0 +1,498 @@
+{
+  "about": "Keyboard events and the bytes the web terminal sends for them (vt/input.ts with libghostty-vt's encoder): 'legacy' a terminal in its default modes, 'app' with application cursor and keypad modes, 'kitty' with the kitty keyboard protocol's disambiguate flag. null: the browser keeps the event. options: mac and optionIsMeta.",
+  "rows": [
+    {
+      "name": "a",
+      "event": {
+        "key": "a",
+        "code": "KeyA"
+      },
+      "bytes": {
+        "legacy": "a",
+        "app": "a",
+        "kitty": "a"
+      }
+    },
+    {
+      "name": "Shift+A",
+      "event": {
+        "key": "A",
+        "code": "KeyA",
+        "shiftKey": true
+      },
+      "bytes": {
+        "legacy": "A",
+        "app": "A",
+        "kitty": "A"
+      }
+    },
+    {
+      "name": "Shift+1",
+      "event": {
+        "key": "!",
+        "code": "Digit1",
+        "shiftKey": true
+      },
+      "bytes": {
+        "legacy": "!",
+        "app": "!",
+        "kitty": "!"
+      }
+    },
+    {
+      "name": "Alt+B",
+      "event": {
+        "key": "b",
+        "code": "KeyB",
+        "altKey": true
+      },
+      "options": {
+        "mac": false
+      },
+      "bytes": {
+        "legacy": "\u001bb",
+        "app": "\u001bb",
+        "kitty": "\u001b[98;3u"
+      }
+    },
+    {
+      "name": "Ctrl+Shift+Left",
+      "event": {
+        "key": "ArrowLeft",
+        "code": "ArrowLeft",
+        "ctrlKey": true,
+        "shiftKey": true
+      },
+      "bytes": {
+        "legacy": "\u001b[1;6D",
+        "app": "\u001b[1;6D",
+        "kitty": "\u001b[1;6D"
+      }
+    },
+    {
+      "name": "Enter",
+      "event": {
+        "key": "Enter",
+        "code": "Enter"
+      },
+      "bytes": {
+        "legacy": "\r",
+        "app": "\r",
+        "kitty": "\r"
+      }
+    },
+    {
+      "name": "Shift+Enter",
+      "event": {
+        "key": "Enter",
+        "code": "Enter",
+        "shiftKey": true
+      },
+      "note": "Ghostty's encoding: xterm's CSI 27;2;13~ in a legacy terminal, CSI 13;2u once the program enables the kitty keyboard protocol (Claude Code and Codex do, and then insert a newline).",
+      "bytes": {
+        "legacy": "\u001b[27;2;13~",
+        "app": "\u001b[27;2;13~",
+        "kitty": "\u001b[13;2u"
+      }
+    },
+    {
+      "name": "Alt+Enter",
+      "event": {
+        "key": "Enter",
+        "code": "Enter",
+        "altKey": true
+      },
+      "options": {
+        "mac": false
+      },
+      "bytes": {
+        "legacy": "\u001b\r",
+        "app": "\u001b\r",
+        "kitty": "\u001b[13;3u"
+      }
+    },
+    {
+      "name": "Ctrl+Enter",
+      "event": {
+        "key": "Enter",
+        "code": "Enter",
+        "ctrlKey": true
+      },
+      "bytes": {
+        "legacy": "\u001b[27;5;13~",
+        "app": "\u001b[27;5;13~",
+        "kitty": "\u001b[13;5u"
+      }
+    },
+    {
+      "name": "Tab",
+      "event": {
+        "key": "Tab",
+        "code": "Tab"
+      },
+      "bytes": {
+        "legacy": "\t",
+        "app": "\t",
+        "kitty": "\t"
+      }
+    },
+    {
+      "name": "Shift+Tab",
+      "event": {
+        "key": "Tab",
+        "code": "Tab",
+        "shiftKey": true
+      },
+      "bytes": {
+        "legacy": "\u001b[Z",
+        "app": "\u001b[Z",
+        "kitty": "\u001b[9;2u"
+      }
+    },
+    {
+      "name": "Backspace",
+      "event": {
+        "key": "Backspace",
+        "code": "Backspace"
+      },
+      "bytes": {
+        "legacy": "",
+        "app": "",
+        "kitty": ""
+      }
+    },
+    {
+      "name": "Ctrl+Backspace",
+      "event": {
+        "key": "Backspace",
+        "code": "Backspace",
+        "ctrlKey": true
+      },
+      "bytes": {
+        "legacy": "\b",
+        "app": "\b",
+        "kitty": "\u001b[127;5u"
+      }
+    },
+    {
+      "name": "Alt+Backspace",
+      "event": {
+        "key": "Backspace",
+        "code": "Backspace",
+        "altKey": true
+      },
+      "options": {
+        "mac": false
+      },
+      "bytes": {
+        "legacy": "\u001b",
+        "app": "\u001b",
+        "kitty": "\u001b[127;3u"
+      }
+    },
+    {
+      "name": "Escape",
+      "event": {
+        "key": "Escape",
+        "code": "Escape"
+      },
+      "bytes": {
+        "legacy": "\u001b",
+        "app": "\u001b",
+        "kitty": "\u001b[27u"
+      }
+    },
+    {
+      "name": "Up",
+      "event": {
+        "key": "ArrowUp",
+        "code": "ArrowUp"
+      },
+      "note": "Application cursor mode (vim, less, zsh's line editor) gets SS3 sequences.",
+      "bytes": {
+        "legacy": "\u001b[A",
+        "app": "\u001bOA",
+        "kitty": "\u001b[A"
+      }
+    },
+    {
+      "name": "Down",
+      "event": {
+        "key": "ArrowDown",
+        "code": "ArrowDown"
+      },
+      "bytes": {
+        "legacy": "\u001b[B",
+        "app": "\u001bOB",
+        "kitty": "\u001b[B"
+      }
+    },
+    {
+      "name": "Shift+Up",
+      "event": {
+        "key": "ArrowUp",
+        "code": "ArrowUp",
+        "shiftKey": true
+      },
+      "bytes": {
+        "legacy": "\u001b[1;2A",
+        "app": "\u001b[1;2A",
+        "kitty": "\u001b[1;2A"
+      }
+    },
+    {
+      "name": "Ctrl+Left",
+      "event": {
+        "key": "ArrowLeft",
+        "code": "ArrowLeft",
+        "ctrlKey": true
+      },
+      "bytes": {
+        "legacy": "\u001b[1;5D",
+        "app": "\u001b[1;5D",
+        "kitty": "\u001b[1;5D"
+      }
+    },
+    {
+      "name": "Home",
+      "event": {
+        "key": "Home",
+        "code": "Home"
+      },
+      "bytes": {
+        "legacy": "\u001b[H",
+        "app": "\u001bOH",
+        "kitty": "\u001b[H"
+      }
+    },
+    {
+      "name": "End",
+      "event": {
+        "key": "End",
+        "code": "End"
+      },
+      "bytes": {
+        "legacy": "\u001b[F",
+        "app": "\u001bOF",
+        "kitty": "\u001b[F"
+      }
+    },
+    {
+      "name": "Delete",
+      "event": {
+        "key": "Delete",
+        "code": "Delete"
+      },
+      "bytes": {
+        "legacy": "\u001b[3~",
+        "app": "\u001b[3~",
+        "kitty": "\u001b[3~"
+      }
+    },
+    {
+      "name": "PageUp",
+      "event": {
+        "key": "PageUp",
+        "code": "PageUp"
+      },
+      "note": "Goes to the program; the wheel and the scrollbar scroll the terminal's own scrollback.",
+      "bytes": {
+        "legacy": "\u001b[5~",
+        "app": "\u001b[5~",
+        "kitty": "\u001b[5~"
+      }
+    },
+    {
+      "name": "F1",
+      "event": {
+        "key": "F1",
+        "code": "F1"
+      },
+      "bytes": {
+        "legacy": "\u001bOP",
+        "app": "\u001bOP",
+        "kitty": "\u001b[P"
+      }
+    },
+    {
+      "name": "F5",
+      "event": {
+        "key": "F5",
+        "code": "F5"
+      },
+      "bytes": {
+        "legacy": "\u001b[15~",
+        "app": "\u001b[15~",
+        "kitty": "\u001b[15~"
+      }
+    },
+    {
+      "name": "Ctrl+Space",
+      "event": {
+        "key": " ",
+        "code": "Space",
+        "ctrlKey": true
+      },
+      "bytes": {
+        "legacy": "\u0000",
+        "app": "\u0000",
+        "kitty": "\u001b[32;5u"
+      }
+    },
+    {
+      "name": "Ctrl+C",
+      "event": {
+        "key": "c",
+        "code": "KeyC",
+        "ctrlKey": true
+      },
+      "bytes": {
+        "legacy": "\u0003",
+        "app": "\u0003",
+        "kitty": "\u001b[99;5u"
+      }
+    },
+    {
+      "name": "Ctrl+C on a Russian layout",
+      "event": {
+        "key": "с",
+        "code": "KeyC",
+        "ctrlKey": true
+      },
+      "bytes": {
+        "legacy": "\u0003",
+        "app": "\u0003",
+        "kitty": "\u001b[99;5u"
+      }
+    },
+    {
+      "name": "Option+A on macOS types å",
+      "event": {
+        "key": "å",
+        "code": "KeyA",
+        "altKey": true
+      },
+      "options": {
+        "mac": true,
+        "optionIsMeta": false
+      },
+      "note": "Option types the layout's character unless terminal.optionIsMeta is on.",
+      "bytes": {
+        "legacy": "å",
+        "app": "å",
+        "kitty": "å"
+      }
+    },
+    {
+      "name": "Option+A on macOS with Option as Meta",
+      "event": {
+        "key": "å",
+        "code": "KeyA",
+        "altKey": true
+      },
+      "options": {
+        "mac": true,
+        "optionIsMeta": true
+      },
+      "bytes": {
+        "legacy": "\u001ba",
+        "app": "\u001ba",
+        "kitty": "\u001b[97;3u"
+      }
+    },
+    {
+      "name": "Option+Shift+A on macOS with Option as Meta",
+      "event": {
+        "key": "Å",
+        "code": "KeyA",
+        "altKey": true,
+        "shiftKey": true
+      },
+      "options": {
+        "mac": true,
+        "optionIsMeta": true
+      },
+      "bytes": {
+        "legacy": "\u001bA",
+        "app": "\u001bA",
+        "kitty": "\u001b[97;4u"
+      }
+    },
+    {
+      "name": "AltGr+Q on a German layout",
+      "event": {
+        "key": "@",
+        "code": "KeyQ",
+        "ctrlKey": true,
+        "altKey": true,
+        "altGraph": true
+      },
+      "options": {
+        "mac": false
+      },
+      "note": "AltGr types characters: Ctrl and Alt are not sent.",
+      "bytes": {
+        "legacy": "@",
+        "app": "@",
+        "kitty": "@"
+      }
+    },
+    {
+      "name": "Ctrl+Alt+L typing ł without AltGraph state",
+      "event": {
+        "key": "ł",
+        "code": "KeyL",
+        "ctrlKey": true,
+        "altKey": true
+      },
+      "options": {
+        "mac": false
+      },
+      "bytes": {
+        "legacy": "ł",
+        "app": "ł",
+        "kitty": "ł"
+      }
+    },
+    {
+      "name": "Cmd+C",
+      "event": {
+        "key": "c",
+        "code": "KeyC",
+        "metaKey": true
+      },
+      "note": "Copy is left to the browser.",
+      "bytes": null
+    },
+    {
+      "name": "Cmd+V",
+      "event": {
+        "key": "v",
+        "code": "KeyV",
+        "metaKey": true
+      },
+      "note": "The browser pastes through the paste event.",
+      "bytes": null
+    },
+    {
+      "name": "Shift+Enter while composing",
+      "event": {
+        "key": "Enter",
+        "code": "Enter",
+        "shiftKey": true,
+        "isComposing": true
+      },
+      "note": "Input method composition belongs to the input method.",
+      "bytes": null
+    },
+    {
+      "name": "Dead key",
+      "event": {
+        "key": "Dead",
+        "code": "BracketLeft"
+      },
+      "note": "The composed character arrives as an input event.",
+      "bytes": null
+    }
+  ]
+}

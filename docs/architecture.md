@@ -38,7 +38,7 @@ browser (React, canvas)     ──WebSocket + HTTP──▶  core (Go, `herdr-id
 | `internal/gui` | Virtual displays on machines, their windows, frames and input between agents and browser windows. |
 | `internal/server` | HTTP/WS front: guards, session ownership and pane surfaces, files, proxy, bridge, audit. |
 | `internal/embedded` | Build artifacts compiled into the core (agents, bridge VSIX). |
-| `web` | Browser UI (Vite, React, zustand; panes on a canvas, xterm.js for the PTY dialogs); `web/embed.go` embeds `web/dist`. |
+| `web` | Browser UI (Vite, React, zustand; panes on a canvas, xterm.js for the PTY dialogs; `src/vt`: Ghostty's terminal library as WebAssembly with its renderer and input encoders, [26](features/26-web-terminals.md)); `web/embed.go` embeds `web/dist`. |
 | `macos` | macOS application (Swift package): `TermKit`, the clients of `/api/v1/term` and of `/ws` as an events client, with the terminal, layout (workspaces, tabs, splits) and core-process models; `App`, the AppKit window drawing terminals with Ghostty's renderer. |
 | `desktop` | Electron main process and electron-builder config; macOS `.app`/DMG wrapping the embedded core. |
 | `extensions/herdr-ide-bridge` | VS Code extension installed into code-server. |

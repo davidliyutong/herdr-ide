@@ -4,7 +4,7 @@ DEV_LISTEN ?= 127.0.0.1:7790
 SLUG := $(shell sed -n 's/^[[:space:]]*Slug = "\(.*\)"$$/\1/p' internal/brand/brand.go)
 EXT  := extensions/$(SLUG)-bridge
 
-.PHONY: deps build test check tokens it dev-core dev-web macos-app macos-build macos-test desktop-app desktop-dmg desktop-install desktop-icons dev-desktop clean
+.PHONY: deps build test check tokens vt-wasm it dev-core dev-web macos-app macos-build macos-test desktop-app desktop-dmg desktop-install desktop-icons dev-desktop clean
 
 # Electron's ~100 MB binary only runs or packages the macOS app; elsewhere
 # its types suffice for typecheck and the launcher tests.
@@ -36,6 +36,11 @@ check:
 tokens:
 	go run ./scripts/tokens
 	go run ./scripts/registry
+
+# The web UI's terminal emulator, Ghostty's libghostty-vt as WebAssembly
+# (needs zig 0.17; GHOSTTY_SRC=<checkout> skips the clone).
+vt-wasm:
+	scripts/fetch-ghostty-vt.sh
 
 it:
 	go test -tags integration -count=1 ./internal/agent -run Integration -v

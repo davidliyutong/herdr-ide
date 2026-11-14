@@ -24,8 +24,9 @@ configuration and state. SSH machines use their installed herdr.
 | --- | --- |
 | Install JS deps | `make deps` |
 | Unit tests (Go + web + desktop) | `make test` |
-| All checks (gofmt, vet, tsc, prettier, brand/doc/README consistency, generated tokens) | `make check` |
+| All checks (gofmt, vet, tsc, prettier, brand/doc/README consistency, generated tokens, the terminal emulator's digest) | `make check` |
 | Regenerate the design tokens' Swift, CSS and Go after editing `design/tokens.json`, and `design/generated/registry.json` after changing settings or commands | `make tokens` |
+| Rebuild the web UI's terminal emulator (Ghostty's libghostty-vt as WebAssembly; zig 0.17) | `make vt-wasm` |
 | Integration test with a real herdr | `make it` |
 | Full build into `dist/` | `make build` (or `scripts/build.sh`) |
 | macOS `.app` / DMG | `make desktop-app` / `make desktop-dmg` |

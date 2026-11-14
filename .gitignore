@@ -17,4 +17,5 @@ internal/embedded/encoder/*.gz
 internal/embedded/hc/*.gz
 macos/.build/
 macos/.deps/
+web/.deps/
 macos/xcode/MacApp.xcodeproj/

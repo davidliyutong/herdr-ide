@@ -33,6 +33,7 @@ shortcuts, paths) lives in [reference.md](../reference.md).
 | 23 | [macOS application](23-macos-application.md) | A native window on the terminal protocol: Ghostty's GPU renderer per pane, workspaces, tabs and splits kept as a document in the machine's terminal core. |
 | 24 | [Design tokens](24-design-tokens.md) | One file of colors, metrics, font sizes and terminal palettes, generated into the macOS application's Swift and the web UI's CSS variables. |
 | 25 | [Agent detection in terminals](25-agent-detection.md) | herdr's method for the terminal core's terminals: the foreground process names the agent, herdr's rules over the screen give its state, done when a turn ends; in the agent, next to the terminals. |
+| 26 | [Web terminals](26-web-terminals.md) | Ghostty's terminal library as WebAssembly for the browser: the emulator, its WebGL2 and Canvas 2D renderer, and keys, mouse and pastes encoded for each program's modes. |
 
 ## Writing a feature document
 

@@ -38,18 +38,21 @@ function brand(): Plugin {
   };
 }
 
-// The bundled terminal font is not an npm package, so Vite's license list
-// leaves it out (src/terminal/fonts/README.md).
-function fontLicense(): Plugin {
+// The bundled terminal font and terminal emulator are not npm packages, so
+// Vite's license list leaves them out (src/terminal/fonts/README.md,
+// scripts/fetch-ghostty-vt.sh).
+function bundledLicenses(): Plugin {
   return {
-    name: 'font-license',
+    name: 'bundled-licenses',
     generateBundle: {
       order: 'post',
       handler(_, bundle) {
         const out = bundle['licenses.md'];
         if (out?.type !== 'asset') return;
-        const ofl = readFileSync(new URL('./src/terminal/fonts/OFL.txt', import.meta.url), 'utf8').trim();
-        out.source = `${String(out.source).trimEnd()}\n\n## JetBrains Mono - 2.304 (OFL-1.1)\n\n${ofl}\n`;
+        const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8').trim();
+        out.source =
+          `${String(out.source).trimEnd()}\n\n## JetBrains Mono - 2.304 (OFL-1.1)\n\n${read('./src/terminal/fonts/OFL.txt')}\n` +
+          `\n## libghostty-vt (Ghostty cf5519b22f91, MIT)\n\n${read('./src/vt/LICENSE')}\n`;
       },
     },
   };
@@ -70,7 +73,7 @@ function katexWoff2(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), brand(), fontLicense(), katexWoff2()],
+  plugins: [react(), brand(), bundledLicenses(), katexWoff2()],
   build: {
     outDir: 'dist',
     emptyOutDir: true,

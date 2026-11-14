@@ -9,6 +9,8 @@
 #   6. CHANGELOG.md's [Unreleased] is one list without subsections
 #   7. the files generated from design/tokens.json and the settings
 #      registry are current
+#   8. the web UI's terminal emulator (web/src/vt/ghostty-vt.wasm) is the
+#      module whose digest scripts/fetch-ghostty-vt.sh recorded
 set -euo pipefail
 cd "$(dirname "$0")/.."
 fail=0
@@ -56,5 +58,8 @@ fi
 echo "==> design tokens and settings keys"
 go run ./scripts/tokens -check || fail=1
 go run ./scripts/registry -check || fail=1
+
+echo "==> terminal emulator module"
+scripts/fetch-ghostty-vt.sh --check || fail=1
 
 exit $fail

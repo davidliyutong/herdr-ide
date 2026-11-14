@@ -269,7 +269,7 @@ func TestCSPOnAppShell(t *testing.T) {
 	r.Host = "localhost:7780"
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, r)
-	if csp := w.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "frame-ancestors 'self'") || !strings.Contains(csp, "script-src 'self'") {
+	if csp := w.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "frame-ancestors 'self'") || !strings.Contains(csp, "script-src 'self' 'wasm-unsafe-eval';") || strings.Contains(csp, "'unsafe-eval'") || strings.Contains(csp, "script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline'") {
 		t.Fatalf("csp = %q", csp)
 	}
 	if w.Header().Get("X-Content-Type-Options") != "nosniff" {
