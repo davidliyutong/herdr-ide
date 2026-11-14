@@ -168,7 +168,8 @@ whose patches and scroll controls must reproduce herdr's next complete
 surface, delta and patch validation, bounds on hostile lengths, handshake
 errors, chunked request replies, one resize in flight: sizes wanted
 meanwhile collapse into the latest, an older surface does not end the wait,
-a cell size alone is sent at once, the wait ends after its timeout);
+a cell size alone is sent at once, the wait ends after its timeout, a
+resize stuck in a write does not hold up the receiving goroutine);
 `internal/server/surface_test.go`
 (ownership: busy, takeover, read-only rules, handover; the binary encoding
 shared with the web tests; a waiting connection is woken when its machine

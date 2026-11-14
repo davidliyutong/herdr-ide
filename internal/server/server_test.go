@@ -425,12 +425,17 @@ func TestBridgeSendToAgent(t *testing.T) {
 	if _, err := r.ReadString('\n'); err != nil { // the bridge's reply
 		t.Fatal(err)
 	}
+	// Before its hello a window's folders are unknown: none are sent. A
+	// window without a folder sends an empty list.
 	b.Write([]byte(`{"type":"sendToAgent","text":"@/a:1"}` + "\n"))
 	b.Write([]byte(`{"type":"hello","id":"w1","folders":["/srv/app"]}` + "\n"))
 	b.Write([]byte(`{"type":"sendToAgent","text":"@/srv/app/x.go:3","file":"/srv/app/x.go","line":3,"end_line":3}` + "\n"))
+	b.Write([]byte(`{"type":"hello","id":"w1","folders":[]}` + "\n"))
+	b.Write([]byte(`{"type":"sendToAgent","text":"@/b:2"}` + "\n"))
 	for _, want := range []string{
-		`{"end_line":0,"file":"","folders":[],"line":0,"m":"m","t":"bridge.send","text":"@/a:1"}`,
+		`{"end_line":0,"file":"","line":0,"m":"m","t":"bridge.send","text":"@/a:1"}`,
 		`{"end_line":3,"file":"/srv/app/x.go","folders":["/srv/app"],"line":3,"m":"m","t":"bridge.send","text":"@/srv/app/x.go:3"}`,
+		`{"end_line":0,"file":"","folders":[],"line":0,"m":"m","t":"bridge.send","text":"@/b:2"}`,
 	} {
 		select {
 		case m := <-c.send:

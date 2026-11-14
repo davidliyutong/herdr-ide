@@ -384,7 +384,8 @@ export const en = {
   'remoteHerdr.explain':
     'herdr updates it the way herdr --remote does: it offers to install herdr {version} there, verifies the download and asks before replacing a running server. Answer its questions in the terminal; afterwards it shows that machine’s herdr, and you can close the window.',
   'remoteHerdr.handoff': 'Try to keep its terminals running (herdr’s live handoff, experimental)',
-  'remoteHerdr.noLocal': 'herdr on this computer is not available; start it with Manage herdr first.',
+  'remoteHerdr.noLocal':
+    'herdr on this computer is not available; start it first with Start herdr or Restart herdr… on this computer in the sidebar.',
   'remoteHerdr.unknown': 'unknown',
   'remoteHerdr.missing': 'not installed',
   'remoteHerdr.explainInstall':

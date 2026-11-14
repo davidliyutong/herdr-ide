@@ -106,3 +106,42 @@ func TestResizeOneInFlight(t *testing.T) {
 	show <- [2]uint16{129, 40}
 	sent("after the wait", sz(140, 40, 10))
 }
+
+// A resize stuck in a write (a slow link's full window) does not hold up
+// the receiving goroutine, which notes every complete surface.
+func TestResizeWriteDoesNotBlockReceiver(t *testing.T) {
+	release := make(chan struct{})
+	c := fakeServer(t, goodWelcome(), func(s net.Conn) {
+		<-release // reads nothing until released: writes to it block
+		for {
+			if _, err := ReadFrame(s, MaxFrame); err != nil {
+				return
+			}
+		}
+	})
+	conn, err := Handshake(context.Background(), c, Options{Size: Size{Cols: 80, Rows: 24, CellW: 8, CellH: 16}, Active: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	conn.shown(80, 24) // herdr's first surface
+
+	sent := make(chan error, 1)
+	go func() { sent <- conn.Resize(Size{Cols: 100, Rows: 30, CellW: 8, CellH: 16}) }()
+	time.Sleep(50 * time.Millisecond) // the write is now blocked
+
+	noted := make(chan struct{})
+	go func() {
+		conn.shown(100, 30)
+		close(noted)
+	}()
+	select {
+	case <-noted:
+	case <-time.After(time.Second):
+		t.Fatal("a surface waited for a blocked resize write")
+	}
+	close(release)
+	if err := <-sent; err != nil {
+		t.Fatal(err)
+	}
+}

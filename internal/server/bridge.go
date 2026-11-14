@@ -129,12 +129,14 @@ func (h *bridgeHub) serve(mc *machines.Machine, conn net.Conn) {
 			// The browser decides which agent pane receives it (the
 			// focused one, or one of the workspace whose panel shows this
 			// window's folders) and pastes without submitting. Only this
-			// goroutine sets w.folders.
-			folders := w.folders
-			if folders == nil {
-				folders = []string{}
+			// goroutine sets w.folders. A window that has not said hello
+			// has unknown folders, sent as none at all (not as an empty
+			// list, which is a window without a folder).
+			ev := map[string]any{"t": "bridge.send", "m": mc.ID(), "text": msg.Text, "file": msg.File, "line": msg.Line, "end_line": msg.EndLine}
+			if w.folders != nil {
+				ev["folders"] = w.folders
 			}
-			h.s.broadcast(map[string]any{"t": "bridge.send", "m": mc.ID(), "text": msg.Text, "file": msg.File, "line": msg.Line, "end_line": msg.EndLine, "folders": folders})
+			h.s.broadcast(ev)
 		case "download":
 			// Files chosen in VS Code's explorer: the browser showing that
 			// VS Code (the one with focus) downloads them (handleDownload).

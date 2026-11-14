@@ -70,8 +70,8 @@ Non-goals: managing ssh keys or herdr installations; Windows machines.
   so herdr's catalog is never written. Disabling ends the session (the
   agent exits and stops the code-server it started; panes keep running in
   herdr), drops the machine's snapshot and shows it as *disabled*; enabling
-  connects it. Disabling a connected machine asks first; for an SSH machine
-  with herdr the dialog also offers, checked by default, to stop its herdr
+  connects it. Disabling a connected machine asks first; for a *ready* SSH
+  machine the dialog also offers, checked by default, to stop its herdr
   server before the session ends
   ([17](17-local-herdr-management.md)). Read-only browsers cannot do
   either. The sidebar folds disabled machines, so their Enable

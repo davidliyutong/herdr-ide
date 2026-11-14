@@ -137,13 +137,12 @@ export function normFolder(folder?: string): string | undefined {
 }
 
 /** Docks that still have something to show, without the views and
- * workspaces that are gone: workspaces of machines that are not in machines
- * (when all is set: the list is complete) or not in their machine's
- * snapshot, and views of machines that are not there. */
-function pruneDocks(docks: Record<string, WorkspaceDock>, machines: Record<string, MachineState>, all: boolean) {
+ * workspaces that are gone: workspaces of machines that gone() says were
+ * removed or that are not in their machine's snapshot, and views of
+ * removed machines. */
+function pruneDocks(docks: Record<string, WorkspaceDock>, machines: Record<string, MachineState>, gone: (m: string) => boolean) {
   const out: Record<string, WorkspaceDock> = {};
   let changed = false;
-  const gone = (m: string) => all && !machines[m];
   for (const [k, d] of Object.entries(docks)) {
     const snap = machines[d.m]?.snapshot;
     if (k && (gone(d.m) || (snap && !snap.workspaces.some((w) => w.workspace_id === d.ws)))) {
@@ -213,8 +212,10 @@ export const useStore = create<UIState>((set, get) => ({
     const machines: Record<string, MachineState> = {};
     for (const m of list) machines[m.id] = m;
     // A machine removed from herdr's catalog takes what showed it along.
-    const { docks, focused } = get();
-    const nextDocks = pruneDocks(docks, machines, true);
+    // Only one this page saw go: a core started with fewer machines (as with
+    // --local-only) leaves the others' docks for when they are back.
+    const { docks, focused, machines: prev } = get();
+    const nextDocks = pruneDocks(docks, machines, (m) => !!prev[m] && !machines[m]);
     if (nextDocks !== docks) saveDocks(nextDocks);
     set({
       machines,
@@ -228,7 +229,7 @@ export const useStore = create<UIState>((set, get) => ({
     set((s) => {
       const machines = { ...s.machines, [st.id]: st };
       // A workspace closed in herdr takes its dock along.
-      const docks = pruneDocks(s.docks, { [st.id]: st }, false);
+      const docks = pruneDocks(s.docks, { [st.id]: st }, () => false);
       if (docks !== s.docks) saveDocks(docks);
       return { machines, docks, order: s.order.includes(st.id) ? s.order : [...s.order, st.id] };
     });

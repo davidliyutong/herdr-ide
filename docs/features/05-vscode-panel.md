@@ -67,8 +67,9 @@ settings between machines.
   between them.
 - The choice is kept per browser (local storage) and restored after a
   reload. A workspace closed in herdr, or a machine removed from herdr's
-  machines, takes its panel along; a machine that is reconnecting (no
-  snapshot) keeps them.
+  machines while the page is open, takes its panel along; a machine that
+  is reconnecting (no snapshot), or one a core started with fewer machines
+  (`--local-only`) does not list, keeps them.
 - VS Code is a same-origin iframe per machine and folder (`?folder=`, the
   focused pane's cwd when opened from a pane); workspaces showing the same
   folder share it. A window that is no longer shown stays loaded, so

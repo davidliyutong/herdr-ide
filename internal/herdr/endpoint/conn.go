@@ -123,7 +123,12 @@ type Conn struct {
 
 	// Resizes (see Resize): the size herdr was asked for last, the size
 	// wanted now, and, while herdr has not yet sent a complete surface of
-	// the asked grid size, the timer that stops waiting for it.
+	// the asked grid size, the timer that stops waiting for it. rmu guards
+	// them and is never held across a write, so the receiving goroutine
+	// (shown) only waits for short sections; rsend, taken before rmu, is
+	// held from choosing a resize until it is written, which keeps resizes
+	// in order.
+	rsend    sync.Mutex
 	rmu      sync.Mutex
 	asked    Size
 	want     Size
@@ -222,15 +227,34 @@ func Handshake(ctx context.Context, c net.Conn, o Options) (*Conn, error) {
 // which is sent once herdr's surface of the asked size arrived (or after
 // resizeWait, in case herdr answers with another size).
 func (c *Conn) Resize(s Size) error {
+	c.rsend.Lock()
+	defer c.rsend.Unlock()
 	c.rmu.Lock()
-	defer c.rmu.Unlock()
 	c.want = s
-	return c.flushLocked()
+	b := c.nextLocked()
+	c.rmu.Unlock()
+	if b == nil {
+		return nil
+	}
+	return c.Send(b)
 }
 
-// flushLocked sends the wanted size unless a resize is in flight or herdr
-// was already asked for it; rmu is held, which keeps resizes in order.
-func (c *Conn) flushLocked() error {
+// flush sends the wanted size unless a resize is in flight or herdr was
+// already asked for it.
+func (c *Conn) flush() {
+	c.rsend.Lock()
+	defer c.rsend.Unlock()
+	c.rmu.Lock()
+	b := c.nextLocked()
+	c.rmu.Unlock()
+	if b != nil {
+		_ = c.Send(b)
+	}
+}
+
+// nextLocked returns the resize to send now, if any, and records it as
+// asked (and in flight when the grid size changes); rmu is held.
+func (c *Conn) nextLocked() []byte {
 	if c.inflight != nil || c.want == c.asked {
 		return nil
 	}
@@ -239,7 +263,7 @@ func (c *Conn) flushLocked() error {
 		c.waitLocked()
 	}
 	c.asked = c.want
-	return c.Send(EncodeResize(c.want))
+	return EncodeResize(c.want)
 }
 
 // waitLocked marks a resize in flight until herdr's answer or resizeWait.
@@ -248,17 +272,20 @@ func (c *Conn) waitLocked() {
 	gen := c.waitGen
 	c.inflight = time.AfterFunc(c.wait, func() {
 		c.rmu.Lock()
-		defer c.rmu.Unlock()
-		if c.waitGen == gen && c.inflight != nil {
+		expired := c.waitGen == gen && c.inflight != nil
+		if expired {
 			c.inflight = nil
-			_ = c.flushLocked()
+		}
+		c.rmu.Unlock()
+		if expired {
+			c.flush()
 		}
 	})
 }
 
 // shown notes a complete surface of w×h. When it answers the resize in
-// flight, the size wanted since is sent (on another goroutine: the
-// receiving one must not wait for a write).
+// flight, the size wanted since is sent on another goroutine: the
+// receiving one must not wait for a write.
 func (c *Conn) shown(w, h uint16) {
 	c.rmu.Lock()
 	defer c.rmu.Unlock()
@@ -268,11 +295,7 @@ func (c *Conn) shown(w, h uint16) {
 	c.inflight.Stop()
 	c.inflight = nil
 	if c.want != c.asked {
-		go func() {
-			c.rmu.Lock()
-			defer c.rmu.Unlock()
-			_ = c.flushLocked()
-		}()
+		go c.flush()
 	}
 }
 

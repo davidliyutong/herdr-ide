@@ -150,17 +150,20 @@ user's confirmation; choosing herdr's preview channel.
   - **Restart herdr…** and **Stop herdr…**, for every machine whose agent
     is connected, ask first (they end every terminal on that machine) and
     restart the server (or start it when it is not running) or stop it.
-  - **Update herdr…** on the local machine checks herdr's latest release:
-    the application's copy, when older, is updated after the user confirms
-    the version (a toast asks for a restart when the running server could
-    not be handed over); an installation of the user's, or an up-to-date
-    copy, only gets a toast. On an SSH machine the same item runs herdr's
-    `--remote` flow above.
+  - **Update herdr…** on the local machine reads the status first: an
+    installation of the user's only gets a toast, without asking herdr.dev.
+    The application's copy is checked against herdr's latest release and,
+    when older, updated after the user confirms the version (a toast asks
+    for a restart when the running server could not be handed over); an
+    up-to-date copy gets a toast. On an SSH machine the same item runs
+    herdr's `--remote` flow above.
   - **Start herdr** in the status block of a machine that reports a
     problem (always on the local machine, on an SSH machine when it is
     *degraded*) starts its server; a running one is left alone.
-  - **Disable machine** on a connected SSH machine with herdr asks whether
-    to stop its herdr server too (checked by default): the server is
+  - **Disable machine** on an SSH machine that is *ready* (its agent
+    connected and its herdr answering) asks whether to stop its herdr
+    server too (checked by default; a *degraded* machine's server usually
+    does not run, so it is not offered there): the server is
     stopped first, while the agent can still do it, then the machine is
     disabled; a failed stop is reported and the machine is disabled all
     the same. Unchecked, and for the local machine, its panes keep running

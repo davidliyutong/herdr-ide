@@ -377,7 +377,7 @@ export const zhCN: Messages = {
   'remoteHerdr.explain':
     '更新方式与 herdr --remote 完全相同：herdr 会询问是否在那台机器上安装 herdr {version}，校验下载的文件，并在替换正在运行的服务器前再次询问。请在终端里回答它的问题；完成后会显示那台机器上的 herdr，之后可以关闭窗口。',
   'remoteHerdr.handoff': '尽量不中断那台机器上的终端（herdr 的 live handoff，实验性）',
-  'remoteHerdr.noLocal': '本机的 herdr 不可用，请先在“管理 herdr”中启动它。',
+  'remoteHerdr.noLocal': '本机的 herdr 不可用，请先在侧栏对本机使用“启动 herdr”或“重启 herdr”启动它。',
   'remoteHerdr.unknown': '未知',
   'remoteHerdr.missing': '未安装',
   'remoteHerdr.explainInstall':

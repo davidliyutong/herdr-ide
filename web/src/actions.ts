@@ -250,8 +250,9 @@ export const actions = {
         danger: true,
       };
       // An SSH machine's herdr server can go with it (checked by default)
-      // while its agent is still connected to stop it.
-      if (st?.kind === 'ssh' && (st.status === 'ready' || st.status === 'degraded') && !herdrMissing(st)) {
+      // while its agent is connected and the server answers: a degraded
+      // machine's server is usually not running at all.
+      if (st?.kind === 'ssh' && st.status === 'ready' && !herdrMissing(st)) {
         const res = await confirmCheckDialog({
           ...ask,
           message: t('confirm.disableMachineStop'),
@@ -352,6 +353,10 @@ export const actions = {
    * core host, updates it after asking (docs/features/17). */
   async updateHerdr(m: string) {
     const { toast } = useStore.getState();
+    // The status says whether this is the application's copy; only that
+    // one is checked against herdr's latest release.
+    const cur = await herdrRequest(m);
+    if (!cur.error && !cur.managed) return toast(t('herdr.error.not_managed'));
     toast(t('herdr.busy.check'));
     const st = await herdrRequest(m, 'check');
     if (st.error) return report(new Error(t('herdr.checkFailed', { error: herdrDetail(st) })));

@@ -91,6 +91,17 @@ describe('the dock of a workspace', () => {
     storage.set('docks', '{}');
   });
 
+  it('keeps the docks of machines missing from a core that has fewer of them', async () => {
+    storage.set('docks', JSON.stringify({ 'c|w5': { m: 'c', ws: 'w5', view: { kind: 'code', m: 'c', folder: '/c' } } }));
+    vi.resetModules();
+    const fresh = await import('../state/store');
+    // A core started with --local-only lists only its own machine.
+    fresh.useStore.getState().setMachines([machine('a', ['w1'])]);
+    expect(Object.keys(fresh.useStore.getState().docks)).toEqual(['c|w5']);
+    expect(JSON.parse(storage.get('docks') ?? '{}')).toHaveProperty(['c|w5']);
+    storage.set('docks', '{}');
+  });
+
   it('goes with its workspace or machine', () => {
     const s = useStore.getState();
     s.openDock({ kind: 'code', m: 'a', folder: '/x' });

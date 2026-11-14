@@ -370,16 +370,19 @@ describe('machineMenu', () => {
       await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
       expect(fetchMock.mock.calls.map((c) => c[0])).toEqual(['/api/m/gpu/herdr/stop', '/api/m/gpu/enabled']);
 
-      // Without a connected agent there is nothing to stop, and no checkbox.
-      fetchMock.mockClear();
-      useDialog.setState({ current: undefined });
-      useStore.getState().setMachines([ssh('error')]);
-      (machineMenu('gpu')[4] as MenuItem).run();
-      const plain = useDialog.getState().current;
-      expect(plain?.kind === 'confirm' && plain.check).toBeFalsy();
-      if (plain?.kind === 'confirm') plain.resolve(true);
-      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-      expect(fetchMock.mock.calls[0][0]).toBe('/api/m/gpu/enabled');
+      // Without a connected agent, or on a degraded machine whose server
+      // usually does not run, there is no checkbox and nothing is stopped.
+      for (const status of ['error', 'degraded']) {
+        fetchMock.mockClear();
+        useDialog.setState({ current: undefined });
+        useStore.getState().setMachines([ssh(status)]);
+        (machineMenu('gpu')[4] as MenuItem).run();
+        const plain = useDialog.getState().current;
+        expect(plain?.kind === 'confirm' && plain.check).toBeFalsy();
+        if (plain?.kind === 'confirm') plain.resolve(true);
+        await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+        expect(fetchMock.mock.calls[0][0]).toBe('/api/m/gpu/enabled');
+      }
 
       // Enabling does not ask.
       fetchMock.mockClear();
@@ -513,16 +516,20 @@ describe('machineMenu', () => {
       useStore.getState().setMachines([local]);
       const update = () => (machineMenu('local').find((e) => isItem(e) && e.label === 'Update herdr…') as MenuItem).run();
 
-      // Up to date, or the user's own installation: only a toast.
+      // Up to date: only a toast after the check.
       reply = { managed: true, running: true, version: '0.9.5', latest: '0.9.5' };
       update();
       await vi.waitFor(() => expect(toast).toHaveBeenLastCalledWith('herdr 0.9.5 is up to date.'));
-      reply = { managed: false, running: true, version: '0.9.5', latest: '0.9.6' };
+      expect(fetchMock.mock.calls.map((c) => c[0])).toEqual(['/api/m/local/herdr', '/api/m/local/herdr/check']);
+
+      // The user's own installation is not checked against herdr's releases.
+      fetchMock.mockClear();
+      reply = { managed: false, running: true, version: '0.9.5' };
       update();
       await vi.waitFor(() =>
         expect(toast).toHaveBeenLastCalledWith('This herdr is your own installation; update it the way you installed it.'),
       );
-      expect(fetchMock.mock.calls.map((c) => c[0])).toEqual(['/api/m/local/herdr/check', '/api/m/local/herdr/check']);
+      expect(fetchMock.mock.calls.map((c) => c[0])).toEqual(['/api/m/local/herdr']);
 
       // A newer release for the managed copy is installed after asking.
       fetchMock.mockClear();
@@ -534,7 +541,11 @@ describe('machineMenu', () => {
       reply = { managed: true, running: true, version: '0.9.6', restart_needed: true };
       if (req?.kind === 'confirm') req.resolve(true);
       await vi.waitFor(() => expect(toast).toHaveBeenLastCalledWith('herdr 0.9.6 is installed. Restart herdr to use it.'));
-      expect(fetchMock.mock.calls.map((c) => c[0])).toEqual(['/api/m/local/herdr/check', '/api/m/local/herdr/update']);
+      expect(fetchMock.mock.calls.map((c) => c[0])).toEqual([
+        '/api/m/local/herdr',
+        '/api/m/local/herdr/check',
+        '/api/m/local/herdr/update',
+      ]);
     } finally {
       toast.mockRestore();
       useDialog.setState({ current: undefined });
