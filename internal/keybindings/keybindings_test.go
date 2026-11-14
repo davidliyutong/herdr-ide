@@ -86,7 +86,7 @@ func TestDefaults(t *testing.T) {
 			chords++
 		}
 	}
-	if chords != 37 {
+	if chords != 39 {
 		t.Errorf("%d prefix chords", chords)
 	}
 	// No platform has conflicting defaults.

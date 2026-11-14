@@ -26,6 +26,16 @@
       "when": "terminal"
     },
     {
+      "id": "workspace.next",
+      "section": "workspace",
+      "when": "terminal"
+    },
+    {
+      "id": "workspace.previous",
+      "section": "workspace",
+      "when": "terminal"
+    },
+    {
       "id": "workspace.new",
       "section": "workspace",
       "when": "terminal"
@@ -248,6 +258,8 @@
       "command.view.toggleSidebar",
       "command.workspace.close",
       "command.workspace.new",
+      "command.workspace.next",
+      "command.workspace.previous",
       "command.workspace.rename",
       "command.workspace.switch",
       "settings.appearance.theme",
@@ -350,6 +362,8 @@
       "command.view.toggleSidebar",
       "command.workspace.close",
       "command.workspace.new",
+      "command.workspace.next",
+      "command.workspace.previous",
       "command.workspace.rename",
       "command.workspace.switch",
       "settings.appearance.language",
@@ -454,6 +468,16 @@
       {
         "key": "ctrl+b w",
         "command": "workspace.switch",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+0",
+        "command": "workspace.next",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+9",
+        "command": "workspace.previous",
         "when": "terminal"
       },
       {
@@ -704,6 +728,16 @@
         "when": "terminal"
       },
       {
+        "key": "ctrl+b shift+0",
+        "command": "workspace.next",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+9",
+        "command": "workspace.previous",
+        "when": "terminal"
+      },
+      {
         "key": "ctrl+b shift+n",
         "command": "workspace.new",
         "when": "terminal"
@@ -898,6 +932,16 @@
       {
         "key": "ctrl+b w",
         "command": "workspace.switch",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+0",
+        "command": "workspace.next",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+9",
+        "command": "workspace.previous",
         "when": "terminal"
       },
       {
@@ -1110,6 +1154,16 @@
       {
         "key": "ctrl+b w",
         "command": "workspace.switch",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+0",
+        "command": "workspace.next",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+9",
+        "command": "workspace.previous",
         "when": "terminal"
       },
       {

@@ -37,27 +37,8 @@ export function attentionList(): AttentionItem[] {
   return out.sort((a, b) => statusRank[b.status] - statusRank[a.status]);
 }
 
-type Rect = { x: number; y: number; w: number; h: number };
-
 /** Each terminal's share of its tab, from the split tree. */
-export function paneRects(node: L.Node, r: Rect = { x: 0, y: 0, w: 1, h: 1 }, out = new Map<string, Rect>()): Map<string, Rect> {
-  if (L.isLeaf(node)) {
-    out.set(node.terminal, r);
-    return out;
-  }
-  if (!L.isSplit(node)) return out;
-  const [a, b] = node.children;
-  if (node.split === 'horizontal') {
-    const w1 = r.w * node.ratio;
-    paneRects(a, { x: r.x, y: r.y, w: w1, h: r.h }, out);
-    paneRects(b, { x: r.x + w1, y: r.y, w: r.w - w1, h: r.h }, out);
-  } else {
-    const h1 = r.h * node.ratio;
-    paneRects(a, { x: r.x, y: r.y, w: r.w, h: h1 }, out);
-    paneRects(b, { x: r.x, y: r.y + h1, w: r.w, h: r.h - h1 }, out);
-  }
-  return out;
-}
+export const paneRects = L.paneRects;
 
 /** The shown machine's selected workspace and tab, and the focused terminal. */
 export function current() {
@@ -477,40 +458,10 @@ export const actions = {
     focusDom(m, terminal);
   },
 
-  focusDirection(dir: 'left' | 'right' | 'up' | 'down') {
+  focusDirection(dir: L.Direction) {
     const c = current();
-    if (!c?.tab) return;
-    const rects = paneRects(c.tab.root);
-    const from = c.focused ? rects.get(c.focused) : undefined;
-    if (!from) {
-      const first = rects.keys().next().value;
-      if (first) actions.focusTerminal(c.m, first);
-      return;
-    }
-    const cx = from.x + from.w / 2;
-    const cy = from.y + from.h / 2;
-    let best: string | undefined;
-    let bestScore = Infinity;
-    for (const [id, r] of rects) {
-      if (id === c.focused) continue;
-      const ok =
-        dir === 'left'
-          ? r.x + r.w <= from.x + 1e-6
-          : dir === 'right'
-            ? r.x >= from.x + from.w - 1e-6
-            : dir === 'up'
-              ? r.y + r.h <= from.y + 1e-6
-              : r.y >= from.y + from.h - 1e-6;
-      if (!ok) continue;
-      const dx = r.x + r.w / 2 - cx;
-      const dy = r.y + r.h / 2 - cy;
-      const score = dir === 'left' || dir === 'right' ? Math.abs(dx) + 2 * Math.abs(dy) : Math.abs(dy) + 2 * Math.abs(dx);
-      if (score < bestScore) {
-        bestScore = score;
-        best = id;
-      }
-    }
-    if (best) actions.focusTerminal(c.m, best);
+    const next = c && L.neighbor(c.layout, dir);
+    if (c && next) actions.focusTerminal(c.m, next);
   },
 
   cyclePane(step: number) {
@@ -520,6 +471,14 @@ export const actions = {
     if (!ids.length) return;
     const i = c.focused ? ids.indexOf(c.focused) : -1;
     actions.focusTerminal(c.m, ids[(i + step + ids.length) % ids.length]);
+  },
+
+  /** Selects the next (1) or previous (-1) workspace of the shown machine. */
+  cycleWorkspace(step: number) {
+    const c = current();
+    const n = c?.layout.workspaces.length ?? 0;
+    if (!c || n < 2) return;
+    actions.selectWorkspace(c.m, c.layout.workspaces[(c.layout.selected + step + n) % n].id);
   },
 
   switchTab(step: number | { index: number }) {

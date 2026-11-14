@@ -171,7 +171,7 @@ described in [13](13-settings-and-appearance.md))
   bindings the core works out for its platform.
 - The defaults are a prefix keymap: `ctrl+b`, then a key (split
   `v` / `-`, focus `h` `j` `k` `l`, tabs `c` `n` `p` `1`…`9`, workspaces
-  `shift+n` `shift+w` `shift+d`…). A chord lasts 3 s or until its next key;
+  `shift+n` `shift+w` `shift+d`, next and previous workspace `)` `(`…). A chord lasts 3 s or until its next key;
   the prefix twice (`ctrl+b ctrl+b`) sends it to the pane; a key that ends
   no chord is dropped.
 - herdr-ide adds bindings for its own features (VS Code `ctrl+b e`, diff

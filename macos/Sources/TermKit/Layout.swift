@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// The arrangement of a machine's terminals that every client shares:
@@ -333,6 +334,60 @@ public struct Layout: Equatable {
         selected = w
     }
 
+    // MARK: - Panes on screen
+
+    /// Where on a pane another one is dropped: its middle swaps them, an edge
+    /// places the dropped pane on that side.
+    public enum DropZone: String { case center, left, right, top, bottom }
+
+    public enum Direction: String { case left, right, up, down }
+
+    /// The zone of a point given as shares (0 to 1) of the pane's width and
+    /// height from its top left: the middle (0.3 to 0.7 both ways), else the
+    /// nearest edge.
+    public static func dropZone(_ fx: Double, _ fy: Double) -> DropZone {
+        if fx > 0.3, fx < 0.7, fy > 0.3, fy < 0.7 { return .center }
+        let edges: [(DropZone, Double)] = [(.left, fx), (.right, 1 - fx), (.top, fy), (.bottom, 1 - fy)]
+        return edges.reduce(edges[0]) { $1.1 < $0.1 ? $1 : $0 }.0
+    }
+
+    /// The layout after dropping a terminal's pane on a zone of another's.
+    public mutating func drop(_ address: String, on target: String, zone: DropZone) {
+        if zone == .center { return swap(address, target) }
+        move(address, beside: target, axis: zone == .left || zone == .right ? .horizontal : .vertical, before: zone == .left || zone == .top)
+    }
+
+    /// The terminal of the selected tab beside the focused one in a
+    /// direction: of the panes wholly on that side, the one whose centre is
+    /// nearest, a step across counting twice a step along. The first pane
+    /// when none is focused; nil when nothing is there.
+    public func neighbor(_ direction: Direction) -> String? {
+        guard let tab = selectedTab else { return nil }
+        let rects = tab.root.rects()
+        guard let from = rects.first(where: { $0.terminal == tab.focused })?.rect else { return rects.first?.terminal }
+        let eps = 1e-6
+        var best: (String, CGFloat)?
+        for (id, r) in rects where id != tab.focused {
+            let ok: Bool
+            switch direction {
+            case .left: ok = r.maxX <= from.minX + eps
+            case .right: ok = r.minX >= from.maxX - eps
+            case .up: ok = r.maxY <= from.minY + eps
+            case .down: ok = r.minY >= from.maxY - eps
+            }
+            guard ok else { continue }
+            let dx = abs(r.midX - from.midX), dy = abs(r.midY - from.midY)
+            let score = direction == .left || direction == .right ? dx + 2 * dy : dy + 2 * dx
+            if best == nil || score < best!.1 { best = (id, score) }
+        }
+        return best?.0
+    }
+
+    /// Focuses the terminal beside the focused one (`neighbor`).
+    public mutating func focus(_ direction: Direction) {
+        if let next = neighbor(direction) { focus(next) }
+    }
+
     /// The selection after moving the item at `from` to `to`: it stays on its item.
     static func afterMove(_ selected: Int, _ from: Int, _ to: Int) -> Int {
         if selected == from { return to }
@@ -356,6 +411,26 @@ extension Layout.Node {
         case let .terminal(address, _): return [address]
         case let .split(_, _, first, second, _): return first.terminals + second.terminals
         case .other: return []
+        }
+    }
+
+    /// Each terminal's share of the tab, in the tree's order, as parts of a
+    /// unit square whose y grows downwards.
+    public func rects(in r: CGRect = CGRect(x: 0, y: 0, width: 1, height: 1)) -> [(terminal: String, rect: CGRect)] {
+        switch self {
+        case let .terminal(address, _):
+            return [(address, r)]
+        case let .split(axis, ratio, first, second, _):
+            if axis == .horizontal {
+                let w = r.width * ratio
+                return first.rects(in: CGRect(x: r.minX, y: r.minY, width: w, height: r.height))
+                    + second.rects(in: CGRect(x: r.minX + w, y: r.minY, width: r.width - w, height: r.height))
+            }
+            let h = r.height * ratio
+            return first.rects(in: CGRect(x: r.minX, y: r.minY, width: r.width, height: h))
+                + second.rects(in: CGRect(x: r.minX, y: r.minY + h, width: r.width, height: r.height - h))
+        case .other:
+            return []
         }
     }
 

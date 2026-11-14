@@ -2,8 +2,139 @@ import AppKit
 import GhosttyTerminal
 import TermKit
 
-/// One terminal on screen: Ghostty's surface fed by a stream of the core.
-/// The surface emulates the terminal; the pane only moves bytes and sizes.
+/// The terminal view of a pane: Ghostty's, with the pane's own paste, drop
+/// and menu (TerminalPane sets the hooks).
+final class PaneTerminalView: TerminalView {
+    /// Paste: true when the pane took the clipboard itself (files, images).
+    nonisolated(unsafe) var onPaste: (() -> Bool)?
+    /// Files dropped: true when the pane took them.
+    nonisolated(unsafe) var onDrop: ((NSPasteboard) -> Bool)?
+    /// The menu of a right click without a selection.
+    nonisolated(unsafe) var menuBuilder: ((NSEvent) -> NSMenu?)?
+    /// The pointer moved, with ⌘ held or not.
+    nonisolated(unsafe) var onHover: ((NSEvent) -> Void)?
+
+    override func paste(_ sender: Any?) {
+        if onPaste?() != true { super.paste(sender) }
+    }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        onDrop?(sender.draggingPasteboard) == true || super.performDragOperation(sender)
+    }
+
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        let files = sender.draggingPasteboard.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true])
+        return files ? .copy : super.draggingEntered(sender)
+    }
+
+    override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        let files = sender.draggingPasteboard.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true])
+        return files ? .copy : super.draggingUpdated(sender)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        super.menu(for: event) ?? menuBuilder?(event)
+    }
+
+    override func rightMouseUp(with event: NSEvent) {
+        super.rightMouseUp(with: event)
+        // Ghostty shows its own menu for a selection, and programs that
+        // take the mouse get the button.
+        guard MainActor.assumeIsolated({ selectionRegion }) == nil, let menu = menuBuilder?(event) else { return }
+        NSMenu.popUpContextMenu(menu, with: event, for: self)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        onHover?(event)
+    }
+}
+
+/// A pane's title bar: its status, name and directory, and its commands
+/// (VS Code, split, zoom, close). Dragging it moves the pane; a double click
+/// on it renames the pane.
+final class PaneHeader: NSView {
+    static let height: CGFloat = 24
+    private let dot = FillView(.clear)
+    private let title = NSTextField(labelWithString: "")
+    private let detail = NSTextField(labelWithString: "")
+    private let buttons = NSStackView()
+    private let zoom: ClosureButton
+    /// A command for this pane (pane.splitRight, code.open…).
+    var onCommand: ((String) -> Void)?
+    var onPress: ((NSEvent) -> Void)?
+    var menuBuilder: (() -> NSMenu?)?
+
+    init() {
+        var run: ((String) -> Void)?
+        func button(_ symbol: String, _ tip: String, _ command: String) -> ClosureButton {
+            let b = ClosureButton(symbol: symbol, tip: tip) { run?(command) }
+            b.widthAnchor.constraint(equalToConstant: 18).isActive = true
+            return b
+        }
+        zoom = button("arrow.up.left.and.arrow.down.right", tr("menu.zoom"), "pane.zoom")
+        super.init(frame: .zero)
+        run = { [weak self] in self?.onCommand?($0) }
+        let background = FillView(Theme.sidebar)
+        let border = FillView(Theme.border)
+        dot.layer?.cornerRadius = 3
+        dot.layer?.masksToBounds = true
+        title.lineBreakMode = .byTruncatingTail
+        detail.lineBreakMode = .byTruncatingHead
+        detail.font = Theme.fontSmall
+        detail.textColor = Theme.muted
+        title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        detail.setContentCompressionResistancePriority(.defaultLow - 1, for: .horizontal)
+        for b in [button("chevron.left.forwardslash.chevron.right", tr("menu.openCode"), "code.open"),
+                  button("rectangle.split.2x1", tr("menu.splitRight"), "pane.splitRight"),
+                  button("rectangle.split.1x2", tr("menu.splitDown"), "pane.splitDown"), zoom,
+                  button("xmark", tr("menu.closeTerminal"), "pane.close")] {
+            buttons.addArrangedSubview(b)
+        }
+        buttons.spacing = 2
+        for view in [background, dot, title, detail, buttons, border] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(view)
+        }
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: Self.height),
+            background.topAnchor.constraint(equalTo: topAnchor), background.bottomAnchor.constraint(equalTo: bottomAnchor),
+            background.leadingAnchor.constraint(equalTo: leadingAnchor), background.trailingAnchor.constraint(equalTo: trailingAnchor),
+            dot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10), dot.centerYAnchor.constraint(equalTo: centerYAnchor),
+            dot.widthAnchor.constraint(equalToConstant: 6), dot.heightAnchor.constraint(equalToConstant: 6),
+            title.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 6), title.centerYAnchor.constraint(equalTo: centerYAnchor),
+            detail.leadingAnchor.constraint(equalTo: title.trailingAnchor, constant: 8), detail.centerYAnchor.constraint(equalTo: centerYAnchor),
+            detail.trailingAnchor.constraint(lessThanOrEqualTo: buttons.leadingAnchor, constant: -8),
+            buttons.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6), buttons.centerYAnchor.constraint(equalTo: centerYAnchor),
+            border.bottomAnchor.constraint(equalTo: bottomAnchor), border.heightAnchor.constraint(equalToConstant: Theme.divider),
+            border.leadingAnchor.constraint(equalTo: leadingAnchor), border.trailingAnchor.constraint(equalTo: trailingAnchor),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder _: NSCoder) { fatalError() }
+
+    func update(record: TerminalRecord?, address: String, focused: Bool, zoomed: Bool, readOnly: Bool) {
+        title.stringValue = record?.displayName ?? address
+        title.font = focused ? Theme.fontStrong : Theme.font
+        title.textColor = focused ? Theme.foreground : Theme.muted
+        let cwd = (record?.raw["foreground"] as? [String: Any])?["cwd"] as? String ?? record?.cwd ?? ""
+        detail.stringValue = (cwd as NSString).abbreviatingWithTildeInPath
+        dot.fill = Theme.status(Activity.status(record)) ?? .clear
+        zoom.image = NSImage(systemSymbolName: zoomed ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
+                             accessibilityDescription: nil)
+        zoom.toolTip = zoomed ? tr("menu.restore") : tr("menu.zoom")
+        buttons.isHidden = readOnly
+    }
+
+    override func mouseDown(with event: NSEvent) { onPress?(event) }
+
+    override func menu(for _: NSEvent) -> NSMenu? { menuBuilder?() }
+}
+
+/// One terminal on screen: Ghostty's surface fed by a stream of the core,
+/// under its header. The surface emulates the terminal; the pane only moves
+/// bytes and sizes.
 final class TerminalPane: NSView, TermStreamDelegate, TerminalSurfaceTitleDelegate, TerminalSurfaceSearchDelegate,
     TerminalSurfaceOpenURLHandlingDelegate, TerminalSurfaceBellDelegate, TerminalSurfaceClipboardConfirmationDelegate
 {
@@ -16,20 +147,22 @@ final class TerminalPane: NSView, TermStreamDelegate, TerminalSurfaceTitleDelega
     let machine: String
     let address: String
     private let connection: TermConnection
-    private let terminalView = TerminalView(frame: .zero)
-    private var session: InMemoryTerminalSession!
+    let terminalView = PaneTerminalView(frame: .zero)
+    let header = PaneHeader()
+    private(set) var session: InMemoryTerminalSession!
     private var stream: UInt32?
     private var attaching = false
     private var grid: (cols: Int, rows: Int)?
-    private let ring = FillView(.clear)
+    /// The size of a cell in points, from the surface's last report.
+    private(set) var cell = CGSize(width: 8, height: 16)
     private lazy var findBar = FindBar(
         search: { [weak self] in self?.search($0) },
         step: { [weak self] forward in self?.findStep(forward) },
         close: { [weak self] in self?.hideFind() }
     )
-    var isFocusedPane = false { didSet { updateRing() } }
-    /// Whether the pane is alone in its tab: a single pane needs no ring.
-    var isAlone = true { didSet { updateRing() } }
+    var isFocusedPane = false
+    /// Input is not sent (a read-only core).
+    var readOnly = false
 
     init(machine: String, address: String, connection: TermConnection, controller: TerminalController) {
         self.machine = machine
@@ -39,23 +172,29 @@ final class TerminalPane: NSView, TermStreamDelegate, TerminalSurfaceTitleDelega
         session = InMemoryTerminalSession(
             write: { [weak self] data in DispatchQueue.main.async { self?.input(data) } },
             resize: { [weak self] viewport in
-                DispatchQueue.main.async { self?.resized(cols: Int(viewport.columns), rows: Int(viewport.rows)) }
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    let scale = self.window?.backingScaleFactor ?? 2
+                    if viewport.cellWidthPixels > 0, viewport.cellHeightPixels > 0 {
+                        self.cell = CGSize(width: CGFloat(viewport.cellWidthPixels) / scale, height: CGFloat(viewport.cellHeightPixels) / scale)
+                    }
+                    self.resized(cols: Int(viewport.columns), rows: Int(viewport.rows))
+                }
             },
             suppressesPixelOnlyResizes: true
         )
         terminalView.delegate = self
         terminalView.configuration = TerminalSurfaceOptions(backend: .inMemory(session))
         terminalView.controller = controller
-        for view in [terminalView, ring] as [NSView] {
+        for view in [header, terminalView] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
         NSLayoutConstraint.activate([
-            ring.topAnchor.constraint(equalTo: topAnchor),
-            ring.leadingAnchor.constraint(equalTo: leadingAnchor),
-            ring.trailingAnchor.constraint(equalTo: trailingAnchor),
-            ring.heightAnchor.constraint(equalToConstant: 2),
-            terminalView.topAnchor.constraint(equalTo: topAnchor),
+            header.topAnchor.constraint(equalTo: topAnchor),
+            header.leadingAnchor.constraint(equalTo: leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: trailingAnchor),
+            terminalView.topAnchor.constraint(equalTo: header.bottomAnchor),
             terminalView.leadingAnchor.constraint(equalTo: leadingAnchor),
             terminalView.trailingAnchor.constraint(equalTo: trailingAnchor),
             terminalView.bottomAnchor.constraint(equalTo: bottomAnchor),
@@ -64,10 +203,6 @@ final class TerminalPane: NSView, TermStreamDelegate, TerminalSurfaceTitleDelega
 
     @available(*, unavailable)
     required init?(coder _: NSCoder) { fatalError() }
-
-    private func updateRing() {
-        ring.fill = isFocusedPane && !isAlone ? Theme.focusRing : .clear
-    }
 
     override func layout() {
         super.layout()
@@ -133,7 +268,12 @@ final class TerminalPane: NSView, TermStreamDelegate, TerminalSurfaceTitleDelega
     }
 
     private func input(_ data: Data) {
-        if let stream { connection.write(stream, data) }
+        if let stream, !readOnly { connection.write(stream, data) }
+    }
+
+    /// Pastes text as the terminal does (bracketed when the program asks).
+    func paste(_ text: String) {
+        _ = MainActor.assumeIsolated { terminalView.paste(text: text) }
     }
 
     func stream(_ stream: UInt32, output: Data) {

@@ -149,6 +149,8 @@ export const en = {
   'machine.addFailed': 'Could not add {machine}: {detail}',
   'command.app.keyboardShortcuts': 'Keyboard shortcuts',
   'command.workspace.switch': 'Switch workspace',
+  'command.workspace.next': 'Next workspace',
+  'command.workspace.previous': 'Previous workspace',
   'command.workspace.new': 'New workspace',
   'command.workspace.rename': 'Rename workspace',
   'command.workspace.close': 'Close workspace',

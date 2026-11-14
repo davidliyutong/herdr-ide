@@ -85,9 +85,40 @@ terminal core, which get no virtual display; Linux and Windows.
 - **Workspaces.** A new workspace (⌘N, or the machine's menu in the
   sidebar) asks for a name and a working directory, both optional (without
   a name it is called after its directory), selects it and opens a
-  terminal there. Renaming asks for the name; closing removes the
-  workspace and kills its terminals, after asking when any still runs.
-  The last workspace closed is replaced by an empty one.
+  terminal there. Renaming (a double click on its row, or its menu) asks
+  for the name; its menu also moves it up or down; closing removes the
+  workspace and kills its terminals after asking, as the web UI does. The
+  last workspace closed is replaced by an empty one. **Next / previous
+  workspace** (`ctrl+b )` / `(`) cycle through the machine's workspaces,
+  **Switch workspace** (`ctrl+b w`) opens the palette with every machine's
+  workspaces, numbered.
+- **Folders** dropped on the sidebar or on the Dock icon
+  (`CFBundleDocumentTypes` for folders, `macos/xcode/Info.plist`) become
+  workspaces on the local machine, one each, named after the folder; they
+  wait up to 30 s for the local machine's terminals. Files that are not
+  folders are skipped with a note.
+- **Tabs.** A click selects a tab, a double click renames it (an empty
+  name shows its terminal's title again), dragging moves it within the
+  bar, and its menu renames, opens a terminal beside, moves left or right
+  and closes it.
+- **Panes** have a header: the agent's status dot, the pane's name (the
+  `name` label, set by a double click or the header's menu) or terminal
+  title, its directory, and buttons for VS Code, split right and down,
+  zoom and close. Dragging the header onto another pane swaps the two
+  (middle) or places the pane on that side (edges); onto a tab, beside
+  that tab's focused terminal; onto the plus button, into a new tab
+  (`Layout.drop`, `DragTracker`). **Zoom** (`ctrl+b z`) shows the focused
+  pane alone in this window until zoomed again or the pane leaves the tab.
+  **Focus left / right / up / down** (`ctrl+b h` `l` `k` `j`) move to the
+  pane whose centre is nearest on that side (`Layout.neighbor`, the same
+  rule as the web UI's, run on the vectors of `design/testdata/layout`).
+- **Closing** a pane or a tab asks first when a program runs in front of
+  a terminal's shell (`Activity.runningProgram`: the foreground process is
+  not the shell itself, or an agent was detected), naming the programs;
+  Cancel is the default button.
+- **Command palette** (`ctrl+b space`, View menu): a sheet with a field and
+  the commands this application runs with their keys and every
+  workspace; ↑ ↓ choose, Return runs, Escape closes (`fuzzyMatch`).
 - `TerminalPane` owns one Ghostty surface and one stream. It attaches when
   the surface first reports its grid, sends later grids as `resize`,
   passes output to the surface and acknowledges it, and writes the
@@ -155,15 +186,19 @@ terminal core, which get no virtual display; Linux and Windows.
   sidebar, and one opens in a window of its own whose web view shows the
   core's page for it (frames, video, input). A window closes when its
   program's window goes.
-- Menu: ⌘T new terminal, ⌘D split right, ⇧⌘D split down, ⌘N new
-  workspace, rename and close workspace, ⌘W close terminal, ⇧⌘] and ⇧⌘[
-  next and previous tab, ⌘B sidebar. ⌘N, like the terminal commands, is
-  off while VS Code has the keyboard, and the workspace commands wait for
-  the machine's layout. A terminal with the keyboard takes the keys Ghostty
-  binds before the menu sees them, and Ghostty binds most of these by
-  default (new tab, splits, close, find, its own settings); the
-  controller's configuration unbinds every key of the menu
-  (`TerminalControllerBox.menuKeys`), so they reach the menu. A search Ghostty starts by itself shows the find bar as well.
+- Menu: the application's (settings, keyboard shortcuts), Shell (new
+  terminal, splits, workspaces, rename tab, close terminal or tab), Edit
+  (copy, paste, find), View (palette, switch workspace, sidebar, VS Code,
+  zoom, next and previous tab, workspace and pane, focus on a side) and
+  Window. Each item shows the first single-stroke key the keybindings give
+  its command; ⌘N, like the terminal commands, is off while VS Code has
+  the keyboard, and the workspace commands wait for the machine's layout.
+  A terminal with the keyboard takes the keys Ghostty binds before the
+  menu sees them, and Ghostty binds most of these by default (new tab,
+  splits, close, find, its own settings); the controller's configuration
+  unbinds every key of the menu (`TerminalControllerBox.menuKeys`), so they
+  reach the menu. A search Ghostty starts by itself shows the find bar as
+  well.
 
 **Building** (`scripts/fetch-ghostty.sh`, `scripts/macos-app.sh`,
 `macos/xcode/project.yml`). `make macos-build` and `make macos-test` fetch
@@ -249,7 +284,9 @@ See the row for the macOS application in
 
 ## Testing
 
-`macos/Tests/TermKitTests` (`make macos-test`): paths as terminals print
+`macos/Tests/TermKitTests` (`make macos-test`): the running-program rule,
+the attention list and its order, the reactions to agents' states, where
+text sent from VS Code goes, the palette's matching, paths as terminals print
 them (line suffixes, `~`, relative, `file:` URLs, other schemes) and the
 names of their local copies, frame encoding and slices,
 terminal names, the store's snapshots and every event kind (detected

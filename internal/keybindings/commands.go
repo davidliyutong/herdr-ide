@@ -102,6 +102,8 @@ var Commands = func() []Command {
 		cmd("app.agentAttention", "app", keys("ctrl+b o")...),
 
 		cmd("workspace.switch", "workspace", keys("ctrl+b w")...),
+		cmd("workspace.next", "workspace", keys("ctrl+b shift+0")...),
+		cmd("workspace.previous", "workspace", keys("ctrl+b shift+9")...),
 		cmd("workspace.new", "workspace", Default{Key: "ctrl+b shift+n"}, on(macApp, "cmd+n"), on(pcApp, "ctrl+shift+n")),
 		cmd("workspace.rename", "workspace", keys("ctrl+b shift+w")...),
 		cmd("workspace.close", "workspace", keys("ctrl+b shift+d")...),

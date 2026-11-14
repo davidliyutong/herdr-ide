@@ -82,8 +82,8 @@ final class PaneArea: NSView {
     private var shownMachine: String?
     private var content: NSView?
     private let empty = EmptyView()
-    /// A path was activated in a terminal: machine, terminal, text.
-    var onOpenPath: ((String, String, String) -> Void)?
+    /// Sets up a new pane's hooks (commands, drags, menus, paste).
+    var configure: ((TerminalPane) -> Void)?
 
     init(model: AppModel, controller: TerminalControllerBox) {
         self.model = model
@@ -115,7 +115,7 @@ final class PaneArea: NSView {
         let key = machine + "/" + address
         if let pane = panes[key] { return pane }
         let pane = TerminalPane(machine: machine, address: address, connection: model.connection, controller: controller.controller)
-        pane.onOpenPath = { [weak self] text in self?.onOpenPath?(machine, address, text) }
+        configure?(pane)
         panes[key] = pane
         return pane
     }
@@ -140,6 +140,12 @@ final class PaneArea: NSView {
         panes.values.first { $0.contains(view) }
     }
 
+    /// The pane shown under a point of the window's content view.
+    func pane(at point: NSPoint) -> TerminalPane? {
+        guard let content = window?.contentView else { return nil }
+        return panes.values.first { $0.window != nil && !$0.isHiddenOrHasHiddenAncestor && $0.convert($0.bounds, to: content).contains(point) }
+    }
+
     func reattach() {
         panes.values.forEach { $0.attach() }
     }
@@ -159,26 +165,29 @@ final class PaneArea: NSView {
             panes[key] = nil
         }
 
-        if tab?.root != shown || machine != shownMachine {
+        let zoomed = model.zoomedTerminal
+        let root = zoomed.map { Layout.Node.terminal($0) } ?? tab?.root
+        if root != shown || machine != shownMachine {
             content?.removeFromSuperview()
             content = nil
-            if let tab, let machine {
-                let view = build(tab.root, machine: machine, path: [])
+            if let root, let machine {
+                let view = build(root, machine: machine, path: [])
                 addSubview(view)
                 view.frame = bounds
                 content = view
             }
-            shown = tab?.root
+            shown = root
             shownMachine = machine
         }
         empty.isHidden = tab != nil
         empty.update(model: model)
         guard let tab, let machine else { return }
-        let alone = tab.root.terminals.count == 1
         for address in tab.root.terminals {
             let pane = pane(machine, address)
-            pane.isAlone = alone
             pane.isFocusedPane = address == tab.focused
+            pane.readOnly = model.readOnly
+            pane.header.update(record: model.store.terminal(address, on: machine), address: address, focused: address == tab.focused,
+                               zoomed: zoomed == address, readOnly: model.readOnly)
         }
         // The focus follows the layout unless the user is in another field.
         if window?.firstResponder is NSText || tab.focused.isEmpty { return }

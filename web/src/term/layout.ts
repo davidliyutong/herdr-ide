@@ -412,6 +412,98 @@ export function moveToNewTab(layout: Layout, address: string, workspace: string)
   return withWorkspace(removed, index, { ...ws, tabs, selected: tabs.length - 1 }, true);
 }
 
+/** A part of a tab, as shares of its width and height. */
+export interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Each terminal's share of its tab, from the split tree. */
+export function paneRects(node: Node, r: Rect = { x: 0, y: 0, w: 1, h: 1 }, out = new Map<string, Rect>()): Map<string, Rect> {
+  if (isLeaf(node)) {
+    out.set(node.terminal, r);
+    return out;
+  }
+  if (!isSplit(node)) return out;
+  const [a, b] = node.children;
+  if (node.split === 'horizontal') {
+    const w1 = r.w * node.ratio;
+    paneRects(a, { x: r.x, y: r.y, w: w1, h: r.h }, out);
+    paneRects(b, { x: r.x + w1, y: r.y, w: r.w - w1, h: r.h }, out);
+  } else {
+    const h1 = r.h * node.ratio;
+    paneRects(a, { x: r.x, y: r.y, w: r.w, h: h1 }, out);
+    paneRects(b, { x: r.x, y: r.y + h1, w: r.w, h: r.h - h1 }, out);
+  }
+  return out;
+}
+
+export type Direction = 'left' | 'right' | 'up' | 'down';
+
+/** The terminal of the selected tab beside the focused one in a direction:
+ * of the panes wholly on that side, the one whose centre is nearest, a step
+ * across counting twice a step along. The first pane when none is focused;
+ * undefined when nothing is there. */
+export function neighbor(layout: Layout, dir: Direction): string | undefined {
+  const tab = selectedTab(layout);
+  if (!tab) return undefined;
+  const rects = paneRects(tab.root);
+  const from = rects.get(tab.focused);
+  if (!from) return rects.keys().next().value;
+  const cx = from.x + from.w / 2;
+  const cy = from.y + from.h / 2;
+  const eps = 1e-6;
+  let best: string | undefined;
+  let bestScore = Infinity;
+  for (const [id, r] of rects) {
+    if (id === tab.focused) continue;
+    const ok =
+      dir === 'left'
+        ? r.x + r.w <= from.x + eps
+        : dir === 'right'
+          ? r.x >= from.x + from.w - eps
+          : dir === 'up'
+            ? r.y + r.h <= from.y + eps
+            : r.y >= from.y + from.h - eps;
+    if (!ok) continue;
+    const dx = Math.abs(r.x + r.w / 2 - cx);
+    const dy = Math.abs(r.y + r.h / 2 - cy);
+    const score = dir === 'left' || dir === 'right' ? dx + 2 * dy : dy + 2 * dx;
+    if (score < bestScore) {
+      bestScore = score;
+      best = id;
+    }
+  }
+  return best;
+}
+
+/** Focuses the terminal beside the focused one (neighbor). */
+export function focusDirection(layout: Layout, dir: Direction): Layout {
+  const next = neighbor(layout, dir);
+  return next ? focusTerminal(layout, next) : layout;
+}
+
+/** Where on a pane another one is dropped: its middle swaps them, an edge
+ * places the dropped pane on that side. */
+export type DropZone = 'center' | 'left' | 'right' | 'top' | 'bottom';
+
+/** The zone of a point given as shares (0 to 1) of the pane's width and
+ * height: the middle (0.3 to 0.7 both ways), else the nearest edge. */
+export function dropZone(fx: number, fy: number): DropZone {
+  if (fx > 0.3 && fx < 0.7 && fy > 0.3 && fy < 0.7) return 'center';
+  const d: Record<Exclude<DropZone, 'center'>, number> = { left: fx, right: 1 - fx, top: fy, bottom: 1 - fy };
+  return (Object.keys(d) as (keyof typeof d)[]).reduce((a, b) => (d[b] < d[a] ? b : a));
+}
+
+/** The layout after dropping a terminal's pane on a zone of another's. */
+export function dropOnPane(layout: Layout, address: string, target: string, zone: DropZone): Layout {
+  if (zone === 'center') return swapTerminals(layout, address, target);
+  const axis: Axis = zone === 'left' || zone === 'right' ? 'horizontal' : 'vertical';
+  return moveTerminal(layout, address, target, axis, zone === 'left' || zone === 'top');
+}
+
 function jsonEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null || Array.isArray(a) !== Array.isArray(b)) return false;

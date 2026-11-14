@@ -114,9 +114,13 @@ public struct TerminalRecord: Equatable, Identifiable {
     /// The program in the foreground, by name.
     public var foreground: String? { (raw["foreground"] as? [String: Any])?["name"] as? String }
 
-    /// What to call the terminal in a list: its name, its title, the
-    /// program in it, or its address.
+    /// The name the user gave its pane (its "name" label).
+    public var paneName: String? { labels["name"].flatMap { $0.isEmpty ? nil : $0 } }
+
+    /// What to call the terminal in a list: its pane's name, its name, its
+    /// title, the program in it, or its address.
     public var displayName: String {
+        if let paneName { return paneName }
         if let name, !name.isEmpty { return name }
         if !title.isEmpty { return title }
         if let foreground, !foreground.isEmpty { return foreground }

@@ -8,8 +8,6 @@ import { terms } from './state/terms';
 import * as L from './term/layout';
 import { t } from './i18n';
 
-export type Zone = 'center' | 'left' | 'right' | 'top' | 'bottom';
-
 export type DropTarget =
   | { kind: 'pane'; terminal: string; zone: Zone; rect: DOMRect }
   | { kind: 'tab'; ws: string; index: number; rect: DOMRect }
@@ -22,14 +20,12 @@ export interface DragSource {
   label: string;
 }
 
+export type Zone = L.DropZone;
+
 /** Drop zone for a point inside a pane: the middle swaps, the rest moves the
  * pane to the nearest edge. */
 export function dropZone(r: Box, x: number, y: number): Zone {
-  const fx = (x - r.left) / r.width;
-  const fy = (y - r.top) / r.height;
-  if (fx > 0.3 && fx < 0.7 && fy > 0.3 && fy < 0.7) return 'center';
-  const d = { left: fx, right: 1 - fx, top: fy, bottom: 1 - fy };
-  return (Object.keys(d) as (keyof typeof d)[]).reduce((a, b) => (d[b] < d[a] ? b : a));
+  return L.dropZone((x - r.left) / r.width, (y - r.top) / r.height);
 }
 
 function findTarget(src: DragSource, x: number, y: number): DropTarget | undefined {
@@ -70,11 +66,7 @@ function markerRect(tg: DropTarget): Box {
 
 /** The layout after dropping the source on a target. */
 export function dropped(l: L.Layout, src: DragSource, tg: DropTarget): L.Layout {
-  if (tg.kind === 'pane') {
-    if (tg.zone === 'center') return L.swapTerminals(l, src.terminal, tg.terminal);
-    const axis: L.Axis = tg.zone === 'left' || tg.zone === 'right' ? 'horizontal' : 'vertical';
-    return L.moveTerminal(l, src.terminal, tg.terminal, axis, tg.zone === 'left' || tg.zone === 'top');
-  }
+  if (tg.kind === 'pane') return L.dropOnPane(l, src.terminal, tg.terminal, tg.zone);
   if (tg.kind === 'tab') {
     // Beside the tab's focused terminal.
     const target = l.workspaces.find((w) => w.id === tg.ws)?.tabs[tg.index]?.focused;

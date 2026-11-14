@@ -145,6 +145,8 @@ final class LayoutTests: XCTestCase {
         case "swap": layout.swap(s("a"), s("b"))
         case "moveTerminal": layout.move(s("terminal"), beside: s("target"), axis: axis(), before: op["before"]?.bool ?? false)
         case "moveToNewTab": layout.moveToNewTab(s("terminal"), in: s("workspace"))
+        case "focusDirection": layout.focus(Layout.Direction(rawValue: s("dir")) ?? .left)
+        case "dropOnPane": layout.drop(s("terminal"), on: s("target"), zone: Layout.DropZone(rawValue: s("zone")) ?? .center)
         default: XCTFail("unknown op \(s("op"))")
         }
     }
@@ -421,5 +423,76 @@ final class SettingsModelTests: XCTestCase {
             XCTFail("settings message")
         }
         if case .keybindings? = EventConnection.decode(#"{"t":"keybindings","effective":{"mac":[]}}"#) {} else { XCTFail("keybindings message") }
+    }
+}
+
+final class ActivityTests: XCTestCase {
+    private func record(_ address: String, _ fields: [String: Any] = [:]) -> TerminalRecord {
+        TerminalRecord(raw: ["address": address, "state": "live", "pid": 10].merging(fields) { $1 })
+    }
+
+    func testRunningPrograms() {
+        // The shell at its prompt runs nothing; a program in front of it does.
+        XCTAssertNil(Activity.runningProgram(record("t1", ["foreground": ["pid": 10, "name": "-zsh"]])))
+        XCTAssertNil(Activity.runningProgram(record("t1", ["foreground": ["pid": 10, "name": "/bin/bash"]])))
+        XCTAssertEqual(Activity.runningProgram(record("t1", ["foreground": ["pid": 11, "name": "vim"]])), "vim")
+        // A shell started from the shell is a program too.
+        XCTAssertEqual(Activity.runningProgram(record("t1", ["foreground": ["pid": 12, "name": "bash"]])), "bash")
+        XCTAssertEqual(Activity.runningProgram(record("t1", ["foreground": ["pid": 12, "name": "node"], "agent": "claude"])), "claude")
+        XCTAssertNil(Activity.runningProgram(record("t1", ["state": "finished", "foreground": ["pid": 11, "name": "vim"]])))
+        XCTAssertNil(Activity.runningProgram(record("t1")))
+        XCTAssertEqual(Activity.runningPrograms([record("a", ["foreground": ["pid": 2, "name": "vim"]]), nil,
+                                                 record("b", ["foreground": ["pid": 3, "name": "vim"]]),
+                                                 record("c", ["foreground": ["pid": 4, "name": "top.exe"]])]), ["vim", "top"])
+    }
+
+    func testAttentionAndReactions() {
+        let list = Activity.attention([
+            ("m1", [record("a", ["agent": "claude", "agent_status": "working"]), record("b", ["status": ["state": "idle"]]),
+                    record("c", ["agent": "codex", "agent_status": "done"])]),
+            ("m2", [record("d", ["status": ["state": "error"]]), record("e", ["agent": "x", "agent_status": "blocked", "state": "finished"])]),
+        ])
+        XCTAssertEqual(list.map(\.terminal), ["d", "c", "a"])
+        XCTAssertEqual(list.map(\.status), ["blocked", "done", "working"])
+        XCTAssertEqual(Activity.badge(list), 1)
+        XCTAssertEqual(Activity.muted(" Droid, codex  gemini"), ["droid", "codex", "gemini"])
+
+        let blocked = Activity.AgentEvent(machine: "m", terminal: "t", status: "blocked", agent: "claude", sound: true)
+        XCTAssertEqual(Activity.reaction(blocked, soundsOn: true, muted: [], onScreen: true, inFront: true),
+                       Activity.Reaction(sound: .request, notification: false, note: true))
+        XCTAssertEqual(Activity.reaction(blocked, soundsOn: true, muted: ["claude"], onScreen: false, inFront: false),
+                       Activity.Reaction(sound: nil, notification: true, note: false))
+        var done = blocked
+        done.status = "done"
+        XCTAssertNil(Activity.reaction(done, soundsOn: true, muted: [], onScreen: true, inFront: true).sound)
+        XCTAssertEqual(Activity.reaction(done, soundsOn: true, muted: [], onScreen: true, inFront: false).sound, .done)
+        done.sound = false // another client plays it
+        XCTAssertNil(Activity.reaction(done, soundsOn: true, muted: [], onScreen: false, inFront: false).sound)
+        XCTAssertNil(Activity.reaction(done, soundsOn: false, muted: [], onScreen: false, inFront: false).sound)
+        var working = blocked
+        working.status = "working"
+        XCTAssertEqual(Activity.reaction(working, soundsOn: true, muted: [], onScreen: false, inFront: false),
+                       Activity.Reaction(sound: nil, notification: false, note: false))
+    }
+
+    func testSendTarget() {
+        let terminals = [record("a"), record("b", ["agent": "claude", "agent_status": "working"]), record("c", ["agent": "codex", "agent_status": "idle"])]
+        XCTAssertEqual(Activity.sendTarget(focused: "a", terminals: terminals, order: ["a", "b", "c"]), "a")
+        XCTAssertEqual(Activity.sendTarget(focused: nil, terminals: terminals, order: ["a", "b", "c"]), "c")
+        XCTAssertEqual(Activity.sendTarget(focused: nil, terminals: Array(terminals.prefix(2)), order: ["a", "b"]), "b")
+        XCTAssertNil(Activity.sendTarget(focused: nil, terminals: [record("a")], order: ["a"]))
+    }
+
+    func testPaletteAndSlots() {
+        XCTAssertTrue(fuzzyMatch("nwt", "New workspace tab"))
+        XCTAssertTrue(fuzzyMatch("", "x"))
+        XCTAssertFalse(fuzzyMatch("tn", "New tab"))
+        XCTAssertTrue(fuzzyMatch("SPLIT", "split right"))
+        XCTAssertEqual(slotIndex(from: 1, slot: 3), 2)
+        XCTAssertEqual(slotIndex(from: 3, slot: 0), 0)
+        XCTAssertEqual(Layout.dropZone(0.5, 0.5), .center)
+        XCTAssertEqual(Layout.dropZone(0.1, 0.5), .left)
+        XCTAssertEqual(Layout.dropZone(0.5, 0.95), .bottom)
+        XCTAssertEqual(TerminalRecord(raw: ["address": "t1", "labels": ["name": "build"], "name": "x"]).displayName, "build")
     }
 }

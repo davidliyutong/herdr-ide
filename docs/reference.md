@@ -133,7 +133,7 @@ The defaults have a prefix keymap (prefix `ctrl+b`) on every platform:
 | `ctrl+b space` / `ctrl+b g` | Command palette | `ctrl+b w` | Switch workspace or agent |
 | `ctrl+b b` | Toggle sidebar | `ctrl+b ?` | Shortcut list |
 | `ctrl+b shift+t` | Rename tab | `ctrl+b ,` | Settings |
-| `ctrl+b ctrl+b` | Send ctrl+b itself | | |
+| `ctrl+b )` / `(` | Next / previous workspace | `ctrl+b ctrl+b` | Send ctrl+b itself |
 
 The desktop applications add direct shortcuts. On macOS (the macOS
 application and the desktop app): `cmd+t` new tab, `cmd+d` / `cmd+shift+d`

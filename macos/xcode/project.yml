@@ -34,6 +34,9 @@ targets:
         CURRENT_PROJECT_VERSION: ${APP_VERSION}
         SWIFT_VERSION: "5.0"
         GENERATE_INFOPLIST_FILE: YES
+        # Keys the build settings cannot express: the folders the Dock icon
+        # takes (each becomes a workspace on the local machine).
+        INFOPLIST_FILE: Info.plist
         INFOPLIST_KEY_CFBundleDisplayName: ${APP_NAME}
         INFOPLIST_KEY_CFBundleIconFile: icon
         INFOPLIST_KEY_NSPrincipalClass: NSApplication

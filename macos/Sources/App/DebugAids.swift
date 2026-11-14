@@ -16,7 +16,11 @@
     /// settings), keys (their keyboard shortcuts page), set:<key>=<json>
     /// (changes a setting through the core), strokes:<stroke> <stroke>…
     /// (strokes given to the key matcher, as "ctrl+b c"), key:cmd+<key>
-    /// (the key as the keyboard sends it, with shift+ before the key).
+    /// (the key as the keyboard sends it, with shift+ before the key),
+    /// command:<id> (a command of the keybindings), folder:<path> (a folder
+    /// dropped on the Dock icon), palette:<text> (typed into the palette),
+    /// drag:<from>:<to>:<zone> (a pane dragged by its header onto another,
+    /// zone center, left, right, top or bottom; or tab onto tab: "tab").
     enum DebugAids {
         static func start(window: NSWindow, model: AppModel, panes: PaneArea, webPanel: WebPanel, run: @escaping (String) -> Void) {
             let env = ProcessInfo.processInfo.environment
@@ -38,7 +42,7 @@
                 case "new": model.newTerminal()
                 case "split-right": model.split(.horizontal)
                 case "split-down": model.split(.vertical)
-                case "close": model.closeFocused()
+                case "close": if let address = model.focusedTerminal { model.closePane(address) }
                 case "next-tab": model.cycleTab(1)
                 case "next-workspace": model.cycleWorkspace(1)
                 case "close-workspace":
@@ -49,7 +53,7 @@
                 case "page": webPanel.debugDescribe { FileHandle.standardError.write(Data(("page: " + $0 + "\n").utf8)) }
                 case "find-next": panes.pane(containing: window.firstResponder as? NSView)?.findStep(true)
                 default:
-                    if action.hasPrefix("settings:") || action.hasPrefix("strokes:") {
+                    if ["settings:", "strokes:", "command:", "folder:", "palette:", "drag:"].contains(where: action.hasPrefix) {
                         run(action)
                     } else if action.hasPrefix("set:"), let eq = action.firstIndex(of: "=") {
                         let key = String(action[action.index(action.startIndex, offsetBy: 4) ..< eq])

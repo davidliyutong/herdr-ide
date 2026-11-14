@@ -313,16 +313,18 @@ final class AppModel {
         connection.call(machine, "terminal.kill", ["terminal": address]) { _ in }
     }
 
-    func closeFocused() {
-        guard let machine = selectedMachine, let address = focusedTerminal else { return }
+    /// Closes a terminal of the selected machine and ends its program.
+    func closePane(_ address: String) {
+        guard let machine = selectedMachine else { return }
+        mutate(machine) { $0.close(address) }
         kill(address, on: machine)
     }
 
-    /// Closes the selected tab and ends the programs of its terminals.
-    func closeTab() {
-        guard let machine = selectedMachine, let workspace = layout.selectedWorkspace, let tab = workspace.selectedTab else { return }
-        let index = workspace.selected
-        mutate(machine) { $0.closeTab(index, in: workspace.id) }
+    /// Closes a tab and ends the programs of its terminals.
+    func closeTab(_ index: Int, in workspace: String) {
+        guard let machine = selectedMachine,
+              let tab = layout(of: machine)?.workspaces.first(where: { $0.id == workspace })?.tabs[safe: index] else { return }
+        mutate(machine) { $0.closeTab(index, in: workspace) }
         tab.root.terminals.forEach { kill($0, on: machine) }
     }
 
@@ -333,6 +335,74 @@ final class AppModel {
         guard all.count > 1, let index = all.firstIndex(of: tab.focused) else { return }
         focus(all[(index + step + all.count) % all.count])
     }
+
+    /// Focuses the pane on a side of the focused one.
+    func focus(_ direction: Layout.Direction) {
+        guard let machine = selectedMachine else { return }
+        mutate(machine) { $0.focus(direction) }
+    }
+
+    /// The terminal shown alone in its tab, in this window.
+    private(set) var zoomed: (machine: String, terminal: String)?
+
+    /// The zoomed terminal when it is in the selected tab.
+    var zoomedTerminal: String? {
+        guard let zoomed, zoomed.machine == selectedMachine, layout.selectedTab?.root.terminals.contains(zoomed.terminal) == true else { return nil }
+        return zoomed.terminal
+    }
+
+    /// Shows a terminal alone in its tab, or all of the tab again.
+    func toggleZoom(_ address: String? = nil) {
+        guard let machine = selectedMachine, let address = address ?? focusedTerminal else { return }
+        zoomed = zoomedTerminal == address ? nil : (machine, address)
+        focus(address)
+        onChange?()
+    }
+
+    func renameTab(_ index: Int, in workspace: String, to name: String) {
+        guard let machine = selectedMachine else { return }
+        mutate(machine) { $0.renameTab(index, in: workspace, to: name) }
+    }
+
+    /// Moves a tab of the selected workspace to a slot (0 before the first).
+    func moveTab(_ from: Int, toSlot slot: Int) {
+        guard let machine = selectedMachine, let workspace = layout.selectedWorkspace else { return }
+        mutate(machine) { $0.moveTab(from, to: slotIndex(from: from, slot: slot), in: workspace.id) }
+    }
+
+    /// Names a terminal's pane; empty shows its title again.
+    func renamePane(_ address: String, to name: String, on machine: String) {
+        connection.call(machine, "terminal.label", ["terminal": address, "labels": ["name": name]]) { _ in }
+    }
+
+    /// Drops a pane on another's zone (swap or place beside).
+    func drop(_ address: String, on target: String, zone: Layout.DropZone) {
+        guard let machine = selectedMachine else { return }
+        mutate(machine) { $0.drop(address, on: target, zone: zone) }
+    }
+
+    /// Moves a pane into a tab of the selected workspace, beside its focused
+    /// terminal, or into a new tab (nil).
+    func movePane(_ address: String, toTab index: Int?) {
+        guard let machine = selectedMachine, let workspace = layout.selectedWorkspace else { return }
+        mutate(machine) { layout in
+            if let index, let target = workspace.tabs[safe: index]?.focused {
+                layout.move(address, beside: target, axis: .horizontal)
+            } else {
+                layout.moveToNewTab(address, in: workspace.id)
+            }
+        }
+    }
+
+    /// Moves a workspace of a machine up (-1) or down (1).
+    func moveWorkspace(_ id: String, by step: Int, on machine: String) {
+        mutate(machine) { layout in
+            if let index = layout.workspaceIndex(id) { layout.moveWorkspace(id, to: index + step) }
+        }
+    }
+
+    /// The core does not take changes (--read-only).
+    var readOnly: Bool { settings.readOnly }
 
     /// Shows a terminal: where it is, else in a new tab of the selected workspace.
     func open(_ address: String, on machine: String) {
@@ -395,4 +465,8 @@ final class AppModel {
         let count = layout.workspaces.count
         selectWorkspace(layout.workspaces[(layout.selected + step + count) % count].id, on: machine)
     }
+}
+
+extension Array {
+    subscript(safe index: Int) -> Element? { indices.contains(index) ? self[index] : nil }
 }

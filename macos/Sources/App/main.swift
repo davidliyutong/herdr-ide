@@ -14,9 +14,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var quickLook: QuickLook?
     private var settings: SettingsWindow?
     private var programs: ProgramWindows?
-    private var dialogs: WorkspaceDialogs?
+    private var dialogs: Dialogs?
     private var machineDialogs: MachineDialogs?
-    private var panelWidth: NSLayoutConstraint?
+    private var palette: Palette?
+    private let toasts = Toasts()
+    private var panelSize: NSLayoutConstraint?
     private var panelShown = false
     private var sidebarWidth: NSLayoutConstraint?
     private var monitor: Any?
@@ -29,6 +31,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var pendingTimer: Timer?
     /// The keys the menu shows, by command; the matcher leaves them to it.
     private var menuKeys: [String: String] = [:]
+    /// Folders to open as workspaces on the local machine once it is ready,
+    /// and until when they wait.
+    private var pendingFolders: [String] = []
+    private var foldersDeadline = Date.distantPast
 
     func applicationDidFinishLaunching(_: Notification) {
         NSApp.mainMenu = makeMenu()
@@ -89,24 +95,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let programs = ProgramWindows(core: core)
         self.programs = programs
         sidebar.onProgram = { programs.show($0) }
-        let dialogs = WorkspaceDialogs(model: model, window: window)
+        sidebar.onFolders = { [weak self] in self?.openFolders($0) }
+        let dialogs = Dialogs(model: model, window: window)
         self.dialogs = dialogs
         sidebar.dialogs = dialogs
+        tabs.dialogs = dialogs
         let machineDialogs = MachineDialogs(model: model, window: window)
         self.machineDialogs = machineDialogs
         sidebar.machineDialogs = machineDialogs
+        palette = Palette(parent: window)
         let quickLook = QuickLook(core: core)
         self.quickLook = quickLook
         quickLook.onFailure = { [weak self] key, path in self?.notice(tr(key, path)) }
-        panes.onOpenPath = { [weak self] machine, terminal, text in
-            guard let self, let path = TerminalPath.resolve(text, cwd: model.directory(of: terminal, on: machine) ?? "") else { return }
-            self.quickLook?.preview(path, on: machine)
-        }
+        panes.configure = { [weak self] pane in self?.configure(pane) }
         let root = NSView()
         // The title bar is part of the content: the tab bar's color runs
         // up to the window's edge behind the window buttons.
         let titlebar = FillView(Theme.tabBar)
-        for view in [titlebar, sidebar, tabs, panes, webPanel] as [NSView] {
+        for view in [titlebar, sidebar, tabs, panes, webPanel, toasts] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(view)
         }
@@ -120,17 +126,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             sidebar.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             tabs.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor), tabs.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor),
             tabs.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            panes.topAnchor.constraint(equalTo: tabs.bottomAnchor), panes.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-            panes.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor), panes.trailingAnchor.constraint(equalTo: webPanel.leadingAnchor),
-            webPanel.topAnchor.constraint(equalTo: tabs.bottomAnchor), webPanel.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-            webPanel.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            panes.topAnchor.constraint(equalTo: tabs.bottomAnchor), panes.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor),
+            toasts.centerXAnchor.constraint(equalTo: panes.centerXAnchor), toasts.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -16),
+            toasts.widthAnchor.constraint(lessThanOrEqualToConstant: 520),
         ])
-        // The panel takes half of the room beside the sidebar when shown.
-        let hidden = webPanel.widthAnchor.constraint(equalToConstant: 0)
-        hidden.isActive = true
-        panelWidth = hidden
-        webPanel.isHidden = true
         window.contentView = root
+        placePanel()
         model.onChange = { [weak self] in self?.refresh() }
         model.onSettings = { [weak self] in self?.applySettings() }
         model.onKeybindings = { [weak self] in self?.applyKeybindings() }
@@ -149,19 +150,203 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         model.start()
         refresh()
         #if DEBUG
-            DebugAids.start(window: window, model: model, panes: panes, webPanel: webPanel) { [weak self] action in
-                if action == "code" { self?.togglePanel() }
-                if action == "settings" { self?.showSettings() }
-                if action == "keys" { self?.settings?.show(page: SettingsWindow.keysPage) }
-                if action.hasPrefix("settings:") { self?.settings?.show(page: String(action.dropFirst(9))) }
+            DebugAids.start(window: window, model: model, panes: panes, webPanel: webPanel) { [weak self] action in self?.debug(action) }
+        #endif
+    }
+
+    #if DEBUG
+        /// Actions of DebugAids that need the window's parts.
+        private func debug(_ action: String) {
+            switch action {
+            case "code": togglePanel()
+            case "settings": showSettings()
+            case "keys": settings?.show(page: SettingsWindow.keysPage)
+            default:
+                if action.hasPrefix("settings:") { settings?.show(page: String(action.dropFirst(9))) }
+                if action.hasPrefix("command:") { perform(String(action.dropFirst(8))) }
+                if action.hasPrefix("folder:") { openFolders([String(action.dropFirst(7))]) }
+                if action.hasPrefix("palette:") { palette?.debugType(String(action.dropFirst(8))) }
+                if action.hasPrefix("drag:") { debugDrag(action.dropFirst(5).split(separator: ":").map(String.init)) }
                 if action.hasPrefix("strokes:") {
                     for stroke in action.dropFirst(8).split(separator: " ") {
-                        let result = self?.feed(String(stroke), context: "terminal")
+                        let result = feed(String(stroke), context: "terminal")
                         FileHandle.standardError.write(Data("stroke \(stroke): \(String(describing: result))\n".utf8))
                     }
                 }
             }
-        #endif
+        }
+
+        /// Development: drags pane `from` (its header) to the middle of pane
+        /// `to` or near an edge ("left"…), or tab `from` onto the slot before
+        /// tab `to` ("tab"), with mouse events posted to this application's
+        /// own queue: [from, to, zone].
+        private func debugDrag(_ spec: [String]) {
+            guard spec.count == 3, let from = Int(spec[0]), let to = Int(spec[1]), let model, let panes, let tabs,
+                  let content = window.contentView, let tab = model.layout.selectedTab else { return }
+            let all = tab.root.terminals
+            func center(_ view: NSView) -> NSPoint { let f = view.convert(view.bounds, to: nil); return NSPoint(x: f.midX, y: f.midY) }
+            var start: NSPoint, end: NSPoint
+            var press: (NSEvent) -> Void
+            if spec[2] == "tab" {
+                guard tabs.buttons.indices.contains(from), tabs.buttons.indices.contains(to) else { return }
+                start = center(tabs.buttons[from])
+                let f = tabs.buttons[to].convert(tabs.buttons[to].bounds, to: nil)
+                end = NSPoint(x: f.minX + 2, y: f.midY)
+                press = { tabs.buttons[from].mouseDown(with: $0) }
+            } else {
+                guard all.indices.contains(from), all.indices.contains(to), let machine = model.selectedMachine else { return }
+                let source = panes.pane(machine, all[from]), target = panes.pane(machine, all[to])
+                start = center(source.header)
+                let f = target.convert(target.bounds, to: nil)
+                let offsets: [String: (CGFloat, CGFloat)] = ["left": (0.1, 0.5), "right": (0.9, 0.5), "top": (0.5, 0.9), "bottom": (0.5, 0.1)]
+                let (fx, fy) = offsets[spec[2]] ?? (0.5, 0.5)
+                end = NSPoint(x: f.minX + f.width * fx, y: f.minY + f.height * fy)
+                press = { source.header.mouseDown(with: $0) }
+            }
+            _ = content
+            func event(_ type: NSEvent.EventType, _ p: NSPoint) -> NSEvent? {
+                NSEvent.mouseEvent(with: type, location: p, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                   windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+            }
+            let mid = NSPoint(x: (start.x + end.x) / 2, y: (start.y + end.y) / 2)
+            for (type, p) in [(NSEvent.EventType.leftMouseDragged, mid), (.leftMouseDragged, end), (.leftMouseUp, end)] {
+                if let e = event(type, p) { NSApp.postEvent(e, atStart: false) }
+            }
+            if let down = event(.leftMouseDown, start) { press(down) }
+            FileHandle.standardError.write(Data("drag \(spec): \(model.layout.selectedTab.map { "\($0.root.terminals)" } ?? "")\n".utf8))
+        }
+    #endif
+
+    // MARK: - Panes
+
+    /// Wires a new pane: its header's commands, drag and menu, its text's
+    /// menu and the paths activated in it.
+    private func configure(_ pane: TerminalPane) {
+        pane.header.onCommand = { [weak self] command in
+            self?.model?.focus(pane.address)
+            self?.perform(command)
+        }
+        pane.header.onPress = { [weak self] event in self?.pressHeader(pane, event) }
+        pane.header.menuBuilder = { [weak self] in self?.paneMenu(pane) }
+        pane.terminalView.menuBuilder = { [weak self] _ in self?.textMenu(pane) }
+        pane.onOpenPath = { [weak self] text in self?.openPath(text, in: pane) }
+    }
+
+    /// A press on a pane's header: a double click renames the pane, a drag
+    /// moves it, a click focuses it.
+    private func pressHeader(_ pane: TerminalPane, _ event: NSEvent) {
+        guard let model else { return }
+        if event.clickCount == 2, !model.readOnly { return dialogs?.renamePane(pane.address) ?? () }
+        if !model.readOnly, DragTracker.track(event, target: { [weak self] in self?.paneDropTarget(pane.address, at: $0) }) { return }
+        model.focus(pane.address)
+    }
+
+    /// Where a dragged pane would go: onto another pane (its middle swaps,
+    /// an edge places it there), onto a tab (beside its focused terminal),
+    /// onto the plus button (a new tab).
+    private func paneDropTarget(_ source: String, at point: NSPoint) -> (NSRect, () -> Void)? {
+        guard let model, let content = window.contentView else { return nil }
+        if let pane = panes?.pane(at: point), pane.address != source {
+            let f = pane.convert(pane.bounds, to: content)
+            let zone = Layout.dropZone(Double((point.x - f.minX) / f.width), Double((f.maxY - point.y) / f.height))
+            var mark = f
+            switch zone {
+            case .left: mark.size.width /= 2
+            case .right: mark.origin.x += f.width / 2; mark.size.width /= 2
+            case .top: mark.origin.y += f.height / 2; mark.size.height /= 2
+            case .bottom: mark.size.height /= 2
+            case .center: break
+            }
+            return (mark, { model.drop(source, on: pane.address, zone: zone) })
+        }
+        if let (index, frame) = tabs?.target(at: point) {
+            if let index, model.layout.selectedWorkspace?.tabs[safe: index]?.root.terminals.contains(source) == true { return nil }
+            return (frame, { model.movePane(source, toTab: index) })
+        }
+        return nil
+    }
+
+    /// The menu of a pane's header.
+    private func paneMenu(_ pane: TerminalPane) -> NSMenu? {
+        guard let model, !model.readOnly else { return nil }
+        let menu = ClosureMenu()
+        let run = { [weak self] (command: String) in
+            self?.model?.focus(pane.address)
+            self?.perform(command)
+        }
+        menu.item(tr("menu.renamePane"), symbol: "pencil") { [weak self] in self?.dialogs?.renamePane(pane.address) }
+        menu.separator()
+        menu.item(tr("menu.splitRight"), symbol: "rectangle.split.2x1") { run("pane.splitRight") }
+        menu.item(tr("menu.splitDown"), symbol: "rectangle.split.1x2") { run("pane.splitDown") }
+        menu.item(model.zoomedTerminal == pane.address ? tr("menu.restore") : tr("menu.zoom"), symbol: "arrow.up.left.and.arrow.down.right") {
+            run("pane.zoom")
+        }
+        menu.separator()
+        menu.item(tr("menu.openCode"), symbol: "chevron.left.forwardslash.chevron.right") { run("code.open") }
+        menu.separator()
+        menu.item(tr("menu.closeTerminal"), symbol: "xmark") { run("pane.close") }
+        return menu
+    }
+
+    /// The menu of a terminal's text (a right click without a selection).
+    private func textMenu(_ pane: TerminalPane) -> NSMenu? {
+        let menu = ClosureMenu()
+        menu.item(tr("menu.paste"), symbol: "doc.on.clipboard") { [weak pane] in MainActor.assumeIsolated { pane?.terminalView.paste(nil) } }
+        menu.item(tr("menu.find"), symbol: "magnifyingglass") { [weak self] in
+            self?.model?.focus(pane.address)
+            pane.showFind()
+            _ = self
+        }
+        return menu
+    }
+
+    /// A path activated in a terminal (⌘-click): shown with Quick Look.
+    private func openPath(_ text: String, in pane: TerminalPane) {
+        guard let model, let path = TerminalPath.resolve(text, cwd: model.directory(of: pane.address, on: pane.machine) ?? "") else { return }
+        quickLook?.preview(path, on: pane.machine)
+    }
+
+    // MARK: - Folders
+
+    /// Folders dropped on the sidebar or the Dock icon become workspaces on
+    /// the local machine, one each, as if made in the new workspace dialog;
+    /// they wait up to 30 s for the local machine's terminals.
+    private func openFolders(_ paths: [String]) {
+        var folders: [String] = []
+        for path in paths {
+            var isDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue { folders.append(path) }
+        }
+        if folders.count < paths.count { toasts.show(tr("sidebar.dropFoldersOnly", String(paths.count - folders.count))) }
+        guard !folders.isEmpty else { return }
+        pendingFolders += folders
+        foldersDeadline = Date().addingTimeInterval(30)
+        if let local = model?.machines.first(where: { $0.kind == "local" }) { model?.select(machine: local.id) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30.5) { [weak self] in self?.openPendingFolders() }
+        openPendingFolders()
+    }
+
+    private func openPendingFolders() {
+        guard !pendingFolders.isEmpty, let model else { return }
+        let local = model.machines.first { $0.kind == "local" }
+        if let local, !model.readOnly, model.layout(of: local.id) != nil, model.backend(of: local.id)?.phase == .ready {
+            let folders = pendingFolders
+            pendingFolders = []
+            for folder in folders { model.newWorkspace(name: "", cwd: folder, on: local.id) }
+        } else if Date() > foldersDeadline || model.readOnly || local?.status == "disabled" {
+            toasts.show(tr("sidebar.openFoldersFailed", String(pendingFolders.count)))
+            pendingFolders = []
+        }
+    }
+
+    func application(_: NSApplication, open urls: [URL]) {
+        let paths = urls.filter(\.isFileURL).map(\.path)
+        if model == nil {
+            pendingFolders += paths
+            foldersDeadline = Date().addingTimeInterval(30)
+        } else {
+            openFolders(paths)
+        }
     }
 
     // MARK: - Settings and keybindings
@@ -180,6 +365,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         TerminalPane.history = Int(min(100_000, max(0, s.number("terminal.scrollback", 10000))))
         TerminalPane.bell = s.string("terminal.bell", "visual")
         MainActor.assumeIsolated { controllerBox?.apply(s, menuKeys: Array(menuKeys.values)) }
+        placePanel()
         settings?.refresh()
         refresh()
     }
@@ -244,44 +430,70 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
     }
 
+    // MARK: - Commands
+
     /// The commands this application runs (the settings mark the others).
     static let supported: Set<String> = {
         var out: Set<String> = [
-            "app.settings", "app.keyboardShortcuts", "workspace.new", "workspace.rename", "workspace.close", "tab.new", "tab.close",
-            "tab.next", "tab.previous", "pane.splitRight", "pane.splitDown", "pane.close", "pane.focusNext", "pane.focusPrevious",
+            "app.commandPalette", "app.settings", "app.keyboardShortcuts",
+            "workspace.switch", "workspace.next", "workspace.previous", "workspace.new", "workspace.rename", "workspace.close",
+            "tab.new", "tab.rename", "tab.close", "tab.next", "tab.previous",
+            "pane.splitRight", "pane.splitDown", "pane.close", "pane.zoom", "pane.focusLeft", "pane.focusRight", "pane.focusUp",
+            "pane.focusDown", "pane.focusNext", "pane.focusPrevious",
             "view.toggleSidebar", "view.toggleCode", "find.open", "find.next", "find.previous", "code.open",
         ]
         for i in 1 ... 9 { out.insert("tab.select\(i)") }
         return out
     }()
 
+    /// Commands that change something: none runs while the core is read-only.
+    private static let changing: Set<String> = [
+        "workspace.new", "workspace.rename", "workspace.close", "tab.new", "tab.rename", "tab.close", "pane.splitRight", "pane.splitDown",
+        "pane.close", "code.open", "code.diff", "code.gitGraph", "view.toggleCode",
+    ]
+
     /// Runs a command; those this application does not have do nothing.
     private func perform(_ command: String) {
+        guard let model else { return }
+        if model.readOnly, Self.changing.contains(command) { return }
         if command.hasPrefix("tab.select"), let n = Int(command.dropFirst(10)) {
-            model?.selectTab(n - 1)
+            model.selectTab(n - 1)
             return
         }
+        let machine = model.selectedMachine
+        let workspace = model.layout.selectedWorkspace
+        let focused = model.focusedTerminal
         switch command {
+        case "app.commandPalette": showPalette(workspacesOnly: false)
         case "app.settings": showSettings()
         case "app.keyboardShortcuts": settings?.show(page: SettingsWindow.keysPage)
-        case "workspace.new": newWorkspace()
-        case "workspace.rename": renameWorkspace()
-        case "workspace.close": closeWorkspace()
-        case "tab.new": model?.newTerminal()
-        case "tab.close": model?.closeTab()
-        case "tab.next": model?.cycleTab(1)
-        case "tab.previous": model?.cycleTab(-1)
-        case "pane.splitRight": model?.split(.horizontal)
-        case "pane.splitDown": model?.split(.vertical)
-        case "pane.close": model?.closeFocused()
-        case "pane.focusNext": model?.cycleFocus(1)
-        case "pane.focusPrevious": model?.cycleFocus(-1)
+        case "workspace.switch": showPalette(workspacesOnly: true)
+        case "workspace.next": model.cycleWorkspace(1)
+        case "workspace.previous": model.cycleWorkspace(-1)
+        case "workspace.new": if let machine { dialogs?.createWorkspace(on: machine) }
+        case "workspace.rename": if let machine, let workspace { dialogs?.renameWorkspace(workspace.id, on: machine) }
+        case "workspace.close": if let machine, let workspace { dialogs?.closeWorkspace(workspace.id, on: machine) }
+        case "tab.new": model.newTerminal()
+        case "tab.rename": if let workspace { dialogs?.renameTab(workspace.selected) }
+        case "tab.close": if let workspace { dialogs?.closeTab(workspace.selected) }
+        case "tab.next": model.cycleTab(1)
+        case "tab.previous": model.cycleTab(-1)
+        case "pane.splitRight": model.split(.horizontal)
+        case "pane.splitDown": model.split(.vertical)
+        case "pane.close": if let focused { dialogs?.closePane(focused) }
+        case "pane.zoom": model.toggleZoom()
+        case "pane.focusLeft": model.focus(.left)
+        case "pane.focusRight": model.focus(.right)
+        case "pane.focusUp": model.focus(.up)
+        case "pane.focusDown": model.focus(.down)
+        case "pane.focusNext": model.cycleFocus(1)
+        case "pane.focusPrevious": model.cycleFocus(-1)
         case "view.toggleSidebar": toggleSidebar()
         case "view.toggleCode": togglePanel()
         case "code.open": if !panelShown { togglePanel() }
-        case "find.open": find()
-        case "find.next": findNext()
-        case "find.previous": findPrevious()
+        case "find.open": focusedPane?.showFind()
+        case "find.next": focusedPane?.findStep(true)
+        case "find.previous": focusedPane?.findStep(false)
         default: break
         }
     }
@@ -290,6 +502,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         if let command = sender.representedObject as? String { perform(command) }
     }
 
+    /// The palette: the commands this application runs with their keys and
+    /// every machine's workspaces, or the workspaces alone.
+    private func showPalette(workspacesOnly: Bool) {
+        guard let model else { return }
+        var items: [Palette.Item] = []
+        if !workspacesOnly {
+            let hidden: Set<String> = ["app.commandPalette", "workspace.switch"]
+            for command in model.keybindings.commands where Self.supported.contains(command.id) && !hidden.contains(command.id)
+                && !command.id.hasPrefix("tab.select") && !(model.readOnly && Self.changing.contains(command.id)) {
+                let key = model.keybindings.keys(of: command.id).sorted { !$0.contains(" ") && $1.contains(" ") }.first
+                items.append(Palette.Item(label: SettingsWindow.text("command." + command.id) ?? command.id,
+                                          hint: key.map(Keys.label) ?? "") { [weak self] in self?.perform(command.id) })
+            }
+        }
+        for machine in model.machines {
+            for (index, workspace) in (model.layout(of: machine.id)?.workspaces ?? []).enumerated() {
+                items.append(Palette.Item(label: "\(index + 1)  " + Dialogs.name(of: workspace), hint: machine.label) {
+                    model.selectWorkspace(workspace.id, on: machine.id)
+                })
+            }
+        }
+        palette?.show(placeholder: workspacesOnly ? tr("palette.workspaces") : tr("palette.commands"), items: items)
+    }
 
     private var refreshing = false
 
@@ -306,19 +541,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             self.panes?.update()
             self.panes?.reattach()
             self.showPanelFolder()
+            self.openPendingFolders()
         }
+    }
+
+    // MARK: - VS Code
+
+    /// Places the VS Code panel beside the terminals or below them
+    /// (layout.panelPosition), half of the room when shown.
+    private func placePanel() {
+        guard let webPanel, let panes, let root = window.contentView else { return }
+        let bottom = model?.settings.string("layout.panelPosition", "right") == "bottom"
+        NSLayoutConstraint.deactivate(root.constraints.filter { c in
+            [c.firstItem, c.secondItem].contains { $0 === webPanel } || (c.firstItem === panes && [.bottom, .trailing].contains(c.firstAttribute))
+        })
+        panelSize?.isActive = false
+        let shown = panelShown
+        if bottom {
+            panelSize = shown ? webPanel.heightAnchor.constraint(equalTo: panes.heightAnchor) : webPanel.heightAnchor.constraint(equalToConstant: 0)
+            NSLayoutConstraint.activate([
+                panes.trailingAnchor.constraint(equalTo: root.trailingAnchor), panes.bottomAnchor.constraint(equalTo: webPanel.topAnchor),
+                webPanel.leadingAnchor.constraint(equalTo: panes.leadingAnchor), webPanel.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+                webPanel.bottomAnchor.constraint(equalTo: root.bottomAnchor), panelSize!,
+            ])
+        } else {
+            panelSize = shown ? webPanel.widthAnchor.constraint(equalTo: panes.widthAnchor) : webPanel.widthAnchor.constraint(equalToConstant: 0)
+            NSLayoutConstraint.activate([
+                panes.bottomAnchor.constraint(equalTo: root.bottomAnchor), panes.trailingAnchor.constraint(equalTo: webPanel.leadingAnchor),
+                webPanel.topAnchor.constraint(equalTo: panes.topAnchor), webPanel.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+                webPanel.trailingAnchor.constraint(equalTo: root.trailingAnchor), panelSize!,
+            ])
+        }
+        webPanel.isHidden = !shown
     }
 
     /// Shows or hides VS Code beside the terminals, for the directory of
     /// the focused terminal.
     @objc private func togglePanel() {
-        guard let webPanel, let panes, let old = panelWidth else { return }
         panelShown.toggle()
-        old.isActive = false
-        let next = panelShown ? webPanel.widthAnchor.constraint(equalTo: panes.widthAnchor) : webPanel.widthAnchor.constraint(equalToConstant: 0)
-        next.isActive = true
-        panelWidth = next
-        webPanel.isHidden = !panelShown
+        placePanel()
         showPanelFolder()
         if !panelShown { refresh() }
     }
@@ -360,13 +621,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     /// While a web page has the keyboard its shortcuts are its own: the
     /// commands for terminals are off, so their keys reach the page.
-    /// Workspaces change once the machine's layout was read.
+    /// Workspaces change once the machine's layout was read; nothing
+    /// changes while the core is read-only.
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         guard let command = item.representedObject as? String else { return true }
         let inPage = webPanel?.contains(window.firstResponder as? NSView) ?? false
         // Keys of commands for everywhere also work in the page.
         let when = model?.keybindings.commands.first { $0.id == command }?.when ?? "terminal"
         if inPage, when != "always", when != "vscode" { return false }
+        if model?.readOnly == true, Self.changing.contains(command) { return false }
         if command.hasPrefix("workspace.") {
             return model?.selectedMachine.flatMap { model?.layout(of: $0) } != nil
         }
@@ -440,6 +703,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             command(menu, "menu.renameWorkspace", "workspace.rename")
             command(menu, "menu.closeWorkspace", "workspace.close")
             menu.addItem(.separator())
+            command(menu, "menu.renameTab", "tab.rename")
             command(menu, "menu.closeTerminal", "pane.close")
             command(menu, "menu.closeTab", "tab.close")
         }
@@ -453,13 +717,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             command(menu, "menu.findPrevious", "find.previous")
         }
         submenu(tr("menu.view")) { menu in
+            command(menu, "menu.commandPalette", "app.commandPalette")
+            command(menu, "menu.switchWorkspace", "workspace.switch")
+            menu.addItem(.separator())
             command(menu, "menu.toggleSidebar", "view.toggleSidebar")
             command(menu, "menu.toggleCode", "view.toggleCode")
+            command(menu, "menu.zoom", "pane.zoom")
             menu.addItem(.separator())
             command(menu, "menu.nextTab", "tab.next")
             command(menu, "menu.previousTab", "tab.previous")
+            command(menu, "menu.nextWorkspace", "workspace.next")
+            command(menu, "menu.previousWorkspace", "workspace.previous")
+            menu.addItem(.separator())
             command(menu, "menu.nextPane", "pane.focusNext")
             command(menu, "menu.previousPane", "pane.focusPrevious")
+            command(menu, "menu.focusLeft", "pane.focusLeft")
+            command(menu, "menu.focusRight", "pane.focusRight")
+            command(menu, "menu.focusUp", "pane.focusUp")
+            command(menu, "menu.focusDown", "pane.focusDown")
         }
         submenu(tr("menu.window")) { menu in
             add(menu, "menu.minimize", #selector(NSWindow.performMiniaturize(_:)), "m")
@@ -475,23 +750,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
 
     private func showSettings() { settings?.show() }
-    private func find() { focusedPane?.showFind() }
-    private func findNext() { focusedPane?.findStep(true) }
-    private func findPrevious() { focusedPane?.findStep(false) }
 
-    private func newWorkspace() {
-        if let machine = model?.selectedMachine { dialogs?.create(on: machine) }
-    }
-
-    private func renameWorkspace() {
-        guard let model, let machine = model.selectedMachine, let workspace = model.layout.selectedWorkspace else { return }
-        dialogs?.rename(workspace.id, on: machine)
-    }
-
-    private func closeWorkspace() {
-        guard let model, let machine = model.selectedMachine, let workspace = model.layout.selectedWorkspace else { return }
-        dialogs?.close(workspace.id, on: machine)
-    }
     private func toggleSidebar() {
         guard let sidebar, let sidebarWidth else { return }
         sidebar.isHidden.toggle()

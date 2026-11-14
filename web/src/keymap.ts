@@ -159,6 +159,12 @@ export function runCommand(id: string) {
     case 'workspace.switch':
       s.setPalette?.('workspaces');
       break;
+    case 'workspace.next':
+      actions.cycleWorkspace(1);
+      break;
+    case 'workspace.previous':
+      actions.cycleWorkspace(-1);
+      break;
     case 'workspace.new':
       actions.newWorkspace();
       break;

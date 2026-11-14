@@ -5,7 +5,9 @@ import {
   closeTerminal,
   closeWorkspace,
   createWorkspace,
+  dropOnPane,
   emptyLayout,
+  focusDirection,
   focusedTerminal,
   focusTerminal,
   layoutTerminals,
@@ -29,6 +31,8 @@ import {
   swapTerminals,
   type Axis,
   type Layout,
+  type Direction,
+  type DropZone,
 } from '../term/layout';
 import {
   decodeFrame,
@@ -162,6 +166,10 @@ function applyOp(layout: Layout, op: Record<string, unknown>): Layout {
       return moveTerminal(layout, s('terminal'), s('target'), op.axis as Axis, op.before === true);
     case 'moveToNewTab':
       return moveToNewTab(layout, s('terminal'), s('workspace'));
+    case 'focusDirection':
+      return focusDirection(layout, op.dir as Direction);
+    case 'dropOnPane':
+      return dropOnPane(layout, s('terminal'), s('target'), op.zone as DropZone);
   }
   throw new Error(`unknown op ${String(op.op)}`);
 }

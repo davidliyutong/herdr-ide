@@ -1,0 +1,65 @@
+{
+  "description": "Moving the focus to the pane on a side (the nearest centre wins, a step across counting twice; nothing on that side changes nothing) and dropping a pane on another's middle (swap) or edge (placed on that side).",
+  "input": {
+    "version": 2,
+    "workspaces": [
+      {
+        "id": "w1",
+        "name": "one",
+        "cwd": "",
+        "tabs": [
+          {
+            "root": {
+              "split": "horizontal",
+              "ratio": 0.5,
+              "children": [
+                { "terminal": "a" },
+                { "split": "vertical", "ratio": 0.5, "children": [{ "terminal": "b" }, { "terminal": "c" }] }
+              ]
+            },
+            "focused": "a"
+          }
+        ],
+        "selected": 0
+      }
+    ],
+    "selected": 0
+  },
+  "ops": [
+    { "op": "focusDirection", "dir": "right" },
+    { "op": "focusDirection", "dir": "down" },
+    { "op": "focusDirection", "dir": "right" },
+    { "op": "focusDirection", "dir": "left" },
+    { "op": "dropOnPane", "terminal": "c", "target": "a", "zone": "center" },
+    { "op": "dropOnPane", "terminal": "b", "target": "c", "zone": "top" },
+    { "op": "dropOnPane", "terminal": "a", "target": "a", "zone": "center" },
+    { "op": "focusDirection", "dir": "up" },
+    { "op": "focusDirection", "dir": "right" }
+  ],
+  "changed": true,
+  "expected": {
+    "version": 2,
+    "workspaces": [
+      {
+        "id": "w1",
+        "name": "one",
+        "cwd": "",
+        "tabs": [
+          {
+            "root": {
+              "split": "horizontal",
+              "ratio": 0.5,
+              "children": [
+                { "split": "vertical", "ratio": 0.5, "children": [{ "terminal": "b" }, { "terminal": "c" }] },
+                { "terminal": "a" }
+              ]
+            },
+            "focused": "a"
+          }
+        ],
+        "selected": 0
+      }
+    ],
+    "selected": 0
+  }
+}

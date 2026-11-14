@@ -72,318 +72,18 @@ final class TerminalControllerBox {
     }
 }
 
-/// A row of the sidebar: a machine, one of its workspaces, a terminal or a
-/// program window.
-private enum SidebarItem: Equatable {
-    case machine(Machine)
-    case workspace(machine: String, workspace: Layout.Workspace, selected: Bool)
-    /// A terminal, inside a workspace or not.
-    case terminal(machine: String, record: TerminalRecord, inWorkspace: Bool)
-    /// A program window, under the terminal its program runs in (level 2
-    /// or 3) or under its machine (level 1).
-    case program(ProgramWindow, level: Int)
-}
-
-/// Machines, their workspaces and their terminals.
-final class SidebarView: NSView, NSTableViewDataSource, NSTableViewDelegate {
-    private let model: AppModel
-    private let table = NSTableView()
-    private var items: [SidebarItem] = []
-    /// A program window was chosen.
-    var onProgram: ((ProgramWindow) -> Void)?
-    var dialogs: WorkspaceDialogs?
-    var machineDialogs: MachineDialogs?
-
-    init(model: AppModel) {
-        self.model = model
-        super.init(frame: .zero)
-        let background = FillView(Theme.sidebar)
-        let scroll = NSScrollView()
-        scroll.documentView = table
-        scroll.drawsBackground = false
-        scroll.hasVerticalScroller = true
-        scroll.autohidesScrollers = true
-        scroll.scrollerStyle = .overlay
-        let column = NSTableColumn(identifier: .init("item"))
-        table.addTableColumn(column)
-        table.headerView = nil
-        table.backgroundColor = .clear
-        table.style = .plain
-        table.selectionHighlightStyle = .none
-        table.intercellSpacing = .zero
-        table.rowHeight = Theme.rowHeight
-        table.dataSource = self
-        table.delegate = self
-        table.target = self
-        table.action = #selector(clicked)
-        table.refusesFirstResponder = true
-        let menu = NSMenu()
-        menu.delegate = self
-        table.menu = menu
-        let border = FillView(Theme.border)
-        for view in [background, scroll, border] as [NSView] {
-            view.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(view)
-        }
-        NSLayoutConstraint.activate([
-            background.topAnchor.constraint(equalTo: topAnchor), background.bottomAnchor.constraint(equalTo: bottomAnchor),
-            background.leadingAnchor.constraint(equalTo: leadingAnchor), background.trailingAnchor.constraint(equalTo: trailingAnchor),
-            scroll.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor, constant: 4), scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
-            scroll.leadingAnchor.constraint(equalTo: leadingAnchor), scroll.trailingAnchor.constraint(equalTo: border.leadingAnchor),
-            border.topAnchor.constraint(equalTo: topAnchor), border.bottomAnchor.constraint(equalTo: bottomAnchor),
-            border.trailingAnchor.constraint(equalTo: trailingAnchor), border.widthAnchor.constraint(equalToConstant: Theme.divider),
-        ])
-    }
-
-    @available(*, unavailable)
-    required init?(coder _: NSCoder) { fatalError() }
-
-    func update() {
-        var next: [SidebarItem] = []
-        for machine in model.machines {
-            next.append(.machine(machine))
-            let live = model.store.terminals(of: machine.id).filter(\.isLive)
-            let programs = model.programs.filter { $0.machine == machine.id }
-            var placed: Set<String> = []
-            // A terminal, then the windows of the programs it runs.
-            func add(_ record: TerminalRecord, inWorkspace: Bool) {
-                placed.insert(record.address)
-                next.append(.terminal(machine: machine.id, record: record, inWorkspace: inWorkspace))
-                for program in programs where program.terminal == record.address {
-                    next.append(.program(program, level: inWorkspace ? 3 : 2))
-                }
-            }
-            if let layout = model.layout(of: machine.id) {
-                for (index, workspace) in layout.workspaces.enumerated() {
-                    next.append(.workspace(machine: machine.id, workspace: workspace,
-                                           selected: machine.id == model.selectedMachine && index == layout.selected))
-                    for address in workspace.terminals {
-                        guard let record = live.first(where: { $0.address == address }) else { continue }
-                        add(record, inWorkspace: true)
-                    }
-                }
-            }
-            // Terminals no workspace shows, such as those another client started.
-            for record in live where !placed.contains(record.address) {
-                add(record, inWorkspace: false)
-            }
-            for program in programs where !placed.contains(program.terminal) {
-                next.append(.program(program, level: 1))
-            }
-        }
-        items = next
-        table.rowHeight = Theme.rowHeight
-        table.reloadData()
-    }
-
-    func numberOfRows(in _: NSTableView) -> Int { items.count }
-
-    func tableView(_: NSTableView, viewFor _: NSTableColumn?, row: Int) -> NSView? {
-        let cell = SidebarRow()
-        switch items[row] {
-        case let .machine(machine):
-            var detail = ""
-            if machine.status != "ready" {
-                detail = tr("machine." + machine.status)
-            } else if let state = model.backend(of: machine.id) ?? machine.hc, state.phase == .error {
-                detail = tr("backend." + state.code)
-            } else if case let waiting = model.store.attention(of: machine.id), waiting > 0 {
-                // Agents that are blocked or finished a turn nobody saw.
-                detail = tr("sidebar.waiting", String(waiting))
-            }
-            cell.configure(title: machine.label, detail: detail, dot: nil, level: 0, strong: true, selected: false) { [weak self] in
-                self?.model.newTerminal(on: machine.id)
-            }
-            cell.toolTip = detail.isEmpty ? nil : detail
-            cell.setAccessibilityLabel(tr("sidebar.newTerminal", machine.label))
-        case let .workspace(machine, workspace, selected):
-            let name = WorkspaceDialogs.name(of: workspace)
-            cell.configure(title: name, detail: (workspace.cwd as NSString).abbreviatingWithTildeInPath, dot: nil, level: 1,
-                           strong: selected, selected: false) { [weak self] in
-                self?.model.newTerminal(on: machine, in: workspace.id)
-            }
-            cell.toolTip = workspace.cwd.isEmpty ? nil : workspace.cwd
-            cell.setAccessibilityLabel(tr("sidebar.newTerminalIn", name))
-        case let .terminal(machine, record, inWorkspace):
-            let focused = machine == model.selectedMachine && model.focusedTerminal == record.address
-            cell.configure(title: record.displayName, detail: (record.cwd as NSString).abbreviatingWithTildeInPath,
-                           dot: Theme.status(record.status), level: inWorkspace ? 2 : 1, strong: false, selected: focused, action: nil)
-            cell.toolTip = [record.agent, record.status.map { tr("status." + $0) }].compactMap { $0 }.joined(separator: " · ")
-        case let .program(program, level):
-            cell.configure(title: program.title.isEmpty ? tr("sidebar.window") : program.title, detail: tr("sidebar.window"),
-                           dot: nil, level: level, strong: false, selected: false, action: nil)
-        }
-        return cell
-    }
-
-    @objc private func clicked() {
-        guard items.indices.contains(table.clickedRow) else { return }
-        switch items[table.clickedRow] {
-        case let .machine(machine): model.select(machine: machine.id)
-        case let .workspace(machine, workspace, _): model.selectWorkspace(workspace.id, on: machine)
-        case let .terminal(machine, record, _): model.open(record.address, on: machine)
-        case let .program(program, _): onProgram?(program)
-        }
-    }
-}
-
-extension SidebarView: NSMenuDelegate {
-    func menuNeedsUpdate(_ menu: NSMenu) {
-        menu.removeAllItems()
-        guard items.indices.contains(table.clickedRow) else { return }
-        func add(_ title: String, _ action: Selector, _ object: Any) {
-            let item = menu.addItem(withTitle: title, action: action, keyEquivalent: "")
-            item.target = self
-            item.representedObject = object
-        }
-        switch items[table.clickedRow] {
-        case let .machine(machine):
-            add(tr("menu.newTerminal"), #selector(menuNew(_:)), [machine.id])
-            if model.layout(of: machine.id) != nil { add(tr("menu.newWorkspace"), #selector(menuNewWorkspace(_:)), machine.id) }
-            // The machine's terminal core: started when it was stopped (or
-            // none runs), else restarted (programs keep running) or stopped.
-            if machine.status == "ready", !model.settings.readOnly {
-                menu.addItem(.separator())
-                let code = (model.backend(of: machine.id) ?? machine.hc)?.code
-                if code == "stopped" || code == "not_running" {
-                    add(tr("menu.startCore"), #selector(menuStartCore(_:)), machine.id)
-                } else {
-                    add(tr("menu.restartCore"), #selector(menuRestartCore(_:)), machine.id)
-                    add(tr("menu.stopCore"), #selector(menuStopCore(_:)), machine.id)
-                }
-            }
-        case let .workspace(machine, workspace, _):
-            add(tr("menu.newTerminal"), #selector(menuNew(_:)), [machine, workspace.id])
-            menu.addItem(.separator())
-            add(tr("menu.renameWorkspace"), #selector(menuRenameWorkspace(_:)), [machine, workspace.id])
-            add(tr("menu.closeWorkspace"), #selector(menuCloseWorkspace(_:)), [machine, workspace.id])
-        case let .terminal(machine, record, _):
-            // Shells started before the machine's display existed get it
-            // typed in (remote machines only: the local one has its own).
-            if model.machines.first(where: { $0.id == machine })?.kind == "ssh", !model.settings.readOnly {
-                add(tr("menu.enableWindows"), #selector(menuEnableWindows(_:)), [machine, record.address])
-                menu.addItem(.separator())
-            }
-            add(tr("sidebar.kill"), #selector(menuKill(_:)), [machine, record.address])
-        case .program:
-            break
-        }
-    }
-
-    /// [machine] or [machine, workspace].
-    @objc private func menuNew(_ sender: NSMenuItem) {
-        guard let pair = sender.representedObject as? [String], let machine = pair.first else { return }
-        model.newTerminal(on: machine, in: pair.count > 1 ? pair[1] : nil)
-    }
-
-    @objc private func menuStartCore(_ sender: NSMenuItem) {
-        if let machine = sender.representedObject as? String { machineDialogs?.core("start", on: machine) }
-    }
-
-    @objc private func menuRestartCore(_ sender: NSMenuItem) {
-        if let machine = sender.representedObject as? String { machineDialogs?.core("restart", on: machine) }
-    }
-
-    @objc private func menuStopCore(_ sender: NSMenuItem) {
-        if let machine = sender.representedObject as? String { machineDialogs?.stopCore(on: machine) }
-    }
-
-    @objc private func menuNewWorkspace(_ sender: NSMenuItem) {
-        if let machine = sender.representedObject as? String { dialogs?.create(on: machine) }
-    }
-
-    @objc private func menuRenameWorkspace(_ sender: NSMenuItem) {
-        if let pair = sender.representedObject as? [String], pair.count == 2 { dialogs?.rename(pair[1], on: pair[0]) }
-    }
-
-    @objc private func menuCloseWorkspace(_ sender: NSMenuItem) {
-        if let pair = sender.representedObject as? [String], pair.count == 2 { dialogs?.close(pair[1], on: pair[0]) }
-    }
-
-    @objc private func menuEnableWindows(_ sender: NSMenuItem) {
-        if let pair = sender.representedObject as? [String], pair.count == 2 { machineDialogs?.enableWindows(pair[1], on: pair[0]) }
-    }
-
-    @objc private func menuKill(_ sender: NSMenuItem) {
-        if let pair = sender.representedObject as? [String], pair.count == 2 { model.kill(pair[1], on: pair[0]) }
-    }
-}
-
-private final class SidebarRow: NSView {
-    private let title = NSTextField(labelWithString: "")
-    private let detail = NSTextField(labelWithString: "")
-    private let dot = FillView(.clear)
-    private let add = NSButton(title: "", target: nil, action: nil)
-    private let highlight = FillView(.clear)
-    private var action: (() -> Void)?
-
-    init() {
-        super.init(frame: .zero)
-        highlight.wantsLayer = true
-        highlight.layer?.cornerRadius = Theme.radius
-        highlight.layer?.masksToBounds = true
-        dot.wantsLayer = true
-        dot.layer?.cornerRadius = 3
-        dot.layer?.masksToBounds = true
-        title.lineBreakMode = .byTruncatingTail
-        detail.lineBreakMode = .byTruncatingHead
-        detail.font = Theme.fontSmall
-        detail.textColor = Theme.muted
-        detail.setContentCompressionResistancePriority(.defaultLow - 1, for: .horizontal)
-        title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        add.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)
-        add.isBordered = false
-        add.contentTintColor = Theme.muted
-        add.target = self
-        add.action = #selector(pressed)
-        for view in [highlight, dot, title, detail, add] as [NSView] {
-            view.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(view)
-        }
-        NSLayoutConstraint.activate([
-            highlight.topAnchor.constraint(equalTo: topAnchor, constant: 1), highlight.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -1),
-            highlight.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6), highlight.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
-            dot.trailingAnchor.constraint(equalTo: title.leadingAnchor, constant: -8), dot.centerYAnchor.constraint(equalTo: centerYAnchor),
-            dot.widthAnchor.constraint(equalToConstant: 6), dot.heightAnchor.constraint(equalToConstant: 6),
-            title.centerYAnchor.constraint(equalTo: centerYAnchor),
-            detail.leadingAnchor.constraint(greaterThanOrEqualTo: title.trailingAnchor, constant: 8),
-            detail.centerYAnchor.constraint(equalTo: centerYAnchor),
-            detail.trailingAnchor.constraint(equalTo: add.leadingAnchor, constant: -4),
-            add.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10), add.centerYAnchor.constraint(equalTo: centerYAnchor),
-            add.widthAnchor.constraint(equalToConstant: 18),
-        ])
-    }
-
-    @available(*, unavailable)
-    required init?(coder _: NSCoder) { fatalError() }
-
-    private var leading: NSLayoutConstraint?
-
-    /// `level` 0 is a machine, 1 what is directly under it, 2 a terminal of
-    /// a workspace or a window of a terminal, 3 a window of a terminal of a
-    /// workspace.
-    func configure(title text: String, detail detailText: String, dot color: NSColor?, level: Int, strong: Bool, selected: Bool,
-                   action: (() -> Void)?) {
-        title.stringValue = text
-        title.font = strong ? Theme.fontStrong : Theme.font
-        title.textColor = level == 0 ? Theme.muted : Theme.foreground
-        detail.stringValue = detailText
-        dot.fill = color ?? .clear
-        add.isHidden = action == nil
-        self.action = action
-        highlight.fill = selected ? Theme.accent : .clear
-        leading?.isActive = false
-        leading = title.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14 + 16 * CGFloat(level))
-        leading?.isActive = true
-    }
-
-    @objc private func pressed() { action?() }
-}
-
-/// The tabs of the selected machine's selected workspace.
+/// The tabs of the selected machine's selected workspace: a click selects
+/// one, a double click renames it, dragging moves it, its menu renames,
+/// moves and closes it. A pane dragged here moves into the tab (or a new
+/// one, on the plus button).
 final class TabBar: NSView {
     private let model: AppModel
     private let stack = NSStackView()
+    private(set) var buttons: [NSView] = []
+    private(set) var addButton: NSButton?
+    var dialogs: Dialogs?
+    /// Views at the end of the bar (transfers).
+    let trailing = NSStackView()
 
     init(model: AppModel) {
         self.model = model
@@ -393,7 +93,9 @@ final class TabBar: NSView {
         stack.orientation = .horizontal
         stack.spacing = 2
         stack.alignment = .centerY
-        for view in [background, stack, border] as [NSView] {
+        trailing.orientation = .horizontal
+        trailing.spacing = 6
+        for view in [background, stack, trailing, border] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
@@ -402,7 +104,8 @@ final class TabBar: NSView {
             background.topAnchor.constraint(equalTo: topAnchor), background.bottomAnchor.constraint(equalTo: bottomAnchor),
             background.leadingAnchor.constraint(equalTo: leadingAnchor), background.trailingAnchor.constraint(equalTo: trailingAnchor),
             stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6), stack.centerYAnchor.constraint(equalTo: centerYAnchor),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -6),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: trailing.leadingAnchor, constant: -6),
+            trailing.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8), trailing.centerYAnchor.constraint(equalTo: centerYAnchor),
             border.bottomAnchor.constraint(equalTo: bottomAnchor), border.heightAnchor.constraint(equalToConstant: Theme.divider),
             border.leadingAnchor.constraint(equalTo: leadingAnchor), border.trailingAnchor.constraint(equalTo: trailingAnchor),
         ])
@@ -413,30 +116,76 @@ final class TabBar: NSView {
 
     func update() {
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        buttons = []
+        addButton = nil
         guard let machine = model.selectedMachine else { return }
         let workspace = model.layout.selectedWorkspace
         for (index, tab) in (workspace?.tabs ?? []).enumerated() {
             let record = model.store.terminal(tab.focused, on: machine)
-            let button = TabButton(title: tab.name ?? record?.displayName ?? tab.focused, dot: Theme.status(record?.status),
-                                   selected: index == workspace?.selected) { [weak self] in self?.model.selectTab(index) }
+            let button = TabButton(title: tab.name ?? record?.displayName ?? tab.focused, dot: Theme.status(Activity.status(record)),
+                                   selected: index == workspace?.selected)
+            button.onPress = { [weak self] event in self?.pressed(index, event) }
+            button.menuBuilder = { [weak self] in self?.menu(index) }
             stack.addArrangedSubview(button)
+            buttons.append(button)
         }
-        let add = NSButton(image: NSImage(systemSymbolName: "plus", accessibilityDescription: tr("menu.newTerminal"))!,
-                           target: self, action: #selector(newTab))
-        add.isBordered = false
-        add.contentTintColor = Theme.muted
-        add.toolTip = tr("menu.newTerminal")
+        guard !model.readOnly else { return }
+        let add = ClosureButton(symbol: "plus", tip: tr("menu.newTerminal")) { [weak self] in self?.model.newTerminal() }
         stack.addArrangedSubview(add)
+        addButton = add
     }
 
-    @objc private func newTab() { model.newTerminal() }
+    /// A click selects, a double click renames, a drag moves the tab.
+    private func pressed(_ index: Int, _ event: NSEvent) {
+        if event.clickCount == 2, !model.readOnly { return dialogs?.renameTab(index) ?? () }
+        let moved = !model.readOnly && DragTracker.track(event) { [weak self] point in
+            guard let self, let window, let content = window.contentView else { return nil }
+            let frames = self.buttons.map { $0.convert($0.bounds, to: content) }
+            guard let first = frames.first, let last = frames.last, abs(point.y - first.midY) < 40 else { return nil }
+            let slot = frames.firstIndex { point.x < $0.midX } ?? frames.count
+            guard slot != index, slot != index + 1 else { return nil }
+            let x = slot == frames.count ? last.maxX + 1 : frames[slot].minX - 1
+            return (NSRect(x: x - 1, y: first.minY, width: 3, height: first.height), { [weak self] in self?.model.moveTab(index, toSlot: slot) })
+        }
+        if !moved { model.selectTab(index) }
+    }
+
+    private func menu(_ index: Int) -> NSMenu? {
+        guard !model.readOnly, let count = model.layout.selectedWorkspace?.tabs.count else { return nil }
+        let menu = ClosureMenu()
+        menu.item(tr("menu.renameTab"), symbol: "pencil") { [weak self] in self?.dialogs?.renameTab(index) }
+        menu.item(tr("menu.newTerminal"), symbol: "plus") { [weak self] in self?.model.newTerminal() }
+        menu.separator()
+        menu.item(tr("menu.moveLeft"), symbol: "arrow.left", enabled: index > 0) { [weak self] in self?.model.moveTab(index, toSlot: index - 1) }
+        menu.item(tr("menu.moveRight"), symbol: "arrow.right", enabled: index < count - 1) { [weak self] in
+            self?.model.moveTab(index, toSlot: index + 2)
+        }
+        menu.separator()
+        menu.item(tr("menu.closeTab"), symbol: "xmark") { [weak self] in self?.dialogs?.closeTab(index) }
+        return menu
+    }
+
+    /// The tab (or the plus button: nil) under a point of the window's
+    /// content view, with its frame there.
+    func target(at point: NSPoint) -> (index: Int?, frame: NSRect)? {
+        guard let content = window?.contentView else { return nil }
+        for (index, button) in buttons.enumerated() {
+            let frame = button.convert(button.bounds, to: content)
+            if frame.contains(point) { return (index, frame) }
+        }
+        if let add = addButton {
+            let frame = add.convert(add.bounds, to: content).insetBy(dx: -4, dy: -4)
+            if frame.contains(point) { return (nil, frame) }
+        }
+        return nil
+    }
 }
 
 private final class TabButton: NSView {
-    private let action: () -> Void
+    var onPress: ((NSEvent) -> Void)?
+    var menuBuilder: (() -> NSMenu?)?
 
-    init(title: String, dot: NSColor?, selected: Bool, action: @escaping () -> Void) {
-        self.action = action
+    init(title: String, dot: NSColor?, selected: Bool) {
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = Theme.radius
@@ -475,5 +224,7 @@ private final class TabButton: NSView {
     @available(*, unavailable)
     required init?(coder _: NSCoder) { fatalError() }
 
-    override func mouseDown(with _: NSEvent) { action() }
+    override func mouseDown(with event: NSEvent) { onPress?(event) }
+
+    override func menu(for _: NSEvent) -> NSMenu? { menuBuilder?() }
 }

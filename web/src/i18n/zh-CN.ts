@@ -145,6 +145,8 @@ export const zhCN: Messages = {
   'machine.addFailed': '无法添加 {machine}：{detail}',
   'command.app.keyboardShortcuts': '快捷键帮助',
   'command.workspace.switch': '切换 workspace',
+  'command.workspace.next': '下一个 workspace',
+  'command.workspace.previous': '上一个 workspace',
   'command.workspace.new': '新建 workspace',
   'command.workspace.rename': '重命名 workspace',
   'command.workspace.close': '关闭 workspace',

@@ -17,6 +17,28 @@ final class MachineDialogs {
         model.machines.first { $0.id == machine }?.label ?? machine
     }
 
+    /// What the sidebar's free space offers.
+    func addItems(to _: ClosureMenu) {}
+
+    /// A machine's menu: new terminal or workspace, and its terminal core:
+    /// started when it was stopped (or none runs), else restarted (programs
+    /// keep running) or stopped.
+    func items(for machine: Machine, in menu: ClosureMenu, dialogs: Dialogs?) {
+        guard machine.status == "ready" else { return }
+        menu.item(tr("menu.newTerminal"), symbol: "plus") { [weak self] in self?.model.newTerminal(on: machine.id) }
+        if model.layout(of: machine.id) != nil {
+            menu.item(tr("menu.newWorkspace"), symbol: "rectangle.stack.badge.plus") { dialogs?.createWorkspace(on: machine.id) }
+        }
+        menu.separator()
+        let code = (model.backend(of: machine.id) ?? machine.hc)?.code
+        if code == "stopped" || code == "not_running" {
+            menu.item(tr("menu.startCore"), symbol: "play") { [weak self] in self?.core("start", on: machine.id) }
+        } else {
+            menu.item(tr("menu.restartCore"), symbol: "arrow.clockwise") { [weak self] in self?.core("restart", on: machine.id) }
+            menu.item(tr("menu.stopCore"), symbol: "stop") { [weak self] in self?.stopCore(on: machine.id) }
+        }
+    }
+
     /// Stops the machine's terminal core after asking.
     func stopCore(on machine: String) {
         guard let window else { return }
