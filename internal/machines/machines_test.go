@@ -45,7 +45,7 @@ func TestLoadSpecsFromHerdrCatalog(t *testing.T) {
 }
 
 func TestIsReadOnly(t *testing.T) {
-	for m, want := range map[string]bool{"session.snapshot": true, "pane.list": true, "layout.export": true, "pane.split": false, "agent.prompt": false} {
+	for m, want := range map[string]bool{"session.snapshot": true, "pane.list": true, "layout.export": true, "pane.copy_search": true, "pane.copy_motion": true, "pane.split": false, "agent.prompt": false, "pane.scroll": false} {
 		if IsReadOnlyMethod(m) != want {
 			t.Errorf("isReadOnly(%s) != %v", m, want)
 		}

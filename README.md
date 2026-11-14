@@ -64,6 +64,9 @@ browser tab, with VS Code (code-server) one keystroke away.
 - **Formulas.** Rest the pointer on a LaTeX formula an agent wrote in a
   pane (`$…$`, `$$…$$`, `\(…\)`, `\[…\]`, also with the backslashes its
   markdown dropped) to see it typeset, and copy its source.
+- **Find.** ⌘F (Ctrl+Shift+F on other systems) finds text in a pane's
+  output, scrollback included: every match is highlighted, Enter and
+  Shift+Enter step to older and newer ones, scrolling them into view.
 - **Files to agents.** Paste or drop files into a pane to paste their paths;
   files that are not on the pane's machine are uploaded to it first, dropped
   ones into the pane's directory (an existing file there is never replaced).

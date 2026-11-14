@@ -33,6 +33,7 @@ import {
 import { palette as makePalette, rgb, type Palette } from './colors';
 import { moveRanges, paintRows, sameRanges, type Metrics, type Ranges } from './paint';
 import { routeKey } from './keys';
+import { isFindKey, matchRows, useFind } from './find';
 import { isMac, pasteText, releaseOf, type InputEvent, type KeyEvent, type MouseEvent as PaneMouse } from './input';
 import { Selection, scrollRate, viewTop, wordAt, type Point } from './selection';
 import type { ScrollInfo, SurfaceMeta, SurfacePane, SurfaceSplit } from './protocol';
@@ -69,6 +70,8 @@ export interface ControllerOptions {
   onMath?(math: ShownMath | undefined): void;
   /** Whether formulas under the pointer are shown. */
   mathHover?(): boolean;
+  /** Opens find in a pane, with the selected text as the query if any. */
+  onFind?(pane: string, text?: string): void;
 }
 
 /** A formula in a pane and the cells it covers, one range per row. */
@@ -164,6 +167,9 @@ export class SurfaceController {
   private mathTimer?: number;
   /** Where the pointer was at the last move over the panes. */
   private mathFrom?: { x: number; y: number };
+  /** Find's matches in a pane of this machine: columns per absolute row. */
+  private found?: { pane: string; cols: number; rows: Map<number, Ranges> };
+  private unsubscribeFind: () => void;
   private disposed = false;
 
   constructor(
@@ -183,6 +189,9 @@ export class SurfaceController {
     // at once (not after React renders) paints both together.
     this.unsubscribe = useSurface.subscribe((st, prev) => {
       if (st.meta !== prev.meta) this.setMeta(st.meta && st.meta.m === this.o.m() ? st.meta : undefined);
+    });
+    this.unsubscribeFind = useFind.subscribe((st, prev) => {
+      if (st.matches !== prev.matches || st.current !== prev.current || st.open !== prev.open) this.findChanged();
     });
     this.ro = new ResizeObserver(() => this.measureSize());
     this.ro.observe(host);
@@ -262,6 +271,8 @@ export class SurfaceController {
     this.meta = meta;
     this.metaCount++;
     if (this.sel && !this.paneById(this.sel.pane)) this.clearSelection();
+    // Find's pane may have arrived, or gone.
+    if (useFind.getState().open && (!this.found || !this.paneById(this.found.pane))) this.findChanged();
     if (prev?.w !== meta?.w || prev?.h !== meta?.h) grid.invalidate();
     // A scroll moved the rows past the edge a selection drag is held at.
     if (this.drag?.kind === 'select') this.trackSelection();
@@ -351,12 +362,41 @@ export class SurfaceController {
     }
   }
 
-  private highlight(y: number): Array<[number, number]> | undefined {
+  /** A row's highlights: find's matches in it and the selection. */
+  private highlight(y: number): Ranges | undefined {
     const sel = this.sel;
-    if (!sel) return;
-    const p = this.paneById(sel.pane);
-    const c = p && sel.columns(p, y);
-    return c ? [c] : undefined;
+    const sp = sel && this.paneById(sel.pane);
+    const c = sp && sel.columns(sp, y);
+    const found = this.foundIn(y);
+    if (!found) return c ? [c] : undefined;
+    return c ? [...found, c] : found;
+  }
+
+  /** Find's matches in surface row y, if it shows a row of the pane find
+   * searched. */
+  private foundIn(y: number): Ranges | undefined {
+    const f = this.found;
+    const p = f && this.paneById(f.pane);
+    if (!f || !p || y < p.inner.y || y >= p.inner.y + p.inner.h) return;
+    if (f.cols !== p.inner.w) this.findChanged();
+    const row = this.found?.rows.get(viewTop(p.scroll) + (y - p.inner.y));
+    return row?.map(([a, b, k]) => [p.inner.x + a, p.inner.x + b, k]);
+  }
+
+  /** Find's matches changed: rows get their highlights at the next paint. */
+  private findChanged() {
+    const st = useFind.getState();
+    const p = st.open && st.m === this.o.m() && st.pane ? this.paneById(st.pane) : undefined;
+    this.found = p && st.matches.length ? { pane: p.id, cols: p.inner.w, rows: matchRows(st.matches, st.current, p.inner.w) } : undefined;
+    this.schedule();
+  }
+
+  /** Opens find in the pane (keys go to the focused one), with the
+   * selection's text as the query when it is one short line. */
+  openFind(pane = this.targetPane()) {
+    if (!pane) return;
+    const text = this.sel?.pane === pane && !this.sel.empty ? this.selectionText()?.trim() : undefined;
+    this.o.onFind?.(pane, text && !text.includes('\n') && text.length <= 200 ? text : undefined);
   }
 
   /** Keeps the hidden textarea at the cursor, where input methods show
@@ -457,7 +497,13 @@ export class SurfaceController {
     const pane = this.targetPane();
     const route = routeKey(
       ev,
-      (e) => this.o.appKey(e),
+      (e) => {
+        if (e.type === 'keydown' && isFindKey(e) && this.o.onFind) {
+          this.openFind(pane);
+          return true;
+        }
+        return this.o.appKey(e);
+      },
       (e) => {
         if (e.t === 'key' && e.key.tracksRelease) this.pressed.set(ev.code || ev.key, { pane: pane!, key: e.key });
         this.send(pane, [e]);
@@ -626,7 +672,7 @@ export class SurfaceController {
   }
 
   private onContextMenu = (ev: MouseEvent) => {
-    if ((ev.target as Element | null)?.closest?.('button') || !this.meta) return;
+    if ((ev.target as Element | null)?.closest?.('button, .find-bar') || !this.meta) return;
     const { x, y } = this.cellAt(ev.clientX, ev.clientY);
     const p = this.paneAt(x, y);
     if (!p) return;
@@ -663,14 +709,15 @@ export class SurfaceController {
               }
             : undefined,
         paste: readOnly || !navigator.clipboard?.readText ? undefined : () => this.pasteClipboard(p.id),
+        find: this.o.onFind ? () => this.openFind(p.id) : undefined,
       }),
     );
   };
 
   private onMouseDown = (ev: MouseEvent) => {
-    // Buttons over the grid (a pane's close button) handle their own clicks;
-    // the program under them must not get one.
-    if ((ev.target as Element | null)?.closest?.('button, .math-popover')) return;
+    // Buttons over the grid (a pane's close button) and the find bar handle
+    // their own clicks; the program under them must not get one.
+    if ((ev.target as Element | null)?.closest?.('button, .math-popover, .find-bar')) return;
     this.hideMath();
     if (useSurface.getState().ownership !== 'owner' || !this.meta) return;
     const { x, y } = this.cellAt(ev.clientX, ev.clientY);
@@ -1134,6 +1181,7 @@ export class SurfaceController {
     this.preedit.remove();
     onPaint(undefined);
     this.unsubscribe();
+    this.unsubscribeFind();
     if (this.frame !== undefined) cancelAnimationFrame(this.frame);
     this.stopAutoScroll();
     this.ro.disconnect();

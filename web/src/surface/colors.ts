@@ -10,6 +10,9 @@ export interface Palette {
   cursor: string;
   cursorAccent: string;
   selection: string;
+  /** Backgrounds of find matches and of the current one. */
+  match: string;
+  matchCurrent: string;
   /** 256 colors: the theme's 16, the 6x6x6 cube and the grey ramp. */
   colors: string[];
 }
@@ -45,7 +48,27 @@ export function palette(t: ITheme): Palette {
   }
   const fg = t.foreground ?? '#ffffff';
   const bg = t.background ?? '#000000';
-  return { fg, bg, cursor: t.cursor ?? fg, cursorAccent: t.cursorAccent ?? bg, selection: t.selectionBackground ?? '#3b4a6b', colors };
+  // Amber for find matches, dimmer on dark backgrounds, so that the text on
+  // them keeps its contrast; the current match is stronger.
+  const dark = luminance(bg) < 0.5;
+  return {
+    fg,
+    bg,
+    cursor: t.cursor ?? fg,
+    cursorAccent: t.cursorAccent ?? bg,
+    selection: t.selectionBackground ?? '#3b4a6b',
+    match: dark ? '#5c4813' : '#fff2b3',
+    matchCurrent: dark ? '#9a6a00' : '#ffc94d',
+    colors,
+  };
+}
+
+/** Relative brightness (0 to 1) of a #rrggbb color; 0 for others. */
+function luminance(c: string): number {
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(c);
+  if (!m) return 0;
+  const [r, g, b] = [m[1], m[2], m[3]].map((h) => parseInt(h, 16) / 255);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
 // Named colors 1..16 in ratatui order: Black, Red, Green, Yellow, Blue,

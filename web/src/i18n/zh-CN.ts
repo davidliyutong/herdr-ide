@@ -262,6 +262,17 @@ export const zhCN: Messages = {
   'surface.uploadingInto': '正在上传 {n} 个文件到 {machine} 的 {dir}…',
   'surface.dropNoFolders': '文件夹无法上传，已跳过 {n} 个。',
 
+  'find.menu': '查找…',
+  'find.label': '在窗格中查找',
+  'find.placeholder': '查找',
+  'find.older': '更早的匹配（Enter）',
+  'find.newer': '更新的匹配（Shift+Enter）',
+  'find.close': '关闭（Escape）',
+  'find.count': '第 {n} 个，共 {total} 个',
+  'find.none': '无结果',
+  'find.busy': '输出仍在变化，按 Enter 重试',
+  'find.failed': '查找失败',
+
   'dock.code': 'VS Code',
   'dock.preview': '预览',
   'dock.openInTab': '在新标签页打开',

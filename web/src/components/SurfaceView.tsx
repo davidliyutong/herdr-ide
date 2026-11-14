@@ -13,6 +13,8 @@ import { setSurfaceFocus } from '../terminal/registry';
 import { whenTermFont } from '../terminal/fonts';
 import { PaneHeader } from './PaneHeader';
 import { MathPopover } from './MathPopover';
+import { FindBar } from './FindBar';
+import { closeFind, openFind, useFind } from '../surface/find';
 import { t, type MessageKey } from '../i18n';
 
 /** A pane's working directory, as herdr reports it. */
@@ -66,6 +68,9 @@ export function SurfaceView({ m, tabId, layout }: Props) {
   const [dropOn, setDropOn] = useState<string>();
   // The formula under the pointer, rendered.
   const [math, setMath] = useState<ShownMath>();
+  // The pane find is open in, on this machine.
+  const findPane = useFind((s) => (s.open && s.m === m ? s.pane : undefined));
+  const findGone = useStore((s) => !!findPane && !s.machines[m]?.snapshot?.panes.some((p) => p.pane_id === findPane));
   const live = useRef({ m, tabId, focusedPane });
   live.current = { m, tabId, focusedPane };
 
@@ -93,6 +98,7 @@ export function SurfaceView({ m, tabId, layout }: Props) {
         setTitle,
         onMath: setMath,
         mathHover: () => usePrefs.getState().prefs.mathHover,
+        onFind: (pane, text) => openFind(live.current.m, pane, text),
       },
       appearanceOf(prefs),
     );
@@ -139,6 +145,11 @@ export function SurfaceView({ m, tabId, layout }: Props) {
   }, [m, tabId, pane, cell]);
 
   useEffect(() => ctlRef.current?.setMeta(meta && meta.m === m ? meta : undefined), [meta, m]);
+
+  // A closed pane takes its find bar with it.
+  useEffect(() => {
+    if (findGone) closeFind();
+  }, [findGone]);
 
   useEffect(() => {
     if (!bell) return;
@@ -217,6 +228,18 @@ export function SurfaceView({ m, tabId, layout }: Props) {
         />
       )}
       {math && current && <MathPopover math={math} cw={cw} ch={ch} />}
+      {findPane &&
+        headers
+          .filter((h) => h.id === findPane)
+          .map((h) => (
+            <FindBar
+              key="find"
+              m={m}
+              top={h.box.top + (h.style ? ch : 0) + 4}
+              right={h.box.left + h.box.width - 8}
+              maxWidth={Math.max(0, h.box.width - 16)}
+            />
+          ))}
       {overlay && (
         <div className={`surface-overlay ${overlay.soft ? 'soft' : ''}`}>
           <span>{overlay.text}</span>
