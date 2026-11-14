@@ -66,6 +66,11 @@ type wsClient struct {
 	req *http.Request
 	// readOnly browsers watch: no input, and no takeover from a writable one.
 	readOnly bool
+	// events clients (/ws?events=1, such as the macOS application) follow
+	// machines, program windows and the other events: they take no part in
+	// the pane session, send no pane input or herdr calls, and play sounds
+	// only after they report activity.
+	events bool
 
 	// active is when the user last used this page (guarded by
 	// Server.clientsMu); the most recently used page plays sounds.
@@ -85,12 +90,15 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	conn.SetReadLimit(64 << 20)
 	ctx, cancel := context.WithCancel(context.Background())
-	c := &wsClient{s: s, conn: conn, ctx: ctx, cancel: cancel, send: make(chan outMsg, sendQueue), req: r, readOnly: s.opts.ReadOnly}
+	c := &wsClient{s: s, conn: conn, ctx: ctx, cancel: cancel, send: make(chan outMsg, sendQueue), req: r, readOnly: s.opts.ReadOnly,
+		events: r.URL.Query().Has("events")}
 	s.audit.log(r, "ws.connect", nil)
 	defer s.audit.log(r, "ws.disconnect", nil)
 	defer c.close()
 	s.clientsMu.Lock()
-	c.active = time.Now()
+	if !c.events {
+		c.active = time.Now()
+	}
 	s.clients[c] = true
 	s.clientsMu.Unlock()
 	defer func() {
@@ -111,7 +119,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		c.sendJSON(map[string]any{"t": "agent", "m": ev.Machine, "data": ev.Data, "sound": s.soundClient() == c})
 	})
 	defer unsub()
-	s.surfJoin(c)
+	if !c.events {
+		s.surfJoin(c)
+	}
 
 	for {
 		typ, data, err := conn.Read(ctx)
@@ -177,6 +187,12 @@ func (c *wsClient) sendJSON(v any) {
 }
 
 func (c *wsClient) dispatch(m *inMsg) {
+	if c.events {
+		switch m.T {
+		case "view", "takeover", "in", "focus", "host", "api":
+			return
+		}
+	}
 	switch m.T {
 	case "view":
 		c.s.surfView(c, viewMsg{M: m.M, Tab: m.Tab, Pane: m.Pane, Cols: m.Cols, Rows: m.Rows, CW: m.CW, CH: m.CH})

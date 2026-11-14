@@ -1,18 +1,12 @@
 import AppKit
 import TermKit
 
-/// A machine as the core lists it.
-struct Machine: Equatable {
-    var id: String
-    var label: String
-    var status: String
-}
-
-/// The state behind the window: machines, their terminals and layouts, and
-/// what the user does with them.
+/// The state behind the window: machines, their terminals, layouts and
+/// program windows, and what the user does with them.
 final class AppModel {
     let core: URL
     let connection: TermConnection
+    let events: EventConnection
     let store = TerminalStore()
     private(set) var machines: [Machine] = []
     private(set) var selectedMachine: String?
@@ -23,20 +17,23 @@ final class AppModel {
     private var dirty: Set<String> = []
     /// The newest version of each machine's layout document an event named.
     private var announced: [String: Int] = [:]
-    private var poll: Timer?
-    /// Machines a terminal was asked for before their terminals were ready.
+    /// Machines a terminal was asked for before their terminals and layout
+    /// were ready.
     private var pendingTerminals: Set<String> = []
+    /// Each machine's program windows, as the core last sent them.
+    private var windows: [String: [ProgramWindow]] = [:]
     /// The program windows on the machines' virtual displays.
     private(set) var programs: [ProgramWindow] = []
 
     /// Something the window shows changed.
     var onChange: (() -> Void)?
-    /// The connection to the core came or went.
+    /// The connection to the core's terminals came or went.
     var onConnection: ((Bool) -> Void)?
 
     init(core: URL) {
         self.core = core
         connection = TermConnection(core: core)
+        events = EventConnection(core: core)
         connection.onMessage = { [weak self] in self?.message($0) }
         connection.onConnection = { [weak self] up in
             if !up {
@@ -47,63 +44,51 @@ final class AppModel {
             self?.onConnection?(up)
             self?.onChange?()
         }
+        events.onEvent = { [weak self] in self?.event($0) }
+        // The core sends every machine's windows again on a new connection.
+        events.onConnection = { [weak self] up in if up { self?.windows = [:] } }
     }
 
     func start() {
         connection.start()
-        fetchMachines()
-        fetchPrograms()
-        poll = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
-            self?.fetchMachines()
-            self?.fetchPrograms()
-        }
+        events.start()
     }
 
     func stop() {
-        poll?.invalidate()
+        events.close()
         connection.close()
     }
 
+    /// The selected machine's layout.
     var layout: Layout { selectedMachine.flatMap { layouts[$0] } ?? Layout() }
+
+    /// A machine's layout, once it was read from the machine.
+    func layout(of machine: String) -> Layout? { loaded.contains(machine) ? layouts[machine] : nil }
 
     func backend(of machine: String) -> BackendState? { store.backends[machine] }
 
-    // MARK: - Machines
+    /// The terminal the selected tab focuses.
+    var focusedTerminal: String? { layout.focusedTerminal }
 
-    private func fetchMachines() {
-        var request = URLRequest(url: core.appendingPathComponent("api/machines"))
-        request.timeoutInterval = 10
-        URLSession.shared.dataTask(with: request) { [weak self] data, _, _ in
-            guard let data, let list = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else { return }
-            let machines = list.compactMap { raw -> Machine? in
-                guard let id = raw["id"] as? String else { return nil }
-                return Machine(id: id, label: raw["label"] as? String ?? id, status: raw["status"] as? String ?? "")
-            }
-            DispatchQueue.main.async { self?.setMachines(machines) }
-        }.resume()
-    }
+    // MARK: - Machines and program windows
 
-    private func fetchPrograms() {
-        var request = URLRequest(url: core.appendingPathComponent("api/gui"))
-        request.timeoutInterval = 10
-        URLSession.shared.dataTask(with: request) { [weak self] data, _, _ in
-            guard let data, let states = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else { return }
-            var programs: [ProgramWindow] = []
-            for state in states {
-                guard let machine = state["m"] as? String else { continue }
-                // A dialog belongs to its window: the page of the window shows it.
-                for window in state["windows"] as? [[String: Any]] ?? [] where (window["transient"] as? Int ?? 0) == 0 {
-                    guard let id = window["id"] as? Int else { continue }
-                    programs.append(ProgramWindow(machine: machine, id: id, title: window["title"] as? String ?? "",
-                                                  width: window["w"] as? Int ?? 0, height: window["h"] as? Int ?? 0))
-                }
-            }
-            DispatchQueue.main.async {
-                guard let self, programs != self.programs else { return }
-                self.programs = programs
-                self.onChange?()
-            }
-        }.resume()
+    private func event(_ event: EventConnection.Event) {
+        switch event {
+        case let .machines(list):
+            setMachines(list)
+        case let .machine(machine):
+            var list = machines
+            if let index = list.firstIndex(where: { $0.id == machine.id }) { list[index] = machine } else { list.append(machine) }
+            setMachines(list)
+        case let .gui(machine, list):
+            // A dialog belongs to its window: the page of the window shows it.
+            windows[machine] = list.filter { $0.transient == 0 }
+        }
+        let next = machines.flatMap { windows[$0.id] ?? [] }
+        if next != programs {
+            programs = next
+            onChange?()
+        }
     }
 
     private func setMachines(_ list: [Machine]) {
@@ -113,6 +98,7 @@ final class AppModel {
         for id in known.subtracting(list.map(\.id)) {
             connection.unsubscribe(id)
             pendingTerminals.remove(id)
+            windows[id] = nil
         }
         if selectedMachine == nil || !list.contains(where: { $0.id == selectedMachine }) {
             selectedMachine = (list.first { $0.id == "local" } ?? list.first)?.id
@@ -130,15 +116,16 @@ final class AppModel {
         onChange?()
     }
 
-    // MARK: - Messages
+    // MARK: - Terminal messages
 
     private func message(_ msg: [String: Any]) {
         guard let machine = msg["m"] as? String else { return }
         let changed = store.apply(msg)
         switch msg["t"] as? String {
         case "snapshot":
-            loadLayout(machine)
-            if pendingTerminals.remove(machine) != nil { run(on: machine) { $0.open($1) } }
+            loadLayout(machine) { [weak self] in
+                if self?.pendingTerminals.remove(machine) != nil { self?.newTerminal(on: machine) }
+            }
         case "event":
             if msg["type"] as? String == "doc", let data = msg["data"] as? [String: Any],
                data["name"] as? String == Layout.documentName, let version = data["version"] as? Int {
@@ -160,21 +147,28 @@ final class AppModel {
 
     // MARK: - Layout documents
 
-    private func loadLayout(_ machine: String) {
+    /// A layout always has a workspace to open terminals in: a new one is
+    /// named in the user's language. True when it added one.
+    @discardableResult
+    private func ensureWorkspace(_ layout: inout Layout) -> Bool {
+        guard layout.workspaces.isEmpty else { return false }
+        layout.createWorkspace(id: Layout.newWorkspaceID(), name: tr("workspace.default"))
+        return true
+    }
+
+    private func loadLayout(_ machine: String, then done: (() -> Void)? = nil) {
         connection.call(machine, "doc.get", ["name": Layout.documentName]) { [weak self] result in
             guard let self, case let .success(doc) = result else { return }
             self.versions[machine] = doc["version"] as? Int ?? 0
-            var layout = Layout()
-            if let value = doc["value"], !(value is NSNull), let data = try? JSONSerialization.data(withJSONObject: value),
-               let decoded = try? JSONDecoder().decode(Layout.self, from: data) {
-                layout = decoded
-            }
+            var layout = Layout(document: JSONValue(any: doc["value"]))
             let live = Set(self.store.terminals(of: machine).filter(\.isLive).map(\.address))
             let pruned = layout.prune(keeping: live)
+            let added = self.ensureWorkspace(&layout)
             self.layouts[machine] = layout
             self.loaded.insert(machine)
-            if pruned { self.saveLayout(machine) }
+            if pruned || added { self.saveLayout(machine) }
             self.onChange?()
+            done?()
         }
     }
 
@@ -186,11 +180,10 @@ final class AppModel {
             dirty.insert(machine)
             return
         }
-        guard let layout = layouts[machine], let data = try? JSONEncoder().encode(layout),
-              let value = try? JSONSerialization.jsonObject(with: data) else { return }
+        guard let layout = layouts[machine] else { return }
         saving.insert(machine)
         let version = versions[machine] ?? 0
-        connection.call(machine, "doc.set", ["name": Layout.documentName, "value": value, "version": version]) { [weak self] result in
+        connection.call(machine, "doc.set", ["name": Layout.documentName, "value": layout.document.any, "version": version]) { [weak self] result in
             guard let self else { return }
             self.saving.remove(machine)
             let again = self.dirty.remove(machine) != nil
@@ -210,11 +203,13 @@ final class AppModel {
         }
     }
 
-    /// Changes a machine's layout and saves it when that changed it.
+    /// Changes a machine's layout once it was read, and saves it when that
+    /// changed it.
     func mutate(_ machine: String, _ change: (inout Layout) -> Void) {
-        var layout = layouts[machine] ?? Layout()
+        guard loaded.contains(machine), var layout = layouts[machine] else { return }
         let before = layout
         change(&layout)
+        ensureWorkspace(&layout) // closing the last workspace leaves a new one
         guard layout != before else { return }
         layouts[machine] = layout
         saveLayout(machine)
@@ -229,44 +224,42 @@ final class AppModel {
         return cwd.isEmpty ? nil : cwd
     }
 
-    /// The terminal the selected tab focuses.
-    var focusedTerminal: String? {
-        layout.tabs.indices.contains(layout.selected) ? layout.tabs[layout.selected].focused : nil
-    }
+    // MARK: - Terminals
 
-    // MARK: - Actions
-
-    /// Starts the machine's shell in a new terminal, in the directory of
-    /// the focused one, and places it with `place`.
-    private func run(on machine: String, place: @escaping (inout Layout, String) -> Void) {
-        guard store.backends[machine]?.phase == .ready else {
+    /// Starts the machine's shell in a new terminal and places it with
+    /// `place`. A new tab starts in its workspace's directory, else in the
+    /// focused terminal's; a split the other way round.
+    private func run(on machine: String, workspace: String? = nil, split: Bool = false, place: @escaping (inout Layout, String) -> Void) {
+        guard store.backends[machine]?.phase == .ready, let layout = layout(of: machine) else {
             // Asked for on a machine whose terminals are still starting:
-            // one terminal opens once they are ready.
+            // one terminal opens once they and the layout are ready.
             pendingTerminals.insert(machine)
             return
         }
+        let target = workspace.flatMap { id in layout.workspaces.first { $0.id == id } } ?? layout.selectedWorkspace
+        let base = target.flatMap { $0.cwd.isEmpty ? nil : $0.cwd }
+        let focused = target?.selectedTab.flatMap { directory(of: $0.focused, on: machine) }
         var params: [String: Any] = ["keep": false]
-        let current = layouts[machine]
-        if let current, current.tabs.indices.contains(current.selected),
-           let cwd = directory(of: current.tabs[current.selected].focused, on: machine) {
-            params["cwd"] = cwd
-        }
+        if let cwd = split ? focused ?? base : base ?? focused { params["cwd"] = cwd }
         connection.call(machine, "terminal.run", params) { [weak self] result in
             guard let self, case let .success(record) = result, let address = record["address"] as? String else { return }
             self.mutate(machine) { place(&$0, address) }
         }
     }
 
-    func newTerminal(on machine: String? = nil) {
+    /// A new terminal in a new tab of a workspace, the selected one by default.
+    func newTerminal(on machine: String? = nil, in workspace: String? = nil) {
         guard let machine = machine ?? selectedMachine else { return }
         select(machine: machine)
-        run(on: machine) { $0.open($1) }
+        run(on: machine, workspace: workspace) { layout, address in
+            layout.open(address, in: workspace.flatMap { layout.workspaceIndex($0) == nil ? nil : $0 })
+        }
     }
 
     func split(_ axis: Layout.Axis) {
         guard let machine = selectedMachine else { return }
-        if layout.tabs.isEmpty { return newTerminal() }
-        run(on: machine) { layout, address in
+        if layout.selectedTab == nil { return newTerminal() }
+        run(on: machine, split: true) { layout, address in
             if !layout.split(axis, new: address) { layout.open(address) }
         }
     }
@@ -277,10 +270,11 @@ final class AppModel {
     }
 
     func closeFocused() {
-        guard let machine = selectedMachine, layout.tabs.indices.contains(layout.selected) else { return }
-        kill(layout.tabs[layout.selected].focused, on: machine)
+        guard let machine = selectedMachine, let address = focusedTerminal else { return }
+        kill(address, on: machine)
     }
 
+    /// Shows a terminal: where it is, else in a new tab of the selected workspace.
     func open(_ address: String, on machine: String) {
         select(machine: machine)
         mutate(machine) { $0.open(address) }
@@ -288,30 +282,57 @@ final class AppModel {
 
     func selectTab(_ index: Int) {
         guard let machine = selectedMachine else { return }
-        mutate(machine) { if $0.tabs.indices.contains(index) { $0.selected = index } }
+        mutate(machine) { if let workspace = $0.selectedWorkspace { $0.selectTab(index, in: workspace.id) } }
     }
 
     func cycleTab(_ step: Int) {
-        let count = layout.tabs.count
-        guard count > 1 else { return }
-        selectTab((layout.selected + step + count) % count)
+        guard let workspace = layout.selectedWorkspace, workspace.tabs.count > 1 else { return }
+        let count = workspace.tabs.count
+        selectTab((workspace.selected + step + count) % count)
     }
 
     func focus(_ address: String) {
         guard let machine = selectedMachine else { return }
-        mutate(machine) { layout in
-            if let index = layout.tabs.firstIndex(where: { $0.root.terminals.contains(address) }) {
-                layout.selected = index
-                layout.tabs[index].focused = address
-            }
-        }
+        mutate(machine) { $0.focus(address) }
     }
 
     func setRatio(_ ratio: Double, at path: [Bool]) {
         guard let machine = selectedMachine else { return }
-        mutate(machine) { layout in
-            guard layout.tabs.indices.contains(layout.selected) else { return }
-            layout.tabs[layout.selected].root = layout.tabs[layout.selected].root.settingRatio(ratio, at: path[...])
-        }
+        mutate(machine) { $0.setRatio(ratio, at: path) }
+    }
+
+    // MARK: - Workspaces
+
+    /// Creates a workspace, selects it and opens a terminal in it. Without a
+    /// name it is called after its directory.
+    func newWorkspace(name: String, cwd: String, on machine: String) {
+        guard loaded.contains(machine) else { return }
+        select(machine: machine)
+        let id = Layout.newWorkspaceID()
+        let title = !name.isEmpty ? name : !cwd.isEmpty ? (cwd as NSString).lastPathComponent : tr("workspace.default")
+        mutate(machine) { $0.createWorkspace(id: id, name: title, cwd: cwd) }
+        newTerminal(on: machine, in: id)
+    }
+
+    func renameWorkspace(_ id: String, to name: String, on machine: String) {
+        mutate(machine) { $0.renameWorkspace(id, to: name) }
+    }
+
+    /// Closes a workspace and ends the programs of its terminals.
+    func closeWorkspace(_ id: String, on machine: String) {
+        guard let workspace = layout(of: machine)?.workspaces.first(where: { $0.id == id }) else { return }
+        mutate(machine) { $0.closeWorkspace(id) }
+        workspace.terminals.forEach { kill($0, on: machine) }
+    }
+
+    func selectWorkspace(_ id: String, on machine: String) {
+        select(machine: machine)
+        mutate(machine) { $0.selectWorkspace(id) }
+    }
+
+    func cycleWorkspace(_ step: Int) {
+        guard let machine = selectedMachine, layout.workspaces.count > 1 else { return }
+        let count = layout.workspaces.count
+        selectWorkspace(layout.workspaces[(layout.selected + step + count) % count].id, on: machine)
     }
 }

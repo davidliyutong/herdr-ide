@@ -1,0 +1,34 @@
+{
+  "description": "A version 1 document is one workspace with its tabs; ratios are clamped and a focus outside its tab moves to the tab's first terminal.",
+  "input": {
+    "tabs": [
+      {
+        "root": { "split": "vertical", "ratio": 0.95, "children": [{ "terminal": "t1" }, { "terminal": "t2" }] },
+        "focused": "gone"
+      },
+      { "root": { "terminal": "t3" }, "focused": "t3" }
+    ],
+    "selected": 1
+  },
+  "ops": [],
+  "changed": false,
+  "expected": {
+    "version": 2,
+    "workspaces": [
+      {
+        "id": "default",
+        "name": "",
+        "cwd": "",
+        "tabs": [
+          {
+            "root": { "split": "vertical", "ratio": 0.9, "children": [{ "terminal": "t1" }, { "terminal": "t2" }] },
+            "focused": "t1"
+          },
+          { "root": { "terminal": "t3" }, "focused": "t3" }
+        ],
+        "selected": 1
+      }
+    ],
+    "selected": 0
+  }
+}

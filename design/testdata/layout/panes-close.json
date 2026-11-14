@@ -1,0 +1,47 @@
+{
+  "description": "Closing terminals: the sibling takes the parent's place and, for the focused terminal, the focus; a tab without terminals goes, a workspace stays; pruning against the live terminals.",
+  "input": {
+    "version": 2,
+    "workspaces": [
+      {
+        "id": "w",
+        "name": "",
+        "cwd": "/p",
+        "tabs": [
+          {
+            "root": {
+              "split": "horizontal",
+              "ratio": 0.5,
+              "children": [
+                { "terminal": "t1" },
+                { "split": "vertical", "ratio": 0.9, "children": [{ "terminal": "t2" }, { "terminal": "t3" }] }
+              ]
+            },
+            "focused": "t1"
+          }
+        ],
+        "selected": 0
+      },
+      { "id": "w2", "name": "other", "cwd": "", "tabs": [{ "root": { "terminal": "t6" }, "focused": "t6" }], "selected": 0 }
+    ],
+    "selected": 0
+  },
+  "ops": [
+    { "op": "closeTerminal", "terminal": "t1" },
+    { "op": "openTerminal", "terminal": "t4" },
+    { "op": "splitFocused", "axis": "horizontal", "terminal": "t5" },
+    { "op": "closeTerminal", "terminal": "t4" },
+    { "op": "prune", "live": ["t2", "t5", "t9"] },
+    { "op": "selectTab", "workspace": "w", "tab": 0 },
+    { "op": "closeTerminal", "terminal": "t2" }
+  ],
+  "changed": true,
+  "expected": {
+    "version": 2,
+    "workspaces": [
+      { "id": "w", "name": "", "cwd": "/p", "tabs": [{ "root": { "terminal": "t5" }, "focused": "t5" }], "selected": 0 },
+      { "id": "w2", "name": "other", "cwd": "", "tabs": [], "selected": 0 }
+    ],
+    "selected": 0
+  }
+}

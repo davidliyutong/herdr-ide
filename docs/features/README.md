@@ -29,8 +29,8 @@ shortcuts, paths) lives in [reference.md](../reference.md).
 | 19 | [Formulas in panes](19-formulas-in-panes.md) | LaTeX under the resting pointer typeset by KaTeX in a popover; the spellings agents print, also without dropped backslashes. |
 | 20 | [Find in panes](20-find-in-panes.md) | ⌘F / Ctrl+Shift+F finds text in a pane's output and scrollback, also by regular expression, case or whole word; the agent searches next to herdr; matches highlighted, the current one scrolled into view. |
 | 21 | [herdr-core terminal core](21-terminal-core.md) | A herdr-core of the agent's own on each machine, in a session apart from the user's, and a client of its API: terminals as raw byte streams with credit. |
-| 22 | [Terminal protocol for clients](22-terminal-protocol.md) | `/api/v1/term`: a machine's terminals, their events and raw byte streams for clients that emulate and draw terminals themselves. |
-| 23 | [macOS application](23-macos-application.md) | A native window on the terminal protocol: Ghostty's GPU renderer per pane, tabs and splits kept as a document in the machine's terminal core. |
+| 22 | [Terminal protocol for clients](22-terminal-protocol.md) | `/api/v1/term`: a machine's terminals, their events and raw byte streams for clients that emulate and draw terminals themselves, and the layout document those clients share. |
+| 23 | [macOS application](23-macos-application.md) | A native window on the terminal protocol: Ghostty's GPU renderer per pane, workspaces, tabs and splits kept as a document in the machine's terminal core. |
 | 24 | [Design tokens](24-design-tokens.md) | One file of colors, metrics, font sizes and terminal palettes, generated into the macOS application's Swift and the web UI's CSS variables. |
 
 ## Writing a feature document

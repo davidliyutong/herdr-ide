@@ -7,10 +7,13 @@
     /// the window can be exercised and inspected without input devices:
     /// <PREFIX>SNAPSHOT=<path> writes the window as a PNG every two seconds,
     /// <PREFIX>ACTIONS=<a;b;...> runs actions two seconds apart: new,
-    /// split-right, split-down, close, next-tab, type:<text>, find:<text>,
-    /// find-next, open:<path> (as if activated in the terminal), code (the VS
-    /// Code panel), page (logs the panel's page), settings, key:cmd+<key>
-    /// (the key as the keyboard sends it, with shift+ before the key).
+    /// split-right, split-down, close, next-tab, workspace:<name>[:<cwd>]
+    /// (a new workspace with a terminal, without the dialog),
+    /// rename-workspace:<name>, close-workspace (without asking),
+    /// next-workspace, type:<text>, find:<text>, find-next, open:<path> (as
+    /// if activated in the terminal), code (the VS Code panel), page (logs
+    /// the panel's page), settings, key:cmd+<key> (the key as the keyboard
+    /// sends it, with shift+ before the key).
     enum DebugAids {
         static func start(window: NSWindow, model: AppModel, panes: PaneArea, webPanel: WebPanel, run: @escaping (String) -> Void) {
             let env = ProcessInfo.processInfo.environment
@@ -34,6 +37,11 @@
                 case "split-down": model.split(.vertical)
                 case "close": model.closeFocused()
                 case "next-tab": model.cycleTab(1)
+                case "next-workspace": model.cycleWorkspace(1)
+                case "close-workspace":
+                    if let machine = model.selectedMachine, let workspace = model.layout.selectedWorkspace {
+                        model.closeWorkspace(workspace.id, on: machine)
+                    }
                 case "code", "settings": run(action)
                 case "page": webPanel.debugDescribe { FileHandle.standardError.write(Data(("page: " + $0 + "\n").utf8)) }
                 case "find-next": panes.pane(containing: window.firstResponder as? NSView)?.findStep(true)
@@ -72,6 +80,12 @@
                             let menu = view ? false : (NSApp.mainMenu?.performKeyEquivalent(with: event) ?? false)
                             FileHandle.standardError.write(Data("key \(action): responder=\(responder) active=\(NSApp.isActive) key=\(window.isKeyWindow) view=\(view) menu=\(menu)\n".utf8))
                         }
+                    } else if action.hasPrefix("workspace:"), let machine = model.selectedMachine {
+                        let spec = action.dropFirst(10).split(separator: ":", maxSplits: 1).map(String.init)
+                        model.newWorkspace(name: spec.first ?? "", cwd: spec.count > 1 ? spec[1] : "", on: machine)
+                    } else if action.hasPrefix("rename-workspace:"), let machine = model.selectedMachine,
+                              let workspace = model.layout.selectedWorkspace {
+                        model.renameWorkspace(workspace.id, to: String(action.dropFirst(17)), on: machine)
                     } else if action.hasPrefix("open:") {
                         if let pane = panes.pane(containing: window.firstResponder as? NSView) { pane.onOpenPath?(String(action.dropFirst(5))) }
                     } else if action.hasPrefix("find:") {

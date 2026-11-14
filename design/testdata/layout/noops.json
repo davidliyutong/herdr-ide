@@ -1,0 +1,37 @@
+{
+  "description": "Operations that do not apply change nothing: unknown or reused ids, indexes out of range, terminals already open or not open, moves to where things are.",
+  "input": {
+    "version": 2,
+    "workspaces": [{ "id": "w1", "name": "one", "cwd": "", "tabs": [{ "root": { "terminal": "t1" }, "focused": "t1" }], "selected": 0 }],
+    "selected": 0
+  },
+  "ops": [
+    { "op": "createWorkspace", "id": "", "name": "x", "cwd": "" },
+    { "op": "createWorkspace", "id": "w1", "name": "dup", "cwd": "" },
+    { "op": "renameWorkspace", "workspace": "nope", "name": "x" },
+    { "op": "renameWorkspace", "workspace": "w1", "name": "one" },
+    { "op": "closeWorkspace", "workspace": "nope" },
+    { "op": "moveWorkspace", "workspace": "w1", "to": 5 },
+    { "op": "selectWorkspace", "workspace": "nope" },
+    { "op": "openTerminal", "terminal": "t2", "workspace": "nope" },
+    { "op": "openTerminal", "terminal": "" },
+    { "op": "renameTab", "workspace": "w1", "tab": 3, "name": "x" },
+    { "op": "closeTab", "workspace": "w1", "tab": 3 },
+    { "op": "moveTab", "workspace": "w1", "from": 0, "to": 0 },
+    { "op": "selectTab", "workspace": "w1", "tab": 4 },
+    { "op": "splitFocused", "axis": "horizontal", "terminal": "t1" },
+    { "op": "closeTerminal", "terminal": "t9" },
+    { "op": "prune", "live": ["t1"] },
+    { "op": "setRatio", "path": [], "ratio": 0.7 },
+    { "op": "focus", "terminal": "t9" },
+    { "op": "swap", "a": "t1", "b": "t9" },
+    { "op": "moveTerminal", "terminal": "t1", "target": "t1", "axis": "horizontal" },
+    { "op": "moveToNewTab", "terminal": "t9", "workspace": "w1" }
+  ],
+  "changed": false,
+  "expected": {
+    "version": 2,
+    "workspaces": [{ "id": "w1", "name": "one", "cwd": "", "tabs": [{ "root": { "terminal": "t1" }, "focused": "t1" }], "selected": 0 }],
+    "selected": 0
+  }
+}

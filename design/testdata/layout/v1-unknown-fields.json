@@ -1,0 +1,30 @@
+{
+  "description": "A version 1 document's unknown fields survive its upgrade and a change; it is written as version 2.",
+  "input": {
+    "theme": { "x": 1 },
+    "tabs": [{ "root": { "terminal": "t1", "zoom": true }, "focused": "t1", "color": "red" }],
+    "selected": 0
+  },
+  "ops": [{ "op": "splitFocused", "axis": "horizontal", "terminal": "t2" }],
+  "changed": true,
+  "expected": {
+    "version": 2,
+    "theme": { "x": 1 },
+    "workspaces": [
+      {
+        "id": "default",
+        "name": "",
+        "cwd": "",
+        "tabs": [
+          {
+            "color": "red",
+            "root": { "split": "horizontal", "ratio": 0.5, "children": [{ "terminal": "t1", "zoom": true }, { "terminal": "t2" }] },
+            "focused": "t2"
+          }
+        ],
+        "selected": 0
+      }
+    ],
+    "selected": 0
+  }
+}

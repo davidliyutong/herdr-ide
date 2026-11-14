@@ -26,6 +26,23 @@ final class ProtocolTests: XCTestCase {
     }
 }
 
+final class EventTests: XCTestCase {
+    func testDecode() {
+        XCTAssertEqual(EventConnection.decode(#"{"t":"machines","list":[{"id":"local","label":"Mac","status":"ready","snapshot":{}},{"id":"b","label":"","status":"connecting"},{"label":"no id"}]}"#),
+                       .machines([Machine(id: "local", label: "Mac", status: "ready"), Machine(id: "b", label: "b", status: "connecting")]))
+        XCTAssertEqual(EventConnection.decode(#"{"t":"machine","state":{"id":"b","label":"Box","status":"degraded","error":"x"}}"#),
+                       .machine(Machine(id: "b", label: "Box", status: "degraded")))
+        XCTAssertEqual(EventConnection.decode(#"{"t":"gui","state":{"m":"b","phase":"ready","windows":[{"id":3,"title":"plot","w":640,"h":480,"pid":9},{"id":4,"title":"Save","w":300,"h":200,"transient":3},{"title":"no id"}]}}"#),
+                       .gui(machine: "b", windows: [ProgramWindow(machine: "b", id: 3, title: "plot", width: 640, height: 480),
+                                                    ProgramWindow(machine: "b", id: 4, title: "Save", width: 300, height: 200, transient: 3)]))
+        XCTAssertEqual(EventConnection.decode(#"{"t":"gui","state":{"m":"b","phase":"off","windows":null}}"#), .gui(machine: "b", windows: []))
+        // Messages the application does not use.
+        for text in [#"{"t":"agent","m":"b","data":{}}"#, #"{"t":"session","state":"busy"}"#, #"{"t":"machine"}"#, "nonsense", "[]"] {
+            XCTAssertNil(EventConnection.decode(text), text)
+        }
+    }
+}
+
 final class TerminalPathTests: XCTestCase {
     func testResolve() {
         XCTAssertEqual(TerminalPath.resolve("/etc/hosts", cwd: "/home/u"), "/etc/hosts")
@@ -87,55 +104,73 @@ final class TerminalStoreTests: XCTestCase {
     }
 }
 
+/// The vectors of design/testdata/layout, which web/src/__tests__/term.test.ts
+/// runs against the TypeScript layout too.
 final class LayoutTests: XCTestCase {
-    func testTabsAndSplits() throws {
+    private func apply(_ op: JSONValue, to layout: inout Layout) {
+        func s(_ key: String) -> String { op[key]?.string ?? "" }
+        func n(_ key: String) -> Int { Int(op[key]?.number ?? -1) }
+        func axis() -> Layout.Axis { Layout.Axis(rawValue: s("axis")) ?? .horizontal }
+        switch s("op") {
+        case "createWorkspace": layout.createWorkspace(id: s("id"), name: s("name"), cwd: s("cwd"))
+        case "renameWorkspace": layout.renameWorkspace(s("workspace"), to: s("name"))
+        case "closeWorkspace": layout.closeWorkspace(s("workspace"))
+        case "moveWorkspace": layout.moveWorkspace(s("workspace"), to: n("to"))
+        case "selectWorkspace": layout.selectWorkspace(s("workspace"))
+        case "openTerminal": layout.open(s("terminal"), in: op["workspace"]?.string)
+        case "renameTab": layout.renameTab(n("tab"), in: s("workspace"), to: s("name"))
+        case "closeTab": layout.closeTab(n("tab"), in: s("workspace"))
+        case "moveTab": layout.moveTab(n("from"), to: n("to"), in: s("workspace"))
+        case "selectTab": layout.selectTab(n("tab"), in: s("workspace"))
+        case "splitFocused": layout.split(axis(), new: s("terminal"))
+        case "closeTerminal": layout.close(s("terminal"))
+        case "prune": layout.prune(keeping: Set((op["live"]?.array ?? []).compactMap(\.string)))
+        case "setRatio": layout.setRatio(op["ratio"]?.number ?? .nan, at: (op["path"]?.array ?? []).compactMap(\.bool))
+        case "focus": layout.focus(s("terminal"))
+        case "swap": layout.swap(s("a"), s("b"))
+        case "moveTerminal": layout.move(s("terminal"), beside: s("target"), axis: axis(), before: op["before"]?.bool ?? false)
+        case "moveToNewTab": layout.moveToNewTab(s("terminal"), in: s("workspace"))
+        default: XCTFail("unknown op \(s("op"))")
+        }
+    }
+
+    func testVectors() throws {
+        let directory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("../../../design/testdata/layout").standardizedFileURL
+        let files = try FileManager.default.contentsOfDirectory(atPath: directory.path).filter { $0.hasSuffix(".json") }.sorted()
+        XCTAssertGreaterThan(files.count, 5)
+        for file in files {
+            let data = try Data(contentsOf: directory.appendingPathComponent(file))
+            let vector = JSONValue(any: try JSONSerialization.jsonObject(with: data))
+            let input = Layout(document: vector["input"])
+            var layout = input
+            for op in vector["ops"]?.array ?? [] { apply(op, to: &layout) }
+            XCTAssertEqual(layout.document, vector["expected"], file)
+            XCTAssertEqual(layout == input, !(vector["changed"]?.bool ?? true), "\(file): changed")
+            XCTAssertEqual(Layout(document: vector["expected"]), layout, "\(file): reads back")
+            // Through the serializer the core's documents pass.
+            let written = try JSONSerialization.data(withJSONObject: layout.document.any)
+            XCTAssertEqual(Layout(document: JSONValue(any: try JSONSerialization.jsonObject(with: written))), layout, "\(file): round trip")
+        }
+    }
+
+    func testHelpers() {
+        let id = Layout.newWorkspaceID()
+        XCTAssertNotNil(id.range(of: "^[a-z0-9]{8}$", options: .regularExpression))
+        XCTAssertNotEqual(Layout.newWorkspaceID(), id)
         var layout = Layout()
-        XCTAssertFalse(layout.split(.horizontal, new: "t9"))
+        layout.createWorkspace(id: id, name: "x", cwd: "/w")
         layout.open("t1")
-        layout.open("t2")
-        layout.open("t1") // selects it where it is
-        XCTAssertEqual(layout.selected, 0)
-        XCTAssertEqual(layout.tabs.count, 2)
-        XCTAssertTrue(layout.split(.horizontal, new: "t3"))
-        XCTAssertTrue(layout.split(.vertical, new: "t4"))
-        XCTAssertEqual(layout.tabs[0].root, .split(axis: .horizontal, ratio: 0.5, first: .terminal("t1"),
-                                                   second: .split(axis: .vertical, ratio: 0.5, first: .terminal("t3"), second: .terminal("t4"))))
-        XCTAssertEqual(layout.tabs[0].focused, "t4")
-        XCTAssertEqual(layout.terminals, ["t1", "t3", "t4", "t2"])
-
-        // Ratios are set by the path to their split, and clamped.
-        layout.tabs[0].root = layout.tabs[0].root.settingRatio(0.99, at: [true][...])
-        guard case let .split(_, outer, _, .split(_, inner, _, _)) = layout.tabs[0].root else { return XCTFail("shape") }
-        XCTAssertEqual(outer, 0.5)
-        XCTAssertEqual(inner, 0.9)
-
-        // The layout survives a round trip through its document, whose
-        // shape other clients read too.
-        let data = try JSONEncoder().encode(layout)
-        XCTAssertEqual(try JSONDecoder().decode(Layout.self, from: data), layout)
-        let document = #"{"tabs":[{"root":{"split":"vertical","ratio":0.95,"children":[{"terminal":"a"},{"terminal":"b"}]},"focused":"b"}],"selected":0}"#
-        let decoded = try JSONDecoder().decode(Layout.self, from: Data(document.utf8))
-        XCTAssertEqual(decoded.tabs[0].root, .split(axis: .vertical, ratio: 0.9, first: .terminal("a"), second: .terminal("b")))
-        let reencoded = try JSONSerialization.jsonObject(with: JSONEncoder().encode(decoded)) as? [String: Any]
-        let root = (reencoded?["tabs"] as? [[String: Any]])?[0]["root"] as? [String: Any]
-        XCTAssertEqual(root?["split"] as? String, "vertical")
-        XCTAssertEqual((root?["children"] as? [[String: String]])?.map { $0["terminal"] }, ["a", "b"])
-        XCTAssertThrowsError(try JSONDecoder().decode(Layout.Node.self, from: Data(#"{"split":"vertical","children":[{"terminal":"a"}]}"#.utf8)))
-
-        // Closing a pane gives its sibling the room and moves the focus.
-        layout.close("t4")
-        XCTAssertEqual(layout.tabs[0].root, .split(axis: .horizontal, ratio: 0.5, first: .terminal("t1"), second: .terminal("t3")))
-        XCTAssertEqual(layout.tabs[0].focused, "t1")
-        // Closing a tab before the selected one keeps the selection on its tab.
-        layout.selected = 1
-        layout.close("t1")
-        layout.close("t3")
-        XCTAssertEqual(layout.tabs.map(\.root), [.terminal("t2")])
-        XCTAssertEqual(layout.selected, 0)
-        XCTAssertFalse(layout.prune(keeping: ["t2"]))
-        XCTAssertTrue(layout.prune(keeping: []))
-        XCTAssertTrue(layout.tabs.isEmpty)
-        XCTAssertEqual(layout.selected, 0)
+        XCTAssertTrue(layout.split(.vertical, new: "t2"))
+        XCTAssertFalse(layout.split(.vertical, new: "t2"))
+        XCTAssertEqual(layout.terminals, ["t1", "t2"])
+        XCTAssertEqual(layout.focusedTerminal, "t2")
+        XCTAssertEqual(layout.selectedWorkspace?.cwd, "/w")
+        XCTAssertEqual(layout.locate("t2")?.tab, 0)
+        XCTAssertNil(layout.locate("t3"))
+        XCTAssertEqual(JSONValue(any: ["a": [true, 1.5, "x", NSNull()]]).any as? NSDictionary, ["a": [true, 1.5, "x", NSNull()]])
+        XCTAssertEqual(JSONValue(any: true), .bool(true))
+        XCTAssertEqual(JSONValue(any: 1), .number(1))
     }
 }
 

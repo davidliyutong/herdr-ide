@@ -1,0 +1,7 @@
+{
+  "description": "A document without workspaces or tabs is an empty layout that keeps its other fields; a terminal cannot open without a workspace.",
+  "input": { "other": true, "selected": 3 },
+  "ops": [{ "op": "openTerminal", "terminal": "t1" }],
+  "changed": false,
+  "expected": { "version": 2, "other": true, "workspaces": [], "selected": 0 }
+}

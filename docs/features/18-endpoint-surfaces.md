@@ -78,7 +78,10 @@ from herdr.
   over, after which the previous owner is told `taken_over` and may take it
   back. A read-only browser cannot take over a writable one and becomes
   owner only while no writable browser is connected. When the owner leaves,
-  another writable browser, else a read-only one, becomes owner.
+  another writable browser, else a read-only one, becomes owner. An events
+  client (`/ws?events=1`, the macOS application) is never owner: it joins
+  no session, its `view`, `takeover`, `in`, `focus`, `host` and `api`
+  messages are ignored, and it is not handed the session.
 - The owner sends `view {m, tab, pane, cols, rows, cw, ch}`. The core keeps
   one endpoint connection to machine `m` at that size (it sends
   `ClientShellResize` when the size changes) and closes the others. herdr
@@ -171,7 +174,8 @@ meanwhile collapse into the latest, an older surface does not end the wait,
 a cell size alone is sent at once, the wait ends after its timeout, a
 resize stuck in a write does not hold up the receiving goroutine);
 `internal/server/surface_test.go`
-(ownership: busy, takeover, read-only rules, handover; the binary encoding
+(ownership: busy, takeover, read-only rules, handover, events clients
+kept out; the binary encoding
 shared with the web tests; a waiting connection is woken when its machine
 connects); `TestIntegrationEndpoint`, `TestIntegrationKeyParity` and
 `TestIntegrationResizeOverSlowLink` (a window drag over a delayed,

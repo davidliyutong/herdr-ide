@@ -28,9 +28,9 @@ Facts the design relies on (libghostty-spm 2.2.2026111302, Ghostty at
 ## Goals / non-goals
 
 Goals: terminals drawn by the GPU; the terminals of every machine the core
-knows; tabs and split panes that every client of a machine shares; the
-same design language as the web UI (neutral greys, color only for state,
-dense rows); English and Chinese.
+knows; workspaces, tabs and split panes that every client of a machine
+shares; the same design language as the web UI (neutral greys, color only
+for state, dense rows); English and Chinese.
 
 Non-goals: the browser UI's panes, which come from herdr; its file
 browser, uploads and downloads, and its settings of the browser itself
@@ -41,39 +41,54 @@ terminal core, which get no virtual display; Linux and Windows.
 
 **TermKit** (`macos/Sources/TermKit`, no UI).
 
-- `TermConnection` is the client of `/api/v1/term` on a
-  `URLSessionWebSocketTask`. It reconnects after 0.5 s doubling to 8 s and
-  subscribes again; calls waiting fail with `unavailable` and open streams
-  close with `disconnected`. A stream's delegate is registered when
+- `CoreSocket` is a `URLSessionWebSocketTask` to the core that reconnects
+  after 0.5 s, doubling to 8 s; the two clients below are built on it.
+- `TermConnection` is the client of `/api/v1/term`. It subscribes again
+  after reconnecting; calls waiting fail with `unavailable` and open
+  streams close with `disconnected`. A stream's delegate is registered when
   `attached` arrives, before the next message is read.
+- `EventConnection` is the client of `/ws` as an events client
+  (`/ws?events=1`), which takes no part in the browser UI's pane session
+  ([18](18-endpoint-surfaces.md)). It decodes `machines`, `machine` and
+  `gui` and ignores every other message; after reconnecting the core sends
+  the whole state again.
 - `TerminalStore` keeps each machine's backend state and terminal records
   from `backend`, `snapshot` and `event`, applying events as the core does.
-- `Layout` is what a window shows of a machine: tabs, each a tree whose
-  leaves are terminals and whose splits have an axis and a ratio. It is the
-  document `layout` in the machine's terminal core:
-  `{"tabs": [{"root": …, "focused": "t3"}], "selected": 0}`, a leaf
-  `{"terminal": "t1"}`, a split
-  `{"split": "horizontal", "ratio": 0.5, "children": [first, second]}`.
+- `Layout` is the machine's layout document, version 2
+  ([22](22-terminal-protocol.md)): workspaces, each with tabs, each a tree
+  whose leaves are terminals and whose splits have an axis and a ratio, as
+  values with the document's operations; `JSONValue` holds the fields of a
+  newer client so they are written back.
 - `CoreProcess` starts the core from the bundle as the Electron shell does
   (`--parent-stdio`, instance `desktop`), but on `127.0.0.1:0`, and reads
   the URL from the core's ready line.
 
 **App** (`macos/Sources/App`, AppKit).
 
-- `AppModel` polls `GET /api/machines` every 3 s and subscribes to the
-  machine the user selects, for the window's life: the first subscription
-  makes the core install and start that machine's terminal core, so a
-  machine nobody turned to gets none, and its row lists no terminals. A
-  terminal asked for while a machine's terminals start opens when they are
-  ready. It loads a machine's layout when its snapshot arrives,
-  dropping terminals that no longer live. Changes are written with
+- `AppModel` follows the machines and their program windows from the
+  events client's messages and subscribes to the machine the user selects,
+  for the window's life: the first subscription makes the core install and
+  start that machine's terminal core, so a machine nobody turned to gets
+  none, and its row lists no terminals. It loads a machine's layout when
+  its snapshot arrives, dropping terminals that no longer live; a layout
+  without workspaces gets one named with the word for a workspace in the
+  user's language. A terminal asked for while a machine's terminals or its
+  layout are not ready opens when they are. Changes are written with
   `doc.set` and the version last read, one write at a time; a conflict or
   a `doc` event with another version loads the document again, so the
   arrangement another client made wins.
 - A new terminal is the machine's shell (`terminal.run` without a
-  command) in the directory of the focused terminal's foreground program.
-  Closing a terminal kills its program; a terminal that finishes or is
-  removed leaves the layout, and a finished one is removed from the core.
+  command). A new tab starts in its workspace's directory, else in the
+  directory of the focused terminal's foreground program; a split starts in
+  the focused terminal's directory, else in the workspace's. Closing a
+  terminal kills its program; a terminal that finishes or is removed leaves
+  the layout, and a finished one is removed from the core.
+- **Workspaces.** A new workspace (⌘N, or the machine's menu in the
+  sidebar) asks for a name and a working directory, both optional (without
+  a name it is called after its directory), selects it and opens a
+  terminal there. Renaming asks for the name; closing removes the
+  workspace and kills its terminals, after asking when any still runs.
+  The last workspace closed is replaced by an empty one.
 - `TerminalPane` owns one Ghostty surface and one stream. It attaches when
   the surface first reports its grid, sends later grids as `resize`,
   passes output to the surface and acknowledges it, and writes the
@@ -81,13 +96,16 @@ terminal core, which get no virtual display; Linux and Windows.
   keeps its surface and scrollback while the arrangement changes; a pane
   attaches again when the connection returns, and the first paint's reset
   redraws it.
-- The window: a sidebar of machines and their live terminals (status dot
-  from the program's own report, working directory), a tab bar under a
-  transparent title bar, and the selected tab's panes with draggable
-  dividers. `Theme` holds the colors, in light and dark, and the metrics, whose values
-  are the design tokens shared with the web UI
-  ([24](24-design-tokens.md));
-  terminals use the web UI's default 16-color palette.
+- The window: a sidebar of machines, their workspaces (the selected one in
+  bold, its directory) and live terminals (status dot from the program's
+  own report, working directory; those of no workspace under the machine),
+  a tab bar of the selected workspace under a transparent title bar, and
+  the selected tab's panes with draggable dividers. A workspace's row
+  selects it, its plus button opens a terminal in it, and its menu creates
+  terminals and renames or closes it. `Theme` holds the colors, in light
+  and dark, and the metrics, whose values are the design tokens shared with
+  the web UI ([24](24-design-tokens.md)); terminals use the web UI's
+  default 16-color palette.
 - **Find** (⌘F, ⌘G, ⇧⌘G). Ghostty searches the surface's screen and
   scrollback and marks the matches; the pane's find bar drives it with the
   binding actions `start_search`, `search:<text>`, `navigate_search:next`
@@ -118,19 +136,21 @@ terminal core, which get no virtual display; Linux and Windows.
   text, written with `PUT /api/settings` and read back. Names,
   descriptions and options are the web UI's strings for the same keys;
   per-machine values are set in the browser UI.
-- **Program windows** (`GuiWindows.swift`). `GET /api/gui`, polled with
-  the machines, lists the windows on the machines' virtual displays
+- **Program windows** (`GuiWindows.swift`). The events client's `gui`
+  messages list the windows on the machines' virtual displays
   ([14](14-gui-windows.md)); they appear under their machine in the
   sidebar, and one opens in a window of its own whose web view shows the
   core's page for it (frames, video, input). A window closes when its
   program's window goes.
-- Menu: ⌘T new terminal, ⌘D split right, ⇧⌘D split down, ⌘W close
-  terminal, ⇧⌘] and ⇧⌘[ next and previous tab, ⌘B sidebar. A terminal
-  with the keyboard takes the keys Ghostty binds before the menu sees
-  them, and Ghostty binds most of these by default (new tab, splits,
-  close, find, its own settings); the controller's configuration unbinds
-  every key of the menu (`TerminalControllerBox.menuKeys`), so they reach
-  the menu. A search Ghostty starts by itself shows the find bar as well.
+- Menu: ⌘T new terminal, ⌘D split right, ⇧⌘D split down, ⌘N new
+  workspace, rename and close workspace, ⌘W close terminal, ⇧⌘] and ⇧⌘[
+  next and previous tab, ⌘B sidebar. ⌘N, like the terminal commands, is
+  off while VS Code has the keyboard, and the workspace commands wait for
+  the machine's layout. A terminal with the keyboard takes the keys Ghostty
+  binds before the menu sees them, and Ghostty binds most of these by
+  default (new tab, splits, close, find, its own settings); the
+  controller's configuration unbinds every key of the menu
+  (`TerminalControllerBox.menuKeys`), so they reach the menu. A search Ghostty starts by itself shows the find bar as well.
 
 **Building** (`scripts/fetch-ghostty.sh`, `scripts/macos-app.sh`,
 `macos/xcode/project.yml`). `make macos-build` and `make macos-test` fetch
@@ -173,9 +193,10 @@ builds the application that ships:
 | A find of our own over `terminal.read` | The core's text has no cell positions to mark; Ghostty already searches what it draws and scrolls to the match. |
 | The browser UI's Quick Look in a web view | The system's panel previews more kinds of files and behaves like every other application's. |
 | A native editor instead of VS Code | VS Code with its extensions, on the machine, is the feature; the proxy and the bridge extension already serve it. |
-| `/ws` for program windows | As for the machine list below; `GET /api/gui` returns the same states. |
 | Subscribing to every machine at launch | Every connected machine would get a terminal core that outlives the application, used or not. |
-| `/ws` for the machine list | Its clients take part in the browser UI's session ownership; a native window would take herdr's panes away from a browser. |
+| Polling `GET /api/machines` and `GET /api/gui` | A change shows up to 3 s late and every poll transfers every machine's state; `/ws` pushes each change once. |
+| `/ws` as a browser does | Its clients take part in the browser UI's session ownership: a native window would take herdr's panes away from a browser. An events client takes none. |
+| Opening a terminal into a layout not read yet | The document read afterwards would replace the layout and leave the terminal in no workspace; the terminal waits for the layout instead. |
 
 ## Failure modes
 
@@ -196,8 +217,11 @@ builds the application that ships:
   the core's value again.
 - **Read-only core** → settings are shown disabled; the VS Code page is
   refused by the core.
-- **Layout document unreadable** (written by a newer client) → treated as
-  empty; terminals stay reachable from the sidebar.
+- **Layout document from a newer client** → its unknown fields and nodes
+  are kept; parts that cannot be read are left out, and terminals they held
+  stay reachable from the sidebar.
+- **Event connection lost** → machines and program windows keep their last
+  state until it returns with backoff.
 - **XcodeGen missing** → `make macos-app` says so (`brew install
   xcodegen`); development builds and tests do not need it.
 - **No signing certificate** → the bundle is signed ad hoc: it runs where
@@ -216,12 +240,13 @@ See the row for the macOS application in
 `macos/Tests/TermKitTests` (`make macos-test`): paths as terminals print
 them (line suffixes, `~`, relative, `file:` URLs, other schemes) and the
 names of their local copies, frame encoding and slices,
-terminal names, the store's snapshots and every event kind, layout tabs,
-splits, ratios, closing, pruning and the document's shape, the core's
-arguments, environment and ready line, a missing core, and the
-localization checks of [12](12-internationalization.md).
-`internal/brand/brand_test.go` keeps `Brand.swift` in step and
-`TestGUIStatesEndpoint` covers `GET /api/gui`. The window is
+terminal names, the store's snapshots and every event kind, the events
+client's messages, every layout vector of `design/testdata/layout`
+([22](22-terminal-protocol.md)), the core's arguments, environment and
+ready line, a missing core, and the localization checks of
+[12](12-internationalization.md). `internal/brand/brand_test.go` keeps
+`Brand.swift` in step and `TestEventsClientStaysOutOfThePaneSession` the
+events client out of the pane session. The window is
 exercised by hand with the development aids of debug builds
 (`HERDR_IDE_ACTIONS`, `HERDR_IDE_SNAPSHOT`, see
 [reference](../reference.md#environment-variables)) against

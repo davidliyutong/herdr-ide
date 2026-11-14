@@ -152,7 +152,7 @@ func (s *Server) surfLeave(c *wsClient) {
 	s.clientsMu.Lock()
 	var next *wsClient
 	for o := range s.clients {
-		if o != c && o.ctx.Err() == nil && (next == nil || next.readOnly && !o.readOnly) {
+		if o != c && !o.events && o.ctx.Err() == nil && (next == nil || next.readOnly && !o.readOnly) {
 			next = o
 		}
 	}

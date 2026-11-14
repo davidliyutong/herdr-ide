@@ -1,0 +1,37 @@
+{
+  "description": "Opening terminals in tabs, naming, reordering, selecting and closing tabs; an open terminal is selected where it is.",
+  "input": {
+    "version": 2,
+    "workspaces": [{ "id": "w", "name": "main", "cwd": "", "tabs": [], "selected": 0 }],
+    "selected": 0
+  },
+  "ops": [
+    { "op": "openTerminal", "terminal": "t1" },
+    { "op": "openTerminal", "terminal": "t2" },
+    { "op": "openTerminal", "terminal": "t3" },
+    { "op": "openTerminal", "terminal": "t1" },
+    { "op": "renameTab", "workspace": "w", "tab": 1, "name": "logs" },
+    { "op": "moveTab", "workspace": "w", "from": 0, "to": 2 },
+    { "op": "selectTab", "workspace": "w", "tab": 0 },
+    { "op": "moveTab", "workspace": "w", "from": 2, "to": 1 },
+    { "op": "closeTab", "workspace": "w", "tab": 0 },
+    { "op": "selectTab", "workspace": "w", "tab": 1 },
+    { "op": "closeTab", "workspace": "w", "tab": 1 },
+    { "op": "renameTab", "workspace": "w", "tab": 0, "name": "main tab" },
+    { "op": "renameTab", "workspace": "w", "tab": 5, "name": "x" }
+  ],
+  "changed": true,
+  "expected": {
+    "version": 2,
+    "workspaces": [
+      {
+        "id": "w",
+        "name": "main",
+        "cwd": "",
+        "tabs": [{ "name": "main tab", "root": { "terminal": "t1" }, "focused": "t1" }],
+        "selected": 0
+      }
+    ],
+    "selected": 0
+  }
+}

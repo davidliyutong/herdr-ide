@@ -35,10 +35,10 @@ browser (React, canvas)     ──WebSocket + HTTP──▶  core (Go, `herdr-id
 | `internal/server` | HTTP/WS front: guards, session ownership and pane surfaces, files, proxy, bridge, audit. |
 | `internal/embedded` | Build artifacts compiled into the core (agents, bridge VSIX). |
 | `web` | Browser UI (Vite, React, zustand; panes on a canvas, xterm.js for the PTY dialogs); `web/embed.go` embeds `web/dist`. |
-| `macos` | macOS application (Swift package): `TermKit`, the client of `/api/v1/term` with the terminal, layout and core-process models; `App`, the AppKit window drawing terminals with Ghostty's renderer. |
+| `macos` | macOS application (Swift package): `TermKit`, the clients of `/api/v1/term` and of `/ws` as an events client, with the terminal, layout (workspaces, tabs, splits) and core-process models; `App`, the AppKit window drawing terminals with Ghostty's renderer. |
 | `desktop` | Electron main process and electron-builder config; macOS `.app`/DMG wrapping the embedded core. |
 | `extensions/herdr-ide-bridge` | VS Code extension installed into code-server. |
-| `design` | Design tokens (`tokens.json`): colors in light and dark, metrics, font sizes and terminal palettes; `scripts/tokens` generates `macos/Sources/App/Tokens.swift` and `web/src/tokens.css` from them. |
+| `design` | Design tokens (`tokens.json`): colors in light and dark, metrics, font sizes and terminal palettes; `scripts/tokens` generates `macos/Sources/App/Tokens.swift` and `web/src/tokens.css` from them. `testdata/layout`: the layout document's test vectors, run by the TypeScript and Swift clients ([22](features/22-terminal-protocol.md)). |
 
 ## Desktop launcher
 
@@ -153,6 +153,12 @@ Text frames are JSON with a `t` field; binary frames are pane surface updates
 (complete or patch: generation, size, cursor, row moves, spans of cells; see
 `web/src/surface/protocol.ts`).
 
+`/ws?events=1` connects an events client (the macOS application): it gets
+the same messages except the pane session's (`session`, `surf*`, `clip`,
+`bell`, binary frames), never owns or takes over the session, and its
+`view`, `takeover`, `in`, `focus`, `host` and `api` are ignored. It plays
+no notification sounds (`agent {sound}`) before it reports `active`.
+
 | Browser → core | Core → browser |
 | --- | --- |
 | `view {m, tab, pane, cols, rows, cw, ch}`, `takeover` | `session {state: owner\|busy\|taken_over}` |
@@ -223,7 +229,7 @@ One browser connection owns the core's session, like a KVM console: it
 chooses the shown machine, tab and size, and only its input reaches herdr.
 Another browser is told the session is busy and may take it over; the
 previous owner is then told it was taken over. A read-only browser never
-takes over a writable one. The core keeps one endpoint connection to the
+takes over a writable one, and events clients take no part. The core keeps one endpoint connection to the
 shown machine's herdr, decodes its surfaces into a grid and forwards changed
 spans; when the owner changes, the new owner gets the current surface. It
 keeps one resize whose grid size changes in flight, so a window drag over a

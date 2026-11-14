@@ -10,68 +10,43 @@ public protocol TermStreamDelegate: AnyObject {
     func stream(_ stream: UInt32, closed reason: String, exitCode: Int?)
 }
 
-/// A connection to the core's terminal protocol. It reconnects by itself
-/// and subscribes again; streams end with the connection they were opened on
-/// and are attached again by their owners. Use it from the main queue.
-public final class TermConnection: NSObject, URLSessionWebSocketDelegate {
+/// A connection to the core's terminal protocol (/api/v1/term). It
+/// reconnects by itself (`CoreSocket`) and subscribes again; streams end
+/// with the connection they were opened on and are attached again by their
+/// owners. Use it from the main queue.
+public final class TermConnection {
     /// A text message the store may hold (backend, snapshot, event).
     public var onMessage: (([String: Any]) -> Void)?
     /// The connection came (true) or went (false).
     public var onConnection: ((Bool) -> Void)?
-    public private(set) var isConnected = false
+    public var isConnected: Bool { socket.isConnected }
 
-    private let url: URL
-    private lazy var session = URLSession(configuration: .ephemeral, delegate: self, delegateQueue: .main)
-    private var task: URLSessionWebSocketTask?
+    private let socket: CoreSocket
     private var nextRID = 1
     private var replies: [Int: (Result<[String: Any], TermError>) -> Void] = [:]
     private var attaching: [Int: TermStreamDelegate] = [:]
     private var streams: [UInt32: TermStreamDelegate] = [:]
     private var machines: Set<String> = []
-    private var retry: TimeInterval = 0.5
-    private var closed = false
 
     /// `core` is the core's HTTP origin, such as http://127.0.0.1:7781.
     public init(core: URL) {
-        var parts = URLComponents(url: core, resolvingAgainstBaseURL: false)!
-        parts.scheme = parts.scheme == "https" ? "wss" : "ws"
-        parts.path = "/api/v1/term"
-        url = parts.url!
-        super.init()
+        socket = CoreSocket(core: core, path: "/api/v1/term")
+        socket.onOpen = { [weak self] in self?.opened() }
+        socket.onClose = { [weak self] wasConnected in self?.dropped(wasConnected) }
+        socket.onText = { [weak self] in self?.text($0) }
+        socket.onData = { [weak self] in self?.binary($0) }
     }
 
-    public func start() {
-        guard task == nil, !closed else { return }
-        let task = session.webSocketTask(with: url)
-        task.maximumMessageSize = 32 << 20
-        self.task = task
-        task.resume()
-        receive(on: task)
-    }
+    public func start() { socket.start() }
 
-    public func close() {
-        closed = true
-        task?.cancel(with: .normalClosure, reason: nil)
-        session.invalidateAndCancel()
-    }
+    public func close() { socket.close() }
 
-    public func urlSession(_: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol _: String?) {
-        guard webSocketTask === task else { return }
-        isConnected = true
-        retry = 0.5
+    private func opened() {
         for machine in machines { send(["t": "sub", "m": machine]) }
         onConnection?(true)
     }
 
-    public func urlSession(_: URLSession, task finished: URLSessionTask, didCompleteWithError _: Error?) {
-        guard finished === task else { return }
-        dropped()
-    }
-
-    private func dropped() {
-        task = nil
-        let wasConnected = isConnected
-        isConnected = false
+    private func dropped(_ wasConnected: Bool) {
         let waiting = replies
         let open = streams
         replies = [:]
@@ -80,29 +55,6 @@ public final class TermConnection: NSObject, URLSessionWebSocketDelegate {
         for (_, reply) in waiting { reply(.failure(TermError(kind: "unavailable"))) }
         for (id, delegate) in open { delegate.stream(id, closed: "disconnected", exitCode: nil) }
         if wasConnected { onConnection?(false) }
-        guard !closed else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + retry) { [weak self] in self?.start() }
-        retry = min(retry * 2, 8)
-    }
-
-    private func receive(on task: URLSessionWebSocketTask) {
-        task.receive { [weak self] result in
-            DispatchQueue.main.async {
-                guard let self, task === self.task else { return }
-                switch result {
-                case .failure:
-                    task.cancel()
-                    self.dropped()
-                case let .success(message):
-                    switch message {
-                    case let .data(data): self.binary(data)
-                    case let .string(text): self.text(text)
-                    @unknown default: break
-                    }
-                    self.receive(on: task)
-                }
-            }
-        }
     }
 
     private func binary(_ data: Data) {
@@ -141,8 +93,7 @@ public final class TermConnection: NSObject, URLSessionWebSocketDelegate {
     }
 
     private func send(_ msg: [String: Any]) {
-        guard let task, let data = try? JSONSerialization.data(withJSONObject: msg) else { return }
-        task.send(.string(String(decoding: data, as: UTF8.self))) { _ in }
+        socket.send(json: msg)
     }
 
     // MARK: - Machines
@@ -187,8 +138,8 @@ public final class TermConnection: NSObject, URLSessionWebSocketDelegate {
     }
 
     public func write(_ stream: UInt32, _ data: Data, automatic: Bool = false) {
-        guard streams[stream] != nil, let task else { return }
-        task.send(.data(Frame(stream: stream, kind: automatic ? .automatic : .data, payload: data).encoded())) { _ in }
+        guard streams[stream] != nil else { return }
+        socket.send(Frame(stream: stream, kind: automatic ? .automatic : .data, payload: data).encoded())
     }
 
     /// Returns the credit of output bytes the terminal has taken.

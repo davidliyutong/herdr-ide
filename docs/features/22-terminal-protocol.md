@@ -19,7 +19,7 @@ follow its API as it grows; backpressure from the drawing client to the
 program's terminal; the core's guards and read-only mode.
 
 Non-goals: emulating terminals in the core; a layout model in the core
-(clients keep theirs in herdr-core's documents, `doc.get` and `doc.set`);
+(clients share theirs as a document of herdr-core, see Layout document);
 replacing `/ws`, which still carries machines, files and the browser UI's
 panes.
 
@@ -79,15 +79,82 @@ read-only core) gets the terminal's grid as kind 3 frames before the
 output drawn for it, and sends nothing. `closed` ends a stream with
 herdr-core's reason, or `disconnected` when the backend's connection went.
 
-**Clients.** Two implementations follow the protocol and share the layout
-document ([23](23-macos-application.md)): `macos/Sources/TermKit` (Swift),
-used by the macOS application, and `web/src/term` (TypeScript):
+**Layout document.** Clients arrange a machine's terminals in herdr-core's
+document `layout` on that machine, read with `doc.get`, written with
+`doc.set` and the version last read (a `doc` event announces a newer one),
+so every client of the machine shows the same arrangement. Version 2:
+
+```json
+{
+  "version": 2,
+  "workspaces": [
+    {
+      "id": "k3v9x0qa",
+      "name": "api",
+      "cwd": "/srv/api",
+      "tabs": [
+        {
+          "name": "build",
+          "root": {
+            "split": "horizontal",
+            "ratio": 0.5,
+            "children": [{ "terminal": "t1" }, { "terminal": "t2" }]
+          },
+          "focused": "t2"
+        }
+      ],
+      "selected": 0
+    }
+  ],
+  "selected": 0
+}
+```
+
+- A workspace has an `id` (eight random lowercase letters and digits from
+  the client that created it, unique in the document), a `name`, the `cwd`
+  new terminals start in (empty for none), its `tabs` and its `selected`
+  tab. The top-level `selected` is the selected workspace.
+- A tab has a `root` node and the `focused` terminal, and a `name` only
+  when the user named it.
+- A node is a leaf `{"terminal": address}` or a split
+  `{"split": "horizontal" | "vertical", "ratio", "children": [first, second]}`;
+  `horizontal` places the children side by side, and `ratio`, the first
+  child's share, is clamped to 0.1–0.9.
+- A document with `tabs` instead of `workspaces` (version 1) reads as one
+  workspace with the id `default`, an empty name and directory, and those
+  tabs. Workspaces without an id or with a repeated one and tabs without a
+  root are left out, fields of the wrong type read as empty, a focus outside
+  its tab moves to the tab's first terminal, and selections are clamped.
+- Fields a client does not know, at every level, and nodes of a kind it
+  does not know are kept and written back: a newer client's additions
+  survive an older client's change. Such a node holds no terminals and
+  stays where it is. Clients write version 2.
+- Operations, with the same results in every client: workspaces are
+  created (at the end, selected), renamed, closed (the selection moves to
+  the next one, else the one before), moved and selected; a terminal opens
+  in a new tab of a workspace, or is focused where it already is; tabs are
+  named (an empty name removes the name), closed, moved and selected; the
+  focused terminal is split, the new terminal second and focused; a closed
+  terminal's sibling takes its parent's place and, if it had it, the focus,
+  a tab left without terminals goes and its workspace stays; pruning closes
+  the terminals that no longer live; a ratio is set by the path to its
+  split; two terminals' panes swap, also across tabs and workspaces; a pane
+  moves beside another one, before or after it, or into a new tab of a
+  workspace. Closing a workspace or tab ends no program; the client ends
+  them.
+- `design/testdata/layout/*.json` holds the contract as vectors: an input
+  document, operations, whether they change the layout, and the expected
+  document. Both clients run every vector.
+
+**Clients.** Two implementations follow the protocol and the layout
+document: `macos/Sources/TermKit` (Swift), used by the macOS application
+([23](23-macos-application.md)), and `web/src/term` (TypeScript):
 `connection.ts` (the WebSocket, reconnecting and subscribing again, calls
 as promises, streams with their handlers registered before their first
 frame), `store.ts` (terminal records from snapshots and events) and
-`layout.ts` (the tabs and splits of the layout document as immutable
-values). The browser UI's panes do not use it; they come from herdr
-([18](18-endpoint-surfaces.md)).
+`layout.ts` (the layout document's workspaces, tabs and splits as immutable
+values and the operations on them). The browser UI's panes do not use it;
+they come from herdr ([18](18-endpoint-surfaces.md)).
 
 ## Alternatives considered
 
@@ -130,10 +197,10 @@ facts reaching the terminal core, detaching, a program's end, the terminal
 core going away and coming back, read-only (writing calls refused, attaches
 observe, input dropped, nothing installed), and a machine without a
 terminal core. `web/src/__tests__/term.test.ts` covers the TypeScript client against a
-scripted socket (frames, names, the store's events, layouts and the
-document the macOS application writes, subscribing, calls, a stream's
-reply before its frames, input, credit, reconnecting), and
-`macos/Tests/TermKitTests` the Swift one. `TestIntegrationTerm` (`make it`, `HC_TEST_BIN`) runs the
+scripted socket (frames, names, the store's events, every layout vector,
+subscribing, calls, a stream's reply before its frames, input, credit,
+reconnecting), and `macos/Tests/TermKitTests` the Swift one, with the same
+layout vectors. `TestIntegrationTerm` (`make it`, `HC_TEST_BIN`) runs the
 whole path against a real herdr-core: install and start through the agent,
 a shell started, typed into and read by one client, found and watched by a
 second, and killed.

@@ -1,14 +1,33 @@
 import { describe, expect, it } from 'vitest';
 import { TermConnection, type Socket, type StreamHandler } from '../term/connection';
 import {
+  closeTab,
   closeTerminal,
+  closeWorkspace,
+  createWorkspace,
   emptyLayout,
+  focusedTerminal,
+  focusTerminal,
   layoutTerminals,
+  locate,
+  moveTab,
+  moveTerminal,
+  moveToNewTab,
+  moveWorkspace,
+  newWorkspaceId,
   openTerminal,
   parseLayout,
   pruneLayout,
+  renameTab,
+  renameWorkspace,
+  sameLayout,
+  selectedWorkspace,
+  selectTab,
+  selectWorkspace,
   setRatio,
   splitFocused,
+  swapTerminals,
+  type Axis,
   type Layout,
 } from '../term/layout';
 import {
@@ -92,53 +111,95 @@ describe('terminal store', () => {
   });
 });
 
+/** A vector of design/testdata/layout, shared with macos/Tests/TermKitTests. */
+interface LayoutVector {
+  description: string;
+  input: unknown;
+  ops: Array<Record<string, unknown>>;
+  changed: boolean;
+  expected: unknown;
+}
+
+const vectors = import.meta.glob<LayoutVector>('../../../design/testdata/layout/*.json', { eager: true, import: 'default' });
+
+function applyOp(layout: Layout, op: Record<string, unknown>): Layout {
+  const s = (key: string) => op[key] as string;
+  const n = (key: string) => op[key] as number;
+  switch (op.op) {
+    case 'createWorkspace':
+      return createWorkspace(layout, s('id'), s('name'), s('cwd'));
+    case 'renameWorkspace':
+      return renameWorkspace(layout, s('workspace'), s('name'));
+    case 'closeWorkspace':
+      return closeWorkspace(layout, s('workspace'));
+    case 'moveWorkspace':
+      return moveWorkspace(layout, s('workspace'), n('to'));
+    case 'selectWorkspace':
+      return selectWorkspace(layout, s('workspace'));
+    case 'openTerminal':
+      return openTerminal(layout, s('terminal'), op.workspace as string | undefined);
+    case 'renameTab':
+      return renameTab(layout, s('workspace'), n('tab'), s('name'));
+    case 'closeTab':
+      return closeTab(layout, s('workspace'), n('tab'));
+    case 'moveTab':
+      return moveTab(layout, s('workspace'), n('from'), n('to'));
+    case 'selectTab':
+      return selectTab(layout, s('workspace'), n('tab'));
+    case 'splitFocused':
+      return splitFocused(layout, op.axis as Axis, s('terminal'));
+    case 'closeTerminal':
+      return closeTerminal(layout, s('terminal'));
+    case 'prune':
+      return pruneLayout(layout, new Set(op.live as string[]));
+    case 'setRatio':
+      return setRatio(layout, op.path as boolean[], n('ratio'));
+    case 'focus':
+      return focusTerminal(layout, s('terminal'));
+    case 'swap':
+      return swapTerminals(layout, s('a'), s('b'));
+    case 'moveTerminal':
+      return moveTerminal(layout, s('terminal'), s('target'), op.axis as Axis, op.before === true);
+    case 'moveToNewTab':
+      return moveToNewTab(layout, s('terminal'), s('workspace'));
+  }
+  throw new Error(`unknown op ${String(op.op)}`);
+}
+
 describe('layout', () => {
-  it('opens, splits, resizes, closes and prunes without changing its input', () => {
-    expect(splitFocused(emptyLayout, 'horizontal', 't9')).toBeNull();
-    let layout: Layout = openTerminal(openTerminal(emptyLayout, 't1'), 't2');
-    const frozen = JSON.stringify(layout);
-    layout = openTerminal(layout, 't1'); // selects it where it is
-    expect(layout.selected).toBe(0);
-    layout = splitFocused(layout, 'horizontal', 't3')!;
-    layout = splitFocused(layout, 'vertical', 't4')!;
-    expect(layout.tabs[0]).toEqual({
-      root: {
-        split: 'horizontal',
-        ratio: 0.5,
-        children: [{ terminal: 't1' }, { split: 'vertical', ratio: 0.5, children: [{ terminal: 't3' }, { terminal: 't4' }] }],
-      },
-      focused: 't4',
-    });
-    expect(layoutTerminals(layout)).toEqual(['t1', 't3', 't4', 't2']);
-    expect(JSON.stringify(openTerminal(openTerminal(emptyLayout, 't1'), 't2'))).toBe(frozen);
-
-    const resized = setRatio(layout, [true], 0.99);
-    expect((resized.tabs[0].root as { children: [unknown, { ratio: number }] }).children[1].ratio).toBe(0.9);
-    expect((resized.tabs[0].root as { ratio: number }).ratio).toBe(0.5);
-
-    layout = closeTerminal(layout, 't4');
-    expect(layout.tabs[0]).toEqual({
-      root: { split: 'horizontal', ratio: 0.5, children: [{ terminal: 't1' }, { terminal: 't3' }] },
-      focused: 't1',
-    });
-    layout = closeTerminal(closeTerminal({ ...layout, selected: 1 }, 't1'), 't3');
-    expect(layout).toEqual({ tabs: [{ root: { terminal: 't2' }, focused: 't2' }], selected: 0 });
-    expect(pruneLayout(layout, new Set(['t2']))).toBe(layout);
-    expect(pruneLayout(layout, new Set())).toEqual(emptyLayout);
+  it('has vectors', () => {
+    expect(Object.keys(vectors).length).toBeGreaterThan(5);
   });
 
-  it('reads the document the macOS application writes, and nothing malformed', () => {
-    const doc = {
-      tabs: [{ root: { split: 'vertical', ratio: 0.95, children: [{ terminal: 'a' }, { terminal: 'b' }] }, focused: 'gone' }],
-      selected: 5,
-    };
-    expect(parseLayout(doc)).toEqual({
-      tabs: [{ root: { split: 'vertical', ratio: 0.9, children: [{ terminal: 'a' }, { terminal: 'b' }] }, focused: 'a' }],
-      selected: 0,
+  for (const [path, vector] of Object.entries(vectors)) {
+    it(path.split('/').pop()!, () => {
+      const input = parseLayout(vector.input);
+      const before = JSON.stringify(input);
+      const result = vector.ops.reduce(applyOp, input);
+      expect(JSON.stringify(input)).toBe(before); // arguments never change
+      expect(result).toEqual(vector.expected);
+      expect(sameLayout(result, parseLayout(vector.expected))).toBe(true);
+      expect(sameLayout(input, result)).toBe(!vector.changed);
+      // The document reads back as the same layout.
+      expect(sameLayout(parseLayout(JSON.parse(JSON.stringify(result))), result)).toBe(true);
     });
-    expect(parseLayout(null)).toEqual(emptyLayout);
-    expect(parseLayout({ tabs: [{ root: { split: 'vertical', children: [{ terminal: 'a' }] } }] })).toEqual(emptyLayout);
-    expect(parseLayout({ tabs: [{ root: { split: 'diagonal', children: [{ terminal: 'a' }, { terminal: 'b' }] } }] })).toEqual(emptyLayout);
+  }
+
+  it('compares layouts as documents and makes workspace ids', () => {
+    const a = parseLayout({ selected: 0, version: 2, workspaces: [] });
+    expect(sameLayout(a, { workspaces: [], selected: 0, version: 2 })).toBe(true);
+    expect(sameLayout(a, { ...a, extra: 1 })).toBe(false);
+    expect(sameLayout(emptyLayout, parseLayout('nonsense'))).toBe(true);
+    const id = newWorkspaceId();
+    expect(id).toMatch(/^[a-z0-9]{8}$/);
+    expect(newWorkspaceId()).not.toBe(id);
+    let layout = openTerminal(createWorkspace(emptyLayout, id, 'x', '/w'), 't1');
+    layout = splitFocused(layout, 'vertical', 't2');
+    expect(layoutTerminals(layout)).toEqual(['t1', 't2']);
+    expect(focusedTerminal(layout)).toBe('t2');
+    expect(selectedWorkspace(layout)?.cwd).toBe('/w');
+    expect(locate(layout, 't2')).toEqual({ workspace: 0, tab: 0 });
+    expect(locate(layout, 't3')).toBeNull();
   });
 });
 

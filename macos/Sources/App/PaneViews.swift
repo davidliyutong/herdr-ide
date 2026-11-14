@@ -72,7 +72,7 @@ final class SplitView: NSView {
     }
 }
 
-/// Shows the selected tab's panes. Panes are kept by terminal, so a
+/// Shows the panes of the selected workspace's selected tab. Panes are kept by terminal, so a
 /// terminal keeps its surface when the arrangement around it changes.
 final class PaneArea: NSView {
     private let model: AppModel
@@ -122,13 +122,16 @@ final class PaneArea: NSView {
 
     private func build(_ node: Layout.Node, machine: String, path: [Bool]) -> NSView {
         switch node {
-        case let .terminal(address):
+        case let .terminal(address, _):
             return pane(machine, address)
-        case let .split(axis, ratio, first, second):
+        case let .split(axis, ratio, first, second, _):
             let view = SplitView(axis: axis, ratio: ratio, first: build(first, machine: machine, path: path + [false]),
                                  second: build(second, machine: machine, path: path + [true]))
             view.onRatio = { [weak self] in self?.model.setRatio($0, at: path) }
             return view
+        case .other:
+            // A kind of pane a newer client added: its place stays empty.
+            return FillView(Theme.background)
         }
     }
 
@@ -143,8 +146,7 @@ final class PaneArea: NSView {
 
     func update() {
         let machine = model.selectedMachine
-        let layout = model.layout
-        let tab = layout.tabs.indices.contains(layout.selected) ? layout.tabs[layout.selected] : nil
+        let tab = model.layout.selectedTab
 
         // Panes of terminals that are gone give up their streams.
         var open: Set<String> = []
@@ -179,7 +181,7 @@ final class PaneArea: NSView {
             pane.isFocusedPane = address == tab.focused
         }
         // The focus follows the layout unless the user is in another field.
-        if window?.firstResponder is NSText { return }
+        if window?.firstResponder is NSText || tab.focused.isEmpty { return }
         if self.pane(containing: window?.firstResponder as? NSView)?.address != tab.focused {
             pane(machine, tab.focused).takeFocus()
         }

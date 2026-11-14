@@ -1,0 +1,76 @@
+{
+  "description": "Fields and node kinds of a newer client survive changes at every level: the document, workspaces, tabs, splits and leaves; a node of an unknown kind stays where it is and holds no terminals.",
+  "input": {
+    "version": 3,
+    "future": [1, 2],
+    "workspaces": [
+      {
+        "id": "w1",
+        "name": "api",
+        "cwd": "/srv/api",
+        "pinned": true,
+        "selected": 0,
+        "tabs": [
+          {
+            "name": "build",
+            "icon": "hammer",
+            "focused": "t2",
+            "root": {
+              "split": "horizontal",
+              "ratio": 0.3,
+              "locked": false,
+              "children": [
+                { "terminal": "t1", "font": 12 },
+                { "split": "vertical", "ratio": 0.5, "children": [{ "terminal": "t2" }, { "browser": "https://example.com" }] }
+              ]
+            }
+          }
+        ]
+      },
+      { "id": "w2", "name": "docs", "cwd": "", "tabs": [], "selected": 0, "color": "#123456" }
+    ],
+    "selected": 0
+  },
+  "ops": [
+    { "op": "setRatio", "path": [], "ratio": 0.6 },
+    { "op": "closeTerminal", "terminal": "t2" },
+    { "op": "renameWorkspace", "workspace": "w2", "name": "notes" },
+    { "op": "openTerminal", "terminal": "t5", "workspace": "w2" },
+    { "op": "renameTab", "workspace": "w1", "tab": 0, "name": "" }
+  ],
+  "changed": true,
+  "expected": {
+    "version": 2,
+    "future": [1, 2],
+    "workspaces": [
+      {
+        "id": "w1",
+        "name": "api",
+        "cwd": "/srv/api",
+        "pinned": true,
+        "selected": 0,
+        "tabs": [
+          {
+            "icon": "hammer",
+            "focused": "t1",
+            "root": {
+              "split": "horizontal",
+              "ratio": 0.6,
+              "locked": false,
+              "children": [{ "terminal": "t1", "font": 12 }, { "browser": "https://example.com" }]
+            }
+          }
+        ]
+      },
+      {
+        "id": "w2",
+        "name": "notes",
+        "cwd": "",
+        "color": "#123456",
+        "tabs": [{ "root": { "terminal": "t5" }, "focused": "t5" }],
+        "selected": 0
+      }
+    ],
+    "selected": 1
+  }
+}

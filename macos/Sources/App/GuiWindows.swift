@@ -2,15 +2,6 @@ import AppKit
 import TermKit
 import WebKit
 
-/// A window of a program running on a machine's virtual display.
-struct ProgramWindow: Equatable {
-    var machine: String
-    var id: Int
-    var title: String
-    var width: Int
-    var height: Int
-}
-
 /// Shows program windows in windows of their own. The core's page for a
 /// window (`/m/<machine>/gui/<window>`) draws its frames and sends input;
 /// here it fills a web view that loads nothing but the core.

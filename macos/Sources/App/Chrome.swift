@@ -42,20 +42,24 @@ final class TerminalControllerBox {
     }
 }
 
-/// A row of the sidebar: a machine, or a terminal on one.
+/// A row of the sidebar: a machine, one of its workspaces, a terminal or a
+/// program window.
 private enum SidebarItem: Equatable {
     case machine(Machine)
-    case terminal(machine: String, record: TerminalRecord)
+    case workspace(machine: String, workspace: Layout.Workspace, selected: Bool)
+    /// A terminal, inside a workspace or not.
+    case terminal(machine: String, record: TerminalRecord, inWorkspace: Bool)
     case program(ProgramWindow)
 }
 
-/// Machines and their terminals.
+/// Machines, their workspaces and their terminals.
 final class SidebarView: NSView, NSTableViewDataSource, NSTableViewDelegate {
     private let model: AppModel
     private let table = NSTableView()
     private var items: [SidebarItem] = []
     /// A program window was chosen.
     var onProgram: ((ProgramWindow) -> Void)?
+    var dialogs: WorkspaceDialogs?
 
     init(model: AppModel) {
         self.model = model
@@ -105,8 +109,22 @@ final class SidebarView: NSView, NSTableViewDataSource, NSTableViewDelegate {
         var next: [SidebarItem] = []
         for machine in model.machines {
             next.append(.machine(machine))
-            for record in model.store.terminals(of: machine.id) where record.isLive {
-                next.append(.terminal(machine: machine.id, record: record))
+            let live = model.store.terminals(of: machine.id).filter(\.isLive)
+            var placed: Set<String> = []
+            if let layout = model.layout(of: machine.id) {
+                for (index, workspace) in layout.workspaces.enumerated() {
+                    next.append(.workspace(machine: machine.id, workspace: workspace,
+                                           selected: machine.id == model.selectedMachine && index == layout.selected))
+                    for address in workspace.terminals {
+                        guard let record = live.first(where: { $0.address == address }) else { continue }
+                        placed.insert(address)
+                        next.append(.terminal(machine: machine.id, record: record, inWorkspace: true))
+                    }
+                }
+            }
+            // Terminals no workspace shows, such as those another client started.
+            for record in live where !placed.contains(record.address) {
+                next.append(.terminal(machine: machine.id, record: record, inWorkspace: false))
             }
             for program in model.programs where program.machine == machine.id {
                 next.append(.program(program))
@@ -118,12 +136,6 @@ final class SidebarView: NSView, NSTableViewDataSource, NSTableViewDelegate {
 
     func numberOfRows(in _: NSTableView) -> Int { items.count }
 
-    private func focused(_ machine: String) -> String? {
-        guard machine == model.selectedMachine else { return nil }
-        let layout = model.layout
-        return layout.tabs.indices.contains(layout.selected) ? layout.tabs[layout.selected].focused : nil
-    }
-
     func tableView(_: NSTableView, viewFor _: NSTableColumn?, row: Int) -> NSView? {
         let cell = SidebarRow()
         switch items[row] {
@@ -134,18 +146,27 @@ final class SidebarView: NSView, NSTableViewDataSource, NSTableViewDelegate {
             } else if let state = model.backend(of: machine.id), state.phase == .error {
                 detail = tr("backend." + state.code)
             }
-            cell.configure(title: machine.label, detail: detail, dot: nil, heading: true, selected: false) { [weak self] in
+            cell.configure(title: machine.label, detail: detail, dot: nil, level: 0, strong: true, selected: false) { [weak self] in
                 self?.model.newTerminal(on: machine.id)
             }
             cell.toolTip = detail.isEmpty ? nil : detail
             cell.setAccessibilityLabel(tr("sidebar.newTerminal", machine.label))
-        case let .terminal(machine, record):
+        case let .workspace(machine, workspace, selected):
+            let name = WorkspaceDialogs.name(of: workspace)
+            cell.configure(title: name, detail: (workspace.cwd as NSString).abbreviatingWithTildeInPath, dot: nil, level: 1,
+                           strong: selected, selected: false) { [weak self] in
+                self?.model.newTerminal(on: machine, in: workspace.id)
+            }
+            cell.toolTip = workspace.cwd.isEmpty ? nil : workspace.cwd
+            cell.setAccessibilityLabel(tr("sidebar.newTerminalIn", name))
+        case let .terminal(machine, record, inWorkspace):
+            let focused = machine == model.selectedMachine && model.focusedTerminal == record.address
             cell.configure(title: record.displayName, detail: (record.cwd as NSString).abbreviatingWithTildeInPath,
-                           dot: Theme.status(record.status), heading: false, selected: focused(machine) == record.address, action: nil)
+                           dot: Theme.status(record.status), level: inWorkspace ? 2 : 1, strong: false, selected: focused, action: nil)
             cell.toolTip = record.status.map { tr("status." + $0) }
         case let .program(program):
             cell.configure(title: program.title.isEmpty ? tr("sidebar.window") : program.title, detail: tr("sidebar.window"),
-                           dot: nil, heading: false, selected: false, action: nil)
+                           dot: nil, level: 1, strong: false, selected: false, action: nil)
         }
         return cell
     }
@@ -154,7 +175,8 @@ final class SidebarView: NSView, NSTableViewDataSource, NSTableViewDelegate {
         guard items.indices.contains(table.clickedRow) else { return }
         switch items[table.clickedRow] {
         case let .machine(machine): model.select(machine: machine.id)
-        case let .terminal(machine, record): model.open(record.address, on: machine)
+        case let .workspace(machine, workspace, _): model.selectWorkspace(workspace.id, on: machine)
+        case let .terminal(machine, record, _): model.open(record.address, on: machine)
         case let .program(program): onProgram?(program)
         }
     }
@@ -164,22 +186,43 @@ extension SidebarView: NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
         guard items.indices.contains(table.clickedRow) else { return }
+        func add(_ title: String, _ action: Selector, _ object: Any) {
+            let item = menu.addItem(withTitle: title, action: action, keyEquivalent: "")
+            item.target = self
+            item.representedObject = object
+        }
         switch items[table.clickedRow] {
         case let .machine(machine):
-            let item = menu.addItem(withTitle: tr("menu.newTerminal"), action: #selector(menuNew(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = machine.id
-        case let .terminal(machine, record):
-            let item = menu.addItem(withTitle: tr("sidebar.kill"), action: #selector(menuKill(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = [machine, record.address]
+            add(tr("menu.newTerminal"), #selector(menuNew(_:)), [machine.id])
+            if model.layout(of: machine.id) != nil { add(tr("menu.newWorkspace"), #selector(menuNewWorkspace(_:)), machine.id) }
+        case let .workspace(machine, workspace, _):
+            add(tr("menu.newTerminal"), #selector(menuNew(_:)), [machine, workspace.id])
+            menu.addItem(.separator())
+            add(tr("menu.renameWorkspace"), #selector(menuRenameWorkspace(_:)), [machine, workspace.id])
+            add(tr("menu.closeWorkspace"), #selector(menuCloseWorkspace(_:)), [machine, workspace.id])
+        case let .terminal(machine, record, _):
+            add(tr("sidebar.kill"), #selector(menuKill(_:)), [machine, record.address])
         case .program:
             break
         }
     }
 
+    /// [machine] or [machine, workspace].
     @objc private func menuNew(_ sender: NSMenuItem) {
-        if let machine = sender.representedObject as? String { model.newTerminal(on: machine) }
+        guard let pair = sender.representedObject as? [String], let machine = pair.first else { return }
+        model.newTerminal(on: machine, in: pair.count > 1 ? pair[1] : nil)
+    }
+
+    @objc private func menuNewWorkspace(_ sender: NSMenuItem) {
+        if let machine = sender.representedObject as? String { dialogs?.create(on: machine) }
+    }
+
+    @objc private func menuRenameWorkspace(_ sender: NSMenuItem) {
+        if let pair = sender.representedObject as? [String], pair.count == 2 { dialogs?.rename(pair[1], on: pair[0]) }
+    }
+
+    @objc private func menuCloseWorkspace(_ sender: NSMenuItem) {
+        if let pair = sender.representedObject as? [String], pair.count == 2 { dialogs?.close(pair[1], on: pair[0]) }
     }
 
     @objc private func menuKill(_ sender: NSMenuItem) {
@@ -221,7 +264,7 @@ private final class SidebarRow: NSView {
         NSLayoutConstraint.activate([
             highlight.topAnchor.constraint(equalTo: topAnchor, constant: 1), highlight.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -1),
             highlight.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6), highlight.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
-            dot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16), dot.centerYAnchor.constraint(equalTo: centerYAnchor),
+            dot.trailingAnchor.constraint(equalTo: title.leadingAnchor, constant: -8), dot.centerYAnchor.constraint(equalTo: centerYAnchor),
             dot.widthAnchor.constraint(equalToConstant: 6), dot.heightAnchor.constraint(equalToConstant: 6),
             title.centerYAnchor.constraint(equalTo: centerYAnchor),
             detail.leadingAnchor.constraint(greaterThanOrEqualTo: title.trailingAnchor, constant: 8),
@@ -237,24 +280,27 @@ private final class SidebarRow: NSView {
 
     private var leading: NSLayoutConstraint?
 
-    func configure(title text: String, detail detailText: String, dot color: NSColor?, heading: Bool, selected: Bool, action: (() -> Void)?) {
+    /// `level` 0 is a machine, 1 what is directly under it, 2 a terminal of
+    /// a workspace.
+    func configure(title text: String, detail detailText: String, dot color: NSColor?, level: Int, strong: Bool, selected: Bool,
+                   action: (() -> Void)?) {
         title.stringValue = text
-        title.font = heading ? Theme.fontStrong : Theme.font
-        title.textColor = heading ? Theme.muted : Theme.foreground
+        title.font = strong ? Theme.fontStrong : Theme.font
+        title.textColor = level == 0 ? Theme.muted : Theme.foreground
         detail.stringValue = detailText
         dot.fill = color ?? .clear
         add.isHidden = action == nil
         self.action = action
         highlight.fill = selected ? Theme.accent : .clear
         leading?.isActive = false
-        leading = title.leadingAnchor.constraint(equalTo: leadingAnchor, constant: heading ? 14 : 30)
+        leading = title.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14 + 16 * CGFloat(level))
         leading?.isActive = true
     }
 
     @objc private func pressed() { action?() }
 }
 
-/// The tabs of the selected machine.
+/// The tabs of the selected machine's selected workspace.
 final class TabBar: NSView {
     private let model: AppModel
     private let stack = NSStackView()
@@ -288,11 +334,11 @@ final class TabBar: NSView {
     func update() {
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         guard let machine = model.selectedMachine else { return }
-        let layout = model.layout
-        for (index, tab) in layout.tabs.enumerated() {
+        let workspace = model.layout.selectedWorkspace
+        for (index, tab) in (workspace?.tabs ?? []).enumerated() {
             let record = model.store.terminal(tab.focused, on: machine)
-            let button = TabButton(title: record?.displayName ?? tab.focused, dot: Theme.status(record?.status),
-                                   selected: index == layout.selected) { [weak self] in self?.model.selectTab(index) }
+            let button = TabButton(title: tab.name ?? record?.displayName ?? tab.focused, dot: Theme.status(record?.status),
+                                   selected: index == workspace?.selected) { [weak self] in self?.model.selectTab(index) }
             stack.addArrangedSubview(button)
         }
         let add = NSButton(image: NSImage(systemSymbolName: "plus", accessibilityDescription: tr("menu.newTerminal"))!,

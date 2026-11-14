@@ -6,9 +6,14 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"flag"
+	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/coder/websocket"
 
 	"herdr-ide/internal/herdr/endpoint"
 )
@@ -87,6 +92,87 @@ func TestSessionOwnership(t *testing.T) {
 	a.leaveForTest()
 	if st := lastState(t, r); st != "owner" {
 		t.Fatalf("read-only after writable left: %q", st)
+	}
+}
+
+// An events client (/ws?events=1) follows machines without taking part in
+// the pane session: it never owns it, takes it over or receives it.
+func TestEventsClientStaysOutOfThePaneSession(t *testing.T) {
+	s := newTestServer()
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	// A connection and its messages as "type:state". (A read whose context
+	// ends closes the connection, so one reader reads until the end.)
+	dial := func(query string) (*websocket.Conn, <-chan string) {
+		conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws"+query, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ch := make(chan string, 64)
+		go func() {
+			defer close(ch)
+			for {
+				_, data, err := conn.Read(ctx)
+				if err != nil {
+					return
+				}
+				var m struct{ T, State string }
+				_ = json.Unmarshal(data, &m)
+				ch <- m.T + ":" + m.State
+			}
+		}()
+		return conn, ch
+	}
+	// The messages that arrive within a while.
+	drain := func(ch <-chan string) []string {
+		var seen []string
+		for {
+			select {
+			case m, ok := <-ch:
+				if !ok {
+					return seen
+				}
+				seen = append(seen, m)
+			case <-time.After(300 * time.Millisecond):
+				return seen
+			}
+		}
+	}
+	events, fromEvents := dial("?events=1")
+	defer events.CloseNow()
+	if got := drain(fromEvents); len(got) != 1 || got[0] != "machines:" {
+		t.Fatalf("events client got %v", got)
+	}
+	if err := events.Write(ctx, websocket.MessageText, []byte(`{"t":"takeover"}`)); err != nil {
+		t.Fatal(err)
+	}
+	browser, fromBrowser := dial("")
+	if got := drain(fromBrowser); !slices.Contains(got, "session:owner") {
+		t.Fatalf("browser after an events client got %v", got)
+	}
+	// The owner leaves: the session is not handed to the events client.
+	browser.Close(websocket.StatusNormalClosure, "")
+	if got := drain(fromEvents); len(got) != 0 {
+		t.Fatalf("events client after the owner left got %v", got)
+	}
+
+	// Sounds go to a browser, not to an events client that reported no use.
+	e := fakeClient(s, false)
+	e.events = true
+	b := fakeClient(s, false)
+	s.markActive(b, time.Hour)
+	if s.soundClient() != b {
+		t.Fatal("sound went to the events client")
+	}
+	s.surfJoin(b)
+	b.leaveForTest()
+	s.surf.mu.Lock()
+	owner := s.surf.owner
+	s.surf.mu.Unlock()
+	if owner != nil {
+		t.Fatal("the session was handed to an events client")
 	}
 }
 

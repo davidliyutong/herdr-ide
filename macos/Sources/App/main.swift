@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var quickLook: QuickLook?
     private var settings: SettingsWindow?
     private var programs: ProgramWindows?
+    private var dialogs: WorkspaceDialogs?
     private var panelWidth: NSLayoutConstraint?
     private var panelShown = false
     private var sidebarWidth: NSLayoutConstraint?
@@ -76,6 +77,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let programs = ProgramWindows(core: core)
         self.programs = programs
         sidebar.onProgram = { programs.show($0) }
+        let dialogs = WorkspaceDialogs(model: model, window: window)
+        self.dialogs = dialogs
+        sidebar.dialogs = dialogs
         let quickLook = QuickLook(core: core)
         self.quickLook = quickLook
         quickLook.onFailure = { [weak self] key, path in self?.notice(tr(key, path)) }
@@ -202,11 +206,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     /// While a web page has the keyboard its shortcuts are its own: the
     /// commands for terminals are off, so their keys reach the page.
+    /// Workspaces change once the machine's layout was read.
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         let inPage = webPanel?.contains(window.firstResponder as? NSView) ?? false
         let terminalOnly: Set<Selector> = [#selector(newTerminal), #selector(splitRight), #selector(splitDown), #selector(closeTerminal),
-                                           #selector(find), #selector(findNext), #selector(findPrevious)]
+                                           #selector(find), #selector(findNext), #selector(findPrevious), #selector(newWorkspace)]
         if inPage, let action = item.action, terminalOnly.contains(action) { return false }
+        let workspaceActions: Set<Selector> = [#selector(newWorkspace), #selector(renameWorkspace), #selector(closeWorkspace)]
+        if let action = item.action, workspaceActions.contains(action) {
+            return model?.selectedMachine.flatMap { model?.layout(of: $0) } != nil
+        }
         return true
     }
 
@@ -253,6 +262,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             add(menu, "menu.splitRight", #selector(splitRight), "d")
             add(menu, "menu.splitDown", #selector(splitDown), "d", [.command, .shift])
             menu.addItem(.separator())
+            add(menu, "menu.newWorkspace", #selector(newWorkspace), "n")
+            add(menu, "menu.renameWorkspace", #selector(renameWorkspace), "")
+            add(menu, "menu.closeWorkspace", #selector(closeWorkspace), "")
+            menu.addItem(.separator())
             add(menu, "menu.closeTerminal", #selector(closeTerminal), "w")
         }
         submenu(tr("menu.edit")) { menu in
@@ -279,8 +292,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// The pane the layout focuses: where the menu's commands go, also
     /// while the find field has the keyboard.
     private var focusedPane: TerminalPane? {
-        guard let model, let machine = model.selectedMachine, model.layout.tabs.indices.contains(model.layout.selected) else { return nil }
-        return panes?.pane(machine, model.layout.tabs[model.layout.selected].focused)
+        guard let model, let machine = model.selectedMachine, let address = model.focusedTerminal else { return nil }
+        return panes?.pane(machine, address)
     }
 
     @objc private func showSettings() { settings?.show() }
@@ -291,6 +304,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     @objc private func splitRight() { model?.split(.horizontal) }
     @objc private func splitDown() { model?.split(.vertical) }
     @objc private func closeTerminal() { model?.closeFocused() }
+
+    @objc private func newWorkspace() {
+        if let machine = model?.selectedMachine { dialogs?.create(on: machine) }
+    }
+
+    @objc private func renameWorkspace() {
+        guard let model, let machine = model.selectedMachine, let workspace = model.layout.selectedWorkspace else { return }
+        dialogs?.rename(workspace.id, on: machine)
+    }
+
+    @objc private func closeWorkspace() {
+        guard let model, let machine = model.selectedMachine, let workspace = model.layout.selectedWorkspace else { return }
+        dialogs?.close(workspace.id, on: machine)
+    }
     @objc private func nextTab() { model?.cycleTab(1) }
     @objc private func previousTab() { model?.cycleTab(-1) }
 

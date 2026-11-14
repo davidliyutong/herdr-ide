@@ -1,0 +1,27 @@
+{
+  "description": "Creating, selecting, reordering, renaming and closing workspaces; the selection stays on its workspace, and closing the selected one selects the next, else the one before.",
+  "input": null,
+  "ops": [
+    { "op": "createWorkspace", "id": "w1", "name": "one", "cwd": "/a" },
+    { "op": "createWorkspace", "id": "w2", "name": "two", "cwd": "" },
+    { "op": "createWorkspace", "id": "w3", "name": "three", "cwd": "/c" },
+    { "op": "createWorkspace", "id": "w2", "name": "dup", "cwd": "/x" },
+    { "op": "openTerminal", "terminal": "t1" },
+    { "op": "selectWorkspace", "workspace": "w1" },
+    { "op": "openTerminal", "terminal": "t2", "workspace": "w2" },
+    { "op": "moveWorkspace", "workspace": "w2", "to": 0 },
+    { "op": "moveWorkspace", "workspace": "w3", "to": 9 },
+    { "op": "renameWorkspace", "workspace": "w1", "name": "first" },
+    { "op": "closeWorkspace", "workspace": "w2" },
+    { "op": "moveWorkspace", "workspace": "w3", "to": 0 },
+    { "op": "closeWorkspace", "workspace": "w1" }
+  ],
+  "changed": true,
+  "expected": {
+    "version": 2,
+    "workspaces": [
+      { "id": "w3", "name": "three", "cwd": "/c", "tabs": [{ "root": { "terminal": "t1" }, "focused": "t1" }], "selected": 0 }
+    ],
+    "selected": 0
+  }
+}
