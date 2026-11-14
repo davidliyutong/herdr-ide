@@ -45,8 +45,7 @@ a=$(grep -c '^## ' README.md); b=$(grep -c '^## ' README.zh-CN.md)
 if [[ "$a" != "$b" ]]; then echo "README.md has $a sections, README.zh-CN.md has $b"; fail=1; fi
 
 echo "==> changelog"
-# CHANGELOG.md merges with the union driver (.gitattributes), which keeps
-# both sides' lines; a subsection heading would be kept twice.
+# A version's changes are one list; the release notes are cut from it.
 if awk '/^## \[Unreleased\]/ {p=1; next} /^## \[/ {p=0} p' CHANGELOG.md | grep -n '^#'; then
   echo "CHANGELOG.md: [Unreleased] is one list, without headings"
   fail=1

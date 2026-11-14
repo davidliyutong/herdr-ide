@@ -52,9 +52,7 @@ Run `make check test` before finishing a change.
    and its reasoning → the feature's `docs/features/NN-*.md` (new features get
    a new document following `docs/features/README.md`); operations →
    `docs/deployment.md`; user-facing summary → `README.md` and
-   `README.zh-CN.md` (same sections); notable changes → `CHANGELOG.md`
-   (one entry at the end of `[Unreleased]`, a list without `###`
-   subsections).
+   `README.zh-CN.md` (same sections).
    Documents describe the system as it is: no TODO, TBD or open questions in
    files or code comments. Report open items to the user so they are tracked
    in the issue tracker.
@@ -72,6 +70,10 @@ Run `make check test` before finishing a change.
 8. **Tests.** Go tests beside the code (agent tests set `HOME` to a temp
    dir); web tests in `web/src/__tests__`. Don't add tests that need network
    access or real machines to `make test`.
+9. **`CHANGELOG.md` changes only in a release.** Feature and fix branches
+   do not touch it. When a release is cut, a `release-manager` subagent
+   writes the version's entries from the pull requests merged since the
+   last tag ([RELEASING.md](RELEASING.md)).
 
 ## Agent roles
 
@@ -85,7 +87,7 @@ playbooks):
 | `security-reviewer` | Before merging changes to guards, files, sockets, processes, ssh or downloads. |
 | `docs-keeper` | After changing flags, shortcuts, protocols, layout on disk or features. |
 | `i18n-translator` | After adding or changing user-visible text, or to add a locale. |
-| `release-manager` | Cutting a release or bumping pinned code-server/extension versions. |
+| `release-manager` | Cutting a release (it writes `CHANGELOG.md`) or bumping pinned code-server/extension versions. |
 | `oss-steward` | Auditing open-source health before releases or after restructurings. |
 
 ## Gotchas
@@ -106,9 +108,7 @@ playbooks):
   `web/dist/.gitkeep`, which `go:embed` needs in a clean checkout.
 - Adding a Go dependency changes `THIRD_PARTY_NOTICES.md`; run
   `scripts/notices.sh`.
-- Files every change touches are laid out so that parallel branches merge:
-  `CHANGELOG.md` uses git's union merge (`.gitattributes`; both sides'
-  entries are kept, so look at it after a merge or rebase),
+- Files many changes touch are laid out so that parallel branches merge:
   `README.zh-CN.md` has one sentence per line, and enumerations in the docs
   that grow with features are lists with one item per line.
 - macOS limits unix socket paths to 104 bytes; keep socket paths short.

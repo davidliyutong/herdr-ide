@@ -12,8 +12,13 @@ match; the bridge extension is reinstalled whenever its content changes.
    pinned digests in `internal/codeserver/artifacts.go` were updated from the
    upstream source (see `.claude/agents/release-manager.md`).
 3. If Go dependencies changed, `scripts/notices.sh` (CI checks it).
-4. In `CHANGELOG.md`, rename `[Unreleased]` to `[X.Y.Z] - YYYY-MM-DD` and
-   start a new empty `[Unreleased]` section. Commit as `release: vX.Y.Z`.
+4. Write the changelog. Feature and fix pull requests do not touch
+   `CHANGELOG.md`; a `release-manager` subagent
+   (`.claude/agents/release-manager.md`) adds an entry to `[Unreleased]`
+   for each user-visible change merged since the last tag, then renames
+   `[Unreleased]` to `[X.Y.Z] - YYYY-MM-DD` and starts a new empty
+   `[Unreleased]` section. Read its entries, then commit as
+   `release: vX.Y.Z`.
 5. Tag and push: `git tag -a vX.Y.Z -m vX.Y.Z && git push origin vX.Y.Z`.
 6. The `release` workflow (`.github/workflows/release.yml`) builds the four
    platforms, packages each binary with `LICENSE`, `THIRD_PARTY_NOTICES.md`
