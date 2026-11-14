@@ -1,6 +1,7 @@
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { requestNotifyPermission } from './notify';
+import './tokens.css';
 import './styles.css';
 import { getTerm } from './terminal/registry';
 import { useStore } from './state/store';

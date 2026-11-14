@@ -1,30 +1,32 @@
 :root {
-  --bg: #0e1116;
-  --bg-1: #12161d;
-  --bg-2: #171c24;
-  --bg-3: #1e2430;
-  --line: #262d3a;
-  --line-2: #323b4c;
-  --fg: #c9d1d9;
-  --fg-dim: #8b95a7;
-  --fg-mute: #5f6b80;
-  --accent: #7aa2f7;
-  --working: #7aa2f7;
-  --blocked: #ff9e64;
-  --done: #9ece6a;
-  --idle: #5f6b80;
-  --error: #f7768e;
-  --overlay: rgba(14, 17, 22, 0.75);
-  --float: rgba(30, 36, 48, 0.94);
+  /* The UI's colors are the design tokens (tokens.css, generated from
+     design/tokens.json), which the macOS application shares. */
+  --bg: var(--ds-color-background);
+  --bg-1: var(--ds-color-sidebar);
+  --bg-2: var(--ds-color-hover);
+  --bg-3: var(--ds-color-accent);
+  --line: var(--ds-color-border);
+  --line-2: var(--ds-color-border-strong);
+  --fg: var(--ds-color-foreground);
+  --fg-dim: var(--ds-color-muted);
+  --fg-mute: var(--ds-color-faint);
+  --accent: var(--ds-color-primary);
+  --working: var(--ds-status-working);
+  --blocked: var(--ds-status-blocked);
+  --done: var(--ds-status-done);
+  --idle: var(--ds-status-idle);
+  --error: var(--ds-status-error);
+  --overlay: color-mix(in srgb, var(--ds-color-background) 75%, transparent);
+  --float: color-mix(in srgb, var(--ds-color-accent) 94%, transparent);
   --backdrop: rgba(0, 0, 0, 0.4);
   --shadow: rgba(0, 0, 0, 0.5);
-  --checker-a: #151a22;
-  --checker-b: #11151c;
-  --on-accent: #0e1116;
-  --focus-ring: #3d5a99;
-  --accent-soft: rgba(122, 162, 247, 0.16);
-  --blocked-glow: rgba(255, 158, 100, 0.25);
-  --radius: 6px;
+  --checker-a: #171717;
+  --checker-b: #101010;
+  --on-accent: var(--ds-color-on-primary);
+  --focus-ring: var(--ds-color-focus-ring);
+  --accent-soft: color-mix(in srgb, var(--ds-color-primary) 14%, transparent);
+  --blocked-glow: color-mix(in srgb, var(--ds-status-blocked) 25%, transparent);
+  --radius: var(--ds-metric-radius);
   /* Sizes are in rem so that the UI font size setting scales the chrome. */
   --fs-sm: 0.846rem;
   --fs-md: 0.923rem;
@@ -32,32 +34,16 @@
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Noto Sans CJK SC', sans-serif;
   font-size: 13px;
 }
+/* The tokens change with the theme; only what is not a token is set here. */
 :root[data-theme='light'] {
-  --bg: #ffffff;
-  --bg-1: #f6f8fa;
-  --bg-2: #eef1f4;
-  --bg-3: #e2e7ed;
-  --line: #d8dee4;
-  --line-2: #c3cbd4;
-  --fg: #1f2328;
-  --fg-dim: #57606a;
-  --fg-mute: #848d97;
-  --accent: #2f6fde;
-  --working: #2f6fde;
-  --blocked: #c4570d;
-  --done: #1a7f37;
-  --idle: #9aa3ad;
-  --error: #cf222e;
-  --overlay: rgba(255, 255, 255, 0.8);
-  --float: rgba(246, 248, 250, 0.96);
-  --backdrop: rgba(31, 35, 40, 0.38);
-  --shadow: rgba(31, 35, 40, 0.18);
-  --checker-a: #f3f4f6;
-  --checker-b: #e7e9ec;
-  --on-accent: #ffffff;
-  --focus-ring: #8fb3ef;
-  --accent-soft: rgba(47, 111, 222, 0.12);
-  --blocked-glow: rgba(196, 87, 13, 0.2);
+  --overlay: color-mix(in srgb, var(--ds-color-background) 80%, transparent);
+  --float: color-mix(in srgb, var(--ds-color-sidebar) 96%, transparent);
+  --backdrop: rgba(10, 10, 10, 0.38);
+  --shadow: rgba(10, 10, 10, 0.18);
+  --checker-a: #f3f3f3;
+  --checker-b: #e8e8e8;
+  --accent-soft: color-mix(in srgb, var(--ds-color-primary) 10%, transparent);
+  --blocked-glow: color-mix(in srgb, var(--ds-status-blocked) 20%, transparent);
   color-scheme: light;
 }
 
@@ -430,7 +416,7 @@ select,
   min-height: 2.6rem;
   padding: calc((2.6rem - 1px - var(--tab-row)) / 2) 8px;
   border-bottom: 1px solid var(--line);
-  background: var(--bg-1);
+  background: var(--ds-color-tab-bar);
   flex: none;
 }
 .crumb {
@@ -469,7 +455,7 @@ select,
   background: var(--bg-2);
 }
 .tab.active {
-  background: var(--bg-3);
+  background: var(--ds-color-tab-active);
   color: var(--fg);
 }
 .tab-close {

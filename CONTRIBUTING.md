@@ -11,6 +11,10 @@ Requirements: Go (see `go.mod`), Node.js 22.12+, pnpm, and
 herdr for release archives into `dist/herdr/`; without an installed herdr, use
 that file as `herdr` below and set `HERDR_BIN` to it for `make dev-core`.
 
+The macOS application (`macos/`) additionally needs Xcode 26 or later for
+`make macos-build` and `make macos-test`, and XcodeGen (`brew install
+xcodegen`) for `make macos-app`.
+
 ```bash
 make deps            # pnpm install for web/, the extension and desktop/
 make build           # web UI, extension, agents, core; release archives with herdr
@@ -35,7 +39,9 @@ Release archives are in `dist/release/`; the unpacked directories are in
 `dist/packages/`. Keep each core beside its `herdr` and licenses.
 herdr upgrades require reviewing the pinned digests in `internal/herdrdist`,
 regenerating `licenses/herdr/` with `scripts/herdr-notices.py`, and rerunning
-integration tests before distributing the new release.
+integration tests before distributing the new release. herdr-core upgrades
+change the version and the four archive digests in `internal/hcdist`; its
+license and notices are taken from the release archive by `scripts/fetch-hc`.
 
 On macOS, `make dev-desktop` builds and launches Electron with the embedded
 UI, the same isolated session and instance `dev` (port 7791). Stop other dev

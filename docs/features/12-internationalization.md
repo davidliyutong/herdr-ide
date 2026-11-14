@@ -26,6 +26,12 @@ reference documentation.
   the page). Settings defined by the core are labelled with keys built from
   their names (`settings.<key>`, `.desc`, `.<option>`); a test checks that
   the known ones exist, and an untranslated one shows its key.
+- **macOS application** (`macos/Sources/App/Resources`): `Localizable.strings`
+  per locale (`en`, `zh-Hans`), read with `tr(key, args)`; the system picks
+  the language. `LocalizationTests` checks that every locale has the
+  English keys with the same `%@` placeholders, and that every key is used
+  and every used key exists. The core's codes (backend and machine states)
+  are keys: `backend.<code>`, `machine.<status>`, `status.<state>`.
 - **Desktop shell**: error dialogs reuse `desktop.*` keys from the web's
   English/Chinese dictionaries and follow the OS locale. Native menu roles
   use Electron's standard labels; the web UI keeps its own saved language.

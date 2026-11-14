@@ -66,6 +66,9 @@ clearly grant general redistribution rights for the original package. It is
 downloaded for the user's installation rather than included in application
 releases. Do not publish bundles containing it without suitable permission.
 Herdr is distributed under Apache-2.0 with notices in `licenses/herdr/`.
+herdr-core, embedded in the core at build time
+([21](21-terminal-core.md)), is distributed under Apache-2.0 with its
+license and notices in a release's `licenses/herdr-core/`.
 
 ## Security
 

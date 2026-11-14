@@ -272,3 +272,13 @@ func (s *Server) handleGUIClose(w http.ResponseWriter, r *http.Request) {
 	s.gui.Close(mc.ID(), uint32(win))
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// handleGUIStates lists the program windows of every machine, as /ws sends
+// them, for clients that do not hold a /ws connection.
+func (s *Server) handleGUIStates(w http.ResponseWriter, r *http.Request) {
+	states := s.gui.States()
+	if states == nil {
+		states = []gui.State{}
+	}
+	writeJSON(w, http.StatusOK, states)
+}

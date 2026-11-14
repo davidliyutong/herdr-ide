@@ -10,7 +10,9 @@ changes.
 A Go server (`cmd/herdr-ide`) that serves a React terminal UI and drives
 [herdr](https://herdr.dev) on several machines through a per-machine Go agent
 (`cmd/herdr-ide-agent`) over ssh, with panes drawn from herdr's endpoint
-protocol; code-server provides VS Code panels. One
+protocol; code-server provides VS Code panels. A macOS application
+(`macos/`) draws terminals of each machine's own herdr-core with Ghostty's
+renderer through the core's terminal protocol. One
 binary embeds the UI, the agents for 4 platforms and a VS Code extension.
 Release archives also contain a native herdr and its license notices, used
 on the core host only when no herdr is installed; it keeps herdr's usual
@@ -22,11 +24,13 @@ configuration and state. SSH machines use their installed herdr.
 | --- | --- |
 | Install JS deps | `make deps` |
 | Unit tests (Go + web + desktop) | `make test` |
-| All checks (gofmt, vet, tsc, prettier, brand/doc/README consistency) | `make check` |
+| All checks (gofmt, vet, tsc, prettier, brand/doc/README consistency, generated tokens) | `make check` |
+| Regenerate the design tokens' Swift and CSS after editing `design/tokens.json` | `make tokens` |
 | Integration test with a real herdr | `make it` |
 | Full build into `dist/` | `make build` (or `scripts/build.sh`) |
 | macOS `.app` / DMG | `make desktop-app` / `make desktop-dmg` |
 | Build the `.app` and install it into `/Applications` | `make desktop-install` |
+| macOS application: unit tests / debug build / `.app` | `make macos-test` / `make macos-build` / `make macos-app` |
 | Isolated desktop development | `make dev-desktop` |
 | Run for development | `make dev-core` and `make dev-web` |
 
@@ -42,10 +46,13 @@ Run `make check test` before finishing a change.
    `herdr server stop` without `--session`, and do not attach to panes of
    the default session in control mode.
 2. **No hardcoded product name.** Use `brand.*` (Go), `APP_NAME`/`APP_SLUG`/
-   `storage` from `web/src/brand.ts`, `src/brand.ts` in the extension.
+   `storage` from `web/src/brand.ts`, `src/brand.ts` in the extension,
+   `Brand` (`macos/Sources/TermKit/Brand.swift`) in the macOS application.
    `scripts/check.sh` fails otherwise. Renames: `scripts/rename.sh`.
 3. **All UI text through i18n.** Add the key to `web/src/i18n/en.ts` and the
-   translation to `zh-CN.ts` (the build fails if one is missing). The server
+   translation to `zh-CN.ts` (the build fails if one is missing); in the
+   macOS application to both `Localizable.strings` (`make macos-test` fails
+   if one is missing or unused). The server
    returns codes, not prose. Comments, logs and identifiers are English.
 4. **Docs move with code.** New or changed flags → `docs/reference.md` (CI
    checks); protocol or component changes → `docs/architecture.md`; behavior
@@ -68,7 +75,8 @@ Run `make check test` before finishing a change.
    `internal/agentproto` by adding fields/ops. herdr's API is external: keep
    requests one per connection and handle `events_lost`.
 8. **Tests.** Go tests beside the code (agent tests set `HOME` to a temp
-   dir); web tests in `web/src/__tests__`. Don't add tests that need network
+   dir); web tests in `web/src/__tests__`; the macOS application's in
+   `macos/Tests` (`make macos-test`, needs Xcode). Don't add tests that need network
    access or real machines to `make test`.
 9. **`CHANGELOG.md` changes only in a release.** Feature and fix branches
    do not touch it. When a release is cut, a `release-manager` subagent

@@ -3,11 +3,12 @@
 ```
 browser (React, canvas)     ──WebSocket + HTTP──▶  core (Go, `herdr-ide`)
                                                      ├─ machines: registry + connection state machine
-                                                     ├─ server: WS hub, session owner + pane surfaces, files, code-server proxy, bridge hub
+                                                     ├─ server: WS hub, session owner + pane surfaces, terminal streams, files, code-server proxy, bridge hub
                                                      ├─ gui: virtual displays per machine, window list, frame routing
                                                      └─ one ssh session per machine ──yamux──▶ agent (`herdr-ide-agent`)
                                                                                                  ├─ herdr API socket (raw pipe)
                                                                                                  ├─ herdr client socket (raw pipe, endpoint protocol)
+                                                                                                 ├─ herdr-core in a session of its own (raw pipe to its API socket)
                                                                                                  ├─ files (stat/list/range read/upload/zip)
                                                                                                  ├─ code-server (unix socket only)
                                                                                                  ├─ Xvfb + window manager (programs' windows)
@@ -25,6 +26,7 @@ browser (React, canvas)     ──WebSocket + HTTP──▶  core (Go, `herdr-id
 | `internal/machines` | Machine registry (herdr's saved machines, enabled or disabled over it from the UI, added, removed and relabelled at runtime after herdr's `machine add`,
 `remove` and `rename` or a reload), state machine, herdr snapshots and subscriptions. |
 | `internal/herdr` | herdr public socket API client; `endpoint`: client of herdr's endpoint protocol (generation 1). |
+| `internal/hc` | Client of herdr-core's API (protocol generation 1): JSON-RPC calls, attached terminals as raw byte streams with credit, event subscriptions. |
 | `internal/herdrdist` | herdr release bundled in archives: version, upstream asset names and SHA-256 digests. |
 | `internal/checksum` | SHA-256 of files, shared by code-server and herdr downloads. |
 | `internal/codeserver` | code-server provisioning (artifacts, checksums, install modes, start/stop). |
@@ -33,8 +35,10 @@ browser (React, canvas)     ──WebSocket + HTTP──▶  core (Go, `herdr-id
 | `internal/server` | HTTP/WS front: guards, session ownership and pane surfaces, files, proxy, bridge, audit. |
 | `internal/embedded` | Build artifacts compiled into the core (agents, bridge VSIX). |
 | `web` | Browser UI (Vite, React, zustand; panes on a canvas, xterm.js for the PTY dialogs); `web/embed.go` embeds `web/dist`. |
+| `macos` | macOS application (Swift package): `TermKit`, the client of `/api/v1/term` with the terminal, layout and core-process models; `App`, the AppKit window drawing terminals with Ghostty's renderer. |
 | `desktop` | Electron main process and electron-builder config; macOS `.app`/DMG wrapping the embedded core. |
 | `extensions/herdr-ide-bridge` | VS Code extension installed into code-server. |
+| `design` | Design tokens (`tokens.json`): colors in light and dark, metrics, font sizes and terminal palettes; `scripts/tokens` generates `macos/Sources/App/Tokens.swift` and `web/src/tokens.css` from them. |
 
 ## Desktop launcher
 
@@ -133,6 +137,8 @@ after a successful reply it carries op-specific bytes.
 | `dial-unix` | core → agent | raw pipe to a socket in the agent's run directory |
 | `code-server` | core → agent | actions `status`, `install` (chunked tarball), `download` (the machine fetches `URL`, checked against `Digest`), `start`, `stop`, `install-ext`, `uninstall-ext`, `marker`; `Bin` selects an installed code-server |
 | `herdr` | core → agent | – (an empty reply at once, then a second reply with `Herdr` when the action is done); actions `status`, `start`, `stop`, `restart` (the server of `Session`; nothing is started or stopped while another user's process or an unresponsive listener holds its socket; a restart stops only this user's answering server, then starts one), `check` (herdr's newest release), `update` (only the application's managed copy); each looks herdr up again (a path that is no longer executable gives way to the usual search) and without one replies `not_found` with whether a server still answers on the socket; the core then shows that herdr for the machine |
+| `hc` | core → agent | actions `status`, `install` (after a first reply the gzip-compressed herdr-core executable, chunked, checked against `Digest`), `start`, `restart` (the core's successor adopts the programs) and `stop` (the terminal core of the agent's instance); each ends with a reply with `HC` (the installed executable's digest, whether a core answers, its version, session and socket); failures carry `Code`: `not_installed`, `bad_digest`, `start_failed`, `stop_failed` |
+| `hc-api` | core → agent | raw pipe to the terminal core's socket (herdr-core's API, `internal/hc`); starts nothing |
 | `bridge` | agent → core | JSON lines between the VS Code extension and the core |
 | `gui` | core → agent | actions `status`, `install` (fetch Xvfb in user space), `start`, `keep` (start the display keeper for `Session`'s herdr server), `shells` (which of the pids in `Args` were started with the display) (reply `GUI`); `video` and `video-install` (`Digest`: the video encoder's SHA-256; the second streams the gzip-compressed encoder, chunked) reply whether it is installed and the stream kinds it makes here (`GUI.Video`, `GUI.VideoEncoders`); `attach`: messages `[kind u8][len u32][payload]`, JSON events (`window`, `gone`, `layer`, `layer_gone`, `cursor`, `stats`, `video` (a window's stream starts, or ends without a codec)) and frames (`GUIFrameHeader` + JPEG/PNG, or a video frame of the whole window, `Enc` 3, 4 for key frames) from the agent, JSON commands (`watch`, `ack`, `refresh`, `codecs` (the stream kinds all viewers decode, also sent with `watch` and `refresh`), `keyframe`, input, `close`) from the core |
 
@@ -163,7 +169,8 @@ anything else as a zip from `fs.archive`; `download.cancel` over `/ws`
 breaks a followed download off), uploads and the code-server proxy:
 `POST /api/m/{id}/find` (find in a pane through `pane.find`, also for
 read-only pages, see [20](features/20-find-in-panes.md)),
-`GET /api/config`, `GET /api/keymap`, `GET /api/machines`, and
+`GET /api/config`, `GET /api/keymap`, `GET /api/machines`, `GET /api/gui`
+(the program windows of every machine, as the `gui` messages of `/ws`), and
 `GET`/`PUT /api/settings` (core settings with their definitions, see
 [13](features/13-settings-and-appearance.md)), and `PUT /api/m/{id}/enabled`
 (`{"enabled": bool}`: enables or disables a machine, see
@@ -188,6 +195,24 @@ server, `POST /api/m/{id}/herdr/{check|update}` the local machine's copy of
 herdr; the WebSocket `GET /api/m/{id}/herdr/remote` runs the local
 herdr's `herdr --remote` for an SSH machine in a PTY, see
 [17](features/17-local-herdr-management.md).
+
+## Terminal clients ↔ core protocol (`/api/v1/term`)
+
+Clients that draw terminals themselves use the WebSocket `/api/v1/term`,
+behind the same guards as `/ws`. It reaches the terminal core of each
+machine (herdr-core in the agent's own session,
+[21](features/21-terminal-core.md)); the protocol and its reasoning are in
+[22](features/22-terminal-protocol.md). Text frames are JSON with a `t`
+field; binary frames are `[stream u32 LE][kind u8][payload]`.
+
+| Client → core | Core → client |
+| --- | --- |
+| `sub {m}`, `unsub {m}` (a machine's terminals) | `backend {m, state: starting\|ready\|error, code, version}`, `snapshot {m, terminals}` (herdr-core's terminal records), `event {m, type, terminal, data}` (herdr-core's events) |
+| `call {rid, m, method, params}` (allowlisted herdr-core methods) | `res {rid, result}` or `res {rid, error: {kind, message}}` |
+| `attach {rid, m, terminal, cols, rows, history, observe, display}` | `attached {rid, s, terminal, cols, rows, observe, automatic}`, later `closed {s, reason, exit_code, signal}` |
+| `ack {s, n}` (output bytes drawn), `resize {s, cols, rows}`, `focus {s, focused}`, `facts {s, display}`, `detach {s}` | – |
+| binary kind 0 (input bytes), kind 6 (the client terminal's automatic answers) | binary kind 0 (output bytes: a first paint, then the program's output), kind 3 (`cols u16 LE, rows u16 LE`: an observed terminal's new grid) |
+| `ping {rid}` | `pong {rid}` |
 
 User-facing text is never produced by the server: it sends codes (phases,
 notices) that the UI translates.

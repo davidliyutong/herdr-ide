@@ -21,7 +21,7 @@ cd dist/packages/herdr-ide-$(go env GOOS)-$(go env GOARCH)
 ```
 
 Each `dist/release/` archive contains the core, a native herdr 0.9.5 beside it
-and licenses. Extract it as a directory; moving just the core loses the bundled
+and licenses (`licenses/`). Extract it as a directory; moving just the core loses the bundled
 herdr. Supported hosts are Linux/macOS on amd64/arm64.
 
 The core embeds the video encoder it puts on Linux machines to send program
@@ -30,6 +30,18 @@ embeds it when `scripts/build-ffmpeg.sh` (Docker) built it into
 `dist/ffmpeg/`; the release workflow builds it on native amd64 and arm64
 runners and requires it (`REQUIRE_ENCODER=1`). A build without it sends
 program windows as pictures.
+
+The core also embeds herdr-core 0.1.21, the terminal core its agent installs
+on machines ([21](features/21-terminal-core.md)), for Linux and macOS on
+amd64 and arm64: about 12 MB in the core. `scripts/build.sh` runs
+`scripts/fetch-hc`, which downloads the four release archives from
+`releases.herdr.dev` (or reuses those in `dist/hc/`), checks them against
+the SHA-256 digests pinned in `internal/hcdist` and writes the executables,
+gzip-compressed, to `internal/embedded/hc/`; the build fails when an archive
+cannot be fetched or verified. To build without network access, put the four
+archives into `dist/hc/` first. herdr-core's license and notices are in the
+archive's `licenses/herdr-core/`. A core built with `go build` alone has no
+herdr-core unless `go run ./scripts/fetch-hc <os>/<arch> ...` ran before it.
 
 The bundled herdr only spares installing herdr on this host. herdr-ide uses an
 installed herdr when it finds one, otherwise its own copy of the bundled
@@ -259,6 +271,9 @@ What herdr-ide starts on a machine and how it is reclaimed:
 | `herdr update` | **Update herdr…** on the local machine | Ends with the update (15 min limit); herdr's temporary download is in `~/.herdr-ide/herdr/`. |
 | `herdr machine add` (core host) | **Add machine…** | Ends when herdr exits or the window closes. A herdr it installs on the machine and the server it starts there belong to the user, like after `herdr machine add` in a terminal; **Remove machine…** (`herdr machine remove`) forgets the machine without stopping them. A removed machine's agent exits with its session; the agent builds left in `~/.herdr-ide/agent/` follow their usual retention. |
 | `herdr --remote` client (core host) | **Update herdr** for an SSH machine | Ends when herdr exits or the window closes. A herdr it installs on the machine (usually `~/.local/bin/herdr`) is herdr's own installation and stays until the user removes it; a server it starts there belongs to the user. |
+| Terminal core (herdr-core) | when a client of `/api/v1/term` first subscribes to the machine's terminals and no core answers (never in `--read-only`; audited as `term.start`) | Started by herdr-core detached from the agent (a systemd user service on Linux, a launchd job on macOS) in the session `herdr-ide[-<instance>]`, with its socket in `~/.herdr-ide[-<instance>]/run/hc.sock`. It belongs to the user and outlives the agent and the core, so its programs keep running; it ends with the agent op `hc` action `stop`, with `HC_SESSION=herdr-ide[-<instance>] HC_SOCKET=<socket> herdr-core server stop`, and with the machine. Its state (terminal records, saved screens, logs) is herdr-core's, in `~/.local/state/herdr-core/herdr-ide[-<instance>]/`, and stays until the user removes it. |
+| herdr-core executable | pushed with the first subscription to a machine's terminals when the machine has another build than the core carries (never in `--read-only`; audited as `term.install`); a core already running is then restarted onto it (`term.restart`), and its programs keep running | One file, `~/.herdr-ide[-<instance>]/hc/herdr-core`, verified by SHA-256 and replaced whole by the next install; a running core keeps the executable it started from. A partial upload left by a killed agent is removed by the next install after 1 h. |
+| Connection to the terminal core | one per machine while a client of `/api/v1/term` is subscribed to it | Closed 10 s after the last subscriber left, and with the agent; attached streams end with their client. No process is started by it. |
 | Connection to herdr's client socket | one per core, to the machine the browser shows | Closed when another machine is shown, 10 s after the owning browser left (unless another browser takes over), or with the agent; no process is started. |
 | code-server | on first VS Code use | Stopped after `--code-server-idle` (default 20 min) without VS Code connections, when the agent exits (if that agent started it; for the local machine, when the core stops), or by the stop button in the VS Code panel. Hidden VS Code windows (each workspace has its own panel) disconnect after 10 min, and at most 3 stay loaded per page. A process left behind by a killed agent is stopped by the next agent, and code-server exits by itself after 1 h without connections. |
 | VS Code extension hosts | one per VS Code window | Disposed 5 min after the window disconnects. |

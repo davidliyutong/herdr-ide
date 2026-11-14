@@ -1,7 +1,8 @@
 // Package embedded carries build artifacts compiled into the herdr-ide binary:
 // the per-platform agents (gzip), the VS Code bridge extension and, when
 // built (scripts/build-ffmpeg.sh), the encoder machines send program
-// windows as video with.
+// windows as video with, and the upstream herdr-core executables
+// (scripts/fetch-hc) the core installs on machines.
 package embedded
 
 import (
@@ -125,5 +126,43 @@ func Encoder(goos, goarch string) ([]byte, string, error) {
 	}
 	e := encoderEntry{gz: gz, digest: hex.EncodeToString(h.Sum(nil))}
 	encoderCache[key] = e
+	return e.gz, e.digest, nil
+}
+
+//go:embed all:hc
+var hcEmbedded embed.FS
+
+// hcFS holds hc/hc-<os>-<arch>.gz; tests replace it.
+var hcFS fs.FS = hcEmbedded
+
+var (
+	hcMu    sync.Mutex
+	hcCache = map[string]encoderEntry{}
+)
+
+// HC returns the gzip-compressed herdr-core executable for goos/goarch and
+// the SHA-256 of the uncompressed executable, which the agent's install
+// checks; an error when this build has none.
+func HC(goos, goarch string) ([]byte, string, error) {
+	key := goos + "-" + goarch
+	hcMu.Lock()
+	defer hcMu.Unlock()
+	if e, ok := hcCache[key]; ok {
+		return e.gz, e.digest, nil
+	}
+	gz, err := fs.ReadFile(hcFS, "hc/hc-"+key+".gz")
+	if err != nil {
+		return nil, "", fmt.Errorf("no herdr-core for %s in this build", key)
+	}
+	zr, err := gzip.NewReader(bytes.NewReader(gz))
+	if err != nil {
+		return nil, "", err
+	}
+	h := sha256.New()
+	if _, err := io.Copy(h, zr); err != nil {
+		return nil, "", err
+	}
+	e := encoderEntry{gz: gz, digest: hex.EncodeToString(h.Sum(nil))}
+	hcCache[key] = e
 	return e.gz, e.digest, nil
 }

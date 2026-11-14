@@ -37,6 +37,17 @@ func TestBrandMirrorsAgree(t *testing.T) {
 	if tsConst(t, web, "APP_NAME") != Name || tsConst(t, web, "APP_SLUG") != Slug {
 		t.Errorf("web/src/brand.ts disagrees with internal/brand")
 	}
+	mac := readRepo(t, "macos/Sources/TermKit/Brand.swift")
+	swiftConst := func(name string) string {
+		m := regexp.MustCompile(`public static let ` + name + ` = "([^"]*)"`).FindStringSubmatch(mac)
+		if m == nil {
+			t.Fatalf("Brand.swift: %s not found", name)
+		}
+		return m[1]
+	}
+	if swiftConst("appName") != Name || swiftConst("appSlug") != Slug {
+		t.Errorf("macos/Sources/TermKit/Brand.swift disagrees with internal/brand")
+	}
 	extDir := filepath.Join("extensions", BridgeExt)
 	ext := readRepo(t, filepath.Join(extDir, "src", "brand.ts"))
 	if tsConst(t, ext, "DATA_DIR") != DataDirName || tsConst(t, ext, "ENV_PREFIX") != EnvPrefix || tsConst(t, ext, "SLUG") != Slug {

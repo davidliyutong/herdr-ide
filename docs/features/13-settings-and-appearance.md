@@ -86,7 +86,8 @@ syncing browser settings between browsers; theming terminal applications.
   from `dark` to `system` changes the resolved kind without changing the
   settings). The resolved kind sets
   `<html data-theme>`, whose CSS variables restyle the UI (`styles.css` has
-  no other colors), the terminal palette of the pane surface and the dialogs'
+  no other colors; they are defined from the design tokens the macOS
+  application shares, [24](24-design-tokens.md)), the terminal palette of the pane surface and the dialogs'
   terminals (`themes` in `web/src/terminal/options.ts`, backgrounds equal to
   `--bg`) and
   `theme-color`. The kind is sent to the core, which switches VS Code
@@ -94,8 +95,8 @@ syncing browser settings between browsers; theming terminal applications.
   to the shell, whose title bar follows it
   ([16](16-desktop-packaging.md)).
 - Terminal palettes: dark is GitHub Dark Default (Ghostty's theme of that
-  name: foreground `#e6edf3`, colors made for a near-black background) on
-  the UI's `--bg`; light is GitHub Light Default except for brighter
+  name: colors made for a near-black background) on
+  the UI's `--bg` with its `--fg`; light is GitHub Light Default except for brighter
   yellows. The palette only colors what programs leave to the terminal
   (default colors and the 16 ANSI colors); programs that use 24-bit colors
   look the same everywhere. The owning browser reports the palette's

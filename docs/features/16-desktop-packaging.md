@@ -63,7 +63,9 @@ implemented independently.
   The app carries the release's herdr and its notices in
   `Contents/Resources/bin/herdr` and `licenses/herdr/`, beside the core, which
   uses it only when no installed herdr is found
-  ([15](15-bundled-herdr.md)). OpenSSH is user-installed. The desktop shell
+  ([15](15-bundled-herdr.md)), and the notices of the herdr-core its core
+  embeds in `licenses/herdr-core/` ([21](21-terminal-core.md)). OpenSSH is
+  user-installed. The desktop shell
   does not start or stop herdr's servers; the user does so, and updates herdr,
   from the web UI ([17](17-local-herdr-management.md)). All inherited environment and SSH configuration
   remain available to the core.

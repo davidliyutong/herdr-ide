@@ -33,6 +33,8 @@ module.exports = {
     // Beside the core, where it finds the bundled herdr (docs/features/15).
     { from: herdr, to: 'bin/herdr' },
     { from: '../licenses/herdr', to: 'licenses/herdr' },
+    // Written by scripts/fetch-hc from the herdr-core release the core embeds.
+    { from: '../dist/hc/licenses', to: 'licenses/herdr-core' },
     { from: '../licenses/encoder', to: 'licenses/encoder' },
     { from: '../LICENSE', to: 'LICENSE' },
     { from: '../THIRD_PARTY_NOTICES.md', to: 'THIRD_PARTY_NOTICES.md' },
@@ -45,7 +47,7 @@ module.exports = {
     if (packing !== arch) {
       throw new Error(`Packaging ${packing} with ${goArch} binaries; set DESKTOP_ARCH=${packing} (scripts/desktop.sh does)`);
     }
-    for (const file of [core, herdr, '../web/dist/licenses.md']) {
+    for (const file of [core, herdr, '../dist/hc/licenses/LICENSE', '../web/dist/licenses.md']) {
       if (!existsSync(join(__dirname, file))) throw new Error(`Missing ${file}; build it with scripts/desktop.sh`);
     }
   },

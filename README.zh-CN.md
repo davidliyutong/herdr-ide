@@ -183,5 +183,6 @@ make check test                          # 提交 PR 之前运行
 [MIT](LICENSE)。
 第三方许可证：Go 依赖见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)，前端打包的依赖见程序提供的 `/licenses.md`。
 附带的 herdr 使用 Apache-2.0，其许可证及依赖声明见 [licenses/herdr/](licenses/herdr/)。
+核心程序内嵌供各机器使用的 [herdr-core](https://github.com/herdrdev/herdr-core)（Apache-2.0），其许可证及依赖声明在发布包的 `licenses/herdr-core/` 中。
 code-server 和 Git Graph 使用各自的许可证，在运行时下载。
 Git Graph 明确限制衍生作品分发，对原版的一般再分发授权不明确，因此不纳入公开发布包。

@@ -58,6 +58,15 @@ const (
 	// OpPaneFind searches the text of pane Header.Find.Pane next to herdr
 	// (internal/panefind) and answers with Reply.Find; nothing follows.
 	OpPaneFind Op = "pane.find"
+	// OpHC manages the agent's own herdr-core: the executable the core
+	// uploads and the terminal core of the agent's instance (actions status,
+	// install, start, restart, stop). An install carries the gzip-compressed
+	// executable as ChunkWriter chunks after a first reply, checked against
+	// Header.Digest; every action ends with a reply with HC.
+	OpHC Op = "hc"
+	// OpHCAPI dials the terminal core's socket and pipes raw bytes
+	// (internal/hc). It starts nothing.
+	OpHCAPI Op = "hc-api"
 )
 
 // Header is the first line of every stream.
@@ -121,6 +130,7 @@ type Reply struct {
 	GUI     *GUIStatus   `json:"gui,omitempty"`
 	Herdr   *HerdrStatus `json:"herdr,omitempty"`
 	Find    *FindResult  `json:"find,omitempty"`
+	HC      *HCStatus    `json:"hc,omitempty"`
 }
 
 // ErrHerdrNotFound: the agent found no herdr executable on its host (not
@@ -196,6 +206,26 @@ type HerdrStatus struct {
 	Error  string `json:"error,omitempty"`
 	Output string `json:"output,omitempty"`
 }
+
+// HCStatus describes the agent's herdr-core.
+type HCStatus struct {
+	// Digest is the SHA-256 of the installed executable, "" without one.
+	Digest string `json:"digest,omitempty"`
+	// Running: a core answers on Socket; Version is that core's.
+	Running bool   `json:"running"`
+	Version string `json:"version,omitempty"`
+	// Session is the core's session name and Socket its API socket.
+	Session string `json:"session"`
+	Socket  string `json:"socket"`
+}
+
+// Codes of failed OpHC actions (Reply.Code).
+const (
+	HCNotInstalled = "not_installed"
+	HCBadDigest    = "bad_digest"
+	HCStartFailed  = "start_failed"
+	HCStopFailed   = "stop_failed"
+)
 
 type BridgeInfo struct {
 	ConnID string `json:"conn_id"`

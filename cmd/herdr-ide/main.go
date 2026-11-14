@@ -333,6 +333,7 @@ func serve(args []string, logger *log.Logger) {
 		Audit:          audit,
 		UserHeader:     *userHeader,
 		Settings:       prefs,
+		HC:             embedded.HC,
 		Catalog:        catalog,
 		Selected:       selected,
 	})

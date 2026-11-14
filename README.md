@@ -216,7 +216,10 @@ Issues and pull requests are welcome, in English or Chinese. Please read
 [MIT](LICENSE). Third-party licenses: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
 (Go modules) and `/licenses.md` served by the binary (web UI bundle).
 The bundled herdr is Apache-2.0; its license and dependency notices are in
-[licenses/herdr/](licenses/herdr/). code-server and Git Graph retain their
+[licenses/herdr/](licenses/herdr/). The core embeds
+[herdr-core](https://github.com/herdrdev/herdr-core) (Apache-2.0) for
+machines; release archives carry its license and notices in
+`licenses/herdr-core/`. code-server and Git Graph retain their
 own licenses and are downloaded at runtime. Git Graph restricts derivative
 distribution and does not clearly grant general redistribution of the original;
 it is excluded from public release packages.

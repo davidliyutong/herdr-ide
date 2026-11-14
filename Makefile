@@ -4,7 +4,7 @@ DEV_LISTEN ?= 127.0.0.1:7790
 SLUG := $(shell sed -n 's/^[[:space:]]*Slug = "\(.*\)"$$/\1/p' internal/brand/brand.go)
 EXT  := extensions/$(SLUG)-bridge
 
-.PHONY: deps build test check it dev-core dev-web desktop-app desktop-dmg desktop-install desktop-icons dev-desktop clean
+.PHONY: deps build test check tokens it dev-core dev-web macos-app macos-build macos-test desktop-app desktop-dmg desktop-install desktop-icons dev-desktop clean
 
 # Electron's ~100 MB binary only runs or packages the macOS app; elsewhere
 # its types suffice for typecheck and the launcher tests.
@@ -30,14 +30,30 @@ check:
 	pnpm -C desktop typecheck
 	pnpm -C desktop format:check
 
+# The design tokens of the web UI and the macOS application, from
+# design/tokens.json.
+tokens:
+	go run ./scripts/tokens
+
 it:
 	go test -tags integration -count=1 ./internal/agent -run Integration -v
+	go test -tags integration -count=1 ./internal/hc -run Integration -v
+	go test -tags integration -count=1 ./internal/server -run Integration -v
 
 dev-core:
 	go run ./cmd/$(SLUG) --instance dev --local-only --local-session $(SLUG)-dev --listen $(DEV_LISTEN) --agent-dir dist/agents
 
 dev-web:
 	$(shell echo $(SLUG) | tr 'a-z-' 'A-Z_')_CORE=http://$(DEV_LISTEN) pnpm -C web dev
+
+macos-app:
+	scripts/macos-app.sh app
+
+macos-build:
+	scripts/macos-app.sh build
+
+macos-test:
+	scripts/macos-app.sh test
 
 desktop-app:
 	scripts/desktop.sh app
@@ -55,4 +71,4 @@ dev-desktop:
 	scripts/desktop.sh dev
 
 clean:
-	rm -rf dist desktop/dist web/dist/assets internal/embedded/agents/*.gz internal/embedded/ext/*.vsix
+	rm -rf dist desktop/dist macos/.build web/dist/assets internal/embedded/agents/*.gz internal/embedded/hc/*.gz internal/embedded/ext/*.vsix

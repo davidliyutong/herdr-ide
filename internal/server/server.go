@@ -49,6 +49,10 @@ type Options struct {
 	Audit io.Writer
 	// UserHeader names the header with the authenticated user (audit log).
 	UserHeader string
+	// HC returns the gzip-compressed herdr-core executable this build
+	// carries for a platform and the SHA-256 of the executable; nil or an
+	// error leaves machines with the herdr-core they have.
+	HC func(goos, goarch string) (gz []byte, digest string, err error)
 	// Settings are the core settings the UI can change; nil disables them.
 	Settings *settings.Store
 	// Catalog returns herdr's saved SSH machines as the core configures
@@ -82,6 +86,7 @@ type Server struct {
 	clients   map[*wsClient]bool
 
 	surf surfaces
+	term termHub
 
 	audit *auditor
 }
@@ -91,6 +96,7 @@ func New(mg *machines.Manager, opts Options) *Server {
 	s := &Server{opts: opts, mg: mg, logger: opts.Logger, origins: map[string]bool{}, hosts: map[string]bool{},
 		cs: opts.CodeServer, clients: map[*wsClient]bool{}}
 	s.surf.sessions = map[string]*surfSession{}
+	s.term = termHub{s: s, backends: map[string]*termBackend{}}
 	if s.cs == nil {
 		s.cs = codeserver.New(opts.Logger)
 	}
@@ -115,6 +121,7 @@ func New(mg *machines.Manager, opts Options) *Server {
 	mg.Subscribe(func(st machines.State) {
 		if st.Status == machines.StatusReady || st.Status == machines.StatusDegraded {
 			s.wakeSurface(st.ID)
+			s.term.wakeUp(st.ID)
 		}
 	}, func(machines.AgentEvent) {})
 	return s
@@ -124,6 +131,7 @@ func New(mg *machines.Manager, opts Options) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /ws", s.handleWS)
+	mux.HandleFunc("GET /api/v1/term", s.handleTermWS)
 	mux.HandleFunc("GET /api/config", s.handleConfig)
 	mux.HandleFunc("GET /api/settings", s.handleSettings)
 	mux.HandleFunc("PUT /api/settings", s.writable(s.handleSetSetting))
@@ -154,6 +162,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /m/{id}/gui/{win}/ws", s.handleGUIWS)
 	mux.HandleFunc("POST /m/{id}/gui/{win}/close", s.writable(s.handleGUIClose))
 	mux.HandleFunc("POST /api/m/{id}/gui/enable", s.writable(s.handleGUIEnable))
+	mux.HandleFunc("GET /api/gui", s.handleGUIStates)
 	mux.HandleFunc("GET /api/m/{id}/herdr", s.handleHerdrStatus)
 	mux.HandleFunc("POST /api/m/{id}/herdr/{action}", s.writable(s.handleHerdrAction))
 	mux.HandleFunc("GET /api/m/{id}/herdr/remote", s.writable(s.handleHerdrRemote))

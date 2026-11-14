@@ -39,6 +39,10 @@ type Agent struct {
 	bundledHerdr string            // last resort when no installed herdr is found
 	herdrOp      sync.Mutex        // serializes starting, stopping and updating herdr
 
+	hcOp     sync.Mutex // serializes installing, starting and stopping herdr-core
+	hcMu     sync.Mutex
+	hcHashed hcHashed // the installed executable when it was last hashed
+
 	cs  *codeServer
 	gui *gui
 }
@@ -165,6 +169,10 @@ func (a *Agent) handle(ctx context.Context, st net.Conn) {
 		err = a.handleHerdr(ctx, st, h)
 	case agentproto.OpPaneFind:
 		err = a.handleFind(ctx, st, h)
+	case agentproto.OpHC:
+		err = a.handleHC(ctx, st, h)
+	case agentproto.OpHCAPI:
+		err = a.pipeUnix(st, a.hcSocket())
 	default:
 		err = agentproto.Fail(st, fmt.Errorf("unknown op %q", h.Op))
 		st.Close()
@@ -237,7 +245,7 @@ func (a *Agent) pipeUnix(st net.Conn, path string) error {
 	defer st.Close()
 	c, err := net.DialTimeout("unix", path, 5*time.Second)
 	if err != nil {
-		return agentproto.Fail(st, fmt.Errorf("herdr socket %s: %w", path, err))
+		return agentproto.Fail(st, fmt.Errorf("socket %s: %w", path, err))
 	}
 	if err := agentproto.WriteLine(st, agentproto.Reply{OK: true}); err != nil {
 		c.Close()

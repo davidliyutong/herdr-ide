@@ -7,6 +7,7 @@
 #   4. THIRD_PARTY_NOTICES.md matches the linked Go modules
 #   5. README.md and README.zh-CN.md have the same section structure
 #   6. CHANGELOG.md's [Unreleased] is one list without subsections
+#   7. the files generated from design/tokens.json are current
 set -euo pipefail
 cd "$(dirname "$0")/.."
 fail=0
@@ -22,12 +23,12 @@ go vet -tags integration ./... || fail=1
 echo "==> brand literals"
 # String literals containing the slug outside the brand files, ignoring Go
 # import paths and comments.
-hits=$(grep -rnE --include='*.go' --include='*.ts' --include='*.tsx' "[\"'\`][^\"'\`]*\b${slug}\b" cmd internal web/src extensions/*/src desktop/src 2>/dev/null \
-  | grep -vE '(internal/brand/|web/src/brand\.ts|extensions/[^/]+/src/brand\.ts|_test\.go:|__tests__/)' \
+hits=$(grep -rnE --include='*.go' --include='*.ts' --include='*.tsx' --include='*.swift' --include='*.strings' "[\"'\`][^\"'\`]*\b${slug}\b" cmd internal web/src extensions/*/src desktop/src macos/Sources macos/Tests 2>/dev/null \
+  | grep -vE '(internal/brand/|web/src/brand\.ts|extensions/[^/]+/src/brand\.ts|macos/Sources/TermKit/Brand\.swift|_test\.go:|__tests__/)' \
   | grep -vE "\"${module}/" \
   | grep -vE '^[^:]+:[0-9]+:\s*(//|\*)' || true)
 if [[ -n "$hits" ]]; then
-  echo "hardcoded '${slug}' (use internal/brand, web/src/brand.ts or the extension's src/brand.ts):"
+  echo "hardcoded '${slug}' (use internal/brand, web/src/brand.ts, the extension's src/brand.ts or macos/Sources/TermKit/Brand.swift):"
   echo "$hits"
   fail=1
 fi
@@ -50,5 +51,8 @@ if awk '/^## \[Unreleased\]/ {p=1; next} /^## \[/ {p=0} p' CHANGELOG.md | grep -
   echo "CHANGELOG.md: [Unreleased] is one list, without headings"
   fail=1
 fi
+
+echo "==> design tokens"
+go run ./scripts/tokens -check || fail=1
 
 exit $fail

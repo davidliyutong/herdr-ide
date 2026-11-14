@@ -14,3 +14,7 @@ coverage/
 .claude/settings.local.json
 CLAUDE.local.md
 internal/embedded/encoder/*.gz
+internal/embedded/hc/*.gz
+macos/.build/
+macos/.deps/
+macos/xcode/MacApp.xcodeproj/

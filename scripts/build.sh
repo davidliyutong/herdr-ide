@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Builds the web UI, the VS Code bridge extension, the per-platform agents
-# (embedded gzip), then the core for TARGETS (default: host platform), packaged
-# beside native herdr and license notices. Names come from internal/brand.
+# (embedded gzip), fetches the pinned herdr-core of each agent platform
+# (embedded gzip), then builds the core for TARGETS (default: host platform),
+# packaged beside native herdr and license notices. Names come from
+# internal/brand.
 #
 #   scripts/build.sh                       # host archive in dist/release/
 #   TARGETS="linux/amd64 darwin/arm64" scripts/build.sh
@@ -44,6 +46,13 @@ for p in $AGENT_PLATFORMS; do
   gzip -9 -n -c "$out" > "internal/embedded/agents/${SLUG}-agent-$os-$arch.gz"
   echo "    $os/$arch $(du -h "$out" | cut -f1)"
 done
+
+# herdr-core for machines: the pinned upstream release of every agent
+# platform, verified and embedded; the build fails without it.
+echo "==> herdr-core for machines"
+mkdir -p internal/embedded/hc
+rm -f internal/embedded/hc/*.gz
+go run ./scripts/fetch-hc $AGENT_PLATFORMS
 
 # The encoder Linux machines send program windows as video with, built by
 # scripts/build-ffmpeg.sh; without it windows are always pictures.

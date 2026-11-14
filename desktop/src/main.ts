@@ -232,9 +232,9 @@ ipcMain.on(channels.theme, (event, value: unknown) => {
   if (fromMainPage(event) && source) nativeTheme.themeSource = source;
 });
 
-/** The page's background (--bg in web/src/styles.css), shown before it paints. */
+/** The page's background (color.background in design/tokens.json), shown before it paints. */
 function windowBackground(): string {
-  return nativeTheme.shouldUseDarkColors ? '#0e1116' : '#ffffff';
+  return nativeTheme.shouldUseDarkColors ? '#0a0a0a' : '#ffffff';
 }
 
 function createWindow() {

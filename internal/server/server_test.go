@@ -695,6 +695,16 @@ func TestSoundClientMostRecentlyActive(t *testing.T) {
 }
 
 // Browsers name the video streams they decode; anything else is dropped.
+func TestGUIStatesEndpoint(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/gui", nil)
+	req.Host = "127.0.0.1:7780"
+	newTestServer().Handler().ServeHTTP(rec, req)
+	if rec.Code != 200 || strings.TrimSpace(rec.Body.String()) != "[]" {
+		t.Fatalf("GET /api/gui = %d %q", rec.Code, rec.Body.String())
+	}
+}
+
 func TestVideoCodecsParam(t *testing.T) {
 	for q, want := range map[string]string{
 		"":                       "",

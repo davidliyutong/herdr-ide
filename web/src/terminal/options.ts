@@ -5,12 +5,15 @@ import type { ITerminalOptions, ITheme } from '@xterm/xterm';
 import type { Appearance, ThemeKind } from '../appearance';
 import { termFontFamily } from './fonts';
 
-// GitHub Dark Default (as in Ghostty's theme of that name), on the UI's --bg.
+// The terminal palettes are the design tokens' (design/tokens.json), which
+// the macOS application shares; tokens.test.ts keeps the two equal.
+// GitHub Dark Default's colors (as in Ghostty's theme of that name) on the
+// UI's --bg and --fg.
 const dark: ITheme = {
-  background: '#0e1116',
-  foreground: '#e6edf3',
-  cursor: '#e6edf3',
-  cursorAccent: '#0e1116',
+  background: '#0a0a0a',
+  foreground: '#f0f0f0',
+  cursor: '#f0f0f0',
+  cursorAccent: '#0a0a0a',
   selectionBackground: '#3b4a6b',
   black: '#484f58',
   red: '#ff7b72',
@@ -32,8 +35,8 @@ const dark: ITheme = {
 
 const light: ITheme = {
   background: '#ffffff',
-  foreground: '#1f2328',
-  cursor: '#1f2328',
+  foreground: '#0a0a0a',
+  cursor: '#0a0a0a',
   cursorAccent: '#ffffff',
   selectionBackground: '#b6d4fe',
   black: '#24292f',
