@@ -69,22 +69,34 @@ function bestAgent(panes: Pane[]): string | undefined {
   return agents.find((p) => p.agent_status === 'idle' || p.agent_status === 'done')?.pane_id ?? agents[0]?.pane_id;
 }
 
-/** The pane that text sent from a VS Code window of machine m ("Send to
- * agent") goes to. With the window's folders known, the workspace whose
- * panel shows that window decides: the focused pane when it is the selected
- * workspace and the pane is on m, else that workspace's most
- * attention-worthy agent pane. Otherwise the focused pane on m, else m's most
- * attention-worthy agent pane anywhere. */
-export function sendTarget(s: UIState, m: string, folders?: string[]): string | undefined {
+/** Where text sent from a VS Code window of machine m ("Send to agent")
+ * goes: a pane, or none (workspace: the workspace showing the window, which
+ * has no agent pane). */
+export interface SendTarget {
+  pane?: string;
+  workspace?: string;
+}
+
+/** The pane that text sent from a VS Code window of machine m goes to. With
+ * the window's folders known, the workspace whose panel shows that window
+ * decides: the focused pane when it is the selected workspace and the pane
+ * is on m, else that workspace's most attention-worthy agent pane, and no
+ * pane of another workspace (another project's agent) when it has none.
+ * Without such a workspace (the window is unknown, or no panel shows it):
+ * the focused pane on m, else m's most attention-worthy agent pane. */
+export function sendTarget(s: UIState, m: string, folders?: string[]): SendTarget {
   const panes = s.machines[m]?.snapshot?.panes ?? [];
   const focused = s.focused?.m === m ? s.focused.pane : undefined;
   if (folders) {
     const here = showsWindow(s.docks[dockKey(s)]?.view, m, folders);
     const other = here ? undefined : Object.entries(s.docks).find(([k, d]) => k && d.m === m && showsWindow(d.view, m, folders))?.[1];
     const ws = here ? (s.machineId === m ? s.workspaceId : undefined) : other?.ws;
-    if (here && focused) return focused;
-    const inWs = ws ? bestAgent(panes.filter((p) => p.workspace_id === ws)) : undefined;
-    if (inWs) return inWs;
+    if (here && focused) return { pane: focused };
+    if (ws) {
+      const inWs = bestAgent(panes.filter((p) => p.workspace_id === ws));
+      return inWs ? { pane: inWs } : { workspace: ws };
+    }
   }
-  return focused ?? bestAgent(panes);
+  const pane = focused ?? bestAgent(panes);
+  return pane ? { pane } : {};
 }

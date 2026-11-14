@@ -9,11 +9,12 @@
 // nothing of it is left on the machine. Once the whole body is sent the
 // agent is finishing the file, and it can no longer be cancelled.
 
-import { create } from 'zustand';
-import { storage } from './brand';
 import { t } from './i18n';
 import { shellQuote, UploadCancelled, UploadDisconnected, uploadFile, uploadName } from './lib/files';
 import { useStore } from './state/store';
+import { Speed, transferList } from './transferList';
+
+export { HISTORY_MAX, SPEED_WINDOW_MS } from './transferList';
 
 export type TransferStatus = 'queued' | 'uploading' | 'finishing' | 'done' | 'failed' | 'cancelled';
 
@@ -39,79 +40,28 @@ export interface Transfer {
   error?: string;
 }
 
-export const HISTORY_MAX = 50;
-/** The span the speed is measured over, and how often progress is shown. */
-export const SPEED_WINDOW_MS = 3000;
-const SHOW_EVERY_MS = 250;
-const KEY = 'uploads';
-const FINISHED = new Set<TransferStatus>(['done', 'failed', 'cancelled']);
+const FINISHED = new Set<unknown>(['done', 'failed', 'cancelled']);
 
-/** Finished uploads in this browser's storage; undefined when it has none
- * or cannot be read. */
-function storedHistory(): Transfer[] | undefined {
-  const raw = storage.get(KEY);
-  if (raw === null) return undefined;
-  try {
-    const v: unknown = JSON.parse(raw);
-    if (!Array.isArray(v)) return [];
-    return v
-      .filter((x) => x && typeof x.id === 'string' && typeof x.m === 'string' && typeof x.name === 'string' && FINISHED.has(x.status))
-      .slice(0, HISTORY_MAX);
-  } catch {
-    return [];
-  }
-}
+const list = transferList<Transfer>('uploads', (x) => typeof x.m === 'string' && typeof x.name === 'string' && FINISHED.has(x.status));
 
-interface TransfersState {
-  /** Waiting, uploading and finishing, in the order they go. */
-  active: Transfer[];
-  /** Finished, newest first. */
-  history: Transfer[];
-  panel: boolean;
-  setPanel(open: boolean): void;
-}
-
-export const useTransfers = create<TransfersState>((set) => ({
-  active: [],
-  history: storedHistory() ?? [],
-  panel: false,
-  // Opening shows what other tabs of this browser finished meanwhile.
-  setPanel: (panel) => set(panel ? (s) => ({ panel, history: storedHistory() ?? s.history }) : { panel }),
-}));
-
-function setHistory(fn: (h: Transfer[]) => Transfer[]) {
-  const history = fn(storedHistory() ?? useTransfers.getState().history).slice(0, HISTORY_MAX);
-  storage.set(KEY, JSON.stringify(history));
-  useTransfers.setState({ history });
-}
+/** Waiting, uploading and finishing uploads in the order they go, and the
+ * finished ones. */
+export const useTransfers = list.store;
 
 /** What a running or waiting upload needs besides its entry. */
 interface Live {
   ctl: AbortController;
-  /** [time, bytes sent] over the last SPEED_WINDOW_MS. */
-  samples: Array<[number, number]>;
-  shown: number;
+  speed?: Speed;
 }
 const live = new Map<string, Live>();
 let seq = 0;
 
-const find = (id: string) => useTransfers.getState().active.find((x) => x.id === id);
-
-function patch(id: string, p: Partial<Transfer>) {
-  useTransfers.setState((s) => ({ active: s.active.map((x) => (x.id === id ? { ...x, ...p } : x)) }));
-}
+const find = list.find;
+const patch = list.patch;
 
 function progress(id: string, sent: number) {
-  const l = live.get(id);
-  if (!l) return;
-  const now = Date.now();
-  l.samples.push([now, sent]);
-  // Keep the last sample at or before the window's start.
-  while (l.samples.length > 2 && now - l.samples[1][0] >= SPEED_WINDOW_MS) l.samples.shift();
-  if (now - l.shown < SHOW_EVERY_MS) return;
-  l.shown = now;
-  const [t0, s0] = l.samples[0];
-  patch(id, { sent, speed: now > t0 ? ((sent - s0) * 1000) / (now - t0) : 0 });
+  const speed = live.get(id)?.speed?.add(sent);
+  if (speed !== undefined) patch(id, { sent, speed });
 }
 
 /** Moves an upload to the history. */
@@ -121,15 +71,13 @@ function end(id: string, p: Pick<Transfer, 'status'> & Partial<Transfer>) {
   if (!x) return;
   const ended = Date.now();
   const done = p.status === 'done';
-  const entry: Transfer = {
+  list.archive({
     ...x,
     ...p,
     ended,
     sent: done ? x.size : x.sent,
     speed: done && x.started !== undefined && ended > x.started ? (x.size * 1000) / (ended - x.started) : 0,
-  };
-  useTransfers.setState((s) => ({ active: s.active.filter((a) => a.id !== id) }));
-  setHistory((h) => [entry, ...h.filter((e) => e.id !== id)]);
+  });
 }
 
 /** Queues uploads of files to machine m, into the existing directory dir or
@@ -147,8 +95,8 @@ export function queueUploads(m: string, files: File[], dir?: string): string[] {
     sent: 0,
     speed: 0,
   }));
-  for (const x of items) live.set(x.id, { ctl: new AbortController(), samples: [], shown: -Infinity });
-  useTransfers.setState((s) => ({ active: [...s.active, ...items] }));
+  for (const x of items) live.set(x.id, { ctl: new AbortController() });
+  list.add(items);
   return items.map((x) => x.id);
 }
 
@@ -163,8 +111,7 @@ export async function runUpload(id: string, file: File): Promise<string | undefi
   const l = live.get(id);
   if (!x || !l) return undefined; // cancelled while waiting
   const attempt = async (dir?: string) => {
-    l.samples = [[Date.now(), 0]];
-    l.shown = -Infinity;
+    l.speed = new Speed();
     patch(id, { status: 'uploading', dir, sent: 0, speed: 0 });
     const st = await uploadFile(x.m, x.name, file, dir, {
       signal: l.ctl.signal,
@@ -233,13 +180,9 @@ export function cancelAllUploads() {
   for (const x of useTransfers.getState().active) cancelUpload(x.id);
 }
 
-export function forgetUpload(id: string) {
-  setHistory((h) => h.filter((e) => e.id !== id));
-}
+export const forgetUpload = list.forget;
 
-export function clearUploadHistory() {
-  setHistory(() => []);
-}
+export const clearUploadHistory = list.clear;
 
 /** Sent and total bytes of the active uploads. */
 export function activeProgress(active: Transfer[]): { sent: number; size: number } {

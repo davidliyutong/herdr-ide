@@ -228,17 +228,35 @@ describe('Send to agent', () => {
     s.focusPane({ m: 'a', pane: 'w1-shell' });
     const st = () => useStore.getState();
     // The selected workspace shows it: the focused pane.
-    expect(sendTarget(st(), 'a', ['/home/u/w1'])).toBe('w1-shell');
+    expect(sendTarget(st(), 'a', ['/home/u/w1'])).toEqual({ pane: 'w1-shell' });
     // Another workspace shows it: that workspace's agent.
     s.selectWorkspace('a', 'w2');
     s.focusPane({ m: 'a', pane: 'w2-shell' });
-    expect(sendTarget(st(), 'a', ['/home/u/w1'])).toBe('w1-agent');
+    expect(sendTarget(st(), 'a', ['/home/u/w1'])).toEqual({ pane: 'w1-agent' });
     // No panel shows it, or the window is unknown: the focused pane.
-    expect(sendTarget(st(), 'a', ['/elsewhere'])).toBe('w2-shell');
-    expect(sendTarget(st(), 'a')).toBe('w2-shell');
+    expect(sendTarget(st(), 'a', ['/elsewhere'])).toEqual({ pane: 'w2-shell' });
+    expect(sendTarget(st(), 'a')).toEqual({ pane: 'w2-shell' });
     // Nothing focused on that machine: its first attention-worthy agent.
     s.focusPane(undefined);
-    expect(sendTarget(st(), 'a', ['/elsewhere'])).toBe('w1-agent');
+    expect(sendTarget(st(), 'a', ['/elsewhere'])).toEqual({ pane: 'w1-agent' });
     expect(dockKey(st())).toBe('a|w2');
+  });
+
+  it('sends nothing to another workspace when the window’s workspace has no agent', () => {
+    const s = useStore.getState();
+    const a = machine('a', ['w1', 'w2']);
+    a.snapshot!.panes = a.snapshot!.panes.filter((p) => p.pane_id !== 'w2-agent');
+    s.setMachines([a]);
+    // w2 (no agent) shows the window; w1, with an agent, is selected.
+    s.selectWorkspace('a', 'w2');
+    s.openDock({ kind: 'code', m: 'a', folder: '/home/u/w2' });
+    s.selectWorkspace('a', 'w1');
+    s.focusPane({ m: 'a', pane: 'w1-shell' });
+    const st = () => useStore.getState();
+    expect(sendTarget(st(), 'a', ['/home/u/w2'])).toEqual({ workspace: 'w2' });
+    // Selected, with nothing focused on the machine: still not w1's agent.
+    s.selectWorkspace('a', 'w2');
+    s.focusPane(undefined);
+    expect(sendTarget(st(), 'a', ['/home/u/w2'])).toEqual({ workspace: 'w2' });
   });
 });

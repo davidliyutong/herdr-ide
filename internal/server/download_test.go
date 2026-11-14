@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -21,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/machines"
 )
 
@@ -392,5 +394,111 @@ func TestDownloadProgress(t *testing.T) {
 	s.forgetWatcher(c)
 	if n := len(s.downloads.watchers); n != 0 {
 		t.Fatalf("%d ids still followed after the page left", n)
+	}
+}
+
+// Downloads beyond the usual are followed, one cancelled before its request
+// arrives is refused, and a download answered with an error says why
+// instead of breaking off.
+func TestDownloadEdges(t *testing.T) {
+	mg, mc, logger := agentMachine(t)
+	s := New(mg, Options{Logger: logger})
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c := &wsClient{s: s, ctx: ctx, cancel: cancel, send: make(chan outMsg, 4096)}
+	s.clients[c] = true
+	dir := t.TempDir()
+	file := filepath.Join(dir, "a.txt")
+	os.WriteFile(file, []byte("alpha"), 0o644)
+
+	type event struct {
+		ID    string `json:"id"`
+		State string `json:"state"`
+		Error string `json:"error"`
+	}
+	// final returns the last event of id once it ended.
+	final := func(id string) event {
+		t.Helper()
+		for {
+			select {
+			case m := <-c.send:
+				var e event
+				if json.Unmarshal(m.data, &e) == nil && e.ID == id && e.State != "running" && e.State != "unknown" {
+					return e
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatalf("%s: no end", id)
+			}
+		}
+	}
+	get := func(id string, header http.Header, paths ...string) *http.Response {
+		t.Helper()
+		c.dispatch(&inMsg{T: "download.watch", IDs: []string{id}})
+		req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/m/x/download?"+url.Values{"path": paths, "dl": {id}}.Encode(), nil)
+		for k, v := range header {
+			req.Header[k] = v
+		}
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		return res
+	}
+
+	// Many downloads at once are all followed.
+	s.downloads.mu.Lock()
+	s.downloads.init()
+	for i := range 100 {
+		s.downloads.running[fmt.Sprintf("busy-%04d", i)] = &download{}
+	}
+	s.downloads.mu.Unlock()
+	if res := get("many-0001", nil, file); res.StatusCode != http.StatusOK || final("many-0001").State != "done" {
+		t.Fatalf("a download beyond 100 others: %d", res.StatusCode)
+	}
+	s.downloads.mu.Lock()
+	clear(s.downloads.running)
+	s.downloads.mu.Unlock()
+
+	// Cancelled while the browser still held it back: done at once, and
+	// the request that comes after all is refused.
+	c.dispatch(&inMsg{T: "download.cancel", ID: "early-001"})
+	if e := final("early-001"); e.State != "cancelled" {
+		t.Fatalf("early cancel: %+v", e)
+	}
+	if res := get("early-001", nil, file); res.StatusCode != http.StatusGone {
+		t.Fatalf("request after an early cancel: %d", res.StatusCode)
+	}
+
+	// A resumed download of a file that shrank: 416, not a broken
+	// connection, and the panel says the file changed.
+	if res := get("range-001", http.Header{"Range": {"bytes=100-"}}, file); res.StatusCode != http.StatusRequestedRangeNotSatisfiable {
+		t.Fatalf("range past the end: %d", res.StatusCode)
+	}
+	if e := final("range-001"); e.State != "failed" || e.Error != "changed" {
+		t.Fatalf("range past the end: %+v", e)
+	}
+
+	// A file removed between its stat and its read is not found.
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/m/x/download", nil)
+	complete, code := serveFile(rec, req, mc, &agentproto.Stat{Path: filepath.Join(dir, "gone.txt"), Size: 10}, true)
+	if complete || code != "not_found" || rec.Code != http.StatusNotFound || rec.Header().Get("Content-Disposition") != "" {
+		t.Fatalf("removed file: %v %q %d %v", complete, code, rec.Code, rec.Header())
+	}
+
+	// Cancelled in the browser before the machine answered: cancelled, not
+	// a failure of the machine.
+	gone, stop := context.WithCancel(context.Background())
+	stop()
+	c.dispatch(&inMsg{T: "download.watch", IDs: []string{"left-0001"}})
+	req = httptest.NewRequest(http.MethodGet, "/api/m/x/download?"+url.Values{"path": {file}, "dl": {"left-0001"}}.Encode(), nil).WithContext(gone)
+	req.SetPathValue("id", "x")
+	s.handleDownload(httptest.NewRecorder(), req)
+	if e := final("left-0001"); e.State != "cancelled" {
+		t.Fatalf("browser gone during the stat: %+v", e)
 	}
 }

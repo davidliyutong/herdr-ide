@@ -27,6 +27,7 @@ export const en = {
   'app.hint': '{prefix} ? shortcuts · {prefix} space command palette',
   'app.readOnly': 'READ-ONLY',
   'app.noAgentPane': 'No pane to receive it: focus an agent pane first',
+  'app.noAgentInWorkspace': 'No agent pane in {workspace}, the workspace showing this VS Code window',
   'app.uploadFailed': 'Upload failed: {error}',
   'app.uploadDirFailed': 'Could not save into {dir} ({error}); uploading to the upload folder instead.',
   'transfers.title': 'Uploads',
@@ -56,6 +57,7 @@ export const en = {
   'transfers.hours': '{h} h {m} min',
   'downloads.title': 'Downloads',
   'downloads.starting': 'Starting…',
+  'downloads.waiting': 'Not started yet: the browser may be holding it behind other downloads, or blocked it',
   'downloads.received': '{sent} · {speed}/s',
   'downloads.items': '{n} items',
   'downloads.paths': '{path} and {n} more',
@@ -68,6 +70,7 @@ export const en = {
   'downloads.error.interrupted': 'The transfer broke off',
   'downloads.error.no_response': 'The download did not start',
   'downloads.error.lost': "How it ended is not known; see the browser's downloads",
+  'downloads.error.changed': 'The file changed on the machine',
   'app.updated': 'The server was updated. Reload the page to use the new version.',
   'app.reload': 'Reload',
 

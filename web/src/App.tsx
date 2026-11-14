@@ -34,10 +34,13 @@ import { DownloadsTray } from './components/Downloads';
  * workspace whose panel shows the sending window. */
 function pasteToAgent(m: string, text: string, folders?: string[]) {
   const s = useStore.getState();
-  const pane = sendTarget(s, m, folders);
+  const { pane, workspace } = sendTarget(s, m, folders);
   const term = pane ? getTerm(m, pane) : undefined;
   if (!term) {
-    s.toast(t('app.noAgentPane'));
+    if (workspace) {
+      const label = s.machines[m]?.snapshot?.workspaces.find((w) => w.workspace_id === workspace)?.label || workspace;
+      s.toast(t('app.noAgentInWorkspace', { workspace: label }));
+    } else s.toast(t('app.noAgentPane'));
     return;
   }
   term.paste(text);

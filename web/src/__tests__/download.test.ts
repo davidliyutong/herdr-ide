@@ -281,7 +281,7 @@ describe('downloads panel', () => {
     expect(store.useStore.getState().toasts.at(-1)?.msg).toBe('Could not download srv.zip: The machine is not connected');
   });
 
-  it('cancels through the core, gives up on a download that never started, and downloads again', async () => {
+  it('cancels through the core, waits for a download the browser holds back, and downloads again', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     download.startDownload('gpu', ['/srv/a.txt']);
     const dl = id(clicked[0]);
@@ -291,21 +291,37 @@ describe('downloads panel', () => {
     download.downloadEvent({ id: dl, state: 'cancelled', sent: 10, total: 100 });
     expect(history()[0]).toMatchObject({ id: dl, status: 'cancelled' });
 
-    // No word from the core at all; the time while the page is not
-    // connected does not count.
+    // No word from the core: not started yet (the browser holds it back
+    // behind other downloads, or blocked it), not a failure; the time
+    // while the page is not connected does not count.
     download.startDownload('gpu', ['/srv/b.txt']);
+    const b = id(clicked[1]);
     link.connected = false;
     vi.advanceTimersByTime(download.NO_RESPONSE_MS);
     expect(active()).toMatchObject([{ name: 'b.txt', status: 'starting' }]);
+    expect(active()[0].waiting).toBeUndefined();
     link.connected = true;
     vi.advanceTimersByTime(download.NO_RESPONSE_MS);
-    expect(history()[0]).toMatchObject({ name: 'b.txt', status: 'failed', error: 'no_response' });
+    expect(active()).toMatchObject([{ name: 'b.txt', status: 'starting', waiting: true }]);
+    expect(Downloads.downloadDetail(active()[0])).toBe(
+      'Not started yet: the browser may be holding it behind other downloads, or blocked it',
+    );
+    // Once the browser lets it go, it runs like any other.
+    download.downloadEvent({ id: b, state: 'running', sent: 1, total: 100 });
+    expect(active()[0]).toMatchObject({ status: 'downloading' });
+    expect(active()[0].waiting).toBeUndefined();
+    // Cancelled while held back, the core answers at once.
+    download.startDownload('gpu', ['/srv/c.txt']);
+    const c = id(clicked[2]);
+    download.cancelDownload(c);
+    download.downloadEvent({ id: c, state: 'cancelled', sent: 0 });
+    expect(history()[0]).toMatchObject({ id: c, status: 'cancelled' });
 
     // Downloading again starts a new download of the same paths.
     download.retryDownload(history()[0]);
-    expect(clicked.map(query).at(-1)).toEqual(['/srv/b.txt']);
-    expect(id(clicked.at(-1)!)).not.toBe(id(clicked[1]));
-    expect(active()).toHaveLength(1);
+    expect(clicked.map(query).at(-1)).toEqual(['/srv/c.txt']);
+    expect(id(clicked.at(-1)!)).not.toBe(c);
+    expect(active()).toHaveLength(2);
   });
 
   it('asks again after a reconnect, and ends what the core no longer knows', () => {
