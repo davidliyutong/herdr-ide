@@ -6,8 +6,9 @@ body {
   font-size: 16px;
 }
 
+/* As wide as the formula: the application sizes its popover from it. */
 #math {
   display: inline-block;
+  width: max-content;
   padding: 8px 12px;
-  max-width: 640px;
 }

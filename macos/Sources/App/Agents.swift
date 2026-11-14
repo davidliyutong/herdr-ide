@@ -191,6 +191,7 @@ final class MathHover: NSObject, WKScriptMessageHandler, WKNavigationDelegate, N
 
     func userContentController(_: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let size = message.body as? [String: Any], let w = size["w"] as? Double, let h = size["h"] as? Double, w > 0, h > 0 else { return }
-        popover.contentSize = NSSize(width: w, height: h)
+        // A very long formula scrolls in the popover.
+        popover.contentSize = NSSize(width: min(w, 900), height: min(h, 600))
     }
 }
