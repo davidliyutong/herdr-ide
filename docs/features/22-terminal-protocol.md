@@ -2,12 +2,10 @@
 
 ## Context
 
-herdr renders a tab's cell grid for one foreground client
-([18](18-endpoint-surfaces.md)). A client that emulates terminals itself (a
-native application drawing with the GPU, a browser renderer with its own
-terminal state) needs the opposite: each terminal's
-raw output, several viewers of one terminal, and input bytes it encodes
-itself. herdr-core provides that per machine
+A client that emulates terminals itself (a native application drawing
+with the GPU, a browser renderer with its own terminal state) needs each
+terminal's raw output, several viewers of one terminal, and input bytes it
+encodes itself, rather than a cell grid rendered for it. herdr-core provides that per machine
 ([21](21-terminal-core.md)), but its API is only reachable through the
 machine's agent, and it also runs commands and reads files.
 

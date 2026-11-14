@@ -14,8 +14,8 @@ Goals: one place per language that defines the name; a single command that
 renames everything; existing state migrates instead of being orphaned; CI
 prevents new hardcoded names.
 
-Non-goals: running two names side by side; renaming herdr-related
-identifiers (herdr session names, herdr paths).
+Non-goals: running two names side by side; renaming herdr-core's own
+identifiers (its executable, `HC_*` variables and state directory).
 
 ## Design
 

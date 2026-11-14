@@ -2,10 +2,10 @@
 
 English | [简体中文](README.zh-CN.md)
 
-A terminal-first, multi-machine, agent-native web IDE built on
-[herdr](https://herdr.dev)'s terminal core: the workspaces and terminals of
-every machine in one browser tab, with VS Code (code-server) one keystroke
-away.
+A terminal-first, multi-machine, agent-native web IDE built on the
+[herdr-core](https://github.com/herdrdev/herdr-core) terminal core: the
+workspaces and terminals of every machine in one browser tab, with VS Code
+(code-server) one keystroke away.
 
 ![Two SSH machines in one tab: Claude Code waiting for confirmation and codex done in the agent inbox, with git history and a GPU monitor in split panes](docs/images/overview.png)
 
@@ -27,7 +27,7 @@ away.
   shortcuts use the prefix `ctrl+b` and can be changed in the settings.
 - **Terminal core included.** The binary carries herdr-core for Linux/macOS
   on amd64/arm64 and installs it on a machine the first time its terminals
-  are shown; machines need no herdr and no internet. Programs keep running
+  are shown; machines need nothing installed and no internet. Programs keep running
   when the browser closes or the core stops. Right-click a machine to
   **Start terminal core**, **Restart terminal core…** (its programs keep
   running) or **Stop terminal core…**.
@@ -55,8 +55,8 @@ away.
   panel sits beside or below the terminals. Idle instances are stopped.
 - **Program windows.** Windows that programs on remote Linux machines open
   (matplotlib, the MuJoCo viewer, Qt tools) appear in browser windows, one
-  per program window, with mouse and keyboard. Panes and terminals get a
-  virtual display automatically (a shell opened before can be given it from
+  per program window, with mouse and keyboard. Terminals get a virtual
+  display automatically (a shell opened before can be given it from
   its menu); Xvfb is fetched without root when a machine lacks it, and
   VirtualGL renders OpenGL on the GPU where it is installed. Windows that
   keep changing are sent as video (H.264 on NVIDIA, Intel and AMD GPUs, VP8
@@ -128,10 +128,8 @@ cd dist/packages/herdr-ide-$(go env GOOS)-$(go env GOARCH)
 ```
 
 Or extract the matching archive from `dist/release/` (or GitHub Releases)
-and run `./herdr-ide`; keep the directory together. Without an installed
-herdr, `./herdr-ide herdr [args]` runs the included one, for example
-`./herdr-ide herdr` to open its TUI (which starts the local herdr server).
-Add SSH machines with **Add machine…** in the sidebar.
+and run `./herdr-ide`. Add SSH machines with **Add machine…** in the
+sidebar.
 
 Open <http://127.0.0.1:7780>. Press `ctrl+b space` for the command palette and
 `ctrl+b ?` for shortcuts. All flags are listed in
@@ -166,9 +164,8 @@ Change or remove them under **Settings → Keyboard shortcuts**. Prefix bindings
 working, and browsers keep their own `cmd+t` / `cmd+w`.
 
 The app starts its own core at `http://127.0.0.1:7781` with instance
-`desktop`; quitting or closing the main window stops that core. The app
-includes herdr, used when none is installed; OpenSSH must already be
-installed. Released and local builds use ad-hoc signing,
+`desktop`; quitting or closing the main window stops that core. OpenSSH
+must already be installed. Released and local builds use ad-hoc signing,
 without Apple notarization or automatic updates. See
 [desktop deployment](docs/deployment.md#macos-desktop-app) for paths,
 versioning and isolated development. Only macOS packaging is implemented.
@@ -200,10 +197,9 @@ pinned SHA-256 digests. Details in
 ## Development
 
 ```bash
-herdr --session herdr-ide-dev server &   # isolated herdr session
-make dev-core                            # core on :7790 with --instance dev
-make dev-web                             # UI with hot reload on :5173
-make check test                          # before sending a PR
+make dev-core      # core on :7790 with --instance dev (terminal core session herdr-ide-dev)
+make dev-web       # UI with hot reload on :5173
+make check test    # before sending a PR
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md); coding agents start with
@@ -219,11 +215,12 @@ Issues and pull requests are welcome, in English or Chinese. Please read
 
 [MIT](LICENSE). Third-party licenses: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
 (Go modules) and `/licenses.md` served by the binary (web UI bundle).
-The bundled herdr is Apache-2.0; its license and dependency notices are in
-[licenses/herdr/](licenses/herdr/). The core embeds
+The core embeds
 [herdr-core](https://github.com/herdrdev/herdr-core) (Apache-2.0) for
 machines; release archives carry its license and notices in
-`licenses/herdr-core/`. code-server and Git Graph retain their
-own licenses and are downloaded at runtime. Git Graph restricts derivative
-distribution and does not clearly grant general redistribution of the original;
-it is excluded from public release packages.
+`licenses/herdr-core/`. The agents carry herdr's agent detection rules
+(Apache-2.0, [licenses/herdr-detect/](licenses/herdr-detect/)).
+code-server and Git Graph retain their own licenses and are downloaded at
+runtime. Git Graph restricts derivative distribution and does not clearly
+grant general redistribution of the original; it is excluded from public
+release packages.

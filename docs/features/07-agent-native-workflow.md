@@ -38,15 +38,14 @@ automatically, scheduling agents.
   notification when the page is hidden (a toast when visible for `blocked`);
   clicking it focuses the agent. The title and the PWA badge count blocked
   agents.
-- **Sounds** (`web/src/sound.ts`): the page plays herdr's sounds on the
-  same transitions: `blocked` plays the request chime, `done` the done chime,
-  except — as in herdr — when the terminal is on screen (selected workspace
-  and tab) and the page is visible and focused. The two chimes are synthesized
-  with the Web Audio API, so no audio files are shipped. The setting
-  **Notification sounds** is on by default, like herdr's `[ui.sound]`;
-  **Silent agents** lists agents (matched by herdr's agent name or display
-  name) that never sound and starts with `droid`, which herdr mutes by
-  default. Both are settings of the core
+- **Sounds** (`web/src/sound.ts`): the page plays a sound on the same
+  transitions: `blocked` plays the request chime, `done` the done chime,
+  except when the terminal is on screen (selected workspace and tab) and
+  the page is visible and focused. The two chimes are synthesized with the
+  Web Audio API, so no audio files are shipped. The setting **Notification
+  sounds** is on by default; **Silent agents** lists agents (matched by the
+  detected agent's name or display name) that never sound and starts with
+  `droid`. Both are settings of the core
   ([13](13-settings-and-appearance.md)).
 - **One browser sounds**: each page tells the core when it is used
   (`active` on the WebSocket: on connect with the time since its last input,
@@ -78,7 +77,7 @@ automatically, scheduling agents.
 | Option | Why not |
 | --- | --- |
 | A prompt box sending text to the agent | The terminal itself is the prompt; a second input duplicates it and hides the agent's own UI (approvals, slash commands). |
-| herdr's own sound files | They carry no separate attribution in herdr's repository; synthesized chimes need no asset or license notice. |
+| Sound files | Shipped audio needs an asset and its license notice; synthesized chimes need neither. |
 | Every browser plays | With several browsers or tabs open, each would sound at once. |
 | Web Push for closed tabs | Requires a push service and subscription storage; the reverse-proxy model has no user accounts. |
 
@@ -89,9 +88,6 @@ automatically, scheduling agents.
   context.
 - The chosen browser may be one the user has walked away from (another
   browser was opened earlier and not used since); its sounds play there.
-- herdr's `[ui.sound]` configuration on the core host (custom sound files,
-  per-agent overrides, `HERDR_DISABLE_SOUND`) is not read; the browser
-  settings apply.
 
 ## Testing
 

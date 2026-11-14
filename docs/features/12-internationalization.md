@@ -41,7 +41,7 @@ reference documentation.
   carries its own small English/Chinese table for the same codes and uses
   the embedding page's language. Settings errors are codes too (`invalid`,
   `locked`, `unknown`, `save`). Error
-  messages from herdr, ssh or the OS are shown verbatim.
+  messages from herdr-core, ssh or the OS are shown verbatim.
 - **VS Code extension**: `package.nls.json` / `package.nls.zh-cn.json` for
   contributed titles; `vscode.l10n.t` with `l10n/bundle.l10n.zh-cn.json` for
   runtime strings.

@@ -7,16 +7,15 @@ changes.
 
 ## What this is
 
-A Go server (`cmd/herdr-ide`) that serves a React terminal UI and drives
-[herdr](https://herdr.dev) on several machines through a per-machine Go agent
-(`cmd/herdr-ide-agent`) over ssh, with panes drawn from herdr's endpoint
-protocol; code-server provides VS Code panels. A macOS application
-(`macos/`) draws terminals of each machine's own herdr-core with Ghostty's
-renderer through the core's terminal protocol. One
-binary embeds the UI, the agents for 4 platforms and a VS Code extension.
-Release archives also contain a native herdr and its license notices, used
-on the core host only when no herdr is installed; it keeps herdr's usual
-configuration and state. SSH machines use their installed herdr.
+A Go server (`cmd/herdr-ide`) that serves a React terminal UI and reaches
+several machines through a per-machine Go agent (`cmd/herdr-ide-agent`) over
+ssh. Every machine's terminals live in a terminal core of the agent's own
+(herdr-core, `hc`, in a session apart from the user's); the browser emulates
+them with Ghostty's libghostty-vt as WebAssembly, and a macOS application
+(`macos/`) draws them with Ghostty's renderer, both through the core's
+terminal protocol (`/api/v1/term`). code-server provides VS Code panels. One
+binary embeds the UI, the agents and herdr-core for 4 platforms, and a VS
+Code extension.
 
 ## Commands
 
@@ -27,7 +26,7 @@ configuration and state. SSH machines use their installed herdr.
 | All checks (gofmt, vet, tsc, prettier, brand/doc/README consistency, generated tokens, the terminal emulator's digest) | `make check` |
 | Regenerate the design tokens' Swift, CSS and Go after editing `design/tokens.json`, and `design/generated/registry.json` after changing settings or commands | `make tokens` |
 | Rebuild the web UI's terminal emulator (Ghostty's libghostty-vt as WebAssembly; zig 0.17) | `make vt-wasm` |
-| Integration test with a real herdr | `make it` |
+| Integration test with a real terminal core (`HC_TEST_BIN=<herdr-core>`) | `make it` |
 | Full build into `dist/` | `make build` (or `scripts/build.sh`) |
 | macOS `.app` / DMG | `make desktop-app` / `make desktop-dmg` |
 | Build the `.app` and install it into `/Applications` | `make desktop-install` |
@@ -39,13 +38,13 @@ Run `make check test` before finishing a change.
 
 ## Rules
 
-1. **Never touch the user's real herdr session or state.** Experiments,
-   tests and dev servers use `herdr --session herdr-ide-dev` (or the
-   integration test's `herdr-ide-it`) and `--instance dev`; against remote
-   machines add `--remote-session herdr-ide-dev` (start that session there
-   with `herdr --session herdr-ide-dev server`). Do not run
-   `herdr server stop` without `--session`, and do not attach to panes of
-   the default session in control mode.
+1. **Never touch the user's real instance or terminals.** Experiments,
+   tests and dev servers use `--instance dev` (state in `~/.herdr-ide-dev`,
+   terminal core session `herdr-ide-dev`) or the integration tests'
+   session `herdr-ide-it`; the desktop apps' instance (`desktop`) and the
+   default one are the user's. Stop a terminal core only through its own
+   instance (`POST /api/m/{id}/hc/stop` of the dev core), never the user's,
+   and do not attach to the user's terminals.
 2. **No hardcoded product name.** Use `brand.*` (Go), `APP_NAME`/`APP_SLUG`/
    `storage` from `web/src/brand.ts`, `src/brand.ts` in the extension,
    `Brand` (`macos/Sources/TermKit/Brand.swift`) in the macOS application.
@@ -65,16 +64,17 @@ Run `make check test` before finishing a change.
    files or code comments. Report open items to the user so they are tracked
    in the issue tracker.
 5. **Keep the security guardrails.** Loopback by default, Host/Origin checks,
-   proxy secret, herdr API allowlist, read-only mode, 0700/0600 unix sockets,
-   nothing listening on TCP on machines, verified downloads. Changes here need
-   a test and a note in `SECURITY.md`.
+   proxy secret, the terminal protocol's method allowlist, read-only mode,
+   0700/0600 unix sockets, nothing listening on TCP on machines, verified
+   downloads. Changes here need a test and a note in `SECURITY.md`.
 6. **Bound remote resources.** Anything started on a machine must have an
    owner and a way to end (agent exit, idle timeout, explicit stop); anything
    written to disk needs a retention rule. Document it in
    `docs/deployment.md#remote-resources`.
 7. **Protocol compatibility.** Core and agent ship together, but extend
-   `internal/agentproto` by adding fields/ops. herdr's API is external: keep
-   requests one per connection and handle `events_lost`.
+   `internal/agentproto` by adding fields/ops. herdr-core's API is external:
+   speak its protocol generation (`internal/hc`), honor stream credit, and
+   take a `missed` notification as the subscription's new complete state.
 8. **Tests.** Go tests beside the code (agent tests set `HOME` to a temp
    dir); web tests in `web/src/__tests__`; the macOS application's in
    `macos/Tests` (`make macos-test`, needs Xcode). Don't add tests that need network
@@ -92,7 +92,7 @@ playbooks):
 
 | Role | Use it when |
 | --- | --- |
-| `herdr-integration` | Changing anything that talks to herdr, or upgrading herdr. |
+| `hc-integration` | Changing anything that talks to the terminal core (herdr-core), or upgrading it. |
 | `security-reviewer` | Before merging changes to guards, files, sockets, processes, ssh or downloads. |
 | `docs-keeper` | After changing flags, shortcuts, protocols, layout on disk or features. |
 | `i18n-translator` | After adding or changing user-visible text, or to add a locale. |
@@ -113,10 +113,6 @@ playbooks):
   change after any call, so take views again after each one.
 - yamux streams cannot be half-closed: use `agentproto.ChunkWriter` for
   uploads that expect a reply.
-- herdr's surface patches apply only to the revision before them, and a
-  `/ws` client's to the generation of the last complete surface; anything
-  that changes the grid outside that order must start from a complete
-  surface.
 - `web/dist` is embedded at build time; run `pnpm -C web build` (or
   `make build`) before `go build` if the UI changed. The build keeps
   `web/dist/.gitkeep`, which `go:embed` needs in a clean checkout.

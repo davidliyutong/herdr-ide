@@ -17,9 +17,10 @@ invariants, and run `go test ./internal/server ./internal/agent ./internal/trans
 2. Every HTTP/WS route passes `guard` (proxy secret, Host/Origin allowlist);
    state-changing routes are wrapped in `writable`; new WebSocket messages
    respect read-only mode.
-3. herdr calls from browsers go through `apiAllowed`; additions are justified
-   and do not expose `server.*`, integrations, plugin installation, event
-   streams or client-shell methods.
+3. Terminal core calls from clients go through the `/api/v1/term` allowlist
+   (`termReadMethods`, `termWriteMethods` in `internal/server/term.go`);
+   additions are justified and do not expose `machine.*`, `file.*`,
+   `server.*` or calls with `on`.
 4. Files: served with `nosniff` and the sandbox CSP; active content never as
    HTML/JS; uploads named by the server; size limits kept.
 5. Sockets and directories on machines and the core host: 0700 directories,

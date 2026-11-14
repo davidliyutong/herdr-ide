@@ -2,9 +2,9 @@
 
 ## Context
 
-herdr users already know its layout model (workspaces → tabs → binary split
-trees of panes) and its prefix keymap (`ctrl+b` by default). The terminal
-core keeps terminals, not layouts; every client of a machine arranges its
+Terminal multiplexer users know a layout model (workspaces → tabs → binary
+split trees of panes) and a prefix keymap (`ctrl+b` by default). The
+terminal core keeps terminals, not layouts; every client of a machine arranges its
 terminals in the machine's layout document ([22](22-terminal-protocol.md)),
 so the browser, the desktop app and the macOS application show the same
 arrangement. In a browser, `Cmd+W`, `Cmd+T` and similar shortcuts belong to
@@ -13,8 +13,8 @@ application own their keys.
 
 ## Goals / non-goals
 
-Goals: herdr's topology, shared by every client of a machine; herdr's
-default keys work unchanged in every client; one set of keybindings,
+Goals: that topology, shared by every client of a machine; the prefix
+keys work unchanged in every client; one set of keybindings,
 changeable, for every client; nothing important depends on
 browser-reserved shortcuts.
 
@@ -169,7 +169,7 @@ described in [13](13-settings-and-appearance.md))
   the core host add and remove keys, and the settings' **Keyboard
   shortcuts** page edits them. Every client matches keys against the
   bindings the core works out for its platform.
-- The defaults keep herdr's prefix keymap: `ctrl+b`, then a key (split
+- The defaults are a prefix keymap: `ctrl+b`, then a key (split
   `v` / `-`, focus `h` `j` `k` `l`, tabs `c` `n` `p` `1`…`9`, workspaces
   `shift+n` `shift+w` `shift+d`…). A chord lasts 3 s or until its next key;
   the prefix twice (`ctrl+b ctrl+b`) sends it to the pane; a key that ends
@@ -248,16 +248,15 @@ described in [13](13-settings-and-appearance.md))
 | Option | Why not |
 | --- | --- |
 | Each client keeping its own arrangement | The browser, the desktop app and the macOS application would show the same terminals differently; the document is one arrangement for every client of the machine. |
-| The selection kept per browser | Two windows on one machine would disagree about what is shown and focused; herdr shares them too. Zoom stays per browser, since it is a way of looking. |
-| Pane headers over herdr's border rows, a toolbar above a lone pane (the previous design) | The grid was herdr's; with the page's own layout every pane has room for a header of its own. |
+| The selection kept per browser | Two windows on one machine would disagree about what is shown and focused. Zoom stays per browser, since it is a way of looking. |
+| A toolbar above a lone pane instead of pane headers | With the page's own layout every pane has room for a header of its own. |
 | A tab bar that scrolls sideways (with auto-scroll while dragging) | Tabs out of view are hidden with no sign that they exist. |
 | Tabs that shrink to fit, as in Chrome | Labels become unreadable with many tabs. |
 | A "more tabs" menu for the tabs that do not fit | Hides tabs again and costs a click. |
-| Bindings to move tabs and workspaces | herdr has no such bindings to mirror; the context menu's move items work from the keyboard. |
+| Bindings to move tabs and workspaces | Rarely needed; the context menu's move items work from the keyboard. |
 | A "⋯" button on every header, tab and workspace row | Takes room on every tab and row; right-click covers desktop browsers. |
 | Desktop shell (Electron/Tauri) to own all shortcuts | Electron was replaced by browser access so the IDE works remotely; Tauri's WKWebView on macOS lacks service workers, which VS Code webviews need. |
-| Browser-specific bindings (`Cmd+…`) | Conflict with the browser and with muscle memory from herdr; browsers do not deliver `Cmd+T`/`Cmd+W` to pages. The desktop app has them (above). |
-| Keys in herdr's `config.toml` | herdr's TUI cannot see Cmd and would read the entries as its own bindings; the shell and the macOS application need keys before and outside herdr. |
+| Browser-specific bindings (`Cmd+…`) | Conflict with the browser; browsers do not deliver `Cmd+T`/`Cmd+W` to pages. The desktop app has them (above). |
 | Desktop shortcuts as registered menu accelerators | Would also take the keys in program windows; the page's key handlers and frames (VS Code) would need their own exceptions. |
 | Desktop shortcuts per browser profile (localStorage) | The shell needs them before and outside the page; the core's keybindings keep one set for all windows. |
 | `cmd+w` closing the tab on macOS, as the desktop app did | The macOS application's menu closes the focused terminal with it, like Ghostty and iTerm close a split; one set of macOS defaults for both applications. `ctrl+b shift+x` closes a tab. |

@@ -187,7 +187,7 @@ returns. Focus changes are reported to programs that asked (mode 1004).
 | Option | Why not |
 | --- | --- |
 | xterm.js | A second emulator beside the macOS application's, with its own parsing, key encodings and quirks; programs would behave differently in the two clients. |
-| herdr's rendered cell grid (the previous design) | Needs herdr on every machine; one browser owned the session at a time; scrollback, selections and find were herdr's, a round trip each. |
+| A cell grid rendered on the machine (the previous design) | Needs a renderer on every machine; one browser owned the session at a time; scrollback, selections and find were a round trip each. |
 | Reading the screen from the terminal core (`terminal.read`) instead of emulating | A request per change, no scrollback in the page, and the page could not answer programs or encode keys for their modes. |
 | A small zig or C module of our own linking the library with JavaScript imports | Needs zig in every build; the trampoline module gives the library's callbacks without changing the library. |
 | Polling the emulator for replies, titles and bells after each write | Replies would be late and ordered differently from Ghostty's, and events between two polls could be lost. |
@@ -195,7 +195,7 @@ returns. Focus changes are reported to programs that asked (mode 1004).
 | One canvas per tab | The panes' layout would have to be drawn in the canvas; with a canvas per pane the split tree stays HTML and a pane keeps its terminal while the tree changes. |
 | Keeping the terminals of hidden tabs attached | Every hidden terminal's output would cross the connection and be emulated; attaching again brings the screen and its history. |
 | Building the module in CI | CI would need zig and Ghostty's dependencies; the build is reproducible, so the committed module's digest is checked instead. |
-| Regular expressions and whole words in find (the previous design) | The emulator's search finds text; the agent's search read herdr's panes. |
+| Regular expressions and whole words in find (the previous design) | The emulator's search finds text; regular expressions would need a search of the agent's over the terminal's text. |
 
 ## Failure modes
 

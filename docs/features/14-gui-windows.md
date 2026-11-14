@@ -49,56 +49,50 @@ input methods.
   file lock (`run/gui.lock`) serializes
   reservation and start between agents of the instance.
 - Each Xvfb start writes a new MIT-MAGIC-COOKIE-1 for the display: Xvfb reads
-  `run/xauth.server`, panes get `run/xauth` (both 0600). Programs that edit
+  `run/xauth.server`, terminals get `run/xauth` (both 0600). Programs that edit
   their `XAUTHORITY` file cannot leave the server without a cookie, which
   would let any local user in. Xvfb runs with `-nolisten tcp`, a 2560×1440
   screen, in its own session so that it survives the agent and the ssh
   connection, and with `-terminate 60`: it exits a minute after its last
   client disconnected. Its clients are the programs, the agent's window
   manager while the core is connected, and the display keeper while the
-  instance's terminal core or the herdr server runs, so the display belongs
-  to the servers whose terminals and panes have `DISPLAY`: it stays while
-  they may start programs and ends soon after both stopped (once the
-  programs have exited too).
+  instance's terminal core runs, so the display belongs to the server whose
+  terminals have `DISPLAY`: it stays while they may start programs and ends
+  soon after the terminal core stopped (once the programs have exited too).
 - The keeper (`internal/agent/guikeep.go`) is the agent binary run as
   `gui-keep`, in its own session: it holds a connection to the display and
-  checks every 5 s that the instance's terminal core (`run/hc.sock`) or the
-  session's herdr server still runs (the user's process listening on the
-  socket, by peer credentials and start time); a server restarted within
-  30 s is followed (so is a terminal core's successor after a restart),
-  and once neither runs it exits. The core asks the agent for one (action
-  `keep`, audited as `gui.keep`) once the display is ready and each time
-  the machine's terminal core or herdr server becomes reachable again (a
-  keeper started while they were down has left), except in read-only mode,
-  and the agent starts one after starting herdr's server from the UI. One runs per instance (`run/gui-keep.lock`); it logs to
+  checks every 5 s that the instance's terminal core (`run/hc.sock`) still
+  runs (the user's process listening on the socket, by peer credentials and
+  start time); a terminal core restarted within 30 s is followed (so is its
+  successor after a restart), and once none runs it exits. The core asks
+  the agent for one (action `keep`, audited as `gui.keep`) once the display
+  is ready and each time the machine's terminal core becomes reachable
+  again (a keeper started while it was down has left), except in read-only
+  mode. One runs per instance (`run/gui-keep.lock`); it logs to
   `~/.herdr-ide/gui-keep.log`. The agent connects once right after starting
   Xvfb, so a display nobody attaches to exits too. xorg-server before 21.1
   lacks the delay: such a server exits as soon as its last client leaves,
   and one that never got a client stays until an agent attaches.
 
-**Terminals and panes** (`internal/server/gui.go`, `internal/server/term.go`,
+**Terminals** (`internal/server/gui.go`, `internal/server/term.go`,
 `internal/gui`)
 
 - When the GUI setting is on for a machine, the core adds `DISPLAY` and
   `XAUTHORITY` to the `env` of the terminal core's `terminal.run`
-  ([22](22-terminal-protocol.md)) and of herdr's `workspace.create`,
-  `tab.create` and `pane.split` for that remote machine once its display is
-  ready (verified as the instance's own). In a terminal's `env` the
-  display's variables replace those of the client, so a client cannot
-  point new terminals at another display; a malformed `env` is refused.
-  For herdr's panes variables the browser set win. The audit log records
+  ([22](22-terminal-protocol.md)) for that remote machine once its display
+  is ready (verified as the instance's own). The display's variables
+  replace those of the client, so a client cannot point new terminals at
+  another display; a malformed `env` is refused. The audit log records
   which variables were added.
-- Terminals and panes created otherwise (before the display existed, by
-  another client, in herdr's own UI or CLI) keep their environment: a shell
-  gets its variables when it starts. "Enable in open panes" (settings
-  dialog, per machine: every terminal of the machine's terminal core), the
-  palette command for the focused pane's terminal and, in the macOS
-  application, **Enable Program Windows Here** in a terminal's menu
-  (`POST /api/m/{id}/gui/enable`, `{"terminals": [...]}`, empty for all;
-  `{"panes": [...]}` for herdr's panes) catch them up without restarting anything: for
-  each pane the core asks herdr for the shell and its foreground process
-  group (`pane.process_info`), for each terminal the terminal core for its
-  record now (`terminal.get`: the program's `pid` and the `foreground`
+- Terminals created otherwise (before the display existed, or with
+  herdr-core's own commands) keep their environment: a shell gets its
+  variables when it starts. "Enable in open panes" (settings dialog, per
+  machine: every terminal of the machine's terminal core), the palette
+  command for the focused pane's terminal and, in the macOS application,
+  **Enable Program Windows Here** in a terminal's menu
+  (`POST /api/m/{id}/gui/enable`, `{"terminals": [...]}`, empty or absent
+  for all) catch them up without restarting anything: for each terminal
+  the core asks the terminal core for its record now (`terminal.get`: the program's `pid` and the `foreground`
   process group's leader; the shell waits at its prompt when it leads the
   group), and the agent which shells were started with the display
   (`/proc/<pid>/environ`, action `shells`, which also reports each
@@ -107,21 +101,20 @@ input methods.
   again right before) gets Ctrl-C, which discards a half-typed command line,
   and after 200 ms
   ` export DISPLAY='…' XAUTHORITY='…'` (values single-quoted, leading space
-  to keep it out of history where enabled; into a pane with
-  `pane.send_text`, into a terminal as input of a short-lived attach at the
-  terminal's own size, so typing resizes nothing); a
-  pane running a program (an agent, an editor, a program that replaced its
-  shell with `exec`) is not typed into and is reported, with the command to
-  copy. A shell busy with a builtin (`read`) looks idle and gets the text.
-  Unreachable panes are skipped and reported; the audit record lists the
-  panes typed into even when the request fails. The core remembers the shells it typed
+  to keep it out of history where enabled; as input of a short-lived
+  attach at the terminal's own size, so typing resizes nothing); a
+  terminal running a program (an agent, an editor, a program that replaced
+  its shell with `exec`) is not typed into and is reported, with the
+  command to copy. A shell busy with a builtin (`read`) looks idle and gets
+  the text. Unreachable terminals are skipped and reported; the audit
+  record lists the terminals typed into even when the request fails. The core remembers the shells it typed
   into until it restarts. A program already running keeps its environment:
   an agent started before has to be restarted from a shell that has the
   display.
 - On machines with a working VirtualGL EGL back end (`vglrun` found, its
-  `eglinfo egl0` succeeds) panes also get `VGL_DISPLAY=egl0`, so
+  `eglinfo egl0` succeeds) terminals also get `VGL_DISPLAY=egl0`, so
   `vglrun program` renders on the GPU without a 3D X server. With
-  `gui.gpu` set to `all` panes get VirtualGL's `LD_PRELOAD` and `VGL_ISACTIVE=1`, as
+  `gui.gpu` set to `all` terminals get VirtualGL's `LD_PRELOAD` and `VGL_ISACTIVE=1`, as
   if the shell ran under `vglrun`.
 
 **Window manager and capture** (agent `internal/agent/guiwm.go`)
@@ -183,11 +176,9 @@ input methods.
   extension; where it runs from `/proc/<pid>/environ` (or its nearest
   ancestor's that names one): its terminal from `HC_TERMINAL_ID` when
   `HC_TERMINAL_SOCKET` is the instance's terminal core (`run/hc.sock`;
-  terminals of the user's own herdr-core are not named), its herdr pane
-  from `HERDR_PANE_ID` and `HERDR_SOCKET_PATH`. The window record carries
-  `terminal` and `pane`; the core keeps the pane only when the socket is
-  the machine's herdr session. The macOS application lists a window under
-  its terminal ([23](23-macos-application.md)).
+  terminals of the user's own herdr-core are not named). The window record
+  carries `terminal`; the macOS application lists a window under its
+  terminal ([23](23-macos-application.md)).
 - Input arrives in window coordinates and is replayed with XTEST: pointer
   motion, buttons, wheel steps (buttons 4–7) and keys as X keycodes. The
   browser sends the physical key (`KeyboardEvent.code` → evdev code + 8), so
@@ -345,9 +336,9 @@ turning it on pushes the encoder if needed.
 | JPEG rows as separate frames (parallel encoding without restart markers) | Every part carries its own headers (1–5% more bytes), is drawn at a different moment (tearing across a moving picture) and acknowledged on its own. |
 | A fixed number of frames in flight (three, before) | Three large pictures queue on a slow link (222 ms from capture to drawing at 10 Mbit/s), while three small video frames per round trip held video back to 31 frames per second with 87 ms round trips. |
 | The machine's libva (or a second encoder linked to it) | The encoder would not start at all where libva is missing; VA-API drivers do not link libva, so the built-in one loads them. A driver built for a newer VA-API than 1.24 is not found and the encoder uses VP8. |
-| Xvfb exiting six hours after its last client (before) | Outlived `herdr server stop` by hours as an orphan; the keeper ties the display to the server instead, while the short delay keeps it across a core restart. |
+| Xvfb exiting six hours after its last client (before) | Outlived the terminal server it served by hours as an orphan; the keeper ties the display to the terminal core instead, while the short delay keeps it across a core restart. |
 | `DISPLAY` only when asked | MuJoCo and matplotlib would need setup in every pane. With a display, `plt.show()` blocks until its window is closed, which is visible in the browser; machines where that is unwanted are turned off individually. |
-| Restarting herdr's server with `DISPLAY` set, or `terminal.default_shell` pointing at a wrapper | Restarting ends every pane and agent; a wrapper means editing the user's herdr configuration. |
+| Restarting the terminal core with `DISPLAY` set, or a wrapper as the shell | Programs inherit the core's environment, so every terminal would get a display the core may not have; a wrapper means changing the user's shell. |
 | Typing the export into every pane | Would land in agents' prompts and editors; only shells at their prompt are typed into. |
 
 ## Failure modes
@@ -399,13 +390,13 @@ turning it on pushes the encoder if needed.
 - **No MIT-SHM** (a display without the extension, or the segment failing)
   → captures go through the X connection (2.4 ms instead of 0.4 ms for a
   1706×960 window); logged once.
-- **Keeper not running** (killed, or herdr's server restarted more than
+- **Keeper not running** (killed, or the terminal core restarted more than
   30 s later while the core was away; while connected the core asks for a
-  new one when the server is back) → the display ends a minute after its
-  last client; the next connection of the core starts it again on the same
-  number if it is still free, with a new cookie that panes read from
-  `run/xauth`, otherwise panes created earlier point at a number another
-  server may hold (see Security).
+  new one when the terminal core is back) → the display ends a minute
+  after its last client; the next connection of the core starts it again
+  on the same number if it is still free, with a new cookie that terminals
+  read from `run/xauth`, otherwise terminals created earlier point at a
+  number another server may hold (see Security).
 - **Browser without WebCodecs or not in a secure context** (plain HTTP on a
   LAN) → it asks for no video and gets pictures; so does every viewer of a
   window one of whose viewers does not decode the stream.
@@ -435,18 +426,18 @@ reads frames from a pipe and writes packets to one. See
 
 `internal/agent/gui_test.go` runs a real Xvfb (skipped where there is none;
 `GUI_TEST_INSTALL=1` fetches the package): a helper program's window is
-announced with its pane, streamed, receives clicks and keys (also after a
+announced with its terminal, streamed, receives clicks and keys (also after a
 second window appeared) and is closed; plus cookie rotation, display
 reservation against another user's files and listeners (played by another
 uid in a private directory), the socket directory check, capture tiles,
 staging cleanup, library ownership and package pruning.
-`internal/agent/guiorigin_test.go` the origin of a window (a terminal of
-the instance's terminal core, not of another one, a herdr pane);
+`internal/agent/guiorigin_test.go` the terminal of a window (one of the
+instance's terminal core, not of another one);
 `internal/server/term_test.go` the display's variables in `terminal.run`
 (replacing the client's, a malformed `env`) and typing into a terminal's
 shell (its record read now, input at its own size), and
 `TestIntegrationTermShells` the same with a real herdr-core;
-`internal/gui/gui_test.go` covers pane environments (also per machine),
+`internal/gui/gui_test.go` covers terminal environments (also per machine),
 the export command's quoting, frame routing, forged acknowledgements and
 refresh floods, the read-only plan, the close grace period, preparing once
 per connection, the retry backoff, and detaching without an error when the
@@ -454,8 +445,8 @@ machine disconnects or is removed;
 `web/src/__tests__/guiError.test.ts` covers the status bar's error (shown
 on click, dismissed until the display failed anew, hidden for machines
 that are not connected);
-`internal/server/server_test.go` covers malformed `env` parameters and the
-Origin check of the close request;
+`internal/server/server_test.go` covers the Origin check of the close
+request;
 `internal/agent/gui_test.go` also covers recognizing shells started with the
 display (a process still in exec has an empty environment and is skipped),
 frame statistics and the flow (a simulated 10 Mbit/s link: the budget
@@ -463,14 +454,12 @@ settles near the bandwidth-delay product, acknowledgements in bursts do not
 inflate the rate, a round trip measured with a queue is measured again);
 `internal/jpegstrip` that one row group gives `image/jpeg`'s bytes and any
 number of groups its pixels; `internal/agent/guikeep_test.go` that the
-keeper follows a server that restarts, lasts while either server runs,
-leaves once both are gone, holds the display meanwhile and runs once per
-instance; `internal/gui/gui_test.go` that the keeper is asked for again
-when herdr's server or the terminal core comes back and never in read-only
-mode (nor is the encoder pushed), and that commands to
+keeper follows a terminal core that restarts, leaves once it is gone,
+holds the display meanwhile and runs once per instance;
+`internal/gui/gui_test.go` that the keeper is asked for again when the
+terminal core comes back and never in read-only mode (nor is the encoder pushed), and that commands to
 the agent are the core's; `internal/gui/gui_test.go` that they reach only the
-window's viewers; `internal/server/server_test.go` the environment merge;
-`web/src/__tests__/gui.test.ts` keycodes, paths, unseen windows and the
+window's viewers; `web/src/__tests__/gui.test.ts` keycodes, paths, unseen windows and the
 statistics shown. Video: `internal/agent/guivideo_test.go` runs the
 encoder's protocol against a stand-in process (key frames on request,
 codec strings, an encoder that exits or stops reading), installs with a wrong and the right
@@ -497,8 +486,8 @@ and 58 (90 ms, before 31 with three frames in flight). The desktop app's
 Electron decoded the same stream at 57–60 frames per second.
 matplotlib (TkAgg) and the MuJoCo viewer under `vglrun` were used end to end
 in Chrome on Ubuntu 24.04 machines, one with Xvfb installed and one where it
-was fetched without privileges. Enabling open panes was checked in an
-isolated herdr session with panes created by herdr's CLI: idle shells got
-the variables, a pane running a program was reported busy, a second call
-typed nothing; turning a machine off and back to the default in the
-dialog detached and re-attached its display.
+was fetched without privileges; turning a machine off and back to the
+default in the dialog detached and re-attached its display.
+`TestIntegrationTermShells` types into a real shell of a real herdr-core
+as enabling does: the shell waits at its prompt, the text runs and the
+terminal keeps its size.

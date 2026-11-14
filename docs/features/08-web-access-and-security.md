@@ -36,17 +36,14 @@ API and the code-server proxy on `127.0.0.1:7780` by default.
 4. **Read-only mode** (`--read-only`): terminals are shown but only
    observed: no input, size or focus reaches them, writing calls of the
    terminal protocol are refused and no terminal core is installed or
-   started ([22](22-terminal-protocol.md)); herdr's panes, for a client of
-   them, get no input, focus or colors, and a read-only client never takes
-   that session from a writable one ([18](18-endpoint-surfaces.md));
-   uploads, ssh authentication, bridge commands, VS Code, retrying machines
-   (`denied.retry`) and enabling or disabling them refused; herdr calls
-   limited to reads.
-5. **herdr API allowlist**: workspace/tab/pane/agent/layout/worktree methods,
-   snapshot and plugin actions; no `server.*`, integrations, plugin
-   installation, event streams or client-shell calls. The browser never
-   sends endpoint requests: the core composes `tab.focus` and `pane.focus`
-   for the shown tab.
+   started ([22](22-terminal-protocol.md)); uploads, ssh authentication,
+   bridge commands, VS Code, retrying machines (`denied.retry`) and
+   enabling or disabling them refused.
+5. **Terminal protocol allowlist**: clients reach the terminal core's
+   methods about terminals and documents only, never `machine.*`,
+   `file.*`, `server.*` or a call to another machine of that core;
+   attaching is a message of its own
+   ([22](22-terminal-protocol.md)).
 6. **CSP** on the UI (`script-src 'self'`, `frame-ancestors 'self'`, …).
 7. **Audit log** (`--audit-log`): JSON lines for connections, mutating calls,
    uploads, VS Code and bridge use, ssh authentication and denials, with the
@@ -66,7 +63,7 @@ with 0600 modes.
 | Electron as the only delivery format | Would exclude access from other devices. The optional [desktop shell](16-desktop-packaging.md) wraps the same web core; browser delivery remains available. |
 | Tauri desktop app | macOS WKWebView does not provide service workers to arbitrary origins; VS Code webviews (Git Graph, media preview) break. |
 | Built-in password login | Duplicates what proxies do better (SSO, 2FA, device trust); authentication is delegated to the proxy by design. |
-| Blocklist of dangerous herdr methods | New herdr methods would be exposed by default. |
+| Blocklist of dangerous terminal core methods | New methods would be exposed by default. |
 
 ## Failure modes
 

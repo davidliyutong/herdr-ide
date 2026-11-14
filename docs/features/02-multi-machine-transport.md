@@ -7,10 +7,9 @@ The user's machines are reached over ssh with their own `~/.ssh/config`
 (lab workstations, GPU servers, robots) running Linux or macOS on amd64 or
 arm64, sometimes with old userlands, sometimes without internet access. The
 core needs many concurrent channels per machine: the terminal core's API
-and terminal streams ([21](21-terminal-core.md)), herdr API calls and the
-pane surface of herdr's shown tab for a client of herdr's panes, file reads,
-uploads, a code-server proxy and a reverse channel for the VS Code
-extension.
+and terminal streams ([21](21-terminal-core.md)), agent detection, file
+reads, uploads, program windows, a code-server proxy and a reverse channel
+for the VS Code extension.
 
 ## Goals / non-goals
 
@@ -18,7 +17,7 @@ Goals: reuse the user's ssh setup unchanged; no listening ports on machines;
 no runtime dependencies on machines (no Node, Python or specific glibc);
 bounded ssh session count; the same code path for the local machine.
 
-Non-goals: managing ssh keys or herdr installations; Windows machines.
+Non-goals: managing ssh keys; Windows machines.
 
 ## Design
 
@@ -48,7 +47,7 @@ Non-goals: managing ssh keys or herdr installations; Windows machines.
   auth_required, error, disabled; reconnect backoff 0.5 s doubling to 120 s;
   auth failures retry every 30 s or immediately after the UI's
   authentication terminal closes. A machine is *ready* as soon as its agent
-  answers `hello`, with or without herdr. The UI's **Retry**, offered to
+  answers `hello`. The UI's **Retry**, offered to
   writable browsers in every state but *ready* and *disabled*, ends the
   backoff wait; read-only browsers cannot retry (`denied.retry`), since an
   attempt may start an ssh login.
@@ -59,27 +58,15 @@ Non-goals: managing ssh keys or herdr installations; Windows machines.
   terminals work there. While that connection lasts the agent also tells
   which coding agents run in the terminals and what they do
   ([25](25-agent-detection.md)).
-- **herdr is optional.** herdr's snapshot and tab layouts are fetched every
-  5 s and after herdr's events while herdr
-  answers. When two fetches in a row fail, the machine drops them and
-  shows why (`herdr_error`) but stays *ready*; nothing is logged, and the
-  subscription to herdr's events is tried again after 1 s, doubling to
-  30 s. No client of this build uses them: the browser UI and the macOS
-  application show the terminal core's terminals.
-- **herdr API requests over the agent.** herdr drops an API connection whose
-  request has not arrived 5 s after it accepted it. The core sends the
-  request right behind the stream's header (`Session.OpenWith`) instead of
-  after the agent's reply, so the request does not wait for a round trip
-  through the reply direction, where pane surfaces and program windows may
-  be queued on a slow link.
 - **Machines.** The core keeps its own list of machines in
   `machines[-<instance>].json` beside its settings file
   ([reference](../reference.md#files-and-directories)): one record per SSH
   machine (`id`, `label`, `kind: "ssh"`, `target`, `enabled`), and one of
   the local machine (its `enabled` flag) once it was enabled or disabled.
   Every change is written at once (atomically, 0600). The first time a core
-  of an instance starts without the file, it imports herdr's saved machines
-  (`~/.local/state/herdr/client/endpoints.json`) with their labels and
+  of an instance starts without the file, it imports the SSH machines saved
+  by herdr, the terminal multiplexer an earlier version drew its panes from
+  (`~/.local/state/herdr/client/endpoints.json`), with their labels and
   enabled flags, and the choices an earlier version kept in the same file;
   after that herdr's catalog is never read. Machines given with `--ssh`
   are not stored: changes to them last until the core stops. `--local-only`
@@ -103,13 +90,13 @@ Non-goals: managing ssh keys or herdr installations; Windows machines.
   its host's name). **Remove machine…** asks first (`DELETE /api/m/{id}`):
   the record goes, the machine's session ends as disabling does (waiting up
   to 15 s), and browsers that showed it move to another machine and close
-  its VS Code panel; nothing on the machine is removed, its terminal core,
-  terminals and herdr server keep running. The local machine cannot be
+  its VS Code panel; nothing on the machine is removed, its terminal core
+  and terminals keep running. The local machine cannot be
   removed. `PUT /api/m/{id}/enabled` (`{"enabled": bool}`) enables or
   disables a machine: stored and applied at once. Disabling ends the
   session (the agent exits and stops the code-server it started; programs
-  keep running in the terminal core and in herdr), drops the machine's
-  snapshot and shows it as *disabled*; enabling connects it. Disabling a
+  keep running in the terminal core) and shows it as *disabled*; enabling
+  connects it. Disabling a
   connected machine asks first. The
   sidebar folds disabled machines, so their Enable button shows only when
   the user opens one; disabling a machine folds it and enabling it unfolds
@@ -139,11 +126,10 @@ Non-goals: managing ssh keys or herdr installations; Windows machines.
 | Option | Why not |
 | --- | --- |
 | `ssh -L`/`-R` unix-socket forwarding over a ControlMaster | Each pane stream would be an ssh exec session (MaxSessions limit); depends on sshd allowing stream-local forwarding; stale remote sockets need cleanup. |
-| herdr's own `remote-api-bridge` per request | One ssh exec plus one remote process per call; does not cover terminals, files or code-server. |
+| One ssh exec per request | One ssh exec plus one remote process per call (sshd's `MaxSessions`), and no way to stream terminals, files or code-server. |
 | Helper written in Node or Python | Not present on every machine; glibc and version constraints. |
 | Go `x/crypto/ssh` client instead of OpenSSH | Would not honour the user's ssh config (ProxyJump, Match blocks, agents, certificates). |
-| herdr's saved machines as the list (`herdr machine add`, `remove`, `rename` run by the core) | Needs herdr on the core host and its interactive add flow; machines are reached through the agent and its terminal core, not through herdr's machine profiles. |
-| Reading herdr's catalog at every start | The core's list would change with herdr's; one import keeps the user's machines without depending on herdr afterwards. |
+| Reading herdr's catalog at every start | The core's list would change with another program's; one import keeps the user's machines without depending on it afterwards. |
 | Node.js core (sharing TypeScript types with the UI) | A Go core and agent cross-compile to static binaries for every platform with no runtime on the host; the UI types are generated separately. |
 
 ## Failure modes
@@ -164,15 +150,9 @@ Non-goals: managing ssh keys or herdr installations; Windows machines.
   other instances' (the control directory is per user, not per instance),
   keep running until they end or its checks end them. A password or 2FA
   login is needed for the new master, as for any new connection.
-- **Slow or congested link** → yamux's keepalive tolerates 30 s, while
-  herdr wants each API request within 5 s of accepting the connection;
-  sending the request with the stream header keeps snapshots working.
-- **herdr does not answer while the agent is connected** → the machine is
-  *ready* without herdr's snapshot (`herdr_error`); fetches retry every
-  5 s. Nothing starts a herdr server by itself: the status block's
-  **Start herdr** or the menu's **Restart herdr…** does
-  ([17](17-local-herdr-management.md)). When the agent finds no herdr
-  executable there, the status block says so and offers **Install herdr**.
+- **The terminal core does not answer** → the machine stays *ready*; its
+  `hc` state shows the backend's code, and the machine's menu offers to
+  start or restart the terminal core ([21](21-terminal-core.md)).
 - **Adding a machine that cannot be reached** (unknown host, refused
   connection) → it is stored and shows *error* with ssh's message, retried
   with the backoff; remove it or fix the ssh configuration. One that needs
@@ -193,19 +173,17 @@ Non-goals: managing ssh keys or herdr installations; Windows machines.
 ## Testing
 
 `internal/agent/agent_test.go` (agent over the in-process transport, file
-ops, exec, dial restrictions), `internal/transport/*_test.go` (ssh error
-classification, arch normalization, quoting, control directory checks, a
-request sent with the header reaches the agent before its reply, the
+ops, dial restrictions), `internal/transport/*_test.go` (ssh error
+classification, arch normalization, quoting, control directory checks, the
 lost-session hook runs only when the session ends by itself, the control
 master is stopped (`-O stop`) only while ssh stays up),
 `internal/machines/machines_test.go` (herdr's catalog imported once, also
 when empty, never again; the earlier file's enabled choices migrated, the
-local machine's included; records written 0600 without the herdr
-session, read back; a damaged file reported and left alone; an unreadable
-catalog imports and writes nothing; the order of the local, stored and
-`--ssh` machines; a machine is ready without herdr, drops the snapshot and
-logs nothing; disabling at runtime ends the session and forgets the
-snapshot, enabling connects again, both stored; machines added at runtime
+local machine's included; records written 0600 and read back; a damaged
+file reported and left alone; an unreadable catalog imports and writes
+nothing; the order of the local, stored and `--ssh` machines; a machine is
+ready once its agent answers and logs nothing; disabling at runtime ends
+the session, enabling connects again, both stored; machines added at runtime
 are stored and connect, a known id or target is refused, removed ones end
 their session, lose their record and publish nothing more, the local
 machine cannot be removed; renaming stores the label for stored machines,
@@ -227,7 +205,6 @@ stopping the terminal core, one action at a time),
 header, a machine's terminals followed when shown, starting a terminal
 core that failed), `web/src/__tests__/addMachine.test.ts` (the form's
 checks, a removed machine takes its VS Code panel along),
-`macos/Tests/TermKitTests` (the machine state's `hc`),
-`internal/herdr/client_test.go` (requests sent with the dial), `make it`
-for herdr streams. Verified manually against eight Ubuntu x86_64 hosts and
+`macos/Tests/TermKitTests` (the machine state's `hc`), `make it` for the
+terminal core's streams. Verified manually against eight Ubuntu x86_64 hosts and
 an arm64 Ubuntu VM.

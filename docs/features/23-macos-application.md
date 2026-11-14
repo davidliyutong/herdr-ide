@@ -47,11 +47,10 @@ terminal core, which get no virtual display; Linux and Windows.
   after reconnecting; calls waiting fail with `unavailable` and open
   streams close with `disconnected`. A stream's delegate is registered when
   `attached` arrives, before the next message is read.
-- `EventConnection` is the client of `/ws` as an events client
-  (`/ws?events=1`, as the browser UI is), which takes no part in herdr's
-  pane session ([18](18-endpoint-surfaces.md)). It decodes `machines`, `machine` and
-  `gui` and ignores every other message; after reconnecting the core sends
-  the whole state again.
+- `EventConnection` is the client of the event channel `/ws`, as the
+  browser UI is. It decodes `machines`, `machine`, `gui`, `settings` and
+  `keybindings` and ignores every other message; after reconnecting the
+  core sends the whole state again.
 - `TerminalStore` keeps each machine's backend state and terminal records
   from `backend`, `snapshot` and `event`, applying events as the core does.
 - `Layout` is the machine's layout document, version 2
@@ -66,7 +65,7 @@ terminal core, which get no virtual display; Linux and Windows.
 **App** (`macos/Sources/App`, AppKit).
 
 - `AppModel` follows the machines and their program windows from the
-  events client's messages and subscribes to the machine the user selects,
+  event channel's messages and subscribes to the machine the user selects,
   for the window's life: the first subscription makes the core install and
   start that machine's terminal core, so a machine nobody turned to gets
   none, and its row lists no terminals. It loads a machine's layout when
@@ -150,7 +149,7 @@ terminal core, which get no virtual display; Linux and Windows.
   text, written with `PUT /api/settings` and read back. Names,
   descriptions and options are the web UI's strings for the same keys;
   per-machine values are set in the browser UI.
-- **Program windows** (`GuiWindows.swift`). The events client's `gui`
+- **Program windows** (`GuiWindows.swift`). The event channel's `gui`
   messages list the windows on the machines' virtual displays
   ([14](14-gui-windows.md)); they appear under their machine in the
   sidebar, and one opens in a window of its own whose web view shows the
@@ -181,8 +180,8 @@ builds the application that ships:
    bundles and the localized strings into `Contents/Resources`
    (`Bundle.app` is the package's bundle under SwiftPM and the main bundle
    under Xcode).
-4. The script adds the core and herdr to `Contents/Resources/bin` and the
-   licenses, signs those two executables and then the bundle with the
+4. The script adds the core to `Contents/Resources/bin` and the licenses,
+   signs the core and then the bundle with the
    hardened runtime, and checks the result with
    `codesign --verify --deep --strict`. `SIGN_IDENTITY` names a Developer
    ID certificate; without it the signature is ad hoc, like the Electron
@@ -209,7 +208,6 @@ builds the application that ships:
 | A native editor instead of VS Code | VS Code with its extensions, on the machine, is the feature; the proxy and the bridge extension already serve it. |
 | Subscribing to every machine at launch | Every connected machine would get a terminal core that outlives the application, used or not. |
 | Polling `GET /api/machines` and `GET /api/gui` | A change shows up to 3 s late and every poll transfers every machine's state; `/ws` pushes each change once. |
-| `/ws` as a client of herdr's panes | Such clients take part in herdr's session ownership: a native window would take the session away from another client. An events client takes none. |
 | Opening a terminal into a layout not read yet | The document read afterwards would replace the layout and leave the terminal in no workspace; the terminal waits for the layout instead. |
 
 ## Failure modes
@@ -255,13 +253,12 @@ See the row for the macOS application in
 them (line suffixes, `~`, relative, `file:` URLs, other schemes) and the
 names of their local copies, frame encoding and slices,
 terminal names, the store's snapshots and every event kind (detected
-agents and the count of terminals that wait included), the events
-client's messages (a machine's terminal core state, a window's terminal), every layout vector of `design/testdata/layout`
+agents and the count of terminals that wait included), the event
+channel's messages (a machine's terminal core state, a window's terminal), every layout vector of `design/testdata/layout`
 ([22](22-terminal-protocol.md)), the core's arguments, environment and
 ready line, a missing core, and the localization checks of
 [12](12-internationalization.md). `internal/brand/brand_test.go` keeps
-`Brand.swift` in step and `TestEventsClientStaysOutOfThePaneSession` the
-events client out of the pane session. The window is
+`Brand.swift` in step. The window is
 exercised by hand with the development aids of debug builds
 (`HERDR_IDE_ACTIONS`, `HERDR_IDE_SNAPSHOT`, see
 [reference](../reference.md#environment-variables)) against

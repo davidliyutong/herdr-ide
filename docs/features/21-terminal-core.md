@@ -2,10 +2,9 @@
 
 ## Context
 
-herdr-core (`hc`) is a terminal server by herdr's authors, separate from the
-herdr that draws tabs and panes ([01](01-herdr-integration.md)): it keeps
-terminals and their programs alive, hands a viewer a terminal's raw output,
-and stores small JSON documents for its clients. It knows no workspaces,
+herdr-core (`hc`, github.com/herdrdev/herdr-core) is a terminal server: it
+keeps terminals and their programs alive, hands a viewer a terminal's raw
+output, and stores small JSON documents for its clients. It knows no workspaces,
 tabs or panes. One account can run several cores side by side, one per
 session name.
 
@@ -45,7 +44,7 @@ against a running core by the integration tests):
 ## Goals / non-goals
 
 Goals: a terminal core per machine that belongs to herdr-ide's instance and
-shares nothing with a herdr or herdr-core the user runs; its executable
+shares nothing with a herdr-core the user runs; its executable
 delivered through the agent, verified; a Go client of the API whose
 backpressure reaches the slowest hop.
 
@@ -117,9 +116,9 @@ machine's menu ([02](02-multi-machine-transport.md)).
 
 | Option | Why not |
 | --- | --- |
-| A named session of the user's herdr (`herdr --session`) | Still needs herdr installed on every machine, and herdr renders a tab's grid for one foreground client: several viewers of a pane and client-side rendering are not possible. |
-| herdr-core's default session | Its terminals, documents and restarts would be shared with the user's Herdr app and `hc` commands. |
-| Private XDG directories for the core | Programs inherit the core's environment, so the directories would reach the user's shells and tools (the reason [15](15-bundled-herdr.md) rejected a private herdr profile). A session name moves the state without them. |
+| A terminal multiplexer that renders panes itself (tmux and the like) | Needs it installed on every machine, and it renders a tab's grid for one foreground client: several viewers of a terminal and client-side rendering are not possible. |
+| herdr-core's default session | Its terminals, documents and restarts would be shared with the user's own herdr-core clients and `hc` commands. |
+| Private XDG directories for the core | Programs inherit the core's environment, so the directories would reach the user's shells and tools. A session name moves the state without them. |
 | herdr-core's default socket path | Depends on `XDG_RUNTIME_DIR` and the state directory, which the agent would have to mirror; the run directory is already private and short. |
 | A versioned install directory per digest | The core starts its holders and its successor from its own path; a fixed path replaced by rename is what herdr-core's updater does. |
 | Reaching machines through `hc connect` over ssh | A second ssh session and installation path per machine beside the agent's; the agent already multiplexes one session. |

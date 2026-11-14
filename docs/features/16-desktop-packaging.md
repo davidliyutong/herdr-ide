@@ -12,7 +12,8 @@ HTTP, WebSocket and service-worker behavior.
 
 Goals: reproducible dependency resolution, native macOS arm64/x64 `.app`
 and DMG builds, automatic core ownership and cleanup, safe renderer windows,
-and a development mode that cannot connect to the default herdr session.
+and a development mode that cannot touch the daily instance's state or
+terminals.
 
 Non-goals: Windows/Linux installers, universal binaries, automatic updates, Developer ID signing/notarization,
 or replacing browser access. The shell and packaging configuration are
@@ -55,18 +56,15 @@ implemented independently.
   the web dictionaries; exit codes and similar details are appended as is.
 - Production uses loopback port 7781 and instance `desktop`. A stable origin
   preserves browser settings; an explicit port override is available. Dev
-  uses port 7791, instance `dev`, local-only and local/remote session
-  `herdr-ide-dev`. Unpackaged runs always use dev mode, and packaged runs can
+  uses port 7791, instance `dev` (terminal core session `herdr-ide-dev`)
+  and local-only. Unpackaged runs always use dev mode, and packaged runs can
   opt into it. Both modes have separate Electron profiles and single-instance
   locks. Closing the main window quits; a second launch focuses it.
 - Finder PATH gains common binary locations without executing a shell.
-  The app carries the release's herdr and its notices in
-  `Contents/Resources/bin/herdr` and `licenses/herdr/`, beside the core, which
-  uses it only when no installed herdr is found
-  ([15](15-bundled-herdr.md)), and the notices of the herdr-core its core
-  embeds in `licenses/herdr-core/` ([21](21-terminal-core.md)). OpenSSH is
-  user-installed. The desktop shell
-  does not start or stop terminal cores or herdr's servers; the web UI
+  The app carries the notices of the herdr-core its core embeds in
+  `licenses/herdr-core/` ([21](21-terminal-core.md)) and of herdr's agent
+  detection rules in `licenses/herdr-detect/`. OpenSSH is user-installed.
+  The desktop shell does not start or stop terminal cores; the web UI
   starts, restarts and stops a machine's terminal core
   ([22](22-terminal-protocol.md)). All inherited environment and SSH configuration
   remain available to the core.
@@ -144,7 +142,7 @@ implemented independently.
   existing orphan-reaping and idle-timeout protection.
 - The local terminal core fails to start: the machine's status in the web
   UI shows the error and offers **Start terminal core**; the desktop shell
-  does not start or alter terminal cores or herdr sessions.
+  does not start or alter terminal cores.
 - Downloaded ad-hoc signed app blocked by Gatekeeper: explicit user approval
   can be required; this build is not a notarized distribution.
 
@@ -182,8 +180,8 @@ isolation arguments, URL and permission policy, the accepted theme values, the
 preload's functions (`preload.test.ts`, against a stand-in for Electron) and
 dropped files' paths, shortcut matching, spawn failures, malformed
 readiness, ephemeral ports, unexpected exits, late child errors and idempotent
-child shutdown, using fake Node children and no network or real herdr
-sessions. `make check test` includes desktop type, format and unit checks
+child shutdown, using fake Node children and no network or real terminal
+cores. `make check test` includes desktop type, format and unit checks
 (outside macOS without downloading Electron). macOS CI packages the app for
 pull requests and `main`; the release workflow builds and publishes the
 DMGs. Packaged smoke tests use `HERDR_IDE_DESKTOP_DEV=1` and an

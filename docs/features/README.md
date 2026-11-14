@@ -8,9 +8,8 @@ shortcuts, paths) lives in [reference.md](../reference.md).
 
 | # | Feature | Summary |
 | --- | --- | --- |
-| 01 | [herdr integration](01-herdr-integration.md) | Talk to herdr through its public socket API and its endpoint protocol instead of embedding its TUI. |
 | 02 | [Multi-machine transport](02-multi-machine-transport.md) | One ssh session per machine running a static agent; yamux multiplexing; platform detection and upload. |
-| 04 | [Layout and keyboard](04-layout-and-keyboard.md) | Workspaces, tabs and split panes of the machine's layout document; herdr's prefix keys as default bindings, direct shortcuts of the applications; command palette. |
+| 04 | [Layout and keyboard](04-layout-and-keyboard.md) | Workspaces, tabs and split panes of the machine's layout document; prefix keys as default bindings, direct shortcuts of the applications; command palette. |
 | 05 | [VS Code panel](05-vscode-panel.md) | code-server per machine behind the core's proxy; bridge extension; Git Graph and diffs. |
 | 06 | [Quick Look and files](06-quick-look-and-files.md) | Path detection in terminals, media preview with range streaming, uploads for agents, downloads with folders as zips. |
 | 07 | [Agent-native workflow](07-agent-native-workflow.md) | Attention inbox, notifications, starting agents, sending code to agents. |
@@ -21,10 +20,7 @@ shortcuts, paths) lives in [reference.md](../reference.md).
 | 12 | [Internationalization](12-internationalization.md) | English and Chinese UI, translated extension, codes instead of server prose. |
 | 13 | [Settings, keybindings and appearance](13-settings-and-appearance.md) | One settings and one keybinding system in the core, VS Code style files, settings UIs generated from definitions in every client; themes, terminal font, colors and cursor. |
 | 14 | [GUI windows](14-gui-windows.md) | Windows of programs on remote machines in browser windows: user-space Xvfb, per-window capture, VirtualGL. |
-| 15 | [Bundled herdr](15-bundled-herdr.md) | Release archives carry the native herdr, verified at build time and used when no herdr is installed. |
 | 16 | [Desktop packaging](16-desktop-packaging.md) | macOS Electron shell, owned core lifecycle, `.app` and DMG builds. |
-| 17 | [Managing herdr from the UI](17-local-herdr-management.md) | Start, stop and update the core host's herdr; a managed copy of the bundled herdr; herdr's own `--remote` update for SSH machines. |
-| 18 | [Pane surfaces through herdr's endpoint](18-endpoint-surfaces.md) | One connection per shown machine to herdr's client socket; endpoint protocol generation 1; one browser owns the session at a time. |
 | 19 | [Formulas in panes](19-formulas-in-panes.md) | LaTeX under the resting pointer typeset by KaTeX in a popover; the spellings agents print, also without dropped backslashes. |
 | 21 | [herdr-core terminal core](21-terminal-core.md) | A herdr-core of the agent's own on each machine, in a session apart from the user's, and a client of its API: terminals as raw byte streams with credit. |
 | 22 | [Terminal protocol for clients](22-terminal-protocol.md) | `/api/v1/term`: a machine's terminals, their events and raw byte streams for clients that emulate and draw terminals themselves, and the layout document those clients share. |

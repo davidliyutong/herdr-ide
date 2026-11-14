@@ -9,11 +9,10 @@ here; both READMEs link to this page instead of repeating it.
 | Command | Description |
 | --- | --- |
 | `herdr-ide [serve] [flags]` | Run the server (default command). |
-| `herdr-ide herdr [args]` | Run the herdr bundled beside the core with `args` and the caller's environment unchanged (for hosts without an installed herdr), e.g. `herdr-ide herdr machine list`. |
 | `herdr-ide fetch-assets [flags] DIR` | Download and verify code-server releases and extensions into `DIR` for air-gapped installs. |
 | `herdr-ide version` | Print the version. |
 | `herdr-ide-agent serve [--instance NAME]` | Per-machine helper; started by the core over ssh, never by hand. |
-| `herdr-ide-agent gui-keep --instance NAME --session S` | Holds a machine's virtual display while the instance's terminal core or the herdr server of session `S` runs; started by the agent, never by hand. |
+| `herdr-ide-agent gui-keep --instance NAME` | Holds a machine's virtual display while the instance's terminal core runs; started by the agent, never by hand. |
 
 ## `serve` flags
 
@@ -25,7 +24,7 @@ here; both READMEs link to this page instead of repeating it.
 | `--allowed-origin` | – | Public origin of the reverse proxy, e.g. `https://ide.example.com` (repeatable). Host and Origin headers are checked against loopback plus these. |
 | `--proxy-secret-file` | – | File with a secret (≥ 16 characters) that the reverse proxy sends in `X-herdr-ide-Proxy-Secret`. Required for requests not coming from loopback. |
 | `--insecure-listen` | `false` | Accept a non-loopback `--listen` without a proxy secret. Anyone reaching the port gets shell access to every machine. |
-| `--read-only` | `false` | Watch only: terminals get no input (they observe), writing terminal core calls (layout changes, new and ended terminals), mutating herdr calls, uploads, ssh authentication and VS Code are refused, and no terminal core is installed or started. |
+| `--read-only` | `false` | Watch only: terminals get no input (they observe), writing terminal core calls (layout changes, new and ended terminals), uploads, ssh authentication and VS Code are refused, and no terminal core is installed or started. |
 | `--audit-log` | – | Append security-relevant events (connections, mutating API calls, uploads, VS Code and bridge use, denials) as JSON lines. |
 | `--user-header` | – | Header holding the authenticated user for the audit log. Without it, `Tailscale-User-Login`, `X-Forwarded-User`, `X-Auth-Request-User`, `Remote-User` and `X-Forwarded-Email` are tried. |
 
@@ -33,12 +32,10 @@ here; both READMEs link to this page instead of repeating it.
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--local-session` | `default` | herdr session used on the local machine. |
-| `--remote-session` | – | herdr session used on every remote machine instead of herdr's default (development and tests against an isolated session). |
 | `--local-only` | `false` | Do not connect to the stored SSH machines (`--ssh` targets are still used). |
 | `--machine` | – | Connect only these machines, by id, label or ssh target (repeatable). |
 | `--ssh` | – | Extra ssh target (`~/.ssh/config` alias or `user@host`) for this run, not stored; renaming or disabling it in the UI lasts until the core stops (repeatable). |
-| `--instance` | – | State instance: machines use `~/.herdr-ide-<instance>` instead of `~/.herdr-ide`, with separate sockets, code-server process and settings. Lets a development core run next to the daily one. |
+| `--instance` | – | State instance: machines use `~/.herdr-ide-<instance>` instead of `~/.herdr-ide`, with separate sockets, terminal core (session `herdr-ide-<instance>`), code-server process and settings. Lets a development core run next to the daily one. |
 
 ### code-server
 
@@ -122,7 +119,7 @@ platform, changed in **Settings → Keyboard shortcuts** or in
 separated by spaces (`ctrl+b c`: ctrl+b, then c within 3 s). The first
 stroke needs `cmd`, `ctrl` or `alt` (or is a function key).
 
-The defaults keep herdr's prefix keymap (prefix `ctrl+b`) on every platform:
+The defaults have a prefix keymap (prefix `ctrl+b`) on every platform:
 
 | Keys | Command | Keys | Command |
 | --- | --- | --- | --- |
@@ -193,15 +190,14 @@ browser's menu shows instead.
 | `HERDR_IDE_BRIDGE_SOCKET` | set by the agent for code-server | Socket of the VS Code bridge extension. |
 | `HERDR_IDE_CORE` | `pnpm -C web dev`, the macOS application | Core URL the Vite dev server proxies to (default `http://127.0.0.1:7780`); the macOS application uses that core instead of starting the one in its bundle. |
 | `SIGN_IDENTITY`, `NOTARY_PROFILE` | `make macos-app` | A code-signing certificate's name (default `-`, an ad hoc signature) and a `notarytool` keychain profile; with both the application is notarized and stapled. `SKIP_CORE=1` reuses the core in `dist/`; `OUT_DIR` is where the `.app` goes (default `dist/macos`). |
-| `HERDR_IDE_DEV` | the macOS application | `1` starts the bundled core as instance `dev` with the development sessions, like `make dev-desktop`. |
+| `HERDR_IDE_DEV` | the macOS application | `1` starts the bundled core as instance `dev`, local-only, like `make dev-desktop`. |
 | `HERDR_IDE_SNAPSHOT`, `HERDR_IDE_ACTIONS` | debug builds of the macOS application | Development aids: a path the window is written to as a PNG every two seconds, and actions run two seconds apart (`new`, `split-right`, `split-down`, `close`, `next-tab`, `workspace:<name>[:<cwd>]` (a new workspace with a terminal, without the dialog), `rename-workspace:<name>`, `close-workspace` (without asking), `next-workspace`, `type:<text>`, `find:<text>`, `find-next`, `open:<path>`, `code`, `page`, `settings`, `settings:<section>`, `keys` (the keyboard shortcuts page), `set:<key>=<json>` (a setting changed through the core), `strokes:<stroke> <stroke>…` (strokes given to the key matcher), `key:cmd+<key>`, separated by `;`). |
-| `HERDR_IDE_DESKTOP_DEV` | Electron | `1` forces isolated development even in a packaged app: instance `dev`, local-only, local/remote session `herdr-ide-dev`, separate Electron profile. Unpackaged Electron always uses this mode. |
+| `HERDR_IDE_DESKTOP_DEV` | Electron | `1` forces isolated development even in a packaged app: instance `dev` (terminal core session `herdr-ide-dev`), local-only, separate Electron profile. Unpackaged Electron always uses this mode. |
 | `HERDR_IDE_DESKTOP_PORT` | Electron | Loopback port (default `7781`, development `7791`); `0` chooses an ephemeral port, which gives a new browser storage origin. |
 | `ARCH` | `make desktop-app`, `make desktop-dmg` | `arm64` or `x64`; defaults to the host Node architecture. The Go core architecture is matched automatically. |
 | `VERSION` | desktop build | Semver for app metadata, DMG name and bundled core; a leading `v` (release tags such as `v0.2.0`) is kept for the core and dropped for the app metadata and DMG name. Without it the core reports `git describe` and the app uses the `desktop/package.json` version. |
-| `HERDR_BIN` | agent | herdr binary to use on a machine. Without it, an installed herdr is searched; the local machine falls back to its copy of the bundled one. |
-| `HERDR_TEST_BIN` | `make it` | herdr executable for the integration test (for example the bundled one); otherwise found on `PATH`. |
-| `XDG_STATE_HOME`, `XDG_CONFIG_HOME`, `HERDR_CONFIG_PATH`, `HERDR_SOCKET_PATH` | core, agent | Honoured like herdr does when locating its state, configuration and sockets. |
+| `HC_TEST_BIN` | `make it` | herdr-core executable for the integration tests; otherwise `hc` is found on `PATH`, and without one they are skipped. |
+| `XDG_STATE_HOME` | core | Where the SSH machines herdr saved are read from for the one-time import (`$XDG_STATE_HOME/herdr/client/endpoints.json`, default `~/.local/state/herdr/client/endpoints.json`). |
 
 ## Files and directories
 
@@ -211,9 +207,8 @@ On every machine (the agent's `$HOME`):
 | --- | --- | --- |
 | `~/.herdr-ide/agent/<build>/` | Uploaded agent binaries | Builds unused for 14 days are removed. |
 | `~/.herdr-ide/code-server/<version>/` | code-server releases (shared by instances) | Versions unused for 14 days are removed. |
-| `~/.herdr-ide/herdr/herdr` | Core host only: the application's copy of the bundled herdr (shared by instances) | Replaced by **Update** and by a newer bundled herdr; kept until removed. |
-| `~/.herdr-ide/herdr/server.log` | Output of the herdr server last started from the UI on that machine (core host or SSH machine) | Replaced at every start from the UI. |
-| `~/.herdr-ide[-<instance>]/run/` (0700) | `cs.sock`, `cs.pid`, `bridge.sock`; `gui.json` (reserved display and Xvfb pid), `xauth` (panes' display cookie) and `xauth.server` (Xvfb's copy), both 0600 and replaced at each Xvfb start, `gui.lock`, `gui-keep.lock` (held by the display keeper) | Sockets while the agent runs; the display files are kept so panes keep a valid environment. |
+| `~/.herdr-ide[-<instance>]/hc/herdr-core` (0700 directory) | The terminal core's executable, pushed by the core and accepted only with its SHA-256 | Replaced when the core brings another build; kept until removed. |
+| `~/.herdr-ide[-<instance>]/run/` (0700) | `hc.sock` (the terminal core's API socket, 0600) and its holders' sockets; `cs.sock`, `cs.pid`, `bridge.sock`; `gui.json` (reserved display and Xvfb pid), `xauth` (terminals' display cookie) and `xauth.server` (Xvfb's copy), both 0600 and replaced at each Xvfb start, `gui.lock`, `gui-keep.lock` (held by the display keeper) | Sockets while the agent (code-server, bridge) or the terminal core runs; the display files are kept so terminals keep a valid environment. |
 | `~/.herdr-ide/xvfb/<version>/` | Xvfb unpacked from the distribution's package (shared by instances) | Versions unused for 14 days are removed when another is unpacked. |
 | `~/.herdr-ide/video/<sha256 prefix>/encoder` | Video encoder pushed by the core (`gui-video`, shared by instances), run only while its SHA-256 matches | Builds unused for 14 days are removed when another is installed; unfinished installs after 1 h. |
 | `~/.herdr-ide[-<instance>]/xvfb.log` | Output of the last Xvfb started | Replaced at each start. |
@@ -229,8 +224,9 @@ downloaded themselves), the settings in `settings[-<instance>].json`, the
 keybindings in `keybindings[-<instance>].json` and the machines in
 `machines[-<instance>].json` (`{"version": 1, "machines": [{id, label,
 kind, target, enabled}]}`: the SSH machines, and the local machine's
-enabled flag once it was changed; herdr's saved machines are imported into
-it the first time a core of the instance starts without one), all in the
+enabled flag once it was changed; the SSH machines herdr saved
+(`~/.local/state/herdr/client/endpoints.json`) are imported into it the
+first time a core of the instance starts without one), all in the
 user configuration directory (`~/Library/Application Support/herdr-ide/` on
 macOS, `~/.config/herdr-ide/` on Linux; directory 0700, files 0600 replaced
 atomically, kept until removed). The settings and keybindings files can be
@@ -238,13 +234,11 @@ edited by hand: the core reads them again within two seconds, keeps entries
 it does not know and reports values it cannot use. The machines file is
 read when the core starts and written by it at every change.
 
-A release directory holds the core, the bundled `herdr`, `LICENSE`,
-`THIRD_PARTY_NOTICES.md`, `licenses.md` and `licenses/` (`herdr/`,
-`herdr-core/`, `herdr-detect/` (herdr's agent detection rules, which the
-agents carry), `encoder/`); they stay until
-the user removes the directory and are not copied to SSH machines. herdr's own
-files (configuration, sessions, machine list) are where herdr puts them,
-whichever herdr is used.
+A release directory holds the core, `LICENSE`, `THIRD_PARTY_NOTICES.md`,
+`licenses.md` and `licenses/` (`herdr-core/` (the terminal core the core
+embeds for machines), `herdr-detect/` (herdr's agent detection rules, which
+the agents carry), `encoder/`); they stay until the user removes the
+directory and are not copied to SSH machines.
 
 In the browser, in `localStorage` under `herdr-ide.*` (state of that
 browser only; settings are the core's):

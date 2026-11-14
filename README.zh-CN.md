@@ -2,7 +2,7 @@
 
 [English](README.md) | 简体中文
 
-基于 [herdr](https://herdr.dev) 终端核心的 Web IDE，以终端为中心，支持多台机器，围绕 agent 工作流设计：在一个浏览器标签页里使用所有机器上的 workspace 和终端，VS Code（code-server）一个快捷键就能打开。
+基于 [herdr-core](https://github.com/herdrdev/herdr-core) 终端核心的 Web IDE，以终端为中心，支持多台机器，围绕 agent 工作流设计：在一个浏览器标签页里使用所有机器上的 workspace 和终端，VS Code（code-server）一个快捷键就能打开。
 
 > 英文版 README 为主版本，本文与其保持相同的章节结构。
 > 参数、快捷键等参考资料统一维护在英文文档 [docs/reference.md](docs/reference.md) 中。
@@ -21,7 +21,7 @@
   右键 pane 标题栏、tab 或 workspace 可打开对应的命令菜单，右键 pane 里的文字可复制、粘贴或打开路径。
   快捷键使用前缀 `ctrl+b`，可在设置中修改。
 - **自带终端核心**：程序内置 Linux/macOS × amd64/arm64 的 herdr-core，第一次显示某台机器的终端时自动装到那台机器上；
-  机器上不需要 herdr，也不需要外网。
+  机器上不需要预先安装任何东西，也不需要外网。
   关闭浏览器或停止 core 后，程序继续运行。
   右键机器可以 **启动终端核心**、**重启终端核心**（程序继续运行）或 **停止终端核心**。
 - **多机器**：自己保存 SSH 机器列表（第一次启动时导入 herdr 中保存的机器）。
@@ -44,7 +44,7 @@
   - 面板可以放在终端右侧或下方。
   - 长时间不用的 code-server 会自动停止。
 - **程序窗口**：远端 Linux 机器上程序打开的窗口（matplotlib、MuJoCo 查看器、Qt 工具等）会以浏览器窗口的形式出现，一个程序窗口对应一个浏览器窗口，支持鼠标和键盘。
-  pane 和终端会自动获得虚拟显示（之前打开的 shell 可以从它的菜单补上）；
+  终端会自动获得虚拟显示（之前打开的 shell 可以从它的菜单补上）；
   机器上没有 Xvfb 时会以普通用户身份获取，无需 root；
   装有 VirtualGL 的机器可用 GPU 渲染 OpenGL。
   持续变化的窗口以视频传输给能解码的浏览器（NVIDIA、Intel、AMD 显卡上用 H.264，否则用 VP8），静止的窗口以精确的图片传输。
@@ -94,9 +94,7 @@ cd dist/packages/herdr-ide-$(go env GOOS)-$(go env GOARCH)
 ./herdr-ide
 ```
 
-也可以解压 `dist/release/` 或 GitHub Releases 中对应平台的压缩包，运行 `./herdr-ide`；
-请保持目录完整。
-本机没装 herdr 时，用 `./herdr-ide herdr [参数]` 运行自带的 herdr，例如 `./herdr-ide herdr` 打开它的 TUI（同时启动本地 herdr server）。
+也可以解压 `dist/release/` 或 GitHub Releases 中对应平台的压缩包，运行 `./herdr-ide`。
 SSH 机器用侧栏的「添加机器…」添加。
 
 打开 <http://127.0.0.1:7780>。
@@ -130,7 +128,6 @@ macOS 版包含适用于 Finder 和 Dock 的多尺寸图标。
 
 应用会以 `desktop` instance 启动自己的 core，监听 `http://127.0.0.1:7781`；
 退出应用或关闭主窗口时回收该 core。
-应用自带 herdr，本机没装 herdr 时使用它；
 仍需预先安装 OpenSSH。
 发布版和本地构建都使用 ad-hoc 签名，不含 Apple 公证或自动更新。
 版本号、数据目录和隔离开发方式见[桌面部署说明](docs/deployment.md#macos-desktop-app)。
@@ -164,10 +161,9 @@ herdr-ide 本身不带登录：让它只监听 `127.0.0.1`，前面放一个负�
 ## 开发
 
 ```bash
-herdr --session herdr-ide-dev server &   # 隔离的 herdr session
-make dev-core                            # 在 :7790 以 --instance dev 运行 core
-make dev-web                             # 前端热更新，端口 5173
-make check test                          # 提交 PR 之前运行
+make dev-core      # 在 :7790 以 --instance dev 运行 core（终端核心 session 为 herdr-ide-dev）
+make dev-web       # 前端热更新，端口 5173
+make check test    # 提交 PR 之前运行
 ```
 
 见 [CONTRIBUTING.md](CONTRIBUTING.md)；
@@ -181,7 +177,7 @@ make check test                          # 提交 PR 之前运行
 
 [MIT](LICENSE)。
 第三方许可证：Go 依赖见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)，前端打包的依赖见程序提供的 `/licenses.md`。
-附带的 herdr 使用 Apache-2.0，其许可证及依赖声明见 [licenses/herdr/](licenses/herdr/)。
 核心程序内嵌供各机器使用的 [herdr-core](https://github.com/herdrdev/herdr-core)（Apache-2.0），其许可证及依赖声明在发布包的 `licenses/herdr-core/` 中。
+agent 中带有 herdr 的 agent 识别规则（Apache-2.0，见 [licenses/herdr-detect/](licenses/herdr-detect/)）。
 code-server 和 Git Graph 使用各自的许可证，在运行时下载。
 Git Graph 明确限制衍生作品分发，对原版的一般再分发授权不明确，因此不纳入公开发布包。

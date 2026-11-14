@@ -58,18 +58,18 @@ settings between machines.
 **One panel per workspace** (`web/src/state/store.ts` `docks`,
 `web/src/components/Dock.tsx`)
 
-- Each herdr workspace (machine and workspace id) has its own panel: what it
-  shows (VS Code of a machine and folder, a preview, or nothing) and the
-  VS Code panel it showed last. Selecting a workspace shows its panel;
+- Each workspace of a machine's layout document (machine and workspace id)
+  has its own panel: what it shows (VS Code of a machine and folder, a
+  preview, or nothing) and the VS Code panel it showed last. Selecting a workspace shows its panel;
   opening VS Code, a diff, Git Graph or a preview from a pane goes to the
   selected workspace's panel. Several VS Code windows (machines or folders)
   thus stay open, one per workspace, and switching workspace switches
   between them.
 - The choice is kept per browser (local storage) and restored after a
-  reload. A workspace closed in herdr, or a machine removed from herdr's
-  machines while the page is open, takes its panel along; a machine that
-  is reconnecting (no snapshot), or one a core started with fewer machines
-  (`--local-only`) does not list, keeps them.
+  reload. A workspace closed in the layout document (by any client), or a
+  machine removed from the core while the page is open, takes its panel
+  along; a machine whose layout has not loaded yet, or one a core started
+  with fewer machines (`--local-only`) does not list, keeps them.
 - VS Code is a same-origin iframe per machine and folder (`?folder=`, the
   focused pane's cwd when opened from a pane); workspaces showing the same
   folder share it. A window that is no longer shown stays loaded, so
@@ -176,8 +176,9 @@ settings between machines.
 - **A hidden window was unmounted** (10 minutes, or more than 3 hidden) →
   selecting its workspace loads it again; code-server restores its editors,
   and starts again first if it was stopped as idle.
-- **herdr gives workspaces new ids** (for example a new session) → their
-  stored panels no longer match a workspace and are dropped.
+- **The layout document starts over** (the terminal core's state was
+  removed) → its workspaces have new ids; their stored panels no longer
+  match a workspace and are dropped.
 - **Two cores on one machine (same instance)** → the bridge socket stays with
   the first agent; the other logs that VS Code commands go to that core.
   Separate instances avoid this.

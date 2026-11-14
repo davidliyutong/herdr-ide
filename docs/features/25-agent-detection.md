@@ -5,11 +5,11 @@
 Coding agents (Claude Code, Codex, Gemini, OpenCode, Kimi, Grok, Cursor,
 Copilot, Qwen, Amp, …) run in terminals on several machines at once, and
 the user's attention goes to the ones that wait for an answer or finished
-a turn ([07](07-agent-native-workflow.md)). herdr tells this for its own
-panes. The terminal core ([21](21-terminal-core.md)) does not: a
-terminal's status there is only what its program reports through OSC 7501,
-and the agents above report nothing. So the terminals of the terminal core
-need herdr's detection, done next to them.
+a turn ([07](07-agent-native-workflow.md)). The terminal multiplexer herdr
+tells this for its own panes. The terminal core ([21](21-terminal-core.md))
+does not: a terminal's status there is only what its program reports
+through OSC 7501, and the agents above report nothing. So the terminals of
+the terminal core get herdr's detection, done next to them.
 
 herdr's method (herdr v0.9.5, `src/detect`, `src/pane/agent_detection.rs`,
 Apache-2.0):
@@ -98,7 +98,7 @@ per terminal, merges them into the terminal records as `agent` and
 subscribers an `event {type: "agent", terminal, data: {agent,
 agent_status}}` (both null when the agent left); after an event that
 replaces a record (`created`, `restarted`, `labels`) the agent event is
-sent again. `/ws` clients get the agent message herdr's panes produce,
+sent again. `/ws` clients get the agent message
 `agent {m, data: {terminal, agent, display_agent, agent_status, title},
 sound}`, with the same choice of the page that plays the sound
 ([07](07-agent-native-workflow.md)). A client's `focus {s, focused: true}`

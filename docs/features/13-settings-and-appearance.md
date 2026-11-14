@@ -94,7 +94,7 @@ settings per browser; theming terminal applications.
   `file` (409), `save`. A `remote-machine` setting cannot be set for the
   core's own machine; the machine must be one the core has.
 - Every change, through the API or the file, is pushed to every `/ws`
-  client, events clients included, as `{t: "settings", values, problems}`:
+  client as `{t: "settings", values, problems}`:
   clients replace their values without asking again.
 - Writes are refused in read-only mode, audited (`settings.set`,
   `settings.reset`) and behind the Host/Origin and proxy-secret guards.
@@ -120,7 +120,7 @@ settings per browser; theming terminal applications.
   run the vectors of `design/testdata/keys` (`parse.json`; the clients also
   `events.json`, how a key press is named, and `sequences.json`, how strokes
   run bindings).
-- Defaults keep herdr's prefix keymap on every platform (`ctrl+b`, then a
+- Defaults are a prefix keymap on every platform (`ctrl+b`, then a
   key; the tab numbers are the commands `tab.select1`…`9`) and add each
   application's direct shortcuts: the macOS application's menu keys on
   `mac` (`cmd+t`, `cmd+d`, `cmd+w` closes the pane…), the desktop app's
@@ -282,7 +282,6 @@ settings per browser; theming terminal applications.
 | A file watcher library (fsnotify) | A new dependency for two small files; polling the modification time every 2 s is enough for edits by hand. |
 | Clients working out the effective bindings | Three implementations of the rules and of the conflicts; the core serves them per platform and clients only match keys. |
 | One platform per OS | The desktop app and a browser on the same Mac need different defaults (`cmd+t` is the browser's). |
-| herdr's `config.toml` keys | Read only by herdr; the macOS application and the desktop shell need keys before and outside herdr, and herdr is going away. |
 | Settings file overriding flags | Breaks service definitions and scripts that rely on their flags. |
 | CSS `zoom` for the font size | Distorts mouse coordinates and canvas sharpness. |
 | Relying on installed fonts for terminals | Cell size and glyphs differ per system; the bundled font stays the default, an installed one is a choice. |

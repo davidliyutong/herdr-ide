@@ -2,13 +2,12 @@
 
 ```
 browser (React, WebGL)      ──WebSocket + HTTP──▶  core (Go, `herdr-ide`)
-                                                     ├─ machines: registry + connection state machine
-                                                     ├─ server: WS hub, session owner + pane surfaces, terminal streams, files, code-server proxy, bridge hub
+macOS application                                    ├─ machines: registry + connection state machine
+                                                     ├─ server: event channel, terminal streams, files, code-server proxy, bridge hub
                                                      ├─ gui: virtual displays per machine, window list, frame routing
                                                      └─ one ssh session per machine ──yamux──▶ agent (`herdr-ide-agent`)
-                                                                                                 ├─ herdr API socket (raw pipe)
-                                                                                                 ├─ herdr client socket (raw pipe, endpoint protocol)
                                                                                                  ├─ herdr-core in a session of its own (raw pipe to its API socket)
+                                                                                                 ├─ agent detection in its terminals
                                                                                                  ├─ files (stat/list/range read/upload/zip)
                                                                                                  ├─ code-server (unix socket only)
                                                                                                  ├─ Xvfb + window manager (programs' windows)
@@ -17,18 +16,17 @@ browser (React, WebGL)      ──WebSocket + HTTP──▶  core (Go, `herdr-id
 
 | Directory | Role |
 | --- | --- |
-| `cmd/herdr-ide` | Core entry point: flags, `serve`, `herdr` (runs the bundled herdr), `fetch-assets`. |
+| `cmd/herdr-ide` | Core entry point: flags, `serve`, `fetch-assets`, `version`. |
 | `cmd/herdr-ide-agent` | Agent entry point (`serve` over stdio). |
 | `internal/brand` | Product names; the only place they are defined in Go. |
 | `internal/agentproto` | Stream protocol shared by core and agent. |
-| `internal/agent` | Agent: herdr, terminals, files, code-server supervision, bridge listener, housekeeping. |
+| `internal/agent` | Agent: the terminal core, agent detection, files, code-server supervision, virtual displays, bridge listener, housekeeping. |
 | `internal/agent/detect` | Which coding agent a terminal's foreground process is and its state from the screen, by herdr's method and manifests (embedded, Apache-2.0), with the state machine for debouncing and done ([25](features/25-agent-detection.md)). |
 | `internal/transport` | yamux sessions: in-process for the local machine, ssh stdio for others; agent upload. |
-| `internal/machines` | The core's machines (`Registry`: SSH machines in `machines[-<instance>].json`, herdr's saved machines imported once), added, removed, renamed, enabled and disabled at runtime; the connection state machine; herdr snapshots and subscriptions while herdr answers. |
-| `internal/herdr` | herdr public socket API client; `endpoint`: client of herdr's endpoint protocol (generation 1). |
+| `internal/machines` | The core's machines (`Registry`: SSH machines in `machines[-<instance>].json`, the SSH machines herdr saved imported once when that file does not exist), added, removed, renamed, enabled and disabled at runtime; the connection state machine. |
 | `internal/hc` | Client of herdr-core's API (protocol generation 1): JSON-RPC calls, attached terminals as raw byte streams with credit, event subscriptions. |
-| `internal/herdrdist` | herdr release bundled in archives: version, upstream asset names and SHA-256 digests. |
-| `internal/checksum` | SHA-256 of files, shared by code-server and herdr downloads. |
+| `internal/hcdist` | herdr-core release embedded for machines: version, upstream archive names and SHA-256 digests ([21](features/21-terminal-core.md)). |
+| `internal/checksum` | SHA-256 of files, shared by the code-server downloads. |
 | `internal/codeserver` | code-server provisioning (artifacts, checksums, install modes, start/stop). |
 | `internal/settings` | The settings system: typed definitions registered by packages, flags, the hand-editable settings file (watched, migrated), layered values per machine ([13](features/13-settings-and-appearance.md)). |
 | `internal/keybindings` | Commands, default keys per platform, the user's keybindings file, the bindings in effect and their conflicts; the key syntax shared with the clients. |
@@ -36,10 +34,10 @@ browser (React, WebGL)      ──WebSocket + HTTP──▶  core (Go, `herdr-id
 | `internal/registry` | What the core registers: the setting modules and the commands (used by the core and `scripts/registry`). |
 | `internal/userfile` | Atomic writes and change detection of the hand-editable files. |
 | `internal/gui` | Virtual displays on machines, their windows, frames and input between agents and browser windows. |
-| `internal/server` | HTTP/WS front: guards, session ownership and pane surfaces, files, proxy, bridge, audit. |
-| `internal/embedded` | Build artifacts compiled into the core (agents, bridge VSIX). |
+| `internal/server` | HTTP/WS front: guards, the event channel, terminal streams, files, proxy, bridge, audit. |
+| `internal/embedded` | Build artifacts compiled into the core (agents, herdr-core, the video encoder, bridge VSIX). |
 | `web` | Browser UI (Vite, React, zustand): the terminals of the machines' terminal cores (`src/term`: the client of `/api/v1/term` and the layout document; `src/state/terms.ts`: the machines' terminals and layouts; `src/vt`: Ghostty's terminal library as WebAssembly with its renderer and input encoders, also for the PTY dialogs, [26](features/26-web-terminals.md)); `web/embed.go` embeds `web/dist`. |
-| `macos` | macOS application (Swift package): `TermKit`, the clients of `/api/v1/term` and of `/ws` as an events client, with the terminal, layout (workspaces, tabs, splits) and core-process models; `App`, the AppKit window drawing terminals with Ghostty's renderer. |
+| `macos` | macOS application (Swift package): `TermKit`, the clients of `/api/v1/term` and of the event channel `/ws`, with the terminal, layout (workspaces, tabs, splits) and core-process models; `App`, the AppKit window drawing terminals with Ghostty's renderer. |
 | `desktop` | Electron main process and electron-builder config; macOS `.app`/DMG wrapping the embedded core. |
 | `extensions/herdr-ide-bridge` | VS Code extension installed into code-server. |
 | `design` | Design tokens (`tokens.json`): colors in light and dark, metrics, font sizes and terminal palettes; `scripts/tokens` generates `macos/Sources/App/Tokens.swift`, `web/src/tokens.css` and the terminal colors' setting defaults (`internal/uisettings/tokens.go`) from them. `generated/registry.json` (`scripts/registry`): setting defaults, commands, default bindings per platform and the translation keys each UI needs. `testdata/layout`: the layout document's test vectors, run by the TypeScript and Swift clients ([22](features/22-terminal-protocol.md)); `testdata/keys`: the key syntax's vectors, run by Go, TypeScript and Swift. |
@@ -71,55 +69,6 @@ launched the app. Same-origin popups become equally restricted native
 windows; HTTP(S) links outside the core open in the default browser. Packaging
 and lifecycle details are in [16](features/16-desktop-packaging.md).
 
-## herdr facts the design relies on
-
-Release archives contain the core with the matching native herdr beside it,
-plus licenses. herdr is not embedded in agents. Every agent finds an installed
-herdr the same way; the local agent falls back to the bundled one when none is
-installed. herdr keeps its usual configuration, state and sockets. See
-[feature 15](features/15-bundled-herdr.md).
-
-Verified against herdr 0.9.5 (protocol 22):
-
-- The public socket (`~/.config/herdr/herdr.sock`, mode 0600, no other auth)
-  takes **one request per connection**, newline-delimited JSON
-  `{id, method, params}`, and the request must arrive within 5 s.
-- `events.subscribe` turns a connection into an event stream. A lagging
-  subscriber gets `events_lost` and is closed; resubscribe and refetch
-  `session.snapshot`. Agent status needs per-pane subscriptions. There is no
-  pane output event.
-- `herdr-client.sock` (beside the API socket, mode 0600) speaks the client
-  endpoint protocol; generation 1 is kept for clients of any herdr build
-  (0.9.5 and newer). Frames are a u32 little-endian length and a bincode 2
-  value; the client says hello (generation, codecs, surface size), herdr
-  welcomes it and sends a JSON snapshot, then complete surfaces and patches
-  of the connection's focused tab, rendered by herdr at the client's size
-  with borders and split lines. Keys, text, pastes and mouse events are
-  sent per pane and encoded by herdr for the pane's modes. The client that
-  interacted last is the foreground client: it receives OSC 52, bells and
-  titles, and its reported colors answer OSC 10/11/4 and `CSI ?996n` for
-  every pane. With a single client its size resizes every tab; a client
-  connecting to a session without a workspace makes herdr create one. See
-  [18](features/18-endpoint-surfaces.md).
-- herdr 0.9.5 encodes no bytes for a Backspace key event without Ctrl; its
-  own client sends the DEL byte as text, and so does the browser.
-- Panes report their scroll position (`scroll`: `offset_from_bottom`,
-  `max_offset_from_bottom`, `viewport_rows`) in `pane.get` and the snapshot.
-  `pane.scroll` sets an absolute offset (clamped) and replies with the pane;
-  the position is shared by every client of the pane, a scrolled-back view
-  stays on its lines while output arrives, and stream input returns it to
-  the bottom. `pane.selection.read` returns the text between two cells in
-  absolute rows (row 0 is the oldest line kept), both included.
-  A read reaching past the pane's rows or columns answers
-  `selection_unavailable`, which is how the agent finds a pane's width
-  (herdr reports none); the text has one line per line of output, soft
-  wrapped rows joined and trailing blanks trimmed, and comes from one
-  consistent state of the terminal. `pane.copy_search` finds literal text
-  (smart case, across soft wraps) in the same rows and returns up to 1024
-  matches (first and last cell) around the current one with the total; it
-  needs the pane's current content revision, which `pane.copy_motion`
-  returns, and answers `stale_content` for any other.
-
 ## Core ↔ agent protocol (`internal/agentproto`)
 
 One yamux session per machine over the ssh session's stdio (an in-process
@@ -129,49 +78,34 @@ after a successful reply it carries op-specific bytes.
 
 | Op | Direction | Payload after the reply |
 | --- | --- | --- |
-| `hello` | core → agent | – (reply has host info, herdr binary, data dirs; without a herdr binary, `herdr_error` and still the socket); the machine is ready once it answers |
-| `herdr-api` | core → agent | raw pipe to the herdr socket; the core sends the request line right after the header, without waiting for the reply (herdr wants it within 5 s) |
-| `herdr-client` | core → agent | raw pipe to herdr's client socket (endpoint protocol) |
+| `hello` | core → agent | – (reply has host info and data dirs); the machine is ready once it answers |
 | `fs.stat`, `fs.list` | core → agent | – |
 | `fs.read` | core → agent | `Length` bytes from `Offset` |
 | `fs.write` | core → agent | chunked upload, then a second reply; `unique` keeps existing files (`-1`, `-2`… names) |
 | `fs.archive` | core → agent | a zip of `Paths` (each at the root under its name, directories recursively), streamed until the agent closes the stream; with `Chunked` as `ChunkWriter` chunks ended by the empty chunk once the archive is complete |
-| `exec` | core → agent | – (buffered output in the reply) |
-| `pane.find` | core → agent | – (reply `Find`: matches of `Find`'s query in the pane's text, which the agent reads from herdr and searches on the machine, with `Text`, a hash of the search and the text; a request with `Known` set to that hash is answered `Unchanged` while it holds; `Code` classifies errors: `invalid_regex`, `query_too_large`, `unavailable`, or herdr's code) |
 | `dial-unix` | core → agent | raw pipe to a socket in the agent's run directory |
-| `code-server` | core → agent | actions `status`, `install` (chunked tarball), `download` (the machine fetches `URL`, checked against `Digest`), `start`, `stop`, `install-ext`, `uninstall-ext`, `marker`; `Bin` selects an installed code-server |
-| `herdr` | core → agent | – (an empty reply at once, then a second reply with `Herdr` when the action is done); actions `status`, `start`, `stop`, `restart` (the server of `Session`; nothing is started or stopped while another user's process or an unresponsive listener holds its socket; a restart stops only this user's answering server, then starts one), `check` (herdr's newest release), `update` (only the application's managed copy); each looks herdr up again (a path that is no longer executable gives way to the usual search) and without one replies `not_found` with whether a server still answers on the socket; the core then shows that herdr for the machine |
+| `code-server` | core → agent | actions `status`, `install` (chunked tarball), `download` (the machine fetches `URL`, checked against `Digest`), `start`, `stop`, `install-ext`, `uninstall-ext` (their output in `Exec`), `marker`; `Bin` selects an installed code-server |
 | `hc` | core → agent | actions `status`, `install` (after a first reply the gzip-compressed herdr-core executable, chunked, checked against `Digest`), `start`, `restart` (the core's successor adopts the programs) and `stop` (the terminal core of the agent's instance); each ends with a reply with `HC` (the installed executable's digest, whether a core answers, its version, session and socket); failures carry `Code`: `not_installed`, `bad_digest`, `start_failed`, `stop_failed` |
 | `hc-api` | core → agent | raw pipe to the terminal core's socket (herdr-core's API, `internal/hc`); starts nothing |
 | `detect` | core → agent | after the reply, `DetectEvent` lines `{terminal, agent, status}` (status `working`, `blocked`, `idle`, `done`, `unknown`; `{terminal}` when the agent left) from the agent, which follows the terminal core's terminals until the core closes the stream ([25](features/25-agent-detection.md)); starts and writes nothing |
 | `bridge` | agent → core | JSON lines between the VS Code extension and the core |
-| `gui` | core → agent | actions `status`, `install` (fetch Xvfb in user space), `start`, `keep` (start the display keeper, which holds the display while the instance's terminal core or `Session`'s herdr server runs), `shells` (which of the pids in `Args` were started with the display) (reply `GUI`); `video` and `video-install` (`Digest`: the video encoder's SHA-256; the second streams the gzip-compressed encoder, chunked) reply whether it is installed and the stream kinds it makes here (`GUI.Video`, `GUI.VideoEncoders`); `attach`: messages `[kind u8][len u32][payload]`, JSON events (`window`, `gone`, `layer`, `layer_gone`, `cursor`, `stats`, `video` (a window's stream starts, or ends without a codec)) and frames (`GUIFrameHeader` + JPEG/PNG, or a video frame of the whole window, `Enc` 3, 4 for key frames) from the agent, JSON commands (`watch`, `ack`, `refresh`, `codecs` (the stream kinds all viewers decode, also sent with `watch` and `refresh`), `keyframe`, input, `close`) from the core |
+| `gui` | core → agent | actions `status`, `install` (fetch Xvfb in user space), `start`, `keep` (start the display keeper, which holds the display while the instance's terminal core runs), `shells` (which of the pids in `Args` were started with the display) (reply `GUI`); `video` and `video-install` (`Digest`: the video encoder's SHA-256; the second streams the gzip-compressed encoder, chunked) reply whether it is installed and the stream kinds it makes here (`GUI.Video`, `GUI.VideoEncoders`); `attach`: messages `[kind u8][len u32][payload]`, JSON events (`window`, `gone`, `layer`, `layer_gone`, `cursor`, `stats`, `video` (a window's stream starts, or ends without a codec)) and frames (`GUIFrameHeader` + JPEG/PNG, or a video frame of the whole window, `Enc` 3, 4 for key frames) from the agent, JSON commands (`watch`, `ack`, `refresh`, `codecs` (the stream kinds all viewers decode, also sent with `watch` and `refresh`), `keyframe`, input, `close`) from the core |
 
 yamux streams cannot be half-closed, so uploads use `ChunkWriter` framing
 (`[u32 length][data]…[0]`). Core and agent always come from the same build:
 the agent is uploaded by content hash, so the protocol needs no version
 negotiation. Keep it that way when adding ops (add fields, don't reuse them).
 
-## Browser ↔ core protocol (`/ws`)
+## Event channel (`/ws`)
 
-Text frames are JSON with a `t` field; binary frames are herdr's pane
-surface updates (`internal/server/surface.go`) for a client that shows
-herdr's panes, which no client of this build does.
+Every client holds one: the browser UI, the desktop app and the macOS
+application. Text frames are JSON with a `t` field; terminals have their
+own protocol (`/api/v1/term`, below). A client plays no notification sounds
+(`agent {sound}`) before it reports `active`.
 
-`/ws?events=1` connects an events client: the browser UI, the desktop app
-and the macOS application, whose terminals use `/api/v1/term`. It gets the
-same messages, `settings` and `keybindings` included, except the pane
-session's (`session`, `surf*`, `clip`, `bell`, binary frames), never owns
-or takes over the session, and its `view`, `takeover`, `in`, `focus`,
-`host` and `api` are ignored. It plays no notification sounds (`agent
-{sound}`) before it reports `active`.
-
-| Browser → core | Core → browser |
+| Client → core | Core → client |
 | --- | --- |
-| `view {m, tab, pane, cols, rows, cw, ch}`, `takeover` | `session {state: owner\|busy\|taken_over}` |
-| `in {m, pane, ev}` (key, text, paste, mouse events), `focus {m, focused}`, `host {host}` (terminal colors) | `surf {m, gen, ev: open\|error\|notice, code}`, `surf.tab`, `surf.meta` (panes, splits, links), `clip` (OSC 52), `bell` |
-| `api {rid, m, method, params}` (allowlisted herdr calls) | `api.res {rid, result\|error}` |
-| `retry {m}`, `ping` | `machines {list}`, `machine {state}`, `agent {m, data}` (status change), `bridge.send {m, text, folders}` (the sending VS Code window's folders: the page picks the workspace whose panel shows it), `bridge.download {m, paths}` (files chosen in VS Code's explorer; the page with the focus downloads them) |
+| `retry {m}` (ends the wait before a disconnected machine's next connection attempt; refused for read-only clients), `ping` | `machines {list}`, `machine {state}`, `agent {m, data}` (status change), `bridge.send {m, text, folders}` (the sending VS Code window's folders: the page picks the workspace whose panel shows it), `bridge.download {m, paths}` (files chosen in VS Code's explorer; the page with the focus downloads them) |
 | `download.watch {ids}` (downloads the page started with `dl=<id>`: before starting one and after reconnecting), `download.cancel {id}` | `download {id, state, sent, total, name, error}` to the page following the id: progress and how it ended (`unknown` for an id the core has not seen or no longer knows), for the downloads panel |
 | `theme {kind: dark\|light}` (VS Code follows it) | `gui {state: {m, phase, gpu, windows}}` (program windows per machine) |
 | – | `settings {values, problems}` and `keybindings {user, effective, conflicts, problems}` after every change, through the API or the files ([13](features/13-settings-and-appearance.md)) |
@@ -181,12 +115,9 @@ HTTP endpoints besides files (`GET /api/m/{id}/file`, `GET /api/m/{id}/list`,
 and `GET /api/m/{id}/download?path=…[&dl=<id>]`: one file as an attachment,
 anything else as a zip from `fs.archive`; `download.cancel` over `/ws`
 breaks a followed download off), uploads and the code-server proxy:
-`POST /api/m/{id}/find` (find in a herdr pane through `pane.find`),
-`GET /api/config`, `GET /api/keymap` (herdr's custom commands from its
-`config.toml`; the browser UI no longer reads them), `GET /api/machines` (every machine's state: the record,
+`GET /api/config`, `GET /api/machines` (every machine's state: the record,
 `status`, the agent's `info`, `hc {state, code, version}` while the core
-has a connection to the machine's terminal core, and herdr's `snapshot`
-and `layouts` or `herdr_error`), `GET /api/gui`
+has a connection to the machine's terminal core), `GET /api/gui`
 (the program windows of every machine, as the `gui` messages of `/ws`),
 `GET`/`PUT`/`DELETE /api/settings` (definitions, values, problems; one
 value set or removed) and `GET`/`PUT /api/keybindings` (commands, defaults,
@@ -207,15 +138,10 @@ the app at `GET /m/{id}/gui/{win}`, streamed over the WebSocket
 `/m/{id}/gui/{win}/ws` (JSON events and binary frames out, JSON commands in;
 `?video=avc1,vp8` names the video streams the browser decodes)
 and closed through `POST /m/{id}/gui/{win}/close`;
-`POST /api/m/{id}/gui/enable` (`{"panes": [...]}` or
-`{"terminals": [...]}`) gives open panes or terminals the display, see
-[14](features/14-gui-windows.md). `PUT /api/settings` takes an optional
-`machine` for settings that can differ per machine. `GET /api/m/{id}/herdr`
-and `POST /api/m/{id}/herdr/{start|stop|restart}` manage a machine's herdr
-server, `POST /api/m/{id}/herdr/{check|update}` the local machine's copy of
-herdr; the WebSocket `GET /api/m/{id}/herdr/remote` runs the local
-herdr's `herdr --remote` for an SSH machine in a PTY, see
-[17](features/17-local-herdr-management.md).
+`POST /api/m/{id}/gui/enable` (`{"terminals": [...]}`, empty or absent
+for all of them) gives open terminals of the machine's terminal core the
+display, see [14](features/14-gui-windows.md). `PUT /api/settings` takes an
+optional `machine` for settings that can differ per machine.
 
 ## Terminal clients ↔ core protocol (`/api/v1/term`)
 
@@ -237,21 +163,6 @@ field; binary frames are `[stream u32 LE][kind u8][payload]`.
 
 User-facing text is never produced by the server: it sends codes (phases,
 notices) that the UI translates.
-
-## Session ownership and surfaces (`internal/server/surface.go`)
-
-For a `/ws` client that shows herdr's panes (the browser UI before it drew
-its terminals itself; none in this build) one browser connection owns the
-core's session, like a KVM console: it
-chooses the shown machine, tab and size, and only its input reaches herdr.
-Another browser is told the session is busy and may take it over; the
-previous owner is then told it was taken over. A read-only browser never
-takes over a writable one, and events clients take no part. The core keeps one endpoint connection to the
-shown machine's herdr, decodes its surfaces into a grid and forwards changed
-spans; when the owner changes, the new owner gets the current surface. It
-keeps one resize whose grid size changes in flight, so a window drag over a
-slow link does not queue a complete surface per size. See
-[18](features/18-endpoint-surfaces.md).
 
 ## code-server lifecycle
 

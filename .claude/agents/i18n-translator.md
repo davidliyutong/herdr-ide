@@ -24,7 +24,7 @@ Server: never add prose to responses; add a code and translate it in the UI
 (and in the loading-page table in `internal/server/codeserver.go`).
 
 Style for Simplified Chinese: concise UI wording, keep product and technical
-names (herdr, VS Code, pane, workspace, tab, agent) in English as the existing
+names (VS Code, pane, workspace, tab, agent) in English as the existing
 strings do, full-width punctuation in sentences, no machine-translation
 artifacts.
 

@@ -6,10 +6,9 @@ Chinese (中文也可以). Participation is governed by the
 
 ## Setup
 
-Requirements: Go (see `go.mod`), Node.js 22.12+, pnpm, and
-[herdr](https://herdr.dev) for running the app. The build downloads the pinned
-herdr for release archives into `dist/herdr/`; without an installed herdr, use
-that file as `herdr` below and set `HERDR_BIN` to it for `make dev-core`.
+Requirements: Go (see `go.mod`), Node.js 22.12+ and pnpm. The build
+downloads the pinned herdr-core, the terminal core the agents install on
+machines, into `dist/hc/` and embeds it.
 
 The macOS application (`macos/`) additionally needs Xcode 26 or later for
 `make macos-build` and `make macos-test`, and XcodeGen (`brew install
@@ -17,31 +16,31 @@ xcodegen`) for `make macos-app`.
 
 ```bash
 make deps            # pnpm install for web/, the extension and desktop/
-make build           # web UI, extension, agents, core; release archives with herdr
+make build           # web UI, extension, agents, core; release archives
 make test            # Go, web and desktop unit tests
 make check           # formatting, vet, typecheck, brand/doc consistency
 ```
 
-Day-to-day development, without touching your real herdr session or the
-state of your daily herdr-ide:
+Day-to-day development, without touching the state or the terminals of your
+daily herdr-ide (the dev core's terminal core is the session
+`herdr-ide-dev`):
 
 ```bash
-herdr --session herdr-ide-dev server &
-make dev-core        # core on 127.0.0.1:7790: --instance dev --local-only --local-session herdr-ide-dev
+make dev-core        # core on 127.0.0.1:7790: --instance dev --local-only
 make dev-web         # Vite on http://localhost:5173, proxied to the dev core (DEV_LISTEN)
 ```
 
-`make it` runs the integration test against a real herdr in an isolated
-session (`herdr-ide-it`), which it deletes before and after the run. To test the bundled executable, run
-`HERDR_TEST_BIN="$PWD/dist/packages/herdr-ide-$(go env GOOS)-$(go env GOARCH)/herdr" make it`.
+`make it` runs the integration tests against a real herdr-core in the
+isolated session `herdr-ide-it` with temporary state:
+`HC_TEST_BIN=<path to herdr-core> make it` (without it, `hc` on `PATH`;
+without either the tests are skipped). The release archives that
+`scripts/fetch-hc` verifies into `dist/hc/` each hold one at their root.
 
 Release archives are in `dist/release/`; the unpacked directories are in
-`dist/packages/`. Keep each core beside its `herdr` and licenses.
-herdr upgrades require reviewing the pinned digests in `internal/herdrdist`,
-regenerating `licenses/herdr/` with `scripts/herdr-notices.py`, and rerunning
-integration tests before distributing the new release. herdr-core upgrades
-change the version and the four archive digests in `internal/hcdist`; its
-license and notices are taken from the release archive by `scripts/fetch-hc`.
+`dist/packages/`. herdr-core upgrades change the version and the four
+archive digests in `internal/hcdist`; its license and notices are taken
+from the release archive by `scripts/fetch-hc`. Rerun the integration tests
+with the new executable before distributing a release.
 
 On macOS, `make dev-desktop` builds and launches Electron with the embedded
 UI, the same isolated session and instance `dev` (port 7791). Stop other dev

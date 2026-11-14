@@ -13,8 +13,9 @@ Goals: machines never download; the core host can work fully offline from a
 prepared bundle; internal mirrors are supported; every artifact is verified.
 
 Non-goals: offline builds from source (Go and npm dependencies need a module
-proxy or vendoring); installing herdr on SSH machines. The release archive
-already contains the native local herdr and its licenses ([15](15-bundled-herdr.md)).
+proxy or vendoring). The terminal core needs no bundle: the core embeds
+herdr-core for every machine platform and pushes it through the agent
+([21](21-terminal-core.md)).
 
 ## Design
 
@@ -65,7 +66,6 @@ license explicitly restricts distribution of derivative works and does not
 clearly grant general redistribution rights for the original package. It is
 downloaded for the user's installation rather than included in application
 releases. Do not publish bundles containing it without suitable permission.
-Herdr is distributed under Apache-2.0 with notices in `licenses/herdr/`.
 herdr-core, embedded in the core at build time
 ([21](21-terminal-core.md)), is distributed under Apache-2.0 with its
 license and notices in a release's `licenses/herdr-core/`.

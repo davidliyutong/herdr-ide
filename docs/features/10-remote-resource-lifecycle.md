@@ -14,7 +14,8 @@ Goals: every process has an owner and an end; every file has a retention
 rule; nothing depends on the core shutting down cleanly; two cores never
 destroy each other's state.
 
-Non-goals: CPU or memory quotas; managing processes started by herdr panes.
+Non-goals: CPU or memory quotas; managing the programs users start in
+terminals (they belong to the user and run in the terminal core).
 
 ## Design
 
