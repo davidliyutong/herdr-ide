@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 
@@ -89,6 +90,9 @@ type termBackend struct {
 	// stopped: the terminal core was stopped from the UI, so the backend
 	// starts none until it is started again (or the backend starts anew).
 	stopped bool
+	// agents are the coding agents detected in the terminals (op detect),
+	// merged into their records as agent and agent_status.
+	agents map[string]agentproto.DetectEvent
 	// pub orders the publications of the state on the machine.
 	pub sync.Mutex
 }
@@ -98,10 +102,18 @@ func (h *termHub) backend(id string) *termBackend {
 	defer h.mu.Unlock()
 	b := h.backends[id]
 	if b == nil {
-		b = &termBackend{s: h.s, id: id, state: termStarting, subs: map[*termClient]bool{}, wake: make(chan struct{}, 1)}
+		b = &termBackend{s: h.s, id: id, state: termStarting, subs: map[*termClient]bool{}, wake: make(chan struct{}, 1),
+			agents: map[string]agentproto.DetectEvent{}}
 		h.backends[id] = b
 	}
 	return b
+}
+
+// existing returns a machine's backend, nil when it has none.
+func (h *termHub) existing(id string) *termBackend {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.backends[id]
 }
 
 // wakeUp ends a backend's wait before its next try (its machine connected).
@@ -358,12 +370,17 @@ func (b *termBackend) serve(ctx context.Context) (code string) {
 	b.mu.Lock()
 	b.conn, b.version, b.state, b.code = conn, hello.Version, termReady, ""
 	b.terms = indexTerminals(snap)
+	b.agents = map[string]agentproto.DetectEvent{}
 	for c := range b.subs {
 		c.sendJSON(b.stateMsg())
 		c.sendJSON(b.snapshotMsg())
 	}
 	b.mu.Unlock()
 	b.publish()
+	// Which coding agents run in the terminals, while this connection lasts.
+	dctx, dcancel := context.WithCancel(ctx)
+	defer dcancel()
+	go b.detect(dctx, mc)
 
 	for {
 		// The core sends a heartbeat every 15 s without events.
@@ -395,6 +412,9 @@ func (b *termBackend) event(n hc.RawNotification) {
 	switch n.Method {
 	case "missed":
 		b.terms = indexTerminals(n.Terminals)
+		for addr := range b.terms {
+			b.mergeAgent(addr)
+		}
 		for c := range b.subs {
 			c.sendJSON(b.snapshotMsg())
 		}
@@ -410,11 +430,13 @@ func (b *termBackend) event(n hc.RawNotification) {
 		switch n.Type {
 		case "created", "restarted":
 			b.terms[n.Terminal] = data
+			b.mergeAgent(n.Terminal)
 		case "removed":
 			delete(b.terms, n.Terminal)
 		case "labels":
 			if rec, ok := data["record"].(map[string]any); ok {
 				b.terms[n.Terminal] = rec
+				b.mergeAgent(n.Terminal)
 			} else if t != nil {
 				t["labels"] = data["labels"]
 			}
@@ -456,6 +478,148 @@ func (b *termBackend) event(n hc.RawNotification) {
 	for c := range b.subs {
 		c.sendJSON(msg)
 	}
+	// A record replaced by the event lacks the agent the core knows of:
+	// clients get it again right behind.
+	if ev, ok := b.agents[n.Terminal]; ok && n.Terminal != "" && (n.Type == "created" || n.Type == "restarted" || n.Type == "labels") {
+		raw, _ := json.Marshal(map[string]any{"agent": ev.Agent, "agent_status": ev.Status})
+		again := map[string]any{"t": "event", "m": b.id, "type": "agent", "terminal": n.Terminal, "data": json.RawMessage(raw)}
+		for c := range b.subs {
+			c.sendJSON(again)
+		}
+	}
+}
+
+// detect follows the coding agents in the machine's terminals through the
+// agent (op detect) until ctx ends, trying again after 5 s when the stream
+// fails.
+func (b *termBackend) detect(ctx context.Context, mc *machines.Machine) {
+	for ctx.Err() == nil {
+		conn, _, err := mc.Open(ctx, agentproto.Header{Op: agentproto.OpDetect})
+		if err == nil {
+			stop := context.AfterFunc(ctx, func() { conn.Close() })
+			for {
+				var ev agentproto.DetectEvent
+				if agentproto.ReadLine(conn, &ev) != nil {
+					break
+				}
+				b.applyAgent(ev)
+			}
+			stop()
+			conn.Close()
+		}
+		// What the stream said no longer holds: a new one says it again.
+		b.mu.Lock()
+		var cleared []agentproto.DetectEvent
+		for addr := range b.agents {
+			cleared = append(cleared, agentproto.DetectEvent{Terminal: addr})
+		}
+		b.mu.Unlock()
+		for _, ev := range cleared {
+			b.applyAgent(ev)
+		}
+		select {
+		case <-ctx.Done():
+		case <-time.After(5 * time.Second):
+		}
+	}
+}
+
+// applyAgent records a terminal's agent and status and tells the clients:
+// subscribers of the terminal protocol get an "agent" event, /ws clients the
+// agent message that notifications and sounds follow. A turn that ended
+// (done) while a client has the terminal focused counts as seen: idle.
+func (b *termBackend) applyAgent(ev agentproto.DetectEvent) {
+	b.mu.Lock()
+	prev, had := b.agents[ev.Terminal]
+	if ev.Agent == "" {
+		if !had {
+			b.mu.Unlock()
+			return
+		}
+		delete(b.agents, ev.Terminal)
+	} else {
+		if ev.Status == "done" && b.focusedLocked(ev.Terminal) {
+			ev.Status = "idle"
+		}
+		if had && prev == ev {
+			b.mu.Unlock()
+			return
+		}
+		b.agents[ev.Terminal] = ev
+	}
+	b.mergeAgent(ev.Terminal)
+	b.mu.Unlock()
+	b.notifyAgent(ev)
+}
+
+// seen marks a terminal's ended turn seen (a client focused it): done
+// becomes idle.
+func (b *termBackend) seen(addr string) {
+	b.mu.Lock()
+	ev, ok := b.agents[addr]
+	if !ok || ev.Status != "done" {
+		b.mu.Unlock()
+		return
+	}
+	ev.Status = "idle"
+	b.agents[addr] = ev
+	b.mergeAgent(addr)
+	b.mu.Unlock()
+	b.notifyAgent(ev)
+}
+
+// notifyAgent sends a terminal's agent change to the subscribers (event
+// "agent", data {agent, agent_status}, both null when no agent runs there)
+// and to /ws as an agent message.
+func (b *termBackend) notifyAgent(ev agentproto.DetectEvent) {
+	var agent, status any
+	if ev.Agent != "" {
+		agent, status = ev.Agent, ev.Status
+	}
+	raw, _ := json.Marshal(map[string]any{"agent": agent, "agent_status": status})
+	b.mu.Lock()
+	msg := map[string]any{"t": "event", "m": b.id, "type": "agent", "terminal": ev.Terminal, "data": json.RawMessage(raw)}
+	for c := range b.subs {
+		c.sendJSON(msg)
+	}
+	title, _ := b.terms[ev.Terminal]["title"].(string)
+	b.mu.Unlock()
+	ws, err := json.Marshal(map[string]any{"terminal": ev.Terminal, "agent": agent, "display_agent": agent,
+		"agent_status": status, "title": title})
+	if err == nil {
+		b.s.mg.PublishAgent(machines.AgentEvent{Machine: b.id, Data: ws})
+	}
+}
+
+// mergeAgent writes a terminal's agent and status into its record; b.mu is
+// held.
+func (b *termBackend) mergeAgent(addr string) {
+	t := b.terms[addr]
+	if t == nil {
+		return
+	}
+	if ev, ok := b.agents[addr]; ok {
+		t["agent"], t["agent_status"] = ev.Agent, ev.Status
+	} else {
+		delete(t, "agent")
+		delete(t, "agent_status")
+	}
+}
+
+// focusedLocked reports whether a client has a stream of terminal addr
+// with the focus; b.mu is held.
+func (b *termBackend) focusedLocked(addr string) bool {
+	for c := range b.subs {
+		c.mu.Lock()
+		for _, ts := range c.streams {
+			if ts.machine == b.id && ts.terminal == addr && ts.focused {
+				c.mu.Unlock()
+				return true
+			}
+		}
+		c.mu.Unlock()
+	}
+	return false
 }
 
 // connection returns the backend's connection when it is ready.
@@ -488,6 +652,10 @@ type termIn struct {
 type termStream struct {
 	st      *hc.Stream
 	observe bool
+	// machine and terminal are what it shows; focused is the client's last
+	// focus report for it.
+	machine, terminal string
+	focused           bool
 }
 
 type termClient struct {
@@ -664,8 +832,20 @@ func (c *termClient) dispatch(m *termIn) {
 			ts.st.Resize(m.Cols, m.Rows)
 		}
 	case "focus":
-		if ts := c.stream(m.S); ts != nil && !ts.observe {
+		ts := c.stream(m.S)
+		if ts == nil {
+			break
+		}
+		c.mu.Lock()
+		ts.focused = m.Focused
+		b := c.subs[ts.machine]
+		c.mu.Unlock()
+		if !ts.observe {
 			ts.st.Focus(m.Focused)
+		}
+		// Looking at a terminal whose turn ended has seen it.
+		if m.Focused && b != nil {
+			b.seen(ts.terminal)
 		}
 	case "facts":
 		if ts := c.stream(m.S); ts != nil && !ts.observe && m.Display != nil {
@@ -720,9 +900,25 @@ func (c *termClient) call(m *termIn) {
 		c.fail(m.RID, "unavailable", "")
 		return
 	}
+	ev := map[string]any{"machine": m.M, "terminal": params["terminal"], "argv": params["argv"]}
+	if m.Method == "terminal.run" {
+		// New programs get the machine's virtual display (feature 14); its
+		// variables replace any the client gave, so a client cannot point
+		// them elsewhere.
+		if mc := c.s.mg.Get(m.M); mc != nil {
+			if env := c.s.displayEnv(mc); len(env) > 0 {
+				names, ok := addEnv(params, env, true)
+				if !ok {
+					c.fail(m.RID, "usage", "")
+					return
+				}
+				ev["env"] = names
+			}
+		}
+	}
 	switch m.Method {
 	case "terminal.run", "terminal.kill", "terminal.rm":
-		c.s.audit.log(c.req, m.Method, map[string]any{"machine": m.M, "terminal": params["terminal"], "argv": params["argv"]})
+		c.s.audit.log(c.req, m.Method, ev)
 	}
 	ctx, cancel := context.WithTimeout(c.ctx, 60*time.Second)
 	defer cancel()
@@ -759,7 +955,7 @@ func (c *termClient) attach(m *termIn) {
 	}
 	c.next++
 	id := c.next
-	c.streams[id] = &termStream{st: st, observe: observe}
+	c.streams[id] = &termStream{st: st, observe: observe, machine: m.M, terminal: m.Terminal}
 	// The reply is queued before the stream's first frame.
 	c.sendJSON(map[string]any{"t": "attached", "rid": m.RID, "s": id, "terminal": m.Terminal,
 		"cols": a.Terminal.Cols, "rows": a.Terminal.Rows, "observe": observe, "automatic": a.AutomaticInput})
@@ -878,4 +1074,66 @@ func (s *Server) handleHCAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, rep.HC)
+}
+
+// termShells are the terminals of a machine's terminal core, for typing the
+// display's variables into their shells (gui.Shells).
+type termShells struct{ b *termBackend }
+
+var errNoTerminals = errors.New("the terminal core is not connected")
+
+func (t termShells) All(context.Context) ([]string, error) {
+	t.b.mu.Lock()
+	defer t.b.mu.Unlock()
+	var out []string
+	for addr, rec := range t.b.terms {
+		if rec["state"] == "live" {
+			out = append(out, addr)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// get reads a terminal's record now: its foreground is read about twice a
+// second, so the cached one may be older.
+func (t termShells) get(ctx context.Context, addr string) (*hc.Conn, *hc.Terminal, error) {
+	conn := t.b.connection()
+	if conn == nil {
+		return nil, nil, errNoTerminals
+	}
+	var rec hc.Terminal
+	if err := conn.Call(ctx, "terminal.get", map[string]string{"terminal": addr}, &rec); err != nil {
+		return nil, nil, err
+	}
+	return conn, &rec, nil
+}
+
+// Shell is the terminal's program, waiting at its prompt when it leads the
+// foreground process group.
+func (t termShells) Shell(ctx context.Context, addr string) (int, bool, error) {
+	_, rec, err := t.get(ctx, addr)
+	if err != nil {
+		return 0, false, err
+	}
+	if rec.State != "live" || rec.PID == nil {
+		return 0, false, nil
+	}
+	return *rec.PID, rec.Foreground != nil && rec.Foreground.PID == *rec.PID, nil
+}
+
+// Send types text as a viewer of the terminal's own size, so typing
+// changes no viewer's size.
+func (t termShells) Send(ctx context.Context, addr, text string) error {
+	conn, rec, err := t.get(ctx, addr)
+	if err != nil {
+		return err
+	}
+	st, _, err := conn.Attach(ctx, hc.AttachParams{Terminal: addr, Cols: max(rec.Cols, 1), Rows: max(rec.Rows, 1), Resumed: true})
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	_, err = st.Write([]byte(text))
+	return err
 }

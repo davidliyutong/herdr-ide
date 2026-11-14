@@ -35,6 +35,7 @@ module.exports = {
     { from: '../licenses/herdr', to: 'licenses/herdr' },
     // Written by scripts/fetch-hc from the herdr-core release the core embeds.
     { from: '../dist/hc/licenses', to: 'licenses/herdr-core' },
+    { from: '../licenses/herdr-detect', to: 'licenses/herdr-detect' },
     { from: '../licenses/encoder', to: 'licenses/encoder' },
     { from: '../LICENSE', to: 'LICENSE' },
     { from: '../THIRD_PARTY_NOTICES.md', to: 'THIRD_PARTY_NOTICES.md' },

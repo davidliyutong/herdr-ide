@@ -22,6 +22,7 @@ browser (React, canvas)     ──WebSocket + HTTP──▶  core (Go, `herdr-id
 | `internal/brand` | Product names; the only place they are defined in Go. |
 | `internal/agentproto` | Stream protocol shared by core and agent. |
 | `internal/agent` | Agent: herdr, terminals, files, code-server supervision, bridge listener, housekeeping. |
+| `internal/agent/detect` | Which coding agent a terminal's foreground process is and its state from the screen, by herdr's method and manifests (embedded, Apache-2.0), with the state machine for debouncing and done ([25](features/25-agent-detection.md)). |
 | `internal/transport` | yamux sessions: in-process for the local machine, ssh stdio for others; agent upload. |
 | `internal/machines` | The core's machines (`Registry`: SSH machines in `machines[-<instance>].json`, herdr's saved machines imported once), added, removed, renamed, enabled and disabled at runtime; the connection state machine; herdr snapshots and subscriptions while herdr answers. |
 | `internal/herdr` | herdr public socket API client; `endpoint`: client of herdr's endpoint protocol (generation 1). |
@@ -143,8 +144,9 @@ after a successful reply it carries op-specific bytes.
 | `herdr` | core → agent | – (an empty reply at once, then a second reply with `Herdr` when the action is done); actions `status`, `start`, `stop`, `restart` (the server of `Session`; nothing is started or stopped while another user's process or an unresponsive listener holds its socket; a restart stops only this user's answering server, then starts one), `check` (herdr's newest release), `update` (only the application's managed copy); each looks herdr up again (a path that is no longer executable gives way to the usual search) and without one replies `not_found` with whether a server still answers on the socket; the core then shows that herdr for the machine |
 | `hc` | core → agent | actions `status`, `install` (after a first reply the gzip-compressed herdr-core executable, chunked, checked against `Digest`), `start`, `restart` (the core's successor adopts the programs) and `stop` (the terminal core of the agent's instance); each ends with a reply with `HC` (the installed executable's digest, whether a core answers, its version, session and socket); failures carry `Code`: `not_installed`, `bad_digest`, `start_failed`, `stop_failed` |
 | `hc-api` | core → agent | raw pipe to the terminal core's socket (herdr-core's API, `internal/hc`); starts nothing |
+| `detect` | core → agent | after the reply, `DetectEvent` lines `{terminal, agent, status}` (status `working`, `blocked`, `idle`, `done`, `unknown`; `{terminal}` when the agent left) from the agent, which follows the terminal core's terminals until the core closes the stream ([25](features/25-agent-detection.md)); starts and writes nothing |
 | `bridge` | agent → core | JSON lines between the VS Code extension and the core |
-| `gui` | core → agent | actions `status`, `install` (fetch Xvfb in user space), `start`, `keep` (start the display keeper for `Session`'s herdr server), `shells` (which of the pids in `Args` were started with the display) (reply `GUI`); `video` and `video-install` (`Digest`: the video encoder's SHA-256; the second streams the gzip-compressed encoder, chunked) reply whether it is installed and the stream kinds it makes here (`GUI.Video`, `GUI.VideoEncoders`); `attach`: messages `[kind u8][len u32][payload]`, JSON events (`window`, `gone`, `layer`, `layer_gone`, `cursor`, `stats`, `video` (a window's stream starts, or ends without a codec)) and frames (`GUIFrameHeader` + JPEG/PNG, or a video frame of the whole window, `Enc` 3, 4 for key frames) from the agent, JSON commands (`watch`, `ack`, `refresh`, `codecs` (the stream kinds all viewers decode, also sent with `watch` and `refresh`), `keyframe`, input, `close`) from the core |
+| `gui` | core → agent | actions `status`, `install` (fetch Xvfb in user space), `start`, `keep` (start the display keeper, which holds the display while the instance's terminal core or `Session`'s herdr server runs), `shells` (which of the pids in `Args` were started with the display) (reply `GUI`); `video` and `video-install` (`Digest`: the video encoder's SHA-256; the second streams the gzip-compressed encoder, chunked) reply whether it is installed and the stream kinds it makes here (`GUI.Video`, `GUI.VideoEncoders`); `attach`: messages `[kind u8][len u32][payload]`, JSON events (`window`, `gone`, `layer`, `layer_gone`, `cursor`, `stats`, `video` (a window's stream starts, or ends without a codec)) and frames (`GUIFrameHeader` + JPEG/PNG, or a video frame of the whole window, `Enc` 3, 4 for key frames) from the agent, JSON commands (`watch`, `ack`, `refresh`, `codecs` (the stream kinds all viewers decode, also sent with `watch` and `refresh`), `keyframe`, input, `close`) from the core |
 
 yamux streams cannot be half-closed, so uploads use `ChunkWriter` framing
 (`[u32 length][data]…[0]`). Core and agent always come from the same build:
@@ -173,7 +175,7 @@ no notification sounds (`agent {sound}`) before it reports `active`.
 | `download.watch {ids}` (downloads the page started with `dl=<id>`: before starting one and after reconnecting), `download.cancel {id}` | `download {id, state, sent, total, name, error}` to the page following the id: progress and how it ended (`unknown` for an id the core has not seen or no longer knows), for the downloads panel |
 | `theme {kind: dark\|light}` (VS Code follows it) | `gui {state: {m, phase, gpu, windows}}` (program windows per machine) |
 | – | `settings {values, problems}` and `keybindings {user, effective, conflicts, problems}` after every change, through the API or the files ([13](features/13-settings-and-appearance.md)) |
-| `active {idle}` (ms since the user last used the page) | `agent {…, sound}`: `sound` is true only for the most recently used page, which plays the notification sound |
+| `active {idle}` (ms since the user last used the page) | `agent {…, sound}`: `sound` is true only for the most recently used page, which plays the notification sound; a terminal core's terminal sends `data {terminal, agent, display_agent, agent_status, title}` ([25](features/25-agent-detection.md)) |
 
 HTTP endpoints besides files (`GET /api/m/{id}/file`, `GET /api/m/{id}/list`,
 and `GET /api/m/{id}/download?path=…[&dl=<id>]`: one file as an attachment,
@@ -206,7 +208,8 @@ the app at `GET /m/{id}/gui/{win}`, streamed over the WebSocket
 `/m/{id}/gui/{win}/ws` (JSON events and binary frames out, JSON commands in;
 `?video=avc1,vp8` names the video streams the browser decodes)
 and closed through `POST /m/{id}/gui/{win}/close`;
-`POST /api/m/{id}/gui/enable` gives open panes the display, see
+`POST /api/m/{id}/gui/enable` (`{"panes": [...]}` or
+`{"terminals": [...]}`) gives open panes or terminals the display, see
 [14](features/14-gui-windows.md). `PUT /api/settings` takes an optional
 `machine` for settings that can differ per machine. `GET /api/m/{id}/herdr`
 and `POST /api/m/{id}/herdr/{start|stop|restart}` manage a machine's herdr
@@ -226,10 +229,10 @@ field; binary frames are `[stream u32 LE][kind u8][payload]`.
 
 | Client → core | Core → client |
 | --- | --- |
-| `sub {m}`, `unsub {m}` (a machine's terminals) | `backend {m, state: starting\|ready\|error, code, version}` (also in the machine's state on `/ws` as `hc`), `snapshot {m, terminals}` (herdr-core's terminal records), `event {m, type, terminal, data}` (herdr-core's events) |
+| `sub {m}`, `unsub {m}` (a machine's terminals) | `backend {m, state: starting\|ready\|error, code, version}` (also in the machine's state on `/ws` as `hc`), `snapshot {m, terminals}` (herdr-core's terminal records, with the detected `agent` and `agent_status`), `event {m, type, terminal, data}` (herdr-core's events, and `agent` with `{agent, agent_status}`) |
 | `call {rid, m, method, params}` (allowlisted herdr-core methods) | `res {rid, result}` or `res {rid, error: {kind, message}}` |
 | `attach {rid, m, terminal, cols, rows, history, observe, display}` | `attached {rid, s, terminal, cols, rows, observe, automatic}`, later `closed {s, reason, exit_code, signal}` |
-| `ack {s, n}` (output bytes drawn), `resize {s, cols, rows}`, `focus {s, focused}`, `facts {s, display}`, `detach {s}` | – |
+| `ack {s, n}` (output bytes drawn), `resize {s, cols, rows}`, `focus {s, focused}` (focused also marks a terminal's ended turn seen), `facts {s, display}`, `detach {s}` | – |
 | binary kind 0 (input bytes), kind 6 (the client terminal's automatic answers) | binary kind 0 (output bytes: a first paint, then the program's output), kind 3 (`cols u16 LE, rows u16 LE`: an observed terminal's new grid) |
 | `ping {rid}` | `pong {rid}` |
 

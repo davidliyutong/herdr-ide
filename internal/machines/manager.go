@@ -317,6 +317,14 @@ func (mg *Manager) broadcast(st State) {
 	}
 }
 
+// PublishAgent sends an agent's status change to the subscribers, as a
+// herdr pane's would: the terminal core's agents, detected by the agent.
+func (mg *Manager) PublishAgent(ev AgentEvent) {
+	if mg.Get(ev.Machine) != nil {
+		mg.broadcastAgent(ev)
+	}
+}
+
 func (mg *Manager) broadcastAgent(ev AgentEvent) {
 	mg.mu.Lock()
 	fns := make([]func(AgentEvent), 0, len(mg.agentFn))

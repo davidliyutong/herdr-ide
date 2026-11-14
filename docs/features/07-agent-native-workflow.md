@@ -20,7 +20,10 @@ automatically, scheduling agents.
 
 - **States** come from herdr (`idle`, `working`, `blocked`, `done`,
   `unknown`), per pane, through the agent-status subscription
-  ([01](01-herdr-integration.md)).
+  ([01](01-herdr-integration.md)); for the terminals of the terminal core
+  the machine's agent detects them the same way, with herdr's rules
+  ([25](25-agent-detection.md)), and the core sends the same `agent`
+  messages, with the terminal's address instead of a pane's.
 - **Inbox** (sidebar): agents in `blocked` or `done` across all machines,
   blocked first, with machine, pane title and cwd; counts of working agents.
   Workspaces and tabs show the most urgent status of their agents.
@@ -89,6 +92,8 @@ automatically, scheduling agents.
 
 ## Testing
 
+`TestTermAgents` (`internal/server`) and `TestIntegrationDetect` cover the
+agent messages of the terminal core's terminals ([25](25-agent-detection.md)).
 Inbox ordering and notification triggering are driven by snapshot state and
 status events; they were verified against live machines with idle and working
 agents. `internal/herdr/client_test.go` covers status event parsing;

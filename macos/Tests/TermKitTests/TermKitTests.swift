@@ -23,6 +23,12 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(TerminalRecord(raw: ["address": "t1", "argv": ["/bin/bash", "-l"]]).displayName, "bash")
         XCTAssertEqual(TerminalRecord(raw: ["address": "t1"]).displayName, "t1")
         XCTAssertEqual(TerminalRecord(raw: ["address": "t1", "status": ["state": "working"]]).status, "working")
+        // The detected agent's status comes before the program's own word.
+        let agent = TerminalRecord(raw: ["address": "t1", "state": "live", "agent": "claude", "agent_status": "done", "status": ["state": "working"]])
+        XCTAssertEqual(agent.agent, "claude")
+        XCTAssertEqual(agent.status, "done")
+        XCTAssertTrue(agent.needsAttention)
+        XCTAssertFalse(TerminalRecord(raw: ["address": "t1", "state": "finished", "agent_status": "blocked"]).needsAttention)
     }
 }
 
@@ -34,8 +40,8 @@ final class EventTests: XCTestCase {
                        .machine(Machine(id: "b", label: "Box", status: "auth_required")))
         XCTAssertEqual(EventConnection.decode(#"{"t":"machine","state":{"id":"b","label":"Box","kind":"ssh","status":"ready","hc":{"state":"error","code":"stopped"}}}"#),
                        .machine(Machine(id: "b", label: "Box", status: "ready", kind: "ssh", hc: BackendState(phase: .error, code: "stopped"))))
-        XCTAssertEqual(EventConnection.decode(#"{"t":"gui","state":{"m":"b","phase":"ready","windows":[{"id":3,"title":"plot","w":640,"h":480,"pid":9},{"id":4,"title":"Save","w":300,"h":200,"transient":3},{"title":"no id"}]}}"#),
-                       .gui(machine: "b", windows: [ProgramWindow(machine: "b", id: 3, title: "plot", width: 640, height: 480),
+        XCTAssertEqual(EventConnection.decode(#"{"t":"gui","state":{"m":"b","phase":"ready","windows":[{"id":3,"title":"plot","w":640,"h":480,"pid":9,"terminal":"t4"},{"id":4,"title":"Save","w":300,"h":200,"transient":3},{"title":"no id"}]}}"#),
+                       .gui(machine: "b", windows: [ProgramWindow(machine: "b", id: 3, title: "plot", width: 640, height: 480, terminal: "t4"),
                                                     ProgramWindow(machine: "b", id: 4, title: "Save", width: 300, height: 200, transient: 3)]))
         XCTAssertEqual(EventConnection.decode(#"{"t":"gui","state":{"m":"b","phase":"off","windows":null}}"#), .gui(machine: "b", windows: []))
         // Messages the application does not use.
@@ -82,6 +88,13 @@ final class TerminalStoreTests: XCTestCase {
         XCTAssertEqual(store.terminal("t1", on: "x")?.status, "working")
         event("status", "t1", ["status": NSNull(), "records": [:] as [String: Any], "reported": true])
         XCTAssertNil(store.terminal("t1", on: "x")?.status)
+        // The core's agent events, and their end.
+        event("agent", "t1", ["agent": "codex", "agent_status": "blocked"])
+        XCTAssertEqual(store.terminal("t1", on: "x")?.agent, "codex")
+        XCTAssertEqual(store.attention(of: "x"), 1)
+        event("agent", "t1", ["agent": NSNull(), "agent_status": NSNull()])
+        XCTAssertNil(store.terminal("t1", on: "x")?.agent)
+        XCTAssertEqual(store.attention(of: "x"), 0)
         event("title", "t1", ["title": "make"])
         event("size", "t1", ["cols": 120, "rows": 40])
         XCTAssertEqual(store.terminal("t1", on: "x")?.title, "make")
@@ -240,7 +253,7 @@ final class LocalizationTests: XCTestCase {
         }
         // Keys built from a state or code: tr("backend." + code); the
         // settings' and commands' come from the core's registry (below).
-        let prefixes = ["backend.", "machine.", "status.", "quicklook.", "settings.", "command.", "keys.error.", "keys.problem."]
+        let prefixes = ["backend.", "machine.", "status.", "quicklook.", "settings.", "command.", "keys.error.", "keys.problem.", "gui.error."]
         for key in used where !prefixes.contains(key) {
             XCTAssertNotNil(english[key], "missing string \(key)")
         }

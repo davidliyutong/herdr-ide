@@ -13,7 +13,7 @@ here; both READMEs link to this page instead of repeating it.
 | `herdr-ide fetch-assets [flags] DIR` | Download and verify code-server releases and extensions into `DIR` for air-gapped installs. |
 | `herdr-ide version` | Print the version. |
 | `herdr-ide-agent serve [--instance NAME]` | Per-machine helper; started by the core over ssh, never by hand. |
-| `herdr-ide-agent gui-keep --instance NAME --session S` | Holds a machine's virtual display while the herdr server of session `S` runs; started by the agent, never by hand. |
+| `herdr-ide-agent gui-keep --instance NAME --session S` | Holds a machine's virtual display while the instance's terminal core or the herdr server of session `S` runs; started by the agent, never by hand. |
 
 ## `serve` flags
 
@@ -240,7 +240,8 @@ read when the core starts and written by it at every change.
 
 A release directory holds the core, the bundled `herdr`, `LICENSE`,
 `THIRD_PARTY_NOTICES.md`, `licenses.md` and `licenses/` (`herdr/`,
-`herdr-core/`, `encoder/`); they stay until
+`herdr-core/`, `herdr-detect/` (herdr's agent detection rules, which the
+agents carry), `encoder/`); they stay until
 the user removes the directory and are not copied to SSH machines. herdr's own
 files (configuration, sessions, machine list) are where herdr puts them,
 whichever herdr is used.

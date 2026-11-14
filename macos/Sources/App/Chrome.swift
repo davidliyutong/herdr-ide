@@ -79,7 +79,9 @@ private enum SidebarItem: Equatable {
     case workspace(machine: String, workspace: Layout.Workspace, selected: Bool)
     /// A terminal, inside a workspace or not.
     case terminal(machine: String, record: TerminalRecord, inWorkspace: Bool)
-    case program(ProgramWindow)
+    /// A program window, under the terminal its program runs in (level 2
+    /// or 3) or under its machine (level 1).
+    case program(ProgramWindow, level: Int)
 }
 
 /// Machines, their workspaces and their terminals.
@@ -141,24 +143,32 @@ final class SidebarView: NSView, NSTableViewDataSource, NSTableViewDelegate {
         for machine in model.machines {
             next.append(.machine(machine))
             let live = model.store.terminals(of: machine.id).filter(\.isLive)
+            let programs = model.programs.filter { $0.machine == machine.id }
             var placed: Set<String> = []
+            // A terminal, then the windows of the programs it runs.
+            func add(_ record: TerminalRecord, inWorkspace: Bool) {
+                placed.insert(record.address)
+                next.append(.terminal(machine: machine.id, record: record, inWorkspace: inWorkspace))
+                for program in programs where program.terminal == record.address {
+                    next.append(.program(program, level: inWorkspace ? 3 : 2))
+                }
+            }
             if let layout = model.layout(of: machine.id) {
                 for (index, workspace) in layout.workspaces.enumerated() {
                     next.append(.workspace(machine: machine.id, workspace: workspace,
                                            selected: machine.id == model.selectedMachine && index == layout.selected))
                     for address in workspace.terminals {
                         guard let record = live.first(where: { $0.address == address }) else { continue }
-                        placed.insert(address)
-                        next.append(.terminal(machine: machine.id, record: record, inWorkspace: true))
+                        add(record, inWorkspace: true)
                     }
                 }
             }
             // Terminals no workspace shows, such as those another client started.
             for record in live where !placed.contains(record.address) {
-                next.append(.terminal(machine: machine.id, record: record, inWorkspace: false))
+                add(record, inWorkspace: false)
             }
-            for program in model.programs where program.machine == machine.id {
-                next.append(.program(program))
+            for program in programs where !placed.contains(program.terminal) {
+                next.append(.program(program, level: 1))
             }
         }
         items = next
@@ -177,6 +187,9 @@ final class SidebarView: NSView, NSTableViewDataSource, NSTableViewDelegate {
                 detail = tr("machine." + machine.status)
             } else if let state = model.backend(of: machine.id) ?? machine.hc, state.phase == .error {
                 detail = tr("backend." + state.code)
+            } else if case let waiting = model.store.attention(of: machine.id), waiting > 0 {
+                // Agents that are blocked or finished a turn nobody saw.
+                detail = tr("sidebar.waiting", String(waiting))
             }
             cell.configure(title: machine.label, detail: detail, dot: nil, level: 0, strong: true, selected: false) { [weak self] in
                 self?.model.newTerminal(on: machine.id)
@@ -195,10 +208,10 @@ final class SidebarView: NSView, NSTableViewDataSource, NSTableViewDelegate {
             let focused = machine == model.selectedMachine && model.focusedTerminal == record.address
             cell.configure(title: record.displayName, detail: (record.cwd as NSString).abbreviatingWithTildeInPath,
                            dot: Theme.status(record.status), level: inWorkspace ? 2 : 1, strong: false, selected: focused, action: nil)
-            cell.toolTip = record.status.map { tr("status." + $0) }
-        case let .program(program):
+            cell.toolTip = [record.agent, record.status.map { tr("status." + $0) }].compactMap { $0 }.joined(separator: " · ")
+        case let .program(program, level):
             cell.configure(title: program.title.isEmpty ? tr("sidebar.window") : program.title, detail: tr("sidebar.window"),
-                           dot: nil, level: 1, strong: false, selected: false, action: nil)
+                           dot: nil, level: level, strong: false, selected: false, action: nil)
         }
         return cell
     }
@@ -209,7 +222,7 @@ final class SidebarView: NSView, NSTableViewDataSource, NSTableViewDelegate {
         case let .machine(machine): model.select(machine: machine.id)
         case let .workspace(machine, workspace, _): model.selectWorkspace(workspace.id, on: machine)
         case let .terminal(machine, record, _): model.open(record.address, on: machine)
-        case let .program(program): onProgram?(program)
+        case let .program(program, _): onProgram?(program)
         }
     }
 }
@@ -245,6 +258,12 @@ extension SidebarView: NSMenuDelegate {
             add(tr("menu.renameWorkspace"), #selector(menuRenameWorkspace(_:)), [machine, workspace.id])
             add(tr("menu.closeWorkspace"), #selector(menuCloseWorkspace(_:)), [machine, workspace.id])
         case let .terminal(machine, record, _):
+            // Shells started before the machine's display existed get it
+            // typed in (remote machines only: the local one has its own).
+            if model.machines.first(where: { $0.id == machine })?.kind == "ssh", !model.settings.readOnly {
+                add(tr("menu.enableWindows"), #selector(menuEnableWindows(_:)), [machine, record.address])
+                menu.addItem(.separator())
+            }
             add(tr("sidebar.kill"), #selector(menuKill(_:)), [machine, record.address])
         case .program:
             break
@@ -279,6 +298,10 @@ extension SidebarView: NSMenuDelegate {
 
     @objc private func menuCloseWorkspace(_ sender: NSMenuItem) {
         if let pair = sender.representedObject as? [String], pair.count == 2 { dialogs?.close(pair[1], on: pair[0]) }
+    }
+
+    @objc private func menuEnableWindows(_ sender: NSMenuItem) {
+        if let pair = sender.representedObject as? [String], pair.count == 2 { machineDialogs?.enableWindows(pair[1], on: pair[0]) }
     }
 
     @objc private func menuKill(_ sender: NSMenuItem) {
@@ -337,7 +360,8 @@ private final class SidebarRow: NSView {
     private var leading: NSLayoutConstraint?
 
     /// `level` 0 is a machine, 1 what is directly under it, 2 a terminal of
-    /// a workspace.
+    /// a workspace or a window of a terminal, 3 a window of a terminal of a
+    /// workspace.
     func configure(title text: String, detail detailText: String, dot color: NSColor?, level: Int, strong: Bool, selected: Bool,
                    action: (() -> Void)?) {
         title.stringValue = text

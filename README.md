@@ -44,7 +44,10 @@ browser tab, with VS Code (code-server) one keystroke away.
   machines, browser notifications and sounds when an agent needs input or
   finishes, starting agents from the command palette,
   sending code from VS Code to the focused agent, pasting images into agent
-  prompts.
+  prompts. In the terminals of the macOS application, each machine's agent
+  tells which coding agent runs and whether it works, waits or finished a
+  turn, with herdr's rules for Claude Code, Codex, Gemini, OpenCode and
+  more.
 - **VS Code on demand.** code-server is installed per machine from the core
   host (no internet needed on machines), downloaded by the machines
   themselves, or taken from an existing install, with Git Graph and a bridge
@@ -55,8 +58,9 @@ browser tab, with VS Code (code-server) one keystroke away.
   panel sits beside or below the terminals. Idle instances are stopped.
 - **Program windows.** Windows that programs on remote Linux machines open
   (matplotlib, the MuJoCo viewer, Qt tools) appear in browser windows, one
-  per program window, with mouse and keyboard. Panes get a virtual display
-  automatically; Xvfb is fetched without root when a machine lacks it, and
+  per program window, with mouse and keyboard. Panes and terminals get a
+  virtual display automatically (a shell opened before can be given it from
+  its menu); Xvfb is fetched without root when a machine lacks it, and
   VirtualGL renders OpenGL on the GPU where it is installed. Windows that
   keep changing are sent as video (H.264 on NVIDIA, Intel and AMD GPUs, VP8
   otherwise) to browsers that decode it, still ones as exact pictures.

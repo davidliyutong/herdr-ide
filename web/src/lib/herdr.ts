@@ -101,8 +101,11 @@ export interface MachineState {
   updated_at: number;
 }
 
+/** An agent's status change: a herdr pane's (pane_id), or a terminal's of
+ * the machine's terminal core (terminal, detected by the agent). */
 export interface AgentStatusEvent {
   pane_id: string;
+  terminal?: string;
   workspace_id: string;
   agent_status: AgentStatus;
   agent?: string | null;

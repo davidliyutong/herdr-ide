@@ -792,6 +792,7 @@ func (g *gui) attach(st net.Conn) error {
 		return agentproto.Fail(st, err)
 	}
 	wm.tools = g.videoTools
+	wm.hcSocket = g.a.hcSocket()
 	g.wmMu.Lock()
 	g.wm = wm
 	g.wmMu.Unlock()

@@ -15,6 +15,11 @@ public final class TerminalStore {
         }
     }
 
+    /// How many of a machine's terminals wait for the user.
+    public func attention(of machine: String) -> Int {
+        terminals(of: machine).filter(\.needsAttention).count
+    }
+
     public func terminal(_ address: String, on machine: String) -> TerminalRecord? {
         records[machine]?[address]
     }

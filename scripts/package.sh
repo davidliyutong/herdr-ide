@@ -23,12 +23,13 @@ for p in $TARGETS; do
   test -f dist/hc/licenses/LICENSE
   test -f dist/hc/licenses/THIRD-PARTY-NOTICES
   rm -rf "$dir"
-  mkdir -p "$dir/licenses/herdr" "$dir/licenses/herdr-core" "$dir/licenses/encoder"
+  mkdir -p "$dir/licenses/herdr" "$dir/licenses/herdr-core" "$dir/licenses/herdr-detect" "$dir/licenses/encoder"
   cp "dist/$name" "$dir/$SLUG"
   cp "dist/herdr/herdr-$os-$arch" "$dir/herdr"
   cp LICENSE THIRD_PARTY_NOTICES.md web/dist/licenses.md "$dir/"
   cp licenses/herdr/* "$dir/licenses/herdr/"
   cp dist/hc/licenses/LICENSE dist/hc/licenses/THIRD-PARTY-NOTICES "$dir/licenses/herdr-core/"
+  cp licenses/herdr-detect/* "$dir/licenses/herdr-detect/"
   cp licenses/encoder/* "$dir/licenses/encoder/"
   cat > "$dir/README.txt" <<EOF
 $SLUG release for $p
@@ -50,7 +51,7 @@ $SLUG contains the unmodified herdr-core $HC_VERSION executables
 machines.
 
 Licenses: LICENSE, THIRD_PARTY_NOTICES.md, licenses.md, licenses/herdr/,
-licenses/herdr-core/, licenses/encoder/.
+licenses/herdr-core/, licenses/herdr-detect/, licenses/encoder/.
 EOF
   tar -C dist/packages -czf "dist/release/$name.tar.gz" "$name"
   echo "    dist/release/$name.tar.gz"

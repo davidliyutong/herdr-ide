@@ -32,6 +32,7 @@ shortcuts, paths) lives in [reference.md](../reference.md).
 | 22 | [Terminal protocol for clients](22-terminal-protocol.md) | `/api/v1/term`: a machine's terminals, their events and raw byte streams for clients that emulate and draw terminals themselves, and the layout document those clients share. |
 | 23 | [macOS application](23-macos-application.md) | A native window on the terminal protocol: Ghostty's GPU renderer per pane, workspaces, tabs and splits kept as a document in the machine's terminal core. |
 | 24 | [Design tokens](24-design-tokens.md) | One file of colors, metrics, font sizes and terminal palettes, generated into the macOS application's Swift and the web UI's CSS variables. |
+| 25 | [Agent detection in terminals](25-agent-detection.md) | herdr's method for the terminal core's terminals: the foreground process names the agent, herdr's rules over the screen give its state, done when a turn ends; in the agent, next to the terminals. |
 
 ## Writing a feature document
 

@@ -21,6 +21,7 @@ import (
 	"github.com/coder/websocket"
 
 	"herdr-ide/internal/agent"
+	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/machines"
 	"herdr-ide/internal/transport"
 )
@@ -36,6 +37,7 @@ type fakeTermCore struct {
 	conns  []net.Conn
 	frames []string // "kind:payload" of stream frames
 	attach []string // params of terminal.attach
+	calls  []string // params of terminal.run
 }
 
 func (f *fakeTermCore) seen(want string) bool {
@@ -146,6 +148,13 @@ func (f *fakeTermCore) serve(c net.Conn) {
 			if strings.Contains(string(req.Params), `"history":1`) { // the test asks for the program's end
 				write(frameOf(next, 2, []byte(`{"reason":"exited","exit_code":0,"signal":null}`)))
 			}
+		case "terminal.run":
+			f.mu.Lock()
+			f.calls = append(f.calls, string(req.Params))
+			f.mu.Unlock()
+			write(reply(`"result":{"address":"t2"}`))
+		case "terminal.get":
+			write(reply(`"result":{"address":"t1","state":"live","pid":42,"cols":80,"rows":24,"argv":[],"cwd":"/","created_ms":1,"labels":{},"screen":"exact","foreground":{"pid":42,"name":"zsh","argv":["zsh"],"cwd":"/"}}`))
 		case "terminal.list":
 			write(reply(`"result":{"terminals":[],"hidden_finished":0}`))
 		case "terminal.kill":
@@ -588,5 +597,150 @@ func TestHCLifecycle(t *testing.T) {
 		if !strings.Contains(audit.String(), want) {
 			t.Fatalf("audit lacks %s: %s", want, audit.String())
 		}
+	}
+}
+
+// New terminals get the machine's virtual display: its variables replace
+// the client's, the rest of the client's environment stays, and the audit
+// log names them. Malformed environments are refused.
+func TestTermRunGetsTheDisplay(t *testing.T) {
+	s, core, audit := termServer(t, Options{}, true)
+	s.displayEnv = func(*machines.Machine) map[string]string {
+		return map[string]string{"DISPLAY": ":20", "XAUTHORITY": "/home/u/.herdr-ide/run/xauth"}
+	}
+	c := dialTerm(t, s)
+	c.ready()
+	c.send(map[string]any{"t": "call", "rid": 1, "m": "x", "method": "terminal.run",
+		"params": map[string]any{"argv": []string{"sh"}, "env": map[string]string{"DISPLAY": ":0", "FOO": "1"}}})
+	if m := c.until("res"); m["error"] != nil {
+		t.Fatalf("run %v", m)
+	}
+	core.mu.Lock()
+	got := strings.Join(core.calls, " ")
+	core.mu.Unlock()
+	if !strings.Contains(got, `"DISPLAY":":20"`) || !strings.Contains(got, `"FOO":"1"`) || !strings.Contains(got, `"XAUTHORITY":"/home/u/.herdr-ide/run/xauth"`) {
+		t.Fatalf("run params %s", got)
+	}
+	if !strings.Contains(audit.String(), `"env":["DISPLAY","XAUTHORITY"]`) {
+		t.Fatalf("audit %s", audit.String())
+	}
+	c.send(map[string]any{"t": "call", "rid": 2, "m": "x", "method": "terminal.run", "params": map[string]any{"env": "DISPLAY=:0"}})
+	if m := c.until("res"); m["error"].(map[string]any)["kind"] != "usage" {
+		t.Fatalf("malformed env %v", m)
+	}
+	// Without a display nothing is added.
+	s.displayEnv = func(*machines.Machine) map[string]string { return nil }
+	c.send(map[string]any{"t": "call", "rid": 3, "m": "x", "method": "terminal.run", "params": map[string]any{"argv": []string{"sh"}}})
+	c.until("res")
+	core.mu.Lock()
+	last := core.calls[len(core.calls)-1]
+	core.mu.Unlock()
+	if strings.Contains(last, "env") {
+		t.Fatalf("env without a display: %s", last)
+	}
+}
+
+// Enabling program windows in terminals reads each terminal's record now
+// and types as a viewer of the terminal's own size; without a connected
+// terminal core, or a display, nothing is typed.
+func TestTermShells(t *testing.T) {
+	s, core, _ := termServer(t, Options{}, true)
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	post := func(body string) (int, string) {
+		res, err := http.Post(srv.URL+"/api/m/x/gui/enable", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		b, _ := io.ReadAll(res.Body)
+		return res.StatusCode, string(b)
+	}
+	if code, body := post(`{"terminals":["t1"]}`); code != 409 || !strings.Contains(body, "no_terminals") {
+		t.Fatalf("without terminals: %d %s", code, body)
+	}
+	c := dialTerm(t, s)
+	c.ready()
+	if code, body := post(`{"terminals":["t1"]}`); code != 409 || !strings.Contains(body, "not_ready") {
+		t.Fatalf("without a display: %d %s", code, body)
+	}
+	sh := termShells{s.term.existing("x")}
+	ctx := context.Background()
+	if all, _ := sh.All(ctx); len(all) != 1 || all[0] != "t1" {
+		t.Fatalf("all %v", all)
+	}
+	if pid, idle, err := sh.Shell(ctx, "t1"); pid != 42 || !idle || err != nil {
+		t.Fatalf("shell %d %v %v", pid, idle, err)
+	}
+	if err := sh.Send(ctx, "t1", "echo typed\r"); err != nil {
+		t.Fatal(err)
+	}
+	core.waitFor("0:echo typed\r")
+	core.waitFor(`"resumed":true`)
+	core.waitFor(`"cols":80,"rows":24`)
+}
+
+// Detected agents reach the terminal records, the subscribers (an "agent"
+// event) and /ws (agent messages, with the terminal's address). A turn
+// that ended is seen, and reported idle, when a client has the terminal
+// focused, then or later.
+func TestTermAgents(t *testing.T) {
+	s, _, _ := termServer(t, Options{}, true)
+	var mu sync.Mutex
+	var ws []string
+	s.mg.Subscribe(func(machines.State) {}, func(ev machines.AgentEvent) {
+		mu.Lock()
+		ws = append(ws, string(ev.Data))
+		mu.Unlock()
+	})
+	c := dialTerm(t, s)
+	c.ready()
+	b := s.term.existing("x")
+	agentEvent := func() map[string]any {
+		t.Helper()
+		for {
+			if m := c.until("event"); m["type"] == "agent" {
+				return m
+			}
+		}
+	}
+	b.applyAgent(agentproto.DetectEvent{Terminal: "t1", Agent: "claude", Status: "working"})
+	if m := agentEvent(); m["terminal"] != "t1" || m["data"].(map[string]any)["agent_status"] != "working" {
+		t.Fatalf("event %v", m)
+	}
+	// A later subscriber finds it in the record.
+	c2 := dialTerm(t, s)
+	c2.send(map[string]any{"t": "sub", "m": "x"})
+	rec := c2.until("snapshot")["terminals"].([]any)[0].(map[string]any)
+	if rec["agent"] != "claude" || rec["agent_status"] != "working" {
+		t.Fatalf("record %v", rec)
+	}
+	b.applyAgent(agentproto.DetectEvent{Terminal: "t1", Agent: "claude", Status: "done"})
+	if m := agentEvent(); m["data"].(map[string]any)["agent_status"] != "done" {
+		t.Fatalf("done %v", m)
+	}
+	// Focusing the terminal sees it.
+	c.send(map[string]any{"t": "attach", "rid": 1, "m": "x", "terminal": "t1", "cols": 80, "rows": 24})
+	sid := c.until("attached")["s"]
+	c.send(map[string]any{"t": "focus", "s": sid, "focused": true})
+	if m := agentEvent(); m["data"].(map[string]any)["agent_status"] != "idle" {
+		t.Fatalf("seen %v", m)
+	}
+	// While it has the focus, a turn that ends is seen at once.
+	b.applyAgent(agentproto.DetectEvent{Terminal: "t1", Agent: "claude", Status: "working"})
+	agentEvent()
+	b.applyAgent(agentproto.DetectEvent{Terminal: "t1", Agent: "claude", Status: "done"})
+	if m := agentEvent(); m["data"].(map[string]any)["agent_status"] != "idle" {
+		t.Fatalf("done while focused %v", m)
+	}
+	b.applyAgent(agentproto.DetectEvent{Terminal: "t1"})
+	if m := agentEvent(); m["data"].(map[string]any)["agent"] != nil {
+		t.Fatalf("cleared %v", m)
+	}
+	b.applyAgent(agentproto.DetectEvent{Terminal: "t1"}) // nothing to clear: no event
+	mu.Lock()
+	defer mu.Unlock()
+	if len(ws) != 6 || !strings.Contains(ws[0], `"terminal":"t1"`) || !strings.Contains(ws[0], `"agent_status":"working"`) || !strings.Contains(ws[1], `"done"`) {
+		t.Fatalf("/ws agent messages %q", ws)
 	}
 }

@@ -67,7 +67,21 @@ const (
 	// OpHCAPI dials the terminal core's socket and pipes raw bytes
 	// (internal/hc). It starts nothing.
 	OpHCAPI Op = "hc-api"
+	// OpDetect tells which coding agents run in the terminal core's
+	// terminals and what they do (internal/agent/detect): after the reply,
+	// DetectEvent lines from the agent until either side closes the stream.
+	// It starts nothing and writes nothing.
+	OpDetect Op = "detect"
 )
+
+// DetectEvent is one line of an OpDetect stream: the agent a terminal runs
+// ("" when none does any more) and its status (working, blocked, idle,
+// done, unknown; "" without an agent).
+type DetectEvent struct {
+	Terminal string `json:"terminal"`
+	Agent    string `json:"agent"`
+	Status   string `json:"status"`
+}
 
 // Header is the first line of every stream.
 type Header struct {

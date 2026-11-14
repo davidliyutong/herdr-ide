@@ -107,6 +107,10 @@ type GUIWindow struct {
 	// HERDR_SOCKET_PATH: the herdr pane (and session) it was started in.
 	Pane   string `json:"pane,omitempty"`
 	Socket string `json:"socket,omitempty"`
+	// Terminal is the address of the terminal of the instance's terminal
+	// core the program runs in (its HC_TERMINAL_ID, when its
+	// HC_TERMINAL_SOCKET is that core's).
+	Terminal string `json:"terminal,omitempty"`
 	// Transient is the window this one is a dialog of.
 	Transient uint32 `json:"transient,omitempty"`
 }

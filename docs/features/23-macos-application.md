@@ -97,8 +97,15 @@ terminal core, which get no virtual display; Linux and Windows.
   attaches again when the connection returns, and the first paint's reset
   redraws it.
 - The window: a sidebar of machines, their workspaces (the selected one in
-  bold, its directory) and live terminals (status dot from the program's
-  own report, working directory; those of no workspace under the machine),
+  bold, its directory) and live terminals (status dot from the agent the
+  core detected there, else from the program's own report
+  ([25](25-agent-detection.md)), working directory; those of no workspace
+  under the machine; a machine's row counts the terminals that wait:
+  blocked, or a turn that ended unseen), the windows of programs under
+  the terminal they run in (or their machine), and for a remote machine's
+  terminal **Enable Program Windows Here**, which types the display's
+  variables into its shell or offers the command to copy when a program
+  runs there ([14](14-gui-windows.md)),
   a tab bar of the selected workspace under a transparent title bar, and
   the selected tab's panes with draggable dividers. A workspace's row
   selects it, its plus button opens a terminal in it, and its menu creates
@@ -247,8 +254,9 @@ See the row for the macOS application in
 `macos/Tests/TermKitTests` (`make macos-test`): paths as terminals print
 them (line suffixes, `~`, relative, `file:` URLs, other schemes) and the
 names of their local copies, frame encoding and slices,
-terminal names, the store's snapshots and every event kind, the events
-client's messages, every layout vector of `design/testdata/layout`
+terminal names, the store's snapshots and every event kind (detected
+agents and the count of terminals that wait included), the events
+client's messages (a machine's terminal core state, a window's terminal), every layout vector of `design/testdata/layout`
 ([22](22-terminal-protocol.md)), the core's arguments, environment and
 ready line, a missing core, and the localization checks of
 [12](12-internationalization.md). `internal/brand/brand_test.go` keeps

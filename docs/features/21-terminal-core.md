@@ -108,7 +108,8 @@ directory, short enough for the holders' sockets beside it. Op `hc`:
   whether a core answers on the socket, with its version.
 
 Installs, starts and stops run one at a time. Op `hc-api` pipes the socket
-and starts nothing. The agent never stops the core on its own: the core
+and starts nothing; op `detect` connects to it to follow the agents in its
+terminals ([25](25-agent-detection.md)). The agent never stops the core on its own: the core
 asks for `stop` only when the user stops the terminal core from the
 machine's menu ([02](02-multi-machine-transport.md)).
 

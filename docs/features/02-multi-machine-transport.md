@@ -56,7 +56,9 @@ Non-goals: managing ssh keys or herdr installations; Windows machines.
   machine's terminal core ([22](22-terminal-protocol.md)), the machine's
   state carries it as `hc {state, code, version}` (`starting`, `ready` or
   `error` with the backend's code), so every `/ws` client sees whether
-  terminals work there.
+  terminals work there. While that connection lasts the agent also tells
+  which coding agents run in the terminals and what they do
+  ([25](25-agent-detection.md)).
 - **herdr is optional.** herdr's snapshot and tab layouts, for the browser
   UI's panes, are fetched every 5 s and after herdr's events while herdr
   answers. When two fetches in a row fail, the machine drops them and

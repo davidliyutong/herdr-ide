@@ -35,7 +35,8 @@
   - 汇总所有机器上 blocked 和 done 的 agent，agent 需要输入或完成时发浏览器通知并播放提示音；
   - 可以从命令面板新建 agent；
   - 可以从 VS Code 把代码发给当前聚焦的 agent；
-  - 可以把图片直接粘贴进 agent 的输入框。
+  - 可以把图片直接粘贴进 agent 的输入框；
+  - macOS 应用的终端里，每台机器的 agent 会用 herdr 的规则识别正在运行的编程 agent（Claude Code、Codex、Gemini、OpenCode 等），以及它是在工作、等待确认还是完成了一轮。
 - **按需打开 VS Code**：
   - code-server 默认由本机下载后推送到各机器，机器本身不需要外网；
     也可以让机器自行下载，或直接使用机器上已安装的 code-server。
@@ -46,7 +47,7 @@
   - 面板可以放在终端右侧或下方。
   - 长时间不用的 code-server 会自动停止。
 - **程序窗口**：远端 Linux 机器上程序打开的窗口（matplotlib、MuJoCo 查看器、Qt 工具等）会以浏览器窗口的形式出现，一个程序窗口对应一个浏览器窗口，支持鼠标和键盘。
-  pane 会自动获得虚拟显示；
+  pane 和终端会自动获得虚拟显示（之前打开的 shell 可以从它的菜单补上）；
   机器上没有 Xvfb 时会以普通用户身份获取，无需 root；
   装有 VirtualGL 的机器可用 GPU 渲染 OpenGL。
   持续变化的窗口以视频传输给能解码的浏览器（NVIDIA、Intel、AMD 显卡上用 H.264，否则用 VP8），静止的窗口以精确的图片传输。

@@ -71,15 +71,18 @@ func (s *Server) initGUI() {
 	}
 }
 
-// handleGUIEnable gives open panes of a machine the display's environment
-// (see gui.Manager.Enable). Body: {"panes": [...]}, empty for all panes.
+// handleGUIEnable gives open herdr panes or terminals of a machine the
+// display's environment (see gui.Manager.EnableShells). Body:
+// {"panes": [...]} (empty for all panes) or {"terminals": [...]} (the
+// terminal core's; empty for all of them).
 func (s *Server) handleGUIEnable(w http.ResponseWriter, r *http.Request) {
 	mc := s.machine(w, r)
 	if mc == nil {
 		return
 	}
 	var req struct {
-		Panes []string `json:"panes"`
+		Panes     []string `json:"panes"`
+		Terminals []string `json:"terminals"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid"})
@@ -87,9 +90,23 @@ func (s *Server) handleGUIEnable(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), time.Minute)
 	defer cancel()
-	res, err := s.gui.Enable(ctx, mc, req.Panes)
+	var res *gui.EnableResult
+	var err error
+	if req.Terminals != nil {
+		b := s.term.existing(mc.ID())
+		if b == nil || b.connection() == nil {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "no_terminals"})
+			return
+		}
+		res, err = s.gui.EnableShells(ctx, mc, termShells{b}, "hc:", req.Terminals)
+	} else {
+		res, err = s.gui.Enable(ctx, mc, req.Panes)
+	}
 	if res != nil {
 		ev := map[string]any{"machine": mc.ID(), "typed": res.Typed, "busy": res.Busy, "failed": res.Failed}
+		if req.Terminals != nil {
+			ev["terminals"] = true
+		}
 		if err != nil {
 			ev["error"] = err.Error()
 		}
@@ -111,13 +128,13 @@ func (s *Server) handleGUIEnable(w http.ResponseWriter, r *http.Request) {
 var paneCreating = map[string]bool{"workspace.create": true, "tab.create": true, "pane.split": true}
 
 // withPaneEnv adds the machine's display environment to the parameters of
-// a method that creates a pane. Variables the caller set win. It returns
-// the names of the variables it added.
+// a herdr method that creates a pane. Variables the caller set win. It
+// returns the names of the variables it added.
 func (s *Server) withPaneEnv(mc *machines.Machine, method string, params json.RawMessage) (json.RawMessage, []string) {
 	if !paneCreating[method] {
 		return params, nil
 	}
-	return mergeEnv(params, s.gui.PaneEnv(mc))
+	return mergeEnv(params, s.displayEnv(mc))
 }
 
 // mergeEnv adds env to the "env" object of herdr request parameters and
@@ -133,31 +150,42 @@ func mergeEnv(params json.RawMessage, env map[string]string) (json.RawMessage, [
 	if p == nil { // absent or null
 		p = map[string]json.RawMessage{}
 	}
-	var given map[string]string
-	if raw, ok := p["env"]; ok && json.Unmarshal(raw, &given) != nil {
+	added, ok := addEnv(p, env, false)
+	if !ok {
 		return params, nil
 	}
-	if given == nil {
-		given = map[string]string{}
-	}
-	var added []string
-	for k, v := range env {
-		if _, set := given[k]; !set {
-			given[k] = v
-			added = append(added, k)
-		}
-	}
-	sort.Strings(added)
-	b, err := json.Marshal(given)
-	if err != nil {
-		return params, nil
-	}
-	p["env"] = b
 	out, err := json.Marshal(p)
 	if err != nil {
 		return params, nil
 	}
 	return out, added
+}
+
+// addEnv adds env to the "env" object of parameters p and returns the
+// names it set. With override its values replace the caller's; otherwise
+// variables the caller set win. ok is false when "env" is not an object of
+// strings (p is then unchanged).
+func addEnv(p map[string]json.RawMessage, env map[string]string, override bool) (names []string, ok bool) {
+	var given map[string]string
+	if raw, set := p["env"]; set && json.Unmarshal(raw, &given) != nil {
+		return nil, false
+	}
+	if given == nil {
+		given = map[string]string{}
+	}
+	for k, v := range env {
+		if _, set := given[k]; !set || override {
+			given[k] = v
+			names = append(names, k)
+		}
+	}
+	sort.Strings(names)
+	b, err := json.Marshal(given)
+	if err != nil {
+		return nil, false
+	}
+	p["env"] = b
+	return names, true
 }
 
 // handleGUIPage serves the app shell, which shows one window on this path.

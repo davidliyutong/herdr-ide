@@ -31,14 +31,18 @@ public struct ProgramWindow: Equatable {
     public var height: Int
     /// The window this one is a dialog of; 0 for none.
     public var transient: Int
+    /// The terminal (of the machine's terminal core) its program runs in,
+    /// "" when unknown.
+    public var terminal: String
 
-    public init(machine: String, id: Int, title: String, width: Int, height: Int, transient: Int = 0) {
+    public init(machine: String, id: Int, title: String, width: Int, height: Int, transient: Int = 0, terminal: String = "") {
         self.machine = machine
         self.id = id
         self.title = title
         self.width = width
         self.height = height
         self.transient = transient
+        self.terminal = terminal
     }
 }
 
@@ -99,7 +103,8 @@ public final class EventConnection {
             let windows = (state["windows"] as? [[String: Any]] ?? []).compactMap { raw -> ProgramWindow? in
                 guard let window = raw["id"] as? Int else { return nil }
                 return ProgramWindow(machine: id, id: window, title: raw["title"] as? String ?? "",
-                                     width: raw["w"] as? Int ?? 0, height: raw["h"] as? Int ?? 0, transient: raw["transient"] as? Int ?? 0)
+                                     width: raw["w"] as? Int ?? 0, height: raw["h"] as? Int ?? 0, transient: raw["transient"] as? Int ?? 0,
+                                     terminal: raw["terminal"] as? String ?? "")
             }
             return .gui(machine: id, windows: windows)
         case "settings":

@@ -262,3 +262,15 @@
 "settings.terminal.optionIsMeta.desc" = "macOS: Option+key sends Esc+key (Alt shortcuts in shells and editors) instead of typing special characters.";
 "settings.terminal.programClipboard.desc" = "What happens when a program in a pane copies text (OSC 52), such as Claude Code when you select text in it. Automatic copies at once right after your own key or click in a pane and asks otherwise.";
 "settings.terminal.scrollback.desc" = "Lines kept above the screen.";
+"status.unknown" = "Starting";
+"sidebar.waiting" = "%@ waiting";
+"menu.enableWindows" = "Enable Program Windows Here";
+"gui.enabled" = "Programs started in this terminal now open their windows.";
+"gui.already" = "This terminal has the display already.";
+"gui.busy" = "This terminal runs a program, so nothing was typed. Run this in its shell:";
+"gui.copyCommand" = "Copy Command";
+"gui.enableFailed" = "Program windows could not be enabled here";
+"gui.error.off" = "Program windows are off for this machine (Settings).";
+"gui.error.not_ready" = "The machine's virtual display is not ready yet.";
+"gui.error.no_terminals" = "The machine's terminals are not connected.";
+"gui.error.transport" = "The machine did not answer.";

@@ -262,3 +262,15 @@
 "settings.terminal.optionIsMeta.desc" = "macOS：Option+键发送 Esc+键（shell 和编辑器里的 Alt 快捷键），而不是输入特殊字符。";
 "settings.terminal.programClipboard.desc" = "pane 里的程序复制文本（OSC 52）时怎么办，比如在 Claude Code 里选中文字。“自动”在你刚在 pane 里按键或点击后直接复制，其他时候先询问。";
 "settings.terminal.scrollback.desc" = "屏幕上方保留的行数。";
+"status.unknown" = "启动中";
+"sidebar.waiting" = "%@ 个等待处理";
+"menu.enableWindows" = "在此启用程序窗口";
+"gui.enabled" = "在这个终端里启动的程序现在会打开自己的窗口。";
+"gui.already" = "这个终端已经有显示了。";
+"gui.busy" = "这个终端正在运行程序，没有输入任何内容。请在它的 shell 里运行：";
+"gui.copyCommand" = "拷贝命令";
+"gui.enableFailed" = "无法在这里启用程序窗口";
+"gui.error.off" = "这台机器的程序窗口已关闭（设置）。";
+"gui.error.not_ready" = "这台机器的虚拟显示还没有准备好。";
+"gui.error.no_terminals" = "这台机器的终端没有连接。";
+"gui.error.transport" = "机器没有响应。";

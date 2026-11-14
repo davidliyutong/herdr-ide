@@ -96,8 +96,20 @@ public struct TerminalRecord: Equatable, Identifiable {
     public var labels: [String: String] { raw["labels"] as? [String: String] ?? [:] }
     public var createdMS: Int { raw["created_ms"] as? Int ?? 0 }
 
-    /// What the program says it is doing (OSC 7501), nil if it never said.
-    public var status: String? { (raw["status"] as? [String: Any])?["state"] as? String }
+    /// The coding agent the core detected in it (claude, codex, …), nil
+    /// for none.
+    public var agent: String? { raw["agent"] as? String }
+
+    /// What it is doing: the detected agent's status (working, blocked,
+    /// idle, done, unknown), else what the program said itself (OSC 7501),
+    /// nil if neither.
+    public var status: String? {
+        (raw["agent_status"] as? String) ?? (raw["status"] as? [String: Any])?["state"] as? String
+    }
+
+    /// Whether it waits for the user: blocked, or a turn that ended and
+    /// was not looked at since (done).
+    public var needsAttention: Bool { isLive && (status == "blocked" || status == "done") }
 
     /// The program in the foreground, by name.
     public var foreground: String? { (raw["foreground"] as? [String: Any])?["name"] as? String }

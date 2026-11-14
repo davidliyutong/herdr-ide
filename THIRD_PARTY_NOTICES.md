@@ -6,6 +6,7 @@ core binary bundles further dependencies; their licenses are in
 code-server and VS Code extensions are downloaded at runtime, not bundled.
 The native herdr companion is distributed separately under Apache-2.0; see licenses/herdr/ for its license and dependency notices.
 The core also embeds the unmodified herdr-core executables for Linux and macOS machines (https://github.com/herdrdev/herdr-core, Apache-2.0); release archives carry their license and dependency notices in licenses/herdr-core/.
+The agents embedded in the core carry herdr's agent detection rules (herdr v0.9.5, https://github.com/herdrdev/herdr, Apache-2.0), unchanged; see licenses/herdr-detect/.
 The core also embeds a video encoder for Linux machines, built from FFmpeg (LGPL-2.1-or-later), libvpx, libva, libdrm and nv-codec-headers; see licenses/encoder/ for their licenses and sources.
 
 ## Go (image/jpeg, adapted in internal/jpegstrip)

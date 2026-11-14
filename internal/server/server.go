@@ -75,6 +75,9 @@ type Server struct {
 	// herdrCLI is the herdr that runs herdr's update flow for SSH machines
 	// on the core host ("" when unknown): the local machine's.
 	herdrCLI func() string
+	// displayEnv is the environment of a machine's virtual display that new
+	// panes and terminals get (gui.Manager.PaneEnv; tests replace it).
+	displayEnv func(*machines.Machine) map[string]string
 
 	clientsMu sync.Mutex
 	clients   map[*wsClient]bool
@@ -112,6 +115,7 @@ func New(mg *machines.Manager, opts Options) *Server {
 	s.csProxy = newCodeServerProxy(s)
 	s.herdrCLI = s.localHerdr
 	s.initGUI()
+	s.displayEnv = s.gui.PaneEnv
 	s.initSettings()
 	// A machine that connects (again) ends the waits of its terminal
 	// backend and pane surface; herdr answering again ends the surface's.

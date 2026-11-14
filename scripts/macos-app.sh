@@ -72,6 +72,7 @@ cp "$herdr" "$res/bin/herdr"
 chmod 755 "$res/bin/"*
 cp LICENSE THIRD_PARTY_NOTICES.md "$res/licenses/"
 cp -R licenses/herdr "$res/licenses/herdr"
+cp -R licenses/herdr-detect "$res/licenses/herdr-detect"
 cp -R dist/hc/licenses "$res/licenses/herdr-core"
 cp macos/.deps/libghostty-spm/LICENSE "$res/licenses/ghostty/LICENSE-libghostty-spm"
 cp macos/.deps/libghostty-spm/Sources/GhosttyTheme/LICENSE "$res/licenses/ghostty/LICENSE-themes"

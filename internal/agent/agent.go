@@ -173,6 +173,8 @@ func (a *Agent) handle(ctx context.Context, st net.Conn) {
 		err = a.handleHC(ctx, st, h)
 	case agentproto.OpHCAPI:
 		err = a.pipeUnix(st, a.hcSocket())
+	case agentproto.OpDetect:
+		err = a.handleDetect(ctx, st)
 	default:
 		err = agentproto.Fail(st, fmt.Errorf("unknown op %q", h.Op))
 		st.Close()

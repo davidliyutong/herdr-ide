@@ -49,6 +49,14 @@ subscriber starts the machine's backend:
    applied; snapshot and events are sent under one lock, so none is lost
    or applied twice. Records and event data are passed on as herdr-core
    sent them, with fields the core does not know.
+4. The core asks the agent which coding agents run in the terminals
+   ([25](25-agent-detection.md)) and adds them to the records as `agent`
+   (`claude`, `codex`, …) and `agent_status` (`working`, `blocked`,
+   `idle`, `done`, `unknown`), sending subscribers
+   `event {type: "agent", terminal, data: {agent, agent_status}}` (both
+   null when the agent left) at every change and again after an event
+   that replaced the record. A `focus {s, focused: true}` on a stream of a
+   terminal whose turn ended (`done`) marks it seen: `idle`.
 
 A backend that fails reports `backend {state: error, code}`
 (`machine_offline`, `not_bundled`, `not_running`, `install_failed`,
@@ -69,7 +77,11 @@ subscribed, until the core is started from the UI or a backend starts anew
 (the first subscriber after the last one left).
 
 **Calls.** `call` passes an allowlisted herdr-core method to the machine's
-terminal core and answers with its result or its error kind. Reading
+terminal core and answers with its result or its error kind. A
+`terminal.run` on a remote machine whose virtual display is ready gets the
+display's variables in its `env` ([14](14-gui-windows.md)); they replace
+those of the client, whose other variables stay, and the audit entry names
+them. Reading
 methods: `terminal.list`, `terminal.get`, `terminal.read`, `doc.get`,
 `templates.list`. Writing methods: `terminal.run`, `terminal.kill`,
 `terminal.rm`, `terminal.keep`, `terminal.label`, `terminal.interrupt`,
@@ -204,7 +216,9 @@ machine's socket behind a real agent: the lifecycle from the UI (a stopped
 core kept stopped while subscribed, started and restarted, the machine's
 `hc` state), backend states and the snapshot with
 unknown fields kept, events forwarded and applied for a later subscriber,
-allowed and refused calls with their audit entries, a stream's reply before
+allowed and refused calls with their audit entries, the display's
+variables in `terminal.run`, detected agents in records and events and
+seen by focus, typing into a terminal's shell, a stream's reply before
 its first frame, input, automatic input, credit, size, focus and display
 facts reaching the terminal core, detaching, a program's end, the terminal
 core going away and coming back, read-only (writing calls refused, attaches
@@ -216,4 +230,6 @@ reconnecting), and `macos/Tests/TermKitTests` the Swift one, with the same
 layout vectors. `TestIntegrationTerm` (`make it`, `HC_TEST_BIN`) runs the
 whole path against a real herdr-core: install and start through the agent,
 a shell started, typed into and read by one client, found and watched by a
-second, and killed.
+second, and killed; `TestIntegrationDetect` an agent's states
+([25](25-agent-detection.md)); `TestIntegrationTermShells` typing into a
+shell as enabling program windows does, without changing its size.

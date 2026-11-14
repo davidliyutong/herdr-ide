@@ -206,7 +206,8 @@ type display struct {
 	viewers map[uint32]map[*Viewer]bool
 	acked   map[uint32]uint32
 	closing map[uint32]*time.Timer
-	// typed: panes whose shell got the export command, with the display.
+	// typed: panes ("pane:<id>") and terminals ("hc:<address>") whose shell
+	// got the export command, with the display.
 	// A shell's environment as seen in /proc does not show it.
 	typed map[string]string
 }
@@ -1200,11 +1201,38 @@ func ExportCommand(env map[string]string) string {
 	return b.String()
 }
 
-// shellAt returns a pane's shell and whether it waits at its prompt: an
-// interactive shell is its own process group, in the foreground while it
-// reads a command line.
-func shellAt(ctx context.Context, mc *machines.Machine, pane string) (pid int, idle bool, err error) {
-	raw, err := mc.Call(ctx, "pane.process_info", map[string]string{"pane_id": pane})
+// Shells reaches the panes or terminals that Enable types into: herdr's
+// panes, or the terminals of the machine's terminal core.
+type Shells interface {
+	// All lists every pane or terminal, for an Enable without a list.
+	All(ctx context.Context) ([]string, error)
+	// Shell returns the pid of id's shell (0 when it has none) and whether
+	// it waits at its prompt: an interactive shell is its own process
+	// group, in the foreground while it reads a command line.
+	Shell(ctx context.Context, id string) (pid int, idle bool, err error)
+	// Send types text into id.
+	Send(ctx context.Context, id, text string) error
+}
+
+// herdrPanes are a machine's herdr panes.
+type herdrPanes struct{ mc *machines.Machine }
+
+func (h herdrPanes) All(context.Context) ([]string, error) {
+	var snap struct {
+		Panes []struct {
+			PaneID string `json:"pane_id"`
+		} `json:"panes"`
+	}
+	json.Unmarshal(h.mc.State().Snapshot, &snap)
+	var out []string
+	for _, p := range snap.Panes {
+		out = append(out, p.PaneID)
+	}
+	return out, nil
+}
+
+func (h herdrPanes) Shell(ctx context.Context, pane string) (int, bool, error) {
+	raw, err := h.mc.Call(ctx, "pane.process_info", map[string]string{"pane_id": pane})
 	if err != nil {
 		return 0, false, err
 	}
@@ -1220,6 +1248,11 @@ func shellAt(ctx context.Context, mc *machines.Machine, pane string) (pid int, i
 		return 0, false, nil
 	}
 	return *pi.ShellPid, pi.FG != nil && *pi.FG == *pi.ShellPid, nil
+}
+
+func (h herdrPanes) Send(ctx context.Context, pane, text string) error {
+	_, err := h.mc.Call(ctx, "pane.send_text", map[string]string{"pane_id": pane, "text": text})
+	return err
 }
 
 // interruptPause lets a shell handle Ctrl-C before the command follows: the
@@ -1261,13 +1294,20 @@ func typeExport(send func(text string) error, cmd string) error {
 	return send(cmd + "\r")
 }
 
-// Enable gives panes that were opened without the display (before it
-// existed, or outside the UI) the display's environment: a known shell
-// waiting at its prompt gets Ctrl-C and the export command; other panes are
-// left alone and reported. Panes defaults to every pane of the machine. A
-// pane that cannot be reached is reported in Failed; the result always
-// lists what was typed, also with an error.
+// Enable gives herdr panes that were opened without the display (before
+// it existed, or outside the UI) the display's environment; see
+// EnableShells.
 func (m *Manager) Enable(ctx context.Context, mc *machines.Machine, panes []string) (*EnableResult, error) {
+	return m.EnableShells(ctx, mc, herdrPanes{mc}, "pane:", panes)
+}
+
+// EnableShells gives the shells of panes or terminals reached through
+// shells the display's environment: a known shell waiting at its prompt
+// gets Ctrl-C and the export command; the others are left alone and
+// reported. ids defaults to all of them; kind keeps what was typed apart
+// per kind of shell. One that cannot be reached is reported in Failed; the
+// result always lists what was typed, also with an error.
+func (m *Manager) EnableShells(ctx context.Context, mc *machines.Machine, shells Shells, kind string, ids []string) (*EnableResult, error) {
 	if !m.enabled(mc.ID()) {
 		return nil, ErrOff
 	}
@@ -1275,34 +1315,30 @@ func (m *Manager) Enable(ctx context.Context, mc *machines.Machine, panes []stri
 	if env == nil {
 		return nil, ErrNotReady
 	}
-	if len(panes) == 0 {
-		var snap struct {
-			Panes []struct {
-				PaneID string `json:"pane_id"`
-			} `json:"panes"`
+	if len(ids) == 0 {
+		all, err := shells.All(ctx)
+		if err != nil {
+			return nil, err
 		}
-		json.Unmarshal(mc.State().Snapshot, &snap)
-		for _, p := range snap.Panes {
-			panes = append(panes, p.PaneID)
-		}
+		ids = all
 	}
 	type shell struct {
-		pane string
+		id   string
 		pid  int
 		idle bool
 	}
 	res := &EnableResult{Busy: []string{}, Typed: []string{}, Failed: []string{}, Command: ExportCommand(env)}
-	var shells []shell
+	var found []shell
 	var pids []string
-	for _, p := range panes {
-		pid, idle, err := shellAt(ctx, mc, p)
+	for _, id := range ids {
+		pid, idle, err := shells.Shell(ctx, id)
 		switch {
 		case err != nil:
-			res.Failed = append(res.Failed, p)
+			res.Failed = append(res.Failed, id)
 		case pid == 0:
-			res.Busy = append(res.Busy, p)
+			res.Busy = append(res.Busy, id)
 		default:
-			shells = append(shells, shell{p, pid, idle})
+			found = append(found, shell{id, pid, idle})
 			pids = append(pids, strconv.Itoa(pid))
 		}
 	}
@@ -1319,42 +1355,39 @@ func (m *Manager) Enable(ctx context.Context, mc *machines.Machine, panes []stri
 			}
 		}
 	}
-	for _, sh := range shells {
+	for _, sh := range found {
 		m.mu.Lock()
-		typed := m.ds[mc.ID()].typed[sh.pane] == env["DISPLAY"]
+		typed := m.ds[mc.ID()].typed[kind+sh.id] == env["DISPLAY"]
 		m.mu.Unlock()
 		switch decide(procs[sh.pid], sh.idle, typed) {
 		case enableAlready:
 			res.Already++
 			continue
 		case enableBusy:
-			res.Busy = append(res.Busy, sh.pane)
+			res.Busy = append(res.Busy, sh.id)
 			continue
 		}
 		// Check again right before typing: the user may have started a
 		// program meanwhile.
-		pid, idle, err := shellAt(ctx, mc, sh.pane)
+		pid, idle, err := shells.Shell(ctx, sh.id)
 		if err != nil {
-			res.Failed = append(res.Failed, sh.pane)
+			res.Failed = append(res.Failed, sh.id)
 			continue
 		}
 		if !idle || pid != sh.pid {
-			res.Busy = append(res.Busy, sh.pane)
+			res.Busy = append(res.Busy, sh.id)
 			continue
 		}
-		send := func(text string) error {
-			_, err := mc.Call(ctx, "pane.send_text", map[string]string{"pane_id": sh.pane, "text": text})
-			return err
-		}
+		send := func(text string) error { return shells.Send(ctx, sh.id, text) }
 		if err := typeExport(send, res.Command); err != nil {
-			res.Failed = append(res.Failed, sh.pane)
+			res.Failed = append(res.Failed, sh.id)
 			continue
 		}
 		m.mu.Lock()
-		m.ds[mc.ID()].typed[sh.pane] = env["DISPLAY"]
+		m.ds[mc.ID()].typed[kind+sh.id] = env["DISPLAY"]
 		m.mu.Unlock()
 		res.Enabled++
-		res.Typed = append(res.Typed, sh.pane)
+		res.Typed = append(res.Typed, sh.id)
 	}
 	return res, nil
 }

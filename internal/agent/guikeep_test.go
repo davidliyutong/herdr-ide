@@ -59,15 +59,19 @@ func stopServer(cmd *exec.Cmd) {
 }
 
 // The watch lasts while a server runs, follows one that restarts within
-// the grace period, and ends after the grace period without one.
-func TestWatchServer(t *testing.T) {
+// the grace period, lasts while the other server runs, and ends after the
+// grace period without either.
+func TestWatchServers(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("reads /proc")
 	}
 	socket := filepath.Join(t.TempDir(), "herdr.sock")
+	other := filepath.Join(t.TempDir(), "hc.sock")
 	srv := fakeServer(t, socket)
 	done := make(chan error, 1)
-	go func() { done <- watchServer(context.Background(), socket, 20*time.Millisecond, 500*time.Millisecond) }()
+	go func() {
+		done <- watchServers(context.Background(), []string{other, socket}, 20*time.Millisecond, 500*time.Millisecond)
+	}()
 	select {
 	case err := <-done:
 		t.Fatalf("ended while the server runs: %v", err)
@@ -80,18 +84,26 @@ func TestWatchServer(t *testing.T) {
 		t.Fatalf("ended although the server restarted: %v", err)
 	case <-time.After(800 * time.Millisecond):
 	}
+	// The terminal core keeps it while herdr's server is gone.
+	core := fakeServer(t, other)
 	stopServer(srv)
+	select {
+	case err := <-done:
+		t.Fatalf("ended while the terminal core runs: %v", err)
+	case <-time.After(800 * time.Millisecond):
+	}
+	stopServer(core)
 	select {
 	case err := <-done:
 		if err != nil {
 			t.Fatal(err)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("the watch outlived the server")
+		t.Fatal("the watch outlived the servers")
 	}
 	// Nothing listening from the start: over after the grace period.
 	start := time.Now()
-	if err := watchServer(context.Background(), socket, 20*time.Millisecond, 100*time.Millisecond); err != nil || time.Since(start) > time.Second {
+	if err := watchServers(context.Background(), []string{socket}, 20*time.Millisecond, 100*time.Millisecond); err != nil || time.Since(start) > time.Second {
 		t.Fatalf("no server: %v after %v", err, time.Since(start))
 	}
 }

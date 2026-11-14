@@ -13,6 +13,8 @@ export interface GuiWindow {
   pid?: number;
   /** herdr pane the program runs in, when it is in this machine's session. */
   pane?: string;
+  /** Terminal of the machine's terminal core the program runs in. */
+  terminal?: string;
   /** The window this one is a dialog of. */
   transient?: number;
 }
