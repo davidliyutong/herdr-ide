@@ -190,7 +190,9 @@ Another browser is told the session is busy and may take it over; the
 previous owner is then told it was taken over. A read-only browser never
 takes over a writable one. The core keeps one endpoint connection to the
 shown machine's herdr, decodes its surfaces into a grid and forwards changed
-spans; when the owner changes, the new owner gets the current surface. See
+spans; when the owner changes, the new owner gets the current surface. It
+keeps one resize whose grid size changes in flight, so a window drag over a
+slow link does not queue a complete surface per size. See
 [18](features/18-endpoint-surfaces.md).
 
 ## code-server lifecycle

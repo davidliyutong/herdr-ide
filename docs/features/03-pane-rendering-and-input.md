@@ -268,6 +268,12 @@ flashes the surface's edge.
 - **The window moves to a display with another pixel density** → the cell
   is measured again and herdr renders the new grid; until then the canvas
   keeps its CSS size, scaled by the browser.
+- **The window is resized over a slow link** → the canvas shows the last
+  grid herdr sent, at that grid's size, until the grid of the new size
+  arrives; the core keeps one resize in flight
+  ([18](18-endpoint-surfaces.md)), so the grid catches up about one
+  complete surface after the window stops changing instead of going
+  through every size the window had.
 
 ## Testing
 

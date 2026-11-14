@@ -220,7 +220,9 @@ func (s *Server) surfView(c *wsClient, v viewMsg) {
 		return
 	}
 	if resize {
-		_ = conn.Send(endpoint.EncodeResize(size))
+		// One resize at a time: over a slow link a window drag would
+		// otherwise queue a complete surface per size (Conn.Resize).
+		_ = conn.Resize(size)
 	}
 	if retab {
 		go ss.ensureTab()
@@ -440,9 +442,7 @@ func (ss *surfSession) connect() error {
 	ss.conn = conn
 	ss.lastMeta = nil
 	// The size may have changed during the handshake.
-	if ss.size != size {
-		_ = conn.Send(endpoint.EncodeResize(ss.size))
-	}
+	_ = conn.Resize(ss.size)
 	ss.mu.Unlock()
 	ss.s.surf.mu.Lock()
 	theme := ss.s.surf.theme
