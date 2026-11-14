@@ -241,8 +241,12 @@ input methods.
 
 - The core prepares a machine's display when the machine connects (status,
   install, start, attach; phases `installing`, `starting`, `ready`, `error`,
-  `unavailable`, `unsupported`, `off`, `local`), keeps one attach stream per
-  machine and re-attaches after errors. A display is prepared once per
+  `unavailable`, `unsupported`, `off`, `local`, `disconnected`), keeps one
+  attach stream per machine and re-attaches after errors. When the machine
+  is disabled, reconnects, fails or is removed, the core detaches and
+  reports `disconnected` without windows; a preparation or attach stream
+  that fails because its connection is gone reports that too, not an
+  error. A display is prepared once per
   connection of the machine; a failed preparation or an attach stream that
   ends within a minute is retried after 5 s, doubling up to 5 minutes, and
   a change of the GUI setting or a reconnect starts over. Turning the
@@ -334,9 +338,16 @@ turning it on pushes the encoder if needed.
   backoff, so at most one start every 5 minutes.
 - **Any preparation or attach error** → the status bar shows that the
   machine's display failed; clicking it shows the error the core reported
-  (the agent's or Xvfb's message), how it is retried, a button to copy it
-  and one to open the settings, where the machine's program windows can be
-  turned off.
+  (the agent's or Xvfb's message), how it is retried, a button to copy it,
+  one to open the settings, where the machine's program windows can be
+  turned off, and one to dismiss it. A dismissed error stays hidden while
+  retries fail the same way and shows again once the display recovered
+  and failed anew. The status bar shows displays only of connected
+  machines.
+- **Machine disabled, removed or disconnected** → its display is shown as
+  disconnected (not connected in the settings), without an error or
+  windows; the display keeps running on the machine until idle, and the
+  next connection prepares it again.
 - **Network interruption** → browser windows show "Reconnecting"; programs
   and windows stay; after reconnecting the windows are adopted again.
 - **Display number taken** by another user (lock file, socket or listener)
@@ -411,7 +422,11 @@ staging cleanup, library ownership and package pruning.
 `internal/gui/gui_test.go` covers pane environments (also per machine),
 the export command's quoting, frame routing, forged acknowledgements and
 refresh floods, the read-only plan, the close grace period, preparing once
-per connection and the retry backoff;
+per connection, the retry backoff, and detaching without an error when the
+machine disconnects or is removed;
+`web/src/__tests__/guiError.test.ts` covers the status bar's error (shown
+on click, dismissed until the display failed anew, hidden for machines
+that are not connected);
 `internal/server/server_test.go` covers malformed `env` parameters and the
 Origin check of the close request;
 `internal/agent/gui_test.go` also covers recognizing shells started with the

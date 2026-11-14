@@ -17,7 +17,8 @@ export interface GuiWindow {
   transient?: number;
 }
 
-export type GuiPhase = 'off' | 'local' | 'unsupported' | 'unavailable' | 'installing' | 'starting' | 'ready' | 'error' | 'not_running';
+export type GuiPhase =
+  'off' | 'local' | 'unsupported' | 'unavailable' | 'installing' | 'starting' | 'ready' | 'error' | 'not_running' | 'disconnected';
 
 export interface GuiState {
   m: string;
@@ -32,13 +33,18 @@ export const guiKey = (m: string, id: number) => `${m}|${id}`;
 interface GuiStore {
   machines: Record<string, GuiState>;
   unseen: Record<string, true>;
+  /** Machines whose display error the user dismissed; it shows again once
+   * the display left the error phase and failed again. */
+  dismissed: Record<string, true>;
   setState(st: GuiState): void;
   markSeen(m: string, id: number): void;
+  dismiss(m: string): void;
 }
 
 export const useGui = create<GuiStore>((set) => ({
   machines: {},
   unseen: {},
+  dismissed: {},
   setState: (st) =>
     set((s) => {
       const prev = s.machines[st.m];
@@ -53,8 +59,14 @@ export const useGui = create<GuiStore>((set) => ({
         const before = new Set(prev.windows.map((w) => w.id));
         for (const w of st.windows) if (!before.has(w.id)) unseen[guiKey(st.m, w.id)] = true;
       }
-      return { machines: { ...s.machines, [st.m]: st }, unseen };
+      let dismissed = s.dismissed;
+      if (st.phase !== 'error' && dismissed[st.m]) {
+        dismissed = { ...dismissed };
+        delete dismissed[st.m];
+      }
+      return { machines: { ...s.machines, [st.m]: st }, unseen, dismissed };
     }),
+  dismiss: (m) => set((s) => ({ dismissed: { ...s.dismissed, [m]: true } })),
   markSeen: (m, id) =>
     set((s) => {
       const k = guiKey(m, id);

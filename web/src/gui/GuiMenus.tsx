@@ -68,8 +68,9 @@ export function PaneGuiButton({ m, pane }: { m: string; pane: string }) {
 
 /** A machine's failed display in the status bar: clicking shows the error
  * the core reported (the agent's or Xvfb's message); the core retries on
- * its own. */
-export function GuiErrorNote({ label, error }: { label: string; error?: string }) {
+ * its own. Dismissing hides it until the display fails again after
+ * recovering. */
+export function GuiErrorNote({ m, label, error }: { m: string; label: string; error?: string }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLSpanElement>(null);
   const close = useCallback(() => setOpen(false), []);
@@ -105,6 +106,14 @@ export function GuiErrorNote({ label, error }: { label: string; error?: string }
             >
               {t('action.open_settings')}
             </button>
+            <button
+              onClick={() => {
+                setOpen(false);
+                useGui.getState().dismiss(m);
+              }}
+            >
+              {t('gui.dismiss')}
+            </button>
           </div>
         </div>
       )}
@@ -113,20 +122,33 @@ export function GuiErrorNote({ label, error }: { label: string; error?: string }
 }
 
 /** Status bar entry: every program window, and displays being prepared or
- * failing. */
+ * failing on connected machines (an error the user dismissed stays
+ * hidden). */
 export function GuiTray() {
   const machines = useGui((g) => g.machines);
+  const dismissed = useGui((g) => g.dismissed);
+  const connected = useStore(
+    useShallow((s) =>
+      Object.entries(s.machines)
+        .filter(([, st]) => st.status === 'ready' || st.status === 'degraded')
+        .map(([id]) => id),
+    ),
+  );
   const entries = useMemo(() => Object.values(machines).flatMap((st) => st.windows.map((w) => ({ m: st.m, w }))), [machines]);
   const notes = useMemo(
-    () => Object.values(machines).filter((st) => st.phase === 'installing' || st.phase === 'starting' || st.phase === 'error'),
-    [machines],
+    () =>
+      Object.values(machines).filter(
+        (st) =>
+          connected.includes(st.m) && (st.phase === 'installing' || st.phase === 'starting' || (st.phase === 'error' && !dismissed[st.m])),
+      ),
+    [machines, dismissed, connected],
   );
   const labels = useStore(useShallow((s) => Object.fromEntries(Object.entries(s.machines).map(([id, st]) => [id, st.label]))));
   return (
     <>
       {notes.map((n) =>
         n.phase === 'error' ? (
-          <GuiErrorNote key={n.m} label={labels[n.m] ?? n.m} error={n.error} />
+          <GuiErrorNote key={n.m} m={n.m} label={labels[n.m] ?? n.m} error={n.error} />
         ) : (
           <span key={n.m} className={`gui-note ${n.phase}`}>
             {t(`gui.phase.${n.phase}` as 'gui.phase.installing', { m: labels[n.m] ?? n.m })}
