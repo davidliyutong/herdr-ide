@@ -144,10 +144,16 @@ async function openWaiting() {
   }
 }
 
-/** Takes the folders the desktop shell reports; returns a function that
+/** Takes the folders the desktop shell reports, saying how many other
+ * items it skipped, as for a drop on the sidebar; returns a function that
  * stops it. */
 export function takeOpenedFolders(): () => void {
-  return desktopShell?.onOpenFolder(openFolder) ?? (() => {});
+  return (
+    desktopShell?.onOpenFolders(({ folders, skipped }) => {
+      if (skipped) useStore.getState().toast(t('sidebar.dropFoldersOnly', { n: skipped }));
+      folders.forEach(openFolder);
+    }) ?? (() => {})
+  );
 }
 
 // ---- panes ----

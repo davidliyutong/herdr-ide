@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 
 import { keyName } from '../keys';
-import { runShortcut } from '../desktop';
+import { runMenuCommand } from '../desktop';
 import { useDialog } from '../dialog';
 import { useStore, currentDock } from '../state/store';
 import type { MachineState } from '../lib/machine';
@@ -49,7 +49,7 @@ const shell = (address: string, extra: Record<string, unknown> = {}) =>
 const running = (address: string, name: string, extra: Record<string, unknown> = {}) =>
   FakeCore.term(address, { pid: 10, foreground: { pid: 20, name, argv: [name], cwd: '/srv/app' }, ...extra });
 
-describe('runShortcut', () => {
+describe('runMenuCommand', () => {
   let core: FakeCore;
   const setup = async (terminals: Array<Record<string, unknown> & { address: string }>) => {
     core = new FakeCore();
@@ -82,7 +82,7 @@ describe('runShortcut', () => {
   const killed = () => core.calls.filter((c) => c.method === 'terminal.kill').map((c) => c.params.terminal);
 
   it('closes a tab at once when its terminals only have shells at the prompt', async () => {
-    runShortcut('tab.close');
+    runMenuCommand('tab.close');
     await vi.waitFor(() => expect(killed()).toEqual(['t1', 't2']));
     expect(dialog()).toBeUndefined();
     await settle();
@@ -91,24 +91,24 @@ describe('runShortcut', () => {
 
   it('asks before closing a tab with a program running, naming it', async () => {
     await setup([shell('t1'), running('t2', 'vim')]);
-    runShortcut('tab.close');
+    runMenuCommand('tab.close');
     expect(await reply(false)).toBe('Closing this tab ends the programs still running in it: vim.');
     expect(killed()).toEqual([]);
 
     // An agent waiting for input still runs: it goes by its name.
     await setup([running('t1', 'node', { agent: 'claude', agent_status: 'idle' }), shell('t2')]);
-    runShortcut('tab.close');
+    runMenuCommand('tab.close');
     expect(await reply(true)).toContain(': claude.');
     await vi.waitFor(() => expect(killed()).toEqual(['t1', 't2']));
   });
 
   it('asks before closing a pane with a program running; a shell closes at once', async () => {
     await setup([running('t1', 'htop'), shell('t2')]);
-    runShortcut('pane.close');
+    runMenuCommand('pane.close');
     expect(await reply(false)).toBe('Closing this pane ends the program still running in it: htop.');
     expect(killed()).toEqual([]);
     core.model.mutate('m', (l) => ({ ...l, workspaces: [{ ...l.workspaces[0], tabs: [{ ...l.workspaces[0].tabs[0], focused: 't2' }] }] }));
-    runShortcut('pane.close');
+    runMenuCommand('pane.close');
     await vi.waitFor(() => expect(killed()).toEqual(['t2']));
     await settle();
     expect(core.layout('m')?.workspaces[0].tabs[0].root).toEqual({ terminal: 't1' });
@@ -118,22 +118,40 @@ describe('runShortcut', () => {
     const backdrop = document.createElement('div');
     backdrop.className = 'modal-backdrop';
     document.body.append(backdrop);
-    runShortcut('tab.close');
-    runShortcut('tab.new');
+    runMenuCommand('tab.close');
+    runMenuCommand('tab.new');
     await settle();
     expect(useDialog.getState().current).toBeUndefined();
     expect(core.calls.filter((c) => c.method.startsWith('terminal.'))).toEqual([]);
   });
 
+  it('runs only commands for VS Code or everywhere while VS Code has the keyboard', async () => {
+    const frame = document.createElement('iframe');
+    frame.className = 'code-frame';
+    document.body.append(frame);
+    frame.focus();
+    expect(document.activeElement).toBe(frame);
+    useStore.getState().openSettings(false);
+    runMenuCommand('app.settings');
+    runMenuCommand('tab.close');
+    await settle();
+    expect(useStore.getState().settingsOpen).toBe(false);
+    expect(killed()).toEqual([]);
+    // Showing or hiding the VS Code panel is for everywhere.
+    useStore.getState().openDock({ kind: 'code', m: 'm', folder: '/srv/app' });
+    runMenuCommand('view.toggleCode');
+    expect(currentDock(useStore.getState())).toBeUndefined();
+  });
+
   it('opens the settings', () => {
     useStore.getState().openSettings(false);
-    runShortcut('app.settings');
+    runMenuCommand('app.settings');
     expect(useStore.getState().settingsOpen).toBe(true);
     useStore.getState().openSettings(false);
   });
 
   it('asks for a new workspace', () => {
-    runShortcut('workspace.new');
+    runMenuCommand('workspace.new');
     expect(useDialog.getState().current?.kind).toBe('newWorkspace');
   });
 
@@ -142,31 +160,31 @@ describe('runShortcut', () => {
     s.openDock(undefined);
     useStore.setState({ docks: {} });
     // Nothing shown before: the focused terminal's folder opens.
-    runShortcut('view.toggleCode');
+    runMenuCommand('view.toggleCode');
     expect(currentDock(useStore.getState())).toEqual({ kind: 'code', m: 'm', folder: '/srv/app' });
-    runShortcut('view.toggleCode');
+    runMenuCommand('view.toggleCode');
     expect(currentDock(useStore.getState())).toBeUndefined();
     // The panel shown last comes back, as it was.
     s.openDock({ kind: 'code', m: 'm', folder: '/srv/app' });
-    runShortcut('view.toggleCode');
+    runMenuCommand('view.toggleCode');
     expect(currentDock(useStore.getState())).toBeUndefined();
-    runShortcut('view.toggleCode');
+    runMenuCommand('view.toggleCode');
     expect(currentDock(useStore.getState())).toEqual({ kind: 'code', m: 'm', folder: '/srv/app' });
     // A preview panel hides too.
     s.openDock({ kind: 'preview', m: 'm', path: '/srv/a.png' });
-    runShortcut('view.toggleCode');
+    runMenuCommand('view.toggleCode');
     expect(currentDock(useStore.getState())).toBeUndefined();
     // Another machine's last panel is not brought back.
     s.openDock({ kind: 'code', m: 'other', folder: '/x' });
     s.openDock(undefined);
-    runShortcut('view.toggleCode');
+    runMenuCommand('view.toggleCode');
     expect(currentDock(useStore.getState())).toEqual({ kind: 'code', m: 'm', folder: '/srv/app' });
     s.openDock(undefined);
   });
 
   it('ignores unknown commands', () => {
     const calls = core.calls.length;
-    runShortcut('nope.command');
+    runMenuCommand('nope.command');
     expect(useDialog.getState().current).toBeUndefined();
     expect(core.calls.length).toBe(calls);
   });

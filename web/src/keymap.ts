@@ -2,8 +2,8 @@
 // through handleKey, the window the others) is matched against the bindings
 // in effect on this platform (keybindings.ts), chords included: "ctrl+b c"
 // is ctrl+b, then c within 3 s. The same chord's first stroke twice sends it
-// to the terminal. The desktop app's shell takes direct shortcuts before the
-// page (desktop.ts); here they run in browsers.
+// to the terminal. In the desktop app the page sees a key before the
+// application menu, which gets only the keys the page leaves (desktop.ts).
 
 import { actions } from './actions';
 import { useStore } from './state/store';

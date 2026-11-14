@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import type { DesktopShell } from './bridge';
+import type { DesktopShell, OpenedFolders } from '../../web/src/shell';
 import { channels } from './bridge';
 import { exposed, onDisk, receive, sent } from './fakeElectron';
 import './preload';
@@ -9,15 +9,18 @@ const shell = exposed.desktopShell as DesktopShell;
 
 test('the page gets only the desktopShell bridge, with these functions', () => {
   assert.deepEqual(Object.keys(exposed), ['desktopShell']);
-  assert.deepEqual(Object.keys(shell).sort(), [
-    'onOpenFolder',
-    'onRecordedKey',
-    'onShortcut',
-    'pathForFile',
-    'recordShortcut',
-    'setTheme',
-    'shortcutsChanged',
-  ]);
+  assert.deepEqual(Object.keys(shell).sort(), ['onCommand', 'onOpenFolders', 'pathForFile']);
+});
+
+test('the menu sends the page commands, strings only, while it listens', () => {
+  const got: string[] = [];
+  const off = shell.onCommand((c) => got.push(c));
+  receive(channels.command, 'tab.new');
+  receive(channels.command, { command: 'tab.new' });
+  off();
+  receive(channels.command, 'pane.close');
+  assert.deepEqual(got, ['tab.new']);
+  assert.deepEqual(sent, []);
 });
 
 test('a dropped file has its path; other files and objects have none', () => {
@@ -32,15 +35,16 @@ test('a dropped file has its path; other files and objects have none', () => {
 
 test('folders opened with the app reach the page while it listens, which it tells the shell', () => {
   sent.length = 0;
-  const got: string[] = [];
-  const off = shell.onOpenFolder((p) => got.push(p));
+  const got: OpenedFolders[] = [];
+  const off = shell.onOpenFolders((o) => got.push(o));
   assert.deepEqual(sent, [{ channel: channels.foldersWanted, value: true }]);
-  receive(channels.openFolder, '/Users/u/Projects/app');
-  receive(channels.openFolder, { not: 'a path' });
-  assert.deepEqual(got, ['/Users/u/Projects/app']);
+  receive(channels.openFolders, { folders: ['/Users/u/Projects/app'], skipped: 1 });
+  for (const bad of ['/Users/u/x', { folders: [1], skipped: 0 }, { folders: [], skipped: -1 }, { folders: ['/a'] }, null])
+    receive(channels.openFolders, bad);
+  assert.deepEqual(got, [{ folders: ['/Users/u/Projects/app'], skipped: 1 }]);
   off();
-  receive(channels.openFolder, '/Users/u/Projects/lib');
-  assert.deepEqual(got, ['/Users/u/Projects/app']);
+  receive(channels.openFolders, { folders: ['/Users/u/Projects/lib'], skipped: 0 });
+  assert.equal(got.length, 1);
   assert.deepEqual(sent, [
     { channel: channels.foldersWanted, value: true },
     { channel: channels.foldersWanted, value: false },

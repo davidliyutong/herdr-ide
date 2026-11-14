@@ -1,29 +1,32 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { OpenedFolders } from './folders';
+import type { OpenedFolders } from '../../web/src/shell';
+import { FolderQueue } from './folders';
+
+const opened = (...folders: string[]): OpenedFolders => ({ folders, skipped: 0 });
 
 test('folders opened before the page takes them wait for it, in order', () => {
-  const folders = new OpenedFolders();
-  folders.add('/Users/u/app');
-  folders.add('/Users/u/lib');
-  const got: string[] = [];
-  folders.takenBy((p) => got.push(p));
-  assert.deepEqual(got, ['/Users/u/app', '/Users/u/lib']);
-  folders.add('/Users/u/web');
-  assert.deepEqual(got, ['/Users/u/app', '/Users/u/lib', '/Users/u/web']);
+  const queue = new FolderQueue();
+  queue.add(opened('/Users/u/app'));
+  queue.add({ folders: ['/Users/u/lib'], skipped: 2 });
+  const got: OpenedFolders[] = [];
+  queue.takenBy((o) => got.push(o));
+  assert.deepEqual(got, [opened('/Users/u/app'), { folders: ['/Users/u/lib'], skipped: 2 }]);
+  queue.add(opened('/Users/u/web'));
+  assert.deepEqual(got.at(-1), opened('/Users/u/web'));
 });
 
 test('folders opened while the page reloads go to the next page', () => {
-  const folders = new OpenedFolders();
-  const first: string[] = [];
-  folders.takenBy((p) => first.push(p));
-  folders.takenBy(undefined);
-  folders.add('/Users/u/app');
+  const queue = new FolderQueue();
+  const first: OpenedFolders[] = [];
+  queue.takenBy((o) => first.push(o));
+  queue.takenBy(undefined);
+  queue.add(opened('/Users/u/app'));
   assert.deepEqual(first, []);
-  const next: string[] = [];
-  folders.takenBy((p) => next.push(p));
-  assert.deepEqual(next, ['/Users/u/app']);
-  // Each folder is delivered once.
-  folders.takenBy((p) => next.push(p));
-  assert.deepEqual(next, ['/Users/u/app']);
+  const next: OpenedFolders[] = [];
+  queue.takenBy((o) => next.push(o));
+  assert.deepEqual(next, [opened('/Users/u/app')]);
+  // Each request is delivered once.
+  queue.takenBy((o) => next.push(o));
+  assert.deepEqual(next, [opened('/Users/u/app')]);
 });

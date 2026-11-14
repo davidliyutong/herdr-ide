@@ -1,0 +1,105 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { bindingsOf, followCore, settingsOf, type Net, type ShellSettings } from './follow';
+import type { Binding } from './menu';
+
+const origin = 'http://127.0.0.1:7791';
+
+test('the bindings of the platform, well-formed ones only', () => {
+  const reply = {
+    effective: {
+      mac: [
+        { key: 'cmd+t', command: 'tab.new', when: 'terminal' },
+        { key: 'cmd+x', command: 'bad command', when: 'terminal' },
+        { key: 1, command: 'tab.new', when: 'terminal' },
+      ],
+      pc: [{ key: 'ctrl+shift+t', command: 'tab.new', when: 'terminal' }],
+    },
+  };
+  assert.deepEqual(bindingsOf(reply, 'mac'), [{ key: 'cmd+t', command: 'tab.new', when: 'terminal' }]);
+  for (const bad of [null, {}, { effective: {} }, { effective: { mac: 'x' } }]) assert.equal(bindingsOf(bad, 'mac'), undefined);
+});
+
+test('the theme and language settings, defaults for anything else', () => {
+  const values = (theme: unknown, language: unknown) => ({
+    values: { 'appearance.theme': { value: theme }, 'appearance.language': { value: language } },
+  });
+  assert.deepEqual(settingsOf(values('dark', 'zh-CN')), { theme: 'dark', language: 'zh-CN' });
+  assert.deepEqual(settingsOf(values('light', 'auto')), { theme: 'light', language: 'auto' });
+  for (const theme of ['Dark', 'auto', 1, null, { toString: () => 'dark' }])
+    assert.deepEqual(settingsOf(values(theme, 3)), { theme: 'system', language: 'auto' });
+  assert.deepEqual(settingsOf({ values: {} }), { theme: 'system', language: 'auto' });
+  assert.equal(settingsOf(null), undefined);
+});
+
+/** A stand-in for the event channel and the core's API. */
+function fakeNet(replies: Record<string, unknown>) {
+  const sockets: FakeSocket[] = [];
+  const fetched: string[] = [];
+  class FakeSocket {
+    onopen: (() => void) | null = null;
+    onmessage: ((ev: { data: unknown }) => void) | null = null;
+    onclose: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    closed = false;
+    constructor(readonly url: string) {
+      sockets.push(this);
+    }
+    close() {
+      this.closed = true;
+    }
+    push(m: unknown) {
+      this.onmessage?.({ data: JSON.stringify(m) });
+    }
+  }
+  const net: Net = {
+    WebSocket: FakeSocket,
+    fetch: async (url) => {
+      fetched.push(url.pathname);
+      return { ok: true, json: async () => replies[url.pathname] };
+    },
+  };
+  return { net, sockets, fetched };
+}
+
+const settle = () => new Promise((r) => setTimeout(r, 0));
+
+test('reads the state once the channel is open, then follows its messages', async () => {
+  const { net, sockets, fetched } = fakeNet({
+    '/api/settings': { values: { 'appearance.theme': { value: 'dark' } } },
+    '/api/keybindings': { commands: [], effective: { mac: [{ key: 'cmd+t', command: 'tab.new', when: 'terminal' }] } },
+  });
+  const got: { bindings: Binding[][]; settings: ShellSettings[] } = { bindings: [], settings: [] };
+  const stop = followCore(origin, 'mac', { bindings: (b) => got.bindings.push(b), settings: (s) => got.settings.push(s) }, net);
+  assert.equal(sockets[0].url, 'ws://127.0.0.1:7791/ws');
+  assert.deepEqual(fetched, []);
+  sockets[0].onopen!();
+  await settle();
+  assert.deepEqual(fetched.sort(), ['/api/keybindings', '/api/settings']);
+  assert.deepEqual(got.settings, [{ theme: 'dark', language: 'auto' }]);
+  assert.deepEqual(got.bindings, [[{ key: 'cmd+t', command: 'tab.new', when: 'terminal' }]]);
+
+  // A rebinding arrives as a push, with the bindings of every platform.
+  sockets[0].push({ t: 'keybindings', effective: { mac: [{ key: 'cmd+shift+t', command: 'tab.new', when: 'terminal' }], pc: [] } });
+  sockets[0].push({ t: 'settings', values: { 'appearance.language': { value: 'zh-CN' } } });
+  sockets[0].push({ t: 'machines', list: [] });
+  sockets[0].onmessage!({ data: 'not json' });
+  assert.deepEqual(got.bindings.at(-1), [{ key: 'cmd+shift+t', command: 'tab.new', when: 'terminal' }]);
+  assert.deepEqual(got.settings.at(-1), { theme: 'system', language: 'zh-CN' });
+  assert.equal(got.bindings.length, 2);
+
+  stop();
+  assert.ok(sockets[0].closed);
+  sockets[0].onclose!();
+  await new Promise((r) => setTimeout(r, 600));
+  assert.equal(sockets.length, 1, 'no reconnection after stop');
+});
+
+test('opens the channel again when it drops', async () => {
+  const { net, sockets } = fakeNet({});
+  const stop = followCore(origin, 'mac', { bindings: () => {}, settings: () => {} }, net);
+  sockets[0].onclose!();
+  await new Promise((r) => setTimeout(r, 600));
+  assert.equal(sockets.length, 2);
+  stop();
+});

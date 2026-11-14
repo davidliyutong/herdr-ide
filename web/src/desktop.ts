@@ -1,37 +1,35 @@
-// The desktop app's bridge (shell.ts) and its direct shortcuts: the shell
-// takes single-stroke bindings of the keybindings (Cmd+T…) before the page
-// and every frame in it, and asks the page to run their command; in a
-// browser there is no bridge and none of this is active. The shell reads the
-// bindings from the core; the page tells it when they change.
+// The desktop app's menu (desktop/src/menu.ts) sends the page the command of
+// an item chosen. Its keys reach the menu only when the page leaves them:
+// the page matches every key it sees itself (keymap.ts), as in browsers,
+// with the desktop app's bindings, and cancels those it runs. In a browser
+// there is no bridge and none of this is active.
 
-import { runCommand } from './keymap';
+import { applies, keyContext, runCommand, type KeyContext } from './keymap';
 import { useKeys } from './keybindings';
 import { desktopShell } from './shell';
 
 export { desktopShell, type DesktopShell } from './shell';
 
-/** Runs a command of a shortcut the shell took. Nothing runs while a dialog
- * is open (settings, confirmations, the palette…) except bindings meant for
- * everywhere: the key belongs to the dialog. Closing a tab asks first unless
- * its panes only have shells waiting at their prompt (actions.closeTab). */
-export function runShortcut(command: string) {
-  const k = useKeys.getState();
-  const when = k.effective.find((b) => b.command === command)?.when ?? k.commands.find((c) => c.id === command)?.when;
-  if (document.querySelector('.modal-backdrop, .palette-backdrop') && when !== 'always' && when !== 'dialog') return;
+/** Where the keyboard is: a dialog, VS Code's panel or the main UI. */
+function menuContext(): KeyContext {
+  if (keyContext() === 'dialog') return 'dialog';
+  return document.activeElement?.classList.contains('code-frame') ? 'vscode' : 'terminal';
+}
+
+/** Runs a command of the menu, as the macOS application's menu does: while
+ * a dialog or the palette is open only commands for dialogs or everywhere
+ * run, and while VS Code has the keyboard only those for VS Code or
+ * everywhere (a key VS Code left goes no further). Closing a tab asks first
+ * unless its panes only have shells waiting at their prompt
+ * (actions.closeTab). */
+export function runMenuCommand(command: string) {
+  const when = useKeys.getState().commands.find((c) => c.id === command)?.when ?? 'terminal';
+  const ctx = menuContext();
+  if (ctx !== 'terminal' && !applies(when, ctx)) return;
   runCommand(command);
 }
 
-/** Runs the shell's shortcuts and tells it when the bindings change;
- * returns a function that stops it. */
+/** Runs the menu's commands; returns a function that stops it. */
 export function initDesktop(): () => void {
-  if (!desktopShell) return () => {};
-  const shell = desktopShell;
-  const off = shell.onShortcut(runShortcut);
-  const offKeys = useKeys.subscribe((s, prev) => {
-    if (s.effective !== prev.effective) shell.shortcutsChanged();
-  });
-  return () => {
-    off();
-    offKeys();
-  };
+  return desktopShell?.onCommand(runMenuCommand) ?? (() => {});
 }

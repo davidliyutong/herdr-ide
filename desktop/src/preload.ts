@@ -1,17 +1,16 @@
 // Preload of the main window (sandboxed, context-isolated). It gives the page
-// a narrow bridge for direct shortcuts, the theme and dropped folders, and
-// nothing else: the page learns which command a shortcut runs, reports that
-// the keybindings changed, records a new key through the shell while the
-// settings dialog asks for one, reports its theme setting for the native title
-// bar, asks where a file the user dropped is on disk, and learns which folders
-// were opened with the app.
+// a narrow bridge and nothing else: the commands of the menu items chosen,
+// where a file the user dropped is on disk, and which folders were opened
+// with the app.
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
-import { channels, type DesktopShell } from './bridge';
+import type { DesktopShell, OpenedFolders } from '../../web/src/shell';
+import { channels } from './bridge';
 
-/** Listens on channel for string payloads; returns a function that stops it. */
-function listen(channel: string, fn: (value: string) => void): () => void {
+/** Listens on channel for payloads that pass valid; returns a function that
+ * stops it. */
+function listen<T>(channel: string, valid: (value: unknown) => value is T, fn: (value: T) => void): () => void {
   const listener = (_event: IpcRendererEvent, value: unknown) => {
-    if (typeof value === 'string') fn(value);
+    if (valid(value)) fn(value);
   };
   ipcRenderer.on(channel, listener);
   return () => {
@@ -19,18 +18,22 @@ function listen(channel: string, fn: (value: string) => void): () => void {
   };
 }
 
+const isString = (v: unknown): v is string => typeof v === 'string';
+
+function isOpened(v: unknown): v is OpenedFolders {
+  const o = v as OpenedFolders | null;
+  return (
+    typeof o === 'object' &&
+    o !== null &&
+    Array.isArray(o.folders) &&
+    o.folders.every(isString) &&
+    Number.isInteger(o.skipped) &&
+    o.skipped >= 0
+  );
+}
+
 const shell: DesktopShell = {
-  onShortcut: (fn) => listen(channels.shortcut, fn),
-  shortcutsChanged() {
-    ipcRenderer.send(channels.shortcutsChanged);
-  },
-  recordShortcut(active) {
-    ipcRenderer.send(channels.recording, !!active);
-  },
-  onRecordedKey: (fn) => listen(channels.recorded, fn),
-  setTheme(theme) {
-    ipcRenderer.send(channels.theme, theme);
-  },
+  onCommand: (fn) => listen(channels.command, isString, fn),
   pathForFile(file) {
     // Only a File backed by a file on disk has a path; anything else throws.
     try {
@@ -39,8 +42,8 @@ const shell: DesktopShell = {
       return '';
     }
   },
-  onOpenFolder(fn) {
-    const off = listen(channels.openFolder, fn);
+  onOpenFolders(fn) {
+    const off = listen(channels.openFolders, isOpened, fn);
     ipcRenderer.send(channels.foldersWanted, true);
     return () => {
       off();

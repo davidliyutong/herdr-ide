@@ -1,29 +1,39 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, powerMonitor, session, shell, type IpcMainEvent } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  Menu,
+  nativeTheme,
+  powerMonitor,
+  session,
+  shell,
+  type BaseWindow,
+  type IpcMainEvent,
+} from 'electron';
 import { statSync } from 'node:fs';
 import { join } from 'node:path';
+import registry from '../../design/generated/registry.json';
+import tokens from '../../design/tokens.json';
 import { APP_NAME, APP_SLUG } from '../../web/src/brand';
-import { en, type MessageKey } from '../../web/src/i18n/en';
-import { zhCN } from '../../web/src/i18n/zh-CN';
-import { CoreProcess, coreArgs, coreEnv, corePort, DesktopError, ENV_PREFIX } from './core';
+import { detectLocale, translate } from '../../web/src/i18n';
+import type { MessageKey } from '../../web/src/i18n/en';
+import type { OpenedFolders } from '../../web/src/shell';
 import { channels } from './bridge';
-import { OpenedFolders } from './folders';
-import { allowPermission, isExternal, isInternal, mainWindowPreferences, themeSource, webPreferences } from './policy';
-import {
-  acceleratorFor,
-  bindingsFromReply,
-  defaultBindings,
-  isCodeFrame,
-  platformOf,
-  recordedSpec,
-  shortcutFor,
-  shortcutOutsideCode,
-  type Binding,
-} from './shortcuts';
+import { CoreProcess, coreArgs, coreEnv, corePort, DesktopError, ENV_PREFIX } from './core';
+import { FolderQueue } from './folders';
+import { followCore, type ShellSettings } from './follow';
+import { menuTemplate, type Binding } from './menu';
+import { allowPermission, isExternal, isInternal, mainWindowPreferences, webPreferences } from './policy';
 
 app.setName(APP_NAME);
 app.enableSandbox();
 const dev = !app.isPackaged || process.env[`${ENV_PREFIX}DESKTOP_DEV`] === '1';
-app.setPath('userData', join(app.getPath('appData'), `${APP_SLUG}-desktop${dev ? '-dev' : ''}`));
+// Each mode has its own profile and single-instance lock; an explicit
+// --user-data-dir (isolated smoke tests) takes the place of both.
+if (!app.commandLine.hasSwitch('user-data-dir')) {
+  app.setPath('userData', join(app.getPath('appData'), `${APP_SLUG}-desktop${dev ? '-dev' : ''}`));
+}
 
 const core = new CoreProcess();
 let mainWindow: BrowserWindow | undefined;
@@ -32,21 +42,17 @@ let quitting = false;
 let stopped = false;
 let systemShutdown = false;
 let reportingError = false;
-// The keybindings of this platform: its defaults until the core's are read,
-// so a key never falls through to closing the window while they load.
-const platform = platformOf(process.platform);
-let bindings: Binding[] = defaultBindings(platform);
-// The settings dialog is recording a key: the shell reports keys to it
-// instead of running shortcuts.
-let recording = false;
-// The last key-down matched a shortcut but was left to VS Code, which has
-// focus; if VS Code does not take it, the menu must not act on it either.
-let leftToCode = false;
-// Folders dropped on the Dock icon, until the page takes them.
-const openedFolders = new OpenedFolders();
+let stopFollowing = () => {};
+// The keybindings of this platform: its defaults until the core's are read.
+const platform = process.platform === 'darwin' ? 'mac' : 'pc';
+let bindings = registry.keybindings[platform] as Binding[];
+// appearance.language: "auto" follows the system's languages.
+let language = 'auto';
+// Folders opened with the app, until the page takes them.
+const folders = new FolderQueue();
 
-function t(key: MessageKey): string {
-  return (app.getLocale().toLowerCase().startsWith('zh') ? zhCN : en)[key];
+function t(key: MessageKey, vars?: Record<string, string>): string {
+  return translate(detectLocale(language === 'auto' ? null : language, app.getPreferredSystemLanguages()), key, vars);
 }
 
 function describe(error: unknown): string {
@@ -59,6 +65,7 @@ async function fail(error: unknown) {
   reportingError = true;
   console.error(error);
   // Stop before showing a modal dialog, including after a startup timeout.
+  stopFollowing();
   await core.stop();
   if (quitting) return;
   await dialog.showMessageBox({
@@ -96,117 +103,43 @@ app.on('web-contents-created', (_event, contents) => {
   });
 });
 
-function runShortcut(command: string) {
-  const win = mainWindow;
-  if (!win) return;
-  if (!win.isFocused()) win.focus();
-  win.webContents.send(channels.shortcut, command);
+function showMain() {
+  if (!mainWindow) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
 }
 
-// The menu shows the shortcuts; before-input-event runs them, so the menu does
-// not register them (it would also catch keys meant for program windows).
-// Window → Close closes program windows with cmd+w; the main window only when
-// cmd+w is not a shortcut left to VS Code (closing it quits the app).
-function buildMenu() {
-  const item = (command: string, label: MessageKey) => ({
-    label: t(label),
-    accelerator: acceleratorFor(bindings, command),
-    registerAccelerator: false,
-    click: () => runShortcut(command),
-  });
-  Menu.setApplicationMenu(
-    Menu.buildFromTemplate([
-      {
-        role: 'appMenu',
-        submenu: [
-          { role: 'about' },
-          { type: 'separator' },
-          item('app.settings', 'desktop.menu.settings'),
-          { type: 'separator' },
-          { role: 'services' },
-          { type: 'separator' },
-          { role: 'hide' },
-          { role: 'hideOthers' },
-          { role: 'unhide' },
-          { type: 'separator' },
-          { role: 'quit' },
-        ],
-      },
-      {
-        label: t('desktop.menu.file'),
-        submenu: [
-          item('workspace.new', 'desktop.menu.newWorkspace'),
-          item('tab.new', 'desktop.menu.newTab'),
-          { type: 'separator' },
-          item('pane.close', 'desktop.menu.closePane'),
-          item('tab.close', 'desktop.menu.closeTab'),
-        ],
-      },
-      { role: 'editMenu' },
-      {
-        label: t('desktop.menu.view'),
-        submenu: [
-          item('view.toggleCode', 'desktop.menu.toggleCode'),
-          { type: 'separator' },
-          { role: 'reload' },
-          { role: 'forceReload' },
-          { role: 'toggleDevTools' },
-          { type: 'separator' },
-          { role: 'resetZoom' },
-          { role: 'zoomIn' },
-          { role: 'zoomOut' },
-          { type: 'separator' },
-          { role: 'togglefullscreen' },
-        ],
-      },
-      {
-        role: 'window',
-        submenu: [
-          { role: 'minimize' },
-          { role: 'zoom' },
-          { type: 'separator' },
-          {
-            label: t('desktop.menu.closeWindow'),
-            accelerator: 'CommandOrControl+W',
-            click: (_item, win, ev) => {
-              if (win === mainWindow && ev.triggeredByAccelerator && leftToCode) return;
-              win?.close();
-            },
-          },
-          { type: 'separator' },
-          { role: 'front' },
-        ],
-      },
-    ]),
-  );
-}
-
-// The keybindings are the core's; the page reports changes, the shell reads
-// them from the core itself. A failed read keeps the current ones and is
-// retried.
-async function loadShortcuts(attempts = 3) {
-  for (let i = 1; ; i++) {
-    try {
-      const r = await fetch(new URL('/api/keybindings', origin));
-      if (!r.ok) throw new Error(`/api/keybindings: ${r.status}`);
-      bindings = bindingsFromReply(await r.json(), platform) ?? bindings;
-      break;
-    } catch (error) {
-      console.error(error);
-      if (i >= attempts) break;
-      await new Promise((resolve) => setTimeout(resolve, 1000 * i));
-    }
+/** A command of the menu, for the main window's page. In another window (a
+ * program's, VS Code's own) closing a pane or a tab closes that window. */
+function runCommand(command: string, focused: BaseWindow | undefined) {
+  if (focused && focused !== mainWindow && (command === 'pane.close' || command === 'tab.close')) {
+    focused.close();
+    return;
   }
+  if (!mainWindow) return;
+  if (!mainWindow.isFocused()) showMain();
+  mainWindow.webContents.send(channels.command, command);
+}
+
+function buildMenu() {
+  const template = menuTemplate(bindings, APP_NAME, t, (command) => (_item, focused) => runCommand(command, focused));
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+// The core's settings and keybindings, as the macOS application applies
+// them: the theme becomes the title bar's and native controls' (also when it
+// differs from the system's appearance), the language the menu's.
+function applySettings(s: ShellSettings) {
+  nativeTheme.themeSource = s.theme;
+  if (s.language === language) return;
+  language = s.language;
   buildMenu();
 }
 
-/** Whether keyboard focus is in a VS Code frame of win (or a webview inside
- * it): its keys, cmd+w closing an editor included, belong to VS Code. */
-function focusInCode(win: BrowserWindow): boolean {
-  let frame = win.webContents.focusedFrame;
-  if (!frame?.parent) return false;
-  while (frame.parent?.parent) frame = frame.parent;
-  return isCodeFrame(frame.url, origin);
+function applyBindings(b: Binding[]) {
+  bindings = b;
+  buildMenu();
 }
 
 // Messages count only from the top frame of the main window showing the core.
@@ -217,27 +150,15 @@ function fromMainPage(event: IpcMainEvent): boolean {
   );
 }
 
-ipcMain.on(channels.shortcutsChanged, (event) => {
-  if (fromMainPage(event)) void loadShortcuts();
-});
 ipcMain.on(channels.foldersWanted, (event, wanted: unknown) => {
   if (!fromMainPage(event)) return;
   const contents = event.sender;
-  openedFolders.takenBy(wanted === true ? (path) => contents.send(channels.openFolder, path) : undefined);
-});
-ipcMain.on(channels.recording, (event, active: unknown) => {
-  if (fromMainPage(event)) recording = active === true;
-});
-// The title bar, native controls and the windows' background follow the
-// page's theme setting, also when it differs from the system's appearance.
-ipcMain.on(channels.theme, (event, value: unknown) => {
-  const source = themeSource(value);
-  if (fromMainPage(event) && source) nativeTheme.themeSource = source;
+  folders.takenBy(wanted === true ? (opened) => contents.send(channels.openFolders, opened) : undefined);
 });
 
 /** The page's background (color.background in design/tokens.json), shown before it paints. */
 function windowBackground(): string {
-  return nativeTheme.shouldUseDarkColors ? '#0a0a0a' : '#ffffff';
+  return tokens.color.background[nativeTheme.shouldUseDarkColors ? 'dark' : 'light'];
 }
 
 function createWindow() {
@@ -255,52 +176,26 @@ function createWindow() {
   const onTheme = () => win.setBackgroundColor(windowBackground());
   nativeTheme.on('updated', onTheme);
   win.on('closed', () => nativeTheme.off('updated', onTheme));
-  // Before the page and every frame in it, and before the menu.
-  win.webContents.on('before-input-event', (event, input) => {
-    if (input.type !== 'keyDown') return;
-    leftToCode = false;
-    if (recording) {
-      // Taken here, so the menu (cmd+w, cmd+q) never acts on a recorded key.
-      const spec = recordedSpec(input);
-      if (!spec) return;
-      event.preventDefault();
-      if (!input.isAutoRepeat) win.webContents.send(channels.recorded, spec);
-      return;
-    }
-    const inCode = focusInCode(win);
-    const binding = shortcutFor(bindings, input, inCode);
-    if (!binding) {
-      // VS Code keeps its keys: cmd+w closes its editor, not the window.
-      if (inCode && shortcutOutsideCode(bindings, input)) leftToCode = true;
-      return;
-    }
-    event.preventDefault();
-    if (!input.isAutoRepeat) runShortcut(binding.command);
-  });
-  const stopRecording = () => {
-    recording = false;
-  };
-  win.webContents.on('did-navigate', stopRecording);
-  win.webContents.on('render-process-gone', stopRecording);
   // Folders opened from now on wait for the next page, which asks for them;
   // this runs before that page can.
   win.webContents.on('did-start-navigation', (details) => {
-    if (details.isMainFrame && !details.isSameDocument) openedFolders.takenBy(undefined);
+    if (details.isMainFrame && !details.isSameDocument) folders.takenBy(undefined);
   });
-  win.webContents.on('render-process-gone', () => openedFolders.takenBy(undefined));
+  win.webContents.on('render-process-gone', (_event, details) => {
+    folders.takenBy(undefined);
+    if (!quitting) void fail(new DesktopError('desktop.rendererGone', details.reason));
+  });
   win.once('ready-to-show', () => win.show());
   win.on('closed', () => {
     mainWindow = undefined;
     app.quit();
-  });
-  win.webContents.on('render-process-gone', (_event, details) => {
-    if (!quitting) void fail(new DesktopError('desktop.rendererGone', details.reason));
   });
   void win.loadURL(origin).catch(fail);
 }
 
 app.on('before-quit', (event) => {
   quitting = true;
+  stopFollowing();
   if (stopped) return;
   if (systemShutdown) {
     // Delaying a logout, restart or shutdown would cancel it. Signal the core
@@ -315,31 +210,30 @@ app.on('before-quit', (event) => {
   });
 });
 // Closing the main window quits (its 'closed' handler); program windows do not.
-app.on('second-instance', () => {
-  if (mainWindow?.isMinimized()) mainWindow.restore();
-  mainWindow?.show();
-  mainWindow?.focus();
-});
-// A folder dropped on the Dock icon or opened with the app, also the one it
-// was launched with (before ready). Anything else is not taken: the Dock offers
-// only folders, `open -a` passes any file.
+app.on('second-instance', showMain);
+app.on('activate', showMain);
+
+// Folders dropped on the Dock icon or opened with the app, also those it was
+// launched with (before ready). macOS reports each item of one request in a
+// row; they go to the page together, with the number of items that are not
+// folders (`open -a` passes any file), which the page skips with a note.
+let opening: OpenedFolders | undefined;
 app.on('open-file', (event, path) => {
   event.preventDefault();
+  if (!opening) {
+    const batch: OpenedFolders = (opening = { folders: [], skipped: 0 });
+    setImmediate(() => {
+      opening = undefined;
+      folders.add(batch);
+      showMain();
+    });
+  }
   let folder = false;
   try {
     folder = statSync(path).isDirectory();
   } catch {}
-  if (!folder) return;
-  openedFolders.add(path);
-  if (mainWindow?.isMinimized()) mainWindow.restore();
-  mainWindow?.show();
-  mainWindow?.focus();
-});
-app.on('activate', () => {
-  if (mainWindow) {
-    mainWindow.show();
-    mainWindow.focus();
-  }
+  if (folder) opening.folders.push(path);
+  else opening.skipped++;
 });
 process.on('SIGINT', () => app.quit());
 process.on('SIGTERM', () => app.quit());
@@ -377,8 +271,8 @@ if (!app.requestSingleInstanceLock()) {
       ses.setPermissionCheckHandler((contents, permission, requestingOrigin) => {
         return allowPermission(permission, requestingOrigin, contents?.getURL() || '', origin);
       });
+      stopFollowing = followCore(origin, platform, { bindings: applyBindings, settings: applySettings });
       createWindow();
-      await loadShortcuts();
     })
     .catch(fail);
 }

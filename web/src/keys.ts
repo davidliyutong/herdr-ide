@@ -4,7 +4,7 @@
 // named after the US layout's unshifted keys ("?" is "shift+slash").
 // macos/Sources/TermKit/Keys.swift does the same; design/testdata/keys holds
 // the vectors all three are tested with. Shared by the page and the desktop
-// app's shell (desktop/src/shortcuts.ts).
+// app's shell, whose menu shows the keys (desktop/src/menu.ts).
 //
 // A pressed key is named after the character the keyboard layout gives it,
 // as macOS names its shortcuts: on AZERTY, Cmd+Z is "z" although its
@@ -218,6 +218,12 @@ export function altOnly(stroke: string): boolean {
   return mods.includes('alt') && !mods.includes('cmd') && !mods.includes('ctrl');
 }
 
+/** The character a punctuation or digit key types with Shift on a US
+ * layout ("}" for bracketright, "!" for 1); undefined for other keys. */
+export function shiftedChar(name: string): string | undefined {
+  return named[name]?.shifted ?? (/^\d$/.test(name) ? shiftedDigits[Number(name)] : undefined);
+}
+
 /** How a key sequence is shown: "ctrl+b ?", "cmd+}", "ctrl+shift+t". A
  * shifted punctuation key shows the character it types. */
 export function keyLabel(seq: string): string {
@@ -227,7 +233,7 @@ export function keyLabel(seq: string): string {
     .map((stroke) => {
       const parts = stroke.split('+');
       const key = parts.pop()!;
-      const shifted = parts.includes('shift') && (named[key]?.shifted ?? (/^\d$/.test(key) ? shiftedDigits[Number(key)] : undefined));
+      const shifted = parts.includes('shift') && shiftedChar(key);
       if (shifted) return [...parts.filter((p) => p !== 'shift'), shifted].join('+');
       return [...parts, named[key]?.char?.trim() || key].join('+');
     })

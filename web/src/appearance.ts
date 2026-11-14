@@ -1,13 +1,12 @@
 // Applies the appearance settings: light/dark theme (also sent to the core,
-// which switches VS Code windows to match, and to the desktop app's shell,
-// whose title bar follows it) and the UI font. Terminals follow the
-// terminal settings themselves (components/TerminalView.tsx).
+// which switches VS Code windows to match) and the UI font. Terminals follow
+// the terminal settings themselves (components/TerminalView.tsx); the
+// desktop app's shell reads the theme from the core itself.
 
 import { create } from 'zustand';
 import { getPrefs, usePrefs, type Prefs, type TermColors } from './prefs';
 import { conn } from './lib/conn';
 import type { TermFontWeight } from './terminal/fonts';
-import { desktopShell } from './shell';
 
 export type ThemeKind = 'dark' | 'light';
 
@@ -83,8 +82,6 @@ function apply(p: Prefs) {
   root.style.fontSize = `${p.uiFontSize}px`;
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', getComputedStyle(root).getPropertyValue('--bg').trim());
   conn.setTheme(kind);
-  // The setting, not the kind: "system" keeps following the system.
-  desktopShell?.setTheme(p.theme);
 }
 
 /** Applies the current settings and follows later changes. */

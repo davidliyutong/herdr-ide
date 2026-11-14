@@ -3,9 +3,7 @@
 // recording it (press the keys, then Enter; up to MAX_STROKES strokes for a
 // chord), removed with its ×, and a command's keys go back to the defaults
 // with reset. Changes replace the user's rules (PUT /api/keybindings), which
-// the core turns into the bindings of every platform. In the desktop app the
-// shell records keys with Cmd, Ctrl or Alt, so neither its menu nor a
-// shortcut acts on them while recording.
+// the core turns into the bindings of every platform.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Plus, RotateCcw, X } from 'lucide-react';
@@ -13,7 +11,6 @@ import { hasMessage, t } from '../i18n';
 import { commandLabel } from '../keymap';
 import { altOnly, keyLabel, MAX_STROKES, strokeOf, tryNormalize, KeyError, normalizeKeys } from '../keys';
 import { keysOf, resetRules, rulesFor, saveUserRules, useKeys, type Conflict } from '../keybindings';
-import { desktopShell } from '../shell';
 
 function sectionLabel(id: string): string {
   const k = `command.section.${id}`;
@@ -169,8 +166,8 @@ export function KeyboardShortcuts({ query, readOnly }: { query: string; readOnly
 }
 
 /** Records a key sequence: strokes as they are pressed, Enter to keep it,
- * Escape (or leaving the field) to cancel. In the desktop app the shell
- * reports strokes with Cmd, Ctrl or Alt, which never reach the page. */
+ * Escape (or leaving the field) to cancel. Every key is cancelled, so in the
+ * desktop app its menu (Cmd+Q included) does not act on it. */
 function Recorder({ onDone }: { onDone(seq?: string): void }) {
   const [strokes, setStrokes] = useState<string[]>([]);
   const field = useRef<HTMLSpanElement>(null);
@@ -182,13 +179,6 @@ function Recorder({ onDone }: { onDone(seq?: string): void }) {
 
   useEffect(() => {
     field.current?.focus();
-    if (!desktopShell) return;
-    desktopShell.recordShortcut(true);
-    const off = desktopShell.onRecordedKey((stroke) => add(stroke));
-    return () => {
-      off();
-      desktopShell?.recordShortcut(false);
-    };
   }, []);
 
   return (

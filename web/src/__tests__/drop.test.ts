@@ -12,6 +12,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import type { DesktopShell, OpenedFolders } from '../shell';
 import { FakeXhr } from './fakeXhr';
 
 vi.mock('../lib/conn', () => ({
@@ -27,19 +28,15 @@ vi.mock('../lib/conn', () => ({
 /** Files the fake desktop bridge knows the paths of. */
 const onDisk = new Map<File, string>();
 /** What the page gave the bridge for folders dropped on the Dock icon. */
-let openFolder: ((path: string) => void) | undefined;
-const shell = {
-  onOpenFolder: (fn: (path: string) => void) => {
-    openFolder = fn;
+let openFolders: ((opened: OpenedFolders) => void) | undefined;
+const shell: DesktopShell = {
+  onOpenFolders: (fn) => {
+    openFolders = fn;
     return () => {
-      openFolder = undefined;
+      openFolders = undefined;
     };
   },
-  onShortcut: () => () => {},
-  shortcutsChanged() {},
-  recordShortcut() {},
-  onRecordedKey: () => () => {},
-  setTheme() {},
+  onCommand: () => () => {},
   pathForFile: (f: File) => onDisk.get(f) ?? '',
 };
 
@@ -197,8 +194,8 @@ describe('folders dropped on the Dock icon', () => {
     // Launched by the drop: the page does not know its machines yet.
     store.useStore.setState({ machines: {}, order: [] });
     const off = drop.takeOpenedFolders();
-    openFolder!('/Users/u/Projects/app');
-    openFolder!('/Users/u/Projects/lib');
+    openFolders!({ folders: ['/Users/u/Projects/app'], skipped: 0 });
+    openFolders!({ folders: ['/Users/u/Projects/lib'], skipped: 0 });
     await act(async () => store.useStore.setState({ machines: { local: local('connecting') } as never, order: ['local'] }));
     expect(creates()).toEqual([]);
     await act(async () => store.useStore.setState({ machines: { local: local('ready') } as never }));
@@ -209,7 +206,16 @@ describe('folders dropped on the Dock icon', () => {
     ]);
     expect(toasts()).toEqual([]);
     off();
-    expect(openFolder).toBeUndefined();
+    expect(openFolders).toBeUndefined();
+  });
+
+  it('skip other items with a note, as a drop on the sidebar does', async () => {
+    store.useStore.setState({ machines: { local: local('ready') } as never, order: ['local'], toasts: [] });
+    const off = drop.takeOpenedFolders();
+    openFolders!({ folders: ['/Users/u/Projects/app'], skipped: 2 });
+    await vi.waitFor(() => expect(creates()).toEqual([['local', '/Users/u/Projects/app']]));
+    expect(toasts()).toEqual(['Only folders become workspaces; 2 other dropped item(s) skipped.']);
+    off();
   });
 
   it('are not opened, with a note, when the local machine does not connect or is disabled', async () => {
