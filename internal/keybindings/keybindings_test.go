@@ -45,7 +45,7 @@ func TestParseVectors(t *testing.T) {
 	}
 }
 
-// The defaults keep herdr's prefix keymap and the applications' direct
+// The defaults keep the prefix keymap and the applications' direct
 // shortcuts.
 func TestDefaults(t *testing.T) {
 	s := New("", Commands)
@@ -78,8 +78,8 @@ func TestDefaults(t *testing.T) {
 			t.Errorf("%s %s = %v, want %v", c.platform, c.command, got, c.keys)
 		}
 	}
-	// The prefix chords: herdr's keymap (tabs 1 to 9 each a command) and
-	// the IDE's own.
+	// The prefix chords: the terminal keymap (tabs 1 to 9 each a command)
+	// and the IDE's own.
 	chords := 0
 	for _, r := range s.Defaults(PlatformPCBrowser) {
 		if strings.HasPrefix(r.Key, "ctrl+b ") {

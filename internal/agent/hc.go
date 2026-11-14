@@ -55,20 +55,10 @@ func (a *Agent) hcSession() string {
 // its holders' sockets sit beside it.
 func (a *Agent) hcSocket() string { return filepath.Join(a.runDir, "hc.sock") }
 
-// hcEnv is the environment of a herdr-core command: the agent's, selecting
-// the session and socket, without the variables that would make it act for a
-// terminal the agent itself was started in.
+// hcEnv is the environment of a herdr-core command: the agent's (cleanEnv),
+// selecting the instance's session and socket.
 func (a *Agent) hcEnv() []string {
-	var env []string
-	for _, kv := range os.Environ() {
-		name, _, _ := strings.Cut(kv, "=")
-		switch name {
-		case "HC_SESSION", "HC_SOCKET", "HC_TERMINAL_ID", "HC_TERMINAL_SOCKET":
-		default:
-			env = append(env, kv)
-		}
-	}
-	return append(env, "HC_SESSION="+a.hcSession(), "HC_SOCKET="+a.hcSocket())
+	return append(cleanEnv(), "HC_SESSION="+a.hcSession(), "HC_SOCKET="+a.hcSocket())
 }
 
 // hcDigest returns the SHA-256 of the installed executable, "" without one.

@@ -177,13 +177,12 @@ func termServer(t *testing.T, opts Options, core bool) (*Server, *fakeTermCore, 
 	t.Cleanup(func() { os.RemoveAll(home) })
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
-	t.Setenv("HERDR_SOCKET_PATH", "")
 	logger := log.New(io.Discard, "", 0)
 	dial := func(ctx context.Context, spec machines.Spec) (*transport.Session, string, error) {
 		s, err := transport.DialLocal(ctx, agent.Options{Logger: logger})
 		return s, "test/test", err
 	}
-	mg := machines.NewManager([]machines.Spec{{ID: "x", Label: "x", Kind: machines.KindSSH, Session: "herdr-ide-none", Enabled: true}}, dial, logger)
+	mg := machines.NewManager([]machines.Spec{{ID: "x", Label: "x", Kind: machines.KindSSH, Enabled: true}}, dial, logger)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {

@@ -34,8 +34,6 @@ type Manager struct {
 
 	// reg stores the machines (UseRegistry); nil keeps changes in memory.
 	reg *Registry
-	// SSHSession is the herdr session of SSH machines added at runtime.
-	SSHSession string
 }
 
 // UseRegistry stores later changes of the machines in r. Call before Run.
@@ -131,18 +129,14 @@ func NewManager(specs []Spec, dial Dialer, logger *log.Logger) *Manager {
 	return mg
 }
 
-// newMachine creates a machine whose state changes and agent events reach
-// the subscribers while it belongs to the manager: a removed machine's last
-// steps publish nothing.
+// newMachine creates a machine whose state changes reach the subscribers
+// while it belongs to the manager: a removed machine's last steps publish
+// nothing.
 func (mg *Manager) newMachine(s Spec) *Machine {
 	var m *Machine
 	m = newMachine(s, mg.dial, mg.logger, func(st State) {
 		if mg.Get(st.ID) == m {
 			mg.broadcast(st)
-		}
-	}, func(ev AgentEvent) {
-		if mg.Get(ev.Machine) == m {
-			mg.broadcastAgent(ev)
 		}
 	})
 	m.streams = mg.streams
@@ -196,9 +190,6 @@ func (mg *Manager) start(m *Machine) {
 // disabled. A machine with its id or its target exists already.
 func (mg *Manager) Add(s Spec) error {
 	s.Kind = KindSSH
-	if s.Session == "" {
-		s.Session = mg.SSHSession
-	}
 	if s.ID == "" || mg.taken("", func(o Spec) bool { return o.ID == s.ID || (o.Kind == KindSSH && o.Target == s.Target) }) {
 		return ErrMachineExists
 	}
@@ -317,15 +308,12 @@ func (mg *Manager) broadcast(st State) {
 	}
 }
 
-// PublishAgent sends an agent's status change to the subscribers, as a
-// herdr pane's would: the terminal core's agents, detected by the agent.
+// PublishAgent sends a status change of an agent in one of the terminal
+// core's terminals, detected by the machine's agent, to the subscribers.
 func (mg *Manager) PublishAgent(ev AgentEvent) {
-	if mg.Get(ev.Machine) != nil {
-		mg.broadcastAgent(ev)
+	if mg.Get(ev.Machine) == nil {
+		return
 	}
-}
-
-func (mg *Manager) broadcastAgent(ev AgentEvent) {
 	mg.mu.Lock()
 	fns := make([]func(AgentEvent), 0, len(mg.agentFn))
 	for _, f := range mg.agentFn {

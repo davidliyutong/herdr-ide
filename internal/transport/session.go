@@ -81,16 +81,6 @@ func (s *Session) Err() error {
 
 // Open starts a stream with header h and waits for the agent's reply.
 func (s *Session) Open(ctx context.Context, h agentproto.Header) (net.Conn, *agentproto.Reply, error) {
-	return s.OpenWith(ctx, h, nil)
-}
-
-// OpenWith is Open that also sends first right after the header, without
-// waiting for the reply: the agent finds it on the stream as soon as it has
-// set the stream up. Peers that must hear from the core within a deadline of
-// their own (herdr's API wants the request 5 s after accepting) get it one
-// round trip earlier, which matters on slow or congested links. If the agent
-// refuses the stream, first is discarded with it.
-func (s *Session) OpenWith(ctx context.Context, h agentproto.Header, first []byte) (net.Conn, *agentproto.Reply, error) {
 	st, err := s.ys.OpenStream()
 	if err != nil {
 		return nil, nil, err
@@ -112,12 +102,6 @@ func (s *Session) OpenWith(ctx context.Context, h agentproto.Header, first []byt
 	if err := agentproto.WriteLine(st, h); err != nil {
 		st.Close()
 		return nil, nil, err
-	}
-	if len(first) > 0 {
-		if _, err := st.Write(first); err != nil {
-			st.Close()
-			return nil, nil, err
-		}
 	}
 	var rep agentproto.Reply
 	if err := agentproto.ReadLine(st, &rep); err != nil {

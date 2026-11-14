@@ -143,7 +143,7 @@ func TestBridgeDownload(t *testing.T) {
 	s := newTestServer()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	c := &wsClient{s: s, ctx: ctx, cancel: cancel, send: make(chan outMsg, 8)}
+	c := &wsClient{s: s, ctx: ctx, cancel: cancel, send: make(chan []byte, 8)}
 	s.clients[c] = true
 	mc := machines.NewManager([]machines.Spec{{ID: "m", Label: "m", Kind: machines.KindSSH}}, nil, log.New(io.Discard, "", 0)).Get("m")
 	a, b := net.Pipe()
@@ -156,8 +156,8 @@ func TestBridgeDownload(t *testing.T) {
 	b.Write([]byte(`{"type":"download","paths":["/srv/a","/srv/b"]}` + "\n"))
 	select {
 	case m := <-c.send:
-		if string(m.data) != `{"m":"m","paths":["/srv/a","/srv/b"],"t":"bridge.download"}` {
-			t.Fatalf("got %s", m.data)
+		if string(m) != `{"m":"m","paths":["/srv/a","/srv/b"],"t":"bridge.download"}` {
+			t.Fatalf("got %s", m)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("no bridge.download")
@@ -175,7 +175,7 @@ func TestDownloadProgress(t *testing.T) {
 	client := func() *wsClient {
 		ctx, cancel := context.WithCancel(context.Background())
 		t.Cleanup(cancel)
-		c := &wsClient{s: s, ctx: ctx, cancel: cancel, send: make(chan outMsg, 4096)}
+		c := &wsClient{s: s, ctx: ctx, cancel: cancel, send: make(chan []byte, 4096)}
 		s.clients[c] = true
 		return c
 	}
@@ -203,7 +203,7 @@ func TestDownloadProgress(t *testing.T) {
 			select {
 			case m := <-c.send:
 				var e event
-				if json.Unmarshal(m.data, &e) == nil && e.ID == id {
+				if json.Unmarshal(m, &e) == nil && e.ID == id {
 					return e
 				}
 			case <-time.After(10 * time.Second):
@@ -375,15 +375,15 @@ func TestDownloadProgress(t *testing.T) {
 	h.Body.Close()
 	select {
 	case m := <-c.send:
-		if strings.Contains(string(m.data), `"t":"download"`) {
-			t.Fatalf("untracked download reported: %s", m.data)
+		if strings.Contains(string(m), `"t":"download"`) {
+			t.Fatalf("untracked download reported: %s", m)
 		}
 	case <-time.After(200 * time.Millisecond):
 	}
 	// Other pages hear nothing of downloads they do not follow.
 	for len(other.send) > 0 {
-		if m := <-other.send; strings.Contains(string(m.data), `"t":"download"`) {
-			t.Fatalf("another page heard: %s", m.data)
+		if m := <-other.send; strings.Contains(string(m), `"t":"download"`) {
+			t.Fatalf("another page heard: %s", m)
 		}
 	}
 	if n := len(s.downloads.running); n != 0 {
@@ -407,7 +407,7 @@ func TestDownloadEdges(t *testing.T) {
 	defer srv.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	c := &wsClient{s: s, ctx: ctx, cancel: cancel, send: make(chan outMsg, 4096)}
+	c := &wsClient{s: s, ctx: ctx, cancel: cancel, send: make(chan []byte, 4096)}
 	s.clients[c] = true
 	dir := t.TempDir()
 	file := filepath.Join(dir, "a.txt")
@@ -425,7 +425,7 @@ func TestDownloadEdges(t *testing.T) {
 			select {
 			case m := <-c.send:
 				var e event
-				if json.Unmarshal(m.data, &e) == nil && e.ID == id && e.State != "running" && e.State != "unknown" {
+				if json.Unmarshal(m, &e) == nil && e.ID == id && e.State != "running" && e.State != "unknown" {
 					return e
 				}
 			case <-time.After(10 * time.Second):

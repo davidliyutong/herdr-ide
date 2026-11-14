@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"herdr-ide/internal/brand"
@@ -9,11 +8,9 @@ import (
 	"io/fs"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"herdr-ide/internal/agentproto"
 )
@@ -188,74 +185,4 @@ func freeName(path string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no free name for %s", base)
-}
-
-const maxExecOutput = 8 << 20
-
-type cappedBuffer struct {
-	buf       []byte
-	truncated bool
-}
-
-func (c *cappedBuffer) Write(p []byte) (int, error) {
-	room := maxExecOutput - len(c.buf)
-	if room <= 0 {
-		c.truncated = true
-		return len(p), nil
-	}
-	if len(p) > room {
-		c.buf = append(c.buf, p[:room]...)
-		c.truncated = true
-		return len(p), nil
-	}
-	c.buf = append(c.buf, p...)
-	return len(p), nil
-}
-
-func (a *Agent) handleExec(ctx context.Context, st net.Conn, h agentproto.Header) error {
-	defer st.Close()
-	if len(h.Argv) == 0 {
-		return agentproto.Fail(st, errors.New("exec: empty argv"))
-	}
-	timeout := 30 * time.Second
-	if h.Timeout > 0 {
-		timeout = time.Duration(h.Timeout) * time.Millisecond
-	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	argv := h.Argv
-	if argv[0] == "herdr" {
-		bin, err := a.resolveHerdr(h.HerdrBin)
-		if err != nil {
-			return agentproto.Fail(st, err)
-		}
-		argv = append([]string{bin}, herdrArgs(h.Session, argv[1:]...)...)
-	}
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
-	cmd.Env = cleanEnv()
-	if h.Cwd != "" {
-		cwd, err := a.expand(h.Cwd)
-		if err != nil {
-			return agentproto.Fail(st, err)
-		}
-		cmd.Dir = cwd
-	}
-	var stdout, stderr cappedBuffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-	res := &agentproto.ExecResult{
-		Stdout:    string(stdout.buf),
-		Stderr:    string(stderr.buf),
-		Truncated: stdout.truncated || stderr.truncated,
-	}
-	if err != nil {
-		var ee *exec.ExitError
-		if errors.As(err, &ee) {
-			res.ExitCode = ee.ExitCode()
-		} else {
-			return agentproto.Fail(st, err)
-		}
-	}
-	return agentproto.WriteLine(st, agentproto.Reply{OK: true, Exec: res})
 }

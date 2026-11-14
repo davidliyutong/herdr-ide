@@ -1,8 +1,6 @@
 package transport
 
 import (
-	"bufio"
-	"context"
 	"io"
 	"log"
 	"net"
@@ -15,7 +13,6 @@ import (
 	"github.com/hashicorp/yamux"
 
 	"herdr-ide/internal/agent"
-	"herdr-ide/internal/agentproto"
 )
 
 // pair connects a core session to a bare yamux server standing in for the
@@ -37,44 +34,6 @@ func pair(t *testing.T, lost func()) (*Session, *yamux.Session, net.Conn) {
 		srv.Close()
 	})
 	return s, srv, c2
-}
-
-func TestOpenWithSendsFirstBeforeTheReply(t *testing.T) {
-	s, srv, _ := pair(t, nil)
-	got := make(chan string, 1)
-	go func() {
-		st, err := srv.AcceptStream()
-		if err != nil {
-			got <- "accept: " + err.Error()
-			return
-		}
-		defer st.Close()
-		var h agentproto.Header
-		if err := agentproto.ReadLine(st, &h); err != nil {
-			got <- "header: " + err.Error()
-			return
-		}
-		// The request must already be there: the agent has not replied.
-		_ = st.SetReadDeadline(time.Now().Add(2 * time.Second))
-		line, err := bufio.NewReader(st).ReadString('\n')
-		if err != nil {
-			got <- "request: " + err.Error()
-			return
-		}
-		got <- string(h.Op) + " " + line
-		_ = st.SetReadDeadline(time.Time{})
-		_ = agentproto.WriteLine(st, agentproto.Reply{OK: true})
-	}()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	st, _, err := s.OpenWith(ctx, agentproto.Header{Op: agentproto.OpHerdrAPI}, []byte("{\"id\":\"1\"}\n"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	st.Close()
-	if g := <-got; g != "herdr-api {\"id\":\"1\"}\n" {
-		t.Fatalf("agent saw %q", g)
-	}
 }
 
 func TestLostRunsOnlyWhenTheSessionEndsByItself(t *testing.T) {

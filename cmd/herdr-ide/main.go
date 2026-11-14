@@ -178,27 +178,25 @@ func fetchAssets(args []string, logger *log.Logger) {
 func serve(args []string, logger *log.Logger) {
 	fl := flag.NewFlagSet("serve", flag.ExitOnError)
 	var (
-		listen       = fl.String("listen", "127.0.0.1:7780", "address to listen on")
-		parentStdio  = fl.Bool("parent-stdio", false, "launcher lifecycle: write a ready JSON line to stdout and stop when stdin closes")
-		insecure     = fl.Bool("insecure-listen", false, "allow a non-loopback --listen without --proxy-secret-file (anyone reaching the port gets shell access)")
-		proxySecret  = fl.String("proxy-secret-file", "", "file with a secret the reverse proxy sends in the "+server.ProxySecretHeader+" header; required for requests that do not come from loopback")
-		readOnly     = fl.Bool("read-only", false, "watch only: no input, no mutating herdr calls, no uploads, no VS Code")
-		auditLog     = fl.String("audit-log", "", "append security-relevant events as JSON lines to this file")
-		userHeader   = fl.String("user-header", "", "request header carrying the authenticated user, for the audit log (e.g. Tailscale-User-Login)")
-		instance     = fl.String("instance", "", "state instance: machines use ~/"+brand.DataDirName+"-<instance> (lets a development core run next to the daily one)")
-		localSession = fl.String("local-session", "default", "herdr session name on the local machine")
-		remoteSess   = fl.String("remote-session", "", "herdr session name on every remote machine instead of herdr's default (development and tests)")
-		localOnly    = fl.Bool("local-only", false, "do not connect to the stored SSH machines (only to --ssh targets)")
-		csIdle       = fl.Duration("code-server-idle", 20*time.Minute, "stop a machine's code-server after this long without VS Code connections (0 disables)")
-		agentDir     = fl.String("agent-dir", "", "directory with uncompressed "+brand.AgentBin+"-<os>-<arch> builds (development)")
-		extDir       = fl.String("ext-dir", "", "directory containing "+brand.BridgeExt+".vsix (development)")
-		webDir       = fl.String("web-dir", "", "serve the UI from this directory instead of the embedded build (development)")
-		only         listFlag
-		origins      listFlag
-		extraSSH     listFlag
-		csf          codeServerFlags
-		prefs        = settings.New("", registry.Settings()...)
-		keys         = keybindings.New("", registry.Commands())
+		listen      = fl.String("listen", "127.0.0.1:7780", "address to listen on")
+		parentStdio = fl.Bool("parent-stdio", false, "launcher lifecycle: write a ready JSON line to stdout and stop when stdin closes")
+		insecure    = fl.Bool("insecure-listen", false, "allow a non-loopback --listen without --proxy-secret-file (anyone reaching the port gets shell access)")
+		proxySecret = fl.String("proxy-secret-file", "", "file with a secret the reverse proxy sends in the "+server.ProxySecretHeader+" header; required for requests that do not come from loopback")
+		readOnly    = fl.Bool("read-only", false, "watch only: no input, no changes to terminals or settings, no uploads, no VS Code")
+		auditLog    = fl.String("audit-log", "", "append security-relevant events as JSON lines to this file")
+		userHeader  = fl.String("user-header", "", "request header carrying the authenticated user, for the audit log (e.g. Tailscale-User-Login)")
+		instance    = fl.String("instance", "", "state instance: machines use ~/"+brand.DataDirName+"-<instance> (lets a development core run next to the daily one)")
+		localOnly   = fl.Bool("local-only", false, "do not connect to the stored SSH machines (only to --ssh targets)")
+		csIdle      = fl.Duration("code-server-idle", 20*time.Minute, "stop a machine's code-server after this long without VS Code connections (0 disables)")
+		agentDir    = fl.String("agent-dir", "", "directory with uncompressed "+brand.AgentBin+"-<os>-<arch> builds (development)")
+		extDir      = fl.String("ext-dir", "", "directory containing "+brand.BridgeExt+".vsix (development)")
+		webDir      = fl.String("web-dir", "", "serve the UI from this directory instead of the embedded build (development)")
+		only        listFlag
+		origins     listFlag
+		extraSSH    listFlag
+		csf         codeServerFlags
+		prefs       = settings.New("", registry.Settings()...)
+		keys        = keybindings.New("", registry.Commands())
 	)
 	fl.Var(&origins, "allowed-origin", "browser origin of the reverse proxy, e.g. https://ide.example.com (repeatable)")
 	fl.Var(&only, "machine", "connect only these machines, by id, label or ssh target (repeatable)")
@@ -265,29 +263,15 @@ func serve(args []string, logger *log.Logger) {
 	if err != nil {
 		logger.Printf("machines are not stored: %v", err)
 	}
-	specs := selectSpecs(machines.LoadSpecs(*localSession, registry.Specs(), extraSpecs(extraSSH)), *localOnly, extraSSH, only)
-	if *remoteSess != "" {
-		// The name becomes part of paths on the machines.
-		if !brand.ValidInstance(*remoteSess) {
-			logger.Fatalf("invalid --remote-session %q (lowercase letters, digits and -)", *remoteSess)
-		}
-		for i := range specs {
-			if specs[i].Kind != machines.KindLocal {
-				specs[i].Session = *remoteSess
-			}
-		}
-	}
+	specs := selectSpecs(machines.LoadSpecs(registry.Specs(), extraSpecs(extraSSH)), *localOnly, extraSSH, only)
 	controlDir, err := transport.ControlDir()
 	if err != nil {
 		logger.Fatal(err)
 	}
-	// Only release directories carry a bundled herdr; development builds rely
-	// on an installed one.
-	bundled, _ := bundledHerdr()
 	dial := func(ctx context.Context, spec machines.Spec) (*transport.Session, string, error) {
 		switch spec.Kind {
 		case machines.KindLocal:
-			s, err := transport.DialLocal(ctx, agent.Options{Instance: *instance, Logger: logger, BundledHerdr: bundled})
+			s, err := transport.DialLocal(ctx, agent.Options{Instance: *instance, Logger: logger})
 			return s, runtime.GOOS + "/" + runtime.GOARCH, err
 		case machines.KindSSH:
 			s, p, err := transport.DialSSH(ctx, transport.SSHOptions{
@@ -303,7 +287,6 @@ func serve(args []string, logger *log.Logger) {
 	}
 	mg := machines.NewManager(specs, dial, logger)
 	mg.UseRegistry(registry)
-	mg.SSHSession = *remoteSess
 
 	var static fs.FS = web.Dist()
 	if *webDir != "" {

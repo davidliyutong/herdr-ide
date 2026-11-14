@@ -192,7 +192,7 @@ final class LayoutTests: XCTestCase {
 final class CoreProcessTests: XCTestCase {
     func testArgumentsAndReadyLine() {
         XCTAssertEqual(CoreProcess.arguments(dev: false), ["serve", "--parent-stdio", "--listen", "127.0.0.1:0", "--instance", "desktop"])
-        XCTAssertTrue(CoreProcess.arguments(dev: true).contains(Brand.appSlug + "-dev"))
+        XCTAssertEqual(CoreProcess.arguments(dev: true), ["serve", "--parent-stdio", "--listen", "127.0.0.1:0", "--instance", "dev", "--local-only"])
         XCTAssertEqual(CoreProcess.readyURL(#"{"event":"ready","url":"http://127.0.0.1:7781"}"#)?.port, 7781)
         XCTAssertNil(CoreProcess.readyURL(#"{"event":"ready","url":"http://example.com:7781"}"#))
         XCTAssertNil(CoreProcess.readyURL(#"{"event":"log","url":"http://127.0.0.1:1"}"#))

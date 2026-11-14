@@ -20,11 +20,10 @@ final class CoreSocket: NSObject, URLSessionWebSocketDelegate {
     private var closed = false
 
     /// `core` is the core's HTTP origin, such as http://127.0.0.1:7781.
-    init(core: URL, path: String, query: String? = nil) {
+    init(core: URL, path: String) {
         var parts = URLComponents(url: core, resolvingAgainstBaseURL: false)!
         parts.scheme = parts.scheme == "https" ? "wss" : "ws"
         parts.path = path
-        parts.query = query
         url = parts.url!
         super.init()
     }

@@ -48,7 +48,7 @@ it:
 	go test -tags integration -count=1 ./internal/server -run Integration -v
 
 dev-core:
-	go run ./cmd/$(SLUG) --instance dev --local-only --local-session $(SLUG)-dev --listen $(DEV_LISTEN) --agent-dir dist/agents
+	go run ./cmd/$(SLUG) --instance dev --local-only --listen $(DEV_LISTEN) --agent-dir dist/agents
 
 dev-web:
 	$(shell echo $(SLUG) | tr 'a-z-' 'A-Z_')_CORE=http://$(DEV_LISTEN) pnpm -C web dev

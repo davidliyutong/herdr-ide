@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"herdr-ide/internal/agent"
-	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/transport"
 )
 
@@ -85,8 +84,8 @@ func TestRegistryMigratesEnabledChoices(t *testing.T) {
 	if len(got) != 3 || got[0].Enabled || !got[1].Enabled || got[2] != (Spec{ID: LocalID, Kind: KindLocal}) {
 		t.Fatalf("migrated %+v", got)
 	}
-	specs := LoadSpecs("dev", got, nil)
-	if specs[0].ID != LocalID || specs[0].Enabled || specs[0].Session != "dev" || len(specs) != 3 {
+	specs := LoadSpecs(got, nil)
+	if specs[0].ID != LocalID || specs[0].Enabled || len(specs) != 3 {
 		t.Fatalf("specs %+v", specs)
 	}
 }
@@ -101,7 +100,7 @@ func TestRegistryRoundTripAndErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := r.Put(Spec{ID: "x1", Label: "box", Target: "u@box", Enabled: true, Session: "s"}); err != nil {
+	if err := r.Put(Spec{ID: "x1", Label: "box", Target: "u@box", Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.Put(Spec{ID: "y2", Target: "y"}); err != nil {
@@ -145,7 +144,7 @@ func TestRegistryRoundTripAndErrors(t *testing.T) {
 // targets, each once.
 func TestLoadSpecs(t *testing.T) {
 	stored := []Spec{{ID: "a1", Label: "gpu", Kind: KindSSH, Target: "gpu-host", Enabled: true}, {ID: LocalID, Kind: KindLocal, Enabled: true}}
-	specs := LoadSpecs("", stored, []Spec{{Target: "extra"}, {ID: "a1", Target: "dup"}})
+	specs := LoadSpecs(stored, []Spec{{Target: "extra"}, {ID: "a1", Target: "dup"}})
 	if len(specs) != 3 || specs[0].ID != LocalID || !specs[0].Enabled || specs[1].ID != "a1" {
 		t.Fatalf("specs = %+v", specs)
 	}
@@ -154,24 +153,11 @@ func TestLoadSpecs(t *testing.T) {
 	}
 }
 
-func TestIsReadOnly(t *testing.T) {
-	for m, want := range map[string]bool{"session.snapshot": true, "pane.list": true, "layout.export": true, "pane.copy_search": false, "pane.copy_motion": false, "pane.split": false, "agent.prompt": false, "pane.scroll": false} {
-		if IsReadOnlyMethod(m) != want {
-			t.Errorf("isReadOnly(%s) != %v", m, want)
-		}
-	}
-}
-
-// A machine is ready once its agent answers, also without herdr: herdr's
-// snapshot is then missing and the reason noted, quietly.
-func TestReadyWithoutHerdr(t *testing.T) {
+// A machine is ready once its agent answers, quietly.
+func TestReadyWhenTheAgentAnswers(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
-	t.Setenv("HERDR_SOCKET_PATH", "")
-	old := pollInterval
-	pollInterval = 50 * time.Millisecond
-	t.Cleanup(func() { pollInterval = old })
 
 	var logs strings.Builder
 	var logMu sync.Mutex
@@ -184,12 +170,7 @@ func TestReadyWithoutHerdr(t *testing.T) {
 		s, err := transport.DialLocal(ctx, agent.Options{Logger: log.New(io.Discard, "", 0)})
 		return s, "test/test", err
 	}
-	var readyFirst atomic.Bool // ready was published before herdr's absence was known
-	m := newMachine(Spec{ID: "x", Label: "x", Kind: KindSSH, Session: "herdr-ide-none", Enabled: true}, dial, logger, func(st State) {
-		if st.Status == StatusReady && st.HerdrError == "" && st.Snapshot == nil {
-			readyFirst.Store(true)
-		}
-	}, func(AgentEvent) {})
+	m := newMachine(Spec{ID: "x", Label: "x", Kind: KindSSH, Enabled: true}, dial, logger, func(State) {})
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -200,19 +181,19 @@ func TestReadyWithoutHerdr(t *testing.T) {
 		cancel()
 		<-done
 	})
-	for deadline := time.Now().Add(10 * time.Second); m.State().HerdrError == ""; time.Sleep(10 * time.Millisecond) {
+	for deadline := time.Now().Add(10 * time.Second); m.State().Status != StatusReady; time.Sleep(10 * time.Millisecond) {
 		if time.Now().After(deadline) {
 			t.Fatalf("timed out (status %s)", m.State().Status)
 		}
 	}
 	time.Sleep(300 * time.Millisecond)
-	if st := m.State(); st.Status != StatusReady || st.Snapshot != nil || st.Info == nil || !readyFirst.Load() {
-		t.Fatalf("state %s %+v (ready first: %v)", st.Status, st, readyFirst.Load())
+	if st := m.State(); st.Status != StatusReady || st.Info == nil || st.Platform != "test/test" || m.Session() == nil {
+		t.Fatalf("state %s %+v", st.Status, st)
 	}
 	logMu.Lock()
 	defer logMu.Unlock()
 	if logs.Len() > 0 {
-		t.Fatalf("logged without herdr: %s", logs.String())
+		t.Fatalf("logged: %s", logs.String())
 	}
 }
 
@@ -220,13 +201,12 @@ type writerFunc func([]byte) (int, error)
 
 func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
 
-// Disabling a connected machine ends its session at once and forgets its
-// herdr state; enabling it connects again.
+// Disabling a connected machine ends its session at once; enabling it
+// connects again.
 func TestDisableAndEnableAtRuntime(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
-	t.Setenv("HERDR_SOCKET_PATH", "")
 	logger := log.New(io.Discard, "", 0)
 	var dials atomic.Int32
 	dial := func(ctx context.Context, spec Spec) (*transport.Session, string, error) {
@@ -237,7 +217,7 @@ func TestDisableAndEnableAtRuntime(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "machines.json")
 	reg, _ := OpenRegistry(path, nil)
 	reg.Put(Spec{ID: "x", Label: "x", Kind: KindSSH, Target: "x", Enabled: true})
-	mg := NewManager([]Spec{{ID: "x", Label: "x", Kind: KindSSH, Target: "x", Session: "herdr-ide-none", Enabled: true}}, dial, logger)
+	mg := NewManager([]Spec{{ID: "x", Label: "x", Kind: KindSSH, Target: "x", Enabled: true}}, dial, logger)
 	mg.UseRegistry(reg)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -273,7 +253,7 @@ func TestDisableAndEnableAtRuntime(t *testing.T) {
 		}
 	})
 	time.Sleep(100 * time.Millisecond)
-	if st := m.State(); st.Status != StatusDisabled || st.Enabled || st.Snapshot != nil || dials.Load() != 1 {
+	if st := m.State(); st.Status != StatusDisabled || st.Enabled || dials.Load() != 1 {
 		t.Fatalf("disabled: status %s enabled %v, %d dials", st.Status, st.Enabled, dials.Load())
 	}
 	if r, _ := OpenRegistry(path, nil); r.Specs()[0].Enabled {
@@ -292,63 +272,6 @@ func TestDisableAndEnableAtRuntime(t *testing.T) {
 	}
 }
 
-// The herdr a status found replaces the one of the session's first reply:
-// herdr can be removed, reinstalled or moved while the agent runs.
-func TestNoteHerdrFollowsTheMachine(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
-	t.Setenv("HERDR_SOCKET_PATH", "")
-	logger := log.New(io.Discard, "", 0)
-	dial := func(ctx context.Context, spec Spec) (*transport.Session, string, error) {
-		s, err := transport.DialLocal(ctx, agent.Options{Logger: logger})
-		return s, "test/test", err
-	}
-	var published atomic.Bool // the reinstalled herdr reached the UI
-	m := newMachine(Spec{ID: "x", Label: "x", Kind: KindSSH, Session: "herdr-ide-none", Enabled: true}, dial, logger, func(st State) {
-		if st.Info != nil && st.Info.HerdrBin == "/opt/herdr" {
-			published.Store(true)
-		}
-	}, func(AgentEvent) {})
-
-	m.NoteHerdr("/opt/herdr", "0.9.5") // not connected: nothing to note
-	if m.State().Info != nil {
-		t.Fatal("noted herdr without a session")
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		m.Run(ctx)
-		close(done)
-	}()
-	t.Cleanup(func() {
-		cancel()
-		<-done
-	})
-	for deadline := time.Now().Add(10 * time.Second); m.Session() == nil || m.State().Info == nil; time.Sleep(10 * time.Millisecond) {
-		if time.Now().After(deadline) {
-			t.Fatal("timed out waiting for the session")
-		}
-	}
-
-	first := m.State().Info
-	m.NoteHerdr("", "")
-	if info := m.State().Info; info.HerdrBin != "" || info.HerdrVersion != "" || info.HerdrError != agentproto.ErrHerdrNotFound.Error() || info.Hostname != first.Hostname {
-		t.Fatalf("removed: %+v", info)
-	}
-	m.NoteHerdr("/opt/herdr", "0.10.0")
-	if info := m.State().Info; info.HerdrBin != "/opt/herdr" || info.HerdrVersion != "0.10.0" || info.HerdrError != "" {
-		t.Fatalf("reinstalled: %+v", info)
-	}
-	if first.HerdrBin == "/opt/herdr" {
-		t.Fatal("changed an Info already published")
-	}
-	if !published.Load() {
-		t.Fatal("the new herdr was not published")
-	}
-}
-
 // Machines added at runtime are stored, join a running manager and connect;
 // removing one ends its session, deletes its record and publishes nothing
 // more for it. A target or id the core has is refused, and the local machine
@@ -357,7 +280,6 @@ func TestAddAndRemoveAtRuntime(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
-	t.Setenv("HERDR_SOCKET_PATH", "")
 	logger := log.New(io.Discard, "", 0)
 	dial := func(ctx context.Context, spec Spec) (*transport.Session, string, error) {
 		s, err := transport.DialLocal(ctx, agent.Options{Logger: logger})
@@ -367,9 +289,8 @@ func TestAddAndRemoveAtRuntime(t *testing.T) {
 	reg, _ := OpenRegistry(path, nil)
 	// Stored, but left out of this run (--local-only).
 	reg.Put(Spec{ID: "off", Label: "elsewhere", Target: "u@elsewhere", Enabled: true})
-	mg := NewManager([]Spec{{ID: LocalID, Label: "local", Kind: KindLocal, Session: "herdr-ide-none", Enabled: true}}, dial, logger)
+	mg := NewManager([]Spec{{ID: LocalID, Label: "local", Kind: KindLocal, Enabled: true}}, dial, logger)
 	mg.UseRegistry(reg)
-	mg.SSHSession = "herdr-ide-none"
 	var afterRemove atomic.Int32
 	var removed atomic.Bool
 	mg.Subscribe(func(st State) {
@@ -407,7 +328,7 @@ func TestAddAndRemoveAtRuntime(t *testing.T) {
 	}
 	m := mg.Get("x")
 	waitFor("the added machine's session", func() bool { return m.Session() != nil })
-	if st := mg.States(); len(st) != 2 || st[1].ID != "x" || st[1].Kind != KindSSH || st[1].Session != "herdr-ide-none" {
+	if st := mg.States(); len(st) != 2 || st[1].ID != "x" || st[1].Kind != KindSSH {
 		t.Fatalf("states = %+v", st)
 	}
 	if r, _ := OpenRegistry(path, nil); len(r.Specs()) != 2 || r.Specs()[1].Target != "u@x" {

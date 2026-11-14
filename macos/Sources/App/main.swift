@@ -204,7 +204,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let result = matcher.feed(stroke, bindings: matcherBindings, context: context)
         pendingTimer?.invalidate()
         if result == .pending {
-            // A chord waits 3 s for its next stroke, as herdr's prefix does.
+            // A chord waits 3 s for its next stroke, as the browser UI's does.
             pendingTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: false) { [weak self] _ in
                 self?.matcher.reset()
                 self?.pendingKey = nil

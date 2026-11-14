@@ -284,8 +284,8 @@ public struct KeyBinding: Equatable {
 
 /// Matches strokes against bindings, chords included: a stroke that starts
 /// a chord waits for the next; the chord's first stroke twice is sent to
-/// the terminal (as herdr's prefix is); a chord that matches nothing ends
-/// and its last key is dropped.
+/// the terminal (so the prefix can still be typed); a chord that matches
+/// nothing ends and its last key is dropped.
 public struct KeyMatcher {
     public enum Result: Equatable {
         /// The key is not the application's.

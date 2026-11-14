@@ -72,17 +72,13 @@ type Server struct {
 	// downloads the pages follow in their downloads panel
 	downloads downloadsHub
 	gui       *gui.Manager
-	// herdrCLI is the herdr that runs herdr's update flow for SSH machines
-	// on the core host ("" when unknown): the local machine's.
-	herdrCLI func() string
 	// displayEnv is the environment of a machine's virtual display that new
-	// panes and terminals get (gui.Manager.PaneEnv; tests replace it).
+	// terminals get (gui.Manager.PaneEnv; tests replace it).
 	displayEnv func(*machines.Machine) map[string]string
 
 	clientsMu sync.Mutex
 	clients   map[*wsClient]bool
 
-	surf surfaces
 	term termHub
 
 	audit *auditor
@@ -92,7 +88,6 @@ type Server struct {
 func New(mg *machines.Manager, opts Options) *Server {
 	s := &Server{opts: opts, mg: mg, logger: opts.Logger, origins: map[string]bool{}, hosts: map[string]bool{},
 		cs: opts.CodeServer, clients: map[*wsClient]bool{}}
-	s.surf.sessions = map[string]*surfSession{}
 	s.term = termHub{s: s, backends: map[string]*termBackend{}}
 	if s.cs == nil {
 		s.cs = codeserver.New(opts.Logger)
@@ -113,26 +108,20 @@ func New(mg *machines.Manager, opts Options) *Server {
 		s.hosts[strings.ToLower(u.Hostname())] = true
 	}
 	s.csProxy = newCodeServerProxy(s)
-	s.herdrCLI = s.localHerdr
 	s.initGUI()
 	s.displayEnv = s.gui.PaneEnv
 	s.initSettings()
-	// A machine that connects (again) ends the waits of its terminal
-	// backend and pane surface; herdr answering again ends the surface's.
-	type seen struct{ ready, herdr bool }
-	var seenMu sync.Mutex
-	last := map[string]seen{}
+	// A machine that connects (again) ends the wait of its terminal backend.
+	var readyMu sync.Mutex
+	ready := map[string]bool{}
 	mg.Subscribe(func(st machines.State) {
-		now := seen{st.Status == machines.StatusReady, st.Snapshot != nil}
-		seenMu.Lock()
-		prev := last[st.ID]
-		last[st.ID] = now
-		seenMu.Unlock()
-		if now.ready && !prev.ready {
+		now := st.Status == machines.StatusReady
+		readyMu.Lock()
+		prev := ready[st.ID]
+		ready[st.ID] = now
+		readyMu.Unlock()
+		if now && !prev {
 			s.term.wakeUp(st.ID)
-		}
-		if now.ready && (!prev.ready || (now.herdr && !prev.herdr)) {
-			s.wakeSurface(st.ID)
 		}
 	}, func(machines.AgentEvent) {})
 	return s
@@ -156,14 +145,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/m/{id}/enabled", s.writable(s.handleMachineEnabled))
 	mux.HandleFunc("GET /api/m/{id}/hc", s.handleHCStatus)
 	mux.HandleFunc("POST /api/m/{id}/hc/{action}", s.writable(s.handleHCAction))
-	mux.HandleFunc("GET /api/keymap", s.handleKeymap)
 	mux.HandleFunc("GET /api/m/{id}/auth", s.writable(s.handleAuth))
 	mux.HandleFunc("POST /api/m/{id}/bridge", s.writable(s.handleBridge))
 	mux.HandleFunc("GET /api/m/{id}/file", s.handleFile)
 	mux.HandleFunc("GET /api/m/{id}/download", s.handleDownload)
 	mux.HandleFunc("POST /api/m/{id}/upload", s.writable(s.handleUpload))
 	mux.HandleFunc("GET /api/m/{id}/list", s.handleList)
-	mux.HandleFunc("POST /api/m/{id}/find", s.handleFind)
 	mux.HandleFunc("GET /api/m/{id}/code/status", s.handleCodeStatus)
 	mux.HandleFunc("POST /api/m/{id}/code/start", s.writable(s.handleCodeStart))
 	mux.HandleFunc("POST /api/m/{id}/code/stop", s.handleCodeStop)
@@ -178,9 +165,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /m/{id}/gui/{win}/close", s.writable(s.handleGUIClose))
 	mux.HandleFunc("POST /api/m/{id}/gui/enable", s.writable(s.handleGUIEnable))
 	mux.HandleFunc("GET /api/gui", s.handleGUIStates)
-	mux.HandleFunc("GET /api/m/{id}/herdr", s.handleHerdrStatus)
-	mux.HandleFunc("POST /api/m/{id}/herdr/{action}", s.writable(s.handleHerdrAction))
-	mux.HandleFunc("GET /api/m/{id}/herdr/remote", s.writable(s.handleHerdrRemote))
 	if s.opts.Static != nil {
 		mux.Handle("/", spaHandler(s.opts.Static))
 	}

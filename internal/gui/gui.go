@@ -173,9 +173,9 @@ type Manager struct {
 type display struct {
 	mc    *machines.Machine
 	phase string
-	// up: the servers of the machine (ServerHerdr, ServerHC) that were
-	// reachable at the last change seen while the display was attached.
-	up       map[string]bool
+	// up: the machine's terminal core was reachable at the last change
+	// seen while the display was attached.
+	up       bool
 	err      string
 	status   *agentproto.GUIStatus
 	ensuring bool
@@ -206,8 +206,8 @@ type display struct {
 	viewers map[uint32]map[*Viewer]bool
 	acked   map[uint32]uint32
 	closing map[uint32]*time.Timer
-	// typed: panes ("pane:<id>") and terminals ("hc:<address>") whose shell
-	// got the export command, with the display.
+	// typed: the terminals whose shell got the export command, with the
+	// display.
 	// A shell's environment as seen in /proc does not show it.
 	typed map[string]string
 }
@@ -533,9 +533,9 @@ func (m *Manager) prepare(d *display, sess *transport.Session) {
 		close(d.cmds)
 	}
 	d.status, d.sess, d.stream = st, sess, conn
-	// The keeper is asked for below; the next change with a server
-	// reachable asks again, in case it was down meanwhile.
-	d.up = nil
+	// The keeper is asked for below; the next change with the terminal
+	// core reachable asks again, in case it was down meanwhile.
+	d.up = false
 	d.cmds = make(chan []byte, 256)
 	d.windows, d.order, d.layers = map[uint32]*agentproto.GUIWindow{}, nil, map[uint32]agentproto.GUILayer{}
 	// The new window manager numbers frames from the start and has no
@@ -594,37 +594,28 @@ func afterAttach(readOnly, video bool) (keep, push bool) {
 	return true, video
 }
 
-// Servers whose programs use the display: herdr's for the browser UI's panes
-// and the terminal core for terminals (ServerReady).
-const (
-	ServerHerdr = "herdr"
-	ServerHC    = "hc"
-)
-
-// ServerReady follows a server whose programs get the display: each time one
-// is reachable again (or for the first time) while the display is attached,
-// the machine is asked to keep the display while its servers run, since a
-// keeper started while they were down has left.
-func (m *Manager) ServerReady(mc *machines.Machine, server string, ready bool) {
+// ServerReady follows the machine's terminal core, whose programs get the
+// display: each time it is reachable again (or for the first time) while
+// the display is attached, the machine is asked to keep the display while
+// the terminal core runs, since a keeper started while it was down has
+// left.
+func (m *Manager) ServerReady(mc *machines.Machine, ready bool) {
 	m.mu.Lock()
 	d := m.ds[mc.ID()]
 	if d == nil {
 		m.mu.Unlock()
 		return
 	}
-	start := ready && !d.up[server] && d.stream != nil && d.phase == PhaseReady
-	if d.up == nil {
-		d.up = map[string]bool{}
-	}
-	d.up[server] = ready && (d.up[server] || start)
+	start := ready && !d.up && d.stream != nil && d.phase == PhaseReady
+	d.up = ready && (d.up || start)
 	m.mu.Unlock()
 	if keep, _ := afterAttach(m.ReadOnly, false); start && keep {
 		go m.keeper(d)
 	}
 }
 
-// keep has the machine keep its display while its herdr server or its
-// terminal core runs, also after this connection ends.
+// keep has the machine keep its display while its terminal core runs, also
+// after this connection ends.
 func (m *Manager) keep(d *display) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
@@ -762,10 +753,6 @@ func (m *Manager) event(d *display, payload []byte) {
 			break
 		}
 		w := *ev.Window
-		// A program from another herdr session has no pane here.
-		if info := d.mc.State().Info; w.Socket != "" && info != nil && info.HerdrSocket != "" && w.Socket != info.HerdrSocket {
-			w.Pane = ""
-		}
 		isNew := d.windows[w.ID] == nil
 		if isNew {
 			d.order = append(d.order, w.ID)
@@ -1179,10 +1166,10 @@ var (
 type EnableResult struct {
 	Enabled int      `json:"enabled"` // shells that got the variables typed in
 	Already int      `json:"already"` // shells started with the display
-	Busy    []string `json:"busy"`    // panes running a program
-	Typed   []string `json:"typed"`   // panes typed into
-	Failed  []string `json:"failed"`  // panes that could not be reached
-	Command string   `json:"command"` // what was typed, for the busy panes
+	Busy    []string `json:"busy"`    // terminals running a program
+	Typed   []string `json:"typed"`   // terminals typed into
+	Failed  []string `json:"failed"`  // terminals that could not be reached
+	Command string   `json:"command"` // what was typed, for the busy terminals
 }
 
 // ExportCommand is the shell command that sets env (values single-quoted;
@@ -1201,10 +1188,10 @@ func ExportCommand(env map[string]string) string {
 	return b.String()
 }
 
-// Shells reaches the panes or terminals that Enable types into: herdr's
-// panes, or the terminals of the machine's terminal core.
+// Shells reaches the terminals that Enable types into: those of the
+// machine's terminal core.
 type Shells interface {
-	// All lists every pane or terminal, for an Enable without a list.
+	// All lists every terminal, for an Enable without a list.
 	All(ctx context.Context) ([]string, error)
 	// Shell returns the pid of id's shell (0 when it has none) and whether
 	// it waits at its prompt: an interactive shell is its own process
@@ -1214,64 +1201,23 @@ type Shells interface {
 	Send(ctx context.Context, id, text string) error
 }
 
-// herdrPanes are a machine's herdr panes.
-type herdrPanes struct{ mc *machines.Machine }
-
-func (h herdrPanes) All(context.Context) ([]string, error) {
-	var snap struct {
-		Panes []struct {
-			PaneID string `json:"pane_id"`
-		} `json:"panes"`
-	}
-	json.Unmarshal(h.mc.State().Snapshot, &snap)
-	var out []string
-	for _, p := range snap.Panes {
-		out = append(out, p.PaneID)
-	}
-	return out, nil
-}
-
-func (h herdrPanes) Shell(ctx context.Context, pane string) (int, bool, error) {
-	raw, err := h.mc.Call(ctx, "pane.process_info", map[string]string{"pane_id": pane})
-	if err != nil {
-		return 0, false, err
-	}
-	var info struct {
-		ProcessInfo struct {
-			ShellPid *int `json:"shell_pid"`
-			FG       *int `json:"foreground_process_group_id"`
-		} `json:"process_info"`
-	}
-	json.Unmarshal(raw, &info)
-	pi := info.ProcessInfo
-	if pi.ShellPid == nil {
-		return 0, false, nil
-	}
-	return *pi.ShellPid, pi.FG != nil && *pi.FG == *pi.ShellPid, nil
-}
-
-func (h herdrPanes) Send(ctx context.Context, pane, text string) error {
-	_, err := h.mc.Call(ctx, "pane.send_text", map[string]string{"pane_id": pane, "text": text})
-	return err
-}
-
 // interruptPause lets a shell handle Ctrl-C before the command follows: the
 // terminal discards input that arrives with the interrupt.
 var interruptPause = 200 * time.Millisecond
 
 // shellNames are the shells the export command is written for, by
-// executable name; anything else in a pane (a program that replaced its
+// executable name; anything else in a terminal (a program that replaced its
 // shell with exec, an agent) is never typed into.
 var shellNames = map[string]bool{"bash": true, "zsh": true, "fish": true, "dash": true, "sh": true, "ksh": true, "mksh": true, "yash": true, "ash": true}
 
-// Decisions of Enable for one pane.
+// Decisions of Enable for one terminal.
 const (
 	enableAlready = "already"
 	enableBusy    = "busy"
 	enableType    = "type"
 )
 
-// decide tells what Enable does with a pane whose shell is p (nil when the
+// decide tells what Enable does with a terminal whose shell is p (nil when the
 // agent could not see it): idle means it waits at its prompt, typed that
 // the core typed the export into it before.
 func decide(p *agentproto.GUIProc, idle, typed bool) string {
@@ -1294,20 +1240,13 @@ func typeExport(send func(text string) error, cmd string) error {
 	return send(cmd + "\r")
 }
 
-// Enable gives herdr panes that were opened without the display (before
-// it existed, or outside the UI) the display's environment; see
-// EnableShells.
-func (m *Manager) Enable(ctx context.Context, mc *machines.Machine, panes []string) (*EnableResult, error) {
-	return m.EnableShells(ctx, mc, herdrPanes{mc}, "pane:", panes)
-}
-
-// EnableShells gives the shells of panes or terminals reached through
-// shells the display's environment: a known shell waiting at its prompt
-// gets Ctrl-C and the export command; the others are left alone and
-// reported. ids defaults to all of them; kind keeps what was typed apart
-// per kind of shell. One that cannot be reached is reported in Failed; the
-// result always lists what was typed, also with an error.
-func (m *Manager) EnableShells(ctx context.Context, mc *machines.Machine, shells Shells, kind string, ids []string) (*EnableResult, error) {
+// Enable gives the shells of terminals that were opened without the
+// display (before it existed, or outside the UI), reached through shells,
+// the display's environment: a known shell waiting at its prompt gets
+// Ctrl-C and the export command; the others are left alone and reported.
+// ids defaults to all of them. One that cannot be reached is reported in
+// Failed; the result always lists what was typed, also with an error.
+func (m *Manager) Enable(ctx context.Context, mc *machines.Machine, shells Shells, ids []string) (*EnableResult, error) {
 	if !m.enabled(mc.ID()) {
 		return nil, ErrOff
 	}
@@ -1357,7 +1296,7 @@ func (m *Manager) EnableShells(ctx context.Context, mc *machines.Machine, shells
 	}
 	for _, sh := range found {
 		m.mu.Lock()
-		typed := m.ds[mc.ID()].typed[kind+sh.id] == env["DISPLAY"]
+		typed := m.ds[mc.ID()].typed[sh.id] == env["DISPLAY"]
 		m.mu.Unlock()
 		switch decide(procs[sh.pid], sh.idle, typed) {
 		case enableAlready:
@@ -1384,7 +1323,7 @@ func (m *Manager) EnableShells(ctx context.Context, mc *machines.Machine, shells
 			continue
 		}
 		m.mu.Lock()
-		m.ds[mc.ID()].typed[kind+sh.id] = env["DISPLAY"]
+		m.ds[mc.ID()].typed[sh.id] = env["DISPLAY"]
 		m.mu.Unlock()
 		res.Enabled++
 		res.Typed = append(res.Typed, sh.id)

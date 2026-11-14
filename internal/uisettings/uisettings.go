@@ -71,7 +71,7 @@ func defs() []settings.Def {
 		// LaTeX formulas in panes shown rendered under the pointer.
 		{Key: "terminal.mathHover", Type: settings.TypeBool, Default: true, Section: "terminal", Order: 130, Platforms: web},
 
-		// Notifications: on by default, and droid muted, as in herdr's [ui.sound].
+		// Notifications: on by default, with droid muted.
 		{Key: "notifications.sound", Type: settings.TypeBool, Default: true, Section: "notifications", Order: 10, Platforms: web},
 		{Key: "notifications.mutedAgents", Type: settings.TypeString, Default: "droid", Section: "notifications", Order: 20, Platforms: web},
 	}

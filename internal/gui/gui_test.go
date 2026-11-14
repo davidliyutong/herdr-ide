@@ -332,9 +332,9 @@ func TestAfterAttach(t *testing.T) {
 	}
 }
 
-// A keeper started while the servers were down leaves; the machine is asked
-// again each time herdr's server or the terminal core is reachable again,
-// not on every state change, and never in read-only mode.
+// A keeper started while the terminal core was down leaves; the machine is
+// asked again each time the terminal core is reachable again, not on every
+// state change, and never in read-only mode.
 func TestServerReadyKeeps(t *testing.T) {
 	for _, readOnly := range []bool{false, true} {
 		m, d, _ := attached(t)
@@ -345,26 +345,20 @@ func TestServerReadyKeeps(t *testing.T) {
 			time.Sleep(20 * time.Millisecond)
 			return len(kept)
 		}
-		m.ServerReady(d.mc, ServerHerdr, false)
-		m.ServerReady(d.mc, ServerHerdr, true)
-		m.ServerReady(d.mc, ServerHerdr, true)
+		m.ServerReady(d.mc, false)
+		m.ServerReady(d.mc, true)
+		m.ServerReady(d.mc, true)
 		want := 1
 		if readOnly {
 			want = 0
 		}
 		if n := count(); n != want {
-			t.Fatalf("read-only %v: %d keep requests after herdr came up", readOnly, n)
-		}
-		m.ServerReady(d.mc, ServerHerdr, false)
-		m.ServerReady(d.mc, ServerHerdr, true)
-		if n := count(); n != 2*want {
-			t.Fatalf("read-only %v: %d keep requests after herdr came back", readOnly, n)
-		}
-		// The terminal core is followed on its own.
-		m.ServerReady(d.mc, ServerHC, true)
-		m.ServerReady(d.mc, ServerHC, true)
-		if n := count(); n != 3*want {
 			t.Fatalf("read-only %v: %d keep requests after the terminal core came up", readOnly, n)
+		}
+		m.ServerReady(d.mc, false)
+		m.ServerReady(d.mc, true)
+		if n := count(); n != 2*want {
+			t.Fatalf("read-only %v: %d keep requests after the terminal core came back", readOnly, n)
 		}
 	}
 }
@@ -474,11 +468,11 @@ func TestPaneEnvPerMachine(t *testing.T) {
 	m.mu.Lock()
 	m.ds["a"].phase = PhaseStarting
 	m.mu.Unlock()
-	if _, err := m.Enable(context.Background(), mg.Get("a"), nil); !errors.Is(err, ErrNotReady) {
+	if _, err := m.Enable(context.Background(), mg.Get("a"), nil, nil); !errors.Is(err, ErrNotReady) {
 		t.Errorf("enable while the display starts: %v", err)
 	}
 	m.Settings.Set(SettingGUI, "a", false)
-	if _, err := m.Enable(context.Background(), mg.Get("a"), nil); !errors.Is(err, ErrOff) {
+	if _, err := m.Enable(context.Background(), mg.Get("a"), nil, nil); !errors.Is(err, ErrOff) {
 		t.Errorf("enable on a machine turned off: %v", err)
 	}
 }
@@ -595,9 +589,9 @@ func TestTypeExport(t *testing.T) {
 }
 
 // A display is prepared once per connection: the machine's state changes
-// (every herdr snapshot) do not start it again after a failure; forced
-// retries (backoff, setting changes) do, and one arriving while a
-// preparation runs is not lost.
+// (the terminal core's state, a rename) do not start it again after a
+// failure; forced retries (backoff, setting changes) do, and one arriving
+// while a preparation runs is not lost.
 func TestEnsureOncePerSession(t *testing.T) {
 	a, b := new(transport.Session), new(transport.Session)
 	d := &display{}

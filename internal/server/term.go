@@ -14,7 +14,6 @@ import (
 	"github.com/coder/websocket"
 
 	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/gui"
 	"herdr-ide/internal/hc"
 	"herdr-ide/internal/machines"
 )
@@ -146,7 +145,7 @@ func (b *termBackend) publish() {
 	b.mu.Unlock()
 	if mc := b.s.mg.Get(b.id); mc != nil {
 		mc.SetHC(st)
-		b.s.gui.ServerReady(mc, gui.ServerHC, st != nil && st.State == termReady)
+		b.s.gui.ServerReady(mc, st != nil && st.State == termReady)
 	}
 }
 
@@ -907,7 +906,7 @@ func (c *termClient) call(m *termIn) {
 		// them elsewhere.
 		if mc := c.s.mg.Get(m.M); mc != nil {
 			if env := c.s.displayEnv(mc); len(env) > 0 {
-				names, ok := addEnv(params, env, true)
+				names, ok := addEnv(params, env)
 				if !ok {
 					c.fail(m.RID, "usage", "")
 					return

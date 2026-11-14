@@ -19,20 +19,17 @@ const (
 	KindSSH   = "ssh"
 )
 
-// LocalID is the id of the machine herdr-ide runs on.
+// LocalID is the id of the machine the core runs on.
 const LocalID = "local"
 
-// Spec describes one machine. Everything but Session is the record the core
-// keeps in its machines file (Registry).
+// Spec describes one machine: the record the core keeps in its machines
+// file (Registry).
 type Spec struct {
 	ID      string `json:"id"`
 	Label   string `json:"label"`
 	Kind    string `json:"kind"`
 	Target  string `json:"target,omitempty"`
 	Enabled bool   `json:"enabled"`
-	// Session is the herdr session the browser UI's panes come from there
-	// ("" is herdr's default): --local-session, --remote-session. Not stored.
-	Session string `json:"-"`
 }
 
 // Errors of the machine registry and manager.
@@ -129,7 +126,6 @@ func OpenRegistry(path string, imp func() ([]Spec, error)) (*Registry, error) {
 // valid returns a record as it is stored: an SSH machine with an id and a
 // target, or the local machine's.
 func valid(s Spec) (Spec, bool) {
-	s.Session = ""
 	switch {
 	case s.ID == LocalID:
 		return Spec{ID: LocalID, Kind: KindLocal, Enabled: s.Enabled}, true
@@ -225,8 +221,7 @@ func (r *Registry) save() error {
 	return err
 }
 
-// herdr's saved machine catalog (~/.local/state/herdr/client/endpoints.json),
-// imported once.
+// herdr's saved machine catalog, imported once (SavedSpecs).
 type endpointCatalog struct {
 	Version int `json:"version"`
 	SSH     []struct {
@@ -237,40 +232,21 @@ type endpointCatalog struct {
 	} `json:"ssh"`
 }
 
-type sshMetadata struct {
-	Metadata struct {
-		Executable string `json:"executable"`
-	} `json:"metadata"`
-}
-
-// HerdrStateDir mirrors herdr's state_dir().
-func HerdrStateDir() string {
-	if x := os.Getenv("XDG_STATE_HOME"); x != "" {
-		return filepath.Join(x, "herdr")
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".local", "state", "herdr")
-}
-
-// HerdrExecutable is the herdr path herdr recorded for one of its saved SSH
-// machines (it updates the record when it installs herdr there); "" when
-// unknown.
-func HerdrExecutable(id string) string {
-	b, err := os.ReadFile(filepath.Join(HerdrStateDir(), "client", "ssh-metadata", id+".json"))
-	if err != nil {
-		return ""
-	}
-	var md sshMetadata
-	if json.Unmarshal(b, &md) != nil {
-		return ""
-	}
-	return md.Metadata.Executable
-}
-
-// SavedSpecs returns herdr's saved SSH machines, for the registry's one-time
-// import. No catalog means none; one that cannot be read is an error.
+// SavedSpecs returns the SSH machines saved by herdr, the terminal
+// multiplexer an earlier version drew its panes from, for the registry's
+// one-time import: herdr's client/endpoints.json in its state directory
+// ($XDG_STATE_HOME/herdr or ~/.local/state/herdr). No catalog means none;
+// one that cannot be read is an error.
 func SavedSpecs() ([]Spec, error) {
-	b, err := os.ReadFile(filepath.Join(HerdrStateDir(), "client", "endpoints.json"))
+	state := os.Getenv("XDG_STATE_HOME")
+	if state == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, err
+		}
+		state = filepath.Join(home, ".local", "state")
+	}
+	b, err := os.ReadFile(filepath.Join(state, "herdr", "client", "endpoints.json"))
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
@@ -291,10 +267,10 @@ func SavedSpecs() ([]Spec, error) {
 // LoadSpecs returns the local machine, the stored SSH machines and the
 // extra (--ssh) ones not stored, each once. The local machine's stored
 // record gives its enabled flag; its label is the host's name.
-func LoadSpecs(localSession string, stored, extra []Spec) []Spec {
+func LoadSpecs(stored, extra []Spec) []Spec {
 	hostname, _ := os.Hostname()
 	hostname = strings.TrimSuffix(hostname, ".local")
-	local := Spec{ID: LocalID, Label: hostname + " (local)", Kind: KindLocal, Session: localSession, Enabled: true}
+	local := Spec{ID: LocalID, Label: hostname + " (local)", Kind: KindLocal, Enabled: true}
 	specs := []Spec{local}
 	seen := map[string]bool{LocalID: true}
 	for _, s := range stored {

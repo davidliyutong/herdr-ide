@@ -30,18 +30,17 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.audit.log(r, "ssh.auth", map[string]any{"machine": mc.ID(), "target": st.Target})
-	servePTY(w, r, transport.AuthCommand(s.opts.ControlDir, st.Target), nil)
+	servePTY(w, r, transport.AuthCommand(s.opts.ControlDir, st.Target))
 	mc.Wake()
 }
 
-// servePTY runs argv (with env, nil for the core's own) in a PTY on the core
-// host, sized as the browser asked, and bridges it to a WebSocket until the
-// command ends or the browser leaves, which ends the command; the socket
-// closes with the reason "done". It reports whether the command ran.
-func servePTY(w http.ResponseWriter, r *http.Request, argv []string, env []string) bool {
+// servePTY runs argv in a PTY on the core host, sized as the browser asked,
+// and bridges it to a WebSocket until the command ends or the browser
+// leaves, which ends the command; the socket closes with the reason "done".
+func servePTY(w http.ResponseWriter, r *http.Request, argv []string) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
 	if err != nil {
-		return false
+		return
 	}
 	defer conn.CloseNow()
 	// ctx is the command's. Reading has its own: a cancelled read closes the
@@ -52,7 +51,6 @@ func servePTY(w http.ResponseWriter, r *http.Request, argv []string, env []strin
 	defer stopRead()
 
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
-	cmd.Env = env
 	cols, _ := strconv.Atoi(r.URL.Query().Get("cols"))
 	rows, _ := strconv.Atoi(r.URL.Query().Get("rows"))
 	if cols <= 0 || rows <= 0 || cols > 1000 || rows > 1000 {
@@ -61,7 +59,7 @@ func servePTY(w http.ResponseWriter, r *http.Request, argv []string, env []strin
 	f, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
 	if err != nil {
 		conn.Write(ctx, websocket.MessageText, []byte("failed to start "+filepath.Base(argv[0])+": "+err.Error()+"\r\n"))
-		return false
+		return
 	}
 	defer f.Close()
 	drained := make(chan struct{})
@@ -102,7 +100,6 @@ func servePTY(w http.ResponseWriter, r *http.Request, argv []string, env []strin
 	case <-time.After(ptyDrainTimeout):
 	}
 	conn.Close(websocket.StatusNormalClosure, "done")
-	return true
 }
 
 // ptyDrainTimeout bounds how long servePTY forwards output after the command

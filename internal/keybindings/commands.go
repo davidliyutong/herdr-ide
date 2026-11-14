@@ -89,7 +89,7 @@ func cmd(id, section string, defaults ...Default) Command {
 	return Command{ID: id, Section: section, When: WhenTerminal, Defaults: defaults}
 }
 
-// Commands are every command, with the defaults of herdr's prefix keymap
+// Commands are every command, with the defaults of the prefix keymap
 // (ctrl+b, then a key) on every platform and the applications' direct
 // shortcuts: those of the macOS application's menu on macOS (Cmd), the
 // desktop app's on other systems (Ctrl+Shift, as terminal emulators use,

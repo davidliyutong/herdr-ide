@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { tmpdir } from 'node:os';
-import { APP_SLUG } from '../../web/src/brand';
 import { CoreProcess, coreArgs, coreEnv, corePort, DesktopError } from './core';
 
 function fakeCore(source: string) {
@@ -12,11 +11,10 @@ const ready = `process.stdout.write(JSON.stringify({event:'ready',url:'http://12
 test('development is isolated; packaged mode has its own instance', () => {
   const args = coreArgs(true, 7791);
   assert.ok(args.includes('--local-only'));
-  for (const flag of ['--local-session', '--remote-session']) assert.equal(args[args.indexOf(flag) + 1], `${APP_SLUG}-dev`);
   assert.equal(args[args.indexOf('--instance') + 1], 'dev');
   const release = coreArgs(false, 7781);
   assert.equal(release[release.indexOf('--instance') + 1], 'desktop');
-  assert.ok(!release.includes('--local-session'));
+  assert.ok(!release.includes('--local-only'));
   for (const port of ['-1', '65536', 'abc', '80;open', '0.0.0.0:7781'])
     assert.throws(
       () => corePort(port),

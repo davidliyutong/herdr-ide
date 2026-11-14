@@ -109,7 +109,7 @@ func (w *xwin) all() rect { return rect{0, 0, w.w, w.h} }
 type managedWin struct {
 	xwin
 	title      string
-	origin     origin
+	terminal   string // the terminal its program was started in (terminalOf)
 	pid        int
 	transient  xproto.Window
 	deleteWin  bool
@@ -429,7 +429,7 @@ func (wm *windowManager) manage(w xproto.Window) {
 	m.transient = wm.window(w, xproto.AtomWmTransientFor)
 	m.deleteWin, m.takeFocus = wm.protocols(w)
 	m.pid = wm.pid(w)
-	m.origin = originOf(m.pid, wm.hcSocket)
+	m.terminal = terminalOf(m.pid, wm.hcSocket)
 	m.damage = wm.newDamage(w)
 	wm.wins[w] = m
 	wm.clientList()
@@ -444,7 +444,7 @@ func (wm *windowManager) manage(w xproto.Window) {
 func (wm *windowManager) emitWindow(m *managedWin) {
 	wm.emit(agentproto.GUIEvent{Ev: "window", Window: &agentproto.GUIWindow{
 		ID: uint32(m.id), Title: m.title, W: m.w, H: m.h, Pid: m.pid,
-		Pane: m.origin.pane, Socket: m.origin.socket, Terminal: m.origin.terminal, Transient: uint32(m.transient),
+		Terminal: m.terminal, Transient: uint32(m.transient),
 	}})
 }
 
@@ -672,50 +672,41 @@ func (wm *windowManager) pid(w xproto.Window) int {
 	return 0
 }
 
-// origin is where a program was started: a herdr pane (with herdr's
-// socket) or a terminal of the instance's terminal core.
-type origin struct {
-	pane, socket, terminal string
-}
-
-// originOf returns where process pid was started, from its environment or
-// that of its nearest ancestor that has one: HERDR_PANE_ID and
-// HERDR_SOCKET_PATH for a herdr pane, HC_TERMINAL_ID for a terminal of the
-// terminal core whose socket (HC_TERMINAL_SOCKET) is hcSocket. Terminals
-// of another terminal core (the user's own) are not named.
-func originOf(pid int, hcSocket string) origin {
+// terminalOf returns the terminal of the instance's terminal core that
+// process pid was started in, from its environment or that of its nearest
+// ancestor that has one: HC_TERMINAL_ID, when HC_TERMINAL_SOCKET is
+// hcSocket. A terminal of another terminal core (the user's own) is not
+// named.
+func terminalOf(pid int, hcSocket string) string {
 	for i := 0; i < 8 && pid > 1; i++ {
 		if env, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/environ"); err == nil {
-			if o, ok := originFromEnv(env, hcSocket); ok {
-				return o
+			if term, ok := terminalFromEnv(env, hcSocket); ok {
+				return term
 			}
 		}
 		pid = parentPid(pid)
 	}
-	return origin{}
+	return ""
 }
 
-// originFromEnv reads a process's environment (NUL-separated, as in
-// /proc/<pid>/environ); ok tells whether it names a pane or a terminal.
-func originFromEnv(env []byte, hcSocket string) (o origin, ok bool) {
-	var term, termSocket string
+// terminalFromEnv reads a process's environment (NUL-separated, as in
+// /proc/<pid>/environ); ok tells whether it names a terminal of any
+// terminal core, term is that terminal when it is one of hcSocket's.
+func terminalFromEnv(env []byte, hcSocket string) (term string, ok bool) {
+	var id, socket string
 	for _, kv := range bytes.Split(env, []byte{0}) {
 		k, v, _ := strings.Cut(string(kv), "=")
 		switch k {
-		case "HERDR_PANE_ID":
-			o.pane = v
-		case "HERDR_SOCKET_PATH":
-			o.socket = v
 		case "HC_TERMINAL_ID":
-			term = v
+			id = v
 		case "HC_TERMINAL_SOCKET":
-			termSocket = v
+			socket = v
 		}
 	}
-	if term != "" && hcSocket != "" && termSocket == hcSocket {
-		o.terminal = term
+	if id != "" && hcSocket != "" && socket == hcSocket {
+		term = id
 	}
-	return o, o.pane != "" || term != ""
+	return term, id != ""
 }
 
 func parentPid(pid int) int {

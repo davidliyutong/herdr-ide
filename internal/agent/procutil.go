@@ -2,24 +2,46 @@ package agent
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
 )
 
-// cleanEnv drops herdr pane context inherited from a parent herdr pane so the
-// CLI does not treat itself as running inside one.
+// cleanEnv is the agent's environment for the programs it starts, without
+// the terminal core's variables of a terminal the agent itself was started
+// in: those programs belong to no terminal and to no terminal core.
 func cleanEnv() []string {
 	var env []string
 	for _, kv := range os.Environ() {
 		k, _, _ := strings.Cut(kv, "=")
 		switch k {
-		case "HERDR_ENV", "HERDR_PANE_ID", "HERDR_TAB_ID", "HERDR_WORKSPACE_ID", "HERDR_SESSION":
+		case "HC_SESSION", "HC_SOCKET", "HC_TERMINAL_ID", "HC_TERMINAL_SOCKET":
 			continue
 		}
 		env = append(env, kv)
 	}
 	return env
+}
+
+func isExecutable(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && st.Mode().IsRegular() && st.Mode()&0o111 != 0
+}
+
+// runOutput runs a command and returns its standard output; its error
+// carries the standard error.
+func runOutput(ctx context.Context, name string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return stdout.String(), fmt.Errorf("%s: %w: %s", name, err, strings.TrimSpace(stderr.String()))
+	}
+	return stdout.String(), nil
 }
 
 // tailBuffer keeps the last 8 KiB written to it.

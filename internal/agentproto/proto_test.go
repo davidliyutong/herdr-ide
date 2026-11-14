@@ -8,12 +8,12 @@ import (
 )
 
 func TestReadLineLeavesFollowingBytes(t *testing.T) {
-	r := strings.NewReader("{\"op\":\"herdr-client\",\"session\":\"s\"}\nRAW-BYTES")
+	r := strings.NewReader("{\"op\":\"hc-api\",\"path\":\"p\"}\nRAW-BYTES")
 	var h Header
 	if err := ReadLine(r, &h); err != nil {
 		t.Fatal(err)
 	}
-	if h.Op != OpHerdrClient || h.Session != "s" {
+	if h.Op != OpHCAPI || h.Path != "p" {
 		t.Fatalf("header = %+v", h)
 	}
 	rest, _ := io.ReadAll(r)

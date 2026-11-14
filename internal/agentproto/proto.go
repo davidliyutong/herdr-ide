@@ -21,13 +21,6 @@ type Op string
 const (
 	// OpHello returns Info about the agent host.
 	OpHello Op = "hello"
-	// OpHerdrAPI dials the herdr public API socket and pipes raw bytes.
-	OpHerdrAPI Op = "herdr-api"
-	// OpHerdrClient dials herdr's client socket (the endpoint protocol used
-	// by client-rendered shells) and pipes raw bytes.
-	OpHerdrClient Op = "herdr-client"
-	// OpExec runs a command and returns buffered output in the reply.
-	OpExec Op = "exec"
 	// OpFsStat, OpFsList return metadata in the reply.
 	OpFsStat Op = "fs.stat"
 	OpFsList Op = "fs.list"
@@ -48,16 +41,9 @@ const (
 	// bridge extension connection.
 	OpBridge Op = "bridge"
 	// OpGUI manages the virtual display (actions status, install, start,
-	// shells) and, with action attach, streams its windows (see gui.go).
+	// keep, shells) and, with action attach, streams its windows (see
+	// gui.go).
 	OpGUI Op = "gui"
-	// OpHerdr manages the herdr in use and the server of Header.Session
-	// (actions status, start, stop, restart, check, update). An empty reply
-	// comes at once; a second reply line with Herdr follows when the action
-	// is done.
-	OpHerdr Op = "herdr"
-	// OpPaneFind searches the text of pane Header.Find.Pane next to herdr
-	// (internal/panefind) and answers with Reply.Find; nothing follows.
-	OpPaneFind Op = "pane.find"
 	// OpHC manages the agent's own herdr-core: the executable the core
 	// uploads and the terminal core of the agent's instance (actions status,
 	// install, start, restart, stop). An install carries the gzip-compressed
@@ -87,15 +73,6 @@ type DetectEvent struct {
 type Header struct {
 	Op Op `json:"op"`
 
-	// herdr selection
-	Session  string `json:"session,omitempty"`
-	HerdrBin string `json:"herdr_bin,omitempty"`
-
-	// exec
-	Argv    []string `json:"argv,omitempty"`
-	Cwd     string   `json:"cwd,omitempty"`
-	Timeout int      `json:"timeout_ms,omitempty"`
-
 	// fs
 	Path   string `json:"path,omitempty"`
 	Offset int64  `json:"offset,omitempty"`
@@ -123,51 +100,36 @@ type Header struct {
 	// expected SHA-256, "" when unknown (the reply then reports it).
 	URL    string `json:"url,omitempty"`
 	Digest string `json:"digest,omitempty"`
-
-	// pane.find
-	Find *FindRequest `json:"find,omitempty"`
 }
 
 // Reply is the first line written back by the acceptor.
 type Reply struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
-	// Code classifies Error for ops that define codes (pane.find).
+	// Code classifies Error for ops that define codes (hc).
 	Code string `json:"code,omitempty"`
 
-	Info    *Info        `json:"info,omitempty"`
-	Stat    *Stat        `json:"stat,omitempty"`
-	Entries []Stat       `json:"entries,omitempty"`
-	Exec    *ExecResult  `json:"exec,omitempty"`
-	CS      *CSStatus    `json:"cs,omitempty"`
-	Bridge  *BridgeInfo  `json:"bridge,omitempty"`
-	GUI     *GUIStatus   `json:"gui,omitempty"`
-	Herdr   *HerdrStatus `json:"herdr,omitempty"`
-	Find    *FindResult  `json:"find,omitempty"`
-	HC      *HCStatus    `json:"hc,omitempty"`
+	Info    *Info       `json:"info,omitempty"`
+	Stat    *Stat       `json:"stat,omitempty"`
+	Entries []Stat      `json:"entries,omitempty"`
+	Exec    *ExecResult `json:"exec,omitempty"`
+	CS      *CSStatus   `json:"cs,omitempty"`
+	Bridge  *BridgeInfo `json:"bridge,omitempty"`
+	GUI     *GUIStatus  `json:"gui,omitempty"`
+	HC      *HCStatus   `json:"hc,omitempty"`
 }
-
-// ErrHerdrNotFound: the agent found no herdr executable on its host (not
-// installed, or removed or moved since).
-var ErrHerdrNotFound = errors.New("herdr binary not found (set HERDR_BIN or install herdr)")
 
 // Info describes the agent host.
 type Info struct {
-	Version  string `json:"version"`
-	OS       string `json:"os"`
-	Arch     string `json:"arch"`
-	Hostname string `json:"hostname"`
-	Home     string `json:"home"`
-	User     string `json:"user"`
-	// HerdrBin is the herdr executable in use, with its version. Without
-	// one, HerdrError tells why; HerdrSocket is set either way.
-	HerdrBin     string `json:"herdr_bin,omitempty"`
-	HerdrVersion string `json:"herdr_version,omitempty"`
-	HerdrSocket  string `json:"herdr_socket,omitempty"`
-	HerdrError   string `json:"herdr_error,omitempty"`
-	DataDir      string `json:"data_dir"`
-	RunDir       string `json:"run_dir"`
-	UploadDir    string `json:"upload_dir"`
+	Version   string `json:"version"`
+	OS        string `json:"os"`
+	Arch      string `json:"arch"`
+	Hostname  string `json:"hostname"`
+	Home      string `json:"home"`
+	User      string `json:"user"`
+	DataDir   string `json:"data_dir"`
+	RunDir    string `json:"run_dir"`
+	UploadDir string `json:"upload_dir"`
 }
 
 type Stat struct {
@@ -180,6 +142,8 @@ type Stat struct {
 	IsLink  bool   `json:"is_link,omitempty"`
 }
 
+// ExecResult is the output of a command the agent ran for an op
+// (code-server's install-ext and uninstall-ext).
 type ExecResult struct {
 	ExitCode  int    `json:"exit_code"`
 	Stdout    string `json:"stdout"`
@@ -197,28 +161,6 @@ type CSStatus struct {
 	Bin string `json:"bin,omitempty"`
 	// Digest is the SHA-256 of a release the machine downloaded.
 	Digest string `json:"digest,omitempty"`
-}
-
-// HerdrStatus describes the herdr an agent uses and its session's server.
-type HerdrStatus struct {
-	Bin     string `json:"bin,omitempty"`
-	Version string `json:"version,omitempty"`
-	// Managed: Bin is the copy the application keeps and may update, not an
-	// installation of the user's.
-	Managed bool `json:"managed"`
-	// Running is reported without Bin too: a server can outlive the removal
-	// of its herdr.
-	Running       bool   `json:"running"`
-	ServerVersion string `json:"server_version,omitempty"`
-	// RestartNeeded: the running server is from another herdr build.
-	RestartNeeded bool `json:"restart_needed,omitempty"`
-	// Latest is herdr's newest release (action check).
-	Latest string `json:"latest,omitempty"`
-	// Error is a code: not_found, start_failed, stop_failed, check_failed,
-	// update_failed, not_managed. Output is herdr's own text for it, or the
-	// output of an update.
-	Error  string `json:"error,omitempty"`
-	Output string `json:"output,omitempty"`
 }
 
 // HCStatus describes the agent's herdr-core.

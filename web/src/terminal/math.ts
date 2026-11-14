@@ -1,5 +1,5 @@
 // LaTeX formulas in pane text, for the formula shown when the pointer rests
-// on one (surface/controller.ts, components/MathPopover.tsx).
+// on one (vt/pane.ts, components/MathPopover.tsx).
 //
 // Agents write markdown math: $…$ and $$…$$ (Claude), \(…\) and \[…\]
 // (GPT models). Their terminal markdown renderers print it as text, and drop

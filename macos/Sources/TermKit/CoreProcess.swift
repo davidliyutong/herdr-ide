@@ -20,7 +20,7 @@ public final class CoreProcess {
     public static func arguments(dev: Bool) -> [String] {
         var args = ["serve", "--parent-stdio", "--listen", "127.0.0.1:0", "--instance", dev ? "dev" : "desktop"]
         if dev {
-            args += ["--local-only", "--local-session", Brand.appSlug + "-dev", "--remote-session", Brand.appSlug + "-dev"]
+            args.append("--local-only")
         }
         return args
     }

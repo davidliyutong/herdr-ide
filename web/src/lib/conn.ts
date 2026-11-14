@@ -44,9 +44,8 @@ class Conn {
 
   private connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    // An events client: the page draws its terminals itself (term/connection.ts).
-    const ws = new WebSocket(`${proto}//${location.host}/ws?events=1`);
-    ws.binaryType = 'arraybuffer';
+    // The event channel; the page's terminals have their own (term/connection.ts).
+    const ws = new WebSocket(`${proto}//${location.host}/ws`);
     this.ws = ws;
     ws.onopen = () => {
       this.connected = true;

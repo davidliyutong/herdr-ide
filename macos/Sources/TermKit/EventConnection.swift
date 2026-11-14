@@ -46,11 +46,10 @@ public struct ProgramWindow: Equatable {
     }
 }
 
-/// The client of the core's event channel (`/ws?events=1`): the machines,
-/// their program windows, the settings and the keybindings as they change. As an events-only client it
-/// takes no part in the browser UI's pane session. It reconnects by itself
-/// (`CoreSocket`), and the core then sends the whole state again. Use it
-/// from the main queue.
+/// The client of the core's event channel (`/ws`): the machines, their
+/// program windows, the settings and the keybindings as they change. It
+/// reconnects by itself (`CoreSocket`), and the core then sends the whole
+/// state again. Use it from the main queue.
 public final class EventConnection {
     public enum Event: Equatable {
         /// Every machine, in the core's order.
@@ -76,7 +75,7 @@ public final class EventConnection {
 
     /// `core` is the core's HTTP origin, such as http://127.0.0.1:7781.
     public init(core: URL) {
-        socket = CoreSocket(core: core, path: "/ws", query: "events=1")
+        socket = CoreSocket(core: core, path: "/ws")
         socket.onOpen = { [weak self] in self?.onConnection?(true) }
         socket.onClose = { [weak self] wasConnected in if wasConnected { self?.onConnection?(false) } }
         socket.onText = { [weak self] text in

@@ -29,7 +29,7 @@ export function coreArgs(dev: boolean, port: number): string[] {
     `127.0.0.1:${port}`,
     '--instance',
     dev ? 'dev' : 'desktop',
-    ...(dev ? ['--local-only', '--local-session', `${APP_SLUG}-dev`, '--remote-session', `${APP_SLUG}-dev`] : []),
+    ...(dev ? ['--local-only'] : []),
   ];
 }
 
@@ -125,7 +125,7 @@ export class CoreProcess {
     if (!child || child.exitCode !== null || child.signalCode !== null || !child.pid) return Promise.resolve();
     this.stopped = new Promise((resolve) => {
       // The core allows 3 s for HTTP and 15 s for agents. Force only this
-      // owned child if it cannot finish; never signal herdr's session server.
+      // owned child if it cannot finish; never signal the terminal cores.
       const force = setTimeout(() => child.kill('SIGKILL'), 20_000);
       child.once('exit', () => {
         clearTimeout(force);

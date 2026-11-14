@@ -38,9 +38,6 @@ func (s *Server) initGUI() {
 		}
 		if st.Status == machines.StatusReady {
 			s.gui.Ensure(mc)
-			// A herdr server that answers (again) keeps the display, as a
-			// ready terminal core does (term.go).
-			s.gui.ServerReady(mc, gui.ServerHerdr, st.Snapshot != nil)
 			return
 		}
 		// Disabled, reconnecting or failing: no display error or windows
@@ -71,42 +68,31 @@ func (s *Server) initGUI() {
 	}
 }
 
-// handleGUIEnable gives open herdr panes or terminals of a machine the
-// display's environment (see gui.Manager.EnableShells). Body:
-// {"panes": [...]} (empty for all panes) or {"terminals": [...]} (the
-// terminal core's; empty for all of them).
+// handleGUIEnable gives open terminals of a machine's terminal core the
+// display's environment (see gui.Manager.Enable). Body: {"terminals": [...]}
+// (empty or absent for all of them).
 func (s *Server) handleGUIEnable(w http.ResponseWriter, r *http.Request) {
 	mc := s.machine(w, r)
 	if mc == nil {
 		return
 	}
 	var req struct {
-		Panes     []string `json:"panes"`
 		Terminals []string `json:"terminals"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid"})
 		return
 	}
+	b := s.term.existing(mc.ID())
+	if b == nil || b.connection() == nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "no_terminals"})
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), time.Minute)
 	defer cancel()
-	var res *gui.EnableResult
-	var err error
-	if req.Terminals != nil {
-		b := s.term.existing(mc.ID())
-		if b == nil || b.connection() == nil {
-			writeJSON(w, http.StatusConflict, map[string]string{"error": "no_terminals"})
-			return
-		}
-		res, err = s.gui.EnableShells(ctx, mc, termShells{b}, "hc:", req.Terminals)
-	} else {
-		res, err = s.gui.Enable(ctx, mc, req.Panes)
-	}
+	res, err := s.gui.Enable(ctx, mc, termShells{b}, req.Terminals)
 	if res != nil {
 		ev := map[string]any{"machine": mc.ID(), "typed": res.Typed, "busy": res.Busy, "failed": res.Failed}
-		if req.Terminals != nil {
-			ev["terminals"] = true
-		}
 		if err != nil {
 			ev["error"] = err.Error()
 		}
@@ -124,48 +110,10 @@ func (s *Server) handleGUIEnable(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// paneCreating are the herdr methods that start a shell in a new pane.
-var paneCreating = map[string]bool{"workspace.create": true, "tab.create": true, "pane.split": true}
-
-// withPaneEnv adds the machine's display environment to the parameters of
-// a herdr method that creates a pane. Variables the caller set win. It
-// returns the names of the variables it added.
-func (s *Server) withPaneEnv(mc *machines.Machine, method string, params json.RawMessage) (json.RawMessage, []string) {
-	if !paneCreating[method] {
-		return params, nil
-	}
-	return mergeEnv(params, s.displayEnv(mc))
-}
-
-// mergeEnv adds env to the "env" object of herdr request parameters and
-// returns the names it added; malformed parameters are left to herdr.
-func mergeEnv(params json.RawMessage, env map[string]string) (json.RawMessage, []string) {
-	if len(env) == 0 {
-		return params, nil
-	}
-	var p map[string]json.RawMessage
-	if len(params) > 0 && json.Unmarshal(params, &p) != nil {
-		return params, nil
-	}
-	if p == nil { // absent or null
-		p = map[string]json.RawMessage{}
-	}
-	added, ok := addEnv(p, env, false)
-	if !ok {
-		return params, nil
-	}
-	out, err := json.Marshal(p)
-	if err != nil {
-		return params, nil
-	}
-	return out, added
-}
-
-// addEnv adds env to the "env" object of parameters p and returns the
-// names it set. With override its values replace the caller's; otherwise
-// variables the caller set win. ok is false when "env" is not an object of
-// strings (p is then unchanged).
-func addEnv(p map[string]json.RawMessage, env map[string]string, override bool) (names []string, ok bool) {
+// addEnv sets env in the "env" object of parameters p, replacing the
+// caller's values for these names, and returns the names it set. ok is
+// false when "env" is not an object of strings (p is then unchanged).
+func addEnv(p map[string]json.RawMessage, env map[string]string) (names []string, ok bool) {
 	var given map[string]string
 	if raw, set := p["env"]; set && json.Unmarshal(raw, &given) != nil {
 		return nil, false
@@ -174,10 +122,8 @@ func addEnv(p map[string]json.RawMessage, env map[string]string, override bool) 
 		given = map[string]string{}
 	}
 	for k, v := range env {
-		if _, set := given[k]; !set || override {
-			given[k] = v
-			names = append(names, k)
-		}
+		given[k] = v
+		names = append(names, k)
 	}
 	sort.Strings(names)
 	b, err := json.Marshal(given)

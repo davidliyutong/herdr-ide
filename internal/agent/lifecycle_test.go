@@ -17,7 +17,7 @@ func testAgent(t testing.TB) *Agent {
 	base := filepath.Join(home, ".x")
 	run := filepath.Join(base, "run")
 	os.MkdirAll(run, 0o700)
-	return &Agent{logger: log.New(io.Discard, "", 0), home: home, base: base, runDir: run, herdrCache: map[string]string{}}
+	return &Agent{logger: log.New(io.Discard, "", 0), home: home, base: base, runDir: run}
 }
 
 // A code-server whose owning agent died is stopped by the next agent.
