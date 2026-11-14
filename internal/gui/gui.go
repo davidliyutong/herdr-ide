@@ -66,6 +66,10 @@ const (
 	PhaseError       = "error"
 	// PhaseNotRunning: read-only mode, which only shows a display that runs.
 	PhaseNotRunning = "not_running"
+	// PhaseDisconnected: the machine is disabled, reconnecting, failing or
+	// removed; a display there keeps running until idle, and the next
+	// connection prepares it again.
+	PhaseDisconnected = "disconnected"
 )
 
 // State is what browsers see for one machine.
@@ -162,6 +166,9 @@ type display struct {
 	// failures counts failed preparations and short-lived attachments in a
 	// row, for the retry backoff.
 	failures int
+	// gone: the machine was removed; a preparation still running for it
+	// publishes nothing.
+	gone bool
 
 	sess   *transport.Session
 	stream net.Conn
@@ -314,20 +321,90 @@ func (m *Manager) Apply(mc *machines.Machine) {
 	}
 	m.mu.Lock()
 	d := m.get(mc)
-	if d.stream != nil {
-		d.stream.Close()
-		d.stream = nil
-		close(d.cmds)
-	}
+	detachLocked(d)
 	d.phase, d.err = PhaseOff, ""
-	d.windows, d.order = map[uint32]*agentproto.GUIWindow{}, nil
 	st := m.stateLocked(d)
 	m.mu.Unlock()
 	m.publish(st)
 }
 
+// detachLocked ends the display's attach stream, if any, and forgets its
+// windows; m.mu is held. The display keeps running on the machine until
+// idle, and its programs keep their windows.
+func detachLocked(d *display) {
+	if d.stream != nil {
+		d.stream.Close()
+		d.stream = nil
+		close(d.cmds)
+	}
+	d.windows, d.order = map[uint32]*agentproto.GUIWindow{}, nil
+}
+
+// Disconnected follows the machine leaving the connected states (disabled,
+// reconnecting, failing): it detaches and shows the display as
+// disconnected, so an earlier error or program windows do not stay on
+// screen. The next connection prepares the display again.
+func (m *Manager) Disconnected(mc *machines.Machine) {
+	m.mu.Lock()
+	d := m.ds[mc.ID()]
+	if d == nil || (d.phase == PhaseDisconnected && d.stream == nil) {
+		m.mu.Unlock()
+		return
+	}
+	detachLocked(d)
+	d.phase, d.err = PhaseDisconnected, ""
+	st := m.stateLocked(d)
+	m.mu.Unlock()
+	m.publish(st)
+}
+
+// Forget drops the display of a removed machine: it detaches, and browsers
+// are told it is disconnected. A preparation still running for it
+// publishes nothing more.
+func (m *Manager) Forget(id string) {
+	m.mu.Lock()
+	d := m.ds[id]
+	if d == nil {
+		m.mu.Unlock()
+		return
+	}
+	delete(m.ds, id)
+	detachLocked(d)
+	d.gone = true
+	d.phase, d.err = PhaseDisconnected, ""
+	st := m.stateLocked(d)
+	m.mu.Unlock()
+	m.publish(st)
+}
+
+// onSession reports whether mc is still connected through sess.
+func onSession(mc *machines.Machine, sess *transport.Session) bool {
+	if mc.Session() != sess {
+		return false
+	}
+	st := mc.State().Status
+	return st == machines.StatusReady || st == machines.StatusDegraded
+}
+
+// fail shows that preparing or attaching the display over sess failed and
+// retries later. A machine that lost that connection meanwhile shows no
+// error: the failure is most likely the connection's, and the next one
+// prepares the display again.
+func (m *Manager) fail(d *display, sess *transport.Session, err error) {
+	if !onSession(d.mc, sess) {
+		m.setPhase(d, PhaseDisconnected, nil)
+		return
+	}
+	m.setPhase(d, PhaseError, err)
+	m.retryLater(d, sess)
+}
+
 func (m *Manager) setPhase(d *display, phase string, err error) {
 	m.mu.Lock()
+	if d.gone {
+		m.mu.Unlock()
+		return
+	}
 	d.phase, d.err = phase, ""
 	if err != nil {
 		d.err = err.Error()
@@ -390,8 +467,7 @@ func (m *Manager) prepare(d *display, sess *transport.Session) {
 	defer cancel()
 	st, err := m.request(ctx, mc, "status")
 	if err != nil {
-		m.setPhase(d, PhaseError, err)
-		m.retryLater(d, sess)
+		m.fail(d, sess, err)
 		return
 	}
 	m.mu.Lock()
@@ -406,15 +482,13 @@ func (m *Manager) prepare(d *display, sess *transport.Session) {
 		m.setPhase(d, map[string]string{"install": PhaseInstalling, "start": PhaseStarting}[a], nil)
 		m.audit("gui."+a, map[string]any{"machine": mc.ID()})
 		if st, err = m.request(ctx, mc, a); err != nil {
-			m.setPhase(d, PhaseError, err)
-			m.retryLater(d, sess)
+			m.fail(d, sess, err)
 			return
 		}
 	}
 	conn, rep, err := mc.Open(context.Background(), agentproto.Header{Op: agentproto.OpGUI, Action: "attach"})
 	if err != nil {
-		m.setPhase(d, PhaseError, err)
-		m.retryLater(d, sess)
+		m.fail(d, sess, err)
 		return
 	}
 	m.mu.Lock()
@@ -635,8 +709,7 @@ func (m *Manager) read(d *display, sess *transport.Session, conn net.Conn) {
 	if d.mc.Session() != sess {
 		return // the machine reconnects and ensures again
 	}
-	m.setPhase(d, PhaseError, err)
-	m.retryLater(d, sess)
+	m.fail(d, sess, err)
 }
 
 func (m *Manager) event(d *display, payload []byte) {

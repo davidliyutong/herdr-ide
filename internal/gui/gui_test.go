@@ -655,3 +655,65 @@ func TestRetryDelay(t *testing.T) {
 		t.Errorf("capped delays %v %v", retryDelay(6), retryDelay(100))
 	}
 }
+
+// A machine that is disabled, reconnects or fails leaves no display error
+// or windows on screen; a removed one is forgotten, and a preparation still
+// running for it publishes nothing.
+func TestDisconnectedAndForget(t *testing.T) {
+	m, d, agent := attached(t)
+	var got []State
+	m.OnState = func(st State) { got = append(got, st) }
+	mc := d.mc
+
+	m.Disconnected(mc)
+	if len(got) != 1 || got[0].Phase != PhaseDisconnected || len(got[0].Windows) != 0 || got[0].Error != "" {
+		t.Fatalf("states after disconnect = %+v", got)
+	}
+	m.mu.Lock()
+	if d.stream != nil {
+		t.Error("still attached after disconnect")
+	}
+	m.mu.Unlock()
+	// The attach stream was closed.
+	agent.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := agent.Read(make([]byte, 1)); err == nil {
+		t.Error("attach stream still open")
+	}
+	m.Disconnected(mc)
+	if len(got) != 1 {
+		t.Errorf("repeated disconnect published %d states", len(got))
+	}
+
+	// A failure seen after the machine lost its connection is no error.
+	m.mu.Lock()
+	d.phase, d.err = PhaseStarting, ""
+	m.mu.Unlock()
+	m.fail(d, new(transport.Session), errors.New("stream closed"))
+	if last := got[len(got)-1]; last.Phase != PhaseDisconnected || last.Error != "" {
+		t.Errorf("failure on a lost connection = %+v", last)
+	}
+
+	m.Forget(mc.ID())
+	if last := got[len(got)-1]; last.Phase != PhaseDisconnected {
+		t.Errorf("forgotten machine = %+v", last)
+	}
+	if len(m.States()) != 0 {
+		t.Errorf("states after forget = %+v", m.States())
+	}
+	n := len(got)
+	m.setPhase(d, PhaseError, errors.New("late"))
+	if len(got) != n {
+		t.Errorf("a removed machine's preparation published %+v", got[n:])
+	}
+}
+
+// Detaching when the setting is turned off works the same way.
+func TestApplyOffDetaches(t *testing.T) {
+	m, d, _ := attached(t, "--gui", "off")
+	var got []State
+	m.OnState = func(st State) { got = append(got, st) }
+	m.Apply(d.mc)
+	if len(got) != 1 || got[0].Phase != PhaseOff || len(got[0].Windows) != 0 {
+		t.Fatalf("states = %+v", got)
+	}
+}

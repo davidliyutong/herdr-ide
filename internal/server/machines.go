@@ -124,6 +124,7 @@ func (s *Server) syncCatalog(take func(machines.Spec) bool) (catalogChanges, err
 	}
 	for _, st := range s.mg.States() {
 		if st.Saved && !in[st.ID] && s.mg.Remove(st.ID) == nil {
+			s.gui.Forget(st.ID)
 			c.Removed = append(c.Removed, st.ID)
 		}
 	}
@@ -294,6 +295,7 @@ func (s *Server) handleMachineRemove(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "remove", "detail": err.Error()})
 		return
 	}
+	s.gui.Forget(id)
 	s.audit.log(r, "machine.remove", ev)
 	s.broadcastMachines()
 	writeJSON(w, http.StatusOK, map[string]string{"removed": id})

@@ -62,6 +62,12 @@ Fixed, after [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the rows of other formulas, so the copy button can be reached when
   display formulas follow one another.
 
+- Program windows: a machine that is disabled, removed or disconnected no
+  longer leaves its display's error (or its windows) in the status bar;
+  the settings show its display as not connected. A display error can be
+  dismissed; it shows again only after the display recovered and failed
+  anew.
+
 ## [0.3.0] - 2026-11-08
 
 ### Added

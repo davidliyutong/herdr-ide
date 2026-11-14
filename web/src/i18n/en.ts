@@ -88,6 +88,7 @@ export const en = {
   'gui.errorRetry':
     'Retried automatically: first after 5 seconds, then at doubling intervals up to 5 minutes. Reconnecting the machine or changing its program windows setting retries at once.',
   'gui.copyError': 'Copy error',
+  'gui.dismiss': 'Dismiss',
   'gui.state.off': 'Off',
   'gui.state.local': 'Own screen',
   'gui.state.unsupported': 'Not supported',
@@ -97,6 +98,7 @@ export const en = {
   'gui.state.ready': 'Ready',
   'gui.state.error': 'Error',
   'gui.state.not_running': 'Not running (read-only)',
+  'gui.state.disconnected': 'Not connected',
   'gui.enableOpen': 'Enable in open panes',
   'gui.enabled': 'Program windows enabled in {n} panes ({already} had them already).',
   'gui.enableBusy': '{n} panes are running a program: run the copied command in them once it exits.',

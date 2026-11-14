@@ -31,12 +31,18 @@ func (s *Server) initGUI() {
 		s.broadcast(map[string]any{"t": "gui", "state": st})
 	}
 	s.mg.Subscribe(func(st machines.State) {
-		if st.Status == machines.StatusReady || st.Status == machines.StatusDegraded {
-			if mc := s.mg.Get(st.ID); mc != nil {
-				s.gui.Ensure(mc)
-				s.gui.HerdrReady(mc, st.Status == machines.StatusReady)
-			}
+		mc := s.mg.Get(st.ID)
+		if mc == nil {
+			return
 		}
+		if st.Status == machines.StatusReady || st.Status == machines.StatusDegraded {
+			s.gui.Ensure(mc)
+			s.gui.HerdrReady(mc, st.Status == machines.StatusReady)
+			return
+		}
+		// Disabled, reconnecting or failing: no display error or windows
+		// stay on screen for a machine that is not connected.
+		s.gui.Disconnected(mc)
 	}, func(machines.AgentEvent) {})
 	if s.opts.Settings != nil {
 		s.opts.Settings.OnChange(func(key, machine, _ string) {
