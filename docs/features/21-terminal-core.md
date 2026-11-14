@@ -94,7 +94,9 @@ used. It writes the executable gzip-compressed, without a name or time in
 the header, to `internal/embedded/hc/hc-<os>-<arch>.gz`, and the release's
 `LICENSE` and `THIRD-PARTY-NOTICES` to `dist/hc/licenses/`, which archives
 and the desktop app ship as `licenses/herdr-core/`. The executable is never
-run during a build. `embedded.HC` returns the compressed executable of a
+run during a build. `go run ./scripts/fetch-hc -exe <file> <os>/<arch>`
+writes one platform's verified executable to a file instead, for the
+integration tests (`HC_TEST_BIN`; CI's `integration` job). `embedded.HC` returns the compressed executable of a
 platform and the SHA-256 of the uncompressed one, computed once per
 platform: the two things the agent's `install` takes. The four executables
 add about 12 MB to the core.

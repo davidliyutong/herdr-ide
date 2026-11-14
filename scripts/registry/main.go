@@ -11,6 +11,8 @@
 //     settings and commands it shows. The web UI's and the macOS
 //     application's tests fail when one of them lacks a key listed for it.
 //
+// Usage:
+//
 //	go run ./scripts/registry           writes the file
 //	go run ./scripts/registry -check    writes nothing; fails if it is stale
 package main

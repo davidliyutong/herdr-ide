@@ -23,10 +23,10 @@ Code extension.
 | --- | --- |
 | Install JS deps | `make deps` |
 | Unit tests (Go + web + desktop) | `make test` |
-| All checks (gofmt, vet, tsc, prettier, brand/doc/README consistency, generated tokens, the terminal emulator's digest) | `make check` |
+| All checks (gofmt, vet, tsc, prettier, brand/doc/README consistency, generated tokens, the terminal emulator's digest, shared test vectors run by the web and Swift tests) | `make check` |
 | Regenerate the design tokens' Swift, CSS and Go after editing `design/tokens.json`, and `design/generated/registry.json` after changing settings or commands | `make tokens` |
 | Rebuild the web UI's terminal emulator (Ghostty's libghostty-vt as WebAssembly; zig 0.17) | `make vt-wasm` |
-| Integration test with a real terminal core (`HC_TEST_BIN=<herdr-core>`) | `make it` |
+| Integration test with a real terminal core (`HC_TEST_BIN=<herdr-core>`; the pinned one: `go run ./scripts/fetch-hc -exe <file> <os>/<arch>`) | `make it` |
 | Full build into `dist/` | `make build` (or `scripts/build.sh`) |
 | macOS `.app` / DMG | `make desktop-app` / `make desktop-dmg` |
 | Build the `.app` and install it into `/Applications` | `make desktop-install` |

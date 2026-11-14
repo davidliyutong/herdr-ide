@@ -97,9 +97,82 @@ jobs:
           path: dist/desktop/*.dmg
           if-no-files-found: error
 
+  # The macOS application (arm64, the runner's architecture), zipped. With
+  # the optional MACOS_* secrets it is signed with a Developer ID
+  # certificate and notarized; without them it is signed ad hoc, like the
+  # Electron app.
+  macos-app:
+    runs-on: macos-26
+    needs: encoder
+    env:
+      SIGN_CERTIFICATE: ${{ secrets.MACOS_SIGN_CERTIFICATE }}
+      SIGN_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_SIGN_CERTIFICATE_PASSWORD }}
+      SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+      NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+      NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+      NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: |
+            web/pnpm-lock.yaml
+            desktop/pnpm-lock.yaml
+            extensions/*/pnpm-lock.yaml
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: encoder-*
+          path: dist/ffmpeg
+      - name: Place the video encoders
+        run: for d in dist/ffmpeg/encoder-*; do mv "$d" "dist/ffmpeg/${d#dist/ffmpeg/encoder-}"; done
+      # A keychain of this job with the certificate (base64 .p12) and, when
+      # given, notarytool's credentials as the profile scripts/macos-app.sh
+      # uses.
+      - name: Signing keychain
+        if: env.SIGN_CERTIFICATE != '' && env.SIGN_IDENTITY != ''
+        run: |
+          kc="$RUNNER_TEMP/sign.keychain-db"
+          pw=$(uuidgen)
+          security create-keychain -p "$pw" "$kc"
+          security set-keychain-settings -lut 21600 "$kc"
+          security unlock-keychain -p "$pw" "$kc"
+          security default-keychain -s "$kc"
+          security list-keychains -d user -s "$kc"
+          printf '%s' "$SIGN_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/sign.p12"
+          security import "$RUNNER_TEMP/sign.p12" -k "$kc" -P "$SIGN_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/sign.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$pw" "$kc"
+          if [[ -n "$NOTARY_APPLE_ID" ]]; then
+            xcrun notarytool store-credentials release --apple-id "$NOTARY_APPLE_ID" --team-id "$NOTARY_TEAM_ID" --password "$NOTARY_PASSWORD"
+            echo "NOTARY_PROFILE=release" >> "$GITHUB_ENV"
+          fi
+      - run: brew install xcodegen
+      - run: make macos-test
+      - run: make macos-app
+        env:
+          VERSION: ${{ github.ref_name }}
+          REQUIRE_ENCODER: 1
+      - name: Archive
+        run: |
+          name=$(sed -n 's/^[[:space:]]*Name = "\(.*\)"$/\1/p' internal/brand/brand.go)
+          ditto -c -k --keepParent "dist/macos/$name.app" "dist/macos/$name-${GITHUB_REF_NAME#v}-mac-native-arm64.zip"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: macos-app
+          path: dist/macos/*.zip
+          if-no-files-found: error
+
   publish:
     runs-on: ubuntu-24.04
-    needs: [archives, desktop]
+    needs: [archives, desktop, macos-app]
     permissions:
       contents: write
       id-token: write
@@ -111,7 +184,7 @@ jobs:
           path: dist/release
           merge-multiple: true
       - name: Checksums
-        run: cd dist/release && shasum -a 256 *.tar.gz *.dmg > SHA256SUMS && cat SHA256SUMS
+        run: cd dist/release && shasum -a 256 *.tar.gz *.dmg *.zip > SHA256SUMS && cat SHA256SUMS
       # GitHub stores attestations for public repositories (private ones need
       # GitHub Enterprise Cloud); a private repository releases without
       # provenance.
@@ -125,4 +198,4 @@ jobs:
         run: |
           ver=${GITHUB_REF_NAME#v}
           awk -v v="$ver" '$0 ~ "^## \\[" v "\\]" {p=1; next} /^## \[/ {p=0} p' CHANGELOG.md > notes.md
-          gh release create "$GITHUB_REF_NAME" dist/release/*.tar.gz dist/release/*.dmg dist/release/SHA256SUMS --notes-file notes.md --verify-tag
+          gh release create "$GITHUB_REF_NAME" dist/release/*.tar.gz dist/release/*.dmg dist/release/*.zip dist/release/SHA256SUMS --notes-file notes.md --verify-tag

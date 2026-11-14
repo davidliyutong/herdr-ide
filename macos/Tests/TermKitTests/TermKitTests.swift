@@ -307,14 +307,16 @@ final class LocalizationTests: XCTestCase {
 /// The vectors of design/testdata/keys, which internal/keybindings and
 /// web/src/__tests__/keys.test.ts run too.
 final class KeysTests: XCTestCase {
-    private func vectors(_ name: String) throws -> JSONValue {
+    /// A file of design/testdata, by its directory and name; scripts/check.sh
+    /// checks that every vector file is named by a test here.
+    private func vectors(_ file: String) throws -> JSONValue {
         let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .appendingPathComponent("../../../design/testdata/keys/\(name).json").standardizedFileURL
+            .appendingPathComponent("../../../design/testdata/" + file).standardizedFileURL
         return JSONValue(any: try JSONSerialization.jsonObject(with: try Data(contentsOf: url)))
     }
 
     func testParse() throws {
-        let cases = try vectors("parse")["cases"]?.array ?? []
+        let cases = try vectors("keys/parse.json")["cases"]?.array ?? []
         XCTAssertGreaterThan(cases.count, 30)
         for c in cases {
             let input = c["input"]?.string ?? ""
@@ -331,7 +333,7 @@ final class KeysTests: XCTestCase {
     }
 
     func testEvents() throws {
-        for c in try vectors("events")["cases"]?.array ?? [] {
+        for c in try vectors("keys/events.json")["cases"]?.array ?? [] {
             let mods = c["mods"]?.array?.compactMap(\.string) ?? []
             let stroke = Keys.stroke(characters: c["chars"]?.string ?? "", keyCode: UInt16(c["keyCode"]?.number ?? 0),
                                      cmd: mods.contains("cmd"), ctrl: mods.contains("ctrl"), alt: mods.contains("alt"), shift: mods.contains("shift"))
@@ -340,7 +342,7 @@ final class KeysTests: XCTestCase {
     }
 
     func testSequences() throws {
-        let file = try vectors("sequences")
+        let file = try vectors("keys/sequences.json")
         let bindings = (file["bindings"]?.array ?? []).map {
             KeyBinding(key: $0["key"]?.string ?? "", command: $0["command"]?.string ?? "", when: $0["when"]?.string ?? "")
         }

@@ -1,11 +1,19 @@
 // Fetch the pinned upstream herdr-core for the requested Go platforms and
 // write the executables, gzip-compressed, where the core embeds them. The
 // downloaded executables are never run.
+//
+//	go run ./scripts/fetch-hc linux/amd64 darwin/arm64 …
+//	go run ./scripts/fetch-hc -exe FILE OS/ARCH
+//
+// -exe writes one platform's verified executable to FILE instead, as is
+// (for the integration tests' HC_TEST_BIN: make it in CI); nothing is
+// embedded.
 package main
 
 import (
 	"bytes"
 	"compress/gzip"
+	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -26,10 +34,46 @@ const (
 )
 
 func main() {
-	if err := run(os.Args[1:]); err != nil {
+	exe := flag.String("exe", "", "write the executable of the one platform given to this file instead of embedding")
+	flag.Parse()
+	var err error
+	if *exe != "" {
+		err = writeExecutable(*exe, flag.Args())
+	} else {
+		err = run(flag.Args())
+	}
+	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+// writeExecutable fetches the archive of the one platform given and writes
+// its verified executable to path (mode 0755).
+func writeExecutable(path string, platforms []string) error {
+	if len(platforms) != 1 {
+		return fmt.Errorf("usage: go run ./scripts/fetch-hc -exe FILE OS/ARCH")
+	}
+	a, err := hcdist.ForPlatform(platforms[0])
+	if err != nil {
+		return err
+	}
+	archive := filepath.Join(cacheDir, a.Name)
+	if err := fetch(a, archive); err != nil {
+		return err
+	}
+	bin, err := a.Extract(archive, hcdist.Executable, hcdist.MaxExecutable)
+	if err != nil {
+		return err
+	}
+	if err := writeFile(path, bin); err != nil {
+		return err
+	}
+	if err := os.Chmod(path, 0o755); err != nil {
+		return err
+	}
+	fmt.Printf("    herdr-core %s %s (verified) in %s\n", hcdist.Version, platforms[0], path)
+	return nil
 }
 
 func run(platforms []string) error {

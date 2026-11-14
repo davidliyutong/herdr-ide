@@ -33,8 +33,9 @@ make dev-web         # Vite on http://localhost:5173, proxied to the dev core (D
 `make it` runs the integration tests against a real herdr-core in the
 isolated session `herdr-ide-it` with temporary state:
 `HC_TEST_BIN=<path to herdr-core> make it` (without it, `hc` on `PATH`;
-without either the tests are skipped). The release archives that
-`scripts/fetch-hc` verifies into `dist/hc/` each hold one at their root.
+without either the tests are skipped).
+`go run ./scripts/fetch-hc -exe <file> <os>/<arch>` writes the pinned,
+verified executable for one platform to `<file>`, as CI does.
 
 Release archives are in `dist/release/`; the unpacked directories are in
 `dist/packages/`. herdr-core upgrades change the version and the four
@@ -54,13 +55,18 @@ workspaces can live in the ignored `.worktrees/` directory.
 
 - Keep each PR focused; describe the user-visible change and how you tested
   it (the template asks for this).
-- `make check test` must pass; CI runs the same (plus `go test -race` and a
-  macOS job).
+- `make check test` must pass; CI (`.github/workflows/ci.yml`) runs the
+  same, plus `go test -race`, `make it` against the pinned herdr-core, the
+  cross-compiled release archives and, on macOS, the Go tests, the
+  Electron app, `make macos-test` and the ad-hoc signed `make macos-app`.
 - New Go dependencies: run `scripts/notices.sh` and commit
   `THIRD_PARTY_NOTICES.md` (checked by CI); make sure the license is
   compatible with MIT.
 - Add or update tests with behavior changes. Go tests live next to the code;
-  web tests in `web/src/__tests__`, desktop tests in `desktop/src/*.test.ts`.
+  web tests in `web/src/__tests__`, desktop tests in `desktop/src/*.test.ts`,
+  the macOS application's in `macos/Tests`. Vectors both clients run live
+  in `design/testdata/` (`make check` fails when a vector file is run by no
+  web or no Swift test).
 - Update the docs in the same PR: flags and shortcuts in
   [docs/reference.md](docs/reference.md) (CI checks every flag is listed),
   components and protocols in [docs/architecture.md](docs/architecture.md),

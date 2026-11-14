@@ -11,6 +11,8 @@
 #      registry are current
 #   8. the web UI's terminal emulator (web/src/vt/ghostty-vt.wasm) is the
 #      module whose digest scripts/fetch-ghostty-vt.sh recorded
+#   9. every shared test vector (design/testdata) is run by the web UI's
+#      and the macOS application's tests
 set -euo pipefail
 cd "$(dirname "$0")/.."
 fail=0
@@ -18,7 +20,7 @@ slug=$(sed -n 's/^[[:space:]]*Slug = "\(.*\)"$/\1/p' internal/brand/brand.go)
 module=$(sed -n 's/^module //p' go.mod)
 
 echo "==> gofmt / go vet"
-unformatted=$(gofmt -l cmd internal web/*.go)
+unformatted=$(gofmt -l cmd internal scripts web/*.go)
 if [[ -n "$unformatted" ]]; then echo "gofmt needed:"; echo "$unformatted"; fail=1; fi
 go vet ./... || fail=1
 go vet -tags integration ./... || fail=1
@@ -61,5 +63,17 @@ go run ./scripts/registry -check || fail=1
 
 echo "==> terminal emulator module"
 scripts/fetch-ghostty-vt.sh --check || fail=1
+
+echo "==> shared test vectors"
+# Each client runs every vector: its tests name the file (<dir>/<name>.json),
+# the directory's files (<dir>/*.json) or the directory itself
+# ("…/testdata/<dir>"), so a new vector file cannot go unrun on one side.
+for f in design/testdata/*/*.json; do
+  rel=${f#design/testdata/}
+  dir=${rel%%/*}
+  for side in web/src/__tests__ macos/Tests; do
+    grep -rqF -e "$rel" -e "$dir/*.json" -e "testdata/$dir\"" "$side" || { echo "$f is run by no test in $side"; fail=1; }
+  done
+done
 
 exit $fail
