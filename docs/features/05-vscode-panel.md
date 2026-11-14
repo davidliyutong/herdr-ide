@@ -121,8 +121,11 @@ settings between machines.
   core adds the sending window's folders (`bridge.send`), and the browser
   pastes it, unsubmitted, into the focused pane when the selected
   workspace's panel shows that window, else into an agent pane (idle or done
-  first) of the workspace whose panel shows it; without such a workspace,
-  into the focused pane on that machine or its most attention-worthy agent.
+  first) of the workspace whose panel shows it; when that workspace has no
+  agent pane, nothing is pasted (it would land in another project) and a
+  note names the workspace. Without such a workspace (no panel shows the
+  window), it goes to the focused pane on that machine or its most
+  attention-worthy agent.
 - **Download (folders as zip)** in the explorer's menu (several entries can be
   selected) sends their paths; the core passes them to the browsers as
   `bridge.download`, and the page with the focus (the one whose VS Code panel
@@ -205,7 +208,8 @@ paths), `internal/server/download_test.go` (`bridge.download` to browsers),
 `web/src/__tests__/workspaceDock.test.ts` (a panel per workspace, kept per
 browser and dropped with its workspace or machine, windows per machine and
 folder with their order, expiry and limit, disabled machines, read-only
-mode, stopping code-server, the pane Send to Agent picks),
+mode, stopping code-server, the pane Send to Agent picks and none in
+another workspace),
 `web/src/__tests__/download.test.ts` (only the focused page downloads),
 `desktop/src/policy.test.ts` (the File System Access permission). VS Code's
 own Download… was traced in code-server 4.144.0: up to 32 MB it is a blob

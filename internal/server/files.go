@@ -123,10 +123,12 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 	serveFile(w, r, mc, rep.Stat, r.URL.Query().Get("download") == "1")
 }
 
-// serveFile streams the file st describes, as an attachment when download.
-// serveFile serves a file of a machine, or the range asked for, and reports
-// whether the whole response was written.
-func serveFile(w http.ResponseWriter, r *http.Request, mc *machines.Machine, st *agentproto.Stat, download bool) bool {
+// serveFile serves the file of a machine st describes, or the range asked
+// for, as an attachment when download. It reports whether the whole
+// response was written; when it was not, code says why an error response
+// went out instead (a download code), and is empty when the transfer broke
+// off, which leaves the response unfinished.
+func serveFile(w http.ResponseWriter, r *http.Request, mc *machines.Machine, st *agentproto.Stat, download bool) (complete bool, code string) {
 	etag := fmt.Sprintf(`W/"%x-%x"`, st.Size, st.ModTime)
 	h := w.Header()
 	h.Set("ETag", etag)
@@ -146,36 +148,54 @@ func serveFile(w http.ResponseWriter, r *http.Request, mc *machines.Machine, st 
 	}
 	if r.Header.Get("If-None-Match") == etag {
 		w.WriteHeader(http.StatusNotModified)
-		return true
+		return true, ""
 	}
 	start, length, partial := int64(0), st.Size, false
 	if rh := r.Header.Get("Range"); rh != "" {
 		if a, n, ok := parseRange(rh, st.Size); ok {
 			start, length, partial = a, n, true
 		} else if st.Size > 0 {
+			// A resumed download of a file that shrank since.
+			h.Del("Content-Disposition")
 			h.Set("Content-Range", fmt.Sprintf("bytes */%d", st.Size))
 			http.Error(w, "invalid range", http.StatusRequestedRangeNotSatisfiable)
-			return false
+			return false, dlChanged
 		}
 	}
 	h.Set("Content-Length", strconv.FormatInt(length, 10))
 	if partial {
 		h.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, start+length-1, st.Size))
-		w.WriteHeader(http.StatusPartialContent)
 	}
 	if r.Method == http.MethodHead || length == 0 {
-		return true
+		if partial {
+			w.WriteHeader(http.StatusPartialContent)
+		}
+		return true, ""
 	}
+	// Opened before the status goes out: a file removed since its stat is
+	// still answered as not found.
 	conn, _, err := mc.Open(r.Context(), agentproto.Header{Op: agentproto.OpFsRead, Path: st.Path, Offset: start, Length: length})
 	if err != nil {
-		return false
+		for _, k := range []string{"Content-Disposition", "Content-Range", "ETag", "Last-Modified", "Accept-Ranges"} {
+			h.Del(k)
+		}
+		code := failCode(err)
+		status := http.StatusNotFound
+		if code == dlUnavailable {
+			status = http.StatusBadGateway
+		}
+		http.Error(w, err.Error(), status)
+		return false, code
 	}
 	defer conn.Close()
+	if partial {
+		w.WriteHeader(http.StatusPartialContent)
+	}
 	// A request that ends (the browser left, a download cancelled from the
 	// panel) stops reading the agent's stream.
 	defer endWith(r.Context(), conn)()
 	_, err = io.CopyN(w, ctxReader{r.Context(), conn}, length)
-	return err == nil
+	return err == nil, ""
 }
 
 // endWith stops reads of an agent's stream that wait for data and closes it
@@ -256,7 +276,10 @@ func archiveName(paths []string) string {
 // else as a zip the agent makes while it is downloaded (fs.archive).
 func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	// A download the page follows in its downloads panel (downloads.go).
-	d, w, r := s.trackDownload(w, r)
+	d, w, r, ok := s.trackDownload(w, r)
+	if !ok {
+		return
+	}
 	defer d.finish()
 	mc := s.machine(w, r)
 	if mc == nil {
@@ -283,9 +306,12 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		}
 		if !rep.Stat.IsDir {
 			d.describe(filepath.Base(rep.Stat.Path), rep.Stat.Size)
-			if serveFile(w, r, mc, rep.Stat, true) {
+			switch complete, code := serveFile(w, r, mc, rep.Stat, true); {
+			case complete:
 				d.done()
-			} else if d.broken() {
+			case code != "":
+				d.fail(code) // answered with an error
+			case d.broken():
 				// Cancelled from the panel or the machine went away: the
 				// browser must see a failed download.
 				panic(http.ErrAbortHandler)

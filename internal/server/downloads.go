@@ -27,9 +27,8 @@ var downloadID = regexp.MustCompile(`^[A-Za-z0-9_-]{8,64}$`)
 const (
 	// downloadEvery is how often a running download's progress is sent.
 	downloadEvery = 250 * time.Millisecond
-	// maxTrackedDownloads bounds the downloads followed at once; others
-	// still download, without events.
-	maxTrackedDownloads = 64
+	// maxWatchIDs bounds the ids of one download.watch.
+	maxWatchIDs = 256
 	// downloadKeep is how long a download's end, and a page's interest in
 	// an id that never came, are kept; maxEndedDownloads bounds the ends
 	// kept and maxDownloadWatchers the ids followed.
@@ -44,6 +43,7 @@ const (
 	dlUnavailable = "unavailable" // the machine is not connected
 	dlInvalid     = "invalid"     // the paths were refused
 	dlInterrupted = "interrupted" // the transfer broke off
+	dlChanged     = "changed"     // the file is shorter than the range asked for
 )
 
 type downloadsHub struct {
@@ -58,6 +58,8 @@ type downloadsHub struct {
 type endedDownload struct {
 	ev map[string]any
 	at time.Time
+	// early: cancelled before its request arrived, which is then refused.
+	early bool
 }
 
 type downloadWatcher struct {
@@ -69,6 +71,7 @@ type download struct {
 	s      *Server
 	id     string
 	parent context.Context // the browser's request
+	ctx    context.Context // parent, also ended by a cancel from the panel
 	cancel context.CancelFunc
 	byUser atomic.Bool
 
@@ -84,26 +87,35 @@ type download struct {
 // trackDownload follows the download of r when the page gave it an id. It
 // returns the writer and request to serve it with: the writer counts what
 // goes out, the request's context also ends when the page cancels it. A
-// HEAD request, an id in use or too many downloads are not followed.
-func (s *Server) trackDownload(w http.ResponseWriter, r *http.Request) (*download, http.ResponseWriter, *http.Request) {
+// HEAD request or an id in use is not followed. Every download in progress
+// is (its memory goes with its request). ok is false when r was answered
+// already: the page cancelled the download before its request arrived (the
+// browser held it back), so it is refused.
+func (s *Server) trackDownload(w http.ResponseWriter, r *http.Request) (d *download, _ http.ResponseWriter, _ *http.Request, ok bool) {
 	id := r.URL.Query().Get("dl")
 	if r.Method != http.MethodGet || !downloadID.MatchString(id) {
-		return nil, w, r
+		return nil, w, r, true
 	}
 	ctx, cancel := context.WithCancel(r.Context())
-	d := &download{s: s, id: id, parent: r.Context(), cancel: cancel, total: -1}
+	d = &download{s: s, id: id, parent: r.Context(), ctx: ctx, cancel: cancel, total: -1}
 	h := &s.downloads
 	h.mu.Lock()
 	h.init()
-	if h.running[id] != nil || len(h.running) >= maxTrackedDownloads {
+	if e := h.ended[id]; e.early {
 		h.mu.Unlock()
 		cancel()
-		return nil, w, r
+		http.Error(w, "download cancelled", http.StatusGone)
+		return nil, w, r, false
+	}
+	if h.running[id] != nil {
+		h.mu.Unlock()
+		cancel()
+		return nil, w, r, true
 	}
 	h.running[id] = d
 	h.mu.Unlock()
 	d.publish("running")
-	return d, &downloadWriter{ResponseWriter: w, d: d}, r.WithContext(ctx)
+	return d, &downloadWriter{ResponseWriter: w, d: d}, r.WithContext(ctx), true
 }
 
 // describe sets the name the file is saved under and its size, -1 when it
@@ -118,9 +130,10 @@ func (d *download) describe(name string, total int64) {
 	d.publish("running")
 }
 
-// fail records why the download failed (the first reason counts).
+// fail records why the download failed (the first reason counts). Once
+// the browser or the panel cancelled it, errors are that cancel's.
 func (d *download) fail(code string) {
-	if d == nil {
+	if d == nil || d.ctx.Err() != nil {
 		return
 	}
 	d.mu.Lock()
@@ -275,8 +288,8 @@ func (s *Server) watchDownloads(c *wsClient, ids []string) {
 	defer h.mu.Unlock()
 	h.init()
 	h.pruneLocked(now)
-	if len(ids) > maxTrackedDownloads {
-		ids = ids[:maxTrackedDownloads]
+	if len(ids) > maxWatchIDs {
+		ids = ids[:maxWatchIDs]
 	}
 	for _, id := range ids {
 		if !downloadID.MatchString(id) {
@@ -320,7 +333,8 @@ func (w *downloadWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter 
 
 // cancelDownload stops download id for page c (download.cancel): the
 // browser's download fails, and the agent's stream closes. c follows the id
-// from then on, and hears how it ended, or that the core does not know it.
+// from then on and hears how it ended. One the core has not seen counts as
+// cancelled at once, and its request is refused if it comes after all.
 func (s *Server) cancelDownload(c *wsClient, id string) {
 	if !downloadID.MatchString(id) {
 		return
@@ -330,7 +344,18 @@ func (s *Server) cancelDownload(c *wsClient, id string) {
 	h.init()
 	d := h.running[id]
 	if d == nil {
-		ev := h.stateLocked(id)
+		if _, ok := h.ended[id]; !ok {
+			now := time.Now()
+			h.pruneLocked(now)
+			if len(h.ended) >= maxEndedDownloads {
+				h.dropOldestLocked()
+			}
+			ev := map[string]any{"t": "download", "id": id, "state": "cancelled", "sent": 0}
+			h.ended[id] = endedDownload{ev: ev, at: now, early: true}
+			delete(h.watchers, id)
+			s.audit.log(c.req, "file.download.cancel", map[string]any{"id": id})
+		}
+		ev := h.ended[id].ev
 		h.mu.Unlock()
 		c.sendJSON(ev)
 		return

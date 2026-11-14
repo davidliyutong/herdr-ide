@@ -13,14 +13,12 @@
 // per browser (the last HISTORY_MAX, in localStorage; names and paths, no
 // contents).
 
-import { create } from 'zustand';
 import { desktopShell } from './desktop';
 import { downloadUrl } from './lib/files';
 import { useStore } from './state/store';
-import { storage } from './brand';
 import { conn } from './lib/conn';
 import { hasMessage, t } from './i18n';
-import { HISTORY_MAX, SPEED_WINDOW_MS } from './transfers';
+import { Speed, transferList } from './transferList';
 
 /** Whether files of machine m can be downloaded from this page: not the
  * desktop app's own machine, whose files are already on this computer. */
@@ -50,6 +48,9 @@ export interface Download {
   ended?: number;
   /** A failure's code (downloads.error.*). */
   error?: string;
+  /** Not started after NO_RESPONSE_MS: the browser holds it back (behind
+   * other downloads to the same host) or blocked it. */
+  waiting?: boolean;
 }
 
 /** An event of the core about a download (internal/server/downloads.go);
@@ -64,73 +65,28 @@ export interface DownloadEvent {
 }
 
 /** How long a download may go without a word from the core (which reports
- * it as soon as the request arrives) before it counts as not started; the
- * time while the page is not connected does not count. */
+ * it as soon as the request arrives) before it shows as not started yet;
+ * the time while the page is not connected does not count. */
 export const NO_RESPONSE_MS = 30_000;
-const SHOW_EVERY_MS = 250;
-const KEY = 'downloads';
-const FINISHED = new Set<DownloadStatus>(['done', 'failed', 'cancelled']);
+const FINISHED = new Set<unknown>(['done', 'failed', 'cancelled']);
 
-function storedHistory(): Download[] | undefined {
-  const raw = storage.get(KEY);
-  if (raw === null) return undefined;
-  try {
-    const v: unknown = JSON.parse(raw);
-    if (!Array.isArray(v)) return [];
-    return v
-      .filter(
-        (x) =>
-          x &&
-          typeof x.id === 'string' &&
-          typeof x.m === 'string' &&
-          typeof x.name === 'string' &&
-          Array.isArray(x.paths) &&
-          FINISHED.has(x.status),
-      )
-      .slice(0, HISTORY_MAX);
-  } catch {
-    return [];
-  }
-}
+const list = transferList<Download>(
+  'downloads',
+  (x) => typeof x.m === 'string' && typeof x.name === 'string' && Array.isArray(x.paths) && FINISHED.has(x.status),
+);
 
-interface DownloadsState {
-  /** Starting and downloading, oldest first. */
-  active: Download[];
-  /** Finished, newest first. */
-  history: Download[];
-  panel: boolean;
-  setPanel(open: boolean): void;
-}
-
-export const useDownloads = create<DownloadsState>((set) => ({
-  active: [],
-  history: storedHistory() ?? [],
-  panel: false,
-  // Opening shows what other tabs of this browser finished meanwhile.
-  setPanel: (panel) => set(panel ? (s) => ({ panel, history: storedHistory() ?? s.history }) : { panel }),
-}));
-
-function setHistory(fn: (h: Download[]) => Download[]) {
-  const history = fn(storedHistory() ?? useDownloads.getState().history).slice(0, HISTORY_MAX);
-  storage.set(KEY, JSON.stringify(history));
-  useDownloads.setState({ history });
-}
+/** Starting and downloading downloads, oldest first, and the finished ones. */
+export const useDownloads = list.store;
 
 interface Live {
-  /** [time, bytes] over the last SPEED_WINDOW_MS. */
-  samples: Array<[number, number]>;
-  shown: number;
+  speed: Speed;
   timer?: ReturnType<typeof setTimeout>;
   /** The user cancelled it. */
   cancelling?: boolean;
 }
 const live = new Map<string, Live>();
 
-const find = (id: string) => useDownloads.getState().active.find((x) => x.id === id);
-
-function patch(id: string, p: Partial<Download>) {
-  useDownloads.setState((s) => ({ active: s.active.map((x) => (x.id === id ? { ...x, ...p } : x)) }));
-}
+const find = list.find;
 
 /** The message for a failure's code. */
 export function downloadError(code?: string): string {
@@ -147,10 +103,10 @@ function end(id: string, p: Pick<Download, 'status'> & Partial<Download>) {
   if (!x) return;
   const ended = Date.now();
   const entry: Download = { ...x, ...p, ended };
+  delete entry.waiting;
   entry.speed = entry.status === 'done' && ended > x.started ? (entry.sent * 1000) / (ended - x.started) : 0;
   if (entry.status === 'done') entry.size = entry.sent;
-  useDownloads.setState((s) => ({ active: s.active.filter((a) => a.id !== id) }));
-  setHistory((h) => [entry, ...h.filter((e) => e.id !== id)]);
+  list.archive(entry);
   if (entry.status === 'failed') useStore.getState().toast(t('download.failed', { name: entry.name, error: downloadError(entry.error) }));
 }
 
@@ -184,19 +140,22 @@ export function startDownload(m: string, paths: string[]): string | undefined {
     speed: 0,
     started: now,
   };
-  const l: Live = { samples: [[now, 0]], shown: -Infinity };
+  const l: Live = { speed: new Speed() };
   const wait = () => {
     l.timer = setTimeout(() => {
+      l.timer = undefined;
       if (find(id)?.status !== 'starting') return;
       // Disconnected, the page cannot hear the core: it asks again after
-      // reconnecting (resyncDownloads).
-      if (conn.connected) end(id, { status: 'failed', error: 'no_response' });
+      // reconnecting (resyncDownloads). Connected, the request has not
+      // arrived: the browser holds it back or blocked it. It stays, and
+      // can be cancelled.
+      if (conn.connected) list.patch(id, { waiting: true });
       else wait();
     }, NO_RESPONSE_MS);
   };
   wait();
   live.set(id, l);
-  useDownloads.setState((s) => ({ active: [...s.active, x] }));
+  list.add([x]);
   // Before the request, so that the core reports it to this page.
   conn.send({ t: 'download.watch', ids: [id] });
   const a = document.createElement('a');
@@ -238,20 +197,16 @@ export function downloadEvent(ev: DownloadEvent) {
     clearTimeout(l.timer);
     l.timer = undefined;
   }
-  const now = Date.now();
-  l.samples.push([now, sent]);
-  // Keep the last sample at or before the window's start.
-  while (l.samples.length > 2 && now - l.samples[1][0] >= SPEED_WINDOW_MS) l.samples.shift();
   const first = x.status === 'starting' || p.name !== undefined || p.size !== undefined;
-  if (!first && now - l.shown < SHOW_EVERY_MS) return;
-  l.shown = now;
-  const [t0, s0] = l.samples[0];
-  patch(ev.id, { ...p, status: 'downloading', sent, speed: now > t0 ? ((sent - s0) * 1000) / (now - t0) : 0 });
+  const speed = l.speed.add(sent, first);
+  if (speed === undefined) return;
+  list.patch(ev.id, { ...p, status: 'downloading', waiting: undefined, sent, speed });
 }
 
 /** Cancels a download: the core breaks off the response, so the browser's
- * download fails too, and reports it as cancelled (or how it ended before,
- * or that it does not know it). */
+ * download fails too, and reports it as cancelled, or how it ended before.
+ * One whose request has not arrived counts as cancelled at once, and the
+ * core refuses that request if it comes. */
 export function cancelDownload(id: string) {
   const l = live.get(id);
   if (!find(id) || !l) return;
@@ -275,13 +230,9 @@ export function retryDownload(x: Download) {
   startDownload(x.m, x.paths);
 }
 
-export function forgetDownload(id: string) {
-  setHistory((h) => h.filter((e) => e.id !== id));
-}
+export const forgetDownload = list.forget;
 
-export function clearDownloadHistory() {
-  setHistory(() => []);
-}
+export const clearDownloadHistory = list.clear;
 
 /** Received and total bytes of the active downloads; total is undefined
  * while one of them has no size. */

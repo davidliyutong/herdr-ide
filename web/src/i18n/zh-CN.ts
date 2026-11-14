@@ -25,6 +25,7 @@ export const zhCN: Messages = {
   'app.hint': '{prefix} ? 查看快捷键 · {prefix} space 命令面板',
   'app.readOnly': '只读',
   'app.noAgentPane': '没有可接收的 pane：先聚焦一个 agent pane',
+  'app.noAgentInWorkspace': '显示这个 VS Code 窗口的工作区 {workspace} 里没有 agent pane',
   'app.uploadFailed': '上传失败：{error}',
   'app.uploadDirFailed': '无法保存到 {dir}（{error}），改为上传到上传目录。',
   'transfers.title': '上传',
@@ -54,6 +55,7 @@ export const zhCN: Messages = {
   'transfers.hours': '{h} 小时 {m} 分',
   'downloads.title': '下载',
   'downloads.starting': '正在开始…',
+  'downloads.waiting': '尚未开始：浏览器可能让它排在其他下载之后，或已拦截',
   'downloads.received': '{sent} · {speed}/s',
   'downloads.items': '{n} 项',
   'downloads.paths': '{path} 等 {n} 项',
@@ -66,6 +68,7 @@ export const zhCN: Messages = {
   'downloads.error.interrupted': '传输中断',
   'downloads.error.no_response': '下载没有开始',
   'downloads.error.lost': '结果未知，请查看浏览器的下载记录',
+  'downloads.error.changed': '机器上的文件已改变',
   'app.updated': '服务端已更新，请刷新页面以使用新版本。',
   'app.reload': '刷新',
 

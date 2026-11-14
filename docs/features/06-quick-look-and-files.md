@@ -169,7 +169,8 @@ more); editing files (that is VS Code's job).
   removed one by one or all at once; this does not touch the files.
 
 **Downloads panel** (`web/src/download.ts`, `web/src/components/Downloads.tsx`,
-`internal/server/downloads.go`)
+`internal/server/downloads.go`; what it shares with the uploads panel is in
+`web/src/transferList.ts` and `web/src/components/TransferPanel.tsx`)
 
 - The same design as the uploads panel, with its own button in the status
   bar (shown once the browser has downloaded something): the downloads
@@ -183,9 +184,9 @@ more); editing files (that is VS Code's job).
   when the request arrives, when it knows the name the file is saved under
   and its size, every 250 ms while it writes the response, and once at the
   end. `sent` counts the bytes the core wrote to the response, which over a
-  machine's link is close to what the browser received. At most 64
-  downloads are followed at once (the others still download, without
-  progress), a `HEAD` check is not.
+  machine's link is close to what the browser received. Every download in
+  progress is followed (what the core keeps for it goes with its request);
+  a `HEAD` check is not.
 - Every `download.watch` is answered with what the core knows of each id:
   its progress, how it ended (kept for 10 minutes, at most 256), or
   `unknown`. So a request that arrives before the page's message, or a
@@ -201,18 +202,27 @@ more); editing files (that is VS Code's job).
 - **Cancel** (and **Cancel all**) asks the core
   (`download.cancel {id}` over the WebSocket) to break the response off:
   the browser's download fails instead of saving a partial file, the
-  agent's stream ends, and the panel shows it as cancelled. A download the
-  core does not know (its request never arrived) ends as cancelled at once;
-  one that just ended shows how it ended. A download cancelled in the
-  browser (or the desktop app's save dialog) ends the request, which the
-  core also reports as cancelled.
+  agent's stream ends, and the panel shows it as cancelled. A download
+  whose request has not arrived ends as cancelled at once, and the core
+  answers that request `410 Gone` if it comes later; one that just ended
+  shows how it ended. A download cancelled in the browser (or the desktop
+  app's save dialog) ends the request, which the core also reports as
+  cancelled, also while the core is still asking the machine about the
+  path.
 - It ends as done once the core wrote the whole response; as failed with a
-  reason when the path or machine is not there (`not_found`), the machine
-  is not connected (`unavailable`), the paths were refused (`invalid`) or
-  the transfer broke off (`interrupted`; the response is aborted, so the
-  browser reports a failure, not a truncated archive); a note says so too.
-  A download the core never reported within 30 s of connected time (the
-  request did not reach it) counts as failed (`no_response`).
+  reason when the path or machine is not there (`not_found`, also for a
+  file removed between its check and its read), the machine is not
+  connected (`unavailable`), the paths were refused (`invalid`), a resumed
+  download asks for more than the file now has (`changed`, answered `416`)
+  or the transfer broke off (`interrupted`; the response is aborted, so
+  the browser reports a failure, not a truncated archive); a note says so
+  too. Only a transfer that broke off is aborted: the others are answered
+  with their error.
+- A download the core has not reported after 30 s of connected time shows
+  as not started yet: browsers hold back downloads beyond a few to the
+  same host (6 over HTTP/1.1) until others finish, or may block several
+  downloads at once. It stays, can be cancelled, and runs as usual once
+  its request arrives.
 - Finished downloads show the machine, the paths, the size, time and
   average speed, or why they ended, and can be downloaded again or removed
   from the list. The browser keeps the last 50 in `localStorage` (names,
@@ -288,10 +298,13 @@ and an archive to the page following them only, failure codes, the state
 for a page that asks late and for an unknown id, cancelling from the panel
 and in the browser with the response broken off, an archive whose machine
 goes away failing instead of ending, no events without an id or for
-`HEAD`),
+`HEAD`; `TestDownloadEdges`: more than 100 downloads at once followed, a
+download cancelled before its request refused, `416` for a range past the
+end, a file removed between stat and read not found, the browser leaving
+during the stat reported as cancelled),
 `web/src/__tests__/download.test.ts` (the pane menu's items, the check
 before a path's download, the chooser, no downloads for the desktop app's
 own machine; the panel: progress and speed, an archive without a size,
-failures and their notes, cancelling, a download that never started,
+failures and their notes, cancelling, a download the browser holds back,
 asking again after a reconnect and ending what the core no longer knows,
 downloading again, the status bar button).
