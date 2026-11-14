@@ -409,6 +409,40 @@ func TestBridgeTheme(t *testing.T) {
 	}
 }
 
+// Send to Agent reaches the browsers with the sending window's folders, so
+// the page can pick the workspace whose panel shows that window.
+func TestBridgeSendToAgent(t *testing.T) {
+	s := newTestServer()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c := &wsClient{s: s, ctx: ctx, cancel: cancel, send: make(chan outMsg, 8)}
+	s.clients[c] = true
+	mc := machines.NewManager([]machines.Spec{{ID: "m", Label: "m", Kind: machines.KindSSH}}, nil, log.New(io.Discard, "", 0)).Get("m")
+	a, b := net.Pipe()
+	defer b.Close()
+	go s.bridge.serve(mc, a)
+	r := bufio.NewReader(b)
+	if _, err := r.ReadString('\n'); err != nil { // the bridge's reply
+		t.Fatal(err)
+	}
+	b.Write([]byte(`{"type":"sendToAgent","text":"@/a:1"}` + "\n"))
+	b.Write([]byte(`{"type":"hello","id":"w1","folders":["/srv/app"]}` + "\n"))
+	b.Write([]byte(`{"type":"sendToAgent","text":"@/srv/app/x.go:3","file":"/srv/app/x.go","line":3,"end_line":3}` + "\n"))
+	for _, want := range []string{
+		`{"end_line":0,"file":"","folders":[],"line":0,"m":"m","t":"bridge.send","text":"@/a:1"}`,
+		`{"end_line":3,"file":"/srv/app/x.go","folders":["/srv/app"],"line":3,"m":"m","t":"bridge.send","text":"@/srv/app/x.go:3"}`,
+	} {
+		select {
+		case m := <-c.send:
+			if string(m.data) != want {
+				t.Fatalf("got %s, want %s", m.data, want)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("no bridge.send")
+		}
+	}
+}
+
 // New panes get the machine's display environment; what the caller set wins.
 func TestMergeEnv(t *testing.T) {
 	env := map[string]string{"DISPLAY": ":20", "XAUTHORITY": "/x"}

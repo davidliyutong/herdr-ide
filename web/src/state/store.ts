@@ -34,7 +34,21 @@ export interface Toast {
 export type DockView =
   { kind: 'preview'; m: string; path: string } | { kind: 'code'; m: string; folder?: string } | { kind: 'agent'; m: string; pane: string };
 
-interface UIState {
+export type CodeView = Extract<DockView, { kind: 'code' }>;
+
+/** What one workspace shows in the dock beside its panes: each workspace
+ * has its own, so several VS Code windows (machines or folders) stay open
+ * and switching workspace switches the panel (docs/features/05). */
+export interface WorkspaceDock {
+  m: string;
+  ws: string;
+  view?: DockView;
+  /** The VS Code panel this workspace showed last, which toggling the panel
+   * shows again. */
+  lastCode?: CodeView;
+}
+
+export interface UIState {
   connected: boolean;
   order: string[];
   machines: Record<string, MachineState>;
@@ -47,9 +61,9 @@ interface UIState {
   focused?: PaneRef;
 
   sidebarOpen: boolean;
-  dock?: DockView;
-  /** The VS Code panel shown last, which toggling the panel shows again. */
-  lastCode?: Extract<DockView, { kind: 'code' }>;
+  /** Each workspace's dock by dockKey; read the selected workspace's with
+   * currentDock and currentLastCode. */
+  docks: Record<string, WorkspaceDock>;
   dockWidth: number;
   /** Height of the dock when it sits below the panes. */
   dockHeight: number;
@@ -75,7 +89,11 @@ interface UIState {
   selectTab(m: string, ws: string, tab: string): void;
   focusPane(ref: PaneRef | undefined): void;
   toggleSidebar(): void;
+  /** Shows v (or nothing) in the selected workspace's dock. */
   openDock(v: DockView | undefined): void;
+  /** Closes every workspace's VS Code panel of machine m (its code-server
+   * was stopped). */
+  closeCode(m: string): void;
   setDockWidth(w: number): void;
   setDockHeight(h: number): void;
   setPalette(p: UIState['palette']): void;
@@ -93,6 +111,77 @@ interface UIState {
 let toastSeq = 0;
 
 const wsKey = (m: string, ws: string) => `${m}|${ws}`;
+
+/** The key of the selected workspace's dock; "" before one is selected. */
+export function dockKey(s: Pick<UIState, 'machineId' | 'workspaceId'>): string {
+  return s.machineId && s.workspaceId ? wsKey(s.machineId, s.workspaceId) : '';
+}
+
+/** What the selected workspace's dock shows. VS Code is not available in
+ * read-only mode, so a VS Code panel kept from before shows nothing. */
+export function currentDock(s: UIState): DockView | undefined {
+  const v = s.docks[dockKey(s)]?.view;
+  return v?.kind === 'code' && s.readOnly ? undefined : v;
+}
+
+/** The VS Code panel the selected workspace showed last. */
+export function currentLastCode(s: UIState): CodeView | undefined {
+  return s.docks[dockKey(s)]?.lastCode;
+}
+
+/** A workspace folder without a trailing slash, so one folder is one VS Code
+ * window. */
+export function normFolder(folder?: string): string | undefined {
+  if (!folder) return undefined;
+  return folder.length > 1 ? folder.replace(/\/+$/, '') || '/' : folder;
+}
+
+/** Docks that still have something to show, without the views and
+ * workspaces that are gone: workspaces of machines that are not in machines
+ * (when all is set: the list is complete) or not in their machine's
+ * snapshot, and views of machines that are not there. */
+function pruneDocks(docks: Record<string, WorkspaceDock>, machines: Record<string, MachineState>, all: boolean) {
+  const out: Record<string, WorkspaceDock> = {};
+  let changed = false;
+  const gone = (m: string) => all && !machines[m];
+  for (const [k, d] of Object.entries(docks)) {
+    const snap = machines[d.m]?.snapshot;
+    if (k && (gone(d.m) || (snap && !snap.workspaces.some((w) => w.workspace_id === d.ws)))) {
+      changed = true;
+      continue;
+    }
+    const view = d.view && gone(d.view.m) ? undefined : d.view;
+    const lastCode = d.lastCode && gone(d.lastCode.m) ? undefined : d.lastCode;
+    if (view === d.view && lastCode === d.lastCode) {
+      out[k] = d;
+      continue;
+    }
+    changed = true;
+    if (view || lastCode) out[k] = { ...d, view, lastCode };
+  }
+  return changed ? out : docks;
+}
+
+/** Workspace docks persist per browser; the one of no workspace does not. */
+function saveDocks(docks: Record<string, WorkspaceDock>) {
+  const keep: Record<string, WorkspaceDock> = {};
+  for (const [k, d] of Object.entries(docks)) if (k) keep[k] = d;
+  savePref('docks', keep);
+}
+
+function loadDocks(): Record<string, WorkspaceDock> {
+  const raw = loadPref<Record<string, WorkspaceDock>>('docks', {});
+  const out: Record<string, WorkspaceDock> = {};
+  if (!raw || typeof raw !== 'object') return out;
+  const kinds = ['code', 'preview'];
+  const valid = (v?: DockView) => !v || (typeof v === 'object' && kinds.includes(v.kind) && typeof v.m === 'string');
+  for (const [k, d] of Object.entries(raw)) {
+    if (!d || typeof d.m !== 'string' || typeof d.ws !== 'string' || k !== wsKey(d.m, d.ws)) continue;
+    if (!valid(d.view) || (d.lastCode && d.lastCode.kind !== 'code') || !valid(d.lastCode)) continue;
+    out[k] = d;
+  }
+  return out;
+}
 
 function loadPref<T>(key: string, fallback: T): T {
   try {
@@ -113,6 +202,7 @@ export const useStore = create<UIState>((set, get) => ({
   machines: {},
   tabByWorkspace: {},
   sidebarOpen: loadPref('sidebarOpen', true),
+  docks: loadDocks(),
   dockWidth: loadPref('dockWidth', 640),
   dockHeight: loadPref('dockHeight', 360),
   settingsOpen: false,
@@ -123,21 +213,25 @@ export const useStore = create<UIState>((set, get) => ({
     const machines: Record<string, MachineState> = {};
     for (const m of list) machines[m.id] = m;
     // A machine removed from herdr's catalog takes what showed it along.
-    const { dock, lastCode, focused } = get();
+    const { docks, focused } = get();
+    const nextDocks = pruneDocks(docks, machines, true);
+    if (nextDocks !== docks) saveDocks(nextDocks);
     set({
       machines,
       order: list.map((m) => m.id),
-      ...(dock && !machines[dock.m] ? { dock: undefined } : {}),
-      ...(lastCode && !machines[lastCode.m] ? { lastCode: undefined } : {}),
+      docks: nextDocks,
       ...(focused && !machines[focused.m] ? { focused: undefined } : {}),
     });
     ensureSelection(set, get);
   },
   upsertMachine: (st) => {
-    set((s) => ({
-      machines: { ...s.machines, [st.id]: st },
-      order: s.order.includes(st.id) ? s.order : [...s.order, st.id],
-    }));
+    set((s) => {
+      const machines = { ...s.machines, [st.id]: st };
+      // A workspace closed in herdr takes its dock along.
+      const docks = pruneDocks(s.docks, { [st.id]: st }, false);
+      if (docks !== s.docks) saveDocks(docks);
+      return { machines, docks, order: s.order.includes(st.id) ? s.order : [...s.order, st.id] };
+    });
     ensureSelection(set, get);
   },
   setOrder: (m, patch) =>
@@ -161,7 +255,37 @@ export const useStore = create<UIState>((set, get) => ({
     savePref('sidebarOpen', v);
     set({ sidebarOpen: v });
   },
-  openDock: (dock) => set(dock?.kind === 'code' ? { dock, lastCode: dock } : { dock }),
+  openDock: (v) =>
+    set((s) => {
+      const k = dockKey(s);
+      const view: DockView | undefined = v?.kind === 'code' ? { kind: 'code', m: v.m, folder: normFolder(v.folder) } : v;
+      const prev = s.docks[k];
+      const d: WorkspaceDock = {
+        m: prev?.m ?? s.machineId ?? '',
+        ws: prev?.ws ?? s.workspaceId ?? '',
+        view,
+        lastCode: view?.kind === 'code' ? view : prev?.lastCode,
+      };
+      const docks = { ...s.docks };
+      if (d.view || d.lastCode) docks[k] = d;
+      else delete docks[k];
+      saveDocks(docks);
+      return { docks };
+    }),
+  closeCode: (m) =>
+    set((s) => {
+      let changed = false;
+      const docks: Record<string, WorkspaceDock> = {};
+      for (const [k, d] of Object.entries(s.docks)) {
+        if (d.view?.kind === 'code' && d.view.m === m) {
+          changed = true;
+          docks[k] = { ...d, view: undefined };
+        } else docks[k] = d;
+      }
+      if (!changed) return {};
+      saveDocks(docks);
+      return { docks };
+    }),
   setDockWidth: (w) => {
     savePref('dockWidth', w);
     set({ dockWidth: w });

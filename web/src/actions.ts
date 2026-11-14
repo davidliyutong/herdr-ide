@@ -3,7 +3,7 @@
 import { conn } from './lib/conn';
 import type { LayoutNode, Pane, Snapshot } from './lib/herdr';
 import { paneCwd, statusRank, workspaceTabs } from './lib/herdr';
-import { activeTabId, useStore } from './state/store';
+import { activeTabId, currentDock, currentLastCode, useStore } from './state/store';
 import { getTerm } from './terminal/registry';
 import { mediaExt } from './terminal/links';
 import { bridge } from './lib/bridge';
@@ -557,21 +557,21 @@ export const actions = {
     useStore.getState().toggleSidebar();
   },
 
-  /** Shows or hides the VS Code panel: an open panel (VS Code or preview)
-   * closes and the terminal gets the keys again; otherwise the VS Code panel
-   * shown last comes back while it is of the focused pane's machine (its
-   * window is kept for a while, so it is back at once), else the focused
-   * pane's folder opens in VS Code. */
+  /** Shows or hides the selected workspace's VS Code panel: an open panel
+   * (VS Code or preview) closes and the terminal gets the keys again;
+   * otherwise the VS Code panel the workspace showed last comes back while it
+   * is of the focused pane's machine (its window is kept for a while, so it is
+   * back at once), else the focused pane's folder opens in VS Code. */
   toggleCode() {
     const s = useStore.getState();
-    if (s.dock) {
+    if (currentDock(s)) {
       s.openDock(undefined);
       const c = actions.focusedContext();
       if (c?.pane) getTerm(c.m, c.pane).focus();
       return;
     }
     const c = actions.focusedContext();
-    const last = s.lastCode;
+    const last = currentLastCode(s);
     if (last && (!c || last.m === c.m)) s.openDock(last);
     else if (c) actions.openCode(c.m, c.cwd);
   },

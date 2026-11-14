@@ -42,6 +42,7 @@
     会一并装好 Git Graph 和桥接扩展。
   - 一个快捷键或 pane 标题栏里的按钮就能打开 pane 所在的目录、它的 Diff 或 Git Graph；
     终端里的 `path:line` 可以直接跳到编辑器。
+  - 每个 workspace 有自己的 VS Code 面板，可以同时开着多个 VS Code，切换 workspace 就切换到对应的那个。
   - 面板可以放在终端右侧或下方。
   - 长时间不用的 code-server 会自动停止。
 - **程序窗口**：远端 Linux 机器上程序打开的窗口（matplotlib、MuJoCo 查看器、Qt 工具等）会以浏览器窗口的形式出现，一个程序窗口对应一个浏览器窗口，支持鼠标和键盘。

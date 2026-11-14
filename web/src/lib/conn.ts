@@ -30,7 +30,8 @@ type Listener = {
   /** sound: this page plays notification sounds (it was used most recently). */
   onAgent(machine: string, data: AgentStatusEvent, sound: boolean): void;
   onConnection(connected: boolean): void;
-  onBridgeSend(machine: string, text: string): void;
+  /** folders: those of the VS Code window that sent it. */
+  onBridgeSend(machine: string, text: string, folders?: string[]): void;
   /** Files chosen in VS Code's explorer to download. */
   onBridgeDownload(machine: string, paths: string[]): void;
   onGui(st: GuiState): void;
@@ -105,7 +106,11 @@ class Conn {
         this.listener?.onAgent(m.m, m.data, m.sound === true);
         break;
       case 'bridge.send':
-        this.listener?.onBridgeSend(m.m, m.text);
+        this.listener?.onBridgeSend(
+          m.m,
+          m.text,
+          Array.isArray(m.folders) ? m.folders.filter((f: unknown) => typeof f === 'string') : undefined,
+        );
         break;
       case 'bridge.download':
         this.listener?.onBridgeDownload(m.m, m.paths);

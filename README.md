@@ -49,8 +49,9 @@ browser tab, with VS Code (code-server) one keystroke away.
   themselves, or taken from an existing install, with Git Graph and a bridge
   extension: open a pane's folder, its diff or Git Graph with one key or
   from the buttons in the pane's header; jump from a `path:line` in the terminal
-  to the editor. The panel sits beside or below the terminals. Idle
-  instances are stopped.
+  to the editor. Each workspace has its own panel, so several VS Code
+  windows stay open and switching workspace switches between them. The
+  panel sits beside or below the terminals. Idle instances are stopped.
 - **Program windows.** Windows that programs on remote Linux machines open
   (matplotlib, the MuJoCo viewer, Qt tools) appear in browser windows, one
   per program window, with mouse and keyboard. Panes get a virtual display

@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 
 import { addMachineProblem, addMachineQuery } from '../components/AddMachineDialog';
-import { useStore } from '../state/store';
+import { useStore, currentDock, currentLastCode } from '../state/store';
 import type { MachineState } from '../lib/herdr';
 
 const form = (target: string, label = '', session = '') => ({ target, label, session });
@@ -33,11 +33,12 @@ describe('a removed machine', () => {
     s.openDock({ kind: 'code', m: 'b', folder: '/src' });
     s.focusPane({ m: 'b', pane: 'p1' });
     s.setMachines([m('a'), m('b')]);
-    expect(useStore.getState().dock?.m).toBe('b');
+    expect(currentDock(useStore.getState())?.m).toBe('b');
     s.setMachines([m('a')]);
     const after = useStore.getState();
-    expect(after.dock).toBeUndefined();
-    expect(after.lastCode).toBeUndefined();
+    expect(currentDock(after)).toBeUndefined();
+    expect(currentLastCode(after)).toBeUndefined();
+    expect(after.docks).toEqual({});
     expect(after.focused).toBeUndefined();
     expect(after.order).toEqual(['a']);
   });
