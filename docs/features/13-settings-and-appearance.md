@@ -172,9 +172,9 @@ settings per browser; theming terminal applications.
   changed it.
 - The keyboard page lists every command with its keys in effect, grouped
   by section: × removes a key, + records one (press the strokes, Enter
-  keeps them, Escape cancels; in the desktop app the shell takes strokes
-  with cmd, ctrl or alt while recording, so neither its menu nor a shortcut
-  acts on them), reset returns to the defaults; conflicts are marked.
+  keeps them, Escape cancels; the recorder cancels every key, so in the
+  desktop app its menu, ⌘Q included, does not act on one), reset returns to
+  the defaults; conflicts are marked.
   Changes become user rules (`rulesFor`) saved with `PUT`.
 - `keymap.ts` matches every keydown of the app (terminals route theirs
   through it) against the bindings in effect on the page's platform, chords
@@ -183,12 +183,17 @@ settings per browser; theming terminal applications.
   chord matching nothing ends and its key is dropped. While a dialog or
   the palette is open only `dialog` and `always` bindings run. Key hints
   show the direct shortcut in the desktop app, else the first chord.
-- Desktop app (`desktop/src/shortcuts.ts`): the shell reads
-  `/api/keybindings` (its platform's defaults from `registry.json` until
-  then, again when the page reports a push) and takes single-stroke
-  bindings with cmd, ctrl or alt in `before-input-event`: in a VS Code
-  frame only `vscode` and `always` ones, elsewhere `terminal` and `always`
-  ones. Menu items show their command's first direct shortcut.
+- Desktop app (`desktop/src/follow.ts`, `desktop/src/menu.ts`): the page
+  matches its keys as above with the `mac` or `pc` bindings. The shell
+  reads both endpoints when its own event channel opens and follows the
+  `settings` and `keybindings` messages, as the macOS application does
+  (its platform's defaults from `registry.json` and the system's languages
+  until then). Its menu is the macOS application's; items show their
+  command's first single-stroke key and get only the keys the page leaves
+  ([04](04-layout-and-keyboard.md)). `appearance.theme` becomes Electron's
+  `nativeTheme.themeSource` (title bar, native controls, window
+  background), `appearance.language` the language of the menu and the
+  error dialogs.
 
 **macOS application** (`macos/Sources/TermKit/Settings.swift`, `Keys.swift`,
 `App/Settings.swift`, `App/main.swift`)
@@ -244,7 +249,7 @@ settings per browser; theming terminal applications.
   [24](24-design-tokens.md)), the terminals' colors (the theme's
   `terminal.colors.*`, [26](26-web-terminals.md)) and `theme-color`. The kind is sent to the core,
   which switches VS Code ([05](05-vscode-panel.md)); in the desktop app the
-  setting is also sent to the shell, whose title bar follows it
+  shell reads the setting from the core, and its title bar follows it
   ([16](16-desktop-packaging.md)).
 - Terminal palettes: dark is GitHub Dark Default (Ghostty's theme of that
   name: colors made for a near-black background) on the UI's `--bg` with
@@ -347,8 +352,9 @@ current), `web/src/__tests__/keys.test.ts` (the shared vectors: parsing,
 key names, chords; key hints, user rules), `settings.test.ts` (labels for
 every registry key, store, optimistic changes and error codes, migration
 of the browser settings, search), `termOptions.test.ts`, `tokens.test.ts`,
-`desktop/src/shortcuts.test.ts` (direct shortcuts from the reply, layouts,
-VS Code frames, accelerators, recording),
+`desktop/src/follow.test.ts` (keybindings and settings from the replies
+and pushes), `desktop/src/menu.test.ts` (accelerators, rebinding and
+unbinding, titles per language),
 `macos/Tests/TermKitTests` (`KeysTests`: the shared vectors, labels, menu
 equivalents, Ghostty triggers; `SettingsModelTests`;
 `LocalizationTests.testRegistryKeys`). A dev core was changed through the

@@ -159,8 +159,11 @@ of the local machine are pasted as their own paths, without uploading.
 
 In the app, `cmd+t` opens a tab, `cmd+w` closes the pane, `cmd+d` /
 `cmd+shift+d` split it, `cmd+n` creates a workspace, `cmd+,` opens the
-settings and `cmd+j` shows or hides the VS Code panel; while VS Code has focus, all but `cmd+j` stay VS Code's.
-Change or remove them under **Settings → Keyboard shortcuts**. Prefix bindings keep
+settings and `cmd+j` shows or hides the VS Code panel; while VS Code has
+focus, its own keys come first. The menus are the native application's,
+with the keys in effect, in the UI's language; the title bar follows the
+UI's theme.
+Change or remove the keys under **Settings → Keyboard shortcuts**. Prefix bindings keep
 working, and browsers keep their own `cmd+t` / `cmd+w`.
 
 A native macOS application draws the terminals with Ghostty's renderer and

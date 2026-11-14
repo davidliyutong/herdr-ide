@@ -273,7 +273,9 @@ Non-goals: Linux and Windows.
   splits, close, find, its own settings); the controller's configuration
   unbinds every key of the menu (`TerminalControllerBox.menuKeys`), so they
   reach the menu. A search Ghostty starts by itself shows the find bar as
-  well.
+  well. The Electron application's menu has the same items and titles
+  (`desktop/src/menu.test.ts` compares it with `makeMenu` and these
+  strings, [16](16-desktop-packaging.md)).
 
 **Building** (`scripts/fetch-ghostty.sh`, `scripts/macos-app.sh`,
 `macos/xcode/project.yml`). `make macos-build` and `make macos-test` fetch

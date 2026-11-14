@@ -27,14 +27,18 @@ reference documentation.
   their names (`settings.<key>`, `.desc`, `.<option>`); a test checks that
   the known ones exist, and an untranslated one shows its key.
 - **macOS application** (`macos/Sources/App/Resources`): `Localizable.strings`
-  per locale (`en`, `zh-Hans`), read with `tr(key, args)`; the system picks
-  the language. `LocalizationTests` checks that every locale has the
+  per locale (`en`, `zh-Hans`), read with `tr(key, args)`, in the language
+  of the core's `appearance.language` (`auto`: the system's). `LocalizationTests` checks that every locale has the
   English keys with the same `%@` placeholders, and that every key is used
   and every used key exists. The core's codes (backend and machine states)
   are keys: `backend.<code>`, `machine.<status>`, `status.<state>`.
-- **Desktop shell**: error dialogs reuse `desktop.*` keys from the web's
-  English/Chinese dictionaries and follow the OS locale. Native menu roles
-  use Electron's standard labels; the web UI keeps its own saved language.
+- **Desktop shell**: the menu's titles (`desktop.menu.*`, the macOS
+  application's `menu.*` strings in both languages; `desktop/src/menu.test.ts`
+  compares them) and the error dialogs (`desktop.*`) come from the web's
+  English/Chinese dictionaries, Electron's role items included. They follow
+  the core's `appearance.language`, which the shell reads itself; `auto`
+  follows the system's preferred languages, and so does a failure before the
+  core answers.
 - **Server**: sends codes (code-server phases such as `download` with a
   detail, pane notices such as `taken_over`, agent statuses) that the UI
   translates. The code-server loading page, served inside the VS Code iframe,

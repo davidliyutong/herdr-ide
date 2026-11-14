@@ -142,10 +142,13 @@ settings, `cmd+b` sidebar, `cmd+j` show or hide VS Code, `cmd+}` / `cmd+{`
 next / previous tab, `cmd+f` find, `cmd+g` / `cmd+shift+g` next / previous
 match. On other systems (desktop app): `ctrl+shift+t` new tab,
 `ctrl+shift+w` close tab, `ctrl+,` settings, `ctrl+shift+n` new workspace,
-`ctrl+shift+j` VS Code. Browsers keep those keys for themselves; there
-`cmd+f` (macOS) or `ctrl+shift+f` find. In VS Code only bindings for
-`always` (show or hide VS Code) or `vscode` run; the others are VS Code's.
-Keys follow the keyboard layout's characters.
+`ctrl+shift+j` VS Code. Both applications' menus show them; in the desktop
+app the page runs the keys it sees and the menu the keys the page leaves.
+Browsers keep those keys for themselves; there `cmd+f` (macOS) or
+`ctrl+shift+f` find. While VS Code has the keyboard its own keys come first
+(`cmd+w`, `cmd+j`…); a key it leaves runs a command only for `always`
+(show or hide VS Code) or `vscode`. Keys follow the keyboard layout's
+characters.
 
 Default prefix: `ctrl+b`. In terminals, keys reach the program in the
 encoding it asked for (legacy, application cursor and keypad, kitty
@@ -194,6 +197,7 @@ browser's menu shows instead.
 | `HERDR_IDE_SNAPSHOT`, `HERDR_IDE_ACTIONS` | debug builds of the macOS application | Development aids: a path the window is written to as a PNG every two seconds, and actions run two seconds apart (`new`, `split-right`, `split-down`, `close`, `next-tab`, `workspace:<name>[:<cwd>]` (a new workspace with a terminal, without the dialog), `rename-workspace:<name>`, `close-workspace` (without asking), `close-workspace:<names>`, `next-workspace`, `type:<text>`, `find:<text>`, `find-next`, `open:<path>`, `code`, `page`, `settings`, `settings:<section>`, `keys` (the keyboard shortcuts page), `set:<key>=<json>` (a setting changed through the core), `strokes:<stroke> <stroke>…` (strokes given to the key matcher), `key:cmd+<key>`, `command:<id>` (a command of the keybindings), `folder:<path>` (a folder dropped on the Dock icon), `palette:<text>`, `drag:<from>:<to>:<zone>` (a pane dragged by its header, or `tab`), `add-machine`, `machine:<add\|signin\|remove\|menu>:<target>`, `transfers`, `files:<dir>`, `select:<names>`, `download-to:<file>`, `upload-file:<file>`, `paste-file:<file>`, `paste-image:<png>`, `record:<command>:<strokes>` (the key recorder), `hover:<column>,<row>` (the pointer resting on a cell), separated by `;`); the window's other windows are written beside it as `<path>.window.png`, `.window2.png`…. |
 | `HERDR_IDE_DESKTOP_DEV` | Electron | `1` forces isolated development even in a packaged app: instance `dev` (terminal core session `herdr-ide-dev`), local-only, separate Electron profile. Unpackaged Electron always uses this mode. |
 | `HERDR_IDE_DESKTOP_PORT` | Electron | Loopback port (default `7781`, development `7791`); `0` chooses an ephemeral port, which gives a new browser storage origin. |
+| `--user-data-dir=<dir>` | Electron command line | Replaces the Electron profile and its single-instance lock, so a copy launched by its executable (not with `open`, which activates a running copy of the same bundle identifier) runs beside an installed one; for isolated smoke tests with `HERDR_IDE_DESKTOP_DEV=1`. |
 | `ARCH` | `make desktop-app`, `make desktop-dmg` | `arm64` or `x64`; defaults to the host Node architecture. The Go core architecture is matched automatically. |
 | `VERSION` | desktop build | Semver for app metadata, DMG name and bundled core; a leading `v` (release tags such as `v0.2.0`) is kept for the core and dropped for the app metadata and DMG name. Without it the core reports `git describe` and the app uses the `desktop/package.json` version. |
 | `HC_TEST_BIN` | `make it` | herdr-core executable for the integration tests; otherwise `hc` is found on `PATH`, and without one they are skipped. |
@@ -268,7 +272,8 @@ Icon sources and distributable PNG/ICNS are kept in `desktop/assets/`, with
 the small SVG in `web/public/icon.svg`; `make desktop-icons` regenerates the
 PNG and ICNS on macOS with librsvg and iconutil.
 Electron's persistent profile is
-`~/Library/Application Support/herdr-ide-desktop/` (`-dev` for development).
+`~/Library/Application Support/herdr-ide-desktop/` (`-dev` for development,
+or the `--user-data-dir` given).
 It holds browser preferences and Chromium data until manually removed.
 The core uses `settings-desktop.json` and `~/.herdr-ide-desktop/` state;
 development uses the existing `dev` instance. No desktop log files are kept:

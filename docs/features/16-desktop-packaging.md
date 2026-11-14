@@ -25,10 +25,14 @@ implemented independently.
 - `scripts/desktop.sh` builds the existing embedded application and matches
   the Go core architecture to Electron (`x64` maps to Go `amd64`).
   `desktop/electron-builder.cjs` packages the core as an executable resource
-  outside ASAR, with licenses (including the web bundle's `licenses.md`); the
+  outside ASAR, at `Contents/Resources/bin/<slug>` as `scripts/macos-app.sh`
+  does, with the notices laid out as in the release archives (`LICENSE`,
+  `THIRD_PARTY_NOTICES.md`, the web bundle's `licenses.md`,
+  `licenses/herdr-core/`, `licenses/herdr-detect/`, `licenses/encoder/`); the
   shell lives inside ASAR. Its `beforePack` hook refuses to package binaries
   built for another architecture than the Electron app. The DMG has an
-  Applications shortcut. Builds use ad-hoc signing without notarization.
+  Applications shortcut. Builds sign ad hoc with the hardened runtime, the
+  core included, without notarization.
   Its `install` mode (`make desktop-install`) copies the `.app` into
   `/Applications` for development: a copy running from there gets SIGTERM,
   which quits it like the menu, so its core stops before the files change.
@@ -53,13 +57,17 @@ implemented independently.
   shuts down, the shell signals the core and quits without waiting, because
   delaying the quit would cancel the system's request.
 - Startup and core failures are reported with English/Chinese messages from
-  the web dictionaries; exit codes and similar details are appended as is.
+  the web dictionaries, in the language of `appearance.language` once the
+  shell has read it (else the system's); exit codes and similar details
+  are appended as is.
 - Production uses loopback port 7781 and instance `desktop`. A stable origin
   preserves browser settings; an explicit port override is available. Dev
   uses port 7791, instance `dev` (terminal core session `herdr-ide-dev`)
   and local-only. Unpackaged runs always use dev mode, and packaged runs can
   opt into it. Both modes have separate Electron profiles and single-instance
-  locks. Closing the main window quits; a second launch focuses it.
+  locks; `--user-data-dir` on the command line replaces the profile and its
+  lock, for smoke tests beside an installed copy. Closing the main window
+  quits; a second launch focuses it.
 - Finder PATH gains common binary locations without executing a shell.
   The app carries the notices of the herdr-core its core embeds in
   `licenses/herdr-core/` ([21](21-terminal-core.md)) and of herdr's agent
@@ -68,19 +76,46 @@ implemented independently.
   starts, restarts and stops a machine's terminal core
   ([22](22-terminal-protocol.md)). All inherited environment and SSH configuration
   remain available to the core.
-- The main window has a preload (`desktop/src/preload.ts`, sandboxed) that
-  exposes one object, `desktopShell`, for direct shortcuts
-  ([04](04-layout-and-keyboard.md)): the shell tells the page which action a
-  shortcut runs, the page reports that the shortcut settings changed (the
-  shell then reads them from the core itself) and turns recording on and
-  off; while it records, the shell sends the page the spec of each key with
-  `cmd`, `ctrl` or `alt`. The page also reports its theme setting
-  (`system`, `dark` or `light`), which becomes Electron's
+- The shell follows its core as the macOS application does
+  (`desktop/src/follow.ts`): it holds its own event channel (`/ws`), reads
+  `GET /api/settings` and `GET /api/keybindings` when it opens and applies
+  the `settings` and `keybindings` messages after every change; if the
+  channel drops it opens it again after 0.5 s, doubling to 8 s.
+  `appearance.theme` (`system`, `dark` or `light`) becomes Electron's
   `nativeTheme.themeSource`: the title bar, native controls and the window
-  background follow the UI's theme, also when it differs from the system's
-  appearance (a dark UI on a light macOS no longer has a white title bar);
-  `system` keeps following macOS. Messages count only from the top frame of
-  the main window showing the core's origin. Program windows have no preload.
+  background (`color.background` of `design/tokens.json`) follow the UI's
+  theme, also when it differs from the system's appearance; `system` keeps
+  following macOS. `appearance.language` is the language of the menu and
+  the error dialogs; `auto` follows the system's preferred languages.
+- The application menu (`desktop/src/menu.ts`) is the macOS application's
+  ([23](23-macos-application.md)): the application's menu (About, Settings…,
+  Keyboard Shortcuts…, Hide, Quit), **Shell** (New Terminal, Split Right,
+  Split Down, New, Rename and Close Workspace…, Rename Tab…, Close
+  Terminal, Close Tab), **Edit** (Undo, Redo, Cut, Copy, Paste, Select All,
+  Find…, Find Next, Find Previous), **View** (Command Palette…, Switch
+  Workspace…, Toggle Sidebar, Show or Hide VS Code, Zoom Pane, next and
+  previous tab, workspace and pane, Focus Pane Left, Right, Above, Below)
+  and **Window** (Minimize). Undo, Redo and Cut are the shell's own:
+  Chromium's text fields edit with Cmd keys only through the menu. The
+  macOS application's Files… and Add Machine… open its own windows; the web
+  UI's sidebar adds machines. Titles are the web UI's `desktop.menu.*`
+  strings, the macOS application's `menu.*` ones in English and Chinese.
+  Each command item shows the first single-stroke key the keybindings give
+  its command (the registry's defaults until the core answers) and the menu
+  is rebuilt when the keybindings or the language change. The page sees a
+  key first and cancels those it runs, so the menu acts only on keys the
+  page left; keys without Cmd are shown but not registered, since macOS
+  would offer them to a menu before the page
+  ([04](04-layout-and-keyboard.md)). An item chosen sends its command to the
+  main window's page, which runs it where it applies (`web/src/desktop.ts`);
+  with a program window or one of VS Code's own windows in front, closing a
+  pane or a tab closes that window instead.
+- The main window has a preload (`desktop/src/preload.ts`, sandboxed) that
+  exposes one object, `desktopShell` (`web/src/shell.ts`): the commands of
+  menu items chosen, where a dropped file is on disk, and the folders opened
+  with the app. The page sends only whether it takes opened folders;
+  messages count only from the top frame of the main window showing the
+  core's origin. Program windows have no preload.
 - The bridge's `pathForFile` returns where a file the user dropped on the page
   is on disk (`webUtils.getPathForFile`; Electron removed `File.path`), and an
   empty string for a File made in JavaScript or anything else. Folders
@@ -92,23 +127,19 @@ implemented independently.
 - The app's Info.plist declares folders (`public.folder`, rank `None`: the
   Dock accepts dropped folders, but the app never becomes Finder's opener for
   them), so folders dropped on the Dock icon arrive as `open-file`, also the
-  ones that launch the app. The shell takes only directories, keeps them
-  (`desktop/src/folders.ts`) until the page asks for them through the
-  bridge's `onOpenFolder`, which the page does on load and the shell forgets
-  when the page navigates or its renderer goes, then sends each path to the
-  main page and brings the window forward; the page creates the workspaces as
-  for folders dropped on the sidebar ([04](04-layout-and-keyboard.md)).
-  Unpackaged development runs use Electron's own Info.plist and get no Dock
-  drops; `open -a` still reports folders there.
-  The menus are the app menu (with **Settings…**), **File** (New
-  Workspace, New Tab, Close Tab), Edit, **View** (Show or Hide VS Code, then
-  Electron's reload, developer tools, zoom and full screen items), and
-  **Window**, which lists Minimize, Zoom, Close Window (`cmd+w`) and Bring All to
-  Front; Close Window does not close the main window for a shortcut key
-  left to VS Code.
+  ones that launch the app. The shell gathers the items of one request,
+  counting those that are not directories (`open -a` passes any file), and
+  keeps them (`desktop/src/folders.ts`) until the page asks for them through
+  the bridge's `onOpenFolders`, which the page does on load and the shell
+  forgets when the page navigates or its renderer goes; it then sends them
+  to the main page and brings the window forward. The page creates the
+  workspaces as for folders dropped on the sidebar and notes how many other
+  items it skipped, as the macOS application does
+  ([04](04-layout-and-keyboard.md)). Unpackaged development runs use
+  Electron's own Info.plist and get no Dock drops; `open -a` still reports
+  folders there.
 - The web brand constants and English/Chinese message dictionaries are
-  imported into the shell. Build metadata reads the same brand file. Native
-  error dialogs follow the OS locale; UI language still follows web settings.
+  imported into the shell. Build metadata reads the same brand file.
 - The app icon shows three terminal panes: a blue primary pane with a white
   prompt and two smaller green/slate panes, representing several machines in
   one workspace. `desktop/assets/icon.svg` is the 1024-unit master with an
@@ -150,13 +181,17 @@ implemented independently.
 
 Following [Electron's security guidance](https://www.electronjs.org/docs/latest/tutorial/security),
 renderer and child windows have no Node integration; only the main window
-has a preload, whose bridge carries shortcut actions and recorded key
-specs to the page and, from it, two signals without data beyond a boolean
-and the theme setting (one of three values); it also tells the page the disk
-path of a file the user dropped on it, which a browser keeps from pages but
-which reveals nothing the user did not hand over; sandboxing, context isolation and web security are
-enabled. The main window alone allows audio without a prior user gesture,
-so agent notification sounds ([07](07-agent-native-workflow.md)) play after
+has a preload, whose bridge carries menu commands (strings) and opened
+folders (paths and a count, both checked in the preload) to the page and,
+from it, one boolean (whether it takes opened folders); it also tells the
+page the disk path of a file the user dropped on it, which a browser keeps
+from pages but which reveals nothing the user did not hand over; sandboxing,
+context isolation and web security are enabled. The shell reads its
+settings and keybindings from its own core over loopback (`/ws`, and the
+two `GET` endpoints) like any other client, behind the same guards; it
+takes nothing from them but the theme, the language and well-formed
+bindings, and listens on nothing. The main window alone allows audio
+without a prior user gesture, so agent notification sounds ([07](07-agent-native-workflow.md)) play after
 a restart before the first click. Navigation and
 native popups are restricted to the exact owned core origin; external links
 accept only credential-free HTTP(S), with other schemes refused. Permissions
@@ -176,13 +211,20 @@ See [SECURITY.md](../../SECURITY.md) for the local HTTP trust boundary.
 
 `cmd/herdr-ide/parent_test.go` covers readiness, pipe EOF/error cancellation
 and surviving writes to broken stdout pipes. `desktop/src/*.test.ts` cover
-isolation arguments, URL and permission policy, the accepted theme values, the
-preload's functions (`preload.test.ts`, against a stand-in for Electron) and
-dropped files' paths, shortcut matching, spawn failures, malformed
-readiness, ephemeral ports, unexpected exits, late child errors and idempotent
-child shutdown, using fake Node children and no network or real terminal
-cores. `make check test` includes desktop type, format and unit checks
-(outside macOS without downloading Electron). macOS CI packages the app for
+the owned core (`core`: isolation arguments, spawn failures, malformed
+readiness, ephemeral ports, unexpected exits, late child errors and
+idempotent child shutdown, with fake Node children), opened folders waiting
+for the page (`folders`), the settings and keybindings read and followed
+over a stand-in event channel (`follow`), the menu (`menu`: its structure
+and titles against `macos/Sources/App/main.swift` and the macOS
+application's `Localizable.strings`, accelerators, a rebinding, an
+unbinding, chords), URL and permission policy (`policy`) and the preload's
+functions against a stand-in for Electron (`preload`), with no network or
+real terminal cores. `web/src/__tests__/desktop.test.ts` covers the page's
+side of menu commands (dialogs, VS Code with the keyboard) and
+`drop.test.ts` dropped and opened folders. `make check test` includes
+desktop type, format and unit checks (outside macOS without downloading Electron). macOS CI packages the app for
 pull requests and `main`; the release workflow builds and publishes the
-DMGs. Packaged smoke tests use `HERDR_IDE_DESKTOP_DEV=1` and an
-isolated home/session, checking load, popup restrictions and child cleanup.
+DMGs. Packaged smoke tests launch the executable directly with
+`HERDR_IDE_DESKTOP_DEV=1` and their own `--user-data-dir`, checking load,
+the menu, popup restrictions and child cleanup.

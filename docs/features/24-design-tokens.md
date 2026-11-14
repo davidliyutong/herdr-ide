@@ -111,9 +111,10 @@ panes, which stay the terminal settings'
   `design/generated/registry.json` until the core answers), the macOS
   application from the core with `Tokens` as its fallback.
   The page's background before the UI paints (`theme-color` in
-  `web/index.html`, the web app manifest in `web/vite.config.ts`, the
-  desktop shell's window in `desktop/src/main.ts`) is `color.background`
-  written out.
+  `web/index.html`, the web app manifest in `web/vite.config.ts`) is
+  `color.background` written out; the desktop shell's window
+  (`desktop/src/main.ts`) reads it from `tokens.json`, which its build
+  bundles.
 
 ## Alternatives considered
 

@@ -113,7 +113,9 @@ execute shell startup files, so variables exported there reach the core only
 when the app is started from that shell.
 
 The core listens at `127.0.0.1:7781` with instance `desktop`, separate from
-the CLI default and `dev`. A fixed origin preserves UI preferences across
+the CLI default and `dev`. The app follows the core's settings: its theme
+colors the title bar, its language the menu, and the menu shows the
+keybindings in effect. A fixed origin preserves UI preferences across
 launches. `HERDR_IDE_DESKTOP_PORT` overrides the port; changing it changes
 the browser storage origin. An occupied port fails visibly; the app never
 attaches to an existing listener. Opening the app twice focuses the original
@@ -129,15 +131,20 @@ make dev-desktop
 
 This builds the embedded UI (no hot reload) and uses port 7791, instance
 `dev` (terminal core session `herdr-ide-dev`) and local-only connections. For packaged
-smoke tests, launch the executable with `HERDR_IDE_DESKTOP_DEV=1`, e.g.:
+smoke tests, launch the executable with `HERDR_IDE_DESKTOP_DEV=1` and, beside
+an installed copy, a profile of its own, e.g.:
 
 ```bash
-HERDR_IDE_DESKTOP_DEV=1 dist/desktop/mac-arm64/herdr-ide.app/Contents/MacOS/herdr-ide
+HERDR_IDE_DESKTOP_DEV=1 dist/desktop/mac-arm64/herdr-ide.app/Contents/MacOS/herdr-ide \
+  --user-data-dir="$TMPDIR/herdr-ide-smoke"
 ```
 
-Quit other development cores using the `dev` instance first. Electron uses
-its own persistent profile (`herdr-ide-desktop`, or `herdr-ide-desktop-dev`)
-under Application Support; remove that directory manually to reset desktop
+Launch the executable rather than `open` the bundle: `open` activates a
+running copy with the same bundle identifier instead. Quit other development
+cores using the `dev` instance first. Electron uses its own persistent
+profile (`herdr-ide-desktop`, or `herdr-ide-desktop-dev`) under Application
+Support, which also holds its single-instance lock; `--user-data-dir`
+replaces both. Remove that directory manually to reset desktop
 preferences. Browser and desktop preferences are separate. Core state and
 resource retention follow [Remote resources](#remote-resources).
 

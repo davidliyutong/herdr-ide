@@ -89,8 +89,9 @@ settings between machines.
   keys again; a closed one shows the VS Code panel that workspace showed
   last, as it was, while it belongs to the focused pane's machine (its window
   is kept as above, so it is usually back at once), else the focused pane's
-  folder opens. It works while VS Code has focus too, so VS Code's own
-  `cmd+j` (its panel) is not available there.
+  folder opens. While VS Code has the keyboard it keeps its own `cmd+j`
+  (its bottom panel), as in the macOS application; the View menu's **Show
+  or Hide VS Code** works from there.
 
 **Theme** (`theme` WebSocket message, `bridgeHub.setTheme`)
 

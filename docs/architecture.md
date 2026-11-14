@@ -38,7 +38,7 @@ macOS application                                    ├─ machines: registry +
 | `internal/embedded` | Build artifacts compiled into the core (agents, herdr-core, the video encoder, bridge VSIX). |
 | `web` | Browser UI (Vite, React, zustand): the terminals of the machines' terminal cores (`src/term`: the client of `/api/v1/term` and the layout document; `src/state/terms.ts`: the machines' terminals and layouts; `src/vt`: Ghostty's terminal library as WebAssembly with its renderer and input encoders, also for the PTY dialogs, [26](features/26-web-terminals.md)); `math.html` renders a formula for the macOS application's preview ([19](features/19-formulas-in-panes.md)); `web/embed.go` embeds `web/dist`. |
 | `macos` | macOS application (Swift package): `TermKit`, the clients of `/api/v1/term` and of the event channel `/ws`, of the file endpoints (uploads, downloads) and the settings API, with the terminal, layout (workspaces, tabs, splits), settings, keybindings, transfers, agents' attention, formula and core-process models; `App`, the AppKit window drawing terminals with Ghostty's renderer, with the browser UI's features over the same endpoints ([23](features/23-macos-application.md)). |
-| `desktop` | Electron main process and electron-builder config; macOS `.app`/DMG wrapping the embedded core. |
+| `desktop` | Electron shell (`src`: the owned core process, the client of its settings and keybindings, the application menu, the main window's preload and policy) and electron-builder config; macOS `.app`/DMG wrapping the embedded core. |
 | `extensions/herdr-ide-bridge` | VS Code extension installed into code-server. |
 | `design` | Design tokens (`tokens.json`): colors in light and dark, metrics, font sizes and terminal palettes; `scripts/tokens` generates `macos/Sources/App/Tokens.swift`, `web/src/tokens.css` and the terminal colors' setting defaults (`internal/uisettings/tokens.go`) from them. `generated/registry.json` (`scripts/registry`): setting defaults, commands, default bindings per platform and the translation keys each UI needs. `testdata/layout`: the layout document's test vectors (directional focus and pane drops included), run by the TypeScript and Swift clients ([22](features/22-terminal-protocol.md)); `testdata/keys`: the key syntax's vectors, run by Go, TypeScript and Swift; `testdata/math`: the formulas found in terminal text, run by TypeScript and Swift ([19](features/19-formulas-in-panes.md)). |
 
@@ -52,22 +52,29 @@ loads only that owned core's URL. Closing the parent stdin pipe cancels the
 core's context, including when Electron crashes. Normal quit sends SIGTERM
 and waits up to 20 seconds before killing the owned core.
 
+The shell is a client of its core as the macOS application is
+(`desktop/src/follow.ts`): it holds its own `/ws` connection, reads
+`GET /api/settings` and `GET /api/keybindings` when it opens and applies the
+`settings` and `keybindings` messages after every change. The theme setting
+becomes the native title bar's and controls', the language the menu's. The
+application menu (`desktop/src/menu.ts`) is the macOS application's, with
+the same commands, places and titles; each command item shows the first
+single-stroke key its command has, and is rebuilt when the keybindings or
+the language change.
+
 The renderer reuses the browser UI with no Node APIs, sandboxing and context
-isolation. The main window's preload exposes only `desktopShell` for direct
-shortcuts (single-stroke keybindings with cmd, ctrl or alt, such as `cmd+t`):
-the shell intercepts them in `before-input-event`, reading them from
-`/api/keybindings`, leaves them to VS Code while one of its frames has focus
-(except bindings for everywhere, such as showing or hiding the VS Code
-panel), and the page runs the command; the settings dialog records keys
-through the same bridge
-([04](features/04-layout-and-keyboard.md)), the page reports its theme
-setting, which the native title bar follows, and it asks the bridge where a
-file or folder dropped from Finder is on disk, to create a workspace there
-or paste its path into a pane of the local machine; folders dropped on the
-Dock icon reach the page through the same bridge, also when the drop
-launched the app. Same-origin popups become equally restricted native
-windows; HTTP(S) links outside the core open in the default browser. Packaging
-and lifecycle details are in [16](features/16-desktop-packaging.md).
+isolation. The page matches every key it sees itself (`web/src/keymap.ts`),
+with the desktop platform's bindings, and cancels the keys it runs; the menu
+acts only on keys the page left (a text field, VS Code or another window has
+the keyboard), so a key runs once
+([04](features/04-layout-and-keyboard.md)). The main window's preload exposes
+only `desktopShell`: the commands of menu items chosen, where a file or folder
+dropped from Finder is on disk (to create a workspace there or paste its path
+into a pane of the local machine), and the folders dropped on the Dock icon,
+also when the drop launched the app. Same-origin popups become equally
+restricted native windows; HTTP(S) links outside the core open in the default
+browser. Packaging and lifecycle details are in
+[16](features/16-desktop-packaging.md).
 
 ## Core ↔ agent protocol (`internal/agentproto`)
 
@@ -98,7 +105,8 @@ negotiation. Keep it that way when adding ops (add fields, don't reuse them).
 
 ## Event channel (`/ws`)
 
-Every client holds one: the browser UI, the desktop app and the macOS
+Every client holds one: the browser UI, the desktop app (its page and its
+shell, which follows the settings and keybindings) and the macOS
 application. Text frames are JSON with a `t` field; terminals have their
 own protocol (`/api/v1/term`, below). A client plays no notification sounds
 (`agent {sound}`) before it reports `active`.
