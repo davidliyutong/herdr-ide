@@ -26,6 +26,11 @@
         "category": "herdr-ide"
       },
       {
+        "command": "herdr-ide.download",
+        "title": "%command.download%",
+        "category": "herdr-ide"
+      },
+      {
         "command": "herdr-ide.reconnect",
         "title": "%command.reconnect%",
         "category": "herdr-ide"
@@ -42,6 +47,10 @@
         {
           "command": "herdr-ide.sendToAgent",
           "group": "herdr-ide@1"
+        },
+        {
+          "command": "herdr-ide.download",
+          "group": "herdr-ide@2"
         }
       ]
     },

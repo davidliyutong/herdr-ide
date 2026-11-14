@@ -153,6 +153,8 @@ func (a *Agent) handle(ctx context.Context, st net.Conn) {
 		err = a.handleExec(ctx, st, h)
 	case agentproto.OpFsStat, agentproto.OpFsList, agentproto.OpFsRead, agentproto.OpFsWrite:
 		err = a.handleFS(st, h)
+	case agentproto.OpFsArchive:
+		err = a.handleArchive(st, h)
 	case agentproto.OpDialUnix:
 		err = a.handleDialUnix(st, h)
 	case agentproto.OpCodeServer:

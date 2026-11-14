@@ -1289,6 +1289,73 @@ body.dragging * {
 .dir-suggestion.sel {
   background: var(--bg-3);
 }
+.download-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.download-path {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-family: ui-monospace, monospace;
+  font-size: var(--fs-md);
+}
+.download-path-text {
+  direction: rtl;
+  text-align: left;
+}
+.download-list {
+  border: 1px solid var(--line-2);
+  border-radius: 5px;
+  background: var(--bg);
+  height: min(18rem, 50vh);
+  overflow: auto;
+  padding: 2px 0;
+}
+.download-list > .muted,
+.download-list > .error {
+  padding: 6px 8px;
+}
+.download-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  min-width: 0;
+}
+.download-row:hover,
+.download-row.sel {
+  background: var(--bg-3);
+}
+.download-row .lucide {
+  flex: none;
+  color: var(--fg-mute);
+}
+.download-row.download-all {
+  color: var(--fg-dim);
+  border-bottom: 1px solid var(--line-2);
+}
+.download-name {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  cursor: pointer;
+}
+button.download-name {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+button.download-name:hover {
+  text-decoration: underline;
+}
 .dialog-actions {
   display: flex;
   justify-content: flex-end;

@@ -137,7 +137,10 @@ selection, and copying then copies all of it;
 ⌘/Ctrl-click opens paths (media in the preview panel, code in VS Code) and
 URLs. Pasting or dropping files uploads them to the pane's machine (dropped
 files into the pane's directory) and pastes their paths; in the desktop app,
-files dropped on a local pane are pasted where they are.
+files dropped on a local pane are pasted where they are. A pane's right-click
+menu downloads the path under the pointer and, with **Download files…**,
+files and folders chosen in the pane's directory (folders as zips; not for
+the desktop app's own machine).
 
 With the mouse: click a pane's title to rename it (empty restores the
 terminal title); double-click a tab or workspace to rename it; drag a pane by

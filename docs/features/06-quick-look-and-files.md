@@ -4,8 +4,9 @@
 
 Agents and scripts produce plots, renders, GIFs, videos and logs on remote
 machines; their paths scroll by in terminals. Looking at them should take one
-click, without opening VS Code or copying files. Conversely, users want to
-hand screenshots and files to agents running on remote machines.
+click, without opening VS Code or copying files, and so should taking them
+home: a checkpoint, a results folder, a log. Conversely, users want to hand
+screenshots and files to agents running on remote machines.
 
 ## Goals / non-goals
 
@@ -15,9 +16,11 @@ wrapped over several rows; preview images, GIFs, video
 paste or drop files into a pane to paste their paths, uploading them to the
 pane's machine when they are not there (dropped files into the pane's
 directory); follow uploads (progress, speed, time left), cancel them and see
-the recent ones.
+the recent ones; download a path from a pane, or files and folders chosen in
+the pane's directory, into the browser, folders as zip archives.
 
-Non-goals: a file manager; editing files (that is VS Code's job).
+Non-goals: a file manager (the download chooser picks entries, nothing
+more); editing files (that is VS Code's job).
 
 ## Design
 
@@ -57,6 +60,39 @@ Non-goals: a file manager; editing files (that is VS Code's job).
   ← →.
 - A video codec the browser cannot decode shows a hint with download and
   VS Code options.
+
+**Downloads** (`web/src/download.ts`, `internal/server/files.go`,
+`internal/agent/archive.go`)
+
+- `GET /api/m/<machine>/download?path=…&path=…` takes up to 1000 absolute
+  paths. One file comes as itself (the preview's file serving, as an
+  attachment); a directory or several paths come as one zip the agent makes
+  while it is downloaded (`fs.archive`), named after the one path or the
+  directory holding them all. Each path is at the archive's root under its
+  name (a repeated name gets `-1`, `-2`…), directories with everything
+  below them, with modes and times.
+- The pane menu offers **Download <name>** for the path under the pointer
+  or selected (checked with a `HEAD` request first, so text that names no
+  file becomes a note instead of a failed download) and **Download files…**:
+  a chooser listing the pane's working directory, where entries are
+  checked (or all at once), directories entered by clicking their names and
+  left with the up button, and **Download** takes the checked entries of the
+  directory shown in one download. Neither is offered for the desktop app's
+  own machine, whose files are already on the computer; a browser offers
+  them for every machine.
+- The page starts a download with a same-origin link, so the browser (or the
+  desktop app's save dialog) handles it like any download: progress,
+  cancelling, where it goes. Nothing is held in the page's memory. The core
+  copies the agent's stream to the response; cancelling the download closes
+  the stream, which stops the agent's walk.
+- The agent follows the paths it is given when they are symbolic links (the
+  user named them) but stores links below them as links, so a link to `/`
+  inside a project is not followed; sockets, devices and FIFOs are left out
+  (reading a FIFO would block), and so is anything it cannot read. Nothing
+  is written on the machine. Files are compressed at the fastest deflate
+  level: the archive is made while it downloads.
+- VS Code's explorer downloads through the same endpoint
+  ([05](05-vscode-panel.md)).
 
 **Pasted and dropped files** (`web/src/drop.ts`, `web/src/lib/files.ts`)
 
@@ -133,6 +169,11 @@ Non-goals: a file manager; editing files (that is VS Code's job).
 | `fetch` with a streamed request body for upload progress | Streaming request bodies (`duplex: 'half'`) need HTTP/2 and are not in every browser; the core serves HTTP/1.1. `fetch` reports no upload progress otherwise. |
 | Progress reported by the core over `/ws` | Another message type for what the browser already knows; the core streams the body as it arrives, so the bytes sent are close to the bytes written. |
 | Cancelling during saving | The agent may already have renamed the file; a cancel that leaves the file would be misleading. |
+| Zip folders with a tool on the machine (`zip`, `tar`) | Not installed everywhere, different flags across platforms, and a process to own and end; the agent's Go zip writer is the same on every machine. |
+| Archive into a temporary file, then serve it | Disk on the machine and a retention rule for it, and nothing arrives until the whole archive is made. |
+| tar.gz instead of zip | Not opened by a double click on Windows; zip streams just as well (data descriptors, zip64 for large files). |
+| Fetch the files in the page and zip them there | Holds everything in the page's memory and needs a request per file. |
+| One download per checked file | The browser asks to allow several downloads, and a folder still needs an archive. |
 
 ## Security
 
@@ -147,7 +188,10 @@ so an upload replaces no file and follows no symlink there. Such files are
 the user's and stay. A cancelled or interrupted upload leaves no partial
 file: the agent writes to a temporary file in the target directory and
 removes it when the stream ends before its last chunk. The upload history
-is per browser and holds names and paths only.
+is per browser and holds names and paths only. Downloads read only what
+the file preview reads, with the same headers (`nosniff`, a sandboxing
+CSP), are allowed in read-only mode like viewing files, and are audited as
+`file.download`; links below the paths named are not followed.
 
 ## Testing
 
@@ -164,3 +208,10 @@ another, refused stray drops), `web/src/__tests__/transfers.test.ts`
 to the upload directory, the kept history, the panel), and
 `TestCancelledUploadLeavesNoFile` in `internal/server/server_test.go` (an
 aborted upload through a real agent leaves no file; a complete one arrives).
+Downloads: `internal/agent/archive_test.go` (archive contents, repeated
+names, links followed only at the top, modes, missing paths, an abandoned
+stream), `internal/server/download_test.go` (path checks, archive names, a
+file as itself and directories as zips through a real agent, `HEAD`,
+read-only mode, the audit record), `web/src/__tests__/download.test.ts` (the
+pane menu's items, the check before a path's download, the chooser, no
+downloads for the desktop app's own machine).

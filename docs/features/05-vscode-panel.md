@@ -88,6 +88,25 @@ settings between machines.
   `reveal`.
 - **Send to Agent** in the editor sends `@file:lines` plus the selection; the
   browser pastes it, unsubmitted, into the focused agent pane.
+- **Download (folders as zip)** in the explorer's menu (several entries can be
+  selected) sends their paths; the core passes them to the browsers as
+  `bridge.download`, and the page with the focus (the one whose VS Code panel
+  the user just used) downloads them through `/api/m/<machine>/download`: one
+  file as itself, folders and several entries as one zip
+  ([06](06-quick-look-and-files.md)). A VS Code window opened on its own has
+  no app page, so nothing downloads there; VS Code's own **Download…** remains.
+
+**Downloads in VS Code**
+
+- VS Code's own **Download…** saves a file up to 32 MB as a plain browser
+  download, and folders and larger files through the File System Access API
+  into a folder the user picks. Only Chromium-based browsers have that API,
+  and only on `localhost` or HTTPS; elsewhere VS Code cannot save folders. The
+  desktop app grants the API to the core's frames
+  ([16](16-desktop-packaging.md)); before, it denied it and folder downloads
+  failed silently.
+- The bridge's **Download (folders as zip)** works in every browser and needs
+  no permission: the browser streams the response from the core.
 
 ## Alternatives considered
 
@@ -98,6 +117,8 @@ settings between machines.
 | Remote-SSH from desktop VS Code | Not in the browser; no integration with panes. |
 | Driving the iframe from the page | VS Code exposes no command API to the embedding page; the extension host runs on the machine. |
 | Reverse ssh socket forward for the bridge | Replaced by the agent's listener tunnelled over the existing yamux session. |
+| Only VS Code's own Download… | Needs the File System Access API for folders and files over 32 MB: Chromium only, on a secure origin, and a permission the desktop app has to grant. |
+| Routing a download to the exact page of the VS Code window | The extension host does not know which page shows its window; the page with the focus is the one whose panel was just used. |
 
 ## Failure modes
 
@@ -136,7 +157,11 @@ VS Code's "open in browser" links for forwarded ports therefore do not work.
 `internal/agent/codeserver_test.go` (finding an installed code-server,
 verified machine downloads, start flags), `internal/server/server_test.go`
 (bridge window selection, idle tracking, theme broadcast, refused port proxy
-paths). The fallback from `existing` to
+paths), `internal/server/download_test.go` (`bridge.download` to browsers),
+`web/src/__tests__/download.test.ts` (only the focused page downloads),
+`desktop/src/policy.test.ts` (the File System Access permission). VS Code's
+own Download… was traced in code-server 4.144.0: up to 32 MB it is a blob
+download, which reaches Electron's `will-download`. The fallback from `existing` to
 `push` and the theme switch in both directions were verified with
 code-server 4.144.0 in Chrome.
 Provisioning, Git Graph through the bridge and arm64 installs were verified

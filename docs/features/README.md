@@ -13,7 +13,7 @@ shortcuts, paths) lives in [reference.md](../reference.md).
 | 03 | [Pane rendering and input](03-pane-rendering-and-input.md) | herdr's cell grid on a canvas; semantic input herdr encodes per pane; selections, links, clipboard. |
 | 04 | [Layout and keyboard](04-layout-and-keyboard.md) | herdr's split tree rendered natively; herdr-compatible prefix keymap; command palette. |
 | 05 | [VS Code panel](05-vscode-panel.md) | code-server per machine behind the core's proxy; bridge extension; Git Graph and diffs. |
-| 06 | [Quick Look and files](06-quick-look-and-files.md) | Path detection in terminals, media preview with range streaming, uploads for agents. |
+| 06 | [Quick Look and files](06-quick-look-and-files.md) | Path detection in terminals, media preview with range streaming, uploads for agents, downloads with folders as zips. |
 | 07 | [Agent-native workflow](07-agent-native-workflow.md) | Attention inbox, notifications, starting agents, sending code to agents. |
 | 08 | [Web access and security](08-web-access-and-security.md) | Browser/PWA delivery, reverse-proxy model and the guardrails around it. |
 | 09 | [Air-gapped installs](09-air-gapped-installs.md) | Artifact resolution on the core host, seed directories, mirrors, pinned checksums. |

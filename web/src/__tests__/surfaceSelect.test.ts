@@ -369,7 +369,7 @@ describe('pane menu', () => {
     const preview = vi.spyOn(actions, 'openPreview').mockImplementation(() => {});
     const { ev, entries, labels } = open(7, 3);
     expect(ev.defaultPrevented).toBe(true);
-    expect(labels).toEqual(['Copy (off)', 'Paste', '-', 'Preview pose.png', 'Copy full path']);
+    expect(labels).toEqual(['Copy (off)', 'Paste', '-', 'Preview pose.png', 'Download pose.png', 'Copy full path', '-', 'Download files…']);
     item(entries, 'Preview pose.png').run();
     expect(preview).toHaveBeenCalledWith('m1', '/tmp/shots/abcdefghij/pose.png');
     item(entries, 'Copy full path').run();
@@ -390,7 +390,17 @@ describe('pane menu', () => {
     window.dispatchEvent(mouse('mouseup', 7, 11));
     const { entries, labels } = open(7, 5);
     // The selected path wins over the part of it found under the pointer.
-    expect(labels).toEqual(['Copy', 'Paste', '-', 'Preview main.go', 'Open main.go in VS Code', 'Copy full path']);
+    expect(labels).toEqual([
+      'Copy',
+      'Paste',
+      '-',
+      'Preview main.go',
+      'Open main.go in VS Code',
+      'Download main.go',
+      'Copy full path',
+      '-',
+      'Download files…',
+    ]);
     const openPath = vi.spyOn(actions, 'openPath').mockImplementation(() => {});
     item(entries, 'Open main.go in VS Code').run();
     expect(openPath).toHaveBeenCalledWith('m1', '/tmp/shots/abcdehij/main.go', undefined, undefined);

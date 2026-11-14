@@ -8,7 +8,7 @@ browser (React, canvas)     ──WebSocket + HTTP──▶  core (Go, `herdr-id
                                                      └─ one ssh session per machine ──yamux──▶ agent (`herdr-ide-agent`)
                                                                                                  ├─ herdr API socket (raw pipe)
                                                                                                  ├─ herdr client socket (raw pipe, endpoint protocol)
-                                                                                                 ├─ files (stat/list/range read/upload)
+                                                                                                 ├─ files (stat/list/range read/upload/zip)
                                                                                                  ├─ code-server (unix socket only)
                                                                                                  ├─ Xvfb + window manager (programs' windows)
                                                                                                  └─ bridge.sock ◀── VS Code bridge extension
@@ -117,6 +117,7 @@ after a successful reply it carries op-specific bytes.
 | `fs.stat`, `fs.list` | core → agent | – |
 | `fs.read` | core → agent | `Length` bytes from `Offset` |
 | `fs.write` | core → agent | chunked upload, then a second reply; `unique` keeps existing files (`-1`, `-2`… names) |
+| `fs.archive` | core → agent | a zip of `Paths` (each at the root under its name, directories recursively), streamed until the agent closes the stream |
 | `exec` | core → agent | – (buffered output in the reply) |
 | `dial-unix` | core → agent | raw pipe to a socket in the agent's run directory |
 | `code-server` | core → agent | actions `status`, `install` (chunked tarball), `download` (the machine fetches `URL`, checked against `Digest`), `start`, `stop`, `install-ext`, `uninstall-ext`, `marker`; `Bin` selects an installed code-server |
@@ -140,11 +141,13 @@ Text frames are JSON with a `t` field; binary frames are pane surface updates
 | `view {m, tab, pane, cols, rows, cw, ch}`, `takeover` | `session {state: owner\|busy\|taken_over}` |
 | `in {m, pane, ev}` (key, text, paste, mouse events), `focus {m, focused}`, `host {host}` (terminal colors) | `surf {m, gen, ev: open\|error\|notice, code}`, `surf.tab`, `surf.meta` (panes, splits, links), `clip` (OSC 52), `bell` |
 | `api {rid, m, method, params}` (allowlisted herdr calls) | `api.res {rid, result\|error}` |
-| `retry {m}`, `ping` | `machines {list}`, `machine {state}`, `agent {m, data}` (status change), `bridge.send {m, text}` |
+| `retry {m}`, `ping` | `machines {list}`, `machine {state}`, `agent {m, data}` (status change), `bridge.send {m, text}`, `bridge.download {m, paths}` (files chosen in VS Code's explorer; the page with the focus downloads them) |
 | `theme {kind: dark\|light}` (VS Code follows it) | `gui {state: {m, phase, gpu, windows}}` (program windows per machine) |
 | `active {idle}` (ms since the user last used the page) | `agent {…, sound}`: `sound` is true only for the most recently used page, which plays the notification sound |
 
-HTTP endpoints besides files, uploads and the code-server proxy:
+HTTP endpoints besides files (`GET /api/m/{id}/file`, `GET /api/m/{id}/list`,
+and `GET /api/m/{id}/download?path=…`: one file as an attachment, anything
+else as a zip from `fs.archive`), uploads and the code-server proxy:
 `GET /api/config`, `GET /api/keymap`, `GET /api/machines`, and
 `GET`/`PUT /api/settings` (core settings with their definitions, see
 [13](features/13-settings-and-appearance.md)), and `PUT /api/m/{id}/enabled`

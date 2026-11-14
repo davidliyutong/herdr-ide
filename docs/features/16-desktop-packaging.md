@@ -160,10 +160,14 @@ a restart before the first click. Navigation and
 native popups are restricted to the exact owned core origin; external links
 accept only credential-free HTTP(S), with other schemes refused. Permissions
 require both the requesting frame and its top window to belong to the core;
-only notifications, clipboard reads and sanitized clipboard writes are
-allowed. Clipboard reads let VS Code paste text copied in other apps; the
-browser UI grants its frame the same permission, where the browser asks once,
-while the desktop app has no prompt. The existing
+only notifications, clipboard reads, sanitized clipboard writes and the File
+System Access API are allowed. Clipboard reads let VS Code paste text copied
+in other apps; the browser UI grants its frame the same permission, where the
+browser asks once, while the desktop app has no prompt. VS Code's
+**Download…** saves folders and files over 32 MB through the File System
+Access API into a folder the user picks in the native dialog (smaller files
+are a plain download, which Electron saves through its save dialog); without
+the permission it failed silently ([05](05-vscode-panel.md)). The existing
 HTTP guards, API allowlist, read-only behavior and CSP remain in force.
 See [SECURITY.md](../../SECURITY.md) for the local HTTP trust boundary.
 

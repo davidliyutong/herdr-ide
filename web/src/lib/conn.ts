@@ -31,6 +31,8 @@ type Listener = {
   onAgent(machine: string, data: AgentStatusEvent, sound: boolean): void;
   onConnection(connected: boolean): void;
   onBridgeSend(machine: string, text: string): void;
+  /** Files chosen in VS Code's explorer to download. */
+  onBridgeDownload(machine: string, paths: string[]): void;
   onGui(st: GuiState): void;
 };
 
@@ -104,6 +106,9 @@ class Conn {
         break;
       case 'bridge.send':
         this.listener?.onBridgeSend(m.m, m.text);
+        break;
+      case 'bridge.download':
+        this.listener?.onBridgeDownload(m.m, m.paths);
         break;
       case 'gui':
         this.listener?.onGui(m.state);
