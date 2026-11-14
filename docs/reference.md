@@ -87,17 +87,52 @@ Every setting of the core and of the user interfaces is defined in the core
 (`internal/registry`) and shown by the settings dialog of every client
 ([13](features/13-settings-and-appearance.md)). Values live in
 `settings[-<instance>].json` on the core host and can be edited there by
-hand; the core reads the file again within two seconds.
+hand; the core reads the file again within two seconds. A setting with a
+flag is fixed by that flag when it is given (for every machine) and locked
+in the UI; a setting with a scope can have its own value per machine, under
+`"[machine:<id>]"`. The table is generated from the registry by
+`scripts/registry` (`make tokens`; `make check` fails when it is stale).
 
-| Section | Settings |
-| --- | --- |
-| Appearance | `appearance.language` (web UI), `appearance.theme`, `appearance.uiFontSize` |
-| Layout | `layout.panelPosition` (web UI) |
-| Terminal | `terminal.fontFamily`, `terminal.fontSize`, `terminal.fontWeight`, `terminal.lineHeight`, `terminal.cursorStyle`, `terminal.cursorBlink`, `terminal.scrollback`, `terminal.copyOnSelect`, `terminal.bell`, `terminal.boldIsBright`, `terminal.optionIsMeta`, `terminal.programClipboard`, `terminal.mathHover` (web UI) |
-| Terminal colors | `terminal.colors.dark.{foreground,background,cursor,selection,palette}` and the same for `light` (palette: 16 colors) |
-| Notifications | `notifications.sound`, `notifications.mutedAgents` (web UI) |
-| VS Code | `codeServer.install`, `codeServer.path` |
-| Program windows | `gui.enabled`, `gui.gpu`, `gui.video` (also per remote machine) |
+<!-- scripts/registry: settings -->
+
+| Setting | Values | Default | Flag | Scope |
+| --- | --- | --- | --- | --- |
+| `appearance.language` | `auto`, `en`, `zh-CN` | `"auto"` | – | – |
+| `appearance.theme` | `system`, `dark`, `light` | `"system"` | – | – |
+| `appearance.uiFontSize` | integer, 11–20 | `13` | – | – |
+| `layout.panelPosition` | `right`, `bottom` | `"right"` | – | – |
+| `terminal.fontFamily` | string | `""` | – | – |
+| `terminal.fontSize` | number, 6–40 | `13` | – | – |
+| `terminal.fontWeight` | `regular`, `medium` | `"regular"` | – | – |
+| `terminal.lineHeight` | number, 0.8–2 | `1.05` | – | – |
+| `terminal.cursorStyle` | `block`, `bar`, `underline` | `"block"` | – | – |
+| `terminal.cursorBlink` | `true`, `false` | `true` | – | – |
+| `terminal.scrollback` | integer, 0–1000000 | `10000` | – | – |
+| `terminal.copyOnSelect` | `true`, `false` | `false` | – | – |
+| `terminal.bell` | `none`, `sound`, `visual` | `"visual"` | – | – |
+| `terminal.boldIsBright` | `true`, `false` | `false` | – | – |
+| `terminal.optionIsMeta` | `true`, `false` | `false` | – | – |
+| `terminal.programClipboard` | `auto`, `ask`, `off` | `"auto"` | – | – |
+| `terminal.mathHover` | `true`, `false` | `true` | – | – |
+| `terminal.colors.dark.foreground` | color `#rrggbb` | `"#f0f0f0"` | – | – |
+| `terminal.colors.dark.background` | color `#rrggbb` | `"#0a0a0a"` | – | – |
+| `terminal.colors.dark.cursor` | color `#rrggbb` | `"#f0f0f0"` | – | – |
+| `terminal.colors.dark.selection` | color `#rrggbb` | `"#3b4a6b"` | – | – |
+| `terminal.colors.dark.palette` | 16 colors | 16 colors of `design/tokens.json` | – | – |
+| `terminal.colors.light.foreground` | color `#rrggbb` | `"#0a0a0a"` | – | – |
+| `terminal.colors.light.background` | color `#rrggbb` | `"#ffffff"` | – | – |
+| `terminal.colors.light.cursor` | color `#rrggbb` | `"#0a0a0a"` | – | – |
+| `terminal.colors.light.selection` | color `#rrggbb` | `"#b6d4fe"` | – | – |
+| `terminal.colors.light.palette` | 16 colors | 16 colors of `design/tokens.json` | – | – |
+| `notifications.sound` | `true`, `false` | `true` | – | – |
+| `notifications.mutedAgents` | string | `"droid"` | – | – |
+| `codeServer.install` | `push`, `download`, `existing` | `"push"` | `--code-server-install` | – |
+| `codeServer.path` | string | `""` | `--code-server-path` | – |
+| `gui.enabled` | `true`, `false` | `true` | `--gui` | per remote machine |
+| `gui.gpu` | `vglrun`, `all` | `"vglrun"` | `--gui-gpu` | per remote machine |
+| `gui.video` | `true`, `false` | `true` | `--gui-video` | per remote machine |
+
+<!-- end of scripts/registry: settings -->
 
 ```json
 {
@@ -117,40 +152,70 @@ platform, changed in **Settings → Keyboard shortcuts** or in
 `when` is `terminal`, `vscode`, `dialog` or `always`). A key is modifiers
 (`cmd`, `ctrl`, `alt`, `shift`) and a key joined by `+`; a chord is strokes
 separated by spaces (`ctrl+b c`: ctrl+b, then c within 3 s). The first
-stroke needs `cmd`, `ctrl` or `alt` (or is a function key).
+stroke needs `cmd`, `ctrl` or `alt` (or is a function key). The chord's
+first stroke typed twice (`ctrl+b ctrl+b`) sends it to the terminal.
 
-The defaults have a prefix keymap (prefix `ctrl+b`) on every platform:
+The default keys differ by platform: `mac` is the macOS application and
+the desktop app on macOS, `mac-browser` browsers on macOS, `pc` the desktop
+app on other systems and `pc-browser` browsers there. Every platform has
+the prefix chords (`ctrl+b`); the applications add direct shortcuts, which
+browsers keep for themselves (`cmd+t`, `cmd+w`…). Both applications' menus
+show the keys; in the desktop app the page runs the keys it sees and the
+menu the keys the page leaves. While VS Code has the keyboard its own keys
+come first; a key it leaves runs a command only for `always` (show or hide
+VS Code) or `vscode`. Keys follow the keyboard layout's characters. The
+table is generated from the registry by `scripts/registry`.
 
-| Keys | Command | Keys | Command |
-| --- | --- | --- | --- |
-| `ctrl+b v` / `ctrl+b -` | Split right / down | `ctrl+b h` `j` `k` `l` | Focus pane left / down / up / right |
-| `ctrl+b z` | Zoom / restore pane | `ctrl+b x` | Close pane |
-| `ctrl+b tab` / `shift+tab` | Next / previous pane | `ctrl+b c` | New tab |
-| `ctrl+b n` / `p` / `1`…`9` | Next / previous / N-th tab | `ctrl+b shift+x` | Close tab |
-| `ctrl+b shift+n` | New workspace | `ctrl+b shift+w` / `shift+d` | Rename / close workspace |
-| `ctrl+b e` | Open the pane's folder in VS Code | `ctrl+b d` | Diff of the pane's repository |
-| `ctrl+b shift+g` | Git Graph | `ctrl+b o` | Jump to the agent that needs attention |
-| `ctrl+b space` / `ctrl+b g` | Command palette | `ctrl+b w` | Switch workspace or agent |
-| `ctrl+b b` | Toggle sidebar | `ctrl+b ?` | Shortcut list |
-| `ctrl+b shift+t` | Rename tab | `ctrl+b ,` | Settings |
-| `ctrl+b )` / `(` | Next / previous workspace | `ctrl+b ctrl+b` | Send ctrl+b itself |
+<!-- scripts/registry: commands -->
 
-The desktop applications add direct shortcuts. On macOS (the macOS
-application and the desktop app): `cmd+t` new tab, `cmd+d` / `cmd+shift+d`
-split right / down, `cmd+w` close pane, `cmd+n` new workspace, `cmd+,`
-settings, `cmd+b` sidebar, `cmd+j` show or hide VS Code, `cmd+}` / `cmd+{`
-next / previous tab, `cmd+f` find, `cmd+g` / `cmd+shift+g` next / previous
-match. On other systems (desktop app): `ctrl+shift+t` new tab,
-`ctrl+shift+w` close tab, `ctrl+,` settings, `ctrl+shift+n` new workspace,
-`ctrl+shift+j` VS Code. Both applications' menus show them; in the desktop
-app the page runs the keys it sees and the menu the keys the page leaves.
-Browsers keep those keys for themselves; there `cmd+f` (macOS) or
-`ctrl+shift+f` find. While VS Code has the keyboard its own keys come first
-(`cmd+w`, `cmd+j`…); a key it leaves runs a command only for `always`
-(show or hide VS Code) or `vscode`. Keys follow the keyboard layout's
-characters.
+| Command | When | `mac` | `mac-browser` | `pc` | `pc-browser` |
+| --- | --- | --- | --- | --- | --- |
+| `app.commandPalette` | `terminal` | `ctrl+b space`, `ctrl+b g` | `ctrl+b space`, `ctrl+b g` | `ctrl+b space`, `ctrl+b g` | `ctrl+b space`, `ctrl+b g` |
+| `app.keyboardShortcuts` | `terminal` | `ctrl+b shift+slash` | `ctrl+b shift+slash` | `ctrl+b shift+slash` | `ctrl+b shift+slash` |
+| `app.settings` | `terminal` | `ctrl+b comma`, `cmd+comma` | `ctrl+b comma` | `ctrl+b comma`, `ctrl+comma` | `ctrl+b comma` |
+| `app.agentAttention` | `terminal` | `ctrl+b o` | `ctrl+b o` | `ctrl+b o` | `ctrl+b o` |
+| `workspace.switch` | `terminal` | `ctrl+b w` | `ctrl+b w` | `ctrl+b w` | `ctrl+b w` |
+| `workspace.next` | `terminal` | `ctrl+b shift+0` | `ctrl+b shift+0` | `ctrl+b shift+0` | `ctrl+b shift+0` |
+| `workspace.previous` | `terminal` | `ctrl+b shift+9` | `ctrl+b shift+9` | `ctrl+b shift+9` | `ctrl+b shift+9` |
+| `workspace.new` | `terminal` | `ctrl+b shift+n`, `cmd+n` | `ctrl+b shift+n` | `ctrl+b shift+n`, `ctrl+shift+n` | `ctrl+b shift+n` |
+| `workspace.rename` | `terminal` | `ctrl+b shift+w` | `ctrl+b shift+w` | `ctrl+b shift+w` | `ctrl+b shift+w` |
+| `workspace.close` | `terminal` | `ctrl+b shift+d` | `ctrl+b shift+d` | `ctrl+b shift+d` | `ctrl+b shift+d` |
+| `tab.new` | `terminal` | `ctrl+b c`, `cmd+t` | `ctrl+b c` | `ctrl+b c`, `ctrl+shift+t` | `ctrl+b c` |
+| `tab.rename` | `terminal` | `ctrl+b shift+t` | `ctrl+b shift+t` | `ctrl+b shift+t` | `ctrl+b shift+t` |
+| `tab.next` | `terminal` | `ctrl+b n`, `cmd+shift+bracketright` | `ctrl+b n` | `ctrl+b n` | `ctrl+b n` |
+| `tab.previous` | `terminal` | `ctrl+b p`, `cmd+shift+bracketleft` | `ctrl+b p` | `ctrl+b p` | `ctrl+b p` |
+| `tab.select1` | `terminal` | `ctrl+b 1` | `ctrl+b 1` | `ctrl+b 1` | `ctrl+b 1` |
+| `tab.select2` | `terminal` | `ctrl+b 2` | `ctrl+b 2` | `ctrl+b 2` | `ctrl+b 2` |
+| `tab.select3` | `terminal` | `ctrl+b 3` | `ctrl+b 3` | `ctrl+b 3` | `ctrl+b 3` |
+| `tab.select4` | `terminal` | `ctrl+b 4` | `ctrl+b 4` | `ctrl+b 4` | `ctrl+b 4` |
+| `tab.select5` | `terminal` | `ctrl+b 5` | `ctrl+b 5` | `ctrl+b 5` | `ctrl+b 5` |
+| `tab.select6` | `terminal` | `ctrl+b 6` | `ctrl+b 6` | `ctrl+b 6` | `ctrl+b 6` |
+| `tab.select7` | `terminal` | `ctrl+b 7` | `ctrl+b 7` | `ctrl+b 7` | `ctrl+b 7` |
+| `tab.select8` | `terminal` | `ctrl+b 8` | `ctrl+b 8` | `ctrl+b 8` | `ctrl+b 8` |
+| `tab.select9` | `terminal` | `ctrl+b 9` | `ctrl+b 9` | `ctrl+b 9` | `ctrl+b 9` |
+| `tab.close` | `terminal` | `ctrl+b shift+x` | `ctrl+b shift+x` | `ctrl+b shift+x`, `ctrl+shift+w` | `ctrl+b shift+x` |
+| `pane.splitRight` | `terminal` | `ctrl+b v`, `cmd+d` | `ctrl+b v` | `ctrl+b v` | `ctrl+b v` |
+| `pane.splitDown` | `terminal` | `ctrl+b minus`, `cmd+shift+d` | `ctrl+b minus` | `ctrl+b minus` | `ctrl+b minus` |
+| `pane.close` | `terminal` | `ctrl+b x`, `cmd+w` | `ctrl+b x` | `ctrl+b x` | `ctrl+b x` |
+| `pane.zoom` | `terminal` | `ctrl+b z` | `ctrl+b z` | `ctrl+b z` | `ctrl+b z` |
+| `pane.focusLeft` | `terminal` | `ctrl+b h` | `ctrl+b h` | `ctrl+b h` | `ctrl+b h` |
+| `pane.focusDown` | `terminal` | `ctrl+b j` | `ctrl+b j` | `ctrl+b j` | `ctrl+b j` |
+| `pane.focusUp` | `terminal` | `ctrl+b k` | `ctrl+b k` | `ctrl+b k` | `ctrl+b k` |
+| `pane.focusRight` | `terminal` | `ctrl+b l` | `ctrl+b l` | `ctrl+b l` | `ctrl+b l` |
+| `pane.focusNext` | `terminal` | `ctrl+b tab` | `ctrl+b tab` | `ctrl+b tab` | `ctrl+b tab` |
+| `pane.focusPrevious` | `terminal` | `ctrl+b shift+tab` | `ctrl+b shift+tab` | `ctrl+b shift+tab` | `ctrl+b shift+tab` |
+| `view.toggleSidebar` | `terminal` | `ctrl+b b`, `cmd+b` | `ctrl+b b` | `ctrl+b b` | `ctrl+b b` |
+| `view.toggleCode` | `always` | `cmd+j` | – | `ctrl+shift+j` | – |
+| `find.open` | `terminal` | `cmd+f` | `cmd+f` | `ctrl+shift+f` | `ctrl+shift+f` |
+| `find.next` | `terminal` | `cmd+g` | – | – | – |
+| `find.previous` | `terminal` | `cmd+shift+g` | – | – | – |
+| `code.open` | `terminal` | `ctrl+b e` | `ctrl+b e` | `ctrl+b e` | `ctrl+b e` |
+| `code.diff` | `terminal` | `ctrl+b d` | `ctrl+b d` | `ctrl+b d` | `ctrl+b d` |
+| `code.gitGraph` | `terminal` | `ctrl+b shift+g` | `ctrl+b shift+g` | `ctrl+b shift+g` | `ctrl+b shift+g` |
 
-Default prefix: `ctrl+b`. In terminals, keys reach the program in the
+<!-- end of scripts/registry: commands -->
+
+In terminals, keys reach the program in the
 encoding it asked for (legacy, application cursor and keypad, kitty
 keyboard protocol); the bytes of the keys the browser could keep are listed
 in [`vt-keys.json`](../web/src/__tests__/testdata/vt-keys.json): Shift+Enter
@@ -186,22 +251,80 @@ machine's terminal core) with their bindings;
 ↑↓ Home End select, Enter runs, Escape closes. In read-only mode the
 browser's menu shows instead.
 
+## HTTP and WebSocket endpoints
+
+Every endpoint passes the same guards (Host, Origin, proxy secret,
+[SECURITY.md](../SECURITY.md)); those marked *writes* are refused with
+`--read-only`. Protocols and messages are in
+[architecture](architecture.md); `{id}` is a machine's id. `make check`
+fails when a route the server registers (`internal/server/server.go`) is
+missing here.
+
+| Endpoint | Writes | Purpose |
+| --- | --- | --- |
+| `GET /ws` | – | The event channel (WebSocket): machines, agents, settings, keybindings, program windows, downloads. |
+| `GET /api/v1/term` | – | The terminal protocol (WebSocket): the machines' terminals, their events and byte streams ([22](features/22-terminal-protocol.md)). |
+| `GET /api/config` | – | Name, slug, version and whether the core is read-only. |
+| `GET /api/settings` | – | Definitions, values (per machine too) and problems of the settings. |
+| `PUT /api/settings` | writes | Sets one value (`{"key", "value", "machine"?}`). |
+| `DELETE /api/settings` | writes | Removes one value, which falls back to the global value or the default. |
+| `GET /api/keybindings` | – | Commands, default keys per platform, the user's rules, the bindings in effect and their conflicts. |
+| `PUT /api/keybindings` | writes | Replaces the user's rules. |
+| `GET /api/machines` | – | Every machine's state, its agent's information and its terminal core's state. |
+| `POST /api/machines` | writes | Adds and stores an SSH machine (`{"target", "label"}`). |
+| `DELETE /api/m/{id}` | writes | Removes a stored machine. |
+| `PUT /api/m/{id}/label` | writes | Renames a machine. |
+| `PUT /api/m/{id}/enabled` | writes | Enables or disables a machine. |
+| `GET /api/m/{id}/hc` | – | The machine's terminal core: installed, running, version. |
+| `POST /api/m/{id}/hc/{action}` | writes | `start`, `stop` or `restart` the machine's terminal core. |
+| `GET /api/m/{id}/auth` | writes | Interactive ssh login of a machine that needs one (WebSocket, `?cols=&rows=`). |
+| `POST /api/m/{id}/bridge` | writes | A command for the VS Code window of a folder (open a file at a line, diff, Git Graph). |
+| `GET /api/m/{id}/file` | – | A file (`?path=`, `&download=1` as an attachment), with HTTP ranges. |
+| `GET /api/m/{id}/download` | – | One file as an attachment, or several paths (folders included) as a zip (`?path=`…, `&dl=<id>` to follow it on `/ws`). |
+| `POST /api/m/{id}/upload` | writes | Writes the request body to a file (`?name=`, `&dir=` absolute, else the upload directory). |
+| `GET /api/m/{id}/list` | – | A directory's entries (`?path=`). |
+| `GET /api/m/{id}/code/status` | – | Whether the machine's code-server is installed and runs. |
+| `POST /api/m/{id}/code/start` | writes | Installs and starts the machine's code-server. |
+| `POST /api/m/{id}/code/stop` | – | Releases the machine's code-server (allowed read-only: it only stops). |
+| `/m/{id}/code/` | writes | The machine's code-server behind the core's proxy (`/m/{id}/code` redirects here). |
+| `GET /m/{id}/gui/{win}` | – | The page of a program window. |
+| `GET /m/{id}/gui/{win}/ws` | – | A program window's frames and events, its input (WebSocket; `?video=` names the video streams the browser decodes). |
+| `POST /m/{id}/gui/{win}/close` | writes | Asks a program window to close. |
+| `POST /api/m/{id}/gui/enable` | writes | Gives open terminals the machine's display (`{"terminals": [...]}`, empty for all). |
+| `GET /api/gui` | – | The program windows of every machine. |
+| `/` | – | The web UI (`/licenses.md`: the notices of its bundle). |
+
 ## Environment variables
 
 | Variable | Where | Description |
 | --- | --- | --- |
 | `HERDR_IDE_BRIDGE_SOCKET` | set by the agent for code-server | Socket of the VS Code bridge extension. |
 | `HERDR_IDE_CORE` | `pnpm -C web dev`, the macOS application | Core URL the Vite dev server proxies to (default `http://127.0.0.1:7780`); the macOS application uses that core instead of starting the one in its bundle. |
-| `SIGN_IDENTITY`, `NOTARY_PROFILE` | `make macos-app` | A code-signing certificate's name (default `-`, an ad hoc signature) and a `notarytool` keychain profile; with both the application is notarized and stapled. `SKIP_CORE=1` reuses the core in `dist/`; `OUT_DIR` is where the `.app` goes (default `dist/macos`). |
 | `HERDR_IDE_DEV` | the macOS application | `1` starts the bundled core as instance `dev`, local-only, like `make dev-desktop`. |
 | `HERDR_IDE_SNAPSHOT`, `HERDR_IDE_ACTIONS` | debug builds of the macOS application | Development aids: a path the window is written to as a PNG every two seconds, and actions run two seconds apart (`new`, `split-right`, `split-down`, `close`, `next-tab`, `workspace:<name>[:<cwd>]` (a new workspace with a terminal, without the dialog), `rename-workspace:<name>`, `close-workspace` (without asking), `close-workspace:<names>`, `next-workspace`, `type:<text>`, `find:<text>`, `find-next`, `open:<path>`, `code`, `page`, `settings`, `settings:<section>`, `keys` (the keyboard shortcuts page), `set:<key>=<json>` (a setting changed through the core), `strokes:<stroke> <stroke>…` (strokes given to the key matcher), `key:cmd+<key>`, `command:<id>` (a command of the keybindings), `folder:<path>` (a folder dropped on the Dock icon), `palette:<text>`, `drag:<from>:<to>:<zone>` (a pane dragged by its header, or `tab`), `add-machine`, `machine:<add\|signin\|remove\|menu>:<target>`, `transfers`, `files:<dir>`, `select:<names>`, `download-to:<file>`, `upload-file:<file>`, `paste-file:<file>`, `paste-image:<png>`, `record:<command>:<strokes>` (the key recorder), `hover:<column>,<row>` (the pointer resting on a cell), separated by `;`); the window's other windows are written beside it as `<path>.window.png`, `.window2.png`…. |
 | `HERDR_IDE_DESKTOP_DEV` | Electron | `1` forces isolated development even in a packaged app: instance `dev` (terminal core session `herdr-ide-dev`), local-only, separate Electron profile. Unpackaged Electron always uses this mode. |
 | `HERDR_IDE_DESKTOP_PORT` | Electron | Loopback port (default `7781`, development `7791`); `0` chooses an ephemeral port, which gives a new browser storage origin. |
 | `--user-data-dir=<dir>` | Electron command line | Replaces the Electron profile and its single-instance lock, so a copy launched by its executable (not with `open`, which activates a running copy of the same bundle identifier) runs beside an installed one; for isolated smoke tests with `HERDR_IDE_DESKTOP_DEV=1`. |
-| `ARCH` | `make desktop-app`, `make desktop-dmg` | `arm64` or `x64`; defaults to the host Node architecture. The Go core architecture is matched automatically. |
-| `VERSION` | desktop build | Semver for app metadata, DMG name and bundled core; a leading `v` (release tags such as `v0.2.0`) is kept for the core and dropped for the app metadata and DMG name. Without it the core reports `git describe` and the app uses the `desktop/package.json` version. |
-| `HC_TEST_BIN` | `make it` | herdr-core executable for the integration tests; otherwise `hc` is found on `PATH`, and without one they are skipped. `go run ./scripts/fetch-hc -exe <file> <os>/<arch>` writes the pinned one. |
 | `XDG_STATE_HOME` | core | Where the SSH machines herdr saved are read from for the one-time import (`$XDG_STATE_HOME/herdr/client/endpoints.json`, default `~/.local/state/herdr/client/endpoints.json`). |
+
+Variables of the build scripts and tests:
+
+| Variable | Where | Description |
+| --- | --- | --- |
+| `TARGETS` | `scripts/build.sh` | Core platforms to build and package (default the host's), e.g. `"linux/amd64 darwin/arm64"`. |
+| `AGENT_PLATFORMS` | `scripts/build.sh` | Agent and herdr-core platforms to embed (default all four). |
+| `SKIP_WEB`, `SKIP_EXT` | `scripts/build.sh` | `1` reuses `web/dist` or the built bridge extension. |
+| `REQUIRE_ENCODER` | `scripts/build.sh` | `1` (release builds) fails when a Linux video encoder (`scripts/build-ffmpeg.sh`) is missing. |
+| `VERSION` | `scripts/build.sh`, desktop and macOS builds | The version the core and agents report (default `git describe`). Desktop builds take a semver for the app metadata and DMG name; a leading `v` (release tags such as `v0.2.0`) is kept for the core and dropped for the app metadata. The macOS application uses it as its bundle version. |
+| `FFMPEG_PLATFORMS` | `scripts/build-ffmpeg.sh` | Linux platforms to build the video encoder for (default both). |
+| `GHOSTTY_SRC` | `make vt-wasm` | A Ghostty checkout to build libghostty-vt from instead of the pinned clone. |
+| `ARCH` | `make desktop-app`, `make desktop-dmg` | `arm64` or `x64`; defaults to the host Node architecture. The Go core architecture is matched automatically. |
+| `INSTALL_DIR` | `make desktop-install` | Where the Electron app is installed (default `/Applications`). |
+| `SIGN_IDENTITY`, `NOTARY_PROFILE` | `make macos-app` | A code-signing certificate's name (default `-`, an ad hoc signature) and a `notarytool` keychain profile; with both the application is notarized and stapled. `SKIP_CORE=1` reuses the core in `dist/`; `OUT_DIR` is where the `.app` goes (default `dist/macos`). |
+| `DEVELOPER_DIR` | `make macos-*` | The Xcode to use; the script picks `/Applications/Xcode.app` when the active developer directory is the command line tools. |
+| `DEV_LISTEN` | `make dev-core`, `make dev-web` | The development core's address (default `127.0.0.1:7790`). |
+| `HC_TEST_BIN` | `make it` | herdr-core executable for the integration tests; otherwise `hc` is found on `PATH`, and without one they are skipped. `go run ./scripts/fetch-hc -exe <file> <os>/<arch>` writes the pinned one. |
+| `GUI_TEST_INSTALL` | `go test ./internal/agent` on Linux | `1` lets the program-window tests fetch Xvfb when it is not installed. |
 
 ## Files and directories
 
@@ -212,6 +335,7 @@ On every machine (the agent's `$HOME`):
 | `~/.herdr-ide/agent/<build>/` | Uploaded agent binaries | Builds unused for 14 days are removed. |
 | `~/.herdr-ide/code-server/<version>/` | code-server releases (shared by instances) | Versions unused for 14 days are removed. |
 | `~/.herdr-ide[-<instance>]/hc/herdr-core` (0700 directory) | The terminal core's executable, pushed by the core and accepted only with its SHA-256 | Replaced when the core brings another build; kept until removed. |
+| `~/.local/state/herdr-core/herdr-ide[-<instance>]/` (`$XDG_STATE_HOME` when set) | The terminal core's own state (herdr-core's: terminal records, saved screens, logs) | Kept by herdr-core until the user removes it. |
 | `~/.herdr-ide[-<instance>]/run/` (0700) | `hc.sock` (the terminal core's API socket, 0600) and its holders' sockets; `cs.sock`, `cs.pid`, `bridge.sock`; `gui.json` (reserved display and Xvfb pid), `xauth` (terminals' display cookie) and `xauth.server` (Xvfb's copy), both 0600 and replaced at each Xvfb start, `gui.lock`, `gui-keep.lock` (held by the display keeper) | Sockets while the agent (code-server, bridge) or the terminal core runs; the display files are kept so terminals keep a valid environment. |
 | `~/.herdr-ide/xvfb/<version>/` | Xvfb unpacked from the distribution's package (shared by instances) | Versions unused for 14 days are removed when another is unpacked. |
 | `~/.herdr-ide/video/<sha256 prefix>/encoder` | Video encoder pushed by the core (`gui-video`, shared by instances), run only while its SHA-256 matches | Builds unused for 14 days are removed when another is installed; unfinished installs after 1 h. |
@@ -245,13 +369,16 @@ the agents carry), `encoder/`); they stay until the user removes the
 directory and are not copied to SSH machines.
 
 In the browser, in `localStorage` under `herdr-ide.*` (state of that
-browser only; settings are the core's):
+browser only; settings and keybindings are the core's, the workspaces,
+tabs and splits the terminal core's):
 
-- sidebar and panel sizes
-- the selected workspace
-- find options
-- the upload history (the last 50 finished uploads: file names, machines
-  and paths on them)
+- whether the sidebar is open (`sidebarOpen`) and the VS Code panel's size
+  (`dockWidth`, `dockHeight`)
+- what each workspace's panel shows (`docks`)
+- the selected machine (`machine`)
+- the upload and download histories (`uploads`, `downloads`: the last 50
+  finished transfers each, with file names, machines and paths, no
+  contents)
 
 Browser settings of earlier versions kept there (language, theme, font
 sizes, …) are moved to the core's settings once, when a page of a writable
@@ -266,7 +393,11 @@ preview and at quit.
 
 Desktop artifacts: `dist/desktop/mac-arm64/herdr-ide.app` (arm64),
 `dist/desktop/mac/herdr-ide.app` (x64), and
-`dist/desktop/herdr-ide-<version>-mac-<arch>.dmg`. Generated shell code lives
+`dist/desktop/herdr-ide-<version>-mac-<arch>.dmg`; the macOS application is
+built to `dist/macos/herdr-ide.app` (`make macos-app`; releases publish it
+zipped as `herdr-ide-<version>-mac-native-arm64.zip`) and its Xcode build
+products are in `macos/.build/`, the renderer it is built with in
+`macos/.deps/`. Generated shell code lives
 in `desktop/dist/`; `make clean` removes these build outputs.
 Icon sources and distributable PNG/ICNS are kept in `desktop/assets/`, with
 the small SVG in `web/public/icon.svg`; `make desktop-icons` regenerates the

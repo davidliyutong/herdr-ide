@@ -2,11 +2,15 @@
 
 ## Context
 
-Settings used to live in three places: core settings in the core's file,
-browser preferences in each browser's `localStorage`, and the macOS
-application's menu keys hard-coded. A setting changed in one client did not
-reach the others, the desktop app kept five shortcut settings of its own,
-and adding a setting meant UI code in every client.
+Several clients show one core's machines: the web UI (in browsers and
+inside the desktop app), the desktop app's shell (its menu and title bar)
+and the macOS application. Values kept by each client (a browser's
+`localStorage`, an application's preferences, keys written into a menu)
+differ per browser, profile and application, a change in one client does
+not reach the others, and every setting needs UI code in every client.
+Earlier versions kept settings that way: browser preferences in
+`localStorage`, core settings under other names, the desktop app's
+shortcuts as settings of its own. They are migrated once (below).
 
 ## Goals / non-goals
 
@@ -34,9 +38,16 @@ settings per browser; theming terminal applications.
   values, a range and whether numbers are whole, a scope (`app`; `machine`:
   any machine may have its own value; `remote-machine`: machines other than
   the core's host), its section and order, the platforms that use it
-  (`web`, `macos`; none means all, as for every setting of the user
-  interfaces today), an optional command-line flag and a
-  validation function. Invalid definitions panic at start.
+  (`web`, `macos`; none, which every registered setting has, means all),
+  an optional command-line flag and a validation function. Lists
+  hold at most 256 items; strings at most 4096 bytes, without NUL, CR or
+  LF. Invalid definitions panic at start.
+- The modules registered: the user interfaces' sections `appearance`,
+  `layout`, `terminal`, `colors` and `notifications`; code-server's
+  `codeServer` (`codeServer.install`, `codeServer.path`); the program
+  windows' `gui` (`gui.enabled`, `gui.gpu`, `gui.video`, scope
+  `remote-machine`). Every setting with its type, default, flag and scope
+  is listed in [reference](../reference.md#settings).
 - Descriptions are not in Go: the UIs translate `settings.<key>`,
   `settings.<key>.desc`, `settings.<key>.<option>` and
   `settings.section.<id>`. `scripts/registry` writes
@@ -44,8 +55,10 @@ settings per browser; theming terminal applications.
   default, the commands and each platform's default bindings, and the
   translation keys each UI needs (`i18n.web`, `i18n.macos`); a test of the
   web UI and one of the macOS application fail when a listed key is
-  missing, and `make check` fails when the file is stale (`make tokens`
-  writes it).
+  missing. It also writes the tables of settings and of commands with
+  their default keys in [reference](../reference.md), between markers
+  there. `make check` fails when either is stale
+  (`make tokens` writes them).
 - The terminal colors' defaults (`terminal.colors.{dark,light}.*`) are the
   design tokens' (`design/tokens.json`); `scripts/tokens` writes them into
   `internal/uisettings/tokens.go` beside the Swift and CSS tokens
@@ -53,6 +66,13 @@ settings per browser; theming terminal applications.
 
 **File** (`settings[-<instance>].json`, core host)
 
+- The file is in the user's configuration directory on the core host
+  (`~/Library/Application Support/<slug>/` on macOS, `~/.config/<slug>/`
+  on Linux), beside `keybindings[-<instance>].json` and the machines file
+  ([reference](../reference.md#files-and-directories)). A missing file has
+  no values. The desktop app and the macOS application start their cores
+  as instance `desktop`, so both use `settings-desktop.json` and
+  `keybindings-desktop.json`.
 - Global values are top-level `"key": value` pairs, typed JSON; a
   machine's own values are under `"[machine:<id>]": {"key": value}`. The
   file is written with global values first, keys sorted, two-space
@@ -71,9 +91,11 @@ settings per browser; theming terminal applications.
   the old names, machines' values under `"machines": {…}`) is converted
   once and rewritten: `code-server-install` → `codeServer.install`,
   `code-server-path` → `codeServer.path`, `gui` → `gui.enabled` (`on`/`off`
-  → `true`/`false`), `gui-gpu` → `gui.gpu`, `gui-video` → `gui.video`. The
-  desktop app's shortcut settings (`desktop-*-key`) become keybinding
-  rules first (below) and are dropped.
+  → `true`/`false`), `gui-gpu` → `gui.gpu`, `gui-video` → `gui.video`;
+  values of the current format win over migrated ones. The desktop app's
+  shortcut settings (`desktop-*-key`) become keybinding rules before the
+  settings are read (below), and the settings' migration then drops them
+  from the file (`internal/registry`, `TestLegacyShortcutsLeaveTheSettings`).
 
 **Layering**
 
@@ -82,6 +104,13 @@ settings per browser; theming terminal applications.
   default. Readers ask for the value of a machine (`Store.Bool(key,
   machine)`); code-server's install mode is read at each start, GUI
   settings when a display is prepared or a frame is sent.
+- The flags that lock settings are `--code-server-install`,
+  `--code-server-path`, `--gui`, `--gui-gpu` and `--gui-video`
+  (`Def.Flag`, registered with the other flags by `RegisterFlags`). A
+  locked setting reports `source: flag` and `locked`, the UIs show it
+  disabled with the flag's name, and changes to it, global or per
+  machine, are refused (`locked`). The file's value for it stays and
+  applies again when the core runs without the flag.
 
 **API** (`internal/server/settings.go`)
 
@@ -91,9 +120,10 @@ settings per browser; theming terminal applications.
 - `PUT /api/settings {key, value, machine?}` validates and saves; `DELETE
   /api/settings?key=&machine=` removes a value (the global one falls back
   to the default, a machine's to the global value). Errors are codes the
-  UIs translate: `invalid`, `locked` (409), `unknown` (404), `scope`,
-  `file` (409), `save`. A `remote-machine` setting cannot be set for the
-  core's own machine; the machine must be one the core has.
+  UIs translate: `invalid` (400), `locked` (409), `unknown` (404: no such
+  setting, or a machine the core does not have), `scope` (400: an `app`
+  setting given a machine, or a `remote-machine` setting given the core's
+  own machine), `file` (409), `save` (500, with the system's error).
 - Every change, through the API or the file, is pushed to every `/ws`
   client as `{t: "settings", values, problems}`:
   clients replace their values without asking again.
@@ -102,13 +132,23 @@ settings per browser; theming terminal applications.
 
 **Keybindings** (`internal/keybindings`)
 
-- Commands are registered in Go: an id (`tab.new`, `pane.splitRight`,
-  `view.toggleCode`, `find.open`…), a section of the keyboard page, where
-  it applies (`when`: `terminal` — the main window outside VS Code and
-  dialogs, `vscode`, `dialog`, `always`) and default keys per platform.
-  Platforms: `mac` and `pc` (the desktop applications on macOS and on other
-  systems) and `mac-browser`, `pc-browser`. Labels are `command.<id>` and
+- Commands are registered in Go (`internal/keybindings/commands.go`): an
+  id (`tab.new`, `pane.splitRight`, `view.toggleCode`,
+  `find.open`…), a section of the keyboard page (`app`, `workspace`,
+  `tab`, `pane`, `view`, `find`, `code`), where it applies and default
+  keys per platform. Labels are `command.<id>` and
   `command.section.<id>`.
+- `when` contexts: `terminal` (the main window outside VS Code's panel and
+  dialogs; every command but one), `vscode` (VS Code's panel has the
+  keyboard), `dialog` (a dialog, the palette or a text field of the
+  application has it) and `always` (`view.toggleCode`, so the key that
+  hides VS Code works from inside it). A binding runs only in its context;
+  `always` runs in every one.
+- Platforms: `mac` and `pc` (the desktop applications on macOS and on
+  other systems) and `mac-browser`, `pc-browser` (a browser on either).
+  The macOS application and the desktop app on macOS use `mac`; a page
+  picks its platform from the system and whether the desktop shell's
+  bridge is present.
 - Key syntax: a stroke is modifiers (`cmd`, `ctrl`, `alt`, `shift`, with
   aliases such as `meta`, `option`) and a key joined by `+`; a chord is
   strokes separated by spaces (`ctrl+b c`), at most 4. The canonical form
@@ -129,7 +169,11 @@ settings per browser; theming terminal applications.
   they keep `cmd+t` and the like for themselves.
 - The user's file `keybindings[-<instance>].json` is an array of `{key,
   command, when?}`; `"command": "-<id>"` removes the command's binding of
-  that key (every binding without a key), rules apply in order. Entries for
+  that key (every binding without a key; only those of the rule's `when`
+  when it has one), rules apply in order, after the defaults. A rule
+  without `when` takes its command's. Rules are not per platform: a rule
+  applies to the bindings of every platform. Keys are stored as written
+  and normalized when read. Entries for
   commands this version does not have are kept and reported (`unknown`), as
   are entries that are not rules (`invalid`). Same watching, migration of
   the desktop app's `desktop-*-key` settings (a changed key replaces the
@@ -139,8 +183,12 @@ settings per browser; theming terminal applications.
   conflicts, problems, read_only, file}`, with `defaults`, `effective` and
   `conflicts` per platform: the core works out the bindings in effect, so
   clients only match keys. A conflict is a key bound to several commands
-  that apply in the same place, or a stroke bound alone that also starts
-  chords. `PUT /api/keybindings` replaces the user's array (each entry
+  whose contexts overlap (the same `when`, or one of them `always`), or a
+  stroke bound alone that also starts chords where both apply (the chords
+  would never run). No platform's defaults conflict (a test checks it);
+  conflicts made by user rules are kept, marked in every keyboard page,
+  and the clients' key matchers run the first binding of the key in
+  effect. `PUT /api/keybindings` replaces the user's array (each entry
   validated, at most 1000, 256 KiB); pushed as `{t: "keybindings", user,
   effective, conflicts, problems}`; refused in read-only mode, audited
   (`keybindings.set`).
@@ -158,7 +206,8 @@ settings per browser; theming terminal applications.
   clipboard, formulas, sounds, silent agents) are moved once: each value
   the core still has at its default is saved there, then the key is
   removed. Read-only mode leaves them for a writable session. State of one
-  browser (sidebar, panel sizes, selection, find options, transfer history)
+  browser (whether the sidebar is open, the panel's sizes and what each
+  workspace's panel shows, the selected machine, the transfer history)
   stays in `localStorage`.
 - The settings dialog renders sections from the definitions shown on the
   web (`platforms`): a page per section and **Keyboard shortcuts**, a search
@@ -181,8 +230,10 @@ settings per browser; theming terminal applications.
   included: a stroke that starts chords waits 3 s for the next; the
   chord's first stroke twice sends it to the pane (`ctrl+b ctrl+b`); a
   chord matching nothing ends and its key is dropped. While a dialog or
-  the palette is open only `dialog` and `always` bindings run. Key hints
-  show the direct shortcut in the desktop app, else the first chord.
+  the palette is open only `dialog` and `always` bindings run. Keys typed
+  in VS Code's panel do not reach the page; in the desktop app its menu
+  runs the `vscode` and `always` commands there. Key hints show the
+  direct shortcut in the desktop app, else the first chord.
 - Desktop app (`desktop/src/follow.ts`, `desktop/src/menu.ts`): the page
   matches its keys as above with the `mac` or `pc` bindings. The shell
   reads both endpoints when its own event channel opens and follows the
@@ -214,10 +265,11 @@ settings per browser; theming terminal applications.
   keeps them) that names the commands the key would clash with before it
   is saved (`KeybindingsModel.clashes`: the same key, or a chord it starts
   or that starts it, where both apply), removes and resets them, marks
-  conflicts and commands the application does not have yet.
+  conflicts and commands the application does not run.
 - The main menu's key equivalents are the first single-stroke binding of
   each command and are rebuilt on every change; Ghostty unbinds them (and
-  ⌘Q, ⌘H, ⌘M) so the menu gets them. A key matcher in front of the window
+  ⌘Q, ⌘H, ⌘M and ⌘V, `TerminalControllerBox.systemKeys`) so the menu gets
+  them. A key matcher in front of the window
   runs chords and keys no menu item shows, in the contexts `terminal`,
   `vscode` (the web panel) and `dialog` (a text field); the chord's first
   stroke twice reaches the terminal.
@@ -230,10 +282,14 @@ settings per browser; theming terminal applications.
   Ghostty configuration — font family, size and weight (`font-thicken`
   for medium), line height (`adjust-cell-height`), cursor style and blink,
   scrollback (Ghostty bounds it in bytes: 2 KiB a line; new attaches ask
-  the core for that many lines of history), copy on select, bold as
-  bright, Option as Alt, the colors of both themes and the program
-  clipboard (`clipboard-write`; "ask" shows a confirmation). The bell
-  beeps, flashes the pane or does nothing.
+  the core for that many lines of history, at most 100 000), copy on
+  select, bold as bright, Option as Alt, the colors of both themes and the
+  program clipboard (`clipboard-write` is `deny` for `off`; otherwise
+  Ghostty asks the application about each write, which `auto` copies
+  within 10 s of the user's input and otherwise offers in a note,
+  [23](23-macos-application.md)). The bell beeps, flashes the pane or
+  does nothing; `terminal.mathHover` turns the formula preview on or off;
+  `notifications.sound` and `notifications.mutedAgents` decide the sounds.
 
 **Appearance** (`web/src/appearance.ts`)
 
@@ -287,12 +343,16 @@ settings per browser; theming terminal applications.
   the bell flashes the pane, beeps or does nothing.
 - Panel position (`right` or `bottom`) changes the grid: below the panes the
   panel spans the workspace column and is resized by its top edge.
+- `notifications.sound` and `notifications.mutedAgents` decide which
+  agents' changes play a sound ([07](07-agent-native-workflow.md));
+  `terminal.mathHover` turns the formula preview on or off
+  ([19](19-formulas-in-panes.md)).
 
 ## Alternatives considered
 
 | Option | Why not |
 | --- | --- |
-| Settings kept per browser (`localStorage`) | Every browser, profile and the native application had its own values; the desktop app's shell could not read them before the page. |
+| Settings kept per browser (`localStorage`) | Every browser, profile and application would have its own values; the desktop app's shell cannot read a page's storage, and not before the page loads. |
 | JSON Schema for the definitions | Clients would need a schema validator and still a list of sections, scopes and platforms; the definitions are small typed records. |
 | Descriptions in Go | Two UIs translate everything else; one place for text per UI keeps translators' files complete. |
 | A file watcher library (fsnotify) | A new dependency for two small files; polling the modification time every 2 s is enough for edits by hand. |
@@ -333,31 +393,38 @@ settings per browser; theming terminal applications.
 `PUT` and `DELETE /api/settings` and `PUT /api/keybindings` are mutations:
 same Host/Origin and proxy-secret guards, refused in read-only mode,
 audited, bodies bounded (64 KiB, 256 KiB). Values are typed and validated;
-strings refuse control characters, so a value cannot add lines to the
-Ghostty configuration the macOS application writes. See
+strings refuse NUL, CR and LF, so a value cannot add lines to the
+Ghostty configuration the macOS application writes. Machine ids in the
+file and in requests are bounded and refuse brackets and line breaks. See
 [SECURITY.md](../../SECURITY.md).
 
 ## Testing
 
-`internal/settings/settings_test.go` (order of definitions, merge order,
-validation, migration of the old format, unknown keys and invalid values
-kept and reported, reload after edits by hand, broken files),
-`internal/keybindings/keybindings_test.go` (the shared parse vectors,
-defaults per platform without conflicts, user rules and removals,
-conflicts and prefix shadowing, reload, migration of the desktop
-shortcuts), `internal/server/settings_test.go` (both APIs, error codes,
-read-only refusal, the Host/Origin guard, audit, pushes after API changes
-and file edits), `scripts/registry` and `scripts/tokens` (generated files
-current), `web/src/__tests__/keys.test.ts` (the shared vectors: parsing,
-key names, chords; key hints, user rules), `settings.test.ts` (labels for
-every registry key, store, optimistic changes and error codes, migration
-of the browser settings, search), `termOptions.test.ts`, `tokens.test.ts`,
-`desktop/src/follow.test.ts` (keybindings and settings from the replies
-and pushes), `desktop/src/menu.test.ts` (accelerators, rebinding and
-unbinding, titles per language),
-`macos/Tests/TermKitTests` (`KeysTests`: the shared vectors, labels, menu
-equivalents, Ghostty triggers; `SettingsModelTests`;
-`LocalizationTests.testRegistryKeys`). A dev core was changed through the
+`internal/settings/settings_test.go` (`TestDefinitionsOrder`,
+`TestMergeOrder`: flag, machine, global and default; `TestValidation`;
+`TestMigration` of the old format; `TestUnknownAndInvalidKept`;
+`TestReload` after edits by hand and over a broken file;
+`TestMemoryStore`), `internal/keybindings/keybindings_test.go`
+(`TestParseVectors`, the shared vectors; `TestDefaults` per platform
+without conflicts; `TestUserRules`, additions, removals and kept unknown
+entries; `TestConflicts` with prefix shadowing; `TestReload`;
+`TestMigrateDesktopShortcuts`), `internal/server/settings_test.go`
+(`TestSettingsAPI`, `TestSettingsReadOnly`, `TestKeybindingsAPI`,
+`TestSettingsPush`: both APIs, error codes, read-only refusal, the
+Host/Origin guard, audit, pushes after API changes and file edits),
+`scripts/registry/main_test.go` and `scripts/tokens/main_test.go`
+(generated files current), `web/src/__tests__/keys.test.ts` (the shared
+vectors: parsing, key names, chords; key hints, user rules),
+`settings.test.ts` (labels for every registry key, store, optimistic
+changes and error codes, migration of the browser settings, search),
+`theme.test.ts` (`system` after `dark`), `termOptions.test.ts`,
+`tokens.test.ts`, `desktop/src/follow.test.ts` (keybindings and settings
+from the replies and pushes, reconnecting), `desktop/src/menu.test.ts`
+(accelerators, rebinding and unbinding, titles per language),
+`macos/Tests/TermKitTests/TermKitTests.swift` (`KeysTests`: the shared
+vectors, labels, menu equivalents, Ghostty triggers, the closing
+commands; `SettingsModelTests`: loading and pushes, the keybindings
+model's rules and clashes; `LocalizationTests.testRegistryKeys`). A dev core was changed through the
 API and by editing its file, with the pushes observed on `/ws`; the dialog's
 pages were checked in headless Chromium, and so were the browser's
 terminals following a font size and a palette color changed through the

@@ -129,7 +129,9 @@ cd dist/packages/herdr-ide-$(go env GOOS)-$(go env GOARCH)
 
 Or extract the matching archive from `dist/release/` (or GitHub Releases)
 and run `./herdr-ide`. Add SSH machines with **Add machine…** in the
-sidebar.
+sidebar. Coming from a version that drew its panes from herdr: settings,
+keys and machines move over on the first start, terminals stay in herdr
+([migration](docs/deployment.md#migrating-from-versions-that-used-herdr)).
 
 Open <http://127.0.0.1:7780>. Press `ctrl+b space` for the command palette and
 `ctrl+b ?` for shortcuts. All flags are listed in
@@ -173,8 +175,10 @@ ssh sign-in, a files window with uploads and downloads, pasting and dropping
 files into terminals, settings with machines' own values and every keyboard
 shortcut, the command palette, agents' notifications, sounds and Dock
 badge, VS Code beside the terminals and formulas shown under the pointer.
-Build it with `make macos-app` (`dist/macos/`, signed ad hoc unless
-`SIGN_IDENTITY` names a certificate).
+Releases attach it for Apple Silicon (`…-mac-native-arm64.zip`); build it
+with `make macos-app` (`dist/macos/`, signed ad hoc unless `SIGN_IDENTITY`
+names a certificate). It shares the instance `desktop`, and so the
+settings, keys and machines, with the Electron app.
 
 The Electron app starts its own core at `http://127.0.0.1:7781` with
 instance `desktop` (the native application on a port of the system's
@@ -228,12 +232,16 @@ Issues and pull requests are welcome, in English or Chinese. Please read
 ## License
 
 [MIT](LICENSE). Third-party licenses: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
-(Go modules) and `/licenses.md` served by the binary (web UI bundle).
+(Go modules) and `/licenses.md` served by the binary (the web UI bundle,
+with Ghostty's terminal library (MIT), KaTeX and the JetBrains Mono font).
 The core embeds
 [herdr-core](https://github.com/herdrdev/herdr-core) (Apache-2.0) for
 machines; release archives carry its license and notices in
 `licenses/herdr-core/`. The agents carry herdr's agent detection rules
-(Apache-2.0, [licenses/herdr-detect/](licenses/herdr-detect/)).
+(Apache-2.0, [licenses/herdr-detect/](licenses/herdr-detect/)), and the
+core the video encoder for Linux machines (FFmpeg, LGPL-2.1, with libvpx,
+libva and libdrm; [licenses/encoder/](licenses/encoder/)). The macOS application
+also carries the licenses of Ghostty and libghostty-spm (MIT).
 code-server and Git Graph retain their own licenses and are downloaded at
 runtime. Git Graph restricts derivative distribution and does not clearly
 grant general redistribution of the original; it is excluded from public

@@ -17,8 +17,10 @@ Non-goals: built-in user accounts, TLS termination, per-user permissions.
 
 ## Design
 
-**Delivery.** One binary serves the UI (embedded `web/dist`), the WebSocket
-API and the code-server proxy on `127.0.0.1:7780` by default.
+**Delivery.** One binary serves the UI (embedded `web/dist`), the event
+channel (`/ws`), the terminal protocol (`/api/v1/term`), the HTTP API and
+the code-server proxy on `127.0.0.1:7780` by default (the desktop app's own
+core on `127.0.0.1:7781`, [16](16-desktop-packaging.md)).
 
 **Guardrails** (`internal/server/security.go`, `server.go`), in request order:
 
@@ -36,25 +38,36 @@ API and the code-server proxy on `127.0.0.1:7780` by default.
 4. **Read-only mode** (`--read-only`): terminals are shown but only
    observed: no input, size or focus reaches them, writing calls of the
    terminal protocol are refused and no terminal core is installed or
-   started ([22](22-terminal-protocol.md)); uploads, ssh authentication,
-   bridge commands, VS Code, retrying machines (`denied.retry`) and
-   enabling or disabling them refused.
-5. **Terminal protocol allowlist**: clients reach the terminal core's
+   started ([22](22-terminal-protocol.md)). Every mutating endpoint answers
+   `403` (`writable` in `internal/server/server.go`): uploads, ssh
+   authentication, bridge commands, VS Code, settings and keybindings,
+   adding, renaming, removing, enabling and disabling machines, starting,
+   stopping and restarting terminal cores, and enabling or closing program
+   windows; retrying machines over `/ws` is refused too (`denied.retry`).
+   Viewing and downloading files and cancelling one's own download stay
+   allowed, and so does stopping code-server, which only releases it.
+5. **Terminal protocol allowlist** (`termReadMethods`, `termWriteMethods`
+   in `internal/server/term.go`): clients reach the terminal core's
    methods about terminals and documents only, never `machine.*`,
-   `file.*`, `server.*` or a call to another machine of that core;
-   attaching is a message of its own
-   ([22](22-terminal-protocol.md)).
-6. **CSP** on the UI (`script-src 'self'`, `frame-ancestors 'self'`, …).
-7. **Audit log** (`--audit-log`): JSON lines for connections, mutating calls,
-   uploads, VS Code and bridge use, ssh authentication and denials, with the
+   `file.*`, `server.*` or a call with `on` (another machine of that core);
+   refused calls are audited (`denied.term`); attaching is a message of its
+   own ([22](22-terminal-protocol.md)).
+6. **CSP** on the UI (`script-src 'self' 'wasm-unsafe-eval'` for the
+   terminal emulator's WebAssembly, `frame-ancestors 'self'`, …).
+7. **Audit log** (`--audit-log`): JSON lines for connections (`ws.*`,
+   `term.*`), mutating calls (settings, keybindings, machines, terminal
+   cores, terminals run and ended), uploads and downloads, VS Code and
+   bridge use, program windows, ssh authentication and denials, with the
    user from `--user-header` or common proxy headers.
 
 **Startup checks** (`cmd/herdr-ide`): a non-loopback `--listen` is refused
 unless a proxy secret is configured or `--insecure-listen` is given; the ssh
 control directory must be private ([02](02-multi-machine-transport.md)).
 
-**On machines**: nothing listens on TCP; sockets live in a 0700 directory
-with 0600 modes.
+**On machines**: nothing listens on TCP; sockets (the terminal core's
+`hc.sock`, code-server's `cs.sock`, the bridge's `bridge.sock`) live in the
+instance's 0700 run directory with 0600 modes, and the agent's `dial-unix`
+reaches only sockets there ([02](02-multi-machine-transport.md)).
 
 ## Alternatives considered
 
@@ -74,7 +87,18 @@ with 0600 modes.
 
 ## Testing
 
-`internal/server/server_test.go`: Host/Origin guard, proxy secret (local,
-remote, wrong secret, same-host proxy), API allowlist and read-only, CSP and
-headers, read-only refusals. `internal/transport/controldir_test.go`:
-control directory ownership and modes.
+- `internal/server/server_test.go`: Host/Origin guard (`TestGuard`), proxy
+  secret: local, remote, wrong secret, same-host proxy
+  (`TestProxySecret`), CSP and headers (`TestCSPOnAppShell`), read-only
+  refusals (`TestReadOnlyRefusesWrites`, `TestReadOnlyRetryKeepsTheSession`),
+  refused port proxy paths (`TestCodeServerPortProxyRefused`).
+- `internal/server/term_test.go`: the terminal protocol's allowlist and its
+  audit (`TestTermProtocol`), read-only terminals (`TestTermReadOnly`,
+  `TestTermWithoutCore`).
+- `internal/server/settings_test.go` (`TestSettingsReadOnly`),
+  `internal/server/machines_test.go` (read-only browsers refused, the
+  terminal core's endpoints guarded: `TestHCEndpointsGuard`).
+- `internal/transport/controldir_test.go`: control directory ownership and
+  modes (`TestCheckPrivateDir`); `internal/agent/agent_test.go`: the private
+  run directory and `dial-unix` restricted to it
+  (`TestHelloAndPrivateRunDir`, `TestDialRestriction`).

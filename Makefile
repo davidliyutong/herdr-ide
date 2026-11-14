@@ -32,7 +32,8 @@ check:
 
 # The design tokens of the web UI, the macOS application and the core's
 # terminal color defaults, from design/tokens.json; then what the clients
-# take from the registered settings and commands (design/generated).
+# take from the registered settings and commands (design/generated) and the
+# tables of settings and commands in docs/reference.md.
 tokens:
 	go run ./scripts/tokens
 	go run ./scripts/registry

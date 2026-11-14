@@ -21,6 +21,17 @@ var legacyShortcuts = []struct {
 	{"desktop-toggle-code-key", "view.toggleCode", "cmd+j", "ctrl+shift+j"},
 }
 
+// LegacyShortcutSettings names the desktop app's shortcut settings of
+// earlier versions; the settings drop them from their file once
+// MigrateDesktopShortcuts has read them (internal/registry).
+func LegacyShortcutSettings() []string {
+	names := make([]string, len(legacyShortcuts))
+	for i, l := range legacyShortcuts {
+		names[i] = l.setting
+	}
+	return names
+}
+
 // MigrateDesktopShortcuts turns the desktop app's shortcut settings of an
 // earlier version, found in the settings file, into rules of the
 // keybindings file, once: only while that file does not exist. A shortcut

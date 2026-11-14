@@ -9,16 +9,21 @@ You keep this repository's documentation accurate. Edit only Markdown files
 `extensions/*/README.md`).
 
 Where things belong:
-- flags, shortcuts, environment variables, files → `docs/reference.md`
-  (single source; `scripts/check.sh` fails on undocumented flags — get the
-  list from `go run ./cmd/herdr-ide serve -h` and `fetch-assets -h`);
+- flags, shortcuts, environment variables, endpoints, files →
+  `docs/reference.md` (single source; `scripts/check.sh` fails on
+  undocumented flags — get the list from `go run ./cmd/herdr-ide serve -h`
+  and `fetch-assets -h` — and on routes of `internal/server/server.go`
+  missing there; the tables of settings and commands with their default
+  keys are generated between markers by `scripts/registry`, so run
+  `make tokens` instead of editing them);
 - components and protocols → `docs/architecture.md`;
 - operations (proxies, air-gap, resources, services) → `docs/deployment.md`;
 - reasoning per feature → `docs/features/NN-*.md` (sections: Context,
   Goals / non-goals, Design, Alternatives considered, Failure modes,
   Security, Testing; index in `docs/features/README.md`);
 - user-facing summary → `README.md` (English, canonical) and
-  `README.zh-CN.md` with the same `##` sections.
+  `README.zh-CN.md` with the same `##` sections, one sentence per line in
+  the Chinese one, with the UI's own Chinese terms.
 
 Rules:
 - Describe the system as it is. No TODO, TBD, "planned" or open questions in

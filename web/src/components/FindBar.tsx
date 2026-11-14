@@ -1,5 +1,5 @@
 // The find bar over a terminal's top right corner
-// (docs/features/26-web-terminal-renderer.md): the query, which match is
+// (docs/features/26-web-terminals.md): the query, which match is
 // current, buttons for the older and newer matches, and closing. The
 // terminal's emulator searches its screen and scrollback (vt/find.ts);
 // Enter goes to the older match (up, the way output was written),

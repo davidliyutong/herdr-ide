@@ -48,7 +48,7 @@
   机器上没有 Xvfb 时会以普通用户身份获取，无需 root；
   装有 VirtualGL 的机器可用 GPU 渲染 OpenGL。
   持续变化的窗口以视频传输给能解码的浏览器（NVIDIA、Intel、AMD 显卡上用 H.264，否则用 VP8），静止的窗口以精确的图片传输。
-- **快速预览**：在终端里 ⌘/Ctrl+点击或右键路径（折成多行的长路径也可以），即可预览图片、GIF、视频（可拖动进度）、音频、PDF、文本和目录。
+- **快速查看**：在终端里 ⌘/Ctrl+点击或右键路径（折成多行的长路径也可以），即可预览图片、GIF、视频（可拖动进度）、音频、PDF、文本和目录。
 - **公式**：鼠标停在 pane 里 agent 写的 LaTeX 公式上（`$…$`、`$$…$$`、`\(…\)`、`\[…\]`，包括被 markdown 渲染吃掉反斜杠的写法），即可看到排版后的公式，并可复制源码。
 - **查找**：按 ⌘F（其他系统为 Ctrl+Shift+F）可在 pane 的输出里查找文字，包括滚动回看的内容。
   屏幕上的所有匹配都会高亮，Enter 和 Shift+Enter 分别跳到更早和更新的匹配，并自动滚动到可见位置。
@@ -63,7 +63,6 @@
 - **设置**：界面语言（中文、英文）、浅色/深色主题（VS Code 同步切换）、界面大小、终端的字体、行高、光标、回滚行数、响铃和配色（两种主题的 16 色），面板位置、code-server 安装方式以及所有快捷键，集中在一个可搜索的设置对话框里（`ctrl+b ,`）。
   设置和快捷键保存在 core 所在主机上的两个 JSON 文件里，也可以直接手改；浏览器、桌面应用和 macOS 应用看到的都一样。
   终端默认使用内置的 JetBrains Mono 字体，也可以换成其他字体。
-  终端在任何浏览器里都使用内置的 JetBrains Mono 字体。
 
 ## 截图
 
@@ -76,7 +75,7 @@ pane 标题栏上的按钮可以打开它的文件夹、diff 或 Git Graph。
 
 ![workstation 上的 matplotlib 动画显示在单独的浏览器窗口里，下面是启动它的 pane](docs/images/windows.zh-CN.png)
 
-**快速预览**：在终端里右键或 ⌘/Ctrl+点击路径即可预览；
+**快速查看**：在终端里右键或 ⌘/Ctrl+点击路径即可预览；
 用箭头可以翻看同一目录下的其他文件。
 
 ![从文件列表里预览一张训练 loss 曲线](docs/images/quicklook.zh-CN.png)
@@ -96,6 +95,7 @@ cd dist/packages/herdr-ide-$(go env GOOS)-$(go env GOARCH)
 
 也可以解压 `dist/release/` 或 GitHub Releases 中对应平台的压缩包，运行 `./herdr-ide`。
 SSH 机器用侧栏的「添加机器…」添加。
+从使用 herdr 绘制 pane 的旧版本升级时，设置、快捷键和机器会在第一次启动时迁移过来，终端仍留在 herdr 里（见[迁移说明](docs/deployment.md#migrating-from-versions-that-used-herdr)）。
 
 打开 <http://127.0.0.1:7780>。
 `ctrl+b space` 打开命令面板，`ctrl+b ?` 查看快捷键。
@@ -114,22 +114,24 @@ make desktop-install             # .app，并复制到 /Applications
 ARCH=x64 make desktop-dmg        # Intel；默认使用当前 Node 的架构
 ```
 
-桌面版与浏览器使用统一的终端窗格图标；
+桌面版与浏览器使用统一的终端 pane 图标；
 macOS 版包含适用于 Finder 和 Dock 的多尺寸图标。
 
-从 Finder 把文件夹拖到侧边栏或应用的 Dock 图标上，即可在本机为每个文件夹新建一个 workspace。
+从 Finder 把文件夹拖到侧栏或应用的 Dock 图标上，即可在本机为每个文件夹新建一个 workspace。
 拖到本机 pane 上的文件和文件夹直接粘贴原路径，不会上传。
 
-在桌面应用中，`cmd+t` 新建标签页，`cmd+w` 关闭 pane，`cmd+d` / `cmd+shift+d` 分屏，`cmd+n` 新建 workspace，`cmd+,` 打开设置，`cmd+j` 显示或隐藏 VS Code 面板；
+在桌面应用中，`cmd+t` 新建 tab，`cmd+w` 关闭 pane，`cmd+d` / `cmd+shift+d` 分屏，`cmd+n` 新建 workspace，`cmd+,` 打开设置，`cmd+j` 显示或隐藏 VS Code 面板；
 焦点在 VS Code 里时，VS Code 自己的快捷键优先。
 菜单与原生应用相同，显示当前生效的快捷键，使用界面的语言；
 标题栏跟随界面的主题。
 可在**设置 → 快捷键**中修改或移除快捷键。
 前缀快捷键仍然可用；
-浏览器中 `cmd+t` / `cmd+w` 仍归浏览器所有。
+浏览器里 `cmd+t` / `cmd+w` 仍归浏览器自己使用。
 
-原生 macOS 应用用 Ghostty 的渲染器绘制终端，并通过同一个 core 提供浏览器界面的全部功能：workspace、标签页和分屏（拖动、放大、重命名），添加和管理机器（含 ssh 登录），文件窗口与上传下载，把文件粘贴或拖入终端，可按机器覆盖的设置和全部快捷键，命令面板，agent 的通知、提示音和 Dock 角标，终端旁的 VS Code，以及鼠标悬停显示公式。
-用 `make macos-app` 构建（位于 `dist/macos/`；未通过 `SIGN_IDENTITY` 指定证书时使用 ad-hoc 签名）。
+原生 macOS 应用用 Ghostty 的渲染器绘制终端，并通过同一个 core 提供浏览器界面的全部功能：workspace、tab 和分屏（拖动、最大化、重命名），添加和管理机器（含 ssh 登录），文件窗口与上传下载，把文件粘贴或拖入终端，可按机器覆盖的设置和全部快捷键，命令面板，agent 的通知、提示音和 Dock 角标，终端旁的 VS Code，以及鼠标悬停显示公式。
+GitHub Releases 提供 Apple Silicon 版本（`…-mac-native-arm64.zip`）；
+也可以用 `make macos-app` 构建（位于 `dist/macos/`；未通过 `SIGN_IDENTITY` 指定证书时使用 ad-hoc 签名）。
+它与 Electron 应用共用 `desktop` instance，因此设置、快捷键和机器列表也是同一份。
 
 Electron 应用会以 `desktop` instance 启动自己的 core，监听 `http://127.0.0.1:7781`（原生应用监听系统分配的端口）；
 退出应用或关闭主窗口时回收该 core。
@@ -181,8 +183,10 @@ make check test    # 提交 PR 之前运行
 ## 许可证
 
 [MIT](LICENSE)。
-第三方许可证：Go 依赖见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)，前端打包的依赖见程序提供的 `/licenses.md`。
+第三方许可证：Go 依赖见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)，前端打包的依赖（包括 Ghostty 的终端库（MIT）、KaTeX 和 JetBrains Mono 字体）见程序提供的 `/licenses.md`。
 核心程序内嵌供各机器使用的 [herdr-core](https://github.com/herdrdev/herdr-core)（Apache-2.0），其许可证及依赖声明在发布包的 `licenses/herdr-core/` 中。
 agent 中带有 herdr 的 agent 识别规则（Apache-2.0，见 [licenses/herdr-detect/](licenses/herdr-detect/)）。
+核心程序还内嵌供 Linux 机器使用的视频编码器（FFmpeg，LGPL-2.1，以及 libvpx、libva 和 libdrm；见 [licenses/encoder/](licenses/encoder/)）。
+macOS 应用还附带 Ghostty 和 libghostty-spm 的许可证（MIT）。
 code-server 和 Git Graph 使用各自的许可证，在运行时下载。
 Git Graph 明确限制衍生作品分发，对原版的一般再分发授权不明确，因此不纳入公开发布包。

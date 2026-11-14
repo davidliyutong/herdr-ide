@@ -155,5 +155,6 @@ without writing, and that the repository's generated files are current.
 `web/src/__tests__/tokens.test.ts`: the web UI's default terminal colors
 equal the tokens' and a theme's terminal background is the page's.
 `web/src/__tests__/termOptions.test.ts` keeps the terminal colors'
-contrast. The macOS application's build (`scripts/macos-app.sh build`)
-compiles `Theme` against the generated `Tokens`.
+contrast. The macOS application's builds (`make macos-build`,
+`make macos-test`, `make macos-app`) compile `Theme` against the
+generated `Tokens`.

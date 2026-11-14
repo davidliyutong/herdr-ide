@@ -1,18 +1,22 @@
 # Architecture
 
 ```
-browser (React, WebGL)      ──WebSocket + HTTP──▶  core (Go, `herdr-ide`)
-macOS application                                    ├─ machines: registry + connection state machine
-                                                     ├─ server: event channel, terminal streams, files, code-server proxy, bridge hub
-                                                     ├─ gui: virtual displays per machine, window list, frame routing
-                                                     └─ one ssh session per machine ──yamux──▶ agent (`herdr-ide-agent`)
-                                                                                                 ├─ herdr-core in a session of its own (raw pipe to its API socket)
-                                                                                                 ├─ agent detection in its terminals
-                                                                                                 ├─ files (stat/list/range read/upload/zip)
-                                                                                                 ├─ code-server (unix socket only)
-                                                                                                 ├─ Xvfb + window manager (programs' windows)
-                                                                                                 └─ bridge.sock ◀── VS Code bridge extension
+browser (React, wasm + WebGL)  ──WebSocket + HTTP──▶  core (Go, `herdr-ide`)
+desktop app (Electron shell)                            ├─ machines: registry + connection state machine
+macOS application (Ghostty)                             ├─ settings, keybindings (files on the core host)
+                                                        ├─ server: event channel, terminal protocol, files, code-server proxy, bridge hub
+                                                        ├─ gui: virtual displays per machine, window list, frame routing
+                                                        └─ one ssh session per machine ──yamux──▶ agent (`herdr-ide-agent`)
+                                                                                                    ├─ herdr-core in a session of its own (raw pipe to its API socket)
+                                                                                                    ├─ agent detection in its terminals
+                                                                                                    ├─ files (stat/list/range read/upload/zip)
+                                                                                                    ├─ code-server (unix socket only)
+                                                                                                    ├─ Xvfb + window manager (programs' windows)
+                                                                                                    └─ bridge.sock ◀── VS Code bridge extension
 ```
+
+The local machine's agent runs inside the core (an in-process socket pair
+instead of ssh), so both paths run the same code.
 
 | Directory | Role |
 | --- | --- |
@@ -34,12 +38,14 @@ macOS application                                    ├─ machines: registry +
 | `internal/registry` | What the core registers: the setting modules and the commands (used by the core and `scripts/registry`). |
 | `internal/userfile` | Atomic writes and change detection of the hand-editable files. |
 | `internal/gui` | Virtual displays on machines, their windows, frames and input between agents and browser windows. |
+| `internal/jpegstrip` | JPEG encoding of a window capture in independent row groups, encoded in parallel (from Go's `image/jpeg`, BSD). |
 | `internal/server` | HTTP/WS front: guards, the event channel, terminal streams, files, proxy, bridge, audit. |
 | `internal/embedded` | Build artifacts compiled into the core (agents, herdr-core, the video encoder, bridge VSIX). |
 | `web` | Browser UI (Vite, React, zustand): the terminals of the machines' terminal cores (`src/term`: the client of `/api/v1/term` and the layout document; `src/state/terms.ts`: the machines' terminals and layouts; `src/vt`: Ghostty's terminal library as WebAssembly with its renderer and input encoders, also for the PTY dialogs, [26](features/26-web-terminals.md)); `math.html` renders a formula for the macOS application's preview ([19](features/19-formulas-in-panes.md)); `web/embed.go` embeds `web/dist`. |
 | `macos` | macOS application (Swift package): `TermKit`, the clients of `/api/v1/term` and of the event channel `/ws`, of the file endpoints (uploads, downloads) and the settings API, with the terminal, layout (workspaces, tabs, splits), settings, keybindings, transfers, agents' attention, formula and core-process models; `App`, the AppKit window drawing terminals with Ghostty's renderer, with the browser UI's features over the same endpoints ([23](features/23-macos-application.md)). |
 | `desktop` | Electron shell (`src`: the owned core process, the client of its settings and keybindings, the application menu, the main window's preload and policy) and electron-builder config; macOS `.app`/DMG wrapping the embedded core. |
 | `extensions/herdr-ide-bridge` | VS Code extension installed into code-server. |
+| `scripts` | Build, packaging and check scripts (`build.sh`, `package.sh`, `macos-app.sh`, `desktop.sh`, `check.sh`), the pinned downloads (`fetch-hc`, `fetch-ghostty.sh` for the macOS application's renderer, `fetch-ghostty-vt.sh` for the web UI's emulator, `build-ffmpeg.sh` for the video encoder) and the generators (`tokens`, `registry`). |
 | `design` | Design tokens (`tokens.json`): colors in light and dark, metrics, font sizes and terminal palettes; `scripts/tokens` generates `macos/Sources/App/Tokens.swift`, `web/src/tokens.css` and the terminal colors' setting defaults (`internal/uisettings/tokens.go`) from them. `generated/registry.json` (`scripts/registry`): setting defaults, commands, default bindings per platform and the translation keys each UI needs. `testdata/layout`: the layout document's test vectors (directional focus and pane drops included), run by the TypeScript and Swift clients ([22](features/22-terminal-protocol.md)); `testdata/keys`: the key syntax's vectors, run by Go, TypeScript and Swift; `testdata/math`: the formulas found in terminal text, run by TypeScript and Swift ([19](features/19-formulas-in-panes.md)). |
 
 ## Desktop launcher
@@ -75,6 +81,17 @@ also when the drop launched the app. Same-origin popups become equally
 restricted native windows; HTTP(S) links outside the core open in the default
 browser. Packaging and lifecycle details are in
 [16](features/16-desktop-packaging.md).
+
+## macOS application
+
+The macOS application (`macos/`, [23](features/23-macos-application.md))
+starts the core in its bundle (`Contents/Resources/bin/`) as the Electron
+shell does, with `--parent-stdio` and instance `desktop` (so both
+applications share settings, keybindings and machines), but on a loopback
+port the system chooses; `HERDR_IDE_CORE` points it at a running core
+instead. It is a client of the same endpoints as the browser UI: `/ws` for
+machines, settings, keybindings, program windows and agents, and
+`/api/v1/term` for terminals, which Ghostty's renderer emulates and draws.
 
 ## Core ↔ agent protocol (`internal/agentproto`)
 
@@ -113,7 +130,7 @@ own protocol (`/api/v1/term`, below). A client plays no notification sounds
 
 | Client → core | Core → client |
 | --- | --- |
-| `retry {m}` (ends the wait before a disconnected machine's next connection attempt; refused for read-only clients), `ping` | `machines {list}`, `machine {state}`, `agent {m, data}` (status change), `bridge.send {m, text, folders}` (the sending VS Code window's folders: the page picks the workspace whose panel shows it), `bridge.download {m, paths}` (files chosen in VS Code's explorer; the page with the focus downloads them) |
+| `retry {m}` (ends the wait before a disconnected machine's next connection attempt; refused for read-only clients), `ping {rid}` | `pong {rid}`, `machines {list}`, `machine {state}`, `agent {m, data}` (status change), `bridge.send {m, text, file, line, end_line, folders}` (text for an agent, with the file and lines it came from; `folders` are the sending VS Code window's, absent while unknown: the page picks the workspace whose panel shows it), `bridge.download {m, paths}` (files chosen in VS Code's explorer; the page with the focus downloads them) |
 | `download.watch {ids}` (downloads the page started with `dl=<id>`: before starting one and after reconnecting), `download.cancel {id}` | `download {id, state, sent, total, name, error}` to the page following the id: progress and how it ended (`unknown` for an id the core has not seen or no longer knows), for the downloads panel |
 | `theme {kind: dark\|light}` (VS Code follows it) | `gui {state: {m, phase, gpu, windows}}` (program windows per machine) |
 | – | `settings {values, problems}` and `keybindings {user, effective, conflicts, problems}` after every change, through the API or the files ([13](features/13-settings-and-appearance.md)) |
@@ -203,6 +220,11 @@ names to the `Legacy*` lists, from which:
 ## Internationalization
 
 The web UI uses `web/src/i18n`: `en.ts` defines every key, other locales are
-typed against it (missing keys fail the build, a test checks placeholders).
-The VS Code extension uses `package.nls*.json` and `l10n/`. Code comments,
-logs and protocol messages are English.
+typed against it (missing keys fail the build, a test checks placeholders);
+the desktop app's menu and dialogs use the same strings. The macOS
+application has `Localizable.strings` per language
+(`macos/Sources/App/Resources`; its tests fail on a missing, unused or
+mismatched key), and takes the settings' and commands' labels the registry
+lists (`design/generated/registry.json`). The VS Code extension uses
+`package.nls*.json` and `l10n/`. Code comments, logs and protocol messages
+are English ([12](features/12-internationalization.md)).

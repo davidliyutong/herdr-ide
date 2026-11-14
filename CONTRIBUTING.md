@@ -67,8 +67,9 @@ workspaces can live in the ignored `.worktrees/` directory.
   the macOS application's in `macos/Tests`. Vectors both clients run live
   in `design/testdata/` (`make check` fails when a vector file is run by no
   web or no Swift test).
-- Update the docs in the same PR: flags and shortcuts in
-  [docs/reference.md](docs/reference.md) (CI checks every flag is listed),
+- Update the docs in the same PR: flags, endpoints and files in
+  [docs/reference.md](docs/reference.md) (CI checks every flag and route is
+  listed; `make tokens` regenerates its tables of settings and commands),
   components and protocols in [docs/architecture.md](docs/architecture.md),
   feature behavior and its reasoning in [docs/features/](docs/features/README.md),
   operations in [docs/deployment.md](docs/deployment.md). Leave

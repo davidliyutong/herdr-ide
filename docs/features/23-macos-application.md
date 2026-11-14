@@ -2,13 +2,15 @@
 
 ## Context
 
-The browser UI draws every pane on a 2D canvas from cells the core
-forwards, inside Electron on the desktop
-([16](16-desktop-packaging.md)). Drawing is bound to one JavaScript thread
-and a software text path. Ghostty's renderer draws a terminal grid on the
-GPU with Metal, and its library builds for macOS; libghostty-spm packages
-it for Swift with a backend whose bytes the host supplies, which is what
-the core's terminal protocol delivers ([22](22-terminal-protocol.md)).
+The browser UI emulates each terminal with Ghostty's terminal library as
+WebAssembly and draws it with WebGL2 ([26](26-web-terminals.md)), inside
+Electron on the desktop ([16](16-desktop-packaging.md)): one JavaScript
+thread sits between the bytes and the GPU, glyphs come from a canvas
+atlas, and the window is a web page's. Ghostty's renderer draws a terminal
+grid on the GPU with Metal, with its own font shaping, and its library
+builds for macOS; libghostty-spm packages it for Swift with a backend
+whose bytes the host supplies, which is what the core's terminal protocol
+delivers ([22](22-terminal-protocol.md)).
 
 Facts the design relies on (libghostty-spm 2.2.2026111302, Ghostty at
 `cf5519b22f91`):
@@ -51,9 +53,26 @@ Non-goals: Linux and Windows.
   streams close with `disconnected`. A stream's delegate is registered when
   `attached` arrives, before the next message is read.
 - `EventConnection` is the client of the event channel `/ws`, as the
-  browser UI is. It decodes `machines`, `machine`, `gui`, `settings` and
-  `keybindings` and ignores every other message; after reconnecting the
-  core sends the whole state again.
+  browser UI is. It decodes `machines`, `machine`, `gui`, `settings`,
+  `keybindings`, `agent`, `bridge.send` and `bridge.download` and ignores
+  every other message; after reconnecting the core sends the whole state
+  again. The application sends `retry`, `active` (the time since the
+  user's last input, so the core picks the most recently used client to
+  play sounds) and `theme` (the appearance VS Code follows).
+- `SettingsModel` and `KeybindingsModel` (`Settings.swift`) hold the
+  core's definitions, values, bindings in effect on `mac` and conflicts
+  from `GET /api/settings` and `GET /api/keybindings`, apply the pushes,
+  and turn a command's new keys into the user's rules
+  ([13](13-settings-and-appearance.md)); `Keys` parses and labels key
+  sequences and `KeyMatcher` runs strokes against bindings.
+- `Activity` holds the rules shared with the web UI for agents (the
+  running-program check, the attention list, notifications and sounds,
+  where VS Code's text goes, the programs' clipboard); `Files.swift` the
+  listings, transfers and their history (`TransferList`,
+  `TransferClient`); `Paths.swift` the paths terminals print
+  (`TerminalPath`) and the folders opened in the application
+  (`LocalFolders`); `Math.swift` the formulas in terminal text
+  (`MathText`).
 - `TerminalStore` keeps each machine's backend state and terminal records
   from `backend`, `snapshot` and `event`, applying events as the core does.
 - `Layout` is the machine's layout document, version 2
@@ -62,8 +81,12 @@ Non-goals: Linux and Windows.
   values with the document's operations; `JSONValue` holds the fields of a
   newer client so they are written back.
 - `CoreProcess` starts the core from the bundle as the Electron shell does
-  (`--parent-stdio`, instance `desktop`), but on `127.0.0.1:0`, and reads
-  the URL from the core's ready line.
+  (`--parent-stdio`, instance `desktop`), but on `127.0.0.1:0`, with
+  `PATH` extended by the usual install locations, and reads the URL from
+  the core's ready line; it keeps the last 40 lines the core logged.
+  `HERDR_IDE_DEV=1` starts it as instance `dev`, local-only;
+  `HERDR_IDE_CORE` names a running core to use instead
+  ([reference](../reference.md#environment-variables)).
 
 **App** (`macos/Sources/App`, AppKit).
 
@@ -166,14 +189,15 @@ Non-goals: Linux and Windows.
   sentence). None of these show while the core is read-only.
 - `Theme` holds the colors, in light
   and dark, and the metrics, whose values are the design tokens shared with
-  the web UI ([24](24-design-tokens.md)); terminals use the web UI's
-  default 16-color palette.
+  the web UI ([24](24-design-tokens.md)); terminals take the
+  `terminal.colors.*` settings of both themes (whose defaults are the
+  tokens' palettes), so they look as in the web UI.
 - **Find** (⌘F, ⌘G, ⇧⌘G). Ghostty searches the surface's screen and
   scrollback and marks the matches; the pane's find bar drives it with the
   binding actions `start_search`, `search:<text>`, `navigate_search:next`
   and `previous`, `end_search`, and shows the count and position Ghostty
-  reports. A pane attaches with 10000 lines of history, so earlier output
-  can be scrolled to and found.
+  reports. A pane attaches with `terminal.scrollback` lines of history
+  (10000 by default), so earlier output can be scrolled to and found.
 - **Links**. A ⌘-click on a web or mail link opens it in its application.
   Anything else Ghostty found is taken as a path: `TerminalPath` drops a
   trailing `:line:column`, keeps absolute and `~` paths and joins others to
@@ -280,8 +304,9 @@ Non-goals: Linux and Windows.
   A terminal with the keyboard takes the keys Ghostty binds before the
   menu sees them, and Ghostty binds most of these by default (new tab,
   splits, close, find, its own settings); the controller's configuration
-  unbinds every key of the menu (`TerminalControllerBox.menuKeys`), so they
-  reach the menu. A search Ghostty starts by itself shows the find bar as
+  (`TerminalControllerBox.configuration`) unbinds every key the menu shows
+  for a command and the menu's own ⌘Q, ⌘H, ⌘M and ⌘V (`systemKeys`), and
+  is applied again whenever the keybindings change, so they reach the menu. A search Ghostty starts by itself shows the find bar as
   well. The Electron application's menu has the same items and titles
   (`desktop/src/menu.test.ts` compares it with `makeMenu` and these
   strings, [16](16-desktop-packaging.md)).
@@ -312,6 +337,13 @@ builds the application that ships:
    ID certificate; without it the signature is ad hoc, like the Electron
    application's. With `NOTARY_PROFILE` (a `notarytool` keychain profile)
    the bundle is notarized and the ticket stapled.
+
+CI runs `make macos-test` and `make macos-app` on a macOS runner for pull
+requests and `main`. The release workflow builds the arm64 application
+with the release's video encoder, signs and notarizes it when the
+repository has the certificate and the notary's credentials, and
+publishes it as `<name>-<version>-mac-native-arm64.zip` beside the
+archives and DMGs, in the same `SHA256SUMS`.
 
 ## Alternatives considered
 
@@ -344,9 +376,10 @@ builds the application that ships:
   connection returns with backoff and panes attach again.
 - **A machine's terminal backend not ready** → the empty state and the
   machine's row say why (the core's code, translated).
-- **A menu shortcut bound in Ghostty** (a key added to the menu but not
-  to `menuKeys`) → the terminal takes it and nothing happens; the debug
-  action `key:cmd+<key>` logs whether the view or the menu handled a key.
+- **A menu shortcut bound in Ghostty** (a fixed key added to the menu
+  outside the keybindings but not to `TerminalControllerBox.systemKeys`)
+  → the terminal takes it and nothing happens; the debug action
+  `key:cmd+<key>` logs whether the view or the menu handled a key.
 - **A path that is not a file** (a word Ghostty took for one) → the
   sheet says it does not exist.
 - **code-server cannot start** → the proxy's page in the panel shows the
@@ -375,19 +408,28 @@ See the row for the macOS application in
 
 ## Testing
 
-`macos/Tests/TermKitTests` (`make macos-test`): the running-program rule,
-the attention list and its order, the reactions to agents' states, where
-text sent from VS Code goes, the palette's matching, the transfers' list
-and history, listings and the names of downloads, shell quoting, paths as terminals print
-them (line suffixes, `~`, relative, `file:` URLs, other schemes) and the
-names of their local copies, which opened paths are folders, that the
-closing commands are the core's, frame encoding and slices,
-terminal names, the store's snapshots and every event kind (detected
-agents and the count of terminals that wait included), the event
-channel's messages (a machine's terminal core state, a window's terminal), every layout vector of `design/testdata/layout`
-([22](22-terminal-protocol.md)), the core's arguments, environment and
-ready line, a missing core, and the localization checks of
-[12](12-internationalization.md). `internal/brand/brand_test.go` keeps
+`macos/Tests/TermKitTests/TermKitTests.swift` (`make macos-test`):
+`ActivityTests` (the running-program rule, the attention list and its
+order, the reactions to agents' states, where text sent from VS Code
+goes, the palette's matching), `FilesTests` (the transfers' list and
+history, listings and the names of downloads, shell quoting),
+`TerminalPathTests` (paths as terminals print them: line suffixes, `~`,
+relative, `file:` URLs, other schemes, and the names of their local
+copies), `LocalFoldersTests` (which opened paths are folders),
+`ProtocolTests` (frame encoding and slices, terminal names),
+`TerminalStoreTests` (snapshots and every event kind, detected agents and
+the count of terminals that wait included), `EventTests` and
+`FeatureTests.testEventsOfAgentsAndVSCode` (the event channel's messages:
+a machine's terminal core state, a window's terminal, agents, VS Code's
+`bridge.*`), `LayoutTests` (every vector of `design/testdata/layout`,
+[22](22-terminal-protocol.md)), `KeysTests` (the shared key vectors,
+labels, menu equivalents, Ghostty's triggers, that the closing commands
+are the core's), `SettingsModelTests`, `FeatureTests` (the formula
+vectors of `design/testdata/math`, the programs' clipboard rule, the
+core's log kept for its failure), `CoreProcessTests` (the core's
+arguments, environment and ready line, a missing core) and
+`LocalizationTests`, the localization checks of
+[12](12-internationalization.md) and the registry's keys. `internal/brand/brand_test.go` keeps
 `Brand.swift` in step. The window is
 exercised by hand with the development aids of debug builds
 (`HERDR_IDE_ACTIONS`, `HERDR_IDE_SNAPSHOT`, see

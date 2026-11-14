@@ -20,8 +20,9 @@ settings between machines.
 
 **Provisioning** (`internal/codeserver`, agent `codeserver.go`)
 
-- The `codeServer.install` setting (settings dialog or `--code-server-install`) picks how a
-  machine gets code-server:
+- The `codeServer.install` setting (settings dialog or
+  `--code-server-install`; one value for every machine) picks how a machine
+  gets code-server:
   - `push` (default): the release for the machine's platform is resolved on
     the core host ([09](09-air-gapped-installs.md)), uploaded through the
     agent and unpacked into `~/.herdr-ide/code-server/<version>` (shared by
@@ -29,9 +30,10 @@ settings between machines.
   - `download`: the agent fetches the same release URL with the machine's
     curl or wget (its proxy and CA settings apply), checks the digest the
     core sends and unpacks it into the same place;
-  - `existing`: the agent runs a code-server already on the machine
-    (`code-server-path`, or `PATH` and the usual install locations); the
-    core's requests then carry its path (`Header.Bin`).
+  - `existing`: the agent runs a code-server already on the machine (the
+    `codeServer.path` setting or `--code-server-path`, an absolute or `~/`
+    path, else `PATH` and the usual install locations); the core's requests
+    then carry its path (`Header.Bin`).
   `download` and `existing` fall back to `push` (logged); `--offline` skips
   `download`. A change applies the next time code-server starts on a
   machine, since a running process is reused.
@@ -52,8 +54,9 @@ settings between machines.
   the Host header preserved (code-server compares Origin with Host).
 - While code-server is being prepared, the panel shows a page that polls
   `/api/m/<machine>/code/status` and translates the phase codes.
-- The panel sits beside the terminals or below them (a setting, also toggled
-  from the panel's header); width and height are remembered per browser.
+- The panel sits beside the terminals or below them (the core's
+  `layout.panelPosition` setting, also toggled from the panel's header);
+  its width and height are remembered per browser.
 
 **One panel per workspace** (`web/src/state/store.ts` `docks`,
 `web/src/components/Dock.tsx`)
@@ -83,8 +86,9 @@ settings between machines.
   code-server (the panel's power button) closes that machine's VS Code
   panels in every workspace and unmounts its windows; `cmd+j` brings one
   back, which starts code-server again.
-- In the desktop app `cmd+j` (the command `view.toggleCode`,
-  [04](04-layout-and-keyboard.md)) shows or hides the selected workspace's
+- In the desktop app `cmd+j` (`ctrl+shift+j` on other systems; the command
+  `view.toggleCode`, [04](04-layout-and-keyboard.md), which browsers have
+  no key for) shows or hides the selected workspace's
   panel: an open panel (VS Code or preview) closes and the terminal gets the
   keys again; a closed one shows the VS Code panel that workspace showed
   last, as it was, while it belongs to the focused pane's machine (its window
@@ -92,6 +96,11 @@ settings between machines.
   folder opens. While VS Code has the keyboard it keeps its own `cmd+j`
   (its bottom panel), as in the macOS application; the View menu's **Show
   or Hide VS Code** works from there.
+- The macOS application shows the same proxied code-server in a panel of
+  its own (`macos/Sources/App/WebPanel.swift`, ⌘J), a `WKWebView`
+  addressed as `localhost`, which VS Code's web views need as a secure
+  context; it keeps the three most recently shown folders loaded
+  ([23](23-macos-application.md)).
 
 **Theme** (`theme` WebSocket message, `bridgeHub.setTheme`)
 
@@ -101,7 +110,8 @@ settings between machines.
 - The extension switches `workbench.colorTheme` to the user's
   `workbench.preferredLightColorTheme` / `preferredDarkColorTheme` unless
   the current theme is already of that kind, so a chosen theme is kept.
-  Settings are per instance, so all browsers of one core share the last
+  VS Code's settings are per instance (`cs-data` in the instance's
+  directory on the machine), so all browsers of one core share the last
   choice. The loading page reads the language and theme from the embedding
   page.
 
@@ -142,8 +152,7 @@ settings between machines.
   into a folder the user picks. Only Chromium-based browsers have that API,
   and only on `localhost` or HTTPS; elsewhere VS Code cannot save folders. The
   desktop app grants the API to the core's frames
-  ([16](16-desktop-packaging.md)); before, it denied it and folder downloads
-  failed silently.
+  ([16](16-desktop-packaging.md)).
 - The bridge's **Download (folders as zip)** works in every browser and needs
   no permission: the browser streams the response from the core.
 
@@ -160,7 +169,7 @@ settings between machines.
 | Routing a download to the exact page of the VS Code window | The extension host does not know which page shows its window; the page with the focus is the one whose panel was just used. |
 | One VS Code window per machine, navigated to the folder of the selected workspace | Every workspace switch would reload VS Code; one window per folder keeps each workspace's editors as they were. |
 | Keeping every workspace's VS Code window loaded | Each is a whole workbench in the browser, and its connection keeps code-server from stopping when idle; hidden windows are bounded by time and count instead. |
-| One panel for all workspaces (before) | Only one VS Code at a time; opening a pane's folder replaced the window another workspace was using. |
+| One panel for all workspaces | Only one VS Code at a time; opening a pane's folder would replace the window another workspace was using. |
 
 ## Failure modes
 
@@ -200,20 +209,31 @@ VS Code's "open in browser" links for forwarded ports therefore do not work.
 
 ## Testing
 
-`internal/codeserver/artifacts_test.go` (resolution and verification),
-`internal/codeserver/manager_test.go` (install mode, recorded digests),
-`internal/agent/codeserver_test.go` (finding an installed code-server,
-verified machine downloads, start flags), `internal/server/server_test.go`
-(bridge window selection, idle tracking, theme broadcast, refused port proxy
-paths), `internal/server/download_test.go` (`bridge.download` to browsers),
-`TestBridgeSendToAgent` (the sending window's folders in `bridge.send`),
-`web/src/__tests__/workspaceDock.test.ts` (a panel per workspace, kept per
-browser and dropped with its workspace or machine, windows per machine and
-folder with their order, expiry and limit, disabled machines, read-only
-mode, stopping code-server, the pane Send to Agent picks and none in
-another workspace),
-`web/src/__tests__/download.test.ts` (only the focused page downloads),
-`desktop/src/policy.test.ts` (the File System Access permission). VS Code's
+- `internal/codeserver/artifacts_test.go` (resolution and verification),
+  `internal/codeserver/manager_test.go` (`TestInstallMode`,
+  `TestRecordDigest`).
+- `internal/agent/codeserver_test.go`: finding an installed code-server
+  (`TestCodeServerExistingBin`), verified machine downloads
+  (`TestCodeServerDownload`), start flags (`TestCodeServerArgsDisableProxy`),
+  a listener that does not serve VS Code replaced
+  (`TestCodeServerReplacesBrokenListener`).
+- `internal/server/server_test.go`: bridge window selection
+  (`TestBridgePick`), idle tracking (`TestCodeServerIdleTracking`), theme
+  broadcast (`TestBridgeTheme`), refused port proxy paths
+  (`TestCodeServerPortProxyRefused`), the sending window's folders in
+  `bridge.send` (`TestBridgeSendToAgent`);
+  `internal/server/download_test.go` (`TestBridgeDownload`:
+  `bridge.download` to browsers).
+- `web/src/__tests__/workspaceDock.test.ts`: a panel per workspace, kept
+  per browser and dropped with its workspace or machine, windows per
+  machine and folder with their order, expiry and limit, disabled machines,
+  read-only mode, stopping code-server, the pane Send to Agent picks and
+  none in another workspace; `web/src/__tests__/desktop.test.ts` (showing
+  and hiding the panel, back to the one shown last).
+- `web/src/__tests__/download.test.ts` (only the focused page downloads),
+  `desktop/src/policy.test.ts` (the File System Access permission).
+
+VS Code's
 own Download… was traced in code-server 4.144.0: up to 32 MB it is a blob
 download, which reaches Electron's `will-download`. The fallback from `existing` to
 `push` and the theme switch in both directions were verified with

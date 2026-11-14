@@ -1,9 +1,9 @@
 // The terminal font ships with the UI (fonts/README.md), so every browser
 // renders panes with the same glyphs and cell metrics whatever is installed.
-// xterm.js measures the cell when its font family changes and caches each
-// glyph the first time it draws it, so a terminal must not use the font
-// before its faces are loaded: it starts with the fallback stack and switches
-// once they are (TermController).
+// The renderer's glyph atlas (vt/atlas.ts) measures the cell from the font
+// stack and caches each glyph the first time it draws it, so a terminal must
+// not use the font before its faces are loaded: it starts with the fallback
+// stack and switches once they are (whenTermFont, TerminalView).
 
 import regular from './fonts/JetBrainsMono-Regular.woff2';
 import italic from './fonts/JetBrainsMono-Italic.woff2';

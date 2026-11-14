@@ -3,7 +3,8 @@
 #   1. gofmt / go vet
 #   2. the product slug appears in string literals only in the brand files
 #      (so a rename stays a one-file change plus scripts/rename.sh)
-#   3. every command-line flag is documented in docs/reference.md
+#   3. every command-line flag and every HTTP route is documented in
+#      docs/reference.md
 #   4. THIRD_PARTY_NOTICES.md matches the linked Go modules
 #   5. README.md and README.zh-CN.md have the same section structure
 #   6. CHANGELOG.md's [Unreleased] is one list without subsections
@@ -41,6 +42,13 @@ fi
 echo "==> flags documented"
 for f in $( (go run "./cmd/${slug}" serve -h; go run "./cmd/${slug}" fetch-assets -h) 2>&1 | sed -n 's/^  -\([a-z-]*\).*/\1/p' | sort -u); do
   grep -qF -- "\`--$f\`" docs/reference.md || { echo "flag --$f missing from docs/reference.md"; fail=1; }
+done
+
+echo "==> endpoints documented"
+# Every route of the server's mux, as `METHOD /path` or `/path`.
+for route in $(sed -n 's/^[[:space:]]*mux\.Handle\(Func\)\{0,1\}("\([^"]*\)".*/\2/p' internal/server/server.go | tr ' ' '_'); do
+  route=${route//_/ }
+  grep -qF -- "\`$route\`" docs/reference.md || { echo "endpoint $route missing from docs/reference.md"; fail=1; }
 done
 
 echo "==> third-party notices"

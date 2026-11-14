@@ -69,7 +69,7 @@ input methods.
   is ready and each time the machine's terminal core becomes reachable
   again (a keeper started while it was down has left), except in read-only
   mode. One runs per instance (`run/gui-keep.lock`); it logs to
-  `~/.herdr-ide/gui-keep.log`. The agent connects once right after starting
+  `~/.herdr-ide[-<instance>]/gui-keep.log`. The agent connects once right after starting
   Xvfb, so a display nobody attaches to exits too. xorg-server before 21.1
   lacks the delay: such a server exits as soon as its last client leaves,
   and one that never got a client stays until an agent attaches.
@@ -87,8 +87,9 @@ input methods.
 - Terminals created otherwise (before the display existed, or with
   herdr-core's own commands) keep their environment: a shell gets its
   variables when it starts. "Enable in open panes" (settings dialog, per
-  machine: every terminal of the machine's terminal core), the palette
-  command for the focused pane's terminal and, in the macOS application,
+  machine: every terminal of the machine's terminal core), the palette's
+  commands for the focused pane's terminal and for a whole machine and, in
+  the macOS application,
   **Enable Program Windows Here** in a terminal's menu
   (`POST /api/m/{id}/gui/enable`, `{"terminals": [...]}`, empty or absent
   for all) catch them up without restarting anything: for each terminal
@@ -347,7 +348,7 @@ turning it on pushes the encoder if needed.
 - **No Xvfb and no apt** → phase `unavailable`; panes get no `DISPLAY`, so
   programs behave as over plain ssh.
 - **Unpacked Xvfb cannot start** (missing libraries) → phase `error` with
-  Xvfb's output (`~/.herdr-ide/xvfb.log` on the machine); retried with the
+  Xvfb's output (`~/.herdr-ide[-<instance>]/xvfb.log` on the machine); retried with the
   backoff, so at most one start every 5 minutes.
 - **Any preparation or attach error** → the status bar shows that the
   machine's display failed; clicking it shows the error the core reported
@@ -367,7 +368,7 @@ turning it on pushes the encoder if needed.
   after Xvfb idled out → a new number is reserved; panes created earlier
   point at the old one and reach whatever server holds it (see Security).
 - **Old xorg-server** (before 21.1) → Xvfb exits as soon as its last client
-  leaves instead of six hours later; the next connect starts it again.
+  leaves instead of a minute later; the next connect starts it again.
 - **Install interrupted** (agent killed) → its `.fetch-*` directory is removed
   by the next agent after an hour.
 - **Another window manager on the display** (two cores of one instance) →

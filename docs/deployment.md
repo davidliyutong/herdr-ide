@@ -11,6 +11,7 @@ machines.
 - [Remote resources](#remote-resources)
 - [Running as a service](#running-as-a-service)
 - [Several cores and development builds](#several-cores-and-development-builds)
+- [Migrating from versions that used herdr](#migrating-from-versions-that-used-herdr)
 
 ## Local use
 
@@ -59,7 +60,7 @@ Machines come from the core's machines file
 ([reference](reference.md#files-and-directories)); add others for one run
 with `--ssh`. herdr-ide uses OpenSSH with your `~/.ssh/config`
 (ProxyJump, agent, keys) in BatchMode. A machine that needs a password, 2FA or
-a host-key confirmation shows **Authentication required**; **Authenticate…**
+a host-key confirmation shows **Sign-in required**; **Sign in…**
 opens a terminal for it, and later connections reuse that ssh ControlMaster.
 
 ## macOS desktop app
@@ -122,6 +123,23 @@ attaches to an existing listener. Opening the app twice focuses the original
 window. Closing the main window or quitting stops its core and agents;
 closing a program window leaves the main app running. HTTP(S) external links
 open in the default browser; custom URL schemes are refused.
+
+The macOS application ([23](features/23-macos-application.md)) is a
+second, native client of the same kind: releases attach it as
+`herdr-ide-<version>-mac-native-arm64.zip` (Apple Silicon), signed ad hoc
+unless the release had a Developer ID certificate and notarization
+credentials ([RELEASING.md](../RELEASING.md)); allow an ad-hoc signed copy
+once like the DMG's. `make macos-app` builds it into `dist/macos/` (Xcode 26
+and `brew install xcodegen`; `SIGN_IDENTITY` and `NOTARY_PROFILE` sign and
+notarize it). It starts the core in its bundle with instance `desktop` on a
+loopback port the system chooses, so it shares settings, keybindings and
+machines with the Electron app; quitting it stops that core and its agents,
+not the machines' terminal cores. Use one of the two applications at a
+time: two cores of one instance share each machine's run directory
+(`~/.herdr-ide-desktop/run/`: code-server's and the bridge's sockets, the
+display). `HERDR_IDE_DEV=1` starts the bundled core
+as instance `dev`, local-only, and `HERDR_IDE_CORE=<url>` makes it use a
+running core instead (development).
 
 For development run:
 
@@ -348,3 +366,42 @@ but nothing else unless they use the same instance. Give each one its own
 make dev-core     # go run ./cmd/herdr-ide --instance dev --local-only --listen 127.0.0.1:7790 --agent-dir dist/agents
 make dev-web      # Vite on top of it
 ```
+
+## Migrating from versions that used herdr
+
+Earlier versions drew their panes from herdr, the terminal multiplexer, and
+kept part of their configuration in it. This version keeps everything in
+its own files and its own terminal core; starting it once moves what can be
+moved. The steps are one way: an earlier version does not read the new
+files.
+
+- **Settings.** A `settings[-<instance>].json` of the earlier format
+  (string values under the flags' names, machines' values under
+  `"machines"`) is converted when the core first reads it and rewritten in
+  the new format ([13](features/13-settings-and-appearance.md)). Settings a
+  browser kept in `localStorage` (language, theme, font sizes…) are moved
+  into the core's settings once, by the first page of a writable core.
+- **Keybindings.** The desktop app's shortcut settings (`desktop-*-key`)
+  become rules of a new `keybindings[-<instance>].json` once, while that
+  file does not exist, and are dropped from the settings; otherwise the
+  file is created by the first change of a key. Keys set in herdr's own
+  configuration no longer apply: the defaults have the same prefix chords
+  (`ctrl+b` …), and ⌘W in the macOS application and the desktop app now
+  closes the focused pane (`pane.close`), not the tab.
+- **Machines.** The first start of an instance without a
+  `machines[-<instance>].json` imports the SSH machines herdr saved
+  (`$XDG_STATE_HOME/herdr/client/endpoints.json`, default
+  `~/.local/state/herdr/client/endpoints.json`): their ids, labels, targets
+  and whether they were enabled. Names of herdr sessions other than the
+  default that machines used are not kept; every machine gets the
+  instance's own terminal core. Later changes to herdr's file are not
+  read.
+- **Terminals.** Terminals, workspaces and tabs that lived in herdr
+  sessions are not migrated: each machine now has a terminal core of the
+  instance's own (herdr-core, session `herdr-ide[-<instance>]`,
+  [21](features/21-terminal-core.md)), which starts empty. The old
+  terminals keep running in herdr and remain reachable with the herdr CLI
+  until they are ended there; this version neither stops nor attaches to
+  them.
+- **Find** in a terminal finds plain text (ASCII letters in either case);
+  regular expressions and whole-word matching are gone.

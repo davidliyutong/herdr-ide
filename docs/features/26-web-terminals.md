@@ -176,8 +176,8 @@ returns. Focus changes are reported to programs that asked (mode 1004).
   menu opens a bar at the terminal's top right corner, with a one-line
   selection as the query. The emulator searches its screen and scrollback
   for the text, ASCII letters in either case; the newest match is current
-  after typing, Enter goes to the next older one and Shift+Enter (or
-  `find.next` / `find.previous`) to the next newer one, wrapping around;
+  after typing, Enter (or `find.next`) goes to the next older one and
+  Shift+Enter (or `find.previous`) to the next newer one, wrapping around;
   the view scrolls to the current match. Matches on the screen are
   highlighted, the current one stronger, and kept current as output
   arrives. Escape closes the bar and gives the terminal its keys back.
@@ -239,7 +239,9 @@ modes; and `drawRow` (colors, inverse, invisible, faint, wide characters,
 shapes, underline styles, highlights, cursor styles, links and formulas).
 `terms.test.ts` (the layout document's reading and writing, other clients'
 versions, ended programs, terminals asked for early, attention order),
-`clipToast.test.ts`, `paneHeader.test.ts`, `menus.test.ts`,
+`termOptions.test.ts` (the terminal settings as the emulator's options,
+the font stack before and after the bundled font loads, the colors'
+contrast), `clipToast.test.ts`, `paneHeader.test.ts`, `menus.test.ts`,
 `desktop.test.ts` (closing asks when a program runs), `drop.test.ts`,
 `workspaceDock.test.ts`. In headless Chromium against a dev core: a shell
 with colors, 256 and true colors, box drawing, CJK and emoji; typing; vim

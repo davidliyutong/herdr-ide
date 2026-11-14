@@ -4,7 +4,10 @@
 
 The browser UI and Go core already contain the application's features.
 macOS users also need an app they can launch from Finder and install by
-dragging it out of a disk image. VS Code webviews depend on Chromium features
+dragging it out of a disk image. The Electron shell is the browser UI as
+such an app, with its own core; the native macOS application
+([23](23-macos-application.md)) is a separate client of the same core
+protocols. VS Code webviews depend on Chromium features
 and a secure loopback origin, so a native shell must preserve the existing
 HTTP, WebSocket and service-worker behavior.
 
@@ -12,8 +15,10 @@ HTTP, WebSocket and service-worker behavior.
 
 Goals: reproducible dependency resolution, native macOS arm64/x64 `.app`
 and DMG builds, automatic core ownership and cleanup, safe renderer windows,
-and a development mode that cannot touch the daily instance's state or
-terminals.
+a native menu with the macOS application's commands and the core's
+keybindings, the title bar and menu following the core's theme and
+language, and a development mode that cannot touch the daily instance's
+state or terminals.
 
 Non-goals: Windows/Linux installers, universal binaries, automatic updates, Developer ID signing/notarization,
 or replacing browser access. The shell and packaging configuration are
@@ -34,8 +39,10 @@ implemented independently.
   Applications shortcut. Builds sign ad hoc with the hardened runtime, the
   core included, without notarization.
   Its `install` mode (`make desktop-install`) copies the `.app` into
-  `/Applications` for development: a copy running from there gets SIGTERM,
-  which quits it like the menu, so its core stops before the files change.
+  `/Applications` (`INSTALL_DIR` names another directory) for
+  development: a copy running from there gets SIGTERM, which quits it like
+  the menu, so its core stops before the files change; the new copy is
+  placed beside the old one first and opened again afterwards.
   Without `VERSION` the core reports `git describe` as in `scripts/build.sh`;
   the app metadata then uses `desktop/package.json`. A release tag's leading
   `v` stays in the core's version and is dropped for the app metadata, which
@@ -61,7 +68,10 @@ implemented independently.
   shell has read it (else the system's); exit codes and similar details
   are appended as is.
 - Production uses loopback port 7781 and instance `desktop`. A stable origin
-  preserves browser settings; an explicit port override is available. Dev
+  keeps what the page stores per browser (the sidebar, panel sizes,
+  transfer history) and the permissions granted to it; an explicit port
+  override is available (`HERDR_IDE_DESKTOP_PORT`). Settings and
+  keybindings are the core's, in the instance's files. Dev
   uses port 7791, instance `dev` (terminal core session `herdr-ide-dev`)
   and local-only. Unpackaged runs always use dev mode, and packaged runs can
   opt into it. Both modes have separate Electron profiles and single-instance
@@ -95,8 +105,10 @@ implemented independently.
   Find…, Find Next, Find Previous), **View** (Command Palette…, Switch
   Workspace…, Toggle Sidebar, Show or Hide VS Code, Zoom Pane, next and
   previous tab, workspace and pane, Focus Pane Left, Right, Above, Below)
-  and **Window** (Minimize). Undo, Redo and Cut are the shell's own:
-  Chromium's text fields edit with Cmd keys only through the menu. The
+  and **Window** (Minimize). Edit's Undo, Redo, Cut, Copy, Paste and
+  Select All are Electron's standard roles, as AppKit's actions are in the
+  macOS application: Chromium's text fields, like AppKit's, edit with Cmd
+  keys only through the menu. The
   macOS application's Files… and Add Machine… open its own windows; the web
   UI's sidebar adds machines. Titles are the web UI's `desktop.menu.*`
   strings, the macOS application's `menu.*` ones in English and Chinese.
@@ -168,7 +180,7 @@ implemented independently.
 | Reimplement the UI for desktop | Duplicates terminal rendering, layout and VS Code integration. |
 | Tauri/WKWebView | The project's VS Code webviews require Chromium service-worker behavior. |
 | Attach to an existing server on a well-known port | Cannot prove ownership or safely reclaim it; might attach to another instance. |
-| Always choose a random port | localStorage is origin-specific; preferences would disappear on every launch. An explicit port `0` remains useful for isolated smoke tests. |
+| Always choose a random port | Browser storage and permissions are per origin; what the page keeps per browser (sidebar, panel sizes, transfer history) would be lost at every launch. An explicit port `0` remains useful for isolated smoke tests. |
 | Parse the human log for readiness | Log wording is not a protocol; a dedicated JSON line is unambiguous. |
 | Kill the child only on normal quit | Leaves agents and code-server behind after a launcher crash; pipe EOF also handles that case. |
 
@@ -226,7 +238,8 @@ the owned core (`core`: isolation arguments, spawn failures, malformed
 readiness, ephemeral ports, unexpected exits, late child errors and
 idempotent child shutdown, with fake Node children), opened folders waiting
 for the page (`folders`), the settings and keybindings read and followed
-over a stand-in event channel (`follow`), the menu (`menu`: its structure
+over a stand-in event channel, which is opened again when it drops
+(`follow`), the menu (`menu`: its structure
 and titles against `macos/Sources/App/main.swift` and the macOS
 application's `Localizable.strings`, accelerators, a rebinding, an
 unbinding, chords), URL and permission policy (`policy`) and the preload's

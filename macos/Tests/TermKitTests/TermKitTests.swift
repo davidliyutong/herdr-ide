@@ -29,6 +29,8 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(agent.status, "done")
         XCTAssertTrue(agent.needsAttention)
         XCTAssertFalse(TerminalRecord(raw: ["address": "t1", "state": "finished", "agent_status": "blocked"]).needsAttention)
+        // A program's own error status waits for the user like blocked, as in the web UI.
+        XCTAssertTrue(TerminalRecord(raw: ["address": "t2", "state": "live", "status": ["state": "error"]]).needsAttention)
     }
 }
 

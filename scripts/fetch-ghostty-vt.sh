@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds Ghostty's terminal emulator library (libghostty-vt) as WebAssembly
-# for the web UI's terminals (docs/features/26-web-terminal-renderer.md):
+# for the web UI's terminals (docs/features/26-web-terminals.md):
 # web/src/vt/ghostty-vt.wasm, from the Ghostty commit the macOS
 # application's renderer comes from (scripts/fetch-ghostty.sh). The module
 # and its license are committed, so builds and CI need no zig; `make check`

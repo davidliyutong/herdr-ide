@@ -1,4 +1,4 @@
-// Find in a terminal (docs/features/26-web-terminal-renderer.md): the bar's
+// Find in a terminal (docs/features/26-web-terminals.md): the bar's
 // state, shared by the find bar and the terminal it searches. The terminal's
 // emulator searches its screen and scrollback itself, for text whose ASCII
 // letters match either case; the newest match is current after typing,

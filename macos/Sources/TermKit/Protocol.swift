@@ -107,9 +107,10 @@ public struct TerminalRecord: Equatable, Identifiable {
         (raw["agent_status"] as? String) ?? (raw["status"] as? [String: Any])?["state"] as? String
     }
 
-    /// Whether it waits for the user: blocked, or a turn that ended and
+    /// Whether it waits for the user: blocked (a program's own `error`
+    /// counts as blocked, as in `Activity.status`), or a turn that ended and
     /// was not looked at since (done).
-    public var needsAttention: Bool { isLive && (status == "blocked" || status == "done") }
+    public var needsAttention: Bool { isLive && ["blocked", "done", "error"].contains(status ?? "") }
 
     /// The program in the foreground, by name.
     public var foreground: String? { (raw["foreground"] as? [String: Any])?["name"] as? String }

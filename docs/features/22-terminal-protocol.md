@@ -171,6 +171,7 @@ so every client of the machine shows the same arrangement. Version 2:
 document: `macos/Sources/TermKit` (Swift), used by the macOS application
 ([23](23-macos-application.md)), and `web/src/term` (TypeScript), used by
 the browser UI and the desktop app ([26](26-web-terminals.md)):
+`protocol.ts` (the messages, frames and records),
 `connection.ts` (the WebSocket, reconnecting and subscribing again, calls
 as promises, streams with their handlers registered before their first
 frame), `store.ts` (terminal records from snapshots and events) and
@@ -184,7 +185,7 @@ macOS application does.
 
 | Option | Why not |
 | --- | --- |
-| New message types on `/ws` | Its binary frames are pane surfaces without a stream number, its clients share one session owner, and WebSocket compression there would spend CPU on terminal bytes that are already paced by credit. |
+| New message types on `/ws` | Its JSON messages share one send queue and WebSocket compression: terminal output would be compressed although credit already paces it, would need stream numbers there too, and a busy terminal would delay the machine, settings and agent messages every client (the desktop shell included) follows. |
 | Passing herdr-core's framed protocol through to clients | Clients could call `machine.exec`, `file.*` and `server.stop`, and would need one connection per machine. |
 | Acknowledging herdr-core as soon as the core has read a frame | A slow client's backlog would queue in the core; with the client's own acknowledgements a full send queue means a client that stopped reading. |
 | A snapshot fetched with `terminal.list` for each new subscriber | Without a sequence number in it, events between the list and the subscription would be lost or applied twice. |
@@ -227,8 +228,12 @@ observe, input dropped, nothing installed), and a machine without a
 terminal core. `web/src/__tests__/term.test.ts` covers the TypeScript client against a
 scripted socket (frames, names, the store's events, every layout vector,
 subscribing, calls, a stream's reply before its frames, input, credit,
-reconnecting), and `macos/Tests/TermKitTests` the Swift one, with the same
-layout vectors. `TestIntegrationTerm` (`make it`, `HC_TEST_BIN`) runs the
+reconnecting), `terms.test.ts` the browser UI's model (the layout read
+after the terminals, one write at a time with another client's newer
+version taken, ended programs' panes closed, terminals asked for before
+the machine was ready), and `macos/Tests/TermKitTests/TermKitTests.swift`
+the Swift one (`ProtocolTests`, `TerminalStoreTests`, `LayoutTests` with
+the same layout vectors, `EventTests`). `TestIntegrationTerm` (`make it`, `HC_TEST_BIN`) runs the
 whole path against a real herdr-core: install and start through the agent,
 a shell started, typed into and read by one client, found and watched by a
 second, and killed; `TestIntegrationDetect` an agent's states

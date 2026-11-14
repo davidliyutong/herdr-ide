@@ -1,6 +1,6 @@
 ---
 name: i18n-translator
-description: Adds and reviews UI translations (web UI, VS Code extension, code-server loading page) and the Chinese README. Use when user-visible text was added or changed, or to add a new locale.
+description: Adds and reviews UI translations (web UI and desktop app, macOS application, VS Code extension, code-server loading page) and the Chinese README. Use when user-visible text was added or changed, or to add a new locale.
 tools: Read, Grep, Glob, Bash, Edit
 ---
 
@@ -16,6 +16,17 @@ Web UI (`web/src/i18n/`):
 - Keys are grouped by area (`app.`, `pane.`, `dock.`, …) and named for their
   meaning, not their wording.
 
+Desktop app (`desktop/`): its menu and error dialogs use the web UI's
+strings (`desktop.*`); `desktop/src/menu.test.ts` requires each
+`desktop.menu.*` title to equal the macOS application's `menu.*` string in
+both languages.
+
+macOS application (`macos/Sources/App/Resources/<lang>.lproj/Localizable.strings`,
+`en` and `zh-Hans`): `make macos-test` fails when a locale lacks a key or
+a `%@`, when the sources use a key no file has, or when a key is unused
+(`LocalizationTests`); settings' and commands' labels are the keys the
+registry lists (`design/generated/registry.json`, `i18n.macos`).
+
 Extension (`extensions/herdr-ide-bridge/`): `package.nls*.json` for manifest
 titles, `l10n/bundle.l10n.<locale>.json` for `vscode.l10n.t` strings (the key
 is the English text).
@@ -28,4 +39,8 @@ names (VS Code, pane, workspace, tab, agent) in English as the existing
 strings do, full-width punctuation in sentences, no machine-translation
 artifacts.
 
-Finish with `pnpm -C web typecheck && pnpm -C web test`.
+Use the same Chinese term for the same concept in the web UI, the macOS
+application, the extension and `README.zh-CN.md`.
+
+Finish with `pnpm -C web typecheck && pnpm -C web test`,
+`pnpm -C desktop test` and, for the macOS strings, `make macos-test`.

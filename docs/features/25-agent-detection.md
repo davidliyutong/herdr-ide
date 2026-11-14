@@ -105,9 +105,21 @@ sound}`, with the same choice of the page that plays the sound
 on a stream of the terminal marks a `done` seen (`idle`); a `done` arriving
 while a client has the terminal focused is reported idle.
 
-**Clients.** The macOS application colors a terminal's status dot from
-`agent_status` (else the program's own status) and shows per machine how
-many terminals wait (blocked or done) ([23](23-macos-application.md)).
+**Clients.** Both read a terminal's state from `agent_status`, else from
+the program's own status (OSC 7501), and its agent from `agent`.
+
+- The web UI (`web/src/lib/machine.ts`: `agentStatus`, `agentOf`; a
+  program's own `error` reads as blocked) colors the panes', tabs' and
+  the sidebar's status dots, orders the attention inbox blocked, done,
+  working, idle (`attentionList` in `web/src/actions.ts`), and notifies
+  and plays sounds from the `/ws` agent message (`notify.ts`, `sound.ts`,
+  [07](07-agent-native-workflow.md)).
+- The macOS application (`TerminalRecord.status`, `Activity.status`; a
+  program's own `error` reads as blocked, as in the web UI) colors the
+  panes', tabs' and the sidebar's status dots and shows per machine how
+  many terminals wait (blocked or done, `TerminalRecord.needsAttention`)
+  ([23](23-macos-application.md)); `Activity` applies the web UI's rules
+  to the agent message.
 
 ## Alternatives considered
 
@@ -160,4 +172,9 @@ messages, done seen by focus, cleared agents. `TestIntegrationDetect`
 (`make it`, `HC_TEST_BIN`) runs a script named `claude` in a real
 herdr-core that shows a turn, a permission dialog and its prompt, and
 follows working, blocked and done through the agent to `/api/v1/term` and
-`/ws`.
+`/ws`. The clients' side: `web/src/__tests__/terms.test.ts` (agents
+listed by how much they need the user), `sound.test.ts`, and
+`macos/Tests/TermKitTests/TermKitTests.swift` (`TerminalStoreTests`:
+detected agents in records and events, the count of terminals that wait;
+`ActivityTests`: the attention list and the reactions to agents'
+states).

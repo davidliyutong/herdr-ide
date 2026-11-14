@@ -28,7 +28,7 @@ import (
 
 const (
 	hcBinName = "herdr-core"
-	// hcMaxBinary bounds an uploaded executable (releases are about 7 MB).
+	// hcMaxBinary bounds an uploaded executable (releases are about 8 MB).
 	hcMaxBinary = 64 << 20
 )
 

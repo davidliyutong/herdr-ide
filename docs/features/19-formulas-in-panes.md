@@ -6,7 +6,8 @@ Agents answer with markdown, and their math is LaTeX: `$…$` and `$$…$$`
 (Claude), `\(…\)` and `\[…\]` (GPT models). Claude Code and Codex render
 markdown in the terminal as text, so formulas stay source code, often hard
 to read once fractions, sums or matrices nest. Terminals are drawn on a
-canvas ([26](26-web-terminals.md)): there is no DOM text to typeset in
+canvas ([26](26-web-terminals.md)) or by Ghostty's renderer
+([23](23-macos-application.md)): there is no DOM text to typeset in
 place, and a formula's rendering does not fit the grid's rows. Those renderers also treat a backslash before punctuation as
 a markdown escape and drop it: Claude Code printed `e^{-x^2}\,dx` as
 `e^{-x^2},dx`, and `\[ … \]` and `\( … \)` arrive as `[ … ]` and `( … )`.
@@ -79,8 +80,10 @@ dropped (`\{` printed as `{`, `\\` as `\`).
   a Vite plugin (`katexWoff2` in `web/vite.config.ts`) removes the woff and
   ttf alternatives from the stylesheet before Vite resolves its URLs, so
   the embedded UI grows by about 290 KB of fonts instead of 1.1 MB.
-- **Setting.** *Show formulas under the pointer* (Terminal, on by default)
-  turns it off for this browser.
+- **Setting.** `terminal.mathHover`, *Show formulas under the pointer*
+  (Terminal, on by default), is a setting of the core
+  ([13](13-settings-and-appearance.md)): turned off, no client looks for
+  formulas.
 
 ## Alternatives considered
 
@@ -115,10 +118,18 @@ existing Content-Security-Policy (inline styles were already allowed).
 
 ## Testing
 
-`web/src/__tests__/math.test.ts` covers what Claude Code printed, `\(…\)`
-and `\[…\]` with and without backslashes, matrices, shell variables,
-prices, calls and empty lines, display formulas over several rows,
-formulas wrapped by the terminal and by the program, pairing within a
-paragraph and wide characters. `web/src/__tests__/vt.test.ts` (`drawRow`)
+`design/testdata/math/find.json` holds the shared cases: what Claude Code
+printed, `\(…\)` and `\[…\]` with and without backslashes, a display
+formula over several lines, matrices, shell variables, prices, calls,
+escaped dollars and empty lines. `web/src/__tests__/math.test.ts` runs
+them and covers display formulas over several rows, formulas wrapped by
+the terminal and by the program, pairing within a paragraph and wide
+characters;
+`macos/Tests/TermKitTests/TermKitTests.swift` (`FeatureTests`:
+`testMathVectors`, `testMathOnScreen`) runs the same vectors with
+`MathText` and a display formula and a wrapped one after wide characters
+on a screen of rows. `web/src/__tests__/vt.test.ts` (`drawRow`)
 covers the dotted underline. Showing a formula after the pointer rests and
-hiding it after leaving were checked in Chromium.
+hiding it after leaving were checked in Chromium; debug builds of the
+macOS application rest the pointer on a cell with the `hover:<column>,<row>`
+action ([reference](../reference.md#environment-variables)).

@@ -25,13 +25,24 @@ Non-goals: arbitrary docking of panes; floating panes.
 **Layout** (`web/src/state/terms.ts`, `components/Workspace.tsx`,
 `web/src/term/layout.ts`)
 
+- Each machine has one layout document, `layout` in its terminal core,
+  version 2 ([22](22-terminal-protocol.md) has the format and the
+  operations): a list of workspaces and the selected one; a workspace has
+  an id, a name, the directory its new terminals start in, its tabs and
+  the selected tab; a tab has a binary split tree whose leaves are
+  terminal addresses, its focused terminal and a name when the user gave
+  one. `layout.ts` (TypeScript) and `macos/Sources/TermKit/Layout.swift`
+  implement the same operations and run the same vectors
+  (`design/testdata/layout`). Fields and node kinds a client does not know
+  are kept, and a version 1 document (tabs without workspaces) reads as one
+  workspace.
 - The page follows the machines the user turned to (the machine shown at
-  load: the one shown last, else the local machine; others when selected in
-  the sidebar or the palette): it subscribes to their terminals, which
-  installs and starts their terminal cores ([22](22-terminal-protocol.md)),
-  then reads their layout documents. A machine whose document has no
-  workspace gets one, named in the user's language. Terminals that no
-  longer run are dropped from it.
+  load: the one shown last in this browser, else the local machine; others
+  when selected in the sidebar or the palette): it subscribes to their
+  terminals, which installs and starts their terminal cores
+  ([02](02-multi-machine-transport.md)), then reads their layout documents.
+  A machine whose document has no workspace gets one, named in the user's
+  language. Terminals that no longer run are dropped from it.
 - The shown machine's selected workspace, its selected tab and the focused
   terminal are the document's: selecting a workspace or tab, or focusing a
   pane, writes it, and every client follows. Edits are written one at a time
@@ -75,7 +86,7 @@ Non-goals: arbitrary docking of panes; floating panes.
   that turns into a drag, or whose release lands elsewhere because the page
   moved, still switches to it.
 - Dragging a pane by its header (after a few pixels, so a click stays a
-  click) shows a highlight of where the pane will go. The middle of another
+  click) shows a highlight of where the pane goes. The middle of another
   pane swaps the two; an edge places the pane beside it, on that side.
   Dropping on a tab places it beside that tab's focused pane, on `+` into a
   new tab. Escape cancels. All of these are edits of the layout document.
@@ -138,15 +149,19 @@ Non-goals: arbitrary docking of panes; floating panes.
   or resizing closes it. The menu keeps its own width next to the window's
   right edge.
 - Read-only mode offers no items, so the browser's menu shows. A pane's
-  text has its own menu (copy, paste, open a path or URL;
-  [26](26-web-terminals.md)), which keeps copying and opening in
-  read-only mode.
+  text has its own menu (copy, paste, find, open or copy a path or URL,
+  download it or files of the pane's directory;
+  [26](26-web-terminals.md), [06](06-quick-look-and-files.md)), which keeps
+  copying and opening in read-only mode.
 
 **Dialogs** (`web/src/dialog.ts`, `Dialogs.tsx`)
 
-- Creating a workspace asks for its directory, with completion of folders on
-  the machine (Tab, ↑↓; the folder must exist) and an optional name
-  (`workspace.create` `label`). In the desktop app, folders dragged from
+- Creating a workspace asks for its directory (the focused terminal's to
+  begin with, else the machine's home), with completion of folders on the
+  machine (Tab, ↑↓; the folder must exist) and an optional name (else the
+  folder's). The workspace is added at the end of the layout document,
+  selected, and opens a tab with a terminal in that directory. In the
+  desktop app, folders dragged from
   Finder onto the sidebar create a workspace each on the local machine,
   without the dialog (named after the folder; the last one is selected); the sidebar shows where they go while they are over it, and
   dropped files that are not folders are skipped with a note. Folders
@@ -166,20 +181,33 @@ Non-goals: arbitrary docking of panes; floating panes.
 described in [13](13-settings-and-appearance.md))
 
 - Commands (`tab.new`, `pane.splitRight`, `view.toggleCode`…) have default
-  keys per platform; the user's rules in `keybindings[-<instance>].json` on
-  the core host add and remove keys, and the settings' **Keyboard
-  shortcuts** page edits them. Every client matches keys against the
-  bindings the core works out for its platform.
-- The defaults are a prefix keymap: `ctrl+b`, then a key (split
-  `v` / `-`, focus `h` `j` `k` `l`, tabs `c` `n` `p` `1`…`9`, workspaces
-  `shift+n` `shift+w` `shift+d`, next and previous workspace `)` `(`…). A chord lasts 3 s or until its next key;
-  the prefix twice (`ctrl+b ctrl+b`) sends it to the pane; a key that ends
-  no chord is dropped.
-- herdr-ide adds bindings for its own features (VS Code `ctrl+b e`, diff
-  `ctrl+b d`, Git Graph `ctrl+b shift+g`, palette `ctrl+b space`, settings
-  `ctrl+b ,`).
-- The command palette lists commands with their keys, workspaces and agents
-  on the machines followed, agent kinds to start, UI languages and themes.
+  keys per platform (`mac`: the macOS application and the desktop app on
+  macOS; `mac-browser`; `pc`: the desktop app elsewhere; `pc-browser`) and
+  a context (`when`: `terminal`, `vscode`, `dialog` or `always`); the
+  user's rules in `keybindings[-<instance>].json` on the core host add and
+  remove keys, and the settings' **Keyboard shortcuts** page edits them.
+  Every client matches keys against the bindings the core works out for its
+  platform, and follows the core's `keybindings` messages after every
+  change. The full table is in
+  [reference](../reference.md#keyboard-shortcuts).
+- Every platform has the prefix chords: `ctrl+b`, then a key. Panes: split
+  `v` / `-`, focus `h` `j` `k` `l`, next and previous `tab` /
+  `shift+tab`, zoom `z`, close `x`. Tabs: new `c`, next and previous `n` /
+  `p`, `1`…`9`, rename `shift+t`, close `shift+x`. Workspaces: switch `w`,
+  new `shift+n`, rename `shift+w`, close `shift+d`, next and previous
+  `shift+0` / `shift+9` (`)` / `(` on US layouts). The application:
+  palette `space` or `g`, the list of shortcuts `shift+slash` (`?`),
+  settings `comma`, sidebar `b`, the most urgent agent `o`
+  ([07](07-agent-native-workflow.md)), and VS Code `e`, diff `d`, Git Graph
+  `shift+g` of the focused pane's folder ([05](05-vscode-panel.md)). A
+  chord lasts 3 s or until its next key; the prefix twice
+  (`ctrl+b ctrl+b`) sends it to the pane; a key that ends no chord is
+  dropped.
+- The command palette (`components/Palette.tsx`) lists the commands with
+  their keys, the workspaces and agents of the machines followed, the agent
+  kinds to start, the UI languages and themes, and enabling program windows
+  ([14](14-gui-windows.md)). `workspace.switch` opens it with workspaces
+  and agents only, `app.keyboardShortcuts` with the commands only.
 - The PWA manifest allows installing the app in its own window, where fewer
   shortcuts are taken by browser chrome.
 
@@ -189,7 +217,8 @@ described in [13](13-settings-and-appearance.md))
 - The desktop applications own their keys, so their platforms add direct
   shortcuts without the prefix. On macOS (both applications) they are the
   macOS application's menu keys: `cmd+t` new tab, `cmd+d` / `cmd+shift+d`
-  split right / down, `cmd+w` close pane, `cmd+n` new workspace (asking for
+  split right / down, `cmd+w` close the focused pane (its terminal, not
+  the tab), `cmd+n` new workspace (asking for
   its folder), `cmd+,` settings, `cmd+b` sidebar, `cmd+j` show or hide the
   VS Code panel ([05](05-vscode-panel.md)), `cmd+}` / `cmd+{` next / previous
   tab, `cmd+f` / `cmd+g` / `cmd+shift+g` find. On other systems the desktop
@@ -271,7 +300,7 @@ described in [13](13-settings-and-appearance.md))
 | A "more tabs" menu for the tabs that do not fit | Hides tabs again and costs a click. |
 | Bindings to move tabs and workspaces | Rarely needed; the context menu's move items work from the keyboard. |
 | A "⋯" button on every header, tab and workspace row | Takes room on every tab and row; right-click covers desktop browsers. |
-| Desktop shell (Electron/Tauri) to own all shortcuts | Electron was replaced by browser access so the IDE works remotely; Tauri's WKWebView on macOS lacks service workers, which VS Code webviews need. |
+| A desktop shell as the only client, owning all shortcuts | Browser access lets the IDE work from other devices, so the prefix keys work everywhere and the applications add direct shortcuts on top; Tauri's WKWebView on macOS lacks service workers, which VS Code webviews need. |
 | Browser-specific bindings (`Cmd+…`) | Conflict with the browser; browsers do not deliver `Cmd+T`/`Cmd+W` to pages. The desktop app has them (above). |
 | The desktop shell taking direct shortcuts before the page (`before-input-event`), as it did | Two key matchers (the shell's and the page's) with their own rules for VS Code, dialogs and recording keys; with the page matching every key and the menu getting the rest, the desktop app behaves as the macOS application, where VS Code also keeps its own keys. |
 | Desktop shortcuts per browser profile (localStorage) | The shell needs them before and outside the page; the core's keybindings keep one set for all windows. |
@@ -280,7 +309,12 @@ described in [13](13-settings-and-appearance.md))
 
 ## Failure modes
 
-- **Config unreadable** → defaults are used.
+- **The keybindings file has errors** → a file that is not a JSON array
+  keeps the rules read before it (none at start: the defaults) and is
+  reported as `parse`; entries that do not parse or name an unknown command
+  are skipped and reported (`invalid`, `unknown`). The **Keyboard
+  shortcuts** page shows the problems and conflicts
+  ([13](13-settings-and-appearance.md)).
 - **A pane closed while focused** → the focus moves to its sibling.
 - **Two clients edit the layout at once** → the second write is refused
   (version conflict); its client reads the newer layout, which wins.
@@ -289,27 +323,40 @@ described in [13](13-settings-and-appearance.md))
 
 ## Testing
 
-`internal/keybindings/keybindings_test.go` (key syntax vectors, defaults,
-rules, conflicts), `web/src/__tests__/core.test.ts` (pane geometry for
-directional focus), `web/src/__tests__/term.test.ts` (the layout vectors of
-`design/testdata/layout`, shared with the macOS application),
-`web/src/__tests__/terms.test.ts` (reading and writing the document, other
-clients' versions, ended programs, terminals asked for early),
-`web/src/__tests__/settings.test.ts` (drop zones),
-`web/src/__tests__/keys.test.ts` (key names, chords, key hints),
-`web/src/__tests__/desktop.test.ts` (key names on other layouts, the menu's
-commands: closing idle tabs and panes at once and asking for running
-programs, none under dialogs, only those for VS Code or everywhere while
-VS Code has the keyboard), `desktop/src/menu.test.ts` (the menu's structure
-and titles against the macOS application's, accelerators, a rebinding, an
-unbinding, chords without accelerators, keys without Cmd shown only),
-`desktop/src/follow.test.ts` (reading the keybindings and settings, their
-pushes, reconnecting), `macos/Tests/TermKitTests`
-(`KeysTests`: chords, menu equivalents), `web/src/__tests__/menus.test.ts`
-(insertion slots, also on wrapped rows, the area a drop counts in, menu
-items and their commands, moves from the current position, read-only,
-keyboard, focus and closing of the menu, the machine's terminal core),
-`web/src/__tests__/paneHeader.test.ts` (a header's buttons act on its own
-pane and keep the terminal's focus, rename, menu, read-only). Splits, new
-tabs and workspaces, closing and dragging the split handle were checked in
-headless Chromium against a dev core.
+- `internal/keybindings/keybindings_test.go`: key syntax vectors
+  (`TestParseVectors`), defaults per platform (`TestDefaults`), the user's
+  rules and problems (`TestUserRules`), conflicts (`TestConflicts`), edits
+  of the file (`TestReload`), the desktop app's old shortcut settings
+  (`TestMigrateDesktopShortcuts`).
+- `web/src/__tests__/term.test.ts`: the layout vectors of
+  `design/testdata/layout` (workspaces, tabs, splits, closing, swaps and
+  moves, directional focus and pane drops, version 1 documents, unknown
+  fields, malformed documents), also run by the macOS application's
+  `LayoutTests`.
+- `web/src/__tests__/terms.test.ts`: reading the document after the
+  terminals, with a workspace named in the language and without ended
+  terminals; one write at a time and another client's newer version; ended
+  programs closing their panes; terminals asked for early.
+- `web/src/__tests__/core.test.ts` (pane geometry of split trees),
+  `web/src/__tests__/settings.test.ts` (drop zones).
+- `web/src/__tests__/keys.test.ts`: key names, chords from the page's keys,
+  the platform's defaults, key changes as the user's rules, key hints.
+- `web/src/__tests__/desktop.test.ts`: key names on other layouts, the
+  menu's commands: closing idle tabs and panes at once and asking for
+  running programs, none under dialogs, only those for VS Code or
+  everywhere while VS Code has the keyboard, showing and hiding VS Code.
+- `desktop/src/menu.test.ts` (the menu's structure and titles against the
+  macOS application's, accelerators, a rebinding, an unbinding, chords
+  without accelerators, keys without Cmd shown only),
+  `desktop/src/follow.test.ts` (reading the keybindings and settings, their
+  pushes, reconnecting), `macos/Tests/TermKitTests` (`KeysTests`: chords,
+  menu equivalents, closing commands).
+- `web/src/__tests__/menus.test.ts`: insertion slots, also on wrapped rows,
+  the area a drop counts in, drags measured on the screen, menu items and
+  their commands, moves from the current position, read-only, keyboard,
+  focus and closing of the menu, the machine's terminal core.
+- `web/src/__tests__/paneHeader.test.ts`: a header's buttons act on its own
+  pane and keep the terminal's focus, rename, menu, read-only.
+
+Splits, new tabs and workspaces, closing and dragging the split handle were
+checked in headless Chromium against a dev core.

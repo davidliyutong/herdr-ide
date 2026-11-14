@@ -1,8 +1,8 @@
 // What the UI reads from the settings (settings.ts), typed and named for its
 // users: `usePrefs((s) => s.prefs.theme)` in components, `getPrefs()`
 // elsewhere. The values are the core's (shared by every client of the core);
-// setPref saves one there. Pure per-device state (sidebar, panel sizes, find
-// options, transfer history) stays in the browser (state/store.ts).
+// setPref saves one there. Pure per-device state (sidebar, panel sizes, the
+// selected machine, transfer history) stays in the browser (state/store.ts).
 
 import { create } from 'zustand';
 import { setSetting, settingValue, useSettings, type SettingValue } from './settings';

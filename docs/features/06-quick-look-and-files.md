@@ -281,9 +281,12 @@ on a machine) and is audited as `file.download.cancel`.
 
 ## Testing
 
-`internal/server/server_test.go` (range parsing, content types, upload
-names, uploads into a directory), `internal/agent/agent_test.go` (ranged
-reads, chunked writes, writes that keep existing files),
+`internal/server/server_test.go` (range parsing, `TestParseRange`; content
+types, `TestContentTypeNeverActive`; upload names,
+`TestUploadNameUniqueAndSafe`; uploads into a directory,
+`TestUploadIntoDirectory`), `internal/agent/agent_test.go` (ranged reads
+and chunked writes, `TestFileOps`; writes that keep existing files,
+`TestWriteKeepsExistingFiles`),
 `web/src/__tests__/core.test.ts` (path resolution, media detection, wrapped
 links, selected links), `web/src/__tests__/vt.test.ts` (hyperlinks and the
 link underline), `web/src/__tests__/drop.test.ts`
@@ -295,9 +298,10 @@ to the upload directory, the kept history, the panel), and
 aborted upload through a real agent leaves no file; a complete one arrives).
 Downloads: `internal/agent/archive_test.go` (archive contents, repeated
 names, links followed only at the top, modes, missing paths, an abandoned
-stream, the end mark of a chunked archive), `internal/server/download_test.go` (path checks, archive names, a
-file as itself and directories as zips through a real agent, `HEAD`,
-read-only mode, the audit record; `TestDownloadProgress`: events of a file
+stream, the end mark of a chunked archive), `internal/server/download_test.go`
+(path checks and archive names, `TestDownloadPaths`; a file as itself and
+directories as zips through a real agent, `HEAD`, read-only mode, the audit
+record, `TestDownload`; `TestDownloadProgress`: events of a file
 and an archive to the page following them only, failure codes, the state
 for a page that asks late and for an unknown id, cancelling from the panel
 and in the browser with the response broken off, an archive whose machine

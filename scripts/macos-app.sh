@@ -74,6 +74,10 @@ cp LICENSE THIRD_PARTY_NOTICES.md web/dist/licenses.md "$res/licenses/"
 cp -R licenses/herdr-detect "$res/licenses/herdr-detect"
 cp -R licenses/encoder "$res/licenses/encoder"
 cp -R dist/hc/licenses "$res/licenses/herdr-core"
+# Ghostty's own license (the renderer is Ghostty built by libghostty-spm,
+# at the commit the web UI's emulator is built from), the package's and
+# that of its color schemes.
+cp web/src/vt/LICENSE "$res/licenses/ghostty/LICENSE"
 cp macos/.deps/libghostty-spm/LICENSE "$res/licenses/ghostty/LICENSE-libghostty-spm"
 cp macos/.deps/libghostty-spm/Sources/GhosttyTheme/LICENSE "$res/licenses/ghostty/LICENSE-themes"
 

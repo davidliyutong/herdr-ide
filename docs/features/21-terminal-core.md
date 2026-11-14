@@ -182,7 +182,9 @@ their credit, a cancelled dial. `internal/agent/hc_test.go` with a script as
 the executable: digest checks, replacement, the session and socket of
 default and named instances, the environment of commands, failure codes,
 the status of a core on the socket and the API pipe.
-`TestIntegrationTerminal` (`internal/hc`) and `TestIntegrationHC`
+`internal/agent/procutil_test.go` (`TestCleanEnv`): the variables of
+terminals and multiplexers removed, `TMUX_TMPDIR`, `TERM_PROGRAM` and the
+product's own kept. `TestIntegrationTerminal` (`internal/hc`) and `TestIntegrationHC`
 (`internal/agent`) run with `make it` against a real herdr-core
 (`HC_TEST_BIN`, else `hc` on `PATH`) in the sessions `herdr-ide-it` with
 temporary state: first paint, input and output, sizes of two viewers,
