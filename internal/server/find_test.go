@@ -26,8 +26,12 @@ func TestFind(t *testing.T) {
 		_ = json.NewDecoder(res.Body).Decode(&out)
 		return res.StatusCode, out
 	}
-	if code, out := post(`{"pane":"w1:p1","query":"(","regex":true}`); code != 400 || out["error"] != "invalid_regex" || out["detail"] == "" {
+	// An invalid expression is answered with codes, not the parser's prose.
+	if code, out := post(`{"pane":"w1:p1","query":"a(b","regex":true}`); code != 400 || out["error"] != "invalid_regex" || out["reason"] != "missing_paren" || out["expr"] != "a(b" || out["detail"] != "" {
 		t.Errorf("invalid regex: %d %v", code, out)
+	}
+	if code, out := post(`{"pane":"w1:p1","query":"(?=x)","regex":true}`); code != 400 || out["reason"] != "perl_op" {
+		t.Errorf("lookahead: %d %v", code, out)
 	}
 	if code, out := post(`{"pane":"w1:p1","query":""}`); code != 400 || out["error"] != "invalid" {
 		t.Errorf("empty query: %d %v", code, out)

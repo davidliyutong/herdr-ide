@@ -40,6 +40,9 @@ func Pane(ctx context.Context, c Caller, req agentproto.FindRequest) (*Result, e
 			origin = req.Previous.Start
 		}
 	}
+	// Forward from a cursor (no current match), a match starting right
+	// there is the first one: the start of the text has no cell before it.
+	inclusive := !req.Backward && req.Previous == nil
 	var last error
 	for range attempts {
 		rows, cols, err := size(ctx, c, req.Pane, req.Cols)
@@ -66,7 +69,7 @@ func Pane(ctx context.Context, c Caller, req agentproto.FindRequest) (*Result, e
 		if err != nil {
 			return nil, err
 		}
-		res := Search(sel.Text, first, cols, m, req.Backward, origin)
+		res := Search(sel.Text, first, cols, m, req.Backward, origin, inclusive)
 		return &res, nil
 	}
 	return nil, fmt.Errorf("%w: %v", ErrNoText, last)
@@ -125,16 +128,24 @@ func size(ctx context.Context, c Caller, pane string, hint int) (uint32, int, er
 	return uint32(rows), cols, nil
 }
 
-// edge returns the number of indexes 0..n-1 for which has is true, given
-// that it is true up to some n and false after: hint is checked with two
-// probes, else n is found by doubling and halving.
+// edge returns n, the number of indexes for which has is true, given that
+// it is true for 0..n-1 and false from n on, with n at most limit. The two
+// probes around hint settle n when the hint is right; otherwise the search
+// goes on from the hint, by doubling steps away from it and then halving,
+// so a hint that is close costs few probes.
 func edge(has func(int) (bool, error), hint, limit int) (int, error) {
-	if hint > 0 {
+	lo, hi := 0, limit // lo <= n <= hi
+	down := false      // n is below the hint: step down from hi
+	if hint > 0 && hint <= limit {
 		in, err := has(hint - 1)
 		if err != nil {
 			return 0, err
 		}
-		if in {
+		if !in {
+			hi, down = hint-1, true
+		} else if hint == limit {
+			return hint, nil
+		} else {
 			out, err := has(hint)
 			if err != nil {
 				return 0, err
@@ -142,34 +153,46 @@ func edge(has func(int) (bool, error), hint, limit int) (int, error) {
 			if !out {
 				return hint, nil
 			}
+			lo = hint + 1
 		}
 	}
-	if ok, err := has(0); err != nil || !ok {
-		return 0, err
-	}
-	lo, hi := 1, 2 // has(lo-1) is true; has(hi-1) unknown
-	for hi < limit {
-		ok, err := has(hi - 1)
-		if err != nil {
-			return 0, err
+	// Doubling steps from the known end: up from lo, or down from hi.
+	for step := 1; lo < hi; step *= 2 {
+		if down {
+			i := max(hi-step, lo) // n <= i when has(i) is false
+			ok, err := has(i)
+			if err != nil {
+				return 0, err
+			}
+			if ok {
+				lo = i + 1
+				break
+			}
+			hi = i
+		} else {
+			i := min(lo+step-1, hi-1) // n > i when has(i) is true
+			ok, err := has(i)
+			if err != nil {
+				return 0, err
+			}
+			if !ok {
+				hi = i
+				break
+			}
+			lo = i + 1
 		}
-		if !ok {
-			break
-		}
-		lo, hi = hi, hi*2
 	}
-	hi = min(hi, limit)
-	// has(lo-1) true, has(hi-1) false (or hi == limit).
+	// Halving between them.
 	for lo < hi {
-		mid := (lo + hi + 1) / 2
-		ok, err := has(mid - 1)
+		mid := lo + (hi-lo)/2
+		ok, err := has(mid)
 		if err != nil {
 			return 0, err
 		}
 		if ok {
-			lo = mid
+			lo = mid + 1
 		} else {
-			hi = mid - 1
+			hi = mid
 		}
 	}
 	return lo, nil

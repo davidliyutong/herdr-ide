@@ -207,9 +207,10 @@ func TestAPIAllowlist(t *testing.T) {
 	if s.apiAllowed("pane.split") || s.apiAllowed("tab.move") || s.apiAllowed("workspace.move") || !s.apiAllowed("pane.list") {
 		t.Error("read-only allowlist wrong")
 	}
-	// Finding text only reads it, also in read-only mode; scrolling moves
-	// the pane for every client.
-	if !s.apiAllowed("pane.copy_search") || !s.apiAllowed("pane.copy_motion") || s.apiAllowed("pane.scroll") {
+	// Find in panes goes through the agent (POST /api/m/{id}/find), so
+	// read-only pages need none of herdr's copy-mode methods; scrolling
+	// moves the pane for every client.
+	if s.apiAllowed("pane.copy_search") || s.apiAllowed("pane.copy_motion") || s.apiAllowed("pane.scroll") {
 		t.Error("read-only find methods wrong")
 	}
 }

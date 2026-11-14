@@ -139,7 +139,7 @@ URLs. `cmd+f` (macOS) or `ctrl+shift+f` (other systems) finds text in the
 focused pane and its scrollback: Enter goes to the older match,
 Shift+Enter to the newer one, Escape closes the bar; in the bar, `alt+c`
 matches case, `alt+w` whole words and `alt+r` takes the query as a
-regular expression (RE2 syntax; on macOS also `cmd+alt+c`/`w`/`r`). Pasting or dropping files uploads them to the pane's machine (dropped
+regular expression (RE2 syntax; Option on macOS). Pasting or dropping files uploads them to the pane's machine (dropped
 files into the pane's directory) and pastes their paths; in the desktop app,
 files dropped on a local pane are pasted where they are. A pane's right-click
 menu downloads the path under the pointer and, with **Download files…**,

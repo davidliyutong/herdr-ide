@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/herdr"
@@ -45,19 +46,70 @@ func TestOptions(t *testing.T) {
 		{Options{Query: "e.d", Regex: false}, 0},
 		{Options{Query: "le.", Regex: true, WholeWord: true}, 0},
 	} {
-		res := Search(text, 0, 80, mustCompile(t, c.o), false, Point{})
+		res := Search(text, 0, 80, mustCompile(t, c.o), false, Point{}, false)
 		if res.Total != c.want {
 			t.Errorf("%+v: %d matches, want %d", c.o, res.Total, c.want)
 		}
 	}
-	if _, err := Compile(Options{Query: "(", Regex: true}); !errors.As(err, new(*InvalidError)) {
-		t.Errorf("invalid regex: %v", err)
+	// Invalid expressions name the reason as a code and the part at fault
+	// as written, without the case flag added to it.
+	for _, c := range []struct {
+		o            Options
+		reason, expr string
+	}{
+		{Options{Query: "a(b", Regex: true}, "missing_paren", "a(b"},
+		{Options{Query: "a(b", Regex: true, MatchCase: true}, "missing_paren", "a(b"},
+		{Options{Query: "*", Regex: true}, "missing_repeat_arg", "*"},
+		{Options{Query: `x(?=y)`, Regex: true}, "perl_op", "(?="},
+		{Options{Query: `[z-a]`, Regex: true}, "char_range", "z-a"},
+	} {
+		var inv *InvalidError
+		if _, err := Compile(c.o); !errors.As(err, &inv) || inv.Reason != c.reason || inv.Expr != c.expr {
+			t.Errorf("%+v: %v", c.o, err)
+		}
 	}
 	if _, err := Compile(Options{Query: "(", Regex: false}); err != nil {
 		t.Errorf("literal parenthesis: %v", err)
 	}
 	if _, err := Compile(Options{Query: strings.Repeat("a", MaxQuery+1)}); !errors.Is(err, ErrTooLarge) {
 		t.Errorf("long query: %v", err)
+	}
+}
+
+// A match that is not a whole word hides no other: one starting inside or
+// after it, or a longer one at the same place, is found; marks combining
+// with a letter belong to its word.
+func TestWholeWord(t *testing.T) {
+	for _, c := range []struct {
+		name, text string
+		o          Options
+		want       []Range
+	}{
+		{"overlapping", "xa a a", Options{Query: "a a"}, []Range{rng(0, 3, 0, 5)}},
+		{"longer at the same place", "abc", Options{Query: "ab|abc", Regex: true}, []Range{rng(0, 0, 0, 2)}},
+		{"combining mark", "café cafe", Options{Query: "cafe"}, []Range{rng(0, 5, 0, 8)}},
+		{"word after the mark", "éx x", Options{Query: "x"}, []Range{rng(0, 3, 0, 3)}},
+		{"several", "a-a aa a", Options{Query: "a"}, []Range{rng(0, 0, 0, 0), rng(0, 2, 0, 2), rng(0, 7, 0, 7)}},
+		// \b asserts about the text before: matched on whole lines only.
+		{"anchored", "foo xfoo foo", Options{Query: `\bfoo`, Regex: true}, []Range{rng(0, 0, 0, 2), rng(0, 9, 0, 11)}},
+		{"start of line", "ab ab", Options{Query: `^ab|b`, Regex: true}, []Range{rng(0, 0, 0, 1)}},
+	} {
+		c.o.WholeWord = true
+		res := Search(c.text, 0, 80, mustCompile(t, c.o), false, Point{}, true)
+		if fmt.Sprint(res.Matches) != fmt.Sprint(append([]Range{}, c.want...)) {
+			t.Errorf("%s: %v, want %v", c.name, res.Matches, c.want)
+		}
+	}
+	// A long match rejected at every start: the extra work stops and the
+	// line is still searched.
+	line := "q" + strings.Repeat("a", 200_000) + "b c b"
+	m := mustCompile(t, Options{Query: `a+b|c`, Regex: true, WholeWord: true})
+	began := time.Now()
+	if res := Search(line, 0, 1<<15, m, false, Point{}, true); res.Total != 1 {
+		t.Errorf("rejected again and again: %d matches", res.Total)
+	}
+	if d := time.Since(began); d > 2*time.Second {
+		t.Errorf("rejected again and again: %s", d)
 	}
 }
 
@@ -84,13 +136,13 @@ func TestLayout(t *testing.T) {
 		{"empty lines", "\n\nneedle", 80, "needle", []Range{rng(2, 0, 2, 5)}},
 		{"exact width", "abcdef\nneedle", 6, "needle", []Range{rng(1, 0, 1, 5)}},
 	} {
-		res := Search(c.text, 0, c.cols, mustCompile(t, Options{Query: c.query}), false, Point{})
+		res := Search(c.text, 0, c.cols, mustCompile(t, Options{Query: c.query}), false, Point{}, false)
 		if fmt.Sprint(res.Matches) != fmt.Sprint(c.want) {
 			t.Errorf("%s: %v, want %v", c.name, res.Matches, c.want)
 		}
 	}
 	// Rows count from where the text starts.
-	res := Search("x\nneedle", 40, 80, mustCompile(t, Options{Query: "needle"}), false, Point{})
+	res := Search("x\nneedle", 40, 80, mustCompile(t, Options{Query: "needle"}), false, Point{}, false)
 	if res.Matches[0] != rng(41, 0, 41, 5) || res.FirstRow != 40 {
 		t.Errorf("first row: %+v", res)
 	}
@@ -98,55 +150,81 @@ func TestLayout(t *testing.T) {
 
 // The current match is chosen as herdr's search chooses it: forward, the
 // first starting after the origin; backward, the last ending before it;
-// wrapping around at either end.
+// wrapping around at either end. Inclusive takes one at the origin too.
 func TestCurrent(t *testing.T) {
-	text := "a x\nb x\nc x"
+	text := "x a\nb x\nc x"
 	m := mustCompile(t, Options{Query: "x"})
-	cur := func(backward bool, origin Point) int {
-		res := Search(text, 0, 80, m, backward, origin)
+	end := pt(1<<32-1, 0)
+	for _, c := range []struct {
+		backward, inclusive bool
+		origin              Point
+		want                int
+	}{
+		{true, false, end, 2},
+		{true, false, pt(2, 2), 1},  // the current match's start
+		{true, false, pt(0, 0), 2},  // wraps to the newest
+		{false, false, pt(0, 0), 1}, // the current match's end
+		{false, false, pt(2, 2), 0}, // wraps to the oldest
+		// From the start with no current match: the first cell's match.
+		{false, true, pt(0, 0), 0},
+		{false, true, pt(1, 2), 1},
+		{true, true, pt(1, 2), 1},
+		{true, true, pt(1, 1), 0},
+	} {
+		res := Search(text, 0, 80, m, c.backward, c.origin, c.inclusive)
 		if res.Current == nil || res.CurrentGlobal == nil || *res.Current != *res.CurrentGlobal {
 			t.Fatalf("current %v %v", res.Current, res.CurrentGlobal)
 		}
-		return *res.CurrentGlobal
-	}
-	end := pt(1<<32-1, 0)
-	for _, c := range []struct {
-		backward bool
-		origin   Point
-		want     int
-	}{
-		{true, end, 2},
-		{true, pt(2, 2), 1},  // the current match's start
-		{true, pt(0, 2), 2},  // wraps to the newest
-		{false, pt(0, 2), 1}, // the current match's end
-		{false, pt(2, 2), 0}, // wraps to the oldest
-		{false, pt(0, 0), 0},
-	} {
-		if got := cur(c.backward, c.origin); got != c.want {
-			t.Errorf("backward %v from %+v: %d, want %d", c.backward, c.origin, got, c.want)
+		if got := *res.CurrentGlobal; got != c.want {
+			t.Errorf("backward %v inclusive %v from %+v: %d, want %d", c.backward, c.inclusive, c.origin, got, c.want)
 		}
 	}
-	if res := Search(text, 0, 80, mustCompile(t, Options{Query: "z"}), true, end); res.Total != 0 || res.Current != nil || res.Matches == nil {
+	if res := Search(text, 0, 80, mustCompile(t, Options{Query: "z"}), true, end, false); res.Total != 0 || res.Current != nil || res.Matches == nil {
 		t.Errorf("no match: %+v", res)
 	}
 }
 
-// Large results: a window of Limit around the current match, counting
-// stops at MaxTotal.
-func TestWindowAndCap(t *testing.T) {
+// Large results: a window of Limit around the current match, wherever it
+// is, with every match counted.
+func TestWindow(t *testing.T) {
 	text := strings.Repeat("x", 3000)
-	res := Search(text, 0, 100, mustCompile(t, Options{Query: "x"}), true, pt(15, 0))
+	res := Search(text, 0, 100, mustCompile(t, Options{Query: "x"}), true, pt(15, 0), false)
 	if res.Total != 3000 || len(res.Matches) != Limit || *res.CurrentGlobal != 1499 || res.Matches[*res.Current] != rng(14, 99, 14, 99) {
 		t.Fatalf("window: total %d, %d shown, current %d", res.Total, len(res.Matches), *res.CurrentGlobal)
 	}
 	if *res.Current != Limit/2 {
 		t.Errorf("window not centered: %d", *res.Current)
 	}
-	big := strings.Repeat(strings.Repeat("x", 1000)+"\n", MaxTotal/1000+5)
-	res = Search(big, 0, 1000, mustCompile(t, Options{Query: "x"}), false, Point{})
-	if !res.Capped || res.Total != MaxTotal {
-		t.Errorf("cap: %d %v", res.Total, res.Capped)
+
+	// 150 000 matches, one per cell of 150 rows of 1000.
+	const rows, cols = 150, 1000
+	big := strings.Repeat(strings.Repeat("x", cols)+"\n", rows)
+	m := mustCompile(t, Options{Query: "x"})
+	check := func(name string, res Result, current int, cell Point) {
+		t.Helper()
+		if res.Total != rows*cols || len(res.Matches) != Limit || res.CurrentGlobal == nil || *res.CurrentGlobal != current {
+			t.Fatalf("%s: total %d, %d shown, current %v", name, res.Total, len(res.Matches), res.CurrentGlobal)
+		}
+		got := res.Matches[*res.Current]
+		if got.Start != cell || got.End != cell {
+			t.Errorf("%s: current %+v, want %+v", name, got, cell)
+		}
+		// The window holds consecutive matches.
+		for i := 1; i < len(res.Matches); i++ {
+			p, q := res.Matches[i-1].Start, res.Matches[i].Start
+			if q.Row*cols+uint32(q.Col) != p.Row*cols+uint32(p.Col)+1 {
+				t.Fatalf("%s: matches %d and %d not consecutive: %+v %+v", name, i-1, i, p, q)
+			}
+		}
 	}
+	// Backward from the end: the newest match, not one where counting
+	// stopped.
+	check("newest", Search(big, 0, cols, m, true, pt(1<<32-1, 0), false), rows*cols-1, pt(rows-1, cols-1))
+	check("forward in the middle", Search(big, 0, cols, m, false, pt(120, 499), false), 120*cols+500, pt(120, 500))
+	check("backward in the middle", Search(big, 0, cols, m, true, pt(120, 500), false), 120*cols+499, pt(120, 499))
+	check("forward around the end", Search(big, 0, cols, m, false, pt(rows-1, cols-1), false), 0, pt(0, 0))
+	check("backward around the start", Search(big, 0, cols, m, true, pt(0, 0), false), rows*cols-1, pt(rows-1, cols-1))
+	check("near the start", Search(big, 0, cols, m, false, pt(0, 3), false), 4, pt(0, 4))
 }
 
 // fakePane answers herdr's requests for a pane rows x cols holding text.
@@ -206,6 +284,16 @@ func TestPane(t *testing.T) {
 	if err != nil || *res.CurrentGlobal != 0 {
 		t.Errorf("previous: %+v %v", res, err)
 	}
+	// Forward from the start with no current match: the match in the first
+	// cell is the first, not skipped for the next.
+	first := &fakePane{rows: 30, cols: 37, text: "needle x needle"}
+	if res, err := Pane(context.Background(), first, agentproto.FindRequest{Pane: "w1:p1", Query: "needle"}); err != nil || *res.CurrentGlobal != 0 {
+		t.Errorf("forward from the start: %+v %v", res, err)
+	}
+	// Stepping forward from that match goes on to the next one.
+	if res, err := Pane(context.Background(), first, agentproto.FindRequest{Pane: "w1:p1", Query: "needle", Previous: &Range{Start: pt(0, 0), End: pt(0, 5)}}); err != nil || *res.CurrentGlobal != 1 {
+		t.Errorf("forward from the first: %+v %v", res, err)
+	}
 	f.shrink, f.reads = true, 0
 	if res, err := Pane(context.Background(), f, agentproto.FindRequest{Pane: "w1:p1", Query: "needle"}); err != nil || res.Total != 2 || f.reads != 2 {
 		t.Errorf("read again after the pane changed: %+v %v (%d reads)", res, err, f.reads)
@@ -221,19 +309,26 @@ func TestPane(t *testing.T) {
 }
 
 func TestEdge(t *testing.T) {
-	for _, n := range []int{1, 2, 3, 37, 64, 65, 119, 4096} {
-		for _, hint := range []int{0, n, n + 1, n - 1, 5} {
+	for _, n := range []int{0, 1, 2, 3, 37, 64, 65, 119, 4096, 1 << 16} {
+		for _, hint := range []int{0, n, n + 1, n - 1, n + 3, n - 3, 5, 1 << 16, 1<<16 + 9} {
 			probes := 0
 			got, err := edge(func(i int) (bool, error) { probes++; return i < n, nil }, hint, 1<<16)
 			if err != nil || got != n {
 				t.Errorf("n %d hint %d: %d %v", n, hint, got, err)
 			}
-			if hint == n && probes != 2 {
+			if hint == n && n > 0 && probes > 2 {
 				t.Errorf("n %d: %d probes with the right hint", n, probes)
+			}
+			// A hint a few off (a pane that grew or shrank since it was
+			// measured) costs a few probes more, not a search from 0.
+			if (hint == n+3 || hint == n-3) && hint > 0 && hint <= 1<<16 && probes > 8 {
+				t.Errorf("n %d hint %d: %d probes", n, hint, probes)
 			}
 		}
 	}
-	if got, _ := edge(func(int) (bool, error) { return false, nil }, 0, 100); got != 0 {
-		t.Errorf("none: %d", got)
+	// A pane far larger than its hint: steps grow from the hint.
+	probes := 0
+	if got, _ := edge(func(i int) (bool, error) { probes++; return i < 100_037, nil }, 100_000, 1<<31); got != 100_037 || probes > 16 {
+		t.Errorf("grown: %d after %d probes", got, probes)
 	}
 }

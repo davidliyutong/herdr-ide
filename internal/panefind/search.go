@@ -46,23 +46,48 @@ const (
 	MaxQuery = 4096
 	// Limit is how many matches an answer carries, as herdr's search.
 	Limit = 1024
-	// MaxTotal stops counting matches (a one-letter query in a long
-	// scrollback).
-	MaxTotal = 100_000
 )
 
 // ErrTooLarge: the query is longer than MaxQuery.
 var ErrTooLarge = errors.New("query too large")
 
-// InvalidError: the regular expression does not compile.
-type InvalidError struct{ Detail string }
+// InvalidError: the regular expression does not compile. Reason is a code
+// the browser translates (empty when the parser gave none), Expr the part
+// of the expression at fault.
+type InvalidError struct{ Reason, Expr string }
 
-func (e *InvalidError) Error() string { return "invalid regular expression: " + e.Detail }
+func (e *InvalidError) Error() string {
+	return strings.TrimSpace("invalid regular expression: " + e.Reason + " " + e.Expr)
+}
+
+// regexReasons name the parser's errors for the browser.
+var regexReasons = map[syntax.ErrorCode]string{
+	syntax.ErrInvalidCharClass:      "char_class",
+	syntax.ErrInvalidCharRange:      "char_range",
+	syntax.ErrInvalidEscape:         "escape",
+	syntax.ErrInvalidNamedCapture:   "named_capture",
+	syntax.ErrInvalidPerlOp:         "perl_op",
+	syntax.ErrInvalidRepeatOp:       "nested_repeat",
+	syntax.ErrInvalidRepeatSize:     "repeat_count",
+	syntax.ErrInvalidUTF8:           "utf8",
+	syntax.ErrMissingBracket:        "missing_bracket",
+	syntax.ErrMissingParen:          "missing_paren",
+	syntax.ErrMissingRepeatArgument: "missing_repeat_arg",
+	syntax.ErrTrailingBackslash:     "trailing_backslash",
+	syntax.ErrUnexpectedParen:       "unexpected_paren",
+	syntax.ErrNestingDepth:          "too_deep",
+	syntax.ErrLarge:                 "too_large",
+}
 
 // Matcher finds the matches of Options in one line of text.
 type Matcher struct {
-	re   *regexp.Regexp
-	word bool
+	re *regexp.Regexp
+	// Whole words only: longest is re preferring the longest match, and
+	// restart tells whether re may run on the rest of a line (it asserts
+	// nothing about the text before the place it starts at).
+	word    bool
+	longest *regexp.Regexp
+	restart bool
 }
 
 // Compile prepares o. Go's regexp (RE2) runs in time linear in the text,
@@ -75,27 +100,57 @@ func Compile(o Options) (*Matcher, error) {
 	if !o.Regex {
 		pat = regexp.QuoteMeta(pat)
 	}
+	const fold = "(?i)"
 	if !o.MatchCase {
-		pat = "(?i)" + pat
+		pat = fold + pat
 	}
 	re, err := regexp.Compile(pat)
 	if err != nil {
 		var se *syntax.Error
 		if errors.As(err, &se) {
-			return nil, &InvalidError{Detail: string(se.Code) + ": " + se.Expr}
+			// The part at fault as the user wrote it.
+			expr := se.Expr
+			if !o.MatchCase {
+				expr = strings.TrimPrefix(expr, fold)
+			}
+			return nil, &InvalidError{Reason: regexReasons[se.Code], Expr: expr}
 		}
-		return nil, &InvalidError{Detail: err.Error()}
+		return nil, &InvalidError{}
 	}
-	return &Matcher{re: re, word: o.WholeWord}, nil
+	m := &Matcher{re: re, word: o.WholeWord}
+	if o.WholeWord {
+		m.longest = re.Copy()
+		m.longest.Longest()
+		if tree, err := syntax.Parse(pat, syntax.Perl); err == nil {
+			m.restart = restartable(tree)
+		}
+	}
+	return m, nil
 }
 
-// find returns the byte ranges of the matches in line: no empty ones,
-// and only whole words when asked.
-func (m *Matcher) find(line string, max int) [][]int {
-	if max <= 0 {
-		return nil
+// restartable reports whether re can be matched on the rest of a line as
+// on the whole line from there: it asserts nothing about the text before
+// where it starts (^, \A, \b, \B).
+func restartable(re *syntax.Regexp) bool {
+	switch re.Op {
+	case syntax.OpBeginLine, syntax.OpBeginText, syntax.OpWordBoundary, syntax.OpNoWordBoundary:
+		return false
 	}
-	all := m.re.FindAllStringIndex(line, max)
+	for _, sub := range re.Sub {
+		if !restartable(sub) {
+			return false
+		}
+	}
+	return true
+}
+
+// find returns the byte ranges of the matches in line, in order and not
+// overlapping: no empty ones, and only whole words when asked.
+func (m *Matcher) find(line string) [][]int {
+	if m.word && m.restart {
+		return m.words(line)
+	}
+	all := m.re.FindAllStringIndex(line, -1)
 	out := all[:0]
 	for _, r := range all {
 		if r[0] == r[1] || m.word && !wholeWord(line, r[0], r[1]) {
@@ -106,7 +161,56 @@ func (m *Matcher) find(line string, max int) [][]int {
 	return out
 }
 
-func isWord(r rune) bool { return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r) }
+// words finds whole-word matches. A match that is not a whole word does
+// not hide one inside or after it: the longest match at the same place is
+// tried, then the search goes on from the next character. The extra work
+// is bounded per line; past it, the rest of the line is searched as by
+// find, which skips such matches.
+func (m *Matcher) words(line string) [][]int {
+	var out [][]int
+	budget := 8*len(line) + 4096
+	pos := 0
+	for pos < len(line) {
+		if budget < 0 {
+			for _, r := range m.re.FindAllStringIndex(line[pos:], -1) {
+				if s, e := pos+r[0], pos+r[1]; s < e && wholeWord(line, s, e) {
+					out = append(out, []int{s, e})
+				}
+			}
+			return out
+		}
+		loc := m.re.FindStringIndex(line[pos:])
+		if loc == nil {
+			break
+		}
+		s, e := pos+loc[0], pos+loc[1]
+		budget -= e - pos + 1
+		if s < e && wholeWord(line, s, e) {
+			out = append(out, []int{s, e})
+			pos = e
+			continue
+		}
+		if s < e {
+			if l := m.longest.FindStringIndex(line[s:]); l != nil && l[0] == 0 {
+				budget -= l[1] + 1
+				if le := s + l[1]; le != e && wholeWord(line, s, le) {
+					out = append(out, []int{s, le})
+					pos = le
+					continue
+				}
+			}
+		}
+		_, size := utf8.DecodeRuneInString(line[s:])
+		pos = s + max(size, 1)
+	}
+	return out
+}
+
+// isWord: letters, digits, the underscore and the marks that combine with
+// them (é written as e and U+0301).
+func isWord(r rune) bool {
+	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r) || unicode.IsMark(r)
+}
 
 // wholeWord: a match that starts (ends) with a word character has none
 // right before (after) it, like \b in Unicode text.
@@ -126,50 +230,106 @@ func wholeWord(line string, start, end int) bool {
 	return true
 }
 
+// ring keeps the last Limit of the matches pushed: number k of them (from
+// 0) while n-len(buf) <= k < n.
+type ring struct {
+	buf []Range
+	n   int
+}
+
+func (r *ring) push(x Range) {
+	if len(r.buf) < Limit {
+		r.buf = append(r.buf, x)
+	} else {
+		r.buf[r.n%Limit] = x
+	}
+	r.n++
+}
+
+func (r *ring) at(k int) (Range, bool) {
+	if k < r.n-len(r.buf) || k >= r.n {
+		return Range{}, false
+	}
+	return r.buf[k%Limit], true
+}
+
 // Search finds m's matches in text, rows firstRow on of a pane cols
 // wide, as herdr's pane.selection.read returned them. The current match is
 // the first one starting after origin (forward) or the last one ending
 // before it (backward), wrapping around; herdr's pane.copy_search picks it
-// the same way.
-func Search(text string, firstRow uint32, cols int, m *Matcher, backward bool, origin Point) Result {
-	var all []Range
-	target := -1
-	capped := false
+// the same way. Inclusive also takes one starting (ending) at origin.
+// Every match is counted, but only those an answer may carry are kept:
+// the first and the last Limit, and Limit on either side of origin.
+func Search(text string, firstRow uint32, cols int, m *Matcher, backward bool, origin Point, inclusive bool) Result {
+	// beyond: r lies past origin in the search's direction. Matches come
+	// in reading order, so once one does, every later one does.
+	beyond := func(r Range) bool {
+		switch {
+		case backward && inclusive:
+			return less(origin, r.End)
+		case backward:
+			return !less(r.End, origin)
+		case inclusive:
+			return !less(r.Start, origin)
+		}
+		return less(origin, r.Start)
+	}
+	var head, post []Range // the first matches; the first ones past origin
+	var tail, pre ring     // the last matches; the last ones before origin
+	total, pivot := 0, -1  // pivot: the first match past origin
 	row := firstRow
 	for line := range strings.SplitSeq(text, "\n") {
-		found := m.find(line, MaxTotal+1-len(all))
-		ranges, rows := layout(line, row, cols, found)
+		ranges, rows := layout(line, row, cols, m.find(line))
 		for _, r := range ranges {
-			if len(all) == MaxTotal {
-				capped = true
-				break
+			if len(head) < Limit {
+				head = append(head, r)
 			}
-			if !backward && target < 0 && less(origin, r.Start) {
-				target = len(all)
+			tail.push(r)
+			if pivot < 0 && beyond(r) {
+				pivot = total
 			}
-			if backward && less(r.End, origin) {
-				target = len(all)
+			if pivot < 0 {
+				pre.push(r)
+			} else if len(post) < Limit {
+				post = append(post, r)
 			}
-			all = append(all, r)
-		}
-		if capped {
-			break
+			total++
 		}
 		row += rows
 	}
-	res := Result{Total: len(all), Capped: capped, FirstRow: firstRow, Matches: []Range{}}
-	if len(all) == 0 {
+	res := Result{Total: total, FirstRow: firstRow, Matches: []Range{}}
+	if total == 0 {
 		return res
 	}
-	if target < 0 {
-		target = 0
-		if backward {
-			target = len(all) - 1
-		}
+	var target int
+	switch {
+	case !backward && pivot >= 0:
+		target = pivot
+	case !backward:
+		target = 0 // around the end
+	case pivot > 0:
+		target = pivot - 1
+	default:
+		target = total - 1 // every match is before origin, or around the start
 	}
-	n := min(Limit, len(all))
-	start := min(max(target-n/2, 0), len(all)-n)
-	res.Matches = all[start : start+n]
+	at := func(i int) Range {
+		if i < len(head) {
+			return head[i]
+		}
+		if r, ok := tail.at(i); ok {
+			return r
+		}
+		if r, ok := pre.at(i); ok {
+			return r
+		}
+		return post[i-pivot]
+	}
+	n := min(Limit, total)
+	start := min(max(target-n/2, 0), total-n)
+	res.Matches = make([]Range, n)
+	for i := range n {
+		res.Matches[i] = at(start + i)
+	}
 	cur := target - start
 	res.Current, res.CurrentGlobal = &cur, &target
 	return res

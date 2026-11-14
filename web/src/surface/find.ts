@@ -10,6 +10,7 @@
 
 import { create } from 'zustand';
 import { storage } from '../brand';
+import { hasMessage, t } from '../i18n';
 import { conn } from '../lib/conn';
 import { useStore } from '../state/store';
 import { isMac } from './input';
@@ -25,13 +26,12 @@ export interface FindMatch {
 }
 
 /** The search's answer: at most 1024 matches around the current one;
- * `total` counts them all, up to a limit (`capped`). */
+ * `total` counts them all. */
 export interface FindResult {
   matches: FindMatch[];
   total: number;
   current?: number | null;
   current_global?: number | null;
-  capped?: boolean;
 }
 
 /** How the query is matched; remembered in this browser. */
@@ -64,7 +64,6 @@ export interface FindState {
   options: FindOptions;
   matches: FindMatch[];
   total: number;
-  capped: boolean;
   /** Position of the current match among all of them. */
   index?: number;
   current?: FindMatch;
@@ -87,7 +86,7 @@ function loadOptions(): FindOptions {
   return o;
 }
 
-const empty = { matches: [], total: 0, capped: false, index: undefined, current: undefined, status: 'idle' as const, error: undefined };
+const empty = { matches: [], total: 0, index: undefined, current: undefined, status: 'idle' as const, error: undefined };
 
 export const useFind = create<FindState>(() => ({ open: false, query: '', options: loadOptions(), focusSeq: 0, ...empty }));
 
@@ -104,9 +103,10 @@ export const findKeyLabel = (mac = isMac) => (mac ? 'cmd+f' : 'ctrl+shift+f');
 const optionCodes: Record<string, FindOption> = { KeyC: 'matchCase', KeyW: 'wholeWord', KeyR: 'regex' };
 
 /** The option a keydown in the find bar toggles: Alt+C, Alt+W, Alt+R as in
- * VS Code (also with Cmd on macOS, VS Code's keys there). */
-export function findOptionKey(ev: KeyboardEvent, mac = isMac): FindOption | undefined {
-  if (!ev.altKey || ev.ctrlKey || ev.shiftKey || (ev.metaKey && !mac)) return;
+ * VS Code (Option on macOS). Not with Cmd: browsers keep Cmd+Option+C, W
+ * and R for themselves (Chrome's element inspector, Safari's commands). */
+export function findOptionKey(ev: KeyboardEvent): FindOption | undefined {
+  if (!ev.altKey || ev.ctrlKey || ev.shiftKey || ev.metaKey) return;
   return optionCodes[ev.code];
 }
 
@@ -115,8 +115,11 @@ export const findOptionKeyLabel = (o: FindOption, mac = isMac) =>
   `${mac ? '⌥' : 'Alt+'}${{ matchCase: 'C', wholeWord: 'W', regex: 'R' }[o]}`;
 
 let typing: number | undefined;
-let refresh: number | undefined;
 let inflight: AbortController | undefined;
+/** The background refresh once stepping pauses: its timer, then its
+ * request. It runs beside the queue, so a step never waits for it. */
+let refresh: number | undefined;
+let refreshing: AbortController | undefined;
 /** Searches and steps run one after another (a step starts from where the
  * one before it ended); cancel() drops what is queued. */
 let chain: Promise<void> = Promise.resolve();
@@ -127,11 +130,19 @@ function enqueue(job: () => Promise<void> | void) {
   chain = chain.then(() => (g === generation ? job() : undefined)).catch(() => {});
 }
 
+/** Drops the background refresh: a step or a new search makes it stale. */
+function stopRefresh() {
+  window.clearTimeout(refresh);
+  refresh = undefined;
+  refreshing?.abort();
+  refreshing = undefined;
+}
+
 /** Drops pending and running searches: their answers are not wanted. */
 function cancel() {
   window.clearTimeout(typing);
-  window.clearTimeout(refresh);
-  typing = refresh = undefined;
+  typing = undefined;
+  stopRefresh();
   generation++;
   inflight?.abort();
   inflight = undefined;
@@ -190,8 +201,9 @@ export const REFRESH_MS = 400;
 
 /** The next older match (up) or newer one (down), wrapping around. A
  * match among those of the last answer is taken at once; the search then
- * runs again in the background once stepping pauses, keeping that match.
- * Beyond them, the core finds the next one. */
+ * runs again in the background once stepping pauses, keeping that match,
+ * and the next step drops that search rather than wait for it. Beyond
+ * them, the core finds the next one. */
 export function findStep(older: boolean) {
   const st = useFind.getState();
   if (!st.query || st.status === 'invalid') return;
@@ -201,15 +213,20 @@ export function findStep(older: boolean) {
     enqueue(() => search(true));
     return;
   }
-  window.clearTimeout(refresh);
+  stopRefresh();
   enqueue(() => {
     const now = useFind.getState();
     const next = localStep(now, older);
     if (!next) return search(older, now.current);
     useFind.setState(next);
     if (now.m && now.pane) reveal(now.m, now.pane, next.current);
-    window.clearTimeout(refresh);
-    refresh = window.setTimeout(() => enqueue(() => search(true, undefined, after(next.current))), REFRESH_MS);
+    stopRefresh();
+    refresh = window.setTimeout(() => {
+      refresh = undefined;
+      const ctl = new AbortController();
+      refreshing = ctl;
+      void search(true, undefined, after(next.current), ctl);
+    }, REFRESH_MS);
   });
 }
 
@@ -228,15 +245,28 @@ export function localStep(st: FindState, older: boolean): { current: FindMatch; 
 /** Searching backward from right after a match finds that match again. */
 const after = (mt: FindMatch): Point => ({ row: mt.end.row, col: mt.end.col + 1 });
 
-/** A search the core refused or could not make: the code, and herdr's or
- * the regular expression's words. */
+/** A search the core refused or could not make: the code and herdr's
+ * words; for an invalid regular expression, the reason (a code) and the
+ * part at fault. */
 export class FindError extends Error {
   constructor(
     public code: string,
     public detail = '',
+    public reason = '',
+    public expr = '',
   ) {
     super(detail || code);
   }
+}
+
+/** What to say about a failed search: for an invalid regular expression,
+ * why, in the page's language, and where. */
+export function findErrorText(e: unknown): string {
+  if (!(e instanceof FindError)) return String(e);
+  if (e.code !== 'invalid_regex') return e.detail;
+  const key = `find.regex.${e.reason}`;
+  const why = e.reason && hasMessage(key) ? t(key) : t('find.invalid');
+  return e.expr ? `${why}: ${e.expr}` : why;
 }
 
 export interface FindRequest {
@@ -270,19 +300,23 @@ export async function paneFind(m: string, pane: string, req: FindRequest, signal
     }),
   });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new FindError(body.error || String(res.status), body.detail);
+  if (!res.ok) throw new FindError(body.error || String(res.status), body.detail, body.reason, body.expr);
   return body as FindResult;
 }
 
-async function search(backward: boolean, previous?: FindMatch, from?: Point) {
+/** Searches and shows the answer. With `refresh` (the background refresh's
+ * controller) the count stays shown meanwhile and a failure keeps the
+ * matches found before. */
+async function search(backward: boolean, previous?: FindMatch, from?: Point, refresh?: AbortController) {
   const { m, pane, query, options } = useFind.getState();
   if (!m || !pane || !query) return;
   const meta = useSurface.getState().meta;
   const cols = meta?.m === m ? meta.panes.find((p) => p.id === pane)?.inner.w : undefined;
-  const ctl = new AbortController();
-  inflight = ctl;
-  // A background refresh keeps the count shown meanwhile.
-  if (!from) useFind.setState({ status: 'searching', error: undefined });
+  const ctl = refresh ?? new AbortController();
+  if (!refresh) {
+    inflight = ctl;
+    useFind.setState({ status: 'searching', error: undefined });
+  }
   try {
     const res = await paneFind(m, pane, { query, options, backward, previous, from, cols }, ctl.signal);
     if (ctl.signal.aborted) return;
@@ -291,20 +325,19 @@ async function search(backward: boolean, previous?: FindMatch, from?: Point) {
     useFind.setState({
       matches,
       total: res.total ?? matches.length,
-      capped: !!res.capped,
       index: res.current_global ?? undefined,
       current,
       status: 'idle',
     });
     if (current) reveal(m, pane, current);
   } catch (e) {
-    // A failed background refresh leaves the matches found before.
-    if (ctl.signal.aborted || from) return;
+    if (ctl.signal.aborted || refresh) return;
     const code = e instanceof FindError ? e.code : '';
     const status: FindStatus = code === 'invalid_regex' ? 'invalid' : code === 'unavailable' ? 'busy' : 'failed';
-    useFind.setState({ ...empty, status, error: e instanceof FindError ? e.detail : String(e) });
+    useFind.setState({ ...empty, status, error: findErrorText(e) });
   } finally {
     if (inflight === ctl) inflight = undefined;
+    if (refreshing === ctl) refreshing = undefined;
   }
 }
 

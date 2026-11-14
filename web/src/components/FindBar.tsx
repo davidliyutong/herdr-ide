@@ -30,15 +30,14 @@ interface Props {
 }
 
 /** What the bar says about the matches. */
-export function findCount(st: { query: string; total: number; capped?: boolean; index?: number; status: string }): string {
+export function findCount(st: { query: string; total: number; index?: number; status: string }): string {
   if (st.status === 'busy') return t('find.busy');
   if (st.status === 'failed') return t('find.failed');
   if (st.status === 'invalid') return t('find.invalid');
   if (!st.query) return '';
   if (st.total === 0) return st.status === 'searching' ? '…' : t('find.none');
-  const total = st.capped ? t('find.more', { total: st.total }) : String(st.total);
-  if (st.index === undefined) return total;
-  return t('find.count', { n: st.index + 1, total });
+  if (st.index === undefined) return String(st.total);
+  return t('find.count', { n: st.index + 1, total: st.total });
 }
 
 const optionIcons: Record<FindOption, typeof CaseSensitive> = { matchCase: CaseSensitive, wholeWord: WholeWord, regex: Regex };

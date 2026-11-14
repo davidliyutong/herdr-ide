@@ -39,6 +39,8 @@ import {
   CURRENT,
   MATCH,
   closeFind,
+  FindError,
+  findErrorText,
   findOptionKey,
   findStep,
   isFindKey,
@@ -107,16 +109,19 @@ describe('find key', () => {
     expect(isFindKey(key({ code: 'KeyG', key: 'g', metaKey: true }), true)).toBe(false);
   });
 
-  it('toggles options with Alt+C, Alt+W and Alt+R in the bar (also with Cmd on macOS)', () => {
+  it('toggles options with Alt+C, Alt+W and Alt+R in the bar (Option on macOS)', () => {
     // macOS's Option types ç: the code says which key it was.
-    expect(findOptionKey(key({ code: 'KeyC', key: 'ç', altKey: true }), true)).toBe('matchCase');
-    expect(findOptionKey(key({ code: 'KeyW', key: 'w', altKey: true, metaKey: true }), true)).toBe('wholeWord');
-    expect(findOptionKey(key({ code: 'KeyR', key: 'r', altKey: true }), false)).toBe('regex');
-    expect(findOptionKey(key({ code: 'KeyR', key: 'r', altKey: true, metaKey: true }), false)).toBeUndefined();
-    expect(findOptionKey(key({ code: 'KeyC', key: 'c', altKey: true, ctrlKey: true }), false)).toBeUndefined();
-    expect(findOptionKey(key({ code: 'KeyC', key: 'C', altKey: true, shiftKey: true }), false)).toBeUndefined();
-    expect(findOptionKey(key({ code: 'KeyC', key: 'c' }), false)).toBeUndefined();
-    expect(findOptionKey(key({ code: 'KeyX', key: 'x', altKey: true }), false)).toBeUndefined();
+    expect(findOptionKey(key({ code: 'KeyC', key: 'ç', altKey: true }))).toBe('matchCase');
+    expect(findOptionKey(key({ code: 'KeyW', key: '∑', altKey: true }))).toBe('wholeWord');
+    expect(findOptionKey(key({ code: 'KeyR', key: 'r', altKey: true }))).toBe('regex');
+    // Cmd+Option+C, W and R are the browser's (Chrome's element inspector,
+    // Safari's commands).
+    expect(findOptionKey(key({ code: 'KeyC', key: 'c', altKey: true, metaKey: true }))).toBeUndefined();
+    expect(findOptionKey(key({ code: 'KeyR', key: 'r', altKey: true, metaKey: true }))).toBeUndefined();
+    expect(findOptionKey(key({ code: 'KeyC', key: 'c', altKey: true, ctrlKey: true }))).toBeUndefined();
+    expect(findOptionKey(key({ code: 'KeyC', key: 'C', altKey: true, shiftKey: true }))).toBeUndefined();
+    expect(findOptionKey(key({ code: 'KeyC', key: 'c' }))).toBeUndefined();
+    expect(findOptionKey(key({ code: 'KeyX', key: 'x', altKey: true }))).toBeUndefined();
   });
 });
 
@@ -250,13 +255,24 @@ describe('searching', () => {
   });
 
   it('reports the core’s error code', async () => {
-    serve({ error: 'invalid_regex', detail: 'missing closing )' }, 400);
+    serve({ error: 'invalid_regex', reason: 'missing_paren', expr: 'a(b' }, 400);
     await expect(
-      paneFind('local', 'w1:p1', { query: '(', options: { matchCase: false, wholeWord: false, regex: true }, backward: true }),
+      paneFind('local', 'w1:p1', { query: 'a(b', options: { matchCase: false, wholeWord: false, regex: true }, backward: true }),
     ).rejects.toMatchObject({
       code: 'invalid_regex',
-      detail: 'missing closing )',
+      reason: 'missing_paren',
+      expr: 'a(b',
     });
+  });
+
+  it('says why an expression is invalid in the page’s words', () => {
+    expect(findErrorText(new FindError('invalid_regex', '', 'missing_paren', 'a(b'))).toBe('Missing closing ): a(b');
+    expect(findErrorText(new FindError('invalid_regex', '', 'perl_op', '(?='))).toBe(
+      'Unsupported syntax (no lookaround or backreferences): (?=',
+    );
+    // A reason the page does not know, or none.
+    expect(findErrorText(new FindError('invalid_regex', '', 'new_reason', 'x'))).toBe('Invalid regular expression: x');
+    expect(findErrorText(new FindError('invalid_regex'))).toBe('Invalid regular expression');
   });
 
   it('opens on the newest match and scrolls it into view', async () => {
@@ -301,6 +317,47 @@ describe('searching', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('steps at once while the background refresh is still searching, and drops it', async () => {
+    const found = [match(8, 0, 8, 5), match(71, 0, 71, 5), match(80, 0, 80, 5)];
+    serve({ matches: found, total: 3, current: 2, current_global: 2 });
+    openFind('local', 'w1:p1', 'line');
+    await flush();
+    await flush();
+    vi.useFakeTimers();
+    try {
+      findStep(true);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(useFind.getState()).toMatchObject({ index: 1, current: found[1] });
+      // The refresh starts once stepping pauses; its answer is slow.
+      vi.stubGlobal('fetch', (url: string, init: RequestInit) => {
+        searches.push({ url, body: JSON.parse(String(init.body)), signal: init.signal ?? undefined });
+        return new Promise(() => {});
+      });
+      await vi.advanceTimersByTimeAsync(REFRESH_MS);
+      expect(searches).toHaveLength(2);
+      const refresh = searches[1];
+      expect(refresh.signal?.aborted).toBe(false);
+      // Enter: taken from the answer at once, not after the refresh.
+      findStep(true);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(useFind.getState()).toMatchObject({ index: 0, current: found[0], status: 'idle' });
+      expect(refresh.signal?.aborted).toBe(true);
+      // Its own refresh follows the pause after it.
+      await vi.advanceTimersByTimeAsync(REFRESH_MS);
+      expect(searches).toHaveLength(3);
+      expect(searches[2].body).toMatchObject({ backward: true, cursor: { row: 8, col: 6 } });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('searches forward from the start, which the core takes as including the first cell', async () => {
+    serve({ matches: [match(0, 0, 0, 2)], total: 1, current: 0, current_global: 0 });
+    await paneFind('local', 'w1:p1', { query: 'abc', options: { matchCase: false, wholeWord: false, regex: false }, backward: false });
+    expect(searches[0].body).toMatchObject({ backward: false, cursor: { row: 0, col: 0 } });
+    expect(searches[0].body.previous).toBeUndefined();
   });
 
   it('asks the core for a match beyond the answer’s window, one step after another', async () => {
@@ -381,11 +438,11 @@ describe('searching', () => {
   });
 
   it('says when the regular expression is invalid, and does not step then', async () => {
-    serve({ error: 'invalid_regex', detail: 'missing argument to repetition operator: `*`' }, 400);
+    serve({ error: 'invalid_regex', reason: 'missing_repeat_arg', expr: '*' }, 400);
     openFind('local', 'w1:p1', '*');
     await flush();
     await flush();
-    expect(useFind.getState()).toMatchObject({ status: 'invalid', error: 'missing argument to repetition operator: `*`', total: 0 });
+    expect(useFind.getState()).toMatchObject({ status: 'invalid', error: 'Nothing to repeat: *', total: 0 });
     findStep(true);
     expect(searches).toHaveLength(1);
   });
@@ -433,7 +490,7 @@ describe('find bar', () => {
     expect(findCount({ query: '', total: 0, status: 'idle' })).toBe('');
     expect(findCount({ query: 'x', total: 0, status: 'idle' })).toBe('No results');
     expect(findCount({ query: 'x', total: 1500, index: 1499, status: 'idle' })).toBe('1500 of 1500');
-    expect(findCount({ query: 'x', total: 100000, capped: true, index: 4, status: 'idle' })).toBe('5 of 100000+');
+    expect(findCount({ query: 'x', total: 250000, index: 249999, status: 'idle' })).toBe('250000 of 250000');
     expect(findCount({ query: 'x', total: 0, status: 'busy' })).toMatch(/keeps changing/);
     expect(findCount({ query: '(', total: 0, status: 'invalid' })).toBe('Invalid regular expression');
   });

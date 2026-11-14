@@ -40,8 +40,6 @@ type FindResult struct {
 	Total         int         `json:"total"`
 	Current       *int        `json:"current,omitempty"`
 	CurrentGlobal *int        `json:"current_global,omitempty"`
-	// Capped: counting stopped at a limit; there are more.
-	Capped bool `json:"capped,omitempty"`
 	// FirstRow is the oldest row searched (a very long scrollback is
 	// searched from its newest rows back).
 	FirstRow uint32 `json:"first_row,omitempty"`

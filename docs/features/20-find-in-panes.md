@@ -43,16 +43,27 @@ its own search finds the rest); replacing text.
   selects its text.
 - **Options.** Three toggles in the query field, as in VS Code: match case
   (Alt+C), whole word (Alt+W) and regular expression (Alt+R); on macOS
-  Option and ⌘⌥ with the letter, read from the key's code so Option's
-  characters (ç, ∑, ®) are not typed instead. The keys work in the bar
-  only: the bar keeps its keys from the pane and the keymap. Without match
-  case the search ignores case, whatever the query's capitals. Whole word
-  needs no letter, digit or underscore right before a match that starts
-  with one, and none right after one that ends with one, in any script.
-  Regular expressions are Go's RE2 syntax, matched per line of output (`^`
-  and `$` are its ends); an invalid one turns the field red and the bar
-  says so, with the parser's message as the tooltip. The options are kept
-  in the browser's storage.
+  Option with the letter, read from the key's code so Option's characters
+  (ç, ∑, ®) are not typed instead. Not ⌘⌥ with the letter: browsers keep
+  those (Chrome's element inspector, Safari's commands). The keys work in
+  the bar only: the bar keeps its keys from the pane and the keymap.
+  Without match case the search ignores case, whatever the query's
+  capitals. Whole word needs no word character (a letter, digit,
+  underscore or a mark combining with them) right before a match that
+  starts with one, and none right after one that ends with one, in any
+  script. A match that fails this hides no other: the longest match at
+  the same place is tried, then the search goes on from the next
+  character, so `a a` is found in `xa a a` and `ab|abc` finds `abc`. That
+  extra work is bounded per line (a long match failing at every place
+  stops it, and the rest of the line is searched without it), and an
+  expression that looks at the text before it (`^`, `\b`, `\B`) is
+  matched on whole lines only. Regular expressions are Go's RE2 syntax,
+  matched per line of output (`^` and `$` are its ends); an invalid one
+  turns the field red and the bar says so. The core checks the expression
+  before the search and answers with a code for the reason (missing `)`,
+  nothing to repeat, unsupported syntax such as lookaround, …) and the
+  part at fault, which the page states in its language as the tooltip.
+  The options are kept in the browser's storage.
 - **Searching next to herdr** (`internal/panefind`, agent op `pane.find`,
   `POST /api/m/{id}/find`). The browser sends the query, the options, the
   direction, the current match and the pane's width; the machine's agent
@@ -64,7 +75,10 @@ its own search finds the rest); replacing text.
   - *Size.* `pane.get` gives the rows (scrollback plus view). herdr reports
     no column count, so the agent checks the browser's width with two
     one-cell `pane.selection.read`s (the last column exists, the next does
-    not) and otherwise finds it by doubling and halving.
+    not). The row count is checked the same way, since output may have
+    added rows since `pane.get`. A hint that is off is the start of the
+    search: steps doubling away from it, then halving, so a pane a few
+    rows longer costs a few reads more.
   - *Text.* One `pane.selection.read` from the oldest row to the last cell.
     herdr answers it under its terminal's lock, so the text is one
     consistent state even while output keeps arriving: no content revision
@@ -82,11 +96,16 @@ its own search finds the rest); replacing text.
     sequences and combining marks (`TestIntegrationPaneFind`).
   - *Matching.* Go's `regexp` (RE2) runs in time linear in the text, so no
     query can make a search slow; a literal query is quoted, case is
-    ignored with `(?i)`. Empty matches are skipped. Counting stops at
-    100 000 matches; the bar then shows "100000+".
+    ignored with `(?i)`. Empty matches are skipped. Every match is
+    counted, but only those an answer may carry are kept while the text
+    is searched: the first and last 1024 and 1024 on either side of where
+    the search starts, so the current match and the matches around it are
+    right however many there are (4 million one-character matches in a
+    full 4 Mi cells take about 0.2 s).
   - *Current match.* As herdr picks it: forward, the first match starting
     after the current one; backward, the last ending before it; wrapping
-    around at either end.
+    around at either end. Forward without a current match, a match in the
+    first cell counts.
 - **The browser** (`web/src/surface/find.ts`). Typing searches 150 ms after
   the last key, from the end backward: the newest match is current. Enter
   goes to the next older match, Shift+Enter (and the buttons) to the next
@@ -94,7 +113,9 @@ its own search finds the rest); replacing text.
   newest. A step to a match among those of the last answer happens at once
   in the browser; 400 ms after stepping pauses, one search in the
   background (backward from right after the current match) brings the
-  count and positions up to date and keeps that match. A step beyond the
+  count and positions up to date and keeps that match. It runs beside the
+  queue of searches and steps: the next step aborts it instead of waiting
+  for it, and that step's own pause starts the next one. A step beyond the
   answer's 1024 matches asks the core; further steps wait for its answer
   and continue from it, so fast Enter presses are never lost. A new query
   or option aborts the request in flight, which closes the agent's stream
@@ -144,7 +165,7 @@ its own search finds the rest); replacing text.
   shift and highlights are off by those lines until the next search.
 - A pager or editor on the alternate screen: only its screen is searched.
 - More than 1024 matches: only those around the current one are
-  highlighted; the count and stepping cover all of them up to 100 000.
+  highlighted; the count and stepping cover all of them.
 - An agent from before this op answers "unknown op": the bar says find
   failed until the machine reconnects with the current agent.
 
@@ -158,22 +179,28 @@ seconds and by the browser's request, whose end stops it.
 
 ## Testing
 
-`internal/panefind/search_test.go` covers the options, laying text out
-(wraps, wide characters at a row's end, grapheme clusters, combining
-marks, empty lines), choosing the current match, the window and the count
-limit, reading a pane through a fake herdr (width hints right and wrong, a
-pane that shrinks, unknown panes, invalid expressions) and finding the
-width. `TestIntegrationPaneFind` (`make it`) compares the agent's matches
+`internal/panefind/search_test.go` covers the options, invalid
+expressions' reasons and parts, whole words (matches inside or after one
+that is not a word, the longer match at the same place, combining marks,
+expressions about the text before, the bound on the extra work), laying
+text out (wraps, wide characters at a row's end, grapheme clusters,
+combining marks, empty lines), choosing the current match (also from the
+first cell), the window around it among 150 000 matches in every
+direction, reading a pane through a fake herdr (width hints right and
+wrong, a pane that shrinks, unknown panes, invalid expressions) and
+finding a size from hints right, a few off or far off. `TestIntegrationPaneFind` (`make it`) compares the agent's matches
 with `pane.copy_search`'s on text with CJK, emoji, flags, ZWJ sequences
 and combining marks, and checks the options against a real herdr.
 `internal/server/find_test.go` covers the endpoint in read-only mode and
-its error codes. `web/src/__tests__/find.test.ts` covers the find key and
-option keys per system, mapping matches (also across a soft wrap) to
+its error codes, an invalid expression answered with codes only.
+`web/src/__tests__/find.test.ts` covers the find key and option keys per
+system (not with ⌘), mapping matches (also across a soft wrap) to
 columns, highlight priority when painting, scrolling a match into the
 middle of the view and not on the alternate screen or in read-only mode,
-the request, stepping within the answer and the background refresh,
-steps beyond it waiting for each other, typing pauses, cancelling a
-superseded search, invalid expressions, remembering options and the find
-bar's keys and buttons. `web/src/__tests__/input.test.ts` and
+the request, stepping within the answer and the background refresh, a
+step not waiting for that refresh, steps beyond it waiting for each
+other, typing pauses, cancelling a superseded search, invalid
+expressions stated in the page's language, remembering options and the
+find bar's keys and buttons. `web/src/__tests__/input.test.ts` and
 `testdata/keys.json` cover the find key not reaching the pane, and
 `surfaceSelect.test.ts` the menu item with the selection as the query.

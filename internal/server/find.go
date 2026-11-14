@@ -26,8 +26,16 @@ func (s *Server) handleFind(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid"})
 		return
 	}
-	if len(req.Query) > panefind.MaxQuery {
+	// The expression is checked here, so that its error is a code the
+	// browser translates; the agent checks it again.
+	_, err := panefind.Compile(panefind.Options{Query: req.Query, Regex: req.Regex, MatchCase: req.MatchCase, WholeWord: req.WholeWord})
+	var inv *panefind.InvalidError
+	switch {
+	case errors.Is(err, panefind.ErrTooLarge):
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": agentproto.FindTooLarge})
+		return
+	case errors.As(err, &inv):
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": agentproto.FindInvalidRegex, "reason": inv.Reason, "expr": inv.Expr})
 		return
 	}
 	// A newer query cancels the request, which closes the agent's stream
@@ -41,7 +49,7 @@ func (s *Server) handleFind(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, context.Canceled) || r.Context().Err() != nil:
 		// The browser is gone; nobody reads the answer.
 	case rep != nil && rep.Code == agentproto.FindInvalidRegex:
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": rep.Code, "detail": rep.Error})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": rep.Code})
 	case rep != nil && rep.Code != "":
 		writeJSON(w, http.StatusConflict, map[string]string{"error": rep.Code, "detail": rep.Error})
 	default:
