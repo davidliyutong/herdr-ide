@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../state/store';
 import { actions, attentionList } from '../actions';
-import { commandLabel, getHerdrCommands, keyHint, runCommand, runHerdrCommand } from '../keymap';
-import { keyLabel } from '../keys';
+import { commandLabel, keyHint, runCommand } from '../keymap';
 import { useKeys } from '../keybindings';
 import { locales, t, type MessageKey } from '../i18n';
 import { usePrefs } from '../prefs';
-import { paneTitle } from '../lib/herdr';
+import { agentOf, terminalTitle } from '../lib/machine';
+import { useTerms } from '../state/terms';
 import { StatusDot } from './StatusDot';
 import { useGui } from '../gui/state';
 import { enableGui } from '../gui/enable';
@@ -44,23 +44,24 @@ export function Palette() {
     if (!mode) return [];
     const s = useStore.getState();
     const ws: Item[] = [];
+    const tm = useTerms.getState().machines;
     for (const m of s.order) {
       const st = s.machines[m];
-      for (const w of st?.snapshot?.workspaces ?? []) {
+      for (const w of tm[m]?.layout?.workspaces ?? []) {
         ws.push({
-          id: `ws:${m}:${w.workspace_id}`,
-          label: `${w.label}`,
-          hint: st.label,
-          run: () => s.selectWorkspace(m, w.workspace_id),
+          id: `ws:${m}:${w.id}`,
+          label: w.name || t('workspace.default'),
+          hint: st?.label,
+          run: () => actions.selectWorkspace(m, w.id),
         });
       }
     }
-    const agents: Item[] = attentionList().map(({ m, pane }) => ({
-      id: `agent:${m}:${pane.pane_id}`,
-      label: `${pane.agent} · ${paneTitle(pane)}`,
+    const agents: Item[] = attentionList().map(({ m, terminal, record, status }) => ({
+      id: `agent:${m}:${terminal}`,
+      label: `${agentOf(record) ?? terminalTitle(record, terminal)} · ${terminalTitle(record, terminal)}`,
       hint: s.machines[m]?.label,
-      icon: <StatusDot status={pane.agent_status} />,
-      run: () => actions.focusAgent(m, pane.pane_id),
+      icon: <StatusDot status={status} />,
+      run: () => actions.focusTerminal(m, terminal),
     }));
     // Commands that open the palette, and the tabs by number, are left out.
     const hidden = /^(app\.commandPalette|app\.keyboardShortcuts|workspace\.switch|tab\.select\d)$/;
@@ -68,17 +69,9 @@ export function Palette() {
       .getState()
       .commands.filter((c) => !hidden.test(c.id))
       .map((c) => ({ id: `cmd:${c.id}`, label: commandLabel(c.id), hint: keyHint(c.id) || undefined, run: () => runCommand(c.id) }));
-    getHerdrCommands().forEach((c, i) => {
-      cmds.push({
-        id: `custom:${i}`,
-        label: c.description || c.command,
-        hint: keyLabel(c.binding),
-        run: () => runHerdrCommand(c),
-      });
-    });
     const kinds = ['claude', 'codex', 'gemini', 'opencode', 'kimi', 'grok', 'cursor', 'copilot', 'qwen', 'amp'];
     for (const k of kinds) {
-      cmds.push({ id: `start:${k}`, label: t('action.startAgent', { kind: k }), run: () => actions.startAgent(k) });
+      cmds.push({ id: `start:${k}`, label: t('action.startAgent', { kind: k }), run: () => void actions.startAgent(k) });
     }
     for (const l of locales) {
       cmds.push({
@@ -94,9 +87,10 @@ export function Palette() {
         run: () => usePrefs.getState().setPref('theme', th),
       });
     }
-    const f = s.focused;
-    if (f && useGui.getState().machines[f.m]?.phase === 'ready') {
-      cmds.push({ id: 'gui:pane', label: t('action.enableGuiPane'), run: () => void enableGui(f.m, [f.pane]) });
+    const f = actions.focusedContext();
+    const focused = f?.terminal;
+    if (f && focused && useGui.getState().machines[f.m]?.phase === 'ready') {
+      cmds.push({ id: 'gui:pane', label: t('action.enableGuiPane'), run: () => void enableGui(f.m, [focused]) });
     }
     for (const st of Object.values(useGui.getState().machines)) {
       if (st.phase !== 'ready') continue;

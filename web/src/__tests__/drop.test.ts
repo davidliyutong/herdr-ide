@@ -14,13 +14,8 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { FakeXhr } from './fakeXhr';
 
-const calls: Array<{ m: string; method: string; params: Record<string, unknown> }> = [];
 vi.mock('../lib/conn', () => ({
   conn: {
-    api: (m: string, method: string, params: Record<string, unknown>) => {
-      calls.push({ m, method, params });
-      return Promise.resolve(method === 'workspace.create' ? { workspace: { workspace_id: 'w9' }, root_pane: { pane_id: 'p9' } } : {});
-    },
     send: () => {},
     sendNow: () => {},
     setTheme: () => {},
@@ -78,7 +73,11 @@ const uploads = () => FakeXhr.requests.map((r) => r.url);
 
 let store: typeof import('../state/store');
 let drop: typeof import('../drop');
+let fake: typeof import('./fakeTerms');
+let core: import('./fakeTerms').FakeCore;
 let Sidebar: typeof import('../components/Sidebar').Sidebar;
+/** The folders terminals were started in, by machine. */
+const runs = () => core.calls.filter((c) => c.method === 'terminal.run').map((c) => [c.m, c.params.cwd]);
 let root: Root | undefined;
 let host: HTMLDivElement;
 
@@ -86,11 +85,15 @@ beforeAll(async () => {
   (globalThis as { desktopShell?: unknown }).desktopShell = shell;
   store = await import('../state/store');
   drop = await import('../drop');
+  fake = await import('./fakeTerms');
   Sidebar = (await import('../components/Sidebar')).Sidebar;
 });
 
 beforeEach(() => {
-  calls.length = 0;
+  core = new fake.FakeCore();
+  core.machine('local');
+  core.machine('ws2');
+  core.install();
   FakeXhr.reset();
   FakeXhr.reply = answer;
   store.useStore.setState({
@@ -139,10 +142,20 @@ describe('dropped folders', () => {
       aside.dispatchEvent(dragEvent('drop', items));
     });
     expect(host.querySelector('.sidebar-drop')).toBeNull();
-    expect(calls.filter((c) => c.method === 'workspace.create')).toEqual([
-      { m: 'local', method: 'workspace.create', params: { cwd: '/Users/u/Projects/app', label: undefined, focus: false } },
-      { m: 'local', method: 'workspace.create', params: { cwd: '/Users/u/Projects/lib', label: undefined, focus: false } },
+    await vi.waitFor(() =>
+      expect(runs()).toEqual([
+        ['local', '/Users/u/Projects/app'],
+        ['local', '/Users/u/Projects/lib'],
+      ]),
+    );
+    await act(fake.settle);
+    // Each a workspace named after its folder, the last one selected.
+    const layout = core.layout('local')!;
+    expect(layout.workspaces.slice(1).map((w) => [w.name, w.cwd])).toEqual([
+      ['app', '/Users/u/Projects/app'],
+      ['lib', '/Users/u/Projects/lib'],
     ]);
+    expect(layout.selected).toBe(2);
     expect(store.useStore.getState().toasts.map((t) => t.msg)).toEqual([
       'Only folders become workspaces; 1 other dropped item(s) skipped.',
     ]);
@@ -174,7 +187,7 @@ describe('dropped folders', () => {
 });
 
 describe('folders dropped on the Dock icon', () => {
-  const creates = () => calls.filter((c) => c.method === 'workspace.create').map((c) => [c.m, c.params.cwd]);
+  const creates = runs;
   const toasts = () => store.useStore.getState().toasts.map((t) => t.msg);
   const local = (status: string) => ({ id: 'local', label: 'Mac', kind: 'local', session: 'default', enabled: true, status });
 
@@ -189,6 +202,7 @@ describe('folders dropped on the Dock icon', () => {
     await act(async () => store.useStore.setState({ machines: { local: local('connecting') } as never, order: ['local'] }));
     expect(creates()).toEqual([]);
     await act(async () => store.useStore.setState({ machines: { local: local('ready') } as never }));
+    await vi.waitFor(() => expect(creates()).toHaveLength(2));
     expect(creates()).toEqual([
       ['local', '/Users/u/Projects/app'],
       ['local', '/Users/u/Projects/lib'],

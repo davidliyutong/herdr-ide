@@ -2,52 +2,49 @@
 
 English | [简体中文](README.zh-CN.md)
 
-A terminal-first, multi-machine, agent-native web IDE for
-[herdr](https://herdr.dev): your herdr workspaces on every machine in one
-browser tab, with VS Code (code-server) one keystroke away.
+A terminal-first, multi-machine, agent-native web IDE built on
+[herdr](https://herdr.dev)'s terminal core: the workspaces and terminals of
+every machine in one browser tab, with VS Code (code-server) one keystroke
+away.
 
 ![Two SSH machines in one tab: Claude Code waiting for confirmation and codex done in the agent inbox, with git history and a GPU monitor in split panes](docs/images/overview.png)
 
 ## Features
 
-- **Speaks herdr's protocol.** Workspaces, tabs, split layouts and agent
-  states come from herdr's socket API; panes are drawn from the cell grid
-  herdr renders through its endpoint protocol, and herdr encodes every key
-  for the program in the pane (kitty keyboard protocol included). Mouse,
-  scrollback (selections stay in their pane, scroll past the edge and copy
-  whole), IME, OSC 52 copy (a selection in Claude Code goes straight to the
-  clipboard), resizable splits, and programs see the UI
-  theme's colors. One browser tab uses the session at a time; another tab
-  can take it over. Drag a pane by its header to swap or move it, click its title to
-  rename it; drag tabs and workspaces to reorder them; right-click a pane
-  header, tab or workspace for its commands, or a pane's text to copy,
-  paste or open a path. Keyboard shortcuts keep herdr's defaults
-  (prefix `ctrl+b`) and can be changed in the settings.
-- **herdr included.** Release archives carry herdr 0.9.5 for Linux/macOS on
-  amd64/arm64, used when this host has no herdr installed. It behaves like an
-  installed herdr: same configuration, sessions and machines. Right-click a
-  machine to **Restart herdr…** (also to start it after the machine
-  rebooted) or **Stop herdr…**, without a terminal; **Update herdr…** on the
-  local machine updates herdr through herdr's own updater, on an SSH machine
-  it runs herdr's own `herdr --remote` update there, and **Install herdr**
-  the same flow where herdr was removed or moved. Disabling an SSH machine
-  can stop its herdr too.
+- **Terminals in the browser.** Each machine's terminal core (herdr-core)
+  runs the programs; the browser emulates every terminal itself with
+  Ghostty's terminal library, compiled to WebAssembly, and draws it with
+  WebGL (Canvas 2D without it). Keys are encoded for the program in the
+  pane (kitty keyboard protocol included). Mouse, scrollback (selections
+  scroll past the edge and copy whole), IME, OSC 52 copy (a selection in
+  Claude Code goes straight to the clipboard), resizable splits, and
+  programs see the UI theme's colors. Workspaces, tabs and splits are a
+  layout document kept on each machine, the same in every browser, the
+  desktop app and the macOS application. Drag a pane by its header to swap
+  or move it, click its title to rename it; drag tabs and workspaces to
+  reorder them; right-click a pane header, tab or workspace for its
+  commands, or a pane's text to copy, paste or open a path. Keyboard
+  shortcuts use the prefix `ctrl+b` and can be changed in the settings.
+- **Terminal core included.** The binary carries herdr-core for Linux/macOS
+  on amd64/arm64 and installs it on a machine the first time its terminals
+  are shown; machines need no herdr and no internet. Programs keep running
+  when the browser closes or the core stops. Right-click a machine to
+  **Start terminal core**, **Restart terminal core…** (its programs keep
+  running) or **Stop terminal core…**.
 - **Multi-machine.** Keeps its own list of SSH machines (the machines saved
   in herdr are imported the first time); right-click the sidebar to add one
   (an ssh target and a label; a password or host key is asked for in a
-  terminal), or a machine to rename, remove, disable or enable it. The
-  macOS application's machine menu also starts, restarts or stops the
-  machine's terminal core. One ssh connection per machine runs a small static agent
+  terminal), or a machine to rename, remove, disable or enable it. One ssh
+  connection per machine runs a small static agent
   (linux/macOS × amd64/arm64, uploaded automatically) that multiplexes
   everything; nothing listens on the machines.
 - **Agent-native.** An inbox of agents that are blocked or done across all
   machines, browser notifications and sounds when an agent needs input or
   finishes, starting agents from the command palette,
   sending code from VS Code to the focused agent, pasting images into agent
-  prompts. In the terminals of the macOS application, each machine's agent
-  tells which coding agent runs and whether it works, waits or finished a
-  turn, with herdr's rules for Claude Code, Codex, Gemini, OpenCode and
-  more.
+  prompts. Each machine's agent tells which coding agent runs in a terminal
+  and whether it works, waits or finished a turn, with herdr's rules for
+  Claude Code, Codex, Gemini, OpenCode and more.
 - **VS Code on demand.** code-server is installed per machine from the core
   host (no internet needed on machines), downloaded by the machines
   themselves, or taken from an existing install, with Git Graph and a bridge
@@ -71,9 +68,9 @@ browser tab, with VS Code (code-server) one keystroke away.
   pane (`$…$`, `$$…$$`, `\(…\)`, `\[…\]`, also with the backslashes its
   markdown dropped) to see it typeset, and copy its source.
 - **Find.** ⌘F (Ctrl+Shift+F on other systems) finds text in a pane's
-  output, scrollback included, optionally matching case, whole words or a
-  regular expression: every match is highlighted, Enter and Shift+Enter
-  step to older and newer ones, scrolling them into view.
+  output, scrollback included: every match on the screen is highlighted,
+  Enter and Shift+Enter step to older and newer ones, scrolling them into
+  view.
 - **Files to agents.** Paste or drop files into a pane to paste their paths;
   files that are not on the pane's machine are uploaded to it first, dropped
   ones into the pane's directory (an existing file there is never replaced).
@@ -85,8 +82,9 @@ browser tab, with VS Code (code-server) one keystroke away.
   machine. VS Code's explorer has the same download. The downloads panel in
   the status bar shows each download's progress, speed and result, and
   cancels or repeats it.
-- **Several browsers at once.** The active browser controls a pane; others
-  watch at the same size and take over by typing.
+- **Several browsers at once.** Every browser, the desktop app and the
+  macOS application show the same terminals and type into them; the one
+  used last sets a terminal's size.
 - **Settings.** Language (English, Chinese), light/dark theme followed by
   VS Code, interface size, the terminals' font, line height, cursor,
   scrollback, bell and colors (both themes' 16 colors), panel position, the
@@ -118,9 +116,8 @@ it; the arrows step through the other files of the folder.
 
 Requirements:
 
-- [herdr](https://herdr.dev) 0.9.5 or newer running on every machine you
-  want to use (this host can use the herdr included in the release);
-- an OpenSSH client with working access to those machines;
+- an OpenSSH client with working access to the machines you want to use
+  (this host needs none);
 - to build: Go (version in `go.mod`), Node.js 22.12+ and pnpm (`corepack enable`
   picks the pinned version).
 

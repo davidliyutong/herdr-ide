@@ -52,10 +52,11 @@ machines, reimplementing its agent detection.
   (through the agent, see [02](02-multi-machine-transport.md)). Mutating
   calls trigger a refetch. Browser calls go through an allowlist
   ([08](08-web-access-and-security.md)).
-- **Panes.** The core holds one endpoint connection to the shown machine's
-  herdr, through the agent; herdr renders the shown tab at the browser's size
-  and the core forwards the grid ([18](18-endpoint-surfaces.md),
-  [03](03-pane-rendering-and-input.md)).
+- **Panes.** The core can hold one endpoint connection to a machine's
+  herdr, through the agent, for a `/ws` client that shows herdr's panes;
+  herdr renders the shown tab at the client's size and the core forwards the
+  grid ([18](18-endpoint-surfaces.md)). The browser UI shows the terminal
+  core's terminals instead ([26](26-web-terminals.md)).
 - **Discovery.** Machines are the core's own
   ([02](02-multi-machine-transport.md)); herdr's saved catalog is imported
   once. The remote herdr binary is searched (`HERDR_BIN`, `PATH`,

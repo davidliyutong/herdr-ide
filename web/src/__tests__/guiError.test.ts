@@ -12,7 +12,7 @@ vi.mock('../lib/conn', () => ({ conn: { api: () => Promise.resolve({}), setTheme
 import { GuiTray } from '../gui/GuiMenus';
 import { useGui } from '../gui/state';
 import { useStore } from '../state/store';
-import type { MachineState } from '../lib/herdr';
+import type { MachineState } from '../lib/machine';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

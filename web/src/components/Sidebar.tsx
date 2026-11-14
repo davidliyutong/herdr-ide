@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { ChevronDown, ChevronRight, Plus, Settings } from 'lucide-react';
 import { useStore } from '../state/store';
+import { terms, useTerms } from '../state/terms';
 import { conn } from '../lib/conn';
 import { actions, attentionList } from '../actions';
-import { paneCwd, paneTitle, shortPath, statusRank, type AgentStatus, type MachineState } from '../lib/herdr';
+import { aggregate, agentOf, agentStatus, shortPath, terminalTitle, type MachineState } from '../lib/machine';
+import * as L from '../term/layout';
 import { StatusDot, statusLabel } from './StatusDot';
 import { t, type MessageKey } from '../i18n';
 import { keyHint } from '../keymap';
@@ -12,14 +14,7 @@ import { InlineEdit } from './InlineEdit';
 import { startWorkspaceDrag } from '../reorderDrag';
 import { openMenu } from '../contextMenu';
 import { machineMenu, sidebarMenu, workspaceMenu } from '../menus';
-import { herdrMissing, isNewer } from '../lib/localHerdr';
 import { carriesFiles, dropFolders, folderDropTarget } from '../drop';
-
-function aggregate(statuses: AgentStatus[]): AgentStatus | undefined {
-  let best: AgentStatus | undefined;
-  for (const s of statuses) if (!best || statusRank[s] > statusRank[best]) best = s;
-  return best;
-}
 
 export function Sidebar() {
   const order = useStore((s) => s.order);
@@ -54,7 +49,7 @@ export function Sidebar() {
           <button
             className="icon"
             title={t('sidebar.newWorkspace', { key: keyHint('workspace.new') })}
-            onClick={() => actions.newWorkspace()}
+            onClick={() => void actions.newWorkspace()}
           >
             <Plus />
           </button>
@@ -82,11 +77,12 @@ export function Sidebar() {
 }
 
 function Inbox() {
-  // Recomputed on every store change; the lists are small.
-  useStore((s) => s.machines);
-  const items = attentionList().filter((i) => i.pane.agent_status === 'blocked' || i.pane.agent_status === 'done');
-  const working = attentionList().filter((i) => i.pane.agent_status === 'working').length;
-  const machines = useStore.getState().machines;
+  // Recomputed on every change of the terminals; the lists are small.
+  useTerms((s) => s.machines);
+  const machines = useStore((s) => s.machines);
+  const all = attentionList();
+  const items = all.filter((i) => i.status === 'blocked' || i.status === 'done');
+  const working = all.filter((i) => i.status === 'working').length;
   return (
     <div className="inbox">
       <div className="section-title">
@@ -97,15 +93,15 @@ function Inbox() {
         </span>
       </div>
       {items.length === 0 && <div className="muted small pad">{t('sidebar.noPending')}</div>}
-      {items.map(({ m, pane }) => (
-        <div key={m + pane.pane_id} className={`inbox-item st-${pane.agent_status}`} onClick={() => actions.focusAgent(m, pane.pane_id)}>
-          <StatusDot status={pane.agent_status} />
+      {items.map(({ m, terminal, record, status }) => (
+        <div key={`${m} ${terminal}`} className={`inbox-item st-${status}`} onClick={() => actions.focusTerminal(m, terminal)}>
+          <StatusDot status={status} />
           <div className="inbox-text">
             <div className="inbox-title">
-              {pane.agent} · {statusLabel(pane.agent_status)}
+              {agentOf(record) ?? terminalTitle(record, terminal)} · {statusLabel(status)}
             </div>
             <div className="muted small ellipsis">
-              {machines[m]?.label} · {paneTitle(pane)} · {shortPath(paneCwd(pane), machines[m]?.info?.home)}
+              {machines[m]?.label} · {terminalTitle(record, terminal)} · {shortPath(terms.directory(m, terminal), machines[m]?.info?.home)}
             </div>
           </div>
         </div>
@@ -126,22 +122,15 @@ function MachineItem({ m }: { m: MachineState }) {
     setOpen(!disabled);
   }
   const selM = useStore((s) => s.machineId);
-  const selWs = useStore((s) => s.workspaceId);
-  const selectWorkspace = useStore((s) => s.selectWorkspace);
   const readOnly = useStore((s) => s.readOnly);
-  // Remote herdr older than the local one: herdr itself installs the local
-  // version there when the user attaches (RemoteHerdrDialog).
-  const localHerdr = useStore((s) => Object.values(s.machines).find((x) => x.kind === 'local')?.info?.herdr_version);
   const renaming = useStore((s) => (s.renaming?.kind === 'workspace' && s.renaming.m === m.id ? s.renaming.id : undefined));
   const renamingMachine = useStore((s) => s.renaming?.kind === 'machine' && s.renaming.m === m.id);
   const setRenaming = useStore((s) => s.setRenaming);
-  const herdrBusy = useStore((s) => s.herdrBusy[m.id] === true);
-  const snap = m.snapshot;
-  const workspaces = snap?.workspaces ?? [];
-  // herdr removed or moved on an SSH machine (or never installed there):
-  // herdr --remote installs it.
-  const missing = m.kind === 'ssh' && herdrMissing(m);
-  const install = !readOnly && <button onClick={() => useStore.getState().openRemoteHerdr(m.id)}>{t('sidebar.installHerdr')}</button>;
+  const busy = useStore((s) => s.hcBusy[m.id] === true);
+  const mt = useTerms((s) => s.machines[m.id]);
+  const layout = mt?.layout;
+  const backend = mt?.backend;
+  const followed = terms.isSubscribed(m.id);
   return (
     <div className="machine">
       <div
@@ -170,11 +159,7 @@ function MachineItem({ m }: { m: MachineState }) {
           {m.status !== 'ready' && (
             <div className={`machine-status ms-${m.status}`}>
               {t(`machine.${m.status}` as MessageKey)}
-              {missing ? (
-                <div className="small">{t('sidebar.herdrMissing')}</div>
-              ) : (
-                m.error && <div className="small ellipsis2">{m.error}</div>
-              )}
+              {m.error && <div className="small ellipsis2">{m.error}</div>}
               {m.status === 'disabled' && !readOnly && (
                 <div className="row">
                   <button onClick={() => void actions.setMachineEnabled(m.id, true)}>{t('menu.enableMachine')}</button>
@@ -185,89 +170,74 @@ function MachineItem({ m }: { m: MachineState }) {
                   {m.status === 'auth_required' && m.kind === 'ssh' && (
                     <button onClick={() => useStore.getState().openAuth?.(m.id)}>{t('sidebar.authenticate')}</button>
                   )}
-                  {missing
-                    ? install
-                    : m.kind === 'local' &&
-                      !readOnly && (
-                        <button disabled={herdrBusy} onClick={() => void actions.startHerdr(m.id)}>
-                          {t('sidebar.startHerdr')}
-                        </button>
-                      )}
                   {!readOnly && <button onClick={() => conn.retry(m.id)}>{t('sidebar.retry')}</button>}
                 </div>
               )}
             </div>
           )}
-          {!missing && m.status === 'ready' && m.herdr_error && (
-            // The machine works without herdr; its panes need herdr's server.
-            <div className="machine-status ms-notice" title={m.herdr_error}>
-              {t('sidebar.herdrDown')}
+          {m.status === 'ready' && backend?.phase === 'error' && (
+            <div className="machine-status ms-notice" title={backend.code}>
+              {t(`backend.${backend.code}` as MessageKey)}
               {!readOnly && (
                 <div className="row">
-                  <button disabled={herdrBusy} onClick={() => void actions.startHerdr(m.id)}>
-                    {t('sidebar.startHerdr')}
+                  <button disabled={busy} onClick={() => void actions.terminalCore(m.id, 'start')}>
+                    {t('menu.startCore')}
                   </button>
                 </div>
               )}
             </div>
           )}
-          {missing && m.status === 'ready' && (
-            <div className="machine-status ms-notice">
-              {t('sidebar.herdrGone')}
-              {install && <div className="row">{install}</div>}
+          {m.status === 'ready' && !followed && (
+            <div className="ws-item add" onClick={() => actions.showMachine(m.id)}>
+              {t('sidebar.showTerminals')}
             </div>
           )}
-          {m.kind === 'ssh' && m.status === 'ready' && isNewer(localHerdr, m.info?.herdr_version) && (
-            <div className="machine-status ms-notice">
-              {t('sidebar.herdrOlder', { remote: m.info?.herdr_version ?? '', local: localHerdr ?? '' })}
-              {!readOnly && (
-                <div className="row">
-                  <button onClick={() => useStore.getState().openRemoteHerdr(m.id)}>{t('sidebar.updateHerdr')}</button>
-                </div>
-              )}
-            </div>
+          {m.status === 'ready' && followed && !layout && backend?.phase !== 'error' && (
+            <div className="muted small pad">{t('workspace.hcStarting', { machine: m.label })}</div>
           )}
-          {workspaces.map((w) => {
-            const panes = snap!.panes.filter((p) => p.workspace_id === w.workspace_id && p.agent);
-            const agg = aggregate(panes.map((p) => p.agent_status));
-            const selected = selM === m.id && selWs === w.workspace_id;
-            const editing = renaming === w.workspace_id;
+          {layout?.workspaces.map((w, i) => {
+            const agg = aggregate(L.workspaceTerminals(w).map((a) => agentStatus(mt?.terminals[a])));
+            const selected = selM === m.id && layout.selected === i;
+            const editing = renaming === w.id;
+            const name = w.name || t('workspace.default');
             return (
               <div
-                key={w.workspace_id}
+                key={w.id}
                 className={`ws-item ${selected ? 'selected' : ''}`}
-                onClick={() => selectWorkspace(m.id, w.workspace_id)}
-                onDoubleClick={() => !readOnly && actions.startRename('workspace', m.id, w.workspace_id)}
+                onClick={() => actions.selectWorkspace(m.id, w.id)}
+                onDoubleClick={() => !readOnly && actions.startRename('workspace', m.id, w.id)}
                 onPointerDown={(e) => {
                   if (e.button !== 0 || readOnly || editing || (e.target as HTMLElement).closest('button, input')) return;
-                  startWorkspaceDrag(e, { m: m.id, ws: w.workspace_id, label: w.label });
+                  startWorkspaceDrag(e, { m: m.id, ws: w.id, label: name });
                 }}
-                onContextMenu={(e) => !editing && openMenu(e, workspaceMenu(m.id, w.workspace_id))}
-                title={readOnly ? w.label : t('sidebar.workspaceHint', { label: w.label })}
-                data-ws-id={w.workspace_id}
+                onContextMenu={(e) => !editing && openMenu(e, workspaceMenu(m.id, w.id))}
+                title={
+                  readOnly ? name : t('sidebar.workspaceHint', { label: w.cwd ? `${name} · ${shortPath(w.cwd, m.info?.home)}` : name })
+                }
+                data-ws-id={w.id}
                 data-m={m.id}
               >
-                <span className="ws-num">{w.number}</span>
+                <span className="ws-num">{i + 1}</span>
                 {editing ? (
                   <InlineEdit
-                    value={w.label}
+                    value={w.name}
                     onDone={(v) => {
                       setRenaming(undefined);
-                      if (v && v !== w.label) actions.renameWorkspace(m.id, w.workspace_id, v);
+                      if (v && v !== w.name) actions.renameWorkspace(m.id, w.id, v);
                     }}
                   />
                 ) : (
-                  <span className="ellipsis">{w.label}</span>
+                  <span className="ellipsis">{name}</span>
                 )}
                 <span className="ws-meta">
-                  {panes.length > 0 && <StatusDot status={agg} />}
-                  <span className="muted small">{w.tab_count > 1 ? t('sidebar.tabs', { n: w.tab_count }) : ''}</span>
+                  {agg && <StatusDot status={agg} />}
+                  <span className="muted small">{w.tabs.length > 1 ? t('sidebar.tabs', { n: w.tabs.length }) : ''}</span>
                 </span>
               </div>
             );
           })}
-          {m.status === 'ready' && !readOnly && (
-            <div className="ws-item add" onClick={() => actions.newWorkspace(m.id)}>
+          {layout && !readOnly && (
+            <div className="ws-item add" onClick={() => void actions.newWorkspace(m.id)}>
               {t('sidebar.addWorkspace')}
             </div>
           )}

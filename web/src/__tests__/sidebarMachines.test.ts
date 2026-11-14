@@ -1,16 +1,18 @@
 // @vitest-environment jsdom
 //
 // The sidebar folds disabled machines, renames a machine in place, in its
-// header, and offers to start herdr where it does not answer.
+// header, shows the workspaces of the machines followed, and offers to start
+// a terminal core that failed.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
-vi.mock('../lib/conn', () => ({ conn: { api: () => Promise.resolve({}), setTheme: () => {}, retry: () => {} } }));
+vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {}, retry: () => {} } }));
 
 import { useStore } from '../state/store';
-import type { MachineState } from '../lib/herdr';
+import { FakeCore, settle } from './fakeTerms';
+import type { MachineState } from '../lib/machine';
 import { Sidebar } from '../components/Sidebar';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -40,25 +42,65 @@ describe('Sidebar machines', () => {
     vi.unstubAllGlobals();
   });
 
-  it('offers to start herdr on a ready machine where it does not answer, except read-only', async () => {
-    const start = () => Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Start herdr');
+  it('offers to start the terminal core where it failed, except read-only', async () => {
+    const core = new FakeCore();
+    core.install();
+    await settle();
+    const start = () => Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Start terminal core');
     await act(async () =>
-      useStore.getState().setMachines([
-        {
-          id: 'gpu',
-          label: 'gpu',
-          kind: 'ssh',
-          status: 'ready',
-          herdr_error: 'no server',
-          info: { herdr_bin: '/usr/bin/herdr' },
-        } as unknown as MachineState,
-      ]),
+      useStore.getState().setMachines([{ id: 'gpu', label: 'gpu', kind: 'ssh', status: 'ready' } as unknown as MachineState]),
     );
-    expect(host.textContent).toContain('herdr does not answer on this machine');
+    // Not followed yet: the machine's terminals are one click away.
+    expect(host.textContent).toContain('Show its terminals');
+    await act(async () =>
+      Array.from(host.querySelectorAll<HTMLElement>('.ws-item'))
+        .find((e) => e.textContent === 'Show its terminals')!
+        .click(),
+    );
+    await act(settle);
+    expect(useStore.getState().machineId).toBe('gpu');
+    expect(host.textContent).toContain('The machine is not connected.');
     await act(async () => start()!.click());
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/m/gpu/herdr/start');
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/m/gpu/hc/start');
     await act(async () => useStore.getState().setReadOnly(true));
     expect(start()).toBeUndefined();
+  });
+
+  it('lists the workspaces of a followed machine with their agents', async () => {
+    const core = new FakeCore();
+    core.machine('gpu', [FakeCore.term('t1', { agent: 'claude', agent_status: 'blocked' }), FakeCore.term('t2')], {
+      version: 2,
+      workspaces: [
+        { id: 'aaaaaaaa', name: 'api', cwd: '/srv/api', tabs: [{ root: { terminal: 't1' }, focused: 't1' }], selected: 0 },
+        {
+          id: 'bbbbbbbb',
+          name: 'web',
+          cwd: '',
+          tabs: [
+            { root: { terminal: 't2' }, focused: 't2' },
+            { root: { terminal: 't3' }, focused: 't3' },
+          ],
+          selected: 0,
+        },
+      ],
+      selected: 1,
+    });
+    core.install();
+    await act(async () =>
+      useStore.getState().setMachines([{ id: 'gpu', label: 'gpu', kind: 'ssh', status: 'ready' } as unknown as MachineState]),
+    );
+    await act(async () => useStore.getState().selectMachine('gpu'));
+    await act(async () => core.model.subscribe('gpu'));
+    await act(settle);
+    const items = Array.from(host.querySelectorAll<HTMLElement>('.ws-item[data-ws-id]'));
+    expect(items.map((e) => e.querySelector('.ellipsis')?.textContent)).toEqual(['api', 'web']);
+    // The second workspace is selected; t3 is gone, so web has one tab.
+    expect(items[1].classList.contains('selected')).toBe(true);
+    expect(items[0].querySelector('.dot-blocked')).not.toBeNull();
+    expect(host.querySelector('.inbox')?.textContent).toContain('claude');
+    await act(async () => items[0].click());
+    await act(settle);
+    expect(core.layout('gpu')?.selected).toBe(0);
   });
 
   it('folds disabled machines until opened, and unfolds them once enabled', async () => {

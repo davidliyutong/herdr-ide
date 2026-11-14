@@ -30,20 +30,21 @@ more); editing files (that is VS Code's job).
   with a slash, `~`-paths and bare file names with known extensions,
   optionally followed by `:line[:col]`; OSC 8 hyperlinks from the program
   come first. Cell columns are mapped from string indices so wide characters
-  do not shift ranges ([03](03-pane-rendering-and-input.md)).
+  do not shift ranges ([26](26-web-terminals.md)).
 - Long paths wrap. A row whose text reaches the pane's last column is
   joined with the next row, after that row's indentation (a program that
   wraps its own text may indent continued lines), up to 20 rows either
   way. A path that happens to end exactly at the last
   column joins the next row too; the underline shows what a click opens.
-  herdr's grid has no soft-wrap marks, so this is the only signal for both
-  terminal and program wrapping.
+  Programs that wrap their own text (Claude Code, Codex) leave no soft-wrap
+  marks, so this signal covers both terminal and program wrapping.
 - A right click offers the same for the path or URL under the pointer, or
   for the selection when it is one: **Preview**, **Open in VS Code** (not for
   media) and **Copy full path**, or **Open** and **Copy link** for URLs. A
   path wrapped in a way detection does not join (a margin before the last
   column, a diff's `+` in front of the next row) is opened by selecting it.
-- Relative paths resolve against the pane's `foreground_cwd` from herdr;
+- Relative paths resolve against the directory of the terminal's
+  foreground program (the terminal core's record), else where it started;
   `~` against the machine's home.
 - Activation requires ⌘ or Ctrl, so plain clicks still reach mouse-aware
   applications. Media opens in the preview panel; other files open in VS Code
@@ -109,13 +110,12 @@ more); editing files (that is VS Code's job).
 
 - Files pasted into a pane, or dragged from outside the page onto one, end
   up as their paths in the pane, shell-quoted and separated by spaces, sent
-  as a paste, the way a terminal delivers dropped files: herdr brackets it
-  when the program asked for that, so programs that tell pastes from typing
+  as a paste, the way a terminal delivers dropped files: the terminal
+  brackets it when the program asked for that, so programs that tell pastes from typing
   (shells, coding agents) handle it as a paste. The paths go to the pane
   under the drop, which gets the focus.
 - While files are dragged over a pane, it is outlined with what a drop does
-  there. Read-only mode and a page that does not use the session (another
-  browser has it) take no drop. Drops that nothing on the page takes are
+  there. Read-only mode takes no drop. Drops that nothing on the page takes are
   refused, so a file dropped beside a target is not opened by the browser in
   place of the app.
 - In the desktop app, files dropped on a pane of the local machine are
@@ -128,13 +128,14 @@ more); editing files (that is VS Code's job).
   the path. Folders are not uploaded; they are skipped with a note. A failed
   or cancelled upload shows in the uploads panel (a failure also as a note),
   and the paths of the others are still pasted.
-- Dropped files go into the pane's working directory (herdr's
-  `foreground_cwd`, so the directory of the agent running there), given as
+- Dropped files go into the pane's working directory (its foreground
+  program's, from the terminal core, so the directory of the agent running
+  there), given as
   `&dir=`: the user put them there on purpose, and the agent finds them next
   to its project. Each keeps its own name (without control characters); a
   name already taken gets `-1`, `-2`… before the extension, so nothing there
   is replaced. The overlay and the note name that directory. When it does
-  not take the file (not writable, gone) or herdr reports none, the file
+  not take the file (not writable, gone) or there is none, the file
   goes to the upload directory instead, with a note.
 - Pasted files (mostly clipboard screenshots) go to the machine's upload
   directory, where the server adds a timestamp and random suffix (several
@@ -234,7 +235,7 @@ more); editing files (that is VS Code's job).
 | Option | Why not |
 | --- | --- |
 | Preview only inside VS Code | Heavy for a glance; needs code-server running. |
-| Inline terminal images (sixel, Kitty) | Not carried by herdr's terminal-session stream. |
+| Inline terminal images (sixel, Kitty) | The browser's emulator has no image support ([26](26-web-terminals.md)). |
 | `ssh … cat` / `dd` per range request | One process per range; POSIX tool differences across platforms. |
 | Client-chosen upload paths | Collisions and path injection. The browser names at most an existing directory; the server owns the file name and the agent never replaces a file. |
 | Upload to the upload directory, then move | Two steps and a copy across file systems; writing in the target directory renames within it. |
@@ -280,9 +281,8 @@ on a machine) and is audited as `file.download.cancel`.
 names, uploads into a directory), `internal/agent/agent_test.go` (ranged
 reads, chunked writes, writes that keep existing files),
 `web/src/__tests__/core.test.ts` (path resolution, media detection, wrapped
-links, selected links), `web/src/__tests__/surfaceSelect.test.ts` (wrapped
-link underline, the pane menu's items, copy, paste and opening; which drags
-a pane takes and pasting dropped files' paths), `web/src/__tests__/drop.test.ts`
+links, selected links), `web/src/__tests__/vt.test.ts` (hyperlinks and the
+link underline), `web/src/__tests__/drop.test.ts`
 (dropped files' paths on the local machine, uploads and skipped folders for
 another, refused stray drops), `web/src/__tests__/transfers.test.ts`
 (progress and speed, cancelling running and waiting uploads, the fallback

@@ -5,7 +5,7 @@ import { usePrefs } from '../prefs';
 import { fileUrl, formatSize, listDir, type RemoteStat } from '../lib/files';
 import { mediaExt } from '../terminal/links';
 import { actions } from '../actions';
-import { shortPath } from '../lib/herdr';
+import { shortPath } from '../lib/machine';
 import { t } from '../i18n';
 
 /** A code-server window kept in the dock: one per machine and folder, shared

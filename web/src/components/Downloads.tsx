@@ -8,7 +8,7 @@ import { ArrowDownToLine, RotateCw, X } from 'lucide-react';
 import { useStore } from '../state/store';
 import { t } from '../i18n';
 import { formatSize } from '../lib/files';
-import { shortPath } from '../lib/herdr';
+import { shortPath } from '../lib/machine';
 import {
   cancelAllDownloads,
   cancelDownload,

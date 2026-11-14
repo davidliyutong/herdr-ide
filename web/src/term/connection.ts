@@ -56,8 +56,8 @@ export class TermConnection {
 
   /** A connection to the core that served the page. */
   static toCore(): TermConnection {
-    const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/v1/term`;
-    return new TermConnection(() => new WebSocket(url) as unknown as Socket);
+    const url = () => `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/v1/term`;
+    return new TermConnection(() => new WebSocket(url()) as unknown as Socket);
   }
 
   get connected(): boolean {

@@ -2,10 +2,10 @@
 
 ## Context
 
-The browser UI draws panes from the cell grid herdr renders for one
-foreground client ([18](18-endpoint-surfaces.md)). A client that emulates
-terminals itself (a native application drawing with the GPU, a browser
-renderer with its own terminal state) needs the opposite: each terminal's
+herdr renders a tab's cell grid for one foreground client
+([18](18-endpoint-surfaces.md)). A client that emulates terminals itself (a
+native application drawing with the GPU, a browser renderer with its own
+terminal state) needs the opposite: each terminal's
 raw output, several viewers of one terminal, and input bytes it encodes
 itself. herdr-core provides that per machine
 ([21](21-terminal-core.md)), but its API is only reachable through the
@@ -20,8 +20,8 @@ program's terminal; the core's guards and read-only mode.
 
 Non-goals: emulating terminals in the core; a layout model in the core
 (clients share theirs as a document of herdr-core, see Layout document);
-replacing `/ws`, which still carries machines, files and the browser UI's
-panes.
+replacing `/ws`, which carries machines, files, program windows, agent
+states and settings.
 
 ## Design
 
@@ -171,13 +171,16 @@ so every client of the machine shows the same arrangement. Version 2:
 
 **Clients.** Two implementations follow the protocol and the layout
 document: `macos/Sources/TermKit` (Swift), used by the macOS application
-([23](23-macos-application.md)), and `web/src/term` (TypeScript):
+([23](23-macos-application.md)), and `web/src/term` (TypeScript), used by
+the browser UI and the desktop app ([26](26-web-terminals.md)):
 `connection.ts` (the WebSocket, reconnecting and subscribing again, calls
 as promises, streams with their handlers registered before their first
 frame), `store.ts` (terminal records from snapshots and events) and
 `layout.ts` (the layout document's workspaces, tabs and splits as immutable
-values and the operations on them). The browser UI's panes do not use it;
-they come from herdr ([18](18-endpoint-surfaces.md)).
+values and the operations on them); `web/src/state/terms.ts` follows the
+machines the user turned to, reads their layout documents before editing
+them and writes one change at a time with the version last read, as the
+macOS application does.
 
 ## Alternatives considered
 

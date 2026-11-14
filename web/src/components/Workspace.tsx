@@ -1,11 +1,13 @@
+import { useEffect, useRef, useState } from 'react';
 import { PanelLeft, Plus, X } from 'lucide-react';
-import { useStore, activeTabId } from '../state/store';
-import { actions } from '../actions';
-import { SurfaceView, hasBorderRow } from './SurfaceView';
-import { useSurface } from '../surface/session';
-import { PaneToolbar } from './PaneToolbar';
+import { useStore } from '../state/store';
+import { terms, useTerms } from '../state/terms';
+import * as L from '../term/layout';
+import { actions, paneRects, tabName } from '../actions';
+import { TerminalView } from './TerminalView';
+import { PaneHeader } from './PaneHeader';
 import { StatusDot } from './StatusDot';
-import { statusRank, workspaceTabs, type AgentStatus } from '../lib/herdr';
+import { aggregate, agentStatus } from '../lib/machine';
 import { t, type MessageKey } from '../i18n';
 import { keyHint } from '../keymap';
 import { InlineEdit } from './InlineEdit';
@@ -13,49 +15,37 @@ import { startTabDrag } from '../reorderDrag';
 import { openMenu } from '../contextMenu';
 import { tabMenu } from '../menus';
 
+/** The shown machine's selected workspace: its tab bar and the selected tab's panes. */
 export function Workspace() {
   const m = useStore((s) => s.machineId);
-  const ws = useStore((s) => s.workspaceId);
   const machine = useStore((s) => (s.machineId ? s.machines[s.machineId] : undefined));
-  const tabId = useStore((s) => {
-    const snap = s.machineId ? s.machines[s.machineId]?.snapshot : undefined;
-    return s.machineId && snap && s.workspaceId ? activeTabId(s, s.machineId, snap, s.workspaceId) : undefined;
-  });
-  const selectTab = useStore((s) => s.selectTab);
+  const mt = useTerms((s) => (m ? s.machines[m] : undefined));
   const renaming = useStore((s) => (s.renaming?.kind === 'tab' ? s.renaming : undefined));
   const setRenaming = useStore((s) => s.setRenaming);
   const readOnly = useStore((s) => s.readOnly);
-  // Whether the shown surface of this tab has a pane without a border row,
-  // once herdr rendered it.
-  const headerless = useSurface((s) =>
-    s.meta && s.meta.m === m && s.shown?.m === m && s.shown.tab === tabId ? s.meta.panes.some((p) => !hasBorderRow(p)) : undefined,
-  );
+  const layout = mt?.layout;
+  const ws = layout ? L.selectedWorkspace(layout) : undefined;
 
-  if (!m || !ws || !machine?.snapshot) {
+  if (!m || !machine || !layout || !ws) {
+    const backend = mt?.backend;
+    const status = !machine
+      ? t('workspace.waiting')
+      : machine.status !== 'ready'
+        ? t('workspace.machineStatus', { machine: machine.label, status: t(`machine.${machine.status}` as MessageKey) })
+        : backend?.phase === 'error'
+          ? t('workspace.hcError', { machine: machine.label, error: t(`backend.${backend.code}` as MessageKey) })
+          : t('workspace.hcStarting', { machine: machine.label });
     return (
       <main className="workspace empty">
         <div className="muted">
-          {machine
-            ? t('workspace.machineStatus', { machine: machine.label, status: t(`machine.${machine.status}` as MessageKey) })
-            : t('workspace.waiting')}
+          {status}
           <div className="small">{t('workspace.pick')}</div>
         </div>
       </main>
     );
   }
-  const snap = machine.snapshot;
-  const workspace = snap.workspaces.find((w) => w.workspace_id === ws);
-  const tabs = workspaceTabs(snap, ws);
-  const layout = tabId ? machine.layouts?.[tabId] : undefined;
-
-  const tabStatus = (tab: string): AgentStatus | undefined => {
-    let best: AgentStatus | undefined;
-    for (const p of snap.panes) {
-      if (p.tab_id !== tab || !p.agent) continue;
-      if (!best || statusRank[p.agent_status] > statusRank[best]) best = p.agent_status;
-    }
-    return best;
-  };
+  const tab = ws.tabs[ws.selected];
+  const tabStatus = (tb: L.Tab) => aggregate(L.tabTerminals(tb).map((a) => agentStatus(mt.terminals[a])));
 
   return (
     <main className="workspace">
@@ -68,44 +58,48 @@ export function Workspace() {
           <PanelLeft />
         </button>
         <span className="crumb">
-          <span className="muted">{machine.label}</span> / {workspace?.label}
+          <span className="muted">{machine.label}</span> / {ws.name || t('workspace.default')}
         </span>
-        <div className="tabs" data-m={m} data-ws={ws}>
-          {tabs.map((tab) => {
-            const st = tabStatus(tab.tab_id);
-            const editing = renaming?.m === m && renaming.id === tab.tab_id;
+        <div className="tabs" data-m={m} data-ws={ws.id}>
+          {ws.tabs.map((tb, i) => {
+            const st = tabStatus(tb);
+            const id = `${ws.id}:${i}`;
+            const name = tabName(m, tb);
+            const editing = renaming?.m === m && renaming.id === id;
+            const count = L.tabTerminals(tb).length;
             return (
               <div
-                key={tab.tab_id}
-                className={`tab ${tab.tab_id === tabId ? 'active' : ''}`}
-                onDoubleClick={() => !readOnly && actions.startRename('tab', m, tab.tab_id)}
+                key={`${i}:${tb.focused}`}
+                className={`tab ${i === ws.selected ? 'active' : ''}`}
+                onDoubleClick={() => !readOnly && actions.startRename('tab', m, id)}
                 onPointerDown={(e) => {
                   if (e.button !== 0 || editing || (e.target as HTMLElement).closest('button, input')) return;
                   // A tab is shown on press, as in browsers: a press that turns
                   // into a drag (or whose release lands elsewhere) still switches.
-                  selectTab(m, ws, tab.tab_id);
-                  if (!readOnly) startTabDrag(e, { m, ws, tab: tab.tab_id, label: tab.label });
+                  actions.selectTab(m, ws.id, i);
+                  if (!readOnly) startTabDrag(e, { m, ws: ws.id, index: i, label: name });
                 }}
-                onContextMenu={(e) => !editing && openMenu(e, tabMenu(m, ws, tab.tab_id))}
-                title={readOnly ? tab.label : t('workspace.tabHint', { label: tab.label })}
-                data-tab-id={tab.tab_id}
+                onContextMenu={(e) => !editing && openMenu(e, tabMenu(m, ws.id, i))}
+                title={readOnly ? name : t('workspace.tabHint', { label: name })}
+                data-tab={i}
+                data-ws={ws.id}
                 data-m={m}
               >
                 {st && <StatusDot status={st} />}
                 {editing ? (
                   <InlineEdit
-                    value={tab.label}
+                    value={tb.name ?? name}
                     onDone={(v) => {
                       setRenaming(undefined);
-                      if (v && v !== tab.label) actions.renameTab(m, tab.tab_id, v);
+                      if (v !== undefined && v !== (tb.name ?? '')) actions.renameTab(m, ws.id, i, v);
                     }}
                   />
                 ) : (
-                  <span className="tab-label ellipsis">{tab.label}</span>
+                  <span className="tab-label ellipsis">{name}</span>
                 )}
-                {tab.pane_count > 1 && (
-                  <span className="tab-count" title={t('workspace.paneCount', { n: tab.pane_count })}>
-                    {tab.pane_count}
+                {count > 1 && (
+                  <span className="tab-count" title={t('workspace.paneCount', { n: count })}>
+                    {count}
                   </span>
                 )}
                 {!readOnly && (
@@ -114,7 +108,7 @@ export function Workspace() {
                     title={t('workspace.closeTab', { key: keyHint('tab.close') })}
                     onClick={(e) => {
                       e.stopPropagation();
-                      actions.closeTab(m, tab.tab_id);
+                      void actions.closeTab(m, ws.id, i);
                     }}
                   >
                     <X />
@@ -127,8 +121,8 @@ export function Workspace() {
             <button
               className="icon"
               title={t('workspace.newTab', { key: keyHint('tab.new') })}
-              onClick={() => actions.newTab(m, ws)}
-              data-new-tab={ws}
+              onClick={() => void actions.newTab(m, ws.id)}
+              data-new-tab={ws.id}
               data-m={m}
             >
               <Plus />
@@ -136,21 +130,126 @@ export function Workspace() {
           )}
         </div>
       </div>
-      {tabId && toolbarShown(headerless, tabs.find((x) => x.tab_id === tabId)?.pane_count ?? 1) && (
-        <PaneToolbar m={m} tabId={tabId} zoomed={layout?.zoomed} />
-      )}
       <div className="workspace-body">
-        {tabId ? <SurfaceView m={m} tabId={tabId} layout={layout} /> : <div className="muted pad">{t('workspace.loadingLayout')}</div>}
+        {tab ? (
+          <TabView m={m} ws={ws.id} tab={tab} />
+        ) : (
+          <div className="muted pad">
+            {t('workspace.noTabs')}
+            {!readOnly && (
+              <div className="row">
+                <button onClick={() => void actions.newTab(m, ws.id)}>{t('command.tab.new')}</button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </main>
   );
 }
 
-/** Whether the toolbar above the grid is shown: it is the header of a pane
- * without a border row (a lone pane, unless herdr draws outer borders),
- * whose commands would have no other place; panes with a border row,
- * including a zoomed one, have their own header there. Until herdr rendered
- * the tab, only a lone pane is assumed to have none. */
-export function toolbarShown(headerless: boolean | undefined, paneCount: number): boolean {
-  return headerless ?? paneCount <= 1;
+interface SplitBar {
+  path: boolean[];
+  axis: L.Axis;
+  /** The split's area, as fractions of the tab. */
+  area: { x: number; y: number; w: number; h: number };
+  ratio: number;
+}
+
+/** The splits of a tree with their areas, for their handles. */
+function splitBars(node: L.Node, area = { x: 0, y: 0, w: 1, h: 1 }, path: boolean[] = [], out: SplitBar[] = []): SplitBar[] {
+  if (!L.isSplit(node)) return out;
+  out.push({ path, axis: node.split, area, ratio: node.ratio });
+  const [a, b] = node.children;
+  if (node.split === 'horizontal') {
+    const w1 = area.w * node.ratio;
+    splitBars(a, { ...area, w: w1 }, [...path, false], out);
+    splitBars(b, { ...area, x: area.x + w1, w: area.w - w1 }, [...path, true], out);
+  } else {
+    const h1 = area.h * node.ratio;
+    splitBars(a, { ...area, h: h1 }, [...path, false], out);
+    splitBars(b, { ...area, y: area.y + h1, h: area.h - h1 }, [...path, true], out);
+  }
+  return out;
+}
+
+const pct = (v: number) => `${v * 100}%`;
+
+/** A tab's panes, each placed by its share of the split tree; the panes
+ * keep their terminals while the tree around them changes. */
+function TabView({ m, ws, tab }: { m: string; ws: string; tab: L.Tab }) {
+  const zoomed = useStore((s) => (s.zoomed?.m === m ? s.zoomed.terminal : undefined));
+  const readOnly = useStore((s) => s.readOnly);
+  const terminals = L.tabTerminals(tab);
+  const zoom = zoomed && terminals.includes(zoomed) ? zoomed : undefined;
+  const rects = zoom ? new Map([[zoom, { x: 0, y: 0, w: 1, h: 1 }]]) : paneRects(tab.root);
+  const bars = zoom || readOnly ? [] : splitBars(tab.root);
+  const body = useRef<HTMLDivElement>(null);
+  const [dragging, setDragging] = useState<{ path: boolean[]; ratio: number }>();
+  const alone = terminals.length === 1;
+
+  // A zoomed terminal that left the tab is no longer zoomed.
+  useEffect(() => {
+    if (zoomed && !terminals.includes(zoomed)) useStore.getState().setZoomed(undefined);
+  }, [zoomed, terminals.join()]);
+
+  const dragBar = (e: React.PointerEvent, bar: SplitBar) => {
+    e.preventDefault();
+    const box = body.current!.getBoundingClientRect();
+    const ratioAt = (ev: { clientX: number; clientY: number }) => {
+      const r =
+        bar.axis === 'horizontal'
+          ? ((ev.clientX - box.left) / box.width - bar.area.x) / bar.area.w
+          : ((ev.clientY - box.top) / box.height - bar.area.y) / bar.area.h;
+      return Math.min(0.9, Math.max(0.1, r));
+    };
+    const move = (ev: PointerEvent) => setDragging({ path: bar.path, ratio: ratioAt(ev) });
+    const up = (ev: PointerEvent) => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      setDragging(undefined);
+      const ratio = ratioAt(ev);
+      terms.mutate(m, (l) => L.setRatio(l, bar.path, ratio));
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+
+  return (
+    <div className={`tab-panes ${alone ? 'alone' : ''}`} ref={body}>
+      {[...rects].map(([terminal, r]) => (
+        <div
+          key={terminal}
+          className={`pane ${terminal === tab.focused && !alone ? 'focused' : ''}`}
+          style={{ left: pct(r.x), top: pct(r.y), width: pct(r.w), height: pct(r.h) }}
+          data-terminal={terminal}
+          data-m={m}
+          data-ws={ws}
+        >
+          <PaneHeader m={m} terminal={terminal} ws={ws} focused={terminal === tab.focused} zoomed={!!zoom} />
+          <TerminalView
+            m={m}
+            terminal={terminal}
+            focused={terminal === tab.focused}
+            onActivate={() => terminal !== tab.focused && terms.mutate(m, (l) => L.focusTerminal(l, terminal))}
+          />
+        </div>
+      ))}
+      {bars.map((b) => {
+        const ratio = dragging && dragging.path.join() === b.path.join() ? dragging.ratio : b.ratio;
+        const style =
+          b.axis === 'horizontal'
+            ? { left: pct(b.area.x + b.area.w * ratio), top: pct(b.area.y), height: pct(b.area.h) }
+            : { top: pct(b.area.y + b.area.h * ratio), left: pct(b.area.x), width: pct(b.area.w) };
+        return (
+          <div
+            key={b.path.map(Number).join('') || 'root'}
+            className={`split-handle ${b.axis === 'horizontal' ? 'h' : 'v'} ${dragging?.path.join() === b.path.join() ? 'dragging' : ''}`}
+            style={style}
+            onPointerDown={(e) => dragBar(e, b)}
+          />
+        );
+      })}
+    </div>
+  );
 }

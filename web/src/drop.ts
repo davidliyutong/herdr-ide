@@ -19,7 +19,7 @@ import { actions } from './actions';
 import { desktopShell } from './desktop';
 import { t } from './i18n';
 import { shellQuote } from './lib/files';
-import { shortPath, type MachineState } from './lib/herdr';
+import { shortPath, type MachineState } from './lib/machine';
 import { useStore } from './state/store';
 import { uploadFiles, useTransfers } from './transfers';
 

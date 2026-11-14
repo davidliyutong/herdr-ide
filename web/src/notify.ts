@@ -1,12 +1,14 @@
 // Agent attention: desktop notifications, sounds, title and app badge.
 
-import type { AgentStatusEvent } from './lib/herdr';
+import type { AgentStatusEvent } from './lib/machine';
+import { useTerms } from './state/terms';
+import { agentStatus } from './lib/machine';
 import { useStore } from './state/store';
 import { actions } from './actions';
 import { t } from './i18n';
 import { APP_NAME } from './brand';
 import { getPrefs } from './prefs';
-import { paneOnScreen } from './seen';
+import { terminalOnScreen } from './seen';
 import { mutedAgents, playSound, soundFor } from './sound';
 
 let asked = false;
@@ -30,15 +32,15 @@ export function notifyAgent(m: string, ev: AgentStatusEvent, sound: boolean) {
     chosen: sound,
     enabled: prefs.notifySound,
     muted: mutedAgents(prefs.notifySoundMuted),
-    onScreen: paneOnScreen(s, m, ev.pane_id),
+    onScreen: terminalOnScreen(m, ev.terminal),
     focused: visible,
   });
   if (kind) playSound(kind);
   if (!visible && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-    const n = new Notification(title, { body: `${label}${ev.title ? ' · ' + ev.title : ''}`, tag: `${m}|${ev.pane_id}` });
+    const n = new Notification(title, { body: `${label}${ev.title ? ' · ' + ev.title : ''}`, tag: `${m}|${ev.terminal}` });
     n.onclick = () => {
       window.focus();
-      actions.focusAgent(m, ev.pane_id);
+      actions.focusTerminal(m, ev.terminal);
       n.close();
     };
   } else if (visible && ev.agent_status === 'blocked') {
@@ -49,7 +51,8 @@ export function notifyAgent(m: string, ev: AgentStatusEvent, sound: boolean) {
 export function updateBadge() {
   const s = useStore.getState();
   let blocked = 0;
-  for (const id of s.order) for (const p of s.machines[id]?.snapshot?.panes ?? []) if (p.agent && p.agent_status === 'blocked') blocked++;
+  const tm = useTerms.getState().machines;
+  for (const id of s.order) for (const r of Object.values(tm[id]?.terminals ?? {})) if (agentStatus(r) === 'blocked') blocked++;
   document.title = blocked ? `(${blocked}) ${APP_NAME}` : APP_NAME;
   const nav = navigator as Navigator & { setAppBadge?(n: number): Promise<void>; clearAppBadge?(): Promise<void> };
   if (blocked) nav.setAppBadge?.(blocked).catch(() => {});

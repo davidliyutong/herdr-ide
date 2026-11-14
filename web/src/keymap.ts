@@ -1,19 +1,17 @@
-// Keys of the page: every keydown the app sees (panes route theirs through
-// handleKey, the window the others) is matched against the bindings in
-// effect on this platform (keybindings.ts), chords included: "ctrl+b c" is
-// ctrl+b, then c within 3 s, as with herdr's prefix. The same chord's first
-// stroke twice sends it to the pane. The desktop app's shell takes direct
-// shortcuts before the page (desktop.ts); here they run in browsers.
-// herdr's own custom commands ([[keys.command]] in its config.toml, served
-// by /api/keymap) keep working as chords with herdr's prefix.
+// Keys of the page: every keydown the app sees (terminals route theirs
+// through handleKey, the window the others) is matched against the bindings
+// in effect on this platform (keybindings.ts), chords included: "ctrl+b c"
+// is ctrl+b, then c within 3 s. The same chord's first stroke twice sends it
+// to the terminal. The desktop app's shell takes direct shortcuts before the
+// page (desktop.ts); here they run in browsers.
 
 import { actions } from './actions';
-import { conn } from './lib/conn';
 import { useStore } from './state/store';
 import { hasMessage, t } from './i18n';
-import { keyLabel, strokeOf, tryNormalize } from './keys';
+import { keyLabel, strokeOf } from './keys';
 import { platform, useKeys, type Binding, type When } from './keybindings';
-import { openFind, findStep } from './surface/find';
+import { findStep, openFind, useFind } from './vt/find';
+import { paneHandle } from './state/panes';
 
 /** Where a key is pressed: the main UI, VS Code, or a dialog. */
 export type KeyContext = 'terminal' | 'vscode' | 'dialog';
@@ -46,41 +44,14 @@ export function feedStroke(
   return { result: { kind: 'swallow' }, pending: '' };
 }
 
-// herdr's custom commands, as its config.toml has them.
-interface HerdrCommand {
-  key: string;
-  type: string;
-  command: string;
-  description?: string;
-}
-let herdrCommands: (HerdrCommand & { binding: string })[] = [];
-
-/** herdr's custom commands with their keys, for the palette. */
-export function getHerdrCommands() {
-  return herdrCommands;
-}
-
-/** Reads herdr's custom commands: "prefix+v" becomes a chord of herdr's
- * prefix (ctrl+b unless its config names another). */
-export async function loadHerdrCommands() {
-  try {
-    const r = await fetch('/api/keymap');
-    if (!r.ok) return;
-    const j = (await r.json()) as { prefix?: string; commands?: HerdrCommand[] };
-    const prefix = tryNormalize(j.prefix || 'ctrl+b') ?? 'ctrl+b';
-    herdrCommands = (j.commands ?? []).flatMap((c) => {
-      const rest = c.key.toLowerCase().startsWith('prefix+') ? tryNormalize(`ctrl+x ${c.key.slice(7)}`)?.split(' ')[1] : undefined;
-      return rest ? [{ ...c, binding: `${prefix} ${rest}` }] : [];
-    });
-  } catch {
-    /* none */
-  }
-}
-
-/** The bindings matched here: herdr's custom commands first, as before. */
 function bindings(): Binding[] {
-  const custom = herdrCommands.map((c, i): Binding => ({ key: c.binding, command: `herdr:${i}`, when: 'terminal' }));
-  return [...custom, ...useKeys.getState().effective];
+  return useKeys.getState().effective;
+}
+
+/** Whether a key press is a single-stroke binding of a command. */
+export function isCommandKey(ev: KeyboardEvent, command: string): boolean {
+  const stroke = strokeOf(ev);
+  return !!stroke && bindings().some((b) => b.command === command && b.key === stroke);
 }
 
 let pending = '';
@@ -132,7 +103,7 @@ export function handleKey(ev: KeyboardEvent, ctx: KeyContext = keyContext()): bo
       return true;
     case 'literal': {
       ev.preventDefault();
-      // A Ctrl+letter prefix reaches the pane as its control character.
+      // A Ctrl+letter prefix reaches the terminal as its control character.
       const m = /^ctrl\+([a-z])$/.exec(prev);
       if (m) actions.sendLiteral(String.fromCharCode(m[1].charCodeAt(0) & 0x1f));
       return true;
@@ -165,12 +136,6 @@ export function keyHint(command: string): string {
 
 /** Runs a command; unknown ones do nothing. */
 export function runCommand(id: string) {
-  const herdr = /^herdr:(\d+)$/.exec(id);
-  if (herdr) {
-    const c = herdrCommands[Number(herdr[1])];
-    if (c) runHerdrCommand(c);
-    return;
-  }
   const ctx = actions.focusedContext();
   const s = useStore.getState();
   const select = /^tab\.select([1-9])$/.exec(id);
@@ -201,14 +166,14 @@ export function runCommand(id: string) {
       if (s.machineId && s.workspaceId) actions.startRename('workspace', s.machineId, s.workspaceId);
       break;
     case 'workspace.close':
-      if (s.machineId && s.workspaceId) actions.closeWorkspace(s.machineId, s.workspaceId);
+      if (s.machineId && s.workspaceId) void actions.closeWorkspace(s.machineId, s.workspaceId);
       break;
     case 'tab.new':
-      actions.newTab();
+      void actions.newTab();
       break;
     case 'tab.rename': {
       const c = actions.currentTab();
-      if (c) actions.startRename('tab', c.m, c.tab);
+      if (c) actions.startRename('tab', c.m, `${c.ws}:${c.index}`);
       break;
     }
     case 'tab.next':
@@ -219,20 +184,20 @@ export function runCommand(id: string) {
       break;
     case 'tab.close': {
       const c = actions.currentTab();
-      if (c) void actions.closeTab(c.m, c.tab);
+      if (c) void actions.closeTab(c.m, c.ws, c.index);
       break;
     }
     case 'pane.splitRight':
-      if (ctx?.pane) actions.split(ctx.m, ctx.pane, 'right');
+      if (ctx?.terminal) void actions.split(ctx.m, ctx.terminal, 'right');
       break;
     case 'pane.splitDown':
-      if (ctx?.pane) actions.split(ctx.m, ctx.pane, 'down');
+      if (ctx?.terminal) void actions.split(ctx.m, ctx.terminal, 'down');
       break;
     case 'pane.close':
-      if (ctx?.pane) actions.closePane(ctx.m, ctx.pane);
+      if (ctx?.terminal) void actions.closePane(ctx.m, ctx.terminal);
       break;
     case 'pane.zoom':
-      if (ctx?.pane) actions.zoom(ctx.m, ctx.pane);
+      if (ctx?.terminal) actions.zoom(ctx.m, ctx.terminal);
       break;
     case 'pane.focusLeft':
       actions.focusDirection('left');
@@ -258,14 +223,20 @@ export function runCommand(id: string) {
     case 'view.toggleCode':
       actions.toggleCode();
       break;
-    case 'find.open':
-      if (s.focused) openFind(s.focused.m, s.focused.pane);
+    case 'find.open': {
+      if (!ctx?.terminal) break;
+      const h = paneHandle(ctx.m, ctx.terminal);
+      if (h) h.openFind();
+      else openFind(ctx.m, ctx.terminal);
       break;
+    }
     case 'find.next':
-      findStep(true);
+      if (useFind.getState().terminal) findStep(true);
+      else if (ctx?.terminal) openFind(ctx.m, ctx.terminal);
       break;
     case 'find.previous':
-      findStep(false);
+      if (useFind.getState().terminal) findStep(false);
+      else if (ctx?.terminal) openFind(ctx.m, ctx.terminal);
       break;
     case 'code.open':
       if (ctx) actions.openCode(ctx.m, ctx.cwd);
@@ -276,22 +247,5 @@ export function runCommand(id: string) {
     case 'code.gitGraph':
       if (ctx) actions.openGitGraph(ctx.m, ctx.cwd);
       break;
-  }
-}
-
-export function runHerdrCommand(c: HerdrCommand) {
-  const ctx = actions.focusedContext();
-  if (!ctx) return;
-  if (c.type === 'plugin_action') {
-    const i = c.command.lastIndexOf('.');
-    const params: Record<string, unknown> = { action_id: c.command };
-    if (i > 0) {
-      params.plugin_id = c.command.slice(0, i);
-      params.action_id = c.command.slice(i + 1);
-    }
-    if (ctx.pane) params.context = { pane_id: ctx.pane };
-    conn.api(ctx.m, 'plugin.action.invoke', params).catch((e) => useStore.getState().toast?.(String(e.message ?? e)));
-  } else if (c.type === 'pane' || c.type === 'popup' || c.type === 'shell') {
-    actions.runInNewPane(ctx.m, c.command, ctx.cwd);
   }
 }

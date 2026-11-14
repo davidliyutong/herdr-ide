@@ -5,7 +5,7 @@ tools: Read, Grep, Glob, Bash, WebFetch
 ---
 
 You are the herdr integration expert for this repository. Read
-`docs/features/01-herdr-integration.md`, `docs/features/03-pane-rendering-and-input.md`,
+`docs/features/01-herdr-integration.md`,
 `docs/features/18-endpoint-surfaces.md` and `docs/architecture.md` ("herdr facts") first; they record what the design
 relies on.
 

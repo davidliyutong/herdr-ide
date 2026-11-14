@@ -25,7 +25,7 @@ here; both READMEs link to this page instead of repeating it.
 | `--allowed-origin` | – | Public origin of the reverse proxy, e.g. `https://ide.example.com` (repeatable). Host and Origin headers are checked against loopback plus these. |
 | `--proxy-secret-file` | – | File with a secret (≥ 16 characters) that the reverse proxy sends in `X-herdr-ide-Proxy-Secret`. Required for requests not coming from loopback. |
 | `--insecure-listen` | `false` | Accept a non-loopback `--listen` without a proxy secret. Anyone reaching the port gets shell access to every machine. |
-| `--read-only` | `false` | Watch only: panes get no input, mutating herdr calls, uploads, ssh authentication and VS Code are refused. |
+| `--read-only` | `false` | Watch only: terminals get no input (they observe), writing terminal core calls (layout changes, new and ended terminals), mutating herdr calls, uploads, ssh authentication and VS Code are refused, and no terminal core is installed or started. |
 | `--audit-log` | – | Append security-relevant events (connections, mutating API calls, uploads, VS Code and bridge use, denials) as JSON lines. |
 | `--user-header` | – | Header holding the authenticated user for the audit log. Without it, `Tailscale-User-Login`, `X-Forwarded-User`, `X-Auth-Request-User`, `Remote-User` and `X-Forwarded-Email` are tried. |
 
@@ -150,28 +150,28 @@ match. On other systems (desktop app): `ctrl+shift+t` new tab,
 `always` (show or hide VS Code) or `vscode` run; the others are VS Code's.
 Keys follow the keyboard layout's characters.
 
-herdr's own `[[keys.command]]` entries (`~/.config/herdr/config.toml`, type
-`plugin_action`, `pane`, `popup` or `shell`) still run in the web UI as
-chords of herdr's prefix.
-
-Default prefix: `ctrl+b`. In panes: Shift+Enter sends `ESC CR` (newline in
-Claude Code and similar prompts; the bytes of every key are listed in
-[`keys.json`](../web/src/__tests__/testdata/keys.json)); Option/Alt-drag selects text locally;
-holding a selection drag above or below a pane scrolls it and extends the
-selection, and copying then copies all of it;
-⌘/Ctrl-click opens paths (media in the preview panel, code in VS Code) and
-URLs. `cmd+f` (macOS) or `ctrl+shift+f` (other systems) finds text in the
-focused pane and its scrollback (`find.open`): Enter goes to the older match,
-Shift+Enter to the newer one, Escape closes the bar; in the bar, `alt+c`
-matches case, `alt+w` whole words and `alt+r` takes the query as a
-regular expression (RE2 syntax; Option on macOS). Pasting or dropping files uploads them to the pane's machine (dropped
-files into the pane's directory) and pastes their paths; in the desktop app,
-files dropped on a local pane are pasted where they are. A pane's right-click
-menu downloads the path under the pointer and, with **Download files…**,
-files and folders chosen in the pane's directory (folders as zips; not for
-the desktop app's own machine). The downloads panel in the status bar shows
-each download's progress, speed and result, cancels it or downloads it
-again.
+Default prefix: `ctrl+b`. In terminals, keys reach the program in the
+encoding it asked for (legacy, application cursor and keypad, kitty
+keyboard protocol); the bytes of the keys the browser could keep are listed
+in [`vt-keys.json`](../web/src/__tests__/testdata/vt-keys.json): Shift+Enter
+is `CSI 13;2u` once a program enables the kitty keyboard protocol (Claude
+Code and Codex insert a newline), Alt+Enter is `ESC CR`. Dragging selects
+text (double click: a word, triple click: a line; Shift-drag where the
+program takes the mouse); holding a selection drag above or below a
+terminal scrolls its scrollback; `terminal.copyOnSelect` copies at release.
+The wheel scrolls the scrollback (on the alternate screen it is the arrow
+keys; programs that take the mouse get it). ⌘/Ctrl-click opens paths (media
+in the preview panel, code in VS Code) and URLs. `cmd+f` (macOS) or
+`ctrl+shift+f` (other systems) finds text in the focused terminal and its
+scrollback (`find.open`; ASCII letters in either case): Enter goes to the
+older match, Shift+Enter to the newer one, Escape closes the bar. Pasting or
+dropping files uploads them to the terminal's machine (dropped files into
+its directory) and pastes their paths; in the desktop app, files dropped on
+a local terminal are pasted where they are. A terminal's right-click menu
+downloads the path under the pointer and, with **Download files…**, files
+and folders chosen in its directory (folders as zips; not for the desktop
+app's own machine). The downloads panel in the status bar shows each
+download's progress, speed and result, cancels it or downloads it again.
 
 With the mouse: click a pane's title to rename it (empty restores the
 terminal title); double-click a tab or workspace to rename it; drag a pane by
@@ -180,9 +180,9 @@ that pane (edges), onto a tab to move it there, or onto `+` to move it into a
 new tab; drag a tab along the tab bar, or a workspace along its machine's
 list, to reorder it. Escape cancels a drag.
 
-Right-click a pane header (the toolbar above a lone pane), a tab or a
-workspace for a menu of its commands
-(rename, split, zoom, VS Code, new tab, move, close) with their bindings;
+Right-click a pane header, a tab, a workspace or a machine for a menu of
+its commands (rename, split, zoom, VS Code, new tab, move, close; a
+machine's terminal core) with their bindings;
 ↑↓ Home End select, Enter runs, Escape closes. In read-only mode the
 browser's menu shows instead.
 

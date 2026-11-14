@@ -175,15 +175,13 @@ settings per browser; theming terminal applications.
   with cmd, ctrl or alt while recording, so neither its menu nor a shortcut
   acts on them), reset returns to the defaults; conflicts are marked.
   Changes become user rules (`rulesFor`) saved with `PUT`.
-- `keymap.ts` matches every keydown of the app (panes route theirs through
-  it) against the bindings in effect on the page's platform, chords
+- `keymap.ts` matches every keydown of the app (terminals route theirs
+  through it) against the bindings in effect on the page's platform, chords
   included: a stroke that starts chords waits 3 s for the next; the
   chord's first stroke twice sends it to the pane (`ctrl+b ctrl+b`); a
   chord matching nothing ends and its key is dropped. While a dialog or
   the palette is open only `dialog` and `always` bindings run. Key hints
   show the direct shortcut in the desktop app, else the first chord.
-  herdr's own `[[keys.command]]` entries (`/api/keymap`) still run as chords
-  of herdr's prefix.
 - Desktop app (`desktop/src/shortcuts.ts`): the shell reads
   `/api/keybindings` (its platform's defaults from `registry.json` until
   then, again when the page reports a push) and takes single-stroke
@@ -232,9 +230,8 @@ settings per browser; theming terminal applications.
   settings). The resolved kind sets `<html data-theme>`, whose CSS variables
   restyle the UI (`styles.css` has no other colors; they are defined from
   the design tokens the macOS application shares,
-  [24](24-design-tokens.md)), the terminal palette of the pane surface and
-  the dialogs' terminals (`xtermTheme` of the theme's
-  `terminal.colors.*`) and `theme-color`. The kind is sent to the core,
+  [24](24-design-tokens.md)), the terminals' colors (the theme's
+  `terminal.colors.*`, [26](26-web-terminals.md)) and `theme-color`. The kind is sent to the core,
   which switches VS Code ([05](05-vscode-panel.md)); in the desktop app the
   setting is also sent to the shell, whose title bar follows it
   ([16](16-desktop-packaging.md)).
@@ -243,11 +240,9 @@ settings per browser; theming terminal applications.
   its `--fg`; light is GitHub Light Default except for brighter yellows.
   The palette only colors what programs leave to the terminal (default
   colors and the 16 ANSI colors); programs that use 24-bit colors look the
-  same everywhere. The owning browser reports the palette's foreground,
-  background, 16 colors and dark or light to herdr
-  ([18](18-endpoint-surfaces.md)), so programs that ask the terminal for
-  its colors (OSC 10/11/4, `CSI ?996n`) get the UI theme's; programs keep
-  the colors they derived until they ask again or restart.
+  same everywhere. Programs that ask the terminal for its colors (OSC
+  10/11/4, `CSI ?996n`) get the UI theme's from the client's emulator;
+  programs keep the colors they derived until they ask again or restart.
 - Terminal font: JetBrains Mono 2.304, the official web fonts (regular,
   medium, bold, each upright and italic) in `web/src/terminal/fonts/` with
   their license (SIL OFL 1.1, appended to the generated `licenses.md`) and
@@ -255,23 +250,25 @@ settings per browser; theming terminal applications.
   the computer. Characters it lacks (CJK, some symbols) come from the
   fallbacks: SF Mono, Menlo, …, PingFang SC. Rows are
   `terminal.lineHeight` times the font's own line height (1.05 by default).
-- Fonts and cell size: the pane surface measures the cell from the font, so
-  it must not use the font before it is loaded. `fonts.ts` registers the
-  faces with the `FontFace` API and loads them on demand; the page waits up
-  to 1.5 s for the faces of the chosen weight before rendering, a surface
-  shown earlier uses only the fallbacks and measures again (resizing herdr's
-  panes) once the faces arrive, and a new weight is applied when its faces
-  are loaded.
+- Fonts and cell size: a terminal measures its cell from the font, so it
+  must not use the font before it is loaded. `fonts.ts` registers the faces
+  with the `FontFace` API and loads them on demand; the page waits up to
+  1.5 s for the faces of the chosen weight before rendering, a terminal
+  shown earlier uses only the fallbacks and measures again (resizing the
+  terminal) once the faces arrive, and a new weight is applied when its
+  faces are loaded.
 - Terminal font weight: regular (400) or medium (500); bold text is 700.
   Medium gives the heavier strokes native terminals produce with stroke
-  thickening (Ghostty's `font-thicken`), which canvas text does not get.
+  thickening (Ghostty's `font-thicken`), which the browser's glyphs do not
+  get.
 - Interface font size sets the root font size; the chrome is sized in `rem`,
-  so it scales with it. Terminal font family, size, weight and line height,
-  colors and Option as Meta are applied at once; a new cell size resizes
-  herdr's panes. The bell flashes the panes, beeps or does nothing. The
-  pane surface drawn from herdr does not have a cursor style, blink,
-  scrollback or copy on select of its own; those settings take effect in
-  the macOS application.
+  so it scales with it. Every terminal setting applies at once in the
+  browser's terminals ([26](26-web-terminals.md)): font family, size,
+  weight and line height (a new cell size resizes the terminals), colors,
+  cursor style and blink (the cursor a program's reset returns to),
+  scrollback (lines kept by the emulator and asked for when attaching),
+  copy on select, bold as bright, Option as Meta and the program clipboard;
+  the bell flashes the pane, beeps or does nothing.
 - Panel position (`right` or `bottom`) changes the grid: below the panes the
   panel spans the workspace column and is resized by its top edge.
 
@@ -306,10 +303,9 @@ settings per browser; theming terminal applications.
 - **No VS Code window connected** → the theme is sent when one connects.
 - **Two browsers choose different themes** → the setting is the core's;
   the last change wins for every client.
-- **A program derives its colors from the wrong theme** → herdr answered
-  its background query; the browser cannot. Restarting the program after a
-  herdr TUI in a terminal of the same kind reported its colors gives
-  matching ones.
+- **A program derives its colors from the wrong theme** → it asked before
+  the theme changed (or in another client with another theme); it gets the
+  new colors when it asks again or restarts.
 - **The terminal font loads slowly or not at all** → the page renders after
   1.5 s with the fallback fonts; terminals switch when the font arrives.
 - **A page loaded before the core was replaced** has no labels for new
@@ -347,6 +343,8 @@ VS Code frames, accelerators, recording),
 equivalents, Ghostty triggers; `SettingsModelTests`;
 `LocalizationTests.testRegistryKeys`). A dev core was changed through the
 API and by editing its file, with the pushes observed on `/ws`; the dialog's
-pages were checked in headless Chromium; the macOS debug build was driven
+pages were checked in headless Chromium, and so were the browser's
+terminals following a font size and a palette color changed through the
+API; the macOS debug build was driven
 through its debug actions (font size and a palette color changed live,
 the settings window's pages).

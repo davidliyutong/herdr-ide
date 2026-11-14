@@ -33,10 +33,13 @@ API and the code-server proxy on `127.0.0.1:7780` by default.
    `X-Forwarded-For`, so it cannot skip the secret.
 3. **Host / Origin allowlist**: loopback plus `--allowed-origin`, against DNS
    rebinding and cross-site WebSocket hijacking.
-4. **Read-only mode** (`--read-only`): panes are shown but get no input,
-   focus or colors from the browser, and a read-only browser never takes the
-   session from a writable one ([18](18-endpoint-surfaces.md)); uploads, ssh
-   authentication, bridge commands, VS Code, retrying machines
+4. **Read-only mode** (`--read-only`): terminals are shown but only
+   observed: no input, size or focus reaches them, writing calls of the
+   terminal protocol are refused and no terminal core is installed or
+   started ([22](22-terminal-protocol.md)); herdr's panes, for a client of
+   them, get no input, focus or colors, and a read-only client never takes
+   that session from a writable one ([18](18-endpoint-surfaces.md));
+   uploads, ssh authentication, bridge commands, VS Code, retrying machines
    (`denied.retry`) and enabling or disabling them refused; herdr calls
    limited to reads.
 5. **herdr API allowlist**: workspace/tab/pane/agent/layout/worktree methods,

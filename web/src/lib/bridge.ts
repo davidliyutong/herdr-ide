@@ -2,7 +2,9 @@
 // machine. The core routes them to a code-server window showing the folder.
 
 import { currentDock, dockKey, normFolder, useStore, type DockView, type UIState } from '../state/store';
-import type { Pane } from './herdr';
+import { useTerms, type MachineTerms } from '../state/terms';
+import * as L from '../term/layout';
+import { agentOf, agentStatus } from './machine';
 
 export interface BridgeCommand {
   cmd: 'openFile' | 'openDiff' | 'gitGraph' | 'openMedia' | 'reveal';
@@ -46,9 +48,9 @@ export const bridge = {
     const dock = currentDock(s);
     let folder = dock?.kind === 'code' && dock.m === m ? dock.folder : undefined;
     if (!folder || !path.startsWith(folder.replace(/\/$/, '') + '/')) {
-      const f = s.focused;
-      const p = f && f.m === m ? s.machines[m]?.snapshot?.panes.find((x) => x.pane_id === f.pane) : undefined;
-      const cwd = p?.foreground_cwd || p?.cwd || undefined;
+      const layout = useTerms.getState().machines[m]?.layout;
+      const focused = s.machineId === m && layout ? L.focusedTerminal(layout) : undefined;
+      const cwd = focused ? directory(useTerms.getState().machines[m], focused) : undefined;
       folder = cwd && path.startsWith(cwd.replace(/\/$/, '') + '/') ? cwd : dirname(path);
     }
     s.openDock({ kind: 'code', m, folder });
@@ -64,39 +66,51 @@ function showsWindow(v: DockView | undefined, m: string, folders: string[]) {
   return !v.folder || folders.some((f) => normFolder(f) === v.folder);
 }
 
-function bestAgent(panes: Pane[]): string | undefined {
-  const agents = panes.filter((p) => p.agent);
-  return agents.find((p) => p.agent_status === 'idle' || p.agent_status === 'done')?.pane_id ?? agents[0]?.pane_id;
+/** A terminal's directory: its foreground program's, else where it started. */
+function directory(mt: MachineTerms | undefined, address: string): string | undefined {
+  const r = mt?.terminals[address];
+  const fg = r?.foreground as { cwd?: unknown } | undefined;
+  const cwd = typeof fg?.cwd === 'string' && fg.cwd ? fg.cwd : r?.cwd;
+  return typeof cwd === 'string' && cwd ? cwd : undefined;
+}
+
+/** The agent terminal text goes to among some: one waiting for input
+ * (idle or done), else any agent. */
+function bestAgent(mt: MachineTerms | undefined, addresses: string[]): string | undefined {
+  const agents = addresses.filter((a) => agentOf(mt?.terminals[a]));
+  return agents.find((a) => ['idle', 'done'].includes(agentStatus(mt?.terminals[a]) ?? '')) ?? agents[0];
 }
 
 /** Where text sent from a VS Code window of machine m ("Send to agent")
- * goes: a pane, or none (workspace: the workspace showing the window, which
- * has no agent pane). */
+ * goes: a terminal, or none (workspace: the workspace showing the window,
+ * which has no agent). */
 export interface SendTarget {
-  pane?: string;
+  terminal?: string;
   workspace?: string;
 }
 
-/** The pane that text sent from a VS Code window of machine m goes to. With
- * the window's folders known, the workspace whose panel shows that window
- * decides: the focused pane when it is the selected workspace and the pane
- * is on m, else that workspace's most attention-worthy agent pane, and no
- * pane of another workspace (another project's agent) when it has none.
- * Without such a workspace (the window is unknown, or no panel shows it):
- * the focused pane on m, else m's most attention-worthy agent pane. */
+/** The terminal that text sent from a VS Code window of machine m goes to.
+ * With the window's folders known, the workspace whose panel shows that
+ * window decides: the focused terminal when it is the selected workspace,
+ * else that workspace's agent waiting for input, and no terminal of another
+ * workspace (another project's agent) when it has none. Without such a
+ * workspace (the window is unknown, or no panel shows it): the focused
+ * terminal on m, else m's agent waiting for input. */
 export function sendTarget(s: UIState, m: string, folders?: string[]): SendTarget {
-  const panes = s.machines[m]?.snapshot?.panes ?? [];
-  const focused = s.focused?.m === m ? s.focused.pane : undefined;
+  const mt = useTerms.getState().machines[m];
+  const layout = mt?.layout;
+  const focused = s.machineId === m && layout ? L.focusedTerminal(layout) : undefined;
   if (folders) {
     const here = showsWindow(s.docks[dockKey(s)]?.view, m, folders);
     const other = here ? undefined : Object.entries(s.docks).find(([k, d]) => k && d.m === m && showsWindow(d.view, m, folders))?.[1];
     const ws = here ? (s.machineId === m ? s.workspaceId : undefined) : other?.ws;
-    if (here && focused) return { pane: focused };
+    if (here && focused) return { terminal: focused };
     if (ws) {
-      const inWs = bestAgent(panes.filter((p) => p.workspace_id === ws));
-      return inWs ? { pane: inWs } : { workspace: ws };
+      const w = layout?.workspaces.find((x) => x.id === ws);
+      const inWs = bestAgent(mt, w ? L.workspaceTerminals(w) : []);
+      return inWs ? { terminal: inWs } : { workspace: ws };
     }
   }
-  const pane = focused ?? bestAgent(panes);
-  return pane ? { pane } : {};
+  const terminal = focused ?? bestAgent(mt, layout ? L.layoutTerminals(layout) : Object.keys(mt?.terminals ?? {}));
+  return terminal ? { terminal } : {};
 }

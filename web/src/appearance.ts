@@ -1,7 +1,7 @@
 // Applies the appearance settings: light/dark theme (also sent to the core,
 // which switches VS Code windows to match, and to the desktop app's shell,
-// whose title bar follows it) and the UI font. The pane surface follows the
-// terminal settings itself (components/SurfaceView.tsx).
+// whose title bar follows it) and the UI font. Terminals follow the
+// terminal settings themselves (components/TerminalView.tsx).
 
 import { create } from 'zustand';
 import { getPrefs, usePrefs, type Prefs, type TermColors } from './prefs';
@@ -22,6 +22,9 @@ export interface Appearance {
   /** Rows are this many times the font's own line height. */
   lineHeight: number;
   optionIsMeta: boolean;
+  boldIsBright: boolean;
+  cursorStyle: 'block' | 'bar' | 'underline';
+  cursorBlink: boolean;
 }
 
 const darkQuery = typeof matchMedia === 'undefined' ? undefined : matchMedia('(prefers-color-scheme: dark)');
@@ -30,7 +33,7 @@ const darkQuery = typeof matchMedia === 'undefined' ? undefined : matchMedia('(p
  * follows. In the desktop app it is Electron's nativeTheme.themeSource,
  * which the setting itself changes (apply): after switching from "dark" to
  * "system" it turns light only once the shell has been told. Components
- * that draw with the theme (the pane surface) subscribe to it, as they do
+ * that draw with the theme (terminals) subscribe to it, as they do
  * to the settings. */
 export const useSystemDark = create<{ dark: boolean }>(() => ({ dark: darkQuery?.matches ?? true }));
 
@@ -62,6 +65,9 @@ export function appearanceOf(p: Prefs): Appearance {
     fontWeight: p.termFontWeight === 'medium' ? 500 : 400,
     lineHeight: p.termLineHeight,
     optionIsMeta: p.optionIsMeta,
+    boldIsBright: p.boldIsBright,
+    cursorStyle: p.cursorStyle,
+    cursorBlink: p.cursorBlink,
   };
 }
 

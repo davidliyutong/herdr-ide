@@ -1,14 +1,15 @@
 import { create } from 'zustand';
-import { withOrder, type MachineState, type Pane, type Snapshot, type Tab, type Workspace } from '../lib/herdr';
+import type { MachineState } from '../lib/machine';
 import { storage } from '../brand';
 
-export interface PaneRef {
+/** A terminal of a machine's terminal core. */
+export interface TermRef {
   m: string;
-  pane: string;
+  terminal: string;
 }
 
-/** Something being renamed in place (pane title, tab, workspace or one of
- * herdr's saved machines, whose id is the machine's). */
+/** Something being renamed in place: a terminal's pane, a tab (id: the
+ * workspace's id and the tab's index), a workspace, or an SSH machine. */
 export interface Renaming {
   kind: 'pane' | 'tab' | 'workspace' | 'machine';
   m: string;
@@ -32,7 +33,9 @@ export interface Toast {
 }
 
 export type DockView =
-  { kind: 'preview'; m: string; path: string } | { kind: 'code'; m: string; folder?: string } | { kind: 'agent'; m: string; pane: string };
+  | { kind: 'preview'; m: string; path: string }
+  | { kind: 'code'; m: string; folder?: string }
+  | { kind: 'agent'; m: string; terminal: string };
 
 export type CodeView = Extract<DockView, { kind: 'code' }>;
 
@@ -53,12 +56,13 @@ export interface UIState {
   order: string[];
   machines: Record<string, MachineState>;
 
-  // Local view selection; independent from herdr's focused workspace so
-  // several clients (and the herdr TUI) can look at different things.
+  /** The machine shown. Its workspaces, tabs and focus are in its layout
+   * document, shared with every client (state/terms.ts). */
   machineId?: string;
+  /** The workspace the machine's layout selects, kept here for the docks. */
   workspaceId?: string;
-  tabByWorkspace: Record<string, string>;
-  focused?: PaneRef;
+  /** A terminal shown alone in its tab, per browser. */
+  zoomed?: TermRef;
 
   sidebarOpen: boolean;
   /** Each workspace's dock by dockKey; read the selected workspace's with
@@ -72,13 +76,10 @@ export interface UIState {
   renaming?: Renaming;
   toasts: Toast[];
   auth?: string;
-  /** SSH machine whose herdr the remote update terminal updates. */
-  remoteHerdr?: string;
-  /** Machines with a herdr action (start, stop, restart, update) under
-   * way: one at a time, its menu entries disabled meanwhile. */
-  herdrBusy: Record<string, true>;
-  setHerdrBusy(m: string, busy: boolean): void;
-  /** The terminal adding a machine with herdr machine add is open. */
+  /** Machines with a terminal core action (start, stop, restart) under way. */
+  hcBusy: Record<string, true>;
+  setHcBusy(m: string, busy: boolean): void;
+  /** The add-machine dialog is open. */
   addMachine: boolean;
   /** The server runs with --read-only. */
   readOnly: boolean;
@@ -86,18 +87,17 @@ export interface UIState {
   setConnected(c: boolean): void;
   setMachines(list: MachineState[]): void;
   upsertMachine(st: MachineState): void;
-  /** Applies herdr's answer to tab.move / workspace.move (the moved group in
-   * its new order) until the next snapshot arrives. */
-  setOrder(m: string, patch: { tabs?: Tab[]; workspaces?: Workspace[] }): void;
-  selectWorkspace(m: string, ws: string): void;
-  selectTab(m: string, ws: string, tab: string): void;
-  focusPane(ref: PaneRef | undefined): void;
+  selectMachine(m: string): void;
+  setWorkspace(ws: string | undefined): void;
+  setZoomed(z: TermRef | undefined): void;
   toggleSidebar(): void;
   /** Shows v (or nothing) in the selected workspace's dock. */
   openDock(v: DockView | undefined): void;
   /** Closes every workspace's VS Code panel of machine m (its code-server
    * was stopped). */
   closeCode(m: string): void;
+  /** Drops the docks of a machine's workspaces that are gone. */
+  pruneDocks(m: string, workspaces: string[]): void;
   setDockWidth(w: number): void;
   setDockHeight(h: number): void;
   setPalette(p: UIState['palette']): void;
@@ -107,7 +107,6 @@ export interface UIState {
    * action's own) and returns its id. */
   toast(msg: string, action?: ToastAction, ttl?: number): number;
   openAuth(m?: string): void;
-  openRemoteHerdr(m?: string): void;
   openAddMachine(open: boolean): void;
   setReadOnly(v: boolean): void;
 }
@@ -140,16 +139,12 @@ export function normFolder(folder?: string): string | undefined {
   return folder.length > 1 ? folder.replace(/\/+$/, '') || '/' : folder;
 }
 
-/** Docks that still have something to show, without the views and
- * workspaces that are gone: workspaces of machines that gone() says were
- * removed or that are not in their machine's snapshot, and views of
- * removed machines. */
-function pruneDocks(docks: Record<string, WorkspaceDock>, machines: Record<string, MachineState>, gone: (m: string) => boolean) {
+/** Docks without the views of machines that gone() says were removed. */
+function withoutGone(docks: Record<string, WorkspaceDock>, gone: (m: string) => boolean) {
   const out: Record<string, WorkspaceDock> = {};
   let changed = false;
   for (const [k, d] of Object.entries(docks)) {
-    const snap = machines[d.m]?.snapshot;
-    if (k && (gone(d.m) || (snap && !snap.workspaces.some((w) => w.workspace_id === d.ws)))) {
+    if (k && gone(d.m)) {
       changed = true;
       continue;
     }
@@ -186,7 +181,7 @@ function loadDocks(): Record<string, WorkspaceDock> {
   return out;
 }
 
-function loadPref<T>(key: string, fallback: T): T {
+export function loadPref<T>(key: string, fallback: T): T {
   try {
     const v = storage.get(key);
     return v ? (JSON.parse(v) as T) : fallback;
@@ -195,7 +190,7 @@ function loadPref<T>(key: string, fallback: T): T {
   }
 }
 
-function savePref(key: string, v: unknown) {
+export function savePref(key: string, v: unknown) {
   storage.set(key, JSON.stringify(v));
 }
 
@@ -203,7 +198,6 @@ export const useStore = create<UIState>((set, get) => ({
   connected: false,
   order: [],
   machines: {},
-  tabByWorkspace: {},
   sidebarOpen: loadPref('sidebarOpen', true),
   docks: loadDocks(),
   dockWidth: loadPref('dockWidth', 640),
@@ -215,46 +209,28 @@ export const useStore = create<UIState>((set, get) => ({
   setMachines: (list) => {
     const machines: Record<string, MachineState> = {};
     for (const m of list) machines[m.id] = m;
-    // A machine removed from herdr's catalog takes what showed it along.
-    // Only one this page saw go: a core started with fewer machines (as with
+    // A machine removed from the core takes what showed it along. Only one
+    // this page saw go: a core started with fewer machines (as with
     // --local-only) leaves the others' docks for when they are back.
-    const { docks, focused, machines: prev } = get();
-    const nextDocks = pruneDocks(docks, machines, (m) => !!prev[m] && !machines[m]);
+    const { docks, machines: prev } = get();
+    const nextDocks = withoutGone(docks, (m) => !!prev[m] && !machines[m]);
     if (nextDocks !== docks) saveDocks(nextDocks);
-    set({
-      machines,
-      order: list.map((m) => m.id),
-      docks: nextDocks,
-      ...(focused && !machines[focused.m] ? { focused: undefined } : {}),
-    });
+    set({ machines, order: list.map((m) => m.id), docks: nextDocks });
     ensureSelection(set, get);
   },
   upsertMachine: (st) => {
-    set((s) => {
-      const machines = { ...s.machines, [st.id]: st };
-      // A workspace closed in herdr takes its dock along.
-      const docks = pruneDocks(s.docks, { [st.id]: st }, () => false);
-      if (docks !== s.docks) saveDocks(docks);
-      return { machines, docks, order: s.order.includes(st.id) ? s.order : [...s.order, st.id] };
-    });
+    set((s) => ({ machines: { ...s.machines, [st.id]: st }, order: s.order.includes(st.id) ? s.order : [...s.order, st.id] }));
     ensureSelection(set, get);
   },
-  setOrder: (m, patch) =>
-    set((s) => {
-      const st = s.machines[m];
-      const snap = st?.snapshot;
-      if (!snap) return {};
-      const next = { ...snap };
-      if (patch.tabs) next.tabs = withOrder(snap.tabs, (x) => x.tab_id, patch.tabs);
-      if (patch.workspaces) next.workspaces = withOrder(snap.workspaces, (x) => x.workspace_id, patch.workspaces);
-      return { machines: { ...s.machines, [m]: { ...st, snapshot: next } } };
-    }),
-  selectWorkspace: (m, ws) => {
-    set({ machineId: m, workspaceId: ws });
-    savePref('selection', { m, ws });
+  selectMachine: (m) => {
+    if (get().machineId === m) return;
+    savePref('machine', m);
+    set({ machineId: m, workspaceId: undefined });
   },
-  selectTab: (m, ws, tab) => set((s) => ({ machineId: m, workspaceId: ws, tabByWorkspace: { ...s.tabByWorkspace, [wsKey(m, ws)]: tab } })),
-  focusPane: (focused) => set({ focused }),
+  setWorkspace: (workspaceId) => {
+    if (get().workspaceId !== workspaceId) set({ workspaceId });
+  },
+  setZoomed: (zoomed) => set({ zoomed }),
   toggleSidebar: () => {
     const v = !get().sidebarOpen;
     savePref('sidebarOpen', v);
@@ -291,6 +267,16 @@ export const useStore = create<UIState>((set, get) => ({
       saveDocks(docks);
       return { docks };
     }),
+  pruneDocks: (m, workspaces) =>
+    set((s) => {
+      const keep = new Set(workspaces);
+      const gone = Object.entries(s.docks).filter(([k, d]) => k && d.m === m && !keep.has(d.ws));
+      if (!gone.length) return {};
+      const docks = { ...s.docks };
+      for (const [k] of gone) delete docks[k];
+      saveDocks(docks);
+      return { docks };
+    }),
   setDockWidth: (w) => {
     savePref('dockWidth', w);
     set({ dockWidth: w });
@@ -303,14 +289,13 @@ export const useStore = create<UIState>((set, get) => ({
   openSettings: (settingsOpen) => set({ settingsOpen }),
   setRenaming: (renaming) => set({ renaming }),
   openAuth: (auth) => set({ auth }),
-  openRemoteHerdr: (remoteHerdr) => set({ remoteHerdr }),
-  herdrBusy: {},
-  setHerdrBusy: (m, busy) =>
+  hcBusy: {},
+  setHcBusy: (m, busy) =>
     set((s) => {
-      const herdrBusy = { ...s.herdrBusy };
-      if (busy) herdrBusy[m] = true;
-      else delete herdrBusy[m];
-      return { herdrBusy };
+      const hcBusy = { ...s.hcBusy };
+      if (busy) hcBusy[m] = true;
+      else delete hcBusy[m];
+      return { hcBusy };
     }),
   addMachine: false,
   openAddMachine: (addMachine) => set({ addMachine }),
@@ -328,33 +313,12 @@ export const useStore = create<UIState>((set, get) => ({
 
 type Setter = (p: Partial<UIState>) => void;
 
-// Keep the selection pointing at something that exists.
+/** Keeps the shown machine one that exists: the one shown last, else the
+ * local machine, else the first. */
 function ensureSelection(set: Setter, get: () => UIState) {
   const s = get();
-  const cur = s.machineId ? s.machines[s.machineId] : undefined;
-  if (cur?.snapshot && s.workspaceId && cur.snapshot.workspaces.some((w) => w.workspace_id === s.workspaceId)) return;
-  const saved = loadPref<{ m?: string; ws?: string }>('selection', {});
-  const candidates = [saved.m, s.machineId, ...s.order].filter(Boolean) as string[];
-  for (const id of candidates) {
-    const snap = s.machines[id]?.snapshot;
-    if (!snap || snap.workspaces.length === 0) continue;
-    const ws =
-      (id === saved.m && snap.workspaces.find((w) => w.workspace_id === saved.ws)) ||
-      snap.workspaces.find((w) => w.workspace_id === snap.focused_workspace_id) ||
-      snap.workspaces[0];
-    set({ machineId: id, workspaceId: ws.workspace_id });
-    return;
-  }
-}
-
-export function activeTabId(s: UIState, m: string, snap: Snapshot, ws: string): string | undefined {
-  const chosen = s.tabByWorkspace[wsKey(m, ws)];
-  if (chosen && snap.tabs.some((t) => t.tab_id === chosen)) return chosen;
-  const w = snap.workspaces.find((x) => x.workspace_id === ws);
-  return w?.active_tab_id ?? snap.tabs.find((t) => t.workspace_id === ws)?.tab_id;
-}
-
-export function findPane(s: UIState, ref?: PaneRef): Pane | undefined {
-  if (!ref) return undefined;
-  return s.machines[ref.m]?.snapshot?.panes.find((p) => p.pane_id === ref.pane);
+  if (s.machineId && s.machines[s.machineId]) return;
+  const saved = loadPref<string | undefined>('machine', undefined);
+  const id = [saved, ...s.order.filter((m) => s.machines[m]?.kind === 'local'), ...s.order].find((m) => m && s.machines[m]);
+  if (id) set({ machineId: id, workspaceId: undefined });
 }

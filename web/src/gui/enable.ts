@@ -1,7 +1,7 @@
-// Panes opened before a machine's display existed (or outside this UI) have
-// no DISPLAY. The core types the display variables into shells waiting at
-// their prompt; panes running a program are left alone and reported, with
-// the command to enter once the program exits.
+// Terminals opened before a machine's display existed (or outside this UI)
+// have no DISPLAY. The core types the display variables into shells waiting
+// at their prompt; terminals running a program are left alone and reported,
+// with the command to enter once the program exits.
 
 import { useStore } from '../state/store';
 import { hasMessage, t } from '../i18n';
@@ -14,15 +14,15 @@ interface EnableResult {
   command: string;
 }
 
-/** Enables program windows in the given panes of machine m (all its panes
- * when panes is omitted) and reports the outcome in a toast. */
-export async function enableGui(m: string, panes?: string[]): Promise<void> {
+/** Enables program windows in the given terminals of machine m (all of them
+ * when terminals is omitted) and reports the outcome in a toast. */
+export async function enableGui(m: string, terminals: string[] = []): Promise<void> {
   const s = useStore.getState();
   try {
     const r = await fetch(`/api/m/${encodeURIComponent(m)}/gui/enable`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ panes }),
+      body: JSON.stringify({ terminals }),
     });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) {

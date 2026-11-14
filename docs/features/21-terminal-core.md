@@ -49,9 +49,9 @@ shares nothing with a herdr or herdr-core the user runs; its executable
 delivered through the agent, verified; a Go client of the API whose
 backpressure reaches the slowest hop.
 
-Non-goals: the browser UI's panes, which come from herdr
-([18](18-endpoint-surfaces.md)); clients reach these terminals through
-[22](22-terminal-protocol.md); herdr-core's own machine links
+Non-goals: emulating terminals (each client does: the browser UI with
+[26](26-web-terminals.md), the macOS application with Ghostty); clients
+reach these terminals through [22](22-terminal-protocol.md); herdr-core's own machine links
 (`machine.add`): machines are reached through the agent
 ([02](02-multi-machine-transport.md)); Windows.
 

@@ -1,7 +1,7 @@
-// Context menus of pane headers, tabs, workspaces and the panes' text. They
-// call the same commands as the buttons and bindings; read-only mode has no
-// items that change anything (the panes' text keeps copying and opening
-// links), so elsewhere the browser's menu shows there.
+// Context menus of pane headers, tabs, workspaces, machines and the
+// terminals' text. They call the same commands as the buttons and bindings;
+// read-only mode has no items that change anything (the terminals' text
+// keeps copying and opening links), so elsewhere the browser's menu shows.
 
 import {
   ArrowDown,
@@ -21,10 +21,10 @@ import {
   Maximize2,
   Minimize2,
   Pencil,
+  Play,
   Plus,
   Power,
   PowerOff,
-  RefreshCw,
   RotateCw,
   Rows2,
   Search,
@@ -33,64 +33,60 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { actions } from './actions';
+import { actions, current } from './actions';
 import type { MenuEntry } from './contextMenu';
 import { downloadDialog } from './dialog';
 import { canDownload, downloadPath } from './download';
 import { t } from './i18n';
 import { keyHint } from './keymap';
-import { findKeyLabel } from './surface/find';
-import { paneCwd, workspaceTabs } from './lib/herdr';
-import { herdrMissing } from './lib/localHerdr';
 import { mediaExt, openLink, resolvePath, safeUrl, type LinkContext } from './terminal/links';
-import { activeTabId, useStore } from './state/store';
+import { useStore } from './state/store';
+import { terms } from './state/terms';
+import * as L from './term/layout';
 
 /** Bindings act on the current tab or workspace, so other targets show none. */
 const hintIf = (current: boolean, action: string) => (current ? keyHint(action) : undefined);
 
-/** Moves an item of `ids` one place (`by` -1 or 1) from where it is when the
- * menu item runs, as the order may have changed since the menu opened. */
-function moveBy(ids: () => string[], id: string, by: -1 | 1, move: (index: number) => void) {
-  const all = ids();
-  const i = all.indexOf(id);
-  if (i < 0 || i + by < 0 || i + by >= all.length) return;
-  // insert_index is a slot of the current order: after the next item is i+2.
-  move(by < 0 ? i - 1 : i + 2);
-}
+const workspaceOf = (m: string, ws: string) => terms.layout(m)?.workspaces.find((w) => w.id === ws);
 
-const tabIds = (m: string, ws: string) => {
-  const snap = useStore.getState().machines[m]?.snapshot;
-  return snap ? workspaceTabs(snap, ws).map((x) => x.tab_id) : [];
-};
-const workspaceIds = (m: string) => useStore.getState().machines[m]?.snapshot?.workspaces.map((w) => w.workspace_id) ?? [];
-
-export function paneMenu(m: string, pane: string, zoomed: boolean): MenuEntry[] {
+export function paneMenu(m: string, terminal: string): MenuEntry[] {
   const s = useStore.getState();
   if (s.readOnly) return [];
-  const cwd = paneCwd(s.machines[m]?.snapshot?.panes.find((p) => p.pane_id === pane));
-  // The right click focused the pane, so its bindings apply to it.
+  const cwd = terms.directory(m, terminal);
+  const zoomed = s.zoomed?.m === m && s.zoomed.terminal === terminal;
   return [
-    { label: t('menu.renamePane'), icon: <Pencil />, run: () => actions.startRename('pane', m, pane) },
+    { label: t('menu.renamePane'), icon: <Pencil />, run: () => actions.startRename('pane', m, terminal) },
     'sep',
     {
       label: t('command.pane.splitRight'),
       hint: keyHint('pane.splitRight'),
       icon: <Columns2 />,
-      run: () => actions.split(m, pane, 'right'),
+      run: () => void actions.split(m, terminal, 'right'),
     },
-    { label: t('command.pane.splitDown'), hint: keyHint('pane.splitDown'), icon: <Rows2 />, run: () => actions.split(m, pane, 'down') },
+    {
+      label: t('command.pane.splitDown'),
+      hint: keyHint('pane.splitDown'),
+      icon: <Rows2 />,
+      run: () => void actions.split(m, terminal, 'down'),
+    },
     {
       label: t(zoomed ? 'menu.restore' : 'menu.zoom'),
       hint: keyHint('pane.zoom'),
       icon: zoomed ? <Minimize2 /> : <Maximize2 />,
-      run: () => actions.zoom(m, pane),
+      run: () => actions.zoom(m, terminal),
     },
     'sep',
     { label: t('menu.openCode'), hint: keyHint('code.open'), icon: <SquareCode />, run: () => actions.openCode(m, cwd) },
     { label: t('menu.diff'), hint: keyHint('code.diff'), icon: <FileDiff />, run: () => actions.openDiff(m, cwd) },
     { label: t('menu.gitGraph'), hint: keyHint('code.gitGraph'), icon: <GitGraph />, run: () => actions.openGitGraph(m, cwd) },
     'sep',
-    { label: t('command.pane.close'), hint: keyHint('pane.close'), icon: <X />, danger: true, run: () => actions.closePane(m, pane) },
+    {
+      label: t('command.pane.close'),
+      hint: keyHint('pane.close'),
+      icon: <X />,
+      danger: true,
+      run: () => void actions.closePane(m, terminal),
+    },
   ];
 }
 
@@ -110,7 +106,7 @@ export function surfaceMenu(o: {
 }): MenuEntry[] {
   const out: MenuEntry[] = [{ label: t('surface.copy'), icon: <Copy />, disabled: !o.copy, run: () => o.copy?.() }];
   if (o.paste) out.push({ label: t('surface.paste'), icon: <ClipboardPaste />, run: o.paste });
-  if (o.find) out.push({ label: t('find.menu'), hint: findKeyLabel(), icon: <Search />, run: o.find });
+  if (o.find) out.push({ label: t('find.menu'), hint: keyHint('find.open'), icon: <Search />, run: o.find });
   const l = o.link;
   if (l?.kind === 'url' && safeUrl(l.text)) {
     out.push(
@@ -147,45 +143,23 @@ export function sidebarMenu(): MenuEntry[] {
   return useStore.getState().readOnly ? [] : [addMachineItem()];
 }
 
-/** A machine's menu in the sidebar: enable or disable it, restart or stop
- * its herdr server (needs the agent connected), update herdr (the
- * application's copy on the local machine, herdr's own --remote flow on an
- * SSH machine); rename or remove an SSH machine, add one. */
+/** A machine's menu in the sidebar: start, restart or stop its terminal
+ * core (needs the agent connected), enable or disable it; rename or remove
+ * an SSH machine, add one. */
 export function machineMenu(m: string): MenuEntry[] {
   const s = useStore.getState();
   const st = s.machines[m];
   if (s.readOnly || !st) return [];
   const out: MenuEntry[] = [];
   if (st.status !== 'disabled') {
-    const connected = st.status === 'ready';
-    // Without a herdr executable there, a restart would stop nothing and
-    // start nothing; herdr --remote installs one on an SSH machine.
-    const missing = herdrMissing(st);
-    // One herdr action at a time (actions.ts herdrAction).
-    const busy = s.herdrBusy[m] === true;
+    const off = st.status !== 'ready' || s.hcBusy[m] === true;
     out.push(
-      {
-        label: t('menu.restartHerdr'),
-        icon: <RotateCw />,
-        disabled: !connected || missing || busy,
-        run: () => void actions.restartHerdr(m),
-      },
-      { label: t('menu.stopHerdr'), icon: <Square />, disabled: !connected || missing || busy, run: () => void actions.stopHerdr(m) },
+      { label: t('menu.startCore'), icon: <Play />, disabled: off, run: () => void actions.terminalCore(m, 'start') },
+      { label: t('menu.restartCore'), icon: <RotateCw />, disabled: off, run: () => void actions.terminalCore(m, 'restart') },
+      { label: t('menu.stopCore'), icon: <Square />, disabled: off, run: () => void actions.terminalCore(m, 'stop') },
+      'sep',
+      { label: t('menu.disableMachine'), icon: <PowerOff />, danger: true, run: () => void actions.setMachineEnabled(m, false) },
     );
-    if (st.kind === 'local')
-      out.push({ label: t('menu.updateHerdr'), icon: <RefreshCw />, disabled: busy, run: () => void actions.updateHerdr(m) });
-    else
-      out.push({
-        label: t(missing ? 'menu.installRemoteHerdr' : 'menu.updateHerdr'),
-        icon: <RefreshCw />,
-        run: () => s.openRemoteHerdr(m),
-      });
-    out.push('sep', {
-      label: t('menu.disableMachine'),
-      icon: <PowerOff />,
-      danger: true,
-      run: () => void actions.setMachineEnabled(m, false),
-    });
   } else {
     out.push({ label: t('menu.enableMachine'), icon: <Power />, run: () => void actions.setMachineEnabled(m, true) });
   }
@@ -200,98 +174,74 @@ export function machineMenu(m: string): MenuEntry[] {
   return out;
 }
 
-export function tabMenu(m: string, ws: string, tab: string): MenuEntry[] {
+/** A tab's menu: rename, new tab, move left or right, close. */
+export function tabMenu(m: string, ws: string, index: number): MenuEntry[] {
   const s = useStore.getState();
-  const snap = s.machines[m]?.snapshot;
-  if (s.readOnly || !snap) return [];
-  const tabs = workspaceTabs(snap, ws);
-  const i = tabs.findIndex((x) => x.tab_id === tab);
-  const current = s.machineId === m && s.workspaceId === ws && activeTabId(s, m, snap, ws) === tab;
+  const w = workspaceOf(m, ws);
+  if (s.readOnly || !w) return [];
+  const c = current();
+  const isCurrent = c?.m === m && c.ws?.id === ws && c.tabIndex === index;
+  const n = w.tabs.length;
+  // A move uses the position when it runs: another client may have moved tabs.
+  const move = (by: -1 | 1) => () => {
+    const tab = w.tabs[index];
+    const now = workspaceOf(m, ws)?.tabs.indexOf(tab) ?? -1;
+    if (now >= 0) terms.mutate(m, (l) => L.moveTab(l, ws, now, now + by));
+  };
   return [
     {
       label: t('command.tab.rename'),
-      hint: hintIf(current, 'tab.rename'),
+      hint: hintIf(isCurrent, 'tab.rename'),
       icon: <Pencil />,
-      run: () => actions.startRename('tab', m, tab),
+      run: () => actions.startRename('tab', m, `${ws}:${index}`),
     },
-    { label: t('command.tab.new'), hint: keyHint('tab.new'), icon: <Plus />, run: () => actions.newTab(m, ws) },
+    { label: t('command.tab.new'), hint: keyHint('tab.new'), icon: <Plus />, run: () => void actions.newTab(m, ws) },
+    'sep',
+    { label: t('menu.moveLeft'), icon: <ArrowLeft />, disabled: index <= 0, run: move(-1) },
+    { label: t('menu.moveRight'), icon: <ArrowRight />, disabled: index >= n - 1, run: move(1) },
     'sep',
     {
-      label: t('menu.moveLeft'),
-      icon: <ArrowLeft />,
-      disabled: i <= 0,
-      run: () =>
-        moveBy(
-          () => tabIds(m, ws),
-          tab,
-          -1,
-          (index) => actions.moveTab(m, tab, index),
-        ),
+      label: t('command.tab.close'),
+      hint: hintIf(isCurrent, 'tab.close'),
+      icon: <X />,
+      danger: true,
+      run: () => void actions.closeTab(m, ws, index),
     },
-    {
-      label: t('menu.moveRight'),
-      icon: <ArrowRight />,
-      disabled: i < 0 || i >= tabs.length - 1,
-      run: () =>
-        moveBy(
-          () => tabIds(m, ws),
-          tab,
-          1,
-          (index) => actions.moveTab(m, tab, index),
-        ),
-    },
-    'sep',
-    { label: t('command.tab.close'), hint: hintIf(current, 'tab.close'), icon: <X />, danger: true, run: () => actions.closeTab(m, tab) },
   ];
 }
 
+/** A workspace's menu: rename, new tab in it, move up or down, close. */
 export function workspaceMenu(m: string, ws: string): MenuEntry[] {
   const s = useStore.getState();
-  const snap = s.machines[m]?.snapshot;
-  if (s.readOnly || !snap) return [];
-  const i = snap.workspaces.findIndex((w) => w.workspace_id === ws);
-  const n = snap.workspaces.length;
-  const current = s.machineId === m && s.workspaceId === ws;
+  const layout = terms.layout(m);
+  if (s.readOnly || !layout) return [];
+  const i = layout.workspaces.findIndex((w) => w.id === ws);
+  const n = layout.workspaces.length;
+  const c = current();
+  const isCurrent = c?.m === m && c.ws?.id === ws;
+  const move = (by: -1 | 1) => () =>
+    terms.mutate(m, (l) => {
+      const now = l.workspaces.findIndex((w) => w.id === ws);
+      return now < 0 ? l : L.moveWorkspace(l, ws, now + by);
+    });
   return [
     {
       label: t('command.workspace.rename'),
-      hint: hintIf(current, 'workspace.rename'),
+      hint: hintIf(isCurrent, 'workspace.rename'),
       icon: <Pencil />,
       run: () => actions.startRename('workspace', m, ws),
     },
-    { label: t('command.tab.new'), hint: hintIf(current, 'tab.new'), icon: <Plus />, run: () => actions.newTab(m, ws) },
+    { label: t('command.tab.new'), hint: hintIf(isCurrent, 'tab.new'), icon: <Plus />, run: () => void actions.newTab(m, ws) },
     'sep',
-    {
-      label: t('menu.moveUp'),
-      icon: <ArrowUp />,
-      disabled: i <= 0,
-      run: () =>
-        moveBy(
-          () => workspaceIds(m),
-          ws,
-          -1,
-          (index) => actions.moveWorkspace(m, ws, index),
-        ),
-    },
-    {
-      label: t('menu.moveDown'),
-      icon: <ArrowDown />,
-      disabled: i < 0 || i >= n - 1,
-      run: () =>
-        moveBy(
-          () => workspaceIds(m),
-          ws,
-          1,
-          (index) => actions.moveWorkspace(m, ws, index),
-        ),
-    },
+    { label: t('menu.moveUp'), icon: <ArrowUp />, disabled: i <= 0, run: move(-1) },
+    { label: t('menu.moveDown'), icon: <ArrowDown />, disabled: i < 0 || i >= n - 1, run: move(1) },
     'sep',
     {
       label: t('command.workspace.close'),
-      hint: hintIf(current, 'workspace.close'),
+      hint: hintIf(isCurrent, 'workspace.close'),
       icon: <X />,
       danger: true,
-      run: () => actions.closeWorkspace(m, ws),
+      run: () => void actions.closeWorkspace(m, ws),
     },
   ];
 }

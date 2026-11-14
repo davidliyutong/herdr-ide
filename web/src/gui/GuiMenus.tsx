@@ -3,7 +3,7 @@ import { AppWindow, MonitorUp, MonitorX } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../state/store';
 import { t } from '../i18n';
-import { guiKey, openGuiWindow, paneWindows, useGui, type GuiWindow } from './state';
+import { guiKey, openGuiWindow, terminalWindows, useGui, type GuiWindow } from './state';
 import { enableGui } from './enable';
 import { useDismiss } from '../components/useDismiss';
 
@@ -59,9 +59,9 @@ function WindowsButton({ entries, className, label }: { entries: Entry[]; classN
   );
 }
 
-/** Pane header button for the windows of programs started in the pane. */
-export function PaneGuiButton({ m, pane }: { m: string; pane: string }) {
-  const windows = useGui(useShallow((g) => paneWindows(g, m, pane)));
+/** Pane header button for the windows of programs started in the terminal. */
+export function PaneGuiButton({ m, terminal }: { m: string; terminal: string }) {
+  const windows = useGui(useShallow((g) => terminalWindows(g, m, terminal)));
   const entries = useMemo(() => windows.map((w) => ({ m, w })), [windows, m]);
   return <WindowsButton entries={entries} />;
 }
@@ -172,7 +172,7 @@ export function GuiMachineStatus({ m }: { m: string }) {
   );
 }
 
-/** Enables program windows in the machine's open panes. */
+/** Enables program windows in the machine's open terminals. */
 export function GuiEnableButton({ m, disabled }: { m: string; disabled?: boolean }) {
   const ready = useGui((g) => g.machines[m]?.phase === 'ready');
   const [busy, setBusy] = useState(false);

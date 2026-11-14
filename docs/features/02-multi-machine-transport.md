@@ -8,7 +8,7 @@ The user's machines are reached over ssh with their own `~/.ssh/config`
 arm64, sometimes with old userlands, sometimes without internet access. The
 core needs many concurrent channels per machine: the terminal core's API
 and terminal streams ([21](21-terminal-core.md)), herdr API calls and the
-pane surface of the shown tab for the browser UI's panes, file reads,
+pane surface of herdr's shown tab for a client of herdr's panes, file reads,
 uploads, a code-server proxy and a reverse channel for the VS Code
 extension.
 
@@ -59,12 +59,13 @@ Non-goals: managing ssh keys or herdr installations; Windows machines.
   terminals work there. While that connection lasts the agent also tells
   which coding agents run in the terminals and what they do
   ([25](25-agent-detection.md)).
-- **herdr is optional.** herdr's snapshot and tab layouts, for the browser
-  UI's panes, are fetched every 5 s and after herdr's events while herdr
+- **herdr is optional.** herdr's snapshot and tab layouts are fetched every
+  5 s and after herdr's events while herdr
   answers. When two fetches in a row fail, the machine drops them and
   shows why (`herdr_error`) but stays *ready*; nothing is logged, and the
   subscription to herdr's events is tried again after 1 s, doubling to
-  30 s. The sidebar then offers **Start herdr** for the panes.
+  30 s. No client of this build uses them: the browser UI and the macOS
+  application show the terminal core's terminals.
 - **herdr API requests over the agent.** herdr drops an API connection whose
   request has not arrived 5 s after it accepted it. The core sends the
   request right behind the stream's header (`Session.OpenWith`) instead of
@@ -109,9 +110,7 @@ Non-goals: managing ssh keys or herdr installations; Windows machines.
   session (the agent exits and stops the code-server it started; programs
   keep running in the terminal core and in herdr), drops the machine's
   snapshot and shows it as *disabled*; enabling connects it. Disabling a
-  connected machine asks first; for a *ready* SSH machine whose herdr
-  answers the dialog also offers, checked by default, to stop its herdr
-  server before the session ends ([17](17-local-herdr-management.md)). The
+  connected machine asks first. The
   sidebar folds disabled machines, so their Enable button shows only when
   the user opens one; disabling a machine folds it and enabling it unfolds
   it. Read-only browsers can do none of this (`403`); everything is
@@ -121,7 +120,8 @@ Non-goals: managing ssh keys or herdr installations; Windows machines.
   machine's terminal core (the installed executable's digest, whether one
   answers, its version, session and socket), and
   `POST /api/m/{id}/hc/{start|stop|restart}` runs the agent's `hc` op from
-  the machine's menu in the macOS application: start installs this build's
+  the machine's menu (the browser UI's sidebar, the macOS application);
+  restart and stop ask first: start installs this build's
   executable when the machine has another and starts a core; restart has
   the core's successor adopt the programs; stop ends every terminal there
   after the user confirmed it and keeps the core stopped (the terminal
@@ -221,10 +221,12 @@ entries), `cmd/herdr-ide/main_test.go` (`--local-only` and `--machine`),
 `web/src/__tests__/menus.test.ts` (the machine menu asks before disabling
 and before removing, offers renaming and removal for SSH machines, the
 sidebar's free space offers adding; adding opens the authentication
-terminal once the new machine needs a login), `web/src/__tests__/sidebarMachines.test.ts`
-(renaming in the machine's header, Start herdr where herdr does not
-answer), `web/src/__tests__/addMachine.test.ts` (the form's checks, a
-removed machine takes its VS Code panel and focus along),
+terminal once the new machine needs a login; starting, restarting and
+stopping the terminal core, one action at a time),
+`web/src/__tests__/sidebarMachines.test.ts` (renaming in the machine's
+header, a machine's terminals followed when shown, starting a terminal
+core that failed), `web/src/__tests__/addMachine.test.ts` (the form's
+checks, a removed machine takes its VS Code panel along),
 `macos/Tests/TermKitTests` (the machine state's `hc`),
 `internal/herdr/client_test.go` (requests sent with the dial), `make it`
 for herdr streams. Verified manually against eight Ubuntu x86_64 hosts and

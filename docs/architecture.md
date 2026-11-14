@@ -1,7 +1,7 @@
 # Architecture
 
 ```
-browser (React, canvas)     ──WebSocket + HTTP──▶  core (Go, `herdr-ide`)
+browser (React, WebGL)      ──WebSocket + HTTP──▶  core (Go, `herdr-ide`)
                                                      ├─ machines: registry + connection state machine
                                                      ├─ server: WS hub, session owner + pane surfaces, terminal streams, files, code-server proxy, bridge hub
                                                      ├─ gui: virtual displays per machine, window list, frame routing
@@ -38,7 +38,7 @@ browser (React, canvas)     ──WebSocket + HTTP──▶  core (Go, `herdr-id
 | `internal/gui` | Virtual displays on machines, their windows, frames and input between agents and browser windows. |
 | `internal/server` | HTTP/WS front: guards, session ownership and pane surfaces, files, proxy, bridge, audit. |
 | `internal/embedded` | Build artifacts compiled into the core (agents, bridge VSIX). |
-| `web` | Browser UI (Vite, React, zustand; panes on a canvas, xterm.js for the PTY dialogs; `src/vt`: Ghostty's terminal library as WebAssembly with its renderer and input encoders, [26](features/26-web-terminals.md)); `web/embed.go` embeds `web/dist`. |
+| `web` | Browser UI (Vite, React, zustand): the terminals of the machines' terminal cores (`src/term`: the client of `/api/v1/term` and the layout document; `src/state/terms.ts`: the machines' terminals and layouts; `src/vt`: Ghostty's terminal library as WebAssembly with its renderer and input encoders, also for the PTY dialogs, [26](features/26-web-terminals.md)); `web/embed.go` embeds `web/dist`. |
 | `macos` | macOS application (Swift package): `TermKit`, the clients of `/api/v1/term` and of `/ws` as an events client, with the terminal, layout (workspaces, tabs, splits) and core-process models; `App`, the AppKit window drawing terminals with Ghostty's renderer. |
 | `desktop` | Electron main process and electron-builder config; macOS `.app`/DMG wrapping the embedded core. |
 | `extensions/herdr-ide-bridge` | VS Code extension installed into code-server. |
@@ -118,8 +118,7 @@ Verified against herdr 0.9.5 (protocol 22):
   (smart case, across soft wraps) in the same rows and returns up to 1024
   matches (first and last cell) around the current one with the total; it
   needs the pane's current content revision, which `pane.copy_motion`
-  returns, and answers `stale_content` for any other. Find in panes uses
-  the agent's own search instead ([20](features/20-find-in-panes.md)).
+  returns, and answers `stale_content` for any other.
 
 ## Core ↔ agent protocol (`internal/agentproto`)
 
@@ -155,16 +154,17 @@ negotiation. Keep it that way when adding ops (add fields, don't reuse them).
 
 ## Browser ↔ core protocol (`/ws`)
 
-Text frames are JSON with a `t` field; binary frames are pane surface updates
-(complete or patch: generation, size, cursor, row moves, spans of cells; see
-`web/src/surface/protocol.ts`).
+Text frames are JSON with a `t` field; binary frames are herdr's pane
+surface updates (`internal/server/surface.go`) for a client that shows
+herdr's panes, which no client of this build does.
 
-`/ws?events=1` connects an events client (the macOS application): it gets
-the same messages, `settings` and `keybindings` included, except the pane
-session's (`session`, `surf*`, `clip`,
-`bell`, binary frames), never owns or takes over the session, and its
-`view`, `takeover`, `in`, `focus`, `host` and `api` are ignored. It plays
-no notification sounds (`agent {sound}`) before it reports `active`.
+`/ws?events=1` connects an events client: the browser UI, the desktop app
+and the macOS application, whose terminals use `/api/v1/term`. It gets the
+same messages, `settings` and `keybindings` included, except the pane
+session's (`session`, `surf*`, `clip`, `bell`, binary frames), never owns
+or takes over the session, and its `view`, `takeover`, `in`, `focus`,
+`host` and `api` are ignored. It plays no notification sounds (`agent
+{sound}`) before it reports `active`.
 
 | Browser → core | Core → browser |
 | --- | --- |
@@ -181,10 +181,9 @@ HTTP endpoints besides files (`GET /api/m/{id}/file`, `GET /api/m/{id}/list`,
 and `GET /api/m/{id}/download?path=…[&dl=<id>]`: one file as an attachment,
 anything else as a zip from `fs.archive`; `download.cancel` over `/ws`
 breaks a followed download off), uploads and the code-server proxy:
-`POST /api/m/{id}/find` (find in a pane through `pane.find`, also for
-read-only pages, see [20](features/20-find-in-panes.md)),
+`POST /api/m/{id}/find` (find in a herdr pane through `pane.find`),
 `GET /api/config`, `GET /api/keymap` (herdr's custom commands from its
-`config.toml`), `GET /api/machines` (every machine's state: the record,
+`config.toml`; the browser UI no longer reads them), `GET /api/machines` (every machine's state: the record,
 `status`, the agent's `info`, `hc {state, code, version}` while the core
 has a connection to the machine's terminal core, and herdr's `snapshot`
 and `layouts` or `herdr_error`), `GET /api/gui`
@@ -241,7 +240,9 @@ notices) that the UI translates.
 
 ## Session ownership and surfaces (`internal/server/surface.go`)
 
-One browser connection owns the core's session, like a KVM console: it
+For a `/ws` client that shows herdr's panes (the browser UI before it drew
+its terminals itself; none in this build) one browser connection owns the
+core's session, like a KVM console: it
 chooses the shown machine, tab and size, and only its input reaches herdr.
 Another browser is told the session is busy and may take it over; the
 previous owner is then told it was taken over. A read-only browser never

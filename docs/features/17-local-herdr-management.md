@@ -21,6 +21,11 @@ metadata then still names the old path, and a server started before keeps
 running and answering (its executable stays open), but no server can be
 started or restarted there until herdr is installed again.
 
+The browser UI no longer offers these actions: it shows the terminal
+core's terminals ([26](26-web-terminals.md)) and starts, restarts and stops
+the terminal core instead ([02](02-multi-machine-transport.md)). The core's
+endpoints below remain.
+
 ## Goals / non-goals
 
 Goals: start, stop and restart the herdr server of every machine, local or
@@ -266,11 +271,3 @@ SSH machines accept, read-only and audit behavior of the endpoints, the
 and the PTY bridge. `TestIntegrationHerdrManage` starts, stops and restarts
 (stopped and running) a real server in the isolated `herdr-ide-it` session
 with temporary `HOME` and herdr directories.
-`web/src/__tests__/localHerdr.test.ts` covers requests, version comparison,
-messages for every error code and when a machine's herdr counts as missing;
-`menus.test.ts` covers the machine menu's entries, the confirmed restart
-and stop, the local update (up to date, the user's installation, a newer
-release after confirming), **Install herdr…** with restart and stop
-disabled where herdr is missing, one action at a time per machine (entries
-disabled and a second action refused meanwhile), and disabling a machine
-with and without stopping its herdr; `dialog.test.ts` covers the confirmation's checkbox.

@@ -66,8 +66,9 @@ implemented independently.
   ([15](15-bundled-herdr.md)), and the notices of the herdr-core its core
   embeds in `licenses/herdr-core/` ([21](21-terminal-core.md)). OpenSSH is
   user-installed. The desktop shell
-  does not start or stop herdr's servers; the user does so, and updates herdr,
-  from the web UI ([17](17-local-herdr-management.md)). All inherited environment and SSH configuration
+  does not start or stop terminal cores or herdr's servers; the web UI
+  starts, restarts and stops a machine's terminal core
+  ([22](22-terminal-protocol.md)). All inherited environment and SSH configuration
   remain available to the core.
 - The main window has a preload (`desktop/src/preload.ts`, sandboxed) that
   exposes one object, `desktopShell`, for direct shortcuts
@@ -141,9 +142,9 @@ implemented independently.
 - Electron crash: the pipe closes and Go cancels its context. A normal
   quit allows agent cleanup before SIGKILL; force-killed agents retain their
   existing orphan-reaping and idle-timeout protection.
-- No local herdr session running: the existing machine status UI shows the
-  error and offers **Start herdr**; the desktop shell does not bootstrap or
-  alter herdr sessions.
+- The local terminal core fails to start: the machine's status in the web
+  UI shows the error and offers **Start terminal core**; the desktop shell
+  does not start or alter terminal cores or herdr sessions.
 - Downloaded ad-hoc signed app blocked by Gatekeeper: explicit user approval
   can be required; this build is not a notarized distribution.
 

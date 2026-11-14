@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { mutedAgents, soundFor, type SoundContext } from '../sound';
 import { builtinDefaults } from '../settings';
-import type { AgentStatusEvent } from '../lib/herdr';
+import type { AgentStatusEvent } from '../lib/machine';
 
 const ev = (agent_status: AgentStatusEvent['agent_status'], agent = 'claude'): AgentStatusEvent => ({
-  pane_id: 'p1',
-  workspace_id: 'w1',
+  terminal: 't1',
   agent_status,
   agent,
 });

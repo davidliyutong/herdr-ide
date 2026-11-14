@@ -1,15 +1,14 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const api = vi.fn((..._args: unknown[]): Promise<unknown> => Promise.resolve({}));
-vi.mock('../lib/conn', () => ({ conn: { api: (...a: unknown[]) => api(...a), setTheme: () => {} } }));
+vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 
 import { keyName } from '../keys';
 import { runShortcut } from '../desktop';
 import { useDialog } from '../dialog';
-import { PROCESS_INFO_TIMEOUT_MS } from '../actions';
 import { useStore, currentDock } from '../state/store';
-import type { MachineState } from '../lib/herdr';
+import type { MachineState } from '../lib/machine';
+import { FakeCore, settle } from './fakeTerms';
 
 describe('keyName', () => {
   it('names a key after its character on the current layout', () => {
@@ -30,54 +29,44 @@ describe('keyName', () => {
   });
 });
 
-function machine(): MachineState {
-  return {
-    id: 'm',
-    label: 'm',
-    status: 'ready',
-    snapshot: {
-      workspaces: [{ workspace_id: 'w1', active_tab_id: 't1' }],
-      tabs: [{ tab_id: 't1', workspace_id: 'w1' }],
-      panes: [
-        { pane_id: 'p1', workspace_id: 'w1', tab_id: 't1', agent_status: 'unknown' },
-        { pane_id: 'p2', workspace_id: 'w1', tab_id: 't1', agent_status: 'unknown' },
-      ],
+const layout = () => ({
+  version: 2,
+  workspaces: [
+    {
+      id: 'wwwwwwww',
+      name: 'w',
+      cwd: '',
+      tabs: [{ root: { split: 'horizontal', ratio: 0.5, children: [{ terminal: 't1' }, { terminal: 't2' }] }, focused: 't1' }],
+      selected: 0,
     },
-  } as unknown as MachineState;
-}
+  ],
+  selected: 0,
+});
+
+/** A terminal whose shell (pid 10) waits at its prompt, or runs a program in front. */
+const shell = (address: string, extra: Record<string, unknown> = {}) =>
+  FakeCore.term(address, { pid: 10, foreground: { pid: 10, name: 'zsh', argv: ['-zsh'], cwd: '/srv/app' }, ...extra });
+const running = (address: string, name: string, extra: Record<string, unknown> = {}) =>
+  FakeCore.term(address, { pid: 10, foreground: { pid: 20, name, argv: [name], cwd: '/srv/app' }, ...extra });
 
 describe('runShortcut', () => {
-  beforeEach(() => {
-    api.mockClear();
+  let core: FakeCore;
+  const setup = async (terminals: Array<Record<string, unknown> & { address: string }>) => {
+    core = new FakeCore();
+    core.machine('m', terminals, layout());
+    core.install();
     const s = useStore.getState();
-    s.upsertMachine(machine());
-    s.selectWorkspace('m', 'w1');
-    s.focusPane({ m: 'm', pane: 'p1' });
-  });
+    s.upsertMachine({ id: 'm', label: 'm', kind: 'local', status: 'ready' } as unknown as MachineState);
+    s.selectMachine('m');
+    core.model.subscribe('m');
+    await settle();
+  };
+  beforeEach(() => setup([shell('t1'), shell('t2')]));
   afterEach(() => {
     useDialog.setState({ current: undefined });
     document.body.innerHTML = '';
   });
 
-  // herdr's pane.process_info for a pane: its shell waiting at the prompt,
-  // or a program in front of it.
-  const shell = { process_info: { shell_pid: 10, foreground_process_group_id: 10, foreground_processes: [{ pid: 10, name: '-zsh' }] } };
-  const running = (name: string) => ({
-    process_info: {
-      shell_pid: 10,
-      foreground_process_group_id: 20,
-      foreground_processes: [
-        { pid: 21, name: 'cat' },
-        { pid: 20, name },
-      ],
-    },
-  });
-  const answer = (byPane: Record<string, unknown>) =>
-    api.mockImplementation((_m, method, params) => {
-      if (method !== 'pane.process_info') return Promise.resolve({});
-      const r = byPane[(params as { pane_id: string }).pane_id];
-      return r instanceof Error ? Promise.reject(r) : Promise.resolve(r);
-    });
   const dialog = () => useDialog.getState().current;
   /** Answers the confirmation shown, as Dialogs.tsx does, and returns its
    * message. */
@@ -90,69 +79,50 @@ describe('runShortcut', () => {
     await new Promise((r) => setTimeout(r));
     return req.message;
   };
-  afterEach(() => api.mockImplementation(() => Promise.resolve({})));
+  const killed = () => core.calls.filter((c) => c.method === 'terminal.kill').map((c) => c.params.terminal);
 
-  it('closes a tab at once when its panes only have shells at the prompt', async () => {
-    answer({ p1: shell, p2: Object.assign(new Error('pane not found'), { code: 'pane_not_found' }) });
+  it('closes a tab at once when its terminals only have shells at the prompt', async () => {
     runShortcut('tab.close');
-    await vi.waitFor(() => expect(api).toHaveBeenCalledWith('m', 'tab.close', { tab_id: 't1' }));
+    await vi.waitFor(() => expect(killed()).toEqual(['t1', 't2']));
     expect(dialog()).toBeUndefined();
+    await settle();
+    expect(core.layout('m')?.workspaces[0].tabs).toEqual([]);
   });
 
   it('asks before closing a tab with a program running, naming it', async () => {
-    answer({ p1: shell, p2: running('vim') });
+    await setup([shell('t1'), running('t2', 'vim')]);
     runShortcut('tab.close');
     expect(await reply(false)).toBe('Closing this tab ends the programs still running in it: vim.');
-    expect(api).not.toHaveBeenCalledWith('m', 'tab.close', expect.anything());
+    expect(killed()).toEqual([]);
 
     // An agent waiting for input still runs: it goes by its name.
-    const mach = machine();
-    mach.snapshot!.panes[0] = { ...mach.snapshot!.panes[0], agent: 'claude', agent_status: 'idle' };
-    useStore.getState().upsertMachine(mach);
-    answer({ p1: running('node'), p2: shell });
+    await setup([running('t1', 'node', { agent: 'claude', agent_status: 'idle' }), shell('t2')]);
     runShortcut('tab.close');
     expect(await reply(true)).toContain(': claude.');
-    await vi.waitFor(() => expect(api).toHaveBeenCalledWith('m', 'tab.close', { tab_id: 't1' }));
+    await vi.waitFor(() => expect(killed()).toEqual(['t1', 't2']));
   });
 
-  it('asks when herdr cannot tell what runs, or a pane was started with another program', async () => {
-    answer({ p1: shell, p2: new Error('unknown method') });
-    runShortcut('tab.close');
-    expect(await reply(false)).toContain('2');
-    expect(api).not.toHaveBeenCalledWith('m', 'tab.close', expect.anything());
-
-    answer({
-      p1: shell,
-      p2: { process_info: { shell_pid: 30, foreground_process_group_id: 30, foreground_processes: [{ pid: 30, name: 'htop' }] } },
-    });
-    runShortcut('tab.close');
-    expect(await reply(false)).toContain(': htop.');
+  it('asks before closing a pane with a program running; a shell closes at once', async () => {
+    await setup([running('t1', 'htop'), shell('t2')]);
+    runShortcut('pane.close');
+    expect(await reply(false)).toBe('Closing this pane ends the program still running in it: htop.');
+    expect(killed()).toEqual([]);
+    core.model.mutate('m', (l) => ({ ...l, workspaces: [{ ...l.workspaces[0], tabs: [{ ...l.workspaces[0].tabs[0], focused: 't2' }] }] }));
+    runShortcut('pane.close');
+    await vi.waitFor(() => expect(killed()).toEqual(['t2']));
+    await settle();
+    expect(core.layout('m')?.workspaces[0].tabs[0].root).toEqual({ terminal: 't1' });
   });
 
-  it('asks when herdr does not answer in time', async () => {
-    vi.useFakeTimers();
-    try {
-      api.mockImplementation((_m, method) => (method === 'pane.process_info' ? new Promise(() => {}) : Promise.resolve({})));
-      runShortcut('tab.close');
-      // A second key while the first is pending does nothing.
-      runShortcut('tab.close');
-      await vi.advanceTimersByTimeAsync(PROCESS_INFO_TIMEOUT_MS);
-      expect(dialog()?.kind).toBe('confirm');
-      expect(api.mock.calls.filter((c) => c[1] === 'pane.process_info')).toHaveLength(2);
-    } finally {
-      vi.useRealTimers();
-    }
-    await reply(false);
-  });
-
-  it('does nothing while a dialog is open', () => {
+  it('does nothing while a dialog is open', async () => {
     const backdrop = document.createElement('div');
     backdrop.className = 'modal-backdrop';
     document.body.append(backdrop);
     runShortcut('tab.close');
     runShortcut('tab.new');
+    await settle();
     expect(useDialog.getState().current).toBeUndefined();
-    expect(api).not.toHaveBeenCalled();
+    expect(core.calls.filter((c) => c.method.startsWith('terminal.'))).toEqual([]);
   });
 
   it('opens the settings', () => {
@@ -171,9 +141,9 @@ describe('runShortcut', () => {
     const s = useStore.getState();
     s.openDock(undefined);
     useStore.setState({ docks: {} });
-    // Nothing shown before: the focused pane's folder opens.
+    // Nothing shown before: the focused terminal's folder opens.
     runShortcut('view.toggleCode');
-    expect(currentDock(useStore.getState())).toEqual({ kind: 'code', m: 'm', folder: undefined });
+    expect(currentDock(useStore.getState())).toEqual({ kind: 'code', m: 'm', folder: '/srv/app' });
     runShortcut('view.toggleCode');
     expect(currentDock(useStore.getState())).toBeUndefined();
     // The panel shown last comes back, as it was.
@@ -190,13 +160,14 @@ describe('runShortcut', () => {
     s.openDock({ kind: 'code', m: 'other', folder: '/x' });
     s.openDock(undefined);
     runShortcut('view.toggleCode');
-    expect(currentDock(useStore.getState())).toEqual({ kind: 'code', m: 'm', folder: undefined });
+    expect(currentDock(useStore.getState())).toEqual({ kind: 'code', m: 'm', folder: '/srv/app' });
     s.openDock(undefined);
   });
 
   it('ignores unknown commands', () => {
+    const calls = core.calls.length;
     runShortcut('nope.command');
     expect(useDialog.getState().current).toBeUndefined();
-    expect(api).not.toHaveBeenCalled();
+    expect(core.calls.length).toBe(calls);
   });
 });

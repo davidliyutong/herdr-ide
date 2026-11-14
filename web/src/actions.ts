@@ -1,75 +1,88 @@
 // User-level commands shared by buttons, the keymap and the command palette.
+// Workspaces, tabs and panes are edits of the shown machine's layout
+// document plus terminal.run and terminal.kill on its terminal core
+// (state/terms.ts); closing ends the programs after asking when one runs.
 
-import { conn } from './lib/conn';
-import type { LayoutNode, Pane, Snapshot } from './lib/herdr';
-import { paneCwd, statusRank, workspaceTabs } from './lib/herdr';
-import { activeTabId, currentDock, currentLastCode, useStore } from './state/store';
-import { getTerm } from './terminal/registry';
+import * as L from './term/layout';
+import { isLive, type TerminalRecord } from './term/protocol';
+import { terms, useTerms } from './state/terms';
+import { currentDock, currentLastCode, useStore, type TermRef } from './state/store';
+import { paneHandle, withPane } from './state/panes';
+import { agentOf, agentStatus, statusRank, terminalTitle, type AgentStatus } from './lib/machine';
 import { mediaExt } from './terminal/links';
 import { bridge } from './lib/bridge';
-import { t } from './i18n';
-import { confirmCheckDialog, confirmDialog, newWorkspaceDialog } from './dialog';
-import { herdrError, herdrMissing, herdrRequest, isNewer, type MachineHerdr } from './lib/localHerdr';
+import { hasMessage, t } from './i18n';
+import { confirmDialog, newWorkspaceDialog } from './dialog';
 import type { MessageKey } from './i18n/en';
 
 export interface AttentionItem {
   m: string;
-  pane: Pane;
+  terminal: string;
+  record: TerminalRecord;
+  status: AgentStatus;
 }
 
-/** Agent panes across all machines ordered by how much they need the user. */
+/** Terminals with an agent (or a status their program reports) on every
+ * machine followed, by how much they need the user. */
 export function attentionList(): AttentionItem[] {
   const s = useStore.getState();
+  const tm = useTerms.getState().machines;
   const out: AttentionItem[] = [];
   for (const m of s.order) {
-    for (const p of s.machines[m]?.snapshot?.panes ?? []) {
-      if (p.agent) out.push({ m, pane: p });
+    for (const r of Object.values(tm[m]?.terminals ?? {})) {
+      const status = agentStatus(r);
+      if (isLive(r) && status && (agentOf(r) || status !== 'idle')) out.push({ m, terminal: r.address, record: r, status });
     }
   }
-  return out.sort((a, b) => statusRank[b.pane.agent_status] - statusRank[a.pane.agent_status]);
+  return out.sort((a, b) => statusRank[b.status] - statusRank[a.status]);
 }
 
 type Rect = { x: number; y: number; w: number; h: number };
 
-export function paneRects(node: LayoutNode, r: Rect = { x: 0, y: 0, w: 1, h: 1 }, out = new Map<string, Rect>()) {
-  if (node.type === 'pane') {
-    out.set(node.pane_id, r);
+/** Each terminal's share of its tab, from the split tree. */
+export function paneRects(node: L.Node, r: Rect = { x: 0, y: 0, w: 1, h: 1 }, out = new Map<string, Rect>()): Map<string, Rect> {
+  if (L.isLeaf(node)) {
+    out.set(node.terminal, r);
     return out;
   }
-  if (node.direction === 'right') {
+  if (!L.isSplit(node)) return out;
+  const [a, b] = node.children;
+  if (node.split === 'horizontal') {
     const w1 = r.w * node.ratio;
-    paneRects(node.first, { x: r.x, y: r.y, w: w1, h: r.h }, out);
-    paneRects(node.second, { x: r.x + w1, y: r.y, w: r.w - w1, h: r.h }, out);
+    paneRects(a, { x: r.x, y: r.y, w: w1, h: r.h }, out);
+    paneRects(b, { x: r.x + w1, y: r.y, w: r.w - w1, h: r.h }, out);
   } else {
     const h1 = r.h * node.ratio;
-    paneRects(node.first, { x: r.x, y: r.y, w: r.w, h: h1 }, out);
-    paneRects(node.second, { x: r.x, y: r.y + h1, w: r.w, h: r.h - h1 }, out);
+    paneRects(a, { x: r.x, y: r.y, w: r.w, h: h1 }, out);
+    paneRects(b, { x: r.x, y: r.y + h1, w: r.w, h: r.h - h1 }, out);
   }
   return out;
 }
 
-function current() {
-  const s = useStore.getState();
-  const m = s.machineId;
-  const snap = m ? s.machines[m]?.snapshot : undefined;
-  const ws = s.workspaceId;
-  if (!m || !snap || !ws) return undefined;
-  const tab = activeTabId(s, m, snap, ws);
-  const layout = tab ? s.machines[m]?.layouts?.[tab] : undefined;
-  const focused = s.focused?.m === m ? s.focused.pane : undefined;
-  return { s, m, snap, ws, tab, layout, focused };
+/** The shown machine's selected workspace and tab, and the focused terminal. */
+export function current() {
+  const m = useStore.getState().machineId;
+  const layout = m ? useTerms.getState().machines[m]?.layout : undefined;
+  if (!m || !layout) return undefined;
+  const ws = L.selectedWorkspace(layout);
+  const tab = ws?.tabs[ws.selected];
+  return { m, layout, ws, tabIndex: ws?.selected ?? 0, tab, focused: tab?.focused || undefined };
 }
 
-function focusPane(m: string, pane: string) {
-  useStore.getState().focusPane({ m, pane });
-  // The terminal mounts on the next render when the pane is new.
-  setTimeout(() => getTerm(m, pane)?.focus(), 30);
+/** Puts the keyboard in a terminal once it is on screen. */
+function focusDom(m: string, terminal: string) {
+  withPane(m, terminal, (h) => h.focus());
+}
+
+function report(e: unknown) {
+  console.warn(e);
+  const msg = e instanceof Error ? e.message : String(e);
+  useStore.getState().toast?.(msg);
 }
 
 /** The reason a machine request failed, from the core's error code. */
 async function machineError(res: Response): Promise<string> {
   const body = (await res.json().catch(() => ({}))) as { error?: string; detail?: string };
-  if (body.error === 'no_local_herdr') return t('remoteHerdr.noLocal');
   if (body.error === 'label_taken') return t('machine.labelTaken');
   if (body.error === 'machine_exists') return t('machine.exists');
   return body.detail || body.error || String(res.status);
@@ -81,7 +94,6 @@ const LOGIN_WAIT_MS = 2 * 60_000;
 /** Opens the authentication terminal once a machine just added turns
  * auth_required; stops watching once it connected or failed otherwise. */
 function awaitLogin(m: string) {
-  /** What the machine's state decides: open the terminal, stop, or wait. */
   const decide = (): 'login' | 'done' | undefined => {
     // The machine may reach the store after the reply that added it.
     const st = useStore.getState().machines[m];
@@ -102,18 +114,7 @@ function awaitLogin(m: string) {
   timer = setTimeout(() => off(), LOGIN_WAIT_MS);
 }
 
-function report(e: unknown) {
-  console.warn(e);
-  const msg = e instanceof Error ? e.message : String(e);
-  useStore.getState().toast?.(msg);
-}
-
-function cwdOf(snap: Snapshot | undefined, pane?: string) {
-  return paneCwd(snap?.panes.find((p) => p.pane_id === pane));
-}
-
-/** Shells a pane waits at the prompt in. A pane started with another
- * program as its shell process counts as running it. */
+/** Shells a terminal waits at the prompt in. */
 const SHELLS = new Set([
   'sh',
   'bash',
@@ -134,133 +135,121 @@ const SHELLS = new Set([
   'powershell',
   'cmd',
 ]);
-/** How long closing a tab waits for herdr to tell what runs in its panes
- * before asking anyway. */
-export const PROCESS_INFO_TIMEOUT_MS = 1500;
 
-interface ProcessInfo {
-  shell_pid?: number | null;
-  foreground_process_group_id?: number | null;
-  foreground_processes?: Array<{ pid: number; name: string }>;
+const procName = (n: string) =>
+  n
+    .replace(/^-/, '')
+    .replace(/\.exe$/i, '')
+    .split('/')
+    .pop() ?? n;
+
+/** What runs in a terminal in front of its shell: the agent's name for an
+ * agent, the foreground program's otherwise; '' when only the shell waits
+ * at its prompt or the program has ended. Jobs sent to the background do
+ * not count. */
+export function runningProgram(r: TerminalRecord | undefined): string {
+  if (!r || !isLive(r)) return '';
+  const fg = r.foreground as { pid?: number; name?: string } | undefined;
+  if (!fg?.name) return '';
+  const name = procName(fg.name);
+  if (fg.pid === r.pid && SHELLS.has(name.toLowerCase())) return '';
+  return agentOf(r) ?? name;
 }
 
-const procName = (n: string) => n.replace(/^-/, '').replace(/\.exe$/i, '');
+/** Asks before ending the programs that run in these terminals; true when
+ * nothing runs or the user agreed. */
+async function confirmEnd(m: string, addresses: string[], title: MessageKey, single?: boolean): Promise<boolean> {
+  const running = [...new Set(addresses.map((a) => runningProgram(terms.terminal(m, a))).filter(Boolean))];
+  if (!running.length) return true;
+  return confirmDialog({
+    title: t(title),
+    message: single
+      ? t('confirm.closePanePrograms', { programs: running.join(', ') })
+      : t('confirm.closeTabPrograms', { programs: running.join(', ') }),
+    confirm: t('confirm.close'),
+    danger: true,
+  });
+}
 
-/** What runs in a pane in front of its shell (herdr's pane.process_info,
- * the terminal's foreground process group): the program's name (the
- * agent's for an agent), '' when only the shell is there waiting at its
- * prompt or the pane has no terminal any more, undefined when herdr cannot
- * tell in time. A job sent to the background does not count. */
-export async function paneProgram(m: string, p: Pane): Promise<string | undefined> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const late = new Promise<undefined>((resolve) => (timer = setTimeout(resolve, PROCESS_INFO_TIMEOUT_MS)));
-  const ask = conn.api<{ process_info?: ProcessInfo }>(m, 'pane.process_info', { pane_id: p.pane_id }).then(
-    (r) => {
-      const info = r?.process_info;
-      const fg = info?.foreground_process_group_id;
-      const procs = info?.foreground_processes ?? [];
-      const leader = procs.find((x) => x.pid === fg) ?? procs[0];
-      if (fg == null || !leader) return undefined;
-      const name = procName(leader.name);
-      if (fg === info?.shell_pid && SHELLS.has(name.toLowerCase())) return '';
-      return p.agent || name;
-    },
-    (e: unknown) => ((e as { code?: string })?.code === 'pane_not_found' ? '' : undefined),
-  );
+/** Tabs and panes being closed: a second close while the first asks does nothing. */
+const closing = new Set<string>();
+
+async function once(key: string, fn: () => Promise<void>) {
+  if (closing.has(key)) return;
+  closing.add(key);
   try {
-    return await Promise.race([ask, late]);
+    await fn();
   } finally {
-    clearTimeout(timer);
+    closing.delete(key);
   }
 }
 
-/** Tabs being closed: a second close-tab key while the first still asks
- * herdr or shows its dialog does nothing. */
-const closing = new Set<string>();
+/** The slot of an insertion (0 before the first item, n after the last) as
+ * the index the moved item ends at. */
+export const slotIndex = (from: number, slot: number) => (slot > from ? slot - 1 : slot);
+
+const axisOf = (dir: 'right' | 'down'): L.Axis => (dir === 'right' ? 'horizontal' : 'vertical');
 
 export const actions = {
-  async split(m: string, pane: string, direction: 'right' | 'down') {
-    const snap = useStore.getState().machines[m]?.snapshot;
+  /** Splits a terminal's pane: the new terminal starts in its directory. */
+  async split(m: string, terminal: string, dir: 'right' | 'down', argv?: string[]) {
+    terms.mutate(m, (l) => L.focusTerminal(l, terminal));
     try {
-      const res = await conn.api(m, 'pane.split', { target_pane_id: pane, direction, cwd: cwdOf(snap, pane), focus: false });
-      const id = res?.pane?.pane_id;
-      if (id) focusPane(m, id);
+      const address = await terms.run(m, { split: true, argv }, (l, a) => {
+        const next = L.splitFocused(l, axisOf(dir), a);
+        return next === l ? L.openTerminal(l, a) : next;
+      });
+      if (address) focusDom(m, address);
     } catch (e) {
       report(e);
     }
   },
 
-  async zoom(m: string, pane: string) {
-    await conn.api(m, 'pane.zoom', { pane_id: pane, mode: 'toggle' }).catch(report);
-    focusPane(m, pane);
+  /** Shows a terminal alone in its tab, or all of the tab again. */
+  zoom(m: string, terminal: string) {
+    const s = useStore.getState();
+    s.setZoomed(s.zoomed?.m === m && s.zoomed.terminal === terminal ? undefined : { m, terminal });
+    focusDom(m, terminal);
   },
 
-  async closePane(m: string, pane: string) {
-    const p = useStore.getState().machines[m]?.snapshot?.panes.find((x) => x.pane_id === pane);
-    if (
-      p?.agent &&
-      p.agent_status === 'working' &&
-      !(await confirmDialog({
-        title: t('confirm.closePaneTitle'),
-        message: t('confirm.closeWorkingPane', { agent: p.agent }),
-        confirm: t('confirm.close'),
-        danger: true,
-      }))
-    )
-      return;
-    await conn.api(m, 'pane.close', { pane_id: pane }).catch(report);
+  /** Ends a terminal after asking when a program runs in it; its pane goes
+   * with the event that follows. */
+  async closePane(m: string, terminal: string) {
+    await once(`pane ${m} ${terminal}`, async () => {
+      if (!(await confirmEnd(m, [terminal], 'confirm.closePaneTitle', true))) return;
+      terms.mutate(m, (l) => L.closeTerminal(l, terminal));
+      await terms.kill(m, terminal);
+    });
   },
 
-  async newTab(m?: string, ws?: string) {
-    const c = current();
-    m ??= c?.m;
-    ws ??= c?.ws;
-    if (!m || !ws) return;
-    // The focused pane's cwd, when it is in that workspace.
-    const focused = c?.m === m ? c.snap.panes.find((p) => p.pane_id === c.focused && p.workspace_id === ws) : undefined;
+  /** A new terminal in a new tab of a workspace (the selected one). */
+  async newTab(m?: string, ws?: string, argv?: string[]) {
+    m ??= current()?.m ?? useStore.getState().machineId;
+    if (!m) return;
     try {
-      const res = await conn.api(m, 'tab.create', { workspace_id: ws, cwd: paneCwd(focused), focus: false });
-      const tab = res?.tab?.tab_id;
-      if (tab) useStore.getState().selectTab(m, ws, tab);
-      const root = res?.root_pane?.pane_id;
-      if (root) focusPane(m, root);
+      const address = await terms.run(m, { workspace: ws, argv }, (l, a) =>
+        L.openTerminal(l, a, ws && l.workspaces.some((w) => w.id === ws) ? ws : undefined),
+      );
+      if (address) focusDom(m, address);
     } catch (e) {
       report(e);
     }
   },
 
-  /** Closes a tab at once when each of its panes only has its shell waiting
-   * at the prompt; otherwise asks first, naming the programs that would end
-   * (an agent counts even while it waits for input). */
-  async closeTab(m: string, tab: string) {
-    const key = `${m} ${tab}`;
-    if (closing.has(key)) return;
-    closing.add(key);
-    try {
-      const snap = useStore.getState().machines[m]?.snapshot;
-      const panes = snap?.panes.filter((p) => p.tab_id === tab) ?? [];
-      const programs = await Promise.all(panes.map((p) => paneProgram(m, p)));
-      const running = [...new Set(programs.filter((x): x is string => !!x))];
-      const unknown = !panes.length || programs.includes(undefined);
-      const busy = panes.filter((p) => p.agent && p.agent_status === 'working').length;
-      if (
-        (running.length || unknown) &&
-        !(await confirmDialog({
-          title: t('confirm.closeTabTitle'),
-          message: running.length
-            ? t('confirm.closeTabPrograms', { programs: running.join(', ') })
-            : busy
-              ? t('confirm.closeWorkingTab', { n: busy })
-              : t('confirm.closeTabPanes', { n: Math.max(panes.length, 1) }),
-          confirm: t('confirm.close'),
-          danger: true,
-        }))
-      )
-        return;
-      await conn.api(m, 'tab.close', { tab_id: tab }).catch(report);
-    } finally {
-      closing.delete(key);
-    }
+  /** Closes a tab and ends its terminals, asking first when a program runs. */
+  async closeTab(m: string, ws: string, index: number) {
+    const tab = terms.layout(m)?.workspaces.find((w) => w.id === ws)?.tabs[index];
+    if (!tab) return;
+    const addresses = L.tabTerminals(tab);
+    await once(`tab ${m} ${ws} ${addresses.join(',')}`, async () => {
+      if (!(await confirmEnd(m, addresses, 'confirm.closeTabTitle'))) return;
+      terms.mutate(m, (l) => {
+        const w = l.workspaces.find((x) => x.id === ws);
+        const i = w?.tabs.findIndex((x) => L.tabTerminals(x).join() === addresses.join()) ?? -1;
+        return i < 0 ? l : L.closeTab(l, ws, i);
+      });
+      await Promise.all(addresses.map((a) => terms.kill(m, a)));
+    });
   },
 
   /** Adds an SSH machine to the core's machines (docs/features/02) and
@@ -291,29 +280,17 @@ export const actions = {
   async setMachineEnabled(m: string, enabled: boolean) {
     const st = useStore.getState().machines[m];
     const machine = st?.label ?? m;
-    let stop = false;
-    if (!enabled && st?.status !== 'disabled') {
-      const ask = {
+    if (
+      !enabled &&
+      st?.status !== 'disabled' &&
+      !(await confirmDialog({
         title: t('confirm.disableMachineTitle', { machine }),
         message: t('confirm.disableMachine'),
         confirm: t('menu.disableMachine'),
         danger: true,
-      };
-      // An SSH machine's herdr server can go with it (checked by default)
-      // while its agent is connected and the server answers.
-      if (st?.kind === 'ssh' && st.status === 'ready' && !herdrMissing(st) && !st.herdr_error) {
-        const res = await confirmCheckDialog({
-          ...ask,
-          message: t('confirm.disableMachineStop'),
-          check: t('confirm.disableStopHerdr', { machine }),
-          checked: true,
-        });
-        if (!res) return;
-        stop = res.checked;
-      } else if (!(await confirmDialog(ask))) return;
-    }
-    // A failed stop is reported; the machine is disabled all the same.
-    if (stop) await herdrAction(m, () => runHerdr(m, 'stop'));
+      }))
+    )
+      return;
     try {
       const res = await fetch(`/api/m/${encodeURIComponent(m)}/enabled`, {
         method: 'PUT',
@@ -326,8 +303,7 @@ export const actions = {
     }
   },
 
-  /** Removes an SSH machine from the core's machines after asking
-   * (docs/features/02). */
+  /** Removes an SSH machine from the core's machines after asking. */
   async removeMachine(m: string) {
     const st = useStore.getState().machines[m];
     const machine = st?.label ?? m;
@@ -349,7 +325,7 @@ export const actions = {
     }
   },
 
-  /** Renames an SSH machine (docs/features/02). */
+  /** Renames an SSH machine. */
   async renameMachine(m: string, label: string) {
     const st = useStore.getState().machines[m];
     if (!label || !st || label === st.label) return;
@@ -365,88 +341,95 @@ export const actions = {
     }
   },
 
-  /** Restarts a machine's herdr server after asking, since every terminal
-   * there closes; one that is not running is started (docs/features/17). */
-  async restartHerdr(m: string) {
-    await herdrAction(m, async () => {
-      if (await confirmHerdrEnd(m, 'restart')) await runHerdr(m, 'restart');
-    });
+  /** Starts, restarts or stops a machine's terminal core
+   * (POST /api/m/{id}/hc/{action}); restarting and stopping ask first. One
+   * action at a time per machine. */
+  async terminalCore(m: string, action: 'start' | 'restart' | 'stop') {
+    const s = useStore.getState();
+    const machine = s.machines[m]?.label ?? m;
+    if (s.hcBusy[m]) return;
+    if (
+      action !== 'start' &&
+      !(await confirmDialog({
+        title: t(action === 'stop' ? 'core.stopTitle' : 'core.restartTitle', { machine }),
+        message: t(action === 'stop' ? 'core.stopInfo' : 'core.restartInfo'),
+        confirm: t(action === 'stop' ? 'core.stop' : 'core.restart'),
+        danger: action === 'stop',
+      }))
+    )
+      return;
+    s.setHcBusy(m, true);
+    try {
+      const res = await fetch(`/api/m/${encodeURIComponent(m)}/hc/${action}`, { method: 'POST' });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        const code = `backend.${body.error}`;
+        throw new Error(t('core.failed', { machine, error: hasMessage(code) ? t(code) : body.error || String(res.status) }));
+      }
+      s.toast(t(action === 'stop' ? 'core.stopped' : action === 'restart' ? 'core.restarted' : 'core.started', { machine }));
+      // A started core is followed again.
+      if (action !== 'stop') terms.subscribe(m);
+    } catch (e) {
+      report(e);
+    } finally {
+      useStore.getState().setHcBusy(m, false);
+    }
   },
 
-  /** Stops a machine's herdr server after asking (docs/features/17). */
-  async stopHerdr(m: string) {
-    await herdrAction(m, async () => {
-      if (await confirmHerdrEnd(m, 'stop')) await runHerdr(m, 'stop');
-    });
-  },
-
-  /** Starts a machine's herdr server; a running one is left as it is. */
-  async startHerdr(m: string) {
-    await herdrAction(m, () => runHerdr(m, 'start'));
-  },
-
-  /** Checks for a newer herdr and, for the application's own copy on the
-   * core host, updates it after asking (docs/features/17). */
-  async updateHerdr(m: string) {
-    await herdrAction(m, () => updateHerdr(m));
-  },
-
-  async newWorkspace(m?: string, cwd?: string) {
-    const c = current();
-    m ??= c?.m;
+  /** Creates a workspace and opens a terminal in it. Without a directory the
+   * dialog asks for one and a name; without a name it is called after its
+   * directory. */
+  async newWorkspace(m?: string, cwd?: string, name = '') {
+    m ??= useStore.getState().machineId;
     if (!m) return;
-    let label: string | undefined;
+    useStore.getState().selectMachine(m);
+    terms.subscribe(m);
     if (cwd === undefined) {
-      const def = (c?.m === m && c.focused && cwdOf(c.snap, c.focused)) || useStore.getState().machines[m]?.info?.home || '~';
+      const c = current();
+      const def = (c?.m === m && terms.directory(m, c.focused)) || useStore.getState().machines[m]?.info?.home || '~';
       const input = await newWorkspaceDialog(m, def);
       if (!input) return;
       cwd = input.cwd;
-      label = input.label || undefined;
+      name = input.label;
     }
-    try {
-      const res = await conn.api(m, 'workspace.create', { cwd, label, focus: false });
-      const ws = res?.workspace?.workspace_id;
-      if (ws) useStore.getState().selectWorkspace(m, ws);
-      const root = res?.root_pane?.pane_id;
-      if (root) focusPane(m, root);
-    } catch (e) {
-      report(e);
-    }
+    const id = L.newWorkspaceId();
+    const title = name || cwd.replace(/\/+$/, '').split('/').pop() || t('workspace.default');
+    const dir = cwd;
+    await whenLoaded(m);
+    terms.mutate(m, (l) => L.createWorkspace(l, id, title, dir));
+    await actions.newTab(m, id);
   },
 
+  /** Closes a workspace after asking, and ends its terminals. */
   async closeWorkspace(m: string, ws: string) {
-    const label = useStore.getState().machines[m]?.snapshot?.workspaces.find((w) => w.workspace_id === ws)?.label ?? ws;
+    const w = terms.layout(m)?.workspaces.find((x) => x.id === ws);
+    if (!w) return;
+    const addresses = L.workspaceTerminals(w);
     if (
       !(await confirmDialog({
         title: t('confirm.closeWorkspaceTitle'),
-        message: t('confirm.closeWorkspace', { label }),
+        message: t('confirm.closeWorkspace', { label: w.name || t('workspace.default') }),
         confirm: t('confirm.close'),
         danger: true,
       }))
     )
       return;
-    await conn.api(m, 'workspace.close', { workspace_id: ws }).catch(report);
+    terms.mutate(m, (l) => L.closeWorkspace(l, ws));
+    await Promise.all(addresses.map((a) => terms.kill(m, a)));
   },
 
-  /** Moves a tab to a slot of its workspace's tab order: 0 is before the
-   * first tab, the tab count after the last (herdr's insert_index). */
-  async moveTab(m: string, tab: string, index: number) {
-    try {
-      const res = await conn.api(m, 'tab.move', { tab_id: tab, insert_index: index });
-      if (res?.tabs) useStore.getState().setOrder(m, { tabs: res.tabs });
-    } catch (e) {
-      useStore.getState().toast(t('workspace.moveFailed', { error: e instanceof Error ? e.message : String(e) }));
-    }
+  /** Moves a tab to a slot of its workspace's tabs: 0 is before the first
+   * tab, the tab count after the last. */
+  moveTab(m: string, ws: string, from: number, slot: number) {
+    terms.mutate(m, (l) => L.moveTab(l, ws, from, slotIndex(from, slot)));
   },
 
-  /** Moves a workspace to a slot of its machine's workspace order. */
-  async moveWorkspace(m: string, ws: string, index: number) {
-    try {
-      const res = await conn.api(m, 'workspace.move', { workspace_id: ws, insert_index: index });
-      if (res?.workspaces) useStore.getState().setOrder(m, { workspaces: res.workspaces });
-    } catch (e) {
-      useStore.getState().toast(t('sidebar.moveFailed', { error: e instanceof Error ? e.message : String(e) }));
-    }
+  /** Moves a workspace to a slot of its machine's workspaces. */
+  moveWorkspace(m: string, ws: string, slot: number) {
+    terms.mutate(m, (l) => {
+      const from = l.workspaces.findIndex((w) => w.id === ws);
+      return from < 0 ? l : L.moveWorkspace(l, ws, slotIndex(from, slot));
+    });
   },
 
   /** Starts renaming in place; the tab, workspace or pane header shows an editor. */
@@ -456,29 +439,52 @@ export const actions = {
     s.setRenaming({ kind, m, id });
   },
 
-  async renameTab(m: string, tab: string, label: string) {
-    if (!label) return;
-    await conn.api(m, 'tab.rename', { tab_id: tab, label }).catch(report);
+  /** Names a tab; an empty name gives it its terminal's title again. */
+  renameTab(m: string, ws: string, index: number, name: string) {
+    terms.mutate(m, (l) => L.renameTab(l, ws, index, name));
   },
 
-  async renameWorkspace(m: string, ws: string, label: string) {
-    if (!label) return;
-    await conn.api(m, 'workspace.rename', { workspace_id: ws, label }).catch(report);
+  renameWorkspace(m: string, ws: string, name: string) {
+    if (name) terms.mutate(m, (l) => L.renameWorkspace(l, ws, name));
   },
 
-  /** An empty label clears the pane's name (its terminal title shows again). */
-  async renamePane(m: string, pane: string, label: string) {
-    await conn.api(m, 'pane.rename', { pane_id: pane, label: label || null }).catch(report);
+  /** Names a terminal's pane (its "name" label); empty shows its title again. */
+  async renamePane(m: string, terminal: string, name: string) {
+    await terms.call(m, 'terminal.label', { terminal, labels: { name } }).catch(report);
+  },
+
+  /** Shows a machine: its terminals are followed from now on. */
+  showMachine(m: string) {
+    useStore.getState().selectMachine(m);
+    terms.subscribe(m);
+  },
+
+  selectWorkspace(m: string, ws: string) {
+    useStore.getState().selectMachine(m);
+    terms.subscribe(m);
+    terms.mutate(m, (l) => L.selectWorkspace(l, ws));
+  },
+
+  selectTab(m: string, ws: string, index: number) {
+    terms.mutate(m, (l) => L.selectTab(l, ws, index));
+  },
+
+  /** Selects a terminal's workspace and tab and gives it the focus. */
+  focusTerminal(m: string, terminal: string) {
+    useStore.getState().selectMachine(m);
+    terms.subscribe(m);
+    terms.mutate(m, (l) => L.focusTerminal(l, terminal));
+    focusDom(m, terminal);
   },
 
   focusDirection(dir: 'left' | 'right' | 'up' | 'down') {
     const c = current();
-    if (!c?.layout) return;
-    const rects = paneRects(c.layout.root);
+    if (!c?.tab) return;
+    const rects = paneRects(c.tab.root);
     const from = c.focused ? rects.get(c.focused) : undefined;
     if (!from) {
       const first = rects.keys().next().value;
-      if (first) focusPane(c.m, first);
+      if (first) actions.focusTerminal(c.m, first);
       return;
     }
     const cx = from.x + from.w / 2;
@@ -504,51 +510,36 @@ export const actions = {
         best = id;
       }
     }
-    if (best) focusPane(c.m, best);
+    if (best) actions.focusTerminal(c.m, best);
   },
 
   cyclePane(step: number) {
     const c = current();
-    if (!c?.layout) return;
-    const ids = [...paneRects(c.layout.root).keys()];
+    if (!c?.tab) return;
+    const ids = L.tabTerminals(c.tab);
     if (!ids.length) return;
     const i = c.focused ? ids.indexOf(c.focused) : -1;
-    focusPane(c.m, ids[(i + step + ids.length) % ids.length]);
+    actions.focusTerminal(c.m, ids[(i + step + ids.length) % ids.length]);
   },
 
   switchTab(step: number | { index: number }) {
     const c = current();
-    if (!c) return;
-    const tabs = workspaceTabs(c.snap, c.ws);
-    if (!tabs.length) return;
-    let next;
-    if (typeof step === 'number') {
-      const i = tabs.findIndex((t) => t.tab_id === c.tab);
-      next = tabs[(i + step + tabs.length) % tabs.length];
-    } else next = tabs[step.index];
-    if (next) useStore.getState().selectTab(c.m, c.ws, next.tab_id);
+    if (!c?.ws) return;
+    const n = c.ws.tabs.length;
+    if (!n) return;
+    const index = typeof step === 'number' ? (c.ws.selected + step + n) % n : step.index;
+    if (index < n) actions.selectTab(c.m, c.ws.id, index);
   },
 
-  focusAgent(m: string, pane: string) {
-    const s = useStore.getState();
-    const p = s.machines[m]?.snapshot?.panes.find((x) => x.pane_id === pane);
-    if (!p) return;
-    s.selectWorkspace(m, p.workspace_id);
-    s.selectTab(m, p.workspace_id, p.tab_id);
-    // A "done" agent is then marked as seen in herdr (seen.ts).
-    focusPane(m, pane);
-  },
-
-  focusedContext() {
+  /** The focused terminal, its machine and its directory. */
+  focusedContext(): { m: string; terminal?: string; cwd?: string } | undefined {
     const c = current();
     if (!c) return undefined;
-    return { m: c.m, pane: c.focused, cwd: c.focused ? cwdOf(c.snap, c.focused) : undefined };
+    return { m: c.m, terminal: c.focused, cwd: c.focused ? terms.directory(c.m, c.focused) : (c.ws?.cwd ?? undefined) || undefined };
   },
 
   openPath(m: string, path: string, line?: number, col?: number) {
-    if (mediaExt.test(path) || !line) {
-      if (mediaExt.test(path)) return useStore.getState().openDock({ kind: 'preview', m, path });
-    }
+    if (mediaExt.test(path)) return useStore.getState().openDock({ kind: 'preview', m, path });
     // Code (or unknown) files go to VS Code at the given position; fall back
     // to the preview panel when code-server is unavailable.
     bridge.openFile(m, path, line, col).catch(() => useStore.getState().openDock({ kind: 'preview', m, path }));
@@ -579,155 +570,65 @@ export const actions = {
   /** Shows or hides the selected workspace's VS Code panel: an open panel
    * (VS Code or preview) closes and the terminal gets the keys again;
    * otherwise the VS Code panel the workspace showed last comes back while it
-   * is of the focused pane's machine (its window is kept for a while, so it is
-   * back at once), else the focused pane's folder opens in VS Code. */
+   * is of the focused terminal's machine, else the focused terminal's folder
+   * opens in VS Code. */
   toggleCode() {
     const s = useStore.getState();
+    const c = actions.focusedContext();
     if (currentDock(s)) {
       s.openDock(undefined);
-      const c = actions.focusedContext();
-      if (c?.pane) getTerm(c.m, c.pane).focus();
+      if (c?.terminal) paneHandle(c.m, c.terminal)?.focus();
       return;
     }
-    const c = actions.focusedContext();
     const last = currentLastCode(s);
     if (last && (!c || last.m === c.m)) s.openDock(last);
     else if (c) actions.openCode(c.m, c.cwd);
   },
 
+  /** The selected tab: its machine, workspace, index and name. */
   currentTab() {
     const c = current();
-    if (!c?.tab) return undefined;
-    const t = c.snap.tabs.find((x) => x.tab_id === c.tab);
-    return { m: c.m, tab: c.tab, label: t?.label ?? '' };
+    if (!c?.ws || !c.tab) return undefined;
+    return { m: c.m, ws: c.ws.id, index: c.tabIndex, name: tabName(c.m, c.tab) };
   },
 
   /** Jump to the agent that most needs attention (blocked first, then done). */
   openAttention() {
     const best = attentionList()[0];
-    if (best) actions.focusAgent(best.m, best.pane.pane_id);
+    if (best) actions.focusTerminal(best.m, best.terminal);
   },
 
-  async runInNewPane(m: string, command: string, cwd?: string) {
-    const c = current();
-    const target = c?.m === m ? c.focused : undefined;
-    try {
-      const res = await conn.api(m, 'pane.split', { target_pane_id: target, direction: 'down', cwd, focus: false });
-      const id = res?.pane?.pane_id;
-      if (!id) return;
-      await conn.api(m, 'pane.send_text', { pane_id: id, text: command + '\r' });
-      focusPane(m, id);
-    } catch (e) {
-      report(e);
-    }
-  },
-
-  /** Split the focused pane and start a coding agent in the new pane. */
+  /** Starts a coding agent in a pane split off the focused one. */
   async startAgent(kind: string) {
     const c = current();
     if (!c) return;
-    const target = c.focused;
-    const cwd = target ? cwdOf(c.snap, target) : undefined;
-    try {
-      const res = await conn.api(c.m, 'pane.split', { target_pane_id: target, direction: 'right', cwd, focus: false });
-      const pane = res?.pane?.pane_id;
-      if (!pane) return;
-      focusPane(c.m, pane);
-      const name = `${kind}-${Math.random().toString(36).slice(2, 6)}`;
-      // agent.start waits for the shell prompt and the agent to become ready.
-      await conn.api(c.m, 'agent.start', { name, kind, pane_id: pane, timeout_ms: 60000 });
-    } catch (e) {
-      report(e);
-    }
+    if (c.focused) await actions.split(c.m, c.focused, 'right', [kind]);
+    else await actions.newTab(c.m, undefined, [kind]);
   },
 
+  /** Types text into the focused terminal (a chord's prefix sent on). */
   sendLiteral(text: string) {
     const c = current();
-    if (c?.focused) getTerm(c.m, c.focused)?.input(text);
+    if (c?.focused) paneHandle(c.m, c.focused)?.type(text);
   },
 };
 
-/** Checks for a newer herdr and updates the application's copy after
- * asking (actions.updateHerdr). */
-async function updateHerdr(m: string) {
-  const { toast } = useStore.getState();
-  // The status says whether this is the application's copy; only that
-  // one is checked against herdr's latest release.
-  const cur = await herdrRequest(m);
-  if (!cur.error && !cur.managed) return toast(t('herdr.error.not_managed'));
-  toast(t('herdr.busy.check'));
-  const st = await herdrRequest(m, 'check');
-  if (st.error) return report(new Error(t('herdr.checkFailed', { error: herdrDetail(st) })));
-  if (!st.managed) return toast(t('herdr.error.not_managed'));
-  if (!isNewer(st.latest, st.version)) return toast(t('herdr.upToDate', { version: st.version ?? '' }));
-  const version = st.latest ?? '';
-  if (
-    !(await confirmDialog({
-      title: t('herdr.updateTitle', { version }),
-      message: t('herdr.updateMessage', { version: st.version ?? '' }),
-      confirm: t('herdr.update'),
-    }))
-  )
-    return;
-  toast(t('herdr.busy.update'));
-  const res = await herdrRequest(m, 'update');
-  if (res.error) report(new Error(t('herdr.updateFailed', { error: herdrDetail(res) })));
-  else toast(t(res.restart_needed ? 'herdr.updatedRestart' : 'herdr.updated', { version: res.version ?? version }));
+/** A tab's name: its own, else its focused terminal's title. */
+export function tabName(m: string, tab: L.Tab): string {
+  return tab.name || terminalTitle(terms.terminal(m, tab.focused), tab.focused);
 }
 
-/** herdr's error message for a reply, with herdr's own output. */
-function herdrDetail(st: MachineHerdr): string {
-  return [herdrError(st), st.output].filter(Boolean).join(' ');
-}
-
-/** Asks before stopping or restarting a machine's herdr server: every
- * terminal there closes. */
-function confirmHerdrEnd(m: string, action: 'stop' | 'restart'): Promise<boolean> {
-  const st = useStore.getState().machines[m];
-  const machine = st?.label ?? m;
-  return confirmDialog({
-    title: t(action === 'stop' ? 'herdr.stopTitleMachine' : 'herdr.restartTitleMachine', { machine }),
-    message: st?.kind === 'local' ? t('herdr.stopMessage') : t('herdr.stopMessageMachine', { machine }),
-    confirm: t(action === 'stop' ? 'herdr.stop' : 'herdr.restart'),
-    danger: true,
+/** Resolves once a machine's layout was read. */
+function whenLoaded(m: string): Promise<void> {
+  if (terms.layout(m)) return Promise.resolve();
+  return new Promise((resolve) => {
+    const off = useTerms.subscribe((s) => {
+      if (s.machines[m]?.layout) {
+        off();
+        resolve();
+      }
+    });
   });
 }
 
-const herdrToasts: Record<'start' | 'stop' | 'restart', [busy: MessageKey, done: MessageKey, failed: MessageKey]> = {
-  start: ['herdr.starting', 'herdr.started', 'herdr.startFailed'],
-  stop: ['herdr.stopping', 'herdr.stopped', 'herdr.stopFailed'],
-  restart: ['herdr.restarting', 'herdr.restarted', 'herdr.restartFailed'],
-};
-
-/** Runs fn as machine m's one herdr action at a time (its confirmation
- * included): another one asked for meanwhile is refused with a note, and the
- * entries that start one are disabled (menus.tsx, Sidebar.tsx). */
-async function herdrAction(m: string, fn: () => Promise<unknown>) {
-  const { herdrBusy, setHerdrBusy, toast, machines } = useStore.getState();
-  if (herdrBusy[m]) {
-    toast(t('herdr.busyMachine', { machine: machines[m]?.label ?? m }));
-    return;
-  }
-  setHerdrBusy(m, true);
-  try {
-    await fn();
-  } finally {
-    setHerdrBusy(m, false);
-  }
-}
-
-/** Runs a server action on a machine's herdr and reports it in toasts;
- * resolves whether it succeeded. */
-async function runHerdr(m: string, action: 'start' | 'stop' | 'restart'): Promise<boolean> {
-  const machine = useStore.getState().machines[m]?.label ?? m;
-  const [busy, done, failed] = herdrToasts[action];
-  const { toast } = useStore.getState();
-  toast(t(busy, { machine }));
-  const res = await herdrRequest(m, action);
-  if (res.error) {
-    report(new Error(t(failed, { machine, error: herdrDetail(res) })));
-    return false;
-  }
-  toast(t(done, { machine }));
-  return true;
-}
+export type { TermRef };

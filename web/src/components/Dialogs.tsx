@@ -3,7 +3,7 @@ import { ArrowUp, File, Folder, X } from 'lucide-react';
 import { closeDialog, completionParts, useDialog, type DialogRequest } from '../dialog';
 import { startDownload } from '../download';
 import { formatSize, listDir, type RemoteStat } from '../lib/files';
-import { shortPath } from '../lib/herdr';
+import { shortPath } from '../lib/machine';
 import { useStore } from '../state/store';
 import { t } from '../i18n';
 

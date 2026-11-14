@@ -3,13 +3,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 
-const api = vi.fn((..._args: unknown[]): Promise<unknown> => Promise.resolve({}));
-vi.mock('../lib/conn', () => ({ conn: { api: (...a: unknown[]) => api(...a), setTheme: () => {} } }));
+vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 
 import { useStore } from '../state/store';
 import { insertSlot, near } from '../reorderDrag';
 import { dragBegins, trackDrag } from '../drag';
-import { withOrder, workspaceTabs, type MachineState } from '../lib/herdr';
+import type { MachineState } from '../lib/machine';
+import { FakeCore, settle } from './fakeTerms';
 import { closeMenu, isItem, openMenu, stepIndex, tidy, useMenu, type MenuEntry, type MenuItem } from '../contextMenu';
 import { machineMenu, paneMenu, sidebarMenu, tabMenu, workspaceMenu } from '../menus';
 import { actions } from '../actions';
@@ -113,20 +113,6 @@ describe('near', () => {
   });
 });
 
-describe('withOrder', () => {
-  const id = (x: { id: string }) => x.id;
-  const items = [{ id: 'a1' }, { id: 'b1' }, { id: 'a2' }, { id: 'a3' }];
-  it('puts a group in its new order where the group was', () => {
-    const fresh = [{ id: 'a3', v: 1 }, { id: 'a1' }, { id: 'a2' }];
-    expect(withOrder(items, id, fresh)).toEqual([{ id: 'a3', v: 1 }, { id: 'b1' }, { id: 'a1' }, { id: 'a2' }]);
-  });
-  it('leaves the list alone when the group is not in it', () => {
-    expect(withOrder(items, id, [{ id: 'a2' }, { id: 'a1' }])).toEqual([{ id: 'a2' }, { id: 'b1' }, { id: 'a1' }, { id: 'a3' }]);
-    expect(withOrder(items, id, [{ id: 'a1' }, { id: 'a2' }, { id: 'zz' }])).toBe(items);
-    expect(withOrder(items, id, [{ id: 'a1' }, { id: 'a1' }, { id: 'a2' }])).toBe(items);
-  });
-});
-
 describe('menu entries', () => {
   const item = (label: string, disabled = false): MenuItem => ({ label, disabled, run: () => {} });
   it('drops stray separators', () => {
@@ -146,56 +132,57 @@ describe('menu entries', () => {
   });
 });
 
-// Tab numbers are not positions in herdr: the order is the snapshot's.
-function machine(): MachineState {
-  return {
-    id: 'm',
-    label: 'm',
-    status: 'ready',
-    snapshot: {
-      workspaces: [
-        { workspace_id: 'w1', number: 1, label: 'one', active_tab_id: 't1' },
-        { workspace_id: 'w2', number: 2, label: 'two', active_tab_id: 'u1' },
-      ],
+const layout = () => ({
+  version: 2,
+  workspaces: [
+    {
+      id: 'w1w1w1w1',
+      name: 'one',
+      cwd: '/src',
       tabs: [
-        { tab_id: 't1', workspace_id: 'w1', number: 1, label: 'a' },
-        { tab_id: 'tA', workspace_id: 'w1', number: 10, label: 'b' },
-        { tab_id: 'u1', workspace_id: 'w2', number: 1, label: 'c' },
-        { tab_id: 't2', workspace_id: 'w1', number: 2, label: 'd' },
+        { root: { terminal: 'p1' }, focused: 'p1', name: 'a' },
+        { root: { terminal: 'p2' }, focused: 'p2', name: 'b' },
+        { root: { terminal: 'p3' }, focused: 'p3', name: 'd' },
       ],
-      panes: [{ pane_id: 'p1', workspace_id: 'w1', tab_id: 't1', cwd: '/src' }],
+      selected: 0,
     },
-  } as unknown as MachineState;
-}
+    { id: 'w2w2w2w2', name: 'two', cwd: '', tabs: [{ root: { terminal: 'p4' }, focused: 'p4' }], selected: 0 },
+  ],
+  selected: 0,
+});
 
 const labels = (e: MenuEntry[]) => e.filter(isItem).map((i) => i.label);
 const find = (e: MenuEntry[], label: string) => e.filter(isItem).find((i) => i.label === label)!;
-const tabIds = () => workspaceTabs(useStore.getState().machines.m.snapshot!, 'w1').map((t) => t.tab_id);
 
 describe('menus', () => {
-  beforeEach(() => {
-    api.mockReset();
-    api.mockImplementation(() => Promise.resolve({}));
+  let core: FakeCore;
+  const tabNames = () => core.layout('m')!.workspaces[0].tabs.map((t) => t.name);
+  beforeEach(async () => {
+    core = new FakeCore();
+    const term = (a: string, cwd: string) => FakeCore.term(a, { cwd });
+    core.machine('m', [term('p1', '/src'), term('p2', '/src'), term('p3', '/src'), term('p4', '/tmp')], layout());
+    core.install();
     const s = useStore.getState();
     s.setReadOnly(false);
-    s.setMachines([machine()]);
-    s.selectWorkspace('m', 'w1');
-    s.selectTab('m', 'w1', 't1');
+    s.setMachines([{ id: 'm', label: 'm', kind: 'local', status: 'ready' } as unknown as MachineState]);
+    s.selectMachine('m');
+    core.model.subscribe('m');
+    await settle();
   });
 
   it('has no items in read-only mode, so the browser menu shows', () => {
     useStore.getState().setReadOnly(true);
-    expect(paneMenu('m', 'p1', false)).toEqual([]);
-    expect(tabMenu('m', 'w1', 't1')).toEqual([]);
-    expect(workspaceMenu('m', 'w1')).toEqual([]);
+    expect(paneMenu('m', 'p1')).toEqual([]);
+    expect(tabMenu('m', 'w1w1w1w1', 0)).toEqual([]);
+    expect(workspaceMenu('m', 'w1w1w1w1')).toEqual([]);
     const ev = { clientX: 1, clientY: 1, preventDefault: vi.fn(), stopPropagation: vi.fn() };
-    openMenu(ev, tabMenu('m', 'w1', 't1'));
+    openMenu(ev, tabMenu('m', 'w1w1w1w1', 0));
     expect(ev.preventDefault).not.toHaveBeenCalled();
     expect(useMenu.getState().menu).toBeUndefined();
   });
 
-  it('offers the pane commands', () => {
-    expect(labels(paneMenu('m', 'p1', false))).toEqual([
+  it('offers the pane commands, which act on that pane', async () => {
+    expect(labels(paneMenu('m', 'p1'))).toEqual([
       'Rename pane',
       'Split right',
       'Split down',
@@ -205,73 +192,71 @@ describe('menus', () => {
       'Git Graph',
       'Close pane',
     ]);
-    expect(labels(paneMenu('m', 'p1', true))).toContain('Restore');
-    find(paneMenu('m', 'p1', false), 'Split down').run();
-    expect(api).toHaveBeenCalledWith('m', 'pane.split', { target_pane_id: 'p1', direction: 'down', cwd: '/src', focus: false });
+    find(paneMenu('m', 'p1'), 'Zoom').run();
+    expect(labels(paneMenu('m', 'p1'))).toContain('Restore');
+    useStore.getState().setZoomed(undefined);
+    find(paneMenu('m', 'p1'), 'Split down').run();
+    await vi.waitFor(() => expect(core.calls.some((c) => c.method === 'terminal.run')).toBe(true));
+    // The new terminal starts in the split one's folder and goes below it.
+    expect(core.calls.find((c) => c.method === 'terminal.run')?.params).toEqual({ keep: false, cwd: '/src' });
+    await settle();
+    expect(core.layout('m')!.workspaces[0].tabs[0]).toMatchObject({
+      root: { split: 'vertical', children: [{ terminal: 'p1' }, { terminal: 't1' }] },
+      focused: 't1',
+    });
   });
 
-  it('moves tabs by slot and shows key hints only for the current tab', async () => {
-    const first = tabMenu('m', 'w1', 't1');
+  it('moves tabs and shows key hints only for the current tab', async () => {
+    const first = tabMenu('m', 'w1w1w1w1', 0);
     expect(find(first, 'Move left').disabled).toBe(true);
     expect(find(first, 'Move right').disabled).toBe(false);
     expect(find(first, 'Rename tab').hint).toBeTruthy();
-    const last = tabMenu('m', 'w1', 't2');
+    const last = tabMenu('m', 'w1w1w1w1', 2);
     expect(find(last, 'Move right').disabled).toBe(true);
     expect(find(last, 'Rename tab').hint).toBeUndefined();
-
-    // herdr answers with the workspace's tabs in their new order.
-    api.mockImplementation(() =>
-      Promise.resolve({
-        type: 'tab_list',
-        tabs: [
-          { tab_id: 'tA', workspace_id: 'w1', number: 10, label: 'b' },
-          { tab_id: 't1', workspace_id: 'w1', number: 1, label: 'a' },
-          { tab_id: 't2', workspace_id: 'w1', number: 2, label: 'd' },
-        ],
-      }),
-    );
     find(first, 'Move right').run();
-    expect(api).toHaveBeenCalledWith('m', 'tab.move', { tab_id: 't1', insert_index: 2 });
-    await vi.waitFor(() => expect(tabIds()).toEqual(['tA', 't1', 't2']));
-    find(tabMenu('m', 'w1', 't2'), 'Move left').run();
-    expect(api).toHaveBeenLastCalledWith('m', 'tab.move', { tab_id: 't2', insert_index: 1 });
+    await settle();
+    expect(tabNames()).toEqual(['b', 'a', 'd']);
+    // The selection stays with its tab.
+    expect(core.layout('m')!.workspaces[0].selected).toBe(1);
   });
 
-  it('moves from where the item is when the menu item runs', () => {
-    const left = find(tabMenu('m', 'w1', 't2'), 'Move left');
-    const down = find(workspaceMenu('m', 'w1'), 'Move down');
-    // Another client moves t2 to the front and w1 to the end meanwhile.
-    const m = machine();
-    const snap = m.snapshot!;
-    snap.tabs = [snap.tabs[3], snap.tabs[0], snap.tabs[1], snap.tabs[2]];
-    snap.workspaces = [snap.workspaces[1], snap.workspaces[0]];
-    useStore.getState().setMachines([m]);
+  it('moves from where the item is when the menu item runs', async () => {
+    const left = find(tabMenu('m', 'w1w1w1w1', 2), 'Move left');
+    const down = find(workspaceMenu('m', 'w1w1w1w1'), 'Move down');
+    // Another client moves "d" to the front and "one" to the end meanwhile.
+    const l = layout();
+    l.workspaces[0].tabs = [l.workspaces[0].tabs[2], l.workspaces[0].tabs[0], l.workspaces[0].tabs[1]];
+    l.workspaces.reverse();
+    const fm = core.machines.get('m')!;
+    fm.layout = l;
+    fm.version++;
+    core.event('m', 'doc', '', { name: 'layout', version: fm.version });
+    await settle();
     left.run();
     down.run();
-    expect(api).not.toHaveBeenCalled();
-    find(tabMenu('m', 'w1', 't1'), 'Move left').run();
-    expect(api).toHaveBeenLastCalledWith('m', 'tab.move', { tab_id: 't1', insert_index: 0 });
+    await settle();
+    expect(core.layout('m')!.workspaces.map((w) => w.name)).toEqual(['two', 'one']);
+    expect(core.layout('m')!.workspaces[1].tabs.map((t) => t.name)).toEqual(['d', 'a', 'b']);
   });
 
-  it('moves workspaces and reports failures', async () => {
-    const w2 = workspaceMenu('m', 'w2');
+  it('moves workspaces', async () => {
+    const w2 = workspaceMenu('m', 'w2w2w2w2');
     expect(find(w2, 'Move down').disabled).toBe(true);
     expect(find(w2, 'Close workspace').hint).toBeUndefined();
-    expect(find(workspaceMenu('m', 'w1'), 'Close workspace').hint).toBeTruthy();
-    api.mockImplementation(() => Promise.reject(new Error('workspace_move_failed: nope')));
+    expect(find(workspaceMenu('m', 'w1w1w1w1'), 'Close workspace').hint).toBeTruthy();
     find(w2, 'Move up').run();
-    expect(api).toHaveBeenCalledWith('m', 'workspace.move', { workspace_id: 'w2', insert_index: 0 });
-    await vi.waitFor(() =>
-      expect(useStore.getState().toasts.map((t) => t.msg)).toContain('Could not move the workspace: workspace_move_failed: nope'),
-    );
+    await settle();
+    expect(core.layout('m')!.workspaces.map((w) => w.name)).toEqual(['two', 'one']);
   });
 
-  it('creates a tab with the cwd of the focused pane only in its workspace', async () => {
-    useStore.getState().focusPane({ m: 'm', pane: 'p1' });
-    await actions.newTab('m', 'w2');
-    expect(api).toHaveBeenLastCalledWith('m', 'tab.create', { workspace_id: 'w2', cwd: undefined, focus: false });
-    await actions.newTab('m', 'w1');
-    expect(api).toHaveBeenLastCalledWith('m', 'tab.create', { workspace_id: 'w1', cwd: '/src', focus: false });
+  it("creates a tab in its workspace's folder, else the focused terminal's", async () => {
+    await actions.newTab('m', 'w2w2w2w2');
+    expect(core.calls.filter((c) => c.method === 'terminal.run').pop()?.params).toEqual({ keep: false, cwd: '/tmp' });
+    await actions.newTab('m', 'w1w1w1w1');
+    expect(core.calls.filter((c) => c.method === 'terminal.run').pop()?.params).toEqual({ keep: false, cwd: '/src' });
+    await settle();
+    expect(core.layout('m')!.workspaces[0].tabs.length).toBe(4);
   });
 });
 
@@ -337,9 +322,9 @@ describe('machineMenu', () => {
       useStore.getState().setMachines([ssh('ready')]);
       const entries = machineMenu('gpu');
       expect(labels(entries)).toEqual([
-        'Restart herdr…',
-        'Stop herdr…',
-        'Update herdr…',
+        'Start terminal core',
+        'Restart terminal core…',
+        'Stop terminal core…',
         '-',
         'Disable machine',
         '-',
@@ -348,43 +333,14 @@ describe('machineMenu', () => {
         '-',
         'Add machine…',
       ]);
-      // The dialog offers to stop the machine's herdr too, checked; unchecked
-      // only the machine is disabled.
       (entries[4] as MenuItem).run();
       const req = useDialog.getState().current;
       expect(req?.kind).toBe('confirm');
       if (req?.kind !== 'confirm') throw new Error('no dialog');
-      expect(req.check).toBe(
-        'Also stop herdr on gpu: its terminals close and the programs in them end. Unchecked, panes keep running there.',
-      );
-      expect(req.checked).toBe(true);
-      req.resolve(true, false);
+      req.resolve(true);
       await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
       expect(fetchMock.mock.calls[0][0]).toBe('/api/m/gpu/enabled');
       expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'PUT', body: JSON.stringify({ enabled: false }) });
-
-      // Checked, herdr is stopped first, while the agent can still do it.
-      fetchMock.mockClear();
-      useDialog.setState({ current: undefined });
-      (machineMenu('gpu')[4] as MenuItem).run();
-      const stop = useDialog.getState().current;
-      if (stop?.kind === 'confirm') stop.resolve(true, true);
-      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-      expect(fetchMock.mock.calls.map((c) => c[0])).toEqual(['/api/m/gpu/herdr/stop', '/api/m/gpu/enabled']);
-
-      // Without a connected agent, or where herdr does not answer, there is
-      // no checkbox and nothing is stopped.
-      for (const st of [ssh('error'), { ...ssh('ready'), herdr_error: 'no server' } as unknown as MachineState]) {
-        fetchMock.mockClear();
-        useDialog.setState({ current: undefined });
-        useStore.getState().setMachines([st]);
-        (machineMenu('gpu')[4] as MenuItem).run();
-        const plain = useDialog.getState().current;
-        expect(plain?.kind === 'confirm' && plain.check).toBeFalsy();
-        if (plain?.kind === 'confirm') plain.resolve(true);
-        await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-        expect(fetchMock.mock.calls[0][0]).toBe('/api/m/gpu/enabled');
-      }
 
       // Enabling does not ask.
       fetchMock.mockClear();
@@ -406,182 +362,51 @@ describe('machineMenu', () => {
     }
   });
 
-  it('restarts herdr on a connected machine after asking', async () => {
+  it('starts, restarts and stops the terminal core, asking before ending programs, one action at a time', async () => {
     const { useDialog } = await import('../dialog');
-    const fetchMock = vi.fn((_url: string, _init?: RequestInit) =>
-      Promise.resolve(new Response(JSON.stringify({ managed: false, running: true }), { status: 200 })),
+    let release: () => void = () => {};
+    const fetchMock = vi.fn(
+      (_url: string, _init?: RequestInit) =>
+        new Promise<Response>((r) => {
+          release = () => r(new Response('{}', { status: 200 }));
+        }),
     );
     vi.stubGlobal('fetch', fetchMock);
-    const toast = vi.spyOn(useStore.getState(), 'toast');
     try {
       useStore.getState().setReadOnly(false);
-      useStore.getState().setMachines([{ ...ssh('ready'), herdr_error: 'no server' } as unknown as MachineState]);
-      const restart = machineMenu('gpu')[0] as MenuItem;
-      expect(restart.disabled).toBe(false);
-      restart.run();
-      const req = useDialog.getState().current;
-      expect(req?.kind).toBe('confirm');
-      if (req?.kind === 'confirm') req.resolve(true);
-      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
-      expect(fetchMock.mock.calls[0][0]).toBe('/api/m/gpu/herdr/restart');
-      expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST' });
-      await vi.waitFor(() => expect(toast).toHaveBeenLastCalledWith('herdr restarted on gpu.'));
+      useStore.getState().setMachines([ssh('ready')]);
+      const start = find(machineMenu('gpu'), 'Start terminal core');
+      expect(start.disabled).toBe(false);
+      start.run();
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      expect(fetchMock.mock.calls[0]).toEqual(['/api/m/gpu/hc/start', { method: 'POST' }]);
+      // While it runs, the menu's actions are off and another does nothing.
+      expect(find(machineMenu('gpu'), 'Restart terminal core…').disabled).toBe(true);
+      release();
+      await vi.waitFor(() => expect(useStore.getState().hcBusy.gpu).toBeUndefined());
 
-      // A failure names the machine and herdr's output.
-      fetchMock.mockResolvedValueOnce(
-        new Response(JSON.stringify({ managed: false, running: false, error: 'start_failed', output: 'no tty' }), { status: 200 }),
-      );
+      find(machineMenu('gpu'), 'Stop terminal core…').run();
+      await vi.waitFor(() => expect(useDialog.getState().current?.kind).toBe('confirm'));
+      const ask = useDialog.getState().current;
+      if (ask?.kind !== 'confirm') throw new Error('no dialog');
+      expect(ask.title).toBe('Stop the terminal core of gpu?');
+      ask.resolve(false);
+      await settle();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
       useDialog.setState({ current: undefined });
-      (machineMenu('gpu')[0] as MenuItem).run();
+
+      find(machineMenu('gpu'), 'Restart terminal core…').run();
+      await vi.waitFor(() => expect(useDialog.getState().current?.kind).toBe('confirm'));
       const again = useDialog.getState().current;
       if (again?.kind === 'confirm') again.resolve(true);
-      await vi.waitFor(() => expect(toast).toHaveBeenLastCalledWith('Could not restart herdr on gpu: The server did not start. no tty'));
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+      expect(fetchMock.mock.calls[1][0]).toBe('/api/m/gpu/hc/restart');
+      release();
 
-      // Declining sends nothing; without the agent there is nothing to ask.
-      useDialog.setState({ current: undefined });
-      (machineMenu('gpu')[0] as MenuItem).run();
-      const no = useDialog.getState().current;
-      if (no?.kind === 'confirm') no.resolve(false);
-      await Promise.resolve();
-      expect(fetchMock).toHaveBeenCalledTimes(2);
+      // Not connected: nothing to start there.
       useStore.getState().setMachines([ssh('error')]);
-      const entries = machineMenu('gpu') as MenuItem[];
-      expect(entries[0].disabled).toBe(true);
-      expect(entries[1].disabled).toBe(true);
+      expect(find(machineMenu('gpu'), 'Start terminal core').disabled).toBe(true);
     } finally {
-      toast.mockRestore();
-      useDialog.setState({ current: undefined });
-      vi.unstubAllGlobals();
-    }
-  });
-
-  it('runs one herdr action at a time on a machine', async () => {
-    const { useDialog } = await import('../dialog');
-    let answer: (r: Response) => void = () => {};
-    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => (answer = resolve)));
-    vi.stubGlobal('fetch', fetchMock);
-    const toast = vi.spyOn(useStore.getState(), 'toast');
-    try {
-      useStore.getState().setReadOnly(false);
-      useStore.getState().setMachines([ssh('ready')]);
-      (machineMenu('gpu')[0] as MenuItem).run();
-      // While it asks and runs, the entries are disabled and another
-      // action is refused.
-      const entries = machineMenu('gpu') as MenuItem[];
-      expect([entries[0].disabled, entries[1].disabled]).toEqual([true, true]);
-      await actions.stopHerdr('gpu');
-      expect(toast).toHaveBeenLastCalledWith('herdr on gpu is busy with another action');
-      const req = useDialog.getState().current;
-      if (req?.kind === 'confirm') req.resolve(true);
-      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-      expect((machineMenu('gpu')[1] as MenuItem).disabled).toBe(true);
-      answer(new Response(JSON.stringify({ managed: false, running: true }), { status: 200 }));
-      await vi.waitFor(() => expect((machineMenu('gpu')[1] as MenuItem).disabled).toBe(false));
-      expect(useStore.getState().herdrBusy).toEqual({});
-    } finally {
-      toast.mockRestore();
-      useDialog.setState({ current: undefined });
-      vi.unstubAllGlobals();
-    }
-  });
-
-  it('offers to install herdr where it was removed', () => {
-    useStore.getState().setReadOnly(false);
-    const gone = (status: string) => ({ ...ssh(status), info: { os: 'linux' } }) as unknown as MachineState;
-    for (const status of ['ready']) {
-      useStore.getState().setMachines([gone(status)]);
-      const entries = machineMenu('gpu');
-      expect(labels(entries)).toEqual([
-        'Restart herdr…',
-        'Stop herdr…',
-        'Install herdr…',
-        '-',
-        'Disable machine',
-        '-',
-        'Rename machine',
-        'Remove machine…',
-        '-',
-        'Add machine…',
-      ]);
-      // Without herdr there, a restart or stop would do nothing.
-      expect((entries[0] as MenuItem).disabled).toBe(true);
-      expect((entries[1] as MenuItem).disabled).toBe(true);
-      (entries[2] as MenuItem).run();
-      expect(useStore.getState().remoteHerdr).toBe('gpu');
-      useStore.getState().openRemoteHerdr(undefined);
-    }
-    useStore.getState().setMachines([{ ...ssh('ready'), info: { os: 'linux', herdr_bin: '/usr/bin/herdr' } } as unknown as MachineState]);
-    expect(labels(machineMenu('gpu'))[2]).toBe('Update herdr…');
-  });
-
-  it('stops herdr on a connected machine after asking', async () => {
-    const { useDialog } = await import('../dialog');
-    const fetchMock = vi.fn((_url: string, _init?: RequestInit) =>
-      Promise.resolve(new Response(JSON.stringify({ managed: false, running: false }), { status: 200 })),
-    );
-    vi.stubGlobal('fetch', fetchMock);
-    const toast = vi.spyOn(useStore.getState(), 'toast');
-    try {
-      useStore.getState().setReadOnly(false);
-      useStore.getState().setMachines([ssh('ready')]);
-      (machineMenu('gpu')[1] as MenuItem).run();
-      const req = useDialog.getState().current;
-      expect(req?.kind === 'confirm' && req.title).toBe('Stop herdr on gpu?');
-      if (req?.kind === 'confirm') req.resolve(true);
-      await vi.waitFor(() => expect(toast).toHaveBeenLastCalledWith('herdr stopped on gpu.'));
-      expect(fetchMock.mock.calls[0][0]).toBe('/api/m/gpu/herdr/stop');
-      expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST' });
-    } finally {
-      toast.mockRestore();
-      useDialog.setState({ current: undefined });
-      vi.unstubAllGlobals();
-    }
-  });
-
-  it("updates the application's herdr on the local machine after a check", async () => {
-    const { useDialog } = await import('../dialog');
-    const local = { id: 'local', label: 'local', kind: 'local', status: 'ready' } as unknown as MachineState;
-    let reply: Record<string, unknown> = {};
-    const fetchMock = vi.fn((_url: string, _init?: RequestInit) => Promise.resolve(new Response(JSON.stringify(reply), { status: 200 })));
-    vi.stubGlobal('fetch', fetchMock);
-    const toast = vi.spyOn(useStore.getState(), 'toast');
-    try {
-      useStore.getState().setReadOnly(false);
-      useStore.getState().setMachines([local]);
-      const update = () => (machineMenu('local').find((e) => isItem(e) && e.label === 'Update herdr…') as MenuItem).run();
-
-      // Up to date: only a toast after the check.
-      reply = { managed: true, running: true, version: '0.9.5', latest: '0.9.5' };
-      update();
-      await vi.waitFor(() => expect(toast).toHaveBeenLastCalledWith('herdr 0.9.5 is up to date.'));
-      expect(fetchMock.mock.calls.map((c) => c[0])).toEqual(['/api/m/local/herdr', '/api/m/local/herdr/check']);
-
-      // The user's own installation is not checked against herdr's releases.
-      fetchMock.mockClear();
-      reply = { managed: false, running: true, version: '0.9.5' };
-      update();
-      await vi.waitFor(() =>
-        expect(toast).toHaveBeenLastCalledWith('This herdr is your own installation; update it the way you installed it.'),
-      );
-      expect(fetchMock.mock.calls.map((c) => c[0])).toEqual(['/api/m/local/herdr']);
-
-      // A newer release for the managed copy is installed after asking.
-      fetchMock.mockClear();
-      reply = { managed: true, running: true, version: '0.9.5', latest: '0.9.6' };
-      update();
-      await vi.waitFor(() => expect(useDialog.getState().current?.kind).toBe('confirm'));
-      const req = useDialog.getState().current;
-      expect(req?.kind === 'confirm' && req.title).toBe('Update herdr to 0.9.6?');
-      reply = { managed: true, running: true, version: '0.9.6', restart_needed: true };
-      if (req?.kind === 'confirm') req.resolve(true);
-      await vi.waitFor(() => expect(toast).toHaveBeenLastCalledWith('herdr 0.9.6 is installed. Restart herdr to use it.'));
-      expect(fetchMock.mock.calls.map((c) => c[0])).toEqual([
-        '/api/m/local/herdr',
-        '/api/m/local/herdr/check',
-        '/api/m/local/herdr/update',
-      ]);
-    } finally {
-      toast.mockRestore();
       useDialog.setState({ current: undefined });
       vi.unstubAllGlobals();
     }

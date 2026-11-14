@@ -9,9 +9,7 @@ shows. The macOS application does this with Ghostty
 ([23](23-macos-application.md)). The browser UI (also what the desktop app
 shows) needs an emulator too, one that parses, keeps scrollback, encodes
 keys and mouse events and answers programs the same way, so that a program
-behaves alike in both clients. This document describes that emulator and
-its renderer; the browser's panes still come from herdr
-([03](03-pane-rendering-and-input.md)).
+behaves alike in both clients.
 
 ## Goals / non-goals
 
@@ -115,35 +113,118 @@ programs that asked for them. Pastes are bracketed when the program asked,
 with unsafe control characters replaced and, unbracketed, newlines as
 returns. Focus changes are reported to programs that asked (mode 1004).
 
+**In the page** (`vt/pane.ts`, `components/TerminalView.tsx`,
+`components/Workspace.tsx`)
+
+- The selected tab's panes are placed by their shares of the tab's split
+  tree, each a header ([04](04-layout-and-keyboard.md)) above its terminal;
+  a pane keeps its terminal while the tree around it changes. Dragging a
+  split's handle sets its ratio in the layout document.
+- A terminal attaches once its grid is known, with `terminal.scrollback`
+  lines of history (a read-only page observes and follows the terminal's
+  size instead). Output goes into the emulator and the next animation frame
+  draws it; the bytes drawn are then acknowledged, which returns the core's
+  credit: a program floods at the speed the page draws, and a page that
+  falls far behind gets a fresh paint ([22](22-terminal-protocol.md)). A
+  new attach (after a reconnect) starts a new emulator, which the first
+  paint fills. A program's end shows how it ended; its pane goes when the
+  core reports it ([22](22-terminal-protocol.md)).
+- A pane's size follows its element; a new grid resizes the emulator and
+  the terminal. The focused pane has the keyboard; focus and blur go to the
+  core (a turn an agent ended is seen when its terminal has the focus,
+  [25](25-agent-detection.md)) and, when asked for, to the program.
+- Mouse: where the program asked for mouse events (and Shift is not held,
+  and the page is not read-only), presses, releases and moves with a button
+  go to it, encoded at the pixel position; moves without a button go to
+  programs that track every motion. The right button opens the pane's text
+  menu instead. Elsewhere the left button selects: Ghostty's gesture state
+  machine (a click, a double click for a word, a triple click for a line);
+  held past the top or bottom edge it scrolls the
+  scrollback; `terminal.copyOnSelect` copies at release; typing ends the
+  selection. The wheel goes to programs tracking the mouse as wheel
+  buttons, to programs on the alternate screen as arrow keys (Ghostty's
+  alternate scroll), and otherwise scrolls the scrollback; typing returns
+  to the bottom. A scrollbar shows over a terminal with scrollback.
+- Text of the selection is Ghostty's formatter's: soft-wrapped lines
+  joined, trailing blanks trimmed. ⌘C/Ctrl+C in the browser's copy event
+  and the menu's **Copy** copy it; without one, the text a program copied
+  from its own selection (below).
+- Links: with ⌘/Ctrl held, OSC 8 hyperlinks (`http`, `https`, `mailto`) and
+  URLs or paths in the text are underlined, also a path wrapped over
+  several rows (`terminal/links.ts`); a click opens URLs in a new tab and
+  paths in the preview panel or VS Code ([06](06-quick-look-and-files.md)).
+  Formulas under the resting pointer are shown typeset
+  ([19](19-formulas-in-panes.md)).
+- The text menu (right click) has **Copy**, **Paste** (where the browser
+  offers the clipboard API), **Find…**, the URL or path under the pointer
+  or selected, and downloads ([06](06-quick-look-and-files.md)).
+- Files pasted or dropped on a terminal are pasted as their paths, uploaded
+  first when they are not on the terminal's machine (`drop.ts`,
+  [06](06-quick-look-and-files.md)).
+- Bell: `terminal.bell` flashes the pane, beeps or does nothing.
+- Programs' clipboard writes (OSC 52, up to Ghostty's limit;
+  `vt/clipboard.ts`), by `terminal.programClipboard`: **Automatic** copies
+  at once when the write arrives within 10 s of this page's last key, text,
+  paste or button press in a terminal and the browser allows it, with a
+  toast saying what was copied; otherwise, or when the browser refuses, a
+  toast offers **Copy** (5 s). **Ask** always asks; **Off** ignores them. A
+  copy that passed the automatic gate is kept for the menu's **Copy** and
+  ⌘C for 2 minutes or until the next key or button press in a terminal.
+  Reading the clipboard (OSC 52 `?`) is not answered.
+- Find (`vt/find.ts`, `components/FindBar.tsx`): the `find.open` binding
+  (⌘F on macOS, Ctrl+Shift+F elsewhere in browsers) or **Find…** in the
+  menu opens a bar at the terminal's top right corner, with a one-line
+  selection as the query. The emulator searches its screen and scrollback
+  for the text, ASCII letters in either case; the newest match is current
+  after typing, Enter goes to the next older one and Shift+Enter (or
+  `find.next` / `find.previous`) to the next newer one, wrapping around;
+  the view scrolls to the current match. Matches on the screen are
+  highlighted, the current one stronger, and kept current as output
+  arrives. Escape closes the bar and gives the terminal its keys back.
+
 ## Alternatives considered
 
 | Option | Why not |
 | --- | --- |
 | xterm.js | A second emulator beside the macOS application's, with its own parsing, key encodings and quirks; programs would behave differently in the two clients. |
+| herdr's rendered cell grid (the previous design) | Needs herdr on every machine; one browser owned the session at a time; scrollback, selections and find were herdr's, a round trip each. |
 | Reading the screen from the terminal core (`terminal.read`) instead of emulating | A request per change, no scrollback in the page, and the page could not answer programs or encode keys for their modes. |
 | A small zig or C module of our own linking the library with JavaScript imports | Needs zig in every build; the trampoline module gives the library's callbacks without changing the library. |
 | Polling the emulator for replies, titles and bells after each write | Replies would be late and ordered differently from Ghostty's, and events between two polls could be lost. |
 | Canvas 2D only | Every glyph costs a draw call on the CPU; a full screen of a busy program at a high pixel ratio takes milliseconds per frame. |
 | One canvas per tab | The panes' layout would have to be drawn in the canvas; with a canvas per pane the split tree stays HTML and a pane keeps its terminal while the tree changes. |
+| Keeping the terminals of hidden tabs attached | Every hidden terminal's output would cross the connection and be emulated; attaching again brings the screen and its history. |
 | Building the module in CI | CI would need zig and Ghostty's dependencies; the build is reproducible, so the committed module's digest is checked instead. |
+| Regular expressions and whole words in find (the previous design) | The emulator's search finds text; the agent's search read herdr's panes. |
 
 ## Failure modes
 
 - **The module does not load** (an old browser without WebAssembly, a CSP
-  that refuses it) → no terminal can be shown; the core's CSP allows it
+  that refuses it) → terminals stay empty; the core's CSP allows it
   (`'wasm-unsafe-eval'`).
 - **No WebGL2, or its context lost** → Canvas 2D, slower for large busy
   screens.
+- **The page draws slower than a program writes** → the core stops sending
+  at 256 KiB unacknowledged; 4 MiB behind it sends a new paint and the
+  page skips the backlog.
+- **The connection drops** → streams end with `disconnected`; terminals
+  attach again when it is back, with a new paint.
 - **The terminal font loads late** → terminals draw with the fallbacks and
-  are measured again when it arrives.
+  are measured again when it arrives, which resizes them.
 - **A character the font and its fallbacks draw wider than its cells**
   (some symbols) → clipped to its cells and a third of a cell beyond.
+- **The emulator and the terminal core disagree about a character's width**
+  → the cursor is off on that row until the program redraws it.
+- **A program writes the clipboard without the user's input** → it is
+  offered, not copied.
 
 ## Security
 
 The CSP of the UI allows compiling WebAssembly (`'wasm-unsafe-eval'`), not
 `eval` or inline scripts; the module is served from the core like the
-page's scripts. See [SECURITY.md](../../SECURITY.md).
+page's scripts. Programs' clipboard writes follow the setting above and
+reads are refused; only `http`, `https` and `mailto` hyperlinks open. See
+[SECURITY.md](../../SECURITY.md).
 
 ## Testing
 
@@ -156,3 +237,14 @@ by gesture and their text, find, hyperlinks; the mouse, paste and focus
 encoders; every row of the key table in legacy, application and kitty
 modes; and `drawRow` (colors, inverse, invisible, faint, wide characters,
 shapes, underline styles, highlights, cursor styles, links and formulas).
+`terms.test.ts` (the layout document's reading and writing, other clients'
+versions, ended programs, terminals asked for early, attention order),
+`clipToast.test.ts`, `paneHeader.test.ts`, `menus.test.ts`,
+`desktop.test.ts` (closing asks when a program runs), `drop.test.ts`,
+`workspaceDock.test.ts`. In headless Chromium against a dev core: a shell
+with colors, 256 and true colors, box drawing, CJK and emoji; typing; vim
+(alternate screen, application cursor keys, mouse); resizing; splits, new
+tabs and workspaces; find; selection and copy; the wheel in the
+scrollback; font size and a palette color changed live; WebGL and Canvas 2D
+(WebGL disabled, pixel ratio 2); an agent's states in the sidebar; and a
+flood of 200 000 lines without a dropped frame.

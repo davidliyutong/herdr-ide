@@ -3,10 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
-vi.mock('../lib/conn', () => ({ conn: { api: () => Promise.resolve({}), setTheme: () => {} } }));
+vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 
 import { currentDock, currentLastCode, dockKey, useStore } from '../state/store';
-import type { MachineState } from '../lib/herdr';
+import type { MachineState } from '../lib/machine';
+import * as L from '../term/layout';
+import { FakeCore, settle } from './fakeTerms';
 import { Dock, FRAME_TTL, MAX_HIDDEN_FRAMES, frameKey, nextFrames, type Frame } from '../components/Dock';
 import { sendTarget } from '../lib/bridge';
 import { actions } from '../actions';
@@ -14,29 +16,67 @@ import { storage } from '../brand';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-function machine(id: string, workspaces: string[], status = 'ready'): MachineState {
-  return {
-    id,
-    label: id,
-    status,
-    info: { home: '/home/u' },
-    snapshot: {
-      workspaces: workspaces.map((ws, i) => ({ workspace_id: ws, number: i + 1, label: ws, active_tab_id: `${ws}-t` })),
-      tabs: workspaces.map((ws, i) => ({ tab_id: `${ws}-t`, workspace_id: ws, number: i + 1, label: 't' })),
-      panes: workspaces.flatMap((ws) => [
-        { pane_id: `${ws}-shell`, workspace_id: ws, tab_id: `${ws}-t`, cwd: `/home/u/${ws}` },
-        { pane_id: `${ws}-agent`, workspace_id: ws, tab_id: `${ws}-t`, cwd: `/home/u/${ws}`, agent: 'claude', agent_status: 'idle' },
-      ]),
-    },
-  } as unknown as MachineState;
+function machine(id: string, status = 'ready'): MachineState {
+  return { id, label: id, kind: 'ssh', status, info: { home: '/home/u' } } as unknown as MachineState;
+}
+
+/** A machine's terminals and layout: per workspace a tab with a shell and an agent. */
+function terminals(core: FakeCore, id: string, workspaces: string[], agents = workspaces) {
+  const recs = workspaces.flatMap((ws) => [
+    FakeCore.term(`${ws}-shell`, { cwd: `/home/u/${ws}` }),
+    ...(agents.includes(ws) ? [FakeCore.term(`${ws}-agent`, { cwd: `/home/u/${ws}`, agent: 'claude', agent_status: 'idle' })] : []),
+  ]);
+  const layout = {
+    version: 2,
+    workspaces: workspaces.map((ws) => ({
+      id: ws,
+      name: ws,
+      cwd: `/home/u/${ws}`,
+      tabs: [
+        {
+          root: agents.includes(ws)
+            ? { split: 'horizontal', ratio: 0.5, children: [{ terminal: `${ws}-shell` }, { terminal: `${ws}-agent` }] }
+            : { terminal: `${ws}-shell` },
+          focused: `${ws}-shell`,
+        },
+      ],
+      selected: 0,
+    })),
+    selected: 0,
+  };
+  core.machine(id, recs, layout);
 }
 
 const dock = () => currentDock(useStore.getState());
+let core: FakeCore;
 
-beforeEach(() => {
-  useStore.setState({ docks: {}, machineId: undefined, workspaceId: undefined, focused: undefined, readOnly: false });
-  useStore.getState().setMachines([machine('a', ['w1', 'w2']), machine('b', ['w3'])]);
-  useStore.getState().selectWorkspace('a', 'w1');
+/** Shows a workspace of a machine, as the sidebar does. */
+function select(m: string, ws: string) {
+  useStore.getState().selectMachine(m);
+  core.model.mutate(m, (l) => L.selectWorkspace(l, ws));
+  useStore.getState().setWorkspace(ws);
+}
+
+/** Focuses a terminal in its machine's layout, or none. */
+function focus(m: string, terminal: string | undefined) {
+  core.model.mutate(m, (l) =>
+    terminal
+      ? L.focusTerminal(l, terminal)
+      : { ...l, workspaces: l.workspaces.map((w) => ({ ...w, tabs: w.tabs.map((tb) => ({ ...tb, focused: '' })) })) },
+  );
+}
+
+beforeEach(async () => {
+  core = new FakeCore();
+  terminals(core, 'a', ['w1', 'w2']);
+  terminals(core, 'b', ['w3']);
+  core.install();
+  useStore.setState({ docks: {}, machineId: undefined, workspaceId: undefined, readOnly: false });
+  useStore.getState().setMachines([machine('a'), machine('b')]);
+  core.model.subscribe('a');
+  core.model.subscribe('b');
+  await settle();
+  select('a', 'w1');
 });
 
 describe('the dock of a workspace', () => {
@@ -44,24 +84,24 @@ describe('the dock of a workspace', () => {
     const s = useStore.getState();
     s.openDock({ kind: 'code', m: 'a', folder: '/home/u/w1/' });
     expect(dock()).toEqual({ kind: 'code', m: 'a', folder: '/home/u/w1' });
-    s.selectWorkspace('a', 'w2');
+    select('a', 'w2');
     expect(dock()).toBeUndefined();
     s.openDock({ kind: 'preview', m: 'a', path: '/home/u/w2/a.png' });
-    s.selectWorkspace('b', 'w3');
+    select('b', 'w3');
     s.openDock({ kind: 'code', m: 'b', folder: '/srv' });
-    s.selectWorkspace('a', 'w1');
+    select('a', 'w1');
     expect(dock()).toEqual({ kind: 'code', m: 'a', folder: '/home/u/w1' });
-    s.selectWorkspace('a', 'w2');
+    select('a', 'w2');
     expect(dock()).toEqual({ kind: 'preview', m: 'a', path: '/home/u/w2/a.png' });
     expect(currentLastCode(useStore.getState())).toBeUndefined();
     // cmd+j brings back this workspace's own last VS Code panel.
-    s.selectWorkspace('b', 'w3');
-    s.focusPane({ m: 'b', pane: 'w3-shell' });
+    select('b', 'w3');
+    focus('b', 'w3-shell');
     actions.toggleCode();
     expect(dock()).toBeUndefined();
-    s.selectWorkspace('a', 'w1');
+    select('a', 'w1');
     expect(dock()?.kind).toBe('code');
-    s.selectWorkspace('b', 'w3');
+    select('b', 'w3');
     actions.toggleCode();
     expect(dock()).toEqual({ kind: 'code', m: 'b', folder: '/srv' });
   });
@@ -96,7 +136,7 @@ describe('the dock of a workspace', () => {
     vi.resetModules();
     const fresh = await import('../state/store');
     // A core started with --local-only lists only its own machine.
-    fresh.useStore.getState().setMachines([machine('a', ['w1'])]);
+    fresh.useStore.getState().setMachines([machine('a')]);
     expect(Object.keys(fresh.useStore.getState().docks)).toEqual(['c|w5']);
     expect(JSON.parse(storage.get('docks') ?? '{}')).toHaveProperty(['c|w5']);
     storage.set('docks', '{}');
@@ -105,27 +145,24 @@ describe('the dock of a workspace', () => {
   it('goes with its workspace or machine', () => {
     const s = useStore.getState();
     s.openDock({ kind: 'code', m: 'a', folder: '/x' });
-    s.selectWorkspace('a', 'w2');
+    select('a', 'w2');
     s.openDock({ kind: 'code', m: 'a', folder: '/y' });
-    s.selectWorkspace('b', 'w3');
+    select('b', 'w3');
     s.openDock({ kind: 'code', m: 'b', folder: '/z' });
-    // w2 was closed in herdr.
-    s.upsertMachine(machine('a', ['w1']));
+    // w2 was closed: its dock goes.
+    s.pruneDocks('a', ['w1']);
     expect(Object.keys(useStore.getState().docks).sort()).toEqual(['a|w1', 'b|w3']);
-    // A machine without a snapshot (reconnecting) keeps its workspaces' docks.
-    s.upsertMachine({ ...machine('a', []), snapshot: undefined } as MachineState);
-    expect(Object.keys(useStore.getState().docks).sort()).toEqual(['a|w1', 'b|w3']);
-    // b is removed from herdr's machines.
-    s.setMachines([machine('a', ['w1'])]);
+    // b is removed from the core's machines.
+    s.setMachines([machine('a')]);
     expect(Object.keys(useStore.getState().docks)).toEqual(['a|w1']);
   });
 
   it("closes every workspace's VS Code of a machine whose code-server stops, keeping the last one for cmd+j", () => {
     const s = useStore.getState();
     s.openDock({ kind: 'code', m: 'a', folder: '/x' });
-    s.selectWorkspace('a', 'w2');
+    select('a', 'w2');
     s.openDock({ kind: 'code', m: 'a', folder: '/y' });
-    s.selectWorkspace('b', 'w3');
+    select('b', 'w3');
     s.openDock({ kind: 'code', m: 'b', folder: '/z' });
     s.closeCode('a');
     const d = useStore.getState().docks;
@@ -198,24 +235,24 @@ describe('Dock', () => {
     await act(async () => root.render(createElement(Dock)));
     expect(host.querySelector('.dock')).toBeNull();
     await act(async () => s.openDock({ kind: 'code', m: 'a', folder: '/x' }));
-    await act(async () => s.selectWorkspace('b', 'w3'));
+    await act(async () => select('b', 'w3'));
     await act(async () => s.openDock({ kind: 'code', m: 'b', folder: '/z' }));
     expect(frames()).toEqual([
       ['/m/a/code/?folder=%2Fx', 'none'],
       ['/m/b/code/?folder=%2Fz', ''],
     ]);
-    await act(async () => s.selectWorkspace('a', 'w1'));
+    await act(async () => select('a', 'w1'));
     expect(frames()).toEqual([
       ['/m/a/code/?folder=%2Fx', ''],
       ['/m/b/code/?folder=%2Fz', 'none'],
     ]);
     // Another workspace with the same folder shares the window.
-    await act(async () => s.selectWorkspace('a', 'w2'));
+    await act(async () => select('a', 'w2'));
     expect((host.querySelector('.dock') as HTMLElement).style.display).toBe('none');
     await act(async () => s.openDock({ kind: 'code', m: 'a', folder: '/x' }));
     expect(frames()).toHaveLength(2);
     // A disabled machine's window goes; the panel says why.
-    await act(async () => s.upsertMachine(machine('a', ['w1', 'w2'], 'disabled')));
+    await act(async () => s.upsertMachine(machine('a', 'disabled')));
     expect(frames()).toEqual([['/m/b/code/?folder=%2Fz', 'none']]);
     expect(host.querySelector('.dock-body')?.textContent).toContain('a is disabled');
   });
@@ -225,38 +262,40 @@ describe('Send to agent', () => {
   it('goes to the workspace whose panel shows the sending window', () => {
     const s = useStore.getState();
     s.openDock({ kind: 'code', m: 'a', folder: '/home/u/w1' });
-    s.focusPane({ m: 'a', pane: 'w1-shell' });
+    focus('a', 'w1-shell');
     const st = () => useStore.getState();
-    // The selected workspace shows it: the focused pane.
-    expect(sendTarget(st(), 'a', ['/home/u/w1'])).toEqual({ pane: 'w1-shell' });
+    // The selected workspace shows it: the focused terminal.
+    expect(sendTarget(st(), 'a', ['/home/u/w1'])).toEqual({ terminal: 'w1-shell' });
     // Another workspace shows it: that workspace's agent.
-    s.selectWorkspace('a', 'w2');
-    s.focusPane({ m: 'a', pane: 'w2-shell' });
-    expect(sendTarget(st(), 'a', ['/home/u/w1'])).toEqual({ pane: 'w1-agent' });
-    // No panel shows it, or the window is unknown: the focused pane.
-    expect(sendTarget(st(), 'a', ['/elsewhere'])).toEqual({ pane: 'w2-shell' });
-    expect(sendTarget(st(), 'a')).toEqual({ pane: 'w2-shell' });
-    // Nothing focused on that machine: its first attention-worthy agent.
-    s.focusPane(undefined);
-    expect(sendTarget(st(), 'a', ['/elsewhere'])).toEqual({ pane: 'w1-agent' });
+    select('a', 'w2');
+    focus('a', 'w2-shell');
+    expect(sendTarget(st(), 'a', ['/home/u/w1'])).toEqual({ terminal: 'w1-agent' });
+    // No panel shows it, or the window is unknown: the focused terminal.
+    expect(sendTarget(st(), 'a', ['/elsewhere'])).toEqual({ terminal: 'w2-shell' });
+    expect(sendTarget(st(), 'a')).toEqual({ terminal: 'w2-shell' });
+    // Nothing focused on that machine: its first agent waiting for input.
+    focus('a', undefined);
+    expect(sendTarget(st(), 'a', ['/elsewhere'])).toEqual({ terminal: 'w1-agent' });
     expect(dockKey(st())).toBe('a|w2');
   });
 
-  it('sends nothing to another workspace when the window’s workspace has no agent', () => {
+  it('sends nothing to another workspace when the window’s workspace has no agent', async () => {
+    core = new FakeCore();
+    terminals(core, 'a', ['w1', 'w2'], ['w1']);
+    core.install();
+    core.model.subscribe('a');
+    await settle();
     const s = useStore.getState();
-    const a = machine('a', ['w1', 'w2']);
-    a.snapshot!.panes = a.snapshot!.panes.filter((p) => p.pane_id !== 'w2-agent');
-    s.setMachines([a]);
     // w2 (no agent) shows the window; w1, with an agent, is selected.
-    s.selectWorkspace('a', 'w2');
+    select('a', 'w2');
     s.openDock({ kind: 'code', m: 'a', folder: '/home/u/w2' });
-    s.selectWorkspace('a', 'w1');
-    s.focusPane({ m: 'a', pane: 'w1-shell' });
+    select('a', 'w1');
+    focus('a', 'w1-shell');
     const st = () => useStore.getState();
     expect(sendTarget(st(), 'a', ['/home/u/w2'])).toEqual({ workspace: 'w2' });
     // Selected, with nothing focused on the machine: still not w1's agent.
-    s.selectWorkspace('a', 'w2');
-    s.focusPane(undefined);
+    select('a', 'w2');
+    focus('a', undefined);
     expect(sendTarget(st(), 'a', ['/home/u/w2'])).toEqual({ workspace: 'w2' });
   });
 });

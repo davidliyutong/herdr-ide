@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { xKeycode } from '../gui/keycodes';
-import { guiKey, paneWindows, parseGuiPath, useGui, type GuiState } from '../gui/state';
+import { guiKey, parseGuiPath, terminalWindows, useGui, type GuiState } from '../gui/state';
 import { FrameStats, type MachineStats } from '../gui/stats';
 
 describe('xKeycode', () => {
@@ -26,7 +26,7 @@ describe('parseGuiPath', () => {
 const state = (m: string, ...windows: [number, string?][]): GuiState => ({
   m,
   phase: 'ready',
-  windows: windows.map(([id, pane]) => ({ id, title: `w${id}`, w: 100, h: 80, pane })),
+  windows: windows.map(([id, terminal]) => ({ id, title: `w${id}`, w: 100, h: 80, terminal })),
 });
 
 describe('gui state', () => {
@@ -36,7 +36,7 @@ describe('gui state', () => {
     expect(useGui.getState().unseen).toEqual({});
     g.setState(state('m1', [1, 'p1'], [2, 'p1'], [3]));
     expect(Object.keys(useGui.getState().unseen).sort()).toEqual([guiKey('m1', 2), guiKey('m1', 3)]);
-    expect(paneWindows(useGui.getState(), 'm1', 'p1').map((w) => w.id)).toEqual([1, 2]);
+    expect(terminalWindows(useGui.getState(), 'm1', 'p1').map((w) => w.id)).toEqual([1, 2]);
 
     g.markSeen('m1', 2);
     expect(Object.keys(useGui.getState().unseen)).toEqual([guiKey('m1', 3)]);

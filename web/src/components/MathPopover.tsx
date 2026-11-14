@@ -1,13 +1,13 @@
 // The formula under the pointer, rendered by KaTeX, below it (above when
 // there is no room below), with a button that copies its LaTeX source. The
-// controller shows and hides it (surface/controller.ts, updateMath); the
+// terminal shows and hides it (vt/pane.ts, updateMath); the
 // pointer may move onto it.
 
 import { useLayoutEffect, useRef, useState } from 'react';
 import { Copy } from 'lucide-react';
 import { t } from '../i18n';
 import { useStore } from '../state/store';
-import type { ShownMath } from '../surface/controller';
+import type { ShownMath } from '../vt/pane';
 
 /** Space between the formula's rows and the popover, and the popover and
  * the edges of the panes. */

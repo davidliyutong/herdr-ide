@@ -101,17 +101,22 @@ playbooks):
 
 ## Gotchas
 
-- Key events in panes go through `routeKey` (`web/src/surface/keys.ts`),
-  which cancels what it consumes; an uncancelled keydown is followed by a
-  keypress and an input event that would send the text again. Any key the UI
-  translates or swallows needs a row in
-  `web/src/__tests__/testdata/keys.json`; its `bytes` come from herdr
-  (`KEYS_RECORD=1 make it` prints them).
+- Key events in the browser's terminals are encoded by Ghostty's encoder
+  (`web/src/vt/input.ts`, `vt/pane.ts`), and a keydown that sent bytes is
+  cancelled; an uncancelled keydown is followed by a keypress and an input
+  event that would send the text again. Any key the UI translates or leaves
+  to the browser needs a row in `web/src/__tests__/testdata/vt-keys.json`
+  with its bytes in each mode.
+- `web/src/vt/ghostty-vt.wasm` is a build artifact with a recorded digest:
+  change it only with `make vt-wasm` (zig 0.17), which rewrites the digest;
+  libghostty-vt's functions read and write wasm memory, whose buffer may
+  change after any call, so take views again after each one.
 - yamux streams cannot be half-closed: use `agentproto.ChunkWriter` for
   uploads that expect a reply.
-- herdr's surface patches apply only to the revision before them, and the
-  browser's to the generation of the last complete surface; anything that
-  changes the grid outside that order must start from a complete surface.
+- herdr's surface patches apply only to the revision before them, and a
+  `/ws` client's to the generation of the last complete surface; anything
+  that changes the grid outside that order must start from a complete
+  surface.
 - `web/dist` is embedded at build time; run `pnpm -C web build` (or
   `make build`) before `go build` if the UI changed. The build keeps
   `web/dist/.gitkeep`, which `go:embed` needs in a clean checkout.

@@ -91,10 +91,11 @@ input methods.
 - Terminals and panes created otherwise (before the display existed, by
   another client, in herdr's own UI or CLI) keep their environment: a shell
   gets its variables when it starts. "Enable in open panes" (settings
-  dialog, per machine), the palette command for the focused pane and, in
-  the macOS application, **Enable Program Windows Here** in a terminal's
-  menu (`POST /api/m/{id}/gui/enable`, `{"panes": [...]}` or
-  `{"terminals": [...]}`) catch them up without restarting anything: for
+  dialog, per machine: every terminal of the machine's terminal core), the
+  palette command for the focused pane's terminal and, in the macOS
+  application, **Enable Program Windows Here** in a terminal's menu
+  (`POST /api/m/{id}/gui/enable`, `{"terminals": [...]}`, empty for all;
+  `{"panes": [...]}` for herdr's panes) catch them up without restarting anything: for
   each pane the core asks herdr for the shell and its foreground process
   group (`pane.process_info`), for each terminal the terminal core for its
   record now (`terminal.get`: the program's `pid` and the `foreground`
@@ -290,13 +291,13 @@ input methods.
   window and its layers, scaled to fit the browser window with the aspect
   kept, input sent back over `/m/{machine}/gui/{window}/ws`. The browser
   window opens at the program window's size and follows its size changes.
-- A window that appears while its pane is on screen opens at once
+- A window that appears while its terminal is on screen opens at once
   (`window.open`). Browsers block pop-ups not caused by a click unless the
   site is allowed to open them; then a toast offers to open it. Other new
-  windows are marked on the program windows button of their pane's header
-  or of the toolbar above a lone pane ([03](03-pane-rendering-and-input.md)), until
-  opened; the button lists the pane's windows, and the status bar lists every window, including
-  those without a pane. A dialog of a window (`WM_TRANSIENT_FOR`) is opened
+  windows are marked on the program windows button of their terminal's pane
+  header ([04](04-layout-and-keyboard.md)), until opened; the button lists
+  the terminal's windows (by the window's `terminal`), and the status bar
+  lists every window, including those without a terminal. A dialog of a window (`WM_TRANSIENT_FOR`) is opened
   by the browser window of its parent, which may still do so after the click
   that caused it; if blocked, that window shows a button for it.
 - Pictures are decoded as they arrive, several at once
@@ -330,7 +331,7 @@ turning it on pushes the encoder if needed.
 | VNC (TigerVNC `Xvnc`, x11vnc) with noVNC | A whole desktop in one canvas instead of program windows; `Xvnc` was on one of seven machines tried and needs a package installed by root. |
 | Xpra with its HTML5 client | Seamless windows, but all inside one browser page; rootless only through a conda environment with Python, GTK and ffmpeg; its protocol changes between versions while core and agent ship together. |
 | GTK Broadway | Only GTK programs; not Tk (matplotlib's default), Qt or GLFW (MuJoCo). |
-| Terminal graphics (sixel, Kitty) | herdr's terminal-session stream drops them ([01](01-herdr-integration.md)); not interactive. |
+| Terminal graphics (sixel, Kitty) | The browser's emulator has none ([26](26-web-terminals.md)); not interactive. |
 | Starting the display on the first connection (socket activation) | Xvfb cannot take a listening socket; relaying through the agent would end every program's connection when the agent exits. |
 | A display per pane or per workspace | Many X servers for windows that rarely exist; one display with per-window capture separates windows anyway. |
 | Only pictures (no video) | Measured with a 1706×960 MuJoCo viewer rendering 60 frames per second: pictures reach 48 whole windows per second at 44 Mbit/s directly and 7.5 on a 10 Mbit/s link with 50 ms more round trip (240 ms from capture to drawing), H.264 from NVENC 58 frames at 1.7 Mbit/s directly and 58 on that link (90 ms); per frame NVENC costs the machine a third of the CPU time of JPEG. Pictures stay for windows that rarely change, where they are exact and need no encoder. |

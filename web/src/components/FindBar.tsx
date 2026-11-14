@@ -1,48 +1,27 @@
-// The find bar over a pane's top right corner (docs/features/20-find-in-panes.md):
-// the query with its options (match case, whole word, regular expression),
-// which match is current, buttons for the older and newer matches, and
-// closing. The machine's agent searches (surface/find.ts); Enter goes to
-// the older match (up, the way output was written), Shift+Enter to the
-// newer one, Escape closes and gives the pane its keys back.
+// The find bar over a terminal's top right corner
+// (docs/features/26-web-terminal-renderer.md): the query, which match is
+// current, buttons for the older and newer matches, and closing. The
+// terminal's emulator searches its screen and scrollback (vt/find.ts);
+// Enter goes to the older match (up, the way output was written),
+// Shift+Enter to the newer one, Escape closes and gives the terminal its
+// keys back.
 
 import { useEffect, useRef } from 'react';
-import { CaseSensitive, ChevronDown, ChevronUp, Regex, WholeWord, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, X } from 'lucide-react';
 import { t } from '../i18n';
-import {
-  closeFind,
-  findOptionKey,
-  findOptionKeyLabel,
-  findStep,
-  isFindKey,
-  setFindQuery,
-  toggleFindOption,
-  useFind,
-  type FindOption,
-} from '../surface/find';
-import { getTerm } from '../terminal/registry';
-
-interface Props {
-  m: string;
-  /** Position over the surface, in CSS pixels: the pane's top right corner. */
-  top: number;
-  right: number;
-  maxWidth: number;
-}
+import { closeFind, findStep, setFindQuery, useFind } from '../vt/find';
+import { paneHandle } from '../state/panes';
+import { isCommandKey } from '../keymap';
 
 /** What the bar says about the matches. */
-export function findCount(st: { query: string; total: number; index?: number; status: string }): string {
-  if (st.status === 'busy') return t('find.busy');
-  if (st.status === 'failed') return t('find.failed');
-  if (st.status === 'invalid') return t('find.invalid');
+export function findCount(st: { query: string; total: number; selected?: number }): string {
   if (!st.query) return '';
-  if (st.total === 0) return st.status === 'searching' ? '…' : t('find.none');
-  if (st.index === undefined) return String(st.total);
-  return t('find.count', { n: st.index + 1, total: st.total });
+  if (st.total === 0) return t('find.none');
+  if (st.selected === undefined) return String(st.total);
+  return t('find.count', { n: st.selected + 1, total: st.total });
 }
 
-const optionIcons: Record<FindOption, typeof CaseSensitive> = { matchCase: CaseSensitive, wholeWord: WholeWord, regex: Regex };
-
-export function FindBar({ m, top, right, maxWidth }: Props) {
+export function FindBar({ m, terminal }: { m: string; terminal: string }) {
   const st = useFind();
   const input = useRef<HTMLInputElement>(null);
 
@@ -52,46 +31,36 @@ export function FindBar({ m, top, right, maxWidth }: Props) {
   }, [st.focusSeq]);
 
   const close = () => {
-    const pane = st.pane;
     closeFind();
-    if (pane) getTerm(m, pane).focus();
+    paneHandle(m, terminal)?.focus();
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    // The keys are the bar's: no prefix bindings, nothing to the pane.
+    // The keys are the bar's: nothing reaches the terminal.
     e.stopPropagation();
-    const option = findOptionKey(e.nativeEvent);
     if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
       e.preventDefault();
       findStep(!e.shiftKey);
     } else if (e.key === 'Escape') {
       e.preventDefault();
       close();
-    } else if (isFindKey(e.nativeEvent)) {
+    } else if (isCommandKey(e.nativeEvent, 'find.open')) {
+      // The find key again selects the query.
       e.preventDefault();
       input.current?.select();
-    } else if (option) {
-      // Not the character Option types on macOS.
-      e.preventDefault();
-      toggleFindOption(option);
     }
   };
 
-  const count = findCount(st);
-  const none = !!st.query && st.status === 'idle' && st.total === 0;
-  const invalid = st.status === 'invalid';
-  const failed = st.status === 'busy' || st.status === 'failed' || invalid;
+  const none = !!st.query && st.total === 0;
   return (
-    <div className="find-bar" role="search" aria-label={t('find.label')} style={{ top, left: right, maxWidth }}>
-      <div className={`find-field ${none || invalid ? 'none' : ''}`}>
+    <div className="find-bar" role="search" aria-label={t('find.label')} onMouseDown={(e) => e.stopPropagation()}>
+      <div className={`find-field ${none ? 'none' : ''}`}>
         <input
           ref={input}
           className="find-input"
           value={st.query}
           placeholder={t('find.placeholder')}
           aria-label={t('find.placeholder')}
-          aria-invalid={invalid}
-          title={invalid ? st.error : undefined}
           spellCheck={false}
           autoCapitalize="off"
           autoComplete="off"
@@ -99,27 +68,9 @@ export function FindBar({ m, top, right, maxWidth }: Props) {
           onChange={(e) => setFindQuery(e.target.value)}
           onKeyDown={onKeyDown}
         />
-        {(Object.keys(optionIcons) as FindOption[]).map((o) => {
-          const Icon = optionIcons[o];
-          const label = `${t(`find.option.${o}`)} (${findOptionKeyLabel(o)})`;
-          return (
-            <button
-              key={o}
-              className={`icon find-option ${st.options[o] ? 'on' : ''}`}
-              title={label}
-              aria-label={label}
-              aria-pressed={st.options[o]}
-              // Keep the focus (and the caret) in the input.
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => toggleFindOption(o)}
-            >
-              <Icon />
-            </button>
-          );
-        })}
       </div>
-      <span className={`find-count small ${failed ? 'error' : 'muted'}`} aria-live="polite" title={invalid ? st.error : undefined}>
-        {count}
+      <span className="find-count small muted" aria-live="polite">
+        {findCount(st)}
       </span>
       <button className="icon" title={t('find.older')} aria-label={t('find.older')} disabled={!st.total} onClick={() => findStep(true)}>
         <ChevronUp />

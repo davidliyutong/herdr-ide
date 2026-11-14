@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useStore } from './state/store';
+import { terms, useTerms } from './state/terms';
+import { paneHandle } from './state/panes';
 import { conn } from './lib/conn';
 import { Sidebar } from './components/Sidebar';
 import { Workspace } from './components/Workspace';
 import { Dock } from './components/Dock';
 import { Palette } from './components/Palette';
 import { AuthDialog } from './components/AuthDialog';
-import { RemoteHerdrDialog } from './components/RemoteHerdrDialog';
 import { AddMachineDialog } from './components/AddMachineDialog';
 import { SettingsDialog } from './components/SettingsDialog';
 import { Dialogs } from './components/Dialogs';
@@ -14,38 +15,73 @@ import { ContextMenu } from './components/ContextMenu';
 import { usePrefs } from './prefs';
 import { initDesktop } from './desktop';
 import { takeOpenedFolders } from './drop';
-import { handleKey, keyHint, loadHerdrCommands, onPrefixChange, pendingChord } from './keymap';
+import { handleKey, keyHint, onPrefixChange, pendingChord } from './keymap';
 import { applySettings, loadSettings } from './settings';
 import { applyKeybindings, loadKeybindings, useKeys } from './keybindings';
 import { t } from './i18n';
 import { notifyAgent, updateBadge } from './notify';
-import { paneCwd, shortPath } from './lib/herdr';
-import { findPane } from './state/store';
-import { getTerm } from './terminal/registry';
-import { initSurface, surfaceDisconnected } from './surface/session';
+import { shortPath } from './lib/machine';
+import * as L from './term/layout';
 import { useGui } from './gui/state';
 import { GuiTray } from './gui/GuiMenus';
 import { bridgeDownload, downloadEvent, resyncDownloads } from './download';
 import { sendTarget } from './lib/bridge';
 import { TransfersTray } from './components/Transfers';
 import { DownloadsTray } from './components/Downloads';
+import { actions } from './actions';
 
 /** Text sent from VS Code ("Send to agent") is pasted, not submitted, into
- * the pane sendTarget picks: the focused one, or an agent pane of the
+ * the terminal sendTarget picks: the focused one, or an agent of the
  * workspace whose panel shows the sending window. */
 function pasteToAgent(m: string, text: string, folders?: string[]) {
   const s = useStore.getState();
-  const { pane, workspace } = sendTarget(s, m, folders);
-  const term = pane ? getTerm(m, pane) : undefined;
-  if (!term) {
-    if (workspace) {
-      const label = s.machines[m]?.snapshot?.workspaces.find((w) => w.workspace_id === workspace)?.label || workspace;
-      s.toast(t('app.noAgentInWorkspace', { workspace: label }));
-    } else s.toast(t('app.noAgentPane'));
+  const { terminal, workspace } = sendTarget(s, m, folders);
+  if (!terminal) {
+    const name = workspace && terms.layout(m)?.workspaces.find((w) => w.id === workspace)?.name;
+    s.toast(workspace ? t('app.noAgentInWorkspace', { workspace: name || t('workspace.default') }) : t('app.noAgentPane'));
     return;
   }
-  term.paste(text);
-  term.focus();
+  // Shown first, so the terminal is attached and takes the paste.
+  actions.focusTerminal(m, terminal);
+  const paste = () => {
+    const h = paneHandle(m, terminal);
+    if (!h) return false;
+    h.paste(text);
+    h.focus();
+    return true;
+  };
+  if (!paste()) setTimeout(paste, 300);
+}
+
+/** Follows the shown machine's terminals and keeps the store's view of its
+ * layout current: the selected workspace (for its dock), and the docks of
+ * workspaces that are gone. */
+function followTerms() {
+  terms.start();
+  const show = (m?: string) => m && terms.subscribe(m);
+  show(useStore.getState().machineId);
+  const offStore = useStore.subscribe((s, prev) => {
+    if (s.machineId !== prev.machineId) show(s.machineId);
+    // Machines removed from the core are no longer followed.
+    for (const m of prev.order) if (!s.machines[m] && prev.machines[m]) terms.forget(m);
+  });
+  const offTerms = useTerms.subscribe((st, prev) => {
+    const s = useStore.getState();
+    const m = s.machineId;
+    const layout = m ? st.machines[m]?.layout : undefined;
+    if (layout && layout !== (m ? prev.machines[m]?.layout : undefined)) {
+      s.setWorkspace(L.selectedWorkspace(layout)?.id);
+      s.pruneDocks(
+        m!,
+        layout.workspaces.map((w) => w.id),
+      );
+    }
+    updateBadge();
+  });
+  return () => {
+    offStore();
+    offTerms();
+  };
 }
 
 export function App() {
@@ -57,7 +93,6 @@ export function App() {
 
   useEffect(() => {
     const s = useStore.getState();
-    initSurface();
     conn.start({
       onMachines: (list) => s.setMachines(list),
       onMachine: (st) => {
@@ -67,8 +102,7 @@ export function App() {
       onAgent: (m, data, sound) => notifyAgent(m, data, sound),
       onConnection: (c) => {
         useStore.getState().setConnected(c);
-        if (!c) surfaceDisconnected();
-        else {
+        if (c) {
           resyncDownloads();
           // Changes made while the page was away (e.g. a core restart).
           void loadSettings();
@@ -82,8 +116,8 @@ export function App() {
       onSettings: (m) => applySettings(m),
       onKeybindings: (m) => applyKeybindings(m),
     });
+    const offTerms = followTerms();
     void loadKeybindings();
-    void loadHerdrCommands();
     const offDesktop = initDesktop();
     const offFolders = takeOpenedFolders();
     fetch('/api/config')
@@ -91,15 +125,16 @@ export function App() {
       .then((c) => useStore.getState().setReadOnly(!!c.read_only))
       .catch(() => {});
     const off = onPrefixChange(setPrefix);
-    // The prefix key also works when focus is outside a terminal.
+    // Bindings also work when the focus is outside a terminal.
     const onKey = (ev: KeyboardEvent) => {
-      const t = ev.target as HTMLElement | null;
-      if (t?.closest('.surface-host') || t?.closest('input, textarea, iframe, [contenteditable]')) return;
+      const el = ev.target as HTMLElement | null;
+      if (el?.closest('.term-host') || el?.closest('input, textarea, iframe, [contenteditable]')) return;
       handleKey(ev);
     };
     window.addEventListener('keydown', onKey);
     return () => {
       off();
+      offTerms();
       offDesktop();
       offFolders();
       window.removeEventListener('keydown', onKey);
@@ -114,7 +149,6 @@ export function App() {
       <StatusBar connected={connected} prefix={prefix} />
       <Palette />
       <SettingsDialog />
-      <RemoteHerdrDialog />
       <AddMachineDialog />
       <Dialogs />
       <AuthDialog />
@@ -145,9 +179,13 @@ function StatusBar({ connected, prefix }: { connected: boolean; prefix: boolean 
   const readOnly = useStore((s) => s.readOnly);
   // Re-rendered when the bindings change.
   useKeys((s) => s.effective);
-  const focused = useStore((s) => s.focused);
-  const pane = useStore((s) => findPane(s, s.focused));
-  const machine = useStore((s) => (s.focused ? s.machines[s.focused.m] : undefined));
+  const m = useStore((s) => s.machineId);
+  const machine = useStore((s) => (s.machineId ? s.machines[s.machineId] : undefined));
+  const focused = useTerms((s) => {
+    const layout = m ? s.machines[m]?.layout : undefined;
+    return layout ? L.focusedTerminal(layout) : undefined;
+  });
+  const cwd = useTerms(() => (m && focused ? terms.directory(m, focused) : undefined));
   const counts = useStore((s) => {
     let ready = 0;
     for (const id of s.order) if (s.machines[id]?.status === 'ready') ready++;
@@ -160,7 +198,7 @@ function StatusBar({ connected, prefix }: { connected: boolean; prefix: boolean 
       <span className="muted">{t('app.machines', { n: counts })}</span>
       {focused && machine && (
         <span className="muted ellipsis">
-          {machine.label} · {focused.pane} · {shortPath(paneCwd(pane), machine.info?.home)}
+          {machine.label} · {focused} · {shortPath(cwd, machine.info?.home)}
         </span>
       )}
       <span className="spacer" />

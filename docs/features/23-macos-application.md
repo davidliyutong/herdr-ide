@@ -32,7 +32,7 @@ knows; workspaces, tabs and split panes that every client of a machine
 shares; the same design language as the web UI (neutral greys, color only
 for state, dense rows); English and Chinese.
 
-Non-goals: the browser UI's panes, which come from herdr; its file
+Non-goals: the browser UI's file
 browser, uploads and downloads, and its settings of the browser itself
 (appearance, shortcuts); starting program windows from terminals of the
 terminal core, which get no virtual display; Linux and Windows.
@@ -48,8 +48,8 @@ terminal core, which get no virtual display; Linux and Windows.
   streams close with `disconnected`. A stream's delegate is registered when
   `attached` arrives, before the next message is read.
 - `EventConnection` is the client of `/ws` as an events client
-  (`/ws?events=1`), which takes no part in the browser UI's pane session
-  ([18](18-endpoint-surfaces.md)). It decodes `machines`, `machine` and
+  (`/ws?events=1`, as the browser UI is), which takes no part in herdr's
+  pane session ([18](18-endpoint-surfaces.md)). It decodes `machines`, `machine` and
   `gui` and ignores every other message; after reconnecting the core sends
   the whole state again.
 - `TerminalStore` keeps each machine's backend state and terminal records
@@ -209,7 +209,7 @@ builds the application that ships:
 | A native editor instead of VS Code | VS Code with its extensions, on the machine, is the feature; the proxy and the bridge extension already serve it. |
 | Subscribing to every machine at launch | Every connected machine would get a terminal core that outlives the application, used or not. |
 | Polling `GET /api/machines` and `GET /api/gui` | A change shows up to 3 s late and every poll transfers every machine's state; `/ws` pushes each change once. |
-| `/ws` as a browser does | Its clients take part in the browser UI's session ownership: a native window would take herdr's panes away from a browser. An events client takes none. |
+| `/ws` as a client of herdr's panes | Such clients take part in herdr's session ownership: a native window would take the session away from another client. An events client takes none. |
 | Opening a terminal into a layout not read yet | The document read afterwards would replace the layout and leave the terminal in no workspace; the terminal waits for the layout instead. |
 
 ## Failure modes

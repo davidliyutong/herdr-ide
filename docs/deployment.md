@@ -43,26 +43,21 @@ archives into `dist/hc/` first. herdr-core's license and notices are in the
 archive's `licenses/herdr-core/`. A core built with `go build` alone has no
 herdr-core unless `go run ./scripts/fetch-hc <os>/<arch> ...` ran before it.
 
-The bundled herdr only spares installing herdr on this host. herdr-ide uses an
-installed herdr when it finds one, otherwise its own copy of the bundled
-one, and herdr keeps its usual configuration, sessions and machine list
-either way. Start herdr's server before using the local machine: **Manage
-herdr** in the local machine's context menu (or its status when it reports a
-problem) starts and stops it and updates the application's copy of herdr;
-opening the TUI with `./herdr-ide herdr` also starts it.
-`./herdr-ide herdr <args>` runs any herdr command. SSH machines are added
-with **Add machine…** in the sidebar (an ssh target and a label); the first
-start imports the machines saved in herdr. Their panes need their own herdr
-installation and running session. Panes need herdr 0.9.5 or newer
-on every machine (herdr's endpoint protocol, generation 1); with an older
-herdr the machine's state and actions work and its panes ask for an update
-(**Update herdr**).
+The browser UI shows the terminals of each machine's terminal core
+(herdr-core, installed and started through the agent when you first show a
+machine; [21](features/21-terminal-core.md)) and needs no herdr. The bundled
+herdr only spares installing herdr on this host for herdr's own TUI and
+CLI: herdr-ide uses an installed herdr when it finds one, otherwise its own
+copy of the bundled one, and herdr keeps its usual configuration, sessions
+and machine list either way. `./herdr-ide herdr <args>` runs any herdr
+command. SSH machines are added with **Add machine…** in the sidebar (an
+ssh target and a label); the first start imports the machines saved in
+herdr.
 
-One browser tab uses herdr-ide at a time, like a KVM console: another tab
-offers to take the session over, and the previous one then shows that it
-was taken over. herdr-ide is herdr's foreground client while you use it:
-its window size sets the size of herdr's tabs, and herdr's own TUI, if you
-open one at the same time, follows the tab herdr-ide shows.
+Several browser tabs, windows and the desktop and macOS applications can
+show the same machines at once: they share each machine's arrangement of
+workspaces, tabs and panes ([04](features/04-layout-and-keyboard.md)), and
+a terminal takes the size of the client that used it last.
 
 Machines come from herdr's saved SSH machines (`herdr machine list`); add
 others with `--ssh`. herdr-ide uses OpenSSH with your `~/.ssh/config`
@@ -211,11 +206,10 @@ location / {
   browser on the same host, so only your proxy can talk to it. With a secret,
   `--listen` may use a non-loopback address (e.g. a proxy in a container);
   without one, that needs the explicit `--insecure-listen`.
-- **Read-only** – `--read-only` serves a watch-only view (panes without
-  input, no mutating herdr calls, no uploads, no VS Code). Run a second
-  instance with it for sharing screens or phones; while it shows a machine it
-  is herdr's foreground client of that machine too, so its window size sets
-  the size of herdr's tabs.
+- **Read-only** – `--read-only` serves a watch-only view (terminals
+  without input, which follow the size other clients set; no layout
+  changes, uploads or VS Code; no terminal core is installed or started).
+  Run a second instance with it for sharing screens or phones.
 - **Audit log** – `--audit-log FILE` records connections, mutating herdr
   calls, uploads, VS Code and bridge use and refused requests as JSON lines,
   with the user from `--user-header`.
@@ -268,15 +262,15 @@ What herdr-ide starts on a machine and how it is reclaimed:
 | Desktop core | Electron launches its bundled binary | SIGTERM on normal quit, with a 20 s deadline before SIGKILL of that owned child; parent-stdin EOF also stops it if Electron crashes. herdr servers and pane programs remain running. |
 | Electron profile | First desktop launch | Kept until manually removed; Chromium manages its caches. Development has a separate profile. Core stderr is bounded to 16 KiB in memory; no desktop log files accumulate. |
 | `herdr-ide-agent` | one per core while connected | Exits when its ssh session ends; a dead link is detected by keepalives within about 45 s. |
-| herdr server started from the UI (local or SSH machine) | **Start herdr** or **Restart herdr…**, on request | Belongs to the user like one started by the herdr TUI and outlives the core and the agent; stopped with **Stop herdr…**, by **Disable machine** when asked to, with `herdr server stop`, and with the machine. On a machine whose logind ends user processes at logout (`KillUserProcesses=yes`) it ends with the agent's ssh login unless the user enabled lingering (`loginctl enable-linger`). Its output goes to `~/.herdr-ide/herdr/server.log` there, replaced at every start from the UI of any session. |
-| `herdr update` | **Update herdr…** on the local machine | Ends with the update (15 min limit); herdr's temporary download is in `~/.herdr-ide/herdr/`. |
+| herdr server started through the core (local or SSH machine) | `POST /api/m/{id}/herdr/{start\|restart}` (the browser UI no longer offers it), on request | Belongs to the user like one started by the herdr TUI and outlives the core and the agent; stopped with `POST /api/m/{id}/herdr/stop`, with `herdr server stop`, and with the machine. On a machine whose logind ends user processes at logout (`KillUserProcesses=yes`) it ends with the agent's ssh login unless the user enabled lingering (`loginctl enable-linger`). Its output goes to `~/.herdr-ide/herdr/server.log` there, replaced at every start from the UI of any session. |
+| `herdr update` | `POST /api/m/local/herdr/update` | Ends with the update (15 min limit); herdr's temporary download is in `~/.herdr-ide/herdr/`. |
 | A machine added from the UI | **Add machine…** (`POST /api/machines`) | Only a record in the core's `machines[-<instance>].json` and an agent while it is connected. **Remove machine…** deletes the record and ends the session (the agent exits and stops what it started); the machine's terminal core, terminals and herdr server keep running there; the agent builds left in `~/.herdr-ide/agent/` follow their usual retention. |
-| `herdr --remote` client (core host) | **Update herdr** for an SSH machine | Ends when herdr exits or the window closes. A herdr it installs on the machine (usually `~/.local/bin/herdr`) is herdr's own installation and stays until the user removes it; a server it starts there belongs to the user. |
-| Terminal core (herdr-core) | when a client of `/api/v1/term` first subscribes to the machine's terminals and no core answers (never in `--read-only`; audited as `term.start`), or **Start terminal core** / **Restart terminal core** in the machine's menu of the macOS application (`POST /api/m/{id}/hc/{start\|restart}`, audited as `hc.start`, `hc.restart`) | Started by herdr-core detached from the agent (a systemd user service on Linux, a launchd job on macOS) in the session `herdr-ide[-<instance>]`, with its socket in `~/.herdr-ide[-<instance>]/run/hc.sock`. It belongs to the user and outlives the agent and the core, so its programs keep running; it ends with **Stop terminal core…** in the machine's menu (`POST /api/m/{id}/hc/stop`, asked first, audited as `hc.stop`: every terminal there ends, and the core starts none again until it is started from the menu or a client subscribes to the machine anew), with the agent op `hc` action `stop`, with `HC_SESSION=herdr-ide[-<instance>] HC_SOCKET=<socket> herdr-core server stop`, and with the machine. A restart keeps the programs (the core's successor adopts them). Its state (terminal records, saved screens, logs) is herdr-core's, in `~/.local/state/herdr-core/herdr-ide[-<instance>]/`, and stays until the user removes it. |
+| `herdr --remote` client (core host) | the WebSocket `GET /api/m/{id}/herdr/remote` for an SSH machine (the browser UI no longer opens it) | Ends when herdr exits or the window closes. A herdr it installs on the machine (usually `~/.local/bin/herdr`) is herdr's own installation and stays until the user removes it; a server it starts there belongs to the user. |
+| Terminal core (herdr-core) | when a client of `/api/v1/term` first subscribes to the machine's terminals and no core answers (never in `--read-only`; audited as `term.start`), or **Start terminal core** / **Restart terminal core…** in the machine's menu (browser UI, desktop app, macOS application) (`POST /api/m/{id}/hc/{start\|restart}`, audited as `hc.start`, `hc.restart`) | Started by herdr-core detached from the agent (a systemd user service on Linux, a launchd job on macOS) in the session `herdr-ide[-<instance>]`, with its socket in `~/.herdr-ide[-<instance>]/run/hc.sock`. It belongs to the user and outlives the agent and the core, so its programs keep running; it ends with **Stop terminal core…** in the machine's menu (`POST /api/m/{id}/hc/stop`, asked first, audited as `hc.stop`: every terminal there ends, and the core starts none again until it is started from the menu or a client subscribes to the machine anew), with the agent op `hc` action `stop`, with `HC_SESSION=herdr-ide[-<instance>] HC_SOCKET=<socket> herdr-core server stop`, and with the machine. A restart keeps the programs (the core's successor adopts them). Its state (terminal records, saved screens, logs) is herdr-core's, in `~/.local/state/herdr-core/herdr-ide[-<instance>]/`, and stays until the user removes it. |
 | herdr-core executable | pushed with the first subscription to a machine's terminals when the machine has another build than the core carries (never in `--read-only`; audited as `term.install`); a core already running is then restarted onto it (`term.restart`), and its programs keep running | One file, `~/.herdr-ide[-<instance>]/hc/herdr-core`, verified by SHA-256 and replaced whole by the next install; a running core keeps the executable it started from. A partial upload left by a killed agent is removed by the next install after 1 h. |
 | Connection to the terminal core | one per machine while a client of `/api/v1/term` is subscribed to it | Closed 10 s after the last subscriber left, and with the agent; attached streams end with their client. No process is started by it. |
 | Agent detection (op `detect`) | while the core's connection to a machine's terminal core lasts | In the agent: one more connection to the terminal core, an event subscription, and for each terminal running a coding agent an observing attach and screen reads (`terminal.read`, at most every 300 ms after output); everything ends when the core closes the stream (10 s after the last subscriber left, or the connection to the terminal core ended) or with the agent. No process is started and nothing is written to disk. |
-| Connection to herdr's client socket | one per core, to the machine the browser shows | Closed when another machine is shown, 10 s after the owning browser left (unless another browser takes over), or with the agent; no process is started. |
+| Connection to herdr's client socket | one per core, to the machine a `/ws` client of herdr's panes shows (none in this build: the browser UI is an events client) | Closed when another machine is shown, 10 s after the owning client left (unless another takes over), or with the agent; no process is started. |
 | code-server | on first VS Code use | Stopped after `--code-server-idle` (default 20 min) without VS Code connections, when the agent exits (if that agent started it; for the local machine, when the core stops), or by the stop button in the VS Code panel. Hidden VS Code windows (each workspace has its own panel) disconnect after 10 min, and at most 3 stay loaded per page. A process left behind by a killed agent is stopped by the next agent, and code-server exits by itself after 1 h without connections. |
 | VS Code extension hosts | one per VS Code window | Disposed 5 min after the window disconnects. |
 | ssh ControlMaster | per machine | Exits after 10 min unused or after 1 min without answers from the server. When the core finds its connection dead (an agent session lost while ssh kept running, a probe timing out) it tells it to take no new sessions (`ssh -O stop`), and it exits with the last session open through it. |
@@ -288,21 +282,16 @@ What herdr-ide starts on a machine and how it is reclaimed:
 | Shared memory for captures | while the agent's window manager runs | One System V segment of at most 64 MB, 0600, marked for removal as soon as the agent attached it (on Linux; elsewhere once Xvfb attached it): it disappears when the agent and its connection to the display are gone, also when the agent is killed. |
 | curl or wget (`--code-server-install=download`) | while a machine downloads code-server | Ends with the download (20 min limit); the partial file in `~/.herdr-ide/code-server/` is removed, or with the unused versions after 14 days if the agent was killed. |
 | Download archives (`fs.archive`) | while a folder or several files download | No process and nothing on disk: the agent zips into the download's stream and its walk ends with the stream, also when the download is cancelled. |
-| Searches (`pane.find`) | while the find bar searches a pane | No process and nothing on disk: the agent reads the pane's text from herdr into memory and drops it with the answer; a search ends after 20 s at most, or when the browser cancels it for a newer one. |
+| Searches (`pane.find`) | while a client searches a herdr pane through `POST /api/m/{id}/find` (the browser UI finds in its own terminals) | No process and nothing on disk: the agent reads the pane's text from herdr into memory and drops it with the answer; a search ends after 20 s at most, or when the client cancels it for a newer one. |
 | Disk | see [reference](reference.md#files-and-directories) | Uploads and logs after 7 days; agent builds and code-server versions unused for 14 days; Xvfb packages and video encoders unused for 14 days when another one is installed. Files dropped on a pane are written into the pane's directory and belong to the user, like files copied there by hand. A cancelled or interrupted upload leaves nothing: the agent removes its temporary file (`.herdr-ide-upload-*` beside the target) when the stream ends early; only an agent killed during an upload leaves one. |
 
-herdr servers are started and stopped by the user: through herdr, or
-through **Restart herdr…** and **Stop herdr…** in a machine's context menu
-(an SSH machine that rebooted is *ready* without herdr's panes until its
-server is started again; **Start herdr** in its status block starts it). herdr on an SSH
-machine changes only through herdr's own `herdr --remote` flow, which
-**Update herdr** (the machine's context menu) runs in a terminal where the
-user answers herdr's questions; where herdr was removed or moved (or a
-reinstalled system lost it) the same flow is offered as **Install herdr**. The bundled herdr and
-the licenses stay in the extracted release directory until the user removes
-it; the application's copy of herdr and the log of servers it started are
-described in [reference](reference.md#files-and-directories). No herdr binary
-is uploaded to SSH machines.
+herdr servers are started and stopped by the user, through herdr; herdr on
+an SSH machine changes only through herdr's own `herdr --remote` flow. The
+bundled herdr and the licenses stay in the extracted release directory
+until the user removes it; the application's copy of herdr and the log of
+servers it started are described in
+[reference](reference.md#files-and-directories). No herdr binary is
+uploaded to SSH machines.
 
 How machines get code-server is a setting (the settings dialog or
 `--code-server-install`): the core uploads the release (default; works for

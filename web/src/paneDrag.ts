@@ -1,28 +1,23 @@
 // Dragging a pane by its header onto another pane swaps the two (centre) or
-// moves the dragged pane next to the target (edges); dropping it on a tab
-// moves it into that tab, on the new-tab button into a new tab. herdr does
-// the rearranging (pane.swap / pane.move); the layout comes back as events.
-//
-// herdr 0.9.5 refuses pane.move within a tab ("same_tab"), so a move next to
-// a pane of the same tab goes through a new tab, which herdr closes again
-// when the pane leaves it.
+// places the dragged pane beside the target (edges); dropping it on a tab
+// moves it into that tab, on the new-tab button into a new tab. These are
+// edits of the machine's layout document (term/layout.ts).
 
-import { conn } from './lib/conn';
 import { trackDrag, type Box, type DragStart } from './drag';
-import { useStore } from './state/store';
+import { terms } from './state/terms';
+import * as L from './term/layout';
 import { t } from './i18n';
 
 export type Zone = 'center' | 'left' | 'right' | 'top' | 'bottom';
 
 export type DropTarget =
-  | { kind: 'pane'; pane: string; tab: string; zone: Zone; rect: DOMRect }
-  | { kind: 'tab'; tab: string; rect: DOMRect }
+  | { kind: 'pane'; terminal: string; zone: Zone; rect: DOMRect }
+  | { kind: 'tab'; ws: string; index: number; rect: DOMRect }
   | { kind: 'newTab'; ws: string; rect: DOMRect };
 
 export interface DragSource {
   m: string;
-  pane: string;
-  tab: string;
+  terminal: string;
   ws: string;
   label: string;
 }
@@ -39,14 +34,18 @@ export function dropZone(r: Box, x: number, y: number): Zone {
 
 function findTarget(src: DragSource, x: number, y: number): DropTarget | undefined {
   const el = document.elementFromPoint(x, y) as HTMLElement | null;
-  const pane = el?.closest<HTMLElement>('[data-pane-id]');
-  if (pane && pane.dataset.m === src.m && pane.dataset.paneId !== src.pane) {
+  const pane = el?.closest<HTMLElement>('.pane[data-terminal]');
+  if (pane && pane.dataset.m === src.m && pane.dataset.terminal !== src.terminal) {
     const rect = pane.getBoundingClientRect();
-    return { kind: 'pane', pane: pane.dataset.paneId!, tab: pane.dataset.tabId!, zone: dropZone(rect, x, y), rect };
+    return { kind: 'pane', terminal: pane.dataset.terminal!, zone: dropZone(rect, x, y), rect };
   }
-  const tab = el?.closest<HTMLElement>('.tab[data-tab-id]');
-  if (tab && tab.dataset.m === src.m && tab.dataset.tabId !== src.tab)
-    return { kind: 'tab', tab: tab.dataset.tabId!, rect: tab.getBoundingClientRect() };
+  const tab = el?.closest<HTMLElement>('.tab[data-tab]');
+  if (tab && tab.dataset.m === src.m) {
+    const index = Number(tab.dataset.tab);
+    const tabs = terms.layout(src.m)?.workspaces.find((w) => w.id === tab.dataset.ws)?.tabs;
+    if (tabs?.[index] && !L.tabTerminals(tabs[index]).includes(src.terminal))
+      return { kind: 'tab', ws: tab.dataset.ws!, index, rect: tab.getBoundingClientRect() };
+  }
   const add = el?.closest<HTMLElement>('[data-new-tab]');
   if (add && add.dataset.m === src.m) return { kind: 'newTab', ws: add.dataset.newTab!, rect: add.getBoundingClientRect() };
 }
@@ -69,32 +68,19 @@ function markerRect(tg: DropTarget): Box {
   }
 }
 
-/** Tab a pane.move result left the pane in. */
-function movedTo(res: any): string | undefined {
-  return res?.move_result?.pane?.tab_id;
-}
-
-async function drop(src: DragSource, tg: DropTarget) {
-  const { m, pane } = src;
-  const s = useStore.getState();
+/** The layout after dropping the source on a target. */
+export function dropped(l: L.Layout, src: DragSource, tg: DropTarget): L.Layout {
   if (tg.kind === 'pane') {
-    if (tg.zone === 'center') {
-      await conn.api(m, 'pane.swap', { source_pane_id: pane, target_pane_id: tg.pane });
-    } else {
-      if (tg.tab === src.tab) await conn.api(m, 'pane.move', { pane_id: pane, destination: { type: 'new_tab', workspace_id: src.ws } });
-      // herdr splits only to the right or down; left/top is that plus a swap.
-      const split = tg.zone === 'left' || tg.zone === 'right' ? 'right' : 'down';
-      await conn.api(m, 'pane.move', { pane_id: pane, destination: { type: 'tab', tab_id: tg.tab, split, target_pane_id: tg.pane } });
-      if (tg.zone === 'left' || tg.zone === 'top') await conn.api(m, 'pane.swap', { source_pane_id: pane, target_pane_id: tg.pane });
-    }
-  } else if (tg.kind === 'tab') {
-    await conn.api(m, 'pane.move', { pane_id: pane, destination: { type: 'tab', tab_id: tg.tab, split: 'right' } });
-    s.selectTab(m, src.ws, tg.tab);
-  } else {
-    const tab = movedTo(await conn.api(m, 'pane.move', { pane_id: pane, destination: { type: 'new_tab', workspace_id: tg.ws } }));
-    if (tab) s.selectTab(m, tg.ws, tab);
+    if (tg.zone === 'center') return L.swapTerminals(l, src.terminal, tg.terminal);
+    const axis: L.Axis = tg.zone === 'left' || tg.zone === 'right' ? 'horizontal' : 'vertical';
+    return L.moveTerminal(l, src.terminal, tg.terminal, axis, tg.zone === 'left' || tg.zone === 'top');
   }
-  s.focusPane({ m, pane });
+  if (tg.kind === 'tab') {
+    // Beside the tab's focused terminal.
+    const target = l.workspaces.find((w) => w.id === tg.ws)?.tabs[tg.index]?.focused;
+    return target ? L.moveTerminal(l, src.terminal, target, 'horizontal') : l;
+  }
+  return L.moveToNewTab(l, src.terminal, tg.ws);
 }
 
 /** Starts tracking a possible drag from a pane header. */
@@ -103,7 +89,9 @@ export function startPaneDrag(ev: DragStart, src: DragSource) {
     label: src.label,
     find: (x, y) => findTarget(src, x, y),
     marker: (tg) => ({ box: markerRect(tg), zone: tg.kind === 'pane' ? tg.zone : tg.kind }),
-    drop: (tg) => drop(src, tg),
+    drop: async (tg) => {
+      terms.mutate(src.m, (l) => dropped(l, src, tg));
+    },
     failed: (error) => t('pane.moveFailed', { error }),
   });
 }

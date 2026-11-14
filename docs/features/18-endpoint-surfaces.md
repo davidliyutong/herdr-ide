@@ -12,6 +12,11 @@ reports per-pane geometry and modes, accepts semantic input that it encodes
 for each pane, and answers programs' color queries with the colors the
 client reports.
 
+The browser UI no longer uses this path: it draws the terminal core's
+terminals itself ([26](26-web-terminals.md)) and connects to `/ws` as an
+events client. The core still serves surfaces to a `/ws` client that asks
+for them.
+
 Facts the design relies on (herdr 0.9.5, `src/protocol/wire.rs`,
 `endpoint.rs`, `surface_delta.rs`, `surface_scroll.rs`,
 `src/server/headless.rs`, `client_views.rs`):
@@ -160,7 +165,7 @@ never moves herdr's focused pane, and gets no clipboard writes; it still
 selects the tab it shows and sets the tab size, as any herdr client does.
 Pastes are filtered in the core as well as the browser, OSC 52 writes reach
 the clipboard only after a click or, with the browser's automatic setting,
-right after the user's input to a pane ([03](03-pane-rendering-and-input.md)),
+right after the user's input to a pane ([26](26-web-terminals.md) has the same rule),
 and decoding is bounded per item type. See [SECURITY.md](../../SECURITY.md).
 
 ## Testing

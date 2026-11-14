@@ -10,8 +10,7 @@ shortcuts, paths) lives in [reference.md](../reference.md).
 | --- | --- | --- |
 | 01 | [herdr integration](01-herdr-integration.md) | Talk to herdr through its public socket API and its endpoint protocol instead of embedding its TUI. |
 | 02 | [Multi-machine transport](02-multi-machine-transport.md) | One ssh session per machine running a static agent; yamux multiplexing; platform detection and upload. |
-| 03 | [Pane rendering and input](03-pane-rendering-and-input.md) | herdr's cell grid on a canvas; semantic input herdr encodes per pane; selections, links, clipboard. |
-| 04 | [Layout and keyboard](04-layout-and-keyboard.md) | herdr's split tree rendered natively; herdr's prefix keys as default bindings, direct shortcuts of the applications; command palette. |
+| 04 | [Layout and keyboard](04-layout-and-keyboard.md) | Workspaces, tabs and split panes of the machine's layout document; herdr's prefix keys as default bindings, direct shortcuts of the applications; command palette. |
 | 05 | [VS Code panel](05-vscode-panel.md) | code-server per machine behind the core's proxy; bridge extension; Git Graph and diffs. |
 | 06 | [Quick Look and files](06-quick-look-and-files.md) | Path detection in terminals, media preview with range streaming, uploads for agents, downloads with folders as zips. |
 | 07 | [Agent-native workflow](07-agent-native-workflow.md) | Attention inbox, notifications, starting agents, sending code to agents. |
@@ -27,13 +26,12 @@ shortcuts, paths) lives in [reference.md](../reference.md).
 | 17 | [Managing herdr from the UI](17-local-herdr-management.md) | Start, stop and update the core host's herdr; a managed copy of the bundled herdr; herdr's own `--remote` update for SSH machines. |
 | 18 | [Pane surfaces through herdr's endpoint](18-endpoint-surfaces.md) | One connection per shown machine to herdr's client socket; endpoint protocol generation 1; one browser owns the session at a time. |
 | 19 | [Formulas in panes](19-formulas-in-panes.md) | LaTeX under the resting pointer typeset by KaTeX in a popover; the spellings agents print, also without dropped backslashes. |
-| 20 | [Find in panes](20-find-in-panes.md) | ⌘F / Ctrl+Shift+F finds text in a pane's output and scrollback, also by regular expression, case or whole word; the agent searches next to herdr; matches highlighted, the current one scrolled into view. |
 | 21 | [herdr-core terminal core](21-terminal-core.md) | A herdr-core of the agent's own on each machine, in a session apart from the user's, and a client of its API: terminals as raw byte streams with credit. |
 | 22 | [Terminal protocol for clients](22-terminal-protocol.md) | `/api/v1/term`: a machine's terminals, their events and raw byte streams for clients that emulate and draw terminals themselves, and the layout document those clients share. |
 | 23 | [macOS application](23-macos-application.md) | A native window on the terminal protocol: Ghostty's GPU renderer per pane, workspaces, tabs and splits kept as a document in the machine's terminal core. |
 | 24 | [Design tokens](24-design-tokens.md) | One file of colors, metrics, font sizes and terminal palettes, generated into the macOS application's Swift and the web UI's CSS variables. |
 | 25 | [Agent detection in terminals](25-agent-detection.md) | herdr's method for the terminal core's terminals: the foreground process names the agent, herdr's rules over the screen give its state, done when a turn ends; in the agent, next to the terminals. |
-| 26 | [Web terminals](26-web-terminals.md) | Ghostty's terminal library as WebAssembly for the browser: the emulator, its WebGL2 and Canvas 2D renderer, and keys, mouse and pastes encoded for each program's modes. |
+| 26 | [Web terminals](26-web-terminals.md) | Ghostty's terminal library as WebAssembly emulates the browser's terminals; WebGL2 (or Canvas 2D) draws them; keys, mouse and pastes encoded for each program's modes; selections, links, clipboard and find in the page. |
 
 ## Writing a feature document
 

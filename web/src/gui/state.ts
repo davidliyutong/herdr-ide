@@ -1,6 +1,7 @@
 // Windows of programs on machines (docs/features/14-gui-windows.md). The
 // core sends each machine's display state; a window that appeared while
-// this page was open is "unseen" until it is opened, and marked on its pane.
+// this page was open is "unseen" until it is opened, and marked on its
+// terminal's pane.
 
 import { create } from 'zustand';
 import { APP_SLUG } from '../brand';
@@ -11,8 +12,6 @@ export interface GuiWindow {
   w: number;
   h: number;
   pid?: number;
-  /** herdr pane the program runs in, when it is in this machine's session. */
-  pane?: string;
   /** Terminal of the machine's terminal core the program runs in. */
   terminal?: string;
   /** The window this one is a dialog of. */
@@ -79,9 +78,9 @@ export const useGui = create<GuiStore>((set) => ({
     }),
 }));
 
-/** Windows of a pane, in the order they appeared. */
-export function paneWindows(g: GuiStore, m: string, pane: string): GuiWindow[] {
-  return (g.machines[m]?.windows ?? []).filter((w) => w.pane === pane);
+/** Windows of programs in a terminal, in the order they appeared. */
+export function terminalWindows(g: GuiStore, m: string, terminal: string): GuiWindow[] {
+  return (g.machines[m]?.windows ?? []).filter((w) => w.terminal === terminal);
 }
 
 export function guiUrl(m: string, id: number): string {
