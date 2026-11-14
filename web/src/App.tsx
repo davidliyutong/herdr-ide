@@ -24,9 +24,10 @@ import { initSurface, surfaceDisconnected } from './surface/session';
 import { isFindKey, openFind } from './surface/find';
 import { useGui } from './gui/state';
 import { GuiTray } from './gui/GuiMenus';
-import { bridgeDownload } from './download';
+import { bridgeDownload, downloadEvent } from './download';
 import { sendTarget } from './lib/bridge';
 import { TransfersTray } from './components/Transfers';
+import { DownloadsTray } from './components/Downloads';
 
 /** Text sent from VS Code ("Send to agent") is pasted, not submitted, into
  * the pane sendTarget picks: the focused one, or an agent pane of the
@@ -66,6 +67,7 @@ export function App() {
       },
       onBridgeSend: (m, text, folders) => pasteToAgent(m, text, folders),
       onBridgeDownload: (m, paths) => bridgeDownload(m, paths),
+      onDownload: (ev) => downloadEvent(ev),
       onGui: (st) => useGui.getState().setState(st),
     });
     loadKeymap();
@@ -162,6 +164,7 @@ function StatusBar({ connected, prefix }: { connected: boolean; prefix: boolean 
       )}
       <span className="spacer" />
       <TransfersTray />
+      <DownloadsTray />
       <GuiTray />
       {prefix && <span className="prefix-badge">PREFIX</span>}
       <span className="muted small">{t('app.hint', { prefix: keyPrefix })}</span>

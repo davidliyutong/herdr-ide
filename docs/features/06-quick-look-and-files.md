@@ -81,10 +81,14 @@ more); editing files (that is VS Code's job).
   own machine, whose files are already on the computer; a browser offers
   them for every machine.
 - The page starts a download with a same-origin link, so the browser (or the
-  desktop app's save dialog) handles it like any download: progress,
-  cancelling, where it goes. Nothing is held in the page's memory. The core
-  copies the agent's stream to the response; cancelling the download closes
-  the stream, which stops the agent's walk.
+  desktop app's save dialog) saves it like any download, where the user
+  wants it. Nothing is held in the page's memory. The link carries an id
+  (`dl=`), by which the downloads panel follows it (below). The core copies
+  the agent's stream to the response; a download that ends early (cancelled
+  in the browser or the panel) stops reading the stream before its next
+  read and closes it, which stops the agent's walk. (Closing a yamux stream
+  only ends its writes, and a read deadline is not checked while received
+  data is waiting, which it always is while the agent keeps sending.)
 - The agent follows the paths it is given when they are symbolic links (the
   user named them) but stores links below them as links, so a link to `/`
   inside a project is not followed; sockets, devices and FIFOs are left out
@@ -157,6 +161,46 @@ more); editing files (that is VS Code's job).
   opening the panel shows the ones other tabs finished. Entries can be
   removed one by one or all at once; this does not touch the files.
 
+**Downloads panel** (`web/src/download.ts`, `web/src/components/Downloads.tsx`,
+`internal/server/downloads.go`)
+
+- The same design as the uploads panel, with its own button in the status
+  bar (shown once the browser has downloaded something): the downloads
+  running, then the finished ones, newest first.
+- A browser tells a page nothing about the downloads it saves, so the core
+  reports them. A download whose link has an id (8–64 URL-safe characters;
+  the page makes 128 random bits) is followed: the core sends
+  `download {id, state, sent, total?, name?, error?}` to the pages when the
+  request arrives, when it knows the name the file is saved under and its
+  size, every 250 ms while it writes the response, and once at the end.
+  `sent` counts the bytes the core wrote to the response, which over a
+  machine's link is close to what the browser received. Only the page that
+  made the id follows it; the others ignore it. At most 64 downloads are
+  followed at once (the others still download, without progress), a
+  `HEAD` check is not.
+- A running download shows the bytes received of its size, its speed over
+  the last 3 seconds and the time left. An archive is made while it
+  downloads, so its size is not known: it shows the bytes received and the
+  speed, with a moving bar.
+- **Cancel** (and **Cancel all**) asks the core
+  (`POST /api/downloads/{dl}/cancel`) to break the response off: the
+  browser's download fails instead of saving a partial file, the agent's
+  stream ends, and the panel shows it as cancelled. A download cancelled
+  in the browser (or the desktop app's save dialog) ends the request, which
+  the core also reports as cancelled.
+- It ends as done once the core wrote the whole response; as failed with a
+  reason when the path or machine is not there (`not_found`), the machine
+  is not connected (`unavailable`), the paths were refused (`invalid`) or
+  the transfer broke off (`interrupted`; the response is aborted, so the
+  browser reports a failure, not a truncated archive); a note says so too.
+  A download the core never reported within 30 s (the request did not
+  reach it) counts as failed (`no_response`).
+- Finished downloads show the machine, the paths, the size, time and
+  average speed, or why they ended, and can be downloaded again or removed
+  from the list. The browser keeps the last 50 in `localStorage` (names,
+  machines and paths, not contents). A page reloaded during a download no
+  longer follows it; the browser's own downloads still show it.
+
 ## Alternatives considered
 
 | Option | Why not |
@@ -174,6 +218,9 @@ more); editing files (that is VS Code's job).
 | tar.gz instead of zip | Not opened by a double click on Windows; zip streams just as well (data descriptors, zip64 for large files). |
 | Fetch the files in the page and zip them there | Holds everything in the page's memory and needs a request per file. |
 | One download per checked file | The browser asks to allow several downloads, and a folder still needs an archive. |
+| Download progress by fetching the file in the page | Holds the whole file (or archive) in the page's memory before it can be saved. |
+| Save with the File System Access API to follow progress | Chromium only, and asks where to save every time; downloads would behave differently per browser. |
+| Progress from the desktop app's download events | Only in the desktop app; the core's count works in every browser and also tells why a download failed. |
 
 ## Security
 
@@ -191,7 +238,11 @@ removes it when the stream ends before its last chunk. The upload history
 is per browser and holds names and paths only. Downloads read only what
 the file preview reads, with the same headers (`nosniff`, a sandboxing
 CSP), are allowed in read-only mode like viewing files, and are audited as
-`file.download`; links below the paths named are not followed.
+`file.download`; links below the paths named are not followed. Download
+events carry the page's random id, the saved name, sizes, the state and a
+reason code, never contents; cancelling needs the id, is allowed in
+read-only mode (it changes nothing on a machine) and is audited as
+`file.download.cancel`.
 
 ## Testing
 
@@ -212,6 +263,11 @@ Downloads: `internal/agent/archive_test.go` (archive contents, repeated
 names, links followed only at the top, modes, missing paths, an abandoned
 stream), `internal/server/download_test.go` (path checks, archive names, a
 file as itself and directories as zips through a real agent, `HEAD`,
-read-only mode, the audit record), `web/src/__tests__/download.test.ts` (the
-pane menu's items, the check before a path's download, the chooser, no
-downloads for the desktop app's own machine).
+read-only mode, the audit record; `TestDownloadProgress`: events of a file
+and an archive, failure codes, cancelling from the panel and in the browser
+with the response broken off, no events without an id or for `HEAD`),
+`web/src/__tests__/download.test.ts` (the pane menu's items, the check
+before a path's download, the chooser, no downloads for the desktop app's
+own machine; the panel: progress and speed, an archive without a size,
+failures and their notes, cancelling, a download that never started,
+downloading again, the status bar button).

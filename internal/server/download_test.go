@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"log"
 	"net"
@@ -15,6 +16,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -158,4 +160,160 @@ func TestBridgeDownload(t *testing.T) {
 		t.Fatal("no bridge.download")
 	}
 	b.Close()
+}
+
+// A download the page gave an id reports its progress and how it ended to
+// the pages, and can be cancelled from the downloads panel.
+func TestDownloadProgress(t *testing.T) {
+	mg, _, logger := agentMachine(t)
+	s := New(mg, Options{Logger: logger})
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c := &wsClient{s: s, ctx: ctx, cancel: cancel, send: make(chan outMsg, 4096)}
+	s.clients[c] = true
+
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "proj"), 0o755)
+	os.WriteFile(filepath.Join(dir, "proj", "a.txt"), []byte("alpha"), 0o644)
+	big := filepath.Join(dir, "big.bin")
+	f, _ := os.Create(big)
+	f.Truncate(256 << 20) // sparse: more than the connection buffers hold
+	f.Close()
+
+	type event struct {
+		ID    string `json:"id"`
+		State string `json:"state"`
+		Sent  int64  `json:"sent"`
+		Total *int64 `json:"total"`
+		Name  string `json:"name"`
+		Error string `json:"error"`
+	}
+	// events returns the events of id up to its last one.
+	events := func(id string) []event {
+		t.Helper()
+		var out []event
+		for {
+			select {
+			case m := <-c.send:
+				var e event
+				if json.Unmarshal(m.data, &e) != nil || e.ID != id {
+					continue
+				}
+				out = append(out, e)
+				if e.State != "running" {
+					return out
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatalf("%s: events so far %+v", id, out)
+			}
+		}
+	}
+	get := func(id string, paths ...string) *http.Response {
+		t.Helper()
+		q := url.Values{"path": paths}
+		if id != "" {
+			q.Set("dl", id)
+		}
+		res, err := http.Get(srv.URL + "/api/m/x/download?" + q.Encode())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	fetch := func(id string, paths ...string) {
+		t.Helper()
+		res := get(id, paths...)
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+	}
+
+	// One file: its name and size, then done with every byte.
+	fetch("file-0001", filepath.Join(dir, "proj", "a.txt"))
+	ev := events("file-0001")
+	last := ev[len(ev)-1]
+	if ev[0].State != "running" || last.State != "done" || last.Sent != 5 || last.Total == nil || *last.Total != 5 || last.Name != "a.txt" {
+		t.Fatalf("file: %+v", ev)
+	}
+	// An archive has no size in advance.
+	fetch("dir-00001", filepath.Join(dir, "proj"))
+	ev = events("dir-00001")
+	last = ev[len(ev)-1]
+	if last.State != "done" || last.Total != nil || last.Name != "proj.zip" || last.Sent == 0 {
+		t.Fatalf("archive: %+v", ev)
+	}
+	// Failures carry a code the page translates.
+	fetch("missing01", filepath.Join(dir, "missing"))
+	if last := events("missing01"); last[len(last)-1].State != "failed" || last[len(last)-1].Error != "not_found" {
+		t.Fatalf("missing: %+v", last)
+	}
+	fetch("invalid01", "relative")
+	if last := events("invalid01"); last[len(last)-1].State != "failed" || last[len(last)-1].Error != "invalid" {
+		t.Fatalf("invalid: %+v", last)
+	}
+
+	// Cancelled from the panel while the browser keeps reading: the
+	// download breaks off, without the rest of the file.
+	res := get("cancel-01", big)
+	read := make(chan error, 1)
+	var got atomic.Int64
+	go func() {
+		buf := make([]byte, 64<<10)
+		for {
+			n, err := res.Body.Read(buf)
+			got.Add(int64(n))
+			if err != nil {
+				read <- err
+				return
+			}
+			time.Sleep(time.Millisecond) // a slower reader than the agent
+		}
+	}()
+	for got.Load() < 1<<20 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/downloads/cancel-01/cancel", nil)
+	if r, err := http.DefaultClient.Do(req); err != nil || r.StatusCode != http.StatusNoContent {
+		t.Fatalf("cancel: %v %v", r, err)
+	}
+	select {
+	case err := <-read:
+		if err == io.EOF || got.Load() >= res.ContentLength {
+			t.Fatalf("a cancelled download ended like a complete one (%d of %d bytes)", got.Load(), res.ContentLength)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("the download went on after cancelling (%d of %d bytes)", got.Load(), res.ContentLength)
+	}
+	res.Body.Close()
+	if ev := events("cancel-01"); ev[len(ev)-1].State != "cancelled" {
+		t.Fatalf("cancelled: %+v", ev[len(ev)-1])
+	}
+	if r, err := http.DefaultClient.Do(req); err != nil || r.StatusCode != http.StatusNotFound {
+		t.Fatalf("cancel of a finished download: %v %v", r, err)
+	}
+
+	// Cancelled in the browser.
+	res = get("browser-1", big)
+	io.ReadFull(res.Body, make([]byte, 1<<20))
+	res.Body.Close()
+	if ev := events("browser-1"); ev[len(ev)-1].State != "cancelled" {
+		t.Fatalf("closed by the browser: %+v", ev[len(ev)-1])
+	}
+
+	// Without an id, with a malformed one, or a HEAD check: no events.
+	fetch("", filepath.Join(dir, "proj", "a.txt"))
+	fetch("bad id!", filepath.Join(dir, "proj", "a.txt"))
+	h, _ := http.Head(srv.URL + "/api/m/x/download?" + url.Values{"path": {filepath.Join(dir, "proj")}, "dl": {"head-0001"}}.Encode())
+	h.Body.Close()
+	select {
+	case m := <-c.send:
+		if strings.Contains(string(m.data), `"t":"download"`) {
+			t.Fatalf("untracked download reported: %s", m.data)
+		}
+	case <-time.After(200 * time.Millisecond):
+	}
+	if n := len(s.downloads.running); n != 0 {
+		t.Fatalf("%d downloads still followed", n)
+	}
 }

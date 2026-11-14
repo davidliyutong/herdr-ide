@@ -5,6 +5,7 @@
 
 import type { AgentStatusEvent, MachineState } from './herdr';
 import type { GuiState } from '../gui/state';
+import type { DownloadEvent } from '../download';
 
 /** Receives the surface stream: session, surf* , clip and bell messages, and
  * binary updates. */
@@ -34,6 +35,8 @@ type Listener = {
   onBridgeSend(machine: string, text: string, folders?: string[]): void;
   /** Files chosen in VS Code's explorer to download. */
   onBridgeDownload(machine: string, paths: string[]): void;
+  /** Progress or end of a download a page started (download.ts). */
+  onDownload(ev: DownloadEvent): void;
   onGui(st: GuiState): void;
 };
 
@@ -114,6 +117,9 @@ class Conn {
         break;
       case 'bridge.download':
         this.listener?.onBridgeDownload(m.m, m.paths);
+        break;
+      case 'download':
+        this.listener?.onDownload(m);
         break;
       case 'gui':
         this.listener?.onGui(m.state);

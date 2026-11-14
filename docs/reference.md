@@ -144,7 +144,9 @@ files into the pane's directory) and pastes their paths; in the desktop app,
 files dropped on a local pane are pasted where they are. A pane's right-click
 menu downloads the path under the pointer and, with **Download files…**,
 files and folders chosen in the pane's directory (folders as zips; not for
-the desktop app's own machine).
+the desktop app's own machine). The downloads panel in the status bar shows
+each download's progress, speed and result, cancels it or downloads it
+again.
 
 With the mouse: click a pane's title to rename it (empty restores the
 terminal title); double-click a tab or workspace to rename it; drag a pane by

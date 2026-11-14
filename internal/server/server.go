@@ -71,7 +71,9 @@ type Server struct {
 	csProxy *codeServerProxy
 	cs      *codeserver.Manager
 	bridge  *bridgeHub
-	gui     *gui.Manager
+	// downloads the pages follow in their downloads panel
+	downloads downloadsHub
+	gui       *gui.Manager
 	// herdrCLI is the herdr that runs herdr's machine commands on the core
 	// host ("" when unknown): the local machine's (tests replace it).
 	herdrCLI func() string
@@ -136,6 +138,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/m/{id}/bridge", s.writable(s.handleBridge))
 	mux.HandleFunc("GET /api/m/{id}/file", s.handleFile)
 	mux.HandleFunc("GET /api/m/{id}/download", s.handleDownload)
+	mux.HandleFunc("POST /api/downloads/{dl}/cancel", s.handleDownloadCancel)
 	mux.HandleFunc("POST /api/m/{id}/upload", s.writable(s.handleUpload))
 	mux.HandleFunc("GET /api/m/{id}/list", s.handleList)
 	mux.HandleFunc("POST /api/m/{id}/find", s.handleFind)

@@ -1852,11 +1852,29 @@ button.gui-note:hover {
     opacity: 0.45;
   }
 }
+/* A download whose size is not known (an archive, or before it starts). */
+.transfer-bar.indeterminate > div {
+  width: 30%;
+  animation: transfer-slide 1.4s ease-in-out infinite;
+}
+@keyframes transfer-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(340%);
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .transfer-bar > div {
     transition: none;
   }
   .transfer.finishing .transfer-bar > div {
+    animation: none;
+  }
+  .transfer-bar.indeterminate > div {
+    width: 100%;
+    opacity: 0.5;
     animation: none;
   }
 }

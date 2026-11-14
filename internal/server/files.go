@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"net"
 	"net/http"
 	"net/url"
 	"path"
@@ -123,7 +124,9 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 }
 
 // serveFile streams the file st describes, as an attachment when download.
-func serveFile(w http.ResponseWriter, r *http.Request, mc *machines.Machine, st *agentproto.Stat, download bool) {
+// serveFile serves a file of a machine, or the range asked for, and reports
+// whether the whole response was written.
+func serveFile(w http.ResponseWriter, r *http.Request, mc *machines.Machine, st *agentproto.Stat, download bool) bool {
 	etag := fmt.Sprintf(`W/"%x-%x"`, st.Size, st.ModTime)
 	h := w.Header()
 	h.Set("ETag", etag)
@@ -143,7 +146,7 @@ func serveFile(w http.ResponseWriter, r *http.Request, mc *machines.Machine, st 
 	}
 	if r.Header.Get("If-None-Match") == etag {
 		w.WriteHeader(http.StatusNotModified)
-		return
+		return true
 	}
 	start, length, partial := int64(0), st.Size, false
 	if rh := r.Header.Get("Range"); rh != "" {
@@ -152,7 +155,7 @@ func serveFile(w http.ResponseWriter, r *http.Request, mc *machines.Machine, st 
 		} else if st.Size > 0 {
 			h.Set("Content-Range", fmt.Sprintf("bytes */%d", st.Size))
 			http.Error(w, "invalid range", http.StatusRequestedRangeNotSatisfiable)
-			return
+			return false
 		}
 	}
 	h.Set("Content-Length", strconv.FormatInt(length, 10))
@@ -161,14 +164,43 @@ func serveFile(w http.ResponseWriter, r *http.Request, mc *machines.Machine, st 
 		w.WriteHeader(http.StatusPartialContent)
 	}
 	if r.Method == http.MethodHead || length == 0 {
-		return
+		return true
 	}
 	conn, _, err := mc.Open(r.Context(), agentproto.Header{Op: agentproto.OpFsRead, Path: st.Path, Offset: start, Length: length})
 	if err != nil {
-		return
+		return false
 	}
 	defer conn.Close()
-	io.CopyN(w, conn, length)
+	// A request that ends (the browser left, a download cancelled from the
+	// panel) stops reading the agent's stream.
+	defer endWith(r.Context(), conn)()
+	_, err = io.CopyN(w, ctxReader{r.Context(), conn}, length)
+	return err == nil
+}
+
+// endWith stops reads of an agent's stream that wait for data and closes it
+// once ctx ends, and returns the function that stops waiting for that.
+// Closing a stream alone only ends its writes.
+func endWith(ctx context.Context, conn net.Conn) func() bool {
+	return context.AfterFunc(ctx, func() {
+		conn.SetReadDeadline(time.Now())
+		conn.Close()
+	})
+}
+
+// ctxReader stops reading once ctx ends. A yamux stream still returns what
+// it received past its read deadline, and while the agent keeps sending,
+// that never runs out.
+type ctxReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (c ctxReader) Read(p []byte) (int, error) {
+	if err := c.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return c.r.Read(p)
 }
 
 // attachment is a Content-Disposition saving the response as name (RFC 2231
@@ -223,12 +255,17 @@ func archiveName(paths []string) string {
 // (GET /api/m/{id}/download?path=…&path=…): one file as itself, anything
 // else as a zip the agent makes while it is downloaded (fs.archive).
 func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
+	// A download the page follows in its downloads panel (downloads.go).
+	d, w, r := s.trackDownload(w, r)
+	defer d.finish()
 	mc := s.machine(w, r)
 	if mc == nil {
+		d.fail(dlNotFound)
 		return
 	}
 	paths, err := downloadPaths(r.URL.Query()["path"])
 	if err != nil {
+		d.fail(dlInvalid)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -240,11 +277,19 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		rep, err := requestAgent(ctx, mc, agentproto.Header{Op: agentproto.OpFsStat, Path: paths[0]})
 		cancel()
 		if err != nil {
+			d.fail(failCode(err))
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
 		}
 		if !rep.Stat.IsDir {
-			serveFile(w, r, mc, rep.Stat, true)
+			d.describe(filepath.Base(rep.Stat.Path), rep.Stat.Size)
+			if serveFile(w, r, mc, rep.Stat, true) {
+				d.done()
+			} else if d.broken() {
+				// Cancelled from the panel or the machine went away: the
+				// browser must see a failed download.
+				panic(http.ErrAbortHandler)
+			}
 			return
 		}
 	}
@@ -262,19 +307,35 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	conn, _, err := mc.Open(r.Context(), agentproto.Header{Op: agentproto.OpFsArchive, Paths: paths})
 	if err != nil {
+		d.fail(failCode(err))
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
 	defer conn.Close()
-	// A browser that cancels the download ends the agent's walk.
-	stop := context.AfterFunc(r.Context(), func() { conn.Close() })
-	defer stop()
+	// A browser that cancels the download, or the panel, ends the agent's
+	// walk.
+	defer endWith(r.Context(), conn)()
+	d.describe(archiveName(paths), -1)
 	zipHeaders()
-	if _, err := io.Copy(w, conn); err != nil && r.Context().Err() == nil {
-		// The machine went away mid-archive: end the response unfinished,
-		// so the browser reports a failed download, not a truncated zip.
-		panic(http.ErrAbortHandler)
+	if _, err := io.Copy(w, ctxReader{r.Context(), conn}); err != nil {
+		if d.broken() || (d == nil && r.Context().Err() == nil) {
+			// Cancelled from the panel or the machine went away mid-archive:
+			// end the response unfinished, so the browser reports a failed
+			// download, not a truncated zip.
+			panic(http.ErrAbortHandler)
+		}
+		return
 	}
+	d.done()
+}
+
+// failCode is the download code for an agent's refusal: the machine is not
+// connected, or the path is not there.
+func failCode(err error) string {
+	if errors.Is(err, machines.ErrNotConnected) {
+		return dlUnavailable
+	}
+	return dlNotFound
 }
 
 func requestAgent(ctx context.Context, mc *machines.Machine, h agentproto.Header) (*agentproto.Reply, error) {

@@ -152,13 +152,14 @@ Text frames are JSON with a `t` field; binary frames are pane surface updates
 | `view {m, tab, pane, cols, rows, cw, ch}`, `takeover` | `session {state: owner\|busy\|taken_over}` |
 | `in {m, pane, ev}` (key, text, paste, mouse events), `focus {m, focused}`, `host {host}` (terminal colors) | `surf {m, gen, ev: open\|error\|notice, code}`, `surf.tab`, `surf.meta` (panes, splits, links), `clip` (OSC 52), `bell` |
 | `api {rid, m, method, params}` (allowlisted herdr calls) | `api.res {rid, result\|error}` |
-| `retry {m}`, `ping` | `machines {list}`, `machine {state}`, `agent {m, data}` (status change), `bridge.send {m, text, folders}` (the sending VS Code window's folders: the page picks the workspace whose panel shows it), `bridge.download {m, paths}` (files chosen in VS Code's explorer; the page with the focus downloads them) |
+| `retry {m}`, `ping` | `machines {list}`, `machine {state}`, `agent {m, data}` (status change), `bridge.send {m, text, folders}` (the sending VS Code window's folders: the page picks the workspace whose panel shows it), `bridge.download {m, paths}` (files chosen in VS Code's explorer; the page with the focus downloads them), `download {id, state, sent, total, name, error}` (a download the page started with `dl=<id>`: progress and how it ended, for the downloads panel) |
 | `theme {kind: dark\|light}` (VS Code follows it) | `gui {state: {m, phase, gpu, windows}}` (program windows per machine) |
 | `active {idle}` (ms since the user last used the page) | `agent {…, sound}`: `sound` is true only for the most recently used page, which plays the notification sound |
 
 HTTP endpoints besides files (`GET /api/m/{id}/file`, `GET /api/m/{id}/list`,
-and `GET /api/m/{id}/download?path=…`: one file as an attachment, anything
-else as a zip from `fs.archive`), uploads and the code-server proxy:
+and `GET /api/m/{id}/download?path=…[&dl=<id>]`: one file as an attachment,
+anything else as a zip from `fs.archive`; `POST /api/downloads/{dl}/cancel`
+breaks a followed download off), uploads and the code-server proxy:
 `POST /api/m/{id}/find` (find in a pane through `pane.find`, also for
 read-only pages, see [20](features/20-find-in-panes.md)),
 `GET /api/config`, `GET /api/keymap`, `GET /api/machines`, and
