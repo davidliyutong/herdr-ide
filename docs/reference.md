@@ -135,7 +135,9 @@ Claude Code and similar prompts; the bytes of every key are listed in
 holding a selection drag above or below a pane scrolls it and extends the
 selection, and copying then copies all of it;
 ⌘/Ctrl-click opens paths (media in the preview panel, code in VS Code) and
-URLs. Pasting or dropping files uploads them to the pane's machine (dropped
+URLs. `cmd+f` (macOS) or `ctrl+shift+f` (other systems) finds text in the
+focused pane and its scrollback: Enter goes to the older match,
+Shift+Enter to the newer one, Escape closes the bar. Pasting or dropping files uploads them to the pane's machine (dropped
 files into the pane's directory) and pastes their paths; in the desktop app,
 files dropped on a local pane are pasted where they are. A pane's right-click
 menu downloads the path under the pointer and, with **Download files…**,

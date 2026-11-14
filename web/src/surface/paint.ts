@@ -33,15 +33,35 @@ export interface Metrics {
   baseline: number;
 }
 
-/** Highlighted ranges of a row: columns [from, to). */
-export type Ranges = Array<[number, number]>;
+/** A highlighted range of a row: columns [from, to) and its kind, the
+ * selection (none or 0), a find match (1) or the current match (2). */
+export type Range = [number, number, number?];
+
+/** Highlighted ranges of a row. */
+export type Ranges = Range[];
 
 /** A row's highlighted ranges. */
 export type Highlight = (y: number) => Ranges | undefined;
 
 export function sameRanges(a: Ranges | undefined, b: Ranges | undefined): boolean {
   if (!a?.length || !b?.length) return !a?.length && !b?.length;
-  return a.length === b.length && a.every(([x, y], i) => x === b[i][0] && y === b[i][1]);
+  return a.length === b.length && a.every(([x, y, k], i) => x === b[i][0] && y === b[i][1] && (k ?? 0) === (b[i][2] ?? 0));
+}
+
+/** The background a highlighted cell gets: the selection over the current
+ * match over other matches. */
+function highlightFill(p: Palette, hl: Ranges, x: number): string | undefined {
+  let rank = 0;
+  let fill: string | undefined;
+  for (const [a, b, k = 0] of hl) {
+    if (x < a || x >= b) continue;
+    const r = k === 0 ? 3 : k;
+    if (r > rank) {
+      rank = r;
+      fill = k === 0 ? p.selection : k === 2 ? p.matchCurrent : p.match;
+    }
+  }
+  return fill;
 }
 
 /** The highlights painted per row after the painter copied a row move
@@ -55,8 +75,8 @@ export function moveRanges(
   const { x, y, w, h } = m.rect;
   const out = painted.slice();
   const repaint: number[] = [];
-  const inside = ([a, b]: [number, number]) => a >= x && b <= x + w;
-  const outside = ([a, b]: [number, number]) => b <= x || a >= x + w;
+  const inside = ([a, b]: Range) => a >= x && b <= x + w;
+  const outside = ([a, b]: Range) => b <= x || a >= x + w;
   for (let r = y; r < y + h; r++) {
     const from = r + m.shift;
     const moved = from >= y && from < y + h ? (painted[from] ?? []) : [];
@@ -262,7 +282,6 @@ export function paintRows(ctx: CanvasRenderingContext2D, g: Grid, st: PaintState
     if (y < 0 || y >= g.h) continue;
     const top = y * ch;
     const hl = st.highlight?.(y);
-    const inHl = (x: number) => !!hl?.some(([a, b]) => x >= a && x < b);
     const hv = st.hover?.find((c) => c.y === y);
     const mh = st.math?.find((c) => c.y === y);
     // Backgrounds.
@@ -283,7 +302,7 @@ export function paintRows(ctx: CanvasRenderingContext2D, g: Grid, st: PaintState
       cover = wdt - 1;
       const bg = c.mod & MOD.reversed ? (color(p, c.fg) ?? p.fg) : color(p, c.bg);
       for (let i = 0; i < wdt && x + i < g.w; i++) {
-        const fill = inHl(x + i) ? p.selection : bg;
+        const fill = (hl && highlightFill(p, hl, x + i)) || bg;
         if (!fill) continue;
         ctx.fillStyle = fill;
         ctx.fillRect((x + i) * cw, top, cw, ch);

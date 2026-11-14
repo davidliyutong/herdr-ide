@@ -81,6 +81,7 @@ const dropFiles = vi.fn((_pane: string, _items: DataTransferItemList) => Promise
 const dropTarget = vi.fn((_pane: string | undefined) => {});
 let shownMath: import('../surface/controller').ShownMath | undefined;
 let mathOn = true;
+const onFind = vi.fn((_pane: string, _text?: string) => {});
 
 beforeAll(async () => {
   globalThis.ResizeObserver ??= class {
@@ -143,6 +144,7 @@ beforeAll(async () => {
       setTitle: () => {},
       onMath: (m) => (shownMath = m),
       mathHover: () => mathOn,
+      onFind,
     },
     { ...appearanceOf(getPrefs()), fontSize: 13, fontWeight: 400 },
   );
@@ -369,7 +371,17 @@ describe('pane menu', () => {
     const preview = vi.spyOn(actions, 'openPreview').mockImplementation(() => {});
     const { ev, entries, labels } = open(7, 3);
     expect(ev.defaultPrevented).toBe(true);
-    expect(labels).toEqual(['Copy (off)', 'Paste', '-', 'Preview pose.png', 'Download pose.png', 'Copy full path', '-', 'Download files…']);
+    expect(labels).toEqual([
+      'Copy (off)',
+      'Paste',
+      'Find…',
+      '-',
+      'Preview pose.png',
+      'Download pose.png',
+      'Copy full path',
+      '-',
+      'Download files…',
+    ]);
     item(entries, 'Preview pose.png').run();
     expect(preview).toHaveBeenCalledWith('m1', '/tmp/shots/abcdefghij/pose.png');
     item(entries, 'Copy full path').run();
@@ -393,6 +405,7 @@ describe('pane menu', () => {
     expect(labels).toEqual([
       'Copy',
       'Paste',
+      'Find…',
       '-',
       'Preview main.go',
       'Open main.go in VS Code',
@@ -411,6 +424,21 @@ describe('pane menu', () => {
     item(entries, 'Paste').run();
     await new Promise((r) => setTimeout(r, 0));
     expect(sent.flatMap((m) => m.ev ?? [])).toEqual([{ t: 'paste', text: 'pasted' }]);
+  });
+
+  it('finds the selected text from the menu', () => {
+    write(6, 'look for needle here');
+    host.dispatchEvent(mouse('mousedown', 6, 9));
+    window.dispatchEvent(mouse('mousemove', 6, 15));
+    window.dispatchEvent(mouse('mouseup', 6, 15));
+    onFind.mockClear();
+    item(open(6, 10).entries, 'Find…').run();
+    expect(onFind).toHaveBeenCalledWith('p1', 'needle');
+    // Without a selection, the last query stays.
+    ctl.clearSelection();
+    onFind.mockClear();
+    item(open(6, 10).entries, 'Find…').run();
+    expect(onFind).toHaveBeenCalledWith('p1', undefined);
   });
 
   it('opens the menu where the program reports the mouse too', () => {

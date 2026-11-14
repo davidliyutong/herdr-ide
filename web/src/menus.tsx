@@ -28,6 +28,7 @@ import {
   RotateCw,
   Wrench,
   Rows2,
+  Search,
   SquareCode,
   Trash2,
   X,
@@ -37,7 +38,8 @@ import type { MenuEntry } from './contextMenu';
 import { downloadDialog } from './dialog';
 import { canDownload, downloadPath } from './download';
 import { t } from './i18n';
-import { keyHint } from './keymap';
+import { keyHint, keyLabel } from './keymap';
+import { findKeyLabel } from './surface/find';
 import { paneCwd, workspaceTabs } from './lib/herdr';
 import { herdrMissing } from './lib/localHerdr';
 import { mediaExt, openLink, resolvePath, safeUrl, type LinkContext } from './terminal/links';
@@ -99,9 +101,11 @@ export function surfaceMenu(o: {
   link?: { kind: 'url' | 'path'; text: string };
   copy?: () => void;
   paste?: () => void;
+  find?: () => void;
 }): MenuEntry[] {
   const out: MenuEntry[] = [{ label: t('surface.copy'), icon: <Copy />, disabled: !o.copy, run: () => o.copy?.() }];
   if (o.paste) out.push({ label: t('surface.paste'), icon: <ClipboardPaste />, run: o.paste });
+  if (o.find) out.push({ label: t('find.menu'), hint: keyLabel(findKeyLabel()), icon: <Search />, run: o.find });
   const l = o.link;
   if (l?.kind === 'url' && safeUrl(l.text)) {
     out.push(

@@ -246,9 +246,11 @@ func (m *Machine) Call(ctx context.Context, method string, params any) (json.Raw
 }
 
 // IsReadOnlyMethod reports whether a herdr API method only reads state.
+// pane.copy_search and pane.copy_motion only read a pane's text (find in
+// panes, docs/features/20-find-in-panes.md).
 func IsReadOnlyMethod(method string) bool {
 	switch method {
-	case "session.snapshot", "ping":
+	case "session.snapshot", "ping", "pane.copy_search", "pane.copy_motion":
 		return true
 	}
 	for _, suffix := range []string{".list", ".get", ".read", ".current", ".layout", ".export", ".explain", ".process_info", ".edges", ".neighbor", ".resolve"} {

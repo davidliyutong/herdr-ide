@@ -101,6 +101,11 @@ Verified against herdr 0.9.5 (protocol 22):
   stays on its lines while output arrives, and stream input returns it to
   the bottom. `pane.selection.read` returns the text between two cells in
   absolute rows (row 0 is the oldest line kept), both included.
+  `pane.copy_search` finds literal text (smart case, across soft wraps) in
+  the same rows and returns up to 1024 matches (first and last cell) around
+  the current one with the total; it needs the pane's current content
+  revision, which `pane.copy_motion` returns, and answers `stale_content`
+  for any other ([20](features/20-find-in-panes.md)).
 
 ## Core ↔ agent protocol (`internal/agentproto`)
 

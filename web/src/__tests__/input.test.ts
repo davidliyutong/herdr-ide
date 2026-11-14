@@ -12,6 +12,8 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import table from './testdata/keys.json';
 
 const sent: Array<{ pane: string; ev: Array<Record<string, any>> }> = [];
+/** Panes find was opened in. */
+const found: string[] = [];
 
 vi.mock('../lib/conn', () => ({
   conn: {
@@ -112,6 +114,7 @@ beforeAll(async () => {
       linkContext: () => ({ m: 'local' }),
       onSize: () => {},
       setTitle: () => {},
+      onFind: (pane) => found.push(pane),
     },
     { ...appearanceOf(getPrefs()), optionIsMeta: false },
   );
@@ -144,6 +147,14 @@ describe('pane input contract (testdata/keys.json)', () => {
       if (row.events.length) expect(sent.every((s) => s.pane === 'w1:p1')).toBe(true);
     });
   }
+
+  it('opens find in the focused pane with the find key', () => {
+    found.length = 0;
+    const cancelled = press(textarea, { key: 'F', code: 'KeyF', keyCode: 70, charCode: 70, ctrlKey: true, shiftKey: true });
+    expect(cancelled).toBe(true);
+    expect(found).toEqual(['w1:p1']);
+    expect(pressesSent()).toEqual([]);
+  });
 
   it('reports the release of keys that type no text', () => {
     press(textarea, { key: 'ArrowUp', code: 'ArrowUp', keyCode: 38 });

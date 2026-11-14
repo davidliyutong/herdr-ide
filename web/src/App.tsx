@@ -22,6 +22,7 @@ import { paneCwd, shortPath } from './lib/herdr';
 import { findPane } from './state/store';
 import { getTerm } from './terminal/registry';
 import { initSurface, surfaceDisconnected } from './surface/session';
+import { isFindKey, openFind } from './surface/find';
 import { useGui } from './gui/state';
 import { GuiTray } from './gui/GuiMenus';
 import { bridgeDownload } from './download';
@@ -83,6 +84,15 @@ export function App() {
     const onKey = (ev: KeyboardEvent) => {
       const t = ev.target as HTMLElement | null;
       if (t?.closest('.surface-host') || t?.closest('input, textarea, iframe, [contenteditable]')) return;
+      // Find also opens for the focused pane from outside it (the sidebar).
+      if (isFindKey(ev) && !document.querySelector('.modal-backdrop, .palette-backdrop')) {
+        const s = useStore.getState();
+        if (s.focused) {
+          ev.preventDefault();
+          openFind(s.focused.m, s.focused.pane);
+          return;
+        }
+      }
       handleKey(ev);
     };
     window.addEventListener('keydown', onKey);

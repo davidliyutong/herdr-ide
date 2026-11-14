@@ -721,6 +721,21 @@
     "note": "The browser pastes through the paste event."
   },
   {
+    "name": "Ctrl+Shift+F",
+    "keys": [
+      {
+        "key": "F",
+        "code": "KeyF",
+        "keyCode": 70,
+        "charCode": 70,
+        "ctrlKey": true,
+        "shiftKey": true
+      }
+    ],
+    "events": [],
+    "note": "Opens find in the pane (Cmd+F on macOS); Ctrl+F stays the program's."
+  },
+  {
     "name": "prefix, prefix",
     "keys": [
       {

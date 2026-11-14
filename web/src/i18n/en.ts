@@ -267,6 +267,17 @@ export const en = {
   'surface.uploadingInto': 'Uploading {n} file(s) into {dir} on {machine}…',
   'surface.dropNoFolders': 'Folders cannot be uploaded; {n} skipped.',
 
+  'find.menu': 'Find…',
+  'find.label': 'Find in the pane',
+  'find.placeholder': 'Find',
+  'find.older': 'Older match (Enter)',
+  'find.newer': 'Newer match (Shift+Enter)',
+  'find.close': 'Close (Escape)',
+  'find.count': '{n} of {total}',
+  'find.none': 'No results',
+  'find.busy': 'The output keeps changing; press Enter to try again',
+  'find.failed': 'Find failed',
+
   'dock.code': 'VS Code',
   'dock.preview': 'Preview',
   'dock.openInTab': 'Open in a new tab',
