@@ -25,13 +25,13 @@ browser tab, with VS Code (code-server) one keystroke away.
   herdr configuration (prefix `ctrl+b`).
 - **herdr included.** Release archives carry herdr 0.9.5 for Linux/macOS on
   amd64/arm64, used when this host has no herdr installed. It behaves like an
-  installed herdr: same configuration, sessions and machines. **Manage herdr**
-  (right-click a machine) starts, stops and restarts its herdr server, and on
-  the local machine updates herdr through herdr's own updater, without a
-  terminal; **Restart herdr…** restarts a machine's server directly, or
-  starts it after the machine rebooted. **Update herdr** on an SSH machine
-  runs herdr's own `herdr --remote` update there, and **Install herdr** the
-  same flow where herdr was removed or moved.
+  installed herdr: same configuration, sessions and machines. Right-click a
+  machine to **Restart herdr…** (also to start it after the machine
+  rebooted) or **Stop herdr…**, without a terminal; **Update herdr…** on the
+  local machine updates herdr through herdr's own updater, on an SSH machine
+  it runs herdr's own `herdr --remote` update there, and **Install herdr**
+  the same flow where herdr was removed or moved. Disabling an SSH machine
+  can stop its herdr too.
 - **Multi-machine.** Uses the SSH machines saved in herdr; right-click the
   sidebar to add one (herdr's own `herdr machine add`, in a terminal), or a
   machine to rename it or remove it from herdr, or to disable or enable it

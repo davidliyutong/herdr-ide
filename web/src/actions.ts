@@ -8,8 +8,9 @@ import { getTerm } from './terminal/registry';
 import { mediaExt } from './terminal/links';
 import { bridge } from './lib/bridge';
 import { t } from './i18n';
-import { confirmDialog, newWorkspaceDialog } from './dialog';
-import { herdrError, herdrRequest } from './lib/localHerdr';
+import { confirmCheckDialog, confirmDialog, newWorkspaceDialog } from './dialog';
+import { herdrError, herdrMissing, herdrRequest, isNewer, type MachineHerdr } from './lib/localHerdr';
+import type { MessageKey } from './i18n/en';
 
 export interface AttentionItem {
   m: string;
@@ -239,17 +240,30 @@ export const actions = {
    * VS Code there stops; its panes keep running in herdr. */
   async setMachineEnabled(m: string, enabled: boolean) {
     const st = useStore.getState().machines[m];
-    if (
-      !enabled &&
-      st?.status !== 'disabled' &&
-      !(await confirmDialog({
-        title: t('confirm.disableMachineTitle', { machine: st?.label ?? m }),
+    const machine = st?.label ?? m;
+    let stop = false;
+    if (!enabled && st?.status !== 'disabled') {
+      const ask = {
+        title: t('confirm.disableMachineTitle', { machine }),
         message: t('confirm.disableMachine'),
         confirm: t('menu.disableMachine'),
         danger: true,
-      }))
-    )
-      return;
+      };
+      // An SSH machine's herdr server can go with it (checked by default)
+      // while its agent is still connected to stop it.
+      if (st?.kind === 'ssh' && (st.status === 'ready' || st.status === 'degraded') && !herdrMissing(st)) {
+        const res = await confirmCheckDialog({
+          ...ask,
+          message: t('confirm.disableMachineStop'),
+          check: t('confirm.disableStopHerdr', { machine }),
+          checked: true,
+        });
+        if (!res) return;
+        stop = res.checked;
+      } else if (!(await confirmDialog(ask))) return;
+    }
+    // A failed stop is reported; the machine is disabled all the same.
+    if (stop) await runHerdr(m, 'stop');
     try {
       const res = await fetch(`/api/m/${encodeURIComponent(m)}/enabled`, {
         method: 'PUT',
@@ -321,22 +335,41 @@ export const actions = {
   /** Restarts a machine's herdr server after asking, since every terminal
    * there closes; one that is not running is started (docs/features/17). */
   async restartHerdr(m: string) {
-    const st = useStore.getState().machines[m];
-    const machine = st?.label ?? m;
+    if (await confirmHerdrEnd(m, 'restart')) await runHerdr(m, 'restart');
+  },
+
+  /** Stops a machine's herdr server after asking (docs/features/17). */
+  async stopHerdr(m: string) {
+    if (await confirmHerdrEnd(m, 'stop')) await runHerdr(m, 'stop');
+  },
+
+  /** Starts a machine's herdr server; a running one is left as it is. */
+  async startHerdr(m: string) {
+    await runHerdr(m, 'start');
+  },
+
+  /** Checks for a newer herdr and, for the application's own copy on the
+   * core host, updates it after asking (docs/features/17). */
+  async updateHerdr(m: string) {
+    const { toast } = useStore.getState();
+    toast(t('herdr.busy.check'));
+    const st = await herdrRequest(m, 'check');
+    if (st.error) return report(new Error(t('herdr.checkFailed', { error: herdrDetail(st) })));
+    if (!st.managed) return toast(t('herdr.error.not_managed'));
+    if (!isNewer(st.latest, st.version)) return toast(t('herdr.upToDate', { version: st.version ?? '' }));
+    const version = st.latest ?? '';
     if (
       !(await confirmDialog({
-        title: t('herdr.restartTitleMachine', { machine }),
-        message: st?.kind === 'local' ? t('herdr.stopMessage') : t('herdr.stopMessageMachine', { machine }),
-        confirm: t('herdr.restart'),
-        danger: true,
+        title: t('herdr.updateTitle', { version }),
+        message: t('herdr.updateMessage', { version: st.version ?? '' }),
+        confirm: t('herdr.update'),
       }))
     )
       return;
-    const { toast } = useStore.getState();
-    toast(t('herdr.restarting', { machine }));
-    const res = await herdrRequest(m, 'restart');
-    if (res.error) report(new Error(t('herdr.restartFailed', { machine, error: [herdrError(res), res.output].filter(Boolean).join(' ') })));
-    else toast(t('herdr.restarted', { machine }));
+    toast(t('herdr.busy.update'));
+    const res = await herdrRequest(m, 'update');
+    if (res.error) report(new Error(t('herdr.updateFailed', { error: herdrDetail(res) })));
+    else toast(t(res.restart_needed ? 'herdr.updatedRestart' : 'herdr.updated', { version: res.version ?? version }));
   },
 
   async newWorkspace(m?: string, cwd?: string) {
@@ -594,3 +627,43 @@ export const actions = {
     if (c?.focused) getTerm(c.m, c.focused)?.input(text);
   },
 };
+
+/** herdr's error message for a reply, with herdr's own output. */
+function herdrDetail(st: MachineHerdr): string {
+  return [herdrError(st), st.output].filter(Boolean).join(' ');
+}
+
+/** Asks before stopping or restarting a machine's herdr server: every
+ * terminal there closes. */
+function confirmHerdrEnd(m: string, action: 'stop' | 'restart'): Promise<boolean> {
+  const st = useStore.getState().machines[m];
+  const machine = st?.label ?? m;
+  return confirmDialog({
+    title: t(action === 'stop' ? 'herdr.stopTitleMachine' : 'herdr.restartTitleMachine', { machine }),
+    message: st?.kind === 'local' ? t('herdr.stopMessage') : t('herdr.stopMessageMachine', { machine }),
+    confirm: t(action === 'stop' ? 'herdr.stop' : 'herdr.restart'),
+    danger: true,
+  });
+}
+
+const herdrToasts: Record<'start' | 'stop' | 'restart', [busy: MessageKey, done: MessageKey, failed: MessageKey]> = {
+  start: ['herdr.starting', 'herdr.started', 'herdr.startFailed'],
+  stop: ['herdr.stopping', 'herdr.stopped', 'herdr.stopFailed'],
+  restart: ['herdr.restarting', 'herdr.restarted', 'herdr.restartFailed'],
+};
+
+/** Runs a server action on a machine's herdr and reports it in toasts;
+ * resolves whether it succeeded. */
+async function runHerdr(m: string, action: 'start' | 'stop' | 'restart'): Promise<boolean> {
+  const machine = useStore.getState().machines[m]?.label ?? m;
+  const [busy, done, failed] = herdrToasts[action];
+  const { toast } = useStore.getState();
+  toast(t(busy, { machine }));
+  const res = await herdrRequest(m, action);
+  if (res.error) {
+    report(new Error(t(failed, { machine, error: herdrDetail(res) })));
+    return false;
+  }
+  toast(t(done, { machine }));
+  return true;
+}

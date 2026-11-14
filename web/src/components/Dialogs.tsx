@@ -49,13 +49,24 @@ function Frame({ title, onCancel, children }: { title: string; onCancel(): void;
 }
 
 function ConfirmDialog({ req }: { req: Extract<DialogRequest, { kind: 'confirm' }> }) {
+  const [checked, setChecked] = useState(!!req.checked);
+  // A request that replaces another one shown starts from its own state.
+  useEffect(() => setChecked(!!req.checked), [req]);
   const done = (ok: boolean) => {
     closeDialog(req);
-    req.resolve(ok);
+    req.resolve(ok, req.check !== undefined ? checked : undefined);
   };
   return (
     <Frame title={req.title} onCancel={() => done(false)}>
-      <div className="dialog-body">{req.message}</div>
+      <div className="dialog-body">
+        {req.message}
+        {req.check !== undefined && (
+          <label className="row dialog-check">
+            <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} />
+            <span>{req.check}</span>
+          </label>
+        )}
+      </div>
       <div className="dialog-actions">
         {/* Enter cancels a destructive action unless the user moves to it. */}
         <button autoFocus={req.danger} onClick={() => done(false)}>

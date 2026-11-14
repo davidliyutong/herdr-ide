@@ -199,7 +199,8 @@ func TestUpdateOnlyTheManagedCopy(t *testing.T) {
 
 // Restarting stops a running server before starting one, only starts a
 // server that is not running (herdr's stop fails without one), and starts
-// none when the stop failed.
+// none when the stop failed. Stopping a server that is not running
+// succeeds.
 func TestRestartHerdrServer(t *testing.T) {
 	noInstalledHerdr(t)
 	a := testAgent(t)
@@ -249,6 +250,18 @@ esac
 	st := herdrOp(t, a, agentproto.Header{Action: "restart"})
 	if got := calls(); st.Error != "start_failed" || strings.Join(got, ",") != "server" {
 		t.Fatalf("not running: %+v %q", st, got)
+	}
+	// Stopping a server that is not running succeeds without herdr's stop.
+	fake(`/bin/rm -f '` + socket + `'`)
+	st = herdrOp(t, a, agentproto.Header{Action: "stop"})
+	if got := calls(); st.Error != "" || st.Running || len(got) != 0 {
+		t.Fatalf("stop, not running: %+v %q", st, got)
+	}
+	serve()
+	fake(`/bin/rm -f '` + socket + `'`)
+	st = herdrOp(t, a, agentproto.Header{Action: "stop"})
+	if got := calls(); st.Error != "" || st.Running || strings.Join(got, ",") != "server stop" {
+		t.Fatalf("stop, running: %+v %q", st, got)
 	}
 
 	serve()

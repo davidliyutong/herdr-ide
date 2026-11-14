@@ -140,7 +140,7 @@ implemented independently.
   quit allows agent cleanup before SIGKILL; force-killed agents retain their
   existing orphan-reaping and idle-timeout protection.
 - No local herdr session running: the existing machine status UI shows the
-  error and offers **Manage herdr**; the desktop shell does not bootstrap or
+  error and offers **Start herdr**; the desktop shell does not bootstrap or
   alter herdr sessions.
 - Downloaded ad-hoc signed app blocked by Gatekeeper: explicit user approval
   can be required; this build is not a notarized distribution.

@@ -70,8 +70,11 @@ Non-goals: managing ssh keys or herdr installations; Windows machines.
   so herdr's catalog is never written. Disabling ends the session (the
   agent exits and stops the code-server it started; panes keep running in
   herdr), drops the machine's snapshot and shows it as *disabled*; enabling
-  connects it. Disabling a connected machine asks first. Read-only browsers
-  cannot do either. The sidebar folds disabled machines, so their Enable
+  connects it. Disabling a connected machine asks first; for an SSH machine
+  with herdr the dialog also offers, checked by default, to stop its herdr
+  server before the session ends
+  ([17](17-local-herdr-management.md)). Read-only browsers cannot do
+  either. The sidebar folds disabled machines, so their Enable
   button shows only when the user opens one; disabling a machine folds it
   and enabling it unfolds it.
 - **Adding, removing, renaming and reloading.** Machines are herdr's saved
@@ -164,7 +167,7 @@ Non-goals: managing ssh keys or herdr installations; Windows machines.
 - **herdr does not answer while the agent is connected** → *degraded* with
   the error; fetches retry every 5 s and **Retry** reconnects. Retry starts
   no herdr server: when none runs (after the machine rebooted), the status
-  block's **Manage herdr** or the menu's **Restart herdr…** starts it
+  block's **Start herdr** or the menu's **Restart herdr…** starts it
   ([17](17-local-herdr-management.md)). When the agent finds no herdr
   executable there (removed, moved, a reinstalled system), the status
   block says so and offers **Install herdr** instead.

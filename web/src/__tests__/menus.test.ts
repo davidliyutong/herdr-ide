@@ -337,8 +337,8 @@ describe('machineMenu', () => {
       useStore.getState().setMachines([ssh('ready')]);
       const entries = machineMenu('gpu');
       expect(labels(entries)).toEqual([
-        'Manage herdr…',
         'Restart herdr…',
+        'Stop herdr…',
         'Update herdr…',
         '-',
         'Disable machine',
@@ -346,22 +346,50 @@ describe('machineMenu', () => {
         'Add machine…',
         'Reload machines from herdr',
       ]);
+      // The dialog offers to stop the machine's herdr too, checked; unchecked
+      // only the machine is disabled.
       (entries[4] as MenuItem).run();
       const req = useDialog.getState().current;
       expect(req?.kind).toBe('confirm');
-      if (req?.kind === 'confirm') req.resolve(true);
+      if (req?.kind !== 'confirm') throw new Error('no dialog');
+      expect(req.check).toBe(
+        'Also stop herdr on gpu: its terminals close and the programs in them end. Unchecked, panes keep running there.',
+      );
+      expect(req.checked).toBe(true);
+      req.resolve(true, false);
       await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
       expect(fetchMock.mock.calls[0][0]).toBe('/api/m/gpu/enabled');
       expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'PUT', body: JSON.stringify({ enabled: false }) });
 
+      // Checked, herdr is stopped first, while the agent can still do it.
+      fetchMock.mockClear();
+      useDialog.setState({ current: undefined });
+      (machineMenu('gpu')[4] as MenuItem).run();
+      const stop = useDialog.getState().current;
+      if (stop?.kind === 'confirm') stop.resolve(true, true);
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+      expect(fetchMock.mock.calls.map((c) => c[0])).toEqual(['/api/m/gpu/herdr/stop', '/api/m/gpu/enabled']);
+
+      // Without a connected agent there is nothing to stop, and no checkbox.
+      fetchMock.mockClear();
+      useDialog.setState({ current: undefined });
+      useStore.getState().setMachines([ssh('error')]);
+      (machineMenu('gpu')[4] as MenuItem).run();
+      const plain = useDialog.getState().current;
+      expect(plain?.kind === 'confirm' && plain.check).toBeFalsy();
+      if (plain?.kind === 'confirm') plain.resolve(true);
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      expect(fetchMock.mock.calls[0][0]).toBe('/api/m/gpu/enabled');
+
       // Enabling does not ask.
+      fetchMock.mockClear();
       useDialog.setState({ current: undefined });
       useStore.getState().setMachines([ssh('disabled')]);
       const off = machineMenu('gpu');
       expect(labels(off)).toEqual(['Enable machine', '-', 'Add machine…', 'Reload machines from herdr']);
       (off[0] as MenuItem).run();
-      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-      expect(fetchMock.mock.calls[1][1]).toMatchObject({ body: JSON.stringify({ enabled: true }) });
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      expect(fetchMock.mock.calls[0][1]).toMatchObject({ body: JSON.stringify({ enabled: true }) });
       expect(useDialog.getState().current).toBeUndefined();
 
       useStore.getState().setReadOnly(true);
@@ -383,7 +411,7 @@ describe('machineMenu', () => {
     try {
       useStore.getState().setReadOnly(false);
       useStore.getState().setMachines([ssh('degraded')]);
-      const restart = machineMenu('gpu')[1] as MenuItem;
+      const restart = machineMenu('gpu')[0] as MenuItem;
       expect(restart.disabled).toBe(false);
       restart.run();
       const req = useDialog.getState().current;
@@ -399,14 +427,14 @@ describe('machineMenu', () => {
         new Response(JSON.stringify({ managed: false, running: false, error: 'start_failed', output: 'no tty' }), { status: 200 }),
       );
       useDialog.setState({ current: undefined });
-      (machineMenu('gpu')[1] as MenuItem).run();
+      (machineMenu('gpu')[0] as MenuItem).run();
       const again = useDialog.getState().current;
       if (again?.kind === 'confirm') again.resolve(true);
       await vi.waitFor(() => expect(toast).toHaveBeenLastCalledWith('Could not restart herdr on gpu: The server did not start. no tty'));
 
       // Declining sends nothing; without the agent there is nothing to ask.
       useDialog.setState({ current: undefined });
-      (machineMenu('gpu')[1] as MenuItem).run();
+      (machineMenu('gpu')[0] as MenuItem).run();
       const no = useDialog.getState().current;
       if (no?.kind === 'confirm') no.resolve(false);
       await Promise.resolve();
@@ -429,8 +457,8 @@ describe('machineMenu', () => {
       useStore.getState().setMachines([gone(status)]);
       const entries = machineMenu('gpu');
       expect(labels(entries)).toEqual([
-        'Manage herdr…',
         'Restart herdr…',
+        'Stop herdr…',
         'Install herdr…',
         '-',
         'Disable machine',
@@ -438,7 +466,8 @@ describe('machineMenu', () => {
         'Add machine…',
         'Reload machines from herdr',
       ]);
-      // Without herdr there, a restart would end nothing and start nothing.
+      // Without herdr there, a restart or stop would do nothing.
+      expect((entries[0] as MenuItem).disabled).toBe(true);
       expect((entries[1] as MenuItem).disabled).toBe(true);
       (entries[2] as MenuItem).run();
       expect(useStore.getState().remoteHerdr).toBe('gpu');
@@ -446,6 +475,71 @@ describe('machineMenu', () => {
     }
     useStore.getState().setMachines([{ ...ssh('ready'), info: { os: 'linux', herdr_bin: '/usr/bin/herdr' } } as unknown as MachineState]);
     expect(labels(machineMenu('gpu'))[2]).toBe('Update herdr…');
+  });
+
+  it('stops herdr on a connected machine after asking', async () => {
+    const { useDialog } = await import('../dialog');
+    const fetchMock = vi.fn((_url: string, _init?: RequestInit) =>
+      Promise.resolve(new Response(JSON.stringify({ managed: false, running: false }), { status: 200 })),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const toast = vi.spyOn(useStore.getState(), 'toast');
+    try {
+      useStore.getState().setReadOnly(false);
+      useStore.getState().setMachines([ssh('ready')]);
+      (machineMenu('gpu')[1] as MenuItem).run();
+      const req = useDialog.getState().current;
+      expect(req?.kind === 'confirm' && req.title).toBe('Stop herdr on gpu?');
+      if (req?.kind === 'confirm') req.resolve(true);
+      await vi.waitFor(() => expect(toast).toHaveBeenLastCalledWith('herdr stopped on gpu.'));
+      expect(fetchMock.mock.calls[0][0]).toBe('/api/m/gpu/herdr/stop');
+      expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST' });
+    } finally {
+      toast.mockRestore();
+      useDialog.setState({ current: undefined });
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("updates the application's herdr on the local machine after a check", async () => {
+    const { useDialog } = await import('../dialog');
+    const local = { id: 'local', label: 'local', kind: 'local', status: 'ready' } as unknown as MachineState;
+    let reply: Record<string, unknown> = {};
+    const fetchMock = vi.fn((_url: string, _init?: RequestInit) => Promise.resolve(new Response(JSON.stringify(reply), { status: 200 })));
+    vi.stubGlobal('fetch', fetchMock);
+    const toast = vi.spyOn(useStore.getState(), 'toast');
+    try {
+      useStore.getState().setReadOnly(false);
+      useStore.getState().setMachines([local]);
+      const update = () => (machineMenu('local').find((e) => isItem(e) && e.label === 'Update herdr…') as MenuItem).run();
+
+      // Up to date, or the user's own installation: only a toast.
+      reply = { managed: true, running: true, version: '0.9.5', latest: '0.9.5' };
+      update();
+      await vi.waitFor(() => expect(toast).toHaveBeenLastCalledWith('herdr 0.9.5 is up to date.'));
+      reply = { managed: false, running: true, version: '0.9.5', latest: '0.9.6' };
+      update();
+      await vi.waitFor(() =>
+        expect(toast).toHaveBeenLastCalledWith('This herdr is your own installation; update it the way you installed it.'),
+      );
+      expect(fetchMock.mock.calls.map((c) => c[0])).toEqual(['/api/m/local/herdr/check', '/api/m/local/herdr/check']);
+
+      // A newer release for the managed copy is installed after asking.
+      fetchMock.mockClear();
+      reply = { managed: true, running: true, version: '0.9.5', latest: '0.9.6' };
+      update();
+      await vi.waitFor(() => expect(useDialog.getState().current?.kind).toBe('confirm'));
+      const req = useDialog.getState().current;
+      expect(req?.kind === 'confirm' && req.title).toBe('Update herdr to 0.9.6?');
+      reply = { managed: true, running: true, version: '0.9.6', restart_needed: true };
+      if (req?.kind === 'confirm') req.resolve(true);
+      await vi.waitFor(() => expect(toast).toHaveBeenLastCalledWith('herdr 0.9.6 is installed. Restart herdr to use it.'));
+      expect(fetchMock.mock.calls.map((c) => c[0])).toEqual(['/api/m/local/herdr/check', '/api/m/local/herdr/update']);
+    } finally {
+      toast.mockRestore();
+      useDialog.setState({ current: undefined });
+      vi.unstubAllGlobals();
+    }
   });
 
   it('removes a saved machine after asking, with herdr, and reports why it could not', async () => {

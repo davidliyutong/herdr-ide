@@ -77,7 +77,10 @@ user's confirmation; choosing herdr's preview channel.
     with the user's ssh configuration forwarding the agent to that machine,
     its panes get the forwarded `SSH_AUTH_SOCK` while the connection lasts.
   - `stop` runs `herdr [--session S] server stop`, which returns once the
-    server has exited, within 30 s (`stop_failed` otherwise).
+    server has exited, within 30 s (`stop_failed` otherwise). When no
+    server runs there is nothing to stop and the action succeeds without
+    running herdr (herdr's own stop fails then), as `start` of a running
+    server does.
   - `restart` stops the server when one of this user answers on the
     session's socket, waits up to 10 s until nothing listens there, and
     starts one as `start` does. A server that is not running is only started
@@ -135,24 +138,33 @@ user's confirmation; choosing herdr's preview channel.
   installs it, so the same terminal is offered as **Install herdr**: in the
   status block of the *degraded* machine (whose detail says herdr is
   missing instead of the socket error), in a banner while a server that
-  outlived its herdr keeps the machine *ready*, in the context menu (in
-  place of **Update herdr…**) and in **Manage herdr**, which also shows
-  whether a server still runs and offers **Check again** for a herdr the
-  user installed by hand. **Restart herdr…** is disabled meanwhile: it
-  would stop nothing and start nothing. When the terminal ends, the
-  machine reconnects with the path herdr recorded.
-- **UI** (not in read-only mode). **Manage herdr…** in a machine's context
-  menu (for an SSH machine while its agent is connected) opens
-  `web/src/components/HerdrDialog.tsx`, and so does the button in a
-  machine's status block when it reports a problem: always on the local
-  machine, on an SSH machine when it is *degraded*. The dialog shows the
-  herdr in use, the server state, a start button or stop and restart
-  buttons (asking first: they end every terminal on that machine; restart
-  is highlighted when the server runs another herdr build) and, for the
-  managed copy on the local machine, "Check for updates" and "Update".
-  **Restart herdr…** in the context menu of every machine with a connected
-  agent asks the same question, restarts the server (or starts it when it
-  is not running) and reports the result in a toast.
+  outlived its herdr keeps the machine *ready*, and in the context menu (in
+  place of **Update herdr…**); a herdr the user installed by hand is picked
+  up by **Retry**. **Restart herdr…** and **Stop herdr…** are disabled
+  meanwhile: they would stop nothing and start nothing. When the terminal
+  ends, the machine reconnects with the path herdr recorded.
+- **UI** (not in read-only mode), all in the machine's context menu and its
+  status block, without a dialog of its own (`web/src/actions.ts`,
+  `web/src/menus.tsx`); results and errors with herdr's output appear in
+  toasts.
+  - **Restart herdr…** and **Stop herdr…**, for every machine whose agent
+    is connected, ask first (they end every terminal on that machine) and
+    restart the server (or start it when it is not running) or stop it.
+  - **Update herdr…** on the local machine checks herdr's latest release:
+    the application's copy, when older, is updated after the user confirms
+    the version (a toast asks for a restart when the running server could
+    not be handed over); an installation of the user's, or an up-to-date
+    copy, only gets a toast. On an SSH machine the same item runs herdr's
+    `--remote` flow above.
+  - **Start herdr** in the status block of a machine that reports a
+    problem (always on the local machine, on an SSH machine when it is
+    *degraded*) starts its server; a running one is left alone.
+  - **Disable machine** on a connected SSH machine with herdr asks whether
+    to stop its herdr server too (checked by default): the server is
+    stopped first, while the agent can still do it, then the machine is
+    disabled; a failed stop is reported and the machine is disabled all
+    the same. Unchecked, and for the local machine, its panes keep running
+    in herdr ([02](02-multi-machine-transport.md)).
 
 ## Alternatives considered
 
@@ -172,8 +184,8 @@ user's confirmation; choosing herdr's preview channel.
 - Server exits or does not open its socket within 15 s → `start_failed` with
   the end of `server.log`; a server that did not come up in time is killed.
 - SSH machine rebooted → the agent connects again and the machine is
-  *degraded*; its status block offers **Manage herdr** with **Start
-  server**, and the context menu **Restart herdr…**. herdr restores the
+  *degraded*; its status block offers **Start herdr**, and the context
+  menu **Restart herdr…**. herdr restores the
   workspaces it saved at shutdown, with new shells.
 - Restart: herdr's stop fails or does not return within 30 s (a hung
   server), or a server still answers 10 s after it → `stop_failed` with
@@ -194,11 +206,12 @@ user's confirmation; choosing herdr's preview channel.
   here" (or stays *ready* with a warning while its old server runs), every
   server action returns `not_found` and starts or stops nothing, and
   **Install herdr** runs `herdr --remote`; a herdr installed by hand is
-  picked up by **Check again** in **Manage herdr** or by **Retry**.
+  picked up by **Retry**.
 - No network or herdr.dev unavailable → `check_failed` or `update_failed`
   with herdr's message; the installed copy stays as it was.
-- A server older than the new herdr → `restart_needed`; the dialog offers a
-  restart (which closes terminals) when live handoff was not possible.
+- A server older than the new herdr → `restart_needed`; the toast after the
+  update asks for **Restart herdr…** (which closes terminals) when live
+  handoff was not possible.
 - Remote update: the local herdr is missing → `no_local_herdr`; ssh needs a
   password → herdr's ssh asks in the same terminal; the user declines → herdr
   leaves the machine as it was. `--remote` has no install-only mode, so after
@@ -238,7 +251,8 @@ See [SECURITY.md](../../SECURITY.md).
 following newer bundles but not older ones, version comparison, the manifest
 check (including a malformed version), that only the managed copy is
 updated, that a restart stops only a running server and starts nothing
-after a failed, hanging or ineffective stop, that another user's listener
+after a failed, hanging or ineffective stop, that a stop without a running
+server succeeds without running herdr, that another user's listener
 gets no command, how socket probes classify connection errors, that a herdr
 removed while its server runs gives `not_found` with the server still
 running and nothing started or stopped, and that a herdr installed
@@ -253,5 +267,8 @@ and the PTY bridge. `TestIntegrationHerdrManage` starts, stops and restarts
 with temporary `HOME` and herdr directories.
 `web/src/__tests__/localHerdr.test.ts` covers requests, version comparison,
 messages for every error code and when a machine's herdr counts as missing;
-`menus.test.ts` covers the machine menu's entries, the confirmed restart and
-**Install herdr…** with the restart disabled where herdr is missing.
+`menus.test.ts` covers the machine menu's entries, the confirmed restart
+and stop, the local update (up to date, the user's installation, a newer
+release after confirming), **Install herdr…** with restart and stop
+disabled where herdr is missing, and disabling a machine with and without
+stopping its herdr; `dialog.test.ts` covers the confirmation's checkbox.

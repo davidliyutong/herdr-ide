@@ -26,9 +26,9 @@ import {
   PowerOff,
   RefreshCw,
   RotateCw,
-  Wrench,
   Rows2,
   Search,
+  Square,
   SquareCode,
   Trash2,
   X,
@@ -149,10 +149,11 @@ export function sidebarMenu(): MenuEntry[] {
   return useStore.getState().readOnly ? [] : [addMachineItem(), refreshMachinesItem()];
 }
 
-/** A machine's menu in the sidebar: enable or disable it, manage its
- * herdr: its server (needs the agent connected), and on an SSH machine
- * herdr's own update; rename or remove it in herdr's saved machines, add
- * one or reload them. */
+/** A machine's menu in the sidebar: enable or disable it, restart or stop
+ * its herdr server (needs the agent connected), update herdr (the
+ * application's copy on the local machine, herdr's own --remote flow on an
+ * SSH machine); rename or remove it in herdr's saved machines, add one or
+ * reload them. */
 export function machineMenu(m: string): MenuEntry[] {
   const s = useStore.getState();
   const st = s.machines[m];
@@ -164,12 +165,13 @@ export function machineMenu(m: string): MenuEntry[] {
     // start nothing; herdr --remote installs one on an SSH machine.
     const missing = herdrMissing(st);
     out.push(
-      { label: t('menu.manageHerdr'), icon: <Wrench />, disabled: st.kind !== 'local' && !connected, run: () => s.openHerdr(m) },
       { label: t('menu.restartHerdr'), icon: <RotateCw />, disabled: !connected || missing, run: () => void actions.restartHerdr(m) },
+      { label: t('menu.stopHerdr'), icon: <Square />, disabled: !connected || missing, run: () => void actions.stopHerdr(m) },
     );
-    if (st.kind !== 'local')
+    if (st.kind === 'local') out.push({ label: t('menu.updateHerdr'), icon: <RefreshCw />, run: () => void actions.updateHerdr(m) });
+    else
       out.push({
-        label: t(missing ? 'menu.installRemoteHerdr' : 'menu.updateRemoteHerdr'),
+        label: t(missing ? 'menu.installRemoteHerdr' : 'menu.updateHerdr'),
         icon: <RefreshCw />,
         run: () => s.openRemoteHerdr(m),
       });

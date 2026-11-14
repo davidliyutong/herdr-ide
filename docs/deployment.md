@@ -255,8 +255,8 @@ What herdr-ide starts on a machine and how it is reclaimed:
 | Desktop core | Electron launches its bundled binary | SIGTERM on normal quit, with a 20 s deadline before SIGKILL of that owned child; parent-stdin EOF also stops it if Electron crashes. herdr servers and pane programs remain running. |
 | Electron profile | First desktop launch | Kept until manually removed; Chromium manages its caches. Development has a separate profile. Core stderr is bounded to 16 KiB in memory; no desktop log files accumulate. |
 | `herdr-ide-agent` | one per core while connected | Exits when its ssh session ends; a dead link is detected by keepalives within about 45 s. |
-| herdr server started from the UI (local or SSH machine) | **Manage herdr** or **Restart herdr…**, on request | Belongs to the user like one started by the herdr TUI and outlives the core and the agent; stopped with **Manage herdr** or `herdr server stop`, and with the machine. On a machine whose logind ends user processes at logout (`KillUserProcesses=yes`) it ends with the agent's ssh login unless the user enabled lingering (`loginctl enable-linger`). Its output goes to `~/.herdr-ide/herdr/server.log` there, replaced at every start from the UI of any session. |
-| `herdr update` | **Update** in **Manage herdr** | Ends with the update (15 min limit); herdr's temporary download is in `~/.herdr-ide/herdr/`. |
+| herdr server started from the UI (local or SSH machine) | **Start herdr** or **Restart herdr…**, on request | Belongs to the user like one started by the herdr TUI and outlives the core and the agent; stopped with **Stop herdr…**, by **Disable machine** when asked to, with `herdr server stop`, and with the machine. On a machine whose logind ends user processes at logout (`KillUserProcesses=yes`) it ends with the agent's ssh login unless the user enabled lingering (`loginctl enable-linger`). Its output goes to `~/.herdr-ide/herdr/server.log` there, replaced at every start from the UI of any session. |
+| `herdr update` | **Update herdr…** on the local machine | Ends with the update (15 min limit); herdr's temporary download is in `~/.herdr-ide/herdr/`. |
 | `herdr machine add` (core host) | **Add machine…** | Ends when herdr exits or the window closes. A herdr it installs on the machine and the server it starts there belong to the user, like after `herdr machine add` in a terminal; **Remove machine…** (`herdr machine remove`) forgets the machine without stopping them. A removed machine's agent exits with its session; the agent builds left in `~/.herdr-ide/agent/` follow their usual retention. |
 | `herdr --remote` client (core host) | **Update herdr** for an SSH machine | Ends when herdr exits or the window closes. A herdr it installs on the machine (usually `~/.local/bin/herdr`) is herdr's own installation and stays until the user removes it; a server it starts there belongs to the user. |
 | Connection to herdr's client socket | one per core, to the machine the browser shows | Closed when another machine is shown, 10 s after the owning browser left (unless another browser takes over), or with the agent; no process is started. |
@@ -274,7 +274,7 @@ What herdr-ide starts on a machine and how it is reclaimed:
 | Disk | see [reference](reference.md#files-and-directories) | Uploads and logs after 7 days; agent builds and code-server versions unused for 14 days; Xvfb packages and video encoders unused for 14 days when another one is installed. Files dropped on a pane are written into the pane's directory and belong to the user, like files copied there by hand. A cancelled or interrupted upload leaves nothing: the agent removes its temporary file (`.herdr-ide-upload-*` beside the target) when the stream ends early; only an agent killed during an upload leaves one. |
 
 herdr servers are started and stopped by the user: through herdr, or
-through **Manage herdr** and **Restart herdr…** in a machine's context menu
+through **Restart herdr…** and **Stop herdr…** in a machine's context menu
 (an SSH machine that rebooted is *degraded* until its server is started
 again; **Retry** does not start it). herdr on an SSH
 machine changes only through herdr's own `herdr --remote` flow, which
@@ -324,7 +324,7 @@ Description=herdr-ide
 [Service]
 ExecStart=%h/.local/lib/herdr-ide/herdr-ide --allowed-origin https://ide.example.com
 Restart=on-failure
-# A herdr server started with Manage herdr must survive restarts of the service.
+# A herdr server started from the UI must survive restarts of the service.
 KillMode=process
 
 [Install]

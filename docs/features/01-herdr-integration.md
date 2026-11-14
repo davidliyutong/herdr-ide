@@ -85,7 +85,7 @@ machines, reimplementing its agent detection.
 - **herdr not running or not found** → agent reports `herdr_error`, the
   machine shows *degraded*; snapshots are retried, and **Retry** connects
   a new agent ([02](02-multi-machine-transport.md)); a server that is not
-  running is started with **Manage herdr** or **Restart herdr…**
+  running is started with **Start herdr** or **Restart herdr…**
   ([17](17-local-herdr-management.md)); an SSH machine whose herdr was
   removed or moved offers **Install herdr** (herdr's `--remote` flow).
   Every herdr status looks herdr up again, so a herdr removed, reinstalled

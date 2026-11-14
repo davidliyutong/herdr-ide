@@ -6,7 +6,6 @@ import { Workspace } from './components/Workspace';
 import { Dock } from './components/Dock';
 import { Palette } from './components/Palette';
 import { AuthDialog } from './components/AuthDialog';
-import { HerdrDialog } from './components/HerdrDialog';
 import { RemoteHerdrDialog } from './components/RemoteHerdrDialog';
 import { AddMachineDialog } from './components/AddMachineDialog';
 import { SettingsDialog } from './components/SettingsDialog';
@@ -112,7 +111,6 @@ export function App() {
       <StatusBar connected={connected} prefix={prefix} />
       <Palette />
       <SettingsDialog />
-      <HerdrDialog />
       <RemoteHerdrDialog />
       <AddMachineDialog />
       <Dialogs />

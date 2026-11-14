@@ -198,7 +198,7 @@ function MachineItem({ m }: { m: MachineState }) {
                   {missing
                     ? install
                     : (m.kind === 'local' || m.status === 'degraded') &&
-                      !readOnly && <button onClick={() => useStore.getState().openHerdr(m.id)}>{t('sidebar.manageHerdr')}</button>}
+                      !readOnly && <button onClick={() => void actions.startHerdr(m.id)}>{t('sidebar.startHerdr')}</button>}
                   {!readOnly && <button onClick={() => conn.retry(m.id)}>{t('sidebar.retry')}</button>}
                 </div>
               )}
