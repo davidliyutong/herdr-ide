@@ -22,16 +22,20 @@
     /// drag:<from>:<to>:<zone> (a pane dragged by its header onto another,
     /// zone center, left, right, top or bottom; or tab onto tab: "tab"),
     /// add-machine (its dialog), machine:<op>:<target> (add, signin, remove,
-    /// menu: see MachineDialogs.debug).
+    /// menu: see MachineDialogs.debug), transfers (the transfers panel), and
+    /// the files window's: files:, select:, download-to:, upload-file:,
+    /// paste-file:, paste-image: (see AppDelegate.debugFiles).
     enum DebugAids {
         static func start(window: NSWindow, model: AppModel, panes: PaneArea, webPanel: WebPanel, run: @escaping (String) -> Void) {
             let env = ProcessInfo.processInfo.environment
             if let path = env[Brand.envPrefix + "SNAPSHOT"] {
                 Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in
                     snapshot(window, to: path)
-                    // Another window of the application, such as the settings.
-                    if let other = NSApp.windows.first(where: { $0 !== window && $0.isVisible && $0.contentView?.layer != nil }) {
-                        snapshot(other, to: path + ".window.png")
+                    // The application's other windows, such as the settings:
+                    // <path>.window.png, then .window2.png…
+                    let others = NSApp.windows.filter { $0 !== window && $0.isVisible && $0.frame.width > 40 }
+                    for (index, other) in others.enumerated() {
+                        snapshot(other, to: path + (index == 0 ? ".window.png" : ".window\(index + 1).png"))
                     }
                 }
             }
@@ -51,11 +55,11 @@
                     if let machine = model.selectedMachine, let workspace = model.layout.selectedWorkspace {
                         model.closeWorkspace(workspace.id, on: machine)
                     }
-                case "code", "settings", "keys", "add-machine": run(action)
+                case "code", "settings", "keys", "add-machine", "transfers": run(action)
                 case "page": webPanel.debugDescribe { FileHandle.standardError.write(Data(("page: " + $0 + "\n").utf8)) }
                 case "find-next": panes.pane(containing: window.firstResponder as? NSView)?.findStep(true)
                 default:
-                    if ["settings:", "strokes:", "command:", "folder:", "palette:", "drag:", "machine:"].contains(where: action.hasPrefix) {
+                    if ["settings:", "strokes:", "command:", "folder:", "palette:", "drag:", "machine:", "files:", "select:", "download-to:", "upload-file:", "paste-file:", "paste-image:"].contains(where: action.hasPrefix) {
                         run(action)
                     } else if action.hasPrefix("set:"), let eq = action.firstIndex(of: "=") {
                         let key = String(action[action.index(action.startIndex, offsetBy: 4) ..< eq])

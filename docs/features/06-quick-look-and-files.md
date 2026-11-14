@@ -22,6 +22,10 @@ the pane's directory, into the browser, folders as zip archives.
 Non-goals: a file manager (the download chooser picks entries, nothing
 more); editing files (that is VS Code's job).
 
+The macOS application does the same with the same endpoints and native
+panels (a files window, the save and open panels, the system's Quick Look;
+[23](23-macos-application.md)).
+
 ## Design
 
 **Links** (`web/src/terminal/links.ts`)

@@ -17,6 +17,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var dialogs: Dialogs?
     private var machineDialogs: MachineDialogs?
     private var palette: Palette?
+    private var transfers: Transfers?
+    private var transfersButton: TransfersButton?
+    private var files: FilesWindow?
     private let toasts = Toasts()
     private var panelSize: NSLayoutConstraint?
     private var panelShown = false
@@ -106,6 +109,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         self.machineDialogs = machineDialogs
         sidebar.machineDialogs = machineDialogs
         palette = Palette(parent: window)
+        let transfers = Transfers(model: model)
+        transfers.toast = { [weak self] in self?.toasts.show($0) }
+        self.transfers = transfers
+        let transfersButton = TransfersButton(transfers: transfers)
+        self.transfersButton = transfersButton
+        tabs.trailing.addArrangedSubview(transfersButton)
         let quickLook = QuickLook(core: core)
         self.quickLook = quickLook
         quickLook.onFailure = { [weak self] key, path in self?.notice(tr(key, path)) }
@@ -169,6 +178,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 if action.hasPrefix("folder:") { openFolders([String(action.dropFirst(7))]) }
                 if action.hasPrefix("palette:") { palette?.debugType(String(action.dropFirst(8))) }
                 if action == "add-machine" { machineDialogs?.add() }
+                if action == "transfers" { transfersButton?.show() }
+                debugFiles(action)
                 if action.hasPrefix("machine:") {
                     let spec = action.dropFirst(8).split(separator: ":", maxSplits: 1).map(String.init)
                     if spec.count == 2 { machineDialogs?.debug(spec[0], spec[1]) }
@@ -180,6 +191,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                         FileHandle.standardError.write(Data("stroke \(stroke): \(String(describing: result))\n".utf8))
                     }
                 }
+            }
+        }
+
+        /// Development: the files window and transfers. files:<dir> shows a
+        /// directory of the selected machine, select:<a,b> chooses entries,
+        /// download-to:<file> downloads them there without the save panel,
+        /// upload-file:<file> uploads a file into the directory shown,
+        /// paste-file:<file> and paste-image:<png> paste into the focused
+        /// terminal from a pasteboard of their own (not the user's).
+        private func debugFiles(_ action: String) {
+            let arg = String(action.drop { $0 != ":" }.dropFirst())
+            if action.hasPrefix("files:"), let machine = model?.selectedMachine { showFiles(machine: machine, directory: arg) }
+            if action.hasPrefix("select:") { files?.debugSelect(arg.split(separator: ",").map(String.init)) }
+            if action.hasPrefix("download-to:"), let files { files.debugDownload(to: URL(fileURLWithPath: arg)) }
+            if action.hasPrefix("upload-file:") { files?.uploadFiles([URL(fileURLWithPath: arg)]) }
+            if action.hasPrefix("paste-file:") || action.hasPrefix("paste-image:"), let pane = focusedPane {
+                let board = NSPasteboard(name: NSPasteboard.Name(Brand.appSlug + ".debug"))
+                board.clearContents()
+                if action.hasPrefix("paste-file:") {
+                    board.writeObjects([URL(fileURLWithPath: arg) as NSURL])
+                } else if let data = FileManager.default.contents(atPath: arg) {
+                    board.setData(data, forType: .png)
+                }
+                FileHandle.standardError.write(Data("paste: \(takeFiles(board, into: pane, dir: nil))\n".utf8))
             }
         }
 
@@ -236,7 +271,132 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         pane.header.onPress = { [weak self] event in self?.pressHeader(pane, event) }
         pane.header.menuBuilder = { [weak self] in self?.paneMenu(pane) }
         pane.terminalView.menuBuilder = { [weak self] _ in self?.textMenu(pane) }
+        pane.terminalView.onPaste = { [weak self, weak pane] in pane.map { self?.pasteFiles(into: $0) ?? false } ?? false }
+        pane.terminalView.onDrop = { [weak self, weak pane] board in pane.map { self?.dropFiles(board, on: $0) ?? false } ?? false }
         pane.onOpenPath = { [weak self] text in self?.openPath(text, in: pane) }
+    }
+
+    // MARK: - Files
+
+    /// The files window, showing a directory of a machine.
+    private func showFiles(machine: String, directory: String) {
+        guard let model, let transfers else { return }
+        if files == nil {
+            let files = FilesWindow(model: model, transfers: transfers)
+            files.onPreview = { [weak self] machine, path in self?.quickLook?.preview(path, on: machine) }
+            files.onCode = { [weak self] machine, path in self?.openInCode(path, on: machine) }
+            self.files = files
+        }
+        files?.show(machine: machine, directory: directory)
+    }
+
+    @objc private func showFilesOfFocused() {
+        guard let model, let machine = model.selectedMachine else { return }
+        showFiles(machine: machine, directory: model.focusedTerminal.flatMap { model.directory(of: $0, on: machine) } ?? "~")
+    }
+
+    /// The files of the clipboard (or an image without text) pasted into a
+    /// terminal: those of the local machine where they are, the others
+    /// uploaded into the machine's upload directory first; their paths are
+    /// pasted, shell-quoted. False leaves the paste to the terminal (text).
+    private func pasteFiles(into pane: TerminalPane) -> Bool {
+        guard let model, !model.readOnly else { return false }
+        return takeFiles(NSPasteboard.general, into: pane, dir: nil)
+    }
+
+    /// Files dropped on a terminal: as pasted, but uploaded into the
+    /// terminal's directory (else the upload directory); folders of other
+    /// machines are skipped. Files of the local machine are left to the
+    /// terminal, which pastes their paths.
+    private func dropFiles(_ board: NSPasteboard, on pane: TerminalPane) -> Bool {
+        guard let model, !model.readOnly else { return false }
+        if isLocal(pane.machine), board.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) { return false }
+        return takeFiles(board, into: pane, dir: model.directory(of: pane.address, on: pane.machine))
+    }
+
+    private func isLocal(_ machine: String) -> Bool { model?.machines.first { $0.id == machine }?.kind == "local" }
+
+    private func takeFiles(_ board: NSPasteboard, into pane: TerminalPane, dir: String?) -> Bool {
+        guard let transfers else { return false }
+        let urls = (board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
+        let paste = { [weak pane] (paths: [String]) in
+            if !paths.isEmpty { pane?.paste(paths.map(shellQuote).joined(separator: " ") + " ") }
+        }
+        if !urls.isEmpty {
+            if isLocal(pane.machine) {
+                paste(urls.map(\.path))
+                return true
+            }
+            let folders = urls.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+            if !folders.isEmpty { toasts.show(tr("transfers.noFolders", String(folders.count))) }
+            let uploads = urls.filter { !folders.contains($0) }
+            guard !uploads.isEmpty else { return true }
+            announceUploads(uploads.count, to: pane.machine)
+            transfers.upload(uploads, to: pane.machine, dir: dir, done: paste)
+            return true
+        }
+        // An image without a file of its own (a screenshot, a browser's).
+        guard board.string(forType: .string) == nil, let type = board.availableType(from: [.png, .tiff]),
+              let raw = board.data(forType: type),
+              let png = type == .png ? raw : NSBitmapImageRep(data: raw)?.representation(using: .png, properties: [:]) else { return false }
+        announceUploads(1, to: pane.machine)
+        transfers.upload([], data: (png, "paste.png"), to: pane.machine, dir: nil, done: paste)
+        return true
+    }
+
+    private func announceUploads(_ count: Int, to machine: String) {
+        let label = model?.machines.first { $0.id == machine }?.label ?? machine
+        toasts.show(tr("transfers.uploading", String(count), label), button: tr("transfers.show"), ttl: 5) { [weak self] in
+            self?.transfersButton?.show()
+        }
+    }
+
+    /// Chooses files of this Mac to upload into a terminal's directory; their
+    /// paths are pasted.
+    private func uploadInto(_ pane: TerminalPane) {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.beginSheetModal(for: window) { [weak self, weak pane] response in
+            guard let self, let pane, response == .OK, let model = self.model else { return }
+            self.announceUploads(panel.urls.count, to: pane.machine)
+            self.transfers?.upload(panel.urls, to: pane.machine, dir: model.directory(of: pane.address, on: pane.machine)) { [weak pane] paths in
+                if !paths.isEmpty { pane?.paste(paths.map(shellQuote).joined(separator: " ") + " ") }
+            }
+        }
+    }
+
+    /// Shows VS Code for a folder of a machine.
+    private func showCode(machine: String, folder: String) {
+        if !panelShown {
+            panelShown = true
+            placePanel()
+        }
+        panelMachine = machine
+        webPanel?.showCode(machine: machine, folder: folder)
+    }
+
+    /// Opens a file of a machine in VS Code: in the folder of the focused
+    /// terminal when the file is below it, else in the file's directory
+    /// (POST /api/m/{id}/bridge); a folder opens as itself.
+    private func openInCode(_ path: String, on machine: String, line: Int? = nil, isFolder: Bool = false) {
+        guard let model else { return }
+        let cwd = model.selectedMachine == machine ? model.focusedTerminal.flatMap { model.directory(of: $0, on: machine) } : nil
+        if isFolder { return showCode(machine: machine, folder: path) }
+        let folder = cwd.flatMap { path.hasPrefix($0.hasSuffix("/") ? $0 : $0 + "/") ? $0 : nil } ?? RemoteEntry.parent(path)
+        showCode(machine: machine, folder: folder)
+        var body: [String: Any] = ["cmd": "openFile", "path": path, "folder": folder]
+        if let line { body["line"] = line }
+        bridge(machine, body)
+    }
+
+    /// Sends a command to the VS Code window of a folder (the bridge
+    /// extension); a refusal is shown as a note.
+    private func bridge(_ machine: String, _ body: [String: Any]) {
+        let encoded = machine.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? machine
+        model?.api.request("POST", "api/m/\(encoded)/bridge", body: body) { [weak self] status, reply in
+            if status != 200 { self?.toasts.show(tr("code.failed", reply?["error"]?.string ?? String(status))) }
+        }
     }
 
     /// A press on a pane's header: a double click renames the pane, a drag
@@ -295,14 +455,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         return menu
     }
 
-    /// The menu of a terminal's text (a right click without a selection).
+    /// The menu of a terminal's text (a right click without a selection):
+    /// paste, find, and the files of its directory.
     private func textMenu(_ pane: TerminalPane) -> NSMenu? {
         let menu = ClosureMenu()
         menu.item(tr("menu.paste"), symbol: "doc.on.clipboard") { [weak pane] in MainActor.assumeIsolated { pane?.terminalView.paste(nil) } }
-        menu.item(tr("menu.find"), symbol: "magnifyingglass") { [weak self] in
+        menu.item(tr("menu.find"), symbol: "magnifyingglass") { [weak self, weak pane] in
+            guard let pane else { return }
             self?.model?.focus(pane.address)
             pane.showFind()
-            _ = self
+        }
+        menu.separator()
+        let dir = model?.directory(of: pane.address, on: pane.machine) ?? "~"
+        menu.item(tr("menu.files"), symbol: "folder") { [weak self] in self?.showFiles(machine: pane.machine, directory: dir) }
+        if model?.readOnly == false {
+            menu.item(tr("menu.uploadFiles"), symbol: "arrow.up.doc") { [weak self, weak pane] in pane.map { self?.uploadInto($0) } }
         }
         return menu
     }
@@ -633,6 +800,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// changes while the core is read-only.
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         if item.action == #selector(addMachine) { return model?.readOnly == false }
+        if item.action == #selector(showFilesOfFocused) { return model?.selectedMachine != nil }
         guard let command = item.representedObject as? String else { return true }
         let inPage = webPanel?.contains(window.firstResponder as? NSView) ?? false
         // Keys of commands for everywhere also work in the page.
@@ -716,6 +884,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             command(menu, "menu.closeTerminal", "pane.close")
             command(menu, "menu.closeTab", "tab.close")
             menu.addItem(.separator())
+            add(menu, "menu.files", #selector(showFilesOfFocused), "")
             add(menu, "menu.addMachine", #selector(addMachine), "")
         }
         submenu(tr("menu.edit")) { menu in

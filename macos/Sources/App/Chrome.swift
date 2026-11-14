@@ -10,7 +10,8 @@ final class TerminalControllerBox {
     let controller: TerminalController
 
     /// Keys of the menu that are not commands, as Ghostty names them.
-    static let systemKeys = ["super+q", "super+h", "super+m"]
+    /// ⌘V is the menu's Paste, which uploads pasted files and images.
+    static let systemKeys = ["super+q", "super+h", "super+m", "super+v"]
 
     init() {
         controller = TerminalController(theme: Self.theme(nil)) { builder in

@@ -32,10 +32,13 @@ knows; workspaces, tabs and split panes that every client of a machine
 shares; the same design language as the web UI (neutral greys, color only
 for state, dense rows); English and Chinese.
 
-Non-goals: the browser UI's file
-browser, uploads and downloads, and its settings of the browser itself
-(appearance, shortcuts); starting program windows from terminals of the
-terminal core, which get no virtual display; Linux and Windows.
+Goals also: what the browser UI does with the same endpoints — machine
+management, files, uploads and downloads, settings with machines' own
+values, keyboard shortcuts, the palette, agents' notifications and VS
+Code's commands — so that the application can replace the browser UI on
+a Mac.
+
+Non-goals: Linux and Windows.
 
 ## Design
 
@@ -174,6 +177,34 @@ terminal core, which get no virtual display; Linux and Windows.
   Anything else Ghostty found is taken as a path: `TerminalPath` drops a
   trailing `:line:column`, keeps absolute and `~` paths and joins others to
   the directory of the terminal's foreground program.
+- **Files** (`Files.swift`, the web UI's download dialog and preview list,
+  [06](06-quick-look-and-files.md)). **Files…** (Shell menu, a terminal's
+  menu) opens a window on a directory of a machine (`GET
+  /api/m/{id}/list`): the terminal's directory, else home; Up, Home and a
+  path typed in move it; several entries can be chosen; a double click
+  enters a folder or previews a file. Its buttons preview (Quick Look),
+  open in VS Code, download, upload files of this Mac into the directory
+  (`NSOpenPanel`), and copy the paths. **Downloads** ask where to save
+  (`NSSavePanel`, named as the core names it: a file as itself, folders
+  and several entries as `<common directory>.zip`) and stream
+  `GET /api/m/{id}/download` into that file. **Uploads**
+  (`POST /api/m/{id}/upload?name=&dir=`) go one after the other; one that
+  the directory refuses goes into the machine's upload directory, with a
+  note. Files pasted into a terminal (⌘V: Ghostty's own binding of the key
+  is removed so the menu's Paste comes first) or dropped on it are pasted
+  as their shell-quoted paths: files of the local machine where they are,
+  others uploaded first, pasted ones into the upload directory and dropped
+  ones into the terminal's directory; a pasted image without a file
+  (a screenshot) is uploaded as `paste.png`. Folders of other machines are
+  skipped with a note. A terminal's menu also uploads files chosen in an
+  open panel into its directory. **Transfers** (the button at the end of
+  the tab bar, with the number in progress) lists each transfer's
+  progress, speed over the last three seconds and result, cancels it
+  (breaking the request off, so the machine's agent removes a partial
+  upload; not once the machine is writing the file), shows a download in
+  the Finder or copies an upload's path, and keeps the last 50 finished
+  ones in the application's preferences (names and paths, no contents)
+  (`TransferList`, `TransferClient`).
 - **Quick Look** (`QuickLook.swift`). The path is fetched with
   `GET /api/m/<machine>/file` into a directory of its own in the
   temporary directory (0700; emptied before each preview and at quit) and
@@ -300,7 +331,8 @@ See the row for the macOS application in
 
 `macos/Tests/TermKitTests` (`make macos-test`): the running-program rule,
 the attention list and its order, the reactions to agents' states, where
-text sent from VS Code goes, the palette's matching, paths as terminals print
+text sent from VS Code goes, the palette's matching, the transfers' list
+and history, listings and the names of downloads, shell quoting, paths as terminals print
 them (line suffixes, `~`, relative, `file:` URLs, other schemes) and the
 names of their local copies, frame encoding and slices,
 terminal names, the store's snapshots and every event kind (detected

@@ -501,3 +501,61 @@ final class ActivityTests: XCTestCase {
         XCTAssertEqual(TerminalRecord(raw: ["address": "t1", "labels": ["name": "build"], "name": "x"]).displayName, "build")
     }
 }
+
+final class FilesTests: XCTestCase {
+    func testListingsAndNames() throws {
+        let reply = JSONValue(any: ["dir": ["name": "w", "path": "/home/u/w", "is_dir": true],
+                                    "entries": [["name": "b.txt", "size": 6, "mtime": 1000], ["name": "src", "is_dir": true],
+                                                ["name": "a.txt", "size": 2]]] as [String: Any])
+        let listing = try XCTUnwrap(RemoteEntry.listing(reply))
+        XCTAssertEqual(listing.directory.path, "/home/u/w")
+        XCTAssertEqual(listing.entries.map(\.name), ["src", "a.txt", "b.txt"])
+        XCTAssertNil(RemoteEntry.listing(JSONValue(any: ["error": "x"])))
+        XCTAssertEqual(RemoteEntry.join("/", "a"), "/a")
+        XCTAssertEqual(RemoteEntry.join("/w/", "a"), "/w/a")
+        XCTAssertEqual(RemoteEntry.parent("/w/a/"), "/w")
+        XCTAssertEqual(RemoteEntry.parent("/w"), "/")
+        XCTAssertEqual(RemoteEntry.parent("/"), "/")
+        XCTAssertEqual(RemoteEntry.downloadName(["/w/a.txt"], single: true), "a.txt")
+        XCTAssertEqual(RemoteEntry.downloadName(["/w/src"], single: false), "src.zip")
+        XCTAssertEqual(RemoteEntry.downloadName(["/w/p/a", "/w/q/b"], single: false), "w.zip")
+        XCTAssertEqual(RemoteEntry.downloadName(["/a", "/b"], single: false), "download.zip")
+        XCTAssertEqual(shellQuote("/w/a-b_c.txt"), "/w/a-b_c.txt")
+        XCTAssertEqual(shellQuote("/w/my file's.png"), "'/w/my file'\\''s.png'")
+        XCTAssertEqual(shellQuote("/w/图.png"), "'/w/图.png'")
+    }
+
+    func testTransfers() throws {
+        var saved: [Transfer] = []
+        let list = TransferList { saved = $0 }
+        let start = Date(timeIntervalSince1970: 100)
+        var upload = Transfer(kind: .upload, machine: "m", machineLabel: "M", name: "a", paths: [""], size: 1000, started: start)
+        upload.id = "u"
+        let download = Transfer(kind: .download, machine: "m", machineLabel: "M", name: "b.zip", paths: ["/w"], started: start)
+        list.add(upload)
+        list.add(download)
+        list.update("u") { $0.sent = 400 }
+        XCTAssertEqual(list.progress.sent, 400)
+        XCTAssertNil(list.progress.size) // the archive's size is not known
+        list.end("u", .done, result: "/up/a", now: start.addingTimeInterval(2))
+        XCTAssertEqual(list.history.first?.speed, 500)
+        XCTAssertEqual(list.history.first?.result, "/up/a")
+        XCTAssertEqual(saved.count, 1)
+        list.end(download.id, .cancelled)
+        XCTAssertTrue(list.active.isEmpty)
+        XCTAssertEqual(list.history.map(\.status), [.cancelled, .done])
+        XCTAssertFalse(list.history[0].cancellable)
+        // The history is kept as JSON and read back, the last 50.
+        let decoded = try JSONDecoder().decode([Transfer].self, from: JSONEncoder().encode(saved))
+        XCTAssertEqual(decoded, saved)
+        let many = TransferList(history: Array(repeating: list.history[1], count: 60))
+        XCTAssertEqual(many.history.count, TransferList.historyMax)
+        list.forget("u")
+        list.clearHistory()
+        XCTAssertTrue(saved.isEmpty)
+        var speed = Speed(now: 0)
+        XCTAssertEqual(speed.add(100, now: 1), 100)
+        XCTAssertEqual(speed.add(400, now: 2), 200)
+        XCTAssertEqual(speed.add(1000, now: 5), 200) // from the sample at the window's start
+    }
+}
