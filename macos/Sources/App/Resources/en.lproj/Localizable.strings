@@ -7,6 +7,9 @@
 "menu.splitDown" = "Split Down";
 "menu.closeTerminal" = "Close Terminal";
 "menu.edit" = "Edit";
+"menu.undo" = "Undo";
+"menu.redo" = "Redo";
+"menu.cut" = "Cut";
 "menu.copy" = "Copy";
 "menu.paste" = "Paste";
 "menu.selectAll" = "Select All";

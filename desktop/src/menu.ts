@@ -10,8 +10,9 @@
 // macOS offers keys without Cmd to a menu before the page, so the menu only
 // shows those and leaves them to the page.
 //
-// Besides the macOS application's items, Edit has Undo, Redo and Cut: text
-// fields in Chromium edit with Cmd keys only through the menu.
+// Edit's Undo, Redo, Cut, Copy, Paste and Select All are the standard
+// roles: text fields in Chromium, as in AppKit, edit with Cmd keys only
+// through the menu.
 
 import type { MenuItemConstructorOptions } from 'electron';
 import type { MessageKey } from '../../web/src/i18n/en';

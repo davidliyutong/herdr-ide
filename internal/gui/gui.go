@@ -1230,6 +1230,24 @@ func decide(p *agentproto.GUIProc, idle, typed bool) string {
 	return enableType
 }
 
+// shellProcs asks the machine's agent about the processes pids (action
+// shells): which were started with the display, and their executables'
+// names. A variable so tests can stand in for the agent.
+var shellProcs = func(ctx context.Context, mc *machines.Machine, pids []string) (map[int]*agentproto.GUIProc, error) {
+	conn, rep, err := mc.Open(ctx, agentproto.Header{Op: agentproto.OpGUI, Action: "shells", Args: pids})
+	if err != nil {
+		return nil, err
+	}
+	conn.Close()
+	procs := map[int]*agentproto.GUIProc{}
+	if rep.GUI != nil {
+		for i := range rep.GUI.Procs {
+			procs[rep.GUI.Procs[i].Pid] = &rep.GUI.Procs[i]
+		}
+	}
+	return procs, nil
+}
+
 // typeExport discards a half-typed command line with Ctrl-C, then types
 // cmd and Enter.
 func typeExport(send func(text string) error, cmd string) error {
@@ -1283,15 +1301,9 @@ func (m *Manager) Enable(ctx context.Context, mc *machines.Machine, shells Shell
 	}
 	procs := map[int]*agentproto.GUIProc{}
 	if len(pids) > 0 {
-		conn, rep, err := mc.Open(ctx, agentproto.Header{Op: agentproto.OpGUI, Action: "shells", Args: pids})
-		if err != nil {
+		var err error
+		if procs, err = shellProcs(ctx, mc, pids); err != nil {
 			return res, err // nothing typed yet
-		}
-		conn.Close()
-		if rep.GUI != nil {
-			for i := range rep.GUI.Procs {
-				procs[rep.GUI.Procs[i].Pid] = &rep.GUI.Procs[i]
-			}
 		}
 	}
 	for _, sh := range found {

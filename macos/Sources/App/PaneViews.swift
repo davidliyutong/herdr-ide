@@ -150,6 +150,11 @@ final class PaneArea: NSView {
         panes.values.forEach { $0.attach() }
     }
 
+    /// The language changed: every pane's texts, also those not on screen.
+    func localize() {
+        panes.values.forEach { $0.localize() }
+    }
+
     func update() {
         let machine = model.selectedMachine
         let tab = model.layout.selectedTab

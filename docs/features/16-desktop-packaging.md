@@ -106,10 +106,21 @@ implemented independently.
   key first and cancels those it runs, so the menu acts only on keys the
   page left; keys without Cmd are shown but not registered, since macOS
   would offer them to a menu before the page
-  ([04](04-layout-and-keyboard.md)). An item chosen sends its command to the
-  main window's page, which runs it where it applies (`web/src/desktop.ts`);
-  with a program window or one of VS Code's own windows in front, closing a
-  pane or a tab closes that window instead.
+  ([04](04-layout-and-keyboard.md)). Such a key therefore runs its command
+  only where the page matches keys itself: in a terminal or elsewhere in
+  the page outside text fields and VS Code's panel. A command for
+  everywhere (Show or Hide VS Code) bound to a key without Cmd does not run
+  from a text field or from VS Code, where the macOS application's key
+  matcher runs it. An item chosen sends its command to the main window's
+  page, which runs it where it applies (`web/src/desktop.ts`); with a
+  program window or one of VS Code's own windows in front, closing a pane
+  or a tab closes that window instead. Items are not enabled and disabled
+  by context as the macOS application's are (Electron's menu has no
+  validation when it opens): one chosen where its command does not apply
+  (a command for terminals while a dialog is open or VS Code has the
+  keyboard) does nothing. The shell's core never runs
+  read-only, since the shell does not pass `--read-only`, so no item needs
+  disabling for that.
 - The main window has a preload (`desktop/src/preload.ts`, sandboxed) that
   exposes one object, `desktopShell` (`web/src/shell.ts`): the commands of
   menu items chosen, where a dropped file is on disk, and the folders opened

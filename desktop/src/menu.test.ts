@@ -35,10 +35,8 @@ function tidy(items: string[]): string[] {
   return items.filter((it, i, all) => it !== '-' || (i > 0 && i < all.length - 1 && all[i + 1] !== '-'));
 }
 
-// Edit's Undo, Redo and Cut are the shell's own (Chromium's text fields need
-// them); Files… and Add Machine… open the macOS application's own windows
-// and dialogs (the page has its sidebar's).
-const shellOnly = new Set(['undo', 'redo', 'cut']);
+// Files… and Add Machine… open the macOS application's own windows and
+// dialogs (the page has its sidebar's).
 const nativeOnly = new Set(['files', 'addMachine']);
 
 test("the menu is the macOS application's: same menus, commands, order", () => {
@@ -46,11 +44,7 @@ test("the menu is the macOS application's: same menus, commands, order", () => {
   assert.ok(native.length >= 5, 'main.swift parsed');
   const shell = menus.map(({ title, items }) => ({
     title,
-    items: tidy(
-      items
-        .filter((it) => it === '-' || !shellOnly.has(it.title))
-        .map((it) => (it === '-' ? '-' : 'command' in it ? `${it.title} ${it.command}` : it.title)),
-    ),
+    items: tidy(items.map((it) => (it === '-' ? '-' : 'command' in it ? `${it.title} ${it.command}` : it.title))),
   }));
   const expected = native.map(({ title, items }) => ({ title, items: tidy(items.filter((it) => !nativeOnly.has(it))) }));
   assert.deepEqual(shell, expected);
@@ -74,7 +68,7 @@ test("titles are the macOS application's, in English and Chinese", () => {
     for (const title of titles) {
       const own = dict[`desktop.menu.${title}` as MessageKey];
       assert.ok(own, `desktop.menu.${title} (${lproj})`);
-      if (!shellOnly.has(title)) assert.equal(own, native.get(`menu.${title}`), `menu.${title} (${lproj})`);
+      assert.equal(own, native.get(`menu.${title}`), `menu.${title} (${lproj})`);
     }
   }
 });

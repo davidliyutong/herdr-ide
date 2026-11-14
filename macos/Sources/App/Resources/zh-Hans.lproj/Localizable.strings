@@ -7,6 +7,9 @@
 "menu.splitDown" = "向下拆分";
 "menu.closeTerminal" = "关闭终端";
 "menu.edit" = "编辑";
+"menu.undo" = "撤销";
+"menu.redo" = "重做";
+"menu.cut" = "剪切";
 "menu.copy" = "拷贝";
 "menu.paste" = "粘贴";
 "menu.selectAll" = "全选";

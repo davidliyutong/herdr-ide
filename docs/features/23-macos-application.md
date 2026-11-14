@@ -99,7 +99,8 @@ Non-goals: Linux and Windows.
   (`CFBundleDocumentTypes` for folders, `macos/xcode/Info.plist`) become
   workspaces on the local machine, one each, named after the folder; they
   wait up to 30 s for the local machine's terminals. Files that are not
-  folders are skipped with a note.
+  folders are skipped with a note (`LocalFolders.split`), also for a drop
+  that launched the application, whose items wait for the core.
 - **Tabs.** A click selects a tab, a double click renames it (an empty
   name shows its terminal's title again), dragging moves it within the
   bar, and its menu renames, opens a terminal beside, moves left or right
@@ -263,11 +264,19 @@ Non-goals: Linux and Windows.
   program's window goes.
 - Menu: the application's (settings, keyboard shortcuts), Shell (new
   terminal, splits, workspaces, rename tab, close terminal or tab), Edit
-  (copy, paste, find), View (palette, switch workspace, sidebar, VS Code,
-  zoom, next and previous tab, workspace and pane, focus on a side) and
-  Window. Each item shows the first single-stroke key the keybindings give
+  (undo, redo, cut, copy, paste, select all, find), View (palette, switch
+  workspace, sidebar, VS Code, zoom, next and previous tab, workspace and
+  pane, focus on a side) and Window. Undo, Redo and Cut are AppKit's
+  standard actions, for the text fields (find, palette, dialogs, settings,
+  files). Each item shows the first single-stroke key the keybindings give
   its command; ⌘N, like the terminal commands, is off while VS Code has
   the keyboard, and the workspace commands wait for the machine's layout.
+  A closing command's key (⌘W: close terminal, tab or workspace) typed
+  while another window of the application has the keyboard (a program's,
+  files, settings, a login) closes that window (`Keys.closing`); with a
+  dialog in front of the main window it does nothing. When the language
+  changes the menu is rebuilt and the panes' header tooltips and find bars
+  take the new language.
   A terminal with the keyboard takes the keys Ghostty binds before the
   menu sees them, and Ghostty binds most of these by default (new tab,
   splits, close, find, its own settings); the controller's configuration
@@ -292,7 +301,11 @@ builds the application that ships:
    bundles and the localized strings into `Contents/Resources`
    (`Bundle.app` is the package's bundle under SwiftPM and the main bundle
    under Xcode).
-4. The script adds the core to `Contents/Resources/bin` and the licenses,
+4. The script adds the core to `Contents/Resources/bin` and, under
+   `Contents/Resources/licenses/`, the notices of everything the core
+   embeds as the release archives and the Electron application carry them
+   (`LICENSE`, `THIRD_PARTY_NOTICES.md`, the web bundle's `licenses.md`,
+   `herdr-core/`, `herdr-detect/`, `encoder/`) and Ghostty's (`ghostty/`),
    signs the core and then the bundle with the
    hardened runtime, and checks the result with
    `codesign --verify --deep --strict`. `SIGN_IDENTITY` names a Developer
@@ -367,7 +380,8 @@ the attention list and its order, the reactions to agents' states, where
 text sent from VS Code goes, the palette's matching, the transfers' list
 and history, listings and the names of downloads, shell quoting, paths as terminals print
 them (line suffixes, `~`, relative, `file:` URLs, other schemes) and the
-names of their local copies, frame encoding and slices,
+names of their local copies, which opened paths are folders, that the
+closing commands are the core's, frame encoding and slices,
 terminal names, the store's snapshots and every event kind (detected
 agents and the count of terminals that wait included), the event
 channel's messages (a machine's terminal core state, a window's terminal), every layout vector of `design/testdata/layout`

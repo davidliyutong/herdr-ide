@@ -1,5 +1,20 @@
 import Foundation
 
+/// Folders of this Mac opened in the application: dropped on the sidebar or
+/// the Dock icon, also when the drop launched it. Only folders become
+/// workspaces.
+public enum LocalFolders {
+    /// The paths that are directories, in order, and how many are not.
+    public static func split(_ paths: [String], fileManager: FileManager = .default) -> (folders: [String], others: Int) {
+        var folders: [String] = []
+        for path in paths {
+            var isDir: ObjCBool = false
+            if fileManager.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue { folders.append(path) }
+        }
+        return (folders, paths.count - folders.count)
+    }
+}
+
 /// File paths as programs print them in a terminal.
 public enum TerminalPath {
     /// The path a piece of output names on its machine, nil when it is not

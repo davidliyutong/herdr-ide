@@ -8,22 +8,45 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+
+	"herdr-ide/internal/brand"
 )
 
-// cleanEnv is the agent's environment for the programs it starts, without
-// the terminal core's variables of a terminal the agent itself was started
-// in: those programs belong to no terminal and to no terminal core.
+// cleanEnv is the agent's environment for the programs it starts (the
+// terminal core, whose terminals inherit it, code-server, the display),
+// without the variables of a terminal or multiplexer the agent itself was
+// started in: those programs belong to no terminal and to no multiplexer,
+// and a shell in their terminals that saw TMUX or HERDR_PANE_ID would take
+// itself for a nested session, or hand an agent's status to the herdr pane
+// the core was started from. A core started on the command line runs the
+// local machine's agent with its own environment; ssh machines start
+// theirs from a login.
 func cleanEnv() []string {
 	var env []string
 	for _, kv := range os.Environ() {
 		k, _, _ := strings.Cut(kv, "=")
-		switch k {
-		case "HC_SESSION", "HC_SOCKET", "HC_TERMINAL_ID", "HC_TERMINAL_SOCKET":
+		if !inheritedVar(k) {
 			continue
 		}
 		env = append(env, kv)
 	}
 	return env
+}
+
+// inheritedVar says whether a variable of the agent's environment is
+// passed on (cleanEnv): not the terminal core's (HC_SESSION, HC_SOCKET,
+// HC_TERMINAL_ID, HC_TERMINAL_SOCKET), herdr's (HERDR_*; the product's own
+// variables, brand.EnvPrefix, are kept), tmux's (TMUX, TMUX_PANE), GNU
+// screen's (STY) or zellij's (ZELLIJ, ZELLIJ_*).
+func inheritedVar(k string) bool {
+	switch k {
+	case "HC_SESSION", "HC_SOCKET", "HC_TERMINAL_ID", "HC_TERMINAL_SOCKET", "TMUX", "TMUX_PANE", "STY", "ZELLIJ":
+		return false
+	}
+	if strings.HasPrefix(k, "HERDR_") && !strings.HasPrefix(k, brand.EnvPrefix) {
+		return false
+	}
+	return !strings.HasPrefix(k, "ZELLIJ_")
 }
 
 func isExecutable(p string) bool {

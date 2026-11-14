@@ -45,7 +45,7 @@ if [[ -z "${SKIP_CORE:-}" ]]; then
   TARGETS="darwin/$go_arch" scripts/build.sh
 fi
 core=dist/$SLUG-darwin-$go_arch
-for f in "$core" dist/hc/licenses/LICENSE; do
+for f in "$core" dist/hc/licenses/LICENSE web/dist/licenses.md; do
   [[ -e "$f" ]] || { echo "missing $f: run scripts/build.sh" >&2; exit 1; }
 done
 
@@ -67,8 +67,12 @@ res="$app/Contents/Resources"
 mkdir -p "$res/bin" "$res/licenses/ghostty"
 cp "$core" "$res/bin/$SLUG"
 chmod 755 "$res/bin/$SLUG"
-cp LICENSE THIRD_PARTY_NOTICES.md "$res/licenses/"
+# The notices of everything the core embeds, as in the release archives
+# and the Electron app: its Go modules, the web UI's bundle (licenses.md),
+# the agent detection's manifests, the video encoder and herdr-core.
+cp LICENSE THIRD_PARTY_NOTICES.md web/dist/licenses.md "$res/licenses/"
 cp -R licenses/herdr-detect "$res/licenses/herdr-detect"
+cp -R licenses/encoder "$res/licenses/encoder"
 cp -R dist/hc/licenses "$res/licenses/herdr-core"
 cp macos/.deps/libghostty-spm/LICENSE "$res/licenses/ghostty/LICENSE-libghostty-spm"
 cp macos/.deps/libghostty-spm/Sources/GhosttyTheme/LICENSE "$res/licenses/ghostty/LICENSE-themes"

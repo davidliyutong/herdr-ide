@@ -60,6 +60,9 @@ final class PaneHeader: NSView {
     private let detail = NSTextField(labelWithString: "")
     private let buttons = NSStackView()
     private let zoom: ClosureButton
+    private var zoomed = false
+    /// The buttons other than zoom with the keys of their tooltips.
+    private var tips: [(ClosureButton, String)] = []
     /// A command for this pane (pane.splitRight, code.open…).
     var onCommand: ((String) -> Void)?
     var onPress: ((NSEvent) -> Void)?
@@ -67,12 +70,20 @@ final class PaneHeader: NSView {
 
     init() {
         var run: ((String) -> Void)?
+        var tips: [(ClosureButton, String)] = []
         func button(_ symbol: String, _ tip: String, _ command: String) -> ClosureButton {
-            let b = ClosureButton(symbol: symbol, tip: tip) { run?(command) }
+            let b = ClosureButton(symbol: symbol, tip: tr(tip)) { run?(command) }
             b.widthAnchor.constraint(equalToConstant: 18).isActive = true
+            tips.append((b, tip))
             return b
         }
-        zoom = button("arrow.up.left.and.arrow.down.right", tr("menu.zoom"), "pane.zoom")
+        zoom = button("arrow.up.left.and.arrow.down.right", "menu.zoom", "pane.zoom")
+        tips.removeAll()
+        let others = [button("chevron.left.forwardslash.chevron.right", "menu.openCode", "code.open"),
+                      button("rectangle.split.2x1", "menu.splitRight", "pane.splitRight"),
+                      button("rectangle.split.1x2", "menu.splitDown", "pane.splitDown")]
+        let close = button("xmark", "menu.closeTerminal", "pane.close")
+        self.tips = tips
         super.init(frame: .zero)
         run = { [weak self] in self?.onCommand?($0) }
         let background = FillView(Theme.sidebar)
@@ -85,10 +96,7 @@ final class PaneHeader: NSView {
         detail.textColor = Theme.muted
         title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         detail.setContentCompressionResistancePriority(.defaultLow - 1, for: .horizontal)
-        for b in [button("chevron.left.forwardslash.chevron.right", tr("menu.openCode"), "code.open"),
-                  button("rectangle.split.2x1", tr("menu.splitRight"), "pane.splitRight"),
-                  button("rectangle.split.1x2", tr("menu.splitDown"), "pane.splitDown"), zoom,
-                  button("xmark", tr("menu.closeTerminal"), "pane.close")] {
+        for b in others + [zoom, close] {
             buttons.addArrangedSubview(b)
         }
         buttons.spacing = 2
@@ -123,8 +131,18 @@ final class PaneHeader: NSView {
         dot.fill = Theme.status(Activity.status(record)) ?? .clear
         zoom.image = NSImage(systemSymbolName: zoomed ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
                              accessibilityDescription: nil)
+        self.zoomed = zoomed
         zoom.toolTip = zoomed ? tr("menu.restore") : tr("menu.zoom")
         buttons.isHidden = readOnly
+    }
+
+    /// The buttons' tooltips in the language now in use.
+    func localize() {
+        for (button, key) in tips {
+            button.toolTip = tr(key)
+            button.image?.accessibilityDescription = tr(key)
+        }
+        zoom.toolTip = zoomed ? tr("menu.restore") : tr("menu.zoom")
     }
 
     override func mouseDown(with event: NSEvent) { onPress?(event) }
@@ -155,11 +173,18 @@ final class TerminalPane: NSView, TermStreamDelegate, TerminalSurfaceTitleDelega
     private var grid: (cols: Int, rows: Int)?
     /// The size of a cell in points, from the surface's last report.
     private(set) var cell = CGSize(width: 8, height: 16)
-    private lazy var findBar = FindBar(
-        search: { [weak self] in self?.search($0) },
-        step: { [weak self] forward in self?.findStep(forward) },
-        close: { [weak self] in self?.hideFind() }
-    )
+    private var madeFindBar: FindBar?
+    /// The find bar, made the first time it is needed.
+    private var findBar: FindBar {
+        if let madeFindBar { return madeFindBar }
+        let bar = FindBar(
+            search: { [weak self] in self?.search($0) },
+            step: { [weak self] forward in self?.findStep(forward) },
+            close: { [weak self] in self?.hideFind() }
+        )
+        madeFindBar = bar
+        return bar
+    }
     var isFocusedPane = false
     /// Input is not sent (a read-only core).
     var readOnly = false
@@ -227,6 +252,12 @@ final class TerminalPane: NSView, TermStreamDelegate, TerminalSurfaceTitleDelega
 
     func takeFocus() {
         if window?.firstResponder !== terminalView { window?.makeFirstResponder(terminalView) }
+    }
+
+    /// The language changed: the header's tooltips and the find bar's texts.
+    func localize() {
+        header.localize()
+        madeFindBar?.localize(total: total, selected: selected)
     }
 
     /// Whether `view` is this pane's terminal or inside it.
@@ -436,6 +467,8 @@ final class FindBar: NSView, NSTextFieldDelegate {
     // A plain field: a search field keeps Escape for clearing its text.
     private let field = NSTextField()
     private let count = NSTextField(labelWithString: "")
+    /// The buttons with the keys of their tooltips.
+    private var tips: [(NSButton, String)] = []
     private let search: (String) -> Void
     private let step: (Bool) -> Void
     private let close: () -> Void
@@ -449,7 +482,6 @@ final class FindBar: NSView, NSTextFieldDelegate {
         background.layer?.cornerRadius = Theme.radius
         background.layer?.borderWidth = 1
         background.layer?.masksToBounds = true
-        field.placeholderString = tr("find.placeholder")
         field.font = Theme.font
         field.delegate = self
         field.isBordered = false
@@ -460,18 +492,19 @@ final class FindBar: NSView, NSTextFieldDelegate {
         count.font = Theme.fontSmall
         count.textColor = Theme.muted
         func button(_ symbol: String, _ label: String, _ action: Selector) -> NSButton {
-            let button = NSButton(image: NSImage(systemSymbolName: symbol, accessibilityDescription: label)!, target: self, action: action)
+            let button = NSButton(image: NSImage(systemSymbolName: symbol, accessibilityDescription: nil)!, target: self, action: action)
             button.isBordered = false
             button.contentTintColor = Theme.muted
-            button.toolTip = label
+            tips.append((button, label))
             return button
         }
         let stack = NSStackView(views: [
             field, count,
-            button("chevron.up", tr("menu.findPrevious"), #selector(previous)),
-            button("chevron.down", tr("menu.findNext"), #selector(next)),
-            button("xmark", tr("find.close"), #selector(dismiss)),
+            button("chevron.up", "menu.findPrevious", #selector(previous)),
+            button("chevron.down", "menu.findNext", #selector(next)),
+            button("xmark", "find.close", #selector(dismiss)),
         ])
+        localize(total: nil, selected: nil)
         stack.spacing = 6
         stack.edgeInsets = NSEdgeInsets(top: 5, left: 8, bottom: 5, right: 8)
         for view in [background, stack] as [NSView] {
@@ -511,6 +544,16 @@ final class FindBar: NSView, NSTextFieldDelegate {
     func focus() {
         window?.makeFirstResponder(field)
         field.currentEditor()?.selectAll(nil)
+    }
+
+    /// The placeholder, the tooltips and the count in the language now in use.
+    func localize(total: Int?, selected: Int?) {
+        field.placeholderString = tr("find.placeholder")
+        for (button, key) in tips {
+            button.toolTip = tr(key)
+            button.image?.accessibilityDescription = tr(key)
+        }
+        show(total: total, selected: selected)
     }
 
     func show(total: Int?, selected: Int?) {

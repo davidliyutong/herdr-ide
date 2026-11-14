@@ -211,6 +211,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
         model.start()
         refresh()
+        if !launchPaths.isEmpty {
+            let paths = launchPaths
+            launchPaths = []
+            openFolders(paths)
+        }
         #if DEBUG
             DebugAids.start(window: window, model: model, panes: panes, webPanel: webPanel) { [weak self] action in self?.debug(action) }
         #endif
@@ -638,12 +643,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// the local machine, one each, as if made in the new workspace dialog;
     /// they wait up to 30 s for the local machine's terminals.
     private func openFolders(_ paths: [String]) {
-        var folders: [String] = []
-        for path in paths {
-            var isDir: ObjCBool = false
-            if FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue { folders.append(path) }
-        }
-        if folders.count < paths.count { toasts.show(tr("sidebar.dropFoldersOnly", String(paths.count - folders.count))) }
+        let (folders, others) = LocalFolders.split(paths)
+        if others > 0 { toasts.show(tr("sidebar.dropFoldersOnly", String(others))) }
         guard !folders.isEmpty else { return }
         pendingFolders += folders
         foldersDeadline = Date().addingTimeInterval(30)
@@ -665,11 +666,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
     }
 
+    /// Paths opened before the core is up (a drop on the Dock icon that
+    /// launched the application); they go through openFolders once it is.
+    private var launchPaths: [String] = []
+
     func application(_: NSApplication, open urls: [URL]) {
         let paths = urls.filter(\.isFileURL).map(\.path)
         if model == nil {
-            pendingFolders += paths
-            foldersDeadline = Date().addingTimeInterval(30)
+            launchPaths += paths
         } else {
             openFolders(paths)
         }
@@ -682,7 +686,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private func applySettings() {
         guard let model else { return }
         let s = model.settings
-        if Localization.set(s.string("appearance.language", "auto")) { NSApp.mainMenu = makeMenu() }
+        if Localization.set(s.string("appearance.language", "auto")) {
+            NSApp.mainMenu = makeMenu()
+            panes?.localize()
+        }
         switch s.string("appearance.theme", "system") {
         case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
         case "light": NSApp.appearance = NSAppearance(named: .aqua)
@@ -832,7 +839,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
 
     @objc private func runCommand(_ sender: NSMenuItem) {
-        if let command = sender.representedObject as? String { perform(command) }
+        guard let command = sender.representedObject as? String else { return }
+        // A closing command (⌘W) typed in another window of the application
+        // — a program's, the files, the settings, a login — closes that
+        // window; with a sheet in front of the main window it does nothing.
+        if Keys.closing.contains(command), let key = NSApp.keyWindow, key !== window {
+            if key.styleMask.contains(.closable) { key.performClose(nil) }
+            return
+        }
+        perform(command)
     }
 
     /// The palette: the commands this application runs with their keys and
@@ -1076,6 +1091,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             add(menu, "menu.addMachine", #selector(addMachine), "")
         }
         submenu(tr("menu.edit")) { menu in
+            // The text fields' (find, palette, dialogs, settings): the
+            // window's undo manager and the field editor answer them.
+            add(menu, "menu.undo", Selector(("undo:")), "z")
+            add(menu, "menu.redo", Selector(("redo:")), "z", [.command, .shift])
+            menu.addItem(.separator())
+            add(menu, "menu.cut", #selector(NSText.cut(_:)), "x")
             add(menu, "menu.copy", #selector(NSText.copy(_:)), "c")
             add(menu, "menu.paste", #selector(NSText.paste(_:)), "v")
             add(menu, "menu.selectAll", #selector(NSText.selectAll(_:)), "a")

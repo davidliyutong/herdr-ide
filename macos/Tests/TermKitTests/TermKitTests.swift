@@ -74,6 +74,23 @@ final class TerminalPathTests: XCTestCase {
     }
 }
 
+/// Paths opened in the application: only folders become workspaces, also
+/// when they were opened before the core was up.
+final class LocalFoldersTests: XCTestCase {
+    func testSplit() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir.appendingPathComponent("project"), withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: dir.appendingPathComponent("notes.txt"))
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let paths = [dir.appendingPathComponent("project").path, dir.appendingPathComponent("notes.txt").path,
+                     dir.appendingPathComponent("missing").path, dir.path]
+        let (folders, others) = LocalFolders.split(paths)
+        XCTAssertEqual(folders, [paths[0], paths[3]])
+        XCTAssertEqual(others, 2)
+        XCTAssertEqual(LocalFolders.split([]).others, 0)
+    }
+}
+
 final class TerminalStoreTests: XCTestCase {
     func testSnapshotsAndEvents() {
         let store = TerminalStore()
@@ -251,10 +268,12 @@ final class LocalizationTests: XCTestCase {
         for file in try FileManager.default.contentsOfDirectory(atPath: sources.path) where file.hasSuffix(".swift") {
             code += try String(contentsOf: sources.appendingPathComponent(file), encoding: .utf8)
         }
-        let literal = try NSRegularExpression(pattern: #"tr\("([a-z_.A-Z]+)"|add\(menu, "([a-z_.A-Z]+)"|command\(menu, "([a-z_.A-Z]+)""#)
+        // tr("key"), the menu's add(menu, "key"…) and command(menu, "key"…),
+        // and the panes' buttons, button("symbol", "key"…).
+        let literal = try NSRegularExpression(pattern: #"tr\("([a-z_.A-Z]+)"|add\(menu, "([a-z_.A-Z]+)"|command\(menu, "([a-z_.A-Z]+)"|button\("[^"]+", "([a-z_.A-Z]+)""#)
         var used: Set<String> = []
         for match in literal.matches(in: code, range: NSRange(code.startIndex..., in: code)) {
-            for group in 1...3 {
+            for group in 1...4 {
                 if let range = Range(match.range(at: group), in: code) { used.insert(String(code[range])) }
             }
         }
@@ -356,6 +375,17 @@ final class KeysTests: XCTestCase {
         XCTAssertEqual(Keys.ghosttyTriggers("cmd+comma"), ["super+comma", "super+,"])
         XCTAssertEqual(Keys.ghosttyTriggers("cmd+shift+bracketright"), ["super+shift+right_bracket", "super+shift+]"])
         XCTAssertEqual(Keys.ghosttyTriggers("ctrl+b c"), [])
+    }
+
+    /// The closing commands, whose keys close another window of the
+    /// application when it has the keyboard, are commands of the core.
+    func testClosingCommands() throws {
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("../../../design/generated/registry.json").standardizedFileURL
+        let registry = JSONValue(any: try JSONSerialization.jsonObject(with: try Data(contentsOf: url)))
+        let commands = Set((registry["commands"]?.array ?? []).compactMap { $0["id"]?.string })
+        XCTAssertTrue(Keys.closing.isSubset(of: commands), "\(Keys.closing.subtracting(commands))")
+        XCTAssertTrue(Keys.closing.contains("pane.close"))
     }
 }
 

@@ -439,7 +439,13 @@ instance's terminal core, not of another one);
 shell (its record read now, input at its own size), and
 `TestIntegrationTermShells` the same with a real herdr-core;
 `internal/gui/gui_test.go` covers terminal environments (also per machine),
-the export command's quoting, frame routing, forged acknowledgements and
+the export command's quoting, enabling (`TestEnable`, with stand-ins for
+the terminals and the agent: only known shells waiting at their prompt,
+also when checked again right before, are typed into; a program in front,
+a shell that started one meanwhile, a terminal without a shell, an
+unreachable one and a shell started with the display are reported; a
+second enable types into no shell twice until the display changes),
+frame routing, forged acknowledgements and
 refresh floods, the read-only plan, the close grace period, preparing once
 per connection, the retry backoff, and detaching without an error when the
 machine disconnects or is removed;

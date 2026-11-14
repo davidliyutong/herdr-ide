@@ -38,7 +38,16 @@ against a running core by the integration tests):
   Linux, a launchd job on macOS) and returns when it answers. Holder
   processes own the terminals, so a core restart keeps programs running.
 - Programs inherit the core's environment plus `HC_TERMINAL_ID`,
-  `HC_TERMINAL_SOCKET`, `TERM=xterm-256color` and `COLORTERM`.
+  `HC_TERMINAL_SOCKET`, `TERM=xterm-256color` and `COLORTERM`. The agent
+  starts the core (and code-server and the display) with its own
+  environment without the variables of a terminal or multiplexer it was
+  started in (`cleanEnv` in `internal/agent/procutil.go`): herdr-core's
+  `HC_*`, herdr's `HERDR_*` (the product's own `HERDR_IDE_*` stay),
+  tmux's `TMUX` and `TMUX_PANE`, GNU screen's `STY` and zellij's `ZELLIJ`
+  and `ZELLIJ_*`. A core started from a herdr pane or inside tmux runs the
+  local machine's agent in its own process, so without this its terminals
+  would take themselves for nested sessions, and an agent's hooks would
+  report to the herdr pane the core was started from.
 - The protocol is generation 1 and only grows within it.
 
 ## Goals / non-goals

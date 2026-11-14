@@ -42,6 +42,11 @@ public struct KeyParseError: Error, Equatable {
 public enum Keys {
     public static let maxStrokes = 4
 
+    /// Commands that close something of the main window. Their keys (⌘W)
+    /// typed while another window of the application has the keyboard close
+    /// that window instead.
+    public static let closing: Set<String> = ["pane.close", "tab.close", "workspace.close"]
+
     private static let modifiers: [String: String] = [
         "cmd": "cmd", "command": "cmd", "meta": "cmd", "super": "cmd", "win": "cmd",
         "ctrl": "ctrl", "control": "ctrl", "alt": "alt", "option": "alt", "opt": "alt", "shift": "shift",
