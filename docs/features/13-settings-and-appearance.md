@@ -197,20 +197,30 @@ settings per browser; theming terminal applications.
 - The settings window is built from the definitions shown on macOS: a
   sidebar of sections and **Keyboard Shortcuts**, a search field, a switch,
   menu, number field, text field, color well or a grid of 16 color wells
-  per type, a dot on changed settings, reset, a per-machine table, the
-  lock of a flag, the file's problems and **Show File**, which shows the
-  file in the Finder. Its keyboard page records keys in a sheet (strokes as
-  pressed, Cmd keys before the menu, Return keeps them), removes and resets
-  them, marks conflicts and commands the application does not have yet.
+  per type, a dot on changed settings, reset, a per-machine table (each
+  machine follows the global value or has its own; the local machine is
+  left out of settings only remote machines can differ in), the lock of a
+  flag, the file's problems and **Open settings.json** (on the keyboard
+  page **Open keybindings.json**), which opens the file in the application
+  for JSON, else shows it in the Finder. A change from elsewhere rebuilds
+  the page unless a field of it is being edited. Its keyboard page records
+  keys in a sheet (strokes as pressed, Cmd keys before the menu, Return
+  keeps them) that names the commands the key would clash with before it
+  is saved (`KeybindingsModel.clashes`: the same key, or a chord it starts
+  or that starts it, where both apply), removes and resets them, marks
+  conflicts and commands the application does not have yet.
 - The main menu's key equivalents are the first single-stroke binding of
   each command and are rebuilt on every change; Ghostty unbinds them (and
   ⌘Q, ⌘H, ⌘M) so the menu gets them. A key matcher in front of the window
   runs chords and keys no menu item shows, in the contexts `terminal`,
   `vscode` (the web panel) and `dialog` (a text field); the chord's first
   stroke twice reaches the terminal.
-- Settings apply live: `appearance.theme` sets the application's
+- Settings apply live: `appearance.language` switches the menus, the
+  sidebar and the settings to English or Chinese (or the system's
+  language), `appearance.theme` sets the application's
   appearance (the terminals' colors follow it), `appearance.uiFontSize`
-  scales the chrome's fonts and rows, and the terminal settings become
+  scales the chrome's fonts and rows, `layout.panelPosition` puts the VS
+  Code panel beside the terminals or below them, and the terminal settings become
   Ghostty configuration — font family, size and weight (`font-thicken`
   for medium), line height (`adjust-cell-height`), cursor style and blink,
   scrollback (Ghostty bounds it in bytes: 2 KiB a line; new attaches ask

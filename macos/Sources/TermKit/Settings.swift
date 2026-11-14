@@ -243,6 +243,19 @@ public final class KeybindingsModel {
         return out
     }
 
+    /// The other commands a key being recorded for `command` would clash
+    /// with, before it is saved: those bound to the same key, or to a chord
+    /// it starts or that starts it, where both apply.
+    public func clashes(_ key: String, for command: String) -> [String] {
+        let when = commands.first { $0.id == command }?.when ?? "terminal"
+        var out: [String] = []
+        for b in effective where b.command != command && !out.contains(b.command) {
+            let overlap = b.when == when || b.when == "always" || when == "always"
+            if overlap, b.key == key || b.key.hasPrefix(key + " ") || key.hasPrefix(b.key + " ") { out.append(b.command) }
+        }
+        return out
+    }
+
     /// The rules that give `command` exactly `keys`: other commands' rules
     /// are kept, its own replaced, and defaults it no longer has removed
     /// with "-<command>" rules.

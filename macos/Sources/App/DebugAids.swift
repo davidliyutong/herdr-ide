@@ -24,7 +24,8 @@
     /// add-machine (its dialog), machine:<op>:<target> (add, signin, remove,
     /// menu: see MachineDialogs.debug), transfers (the transfers panel), and
     /// the files window's: files:, select:, download-to:, upload-file:,
-    /// paste-file:, paste-image: (see AppDelegate.debugFiles).
+    /// paste-file:, paste-image: (see AppDelegate.debugFiles),
+    /// record:<command>:<stroke,stroke> (the key recorder with strokes).
     enum DebugAids {
         static func start(window: NSWindow, model: AppModel, panes: PaneArea, webPanel: WebPanel, run: @escaping (String) -> Void) {
             let env = ProcessInfo.processInfo.environment
@@ -59,7 +60,7 @@
                 case "page": webPanel.debugDescribe { FileHandle.standardError.write(Data(("page: " + $0 + "\n").utf8)) }
                 case "find-next": panes.pane(containing: window.firstResponder as? NSView)?.findStep(true)
                 default:
-                    if ["settings:", "strokes:", "command:", "folder:", "palette:", "drag:", "machine:", "files:", "select:", "download-to:", "upload-file:", "paste-file:", "paste-image:"].contains(where: action.hasPrefix) {
+                    if ["settings:", "strokes:", "command:", "folder:", "palette:", "drag:", "machine:", "files:", "select:", "download-to:", "upload-file:", "paste-file:", "paste-image:", "record:"].contains(where: action.hasPrefix) {
                         run(action)
                     } else if action.hasPrefix("set:"), let eq = action.firstIndex(of: "=") {
                         let key = String(action[action.index(action.startIndex, offsetBy: 4) ..< eq])

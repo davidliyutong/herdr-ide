@@ -18,6 +18,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
     private let nav = NSStackView()
     private let stack = NSStackView()
     private let search = NSSearchField()
+    private let openButton = NSButton(title: "", target: nil, action: nil)
     private var page = "appearance"
     private var handlers: [Handler] = []
     /// A change arrived while a field was being edited: the page is built
@@ -42,7 +43,9 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
     /// The settings or keybindings changed.
     func refresh() {
         guard window?.isVisible == true else { return }
-        if window?.firstResponder is NSTextView {
+        // A field being edited would lose what was typed; the search field
+        // is not rebuilt.
+        if let editor = window?.firstResponder as? NSTextView, editor.delegate as? NSSearchField !== search {
             stale = true
         } else {
             rebuild()
@@ -70,8 +73,9 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
         search.placeholderString = tr("settings.search")
         search.delegate = self
         search.sendsSearchStringImmediately = true
-        let openFile = NSButton(title: tr("settings.openFile"), target: self, action: #selector(openFile))
-        openFile.bezelStyle = .rounded
+        openButton.target = self
+        openButton.action = #selector(openFile)
+        openButton.bezelStyle = .rounded
 
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -86,7 +90,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
         document.addSubview(stack)
         scroll.documentView = document
 
-        for view in [navBackground, nav, divider, search, openFile, scroll] as [NSView] {
+        for view in [navBackground, nav, divider, search, openButton, scroll] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(view)
         }
@@ -100,8 +104,8 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
             search.topAnchor.constraint(equalTo: root.topAnchor, constant: 12),
             search.leadingAnchor.constraint(equalTo: divider.trailingAnchor, constant: 24),
             search.widthAnchor.constraint(equalToConstant: 260),
-            openFile.centerYAnchor.constraint(equalTo: search.centerYAnchor),
-            openFile.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -20),
+            openButton.centerYAnchor.constraint(equalTo: search.centerYAnchor),
+            openButton.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -20),
             scroll.topAnchor.constraint(equalTo: search.bottomAnchor, constant: 6), scroll.bottomAnchor.constraint(equalTo: root.bottomAnchor),
             scroll.leadingAnchor.constraint(equalTo: divider.trailingAnchor), scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             stack.topAnchor.constraint(equalTo: document.topAnchor), stack.bottomAnchor.constraint(equalTo: document.bottomAnchor),
@@ -113,14 +117,17 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
         self.window = window
     }
 
+    /// Opens the settings file (or the keybindings file, from the keyboard
+    /// page) in the application that edits JSON; without one, or before the
+    /// file exists, shows it in the Finder.
     @objc private func openFile() {
         let path = page == Self.keysPage ? model.keybindings.file : model.settings.file
         guard !path.isEmpty else { return }
         let url = URL(fileURLWithPath: path)
-        if FileManager.default.fileExists(atPath: path) {
-            NSWorkspace.shared.activateFileViewerSelecting([url])
-        } else {
+        if !FileManager.default.fileExists(atPath: path) {
             NSWorkspace.shared.open(url.deletingLastPathComponent())
+        } else if !NSWorkspace.shared.open(url) {
+            NSWorkspace.shared.activateFileViewerSelecting([url])
         }
     }
 
@@ -159,6 +166,11 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
 
     private func rebuild() {
         handlers.removeAll()
+        window?.title = tr("settings.title")
+        search.placeholderString = tr("settings.search")
+        let file = page == Self.keysPage ? model.keybindings.file : model.settings.file
+        openButton.title = tr("settings.openNamed", (file as NSString).lastPathComponent)
+        openButton.isHidden = file.isEmpty
         nav.arrangedSubviews.forEach { $0.removeFromSuperview() }
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         let settings = model.settings
@@ -423,11 +435,22 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
         let settings = model.settings
         heading(tr("settings.perMachine"))
         note(tr("settings.perMachineInfo"))
+        // Settings only other machines than the core's host can differ in
+        // leave the local machine out.
+        let remoteOnly = definitions.allSatisfy { $0.scope == "remote-machine" }
+        let machines = model.machines.filter { !remoteOnly || $0.kind != "local" }
+        if machines.isEmpty { return note(tr("settings.noMachines")) }
         let grid = NSGridView()
         grid.rowSpacing = 6
         grid.columnSpacing = 12
-        grid.addRow(with: [NSTextField(labelWithString: "")] + definitions.map { NSTextField(labelWithString: label($0.key)) })
-        for machine in model.machines {
+        let header = [tr("settings.machine")] + definitions.map { label($0.key) }
+        grid.addRow(with: header.map { text -> NSView in
+            let field = NSTextField(labelWithString: text)
+            field.font = Theme.fontSmall
+            field.textColor = Theme.muted
+            return field
+        })
+        for machine in machines {
             var cells: [NSView] = [NSTextField(labelWithString: machine.label)]
             for definition in definitions {
                 let state = settings.values[definition.key] ?? SettingState(value: definition.defaultValue)
@@ -576,7 +599,10 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
         let alert = NSAlert()
         alert.messageText = tr("keys.record", Self.text("command." + command) ?? command)
         alert.informativeText = tr("keys.press")
-        let recorder = KeyRecorder(frame: NSRect(x: 0, y: 0, width: 300, height: 28))
+        let recorder = KeyRecorder(frame: NSRect(x: 0, y: 0, width: 320, height: 52))
+        recorder.clashes = { [weak self] key in
+            (self?.model.keybindings.clashes(key, for: command) ?? []).map { Self.text("command." + $0) ?? $0 }
+        }
         alert.accessoryView = recorder
         alert.addButton(withTitle: tr("keys.save"))
         alert.addButton(withTitle: tr("workspace.cancel"))
@@ -594,6 +620,22 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
         }
         DispatchQueue.main.async { alert.window.makeFirstResponder(recorder) }
     }
+
+    #if DEBUG
+        /// Development: opens the key recorder for a command with strokes
+        /// already pressed.
+        func debugRecord(_ command: String, _ strokes: [String]) {
+            show(page: Self.keysPage)
+            record(command, current: model.keybindings.keys(of: command))
+            (window?.attachedSheet?.contentView.flatMap { Self.find(KeyRecorder.self, in: $0) })?.debugSet(strokes)
+        }
+
+        private static func find<T: NSView>(_: T.Type, in view: NSView) -> T? {
+            if let hit = view as? T { return hit }
+            for sub in view.subviews { if let hit = find(T.self, in: sub) { return hit } }
+            return nil
+        }
+    #endif
 
     private func saveRules(_ rules: [JSONValue]) {
         model.api.request("PUT", "api/keybindings", body: rules.map(\.any)) { [weak self] status, reply in
@@ -636,22 +678,35 @@ final class KeyRecorder: NSView {
     private(set) var strokes: [String] = []
     var onChange: ((Bool) -> Void)?
     var onConfirm: (() -> Void)?
+    /// The commands a key would clash with (shown under it).
+    var clashes: ((String) -> [String])?
     private let label = NSTextField(labelWithString: "")
+    private let hint = NSTextField(labelWithString: "")
+    private let box = FillView(.clear)
 
     /// The recorded sequence when it can be a binding.
     var sequence: String? { try? Keys.normalize(strokes.joined(separator: " ")) }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
-        wantsLayer = true
-        layer?.cornerRadius = 4
-        layer?.borderWidth = 1
+        box.wantsLayer = true
+        box.layer?.cornerRadius = 4
+        box.layer?.borderWidth = 1
         label.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
-        label.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(label)
+        hint.font = Theme.fontSmall
+        hint.textColor = Theme.statusBlocked
+        hint.lineBreakMode = .byTruncatingTail
+        for view in [box, label, hint] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(view)
+        }
         NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8), label.centerYAnchor.constraint(equalTo: centerYAnchor),
-            label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -8),
+            box.topAnchor.constraint(equalTo: topAnchor), box.leadingAnchor.constraint(equalTo: leadingAnchor),
+            box.trailingAnchor.constraint(equalTo: trailingAnchor), box.heightAnchor.constraint(equalToConstant: 28),
+            label.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 8), label.centerYAnchor.constraint(equalTo: box.centerYAnchor),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: box.trailingAnchor, constant: -8),
+            hint.topAnchor.constraint(equalTo: box.bottomAnchor, constant: 6), hint.leadingAnchor.constraint(equalTo: leadingAnchor),
+            hint.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
         ])
         update()
     }
@@ -661,11 +716,9 @@ final class KeyRecorder: NSView {
 
     override var acceptsFirstResponder: Bool { true }
 
-    override var wantsUpdateLayer: Bool { true }
-
-    override func updateLayer() {
+    private func updateBorder() {
         effectiveAppearance.performAsCurrentDrawingAppearance {
-            layer?.borderColor = (sequence == nil && !strokes.isEmpty ? Theme.statusError : Theme.focusRing).cgColor
+            box.layer?.borderColor = (sequence == nil && !strokes.isEmpty ? Theme.statusError : Theme.focusRing).cgColor
         }
     }
 
@@ -678,7 +731,9 @@ final class KeyRecorder: NSView {
             let code = (try? Keys.parse(strokes.joined(separator: " "))) == nil ? Self.error(strokes) : ""
             label.stringValue = Keys.label(strokes.joined(separator: " ")) + "  " + code
         }
-        needsDisplay = true
+        let others = sequence.flatMap { clashes?($0) } ?? []
+        hint.stringValue = others.isEmpty ? "" : tr("keys.conflict", others.joined(separator: ", "))
+        updateBorder()
         onChange?(sequence != nil)
     }
 
@@ -692,6 +747,13 @@ final class KeyRecorder: NSView {
             return ""
         }
     }
+
+    #if DEBUG
+        func debugSet(_ strokes: [String]) {
+            self.strokes = strokes
+            update()
+        }
+    #endif
 
     private func take(_ event: NSEvent) -> Bool {
         let flags = event.modifierFlags

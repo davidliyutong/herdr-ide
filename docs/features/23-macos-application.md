@@ -221,10 +221,10 @@ Non-goals: Linux and Windows.
   While a page has the keyboard, the terminal commands of the menu are
   off, so their keys reach VS Code.
 - **Settings** (⌘,, `Settings.swift`). A window built from the core's
-  definitions (`GET /api/settings`): a menu for a choice, a field for
-  text, written with `PUT /api/settings` and read back. Names,
-  descriptions and options are the web UI's strings for the same keys;
-  per-machine values are set in the browser UI.
+  definitions (`GET /api/settings`), with machines' own values, the
+  keyboard shortcuts and the language, theme and panel position applied
+  at once ([13](13-settings-and-appearance.md)). Names, descriptions and
+  options are the web UI's strings for the same keys.
 - **Program windows** (`GuiWindows.swift`). The event channel's `gui`
   messages list the windows on the machines' virtual displays
   ([14](14-gui-windows.md)); they appear under their machine in the

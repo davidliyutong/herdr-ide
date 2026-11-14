@@ -179,6 +179,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 if action.hasPrefix("palette:") { palette?.debugType(String(action.dropFirst(8))) }
                 if action == "add-machine" { machineDialogs?.add() }
                 if action == "transfers" { transfersButton?.show() }
+                if action.hasPrefix("record:") {
+                    let spec = action.dropFirst(7).split(separator: ":").map(String.init)
+                    if spec.count == 2 { settings?.debugRecord(spec[0], spec[1].split(separator: ",").map(String.init)) }
+                }
                 debugFiles(action)
                 if action.hasPrefix("machine:") {
                     let spec = action.dropFirst(8).split(separator: ":", maxSplits: 1).map(String.init)
@@ -530,6 +534,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private func applySettings() {
         guard let model else { return }
         let s = model.settings
+        if Localization.set(s.string("appearance.language", "auto")) { NSApp.mainMenu = makeMenu() }
         switch s.string("appearance.theme", "system") {
         case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
         case "light": NSApp.appearance = NSAppearance(named: .aqua)

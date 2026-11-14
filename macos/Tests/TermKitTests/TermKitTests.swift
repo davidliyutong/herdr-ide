@@ -419,6 +419,11 @@ final class SettingsModelTests: XCTestCase {
             .object(["key": .string("cmd+shift+t"), "command": .string("tab.new")]),
         ])
         XCTAssertEqual(KeybindingsModel.reset("tab.close", user: model.user), [])
+        XCTAssertEqual(model.clashes("cmd+t", for: "tab.close"), ["tab.new"])
+        XCTAssertEqual(model.clashes("ctrl+b", for: "tab.close"), ["tab.new"]) // it starts tab.new's chord
+        XCTAssertEqual(model.clashes("ctrl+b c x", for: "tab.close"), ["tab.new"])
+        XCTAssertEqual(model.clashes("cmd+t", for: "tab.new"), [])
+        XCTAssertEqual(model.clashes("cmd+k", for: "tab.close"), [])
     }
 
     func testEvents() {

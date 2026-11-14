@@ -3,8 +3,29 @@ import TermKit
 
 /// Text of the interface in the user's language.
 func tr(_ key: String, _ args: CVarArg...) -> String {
-    let format = Bundle.app.localizedString(forKey: key, value: key, table: nil)
+    let format = Localization.table?[key] ?? Bundle.app.localizedString(forKey: key, value: key, table: nil)
     return args.isEmpty ? format : String(format: format, arguments: args)
+}
+
+/// The language of the interface: the system's, or the one the
+/// appearance.language setting names (en, zh-CN), read from that
+/// language's strings.
+enum Localization {
+    private(set) static var table: [String: String]?
+    private static var current = "auto"
+
+    /// Switches the language; true when it changed.
+    @discardableResult
+    static func set(_ language: String) -> Bool {
+        guard language != current else { return false }
+        current = language
+        // SwiftPM names the folders in lower case, Xcode as they are.
+        let wanted = ["en": "en", "zh-CN": "zh-hans"][language]
+        let folder = Bundle.app.localizations.first { $0.lowercased() == wanted }
+        table = folder.flatMap { Bundle.app.url(forResource: "Localizable", withExtension: "strings", subdirectory: nil, localization: $0) }
+            .flatMap { NSDictionary(contentsOf: $0) as? [String: String] }
+        return true
+    }
 }
 
 extension Bundle {

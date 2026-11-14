@@ -38,7 +38,7 @@ func defs() []settings.Def {
 	out := []settings.Def{
 		// Appearance.
 		{Key: Language, Type: settings.TypeEnum, Default: "auto", Enum: []string{"auto", "en", "zh-CN"},
-			Section: "appearance", Order: 10, Platforms: web},
+			Section: "appearance", Order: 10},
 		{Key: Theme, Type: settings.TypeEnum, Default: "system", Enum: []string{"system", "dark", "light"},
 			Section: "appearance", Order: 20},
 		{Key: UIFontSize, Type: settings.TypeNumber, Default: 13, Min: uiMin, Max: uiMax, Integer: true,
@@ -46,7 +46,7 @@ func defs() []settings.Def {
 
 		// Layout.
 		{Key: "layout.panelPosition", Type: settings.TypeEnum, Default: "right", Enum: []string{"right", "bottom"},
-			Section: "layout", Order: 10, Platforms: web},
+			Section: "layout", Order: 10},
 
 		// Terminal.
 		{Key: FontFamily, Type: settings.TypeString, Default: "", Section: "terminal", Order: 10},
