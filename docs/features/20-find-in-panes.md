@@ -113,7 +113,10 @@ its own search finds the rest); replacing text.
   newest. A step to a match among those of the last answer happens at once
   in the browser; 400 ms after stepping pauses, one search in the
   background (backward from right after the current match) brings the
-  count and positions up to date and keeps that match. It runs beside the
+  count and positions up to date and keeps that match. When the answer
+  held every match, that search sends its text's hash (`known`): while the
+  pane's text is the same, the agent answers `unchanged` without searching
+  or sending matches, and the browser keeps what it shows. It runs beside the
   queue of searches and steps: the next step aborts it instead of waiting
   for it, and that step's own pause starts the next one. A step beyond the
   answer's 1024 matches asks the core; further steps wait for its answer
@@ -187,7 +190,8 @@ text out (wraps, wide characters at a row's end, grapheme clusters,
 combining marks, empty lines), choosing the current match (also from the
 first cell), the window around it among 150 000 matches in every
 direction, reading a pane through a fake herdr (width hints right and
-wrong, a pane that shrinks, unknown panes, invalid expressions) and
+wrong, a pane that shrinks, unknown panes, invalid expressions, an
+unchanged text answered without searching) and
 finding a size from hints right, a few off or far off. `TestIntegrationPaneFind` (`make it`) compares the agent's matches
 with `pane.copy_search`'s on text with CJK, emoji, flags, ZWJ sequences
 and combining marks, and checks the options against a real herdr.
@@ -197,7 +201,8 @@ its error codes, an invalid expression answered with codes only.
 system (not with ⌘), mapping matches (also across a soft wrap) to
 columns, highlight priority when painting, scrolling a match into the
 middle of the view and not on the alternate screen or in read-only mode,
-the request, stepping within the answer and the background refresh, a
+the request, stepping within the answer and the background refresh (with
+the answer's text, and an unchanged answer keeping the step), a
 step not waiting for that refresh, steps beyond it waiting for each
 other, typing pauses, cancelling a superseded search, invalid
 expressions stated in the page's language, remembering options and the

@@ -89,6 +89,13 @@ more); editing files (that is VS Code's job).
   read and closes it, which stops the agent's walk. (Closing a yamux stream
   only ends its writes, and a read deadline is not checked while received
   data is waiting, which it always is while the agent keeps sending.)
+- The agent sends the archive in chunks (`fs.archive` with `chunked`,
+  `agentproto.ChunkWriter`) and marks its end once the archive is
+  complete. A stream that ends without that mark, as when the machine's
+  connection drops (yamux then ends every stream as if it were complete),
+  is a truncated archive: the core aborts the response, so the browser
+  reports a failed download instead of saving a broken zip. One file needs
+  no mark: the response has its length, which the browser checks.
 - The agent follows the paths it is given when they are symbolic links (the
   user named them) but stores links below them as links, so a link to `/`
   inside a project is not followed; sockets, devices and FIFOs are left out
@@ -169,32 +176,43 @@ more); editing files (that is VS Code's job).
   running, then the finished ones, newest first.
 - A browser tells a page nothing about the downloads it saves, so the core
   reports them. A download whose link has an id (8–64 URL-safe characters;
-  the page makes 128 random bits) is followed: the core sends
-  `download {id, state, sent, total?, name?, error?}` to the pages when the
-  request arrives, when it knows the name the file is saved under and its
-  size, every 250 ms while it writes the response, and once at the end.
-  `sent` counts the bytes the core wrote to the response, which over a
-  machine's link is close to what the browser received. Only the page that
-  made the id follows it; the others ignore it. At most 64 downloads are
-  followed at once (the others still download, without progress), a
-  `HEAD` check is not.
+  the page makes 128 random bits) is followed. Before starting it, the page
+  tells the core over its WebSocket that it follows the id
+  (`download.watch {ids}`); the core sends
+  `download {id, state, sent, total?, name?, error?}` to that page alone:
+  when the request arrives, when it knows the name the file is saved under
+  and its size, every 250 ms while it writes the response, and once at the
+  end. `sent` counts the bytes the core wrote to the response, which over a
+  machine's link is close to what the browser received. At most 64
+  downloads are followed at once (the others still download, without
+  progress), a `HEAD` check is not.
+- Every `download.watch` is answered with what the core knows of each id:
+  its progress, how it ended (kept for 10 minutes, at most 256), or
+  `unknown`. So a request that arrives before the page's message, or a
+  download that ends while the page is reconnecting, loses nothing: after
+  every reconnect the page asks again about the downloads it shows as
+  running. One the core reported and no longer knows (it restarted, or the
+  page was away longer than that) ends as failed with `lost`; one it has
+  not seen yet keeps waiting.
 - A running download shows the bytes received of its size, its speed over
   the last 3 seconds and the time left. An archive is made while it
   downloads, so its size is not known: it shows the bytes received and the
   speed, with a moving bar.
 - **Cancel** (and **Cancel all**) asks the core
-  (`POST /api/downloads/{dl}/cancel`) to break the response off: the
-  browser's download fails instead of saving a partial file, the agent's
-  stream ends, and the panel shows it as cancelled. A download cancelled
-  in the browser (or the desktop app's save dialog) ends the request, which
-  the core also reports as cancelled.
+  (`download.cancel {id}` over the WebSocket) to break the response off:
+  the browser's download fails instead of saving a partial file, the
+  agent's stream ends, and the panel shows it as cancelled. A download the
+  core does not know (its request never arrived) ends as cancelled at once;
+  one that just ended shows how it ended. A download cancelled in the
+  browser (or the desktop app's save dialog) ends the request, which the
+  core also reports as cancelled.
 - It ends as done once the core wrote the whole response; as failed with a
   reason when the path or machine is not there (`not_found`), the machine
   is not connected (`unavailable`), the paths were refused (`invalid`) or
   the transfer broke off (`interrupted`; the response is aborted, so the
   browser reports a failure, not a truncated archive); a note says so too.
-  A download the core never reported within 30 s (the request did not
-  reach it) counts as failed (`no_response`).
+  A download the core never reported within 30 s of connected time (the
+  request did not reach it) counts as failed (`no_response`).
 - Finished downloads show the machine, the paths, the size, time and
   average speed, or why they ended, and can be downloaded again or removed
   from the list. The browser keeps the last 50 in `localStorage` (names,
@@ -221,6 +239,8 @@ more); editing files (that is VS Code's job).
 | Download progress by fetching the file in the page | Holds the whole file (or archive) in the page's memory before it can be saved. |
 | Save with the File System Access API to follow progress | Chromium only, and asks where to save every time; downloads would behave differently per browser. |
 | Progress from the desktop app's download events | Only in the desktop app; the core's count works in every browser and also tells why a download failed. |
+| Download events to every page, each ignoring the ids it did not make | Other pages, read-only ones included, would learn the names saved and the ids, with which they could cancel the download. |
+| Checking a zip's end record in the core instead of marking the end | Ties the core to the archive format and to the agent writing no trailing comment; the mark says the agent finished, whatever it sent. |
 
 ## Security
 
@@ -240,9 +260,9 @@ the file preview reads, with the same headers (`nosniff`, a sandboxing
 CSP), are allowed in read-only mode like viewing files, and are audited as
 `file.download`; links below the paths named are not followed. Download
 events carry the page's random id, the saved name, sizes, the state and a
-reason code, never contents; cancelling needs the id, is allowed in
-read-only mode (it changes nothing on a machine) and is audited as
-`file.download.cancel`.
+reason code, never contents, and go only to the page that follows the id;
+cancelling needs the id, is allowed in read-only mode (it changes nothing
+on a machine) and is audited as `file.download.cancel`.
 
 ## Testing
 
@@ -261,13 +281,17 @@ to the upload directory, the kept history, the panel), and
 aborted upload through a real agent leaves no file; a complete one arrives).
 Downloads: `internal/agent/archive_test.go` (archive contents, repeated
 names, links followed only at the top, modes, missing paths, an abandoned
-stream), `internal/server/download_test.go` (path checks, archive names, a
+stream, the end mark of a chunked archive), `internal/server/download_test.go` (path checks, archive names, a
 file as itself and directories as zips through a real agent, `HEAD`,
 read-only mode, the audit record; `TestDownloadProgress`: events of a file
-and an archive, failure codes, cancelling from the panel and in the browser
-with the response broken off, no events without an id or for `HEAD`),
+and an archive to the page following them only, failure codes, the state
+for a page that asks late and for an unknown id, cancelling from the panel
+and in the browser with the response broken off, an archive whose machine
+goes away failing instead of ending, no events without an id or for
+`HEAD`),
 `web/src/__tests__/download.test.ts` (the pane menu's items, the check
 before a path's download, the chooser, no downloads for the desktop app's
 own machine; the panel: progress and speed, an archive without a size,
 failures and their notes, cancelling, a download that never started,
+asking again after a reconnect and ending what the core no longer knows,
 downloading again, the status bar button).

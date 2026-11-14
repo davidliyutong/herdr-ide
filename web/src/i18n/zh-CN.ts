@@ -65,6 +65,7 @@ export const zhCN: Messages = {
   'downloads.error.invalid': '路径被拒绝',
   'downloads.error.interrupted': '传输中断',
   'downloads.error.no_response': '下载没有开始',
+  'downloads.error.lost': '结果未知，请查看浏览器的下载记录',
   'app.updated': '服务端已更新，请刷新页面以使用新版本。',
   'app.reload': '刷新',
 
@@ -374,6 +375,7 @@ export const zhCN: Messages = {
   'herdr.restarting': '正在重启 {machine} 上的 herdr…',
   'herdr.restarted': '{machine} 上的 herdr 已重启。',
   'herdr.restartFailed': '无法重启 {machine} 上的 herdr：{error}',
+  'herdr.busyMachine': '{machine} 上的 herdr 正在执行另一个操作',
   'herdr.starting': '正在启动 {machine} 上的 herdr…',
   'herdr.started': '{machine} 上的 herdr 已在运行。',
   'herdr.startFailed': '无法启动 {machine} 上的 herdr：{error}',

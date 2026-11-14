@@ -453,6 +453,36 @@ describe('machineMenu', () => {
     }
   });
 
+  it('runs one herdr action at a time on a machine', async () => {
+    const { useDialog } = await import('../dialog');
+    let answer: (r: Response) => void = () => {};
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => (answer = resolve)));
+    vi.stubGlobal('fetch', fetchMock);
+    const toast = vi.spyOn(useStore.getState(), 'toast');
+    try {
+      useStore.getState().setReadOnly(false);
+      useStore.getState().setMachines([ssh('ready')]);
+      (machineMenu('gpu')[0] as MenuItem).run();
+      // While it asks and runs, the entries are disabled and another
+      // action is refused.
+      const entries = machineMenu('gpu') as MenuItem[];
+      expect([entries[0].disabled, entries[1].disabled]).toEqual([true, true]);
+      await actions.stopHerdr('gpu');
+      expect(toast).toHaveBeenLastCalledWith('herdr on gpu is busy with another action');
+      const req = useDialog.getState().current;
+      if (req?.kind === 'confirm') req.resolve(true);
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      expect((machineMenu('gpu')[1] as MenuItem).disabled).toBe(true);
+      answer(new Response(JSON.stringify({ managed: false, running: true }), { status: 200 }));
+      await vi.waitFor(() => expect((machineMenu('gpu')[1] as MenuItem).disabled).toBe(false));
+      expect(useStore.getState().herdrBusy).toEqual({});
+    } finally {
+      toast.mockRestore();
+      useDialog.setState({ current: undefined });
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('offers to install herdr where it was removed', () => {
     useStore.getState().setReadOnly(false);
     const gone = (status: string) => ({ ...ssh(status), info: { os: 'linux' } }) as unknown as MachineState;

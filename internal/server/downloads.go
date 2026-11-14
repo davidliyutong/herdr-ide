@@ -11,10 +11,15 @@ import (
 
 // Downloads the page started with an id (GET /api/m/{id}/download?dl=…), for
 // its downloads panel (docs/features/06-quick-look-and-files.md): the browser
-// saves the response itself, and the core tells the pages how much of it it
-// wrote, how it ended, and cancels it on request. Events are
-// {t: "download", id, state: running|done|failed|cancelled, sent, total?,
-// name?, error?}; only the page that made the id follows it.
+// saves the response itself, and the core tells the page how much of it it
+// wrote and how it ended, and cancels it on request. Events are
+// {t: "download", id, state: running|done|failed|cancelled|unknown, sent,
+// total?, name?, error?}, sent only to the page that follows the id: it says
+// so ("download.watch") before it starts the download and again after a
+// reconnect, and is answered with the download's state at once. How a
+// download ended is kept for downloadKeep, so that a page that missed it
+// (its request arrived first, or its connection dropped) still learns it;
+// "unknown" answers an id the core has not seen or no longer knows.
 
 // downloadID is the form of an id the page makes (random, URL-safe).
 var downloadID = regexp.MustCompile(`^[A-Za-z0-9_-]{8,64}$`)
@@ -25,6 +30,12 @@ const (
 	// maxTrackedDownloads bounds the downloads followed at once; others
 	// still download, without events.
 	maxTrackedDownloads = 64
+	// downloadKeep is how long a download's end, and a page's interest in
+	// an id that never came, are kept; maxEndedDownloads bounds the ends
+	// kept and maxDownloadWatchers the ids followed.
+	downloadKeep        = 10 * time.Minute
+	maxEndedDownloads   = 256
+	maxDownloadWatchers = 1024
 )
 
 // Codes of failed downloads, translated by the page.
@@ -38,6 +49,20 @@ const (
 type downloadsHub struct {
 	mu      sync.Mutex
 	running map[string]*download
+	// ended holds the last event of downloads that ended, by id.
+	ended map[string]endedDownload
+	// watchers are the pages following each id.
+	watchers map[string]downloadWatcher
+}
+
+type endedDownload struct {
+	ev map[string]any
+	at time.Time
+}
+
+type downloadWatcher struct {
+	c     *wsClient
+	since time.Time
 }
 
 type download struct {
@@ -69,9 +94,7 @@ func (s *Server) trackDownload(w http.ResponseWriter, r *http.Request) (*downloa
 	d := &download{s: s, id: id, parent: r.Context(), cancel: cancel, total: -1}
 	h := &s.downloads
 	h.mu.Lock()
-	if h.running == nil {
-		h.running = map[string]*download{}
-	}
+	h.init()
 	if h.running[id] != nil || len(h.running) >= maxTrackedDownloads {
 		h.mu.Unlock()
 		cancel()
@@ -124,16 +147,13 @@ func (d *download) broken() bool {
 	return d != nil && d.parent.Err() == nil
 }
 
-// finish sends how the download ended and forgets it.
+// finish sends how the download ended, keeps that for a page that asks
+// later, and stops following it.
 func (d *download) finish() {
 	if d == nil {
 		return
 	}
 	d.cancel()
-	h := &d.s.downloads
-	h.mu.Lock()
-	delete(h.running, d.id)
-	h.mu.Unlock()
 	d.mu.Lock()
 	state := "done"
 	switch {
@@ -145,7 +165,21 @@ func (d *download) finish() {
 		state, d.code = "failed", dlInterrupted
 	}
 	d.mu.Unlock()
-	d.publish(state)
+	ev := d.event(state)
+	h := &d.s.downloads
+	now := time.Now()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	delete(h.running, d.id)
+	h.pruneLocked(now)
+	if len(h.ended) >= maxEndedDownloads {
+		h.dropOldestLocked()
+	}
+	h.ended[d.id] = endedDownload{ev: ev, at: now}
+	if w, ok := h.watchers[d.id]; ok {
+		delete(h.watchers, d.id)
+		w.c.sendJSON(ev)
+	}
 }
 
 func (d *download) wrote(n int) {
@@ -158,8 +192,21 @@ func (d *download) wrote(n int) {
 	}
 }
 
+// publish sends the download's progress to the page following it.
 func (d *download) publish(state string) {
+	ev := d.event(state)
+	h := &d.s.downloads
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if w, ok := h.watchers[d.id]; ok {
+		w.c.sendJSON(ev)
+	}
+}
+
+// event is the download's event in state.
+func (d *download) event(state string) map[string]any {
 	d.mu.Lock()
+	defer d.mu.Unlock()
 	ev := map[string]any{"t": "download", "id": d.id, "state": state, "sent": d.sent}
 	if d.total >= 0 {
 		ev["total"] = d.total
@@ -171,8 +218,90 @@ func (d *download) publish(state string) {
 		ev["error"] = d.code
 	}
 	d.last = time.Now()
-	d.mu.Unlock()
-	d.s.broadcast(ev)
+	return ev
+}
+
+func (h *downloadsHub) init() {
+	if h.running == nil {
+		h.running = map[string]*download{}
+		h.ended = map[string]endedDownload{}
+		h.watchers = map[string]downloadWatcher{}
+	}
+}
+
+// pruneLocked forgets the ends, and the interest in ids that never came,
+// older than downloadKeep.
+func (h *downloadsHub) pruneLocked(now time.Time) {
+	for id, e := range h.ended {
+		if now.Sub(e.at) > downloadKeep {
+			delete(h.ended, id)
+		}
+	}
+	for id, w := range h.watchers {
+		if h.running[id] == nil && now.Sub(w.since) > downloadKeep {
+			delete(h.watchers, id)
+		}
+	}
+}
+
+func (h *downloadsHub) dropOldestLocked() {
+	var oldest string
+	for id, e := range h.ended {
+		if oldest == "" || e.at.Before(h.ended[oldest].at) {
+			oldest = id
+		}
+	}
+	delete(h.ended, oldest)
+}
+
+// stateLocked is what the core knows of download id: its progress, how it
+// ended, or that it does not know it.
+func (h *downloadsHub) stateLocked(id string) map[string]any {
+	if d := h.running[id]; d != nil {
+		return d.event("running")
+	}
+	if e, ok := h.ended[id]; ok {
+		return e.ev
+	}
+	return map[string]any{"t": "download", "id": id, "state": "unknown"}
+}
+
+// watchDownloads makes c the page following the downloads ids
+// (download.watch), and sends it what the core knows of each.
+func (s *Server) watchDownloads(c *wsClient, ids []string) {
+	h := &s.downloads
+	now := time.Now()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.init()
+	h.pruneLocked(now)
+	if len(ids) > maxTrackedDownloads {
+		ids = ids[:maxTrackedDownloads]
+	}
+	for _, id := range ids {
+		if !downloadID.MatchString(id) {
+			continue
+		}
+		ev := h.stateLocked(id)
+		if ev["state"] == "running" || ev["state"] == "unknown" {
+			if _, ok := h.watchers[id]; ok || len(h.watchers) < maxDownloadWatchers {
+				h.watchers[id] = downloadWatcher{c: c, since: now}
+			}
+		}
+		c.sendJSON(ev)
+	}
+}
+
+// forgetWatcher drops the ids page c followed (it disconnected).
+func (s *Server) forgetWatcher(c *wsClient) {
+	h := &s.downloads
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for id, w := range h.watchers {
+		if w.c == c {
+			delete(h.watchers, id)
+		}
+	}
 }
 
 // downloadWriter counts the bytes of a followed download.
@@ -189,19 +318,26 @@ func (w *downloadWriter) Write(p []byte) (int, error) {
 
 func (w *downloadWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
-// handleDownloadCancel stops a followed download from the downloads panel:
-// the browser's download fails, and the agent's stream closes.
-func (s *Server) handleDownloadCancel(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("dl")
-	s.downloads.mu.Lock()
-	d := s.downloads.running[id]
-	s.downloads.mu.Unlock()
-	if d == nil {
-		http.NotFound(w, r)
+// cancelDownload stops download id for page c (download.cancel): the
+// browser's download fails, and the agent's stream closes. c follows the id
+// from then on, and hears how it ended, or that the core does not know it.
+func (s *Server) cancelDownload(c *wsClient, id string) {
+	if !downloadID.MatchString(id) {
 		return
 	}
-	s.audit.log(r, "file.download.cancel", map[string]any{"id": id})
+	h := &s.downloads
+	h.mu.Lock()
+	h.init()
+	d := h.running[id]
+	if d == nil {
+		ev := h.stateLocked(id)
+		h.mu.Unlock()
+		c.sendJSON(ev)
+		return
+	}
+	h.watchers[id] = downloadWatcher{c: c, since: time.Now()}
+	h.mu.Unlock()
+	s.audit.log(c.req, "file.download.cancel", map[string]any{"id": id})
 	d.byUser.Store(true)
 	d.cancel()
-	w.WriteHeader(http.StatusNoContent)
 }

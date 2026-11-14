@@ -17,6 +17,10 @@ type FindRequest struct {
 	// Cols is the pane's width as the browser shows it, a hint the agent
 	// checks.
 	Cols int `json:"cols,omitempty"`
+	// Known is the Text of an answer the browser holds that had every
+	// match: when the same search finds the same text, the answer is
+	// Unchanged, with nothing else (a refresh that found nothing new).
+	Known string `json:"known,omitempty"`
 }
 
 // TextPoint is a cell of a pane: its row counted from the oldest line kept,
@@ -43,6 +47,11 @@ type FindResult struct {
 	// FirstRow is the oldest row searched (a very long scrollback is
 	// searched from its newest rows back).
 	FirstRow uint32 `json:"first_row,omitempty"`
+	// Text identifies the search and the text it searched (a hash), for a
+	// later FindRequest.Known.
+	Text string `json:"text,omitempty"`
+	// Unchanged answers a Known that still holds.
+	Unchanged bool `json:"unchanged,omitempty"`
 }
 
 // Reply.Code values of OpPaneFind.

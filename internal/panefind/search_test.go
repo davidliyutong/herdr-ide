@@ -294,6 +294,22 @@ func TestPane(t *testing.T) {
 	if res, err := Pane(context.Background(), first, agentproto.FindRequest{Pane: "w1:p1", Query: "needle", Previous: &Range{Start: pt(0, 0), End: pt(0, 5)}}); err != nil || *res.CurrentGlobal != 1 {
 		t.Errorf("forward from the first: %+v %v", res, err)
 	}
+	// A refresh of an answer with every match: unchanged while the text
+	// is, without matches; a search again after new output.
+	known := res.Text
+	req := agentproto.FindRequest{Pane: "w1:p1", Query: "needle", Backward: true, Previous: &Range{Start: pt(3, 0), End: pt(3, 5)}, Known: known}
+	if res, err := Pane(context.Background(), f, req); err != nil || !res.Unchanged || len(res.Matches) != 0 || res.Text != known {
+		t.Errorf("unchanged: %+v %v", res, err)
+	}
+	if res, err := Pane(context.Background(), f, agentproto.FindRequest{Pane: "w1:p1", Query: "needles", Known: known}); err != nil || res.Unchanged {
+		t.Errorf("another query: %+v %v", res, err)
+	}
+	before := f.text
+	f.text += "\nneedle"
+	if res, err := Pane(context.Background(), f, req); err != nil || res.Unchanged || res.Total != 3 {
+		t.Errorf("new output: %+v %v", res, err)
+	}
+	f.text = before
 	f.shrink, f.reads = true, 0
 	if res, err := Pane(context.Background(), f, agentproto.FindRequest{Pane: "w1:p1", Query: "needle"}); err != nil || res.Total != 2 || f.reads != 2 {
 		t.Errorf("read again after the pane changed: %+v %v (%d reads)", res, err, f.reads)

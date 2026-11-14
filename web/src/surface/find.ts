@@ -32,6 +32,10 @@ export interface FindResult {
   total: number;
   current?: number | null;
   current_global?: number | null;
+  /** Identifies the search and the text searched (FindRequest.known). */
+  text?: string;
+  /** The text of `known` did not change: nothing else is set. */
+  unchanged?: boolean;
 }
 
 /** How the query is matched; remembered in this browser. */
@@ -67,6 +71,8 @@ export interface FindState {
   /** Position of the current match among all of them. */
   index?: number;
   current?: FindMatch;
+  /** The answer's text (FindResult.text). */
+  text?: string;
   status: FindStatus;
   error?: string;
   /** Bumped to focus the find bar's input and select its text. */
@@ -86,7 +92,15 @@ function loadOptions(): FindOptions {
   return o;
 }
 
-const empty = { matches: [], total: 0, index: undefined, current: undefined, status: 'idle' as const, error: undefined };
+const empty = {
+  matches: [],
+  total: 0,
+  index: undefined,
+  current: undefined,
+  text: undefined,
+  status: 'idle' as const,
+  error: undefined,
+};
 
 export const useFind = create<FindState>(() => ({ open: false, query: '', options: loadOptions(), focusSeq: 0, ...empty }));
 
@@ -221,11 +235,14 @@ export function findStep(older: boolean) {
     useFind.setState(next);
     if (now.m && now.pane) reveal(now.m, now.pane, next.current);
     stopRefresh();
+    // An answer with every match only needs checking for new output: the
+    // agent says so without searching while the text is the same.
+    const known = now.matches.length === now.total ? now.text : undefined;
     refresh = window.setTimeout(() => {
       refresh = undefined;
       const ctl = new AbortController();
       refreshing = ctl;
-      void search(true, undefined, after(next.current), ctl);
+      void search(true, undefined, after(next.current), ctl, known);
     }, REFRESH_MS);
   });
 }
@@ -279,6 +296,8 @@ export interface FindRequest {
   from?: Point;
   /** The pane's width as shown, which the agent checks. */
   cols?: number;
+  /** The text of the answer held, when it has every match. */
+  known?: string;
 }
 
 /** Searches a pane's text on its machine (one request). */
@@ -297,6 +316,7 @@ export async function paneFind(m: string, pane: string, req: FindRequest, signal
       cursor: req.from ?? (req.backward ? END : { row: 0, col: 0 }),
       ...(req.previous ? { previous: { start: req.previous.start, end: req.previous.end } } : {}),
       ...(req.cols ? { cols: req.cols } : {}),
+      ...(req.known ? { known: req.known } : {}),
     }),
   });
   const body = await res.json().catch(() => ({}));
@@ -306,8 +326,9 @@ export async function paneFind(m: string, pane: string, req: FindRequest, signal
 
 /** Searches and shows the answer. With `refresh` (the background refresh's
  * controller) the count stays shown meanwhile and a failure keeps the
- * matches found before. */
-async function search(backward: boolean, previous?: FindMatch, from?: Point, refresh?: AbortController) {
+ * matches found before; `known` is the text of the matches shown, kept
+ * when the agent finds it unchanged. */
+async function search(backward: boolean, previous?: FindMatch, from?: Point, refresh?: AbortController, known?: string) {
   const { m, pane, query, options } = useFind.getState();
   if (!m || !pane || !query) return;
   const meta = useSurface.getState().meta;
@@ -318,8 +339,9 @@ async function search(backward: boolean, previous?: FindMatch, from?: Point, ref
     useFind.setState({ status: 'searching', error: undefined });
   }
   try {
-    const res = await paneFind(m, pane, { query, options, backward, previous, from, cols }, ctl.signal);
+    const res = await paneFind(m, pane, { query, options, backward, previous, from, cols, known }, ctl.signal);
     if (ctl.signal.aborted) return;
+    if (known && res.unchanged) return;
     const matches = res.matches ?? [];
     const current = res.current != null ? matches[res.current] : undefined;
     useFind.setState({
@@ -327,6 +349,7 @@ async function search(backward: boolean, previous?: FindMatch, from?: Point, ref
       total: res.total ?? matches.length,
       index: res.current_global ?? undefined,
       current,
+      text: res.text,
       status: 'idle',
     });
     if (current) reveal(m, pane, current);

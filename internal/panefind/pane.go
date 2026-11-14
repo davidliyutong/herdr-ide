@@ -2,8 +2,11 @@ package panefind
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"hash/fnv"
+	"strconv"
 
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/herdr"
@@ -27,7 +30,8 @@ var ErrNoText = errors.New("pane text unavailable")
 // Pane searches a pane's text through herdr: its size (pane.get, checked
 // cell by cell), then all of its rows in one pane.selection.read, which
 // herdr answers from one consistent state of the terminal, then Search.
-// Rows written after the read are not searched.
+// Rows written after the read are not searched. A request whose Known
+// still holds is answered Unchanged without searching.
 func Pane(ctx context.Context, c Caller, req agentproto.FindRequest) (*Result, error) {
 	m, err := Compile(Options{Query: req.Query, Regex: req.Regex, MatchCase: req.MatchCase, WholeWord: req.WholeWord})
 	if err != nil {
@@ -69,10 +73,37 @@ func Pane(ctx context.Context, c Caller, req agentproto.FindRequest) (*Result, e
 		if err != nil {
 			return nil, err
 		}
+		text := fingerprint(req, first, cols, sel.Text)
+		if req.Known != "" && req.Known == text {
+			return &Result{Matches: []Range{}, Unchanged: true, Text: text}, nil
+		}
 		res := Search(sel.Text, first, cols, m, req.Backward, origin, inclusive)
+		res.Text = text
 		return &res, nil
 	}
 	return nil, fmt.Errorf("%w: %v", ErrNoText, last)
+}
+
+// fingerprint identifies the matches of req's query in text laid out from
+// row first in cols columns: a hash of all of them.
+func fingerprint(req agentproto.FindRequest, first uint32, cols int, text string) string {
+	h := fnv.New64a()
+	var b [8]byte
+	for _, n := range []uint64{uint64(first), uint64(cols), uint64(len(req.Query))} {
+		binary.LittleEndian.PutUint64(b[:], n)
+		h.Write(b[:])
+	}
+	h.Write([]byte(req.Query))
+	h.Write([]byte{flag(req.Regex), flag(req.MatchCase), flag(req.WholeWord)})
+	h.Write([]byte(text))
+	return strconv.FormatUint(h.Sum64(), 36)
+}
+
+func flag(b bool) byte {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func unavailable(err error) bool {

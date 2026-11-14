@@ -5,17 +5,20 @@
 // itself and anything else as a zip the agent makes on the fly.
 //
 // The browser saves the response like any download. Each one carries an id
-// (?dl=), with which the core reports what it wrote and how it ended
-// ("download" events), so the downloads panel (components/Downloads.tsx)
-// shows progress, speed and the result, and can cancel it. The history of
-// finished downloads is kept per browser (the last HISTORY_MAX, in
-// localStorage; names and paths, no contents).
+// (?dl=) the page tells the core it follows ("download.watch", before the
+// download and after every reconnect); the core reports to this page alone
+// what it wrote and how it ended ("download" events), so the downloads panel
+// (components/Downloads.tsx) shows progress, speed and the result, and can
+// cancel it ("download.cancel"). The history of finished downloads is kept
+// per browser (the last HISTORY_MAX, in localStorage; names and paths, no
+// contents).
 
 import { create } from 'zustand';
 import { desktopShell } from './desktop';
 import { downloadUrl } from './lib/files';
 import { useStore } from './state/store';
 import { storage } from './brand';
+import { conn } from './lib/conn';
 import { hasMessage, t } from './i18n';
 import { HISTORY_MAX, SPEED_WINDOW_MS } from './transfers';
 
@@ -49,10 +52,11 @@ export interface Download {
   error?: string;
 }
 
-/** An event of the core about a download (internal/server/downloads.go). */
+/** An event of the core about a download (internal/server/downloads.go);
+ * unknown: the core has not seen the id yet, or no longer knows it. */
 export interface DownloadEvent {
   id: string;
-  state: 'running' | 'done' | 'failed' | 'cancelled';
+  state: 'running' | 'done' | 'failed' | 'cancelled' | 'unknown';
   sent?: number;
   total?: number;
   name?: string;
@@ -60,7 +64,8 @@ export interface DownloadEvent {
 }
 
 /** How long a download may go without a word from the core (which reports
- * it as soon as the request arrives) before it counts as not started. */
+ * it as soon as the request arrives) before it counts as not started; the
+ * time while the page is not connected does not count. */
 export const NO_RESPONSE_MS = 30_000;
 const SHOW_EVERY_MS = 250;
 const KEY = 'downloads';
@@ -116,6 +121,8 @@ interface Live {
   samples: Array<[number, number]>;
   shown: number;
   timer?: ReturnType<typeof setTimeout>;
+  /** The user cancelled it. */
+  cancelling?: boolean;
 }
 const live = new Map<string, Live>();
 
@@ -177,14 +184,21 @@ export function startDownload(m: string, paths: string[]): string | undefined {
     speed: 0,
     started: now,
   };
-  live.set(id, {
-    samples: [[now, 0]],
-    shown: -Infinity,
-    timer: setTimeout(() => {
-      if (find(id)?.status === 'starting') end(id, { status: 'failed', error: 'no_response' });
-    }, NO_RESPONSE_MS),
-  });
+  const l: Live = { samples: [[now, 0]], shown: -Infinity };
+  const wait = () => {
+    l.timer = setTimeout(() => {
+      if (find(id)?.status !== 'starting') return;
+      // Disconnected, the page cannot hear the core: it asks again after
+      // reconnecting (resyncDownloads).
+      if (conn.connected) end(id, { status: 'failed', error: 'no_response' });
+      else wait();
+    }, NO_RESPONSE_MS);
+  };
+  wait();
+  live.set(id, l);
   useDownloads.setState((s) => ({ active: [...s.active, x] }));
+  // Before the request, so that the core reports it to this page.
+  conn.send({ t: 'download.watch', ids: [id] });
   const a = document.createElement('a');
   a.href = `${downloadUrl(m, paths)}&dl=${id}`;
   a.download = '';
@@ -206,6 +220,15 @@ export function downloadEvent(ev: DownloadEvent) {
   if (typeof ev.name === 'string' && ev.name) p.name = ev.name;
   if (typeof ev.total === 'number' && ev.total >= 0) p.size = ev.total;
   const sent = typeof ev.sent === 'number' && ev.sent >= 0 ? ev.sent : x.sent;
+  if (ev.state === 'unknown') {
+    // A cancelled download the core does not know is over; one it reported
+    // and has forgotten (it restarted, or the page was away long) ended
+    // somehow, as the browser's downloads tell. Before its request arrives,
+    // a download is not known yet.
+    if (l.cancelling) end(ev.id, { status: 'cancelled' });
+    else if (x.status === 'downloading') end(ev.id, { status: 'failed', error: 'lost' });
+    return;
+  }
   if (ev.state !== 'running') {
     const status = ev.state === 'done' ? 'done' : ev.state === 'cancelled' ? 'cancelled' : 'failed';
     end(ev.id, { ...p, status, sent, error: status === 'failed' ? ev.error || 'interrupted' : undefined });
@@ -227,16 +250,20 @@ export function downloadEvent(ev: DownloadEvent) {
 }
 
 /** Cancels a download: the core breaks off the response, so the browser's
- * download fails too, and reports it as cancelled. */
+ * download fails too, and reports it as cancelled (or how it ended before,
+ * or that it does not know it). */
 export function cancelDownload(id: string) {
-  const x = find(id);
-  if (!x) return;
-  void fetch(`/api/downloads/${encodeURIComponent(id)}/cancel`, { method: 'POST' })
-    .then((r) => {
-      // The core never saw it (or it just ended, and its event follows).
-      if (r.status === 404 && find(id)?.status === 'starting') end(id, { status: 'cancelled' });
-    })
-    .catch(() => {});
+  const l = live.get(id);
+  if (!find(id) || !l) return;
+  l.cancelling = true;
+  conn.send({ t: 'download.cancel', id });
+}
+
+/** Asks the core again about the downloads in progress, after the page
+ * (re)connected: events sent meanwhile were lost. */
+export function resyncDownloads() {
+  const ids = useDownloads.getState().active.map((x) => x.id);
+  if (ids.length) conn.sendNow({ t: 'download.watch', ids });
 }
 
 export function cancelAllDownloads() {

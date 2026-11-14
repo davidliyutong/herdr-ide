@@ -12,7 +12,20 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { MenuEntry, MenuItem } from '../contextMenu';
 
-vi.mock('../lib/conn', () => ({ conn: { api: () => Promise.resolve({}), send: () => {}, sendNow: () => {}, setTheme: () => {} } }));
+/** Messages the page sent the core. */
+const sent = vi.hoisted(() => [] as unknown[]);
+const link = vi.hoisted(() => ({ connected: true }));
+vi.mock('../lib/conn', () => ({
+  conn: {
+    api: () => Promise.resolve({}),
+    send: (m: unknown) => sent.push(m),
+    sendNow: (m: unknown) => sent.push(m),
+    setTheme: () => {},
+    get connected() {
+      return link.connected;
+    },
+  },
+}));
 
 let shell: unknown;
 vi.mock('../desktop', () => ({
@@ -70,6 +83,8 @@ beforeEach(() => {
   shell = undefined;
   clicked.length = 0;
   fetches.length = 0;
+  sent.length = 0;
+  link.connected = true;
   store.useStore.setState({
     readOnly: false,
     toasts: [],
@@ -223,6 +238,8 @@ describe('downloads panel', () => {
     vi.setSystemTime(1_000_000);
     download.startDownload('gpu', ['/srv/data.bin']);
     const dl = id(clicked[0]);
+    // The core reports it to this page alone.
+    expect(sent).toEqual([{ t: 'download.watch', ids: [dl] }]);
     expect(active()).toMatchObject([{ id: dl, m: 'gpu', machine: 'gpu', name: 'data.bin', status: 'starting', sent: 0 }]);
     expect(Downloads.downloadDetail(active()[0])).toBe('Starting…');
 
@@ -270,12 +287,17 @@ describe('downloads panel', () => {
     const dl = id(clicked[0]);
     download.downloadEvent({ id: dl, state: 'running', sent: 10, total: 100 });
     download.cancelDownload(dl);
-    expect(fetches.at(-1)).toEqual({ url: `/api/downloads/${dl}/cancel`, method: 'POST' });
+    expect(sent.at(-1)).toEqual({ t: 'download.cancel', id: dl });
     download.downloadEvent({ id: dl, state: 'cancelled', sent: 10, total: 100 });
     expect(history()[0]).toMatchObject({ id: dl, status: 'cancelled' });
 
-    // No word from the core at all.
+    // No word from the core at all; the time while the page is not
+    // connected does not count.
     download.startDownload('gpu', ['/srv/b.txt']);
+    link.connected = false;
+    vi.advanceTimersByTime(download.NO_RESPONSE_MS);
+    expect(active()).toMatchObject([{ name: 'b.txt', status: 'starting' }]);
+    link.connected = true;
     vi.advanceTimersByTime(download.NO_RESPONSE_MS);
     expect(history()[0]).toMatchObject({ name: 'b.txt', status: 'failed', error: 'no_response' });
 
@@ -284,6 +306,34 @@ describe('downloads panel', () => {
     expect(clicked.map(query).at(-1)).toEqual(['/srv/b.txt']);
     expect(id(clicked.at(-1)!)).not.toBe(id(clicked[1]));
     expect(active()).toHaveLength(1);
+  });
+
+  it('asks again after a reconnect, and ends what the core no longer knows', () => {
+    download.startDownload('gpu', ['/srv/a.txt']);
+    download.startDownload('gpu', ['/srv/b.txt']);
+    download.startDownload('gpu', ['/srv/c.txt']);
+    const [a, b, c] = clicked.map(id);
+    download.downloadEvent({ id: a, state: 'running', sent: 10, total: 100 });
+    download.downloadEvent({ id: c, state: 'running', sent: 10, total: 100 });
+    sent.length = 0;
+    download.resyncDownloads();
+    expect(sent).toEqual([{ t: 'download.watch', ids: [a, b, c] }]);
+    // The final event was lost while away: the core still knows it.
+    download.downloadEvent({ id: a, state: 'done', sent: 100, total: 100 });
+    // Not seen yet: still starting.
+    download.downloadEvent({ id: b, state: 'unknown' });
+    // Seen and forgotten: how it ended is not known.
+    download.downloadEvent({ id: c, state: 'unknown' });
+    expect(active()).toMatchObject([{ id: b, status: 'starting' }]);
+    expect(history()).toMatchObject([
+      { id: c, status: 'failed', error: 'lost' },
+      { id: a, status: 'done' },
+    ]);
+    // Cancelling one the core never saw ends it.
+    download.cancelDownload(b);
+    download.downloadEvent({ id: b, state: 'unknown' });
+    expect(active()).toEqual([]);
+    expect(history()[0]).toMatchObject({ id: b, status: 'cancelled' });
   });
 
   it('shows the downloads in the status bar', async () => {
@@ -301,7 +351,6 @@ describe('downloads panel', () => {
     expect(host.querySelectorAll('.transfer-bar.indeterminate')).toHaveLength(1);
     expect(host.querySelector('.transfer-bar:not(.indeterminate) > div')?.getAttribute('style')).toContain('width: 25%');
     act(() => host.querySelectorAll<HTMLButtonElement>('button[aria-label="Cancel download"]')[1].click());
-    await flush();
-    expect(fetches.at(-1)?.url).toBe(`/api/downloads/${id(clicked[1])}/cancel`);
+    expect(sent.at(-1)).toEqual({ t: 'download.cancel', id: id(clicked[1]) });
   });
 });

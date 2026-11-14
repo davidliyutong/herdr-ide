@@ -37,7 +37,8 @@ const (
 	// writes them atomically to Path and sends a second reply line.
 	OpFsWrite Op = "fs.write"
 	// OpFsArchive streams Paths as one zip archive after the reply and then
-	// closes the stream; nothing is written on the machine.
+	// closes the stream; nothing is written on the machine. With
+	// Header.Chunked the archive comes as ChunkWriter chunks.
 	OpFsArchive Op = "fs.archive"
 	// OpDialUnix dials a unix socket below the agent run directory.
 	OpDialUnix Op = "dial-unix"
@@ -82,6 +83,10 @@ type Header struct {
 	Unique bool `json:"unique,omitempty"`
 	// Paths (fs.archive) are the files and directories to archive.
 	Paths []string `json:"paths,omitempty"`
+	// Chunked (fs.archive) frames the archive with ChunkWriter, ended by
+	// its empty chunk once the archive is complete: a stream that ends
+	// without it (the machine went away) carries a truncated archive.
+	Chunked bool `json:"chunked,omitempty"`
 
 	// code-server
 	Action  string   `json:"action,omitempty"`

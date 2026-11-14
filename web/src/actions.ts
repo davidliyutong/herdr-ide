@@ -264,7 +264,7 @@ export const actions = {
       } else if (!(await confirmDialog(ask))) return;
     }
     // A failed stop is reported; the machine is disabled all the same.
-    if (stop) await runHerdr(m, 'stop');
+    if (stop) await herdrAction(m, () => runHerdr(m, 'stop'));
     try {
       const res = await fetch(`/api/m/${encodeURIComponent(m)}/enabled`, {
         method: 'PUT',
@@ -336,45 +336,27 @@ export const actions = {
   /** Restarts a machine's herdr server after asking, since every terminal
    * there closes; one that is not running is started (docs/features/17). */
   async restartHerdr(m: string) {
-    if (await confirmHerdrEnd(m, 'restart')) await runHerdr(m, 'restart');
+    await herdrAction(m, async () => {
+      if (await confirmHerdrEnd(m, 'restart')) await runHerdr(m, 'restart');
+    });
   },
 
   /** Stops a machine's herdr server after asking (docs/features/17). */
   async stopHerdr(m: string) {
-    if (await confirmHerdrEnd(m, 'stop')) await runHerdr(m, 'stop');
+    await herdrAction(m, async () => {
+      if (await confirmHerdrEnd(m, 'stop')) await runHerdr(m, 'stop');
+    });
   },
 
   /** Starts a machine's herdr server; a running one is left as it is. */
   async startHerdr(m: string) {
-    await runHerdr(m, 'start');
+    await herdrAction(m, () => runHerdr(m, 'start'));
   },
 
   /** Checks for a newer herdr and, for the application's own copy on the
    * core host, updates it after asking (docs/features/17). */
   async updateHerdr(m: string) {
-    const { toast } = useStore.getState();
-    // The status says whether this is the application's copy; only that
-    // one is checked against herdr's latest release.
-    const cur = await herdrRequest(m);
-    if (!cur.error && !cur.managed) return toast(t('herdr.error.not_managed'));
-    toast(t('herdr.busy.check'));
-    const st = await herdrRequest(m, 'check');
-    if (st.error) return report(new Error(t('herdr.checkFailed', { error: herdrDetail(st) })));
-    if (!st.managed) return toast(t('herdr.error.not_managed'));
-    if (!isNewer(st.latest, st.version)) return toast(t('herdr.upToDate', { version: st.version ?? '' }));
-    const version = st.latest ?? '';
-    if (
-      !(await confirmDialog({
-        title: t('herdr.updateTitle', { version }),
-        message: t('herdr.updateMessage', { version: st.version ?? '' }),
-        confirm: t('herdr.update'),
-      }))
-    )
-      return;
-    toast(t('herdr.busy.update'));
-    const res = await herdrRequest(m, 'update');
-    if (res.error) report(new Error(t('herdr.updateFailed', { error: herdrDetail(res) })));
-    else toast(t(res.restart_needed ? 'herdr.updatedRestart' : 'herdr.updated', { version: res.version ?? version }));
+    await herdrAction(m, () => updateHerdr(m));
   },
 
   async newWorkspace(m?: string, cwd?: string) {
@@ -633,6 +615,34 @@ export const actions = {
   },
 };
 
+/** Checks for a newer herdr and updates the application's copy after
+ * asking (actions.updateHerdr). */
+async function updateHerdr(m: string) {
+  const { toast } = useStore.getState();
+  // The status says whether this is the application's copy; only that
+  // one is checked against herdr's latest release.
+  const cur = await herdrRequest(m);
+  if (!cur.error && !cur.managed) return toast(t('herdr.error.not_managed'));
+  toast(t('herdr.busy.check'));
+  const st = await herdrRequest(m, 'check');
+  if (st.error) return report(new Error(t('herdr.checkFailed', { error: herdrDetail(st) })));
+  if (!st.managed) return toast(t('herdr.error.not_managed'));
+  if (!isNewer(st.latest, st.version)) return toast(t('herdr.upToDate', { version: st.version ?? '' }));
+  const version = st.latest ?? '';
+  if (
+    !(await confirmDialog({
+      title: t('herdr.updateTitle', { version }),
+      message: t('herdr.updateMessage', { version: st.version ?? '' }),
+      confirm: t('herdr.update'),
+    }))
+  )
+    return;
+  toast(t('herdr.busy.update'));
+  const res = await herdrRequest(m, 'update');
+  if (res.error) report(new Error(t('herdr.updateFailed', { error: herdrDetail(res) })));
+  else toast(t(res.restart_needed ? 'herdr.updatedRestart' : 'herdr.updated', { version: res.version ?? version }));
+}
+
 /** herdr's error message for a reply, with herdr's own output. */
 function herdrDetail(st: MachineHerdr): string {
   return [herdrError(st), st.output].filter(Boolean).join(' ');
@@ -656,6 +666,23 @@ const herdrToasts: Record<'start' | 'stop' | 'restart', [busy: MessageKey, done:
   stop: ['herdr.stopping', 'herdr.stopped', 'herdr.stopFailed'],
   restart: ['herdr.restarting', 'herdr.restarted', 'herdr.restartFailed'],
 };
+
+/** Runs fn as machine m's one herdr action at a time (its confirmation
+ * included): another one asked for meanwhile is refused with a note, and the
+ * entries that start one are disabled (menus.tsx, Sidebar.tsx). */
+async function herdrAction(m: string, fn: () => Promise<unknown>) {
+  const { herdrBusy, setHerdrBusy, toast, machines } = useStore.getState();
+  if (herdrBusy[m]) {
+    toast(t('herdr.busyMachine', { machine: machines[m]?.label ?? m }));
+    return;
+  }
+  setHerdrBusy(m, true);
+  try {
+    await fn();
+  } finally {
+    setHerdrBusy(m, false);
+  }
+}
 
 /** Runs a server action on a machine's herdr and reports it in toasts;
  * resolves whether it succeeded. */

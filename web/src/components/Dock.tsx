@@ -49,6 +49,23 @@ export function nextFrames(frames: Record<string, Frame>, dock: DockView | undef
   return next;
 }
 
+type Machines = ReturnType<typeof useStore.getState>['machines'];
+let disabledOf: { machines?: Machines; list: string } = { list: '' };
+
+/** The ids of the disabled machines, one per line: worked out again only
+ * when the machines change, not on every change of the store. */
+function disabledMachines(s: { machines: Machines }): string {
+  if (s.machines !== disabledOf.machines) {
+    const list = Object.values(s.machines)
+      .filter((x) => x.status === 'disabled')
+      .map((x) => x.id)
+      .sort()
+      .join('\n');
+    disabledOf = { machines: s.machines, list };
+  }
+  return disabledOf.list;
+}
+
 export function Dock() {
   const dock = useStore(currentDock);
   const width = useStore((s) => s.dockWidth);
@@ -64,13 +81,7 @@ export function Dock() {
   // nextFrames for when hidden ones go.
   const [frames, setFrames] = useState<Record<string, Frame>>({});
   // Disabled machines have no code-server; their windows go.
-  const disabledList = useStore((s) =>
-    Object.values(s.machines)
-      .filter((x) => x.status === 'disabled')
-      .map((x) => x.id)
-      .sort()
-      .join('\n'),
-  );
+  const disabledList = useStore(disabledMachines);
   const disabled = useMemo(() => new Set(disabledList ? disabledList.split('\n') : []), [disabledList]);
   const off = dock?.kind === 'code' && disabled.has(dock.m);
 

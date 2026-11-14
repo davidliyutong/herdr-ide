@@ -24,7 +24,8 @@ const maxArchivePaths = 1000
 // paths named are followed when they are symbolic links; links below them
 // are stored as links. Irregular files (sockets, devices, FIFOs) and
 // anything unreadable are left out. Nothing is written on the machine; the
-// walk stops when the stream fails (the browser went away).
+// walk stops when the stream fails (the browser went away). With h.Chunked
+// the archive is framed, and its end marked once it is complete.
 func (a *Agent) handleArchive(st net.Conn, h agentproto.Header) error {
 	defer st.Close()
 	if len(h.Paths) == 0 || len(h.Paths) > maxArchivePaths {
@@ -44,7 +45,14 @@ func (a *Agent) handleArchive(st net.Conn, h agentproto.Header) error {
 	if err := agentproto.WriteLine(st, agentproto.Reply{OK: true}); err != nil {
 		return err
 	}
-	return writeArchive(st, roots)
+	if !h.Chunked {
+		return writeArchive(st, roots)
+	}
+	cw := agentproto.ChunkWriter{W: st}
+	if err := writeArchive(cw, roots); err != nil {
+		return err
+	}
+	return cw.Finish()
 }
 
 // writeArchive writes roots as a zip to w; it fails only when w does.

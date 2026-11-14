@@ -164,11 +164,19 @@ export function machineMenu(m: string): MenuEntry[] {
     // Without a herdr executable there, a restart would stop nothing and
     // start nothing; herdr --remote installs one on an SSH machine.
     const missing = herdrMissing(st);
+    // One herdr action at a time (actions.ts herdrAction).
+    const busy = s.herdrBusy[m] === true;
     out.push(
-      { label: t('menu.restartHerdr'), icon: <RotateCw />, disabled: !connected || missing, run: () => void actions.restartHerdr(m) },
-      { label: t('menu.stopHerdr'), icon: <Square />, disabled: !connected || missing, run: () => void actions.stopHerdr(m) },
+      {
+        label: t('menu.restartHerdr'),
+        icon: <RotateCw />,
+        disabled: !connected || missing || busy,
+        run: () => void actions.restartHerdr(m),
+      },
+      { label: t('menu.stopHerdr'), icon: <Square />, disabled: !connected || missing || busy, run: () => void actions.stopHerdr(m) },
     );
-    if (st.kind === 'local') out.push({ label: t('menu.updateHerdr'), icon: <RefreshCw />, run: () => void actions.updateHerdr(m) });
+    if (st.kind === 'local')
+      out.push({ label: t('menu.updateHerdr'), icon: <RefreshCw />, disabled: busy, run: () => void actions.updateHerdr(m) });
     else
       out.push({
         label: t(missing ? 'menu.installRemoteHerdr' : 'menu.updateHerdr'),

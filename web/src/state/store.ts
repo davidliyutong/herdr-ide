@@ -74,6 +74,10 @@ export interface UIState {
   auth?: string;
   /** SSH machine whose herdr the remote update terminal updates. */
   remoteHerdr?: string;
+  /** Machines with a herdr action (start, stop, restart, update) under
+   * way: one at a time, its menu entries disabled meanwhile. */
+  herdrBusy: Record<string, true>;
+  setHerdrBusy(m: string, busy: boolean): void;
   /** The terminal adding a machine with herdr machine add is open. */
   addMachine: boolean;
   /** The server runs with --read-only. */
@@ -300,6 +304,14 @@ export const useStore = create<UIState>((set, get) => ({
   setRenaming: (renaming) => set({ renaming }),
   openAuth: (auth) => set({ auth }),
   openRemoteHerdr: (remoteHerdr) => set({ remoteHerdr }),
+  herdrBusy: {},
+  setHerdrBusy: (m, busy) =>
+    set((s) => {
+      const herdrBusy = { ...s.herdrBusy };
+      if (busy) herdrBusy[m] = true;
+      else delete herdrBusy[m];
+      return { herdrBusy };
+    }),
   addMachine: false,
   openAddMachine: (addMachine) => set({ addMachine }),
   readOnly: false,

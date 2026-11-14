@@ -305,7 +305,7 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		zipHeaders()
 		return
 	}
-	conn, _, err := mc.Open(r.Context(), agentproto.Header{Op: agentproto.OpFsArchive, Paths: paths})
+	conn, _, err := mc.Open(r.Context(), agentproto.Header{Op: agentproto.OpFsArchive, Paths: paths, Chunked: true})
 	if err != nil {
 		d.fail(failCode(err))
 		http.Error(w, err.Error(), http.StatusNotFound)
@@ -317,7 +317,9 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	defer endWith(r.Context(), conn)()
 	d.describe(archiveName(paths), -1)
 	zipHeaders()
-	if _, err := io.Copy(w, ctxReader{r.Context(), conn}); err != nil {
+	// The archive is complete only with the framing's end marker: a stream
+	// that just ends (the machine went away) fails like a cancelled one.
+	if _, err := io.Copy(w, ctxReader{r.Context(), &agentproto.ChunkReader{R: conn}}); err != nil {
 		if d.broken() || (d == nil && r.Context().Err() == nil) {
 			// Cancelled from the panel or the machine went away mid-archive:
 			// end the response unfinished, so the browser reports a failed

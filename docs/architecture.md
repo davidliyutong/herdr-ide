@@ -127,9 +127,9 @@ after a successful reply it carries op-specific bytes.
 | `fs.stat`, `fs.list` | core → agent | – |
 | `fs.read` | core → agent | `Length` bytes from `Offset` |
 | `fs.write` | core → agent | chunked upload, then a second reply; `unique` keeps existing files (`-1`, `-2`… names) |
-| `fs.archive` | core → agent | a zip of `Paths` (each at the root under its name, directories recursively), streamed until the agent closes the stream |
+| `fs.archive` | core → agent | a zip of `Paths` (each at the root under its name, directories recursively), streamed until the agent closes the stream; with `Chunked` as `ChunkWriter` chunks ended by the empty chunk once the archive is complete |
 | `exec` | core → agent | – (buffered output in the reply) |
-| `pane.find` | core → agent | – (reply `Find`: matches of `Find`'s query in the pane's text, which the agent reads from herdr and searches on the machine; `Code` classifies errors: `invalid_regex`, `query_too_large`, `unavailable`, or herdr's code) |
+| `pane.find` | core → agent | – (reply `Find`: matches of `Find`'s query in the pane's text, which the agent reads from herdr and searches on the machine, with `Text`, a hash of the search and the text; a request with `Known` set to that hash is answered `Unchanged` while it holds; `Code` classifies errors: `invalid_regex`, `query_too_large`, `unavailable`, or herdr's code) |
 | `dial-unix` | core → agent | raw pipe to a socket in the agent's run directory |
 | `code-server` | core → agent | actions `status`, `install` (chunked tarball), `download` (the machine fetches `URL`, checked against `Digest`), `start`, `stop`, `install-ext`, `uninstall-ext`, `marker`; `Bin` selects an installed code-server |
 | `herdr` | core → agent | – (an empty reply at once, then a second reply with `Herdr` when the action is done); actions `status`, `start`, `stop`, `restart` (the server of `Session`; nothing is started or stopped while another user's process or an unresponsive listener holds its socket; a restart stops only this user's answering server, then starts one), `check` (herdr's newest release), `update` (only the application's managed copy); each looks herdr up again (a path that is no longer executable gives way to the usual search) and without one replies `not_found` with whether a server still answers on the socket; the core then shows that herdr for the machine |
@@ -152,13 +152,14 @@ Text frames are JSON with a `t` field; binary frames are pane surface updates
 | `view {m, tab, pane, cols, rows, cw, ch}`, `takeover` | `session {state: owner\|busy\|taken_over}` |
 | `in {m, pane, ev}` (key, text, paste, mouse events), `focus {m, focused}`, `host {host}` (terminal colors) | `surf {m, gen, ev: open\|error\|notice, code}`, `surf.tab`, `surf.meta` (panes, splits, links), `clip` (OSC 52), `bell` |
 | `api {rid, m, method, params}` (allowlisted herdr calls) | `api.res {rid, result\|error}` |
-| `retry {m}`, `ping` | `machines {list}`, `machine {state}`, `agent {m, data}` (status change), `bridge.send {m, text, folders}` (the sending VS Code window's folders: the page picks the workspace whose panel shows it), `bridge.download {m, paths}` (files chosen in VS Code's explorer; the page with the focus downloads them), `download {id, state, sent, total, name, error}` (a download the page started with `dl=<id>`: progress and how it ended, for the downloads panel) |
+| `retry {m}`, `ping` | `machines {list}`, `machine {state}`, `agent {m, data}` (status change), `bridge.send {m, text, folders}` (the sending VS Code window's folders: the page picks the workspace whose panel shows it), `bridge.download {m, paths}` (files chosen in VS Code's explorer; the page with the focus downloads them) |
+| `download.watch {ids}` (downloads the page started with `dl=<id>`: before starting one and after reconnecting), `download.cancel {id}` | `download {id, state, sent, total, name, error}` to the page following the id: progress and how it ended (`unknown` for an id the core has not seen or no longer knows), for the downloads panel |
 | `theme {kind: dark\|light}` (VS Code follows it) | `gui {state: {m, phase, gpu, windows}}` (program windows per machine) |
 | `active {idle}` (ms since the user last used the page) | `agent {…, sound}`: `sound` is true only for the most recently used page, which plays the notification sound |
 
 HTTP endpoints besides files (`GET /api/m/{id}/file`, `GET /api/m/{id}/list`,
 and `GET /api/m/{id}/download?path=…[&dl=<id>]`: one file as an attachment,
-anything else as a zip from `fs.archive`; `POST /api/downloads/{dl}/cancel`
+anything else as a zip from `fs.archive`; `download.cancel` over `/ws`
 breaks a followed download off), uploads and the code-server proxy:
 `POST /api/m/{id}/find` (find in a pane through `pane.find`, also for
 read-only pages, see [20](features/20-find-in-panes.md)),

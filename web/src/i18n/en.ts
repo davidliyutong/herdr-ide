@@ -67,6 +67,7 @@ export const en = {
   'downloads.error.invalid': 'The paths were refused',
   'downloads.error.interrupted': 'The transfer broke off',
   'downloads.error.no_response': 'The download did not start',
+  'downloads.error.lost': "How it ended is not known; see the browser's downloads",
   'app.updated': 'The server was updated. Reload the page to use the new version.',
   'app.reload': 'Reload',
 
@@ -380,6 +381,7 @@ export const en = {
   'herdr.restarting': 'Restarting herdr on {machine}…',
   'herdr.restarted': 'herdr restarted on {machine}.',
   'herdr.restartFailed': 'Could not restart herdr on {machine}: {error}',
+  'herdr.busyMachine': 'herdr on {machine} is busy with another action',
   'herdr.starting': 'Starting herdr on {machine}…',
   'herdr.started': 'herdr is running on {machine}.',
   'herdr.startFailed': 'Could not start herdr on {machine}: {error}',

@@ -146,7 +146,9 @@ user's confirmation; choosing herdr's preview channel.
 - **UI** (not in read-only mode), all in the machine's context menu and its
   status block, without a dialog of its own (`web/src/actions.ts`,
   `web/src/menus.tsx`); results and errors with herdr's output appear in
-  toasts.
+  toasts. A machine runs one of these actions at a time, its confirmation
+  included: meanwhile its entries are disabled, and another one asked for
+  (as by **Disable machine** with its herdr) gets a note instead.
   - **Restart herdr…** and **Stop herdr…**, for every machine whose agent
     is connected, ask first (they end every terminal on that machine) and
     restart the server (or start it when it is not running) or stop it.
@@ -273,5 +275,6 @@ messages for every error code and when a machine's herdr counts as missing;
 `menus.test.ts` covers the machine menu's entries, the confirmed restart
 and stop, the local update (up to date, the user's installation, a newer
 release after confirming), **Install herdr…** with restart and stop
-disabled where herdr is missing, and disabling a machine with and without
-stopping its herdr; `dialog.test.ts` covers the confirmation's checkbox.
+disabled where herdr is missing, one action at a time per machine (entries
+disabled and a second action refused meanwhile), and disabling a machine
+with and without stopping its herdr; `dialog.test.ts` covers the confirmation's checkbox.

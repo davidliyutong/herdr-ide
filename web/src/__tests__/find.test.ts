@@ -278,7 +278,7 @@ describe('searching', () => {
   it('opens on the newest match and scrolls it into view', async () => {
     meta();
     const found = [match(8, 0, 8, 5), match(71, 0, 71, 5), match(80, 0, 80, 5)];
-    serve({ matches: found, total: 3, current: 2, current_global: 2 });
+    serve({ matches: found, total: 3, current: 2, current_global: 2, text: 't1' });
     openFind('local', 'w1:p1', 'line 7');
     await flush();
     await flush();
@@ -307,13 +307,23 @@ describe('searching', () => {
       await vi.advanceTimersByTimeAsync(0);
       expect(useFind.getState()).toMatchObject({ index: 0, current: found[0] });
 
-      // Once stepping pauses, the search runs again keeping that match.
-      serve({ matches: [...found, match(90, 0, 90, 5)], total: 4, current: 0, current_global: 0 });
+      // Once stepping pauses, the search runs again keeping that match;
+      // the answer had every match, so its text goes along, and new output
+      // brings new matches.
+      serve({ matches: [...found, match(90, 0, 90, 5)], total: 4, current: 0, current_global: 0, text: 't2' });
       await vi.advanceTimersByTimeAsync(REFRESH_MS);
       expect(searches).toHaveLength(2);
-      expect(searches[1].body).toMatchObject({ backward: true, cursor: { row: 8, col: 6 } });
+      expect(searches[1].body).toMatchObject({ backward: true, cursor: { row: 8, col: 6 }, known: 't1' });
       expect(searches[1].body.previous).toBeUndefined();
-      expect(useFind.getState()).toMatchObject({ index: 0, total: 4, current: found[0] });
+      expect(useFind.getState()).toMatchObject({ index: 0, total: 4, current: found[0], text: 't2' });
+
+      // Without new output the agent only says so, and the step stays.
+      serve({ unchanged: true, text: 't2' });
+      findStep(false);
+      await vi.advanceTimersByTimeAsync(REFRESH_MS);
+      expect(searches).toHaveLength(3);
+      expect(searches[2].body.known).toBe('t2');
+      expect(useFind.getState()).toMatchObject({ index: 1, total: 4, current: found[1], text: 't2' });
     } finally {
       vi.useRealTimers();
     }

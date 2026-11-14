@@ -24,7 +24,7 @@ import { initSurface, surfaceDisconnected } from './surface/session';
 import { isFindKey, openFind } from './surface/find';
 import { useGui } from './gui/state';
 import { GuiTray } from './gui/GuiMenus';
-import { bridgeDownload, downloadEvent } from './download';
+import { bridgeDownload, downloadEvent, resyncDownloads } from './download';
 import { sendTarget } from './lib/bridge';
 import { TransfersTray } from './components/Transfers';
 import { DownloadsTray } from './components/Downloads';
@@ -64,6 +64,7 @@ export function App() {
       onConnection: (c) => {
         useStore.getState().setConnected(c);
         if (!c) surfaceDisconnected();
+        else resyncDownloads();
       },
       onBridgeSend: (m, text, folders) => pasteToAgent(m, text, folders),
       onBridgeDownload: (m, paths) => bridgeDownload(m, paths),
