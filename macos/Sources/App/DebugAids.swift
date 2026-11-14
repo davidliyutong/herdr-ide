@@ -10,6 +10,7 @@
     /// split-right, split-down, close, next-tab, workspace:<name>[:<cwd>]
     /// (a new workspace with a terminal, without the dialog),
     /// rename-workspace:<name>, close-workspace (without asking),
+    /// close-workspace:<name,name> (those of these names, without asking),
     /// next-workspace, type:<text>, find:<text>, find-next, open:<path> (as
     /// if activated in the terminal), code (the VS Code panel), page (logs
     /// the panel's page), settings, settings:<section> (a page of the
@@ -25,7 +26,9 @@
     /// menu: see MachineDialogs.debug), transfers (the transfers panel), and
     /// the files window's: files:, select:, download-to:, upload-file:,
     /// paste-file:, paste-image: (see AppDelegate.debugFiles),
-    /// record:<command>:<stroke,stroke> (the key recorder with strokes).
+    /// record:<command>:<stroke,stroke> (the key recorder with strokes),
+    /// hover:<column>,<row> (the pointer resting on a cell of the focused
+    /// terminal).
     enum DebugAids {
         static func start(window: NSWindow, model: AppModel, panes: PaneArea, webPanel: WebPanel, run: @escaping (String) -> Void) {
             let env = ProcessInfo.processInfo.environment
@@ -56,11 +59,17 @@
                     if let machine = model.selectedMachine, let workspace = model.layout.selectedWorkspace {
                         model.closeWorkspace(workspace.id, on: machine)
                     }
+                case _ where action.hasPrefix("close-workspace:"):
+                    // The workspaces of these names (comma-separated), without asking.
+                    let names = action.dropFirst(16).split(separator: ",").map(String.init)
+                    if let machine = model.selectedMachine {
+                        for workspace in model.layout.workspaces where names.contains(workspace.name) { model.closeWorkspace(workspace.id, on: machine) }
+                    }
                 case "code", "settings", "keys", "add-machine", "transfers": run(action)
                 case "page": webPanel.debugDescribe { FileHandle.standardError.write(Data(("page: " + $0 + "\n").utf8)) }
                 case "find-next": panes.pane(containing: window.firstResponder as? NSView)?.findStep(true)
                 default:
-                    if ["settings:", "strokes:", "command:", "folder:", "palette:", "drag:", "machine:", "files:", "select:", "download-to:", "upload-file:", "paste-file:", "paste-image:", "record:"].contains(where: action.hasPrefix) {
+                    if ["settings:", "strokes:", "command:", "folder:", "palette:", "drag:", "machine:", "files:", "select:", "download-to:", "upload-file:", "paste-file:", "paste-image:", "record:", "hover:"].contains(where: action.hasPrefix) {
                         run(action)
                     } else if action.hasPrefix("set:"), let eq = action.firstIndex(of: "=") {
                         let key = String(action[action.index(action.startIndex, offsetBy: 4) ..< eq])

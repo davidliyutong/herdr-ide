@@ -30,7 +30,6 @@ const (
 func rng(min, max float64) (*float64, *float64) { return settings.Range(min, max) }
 
 func defs() []settings.Def {
-	web := []string{settings.PlatformWeb}
 	uiMin, uiMax := rng(11, 20)
 	fontMin, fontMax := rng(6, 40)
 	lineMin, lineMax := rng(0.8, 2)
@@ -69,11 +68,11 @@ func defs() []settings.Def {
 		{Key: "terminal.programClipboard", Type: settings.TypeEnum, Default: "auto", Enum: []string{"auto", "ask", "off"},
 			Section: "terminal", Order: 120},
 		// LaTeX formulas in panes shown rendered under the pointer.
-		{Key: "terminal.mathHover", Type: settings.TypeBool, Default: true, Section: "terminal", Order: 130, Platforms: web},
+		{Key: "terminal.mathHover", Type: settings.TypeBool, Default: true, Section: "terminal", Order: 130},
 
 		// Notifications: on by default, with droid muted.
-		{Key: "notifications.sound", Type: settings.TypeBool, Default: true, Section: "notifications", Order: 10, Platforms: web},
-		{Key: "notifications.mutedAgents", Type: settings.TypeString, Default: "droid", Section: "notifications", Order: 20, Platforms: web},
+		{Key: "notifications.sound", Type: settings.TypeBool, Default: true, Section: "notifications", Order: 10},
+		{Key: "notifications.mutedAgents", Type: settings.TypeString, Default: "droid", Section: "notifications", Order: 20},
 	}
 	// Terminal colors per theme, defaulting to the design tokens.
 	for i, theme := range []string{"dark", "light"} {

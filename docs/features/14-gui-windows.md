@@ -178,7 +178,8 @@ input methods.
   `HC_TERMINAL_SOCKET` is the instance's terminal core (`run/hc.sock`;
   terminals of the user's own herdr-core are not named). The window record
   carries `terminal`; the macOS application lists a window under its
-  terminal ([23](23-macos-application.md)).
+  terminal and, like the web UI, opens a new one by itself when that
+  terminal is on screen in the window in front ([23](23-macos-application.md)).
 - Input arrives in window coordinates and is replayed with XTEST: pointer
   motion, buttons, wheel steps (buttons 4–7) and keys as X keycodes. The
   browser sends the physical key (`KeyboardEvent.code` → evdev code + 8), so

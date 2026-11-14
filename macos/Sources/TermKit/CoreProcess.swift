@@ -12,8 +12,27 @@ public final class CoreProcess {
 
     private var process: Process?
     private var stdin: Pipe?
+    private var log: [String] = []
+    private let logLock = NSLock()
+    /// Lines of the core's log kept for a failure's report.
+    public static let logLines = 40
 
     public init() {}
+
+    /// The last lines the core logged, for an error that names why it
+    /// failed.
+    public var logTail: String {
+        logLock.lock()
+        defer { logLock.unlock() }
+        return log.joined(separator: "\n")
+    }
+
+    private func keep(_ text: String) {
+        logLock.lock()
+        log += text.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+        if log.count > Self.logLines { log.removeFirst(log.count - Self.logLines) }
+        logLock.unlock()
+    }
 
     /// The arguments of the owned core: a port of the system's choice on
     /// loopback, and the instance whose data the application uses.
@@ -50,14 +69,24 @@ public final class CoreProcess {
             return ready(.failure(.missing(binary.path)))
         }
         let process = Process()
-        let input = Pipe(), output = Pipe()
+        let input = Pipe(), output = Pipe(), errors = Pipe()
         process.executableURL = binary
         process.arguments = Self.arguments(dev: dev)
         process.environment = Self.environment(ProcessInfo.processInfo.environment, home: NSHomeDirectory())
         process.currentDirectoryURL = URL(fileURLWithPath: NSHomeDirectory())
         process.standardInput = input
         process.standardOutput = output
-        process.standardError = FileHandle.standardError
+        // The log goes on to the application's own, and its end is kept.
+        process.standardError = errors
+        errors.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let chunk = handle.availableData
+            guard !chunk.isEmpty else {
+                handle.readabilityHandler = nil
+                return
+            }
+            FileHandle.standardError.write(chunk)
+            self?.keep(String(decoding: chunk, as: UTF8.self))
+        }
         var answered = false
         let answer: (Result<URL, Failure>) -> Void = { result in
             DispatchQueue.main.async {
@@ -81,9 +110,12 @@ public final class CoreProcess {
             }
         }
         process.terminationHandler = { process in
-            answer(.failure(.exited(process.terminationStatus)))
-            DispatchQueue.main.async {
-                if answered { exited() }
+            // A moment for the log's last lines to arrive.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                answer(.failure(.exited(process.terminationStatus)))
+                DispatchQueue.main.async {
+                    if answered { exited() }
+                }
             }
         }
         do { try process.run() } catch { return ready(.failure(.missing(binary.path))) }

@@ -32,6 +32,15 @@ final class AppModel {
     var onSettings: (() -> Void)?
     var onKeybindings: (() -> Void)?
 
+    /// An agent's status changed; text was sent from VS Code to an agent;
+    /// VS Code's explorer asked for a download; a program opened a window.
+    var onAgent: ((Activity.AgentEvent) -> Void)?
+    var onSend: ((String, String, [String]?) -> Void)?
+    var onDownload: ((String, [String]) -> Void)?
+    var onNewProgram: ((ProgramWindow) -> Void)?
+    /// The event channel (re)connected.
+    var onEventsConnected: (() -> Void)?
+
     /// Something the window shows changed.
     var onChange: (() -> Void)?
     /// The connection to the core's terminals came or went.
@@ -59,6 +68,7 @@ final class AppModel {
             guard up else { return }
             self?.windows = [:]
             self?.loadSettings()
+            self?.onEventsConnected?()
         }
     }
 
@@ -111,12 +121,26 @@ final class AppModel {
             setMachines(list)
         case let .gui(machine, list):
             // A dialog belongs to its window: the page of the window shows it.
-            windows[machine] = list.filter { $0.transient == 0 }
+            let shown = list.filter { $0.transient == 0 }
+            // Windows there when the machine's list first came are not new.
+            if let before = windows[machine] {
+                for window in shown where !before.contains(where: { $0.id == window.id }) { onNewProgram?(window) }
+            }
+            windows[machine] = shown
         case let .settings(message):
             if settings.apply(message) { onSettings?() }
             return
         case let .keybindings(message):
             if keybindings.apply(message) { onKeybindings?() }
+            return
+        case let .agent(change):
+            onAgent?(change)
+            return
+        case let .send(machine, text, folders):
+            onSend?(machine, text, folders)
+            return
+        case let .download(machine, paths):
+            onDownload?(machine, paths)
             return
         }
         let next = machines.flatMap { windows[$0.id] ?? [] }
@@ -273,7 +297,8 @@ final class AppModel {
     /// Starts the machine's shell in a new terminal and places it with
     /// `place`. A new tab starts in its workspace's directory, else in the
     /// focused terminal's; a split the other way round.
-    private func run(on machine: String, workspace: String? = nil, split: Bool = false, place: @escaping (inout Layout, String) -> Void) {
+    private func run(on machine: String, workspace: String? = nil, split: Bool = false, argv: [String] = [],
+                     place: @escaping (inout Layout, String) -> Void) {
         guard store.backends[machine]?.phase == .ready, let layout = layout(of: machine) else {
             // Asked for on a machine whose terminals are still starting:
             // one terminal opens once they and the layout are ready.
@@ -285,6 +310,7 @@ final class AppModel {
         let focused = target?.selectedTab.flatMap { directory(of: $0.focused, on: machine) }
         var params: [String: Any] = ["keep": false]
         if let cwd = split ? focused ?? base : base ?? focused { params["cwd"] = cwd }
+        if !argv.isEmpty { params["argv"] = argv }
         connection.call(machine, "terminal.run", params) { [weak self] result in
             guard let self, case let .success(record) = result, let address = record["address"] as? String else { return }
             self.mutate(machine) { place(&$0, address) }
@@ -300,12 +326,19 @@ final class AppModel {
         }
     }
 
-    func split(_ axis: Layout.Axis) {
+    func split(_ axis: Layout.Axis, argv: [String] = []) {
         guard let machine = selectedMachine else { return }
-        if layout.selectedTab == nil { return newTerminal() }
-        run(on: machine, split: true) { layout, address in
+        if layout.selectedTab == nil {
+            return run(on: machine, argv: argv) { layout, address in layout.open(address) }
+        }
+        run(on: machine, split: true, argv: argv) { layout, address in
             if !layout.split(axis, new: address) { layout.open(address) }
         }
+    }
+
+    /// Starts a coding agent in a pane split off the focused one.
+    func startAgent(_ kind: String) {
+        split(.horizontal, argv: [kind])
     }
 
     /// Ends a terminal's program; its pane goes with the event that follows.
@@ -403,6 +436,15 @@ final class AppModel {
 
     /// The core does not take changes (--read-only).
     var readOnly: Bool { settings.readOnly }
+
+    /// Terminals with agents on every machine followed, by how much they
+    /// need the user.
+    var attention: [Activity.Item] { Activity.attention(machines.map { ($0.id, store.terminals(of: $0.id)) }) }
+
+    /// Whether a terminal is on screen: in the selected machine's selected tab.
+    func onScreen(_ address: String, on machine: String) -> Bool {
+        machine == selectedMachine && layout.selectedTab?.root.terminals.contains(address) == true
+    }
 
     /// Shows a terminal: where it is, else in a new tab of the selected workspace.
     func open(_ address: String, on machine: String) {

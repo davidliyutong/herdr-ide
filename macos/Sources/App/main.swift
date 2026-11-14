@@ -20,7 +20,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var transfers: Transfers?
     private var transfersButton: TransfersButton?
     private var files: FilesWindow?
+    private var notifier: Notifier?
+    private var mathHover: MathHover?
+    private var lastActive = Date.distantPast
     private let toasts = Toasts()
+    /// Says that the core takes no changes (--read-only).
+    private let readOnlyBadge = NSTextField(labelWithString: "")
     private var panelSize: NSLayoutConstraint?
     private var panelShown = false
     private var sidebarWidth: NSLayoutConstraint?
@@ -71,11 +76,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }, exited: { [weak self] in self?.fatal(tr("core.lost")) })
     }
 
+    /// The bundled core failed: why, with the end of its log, then quit.
     private func fatal(_ message: String) {
         let alert = NSAlert()
         alert.alertStyle = .critical
         alert.messageText = Brand.appName
         alert.informativeText = message
+        let tail = coreProcess.logTail
+        if !tail.isEmpty {
+            let text = NSTextView(frame: NSRect(x: 0, y: 0, width: 520, height: 200))
+            text.string = tail
+            text.isEditable = false
+            text.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+            let scroll = NSScrollView(frame: text.frame)
+            scroll.documentView = text
+            scroll.hasVerticalScroller = true
+            scroll.borderType = .bezelBorder
+            text.scrollToEndOfDocument(nil)
+            alert.accessoryView = scroll
+        }
         alert.addButton(withTitle: tr("alert.quit"))
         alert.runModal()
         NSApp.terminate(nil)
@@ -109,12 +128,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         self.machineDialogs = machineDialogs
         sidebar.machineDialogs = machineDialogs
         palette = Palette(parent: window)
+        let notifier = Notifier(model: model)
+        notifier.toast = { [weak self] in self?.toasts.show($0) }
+        notifier.inFront = { [weak self] in NSApp.isActive && self?.window.isKeyWindow == true }
+        notifier.onOpen = { [weak self] machine, terminal in
+            NSApp.activate(ignoringOtherApps: true)
+            self?.window.makeKeyAndOrderFront(nil)
+            self?.model?.open(terminal, on: machine)
+        }
+        self.notifier = notifier
+        mathHover = MathHover(core: core)
+        model.onAgent = { [weak self] in self?.notifier?.react($0) }
+        model.onSend = { [weak self] machine, text, folders in self?.sendToAgent(machine, text, folders) }
+        model.onDownload = { [weak self] machine, paths in
+            guard let self, NSApp.isActive else { return }
+            self.transfers?.download(paths, on: machine, isFile: paths.count == 1, window: self.window)
+        }
+        model.onNewProgram = { [weak self] in self?.autoOpen($0) }
+        TerminalPane.askClipboard = { [weak self] text, answer in self?.askClipboard(text, answer) }
         let transfers = Transfers(model: model)
         transfers.toast = { [weak self] in self?.toasts.show($0) }
         self.transfers = transfers
         let transfersButton = TransfersButton(transfers: transfers)
         self.transfersButton = transfersButton
         tabs.trailing.addArrangedSubview(transfersButton)
+        readOnlyBadge.font = Theme.fontSmall
+        readOnlyBadge.textColor = Theme.statusBlocked
+        readOnlyBadge.isHidden = true
+        tabs.trailing.addArrangedSubview(readOnlyBadge)
         let quickLook = QuickLook(core: core)
         self.quickLook = quickLook
         quickLook.onFailure = { [weak self] key, path in self?.notice(tr(key, path)) }
@@ -152,11 +193,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             if let self, event.window === self.window, let hit = self.window.contentView?.hitTest(event.locationInWindow),
                let pane = self.panes?.pane(containing: hit) {
                 self.model?.focus(pane.address)
+                self.used(input: true)
             }
             return event
         }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            self?.matchKey(event) ?? event
+            self?.used(input: true)
+            return self?.matchKey(event) ?? event
+        }
+        model.onEventsConnected = { [weak model, weak self] in
+            model?.events.send(["t": "active", "idle": Int(Date().timeIntervalSince(TerminalPane.lastInput) * 1000)])
+            self?.themeSent = nil
+            self?.sendTheme()
+        }
+        appearanceObservation = NSApp.observe(\.effectiveAppearance) { [weak self] _, _ in
+            DispatchQueue.main.async { self?.sendTheme() }
         }
         model.start()
         refresh()
@@ -179,6 +230,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 if action.hasPrefix("palette:") { palette?.debugType(String(action.dropFirst(8))) }
                 if action == "add-machine" { machineDialogs?.add() }
                 if action == "transfers" { transfersButton?.show() }
+                if action.hasPrefix("hover:"), let pane = focusedPane, let cellSize = Optional(pane.cell) {
+                    // The pointer resting on a cell (column,row) of the focused pane.
+                    let spec = action.dropFirst(6).split(separator: ",").compactMap { Double($0) }
+                    let view = pane.terminalView
+                    let point = NSPoint(x: ((spec.first ?? 0) + 0.5) * cellSize.width + 8, y: view.bounds.height - ((spec.last ?? 0) + 0.5) * cellSize.height - 6)
+                    if let event = NSEvent.mouseEvent(with: .mouseMoved, location: view.convert(point, to: nil), modifierFlags: [],
+                                                      timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                                      context: nil, eventNumber: 0, clickCount: 0, pressure: 0) {
+                        mathHover?.moved(event, in: pane)
+                    }
+                }
                 if action.hasPrefix("record:") {
                     let spec = action.dropFirst(7).split(separator: ":").map(String.init)
                     if spec.count == 2 { settings?.debugRecord(spec[0], spec[1].split(separator: ",").map(String.init)) }
@@ -263,6 +325,81 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
     #endif
 
+    private var appearanceObservation: NSKeyValueObservation?
+    private var themeSent: String?
+
+    /// Tells the core the theme in use; VS Code windows follow it.
+    private func sendTheme() {
+        guard let model, model.events.isConnected else { return }
+        let kind = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? "dark" : "light"
+        guard kind != themeSent else { return }
+        themeSent = kind
+        model.events.send(["t": "theme", "kind": kind])
+    }
+
+    /// The user is using the window: the core lets the client used last play
+    /// notification sounds ("active", at most every 2 s); a key or a click
+    /// in a terminal lets a program's clipboard write through for a moment.
+    private func used(input: Bool) {
+        if input, panes?.pane(containing: window.firstResponder as? NSView) != nil { TerminalPane.lastInput = Date() }
+        guard Date().timeIntervalSince(lastActive) > 2 else { return }
+        lastActive = Date()
+        model?.events.send(["t": "active", "idle": 0])
+    }
+
+    // MARK: - Agents and VS Code
+
+    /// Text sent from VS Code to an agent is pasted, not submitted, into the
+    /// focused terminal of that machine, else an agent of it waiting for
+    /// input (`Activity.sendTarget`).
+    private func sendToAgent(_ machine: String, _ text: String, _: [String]?) {
+        guard let model else { return }
+        let focused = model.selectedMachine == machine ? model.focusedTerminal : nil
+        let order = model.layout(of: machine)?.terminals ?? model.store.terminals(of: machine).map(\.address)
+        guard let target = Activity.sendTarget(focused: focused, terminals: model.store.terminals(of: machine), order: order) else {
+            toasts.show(tr("agent.noTarget"))
+            return
+        }
+        model.open(target, on: machine)
+        refresh()
+        // Once it is on screen and attached, so the paste reaches it.
+        DispatchQueue.main.async { [weak self] in
+            guard let pane = self?.panes?.pane(machine, target) else { return }
+            pane.afterAttach {
+                pane.paste(text)
+                pane.takeFocus()
+            }
+        }
+    }
+
+    /// A program's new window opens in a window of its own when its
+    /// terminal is on screen in the window in front, as in the web UI.
+    private func autoOpen(_ program: ProgramWindow) {
+        guard let model, NSApp.isActive, !program.terminal.isEmpty, model.onScreen(program.terminal, on: program.machine) else { return }
+        programs?.show(program)
+    }
+
+    /// A program's clipboard write that needs the user's word: a note with
+    /// a Copy button; it is refused when the note goes.
+    private func askClipboard(_ text: String, _ answer: @escaping (Bool) -> Void) {
+        var answered = false
+        let preview = String(text.prefix(60)).replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        toasts.show(tr("clipboard.ask", String(text.count), preview), button: tr("clipboard.copy"), ttl: 8) {
+            answered = true
+            answer(true)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8.5) { if !answered { answer(false) } }
+    }
+
+    /// Diff or Git Graph of the focused terminal's repository in VS Code.
+    private func codeCommand(_ cmd: String) {
+        guard let model, let machine = model.selectedMachine else { return }
+        let folder = model.focusedTerminal.flatMap { model.directory(of: $0, on: machine) } ?? model.layout.selectedWorkspace?.cwd ?? ""
+        guard !folder.isEmpty else { return }
+        showCode(machine: machine, folder: folder)
+        bridge(machine, ["cmd": cmd, "repo": folder, "folder": folder])
+    }
+
     // MARK: - Panes
 
     /// Wires a new pane: its header's commands, drag and menu, its text's
@@ -278,6 +415,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         pane.terminalView.onPaste = { [weak self, weak pane] in pane.map { self?.pasteFiles(into: $0) ?? false } ?? false }
         pane.terminalView.onDrop = { [weak self, weak pane] board in pane.map { self?.dropFiles(board, on: $0) ?? false } ?? false }
         pane.onOpenPath = { [weak self] text in self?.openPath(text, in: pane) }
+        pane.terminalView.onHover = { [weak self, weak pane] event in
+            guard let pane else { return }
+            self?.mathHover?.moved(event, in: pane)
+        }
     }
 
     // MARK: - Files
@@ -383,7 +524,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// Opens a file of a machine in VS Code: in the folder of the focused
     /// terminal when the file is below it, else in the file's directory
     /// (POST /api/m/{id}/bridge); a folder opens as itself.
-    private func openInCode(_ path: String, on machine: String, line: Int? = nil, isFolder: Bool = false) {
+    private func openInCode(_ path: String, on machine: String, line: Int? = nil, isFolder: Bool = false, failed: (() -> Void)? = nil) {
         guard let model else { return }
         let cwd = model.selectedMachine == machine ? model.focusedTerminal.flatMap { model.directory(of: $0, on: machine) } : nil
         if isFolder { return showCode(machine: machine, folder: path) }
@@ -391,15 +532,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         showCode(machine: machine, folder: folder)
         var body: [String: Any] = ["cmd": "openFile", "path": path, "folder": folder]
         if let line { body["line"] = line }
-        bridge(machine, body)
+        bridge(machine, body, failed: failed)
     }
 
     /// Sends a command to the VS Code window of a folder (the bridge
     /// extension); a refusal is shown as a note.
-    private func bridge(_ machine: String, _ body: [String: Any]) {
+    private func bridge(_ machine: String, _ body: [String: Any], failed: (() -> Void)? = nil) {
         let encoded = machine.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? machine
         model?.api.request("POST", "api/m/\(encoded)/bridge", body: body) { [weak self] status, reply in
-            if status != 200 { self?.toasts.show(tr("code.failed", reply?["error"]?.string ?? String(status))) }
+            guard status != 200 else { return }
+            if let failed { return failed() }
+            self?.toasts.show(tr("code.failed", reply?["error"]?.string ?? String(status)))
         }
     }
 
@@ -454,6 +597,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
         menu.separator()
         menu.item(tr("menu.openCode"), symbol: "chevron.left.forwardslash.chevron.right") { run("code.open") }
+        menu.item(tr("menu.diff"), symbol: "plus.forwardslash.minus") { run("code.diff") }
+        menu.item(tr("menu.gitGraph"), symbol: "point.3.connected.trianglepath.dotted") { run("code.gitGraph") }
         menu.separator()
         menu.item(tr("menu.closeTerminal"), symbol: "xmark") { run("pane.close") }
         return menu
@@ -478,10 +623,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         return menu
     }
 
-    /// A path activated in a terminal (⌘-click): shown with Quick Look.
+    /// A path activated in a terminal (⌘-click), as in the web UI: media
+    /// in Quick Look, other files in VS Code at their line, else in Quick
+    /// Look when VS Code cannot take it.
     private func openPath(_ text: String, in pane: TerminalPane) {
         guard let model, let path = TerminalPath.resolve(text, cwd: model.directory(of: pane.address, on: pane.machine) ?? "") else { return }
-        quickLook?.preview(path, on: pane.machine)
+        if TerminalPath.isMedia(path) || model.readOnly { return quickLook?.preview(path, on: pane.machine) ?? () }
+        openInCode(path, on: pane.machine, line: TerminalPath.line(text)) { [weak self] in self?.quickLook?.preview(path, on: pane.machine) }
     }
 
     // MARK: - Folders
@@ -543,6 +691,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         Theme.scale = CGFloat(s.number("appearance.uiFontSize", 13)) / 13
         TerminalPane.history = Int(min(100_000, max(0, s.number("terminal.scrollback", 10000))))
         TerminalPane.bell = s.string("terminal.bell", "visual")
+        TerminalPane.programClipboard = s.string("terminal.programClipboard", "auto")
+        mathHover?.enabled = s.bool("terminal.mathHover", true)
         MainActor.assumeIsolated { controllerBox?.apply(s, menuKeys: Array(menuKeys.values)) }
         placePanel()
         settings?.refresh()
@@ -620,6 +770,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             "pane.splitRight", "pane.splitDown", "pane.close", "pane.zoom", "pane.focusLeft", "pane.focusRight", "pane.focusUp",
             "pane.focusDown", "pane.focusNext", "pane.focusPrevious",
             "view.toggleSidebar", "view.toggleCode", "find.open", "find.next", "find.previous", "code.open",
+            "app.agentAttention", "code.diff", "code.gitGraph",
         ]
         for i in 1 ... 9 { out.insert("tab.select\(i)") }
         return out
@@ -670,6 +821,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         case "view.toggleSidebar": toggleSidebar()
         case "view.toggleCode": togglePanel()
         case "code.open": if !panelShown { togglePanel() }
+        case "code.diff": codeCommand("openDiff")
+        case "code.gitGraph": codeCommand("gitGraph")
+        case "app.agentAttention": if let item = model.attention.first { model.open(item.terminal, on: item.machine) }
         case "find.open": focusedPane?.showFind()
         case "find.next": focusedPane?.findStep(true)
         case "find.previous": focusedPane?.findStep(false)
@@ -695,12 +849,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                                           hint: key.map(Keys.label) ?? "") { [weak self] in self?.perform(command.id) })
             }
         }
+        if !workspacesOnly, !model.readOnly {
+            for kind in ["claude", "codex", "gemini", "opencode", "kimi", "grok", "cursor", "copilot", "qwen", "amp"] {
+                items.append(Palette.Item(label: tr("palette.startAgent", kind)) { model.startAgent(kind) })
+            }
+            for theme in ["system", "dark", "light"] {
+                let name = SettingsWindow.text("settings.appearance.theme." + theme) ?? theme
+                items.append(Palette.Item(label: tr("palette.theme", name)) {
+                    model.api.request("PUT", "api/settings", body: ["key": "appearance.theme", "value": theme]) { _, _ in }
+                })
+            }
+            if let machine = model.machines.first(where: { $0.id == model.selectedMachine && $0.kind == "ssh" }), let focused = model.focusedTerminal {
+                items.append(Palette.Item(label: tr("palette.enableHere")) { [weak self] in self?.machineDialogs?.enableWindows(focused, on: machine.id) })
+            }
+            for machine in model.machines where machine.kind == "ssh" && machine.status == "ready" {
+                items.append(Palette.Item(label: tr("palette.enableMachine", machine.label)) { [weak self] in
+                    self?.machineDialogs?.enableWindows(nil, on: machine.id)
+                })
+            }
+        }
         for machine in model.machines {
             for (index, workspace) in (model.layout(of: machine.id)?.workspaces ?? []).enumerated() {
                 items.append(Palette.Item(label: "\(index + 1)  " + Dialogs.name(of: workspace), hint: machine.label) {
                     model.selectWorkspace(workspace.id, on: machine.id)
                 })
             }
+        }
+        // Agents by how much they need the user.
+        for item in model.attention {
+            let machine = model.machines.first { $0.id == item.machine }?.label ?? item.machine
+            items.append(Palette.Item(label: (item.record.agent ?? item.record.displayName) + " · " + item.record.displayName, hint: machine,
+                                      dot: Theme.status(item.status)) { model.open(item.terminal, on: item.machine) })
         }
         palette?.show(placeholder: workspacesOnly ? tr("palette.workspaces") : tr("palette.commands"), items: items)
     }
@@ -722,6 +901,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             self.showPanelFolder()
             self.openPendingFolders()
             self.machineDialogs?.machinesChanged()
+            self.notifier?.updateBadge()
+            self.readOnlyBadge.stringValue = tr("app.readOnly")
+            self.readOnlyBadge.toolTip = tr("app.readOnlyInfo")
+            self.readOnlyBadge.isHidden = self.model?.readOnly != true
         }
     }
 

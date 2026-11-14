@@ -130,6 +130,25 @@ public enum Activity {
         return Reaction(sound: sound, notification: !inFront, note: inFront && event.status == "blocked")
     }
 
+    // MARK: - Programs' clipboard
+
+    /// What a program's clipboard write (OSC 52) does, by the
+    /// terminal.programClipboard setting: "auto" copies at once within 10 s
+    /// of the user's own input to a terminal, else asks; "ask" always asks;
+    /// "off" ignores it. Output is not trusted, so a copy without such
+    /// input never reaches the clipboard by itself.
+    public enum ClipboardWrite: Equatable { case allow, ask, deny }
+
+    public static let clipboardAutoSeconds: TimeInterval = 10
+
+    public static func clipboardWrite(mode: String, sinceInput: TimeInterval) -> ClipboardWrite {
+        switch mode {
+        case "off": return .deny
+        case "auto": return sinceInput <= clipboardAutoSeconds ? .allow : .ask
+        default: return .ask
+        }
+    }
+
     // MARK: - Send to agent
 
     /// The terminal that text sent from a VS Code window of a machine goes

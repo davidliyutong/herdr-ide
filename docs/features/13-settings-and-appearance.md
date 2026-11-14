@@ -34,7 +34,8 @@ settings per browser; theming terminal applications.
   values, a range and whether numbers are whole, a scope (`app`; `machine`:
   any machine may have its own value; `remote-machine`: machines other than
   the core's host), its section and order, the platforms that use it
-  (`web`, `macos`; none means all), an optional command-line flag and a
+  (`web`, `macos`; none means all, as for every setting of the user
+  interfaces today), an optional command-line flag and a
   validation function. Invalid definitions panic at start.
 - Descriptions are not in Go: the UIs translate `settings.<key>`,
   `settings.<key>.desc`, `settings.<key>.<option>` and

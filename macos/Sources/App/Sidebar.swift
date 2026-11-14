@@ -4,6 +4,9 @@ import TermKit
 /// A row of the sidebar: a machine, one of its workspaces, a terminal or a
 /// program window.
 private enum SidebarItem: Equatable {
+    /// The agents' inbox: how many work and wait, then those that wait.
+    case agents(working: Int, waiting: Int)
+    case agent(Activity.Item)
     case machine(Machine)
     case workspace(machine: String, workspace: Layout.Workspace, index: Int, selected: Bool)
     /// A terminal, inside a workspace or not.
@@ -82,6 +85,12 @@ final class SidebarView: NSView, NSTableViewDataSource, NSTableViewDelegate {
 
     func update() {
         var next: [SidebarItem] = []
+        let attention = model.attention
+        if !attention.isEmpty {
+            let waiting = attention.filter { $0.status == "blocked" || $0.status == "done" }
+            next.append(.agents(working: attention.filter { $0.status == "working" }.count, waiting: waiting.count))
+            next += waiting.map { .agent($0) }
+        }
         for machine in model.machines {
             next.append(.machine(machine))
             let live = model.store.terminals(of: machine.id).filter(\.isLive)
@@ -124,6 +133,15 @@ final class SidebarView: NSView, NSTableViewDataSource, NSTableViewDelegate {
         let cell = SidebarRow()
         let readOnly = model.readOnly
         switch items[row] {
+        case let .agents(working, waiting):
+            let counts = [working > 0 ? tr("sidebar.working", String(working)) : nil, waiting > 0 ? tr("sidebar.waiting", String(waiting)) : nil]
+            cell.configure(title: tr("sidebar.agents"), detail: counts.compactMap { $0 }.joined(separator: " · "), dot: nil, level: 0,
+                           strong: true, selected: false, action: nil)
+        case let .agent(item):
+            let machine = model.machines.first { $0.id == item.machine }?.label ?? item.machine
+            cell.configure(title: (item.record.agent ?? item.record.displayName) + " · " + tr("status." + item.status),
+                           detail: machine, dot: Theme.status(item.status), level: 1, strong: false, selected: false, action: nil)
+            cell.toolTip = [machine, item.record.displayName, (item.record.cwd as NSString).abbreviatingWithTildeInPath].joined(separator: " · ")
         case let .machine(machine):
             var detail = ""
             if machine.status != "ready" {
@@ -172,6 +190,8 @@ final class SidebarView: NSView, NSTableViewDataSource, NSTableViewDelegate {
     @objc private func clicked() {
         guard items.indices.contains(table.clickedRow) else { return }
         switch items[table.clickedRow] {
+        case .agents: break
+        case let .agent(item): model.open(item.terminal, on: item.machine)
         case let .machine(machine): model.select(machine: machine.id)
         case let .workspace(machine, workspace, _, _): model.selectWorkspace(workspace.id, on: machine)
         case let .terminal(machine, record, _): model.open(record.address, on: machine)
@@ -218,7 +238,7 @@ final class SidebarView: NSView, NSTableViewDataSource, NSTableViewDelegate {
                 menu.separator()
             }
             menu.item(tr("sidebar.kill"), symbol: "xmark") { [weak self] in self?.model.kill(record.address, on: machine) }
-        case .program:
+        case .program, .agents, .agent:
             return nil
         }
         return menu.items.isEmpty ? nil : menu

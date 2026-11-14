@@ -256,6 +256,9 @@ final class TerminalPane: NSView, TermStreamDelegate, TerminalSurfaceTitleDelega
             self.attaching = false
             guard case let .success(id) = result else { return }
             self.stream = id
+            let waiting = self.onAttach
+            self.onAttach = []
+            DispatchQueue.main.async { waiting.forEach { $0() } }
             // The grid may have changed while the attach was on its way.
             if let now = self.grid, now != grid { self.connection.resize(id, cols: now.cols, rows: now.rows) }
             self.connection.focus(id, self.isFocusedPane)
@@ -270,6 +273,22 @@ final class TerminalPane: NSView, TermStreamDelegate, TerminalSurfaceTitleDelega
     private func input(_ data: Data) {
         if let stream, !readOnly { connection.write(stream, data) }
     }
+
+    private var onAttach: [() -> Void] = []
+
+    /// Runs `fn` once the pane's stream is attached (now when it is).
+    func afterAttach(_ fn: @escaping () -> Void) {
+        if stream != nil { fn() } else { onAttach.append(fn) }
+    }
+
+    /// When the user last typed, clicked or pasted in a terminal: a
+    /// program's clipboard write right after that is the user's (OSC 52).
+    static var lastInput = Date.distantPast
+    /// The terminal.programClipboard setting.
+    static var programClipboard = "auto"
+    /// Asks the user about a program's clipboard write (a note with a Copy
+    /// button); the closure gets the answer.
+    static var askClipboard: ((String, @escaping (Bool) -> Void) -> Void)?
 
     /// Pastes text as the terminal does (bracketed when the program asks).
     func paste(_ text: String) {
@@ -308,18 +327,18 @@ final class TerminalPane: NSView, TermStreamDelegate, TerminalSurfaceTitleDelega
         }
     }
 
-    /// A program asks to write the clipboard (OSC 52) while
-    /// terminal.programClipboard is "ask": the user decides. Other requests
-    /// are refused, as without this delegate.
+    /// A program asks to write the clipboard (OSC 52; Ghostty asks for
+    /// every write unless the setting is "off"): copied at once right after
+    /// the user's own input when the setting is "auto", else offered in a
+    /// note (`Activity.clipboardWrite`). Other requests are refused.
     func terminalDidRequestClipboardConfirmation(_ request: TerminalClipboardConfirmationRequest) {
-        guard request.kind == .osc52Write, let window else { return request.respond(allow: false) }
-        let alert = NSAlert()
-        alert.messageText = tr("clipboard.ask")
-        alert.informativeText = String(request.contents.prefix(300))
-        alert.addButton(withTitle: tr("clipboard.allow"))
-        alert.addButton(withTitle: tr("clipboard.deny"))
-        alert.beginSheetModal(for: window) { response in
-            request.respond(allow: response == .alertFirstButtonReturn)
+        guard request.kind == .osc52Write else { return request.respond(allow: false) }
+        switch Activity.clipboardWrite(mode: Self.programClipboard, sinceInput: Date().timeIntervalSince(Self.lastInput)) {
+        case .allow: request.respond(allow: true)
+        case .deny: request.respond(allow: false)
+        case .ask:
+            guard let ask = Self.askClipboard else { return request.respond(allow: false) }
+            ask(request.contents) { request.respond(allow: $0) }
         }
     }
 

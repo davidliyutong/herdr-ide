@@ -82,6 +82,13 @@ public final class EventConnection {
         /// The keybindings changed: the message, with the user's rules and
         /// the bindings in effect (`KeybindingsModel.apply`).
         case keybindings(JSONValue)
+        /// An agent's status changed in a terminal.
+        case agent(Activity.AgentEvent)
+        /// Text sent from a VS Code window of a machine ("Send to agent"),
+        /// with the window's folders when it said them.
+        case send(machine: String, text: String, folders: [String]?)
+        /// Files chosen in VS Code's explorer to download.
+        case download(machine: String, paths: [String])
     }
 
     public var onEvent: ((Event) -> Void)?
@@ -136,6 +143,18 @@ public final class EventConnection {
             return .settings(JSONValue(any: msg))
         case "keybindings":
             return .keybindings(JSONValue(any: msg))
+        case "agent":
+            guard let machine = msg["m"] as? String, let data = msg["data"] as? [String: Any],
+                  let terminal = data["terminal"] as? String, let status = data["agent_status"] as? String else { return nil }
+            return .agent(Activity.AgentEvent(machine: machine, terminal: terminal, status: status, agent: data["agent"] as? String,
+                                              displayAgent: data["display_agent"] as? String, title: data["title"] as? String,
+                                              sound: msg["sound"] as? Bool ?? false))
+        case "bridge.send":
+            guard let machine = msg["m"] as? String, let text = msg["text"] as? String else { return nil }
+            return .send(machine: machine, text: text, folders: (msg["folders"] as? [Any])?.compactMap { $0 as? String })
+        case "bridge.download":
+            guard let machine = msg["m"] as? String, let paths = msg["paths"] as? [Any] else { return nil }
+            return .download(machine: machine, paths: paths.compactMap { $0 as? String })
         default:
             return nil
         }

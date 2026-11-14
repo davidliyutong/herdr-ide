@@ -163,8 +163,19 @@ settings and `cmd+j` shows or hides the VS Code panel; while VS Code has focus, 
 Change or remove them under **Settings → Keyboard shortcuts**. Prefix bindings keep
 working, and browsers keep their own `cmd+t` / `cmd+w`.
 
-The app starts its own core at `http://127.0.0.1:7781` with instance
-`desktop`; quitting or closing the main window stops that core. OpenSSH
+A native macOS application draws the terminals with Ghostty's renderer and
+offers what the browser UI does over the same core: workspaces, tabs and
+split panes (drag, zoom, rename), adding and managing machines with their
+ssh sign-in, a files window with uploads and downloads, pasting and dropping
+files into terminals, settings with machines' own values and every keyboard
+shortcut, the command palette, agents' notifications, sounds and Dock
+badge, VS Code beside the terminals and formulas shown under the pointer.
+Build it with `make macos-app` (`dist/macos/`, signed ad hoc unless
+`SIGN_IDENTITY` names a certificate).
+
+The Electron app starts its own core at `http://127.0.0.1:7781` with
+instance `desktop` (the native application on a port of the system's
+choice); quitting or closing the main window stops that core. OpenSSH
 must already be installed. Released and local builds use ad-hoc signing,
 without Apple notarization or automatic updates. See
 [desktop deployment](docs/deployment.md#macos-desktop-app) for paths,

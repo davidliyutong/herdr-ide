@@ -191,7 +191,7 @@ browser's menu shows instead.
 | `HERDR_IDE_CORE` | `pnpm -C web dev`, the macOS application | Core URL the Vite dev server proxies to (default `http://127.0.0.1:7780`); the macOS application uses that core instead of starting the one in its bundle. |
 | `SIGN_IDENTITY`, `NOTARY_PROFILE` | `make macos-app` | A code-signing certificate's name (default `-`, an ad hoc signature) and a `notarytool` keychain profile; with both the application is notarized and stapled. `SKIP_CORE=1` reuses the core in `dist/`; `OUT_DIR` is where the `.app` goes (default `dist/macos`). |
 | `HERDR_IDE_DEV` | the macOS application | `1` starts the bundled core as instance `dev`, local-only, like `make dev-desktop`. |
-| `HERDR_IDE_SNAPSHOT`, `HERDR_IDE_ACTIONS` | debug builds of the macOS application | Development aids: a path the window is written to as a PNG every two seconds, and actions run two seconds apart (`new`, `split-right`, `split-down`, `close`, `next-tab`, `workspace:<name>[:<cwd>]` (a new workspace with a terminal, without the dialog), `rename-workspace:<name>`, `close-workspace` (without asking), `next-workspace`, `type:<text>`, `find:<text>`, `find-next`, `open:<path>`, `code`, `page`, `settings`, `settings:<section>`, `keys` (the keyboard shortcuts page), `set:<key>=<json>` (a setting changed through the core), `strokes:<stroke> <stroke>…` (strokes given to the key matcher), `key:cmd+<key>`, separated by `;`). |
+| `HERDR_IDE_SNAPSHOT`, `HERDR_IDE_ACTIONS` | debug builds of the macOS application | Development aids: a path the window is written to as a PNG every two seconds, and actions run two seconds apart (`new`, `split-right`, `split-down`, `close`, `next-tab`, `workspace:<name>[:<cwd>]` (a new workspace with a terminal, without the dialog), `rename-workspace:<name>`, `close-workspace` (without asking), `close-workspace:<names>`, `next-workspace`, `type:<text>`, `find:<text>`, `find-next`, `open:<path>`, `code`, `page`, `settings`, `settings:<section>`, `keys` (the keyboard shortcuts page), `set:<key>=<json>` (a setting changed through the core), `strokes:<stroke> <stroke>…` (strokes given to the key matcher), `key:cmd+<key>`, `command:<id>` (a command of the keybindings), `folder:<path>` (a folder dropped on the Dock icon), `palette:<text>`, `drag:<from>:<to>:<zone>` (a pane dragged by its header, or `tab`), `add-machine`, `machine:<add\|signin\|remove\|menu>:<target>`, `transfers`, `files:<dir>`, `select:<names>`, `download-to:<file>`, `upload-file:<file>`, `paste-file:<file>`, `paste-image:<png>`, `record:<command>:<strokes>` (the key recorder), `hover:<column>,<row>` (the pointer resting on a cell), separated by `;`); the window's other windows are written beside it as `<path>.window.png`, `.window2.png`…. |
 | `HERDR_IDE_DESKTOP_DEV` | Electron | `1` forces isolated development even in a packaged app: instance `dev` (terminal core session `herdr-ide-dev`), local-only, separate Electron profile. Unpackaged Electron always uses this mode. |
 | `HERDR_IDE_DESKTOP_PORT` | Electron | Loopback port (default `7781`, development `7791`); `0` chooses an ephemeral port, which gives a new browser storage origin. |
 | `ARCH` | `make desktop-app`, `make desktop-dmg` | `arm64` or `x64`; defaults to the host Node architecture. The Go core architecture is matched automatically. |
@@ -252,6 +252,13 @@ browser only; settings are the core's):
 Browser settings of earlier versions kept there (language, theme, font
 sizes, …) are moved to the core's settings once, when a page of a writable
 core loads, and then removed.
+
+The macOS application keeps, in its preferences (`dev.herdr-ide.mac`), the
+window's frames and the transfers' history (the last 50 finished uploads
+and downloads: file names, machines and paths, no contents), until the user
+clears the history in the transfers panel or removes the preferences; its
+Quick Look copies are in a private temporary directory emptied before each
+preview and at quit.
 
 Desktop artifacts: `dist/desktop/mac-arm64/herdr-ide.app` (arm64),
 `dist/desktop/mac/herdr-ide.app` (x64), and

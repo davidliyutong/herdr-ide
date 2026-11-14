@@ -126,7 +126,10 @@ macOS 版包含适用于 Finder 和 Dock 的多尺寸图标。
 前缀快捷键仍然可用；
 浏览器中 `cmd+t` / `cmd+w` 仍归浏览器所有。
 
-应用会以 `desktop` instance 启动自己的 core，监听 `http://127.0.0.1:7781`；
+原生 macOS 应用用 Ghostty 的渲染器绘制终端，并通过同一个 core 提供浏览器界面的全部功能：workspace、标签页和分屏（拖动、放大、重命名），添加和管理机器（含 ssh 登录），文件窗口与上传下载，把文件粘贴或拖入终端，可按机器覆盖的设置和全部快捷键，命令面板，agent 的通知、提示音和 Dock 角标，终端旁的 VS Code，以及鼠标悬停显示公式。
+用 `make macos-app` 构建（位于 `dist/macos/`；未通过 `SIGN_IDENTITY` 指定证书时使用 ad-hoc 签名）。
+
+Electron 应用会以 `desktop` instance 启动自己的 core，监听 `http://127.0.0.1:7781`（原生应用监听系统分配的端口）；
 退出应用或关闭主窗口时回收该 core。
 仍需预先安装 OpenSSH。
 发布版和本地构建都使用 ad-hoc 签名，不含 Apple 公证或自动更新。

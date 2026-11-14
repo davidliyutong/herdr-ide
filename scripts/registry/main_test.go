@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"herdr-ide/internal/settings"
 )
 
 func TestKeys(t *testing.T) {
@@ -14,9 +16,19 @@ func TestKeys(t *testing.T) {
 			t.Errorf("%s missing", k)
 		}
 	}
-	// Web-only settings are not asked of the macOS application.
-	if !slices.Contains(web, "settings.terminal.mathHover") || slices.Contains(mac, "settings.terminal.mathHover") {
-		t.Error("platforms ignored")
+	// Both user interfaces show every setting.
+	if !slices.Equal(web, mac) {
+		t.Errorf("the clients differ:\nweb   %v\nmacos %v", web, mac)
+	}
+	// A setting limited to some clients is not asked of the others, nor is
+	// a section it alone fills.
+	defs := []settings.Def{{Key: "a.b", Section: "s", Enum: []string{"x"}, Platforms: []string{settings.PlatformWeb}}}
+	sections := []settings.Section{{ID: "s"}}
+	if got := keysOf(defs, sections, settings.PlatformWeb); !slices.Contains(got, "settings.a.b.x") || !slices.Contains(got, "settings.section.s") {
+		t.Errorf("web keys %v", got)
+	}
+	if got := keysOf(defs, sections, settings.PlatformMacOS); slices.Contains(got, "settings.a.b") || slices.Contains(got, "settings.section.s") {
+		t.Errorf("platforms ignored: %v", got)
 	}
 }
 

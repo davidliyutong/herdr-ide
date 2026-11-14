@@ -265,9 +265,11 @@ final class MachineDialogs {
     /// Gives a terminal's shell the machine's virtual display, so programs
     /// started there open their windows (POST /api/m/{id}/gui/enable): a
     /// shell at its prompt gets the variables typed in; one running a
-    /// program is left alone, and the sheet offers the command to copy.
-    func enableWindows(_ terminal: String, on machine: String) {
-        model.api.request("POST", "api/m/\(encoded(machine))/gui/enable", body: ["terminals": [terminal]]) { [weak self] status, reply in
+    /// program is left alone, and the sheet offers the command to copy. Without
+    /// a terminal, every terminal of the machine.
+    func enableWindows(_ terminal: String?, on machine: String) {
+        let body = ["terminals": terminal.map { [$0] } ?? []]
+        model.api.request("POST", "api/m/\(encoded(machine))/gui/enable", body: body) { [weak self] status, reply in
             guard let self, let window = self.window else { return }
             let alert = NSAlert()
             var command = ""

@@ -71,6 +71,19 @@ automatically, scheduling agents.
   ([06](06-quick-look-and-files.md)).
 - **Review**: from a pane, `prefix d` opens the multi-file diff and
   `prefix shift+g` Git Graph of its repository ([05](05-vscode-panel.md)).
+- **The macOS application** ([23](23-macos-application.md)) does the
+  same with native means (`Activity` in `macos/Sources/TermKit`, the same
+  rules, unit-tested): the inbox at the top of the sidebar, `prefix o`, the
+  agents in the palette and the kinds to start; system notifications
+  (`UNUserNotificationCenter`, one per terminal, replaced by the next;
+  clicking one shows the terminal) when the window is not in front, a
+  note in it for a blocked agent when it is; the system's sounds instead of
+  the chimes (Ping when input is needed, Glass when done), on the client
+  the core chose (the application reports its use as `active`); the number
+  of blocked terminals on the Dock icon. *Send to Agent* pastes into the
+  focused terminal of the sending window's machine, else into that
+  machine's agent waiting for input; the terminal is shown first and the
+  text pasted once it is attached.
 
 ## Alternatives considered
 

@@ -61,8 +61,8 @@ final class TerminalControllerBox {
             builder.withCustom("copy-on-select", s.bool("terminal.copyOnSelect", false) ? "clipboard" : "false")
             builder.withCustom("bold-is-bright", s.bool("terminal.boldIsBright", false) ? "true" : "false")
             builder.withCustom("macos-option-as-alt", s.bool("terminal.optionIsMeta", false) ? "true" : "false")
-            let clipboard = ["auto": "allow", "ask": "ask", "off": "deny"][s.string("terminal.programClipboard", "auto")] ?? "allow"
-            builder.withCustom("clipboard-write", clipboard)
+            // "auto" and "ask" are decided by TerminalPane per write.
+            builder.withCustom("clipboard-write", s.string("terminal.programClipboard", "auto") == "off" ? "deny" : "ask")
         }
     }
 

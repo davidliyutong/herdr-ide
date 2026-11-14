@@ -564,3 +564,74 @@ final class FilesTests: XCTestCase {
         XCTAssertEqual(speed.add(1000, now: 5), 200) // from the sample at the window's start
     }
 }
+
+final class FeatureTests: XCTestCase {
+    /// The vectors of design/testdata/math, which web/src/__tests__/math.test.ts runs too.
+    func testMathVectors() throws {
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../../design/testdata/math/find.json")
+        let file = JSONValue(any: try JSONSerialization.jsonObject(with: Data(contentsOf: url.standardizedFileURL)))
+        let cases = file["cases"]?.array ?? []
+        XCTAssertGreaterThan(cases.count, 5)
+        for c in cases {
+            let got = MathText.find(c["text"]?.string ?? "").map { JSONValue.array([.string($0.tex), .bool($0.display)]) }
+            XCTAssertEqual(got, c["expected"]?.array ?? [], c["description"]?.string ?? "")
+        }
+    }
+
+    func testMathOnScreen() {
+        let rows = ["text", "", "  $$", "  x = \\frac{1}{2}", "  $$", "", "after"].map { MathText.Row($0, width: 24) }
+        let m = MathText.at(column: 6, row: 3, rows: rows)
+        XCTAssertEqual(m?.tex, "x = \\frac{1}{2}")
+        XCTAssertEqual(m?.cells.map { [$0.row, $0.from, $0.to] }, [[2, 2, 4], [3, 2, 17], [4, 2, 4]])
+        XCTAssertNil(MathText.at(column: 1, row: 3, rows: rows))
+        XCTAssertNil(MathText.at(column: 0, row: 5, rows: rows))
+        // A formula the terminal wrapped at the last column, after wide characters.
+        let wrapped = ["公式 $\\int_0^1 f(x)\\,dx=F(", "1)-F(0)$ holds"].map { MathText.Row($0, width: 26) }
+        XCTAssertEqual(wrapped[0].columns.last, 26)
+        XCTAssertEqual(MathText.at(column: 3, row: 1, rows: wrapped)?.tex, "\\int_0^1 f(x)\\,dx=F(1)-F(0)")
+    }
+
+    func testEventsOfAgentsAndVSCode() {
+        XCTAssertEqual(EventConnection.decode(#"{"t":"agent","m":"b","sound":true,"data":{"terminal":"t1","agent":"claude","display_agent":"claude","agent_status":"blocked","title":"x"}}"#),
+                       .agent(Activity.AgentEvent(machine: "b", terminal: "t1", status: "blocked", agent: "claude", displayAgent: "claude", title: "x", sound: true)))
+        XCTAssertNil(EventConnection.decode(#"{"t":"agent","m":"b","data":{"terminal":"t1","agent":null,"agent_status":null}}"#))
+        XCTAssertEqual(EventConnection.decode(#"{"t":"bridge.send","m":"b","text":"see a.go:3","folders":["/w"]}"#),
+                       .send(machine: "b", text: "see a.go:3", folders: ["/w"]))
+        XCTAssertEqual(EventConnection.decode(#"{"t":"bridge.send","m":"b","text":"x"}"#), .send(machine: "b", text: "x", folders: nil))
+        XCTAssertEqual(EventConnection.decode(#"{"t":"bridge.download","m":"b","paths":["/a","/b"]}"#), .download(machine: "b", paths: ["/a", "/b"]))
+    }
+
+    func testClipboardAndPaths() {
+        XCTAssertEqual(Activity.clipboardWrite(mode: "auto", sinceInput: 3), .allow)
+        XCTAssertEqual(Activity.clipboardWrite(mode: "auto", sinceInput: 30), .ask)
+        XCTAssertEqual(Activity.clipboardWrite(mode: "ask", sinceInput: 0), .ask)
+        XCTAssertEqual(Activity.clipboardWrite(mode: "off", sinceInput: 0), .deny)
+        XCTAssertEqual(TerminalPath.line("src/main.go:12:5"), 12)
+        XCTAssertEqual(TerminalPath.line("a.py:7:"), 7)
+        XCTAssertNil(TerminalPath.line("/etc/hosts"))
+        XCTAssertTrue(TerminalPath.isMedia("/w/plot.PNG"))
+        XCTAssertFalse(TerminalPath.isMedia("/w/main.go"))
+    }
+
+    /// A core that fails at once: its last log lines are kept for the report.
+    func testCoreLogTail() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let script = dir.appendingPathComponent("core")
+        try "#!/bin/sh\necho 'listen tcp 127.0.0.1:0: bind: refused' >&2\nexit 3\n".write(to: script, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+        let core = CoreProcess()
+        let done = expectation(description: "answered")
+        core.start(binary: script, dev: true, ready: { result in
+            XCTAssertEqual(result.failure, .exited(3))
+            XCTAssertTrue(core.logTail.contains("bind: refused"), core.logTail)
+            done.fulfill()
+        }, exited: {})
+        wait(for: [done], timeout: 10)
+    }
+}
+
+private extension Result {
+    var failure: Failure? { if case let .failure(f) = self { return f } else { return nil } }
+}

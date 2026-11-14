@@ -21,6 +21,21 @@ public enum TerminalPath {
         return (cwd as NSString).appendingPathComponent(path)
     }
 
+    /// The line a path printed as `path:line[:column]` points at.
+    public static func line(_ text: String) -> Int? {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let range = t.range(of: #":(\d+)(:\d+)?:?$"#, options: .regularExpression) else { return nil }
+        return Int(t[range].dropFirst().prefix { $0.isNumber })
+    }
+
+    /// Media the system's Quick Look shows: a ⌘-click previews these and
+    /// opens other files in VS Code, as the web UI does.
+    public static func isMedia(_ path: String) -> Bool {
+        let media: Set<String> = ["png", "jpg", "jpeg", "gif", "webp", "avif", "svg", "bmp", "ico", "mp4", "webm", "mov", "m4v", "mkv",
+                                  "mp3", "wav", "ogg", "flac", "m4a", "aac", "pdf"]
+        return media.contains((path as NSString).pathExtension.lowercased())
+    }
+
     /// A name for the local copy of a previewed file: the path's last
     /// component, without anything that would leave the directory it is
     /// written to.

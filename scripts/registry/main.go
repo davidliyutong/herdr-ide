@@ -38,10 +38,16 @@ var clients = map[string]string{"web": settings.PlatformWeb, "macos": settings.P
 // keys returns the translation keys of a client: every section, setting
 // label and enum option it shows, and every command with its section.
 func keys(platform string) []string {
-	set := map[string]bool{}
 	store := settings.New("", registry.Settings()...)
+	return keysOf(store.Defs(), store.Sections(), platform)
+}
+
+// keysOf returns the translation keys of a client from the settings'
+// definitions and sections.
+func keysOf(defs []settings.Def, sections []settings.Section, platform string) []string {
+	set := map[string]bool{}
 	used := map[string]bool{}
-	for _, d := range store.Defs() {
+	for _, d := range defs {
 		if len(d.Platforms) > 0 && !slices.Contains(d.Platforms, platform) {
 			continue
 		}
@@ -51,7 +57,7 @@ func keys(platform string) []string {
 			set["settings."+d.Key+"."+o] = true
 		}
 	}
-	for _, s := range store.Sections() {
+	for _, s := range sections {
 		if used[s.ID] {
 			set["settings.section."+s.ID] = true
 		}

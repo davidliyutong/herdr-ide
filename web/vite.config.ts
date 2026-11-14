@@ -81,6 +81,8 @@ export default defineConfig({
     chunkSizeWarningLimit: 2000,
     // Licenses of the bundled dependencies, shipped inside the embedded UI.
     license: { fileName: 'licenses.md' },
+    // The macOS application's formula preview (src/mathPage.ts).
+    rollupOptions: { input: { main: 'index.html', math: 'math.html' } },
   },
   server: {
     port: 5173,

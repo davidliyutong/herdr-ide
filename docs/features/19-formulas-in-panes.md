@@ -61,6 +61,17 @@ dropped (`\{` printed as `{`, `\\` as `\`).
   clicking, scrolling and rows the terminal moves under it hide it at once,
   and so does a modifier showing links (⌘/Ctrl). When the text under a shown
   formula changes, the formula under the pointer is looked for again.
+- **In the macOS application** (`macos/Sources/TermKit/Math.swift`,
+  `App/Agents.swift` `MathHover`), with `terminal.mathHover` on, the
+  pointer resting 350 ms on a terminal's text reads the screen's rows from
+  Ghostty and finds the formula under it with the same rules
+  (`MathText`, on UTF-16 offsets as in the web UI; wide characters take
+  two columns). The vectors of `design/testdata/math` hold the cases both
+  implementations run. The formula is rendered by the web UI's own KaTeX
+  in a small web view of the core's `/math.html` (a second entry of the
+  Vite build, `web/src/mathPage.ts`, which renders with `mathRender.ts`
+  and reports its size as KaTeX's fonts arrive), shown in a popover under
+  the formula's rows. Moving off the formula hides it.
 - **KaTeX** (`web/src/terminal/mathRender.ts`) is a separate chunk with its
   stylesheet, imported the first time a formula is shown; the last 200
   results (HTML, or that KaTeX could not read the text) are kept. A failed

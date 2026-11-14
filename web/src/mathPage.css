@@ -1,0 +1,13 @@
+html,
+body {
+  margin: 0;
+  background: transparent;
+  color: var(--ds-color-foreground);
+  font-size: 16px;
+}
+
+#math {
+  display: inline-block;
+  padding: 8px 12px;
+  max-width: 640px;
+}

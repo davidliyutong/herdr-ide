@@ -205,6 +205,36 @@ Non-goals: Linux and Windows.
   the Finder or copies an upload's path, and keeps the last 50 finished
   ones in the application's preferences (names and paths, no contents)
   (`TransferList`, `TransferClient`).
+- **Agents** ([07](07-agent-native-workflow.md)): the inbox at the top of
+  the sidebar (how many agents work and wait, then those waiting:
+  blocked, or a turn that ended unseen), **Jump to the agent that needs
+  attention** (`ctrl+b o`), notifications, sounds and the Dock badge
+  (`Notifier`; notifications need the application bundle, so a SwiftPM
+  development build posts none), and *Send to Agent* from VS Code
+  (`bridge.send`); `bridge.download` downloads what VS Code's explorer
+  chose, into a file picked in a save panel, when the application is in
+  front. The palette also lists the agents, the agent kinds to start
+  beside the focused terminal, the themes and **Enable program windows**
+  for the focused terminal or a whole machine.
+- **VS Code commands**: **Open Folder in VS Code** (`ctrl+b e`), **Show
+  Changes** (`ctrl+b d`) and **Open Git Graph** (`ctrl+b shift+g`) show the
+  panel for the focused terminal's directory and send the bridge's
+  `openDiff` or `gitGraph` (`POST /api/m/{id}/bridge`); a ⌘-click on a path
+  that is not media opens it in VS Code at its line (`openFile`), and
+  previews it with Quick Look when VS Code cannot take it, as the web UI
+  does.
+- **Program windows** that appear while their terminal is on screen in
+  the window in front open in a window of their own, as in the web UI;
+  others wait in the sidebar ([14](14-gui-windows.md)).
+- **Programs' clipboard** (OSC 52, `terminal.programClipboard`): Ghostty
+  asks the application about every write unless the setting is `off`; a
+  write within 10 s of the user's own key or click in a terminal is copied
+  (`auto`), any other (and every one under `ask`) is offered in a note with
+  a **Copy** button that refuses it when the note goes.
+- **Read-only core**: the tab bar says **Read-only**; menus, buttons,
+  drags, renames, uploads, pastes of files and input to terminals are off,
+  and the palette lists only what changes nothing.
+- **Formulas** under the pointer ([19](19-formulas-in-panes.md)).
 - **Quick Look** (`QuickLook.swift`). The path is fetched with
   `GET /api/m/<machine>/file` into a directory of its own in the
   temporary directory (0700; emptied before each preview and at quit) and
@@ -293,7 +323,8 @@ builds the application that ships:
 ## Failure modes
 
 - **Bundled core missing, exiting or silent for 30 s** → an alert names
-  it and the application quits; a core that ends later does the same.
+  it, shows the last 40 lines the core logged (`CoreProcess.logTail`) and
+  the application quits; a core that ends later does the same.
 - **Connection to the core lost** → panes keep their contents; the
   connection returns with backoff and panes attach again.
 - **A machine's terminal backend not ready** → the empty state and the
