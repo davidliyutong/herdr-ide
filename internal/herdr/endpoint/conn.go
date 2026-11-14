@@ -32,6 +32,10 @@ var (
 	deadAfter = 15 * time.Second
 )
 
+// resizeWait is how long a resize waits for herdr's complete surface of the
+// size it asked for before the next one is sent anyway (see Conn.Resize).
+var resizeWait = 2 * time.Second
+
 type hello struct {
 	Generation          uint32   `json:"generation"`
 	CellWidthPx         uint32   `json:"cell_width_px"`
@@ -117,6 +121,21 @@ type Conn struct {
 	gridMu sync.Mutex
 	grid   Grid
 
+	// Resizes (see Resize): the size herdr was asked for last, the size
+	// wanted now, and, while herdr has not yet sent a complete surface of
+	// the asked grid size, the timer that stops waiting for it. rmu guards
+	// them and is never held across a write, so the receiving goroutine
+	// (shown) only waits for short sections; rsend, taken before rmu, is
+	// held from choosing a resize until it is written, which keeps resizes
+	// in order.
+	rsend    sync.Mutex
+	rmu      sync.Mutex
+	asked    Size
+	want     Size
+	inflight *time.Timer
+	waitGen  uint64
+	wait     time.Duration // resizeWait
+
 	mu       sync.Mutex
 	snapshot Snapshot
 	reqSlot  chan struct{}
@@ -193,7 +212,102 @@ func Handshake(ctx context.Context, c net.Conn, o Options) (*Conn, error) {
 		closed:  make(chan struct{}),
 	}
 	conn.lastRecv.Store(time.Now().UnixNano())
+	// The hello asked for the first size; herdr answers it with a complete
+	// surface like a resize.
+	conn.asked, conn.want, conn.wait = o.Size, o.Size, resizeWait
+	conn.waitLocked()
 	return conn, nil
+}
+
+// Resize asks herdr to render the surface at s. One resize whose grid size
+// changes is in flight at a time: herdr answers each with a complete
+// surface, which over a slow link takes long to arrive, so the sizes a
+// window drag goes through would queue up and the grid would trail the
+// window by many seconds. Sizes wanted meanwhile are replaced by the latest,
+// which is sent once herdr's surface of the asked size arrived (or after
+// resizeWait, in case herdr answers with another size).
+func (c *Conn) Resize(s Size) error {
+	c.rsend.Lock()
+	defer c.rsend.Unlock()
+	c.rmu.Lock()
+	c.want = s
+	b := c.nextLocked()
+	c.rmu.Unlock()
+	if b == nil {
+		return nil
+	}
+	return c.Send(b)
+}
+
+// flush sends the wanted size unless a resize is in flight or herdr was
+// already asked for it.
+func (c *Conn) flush() {
+	c.rsend.Lock()
+	defer c.rsend.Unlock()
+	c.rmu.Lock()
+	b := c.nextLocked()
+	c.rmu.Unlock()
+	if b != nil {
+		_ = c.Send(b)
+	}
+}
+
+// nextLocked returns the resize to send now, if any, and records it as
+// asked (and in flight when the grid size changes); rmu is held.
+func (c *Conn) nextLocked() []byte {
+	if c.inflight != nil || c.want == c.asked {
+		return nil
+	}
+	if c.want.Cols != c.asked.Cols || c.want.Rows != c.asked.Rows {
+		// Only a new grid size is answered with a complete surface.
+		c.waitLocked()
+	}
+	c.asked = c.want
+	return EncodeResize(c.want)
+}
+
+// waitLocked marks a resize in flight until herdr's answer or resizeWait.
+func (c *Conn) waitLocked() {
+	c.waitGen++
+	gen := c.waitGen
+	c.inflight = time.AfterFunc(c.wait, func() {
+		c.rmu.Lock()
+		expired := c.waitGen == gen && c.inflight != nil
+		if expired {
+			c.inflight = nil
+		}
+		c.rmu.Unlock()
+		if expired {
+			c.flush()
+		}
+	})
+}
+
+// shown notes a complete surface of w×h. When it answers the resize in
+// flight, the size wanted since is sent on another goroutine: the
+// receiving one must not wait for a write.
+func (c *Conn) shown(w, h uint16) {
+	c.rmu.Lock()
+	defer c.rmu.Unlock()
+	if c.inflight == nil || w != c.asked.Cols || h != c.asked.Rows {
+		return
+	}
+	c.inflight.Stop()
+	c.inflight = nil
+	if c.want != c.asked {
+		go c.flush()
+	}
+}
+
+// stopWaiting ends a resize wait when the connection ends.
+func (c *Conn) stopWaiting() {
+	c.rmu.Lock()
+	defer c.rmu.Unlock()
+	if c.inflight != nil {
+		c.inflight.Stop()
+		c.inflight = nil
+	}
+	c.waitGen++
 }
 
 // Has reports whether herdr advertised a capability.
@@ -246,6 +360,7 @@ func (c *Conn) Run(ctx context.Context, fn func(Event)) error {
 	go c.health(ctx, stop)
 	err := c.recv(fn)
 	c.c.Close()
+	c.stopWaiting()
 	c.mu.Lock()
 	c.closeErr = err
 	for id, ch := range c.pending {
@@ -304,6 +419,7 @@ func (c *Conn) handle(m Message, fn func(Event)) error {
 	switch m := m.(type) {
 	case *Surface:
 		c.grid.Full(m)
+		c.shown(m.Frame.W, m.Frame.H)
 		fn(Event{Surface: m})
 	case *Patch:
 		if err := c.grid.Patch(m); err != nil {
@@ -326,6 +442,7 @@ func (c *Conn) handle(m Message, fn func(Event)) error {
 			if err != nil {
 				return err
 			}
+			c.shown(s.Frame.W, s.Frame.H)
 			fn(Event{Surface: s})
 		case ScrollKind:
 			moves, p, err := c.grid.ScrollPatch(m.Data)

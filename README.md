@@ -25,13 +25,13 @@ browser tab, with VS Code (code-server) one keystroke away.
   herdr configuration (prefix `ctrl+b`).
 - **herdr included.** Release archives carry herdr 0.9.5 for Linux/macOS on
   amd64/arm64, used when this host has no herdr installed. It behaves like an
-  installed herdr: same configuration, sessions and machines. **Manage herdr**
-  (right-click a machine) starts, stops and restarts its herdr server, and on
-  the local machine updates herdr through herdr's own updater, without a
-  terminal; **Restart herdr…** restarts a machine's server directly, or
-  starts it after the machine rebooted. **Update herdr** on an SSH machine
-  runs herdr's own `herdr --remote` update there, and **Install herdr** the
-  same flow where herdr was removed or moved.
+  installed herdr: same configuration, sessions and machines. Right-click a
+  machine to **Restart herdr…** (also to start it after the machine
+  rebooted) or **Stop herdr…**, without a terminal; **Update herdr…** on the
+  local machine updates herdr through herdr's own updater, on an SSH machine
+  it runs herdr's own `herdr --remote` update there, and **Install herdr**
+  the same flow where herdr was removed or moved. Disabling an SSH machine
+  can stop its herdr too.
 - **Multi-machine.** Uses the SSH machines saved in herdr; right-click the
   sidebar to add one (herdr's own `herdr machine add`, in a terminal), or a
   machine to rename it or remove it from herdr, or to disable or enable it
@@ -49,8 +49,9 @@ browser tab, with VS Code (code-server) one keystroke away.
   themselves, or taken from an existing install, with Git Graph and a bridge
   extension: open a pane's folder, its diff or Git Graph with one key or
   from the buttons in the pane's header; jump from a `path:line` in the terminal
-  to the editor. The panel sits beside or below the terminals. Idle
-  instances are stopped.
+  to the editor. Each workspace has its own panel, so several VS Code
+  windows stay open and switching workspace switches between them. The
+  panel sits beside or below the terminals. Idle instances are stopped.
 - **Program windows.** Windows that programs on remote Linux machines open
   (matplotlib, the MuJoCo viewer, Qt tools) appear in browser windows, one
   per program window, with mouse and keyboard. Panes get a virtual display
@@ -65,8 +66,9 @@ browser tab, with VS Code (code-server) one keystroke away.
   pane (`$…$`, `$$…$$`, `\(…\)`, `\[…\]`, also with the backslashes its
   markdown dropped) to see it typeset, and copy its source.
 - **Find.** ⌘F (Ctrl+Shift+F on other systems) finds text in a pane's
-  output, scrollback included: every match is highlighted, Enter and
-  Shift+Enter step to older and newer ones, scrolling them into view.
+  output, scrollback included, optionally matching case, whole words or a
+  regular expression: every match is highlighted, Enter and Shift+Enter
+  step to older and newer ones, scrolling them into view.
 - **Files to agents.** Paste or drop files into a pane to paste their paths;
   files that are not on the pane's machine are uploaded to it first, dropped
   ones into the pane's directory (an existing file there is never replaced).
@@ -75,7 +77,9 @@ browser tab, with VS Code (code-server) one keystroke away.
 - **Files from machines.** Right-click in a pane to download the path under
   the pointer, or choose files and folders of the pane's directory to
   download together; folders arrive as zip archives, streamed from the
-  machine. VS Code's explorer has the same download.
+  machine. VS Code's explorer has the same download. The downloads panel in
+  the status bar shows each download's progress, speed and result, and
+  cancels or repeats it.
 - **Several browsers at once.** The active browser controls a pane; others
   watch at the same size and take over by typing.
 - **Settings.** Language (English, Chinese), light/dark theme followed by

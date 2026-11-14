@@ -8,7 +8,7 @@ import { keyName } from '../shortcutKey';
 import { altOnly, runShortcut, shortcutConflict } from '../desktop';
 import { useDialog } from '../dialog';
 import { PROCESS_INFO_TIMEOUT_MS } from '../actions';
-import { useStore } from '../state/store';
+import { useStore, currentDock } from '../state/store';
 import type { MachineState } from '../lib/herdr';
 
 describe('keyName', () => {
@@ -202,26 +202,27 @@ describe('runShortcut', () => {
   it('shows and hides the VS Code panel, coming back to the one shown last', () => {
     const s = useStore.getState();
     s.openDock(undefined);
-    useStore.setState({ lastCode: undefined });
+    useStore.setState({ docks: {} });
     // Nothing shown before: the focused pane's folder opens.
     runShortcut('toggle_code');
-    expect(useStore.getState().dock).toEqual({ kind: 'code', m: 'm', folder: undefined });
+    expect(currentDock(useStore.getState())).toEqual({ kind: 'code', m: 'm', folder: undefined });
     runShortcut('toggle_code');
-    expect(useStore.getState().dock).toBeUndefined();
+    expect(currentDock(useStore.getState())).toBeUndefined();
     // The panel shown last comes back, as it was.
     s.openDock({ kind: 'code', m: 'm', folder: '/srv/app' });
     runShortcut('toggle_code');
-    expect(useStore.getState().dock).toBeUndefined();
+    expect(currentDock(useStore.getState())).toBeUndefined();
     runShortcut('toggle_code');
-    expect(useStore.getState().dock).toEqual({ kind: 'code', m: 'm', folder: '/srv/app' });
+    expect(currentDock(useStore.getState())).toEqual({ kind: 'code', m: 'm', folder: '/srv/app' });
     // A preview panel hides too.
     s.openDock({ kind: 'preview', m: 'm', path: '/srv/a.png' });
     runShortcut('toggle_code');
-    expect(useStore.getState().dock).toBeUndefined();
+    expect(currentDock(useStore.getState())).toBeUndefined();
     // Another machine's last panel is not brought back.
-    useStore.setState({ lastCode: { kind: 'code', m: 'other', folder: '/x' } });
+    s.openDock({ kind: 'code', m: 'other', folder: '/x' });
+    s.openDock(undefined);
     runShortcut('toggle_code');
-    expect(useStore.getState().dock).toEqual({ kind: 'code', m: 'm', folder: undefined });
+    expect(currentDock(useStore.getState())).toEqual({ kind: 'code', m: 'm', folder: undefined });
     s.openDock(undefined);
   });
 

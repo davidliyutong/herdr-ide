@@ -8,7 +8,7 @@ vi.mock('../lib/conn', () => ({ conn: { api: (...a: unknown[]) => api(...a), set
 const command = vi.fn((..._args: unknown[]) => Promise.resolve());
 vi.mock('../lib/bridge', () => ({ bridge: { command: (...a: unknown[]) => command(...a) } }));
 
-import { useStore } from '../state/store';
+import { useStore, currentDock } from '../state/store';
 import type { MachineState } from '../lib/herdr';
 import { PaneToolbar } from '../components/PaneToolbar';
 import { PaneHeader } from '../components/PaneHeader';
@@ -77,7 +77,7 @@ describe('PaneToolbar', () => {
 
     const [code, diff, graph] = buttons();
     await act(async () => code.click());
-    expect(useStore.getState().dock).toEqual({ kind: 'code', m: 'm', folder: '/home/u/src' });
+    expect(currentDock(useStore.getState())).toEqual({ kind: 'code', m: 'm', folder: '/home/u/src' });
     await act(async () => diff.click());
     expect(command).toHaveBeenLastCalledWith('m', '/home/u/src', { cmd: 'openDiff', repo: '/home/u/src' });
     await act(async () => graph.click());

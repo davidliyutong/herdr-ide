@@ -6,7 +6,6 @@ import { Workspace } from './components/Workspace';
 import { Dock } from './components/Dock';
 import { Palette } from './components/Palette';
 import { AuthDialog } from './components/AuthDialog';
-import { HerdrDialog } from './components/HerdrDialog';
 import { RemoteHerdrDialog } from './components/RemoteHerdrDialog';
 import { AddMachineDialog } from './components/AddMachineDialog';
 import { SettingsDialog } from './components/SettingsDialog';
@@ -25,19 +24,17 @@ import { initSurface, surfaceDisconnected } from './surface/session';
 import { isFindKey, openFind } from './surface/find';
 import { useGui } from './gui/state';
 import { GuiTray } from './gui/GuiMenus';
-import { bridgeDownload } from './download';
+import { bridgeDownload, downloadEvent, resyncDownloads } from './download';
+import { sendTarget } from './lib/bridge';
 import { TransfersTray } from './components/Transfers';
+import { DownloadsTray } from './components/Downloads';
 
-/** Text sent from VS Code ("Send to agent") is pasted, not submitted, into the
- * focused pane when it is on the same machine, else that machine's most
- * attention-worthy agent pane. */
-function pasteToAgent(m: string, text: string) {
+/** Text sent from VS Code ("Send to agent") is pasted, not submitted, into
+ * the pane sendTarget picks: the focused one, or an agent pane of the
+ * workspace whose panel shows the sending window. */
+function pasteToAgent(m: string, text: string, folders?: string[]) {
   const s = useStore.getState();
-  let pane = s.focused?.m === m ? s.focused.pane : undefined;
-  if (!pane) {
-    const agents = (s.machines[m]?.snapshot?.panes ?? []).filter((p) => p.agent);
-    pane = agents.find((p) => p.agent_status === 'idle' || p.agent_status === 'done')?.pane_id ?? agents[0]?.pane_id;
-  }
+  const pane = sendTarget(s, m, folders);
   const term = pane ? getTerm(m, pane) : undefined;
   if (!term) {
     s.toast(t('app.noAgentPane'));
@@ -67,9 +64,11 @@ export function App() {
       onConnection: (c) => {
         useStore.getState().setConnected(c);
         if (!c) surfaceDisconnected();
+        else resyncDownloads();
       },
-      onBridgeSend: (m, text) => pasteToAgent(m, text),
+      onBridgeSend: (m, text, folders) => pasteToAgent(m, text, folders),
       onBridgeDownload: (m, paths) => bridgeDownload(m, paths),
+      onDownload: (ev) => downloadEvent(ev),
       onGui: (st) => useGui.getState().setState(st),
     });
     loadKeymap();
@@ -112,7 +111,6 @@ export function App() {
       <StatusBar connected={connected} prefix={prefix} />
       <Palette />
       <SettingsDialog />
-      <HerdrDialog />
       <RemoteHerdrDialog />
       <AddMachineDialog />
       <Dialogs />
@@ -167,6 +165,7 @@ function StatusBar({ connected, prefix }: { connected: boolean; prefix: boolean 
       )}
       <span className="spacer" />
       <TransfersTray />
+      <DownloadsTray />
       <GuiTray />
       {prefix && <span className="prefix-badge">PREFIX</span>}
       <span className="muted small">{t('app.hint', { prefix: keyPrefix })}</span>

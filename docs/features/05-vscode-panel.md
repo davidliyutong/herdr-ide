@@ -52,17 +52,45 @@ settings between machines.
   the Host header preserved (code-server compares Origin with Host).
 - While code-server is being prepared, the panel shows a page that polls
   `/api/m/<machine>/code/status` and translates the phase codes.
-- The panel is a same-origin iframe, one per machine, kept while used;
-  `?folder=` selects the workspace folder (the focused pane's cwd). It sits
-  beside the terminals or below them (a setting, also toggled from the
-  panel's header); width and height are remembered per browser.
+- The panel sits beside the terminals or below them (a setting, also toggled
+  from the panel's header); width and height are remembered per browser.
+
+**One panel per workspace** (`web/src/state/store.ts` `docks`,
+`web/src/components/Dock.tsx`)
+
+- Each herdr workspace (machine and workspace id) has its own panel: what it
+  shows (VS Code of a machine and folder, a preview, or nothing) and the
+  VS Code panel it showed last. Selecting a workspace shows its panel;
+  opening VS Code, a diff, Git Graph or a preview from a pane goes to the
+  selected workspace's panel. Several VS Code windows (machines or folders)
+  thus stay open, one per workspace, and switching workspace switches
+  between them.
+- The choice is kept per browser (local storage) and restored after a
+  reload. A workspace closed in herdr, or a machine removed from herdr's
+  machines while the page is open, takes its panel along; a machine that
+  is reconnecting (no snapshot), or one a core started with fewer machines
+  (`--local-only`) does not list, keeps them.
+- VS Code is a same-origin iframe per machine and folder (`?folder=`, the
+  focused pane's cwd when opened from a pane); workspaces showing the same
+  folder share it. A window that is no longer shown stays loaded, so
+  switching back is instant, for 10 minutes and among the 3 hidden most
+  recently; then it is unmounted, which closes its connection and lets the
+  core stop that machine's idle code-server. Windows keep their place in the
+  document, since moving an iframe reloads it.
+- A disabled machine's windows are unmounted and a panel showing it says so;
+  enabling the machine loads it again. In read-only mode, where the proxy
+  refuses VS Code, a VS Code panel kept from before shows nothing. Stopping
+  code-server (the panel's power button) closes that machine's VS Code
+  panels in every workspace and unmounts its windows; `cmd+j` brings one
+  back, which starts code-server again.
 - In the desktop app `cmd+j` (`desktop-toggle-code-key`,
-  [04](04-layout-and-keyboard.md)) shows or hides the panel: an open panel
-  (VS Code or preview) closes and the terminal gets the keys again; a closed
-  one shows the VS Code panel shown last, as it was, while it belongs to the
-  focused pane's machine (its window is kept for 10 minutes, so it is back at
-  once), else the focused pane's folder opens. It works while VS Code has
-  focus too, so VS Code's own `cmd+j` (its panel) is not available there.
+  [04](04-layout-and-keyboard.md)) shows or hides the selected workspace's
+  panel: an open panel (VS Code or preview) closes and the terminal gets the
+  keys again; a closed one shows the VS Code panel that workspace showed
+  last, as it was, while it belongs to the focused pane's machine (its window
+  is kept as above, so it is usually back at once), else the focused pane's
+  folder opens. It works while VS Code has focus too, so VS Code's own
+  `cmd+j` (its panel) is not available there.
 
 **Theme** (`theme` WebSocket message, `bridgeHub.setTheme`)
 
@@ -85,9 +113,16 @@ settings between machines.
   (waiting up to 60 s for the iframe to load, accepting a containing folder
   after a grace period): `openFile` (path, line, column), `openDiff`
   (multi-file "View Changes"), `gitGraph` (repository root), `openMedia`,
-  `reveal`.
+  `reveal`. With one window per machine and folder, the folder of the
+  selected workspace's panel names its window, so commands reach the
+  VS Code the user sees; `openFile` keeps that folder when the file is
+  below it, else uses the focused pane's cwd or the file's directory.
 - **Send to Agent** in the editor sends `@file:lines` plus the selection; the
-  browser pastes it, unsubmitted, into the focused agent pane.
+  core adds the sending window's folders (`bridge.send`), and the browser
+  pastes it, unsubmitted, into the focused pane when the selected
+  workspace's panel shows that window, else into an agent pane (idle or done
+  first) of the workspace whose panel shows it; without such a workspace,
+  into the focused pane on that machine or its most attention-worthy agent.
 - **Download (folders as zip)** in the explorer's menu (several entries can be
   selected) sends their paths; the core passes them to the browsers as
   `bridge.download`, and the page with the focus (the one whose VS Code panel
@@ -119,6 +154,9 @@ settings between machines.
 | Reverse ssh socket forward for the bridge | Replaced by the agent's listener tunnelled over the existing yamux session. |
 | Only VS Code's own Download… | Needs the File System Access API for folders and files over 32 MB: Chromium only, on a secure origin, and a permission the desktop app has to grant. |
 | Routing a download to the exact page of the VS Code window | The extension host does not know which page shows its window; the page with the focus is the one whose panel was just used. |
+| One VS Code window per machine, navigated to the folder of the selected workspace | Every workspace switch would reload VS Code; one window per folder keeps each workspace's editors as they were. |
+| Keeping every workspace's VS Code window loaded | Each is a whole workbench in the browser, and its connection keeps code-server from stopping when idle; hidden windows are bounded by time and count instead. |
+| One panel for all workspaces (before) | Only one VS Code at a time; opening a pane's folder replaced the window another workspace was using. |
 
 ## Failure modes
 
@@ -132,6 +170,11 @@ settings between machines.
   pid file, and starts a new one.
 - **No window for the folder** → the bridge waits, then falls back to a
   window containing the folder, then reports an error.
+- **A hidden window was unmounted** (10 minutes, or more than 3 hidden) →
+  selecting its workspace loads it again; code-server restores its editors,
+  and starts again first if it was stopped as idle.
+- **herdr gives workspaces new ids** (for example a new session) → their
+  stored panels no longer match a workspace and are dropped.
 - **Two cores on one machine (same instance)** → the bridge socket stays with
   the first agent; the other logs that VS Code commands go to that core.
   Separate instances avoid this.
@@ -158,6 +201,11 @@ VS Code's "open in browser" links for forwarded ports therefore do not work.
 verified machine downloads, start flags), `internal/server/server_test.go`
 (bridge window selection, idle tracking, theme broadcast, refused port proxy
 paths), `internal/server/download_test.go` (`bridge.download` to browsers),
+`TestBridgeSendToAgent` (the sending window's folders in `bridge.send`),
+`web/src/__tests__/workspaceDock.test.ts` (a panel per workspace, kept per
+browser and dropped with its workspace or machine, windows per machine and
+folder with their order, expiry and limit, disabled machines, read-only
+mode, stopping code-server, the pane Send to Agent picks),
 `web/src/__tests__/download.test.ts` (only the focused page downloads),
 `desktop/src/policy.test.ts` (the File System Access permission). VS Code's
 own Download… was traced in code-server 4.144.0: up to 32 MB it is a blob

@@ -12,7 +12,7 @@ import { FakeXhr } from './fakeXhr';
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 vi.stubGlobal('XMLHttpRequest', FakeXhr);
 
-import { useStore } from '../state/store';
+import { useStore, currentDock } from '../state/store';
 import { cancelAllUploads, cancelUpload, clearUploadHistory, forgetUpload, HISTORY_MAX, uploadFiles, useTransfers } from '../transfers';
 import { detail, duration, TransfersTray } from '../components/Transfers';
 
@@ -194,7 +194,7 @@ describe('the uploads panel', () => {
     expect(rows()[1]).toMatch(/^a\.bingpu box · ~\/projCancelled/);
 
     await click('Preview');
-    expect(useStore.getState().dock).toEqual({ kind: 'preview', m: 'ws2', path: '/home/u/proj/b.bin' });
+    expect(currentDock(useStore.getState())).toEqual({ kind: 'preview', m: 'ws2', path: '/home/u/proj/b.bin' });
     expect(useTransfers.getState().panel).toBe(false);
 
     await act(async () => button()!.click());

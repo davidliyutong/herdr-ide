@@ -41,6 +41,11 @@ type inMsg struct {
 	// active: milliseconds since the user last used the page.
 	Idle int64 `json:"idle"`
 
+	// download.watch: the downloads the page follows; download.cancel: the
+	// one it cancels.
+	IDs []string `json:"ids"`
+	ID  string   `json:"id"`
+
 	RID    int64           `json:"rid"`
 	Method string          `json:"method"`
 	Params json.RawMessage `json:"params"`
@@ -92,6 +97,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		s.clientsMu.Lock()
 		delete(s.clients, c)
 		s.clientsMu.Unlock()
+		s.forgetWatcher(c)
 	}()
 
 	go c.writeLoop()
@@ -200,6 +206,12 @@ func (c *wsClient) dispatch(m *inMsg) {
 		if mc.Retry() {
 			c.s.audit.log(c.req, "machine.retry", map[string]any{"machine": m.M})
 		}
+	case "download.watch":
+		// A page follows its own downloads, also in read-only mode, where
+		// it may download.
+		c.s.watchDownloads(c, m.IDs)
+	case "download.cancel":
+		c.s.cancelDownload(c, m.ID)
 	case "ping":
 		c.sendJSON(map[string]any{"t": "pong", "rid": m.RID})
 	case "active":

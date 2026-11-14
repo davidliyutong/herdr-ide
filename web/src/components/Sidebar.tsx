@@ -146,6 +146,7 @@ function MachineItem({ m }: { m: MachineState }) {
   const renaming = useStore((s) => (s.renaming?.kind === 'workspace' && s.renaming.m === m.id ? s.renaming.id : undefined));
   const renamingMachine = useStore((s) => s.renaming?.kind === 'machine' && s.renaming.m === m.id);
   const setRenaming = useStore((s) => s.setRenaming);
+  const herdrBusy = useStore((s) => s.herdrBusy[m.id] === true);
   const snap = m.snapshot;
   const workspaces = snap?.workspaces ?? [];
   // herdr removed or moved on an SSH machine (or never installed there):
@@ -198,7 +199,11 @@ function MachineItem({ m }: { m: MachineState }) {
                   {missing
                     ? install
                     : (m.kind === 'local' || m.status === 'degraded') &&
-                      !readOnly && <button onClick={() => useStore.getState().openHerdr(m.id)}>{t('sidebar.manageHerdr')}</button>}
+                      !readOnly && (
+                        <button disabled={herdrBusy} onClick={() => void actions.startHerdr(m.id)}>
+                          {t('sidebar.startHerdr')}
+                        </button>
+                      )}
                   {!readOnly && <button onClick={() => conn.retry(m.id)}>{t('sidebar.retry')}</button>}
                 </div>
               )}

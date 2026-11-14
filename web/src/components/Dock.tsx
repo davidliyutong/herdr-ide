@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, ExternalLink, PanelBottom, PanelRight, Power, X } from 'lucide-react';
-import { useStore, type DockView } from '../state/store';
+import { currentDock, normFolder, useStore, type DockView } from '../state/store';
 import { usePrefs } from '../prefs';
 import { fileUrl, formatSize, listDir, type RemoteStat } from '../lib/files';
 import { mediaExt } from '../terminal/links';
@@ -8,8 +8,66 @@ import { actions } from '../actions';
 import { shortPath } from '../lib/herdr';
 import { t } from '../i18n';
 
+/** A code-server window kept in the dock: one per machine and folder, shared
+ * by the workspaces that show it. */
+export interface Frame {
+  m: string;
+  folder: string;
+  /** When it was hidden; a shown frame has none. */
+  hidden?: number;
+}
+
+export const frameKey = (m: string, folder?: string) => `${m}|${normFolder(folder) ?? ''}`;
+
+/** A hidden window is unmounted after this long, which closes its
+ * connection and lets the core stop that machine's idle code-server. */
+export const FRAME_TTL = 10 * 60_000;
+/** At most this many hidden windows stay mounted (each is a whole VS Code
+ * workbench); the ones hidden longest go first. */
+export const MAX_HIDDEN_FRAMES = 3;
+
+/** The windows to keep once dock is shown: the one it shows (unless its
+ * machine is disabled), and the others hidden, without those of disabled
+ * machines, expired ones and the oldest beyond MAX_HIDDEN_FRAMES. Windows
+ * keep their order: moving an iframe in the document reloads it. */
+export function nextFrames(frames: Record<string, Frame>, dock: DockView | undefined, disabled: Set<string>, now: number) {
+  const shown = dock?.kind === 'code' && !disabled.has(dock.m) ? frameKey(dock.m, dock.folder) : undefined;
+  const hidden: [string, number][] = [];
+  for (const [k, fr] of Object.entries(frames)) {
+    if (k === shown || disabled.has(fr.m)) continue;
+    const h = fr.hidden ?? now;
+    if (now - h < FRAME_TTL) hidden.push([k, h]);
+  }
+  hidden.sort((a, b) => b[1] - a[1]);
+  const keep = new Map(hidden.slice(0, MAX_HIDDEN_FRAMES));
+  const next: Record<string, Frame> = {};
+  for (const [k, fr] of Object.entries(frames)) {
+    if (k === shown) next[k] = fr.hidden === undefined ? fr : { m: fr.m, folder: fr.folder };
+    else if (keep.has(k)) next[k] = fr.hidden === keep.get(k) ? fr : { ...fr, hidden: keep.get(k) };
+  }
+  if (shown && !next[shown] && dock?.kind === 'code') next[shown] = { m: dock.m, folder: normFolder(dock.folder) ?? '' };
+  return next;
+}
+
+type Machines = ReturnType<typeof useStore.getState>['machines'];
+let disabledOf: { machines?: Machines; list: string } = { list: '' };
+
+/** The ids of the disabled machines, one per line: worked out again only
+ * when the machines change, not on every change of the store. */
+function disabledMachines(s: { machines: Machines }): string {
+  if (s.machines !== disabledOf.machines) {
+    const list = Object.values(s.machines)
+      .filter((x) => x.status === 'disabled')
+      .map((x) => x.id)
+      .sort()
+      .join('\n');
+    disabledOf = { machines: s.machines, list };
+  }
+  return disabledOf.list;
+}
+
 export function Dock() {
-  const dock = useStore((s) => s.dock);
+  const dock = useStore(currentDock);
   const width = useStore((s) => s.dockWidth);
   const setWidth = useStore((s) => s.setDockWidth);
   const height = useStore((s) => s.dockHeight);
@@ -18,19 +76,18 @@ export function Dock() {
   const position = usePrefs((s) => s.prefs.dockPosition);
   const setPref = usePrefs((s) => s.setPref);
   const bottom = position === 'bottom';
-  // code-server windows stay mounted per machine while in use so switching
-  // back is instant; a window hidden for FRAME_TTL is unmounted, which closes
-  // its connection and lets the core stop that machine's idle code-server.
-  const [frames, setFrames] = useState<Record<string, { folder: string; hidden?: number }>>({});
+  // code-server windows stay mounted per machine and folder while in use, so
+  // switching workspace (each has its own panel) or back is instant; see
+  // nextFrames for when hidden ones go.
+  const [frames, setFrames] = useState<Record<string, Frame>>({});
+  // Disabled machines have no code-server; their windows go.
+  const disabledList = useStore(disabledMachines);
+  const disabled = useMemo(() => new Set(disabledList ? disabledList.split('\n') : []), [disabledList]);
+  const off = dock?.kind === 'code' && disabled.has(dock.m);
 
   useEffect(() => {
-    setFrames((f) => {
-      const next: typeof f = {};
-      for (const [m, fr] of Object.entries(f)) next[m] = { folder: fr.folder, hidden: fr.hidden ?? Date.now() };
-      if (dock?.kind === 'code') next[dock.m] = { folder: dock.folder ?? '' };
-      return next;
-    });
-  }, [dock]);
+    setFrames((f) => nextFrames(f, dock, disabled, Date.now()));
+  }, [dock, disabled]);
 
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -42,7 +99,7 @@ export function Dock() {
     }, 60_000);
     const onStopped = (e: Event) => {
       const m = (e as CustomEvent<string>).detail;
-      setFrames((f) => Object.fromEntries(Object.entries(f).filter(([k]) => k !== m)));
+      setFrames((f) => Object.fromEntries(Object.entries(f).filter(([, fr]) => fr.m !== m)));
     };
     window.addEventListener('code-stopped', onStopped);
     return () => {
@@ -83,7 +140,7 @@ export function Dock() {
       <div className="dock-head">
         <DockTitle dock={dock} />
         <span className="spacer" />
-        {dock?.kind === 'code' && (
+        {dock?.kind === 'code' && !off && (
           <>
             <a className="icon" href={codeUrl(dock.m, dock.folder)} target="_blank" rel="noreferrer" title={t('dock.openInTab')}>
               <ExternalLink />
@@ -105,27 +162,33 @@ export function Dock() {
         </button>
       </div>
       <div className="dock-body">
-        {Object.entries(frames).map(([m, fr]) => (
+        {Object.entries(frames).map(([k, fr]) => (
           <iframe
-            key={m}
+            key={k}
             className="code-frame"
-            style={{ display: dock?.kind === 'code' && dock.m === m ? undefined : 'none' }}
-            src={codeUrl(m, fr.folder)}
-            title={`VS Code ${m}`}
+            style={{ display: dock?.kind === 'code' && frameKey(dock.m, dock.folder) === k ? undefined : 'none' }}
+            src={codeUrl(fr.m, fr.folder)}
+            title={`VS Code ${fr.m} ${fr.folder}`}
             allow="clipboard-read; clipboard-write"
           />
         ))}
+        {off && dock && <MachineOff m={dock.m} />}
         {dock?.kind === 'preview' && <Preview key={dock.m + dock.path} m={dock.m} path={dock.path} />}
       </div>
     </section>
   );
 }
 
-const FRAME_TTL = 10 * 60_000;
+/** In place of VS Code of a disabled machine. */
+function MachineOff({ m }: { m: string }) {
+  const label = useStore((s) => s.machines[m]?.label ?? m);
+  return <div className="pad muted">{t('dock.machineDisabled', { machine: label })}</div>;
+}
 
+/** Stops a machine's code-server: every workspace's VS Code panel of that
+ * machine closes and its windows go. */
 async function stopCode(m: string) {
-  const s = useStore.getState();
-  s.openDock(undefined);
+  useStore.getState().closeCode(m);
   await fetch(`/api/m/${encodeURIComponent(m)}/code/stop`, { method: 'POST' }).catch(() => {});
   // Remount on next open (the old window's connection is gone anyway).
   window.dispatchEvent(new CustomEvent('code-stopped', { detail: m }));

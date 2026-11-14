@@ -120,6 +120,30 @@ func TestArchive(t *testing.T) {
 	}
 }
 
+// A chunked archive ends with the framing's end marker: a reader knows it
+// got all of it.
+func TestArchiveChunked(t *testing.T) {
+	s, home := dialAgent(t)
+	proj := filepath.Join(home, "proj")
+	os.MkdirAll(filepath.Join(proj, "src"), 0o755)
+	os.WriteFile(filepath.Join(proj, "a.txt"), []byte("alpha"), 0o644)
+	os.WriteFile(filepath.Join(proj, "src", "b.txt"), bytes.Repeat([]byte("beta"), 1<<16), 0o644)
+	conn, _, err := s.Open(context.Background(), agentproto.Header{Op: agentproto.OpFsArchive, Paths: []string{proj}, Chunked: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	// ReadAll fails with io.ErrUnexpectedEOF unless the end marker came.
+	b, err := io.ReadAll(&agentproto.ChunkReader{R: conn})
+	if err != nil {
+		t.Fatalf("chunked archive: %v", err)
+	}
+	got := readZip(t, b)
+	if got["proj/a.txt"] != "alpha" || len(got["proj/src/b.txt"]) != 4<<16 {
+		t.Fatalf("entries = %d, a.txt = %q", len(got), got["proj/a.txt"])
+	}
+}
+
 // A reader that goes away stops the walk; the agent keeps serving.
 func TestArchiveStopsWhenTheReaderLeaves(t *testing.T) {
 	s, home := dialAgent(t)

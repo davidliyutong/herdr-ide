@@ -37,7 +37,8 @@ const (
 	// writes them atomically to Path and sends a second reply line.
 	OpFsWrite Op = "fs.write"
 	// OpFsArchive streams Paths as one zip archive after the reply and then
-	// closes the stream; nothing is written on the machine.
+	// closes the stream; nothing is written on the machine. With
+	// Header.Chunked the archive comes as ChunkWriter chunks.
 	OpFsArchive Op = "fs.archive"
 	// OpDialUnix dials a unix socket below the agent run directory.
 	OpDialUnix Op = "dial-unix"
@@ -54,6 +55,9 @@ const (
 	// comes at once; a second reply line with Herdr follows when the action
 	// is done.
 	OpHerdr Op = "herdr"
+	// OpPaneFind searches the text of pane Header.Find.Pane next to herdr
+	// (internal/panefind) and answers with Reply.Find; nothing follows.
+	OpPaneFind Op = "pane.find"
 )
 
 // Header is the first line of every stream.
@@ -79,6 +83,10 @@ type Header struct {
 	Unique bool `json:"unique,omitempty"`
 	// Paths (fs.archive) are the files and directories to archive.
 	Paths []string `json:"paths,omitempty"`
+	// Chunked (fs.archive) frames the archive with ChunkWriter, ended by
+	// its empty chunk once the archive is complete: a stream that ends
+	// without it (the machine went away) carries a truncated archive.
+	Chunked bool `json:"chunked,omitempty"`
 
 	// code-server
 	Action  string   `json:"action,omitempty"`
@@ -92,12 +100,17 @@ type Header struct {
 	// expected SHA-256, "" when unknown (the reply then reports it).
 	URL    string `json:"url,omitempty"`
 	Digest string `json:"digest,omitempty"`
+
+	// pane.find
+	Find *FindRequest `json:"find,omitempty"`
 }
 
 // Reply is the first line written back by the acceptor.
 type Reply struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
+	// Code classifies Error for ops that define codes (pane.find).
+	Code string `json:"code,omitempty"`
 
 	Info    *Info        `json:"info,omitempty"`
 	Stat    *Stat        `json:"stat,omitempty"`
@@ -107,6 +120,7 @@ type Reply struct {
 	Bridge  *BridgeInfo  `json:"bridge,omitempty"`
 	GUI     *GUIStatus   `json:"gui,omitempty"`
 	Herdr   *HerdrStatus `json:"herdr,omitempty"`
+	Find    *FindResult  `json:"find,omitempty"`
 }
 
 // ErrHerdrNotFound: the agent found no herdr executable on its host (not

@@ -10,7 +10,17 @@ export interface NewWorkspace {
 }
 
 export type DialogRequest =
-  | { kind: 'confirm'; title: string; message: string; confirm: string; danger?: boolean; resolve(ok: boolean): void }
+  | {
+      kind: 'confirm';
+      title: string;
+      message: string;
+      confirm: string;
+      danger?: boolean;
+      /** A checkbox shown under the message, with its initial state. */
+      check?: string;
+      checked?: boolean;
+      resolve(ok: boolean, checked?: boolean): void;
+    }
   | { kind: 'newWorkspace'; m: string; cwd: string; resolve(v: NewWorkspace | undefined): void }
   | { kind: 'download'; m: string; dir: string; resolve(v: undefined): void };
 
@@ -30,6 +40,21 @@ export function closeDialog(req: DialogRequest) {
 
 export function confirmDialog(opts: { title: string; message: string; confirm: string; danger?: boolean }): Promise<boolean> {
   return new Promise((resolve) => show({ kind: 'confirm', ...opts, resolve }));
+}
+
+/** A confirmation with a checkbox: resolves with the box's state when
+ * confirmed, undefined when cancelled. */
+export function confirmCheckDialog(opts: {
+  title: string;
+  message: string;
+  confirm: string;
+  danger?: boolean;
+  check: string;
+  checked: boolean;
+}): Promise<{ checked: boolean } | undefined> {
+  return new Promise((resolve) =>
+    show({ kind: 'confirm', ...opts, resolve: (ok, checked) => resolve(ok ? { checked: !!checked } : undefined) }),
+  );
 }
 
 /** Asks for the working directory and name of a new workspace on machine m. */

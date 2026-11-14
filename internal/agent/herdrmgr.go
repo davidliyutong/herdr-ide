@@ -470,6 +470,11 @@ func (a *Agent) handleHerdr(ctx context.Context, st net.Conn, h agentproto.Heade
 		case "start":
 			code, output = a.startHerdr(ctx, bin, h.Session)
 		case "stop":
+			// Nothing to stop is not a failure (herdr's own stop fails
+			// without a server), as a start of a running server is not.
+			if probeServer(a.herdrSocket(h.Session)) == serverAbsent {
+				break
+			}
 			if out, err := a.stopHerdrServer(ctx, bin, h.Session); err != nil {
 				code, output = probeCode(err, "stop_failed"), joinOutput(out, err)
 			}

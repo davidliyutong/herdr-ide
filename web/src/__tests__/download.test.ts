@@ -4,14 +4,28 @@
 // and a chooser of the pane's directory (not for the desktop app's own
 // machine), the chooser takes several entries and directories in one
 // download, a path that names nothing becomes a note, and only the page with
-// the focus downloads what VS Code's explorer asked for.
+// the focus downloads what VS Code's explorer asked for. The downloads
+// panel follows each download through the core's events.
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { MenuEntry, MenuItem } from '../contextMenu';
 
-vi.mock('../lib/conn', () => ({ conn: { api: () => Promise.resolve({}), send: () => {}, sendNow: () => {}, setTheme: () => {} } }));
+/** Messages the page sent the core. */
+const sent = vi.hoisted(() => [] as unknown[]);
+const link = vi.hoisted(() => ({ connected: true }));
+vi.mock('../lib/conn', () => ({
+  conn: {
+    api: () => Promise.resolve({}),
+    send: (m: unknown) => sent.push(m),
+    sendNow: (m: unknown) => sent.push(m),
+    setTheme: () => {},
+    get connected() {
+      return link.connected;
+    },
+  },
+}));
 
 let shell: unknown;
 vi.mock('../desktop', () => ({
@@ -69,6 +83,8 @@ beforeEach(() => {
   shell = undefined;
   clicked.length = 0;
   fetches.length = 0;
+  sent.length = 0;
+  link.connected = true;
   store.useStore.setState({
     readOnly: false,
     toasts: [],
@@ -107,7 +123,9 @@ describe('pane menu', () => {
     await flush();
     // Checked first, then downloaded with a same-origin link.
     expect(fetches).toEqual([{ url: '/api/m/gpu/download?path=%2Fhome%2Fu%2Fproj%2Fa.txt', method: 'HEAD' }]);
-    expect(clicked).toEqual(['/api/m/gpu/download?path=%2Fhome%2Fu%2Fproj%2Fa.txt']);
+    // The link carries the id the downloads panel follows it by.
+    expect(clicked).toHaveLength(1);
+    expect(clicked[0]).toMatch(/^\/api\/m\/gpu\/download\?path=%2Fhome%2Fu%2Fproj%2Fa\.txt&dl=[A-Za-z0-9_-]{22}$/);
   });
 
   it('makes a path that names nothing a note', async () => {
@@ -198,5 +216,141 @@ describe('VS Code explorer', () => {
     download.bridgeDownload('gpu', ['/srv/a', '/srv/b']);
     expect(clicked.map(query)).toEqual([['/srv/a', '/srv/b']]);
     focus.mockRestore();
+  });
+});
+
+describe('downloads panel', () => {
+  let Downloads: typeof import('../components/Downloads');
+  const id = (href: string) => new URL(href, 'http://core').searchParams.get('dl')!;
+  const active = () => download.useDownloads.getState().active;
+  const history = () => download.useDownloads.getState().history;
+  beforeAll(async () => {
+    Downloads = await import('../components/Downloads');
+  });
+  beforeEach(() => {
+    download.useDownloads.setState({ active: [], history: [], panel: false });
+    localStorage.clear();
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it('follows a file from start to end, with its speed', () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    vi.setSystemTime(1_000_000);
+    download.startDownload('gpu', ['/srv/data.bin']);
+    const dl = id(clicked[0]);
+    // The core reports it to this page alone.
+    expect(sent).toEqual([{ t: 'download.watch', ids: [dl] }]);
+    expect(active()).toMatchObject([{ id: dl, m: 'gpu', machine: 'gpu', name: 'data.bin', status: 'starting', sent: 0 }]);
+    expect(Downloads.downloadDetail(active()[0])).toBe('Starting…');
+
+    // Other pages' downloads are not this page's business.
+    download.downloadEvent({ id: 'someone-else', state: 'running', sent: 5 });
+    download.downloadEvent({ id: dl, state: 'running', sent: 0, total: 4000, name: 'data.bin' });
+    vi.setSystemTime(1_002_000);
+    download.downloadEvent({ id: dl, state: 'running', sent: 2000, total: 4000, name: 'data.bin' });
+    expect(active()[0]).toMatchObject({ status: 'downloading', sent: 2000, size: 4000, speed: 1000 });
+    expect(Downloads.downloadDetail(active()[0])).toBe('2.0 KB of 3.9 KB · 1000 B/s · 2 s left');
+
+    vi.setSystemTime(1_004_000);
+    download.downloadEvent({ id: dl, state: 'done', sent: 4000, total: 4000, name: 'data.bin' });
+    expect(active()).toEqual([]);
+    expect(history()).toMatchObject([{ id: dl, status: 'done', sent: 4000, size: 4000, speed: 1000 }]);
+    expect(Downloads.downloadDetail(history()[0])).toBe('3.9 KB in 4 s · 1000 B/s');
+    // Kept by the browser, without the live parts.
+    expect(
+      JSON.parse(
+        localStorage.getItem(
+          [...Array(localStorage.length).keys()].map((k) => localStorage.key(k)!).find((k) => k.endsWith('downloads'))!,
+        )!,
+      ),
+    ).toMatchObject([{ id: dl, paths: ['/srv/data.bin'], status: 'done' }]);
+  });
+
+  it('shows an archive without a size, and how a download failed', () => {
+    download.startDownload('gpu', ['/srv/a', '/srv/b']);
+    const dl = id(clicked[0]);
+    expect(active()[0].name).toBe('2 items');
+    download.downloadEvent({ id: dl, state: 'running', sent: 0, name: 'srv.zip' });
+    download.downloadEvent({ id: dl, state: 'running', sent: 2048, name: 'srv.zip' });
+    expect(active()[0]).toMatchObject({ name: 'srv.zip', status: 'downloading', sent: 2048 });
+    expect(active()[0].size).toBeUndefined();
+    expect(Downloads.downloadDetail(active()[0])).toMatch(/^2\.0 KB · .*\/s$/);
+    download.downloadEvent({ id: dl, state: 'failed', sent: 2048, error: 'unavailable' });
+    expect(history()[0]).toMatchObject({ status: 'failed', error: 'unavailable' });
+    expect(Downloads.downloadDetail(history()[0])).toBe('The machine is not connected');
+    expect(store.useStore.getState().toasts.at(-1)?.msg).toBe('Could not download srv.zip: The machine is not connected');
+  });
+
+  it('cancels through the core, gives up on a download that never started, and downloads again', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    download.startDownload('gpu', ['/srv/a.txt']);
+    const dl = id(clicked[0]);
+    download.downloadEvent({ id: dl, state: 'running', sent: 10, total: 100 });
+    download.cancelDownload(dl);
+    expect(sent.at(-1)).toEqual({ t: 'download.cancel', id: dl });
+    download.downloadEvent({ id: dl, state: 'cancelled', sent: 10, total: 100 });
+    expect(history()[0]).toMatchObject({ id: dl, status: 'cancelled' });
+
+    // No word from the core at all; the time while the page is not
+    // connected does not count.
+    download.startDownload('gpu', ['/srv/b.txt']);
+    link.connected = false;
+    vi.advanceTimersByTime(download.NO_RESPONSE_MS);
+    expect(active()).toMatchObject([{ name: 'b.txt', status: 'starting' }]);
+    link.connected = true;
+    vi.advanceTimersByTime(download.NO_RESPONSE_MS);
+    expect(history()[0]).toMatchObject({ name: 'b.txt', status: 'failed', error: 'no_response' });
+
+    // Downloading again starts a new download of the same paths.
+    download.retryDownload(history()[0]);
+    expect(clicked.map(query).at(-1)).toEqual(['/srv/b.txt']);
+    expect(id(clicked.at(-1)!)).not.toBe(id(clicked[1]));
+    expect(active()).toHaveLength(1);
+  });
+
+  it('asks again after a reconnect, and ends what the core no longer knows', () => {
+    download.startDownload('gpu', ['/srv/a.txt']);
+    download.startDownload('gpu', ['/srv/b.txt']);
+    download.startDownload('gpu', ['/srv/c.txt']);
+    const [a, b, c] = clicked.map(id);
+    download.downloadEvent({ id: a, state: 'running', sent: 10, total: 100 });
+    download.downloadEvent({ id: c, state: 'running', sent: 10, total: 100 });
+    sent.length = 0;
+    download.resyncDownloads();
+    expect(sent).toEqual([{ t: 'download.watch', ids: [a, b, c] }]);
+    // The final event was lost while away: the core still knows it.
+    download.downloadEvent({ id: a, state: 'done', sent: 100, total: 100 });
+    // Not seen yet: still starting.
+    download.downloadEvent({ id: b, state: 'unknown' });
+    // Seen and forgotten: how it ended is not known.
+    download.downloadEvent({ id: c, state: 'unknown' });
+    expect(active()).toMatchObject([{ id: b, status: 'starting' }]);
+    expect(history()).toMatchObject([
+      { id: c, status: 'failed', error: 'lost' },
+      { id: a, status: 'done' },
+    ]);
+    // Cancelling one the core never saw ends it.
+    download.cancelDownload(b);
+    download.downloadEvent({ id: b, state: 'unknown' });
+    expect(active()).toEqual([]);
+    expect(history()[0]).toMatchObject({ id: b, status: 'cancelled' });
+  });
+
+  it('shows the downloads in the status bar', async () => {
+    download.startDownload('gpu', ['/srv/a.txt']);
+    download.downloadEvent({ id: id(clicked[0]), state: 'running', sent: 25, total: 100 });
+    download.startDownload('gpu', ['/srv/dir']);
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    act(() => root!.render(createElement(Downloads.DownloadsTray)));
+    // An archive of unknown size leaves out the percentage.
+    expect(host.querySelector('.gui-count')?.textContent).toBe('2');
+    act(() => host.querySelector<HTMLButtonElement>('.transfers-tray')!.click());
+    expect([...host.querySelectorAll('.transfer-name')].map((x) => x.textContent)).toEqual(['a.txt', 'dir']);
+    expect(host.querySelectorAll('.transfer-bar.indeterminate')).toHaveLength(1);
+    expect(host.querySelector('.transfer-bar:not(.indeterminate) > div')?.getAttribute('style')).toContain('width: 25%');
+    act(() => host.querySelectorAll<HTMLButtonElement>('button[aria-label="Cancel download"]')[1].click());
+    expect(sent.at(-1)).toEqual({ t: 'download.cancel', id: id(clicked[1]) });
   });
 });

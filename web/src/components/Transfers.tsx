@@ -30,7 +30,7 @@ export function duration(ms: number): string {
   return t('transfers.hours', { h: Math.floor(m / 60), m: m % 60 });
 }
 
-function when(ms: number): string {
+export function when(ms: number): string {
   const d = new Date(ms);
   const today = d.toDateString() === new Date().toDateString();
   return today

@@ -81,7 +81,13 @@ from herdr.
   another writable browser, else a read-only one, becomes owner.
 - The owner sends `view {m, tab, pane, cols, rows, cw, ch}`. The core keeps
   one endpoint connection to machine `m` at that size (it sends
-  `ClientShellResize` when the size changes) and closes the others. When
+  `ClientShellResize` when the size changes) and closes the others. herdr
+  answers each new grid size with a complete surface (about 90 KB at
+  200×60), so one such resize is in flight at a time (`Conn.Resize`): the
+  hello's size counts as one, the next is sent when herdr's complete
+  surface of the asked size arrives, or after 2 s in case herdr answers
+  with another size, and the sizes the owner wanted meanwhile collapse into
+  the latest. A new cell size on the same grid is sent at once. When
   herdr's focused tab or pane differs from the view's, the core sends
   `pane.focus` (or `tab.focus`) as an endpoint request; it repeats this after
   every snapshot, so herdr follows the UI. For a read-only browser only the
@@ -132,6 +138,14 @@ shrinks the repeated cell fields.
   the browser's next view retries.
 - **Browser send queue overflow** → the core drops that WebSocket; the
   browser reconnects and the core resends a complete surface.
+- **Window resized over a slow link** (a window drag, the layout settling
+  while a machine connects) → the browser sends a view for every size it
+  measures. Sent on to herdr one by one, each new size cost a complete
+  surface, and they queued up on the link: at 150 KB/s with 100 ms latency
+  a one-second drag from 200×60 left the grid at intermediate sizes for ten
+  seconds after the window stopped, drawn at their own size (cut off or
+  with an empty margin). With one resize in flight the grid reaches the
+  final size about one surface after the drag ends.
 
 ## Security
 
@@ -152,9 +166,15 @@ and decoding is bounded per item type. See [SECURITY.md](../../SECURITY.md).
 frozen `endpoint-*-v1.json` fixtures, a session recorded from herdr 0.9.5
 whose patches and scroll controls must reproduce herdr's next complete
 surface, delta and patch validation, bounds on hostile lengths, handshake
-errors, chunked request replies); `internal/server/surface_test.go`
+errors, chunked request replies, one resize in flight: sizes wanted
+meanwhile collapse into the latest, an older surface does not end the wait,
+a cell size alone is sent at once, the wait ends after its timeout, a
+resize stuck in a write does not hold up the receiving goroutine);
+`internal/server/surface_test.go`
 (ownership: busy, takeover, read-only rules, handover; the binary encoding
 shared with the web tests; a waiting connection is woken when its machine
-connects); `TestIntegrationEndpoint` and
-`TestIntegrationKeyParity` (`make it`) against a real herdr through the
-agent.
+connects); `TestIntegrationEndpoint`, `TestIntegrationKeyParity` and
+`TestIntegrationResizeOverSlowLink` (a window drag over a delayed,
+150 KB/s link reaches the final size after at most five grid sizes; every
+size was sent before, 23 of them, and the final one came ten seconds after
+the drag) (`make it`) against a real herdr through the agent.

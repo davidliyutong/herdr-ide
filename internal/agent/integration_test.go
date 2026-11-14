@@ -224,6 +224,97 @@ func TestIntegrationEndpoint(t *testing.T) {
 	}
 }
 
+// slowLink stands for a congested ssh connection: what the core sends
+// arrives d later, and what it receives comes at bw bytes per second.
+type slowLink struct {
+	net.Conn
+	bw int
+	q  chan []byte
+}
+
+func newSlowLink(c net.Conn, d time.Duration, bw int) *slowLink {
+	l := &slowLink{Conn: c, bw: bw, q: make(chan []byte, 1024)}
+	go func() {
+		for b := range l.q {
+			time.Sleep(d)
+			if _, err := c.Write(b); err != nil {
+				return
+			}
+		}
+	}()
+	return l
+}
+
+func (l *slowLink) Write(b []byte) (int, error) {
+	l.q <- append([]byte(nil), b...)
+	return len(b), nil
+}
+
+func (l *slowLink) Read(b []byte) (int, error) {
+	if len(b) > 4096 {
+		b = b[:4096]
+	}
+	n, err := l.Conn.Read(b)
+	time.Sleep(time.Duration(n) * time.Second / time.Duration(l.bw))
+	return n, err
+}
+
+// A window drag over a slow link: herdr answers every new grid size with a
+// complete surface (about 90 KB at 200x60). With one resize in flight the
+// grid reaches the final size after a few surfaces; sending every size made
+// it trail the window by ten seconds at this bandwidth.
+func TestIntegrationResizeOverSlowLink(t *testing.T) {
+	s, api := startHerdr(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	newPane(ctx, t, api)
+	raw, _, err := s.Open(ctx, agentproto.Header{Op: agentproto.OpHerdrClient, Session: itSession})
+	if err != nil {
+		t.Fatal(err)
+	}
+	size := func(cols, rows int) endpoint.Size {
+		return endpoint.Size{Cols: uint16(cols), Rows: uint16(rows), CellW: 8, CellH: 16}
+	}
+	conn, err := endpoint.Handshake(ctx, newSlowLink(raw, 100*time.Millisecond, 150_000), endpoint.Options{Size: size(200, 60), Active: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { conn.Close() })
+	sizes := make(chan [2]uint16, 256)
+	go conn.Run(ctx, func(e endpoint.Event) {
+		if e.Surface != nil {
+			sizes <- [2]uint16{e.Surface.Frame.W, e.Surface.Frame.H}
+		}
+	})
+	select {
+	case <-sizes:
+	case <-ctx.Done():
+		t.Fatal("no first surface")
+	}
+	for i := range 60 {
+		conn.Resize(size(200-i, 60-i/3))
+		time.Sleep(16 * time.Millisecond)
+	}
+	end := time.Now()
+	seen := map[[2]uint16]bool{}
+	for {
+		select {
+		case wh := <-sizes:
+			seen[wh] = true
+			if wh != [2]uint16{141, 41} {
+				continue
+			}
+			t.Logf("final size %v after the drag, %d sizes shown", time.Since(end).Round(time.Millisecond), len(seen))
+			if len(seen) > 5 {
+				t.Errorf("herdr sent %d grid sizes for one drag: %v", len(seen), seen)
+			}
+			return
+		case <-ctx.Done():
+			t.Fatalf("the final size never arrived; sizes shown: %v", seen)
+		}
+	}
+}
+
 // herdr refuses another generation with a code the core maps for the UI.
 func TestIntegrationEndpointRejectsGeneration(t *testing.T) {
 	s, _ := startHerdr(t)

@@ -163,6 +163,8 @@ func (a *Agent) handle(ctx context.Context, st net.Conn) {
 		err = a.gui.handle(ctx, st, h)
 	case agentproto.OpHerdr:
 		err = a.handleHerdr(ctx, st, h)
+	case agentproto.OpPaneFind:
+		err = a.handleFind(ctx, st, h)
 	default:
 		err = agentproto.Fail(st, fmt.Errorf("unknown op %q", h.Op))
 		st.Close()
