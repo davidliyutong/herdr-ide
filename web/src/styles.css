@@ -638,23 +638,46 @@ select,
   border-radius: 6px;
   box-shadow: 0 6px 18px var(--shadow);
 }
-.find-input {
+/* The query and its option toggles look like one field. */
+.find-field {
   flex: 1 1 auto;
-  width: 14rem;
+  display: flex;
+  align-items: center;
   min-width: 3rem;
-  font: inherit;
-  color: var(--fg);
+  padding-right: 2px;
   background: var(--bg);
   border: 1px solid var(--line-2);
   border-radius: 4px;
-  padding: 2px 6px;
 }
-.find-input:focus {
-  outline: none;
+.find-field:focus-within {
   border-color: var(--accent);
 }
-.find-input.none {
+.find-field.none {
   border-color: var(--error);
+}
+.find-input {
+  flex: 1 1 auto;
+  width: 14rem;
+  min-width: 2rem;
+  font: inherit;
+  color: var(--fg);
+  background: transparent;
+  border: 0;
+  outline: none;
+  padding: 2px 6px;
+}
+.find-bar .find-option {
+  flex: none;
+  min-width: 1.4rem;
+  height: 1.4rem;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--fg-dim);
+}
+.find-bar .find-option.on {
+  color: var(--fg);
+  background: var(--accent-soft);
+  border-color: var(--accent);
 }
 .find-count {
   flex: none;

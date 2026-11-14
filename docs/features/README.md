@@ -27,7 +27,7 @@ shortcuts, paths) lives in [reference.md](../reference.md).
 | 17 | [Managing herdr from the UI](17-local-herdr-management.md) | Start, stop and update the core host's herdr; a managed copy of the bundled herdr; herdr's own `--remote` update for SSH machines. |
 | 18 | [Pane surfaces through herdr's endpoint](18-endpoint-surfaces.md) | One connection per shown machine to herdr's client socket; endpoint protocol generation 1; one browser owns the session at a time. |
 | 19 | [Formulas in panes](19-formulas-in-panes.md) | LaTeX under the resting pointer typeset by KaTeX in a popover; the spellings agents print, also without dropped backslashes. |
-| 20 | [Find in panes](20-find-in-panes.md) | ⌘F / Ctrl+Shift+F finds text in a pane's output and scrollback with herdr's own search; matches highlighted, the current one scrolled into view. |
+| 20 | [Find in panes](20-find-in-panes.md) | ⌘F / Ctrl+Shift+F finds text in a pane's output and scrollback, also by regular expression, case or whole word; the agent searches next to herdr; matches highlighted, the current one scrolled into view. |
 
 ## Writing a feature document
 

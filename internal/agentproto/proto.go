@@ -54,6 +54,9 @@ const (
 	// comes at once; a second reply line with Herdr follows when the action
 	// is done.
 	OpHerdr Op = "herdr"
+	// OpPaneFind searches the text of pane Header.Find.Pane next to herdr
+	// (internal/panefind) and answers with Reply.Find; nothing follows.
+	OpPaneFind Op = "pane.find"
 )
 
 // Header is the first line of every stream.
@@ -92,12 +95,17 @@ type Header struct {
 	// expected SHA-256, "" when unknown (the reply then reports it).
 	URL    string `json:"url,omitempty"`
 	Digest string `json:"digest,omitempty"`
+
+	// pane.find
+	Find *FindRequest `json:"find,omitempty"`
 }
 
 // Reply is the first line written back by the acceptor.
 type Reply struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
+	// Code classifies Error for ops that define codes (pane.find).
+	Code string `json:"code,omitempty"`
 
 	Info    *Info        `json:"info,omitempty"`
 	Stat    *Stat        `json:"stat,omitempty"`
@@ -107,6 +115,7 @@ type Reply struct {
 	Bridge  *BridgeInfo  `json:"bridge,omitempty"`
 	GUI     *GUIStatus   `json:"gui,omitempty"`
 	Herdr   *HerdrStatus `json:"herdr,omitempty"`
+	Find    *FindResult  `json:"find,omitempty"`
 }
 
 // ErrHerdrNotFound: the agent found no herdr executable on its host (not

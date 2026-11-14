@@ -138,6 +138,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/m/{id}/download", s.handleDownload)
 	mux.HandleFunc("POST /api/m/{id}/upload", s.writable(s.handleUpload))
 	mux.HandleFunc("GET /api/m/{id}/list", s.handleList)
+	mux.HandleFunc("POST /api/m/{id}/find", s.handleFind)
 	mux.HandleFunc("GET /api/m/{id}/code/status", s.handleCodeStatus)
 	mux.HandleFunc("POST /api/m/{id}/code/start", s.writable(s.handleCodeStart))
 	mux.HandleFunc("POST /api/m/{id}/code/stop", s.handleCodeStop)

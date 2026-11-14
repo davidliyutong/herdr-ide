@@ -8,6 +8,6 @@ require (
 	github.com/hashicorp/yamux v0.1.2
 	github.com/jezek/xgb v1.3.1
 	github.com/pelletier/go-toml/v2 v2.4.3
+	github.com/rivo/uniseg v0.4.7
+	golang.org/x/sys v0.49.0
 )
-
-require golang.org/x/sys v0.49.0 // indirect
