@@ -1,6 +1,7 @@
 {
   "displayName": "herdr-ide 桥接",
-  "description": "把 code-server 窗口连接到 herdr-ide Web IDE（打开文件、Diff、Git Graph、把代码发给 agent）。",
+  "description": "把 code-server 窗口连接到 herdr-ide Web IDE（打开文件、Diff、Git Graph、把代码发给 agent、下载文件）。",
   "command.sendToAgent": "发送到 Agent",
+  "command.download": "下载（文件夹打包为 zip）",
   "command.reconnect": "重新连接"
 }

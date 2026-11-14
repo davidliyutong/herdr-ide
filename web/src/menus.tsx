@@ -11,9 +11,11 @@ import {
   ClipboardPaste,
   Columns2,
   Copy,
+  Download,
   ExternalLink,
   Eye,
   FileDiff,
+  FolderDown,
   GitGraph,
   Link,
   Maximize2,
@@ -32,6 +34,8 @@ import {
 } from 'lucide-react';
 import { actions } from './actions';
 import type { MenuEntry } from './contextMenu';
+import { downloadDialog } from './dialog';
+import { canDownload, downloadPath } from './download';
 import { t } from './i18n';
 import { keyHint } from './keymap';
 import { paneCwd, workspaceTabs } from './lib/herdr';
@@ -85,10 +89,11 @@ export function paneMenu(m: string, pane: string, zoomed: boolean): MenuEntry[] 
 
 const copyText = (text: string) => void navigator.clipboard?.writeText(text).catch(() => {});
 
-/** The menu of a pane's text: copy the selection, paste, and open or copy
- * the URL or path under the pointer or selected. Paths open in the preview
- * panel or in VS Code; the item names the file, so a path detection cut
- * short shows. */
+/** The menu of a pane's text: copy the selection, paste, and open, copy or
+ * download the URL or path under the pointer or selected. Paths open in the
+ * preview panel or in VS Code; the item names the file, so a path detection
+ * cut short shows. Files of the pane's directory can be chosen to download
+ * (not on the desktop app's own machine, where they already are). */
 export function surfaceMenu(o: {
   ctx: LinkContext;
   link?: { kind: 'url' | 'path'; text: string };
@@ -110,7 +115,13 @@ export function surfaceMenu(o: {
     out.push('sep', { label: t('link.menuPreview', { name }), icon: <Eye />, run: () => actions.openPreview(o.ctx.m, r.path) });
     if (!mediaExt.test(r.path))
       out.push({ label: t('link.menuCode', { name }), icon: <SquareCode />, run: () => actions.openPath(o.ctx.m, r.path, r.line, r.col) });
+    if (canDownload(o.ctx.m))
+      out.push({ label: t('link.menuDownload', { name }), icon: <Download />, run: () => void downloadPath(o.ctx.m, r.path) });
     out.push({ label: t('link.menuCopyPath'), icon: <Copy />, run: () => copyText(r.path) });
+  }
+  if (canDownload(o.ctx.m)) {
+    const dir = o.ctx.cwd || o.ctx.home || '~';
+    out.push('sep', { label: t('download.menu'), icon: <FolderDown />, run: () => void downloadDialog(o.ctx.m, dir) });
   }
   return out;
 }

@@ -11,7 +11,8 @@ export interface NewWorkspace {
 
 export type DialogRequest =
   | { kind: 'confirm'; title: string; message: string; confirm: string; danger?: boolean; resolve(ok: boolean): void }
-  | { kind: 'newWorkspace'; m: string; cwd: string; resolve(v: NewWorkspace | undefined): void };
+  | { kind: 'newWorkspace'; m: string; cwd: string; resolve(v: NewWorkspace | undefined): void }
+  | { kind: 'download'; m: string; dir: string; resolve(v: undefined): void };
 
 export const useDialog = create<{ current?: DialogRequest }>(() => ({}));
 
@@ -34,6 +35,12 @@ export function confirmDialog(opts: { title: string; message: string; confirm: s
 /** Asks for the working directory and name of a new workspace on machine m. */
 export function newWorkspaceDialog(m: string, cwd: string): Promise<NewWorkspace | undefined> {
   return new Promise((resolve) => show({ kind: 'newWorkspace', m, cwd, resolve }));
+}
+
+/** Lets the user choose entries of directory dir (and the directories
+ * around it) on machine m to download; resolves when the dialog closes. */
+export function downloadDialog(m: string, dir: string): Promise<undefined> {
+  return new Promise((resolve) => show({ kind: 'download', m, dir, resolve }));
 }
 
 /** Splits a typed path into the directory to list and the name prefix to

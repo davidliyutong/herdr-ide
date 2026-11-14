@@ -6,6 +6,14 @@ export function fileUrl(m: string, path: string, download = false): string {
   return `/api/m/${encodeURIComponent(m)}/file?${q}`;
 }
 
+/** URL saving paths of machine m: one file as itself, a directory or
+ * several paths as one zip archive. */
+export function downloadUrl(m: string, paths: string[]): string {
+  const q = new URLSearchParams();
+  for (const p of paths) q.append('path', p);
+  return `/api/m/${encodeURIComponent(m)}/download?${q}`;
+}
+
 export interface RemoteStat {
   name: string;
   path?: string;

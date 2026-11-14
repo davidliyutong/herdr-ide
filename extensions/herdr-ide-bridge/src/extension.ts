@@ -1,6 +1,7 @@
 // Bridge: lets the web IDE drive this code-server window (open files at a
-// position, multi-file diff, Git Graph, media preview, light/dark theme) and
-// sends editor selections back to the agent pane focused in the web IDE.
+// position, multi-file diff, Git Graph, media preview, light/dark theme),
+// sends editor selections back to the agent pane focused in the web IDE and
+// asks the browser to download files chosen in the explorer.
 //
 // The extension host runs on the machine itself and connects to the agent's
 // unix socket, which the agent tunnels to the core. The agent passes the
@@ -188,6 +189,21 @@ async function sendToAgent(uri?: vscode.Uri) {
   vscode.window.setStatusBarMessage(vscode.l10n.t('Sent to the focused agent'), 2500);
 }
 
+/** Downloads the files and folders chosen in the explorer (or the active
+ * editor's file) into the browser showing this window: the core streams one
+ * file as itself, anything else as a zip. Unlike VS Code's own Download…, it
+ * needs no File System Access API and takes folders in every browser. */
+function download(uri?: vscode.Uri, uris?: vscode.Uri[]) {
+  const chosen = uris?.length ? uris : uri ? [uri] : vscode.window.activeTextEditor ? [vscode.window.activeTextEditor.document.uri] : [];
+  const paths = chosen.filter((u) => u.scheme === 'file').map((u) => u.fsPath);
+  if (paths.length === 0) return;
+  if (!sock || sock.destroyed) {
+    void vscode.window.showWarningMessage(vscode.l10n.t('Not connected to the web IDE: the download cannot start'));
+    return;
+  }
+  send({ type: 'download', paths });
+}
+
 export function activate(ctx: vscode.ExtensionContext) {
   connect();
   ctx.subscriptions.push(
@@ -195,6 +211,7 @@ export function activate(ctx: vscode.ExtensionContext) {
     vscode.workspace.onDidChangeWorkspaceFolders(() => hello()),
     vscode.window.onDidChangeWindowState((s) => s.focused && send({ type: 'focus' })),
     vscode.commands.registerCommand(`${SLUG}.sendToAgent`, sendToAgent),
+    vscode.commands.registerCommand(`${SLUG}.download`, download),
     vscode.commands.registerCommand(`${SLUG}.reconnect`, () => {
       clearTimeout(reconnectTimer);
       const old = sock;

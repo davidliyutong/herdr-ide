@@ -69,6 +69,10 @@ browser tab, with VS Code (code-server) one keystroke away.
   ones into the pane's directory (an existing file there is never replaced).
   The uploads panel in the status bar shows each upload's progress and
   speed, cancels uploads and lists the recent ones.
+- **Files from machines.** Right-click in a pane to download the path under
+  the pointer, or choose files and folders of the pane's directory to
+  download together; folders arrive as zip archives, streamed from the
+  machine. VS Code's explorer has the same download.
 - **Several browsers at once.** The active browser controls a pane; others
   watch at the same size and take over by typing.
 - **Settings.** Language (English, Chinese), light/dark theme followed by

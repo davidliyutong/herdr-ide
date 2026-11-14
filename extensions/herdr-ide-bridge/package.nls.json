@@ -1,6 +1,7 @@
 {
   "displayName": "herdr-ide bridge",
-  "description": "Connects code-server windows to the herdr-ide web IDE (open files, diffs, Git Graph, send code to agents).",
+  "description": "Connects code-server windows to the herdr-ide web IDE (open files, diffs, Git Graph, send code to agents, download files).",
   "command.sendToAgent": "Send to Agent",
+  "command.download": "Download (folders as zip)",
   "command.reconnect": "Reconnect"
 }

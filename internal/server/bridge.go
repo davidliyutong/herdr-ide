@@ -69,6 +69,7 @@ type bridgeMsg struct {
 	File    string   `json:"file"`
 	Line    int      `json:"line"`
 	EndLine int      `json:"end_line"`
+	Paths   []string `json:"paths"`
 }
 
 // serve handles one bridge connection tunnelled from the agent.
@@ -128,6 +129,12 @@ func (h *bridgeHub) serve(mc *machines.Machine, conn net.Conn) {
 			// The browser decides which agent pane receives it (the
 			// focused one) and pastes without submitting.
 			h.s.broadcast(map[string]any{"t": "bridge.send", "m": mc.ID(), "text": msg.Text, "file": msg.File, "line": msg.Line, "end_line": msg.EndLine})
+		case "download":
+			// Files chosen in VS Code's explorer: the browser showing that
+			// VS Code (the one with focus) downloads them (handleDownload).
+			if len(msg.Paths) > 0 && len(msg.Paths) <= maxDownloadPaths {
+				h.s.broadcast(map[string]any{"t": "bridge.download", "m": mc.ID(), "paths": msg.Paths})
+			}
 		}
 	}
 }

@@ -36,6 +36,9 @@ const (
 	// OpFsWrite reads raw bytes until the opener closes its write side, then
 	// writes them atomically to Path and sends a second reply line.
 	OpFsWrite Op = "fs.write"
+	// OpFsArchive streams Paths as one zip archive after the reply and then
+	// closes the stream; nothing is written on the machine.
+	OpFsArchive Op = "fs.archive"
 	// OpDialUnix dials a unix socket below the agent run directory.
 	OpDialUnix Op = "dial-unix"
 	// OpCodeServer manages the code-server installation and process.
@@ -74,6 +77,8 @@ type Header struct {
 	// Unique (fs.write) keeps existing files: the file gets path's name if it
 	// is free, else the first free one with -1, -2… before the extension.
 	Unique bool `json:"unique,omitempty"`
+	// Paths (fs.archive) are the files and directories to archive.
+	Paths []string `json:"paths,omitempty"`
 
 	// code-server
 	Action  string   `json:"action,omitempty"`

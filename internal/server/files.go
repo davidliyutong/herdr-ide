@@ -10,6 +10,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -91,6 +92,10 @@ func parseRange(h string, size int64) (start, length int64, ok bool) {
 	return st, end - st + 1, true
 }
 
+// fileCSP keeps a file opened as a document from running script on our
+// origin.
+const fileCSP = "default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'; sandbox"
+
 // handleFile streams a file from a machine with HTTP Range support, so videos
 // can seek without downloading everything.
 func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
@@ -110,11 +115,15 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	st := rep.Stat
-	if st.IsDir {
+	if rep.Stat.IsDir {
 		http.Error(w, "is a directory", http.StatusBadRequest)
 		return
 	}
+	serveFile(w, r, mc, rep.Stat, r.URL.Query().Get("download") == "1")
+}
+
+// serveFile streams the file st describes, as an attachment when download.
+func serveFile(w http.ResponseWriter, r *http.Request, mc *machines.Machine, st *agentproto.Stat, download bool) {
 	etag := fmt.Sprintf(`W/"%x-%x"`, st.Size, st.ModTime)
 	h := w.Header()
 	h.Set("ETag", etag)
@@ -127,10 +136,10 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 	// Opened as a document, a file must not run script on our origin. PDFs
 	// are exempt because the browser's PDF viewer refuses sandboxed frames.
 	if ctype != "application/pdf" {
-		h.Set("Content-Security-Policy", "default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'; sandbox")
+		h.Set("Content-Security-Policy", fileCSP)
 	}
-	if r.URL.Query().Get("download") == "1" {
-		h.Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filepath.Base(st.Path)}))
+	if download {
+		h.Set("Content-Disposition", attachment(filepath.Base(st.Path)))
 	}
 	if r.Header.Get("If-None-Match") == etag {
 		w.WriteHeader(http.StatusNotModified)
@@ -160,6 +169,112 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 	io.CopyN(w, conn, length)
+}
+
+// attachment is a Content-Disposition saving the response as name (RFC 2231
+// encoding for names that are not plain ASCII).
+func attachment(name string) string {
+	return mime.FormatMediaType("attachment", map[string]string{"filename": name})
+}
+
+// maxDownloadPaths bounds the paths of one download (the agent's limit).
+const maxDownloadPaths = 1000
+
+// downloadPaths checks the paths of a download: absolute, cleaned, without
+// repeats, at most maxDownloadPaths.
+func downloadPaths(raw []string) ([]string, error) {
+	if len(raw) == 0 || len(raw) > maxDownloadPaths {
+		return nil, fmt.Errorf("between 1 and %d paths", maxDownloadPaths)
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(raw))
+	for _, p := range raw {
+		if !strings.HasPrefix(p, "/") || strings.ContainsRune(p, 0) {
+			return nil, fmt.Errorf("not an absolute path: %q", p)
+		}
+		p = path.Clean(p)
+		if !seen[p] {
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	return out, nil
+}
+
+// archiveName is the file name of a zip of paths: the one path's name, or
+// the name of the directory holding them all.
+func archiveName(paths []string) string {
+	dir := paths[0]
+	if len(paths) > 1 {
+		dir = path.Dir(paths[0])
+		for _, p := range paths[1:] {
+			for dir != "/" && !strings.HasPrefix(p, dir+"/") {
+				dir = path.Dir(dir)
+			}
+		}
+	}
+	if base := path.Base(dir); base != "/" && base != "." {
+		return base + ".zip"
+	}
+	return "download.zip"
+}
+
+// handleDownload saves files and directories of a machine in the browser
+// (GET /api/m/{id}/download?path=…&path=…): one file as itself, anything
+// else as a zip the agent makes while it is downloaded (fs.archive).
+func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
+	mc := s.machine(w, r)
+	if mc == nil {
+		return
+	}
+	paths, err := downloadPaths(r.URL.Query()["path"])
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if r.Method != http.MethodHead { // the browser's check before a download
+		s.audit.log(r, "file.download", map[string]any{"machine": mc.ID(), "paths": paths})
+	}
+	if len(paths) == 1 {
+		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+		rep, err := requestAgent(ctx, mc, agentproto.Header{Op: agentproto.OpFsStat, Path: paths[0]})
+		cancel()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		if !rep.Stat.IsDir {
+			serveFile(w, r, mc, rep.Stat, true)
+			return
+		}
+	}
+	zipHeaders := func() {
+		h := w.Header()
+		h.Set("Content-Type", "application/zip")
+		h.Set("Content-Disposition", attachment(archiveName(paths)))
+		h.Set("Cache-Control", "no-store")
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Content-Security-Policy", fileCSP)
+	}
+	if r.Method == http.MethodHead {
+		zipHeaders()
+		return
+	}
+	conn, _, err := mc.Open(r.Context(), agentproto.Header{Op: agentproto.OpFsArchive, Paths: paths})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	defer conn.Close()
+	// A browser that cancels the download ends the agent's walk.
+	stop := context.AfterFunc(r.Context(), func() { conn.Close() })
+	defer stop()
+	zipHeaders()
+	if _, err := io.Copy(w, conn); err != nil && r.Context().Err() == nil {
+		// The machine went away mid-archive: end the response unfinished,
+		// so the browser reports a failed download, not a truncated zip.
+		panic(http.ErrAbortHandler)
+	}
 }
 
 func requestAgent(ctx context.Context, mc *machines.Machine, h agentproto.Header) (*agentproto.Reply, error) {

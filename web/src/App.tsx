@@ -24,6 +24,7 @@ import { getTerm } from './terminal/registry';
 import { initSurface, surfaceDisconnected } from './surface/session';
 import { useGui } from './gui/state';
 import { GuiTray } from './gui/GuiMenus';
+import { bridgeDownload } from './download';
 import { TransfersTray } from './components/Transfers';
 
 /** Text sent from VS Code ("Send to agent") is pasted, not submitted, into the
@@ -67,6 +68,7 @@ export function App() {
         if (!c) surfaceDisconnected();
       },
       onBridgeSend: (m, text) => pasteToAgent(m, text),
+      onBridgeDownload: (m, paths) => bridgeDownload(m, paths),
       onGui: (st) => useGui.getState().setState(st),
     });
     loadKeymap();

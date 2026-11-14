@@ -21,11 +21,14 @@ export function isExternal(url: string): boolean {
 // Clipboard reads match what the browser UI grants VS Code's frame
 // (allow="clipboard-read" in web/src/components/Dock.tsx), where a browser
 // asks once; the desktop app has no prompt, so it grants them to the core.
+// fileSystem is the File System Access API: VS Code's Download… saves
+// folders and files over 32 MB into a folder the user picks in the native
+// dialog, which is the consent (Electron keeps system folders out).
 export function allowPermission(permission: string, requestingURL: string, topURL: string, origin: string): boolean {
   return (
     isInternal(requestingURL, origin) &&
     isInternal(topURL, origin) &&
-    ['notifications', 'clipboard-read', 'clipboard-sanitized-write'].includes(permission)
+    ['notifications', 'clipboard-read', 'clipboard-sanitized-write', 'fileSystem'].includes(permission)
   );
 }
 
