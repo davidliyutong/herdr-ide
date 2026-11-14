@@ -34,8 +34,10 @@ func herdrConfigPath() string {
 	return filepath.Join(dir, "herdr", "config.toml")
 }
 
-// loadKeyConfig reads the [keys] section of the host's herdr config so the
-// web UI uses the same prefix bindings as the herdr TUI.
+// loadKeyConfig reads the [keys] section of the host's herdr config: the web
+// UI runs its [[keys.command]] entries (plugin actions, commands in a new
+// pane) as chords of herdr's prefix. Its own keys are the keybindings'
+// (internal/keybindings).
 func loadKeyConfig() keyConfig {
 	out := keyConfig{Bindings: map[string]string{}, Commands: []keyCommand{}}
 	b, err := os.ReadFile(herdrConfigPath())

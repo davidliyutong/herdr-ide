@@ -9,15 +9,15 @@ import { channels } from './bridge';
 import { OpenedFolders } from './folders';
 import { allowPermission, isExternal, isInternal, mainWindowPreferences, themeSource, webPreferences } from './policy';
 import {
-  defaultShortcuts,
+  acceleratorFor,
+  bindingsFromReply,
+  defaultBindings,
   isCodeFrame,
-  overCode,
+  platformOf,
   recordedSpec,
   shortcutFor,
-  shortcutsFromSettings,
-  toAccelerator,
-  type ShortcutAction,
-  type Shortcuts,
+  shortcutOutsideCode,
+  type Binding,
 } from './shortcuts';
 
 app.setName(APP_NAME);
@@ -32,9 +32,10 @@ let quitting = false;
 let stopped = false;
 let systemShutdown = false;
 let reportingError = false;
-// The platform's defaults until the core's settings are read, so a key never
-// falls through to closing the window while they load.
-let shortcuts: Shortcuts = defaultShortcuts(process.platform);
+// The keybindings of this platform: its defaults until the core's are read,
+// so a key never falls through to closing the window while they load.
+const platform = platformOf(process.platform);
+let bindings: Binding[] = defaultBindings(platform);
 // The settings dialog is recording a key: the shell reports keys to it
 // instead of running shortcuts.
 let recording = false;
@@ -95,11 +96,11 @@ app.on('web-contents-created', (_event, contents) => {
   });
 });
 
-function runShortcut(action: ShortcutAction) {
+function runShortcut(command: string) {
   const win = mainWindow;
   if (!win) return;
   if (!win.isFocused()) win.focus();
-  win.webContents.send(channels.shortcut, action);
+  win.webContents.send(channels.shortcut, command);
 }
 
 // The menu shows the shortcuts; before-input-event runs them, so the menu does
@@ -107,11 +108,11 @@ function runShortcut(action: ShortcutAction) {
 // Window → Close closes program windows with cmd+w; the main window only when
 // cmd+w is not a shortcut left to VS Code (closing it quits the app).
 function buildMenu() {
-  const item = (action: ShortcutAction, label: MessageKey) => ({
+  const item = (command: string, label: MessageKey) => ({
     label: t(label),
-    accelerator: toAccelerator(shortcuts[action]),
+    accelerator: acceleratorFor(bindings, command),
     registerAccelerator: false,
-    click: () => runShortcut(action),
+    click: () => runShortcut(command),
   });
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
@@ -120,7 +121,7 @@ function buildMenu() {
         submenu: [
           { role: 'about' },
           { type: 'separator' },
-          item('open_settings', 'desktop.menu.settings'),
+          item('app.settings', 'desktop.menu.settings'),
           { type: 'separator' },
           { role: 'services' },
           { type: 'separator' },
@@ -134,17 +135,18 @@ function buildMenu() {
       {
         label: t('desktop.menu.file'),
         submenu: [
-          item('new_workspace', 'desktop.menu.newWorkspace'),
-          item('new_tab', 'desktop.menu.newTab'),
+          item('workspace.new', 'desktop.menu.newWorkspace'),
+          item('tab.new', 'desktop.menu.newTab'),
           { type: 'separator' },
-          item('close_tab', 'desktop.menu.closeTab'),
+          item('pane.close', 'desktop.menu.closePane'),
+          item('tab.close', 'desktop.menu.closeTab'),
         ],
       },
       { role: 'editMenu' },
       {
         label: t('desktop.menu.view'),
         submenu: [
-          item('toggle_code', 'desktop.menu.toggleCode'),
+          item('view.toggleCode', 'desktop.menu.toggleCode'),
           { type: 'separator' },
           { role: 'reload' },
           { role: 'forceReload' },
@@ -179,14 +181,15 @@ function buildMenu() {
   );
 }
 
-// Shortcuts are core settings; the page reports changes, the shell reads them
-// from the core itself. A failed read keeps the current ones and is retried.
+// The keybindings are the core's; the page reports changes, the shell reads
+// them from the core itself. A failed read keeps the current ones and is
+// retried.
 async function loadShortcuts(attempts = 3) {
   for (let i = 1; ; i++) {
     try {
-      const r = await fetch(new URL('/api/settings', origin));
-      if (!r.ok) throw new Error(`/api/settings: ${r.status}`);
-      shortcuts = shortcutsFromSettings(await r.json());
+      const r = await fetch(new URL('/api/keybindings', origin));
+      if (!r.ok) throw new Error(`/api/keybindings: ${r.status}`);
+      bindings = bindingsFromReply(await r.json(), platform) ?? bindings;
       break;
     } catch (error) {
       console.error(error);
@@ -264,14 +267,15 @@ function createWindow() {
       if (!input.isAutoRepeat) win.webContents.send(channels.recorded, spec);
       return;
     }
-    const action = shortcutFor(shortcuts, input);
-    if (!action) return;
-    if (!overCode.has(action) && focusInCode(win)) {
-      leftToCode = true;
+    const inCode = focusInCode(win);
+    const binding = shortcutFor(bindings, input, inCode);
+    if (!binding) {
+      // VS Code keeps its keys: cmd+w closes its editor, not the window.
+      if (inCode && shortcutOutsideCode(bindings, input)) leftToCode = true;
       return;
     }
     event.preventDefault();
-    if (!input.isAutoRepeat) runShortcut(action);
+    if (!input.isAutoRepeat) runShortcut(binding.command);
   });
   const stopRecording = () => {
     recording = false;

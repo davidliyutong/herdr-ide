@@ -17,6 +17,7 @@ import (
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/gui"
 	"herdr-ide/internal/machines"
+	"herdr-ide/internal/settings"
 )
 
 // GUI windows (docs/features/14-gui-windows.md): every /ws client gets the
@@ -45,20 +46,22 @@ func (s *Server) initGUI() {
 		s.gui.Disconnected(mc)
 	}, func(machines.AgentEvent) {})
 	if s.opts.Settings != nil {
-		s.opts.Settings.OnChange(func(key, machine, _ string) {
-			if key != gui.SettingGUI && key != gui.SettingVideo {
-				return
-			}
-			// A global change affects every machine without its own value.
-			for _, st := range s.mg.States() {
-				if machine != "" && st.ID != machine {
+		s.opts.Settings.OnChange(func(changes []settings.Change) {
+			for _, c := range changes {
+				if c.Key != gui.SettingGUI && c.Key != gui.SettingVideo {
 					continue
 				}
-				if mc := s.mg.Get(st.ID); mc != nil && (st.Status == machines.StatusReady || st.Status == machines.StatusDegraded) {
-					if key == gui.SettingVideo {
-						s.gui.ApplyVideo(mc)
-					} else {
-						s.gui.Apply(mc)
+				// A global change affects every machine without its own value.
+				for _, st := range s.mg.States() {
+					if c.Machine != "" && st.ID != c.Machine {
+						continue
+					}
+					if mc := s.mg.Get(st.ID); mc != nil && (st.Status == machines.StatusReady || st.Status == machines.StatusDegraded) {
+						if c.Key == gui.SettingVideo {
+							s.gui.ApplyVideo(mc)
+						} else {
+							s.gui.Apply(mc)
+						}
 					}
 				}
 			}

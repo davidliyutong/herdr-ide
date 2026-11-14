@@ -7,11 +7,14 @@ public struct Machine: Equatable {
     /// The core's connection state: connecting, ready, degraded,
     /// auth_required, error or disabled.
     public var status: String
+    /// local (the core's own host) or ssh.
+    public var kind: String
 
-    public init(id: String, label: String, status: String) {
+    public init(id: String, label: String, status: String, kind: String = "") {
         self.id = id
         self.label = label
         self.status = status
+        self.kind = kind
     }
 }
 
@@ -35,8 +38,8 @@ public struct ProgramWindow: Equatable {
     }
 }
 
-/// The client of the core's event channel (`/ws?events=1`): the machines
-/// and their program windows as they change. As an events-only client it
+/// The client of the core's event channel (`/ws?events=1`): the machines,
+/// their program windows, the settings and the keybindings as they change. As an events-only client it
 /// takes no part in the browser UI's pane session. It reconnects by itself
 /// (`CoreSocket`), and the core then sends the whole state again. Use it
 /// from the main queue.
@@ -48,6 +51,12 @@ public final class EventConnection {
         case machine(Machine)
         /// The windows on a machine's virtual display.
         case gui(machine: String, windows: [ProgramWindow])
+        /// The settings changed: the message, with every value and the
+        /// problems of the file (`SettingsModel.apply`).
+        case settings(JSONValue)
+        /// The keybindings changed: the message, with the user's rules and
+        /// the bindings in effect (`KeybindingsModel.apply`).
+        case keybindings(JSONValue)
     }
 
     public var onEvent: ((Event) -> Void)?
@@ -89,6 +98,10 @@ public final class EventConnection {
                                      width: raw["w"] as? Int ?? 0, height: raw["h"] as? Int ?? 0, transient: raw["transient"] as? Int ?? 0)
             }
             return .gui(machine: id, windows: windows)
+        case "settings":
+            return .settings(JSONValue(any: msg))
+        case "keybindings":
+            return .keybindings(JSONValue(any: msg))
         default:
             return nil
         }
@@ -97,6 +110,6 @@ public final class EventConnection {
     private static func machine(_ raw: [String: Any]) -> Machine? {
         guard let id = raw["id"] as? String, !id.isEmpty else { return nil }
         let label = raw["label"] as? String ?? ""
-        return Machine(id: id, label: label.isEmpty ? id : label, status: raw["status"] as? String ?? "")
+        return Machine(id: id, label: label.isEmpty ? id : label, status: raw["status"] as? String ?? "", kind: raw["kind"] as? String ?? "")
     }
 }

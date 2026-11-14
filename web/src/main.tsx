@@ -15,6 +15,8 @@ import { parseGuiPath, useGui } from './gui/state';
 import { conn } from './lib/conn';
 import { unlockAudio } from './sound';
 import { getPrefs } from './prefs';
+import { importLegacyPrefs, loadSettings } from './settings';
+import { setLocale } from './i18n';
 import { GuiWindowPage } from './gui/GuiWindowPage';
 import { refuseStrayFileDrops } from './drop';
 
@@ -23,10 +25,16 @@ import { refuseStrayFileDrops } from './drop';
 
 initAppearance();
 refuseStrayFileDrops();
+// The settings come from the core; until it answers the built-in defaults
+// apply. The language must be known before anything is rendered.
+const settingsLoaded = loadSettings().then((ok) => {
+  setLocale(getPrefs().locale);
+  if (ok) void importLegacyPrefs();
+});
 // A browser window showing one program window (see gui/).
 const guiPage = parseGuiPath(location.pathname);
 if (guiPage) {
-  createRoot(document.getElementById('root')!).render(<GuiWindowPage m={guiPage.m} id={guiPage.id} />);
+  void settingsLoaded.then(() => createRoot(document.getElementById('root')!).render(<GuiWindowPage m={guiPage.m} id={guiPage.id} />));
 } else {
   initSeen();
   initGuiAuto();
@@ -34,10 +42,11 @@ if (guiPage) {
   // Terminals measure their cells when they open: give the bundled font a
   // moment to load (it comes from the core). Terminals opened before it is
   // loaded switch to it later.
-  const font = loadTermFont(currentAppearance().fontWeight);
-  void Promise.race([font, new Promise((r) => setTimeout(r, 1500))]).then(() =>
-    createRoot(document.getElementById('root')!).render(<App />),
-  );
+  const font = settingsLoaded.then(() => loadTermFont(currentAppearance().fontWeight));
+  void Promise.race([font, new Promise((r) => setTimeout(r, 1500))]).then(async () => {
+    await settingsLoaded;
+    createRoot(document.getElementById('root')!).render(<App />);
+  });
   // Notification permission needs a user gesture.
   window.addEventListener('pointerdown', requestNotifyPermission, { once: true });
   // Input tells the core which page is in use (it plays the sounds), and

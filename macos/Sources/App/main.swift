@@ -19,6 +19,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var panelShown = false
     private var sidebarWidth: NSLayoutConstraint?
     private var monitor: Any?
+    private var keyMonitor: Any?
+    private var controllerBox: TerminalControllerBox?
+    /// Chords (and keys no menu item shows) are matched here, before the
+    /// terminal sees them.
+    private var matcher = KeyMatcher()
+    private var pendingKey: NSEvent?
+    private var pendingTimer: Timer?
+    /// The keys the menu shows, by command; the matcher leaves them to it.
+    private var menuKeys: [String: String] = [:]
 
     func applicationDidFinishLaunching(_: Notification) {
         NSApp.mainMenu = makeMenu()
@@ -67,13 +76,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         self.model = model
         let sidebar = SidebarView(model: model)
         let tabs = TabBar(model: model)
-        let panes = PaneArea(model: model, controller: MainActor.assumeIsolated { TerminalControllerBox() })
+        let box = MainActor.assumeIsolated { TerminalControllerBox() }
+        controllerBox = box
+        let panes = PaneArea(model: model, controller: box)
         self.sidebar = sidebar
         self.tabs = tabs
         self.panes = panes
         let webPanel = WebPanel(core: core)
         self.webPanel = webPanel
-        settings = SettingsWindow(core: core)
+        settings = SettingsWindow(model: model, supported: Self.supported)
         let programs = ProgramWindows(core: core)
         self.programs = programs
         sidebar.onProgram = { programs.show($0) }
@@ -117,6 +128,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         webPanel.isHidden = true
         window.contentView = root
         model.onChange = { [weak self] in self?.refresh() }
+        model.onSettings = { [weak self] in self?.applySettings() }
+        model.onKeybindings = { [weak self] in self?.applyKeybindings() }
         model.onConnection = { [weak self] up in if up { self?.panes?.reattach() } }
         // A click into a pane focuses it in the layout too.
         monitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
@@ -126,14 +139,151 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             }
             return event
         }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            self?.matchKey(event) ?? event
+        }
         model.start()
         refresh()
         #if DEBUG
             DebugAids.start(window: window, model: model, panes: panes, webPanel: webPanel) { [weak self] action in
                 if action == "code" { self?.togglePanel() }
                 if action == "settings" { self?.showSettings() }
+                if action == "keys" { self?.settings?.show(page: SettingsWindow.keysPage) }
+                if action.hasPrefix("settings:") { self?.settings?.show(page: String(action.dropFirst(9))) }
+                if action.hasPrefix("strokes:") {
+                    for stroke in action.dropFirst(8).split(separator: " ") {
+                        let result = self?.feed(String(stroke), context: "terminal")
+                        FileHandle.standardError.write(Data("stroke \(stroke): \(String(describing: result))\n".utf8))
+                    }
+                }
             }
         #endif
+    }
+
+    // MARK: - Settings and keybindings
+
+    /// Applies the settings: the theme, the interface's size, and the
+    /// terminals' font, colors, cursor, scrollback and keys.
+    private func applySettings() {
+        guard let model else { return }
+        let s = model.settings
+        switch s.string("appearance.theme", "system") {
+        case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
+        case "light": NSApp.appearance = NSAppearance(named: .aqua)
+        default: NSApp.appearance = nil
+        }
+        Theme.scale = CGFloat(s.number("appearance.uiFontSize", 13)) / 13
+        TerminalPane.history = Int(min(100_000, max(0, s.number("terminal.scrollback", 10000))))
+        TerminalPane.bell = s.string("terminal.bell", "visual")
+        MainActor.assumeIsolated { controllerBox?.apply(s, menuKeys: Array(menuKeys.values)) }
+        settings?.refresh()
+        refresh()
+    }
+
+    /// Rebuilds the menu with the keys in effect and gives the terminals
+    /// the keys the menu now has.
+    private func applyKeybindings() {
+        matcher.reset()
+        NSApp.mainMenu = makeMenu()
+        if let model { MainActor.assumeIsolated { controllerBox?.apply(model.settings, menuKeys: Array(menuKeys.values)) } }
+        settings?.refresh()
+    }
+
+    /// The bindings the matcher handles: all but the keys menu items show.
+    private var matcherBindings: [KeyBinding] {
+        (model?.keybindings.effective ?? []).filter { menuKeys[$0.command] != $0.key }
+    }
+
+    /// Feeds one stroke to the matcher and runs what it finds.
+    @discardableResult
+    private func feed(_ stroke: String, context: String) -> KeyMatcher.Result {
+        let result = matcher.feed(stroke, bindings: matcherBindings, context: context)
+        pendingTimer?.invalidate()
+        if result == .pending {
+            // A chord waits 3 s for its next stroke, as herdr's prefix does.
+            pendingTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: false) { [weak self] _ in
+                self?.matcher.reset()
+                self?.pendingKey = nil
+            }
+        }
+        if case let .run(command) = result { perform(command) }
+        return result
+    }
+
+    /// The key handler in front of the main window's views: chords and
+    /// keys without a menu item. Keys typed in the find field and the web
+    /// panel's (VS Code) are matched in their own contexts.
+    private func matchKey(_ event: NSEvent) -> NSEvent? {
+        guard let window, event.window === window, window.attachedSheet == nil else { return event }
+        let responder = window.firstResponder as? NSView
+        let context = webPanel?.contains(responder) == true ? "vscode" : responder is NSTextView ? "dialog" : "terminal"
+        let flags = event.modifierFlags
+        guard let stroke = Keys.stroke(characters: event.charactersIgnoringModifiers ?? "", keyCode: event.keyCode,
+                                       cmd: flags.contains(.command), ctrl: flags.contains(.control),
+                                       alt: flags.contains(.option), shift: flags.contains(.shift)) else { return event }
+        let first = pendingKey
+        switch feed(stroke, context: context) {
+        case .none:
+            pendingKey = nil
+            return event
+        case .pending:
+            if first == nil { pendingKey = event }
+            return nil
+        case .literal:
+            // The chord's first stroke twice: the terminal gets it.
+            pendingKey = nil
+            if let first { window.firstResponder?.keyDown(with: first) }
+            return nil
+        case .run, .swallow:
+            pendingKey = nil
+            return nil
+        }
+    }
+
+    /// The commands this application runs (the settings mark the others).
+    static let supported: Set<String> = {
+        var out: Set<String> = [
+            "app.settings", "app.keyboardShortcuts", "workspace.new", "workspace.rename", "workspace.close", "tab.new", "tab.close",
+            "tab.next", "tab.previous", "pane.splitRight", "pane.splitDown", "pane.close", "pane.focusNext", "pane.focusPrevious",
+            "view.toggleSidebar", "view.toggleCode", "find.open", "find.next", "find.previous", "code.open",
+        ]
+        for i in 1 ... 9 { out.insert("tab.select\(i)") }
+        return out
+    }()
+
+    /// Runs a command; those this application does not have do nothing.
+    private func perform(_ command: String) {
+        if command.hasPrefix("tab.select"), let n = Int(command.dropFirst(10)) {
+            model?.selectTab(n - 1)
+            return
+        }
+        switch command {
+        case "app.settings": showSettings()
+        case "app.keyboardShortcuts": settings?.show(page: SettingsWindow.keysPage)
+        case "workspace.new": newWorkspace()
+        case "workspace.rename": renameWorkspace()
+        case "workspace.close": closeWorkspace()
+        case "tab.new": model?.newTerminal()
+        case "tab.close": model?.closeTab()
+        case "tab.next": model?.cycleTab(1)
+        case "tab.previous": model?.cycleTab(-1)
+        case "pane.splitRight": model?.split(.horizontal)
+        case "pane.splitDown": model?.split(.vertical)
+        case "pane.close": model?.closeFocused()
+        case "pane.focusNext": model?.cycleFocus(1)
+        case "pane.focusPrevious": model?.cycleFocus(-1)
+        case "view.toggleSidebar": toggleSidebar()
+        case "view.toggleCode": togglePanel()
+        case "code.open": if !panelShown { togglePanel() }
+        case "find.open": find()
+        case "find.next": findNext()
+        case "find.previous": findPrevious()
+        default: break
+        }
+    }
+
+    @objc private func runCommand(_ sender: NSMenuItem) {
+        if let command = sender.representedObject as? String { perform(command) }
     }
 
 
@@ -208,12 +358,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// commands for terminals are off, so their keys reach the page.
     /// Workspaces change once the machine's layout was read.
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        guard let command = item.representedObject as? String else { return true }
         let inPage = webPanel?.contains(window.firstResponder as? NSView) ?? false
-        let terminalOnly: Set<Selector> = [#selector(newTerminal), #selector(splitRight), #selector(splitDown), #selector(closeTerminal),
-                                           #selector(find), #selector(findNext), #selector(findPrevious), #selector(newWorkspace)]
-        if inPage, let action = item.action, terminalOnly.contains(action) { return false }
-        let workspaceActions: Set<Selector> = [#selector(newWorkspace), #selector(renameWorkspace), #selector(closeWorkspace)]
-        if let action = item.action, workspaceActions.contains(action) {
+        // Keys of commands for everywhere also work in the page.
+        let when = model?.keybindings.commands.first { $0.id == command }?.when ?? "terminal"
+        if inPage, when != "always", when != "vscode" { return false }
+        if command.hasPrefix("workspace.") {
             return model?.selectedMachine.flatMap { model?.layout(of: $0) } != nil
         }
         return true
@@ -229,8 +379,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     // MARK: - Menu
 
+    /// The main menu. Items of commands show the first single-stroke key
+    /// the keybindings give them (chords cannot be key equivalents; the
+    /// matcher runs them); the terminals leave those keys to the menu.
     private func makeMenu() -> NSMenu {
         let main = NSMenu()
+        let bindings = model?.keybindings.effective ?? []
+        menuKeys = [:]
         func submenu(_ title: String, _ build: (NSMenu) -> Void) {
             let item = NSMenuItem()
             let menu = NSMenu(title: title)
@@ -249,39 +404,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             let item = menu.addItem(withTitle: arg.map { tr(key, $0) } ?? tr(key), action: action, keyEquivalent: equivalent)
             item.keyEquivalentModifierMask = modifiers
         }
+        func command(_ menu: NSMenu, _ key: String, _ id: String) {
+            let item = menu.addItem(withTitle: tr(key), action: #selector(runCommand(_:)), keyEquivalent: "")
+            item.representedObject = id
+            guard let binding = bindings.first(where: { $0.command == id && Keys.menuEquivalent($0.key) != nil }),
+                  let equivalent = Keys.menuEquivalent(binding.key) else { return }
+            var mask: NSEvent.ModifierFlags = []
+            if equivalent.cmd { mask.insert(.command) }
+            if equivalent.ctrl { mask.insert(.control) }
+            if equivalent.alt { mask.insert(.option) }
+            if equivalent.shift { mask.insert(.shift) }
+            item.keyEquivalent = equivalent.key
+            item.keyEquivalentModifierMask = mask
+            menuKeys[id] = binding.key
+        }
         submenu(Brand.appName) { menu in
             add(menu, "menu.about", #selector(NSApplication.orderFrontStandardAboutPanel(_:)), "", arg: Brand.appName)
             menu.addItem(.separator())
-            add(menu, "menu.settings", #selector(showSettings), ",")
+            command(menu, "menu.settings", "app.settings")
+            command(menu, "menu.keyboardShortcuts", "app.keyboardShortcuts")
             menu.addItem(.separator())
             add(menu, "menu.hide", #selector(NSApplication.hide(_:)), "h", arg: Brand.appName)
             add(menu, "menu.quit", #selector(NSApplication.terminate(_:)), "q", arg: Brand.appName)
         }
         submenu(tr("menu.shell")) { menu in
-            add(menu, "menu.newTerminal", #selector(newTerminal), "t")
-            add(menu, "menu.splitRight", #selector(splitRight), "d")
-            add(menu, "menu.splitDown", #selector(splitDown), "d", [.command, .shift])
+            command(menu, "menu.newTerminal", "tab.new")
+            command(menu, "menu.splitRight", "pane.splitRight")
+            command(menu, "menu.splitDown", "pane.splitDown")
             menu.addItem(.separator())
-            add(menu, "menu.newWorkspace", #selector(newWorkspace), "n")
-            add(menu, "menu.renameWorkspace", #selector(renameWorkspace), "")
-            add(menu, "menu.closeWorkspace", #selector(closeWorkspace), "")
+            command(menu, "menu.newWorkspace", "workspace.new")
+            command(menu, "menu.renameWorkspace", "workspace.rename")
+            command(menu, "menu.closeWorkspace", "workspace.close")
             menu.addItem(.separator())
-            add(menu, "menu.closeTerminal", #selector(closeTerminal), "w")
+            command(menu, "menu.closeTerminal", "pane.close")
+            command(menu, "menu.closeTab", "tab.close")
         }
         submenu(tr("menu.edit")) { menu in
             add(menu, "menu.copy", #selector(NSText.copy(_:)), "c")
             add(menu, "menu.paste", #selector(NSText.paste(_:)), "v")
             add(menu, "menu.selectAll", #selector(NSText.selectAll(_:)), "a")
             menu.addItem(.separator())
-            add(menu, "menu.find", #selector(find), "f")
-            add(menu, "menu.findNext", #selector(findNext), "g")
-            add(menu, "menu.findPrevious", #selector(findPrevious), "g", [.command, .shift])
+            command(menu, "menu.find", "find.open")
+            command(menu, "menu.findNext", "find.next")
+            command(menu, "menu.findPrevious", "find.previous")
         }
         submenu(tr("menu.view")) { menu in
-            add(menu, "menu.toggleSidebar", #selector(toggleSidebar), "b")
-            add(menu, "menu.toggleCode", #selector(togglePanel), "j")
-            add(menu, "menu.nextTab", #selector(nextTab), "}")
-            add(menu, "menu.previousTab", #selector(previousTab), "{")
+            command(menu, "menu.toggleSidebar", "view.toggleSidebar")
+            command(menu, "menu.toggleCode", "view.toggleCode")
+            menu.addItem(.separator())
+            command(menu, "menu.nextTab", "tab.next")
+            command(menu, "menu.previousTab", "tab.previous")
+            command(menu, "menu.nextPane", "pane.focusNext")
+            command(menu, "menu.previousPane", "pane.focusPrevious")
         }
         submenu(tr("menu.window")) { menu in
             add(menu, "menu.minimize", #selector(NSWindow.performMiniaturize(_:)), "m")
@@ -296,32 +470,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         return panes?.pane(machine, address)
     }
 
-    @objc private func showSettings() { settings?.show() }
-    @objc private func find() { focusedPane?.showFind() }
-    @objc private func findNext() { focusedPane?.findStep(true) }
-    @objc private func findPrevious() { focusedPane?.findStep(false) }
-    @objc private func newTerminal() { model?.newTerminal() }
-    @objc private func splitRight() { model?.split(.horizontal) }
-    @objc private func splitDown() { model?.split(.vertical) }
-    @objc private func closeTerminal() { model?.closeFocused() }
+    private func showSettings() { settings?.show() }
+    private func find() { focusedPane?.showFind() }
+    private func findNext() { focusedPane?.findStep(true) }
+    private func findPrevious() { focusedPane?.findStep(false) }
 
-    @objc private func newWorkspace() {
+    private func newWorkspace() {
         if let machine = model?.selectedMachine { dialogs?.create(on: machine) }
     }
 
-    @objc private func renameWorkspace() {
+    private func renameWorkspace() {
         guard let model, let machine = model.selectedMachine, let workspace = model.layout.selectedWorkspace else { return }
         dialogs?.rename(workspace.id, on: machine)
     }
 
-    @objc private func closeWorkspace() {
+    private func closeWorkspace() {
         guard let model, let machine = model.selectedMachine, let workspace = model.layout.selectedWorkspace else { return }
         dialogs?.close(workspace.id, on: machine)
     }
-    @objc private func nextTab() { model?.cycleTab(1) }
-    @objc private func previousTab() { model?.cycleTab(-1) }
-
-    @objc private func toggleSidebar() {
+    private func toggleSidebar() {
         guard let sidebar, let sidebarWidth else { return }
         sidebar.isHidden.toggle()
         sidebarWidth.constant = sidebar.isHidden ? 0 : Theme.sidebarWidth

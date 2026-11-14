@@ -1,51 +1,59 @@
-// Direct shortcuts of the desktop app (keys without herdr's prefix, such as
-// Cmd+T). Their specs are core settings (internal/shortcuts); the shell reads
-// them from /api/settings, intercepts matching keys before the page sees them
-// (so a pane never receives them, whichever frame has focus) and asks the page
-// to run the action. Keys are named by web/src/shortcutKey.ts, after the
-// character the keyboard layout gives them.
+// Direct shortcuts of the desktop app: the keybindings (internal/keybindings)
+// in effect on this platform that are a single stroke with Cmd, Ctrl or Alt
+// (Cmd+T…). The shell reads them from /api/keybindings, intercepts matching
+// keys before the page sees them (so a pane never receives them, whichever
+// frame has focus) and asks the page to run the command. Chords (ctrl+b c)
+// and plain keys stay with the page, which matches them itself. Keys are
+// named by web/src/keys.ts, after the character the keyboard layout gives
+// them.
 
-import { acceleratorKey, isKeyName, keyName } from '../../web/src/shortcutKey';
+import registry from '../../design/generated/registry.json';
+import { acceleratorKey, parseKeys, strokeOf } from '../../web/src/keys';
 
-/** Actions the page runs for a shortcut; the core setting that holds its keys. */
-export const shortcutSettings = {
-  new_tab: 'desktop-new-tab-key',
-  close_tab: 'desktop-close-tab-key',
-  open_settings: 'desktop-settings-key',
-  new_workspace: 'desktop-new-workspace-key',
-  toggle_code: 'desktop-toggle-code-key',
-} as const;
+/** The keybindings' platforms of the desktop app. */
+export type Platform = 'mac' | 'pc';
 
-export type ShortcutAction = keyof typeof shortcutSettings;
-
-/** Actions whose shortcut runs also while VS Code has focus: hiding the
- * VS Code panel from inside it is the point. Other shortcuts leave their key
- * to VS Code there. */
-export const overCode: ReadonlySet<ShortcutAction> = new Set<ShortcutAction>(['toggle_code']);
-export type Shortcuts = Partial<Record<ShortcutAction, string>>;
-
-export interface Shortcut {
-  cmd: boolean;
-  ctrl: boolean;
-  alt: boolean;
-  shift: boolean;
-  key: string;
+export function platformOf(nodePlatform: string): Platform {
+  return nodePlatform === 'darwin' ? 'mac' : 'pc';
 }
 
-/** Parses a spec such as "cmd+shift+t"; undefined for "none" and invalid specs. */
-export function parseShortcut(spec: string | undefined): Shortcut | undefined {
-  if (!spec || spec === 'none') return;
-  const parts = spec.split('+');
-  const key = parts.pop()!;
-  if (!isKeyName(key)) return;
-  const sc: Shortcut = { cmd: false, ctrl: false, alt: false, shift: false, key };
-  for (const p of parts) {
-    if (p !== 'cmd' && p !== 'ctrl' && p !== 'alt' && p !== 'shift') return;
-    if (sc[p]) return;
-    sc[p] = true;
+export interface Binding {
+  key: string;
+  command: string;
+  when: string;
+}
+
+/** Whether a binding is one the shell takes: one stroke with cmd, ctrl or alt. */
+export function isDirect(b: Binding): boolean {
+  try {
+    const seq = parseKeys(b.key);
+    return seq.length === 1 && (seq[0].cmd || seq[0].ctrl || seq[0].alt);
+  } catch {
+    return false;
   }
-  if (!sc.cmd && !sc.ctrl && !sc.alt) return;
-  return sc;
+}
+
+/** The direct shortcuts among bindings. */
+export function directShortcuts(bindings: Binding[]): Binding[] {
+  return bindings.filter(isDirect);
+}
+
+/** The default bindings of the platform (design/generated/registry.json),
+ * used until the core's are read, so a key never falls through to closing
+ * the window while they load. */
+export function defaultBindings(platform: Platform): Binding[] {
+  return registry.keybindings[platform] as Binding[];
+}
+
+/** The bindings in effect on the platform in a /api/keybindings reply;
+ * undefined for a reply without them. */
+export function bindingsFromReply(reply: unknown, platform: Platform): Binding[] | undefined {
+  const list = (reply as { effective?: Record<string, unknown> } | null)?.effective?.[platform];
+  if (!Array.isArray(list)) return;
+  return list.filter(
+    (b): b is Binding =>
+      typeof b?.key === 'string' && typeof b?.command === 'string' && typeof b?.when === 'string' && /^[A-Za-z0-9_.:-]+$/.test(b.command),
+  );
 }
 
 /** The fields of Electron's before-input-event Input used for matching. */
@@ -59,72 +67,62 @@ export interface KeyInput {
   shift: boolean;
 }
 
-/** Whether a key-down matches: the key by its character on the current
- * layout (so AZERTY's Cmd+Z is not cmd+w), and exactly the spec's modifiers. */
-export function matchesInput(sc: Shortcut, input: KeyInput): boolean {
-  return (
-    input.type === 'keyDown' &&
-    keyName(input) === sc.key &&
-    input.meta === sc.cmd &&
-    input.control === sc.ctrl &&
-    input.alt === sc.alt &&
-    input.shift === sc.shift
-  );
+/** The stroke of a key-down, e.g. "cmd+shift+t", by the character the
+ * layout gives the key (so AZERTY's Cmd+Z is not cmd+w). */
+export function inputStroke(input: KeyInput): string | undefined {
+  if (input.type !== 'keyDown') return;
+  return strokeOf({
+    key: input.key,
+    code: input.code,
+    metaKey: input.meta,
+    ctrlKey: input.control,
+    altKey: input.alt,
+    shiftKey: input.shift,
+  });
 }
 
-/** The action whose shortcut matches the input, if any. */
-export function shortcutFor(shortcuts: Shortcuts, input: KeyInput): ShortcutAction | undefined {
-  for (const [action, spec] of Object.entries(shortcuts)) {
-    const sc = parseShortcut(spec);
-    if (sc && matchesInput(sc, input)) return action as ShortcutAction;
-  }
+/** The direct shortcut a key-down runs where focus is: in a VS Code frame
+ * only bindings for VS Code or everywhere, elsewhere those for the main UI or
+ * everywhere (dialog bindings belong to the page). */
+export function shortcutFor(bindings: Binding[], input: KeyInput, inCode = false): Binding | undefined {
+  const stroke = inputStroke(input);
+  if (!stroke) return;
+  return bindings.find((b) => b.key === stroke && isDirect(b) && (b.when === 'always' || b.when === (inCode ? 'vscode' : 'terminal')));
 }
 
-/** Electron accelerator for the menu's key label, e.g. "Command+Shift+T". */
-export function toAccelerator(spec: string | undefined): string | undefined {
-  const sc = parseShortcut(spec);
-  if (!sc) return;
-  const mods = [sc.cmd && 'Super', sc.ctrl && 'Control', sc.alt && 'Alt', sc.shift && 'Shift'].filter(Boolean);
-  return [...mods, acceleratorKey(sc.key)].join('+');
+/** Whether a key-down is a direct shortcut of the main UI, whatever has
+ * focus: one the shell leaves to VS Code when VS Code has it. */
+export function shortcutOutsideCode(bindings: Binding[], input: KeyInput): boolean {
+  const stroke = inputStroke(input);
+  return !!stroke && bindings.some((b) => b.key === stroke && isDirect(b) && b.when === 'terminal');
 }
 
-/** The shortcuts in a /api/settings reply; settings that are missing stay unset. */
-export function shortcutsFromSettings(reply: unknown): Shortcuts {
-  const out: Shortcuts = {};
-  const list = (reply as { settings?: unknown })?.settings;
-  if (!Array.isArray(list)) return out;
-  for (const [action, key] of Object.entries(shortcutSettings) as [ShortcutAction, string][]) {
-    const e = list.find((s) => (s as { key?: unknown })?.key === key) as { value?: unknown } | undefined;
-    if (typeof e?.value === 'string' && parseShortcut(e.value)) out[action] = e.value;
-  }
-  return out;
-}
-
-/** The default shortcuts, as internal/shortcuts sets them: cmd+t / cmd+w /
- * cmd+, / cmd+n / cmd+j on macOS; elsewhere ctrl+shift with the same letters,
- * as in terminal emulators, since ctrl+w, ctrl+n and ctrl+j are keys of
- * shells and editors, and ctrl+,. Used until the core's are read. */
-export function defaultShortcuts(platform: string): Shortcuts {
-  return platform === 'darwin'
-    ? { new_tab: 'cmd+t', close_tab: 'cmd+w', open_settings: 'cmd+comma', new_workspace: 'cmd+n', toggle_code: 'cmd+j' }
-    : {
-        new_tab: 'ctrl+shift+t',
-        close_tab: 'ctrl+shift+w',
-        open_settings: 'ctrl+comma',
-        new_workspace: 'ctrl+shift+n',
-        toggle_code: 'ctrl+shift+j',
-      };
-}
-
-/** The spec of a key-down while the settings dialog records a shortcut, e.g.
- * "cmd+shift+t"; undefined for keys without cmd, ctrl or alt (those reach the
- * page: Escape cancels, Backspace removes) and for lone modifiers. */
-export function recordedSpec(input: KeyInput): string | undefined {
-  if (input.type !== 'keyDown' || !(input.meta || input.control || input.alt)) return;
-  const key = keyName(input);
+/** Electron accelerator for a menu's key label, e.g. "Super+Shift+T";
+ * undefined for chords. */
+export function toAccelerator(key: string | undefined): string | undefined {
   if (!key) return;
-  const mods = [input.meta && 'cmd', input.control && 'ctrl', input.alt && 'alt', input.shift && 'shift'].filter(Boolean);
-  return [...mods, key].join('+');
+  try {
+    const seq = parseKeys(key);
+    if (seq.length !== 1) return;
+    const s = seq[0];
+    const mods = [s.cmd && 'Super', s.ctrl && 'Control', s.alt && 'Alt', s.shift && 'Shift'].filter(Boolean);
+    return [...mods, acceleratorKey(s.key)].join('+');
+  } catch {
+    return;
+  }
+}
+
+/** The menu accelerator of a command: its first direct shortcut. */
+export function acceleratorFor(bindings: Binding[], command: string): string | undefined {
+  return toAccelerator(bindings.find((b) => b.command === command && isDirect(b))?.key);
+}
+
+/** The stroke of a key-down while the settings record a key, e.g.
+ * "cmd+shift+t"; undefined for keys without cmd, ctrl or alt (those reach
+ * the page: Escape cancels, Enter keeps) and for lone modifiers. */
+export function recordedSpec(input: KeyInput): string | undefined {
+  if (!(input.meta || input.control || input.alt)) return;
+  return inputStroke(input);
 }
 
 /** Whether url is a VS Code (code-server) frame of the core, /m/<machine>/code/…. */

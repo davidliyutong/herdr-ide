@@ -50,33 +50,23 @@ here; both READMEs link to this page instead of repeating it.
 | `--extension-url` | Open VSX | Download URL template for extensions (`{publisher}`, `{name}`, `{version}`, `{file}`). |
 | `--seed-dir` | – | Directory with pre-downloaded tarballs and VSIXs (from `fetch-assets`), searched before the cache (repeatable). |
 | `--offline` | `false` | Never download; artifacts must come from `--seed-dir` or the cache. |
-| `--code-server-install` | `push` | How machines get code-server: `push` (the core resolves, verifies and uploads the release), `download` (the machine fetches it with curl or wget, verified against the same digest) or `existing` (a code-server already installed on the machine). `download` and `existing` fall back to `push`; `--offline` disables `download`. Also a setting in the UI. |
-| `--code-server-path` | – | code-server on machines for `existing` (absolute or `~/` path); empty searches `PATH`, `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin` and `/snap/bin`. Also a setting in the UI. |
+| `--code-server-install` | `push` | How machines get code-server: `push` (the core resolves, verifies and uploads the release), `download` (the machine fetches it with curl or wget, verified against the same digest) or `existing` (a code-server already installed on the machine). `download` and `existing` fall back to `push`; `--offline` disables `download`. The setting `codeServer.install`. |
+| `--code-server-path` | – | code-server on machines for `existing` (absolute or `~/` path); empty searches `PATH`, `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin` and `/snap/bin`. The setting `codeServer.path`. |
 
 ### Program windows
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--gui` | `on` | Show windows of programs on remote Linux machines in browser windows: new panes get a virtual display (`DISPLAY`, `XAUTHORITY`); Xvfb is fetched in user space when missing. Applies to panes created afterwards. Also a setting in the UI. |
-| `--gui-gpu` | `vglrun` | OpenGL on machines with VirtualGL: `vglrun` (programs started with `vglrun` render on the GPU) or `all` (every program in new panes runs under VirtualGL). Also a setting in the UI. |
-| `--gui-video` | `on` | Send program windows that keep changing as video (H.264 on machines with an NVIDIA, Intel or AMD GPU, else VP8 on the CPU) to browsers that decode it with WebCodecs, encoded on the machine by the encoder the core brings; pictures otherwise, and always with `off`. Release builds embed the encoder; a build without it (no `scripts/build-ffmpeg.sh` before `make build`) sends pictures. Also a setting in the UI. |
+| `--gui` | `true` | Show windows of programs on remote Linux machines in browser windows: new panes get a virtual display (`DISPLAY`, `XAUTHORITY`); Xvfb is fetched in user space when missing. Applies to panes created afterwards. `true` or `false` (`on` and `off` are accepted too). The setting `gui.enabled`. |
+| `--gui-gpu` | `vglrun` | OpenGL on machines with VirtualGL: `vglrun` (programs started with `vglrun` render on the GPU) or `all` (every program in new panes runs under VirtualGL). The setting `gui.gpu`. |
+| `--gui-video` | `true` | Send program windows that keep changing as video (H.264 on machines with an NVIDIA, Intel or AMD GPU, else VP8 on the CPU) to browsers that decode it with WebCodecs, encoded on the machine by the encoder the core brings; pictures otherwise, and always with `false` (`on`/`off` accepted). Release builds embed the encoder; a build without it (no `scripts/build-ffmpeg.sh` before `make build`) sends pictures. The setting `gui.video`. |
 
-### Desktop app shortcuts
-
-| Flag | Default | Description |
-| --- | --- | --- |
-| `--desktop-new-tab-key` | `cmd+t` (macOS), `ctrl+shift+t` | Desktop app: shortcut for a new tab. Modifiers (`cmd`, `ctrl`, `alt`, `shift`, at least one of the first three) and a key joined by `+`, or `none`. Also a setting in the UI (desktop app only). |
-| `--desktop-close-tab-key` | `cmd+w` (macOS), `ctrl+shift+w` | Desktop app: shortcut that closes the current tab, asking first when a program runs in it; same format. Also a setting in the UI (desktop app only). |
-| `--desktop-settings-key` | `cmd+comma` (macOS), `ctrl+comma` | Desktop app: shortcut that opens the settings; same format. Also a setting in the UI (desktop app only). |
-| `--desktop-new-workspace-key` | `cmd+n` (macOS), `ctrl+shift+n` | Desktop app: shortcut for a new workspace (asks for its folder); same format. Also a setting in the UI (desktop app only). |
-| `--desktop-toggle-code-key` | `cmd+j` (macOS), `ctrl+shift+j` | Desktop app: shortcut that shows or hides the VS Code panel, also while VS Code has focus; same format. Also a setting in the UI (desktop app only). |
-
-Settings marked "also a setting in the UI" can be changed in the settings
-dialog; the value is saved on the core host. code-server settings apply from
-the next code-server start on each machine, GUI settings to panes created
-afterwards, video from the next frame. `--gui`, `--gui-gpu` and `--gui-video` can also be set per remote machine in the
-dialog ("Per machine"); a machine without its own value uses the global one.
-A flag given on the command line wins, for every machine, and locks the
+These flags set settings ([settings](#settings)); the settings dialog and the
+settings file change them at runtime. code-server settings apply from the
+next code-server start on each machine, GUI settings to panes created
+afterwards, video from the next frame. The `gui.*` settings can also be set
+per remote machine; a machine without its own value uses the global one. A
+flag given on the command line wins, for every machine, and locks the
 setting in the UI.
 
 ### Development
@@ -94,40 +84,75 @@ setting in the UI.
 selects the code-server builds; `--code-server-version`, `--code-server-url`,
 `--extension-url`, `--seed-dir` and `--offline` behave as above.
 
+## Settings
+
+Every setting of the core and of the user interfaces is defined in the core
+(`internal/registry`) and shown by the settings dialog of every client
+([13](features/13-settings-and-appearance.md)). Values live in
+`settings[-<instance>].json` on the core host and can be edited there by
+hand; the core reads the file again within two seconds.
+
+| Section | Settings |
+| --- | --- |
+| Appearance | `appearance.language` (web UI), `appearance.theme`, `appearance.uiFontSize` |
+| Layout | `layout.panelPosition` (web UI) |
+| Terminal | `terminal.fontFamily`, `terminal.fontSize`, `terminal.fontWeight`, `terminal.lineHeight`, `terminal.cursorStyle`, `terminal.cursorBlink`, `terminal.scrollback`, `terminal.copyOnSelect`, `terminal.bell`, `terminal.boldIsBright`, `terminal.optionIsMeta`, `terminal.programClipboard`, `terminal.mathHover` (web UI) |
+| Terminal colors | `terminal.colors.dark.{foreground,background,cursor,selection,palette}` and the same for `light` (palette: 16 colors) |
+| Notifications | `notifications.sound`, `notifications.mutedAgents` (web UI) |
+| VS Code | `codeServer.install`, `codeServer.path` |
+| Program windows | `gui.enabled`, `gui.gpu`, `gui.video` (also per remote machine) |
+
+```json
+{
+  "appearance.theme": "dark",
+  "terminal.fontSize": 14,
+  "terminal.colors.dark.palette": ["#484f58", "#ff7b72", "…14 more"],
+  "[machine:gpu-box]": { "gui.video": false }
+}
+```
+
 ## Keyboard shortcuts
 
-The prefix and bindings are read from the host's herdr configuration
-(`~/.config/herdr/config.toml`, `[keys]`), so they match the herdr TUI; the
-defaults are shown. Custom `[[keys.command]]` entries of type `plugin_action`
-run on the pane's machine.
+Keys come from the keybindings (`internal/keybindings`): defaults per
+platform, changed in **Settings → Keyboard shortcuts** or in
+`keybindings[-<instance>].json` on the core host, an array of
+`{"key", "command", "when"}` rules (`"command": "-<id>"` removes a key;
+`when` is `terminal`, `vscode`, `dialog` or `always`). A key is modifiers
+(`cmd`, `ctrl`, `alt`, `shift`) and a key joined by `+`; a chord is strokes
+separated by spaces (`ctrl+b c`: ctrl+b, then c within 3 s). The first
+stroke needs `cmd`, `ctrl` or `alt` (or is a function key).
 
-| Keys | Action | Keys | Action |
+The defaults keep herdr's prefix keymap (prefix `ctrl+b`) on every platform:
+
+| Keys | Command | Keys | Command |
 | --- | --- | --- | --- |
-| `prefix v` / `prefix -` | Split right / down | `prefix h` `j` `k` `l` | Focus pane left / down / up / right |
-| `prefix z` | Zoom / restore pane | `prefix x` | Close pane |
-| `prefix tab` / `shift+tab` | Next / previous pane | `prefix c` | New tab |
-| `prefix n` / `p` / `1..9` | Next / previous / N-th tab | `prefix shift+x` | Close tab |
-| `prefix shift+n` | New workspace | `prefix shift+w` / `shift+d` | Rename / close workspace |
-| `prefix e` | Open the pane's folder in VS Code | `prefix d` | Diff of the pane's repository |
-| `prefix shift+g` | Git Graph | `prefix o` | Jump to the agent that needs attention |
-| `prefix space` | Command palette | `prefix w` | Switch workspace or agent |
-| `prefix b` | Toggle sidebar | `prefix ?` | Shortcut list |
-| `prefix shift+t` | Rename tab | `prefix ,` | Settings |
-| `prefix prefix` | Send the prefix key itself | | |
+| `ctrl+b v` / `ctrl+b -` | Split right / down | `ctrl+b h` `j` `k` `l` | Focus pane left / down / up / right |
+| `ctrl+b z` | Zoom / restore pane | `ctrl+b x` | Close pane |
+| `ctrl+b tab` / `shift+tab` | Next / previous pane | `ctrl+b c` | New tab |
+| `ctrl+b n` / `p` / `1`…`9` | Next / previous / N-th tab | `ctrl+b shift+x` | Close tab |
+| `ctrl+b shift+n` | New workspace | `ctrl+b shift+w` / `shift+d` | Rename / close workspace |
+| `ctrl+b e` | Open the pane's folder in VS Code | `ctrl+b d` | Diff of the pane's repository |
+| `ctrl+b shift+g` | Git Graph | `ctrl+b o` | Jump to the agent that needs attention |
+| `ctrl+b space` / `ctrl+b g` | Command palette | `ctrl+b w` | Switch workspace or agent |
+| `ctrl+b b` | Toggle sidebar | `ctrl+b ?` | Shortcut list |
+| `ctrl+b shift+t` | Rename tab | `ctrl+b ,` | Settings |
+| `ctrl+b ctrl+b` | Send ctrl+b itself | | |
 
-The desktop app adds direct shortcuts, without the prefix: `cmd+t` new tab,
-`cmd+w` close tab, which asks first when a program runs in it, `cmd+,` settings, `cmd+n` new
-workspace and `cmd+j` show or hide the VS Code panel (`ctrl+shift+t` /
-`ctrl+shift+w` / `ctrl+,` / `ctrl+shift+n` / `ctrl+shift+j` on other
-systems). They work wherever focus is except in VS Code, which keeps its own
-`cmd+t` / `cmd+w` / `cmd+,` / `cmd+n`; `cmd+j` hides the panel from VS Code
-too. They are changed or removed under **Settings → Shortcuts** (or
-`--desktop-new-tab-key`, `--desktop-close-tab-key`,
-`--desktop-settings-key`, `--desktop-new-workspace-key`,
-`--desktop-toggle-code-key`); a removed shortcut gives the key back to the
-window (`cmd+w` closes it again). Keys follow the keyboard layout's
-characters. Browsers keep these keys for themselves and use the prefix
-bindings.
+The desktop applications add direct shortcuts. On macOS (the macOS
+application and the desktop app): `cmd+t` new tab, `cmd+d` / `cmd+shift+d`
+split right / down, `cmd+w` close pane, `cmd+n` new workspace, `cmd+,`
+settings, `cmd+b` sidebar, `cmd+j` show or hide VS Code, `cmd+}` / `cmd+{`
+next / previous tab, `cmd+f` find, `cmd+g` / `cmd+shift+g` next / previous
+match. On other systems (desktop app): `ctrl+shift+t` new tab,
+`ctrl+shift+w` close tab, `ctrl+,` settings, `ctrl+shift+n` new workspace,
+`ctrl+shift+j` VS Code. Browsers keep those keys for themselves; there
+`cmd+f` (macOS) or `ctrl+shift+f` find. In VS Code only bindings for
+`always` (show or hide VS Code) or `vscode` run; the others are VS Code's.
+Keys follow the keyboard layout's characters.
+
+herdr's own `[[keys.command]]` entries (`~/.config/herdr/config.toml`, type
+`plugin_action`, `pane`, `popup` or `shell`) still run in the web UI as
+chords of herdr's prefix.
 
 Default prefix: `ctrl+b`. In panes: Shift+Enter sends `ESC CR` (newline in
 Claude Code and similar prompts; the bytes of every key are listed in
@@ -136,7 +161,7 @@ holding a selection drag above or below a pane scrolls it and extends the
 selection, and copying then copies all of it;
 ⌘/Ctrl-click opens paths (media in the preview panel, code in VS Code) and
 URLs. `cmd+f` (macOS) or `ctrl+shift+f` (other systems) finds text in the
-focused pane and its scrollback: Enter goes to the older match,
+focused pane and its scrollback (`find.open`): Enter goes to the older match,
 Shift+Enter to the newer one, Escape closes the bar; in the bar, `alt+c`
 matches case, `alt+w` whole words and `alt+r` takes the query as a
 regular expression (RE2 syntax; Option on macOS). Pasting or dropping files uploads them to the pane's machine (dropped
@@ -169,7 +194,7 @@ browser's menu shows instead.
 | `HERDR_IDE_CORE` | `pnpm -C web dev`, the macOS application | Core URL the Vite dev server proxies to (default `http://127.0.0.1:7780`); the macOS application uses that core instead of starting the one in its bundle. |
 | `SIGN_IDENTITY`, `NOTARY_PROFILE` | `make macos-app` | A code-signing certificate's name (default `-`, an ad hoc signature) and a `notarytool` keychain profile; with both the application is notarized and stapled. `SKIP_CORE=1` reuses the core in `dist/`; `OUT_DIR` is where the `.app` goes (default `dist/macos`). |
 | `HERDR_IDE_DEV` | the macOS application | `1` starts the bundled core as instance `dev` with the development sessions, like `make dev-desktop`. |
-| `HERDR_IDE_SNAPSHOT`, `HERDR_IDE_ACTIONS` | debug builds of the macOS application | Development aids: a path the window is written to as a PNG every two seconds, and actions run two seconds apart (`new`, `split-right`, `split-down`, `close`, `next-tab`, `workspace:<name>[:<cwd>]` (a new workspace with a terminal, without the dialog), `rename-workspace:<name>`, `close-workspace` (without asking), `next-workspace`, `type:<text>`, `find:<text>`, `find-next`, `open:<path>`, `code`, `page`, `settings`, `key:cmd+<key>`, separated by `;`). |
+| `HERDR_IDE_SNAPSHOT`, `HERDR_IDE_ACTIONS` | debug builds of the macOS application | Development aids: a path the window is written to as a PNG every two seconds, and actions run two seconds apart (`new`, `split-right`, `split-down`, `close`, `next-tab`, `workspace:<name>[:<cwd>]` (a new workspace with a terminal, without the dialog), `rename-workspace:<name>`, `close-workspace` (without asking), `next-workspace`, `type:<text>`, `find:<text>`, `find-next`, `open:<path>`, `code`, `page`, `settings`, `settings:<section>`, `keys` (the keyboard shortcuts page), `set:<key>=<json>` (a setting changed through the core), `strokes:<stroke> <stroke>…` (strokes given to the key matcher), `key:cmd+<key>`, separated by `;`). |
 | `HERDR_IDE_DESKTOP_DEV` | Electron | `1` forces isolated development even in a packaged app: instance `dev`, local-only, local/remote session `herdr-ide-dev`, separate Electron profile. Unpackaged Electron always uses this mode. |
 | `HERDR_IDE_DESKTOP_PORT` | Electron | Loopback port (default `7781`, development `7791`); `0` chooses an ephemeral port, which gives a new browser storage origin. |
 | `ARCH` | `make desktop-app`, `make desktop-dmg` | `arm64` or `x64`; defaults to the host Node architecture. The Go core architecture is matched automatically. |
@@ -200,11 +225,14 @@ On the core host: ssh control sockets in `/tmp/herdr-ide-<uid>/s` (must be
 owned by you, mode 0700), downloads in the user cache directory
 (`~/Library/Caches/herdr-ide/code-server` on macOS, `~/.cache/herdr-ide/code-server`
 on Linux) with `.sha256` sidecars (also recorded for releases that machines
-downloaded themselves), settings changed in the UI in
-`settings[-<instance>].json` and machines enabled or disabled in the sidebar
-in `machines[-<instance>].json`, both in the user configuration directory
-(`~/Library/Application Support/herdr-ide/` on macOS, `~/.config/herdr-ide/` on
-Linux; directory 0700, files replaced atomically).
+downloaded themselves), the settings in `settings[-<instance>].json`, the
+keybindings in `keybindings[-<instance>].json` and machines enabled or
+disabled in the sidebar in `machines[-<instance>].json`, all in the user
+configuration directory (`~/Library/Application Support/herdr-ide/` on
+macOS, `~/.config/herdr-ide/` on Linux; directory 0700, files 0600 replaced
+atomically, kept until removed). The settings and keybindings files can be
+edited by hand: the core reads them again within two seconds, keeps entries
+it does not know and reports values it cannot use.
 
 A release directory holds the core, the bundled `herdr`, `LICENSE`,
 `THIRD_PARTY_NOTICES.md`, `licenses.md` and `licenses/` (`herdr/`,
@@ -213,20 +241,18 @@ the user removes the directory and are not copied to SSH machines. herdr's own
 files (configuration, sessions, machine list) are where herdr puts them,
 whichever herdr is used.
 
-In the browser, in `localStorage` under `herdr-ide.*`:
+In the browser, in `localStorage` under `herdr-ide.*` (state of that
+browser only; settings are the core's):
 
-- language
-- theme
-- font sizes
-- terminal font weight
-- panel position
-- Option as Meta
-- what programs copying to the clipboard do
-- whether formulas under the pointer are shown
 - sidebar and panel sizes
 - the selected workspace
+- find options
 - the upload history (the last 50 finished uploads: file names, machines
   and paths on them)
+
+Browser settings of earlier versions kept there (language, theme, font
+sizes, …) are moved to the core's settings once, when a page of a writable
+core loads, and then removed.
 
 Desktop artifacts: `dist/desktop/mac-arm64/herdr-ide.app` (arm64),
 `dist/desktop/mac/herdr-ide.app` (x64), and

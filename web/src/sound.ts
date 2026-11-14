@@ -5,7 +5,7 @@
 
 import type { AgentStatusEvent } from './lib/herdr';
 
-export type SoundKind = 'done' | 'request';
+export type SoundKind = 'done' | 'request' | 'bell';
 
 /** Parses the muted agents setting: names separated by commas or spaces. */
 export function mutedAgents(raw: string): Set<string> {
@@ -59,6 +59,8 @@ const tunes: Record<SoundKind, { wave: OscillatorType; notes: [number, number][]
       [1318.51, 0.32],
     ],
   },
+  // The terminal bell (terminal.bell "sound"): one short tone.
+  bell: { wave: 'sine', notes: [[880, 0]] },
 };
 
 let ctx: AudioContext | undefined;

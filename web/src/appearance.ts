@@ -4,18 +4,23 @@
 // terminal settings itself (components/SurfaceView.tsx).
 
 import { create } from 'zustand';
-import { getPrefs, usePrefs, type Prefs } from './prefs';
+import { getPrefs, usePrefs, type Prefs, type TermColors } from './prefs';
 import { conn } from './lib/conn';
 import type { TermFontWeight } from './terminal/fonts';
-import type { DesktopShell } from './desktop';
+import { desktopShell } from './shell';
 
 export type ThemeKind = 'dark' | 'light';
 
 /** What terminals take from the settings. */
 export interface Appearance {
   theme: ThemeKind;
+  /** The resolved theme's terminal colors. */
+  colors: TermColors;
+  fontFamily: string;
   fontSize: number;
   fontWeight: TermFontWeight;
+  /** Rows are this many times the font's own line height. */
+  lineHeight: number;
   optionIsMeta: boolean;
 }
 
@@ -48,10 +53,14 @@ export function useThemeKind(): ThemeKind {
 }
 
 export function appearanceOf(p: Prefs): Appearance {
+  const theme = resolveTheme(p.theme);
   return {
-    theme: resolveTheme(p.theme),
+    theme,
+    colors: p.colors[theme],
+    fontFamily: p.termFontFamily,
     fontSize: p.termFontSize,
     fontWeight: p.termFontWeight === 'medium' ? 500 : 400,
+    lineHeight: p.termLineHeight,
     optionIsMeta: p.optionIsMeta,
   };
 }
@@ -69,7 +78,7 @@ function apply(p: Prefs) {
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', getComputedStyle(root).getPropertyValue('--bg').trim());
   conn.setTheme(kind);
   // The setting, not the kind: "system" keeps following the system.
-  (globalThis as { desktopShell?: DesktopShell }).desktopShell?.setTheme(p.theme);
+  desktopShell?.setTheme(p.theme);
 }
 
 /** Applies the current settings and follows later changes. */

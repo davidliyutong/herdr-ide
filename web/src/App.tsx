@@ -14,14 +14,15 @@ import { ContextMenu } from './components/ContextMenu';
 import { usePrefs } from './prefs';
 import { initDesktop } from './desktop';
 import { takeOpenedFolders } from './drop';
-import { getKeyConfig, handleKey, loadKeymap, onKeyConfig, onPrefixChange } from './keymap';
+import { handleKey, keyHint, loadHerdrCommands, onPrefixChange, pendingChord } from './keymap';
+import { applySettings, loadSettings } from './settings';
+import { applyKeybindings, loadKeybindings, useKeys } from './keybindings';
 import { t } from './i18n';
 import { notifyAgent, updateBadge } from './notify';
 import { paneCwd, shortPath } from './lib/herdr';
 import { findPane } from './state/store';
 import { getTerm } from './terminal/registry';
 import { initSurface, surfaceDisconnected } from './surface/session';
-import { isFindKey, openFind } from './surface/find';
 import { useGui } from './gui/state';
 import { GuiTray } from './gui/GuiMenus';
 import { bridgeDownload, downloadEvent, resyncDownloads } from './download';
@@ -67,14 +68,22 @@ export function App() {
       onConnection: (c) => {
         useStore.getState().setConnected(c);
         if (!c) surfaceDisconnected();
-        else resyncDownloads();
+        else {
+          resyncDownloads();
+          // Changes made while the page was away (e.g. a core restart).
+          void loadSettings();
+          void loadKeybindings();
+        }
       },
       onBridgeSend: (m, text, folders) => pasteToAgent(m, text, folders),
       onBridgeDownload: (m, paths) => bridgeDownload(m, paths),
       onDownload: (ev) => downloadEvent(ev),
       onGui: (st) => useGui.getState().setState(st),
+      onSettings: (m) => applySettings(m),
+      onKeybindings: (m) => applyKeybindings(m),
     });
-    loadKeymap();
+    void loadKeybindings();
+    void loadHerdrCommands();
     const offDesktop = initDesktop();
     const offFolders = takeOpenedFolders();
     fetch('/api/config')
@@ -86,15 +95,6 @@ export function App() {
     const onKey = (ev: KeyboardEvent) => {
       const t = ev.target as HTMLElement | null;
       if (t?.closest('.surface-host') || t?.closest('input, textarea, iframe, [contenteditable]')) return;
-      // Find also opens for the focused pane from outside it (the sidebar).
-      if (isFindKey(ev) && !document.querySelector('.modal-backdrop, .palette-backdrop')) {
-        const s = useStore.getState();
-        if (s.focused) {
-          ev.preventDefault();
-          openFind(s.focused.m, s.focused.pane);
-          return;
-        }
-      }
       handleKey(ev);
     };
     window.addEventListener('keydown', onKey);
@@ -143,11 +143,8 @@ export function App() {
 
 function StatusBar({ connected, prefix }: { connected: boolean; prefix: boolean }) {
   const readOnly = useStore((s) => s.readOnly);
-  const [keyPrefix, setKeyPrefix] = useState(getKeyConfig().prefix);
-  useEffect(() => {
-    const off = onKeyConfig(() => setKeyPrefix(getKeyConfig().prefix));
-    return () => void off();
-  }, []);
+  // Re-rendered when the bindings change.
+  useKeys((s) => s.effective);
   const focused = useStore((s) => s.focused);
   const pane = useStore((s) => findPane(s, s.focused));
   const machine = useStore((s) => (s.focused ? s.machines[s.focused.m] : undefined));
@@ -170,8 +167,10 @@ function StatusBar({ connected, prefix }: { connected: boolean; prefix: boolean 
       <TransfersTray />
       <DownloadsTray />
       <GuiTray />
-      {prefix && <span className="prefix-badge">PREFIX</span>}
-      <span className="muted small">{t('app.hint', { prefix: keyPrefix })}</span>
+      {prefix && <span className="prefix-badge">{pendingChord()}</span>}
+      <span className="muted small">
+        {t('app.hint', { shortcuts: keyHint('app.keyboardShortcuts'), palette: keyHint('app.commandPalette') })}
+      </span>
     </footer>
   );
 }

@@ -12,16 +12,16 @@ export const channels = {
 } as const;
 
 export interface DesktopShell {
-  /** Calls fn with the action ("new_tab", "close_tab") of each shortcut
-   * pressed; returns a function that stops it. */
-  onShortcut(fn: (action: string) => void): () => void;
-  /** The shortcut settings changed: the shell reads them again. */
+  /** Calls fn with the command ("tab.new", "pane.close") of each direct
+   * shortcut pressed; returns a function that stops it. */
+  onShortcut(fn: (command: string) => void): () => void;
+  /** The keybindings changed: the shell reads them again. */
   shortcutsChanged(): void;
   /** Starts or stops recording a key: while it records, the shell takes keys
    * with cmd, ctrl or alt (so no menu or shortcut runs) and reports them. */
   recordShortcut(active: boolean): void;
-  /** Calls fn with the spec of each key recorded ("cmd+shift+t"); returns a
-   * function that stops it. */
+  /** Calls fn with the stroke of each key recorded ("cmd+shift+t");
+   * returns a function that stops it. */
   onRecordedKey(fn: (spec: string) => void): () => void;
   /** The theme setting ("system", "dark" or "light"): the window's title
    * bar and native controls follow it. */

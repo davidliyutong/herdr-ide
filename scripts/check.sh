@@ -7,7 +7,8 @@
 #   4. THIRD_PARTY_NOTICES.md matches the linked Go modules
 #   5. README.md and README.zh-CN.md have the same section structure
 #   6. CHANGELOG.md's [Unreleased] is one list without subsections
-#   7. the files generated from design/tokens.json are current
+#   7. the files generated from design/tokens.json and the settings
+#      registry are current
 set -euo pipefail
 cd "$(dirname "$0")/.."
 fail=0
@@ -52,7 +53,8 @@ if awk '/^## \[Unreleased\]/ {p=1; next} /^## \[/ {p=0} p' CHANGELOG.md | grep -
   fail=1
 fi
 
-echo "==> design tokens"
+echo "==> design tokens and settings keys"
 go run ./scripts/tokens -check || fail=1
+go run ./scripts/registry -check || fail=1
 
 exit $fail

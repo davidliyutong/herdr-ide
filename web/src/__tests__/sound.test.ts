@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { mutedAgents, soundFor, type SoundContext } from '../sound';
-import { parsePref } from '../prefs';
+import { builtinDefaults } from '../settings';
 import type { AgentStatusEvent } from '../lib/herdr';
 
 const ev = (agent_status: AgentStatusEvent['agent_status'], agent = 'claude'): AgentStatusEvent => ({
@@ -43,8 +43,7 @@ describe('sound settings', () => {
   it('parses muted agents and keeps an empty list', () => {
     expect([...mutedAgents(' Droid, codex  kimi,,')]).toEqual(['droid', 'codex', 'kimi']);
     expect(mutedAgents('').size).toBe(0);
-    expect(parsePref('notifySoundMuted', null)).toBe('droid');
-    expect(parsePref('notifySoundMuted', '')).toBe('');
-    expect(parsePref('notifySound', null)).toBe(true);
+    expect(builtinDefaults['notifications.mutedAgents']).toBe('droid');
+    expect(builtinDefaults['notifications.sound']).toBe(true);
   });
 });

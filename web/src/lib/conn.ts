@@ -38,6 +38,9 @@ type Listener = {
   /** Progress or end of a download a page started (download.ts). */
   onDownload(ev: DownloadEvent): void;
   onGui(st: GuiState): void;
+  /** The settings or keybindings changed: their new state. */
+  onSettings?(m: Record<string, unknown>): void;
+  onKeybindings?(m: Record<string, unknown>): void;
 };
 
 class Conn {
@@ -123,6 +126,12 @@ class Conn {
         break;
       case 'gui':
         this.listener?.onGui(m.state);
+        break;
+      case 'settings':
+        this.listener?.onSettings?.(m);
+        break;
+      case 'keybindings':
+        this.listener?.onKeybindings?.(m);
         break;
       case 'api.res': {
         const p = this.pending.get(m.rid);

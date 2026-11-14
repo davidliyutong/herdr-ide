@@ -24,6 +24,13 @@ final class AppModel {
     private var windows: [String: [ProgramWindow]] = [:]
     /// The program windows on the machines' virtual displays.
     private(set) var programs: [ProgramWindow] = []
+    /// The core's settings and keybindings, kept current by the event channel.
+    let settings = SettingsModel()
+    let keybindings = KeybindingsModel()
+    let api: CoreAPI
+    /// The settings or the keybindings changed.
+    var onSettings: (() -> Void)?
+    var onKeybindings: (() -> Void)?
 
     /// Something the window shows changed.
     var onChange: (() -> Void)?
@@ -32,6 +39,7 @@ final class AppModel {
 
     init(core: URL) {
         self.core = core
+        api = CoreAPI(core: core)
         connection = TermConnection(core: core)
         events = EventConnection(core: core)
         connection.onMessage = { [weak self] in self?.message($0) }
@@ -45,13 +53,34 @@ final class AppModel {
             self?.onChange?()
         }
         events.onEvent = { [weak self] in self?.event($0) }
-        // The core sends every machine's windows again on a new connection.
-        events.onConnection = { [weak self] up in if up { self?.windows = [:] } }
+        // The core sends every machine's windows again on a new connection;
+        // settings changed while it was away are read again.
+        events.onConnection = { [weak self] up in
+            guard up else { return }
+            self?.windows = [:]
+            self?.loadSettings()
+        }
     }
 
     func start() {
         connection.start()
         events.start()
+        loadSettings()
+    }
+
+    /// Reads the settings and keybindings (the event channel brings their
+    /// changes afterwards).
+    func loadSettings() {
+        api.request("GET", "api/settings") { [weak self] status, reply in
+            guard let self, status == 200, let reply else { return }
+            self.settings.load(reply)
+            self.onSettings?()
+        }
+        api.request("GET", "api/keybindings") { [weak self] status, reply in
+            guard let self, status == 200, let reply else { return }
+            self.keybindings.load(reply)
+            self.onKeybindings?()
+        }
     }
 
     func stop() {
@@ -83,6 +112,12 @@ final class AppModel {
         case let .gui(machine, list):
             // A dialog belongs to its window: the page of the window shows it.
             windows[machine] = list.filter { $0.transient == 0 }
+        case let .settings(message):
+            if settings.apply(message) { onSettings?() }
+            return
+        case let .keybindings(message):
+            if keybindings.apply(message) { onKeybindings?() }
+            return
         }
         let next = machines.flatMap { windows[$0.id] ?? [] }
         if next != programs {
@@ -272,6 +307,22 @@ final class AppModel {
     func closeFocused() {
         guard let machine = selectedMachine, let address = focusedTerminal else { return }
         kill(address, on: machine)
+    }
+
+    /// Closes the selected tab and ends the programs of its terminals.
+    func closeTab() {
+        guard let machine = selectedMachine, let workspace = layout.selectedWorkspace, let tab = workspace.selectedTab else { return }
+        let index = workspace.selected
+        mutate(machine) { $0.closeTab(index, in: workspace.id) }
+        tab.root.terminals.forEach { kill($0, on: machine) }
+    }
+
+    /// Focuses the next (1) or previous (-1) terminal of the selected tab.
+    func cycleFocus(_ step: Int) {
+        guard let tab = layout.selectedTab else { return }
+        let all = tab.root.terminals
+        guard all.count > 1, let index = all.firstIndex(of: tab.focused) else { return }
+        focus(all[(index + step + all.count) % all.count])
     }
 
     /// Shows a terminal: where it is, else in a new tab of the selected workspace.

@@ -25,7 +25,7 @@ configuration and state. SSH machines use their installed herdr.
 | Install JS deps | `make deps` |
 | Unit tests (Go + web + desktop) | `make test` |
 | All checks (gofmt, vet, tsc, prettier, brand/doc/README consistency, generated tokens) | `make check` |
-| Regenerate the design tokens' Swift and CSS after editing `design/tokens.json` | `make tokens` |
+| Regenerate the design tokens' Swift, CSS and Go after editing `design/tokens.json`, and `design/generated/registry.json` after changing settings or commands | `make tokens` |
 | Integration test with a real herdr | `make it` |
 | Full build into `dist/` | `make build` (or `scripts/build.sh`) |
 | macOS `.app` / DMG | `make desktop-app` / `make desktop-dmg` |

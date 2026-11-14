@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { xKeycode } from '../gui/keycodes';
 import { guiKey, paneWindows, parseGuiPath, useGui, type GuiState } from '../gui/state';
-import { serverSection } from '../components/SettingsDialog';
 import { FrameStats, type MachineStats } from '../gui/stats';
 
 describe('xKeycode', () => {
@@ -43,14 +42,6 @@ describe('gui state', () => {
     expect(Object.keys(useGui.getState().unseen)).toEqual([guiKey('m1', 3)]);
     g.setState(state('m1', [1, 'p1']));
     expect(useGui.getState().unseen).toEqual({});
-  });
-});
-
-describe('settings sections', () => {
-  it('groups the GUI settings', () => {
-    expect(serverSection('gui')).toBe('gui');
-    expect(serverSection('gui-gpu')).toBe('gui');
-    expect(serverSection('code-server-install')).toBe('codeServer');
   });
 });
 

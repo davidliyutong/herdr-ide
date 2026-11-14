@@ -41,6 +41,7 @@ import {
   closeFind,
   FindError,
   findErrorText,
+  findKeyLabel,
   findOptionKey,
   findStep,
   isFindKey,
@@ -56,11 +57,16 @@ import {
 } from '../surface/find';
 import { useSurface } from '../surface/session';
 import { useStore } from '../state/store';
+import registry from '../../../design/generated/registry.json';
+import type { Binding } from '../keybindings';
 import { storage } from '../brand';
 import { FindBar, findCount } from '../components/FindBar';
 import { paintRows, sameRanges } from '../surface/paint';
 import { palette } from '../surface/colors';
-import { themes } from '../terminal/options';
+import { xtermTheme } from '../terminal/options';
+import { getPrefs } from '../prefs';
+
+const themes = { dark: xtermTheme(getPrefs().colors.dark), light: xtermTheme(getPrefs().colors.light) };
 import { Grid } from '../surface/grid';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -100,13 +106,17 @@ afterEach(() => {
 
 describe('find key', () => {
   it('is Cmd+F on macOS and Ctrl+Shift+F elsewhere', () => {
-    expect(isFindKey(key({ code: 'KeyF', key: 'f', metaKey: true }), true)).toBe(true);
-    expect(isFindKey(key({ code: 'KeyF', key: 'f', ctrlKey: true }), true)).toBe(false);
-    expect(isFindKey(key({ code: 'KeyF', key: 'F', ctrlKey: true, shiftKey: true }), false)).toBe(true);
+    const mac = registry.keybindings['mac-browser'] as Binding[];
+    const pc = registry.keybindings['pc-browser'] as Binding[];
+    expect(isFindKey(key({ code: 'KeyF', key: 'f', metaKey: true }), mac)).toBe(true);
+    expect(isFindKey(key({ code: 'KeyF', key: 'f', ctrlKey: true }), mac)).toBe(false);
+    expect(isFindKey(key({ code: 'KeyF', key: 'F', ctrlKey: true, shiftKey: true }), pc)).toBe(true);
     // Ctrl+F is the programs' (readline's forward-char).
-    expect(isFindKey(key({ code: 'KeyF', key: 'f', ctrlKey: true }), false)).toBe(false);
-    expect(isFindKey(key({ code: 'KeyF', key: 'f', metaKey: true, shiftKey: true }), true)).toBe(false);
-    expect(isFindKey(key({ code: 'KeyG', key: 'g', metaKey: true }), true)).toBe(false);
+    expect(isFindKey(key({ code: 'KeyF', key: 'f', ctrlKey: true }), pc)).toBe(false);
+    expect(isFindKey(key({ code: 'KeyF', key: 'f', metaKey: true, shiftKey: true }), mac)).toBe(false);
+    expect(isFindKey(key({ code: 'KeyG', key: 'g', metaKey: true }), mac)).toBe(false);
+    expect(findKeyLabel(mac)).toBe('cmd+f');
+    expect(findKeyLabel(pc)).toBe('ctrl+shift+f');
   });
 
   it('toggles options with Alt+C, Alt+W and Alt+R in the bar (Option on macOS)', () => {

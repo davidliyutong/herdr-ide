@@ -62,7 +62,7 @@ export function Workspace() {
       <div className="tabbar">
         <button
           className="icon sidebar-toggle"
-          title={t('workspace.sidebar', { key: keyHint('toggle_sidebar') })}
+          title={t('workspace.sidebar', { key: keyHint('view.toggleSidebar') })}
           onClick={() => actions.toggleSidebar()}
         >
           <PanelLeft />
@@ -111,7 +111,7 @@ export function Workspace() {
                 {!readOnly && (
                   <button
                     className="tab-close"
-                    title={t('workspace.closeTab', { key: keyHint('close_tab') })}
+                    title={t('workspace.closeTab', { key: keyHint('tab.close') })}
                     onClick={(e) => {
                       e.stopPropagation();
                       actions.closeTab(m, tab.tab_id);
@@ -126,7 +126,7 @@ export function Workspace() {
           {!readOnly && (
             <button
               className="icon"
-              title={t('workspace.newTab', { key: keyHint('new_tab') })}
+              title={t('workspace.newTab', { key: keyHint('tab.new') })}
               onClick={() => actions.newTab(m, ws)}
               data-new-tab={ws}
               data-m={m}

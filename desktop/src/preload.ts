@@ -1,7 +1,7 @@
 // Preload of the main window (sandboxed, context-isolated). It gives the page
 // a narrow bridge for direct shortcuts, the theme and dropped folders, and
-// nothing else: the page learns which action a shortcut runs, reports that the
-// shortcut settings changed, records a new key through the shell while the
+// nothing else: the page learns which command a shortcut runs, reports that
+// the keybindings changed, records a new key through the shell while the
 // settings dialog asks for one, reports its theme setting for the native title
 // bar, asks where a file the user dropped is on disk, and learns which folders
 // were opened with the app.

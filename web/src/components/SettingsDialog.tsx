@@ -1,61 +1,33 @@
-// Settings dialog. Rows are generated from definitions: browser settings
-// from prefs.ts, core settings from /api/settings (internal/settings). Labels
-// are i18n keys settings.<key>, settings.<key>.desc and settings.<key>.<option>;
-// a core setting without translations shows its key. Core settings that can
-// differ per machine get a table with one row per machine.
+// Settings dialog, rendered from the definitions the core serves
+// (/api/settings, settings.ts): a page per section and one for the
+// keyboard shortcuts, a search across them, a control per type, a marker on
+// changed settings, reset, per-machine values for settings whose scope allows
+// them, and the lock of a command-line flag. Labels are the i18n keys
+// settings.<key>, settings.<key>.desc and settings.<key>.<option>; a setting
+// without them shows its key.
 
-import { useEffect, useRef, useState } from 'react';
-import { Lock, Minus, Plus, RotateCcw, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { AlertTriangle, Lock, RotateCcw, Search, X } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../state/store';
 import { GuiEnableButton, GuiMachineStatus } from '../gui/GuiMenus';
-import { prefDefs, usePrefs, type PrefDef, type PrefKey, type SectionId } from '../prefs';
-import { hasMessage, locales, t, type MessageKey } from '../i18n';
-import { actionLabel, keyHint, keyLabel } from '../keymap';
-import { altOnly, desktopShell, isShortcutSetting, shortcutConflict, shortcutsSaved } from '../desktop';
+import { hasMessage, t } from '../i18n';
+import { keyHint } from '../keymap';
+import {
+  resetSetting,
+  setSetting,
+  useSettings,
+  type SettingDef,
+  type SettingProblem,
+  type SettingState,
+  type SettingValue,
+} from '../settings';
+import { KeyboardShortcuts } from './KeyboardShortcuts';
 
-/** A core setting as listed by /api/settings. */
-export interface ServerSetting {
-  key: string;
-  kind: 'enum' | 'string' | 'bool';
-  default: string;
-  options?: string[];
-  value: string;
-  source: 'default' | 'saved' | 'flag';
-  /** Which machines may have their own value, and their values. */
-  per_machine?: 'all' | 'remote';
-  machines?: Record<string, string>;
-}
+/** The client's platform name in definitions' platforms. */
+const PLATFORM = 'web';
 
-/** Saves a core setting (for one machine when machine is set); resolves to
- * the new list, or an error message. */
-async function saveServer(key: string, value: string, machine?: string): Promise<ServerSetting[] | string> {
-  try {
-    const r = await fetch('/api/settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key, value, machine }),
-    });
-    const j = await r.json();
-    if (r.ok) return j.settings;
-    const code = `settings.error.${j.error}`;
-    // Only an OS error from saving is shown verbatim; other codes are translated.
-    return (hasMessage(code) ? t(code) : String(j.error)) + (j.error === 'save' && j.detail ? `: ${j.detail}` : '');
-  } catch {
-    return t('settings.error.network');
-  }
-}
-
-const sections: SectionId[] = ['appearance', 'layout', 'terminal', 'notifications', 'shortcuts', 'codeServer', 'gui', 'server'];
-
-/** Section of a core setting, from its key. */
-export function serverSection(key: string): SectionId {
-  if (key.startsWith('code-server-')) return 'codeServer';
-  if (isShortcutSetting(key)) return 'shortcuts';
-  return key === 'gui' || key.startsWith('gui-') ? 'gui' : 'server';
-}
-
-function label(key: string): string {
+export function settingLabel(key: string): string {
   const k = `settings.${key}`;
   return hasMessage(k) ? t(k) : key;
 }
@@ -66,25 +38,49 @@ function desc(key: string): string | undefined {
 }
 
 function optionLabel(key: string, option: string): string {
-  if (key === 'locale') return locales.find((l) => l.id === option)?.label ?? t('settings.locale.auto');
   const k = `settings.${key}.${option}`;
   return hasMessage(k) ? t(k) : option;
 }
 
+function sectionLabel(id: string): string {
+  const k = `settings.section.${id}`;
+  return hasMessage(k) ? t(k) : id;
+}
+
+/** Whether a definition is shown here: its platforms include the web UI. */
+export function shownHere(d: Pick<SettingDef, 'platforms'>): boolean {
+  return !d.platforms?.length || d.platforms.includes(PLATFORM);
+}
+
+/** Whether a setting matches a search: its label, description, key or options. */
+export function matchesSearch(d: Pick<SettingDef, 'key' | 'enum'>, q: string): boolean {
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return true;
+  const text = [settingLabel(d.key), desc(d.key) ?? '', d.key, ...(d.enum ?? []).map((o) => optionLabel(d.key, o))].join(' ').toLowerCase();
+  return words.every((w) => text.includes(w));
+}
+
+/** A problem of the settings file as shown. */
+export function problemText(p: SettingProblem): string {
+  const where = p.key ? (p.machine ? `${p.key} (${p.machine})` : p.key) : '';
+  const code = `settings.problem.${p.code}`;
+  const what = hasMessage(code) ? t(code) : p.code;
+  return [where, what, p.detail].filter(Boolean).join(' · ');
+}
+
+const KEYS_PAGE = 'keys';
+
 export function SettingsDialog() {
   const open = useStore((s) => s.settingsOpen);
   const close = () => useStore.getState().openSettings(false);
-  const [server, setServer] = useState<ServerSetting[]>();
-  const [serverError, setServerError] = useState<string>();
-  const readOnly = useStore((s) => s.readOnly);
+  const st = useSettings();
+  const readOnly = useStore((s) => s.readOnly) || st.readOnly;
+  const [page, setPage] = useState('appearance');
+  const [query, setQuery] = useState('');
 
   useEffect(() => {
     if (!open) return;
-    setServerError(undefined);
-    fetch('/api/settings')
-      .then((r) => r.json())
-      .then((j) => setServer(j.settings ?? []))
-      .catch(() => setServerError(t('settings.error.network')));
+    setQuery('');
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') close();
     };
@@ -92,186 +88,291 @@ export function SettingsDialog() {
     return () => window.removeEventListener('keydown', onKey);
   }, [open]);
 
+  const defs = useMemo(() => st.defs.filter(shownHere), [st.defs]);
+  const sections = useMemo(() => st.sections.filter((s) => defs.some((d) => d.section === s.id)), [st.sections, defs]);
+  useEffect(() => {
+    if (sections.length && page !== KEYS_PAGE && !sections.some((s) => s.id === page)) setPage(sections[0].id);
+  }, [sections, page]);
+
   if (!open) return null;
+  const searching = query.trim() !== '';
+  const fileProblems = st.problems.filter((p) => !p.key || !defs.some((d) => d.key === p.key));
+  const go = (id: string) => {
+    setQuery('');
+    setPage(id);
+  };
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && close()}>
       <div className="modal settings" role="dialog" aria-label={t('settings.title')}>
         <div className="modal-head">
           <span className="modal-title">{t('settings.title')}</span>
-          <span className="muted small">{keyHint('open_settings')}</span>
+          <span className="muted small">{keyHint('app.settings')}</span>
           <span className="spacer" />
+          <label className="settings-search">
+            <Search />
+            <input
+              value={query}
+              placeholder={t('settings.search')}
+              aria-label={t('settings.search')}
+              spellCheck={false}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape' && query) {
+                  e.stopPropagation();
+                  e.nativeEvent.stopImmediatePropagation();
+                  setQuery('');
+                }
+              }}
+            />
+          </label>
           <button className="icon" title={t('settings.close')} onClick={close}>
             <X />
           </button>
         </div>
-        <div className="settings-body">
-          {sections.map((sec) => {
-            const prefRows = (Object.keys(prefDefs) as PrefKey[]).filter((k) => prefDefs[k].section === sec);
-            // Direct shortcuts exist only in the desktop app.
-            if (sec === 'shortcuts' && !desktopShell) return null;
-            const serverRows = (server ?? []).filter((s) => serverSection(s.key) === sec);
-            if (prefRows.length === 0 && serverRows.length === 0 && !(sec === 'codeServer' && serverError)) return null;
-            return (
-              <section key={sec} className="settings-section">
-                <h3>{t(`settings.section.${sec}` as MessageKey)}</h3>
-                {(sec === 'shortcuts' || sec === 'codeServer' || sec === 'gui' || sec === 'server') && (
-                  <p className="settings-note">{t(readOnly ? 'settings.serverReadOnly' : 'settings.serverNote')}</p>
-                )}
-                {prefRows.map((k) => (
-                  <PrefRow key={k} k={k} />
-                ))}
-                {serverRows.map((s) => (
-                  <ServerRow key={s.key} s={s} all={server ?? []} readOnly={readOnly} onSaved={setServer} />
-                ))}
-                {serverRows.some((s) => s.per_machine) && (
-                  <MachineSettings
-                    entries={serverRows.filter((s) => s.per_machine)}
+        <div className="settings-main">
+          <nav className="settings-nav">
+            {sections.map((s) => (
+              <button key={s.id} className={!searching && page === s.id ? 'on' : ''} onClick={() => go(s.id)}>
+                {sectionLabel(s.id)}
+              </button>
+            ))}
+            <button className={!searching && page === KEYS_PAGE ? 'on' : ''} onClick={() => go(KEYS_PAGE)}>
+              {t('settings.section.keyboard')}
+            </button>
+          </nav>
+          <div className="settings-body">
+            {readOnly && <p className="settings-note">{t('settings.serverReadOnly')}</p>}
+            {!st.loaded && <p className="error small">{t('settings.error.network')}</p>}
+            {fileProblems.length > 0 && (page !== KEYS_PAGE || searching) && (
+              <div className="settings-problems">
+                <AlertTriangle />
+                <div>
+                  <div>{t('settings.problems')}</div>
+                  {fileProblems.map((p, i) => (
+                    <div key={i} className="muted small">
+                      {problemText(p)}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {page === KEYS_PAGE && !searching ? (
+              <KeyboardShortcuts query="" readOnly={readOnly} />
+            ) : (
+              sections
+                .filter((s) => (searching ? defs.some((d) => d.section === s.id && matchesSearch(d, query)) : s.id === page))
+                .map((s) => (
+                  <SectionView
+                    key={s.id}
+                    id={s.id}
+                    defs={defs.filter((d) => d.section === s.id && (!searching || matchesSearch(d, query)))}
+                    values={st.values}
+                    problems={st.problems}
                     readOnly={readOnly}
-                    onSaved={setServer}
-                    gui={sec === 'gui'}
+                    heading={searching}
                   />
-                )}
-                {sec === 'codeServer' && serverError && <p className="error small">{serverError}</p>}
-              </section>
-            );
-          })}
+                ))
+            )}
+            {searching && <KeyboardShortcuts query={query} readOnly={readOnly} />}
+            {st.file && !searching && <p className="settings-file muted small">{t('settings.file', { file: st.file })}</p>}
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-function Row({ k, children, note }: { k: string; children: React.ReactNode; note?: React.ReactNode }) {
-  const d = desc(k);
+function SectionView({
+  id,
+  defs,
+  values,
+  problems,
+  readOnly,
+  heading,
+}: {
+  id: string;
+  defs: SettingDef[];
+  values: Record<string, SettingState>;
+  problems: SettingProblem[];
+  readOnly: boolean;
+  heading: boolean;
+}) {
+  const perMachine = defs.filter((d) => d.scope !== 'app');
   return (
-    <div className="settings-row">
+    <section className="settings-section">
+      {heading && <h3>{sectionLabel(id)}</h3>}
+      {defs.map((d) => (
+        <SettingRow key={d.key} d={d} state={values[d.key]} problems={problems.filter((p) => p.key === d.key)} readOnly={readOnly} />
+      ))}
+      {perMachine.length > 0 && <MachineSettings defs={perMachine} values={values} readOnly={readOnly} gui={id === 'gui'} />}
+    </section>
+  );
+}
+
+function SettingRow({
+  d,
+  state,
+  problems,
+  readOnly,
+}: {
+  d: SettingDef;
+  state?: SettingState;
+  problems: SettingProblem[];
+  readOnly: boolean;
+}) {
+  const [error, setError] = useState<string>();
+  const value = state?.value ?? d.default;
+  const locked = !!state?.locked;
+  const modified = state?.source === 'global';
+  const disabled = readOnly || locked;
+  // The language is read once, when the page starts.
+  const done = (err: string | undefined) => {
+    if (err) setError(err);
+    else if (d.key === 'appearance.language') location.reload();
+  };
+  const save = async (v: SettingValue) => {
+    setError(undefined);
+    if (JSON.stringify(v) !== JSON.stringify(value)) done(await setSetting(d.key, v));
+  };
+  const reset = async () => {
+    setError(undefined);
+    done(await resetSetting(d.key));
+  };
+  const description = desc(d.key);
+  return (
+    <div className={`settings-row ${d.type === 'list' ? 'wide' : ''}`} data-key={d.key}>
       <div className="settings-label">
-        <div>{label(k)}</div>
-        {d && <div className="muted small">{d}</div>}
-        {note}
+        <div className="settings-name">
+          {modified && <span className="settings-modified" title={t('settings.modified')} />}
+          <span>{settingLabel(d.key)}</span>
+          <span className="settings-key">{d.key}</span>
+        </div>
+        {description && <div className="muted small">{description}</div>}
+        {locked && (
+          <div className="settings-locked small">
+            <Lock /> {t('settings.lockedByFlag', { flag: `--${d.flag ?? d.key}` })}
+          </div>
+        )}
+        {problems
+          .filter((p) => !p.machine)
+          .map((p, i) => (
+            <div key={i} className="error small">
+              {t('settings.problemInFile', { problem: problemText({ ...p, key: undefined }) })}
+            </div>
+          ))}
+        {error && <div className="error small">{error}</div>}
       </div>
-      <div className="settings-control">{children}</div>
+      <div className="settings-control">
+        <Control d={d} value={value} disabled={disabled} onChange={save} />
+        <button className="icon" title={t('settings.reset')} disabled={disabled || !modified} onClick={reset}>
+          <RotateCcw />
+        </button>
+      </div>
     </div>
   );
 }
 
-function Segmented({
-  k,
-  options,
+function Control({
+  d,
   value,
   disabled,
   onChange,
 }: {
-  k: string;
-  options: readonly string[];
-  value: string;
-  disabled?: boolean;
-  onChange(v: string): void;
+  d: SettingDef;
+  value: SettingValue;
+  disabled: boolean;
+  onChange(v: SettingValue): void;
 }) {
-  return (
-    <div className="segmented" role="radiogroup" aria-label={label(k)}>
-      {options.map((o) => (
+  switch (d.type) {
+    case 'bool':
+      return (
         <button
-          key={o}
-          role="radio"
-          aria-checked={o === value}
-          className={o === value ? 'on' : ''}
+          role="switch"
+          aria-checked={value === true}
+          aria-label={settingLabel(d.key)}
+          className={`toggle ${value === true ? 'on' : ''}`}
           disabled={disabled}
-          onClick={() => onChange(o)}
-        >
-          {optionLabel(k, o)}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function Toggle({ k, value, disabled, onChange }: { k: string; value: boolean; disabled?: boolean; onChange(v: boolean): void }) {
-  return (
-    <button
-      role="switch"
-      aria-checked={value}
-      aria-label={label(k)}
-      className={`toggle ${value ? 'on' : ''}`}
-      disabled={disabled}
-      onClick={() => onChange(!value)}
-    />
-  );
-}
-
-function PrefRow({ k }: { k: PrefKey }) {
-  const value = usePrefs((s) => s.prefs[k]);
-  const setPref = usePrefs((s) => s.setPref);
-  const d: PrefDef = prefDefs[k];
-  const note = d.reload ? <div className="muted small">{t('settings.reloads')}</div> : undefined;
-  let control: React.ReactNode;
-  switch (d.kind) {
+          onClick={() => onChange(!value)}
+        />
+      );
     case 'enum':
-      control =
-        d.options.length > 3 ? (
-          <select value={String(value)} onChange={(e) => setPref(k, e.target.value as never)}>
-            {d.options.map((o) => (
-              <option key={o} value={o}>
-                {optionLabel(k, o)}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <Segmented k={k} options={d.options} value={String(value)} onChange={(v) => setPref(k, v as never)} />
-        );
-      break;
-    case 'number': {
-      const n = value as number;
-      control = (
-        <div className="stepper">
-          <button className="icon" disabled={n <= d.min} onClick={() => setPref(k, (n - 1) as never)} aria-label="-">
-            <Minus />
-          </button>
-          <span className="stepper-value">{n}px</span>
-          <button className="icon" disabled={n >= d.max} onClick={() => setPref(k, (n + 1) as never)} aria-label="+">
-            <Plus />
-          </button>
-          <button className="icon" title={t('settings.reset')} disabled={n === d.default} onClick={() => setPref(k, d.default as never)}>
-            <RotateCcw />
-          </button>
+      return (d.enum ?? []).length > 3 ? (
+        <select value={String(value)} disabled={disabled} aria-label={settingLabel(d.key)} onChange={(e) => onChange(e.target.value)}>
+          {(d.enum ?? []).map((o) => (
+            <option key={o} value={o}>
+              {optionLabel(d.key, o)}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <div className="segmented" role="radiogroup" aria-label={settingLabel(d.key)}>
+          {(d.enum ?? []).map((o) => (
+            <button
+              key={o}
+              role="radio"
+              aria-checked={o === value}
+              className={o === value ? 'on' : ''}
+              disabled={disabled}
+              onClick={() => onChange(o)}
+            >
+              {optionLabel(d.key, o)}
+            </button>
+          ))}
         </div>
       );
-      break;
-    }
-    case 'bool':
-      control = <Toggle k={k} value={value as boolean} onChange={(v) => setPref(k, v as never)} />;
-      break;
-    case 'string':
-      control = <PrefText k={k} value={value as string} onSave={(v) => setPref(k, v as never)} />;
-      break;
+    case 'number':
+      return <NumberInput d={d} value={value as number} disabled={disabled} onChange={onChange} />;
+    case 'color':
+      return <ColorInput label={settingLabel(d.key)} value={value as string} disabled={disabled} onChange={onChange} />;
+    case 'list':
+      return d.item === 'color' ? (
+        <Palette d={d} value={value as string[]} disabled={disabled} onChange={onChange} />
+      ) : (
+        <TextInput
+          d={d}
+          value={(value as string[]).join(', ')}
+          disabled={disabled}
+          onChange={(v) =>
+            onChange(
+              v
+                .split(',')
+                .map((s) => s.trim())
+                .filter(Boolean),
+            )
+          }
+        />
+      );
+    default:
+      return <TextInput d={d} value={String(value)} disabled={disabled} onChange={onChange} />;
   }
-  return (
-    <Row k={k} note={note}>
-      {control}
-    </Row>
-  );
+}
+
+/** Escape restores a field without closing the dialog. */
+function stopEscape(e: React.KeyboardEvent) {
+  e.stopPropagation();
+  e.nativeEvent.stopImmediatePropagation();
 }
 
 /** A text field that saves on Enter or blur; Escape restores the value. */
-function PrefText({ k, value, onSave }: { k: string; value: string; onSave(v: string): void }) {
+function TextInput({ d, value, disabled, onChange }: { d: SettingDef; value: string; disabled: boolean; onChange(v: string): void }) {
   const [draft, setDraft] = useState(value);
   useEffect(() => setDraft(value), [value]);
-  const save = () => {
-    if (draft.trim() !== value) onSave(draft.trim());
-  };
-  const ph = `settings.${k}.placeholder`;
+  const save = () => draft.trim() !== value && onChange(draft.trim());
+  const ph = `settings.${d.key}.placeholder`;
   return (
     <input
       className="settings-input"
       value={draft}
+      disabled={disabled}
       spellCheck={false}
-      placeholder={hasMessage(ph) ? t(ph) : undefined}
+      aria-label={settingLabel(d.key)}
+      placeholder={hasMessage(ph) ? t(ph) : String(d.default)}
       onChange={(e) => setDraft(e.target.value)}
       onKeyDown={(e) => {
         if (e.key === 'Enter') save();
         if (e.key === 'Escape') {
-          e.stopPropagation();
+          stopEscape(e);
           setDraft(value);
         }
       }}
@@ -280,177 +381,96 @@ function PrefText({ k, value, onSave }: { k: string; value: string; onSave(v: st
   );
 }
 
-function ServerRow({
-  s,
-  all,
-  readOnly,
-  onSaved,
-}: {
-  s: ServerSetting;
-  all: ServerSetting[];
-  readOnly: boolean;
-  onSaved(list: ServerSetting[]): void;
-}) {
-  const [draft, setDraft] = useState(s.value);
-  const [error, setError] = useState<string>();
-  const [busy, setBusy] = useState(false);
-  useEffect(() => setDraft(s.value), [s.value]);
-  const locked = s.source === 'flag';
-  const disabled = readOnly || locked || busy;
-
-  const save = async (value: string) => {
-    if (value === s.value) return;
-    setError(undefined);
-    const conflict = isShortcutSetting(s.key) ? shortcutConflict(s.key, value, all) : undefined;
-    if (conflict) {
-      setError(t(conflict.message, { action: conflict.action ? actionLabel(conflict.action) : '' }));
-      return;
-    }
-    setBusy(true);
-    const res = await saveServer(s.key, value);
-    setBusy(false);
-    if (typeof res === 'string') {
-      setError(res);
-      setDraft(s.value);
-    } else {
-      onSaved(res);
-      if (isShortcutSetting(s.key)) shortcutsSaved(res);
-    }
+/** A number field with the definition's range; saves on Enter or blur. */
+function NumberInput({ d, value, disabled, onChange }: { d: SettingDef; value: number; disabled: boolean; onChange(v: number): void }) {
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => setDraft(String(value)), [value]);
+  const save = () => {
+    const n = Number(draft);
+    if (draft.trim() === '' || !Number.isFinite(n)) setDraft(String(value));
+    else if (n !== value) onChange(n);
   };
-
-  let control: React.ReactNode;
-  if (isShortcutSetting(s.key)) {
-    control = <ShortcutInput s={s} disabled={disabled} onChange={save} />;
-  } else if (s.kind === 'enum' && s.options) {
-    control =
-      s.options.length > 3 ? (
-        <select value={s.value} disabled={disabled} onChange={(e) => save(e.target.value)}>
-          {s.options.map((o) => (
-            <option key={o} value={o}>
-              {optionLabel(s.key, o)}
-            </option>
-          ))}
-        </select>
-      ) : (
-        <Segmented k={s.key} options={s.options} value={s.value} disabled={disabled} onChange={save} />
-      );
-  } else if (s.kind === 'bool') {
-    control = <Toggle k={s.key} value={s.value === 'true'} disabled={disabled} onChange={(v) => save(String(v))} />;
-  } else {
-    const ph = `settings.${s.key}.placeholder`;
-    control = (
-      <input
-        className="settings-input"
-        value={draft}
-        disabled={disabled}
-        spellCheck={false}
-        placeholder={hasMessage(ph) ? t(ph) : s.default}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') save(draft.trim());
-          if (e.key === 'Escape') {
-            e.stopPropagation();
-            setDraft(s.value);
-          }
-        }}
-        onBlur={() => save(draft.trim())}
-      />
-    );
-  }
-  const note = (
-    <>
-      {locked && (
-        <div className="settings-locked small">
-          <Lock /> {t('settings.lockedByFlag', { flag: `--${s.key}` })}
-        </div>
-      )}
-      {error && <div className="error small">{error}</div>}
-      {isShortcutSetting(s.key) && altOnly(s.value) && <div className="muted small">{t('settings.shortcut.altOnly')}</div>}
-    </>
-  );
   return (
-    <Row k={s.key} note={note}>
-      {control}
-    </Row>
+    <input
+      className="settings-input settings-number"
+      type="number"
+      value={draft}
+      min={d.min}
+      max={d.max}
+      step={d.integer ? 1 : 'any'}
+      disabled={disabled}
+      aria-label={settingLabel(d.key)}
+      onChange={(e) => setDraft(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') save();
+        if (e.key === 'Escape') {
+          stopEscape(e);
+          setDraft(String(value));
+        }
+      }}
+      onBlur={save}
+    />
   );
 }
 
-/** Records a shortcut: focus it and press the keys. The desktop shell takes
- * keys with cmd, ctrl or alt while it records (so neither the menu nor a
- * shortcut acts on them) and reports them; Backspace removes the shortcut,
- * Escape keeps the current one; the reset button restores the default. */
-function ShortcutInput({ s, disabled, onChange }: { s: ServerSetting; disabled: boolean; onChange(v: string): void }) {
-  const [recording, setRecording] = useState(false);
-  const input = useRef<HTMLInputElement>(null);
-  const change = useRef(onChange);
-  change.current = onChange;
-  useEffect(() => {
-    if (!recording || !desktopShell) return;
-    desktopShell.recordShortcut(true);
-    const off = desktopShell.onRecordedKey((spec) => {
-      change.current(spec);
-      input.current?.blur();
-    });
-    return () => {
-      off();
-      desktopShell?.recordShortcut(false);
-    };
-  }, [recording]);
-  const shown = s.value === 'none' ? t('settings.shortcut.none') : keyLabel(s.value);
+/** A color well and its hex value; the pick is saved once it rests. */
+function ColorInput({ label, value, disabled, onChange }: { label: string; value: string; disabled: boolean; onChange(v: string): void }) {
+  const [draft, setDraft] = useState(value);
+  const timer = useRef<number | undefined>(undefined);
+  useEffect(() => setDraft(value), [value]);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const pick = (v: string) => {
+    setDraft(v);
+    clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => v !== value && onChange(v), 300);
+  };
   return (
-    <div className="stepper">
-      <input
-        ref={input}
-        className="settings-input settings-shortcut"
-        readOnly
-        value={recording ? t('settings.shortcut.press') : shown}
-        disabled={disabled}
-        aria-label={label(s.key)}
-        onFocus={() => setRecording(true)}
-        onBlur={() => setRecording(false)}
-        onKeyDown={(e) => {
-          const plain = !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey;
-          if (e.key === 'Tab' && !e.metaKey && !e.ctrlKey && !e.altKey) return;
-          e.preventDefault();
-          e.stopPropagation();
-          if (plain && e.key === 'Escape') return e.currentTarget.blur();
-          if (plain && (e.key === 'Backspace' || e.key === 'Delete')) {
-            onChange('none');
-            return e.currentTarget.blur();
-          }
-        }}
-      />
-      <button className="icon" title={t('settings.reset')} disabled={disabled || s.source === 'default'} onClick={() => onChange('')}>
-        <RotateCcw />
-      </button>
+    <span className="settings-color" title={draft}>
+      <input type="color" value={draft} disabled={disabled} aria-label={label} onChange={(e) => pick(e.target.value)} />
+    </span>
+  );
+}
+
+/** The 16 ANSI colors: black to white, then their bright variants. */
+function Palette({ d, value, disabled, onChange }: { d: SettingDef; value: string[]; disabled: boolean; onChange(v: string[]): void }) {
+  return (
+    <div className="settings-palette">
+      {value.map((c, i) => (
+        <ColorInput
+          key={i}
+          label={`${settingLabel(d.key)} ${i}`}
+          value={c}
+          disabled={disabled}
+          onChange={(v) => onChange(value.map((x, j) => (j === i ? v : x)))}
+        />
+      ))}
     </div>
   );
 }
 
-/** One row per machine for settings that can differ per machine: each
- * machine follows the global value or has its own. The GUI section also
- * shows each machine's display and enables it in open panes. */
+/** One row per machine for the settings that can differ per machine: each
+ * machine follows the global value or has its own. The program windows
+ * section also shows each machine's display and enables it in open panes. */
 function MachineSettings({
-  entries,
+  defs,
+  values,
   readOnly,
-  onSaved,
   gui,
 }: {
-  entries: ServerSetting[];
+  defs: SettingDef[];
+  values: Record<string, SettingState>;
   readOnly: boolean;
-  onSaved(list: ServerSetting[]): void;
   gui: boolean;
 }) {
   const machines = useStore(useShallow((s) => s.order.map((id) => s.machines[id]).filter(Boolean)));
   const [error, setError] = useState<string>();
-  const remoteOnly = entries.every((e) => e.per_machine === 'remote');
+  const remoteOnly = defs.every((d) => d.scope === 'remote-machine');
   const rows = machines.filter((m) => !remoteOnly || m.kind !== 'local');
   if (rows.length === 0) return null;
-  const save = async (e: ServerSetting, m: string, value: string) => {
+  const save = async (d: SettingDef, m: string, raw: string) => {
     setError(undefined);
-    const res = await saveServer(e.key, value, m);
-    if (typeof res === 'string') setError(res);
-    else onSaved(res);
+    const err = raw === '' ? await resetSetting(d.key, m) : await setSetting(d.key, parseOption(d, raw), m);
+    if (err) setError(err);
   };
   return (
     <div className="settings-machines">
@@ -460,12 +480,12 @@ function MachineSettings({
       </div>
       <div
         className="settings-machines-grid"
-        style={{ gridTemplateColumns: `minmax(8rem, 1fr) repeat(${entries.length}, auto)${gui ? ' auto' : ''}` }}
+        style={{ gridTemplateColumns: `minmax(8rem, 1fr) repeat(${defs.length}, auto)${gui ? ' auto' : ''}` }}
       >
         <span className="muted small">{t('settings.machine')}</span>
-        {entries.map((e) => (
-          <span key={e.key} className="muted small">
-            {label(e.key)}
+        {defs.map((d) => (
+          <span key={d.key} className="muted small">
+            {settingLabel(d.key)}
           </span>
         ))}
         {gui && <span />}
@@ -475,22 +495,27 @@ function MachineSettings({
               <span className="ellipsis">{m.label}</span>
               {gui && <GuiMachineStatus m={m.id} />}
             </span>
-            {entries.map((e) => (
-              <select
-                key={e.key}
-                value={e.machines?.[m.id] ?? ''}
-                disabled={readOnly || e.source === 'flag'}
-                aria-label={`${m.label} · ${label(e.key)}`}
-                onChange={(ev) => save(e, m.id, ev.target.value)}
-              >
-                <option value="">{t('settings.inherit', { value: optionLabel(e.key, e.value) })}</option>
-                {(e.options ?? []).map((o) => (
-                  <option key={o} value={o}>
-                    {optionLabel(e.key, o)}
-                  </option>
-                ))}
-              </select>
-            ))}
+            {defs.map((d) => {
+              const st = values[d.key];
+              const own = st?.machines?.[m.id];
+              const disabled = readOnly || !!st?.locked || (d.scope === 'remote-machine' && m.kind === 'local');
+              return (
+                <select
+                  key={d.key}
+                  value={own === undefined ? '' : String(own)}
+                  disabled={disabled}
+                  aria-label={`${m.label} · ${settingLabel(d.key)}`}
+                  onChange={(ev) => save(d, m.id, ev.target.value)}
+                >
+                  <option value="">{t('settings.inherit', { value: valueLabel(d, st?.value ?? d.default) })}</option>
+                  {machineOptions(d).map((o) => (
+                    <option key={o} value={o}>
+                      {valueLabel(d, parseOption(d, o))}
+                    </option>
+                  ))}
+                </select>
+              );
+            })}
             {gui && <GuiEnableButton m={m.id} disabled={readOnly} />}
           </div>
         ))}
@@ -498,4 +523,20 @@ function MachineSettings({
       {error && <p className="error small">{error}</p>}
     </div>
   );
+}
+
+/** The values a per-machine select offers. */
+function machineOptions(d: SettingDef): string[] {
+  return d.type === 'bool' ? ['true', 'false'] : (d.enum ?? []);
+}
+
+function parseOption(d: SettingDef, raw: string): SettingValue {
+  return d.type === 'bool' ? raw === 'true' : raw;
+}
+
+/** How a value is shown: On/Off, an option's label, or the value. */
+export function valueLabel(d: Pick<SettingDef, 'key' | 'type'>, v: SettingValue): string {
+  if (d.type === 'bool') return t(v ? 'settings.on' : 'settings.off');
+  if (d.type === 'enum') return optionLabel(d.key, String(v));
+  return Array.isArray(v) ? v.join(', ') : String(v);
 }

@@ -4,6 +4,7 @@ vi.mock('../lib/conn', () => ({ conn: { sendNow: () => {}, setSurfaceHandler: ()
 
 import { useStore } from '../state/store';
 import { usePrefs } from '../prefs';
+import { fakeSettingsApi } from './fakeSettings';
 import { CLIP_AUTO_MS, PROGRAM_CLIP_MS, handleSurfaceMessage, programClipboard, sendInput, useSurface } from '../surface/session';
 
 const clip = (text: string, m = 'm') => handleSurfaceMessage({ t: 'clip', m, data: btoa(text) });
@@ -16,6 +17,7 @@ beforeEach(() => {
   writeText = vi.fn(() => Promise.resolve());
   vi.stubGlobal('navigator', { clipboard: { writeText } });
   useSurface.setState({ ownership: 'owner' });
+  fakeSettingsApi();
   usePrefs.getState().setPref('programClipboard', 'auto');
 });
 

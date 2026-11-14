@@ -1,14 +1,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  defaultShortcuts,
+  acceleratorFor,
+  bindingsFromReply,
+  defaultBindings,
+  directShortcuts,
   isCodeFrame,
-  overCode,
-  parseShortcut,
+  platformOf,
   recordedSpec,
   shortcutFor,
-  shortcutsFromSettings,
+  shortcutOutsideCode,
   toAccelerator,
+  type Binding,
 } from './shortcuts';
 
 type Mods = Partial<{ meta: boolean; control: boolean; alt: boolean; shift: boolean }>;
@@ -25,64 +28,84 @@ const key = (code: string, mods: Mods = {}, type = 'keyDown') => ({
   ...mods,
 });
 
-test('specs need a known key and cmd, ctrl or alt', () => {
-  assert.deepEqual(parseShortcut('cmd+shift+t'), { cmd: true, ctrl: false, alt: false, shift: true, key: 't' });
-  for (const spec of [undefined, '', 'none', 't', 'shift+t', 'cmd+', 'meta+t', 'cmd+cmd+t', 'cmd+f25', 'cmd+tt', 'Cmd+T'])
-    assert.equal(parseShortcut(spec), undefined, String(spec));
-});
-
-test('inputs match exact modifiers on the physical key', () => {
-  const s = { new_tab: 'cmd+t', close_tab: 'ctrl+w' };
-  assert.equal(shortcutFor(s, key('KeyT', { meta: true })), 'new_tab');
-  assert.equal(shortcutFor(s, key('KeyW', { control: true })), 'close_tab');
-  assert.equal(shortcutFor(s, key('KeyT', { meta: true, shift: true })), undefined);
-  assert.equal(shortcutFor(s, key('KeyT', { meta: true }, 'keyUp')), undefined);
-  assert.equal(shortcutFor(s, key('KeyW', { meta: true })), undefined);
-  assert.equal(shortcutFor({ new_tab: 'none' }, key('KeyT', { meta: true })), undefined);
-  assert.equal(shortcutFor({ new_tab: 'alt+bracketleft' }, key('BracketLeft', { alt: true })), 'new_tab');
-  assert.equal(shortcutFor({ new_tab: 'ctrl+f5' }, key('F5', { control: true })), 'new_tab');
-});
-
 // A key whose character on the current layout is char.
 const typed = (char: string, code: string, mods: Mods = {}) => ({ ...key(code, mods), key: char });
 
+const b = (key: string, command: string, when = 'terminal'): Binding => ({ key, command, when });
+
+test('only single strokes with cmd, ctrl or alt are direct shortcuts', () => {
+  const list = [
+    b('cmd+t', 'tab.new'),
+    b('ctrl+b c', 'tab.new'),
+    b('f5', 'code.open'),
+    b('alt+x', 'x'),
+    b('ctrl+shift+w', 'tab.close'),
+    b('bad key', 'x'),
+  ];
+  assert.deepEqual(
+    directShortcuts(list).map((x) => x.key),
+    ['cmd+t', 'alt+x', 'ctrl+shift+w'],
+  );
+});
+
+test('inputs match exact modifiers', () => {
+  const s = [b('cmd+t', 'tab.new'), b('ctrl+w', 'tab.close'), b('alt+bracketleft', 'x'), b('ctrl+f5', 'y')];
+  assert.equal(shortcutFor(s, key('KeyT', { meta: true }))?.command, 'tab.new');
+  assert.equal(shortcutFor(s, key('KeyW', { control: true }))?.command, 'tab.close');
+  assert.equal(shortcutFor(s, key('KeyT', { meta: true, shift: true })), undefined);
+  assert.equal(shortcutFor(s, key('KeyT', { meta: true }, 'keyUp')), undefined);
+  assert.equal(shortcutFor(s, key('KeyW', { meta: true })), undefined);
+  assert.equal(shortcutFor(s, key('BracketLeft', { alt: true }))?.command, 'x');
+  assert.equal(shortcutFor(s, key('F5', { control: true }))?.command, 'y');
+  // A chord's first stroke is the page's.
+  assert.equal(shortcutFor([b('ctrl+b c', 'tab.new')], key('KeyB', { control: true })), undefined);
+});
+
 test('keys match by their character on the current layout', () => {
-  const s = { new_tab: 'cmd+t', close_tab: 'cmd+w' };
-  // AZERTY: Z sits where QWERTY has W. Cmd+Z is undo, not close tab.
+  const s = [b('cmd+t', 'tab.new'), b('cmd+w', 'pane.close')];
+  // AZERTY: Z sits where QWERTY has W. Cmd+Z is undo, not close.
   assert.equal(shortcutFor(s, typed('z', 'KeyW', { meta: true })), undefined);
-  assert.equal(shortcutFor(s, typed('w', 'KeyZ', { meta: true })), 'close_tab');
+  assert.equal(shortcutFor(s, typed('w', 'KeyZ', { meta: true }))?.command, 'pane.close');
   // Dvorak: the key at KeyW types a comma.
   assert.equal(shortcutFor(s, typed(',', 'KeyW', { meta: true })), undefined);
-  assert.equal(shortcutFor(s, typed('w', 'Comma', { meta: true })), 'close_tab');
   // Shift changes the character's case only.
-  assert.equal(shortcutFor({ new_tab: 'cmd+shift+t' }, typed('T', 'KeyT', { meta: true, shift: true })), 'new_tab');
-  assert.equal(shortcutFor({ new_tab: 'cmd+shift+1' }, typed('!', 'Digit1', { meta: true, shift: true })), 'new_tab');
+  assert.equal(shortcutFor([b('cmd+shift+t', 'x')], typed('T', 'KeyT', { meta: true, shift: true }))?.command, 'x');
+  assert.equal(shortcutFor([b('cmd+shift+1', 'x')], typed('!', 'Digit1', { meta: true, shift: true }))?.command, 'x');
   // Non-Latin layouts and Option characters fall back to the physical key.
-  assert.equal(shortcutFor(s, typed('ц', 'KeyW', { meta: true })), 'close_tab');
-  assert.equal(shortcutFor({ new_tab: 'alt+t' }, typed('†', 'KeyT', { alt: true })), 'new_tab');
-  assert.equal(shortcutFor({ new_tab: 'cmd+comma' }, typed(',', 'KeyM', { meta: true })), 'new_tab');
+  assert.equal(shortcutFor(s, typed('ц', 'KeyW', { meta: true }))?.command, 'pane.close');
+  assert.equal(shortcutFor([b('alt+t', 'x')], typed('†', 'KeyT', { alt: true }))?.command, 'x');
+});
+
+test('VS Code keeps its keys except bindings for everywhere', () => {
+  const s = defaultBindings('mac');
+  assert.equal(shortcutFor(s, key('KeyJ', { meta: true }), true)?.command, 'view.toggleCode');
+  assert.equal(shortcutFor(s, key('KeyW', { meta: true }), true), undefined);
+  assert.equal(shortcutOutsideCode(s, key('KeyW', { meta: true })), true);
+  assert.equal(shortcutFor([b('cmd+k', 'x', 'vscode')], key('KeyK', { meta: true }), true)?.command, 'x');
+  assert.equal(shortcutFor([b('cmd+k', 'x', 'vscode')], key('KeyK', { meta: true })), undefined);
+  assert.equal(shortcutFor([b('cmd+k', 'x', 'dialog')], key('KeyK', { meta: true })), undefined);
 });
 
 test('default shortcuts per platform', () => {
-  assert.deepEqual(defaultShortcuts('darwin'), {
-    new_tab: 'cmd+t',
-    close_tab: 'cmd+w',
-    open_settings: 'cmd+comma',
-    new_workspace: 'cmd+n',
-    toggle_code: 'cmd+j',
-  });
-  assert.deepEqual(defaultShortcuts('linux'), {
-    new_tab: 'ctrl+shift+t',
-    close_tab: 'ctrl+shift+w',
-    open_settings: 'ctrl+comma',
-    new_workspace: 'ctrl+shift+n',
-    toggle_code: 'ctrl+shift+j',
-  });
-  // Only showing or hiding VS Code works while VS Code has focus.
-  assert.deepEqual([...overCode], ['toggle_code']);
+  assert.equal(platformOf('darwin'), 'mac');
+  assert.equal(platformOf('linux'), 'pc');
+  const mac = defaultBindings('mac');
+  const pc = defaultBindings('pc');
+  const direct = (list: Binding[], command: string) => directShortcuts(list).find((x) => x.command === command)?.key;
+  assert.equal(direct(mac, 'tab.new'), 'cmd+t');
+  assert.equal(direct(mac, 'pane.close'), 'cmd+w');
+  assert.equal(direct(mac, 'app.settings'), 'cmd+comma');
+  assert.equal(direct(mac, 'workspace.new'), 'cmd+n');
+  assert.equal(direct(mac, 'view.toggleCode'), 'cmd+j');
+  assert.equal(direct(pc, 'tab.new'), 'ctrl+shift+t');
+  assert.equal(direct(pc, 'tab.close'), 'ctrl+shift+w');
+  assert.equal(direct(pc, 'app.settings'), 'ctrl+comma');
+  assert.equal(direct(pc, 'workspace.new'), 'ctrl+shift+n');
+  assert.equal(direct(pc, 'view.toggleCode'), 'ctrl+shift+j');
   // Cmd+, by the character the layout types.
-  assert.equal(shortcutFor(defaultShortcuts('darwin'), typed(',', 'Comma', { meta: true })), 'open_settings');
-  assert.equal(toAccelerator('cmd+comma'), 'Super+,');
+  assert.equal(shortcutFor(mac, typed(',', 'Comma', { meta: true }))?.command, 'app.settings');
+  assert.equal(acceleratorFor(mac, 'app.settings'), 'Super+,');
+  assert.equal(acceleratorFor(mac, 'tab.close'), undefined);
 });
 
 test('recorded keys', () => {
@@ -110,18 +133,20 @@ test('menu accelerators', () => {
   assert.equal(toAccelerator('cmd+t'), 'Super+T');
   assert.equal(toAccelerator('ctrl+shift+w'), 'Control+Shift+W');
   assert.equal(toAccelerator('alt+comma'), 'Alt+,');
+  assert.equal(toAccelerator('ctrl+b c'), undefined);
   assert.equal(toAccelerator('none'), undefined);
+  assert.equal(toAccelerator(undefined), undefined);
 });
 
-test('shortcuts come from the settings reply; invalid values are dropped', () => {
+test('bindings come from the keybindings reply; malformed entries are dropped', () => {
   const reply = {
-    settings: [
-      { key: 'desktop-new-tab-key', value: 'cmd+t' },
-      { key: 'desktop-close-tab-key', value: 'w' },
-      { key: 'gui', value: 'on' },
-    ],
+    effective: {
+      mac: [b('cmd+t', 'tab.new'), { key: 1, command: 'x', when: 'terminal' }, b('cmd+x', 'bad command')],
+      pc: [b('ctrl+shift+t', 'tab.new')],
+    },
   };
-  assert.deepEqual(shortcutsFromSettings(reply), { new_tab: 'cmd+t' });
-  assert.deepEqual(shortcutsFromSettings(null), {});
-  assert.deepEqual(shortcutsFromSettings({ settings: 'x' }), {});
+  assert.deepEqual(bindingsFromReply(reply, 'mac'), [b('cmd+t', 'tab.new')]);
+  assert.deepEqual(bindingsFromReply(reply, 'pc'), [b('ctrl+shift+t', 'tab.new')]);
+  assert.equal(bindingsFromReply(null, 'mac'), undefined);
+  assert.equal(bindingsFromReply({ effective: 'x' }, 'mac'), undefined);
 });

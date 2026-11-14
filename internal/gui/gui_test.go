@@ -27,7 +27,7 @@ func testMachines() *machines.Manager {
 }
 
 func testManager(t *testing.T, args ...string) *Manager {
-	st := settings.New("", SettingDefs...)
+	st := settings.New("", Settings)
 	fs := flag.NewFlagSet("x", flag.ContinueOnError)
 	st.RegisterFlags(fs)
 	if err := fs.Parse(args); err != nil {
@@ -306,14 +306,14 @@ func TestVideoSettingChange(t *testing.T) {
 	if c := readCmd(t, agent); c.Cmd != "watch" || strings.Join(c.Codecs, ",") != "avc1" {
 		t.Fatalf("watch: %+v", c)
 	}
-	if err := m.Settings.SetFor(SettingVideo, "m1", "off"); err != nil {
+	if err := m.Settings.Set(SettingVideo, "m1", false); err != nil {
 		t.Fatal(err)
 	}
 	m.ApplyVideo(d.mc)
 	if c := readCmd(t, agent); c.Cmd != "codecs" || c.ID != 7 || len(c.Codecs) != 0 {
 		t.Fatalf("off: %+v", c)
 	}
-	m.Settings.SetFor(SettingVideo, "m1", "")
+	m.Settings.Reset(SettingVideo, "m1")
 	m.ApplyVideo(d.mc)
 	if c := readCmd(t, agent); c.Cmd != "codecs" || strings.Join(c.Codecs, ",") != "avc1" {
 		t.Fatalf("back on: %+v", c)
@@ -453,15 +453,15 @@ func TestPaneEnvPerMachine(t *testing.T) {
 		d.status, d.phase = status, PhaseReady
 		m.mu.Unlock()
 	}
-	m.Settings.SetFor(SettingGUI, "a", "off")
-	m.Settings.SetFor(SettingGPU, "b", GPUAll)
+	m.Settings.Set(SettingGUI, "a", false)
+	m.Settings.Set(SettingGPU, "b", GPUAll)
 	if env := m.PaneEnv(mg.Get("a")); env != nil {
 		t.Errorf("machine turned off gets %v", env)
 	}
 	if env := m.PaneEnv(mg.Get("b")); env["LD_PRELOAD"] != status.VGLPreload {
 		t.Errorf("machine with gui-gpu=all gets %v", env)
 	}
-	m.Settings.SetFor(SettingGUI, "a", "")
+	m.Settings.Reset(SettingGUI, "a")
 	if env := m.PaneEnv(mg.Get("a")); env["DISPLAY"] != ":20" || env["LD_PRELOAD"] != "" {
 		t.Errorf("machine back on the global values gets %v", env)
 	}
@@ -471,7 +471,7 @@ func TestPaneEnvPerMachine(t *testing.T) {
 	if _, err := m.Enable(context.Background(), mg.Get("a"), nil); !errors.Is(err, ErrNotReady) {
 		t.Errorf("enable while the display starts: %v", err)
 	}
-	m.Settings.SetFor(SettingGUI, "a", "off")
+	m.Settings.Set(SettingGUI, "a", false)
 	if _, err := m.Enable(context.Background(), mg.Get("a"), nil); !errors.Is(err, ErrOff) {
 		t.Errorf("enable on a machine turned off: %v", err)
 	}

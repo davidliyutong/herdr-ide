@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"io"
 	"log"
 	"net"
@@ -25,7 +24,6 @@ import (
 	"herdr-ide/internal/agent"
 	"herdr-ide/internal/brand"
 	"herdr-ide/internal/machines"
-	"herdr-ide/internal/settings"
 	"herdr-ide/internal/transport"
 )
 
@@ -324,49 +322,6 @@ func TestCodeServerPortProxyRefused(t *testing.T) {
 	}
 }
 
-func TestSettingsAPI(t *testing.T) {
-	s := newTestServer()
-	st := settings.New("", settings.Def{Key: "mode", Kind: settings.KindEnum, Default: "a", Options: []string{"a", "b"}},
-		settings.Def{Key: "locked", Kind: settings.KindString})
-	fs := flag.NewFlagSet("x", flag.ContinueOnError)
-	st.RegisterFlags(fs)
-	fs.Parse([]string{"--locked", "x"})
-	s.opts.Settings = st
-	h := s.Handler()
-	do := func(method, body string) (int, string) {
-		r := httptest.NewRequest(method, "/api/settings", strings.NewReader(body))
-		r.RemoteAddr, r.Host = "127.0.0.1:5555", "127.0.0.1:7780"
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, r)
-		return w.Code, w.Body.String()
-	}
-	if c, b := do("GET", ""); c != 200 || !strings.Contains(b, `"key":"mode"`) || !strings.Contains(b, `"source":"flag"`) {
-		t.Fatalf("GET = %d %s", c, b)
-	}
-	for _, c := range []struct {
-		body, code string
-		status     int
-	}{
-		{`{"key":"mode","value":"b"}`, "", 200},
-		{`{"key":"mode","value":"z"}`, `"error":"invalid"`, 400},
-		{`{"key":"locked","value":"y"}`, `"error":"locked"`, 409},
-		{`{"key":"nope","value":"y"}`, `"error":"unknown"`, 404},
-		{`{"key":"mode","value":"a","machine":"no-such-machine"}`, `"error":"unknown"`, 404},
-		{`not json`, `"error":"invalid"`, 400},
-	} {
-		if code, b := do("PUT", c.body); code != c.status || !strings.Contains(b, c.code) {
-			t.Errorf("PUT %s = %d %s", c.body, code, b)
-		}
-	}
-	if st.Get("mode") != "b" {
-		t.Errorf("mode = %q", st.Get("mode"))
-	}
-	s.opts.ReadOnly = true
-	if code, _ := do("PUT", `{"key":"mode","value":"a"}`); code != 403 || st.Get("mode") != "b" {
-		t.Errorf("read-only PUT = %d, mode %q", code, st.Get("mode"))
-	}
-}
-
 // VS Code windows get the browser's theme kind when they connect and when it
 // changes.
 func TestBridgeTheme(t *testing.T) {
@@ -509,30 +464,6 @@ func TestGUICloseOrigin(t *testing.T) {
 	h.ServeHTTP(w, r)
 	if got := w.Header().Get("Referrer-Policy"); got != "same-origin" {
 		t.Errorf("Referrer-Policy = %q", got)
-	}
-}
-
-// A remote-only per-machine setting cannot be set for the core's own machine.
-func TestSettingsPerMachineScope(t *testing.T) {
-	mg := machines.NewManager([]machines.Spec{
-		{ID: "local", Kind: machines.KindLocal, Enabled: true},
-		{ID: "r1", Kind: machines.KindSSH, Target: "r1", Enabled: true},
-	}, nil, log.New(io.Discard, "", 0))
-	st := settings.New("", settings.Def{Key: "gui", Kind: settings.KindEnum, Default: "on", Options: []string{"on", "off"}, PerMachine: settings.ScopeRemote})
-	s := New(mg, Options{Logger: log.New(io.Discard, "", 0), Settings: st})
-	h := s.Handler()
-	put := func(body string) int {
-		r := httptest.NewRequest("PUT", "/api/settings", strings.NewReader(body))
-		r.RemoteAddr, r.Host = "127.0.0.1:5555", "127.0.0.1:7780"
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, r)
-		return w.Code
-	}
-	if c := put(`{"key":"gui","value":"off","machine":"local"}`); c != http.StatusBadRequest {
-		t.Errorf("local machine: %d", c)
-	}
-	if c := put(`{"key":"gui","value":"off","machine":"r1"}`); c != http.StatusOK || st.GetFor("gui", "r1") != "off" {
-		t.Errorf("remote machine: %d, %s", c, st.GetFor("gui", "r1"))
 	}
 }
 

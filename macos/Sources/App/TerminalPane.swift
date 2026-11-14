@@ -5,11 +5,13 @@ import TermKit
 /// One terminal on screen: Ghostty's surface fed by a stream of the core.
 /// The surface emulates the terminal; the pane only moves bytes and sizes.
 final class TerminalPane: NSView, TermStreamDelegate, TerminalSurfaceTitleDelegate, TerminalSurfaceSearchDelegate,
-    TerminalSurfaceOpenURLHandlingDelegate
+    TerminalSurfaceOpenURLHandlingDelegate, TerminalSurfaceBellDelegate, TerminalSurfaceClipboardConfirmationDelegate
 {
-    /// Lines above the screen a pane asks for, so they can be scrolled to
-    /// and searched.
-    static let history = 10000
+    /// Lines above the screen a pane asks for when it attaches, so they can
+    /// be scrolled to and searched (terminal.scrollback).
+    static var history = 10000
+    /// What the bell does: none, sound or visual (terminal.bell).
+    static var bell = "visual"
 
     let machine: String
     let address: String
@@ -148,6 +150,38 @@ final class TerminalPane: NSView, TermStreamDelegate, TerminalSurfaceTitleDelega
     }
 
     func terminalDidChangeTitle(_: String) {}
+
+    // MARK: - Bell and clipboard
+
+    func terminalDidRingBell() {
+        switch Self.bell {
+        case "sound":
+            NSSound.beep()
+        case "visual":
+            let flash = FillView(Theme.focusRing.withAlphaComponent(0.25))
+            flash.frame = bounds
+            flash.autoresizingMask = [.width, .height]
+            addSubview(flash)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { flash.removeFromSuperview() }
+        default:
+            break
+        }
+    }
+
+    /// A program asks to write the clipboard (OSC 52) while
+    /// terminal.programClipboard is "ask": the user decides. Other requests
+    /// are refused, as without this delegate.
+    func terminalDidRequestClipboardConfirmation(_ request: TerminalClipboardConfirmationRequest) {
+        guard request.kind == .osc52Write, let window else { return request.respond(allow: false) }
+        let alert = NSAlert()
+        alert.messageText = tr("clipboard.ask")
+        alert.informativeText = String(request.contents.prefix(300))
+        alert.addButton(withTitle: tr("clipboard.allow"))
+        alert.addButton(withTitle: tr("clipboard.deny"))
+        alert.beginSheetModal(for: window) { response in
+            request.respond(allow: response == .alertFirstButtonReturn)
+        }
+    }
 
     // MARK: - Links
 

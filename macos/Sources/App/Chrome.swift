@@ -2,22 +2,28 @@ import AppKit
 import GhosttyTerminal
 import TermKit
 
-/// The one Ghostty controller of the application, configured from the
-/// theme; its colors follow the system's appearance.
+/// The one Ghostty controller of the application: its colors follow the
+/// terminal.colors.* settings in the light and the dark appearance, the
+/// other terminal settings become Ghostty configuration (`apply`).
 @MainActor
 final class TerminalControllerBox {
     let controller: TerminalController
 
-    /// The shortcuts of the menu (main.swift), as Ghostty names keys.
-    static let menuKeys = [
-        "super+t", "super+d", "super+shift+d", "super+w", "super+f", "super+g", "super+shift+g",
-        "super+j", "super+b", "super+comma", "super+,", "super+shift+right_bracket", "super+shift+left_bracket",
-        "super+n", "super+q", "super+h", "super+m",
-    ]
+    /// Keys of the menu that are not commands, as Ghostty names them.
+    static let systemKeys = ["super+q", "super+h", "super+m"]
 
     init() {
+        controller = TerminalController(theme: Self.theme(nil)) { builder in
+            builder.withFontSize(Theme.terminalFontSize)
+            builder.withWindowPaddingX(8)
+            builder.withWindowPaddingY(6)
+        }
+        controller.setTerminalConfiguration(Self.configuration(nil, menuKeys: []))
+    }
+
+    static func theme(_ settings: SettingsModel?) -> TerminalTheme {
         func colors(dark: Bool) -> TerminalConfiguration {
-            let colors = Theme.terminalColors(dark: dark)
+            let colors = Theme.terminalColors(dark: dark, settings: settings)
             return TerminalConfiguration { builder in
                 builder.withBackground(colors.background)
                 builder.withForeground(colors.foreground)
@@ -28,17 +34,41 @@ final class TerminalControllerBox {
                 }
             }
         }
-        controller = TerminalController(theme: TerminalTheme(light: colors(dark: false), dark: colors(dark: true))) { builder in
-            // The keys of the application's menu. Ghostty binds most of them
-            // by default, and a terminal with the keyboard takes its bound
-            // keys before the menu sees them; unbound, they reach the menu.
-            for key in Self.menuKeys {
+        return TerminalTheme(light: colors(dark: false), dark: colors(dark: true))
+    }
+
+    /// Ghostty's configuration from the terminal settings, and the menu's
+    /// single-stroke keys unbound: a terminal with the keyboard takes the
+    /// keys Ghostty binds (most Cmd keys) before the menu sees them.
+    static func configuration(_ settings: SettingsModel?, menuKeys: [String]) -> TerminalConfiguration {
+        TerminalConfiguration { builder in
+            for key in systemKeys + menuKeys.flatMap(Keys.ghosttyTriggers) {
                 builder.withCustom("keybind", key + "=unbind")
             }
-            builder.withFontSize(Theme.terminalFontSize)
-            builder.withWindowPaddingX(8)
-            builder.withWindowPaddingY(6)
+            guard let s = settings, s.loaded else { return }
+            let family = s.string("terminal.fontFamily", "").trimmingCharacters(in: .whitespaces)
+            if !family.isEmpty { builder.withFontFamily(family) }
+            builder.withFontSize(Float(s.number("terminal.fontSize", Double(Theme.terminalFontSize))))
+            builder.withFontThicken(s.string("terminal.fontWeight", "regular") == "medium")
+            let extra = Int(((s.number("terminal.lineHeight", 1.05) - 1) * 100).rounded())
+            builder.withCustom("adjust-cell-height", "\(extra)%")
+            builder.withCursorStyle(TerminalCursorStyle(rawValue: s.string("terminal.cursorStyle", "block")) ?? .block)
+            builder.withCursorStyleBlink(s.bool("terminal.cursorBlink", true))
+            // Ghostty bounds its scrollback in bytes: about 2 KB a line.
+            let lines = max(0, s.number("terminal.scrollback", 10000))
+            builder.withCustom("scrollback-limit", String(Int(lines) * 2048))
+            builder.withCustom("copy-on-select", s.bool("terminal.copyOnSelect", false) ? "clipboard" : "false")
+            builder.withCustom("bold-is-bright", s.bool("terminal.boldIsBright", false) ? "true" : "false")
+            builder.withCustom("macos-option-as-alt", s.bool("terminal.optionIsMeta", false) ? "true" : "false")
+            let clipboard = ["auto": "allow", "ask": "ask", "off": "deny"][s.string("terminal.programClipboard", "auto")] ?? "allow"
+            builder.withCustom("clipboard-write", clipboard)
         }
+    }
+
+    /// Applies the settings and the menu's keys to every terminal.
+    func apply(_ settings: SettingsModel, menuKeys: [String]) {
+        controller.setTheme(Self.theme(settings))
+        controller.setTerminalConfiguration(Self.configuration(settings, menuKeys: menuKeys))
     }
 }
 
@@ -131,6 +161,7 @@ final class SidebarView: NSView, NSTableViewDataSource, NSTableViewDelegate {
             }
         }
         items = next
+        table.rowHeight = Theme.rowHeight
         table.reloadData()
     }
 

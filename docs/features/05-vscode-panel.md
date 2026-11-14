@@ -20,7 +20,7 @@ settings between machines.
 
 **Provisioning** (`internal/codeserver`, agent `codeserver.go`)
 
-- The `code-server-install` setting (settings dialog or flag) picks how a
+- The `codeServer.install` setting (settings dialog or `--code-server-install`) picks how a
   machine gets code-server:
   - `push` (default): the release for the machine's platform is resolved on
     the core host ([09](09-air-gapped-installs.md)), uploaded through the
@@ -83,7 +83,7 @@ settings between machines.
   code-server (the panel's power button) closes that machine's VS Code
   panels in every workspace and unmounts its windows; `cmd+j` brings one
   back, which starts code-server again.
-- In the desktop app `cmd+j` (`desktop-toggle-code-key`,
+- In the desktop app `cmd+j` (the command `view.toggleCode`,
   [04](04-layout-and-keyboard.md)) shows or hides the selected workspace's
   panel: an open panel (VS Code or preview) closes and the terminal gets the
   keys again; a closed one shows the VS Code panel that workspace showed

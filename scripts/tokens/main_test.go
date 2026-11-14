@@ -82,6 +82,12 @@ func TestGenerate(t *testing.T) {
 			"  --ds-font-size-base: 12.5px;\n",
 			":root[data-theme='light'] {\n  --ds-color-background: #ffffff;\n  --ds-color-border-strong: #d4d4d4;\n",
 		},
+		goOut: {
+			"// " + header + "\n\npackage uisettings\n",
+			"\"dark\": {\n\t\tBackground: \"#0a0a0a\", Foreground: \"#f0f0f0\", Cursor: \"#f0f0f0\", Selection: \"#3b4a6b\",\n",
+			"\"#100009\", \"#10000a\"",
+			"\"light\": {",
+		},
 	} {
 		for _, s := range want {
 			if !strings.Contains(string(files[name]), s) {
@@ -121,7 +127,7 @@ func TestRejects(t *testing.T) {
 
 func TestCheck(t *testing.T) {
 	root := t.TempDir()
-	for _, name := range []string{source, swiftOut, cssOut} {
+	for _, name := range []string{source, swiftOut, cssOut, goOut} {
 		if err := os.MkdirAll(filepath.Dir(filepath.Join(root, name)), 0o755); err != nil {
 			t.Fatal(err)
 		}

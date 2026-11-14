@@ -1,251 +1,285 @@
-// herdr-compatible prefix keymap. The browser owns Cmd+W/T/N, so window-level
-// commands use herdr's prefix (default ctrl+b) exactly like the herdr TUI;
-// bindings are loaded from the host's herdr config.toml when available.
-// The desktop app adds direct shortcuts on top (desktop.ts).
+// Keys of the page: every keydown the app sees (panes route theirs through
+// handleKey, the window the others) is matched against the bindings in
+// effect on this platform (keybindings.ts), chords included: "ctrl+b c" is
+// ctrl+b, then c within 3 s, as with herdr's prefix. The same chord's first
+// stroke twice sends it to the pane. The desktop app's shell takes direct
+// shortcuts before the page (desktop.ts); here they run in browsers.
+// herdr's own custom commands ([[keys.command]] in its config.toml, served
+// by /api/keymap) keep working as chords with herdr's prefix.
 
 import { actions } from './actions';
 import { conn } from './lib/conn';
 import { useStore } from './state/store';
-import { t, type MessageKey } from './i18n';
+import { hasMessage, t } from './i18n';
+import { keyLabel, strokeOf, tryNormalize } from './keys';
+import { platform, useKeys, type Binding, type When } from './keybindings';
+import { openFind, findStep } from './surface/find';
 
-export interface KeyConfig {
-  prefix: string;
-  bindings: Record<string, string>; // action -> key spec
-  commands: { key: string; type: string; command: string; description?: string }[];
+/** Where a key is pressed: the main UI, VS Code, or a dialog. */
+export type KeyContext = 'terminal' | 'vscode' | 'dialog';
+
+/** What a stroke did: nothing (the key is not the app's), a chord goes on,
+ * a command ran, the chord's first stroke is sent to the terminal, or an
+ * unmatched chord ended and the key is dropped. */
+export type StrokeResult =
+  { kind: 'none' } | { kind: 'pending' } | { kind: 'run'; command: string } | { kind: 'literal' } | { kind: 'swallow' };
+
+export function applies(when: When, ctx: KeyContext): boolean {
+  return when === 'always' || when === ctx;
 }
 
-export const defaultBindings: Record<string, string> = {
-  help: 'prefix+?',
-  workspace_picker: 'prefix+w',
-  goto: 'prefix+g',
-  new_workspace: 'prefix+shift+n',
-  rename_workspace: 'prefix+shift+w',
-  close_workspace: 'prefix+shift+d',
-  new_tab: 'prefix+c',
-  rename_tab: 'prefix+shift+t',
-  previous_tab: 'prefix+p',
-  next_tab: 'prefix+n',
-  switch_tab: 'prefix+1..9',
-  close_tab: 'prefix+shift+x',
-  focus_pane_left: 'prefix+h',
-  focus_pane_down: 'prefix+j',
-  focus_pane_up: 'prefix+k',
-  focus_pane_right: 'prefix+l',
-  cycle_pane_next: 'prefix+tab',
-  cycle_pane_previous: 'prefix+shift+tab',
-  split_vertical: 'prefix+v',
-  split_horizontal: 'prefix+minus',
-  close_pane: 'prefix+x',
-  zoom: 'prefix+z',
-  toggle_sidebar: 'prefix+b',
-  open_notification_target: 'prefix+o',
-  // additions beyond herdr's own bindings
-  open_code: 'prefix+e',
-  open_diff: 'prefix+d',
-  open_git_graph: 'prefix+shift+g',
-  command_palette: 'prefix+space',
-  open_settings: 'prefix+comma',
-};
-
-/** Localized label of a keymap action. */
-export function actionLabel(action: string): string {
-  return t(`action.${action}` as MessageKey);
+/** One step of the matcher: the result of `stroke` after the strokes of an
+ * unfinished chord (`pending`, "" for none), and the chord that goes on. */
+export function feedStroke(
+  bindings: readonly Binding[],
+  pending: string,
+  stroke: string,
+  ctx: KeyContext,
+): { result: StrokeResult; pending: string } {
+  const live = bindings.filter((b) => applies(b.when, ctx));
+  const seq = pending ? `${pending} ${stroke}` : stroke;
+  const exact = live.find((b) => b.key === seq);
+  if (exact) return { result: { kind: 'run', command: exact.command }, pending: '' };
+  if (live.some((b) => b.key.startsWith(seq + ' '))) return { result: { kind: 'pending' }, pending: seq };
+  if (!pending) return { result: { kind: 'none' }, pending: '' };
+  if (!pending.includes(' ') && stroke === pending) return { result: { kind: 'literal' }, pending: '' };
+  return { result: { kind: 'swallow' }, pending: '' };
 }
 
-let config: KeyConfig = { prefix: 'ctrl+b', bindings: { ...defaultBindings }, commands: [] };
-let prefixActive = false;
-let prefixTimer: number | undefined;
+// herdr's custom commands, as its config.toml has them.
+interface HerdrCommand {
+  key: string;
+  type: string;
+  command: string;
+  description?: string;
+}
+let herdrCommands: (HerdrCommand & { binding: string })[] = [];
+
+/** herdr's custom commands with their keys, for the palette. */
+export function getHerdrCommands() {
+  return herdrCommands;
+}
+
+/** Reads herdr's custom commands: "prefix+v" becomes a chord of herdr's
+ * prefix (ctrl+b unless its config names another). */
+export async function loadHerdrCommands() {
+  try {
+    const r = await fetch('/api/keymap');
+    if (!r.ok) return;
+    const j = (await r.json()) as { prefix?: string; commands?: HerdrCommand[] };
+    const prefix = tryNormalize(j.prefix || 'ctrl+b') ?? 'ctrl+b';
+    herdrCommands = (j.commands ?? []).flatMap((c) => {
+      const rest = c.key.toLowerCase().startsWith('prefix+') ? tryNormalize(`ctrl+x ${c.key.slice(7)}`)?.split(' ')[1] : undefined;
+      return rest ? [{ ...c, binding: `${prefix} ${rest}` }] : [];
+    });
+  } catch {
+    /* none */
+  }
+}
+
+/** The bindings matched here: herdr's custom commands first, as before. */
+function bindings(): Binding[] {
+  const custom = herdrCommands.map((c, i): Binding => ({ key: c.binding, command: `herdr:${i}`, when: 'terminal' }));
+  return [...custom, ...useKeys.getState().effective];
+}
+
+let pending = '';
+let pendingTimer: number | undefined;
 const listeners = new Set<(active: boolean) => void>();
 
+/** Calls fn when a chord starts or ends (the status bar shows it). */
 export function onPrefixChange(fn: (active: boolean) => void) {
   listeners.add(fn);
   return () => listeners.delete(fn);
 }
 
-function setPrefix(v: boolean) {
-  prefixActive = v;
-  window.clearTimeout(prefixTimer);
-  if (v) prefixTimer = window.setTimeout(() => setPrefix(false), 3000);
-  listeners.forEach((l) => l(v));
+function setPending(next: string) {
+  const was = pending !== '';
+  pending = next;
+  clearTimeout(pendingTimer);
+  if (next) pendingTimer = window.setTimeout(() => setPending(''), 3000);
+  if (was !== (next !== '')) listeners.forEach((l) => l(next !== ''));
 }
 
-export function getKeyConfig() {
-  return config;
+/** The chord typed so far, as shown ("ctrl+b"). */
+export function pendingChord(): string {
+  return pending ? keyLabel(pending) : '';
 }
 
-const configListeners = new Set<() => void>();
+const modifierKeys = new Set(['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'AltGraph', 'Fn']);
 
-/** Subscribe to keymap (re)loads; returns an unsubscribe function. */
-export function onKeyConfig(fn: () => void) {
-  configListeners.add(fn);
-  return () => configListeners.delete(fn);
+/** Where a key event happens: dialogs and the palette take the keyboard. */
+export function keyContext(): KeyContext {
+  return typeof document !== 'undefined' && document.querySelector('.modal-backdrop, .palette-backdrop') ? 'dialog' : 'terminal';
 }
 
-export async function loadKeymap() {
-  try {
-    const r = await fetch('/api/keymap');
-    if (!r.ok) return;
-    const j = (await r.json()) as Partial<KeyConfig>;
-    config = {
-      prefix: j.prefix || 'ctrl+b',
-      bindings: { ...defaultBindings, ...(j.bindings ?? {}) },
-      commands: j.commands ?? [],
-    };
-    configListeners.forEach((f) => f());
-  } catch {
-    /* keep defaults */
-  }
-}
-
-// Display forms of key names used in herdr's key specs.
-const keySymbols: Record<string, string> = {
-  minus: '-',
-  plus: '+',
-  comma: ',',
-  period: '.',
-  slash: '/',
-  backslash: '\\',
-  semicolon: ';',
-  quote: "'",
-  backtick: '`',
-};
-
-/** Human-readable form of a key spec, e.g. "prefix+comma" → "ctrl+b ,". */
-export function keyLabel(spec: string, prefix = config.prefix): string {
-  const parts = spec.split('+').map((p) => keySymbols[p.toLowerCase()] ?? p);
-  return parts.join('+').replace(/^prefix\+/, prefix + ' ');
-}
-
-// Direct shortcuts of the desktop app (desktop.ts), shown instead of the
-// prefix binding of the same action.
-let direct: Record<string, string> = {};
-
-export function setDirectShortcuts(map: Record<string, string>) {
-  direct = map;
-  configListeners.forEach((f) => f());
-}
-
-/** Human-readable key for an action, e.g. "ctrl+b v". */
-export function keyHint(action: string): string {
-  if (direct[action]) return keyLabel(direct[action]);
-  const spec = config.bindings[action];
-  return spec ? keyLabel(spec) : '';
-}
-
-const keyAliases: Record<string, string> = {
-  minus: '-',
-  plus: '+',
-  space: ' ',
-  tab: 'tab',
-  enter: 'enter',
-  esc: 'escape',
-  escape: 'escape',
-  left: 'arrowleft',
-  right: 'arrowright',
-  up: 'arrowup',
-  down: 'arrowdown',
-  comma: ',',
-  period: '.',
-  slash: '/',
-  backslash: '\\',
-  semicolon: ';',
-  quote: "'",
-  backtick: '`',
-};
-
-interface Spec {
-  ctrl: boolean;
-  alt: boolean;
-  shift: boolean;
-  meta: boolean;
-  key: string;
-}
-
-function parseSpec(s: string): Spec {
-  const parts = s.toLowerCase().split('+');
-  // "prefix+plus" style and literal "+" keys both end up in the last part.
-  let key = parts.pop() ?? '';
-  if (key === '' && parts.length) key = '+';
-  const spec: Spec = { ctrl: false, alt: false, shift: false, meta: false, key: keyAliases[key] ?? key };
-  for (const p of parts) {
-    if (p === 'ctrl' || p === 'control') spec.ctrl = true;
-    else if (p === 'alt' || p === 'option') spec.alt = true;
-    else if (p === 'shift') spec.shift = true;
-    else if (p === 'cmd' || p === 'super' || p === 'meta') spec.meta = true;
-  }
-  return spec;
-}
-
-function eventKey(ev: KeyboardEvent): string {
-  if (ev.key === 'Tab') return 'tab';
-  // Use the physical key for letters/digits so shift/alt variants still match.
-  if (/^Key[A-Z]$/.test(ev.code)) return ev.code.slice(3).toLowerCase();
-  if (/^Digit\d$/.test(ev.code) && !ev.shiftKey) return ev.code.slice(5);
-  return ev.key.toLowerCase();
-}
-
-function matches(spec: Spec, ev: KeyboardEvent, ignoreShift = false): boolean {
-  const k = eventKey(ev);
-  if (spec.key !== k) {
-    // Shifted punctuation such as "?" arrives with shiftKey set.
-    if (!(spec.key.length === 1 && ev.key === spec.key)) return false;
-    return spec.ctrl === ev.ctrlKey && spec.alt === ev.altKey && spec.meta === ev.metaKey;
-  }
-  return spec.ctrl === ev.ctrlKey && spec.alt === ev.altKey && spec.meta === ev.metaKey && (ignoreShift || spec.shift === ev.shiftKey);
-}
-
-function stripPrefix(s: string): string | undefined {
-  return s.toLowerCase().startsWith('prefix+') ? s.slice(7) : undefined;
-}
-
-/** Key handler installed in every terminal. Returns true when consumed. */
-export function handleKey(ev: KeyboardEvent): boolean {
-  if (ev.type !== 'keydown') return prefixActive;
-  if (['Shift', 'Control', 'Alt', 'Meta', 'CapsLock'].includes(ev.key)) return prefixActive;
-  const prefix = parseSpec(config.prefix);
-  if (!prefixActive) {
-    if (matches(prefix, ev)) {
-      setPrefix(true);
+/** Key handler of the app (panes and the window). Returns true when the key
+ * was the app's; the caller cancels it. */
+export function handleKey(ev: KeyboardEvent, ctx: KeyContext = keyContext()): boolean {
+  if (ev.type !== 'keydown') return pending !== '';
+  if (modifierKeys.has(ev.key)) return pending !== '';
+  const stroke = strokeOf(ev);
+  if (!stroke) return pending !== '';
+  const prev = pending;
+  const step = feedStroke(bindings(), pending, stroke, ctx);
+  setPending(step.pending);
+  switch (step.result.kind) {
+    case 'none':
+      return false;
+    case 'pending':
+    case 'swallow':
       ev.preventDefault();
       return true;
-    }
-    return false;
-  }
-  setPrefix(false);
-  ev.preventDefault();
-  // prefix prefix sends the prefix key itself (e.g. ctrl+b to the shell).
-  if (matches(prefix, ev)) {
-    if (prefix.ctrl && prefix.key.length === 1) actions.sendLiteral(String.fromCharCode(prefix.key.charCodeAt(0) & 0x1f));
-    return true;
-  }
-  for (const c of config.commands) {
-    const k = stripPrefix(c.key);
-    if (k && matches(parseSpec(k), ev)) {
-      runCommand(c);
+    case 'literal': {
+      ev.preventDefault();
+      // A Ctrl+letter prefix reaches the pane as its control character.
+      const m = /^ctrl\+([a-z])$/.exec(prev);
+      if (m) actions.sendLiteral(String.fromCharCode(m[1].charCodeAt(0) & 0x1f));
       return true;
     }
-  }
-  for (const [action, spec] of Object.entries(config.bindings)) {
-    const k = stripPrefix(spec);
-    if (!k) continue;
-    if (k.endsWith('1..9')) {
-      const mods = parseSpec(k.replace('1..9', '1'));
-      const digit = /^Digit([1-9])$/.exec(ev.code)?.[1];
-      if (digit && mods.ctrl === ev.ctrlKey && mods.alt === ev.altKey && mods.shift === ev.shiftKey) {
-        runAction(action, Number(digit) - 1);
-        return true;
-      }
-      continue;
-    }
-    if (matches(parseSpec(k), ev)) {
-      runAction(action);
+    case 'run':
+      ev.preventDefault();
+      if (ev.repeat && !prev) return true;
+      runCommand(step.result.command);
       return true;
-    }
   }
-  return true;
 }
 
-export function runCommand(c: KeyConfig['commands'][number]) {
+/** The label of a command, e.g. "New tab". */
+export function commandLabel(id: string): string {
+  const k = `command.${id}`;
+  return hasMessage(k) ? t(k) : id;
+}
+
+/** The key shown for a command: in the desktop app its direct shortcut when
+ * it has one, else its first chord ("cmd+t", "ctrl+b c"). */
+export function keyHint(command: string): string {
+  const keys = useKeys
+    .getState()
+    .effective.filter((b) => b.command === command)
+    .map((b) => b.key);
+  const direct = platform() === 'mac' || platform() === 'pc' ? keys.find((k) => !k.includes(' ')) : undefined;
+  const key = direct ?? keys[0];
+  return key ? keyLabel(key) : '';
+}
+
+/** Runs a command; unknown ones do nothing. */
+export function runCommand(id: string) {
+  const herdr = /^herdr:(\d+)$/.exec(id);
+  if (herdr) {
+    const c = herdrCommands[Number(herdr[1])];
+    if (c) runHerdrCommand(c);
+    return;
+  }
+  const ctx = actions.focusedContext();
+  const s = useStore.getState();
+  const select = /^tab\.select([1-9])$/.exec(id);
+  if (select) {
+    actions.switchTab({ index: Number(select[1]) - 1 });
+    return;
+  }
+  switch (id) {
+    case 'app.commandPalette':
+      s.setPalette?.('commands');
+      break;
+    case 'app.keyboardShortcuts':
+      s.setPalette?.('help');
+      break;
+    case 'app.settings':
+      s.openSettings(true);
+      break;
+    case 'app.agentAttention':
+      actions.openAttention();
+      break;
+    case 'workspace.switch':
+      s.setPalette?.('workspaces');
+      break;
+    case 'workspace.new':
+      actions.newWorkspace();
+      break;
+    case 'workspace.rename':
+      if (s.machineId && s.workspaceId) actions.startRename('workspace', s.machineId, s.workspaceId);
+      break;
+    case 'workspace.close':
+      if (s.machineId && s.workspaceId) actions.closeWorkspace(s.machineId, s.workspaceId);
+      break;
+    case 'tab.new':
+      actions.newTab();
+      break;
+    case 'tab.rename': {
+      const c = actions.currentTab();
+      if (c) actions.startRename('tab', c.m, c.tab);
+      break;
+    }
+    case 'tab.next':
+      actions.switchTab(1);
+      break;
+    case 'tab.previous':
+      actions.switchTab(-1);
+      break;
+    case 'tab.close': {
+      const c = actions.currentTab();
+      if (c) void actions.closeTab(c.m, c.tab);
+      break;
+    }
+    case 'pane.splitRight':
+      if (ctx?.pane) actions.split(ctx.m, ctx.pane, 'right');
+      break;
+    case 'pane.splitDown':
+      if (ctx?.pane) actions.split(ctx.m, ctx.pane, 'down');
+      break;
+    case 'pane.close':
+      if (ctx?.pane) actions.closePane(ctx.m, ctx.pane);
+      break;
+    case 'pane.zoom':
+      if (ctx?.pane) actions.zoom(ctx.m, ctx.pane);
+      break;
+    case 'pane.focusLeft':
+      actions.focusDirection('left');
+      break;
+    case 'pane.focusRight':
+      actions.focusDirection('right');
+      break;
+    case 'pane.focusUp':
+      actions.focusDirection('up');
+      break;
+    case 'pane.focusDown':
+      actions.focusDirection('down');
+      break;
+    case 'pane.focusNext':
+      actions.cyclePane(1);
+      break;
+    case 'pane.focusPrevious':
+      actions.cyclePane(-1);
+      break;
+    case 'view.toggleSidebar':
+      actions.toggleSidebar();
+      break;
+    case 'view.toggleCode':
+      actions.toggleCode();
+      break;
+    case 'find.open':
+      if (s.focused) openFind(s.focused.m, s.focused.pane);
+      break;
+    case 'find.next':
+      findStep(true);
+      break;
+    case 'find.previous':
+      findStep(false);
+      break;
+    case 'code.open':
+      if (ctx) actions.openCode(ctx.m, ctx.cwd);
+      break;
+    case 'code.diff':
+      if (ctx) actions.openDiff(ctx.m, ctx.cwd);
+      break;
+    case 'code.gitGraph':
+      if (ctx) actions.openGitGraph(ctx.m, ctx.cwd);
+      break;
+  }
+}
+
+export function runHerdrCommand(c: HerdrCommand) {
   const ctx = actions.focusedContext();
   if (!ctx) return;
   if (c.type === 'plugin_action') {
@@ -259,103 +293,5 @@ export function runCommand(c: KeyConfig['commands'][number]) {
     conn.api(ctx.m, 'plugin.action.invoke', params).catch((e) => useStore.getState().toast?.(String(e.message ?? e)));
   } else if (c.type === 'pane' || c.type === 'popup' || c.type === 'shell') {
     actions.runInNewPane(ctx.m, c.command, ctx.cwd);
-  }
-}
-
-export function runAction(action: string, index?: number) {
-  const ctx = actions.focusedContext();
-  const s = useStore.getState();
-  switch (action) {
-    case 'split_vertical':
-      if (ctx?.pane) actions.split(ctx.m, ctx.pane, 'right');
-      break;
-    case 'split_horizontal':
-      if (ctx?.pane) actions.split(ctx.m, ctx.pane, 'down');
-      break;
-    case 'close_pane':
-      if (ctx?.pane) actions.closePane(ctx.m, ctx.pane);
-      break;
-    case 'zoom':
-      if (ctx?.pane) actions.zoom(ctx.m, ctx.pane);
-      break;
-    case 'focus_pane_left':
-      actions.focusDirection('left');
-      break;
-    case 'focus_pane_right':
-      actions.focusDirection('right');
-      break;
-    case 'focus_pane_up':
-      actions.focusDirection('up');
-      break;
-    case 'focus_pane_down':
-      actions.focusDirection('down');
-      break;
-    case 'cycle_pane_next':
-      actions.cyclePane(1);
-      break;
-    case 'cycle_pane_previous':
-      actions.cyclePane(-1);
-      break;
-    case 'new_tab':
-      actions.newTab();
-      break;
-    case 'next_tab':
-      actions.switchTab(1);
-      break;
-    case 'previous_tab':
-      actions.switchTab(-1);
-      break;
-    case 'switch_tab':
-      actions.switchTab({ index: index ?? 0 });
-      break;
-    case 'close_tab': {
-      const c = actions.currentTab();
-      if (c) actions.closeTab(c.m, c.tab);
-      break;
-    }
-    case 'rename_tab': {
-      const c = actions.currentTab();
-      if (c) actions.startRename('tab', c.m, c.tab);
-      break;
-    }
-    case 'new_workspace':
-      actions.newWorkspace();
-      break;
-    case 'rename_workspace':
-    case 'close_workspace': {
-      if (!s.machineId || !s.workspaceId) break;
-      if (action === 'close_workspace') actions.closeWorkspace(s.machineId, s.workspaceId);
-      else actions.startRename('workspace', s.machineId, s.workspaceId);
-      break;
-    }
-    case 'toggle_sidebar':
-      actions.toggleSidebar();
-      break;
-    case 'open_notification_target':
-      actions.openAttention();
-      break;
-    case 'open_code':
-      if (ctx) actions.openCode(ctx.m, ctx.cwd);
-      break;
-    case 'toggle_code':
-      actions.toggleCode();
-      break;
-    case 'open_diff':
-      if (ctx) actions.openDiff(ctx.m, ctx.cwd);
-      break;
-    case 'open_git_graph':
-      if (ctx) actions.openGitGraph(ctx.m, ctx.cwd);
-      break;
-    case 'workspace_picker':
-    case 'goto':
-    case 'command_palette':
-      s.setPalette?.(action === 'workspace_picker' ? 'workspaces' : 'commands');
-      break;
-    case 'help':
-      s.setPalette?.('help');
-      break;
-    case 'open_settings':
-      s.openSettings(true);
-      break;
   }
 }

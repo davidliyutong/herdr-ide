@@ -5,7 +5,6 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"io/fs"
 	"log"
@@ -21,6 +20,7 @@ import (
 	"herdr-ide/internal/brand"
 	"herdr-ide/internal/codeserver"
 	"herdr-ide/internal/gui"
+	"herdr-ide/internal/keybindings"
 	"herdr-ide/internal/machines"
 	"herdr-ide/internal/settings"
 )
@@ -53,8 +53,10 @@ type Options struct {
 	// carries for a platform and the SHA-256 of the executable; nil or an
 	// error leaves machines with the herdr-core they have.
 	HC func(goos, goarch string) (gz []byte, digest string, err error)
-	// Settings are the core settings the UI can change; nil disables them.
+	// Settings are the settings of the core and the UIs; nil disables them.
 	Settings *settings.Store
+	// Keybindings are the UIs' keybindings; nil disables them.
+	Keybindings *keybindings.Store
 	// Catalog returns herdr's saved SSH machines as the core configures
 	// them, read again after the UI adds, removes or renames one and when
 	// it reloads them; nil disables all of that.
@@ -118,6 +120,7 @@ func New(mg *machines.Manager, opts Options) *Server {
 	s.csProxy = newCodeServerProxy(s)
 	s.herdrCLI = s.localHerdr
 	s.initGUI()
+	s.initSettings()
 	mg.Subscribe(func(st machines.State) {
 		if st.Status == machines.StatusReady || st.Status == machines.StatusDegraded {
 			s.wakeSurface(st.ID)
@@ -135,6 +138,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/config", s.handleConfig)
 	mux.HandleFunc("GET /api/settings", s.handleSettings)
 	mux.HandleFunc("PUT /api/settings", s.writable(s.handleSetSetting))
+	mux.HandleFunc("DELETE /api/settings", s.writable(s.handleResetSetting))
+	mux.HandleFunc("GET /api/keybindings", s.handleKeybindings)
+	mux.HandleFunc("PUT /api/keybindings", s.writable(s.handleSetKeybindings))
 	mux.HandleFunc("GET /api/machines", s.handleMachines)
 	mux.HandleFunc("GET /api/machines/add", s.writable(s.handleMachineAdd))
 	mux.HandleFunc("POST /api/machines/refresh", s.writable(s.handleMachinesRefresh))
@@ -316,62 +322,6 @@ func (s *Server) Run(ctx context.Context) {
 			cancel()
 			s.audit.log(nil, "code_server.idle_stop", map[string]any{"machine": id})
 		}
-	}
-}
-
-// handleSettings lists the core settings with their definitions, so the UI
-// renders the form without knowing them in advance.
-func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
-	list := []settings.Entry{}
-	if s.opts.Settings != nil {
-		list = s.opts.Settings.List()
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"settings": list, "read_only": s.opts.ReadOnly})
-}
-
-// handleSetSetting changes one setting. Errors are codes the UI translates.
-func (s *Server) handleSetSetting(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Key   string `json:"key"`
-		Value string `json:"value"`
-		// Machine sets that machine's own value of a per-machine setting.
-		Machine string `json:"machine"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid", "detail": err.Error()})
-		return
-	}
-	if s.opts.Settings == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown"})
-		return
-	}
-	if req.Machine != "" {
-		mc := s.mg.Get(req.Machine)
-		if mc == nil {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown"})
-			return
-		}
-		for _, e := range s.opts.Settings.List() {
-			if e.Key == req.Key && e.PerMachine == settings.ScopeRemote && mc.Local() {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid", "detail": req.Key + " applies to remote machines only"})
-				return
-			}
-		}
-	}
-	err := s.opts.Settings.SetFor(req.Key, req.Machine, req.Value)
-	switch {
-	case err == nil:
-		s.audit.log(r, "settings.set", map[string]any{"key": req.Key, "value": req.Value, "machine": req.Machine})
-		writeJSON(w, http.StatusOK, map[string]any{"settings": s.opts.Settings.List()})
-	case errors.Is(err, settings.ErrUnknown):
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown"})
-	case errors.Is(err, settings.ErrLocked):
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "locked"})
-	case errors.Is(err, settings.ErrInvalid):
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid", "detail": err.Error()})
-	default:
-		s.logger.Printf("saving settings: %v", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "save", "detail": err.Error()})
 	}
 }
 

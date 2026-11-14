@@ -27,30 +27,51 @@ import (
 
 // Settings.
 const (
-	SettingGUI   = "gui"
-	SettingGPU   = "gui-gpu"
-	SettingVideo = "gui-video"
+	SettingGUI   = "gui.enabled"
+	SettingGPU   = "gui.gpu"
+	SettingVideo = "gui.video"
 
 	GPUVglrun = "vglrun"
 	GPUAll    = "all"
 )
 
-// SettingDefs are the GUI settings that can be changed at runtime.
-var SettingDefs = []settings.Def{
-	{
-		Key: SettingGUI, Kind: settings.KindEnum, Default: "on", Options: []string{"on", "off"},
-		Usage:      "show windows of programs on remote Linux machines: new panes get a virtual display (DISPLAY), Xvfb is fetched in user space when missing; also per machine in the UI",
-		PerMachine: settings.ScopeRemote,
+// onOff reads the on/off values of earlier versions.
+func onOff(s string) (any, bool) {
+	switch s {
+	case "on":
+		return true, true
+	case "off":
+		return false, true
+	}
+	return nil, false
+}
+
+// Settings are the GUI settings that can be changed at runtime, also per
+// remote machine, with the flags and file keys of earlier versions.
+var Settings = settings.Module{
+	Sections: []settings.Section{{ID: "gui", Order: 70}},
+	Defs: []settings.Def{
+		{
+			Key: SettingGUI, Type: settings.TypeBool, Default: true, Scope: settings.ScopeRemoteMachine, Section: "gui", Order: 10,
+			Flag:  "gui",
+			Usage: "show windows of programs on remote Linux machines: new panes get a virtual display (DISPLAY), Xvfb is fetched in user space when missing; true or false (on or off); also per machine in the UI",
+		},
+		{
+			Key: SettingGPU, Type: settings.TypeEnum, Default: GPUVglrun, Enum: []string{GPUVglrun, GPUAll},
+			Scope: settings.ScopeRemoteMachine, Section: "gui", Order: 20,
+			Flag:  "gui-gpu",
+			Usage: "OpenGL on machines with VirtualGL: vglrun (programs started with vglrun render on the GPU) or all (every program in new panes runs under VirtualGL); also per machine in the UI",
+		},
+		{
+			Key: SettingVideo, Type: settings.TypeBool, Default: true, Scope: settings.ScopeRemoteMachine, Section: "gui", Order: 30,
+			Flag:  "gui-video",
+			Usage: "send program windows that keep changing as video (H.264 on NVIDIA, Intel or AMD GPUs, else VP8 on the CPU) to browsers that decode it, encoded on the machine by the encoder the core brings; pictures otherwise (false: always pictures); also per machine in the UI",
+		},
 	},
-	{
-		Key: SettingGPU, Kind: settings.KindEnum, Default: GPUVglrun, Options: []string{GPUVglrun, GPUAll},
-		Usage:      "OpenGL on machines with VirtualGL: vglrun (programs started with vglrun render on the GPU) or all (every program in new panes runs under VirtualGL); also per machine in the UI",
-		PerMachine: settings.ScopeRemote,
-	},
-	{
-		Key: SettingVideo, Kind: settings.KindEnum, Default: "on", Options: []string{"on", "off"},
-		Usage:      "send program windows that keep changing as video (H.264 on NVIDIA, Intel or AMD GPUs, else VP8 on the CPU) to browsers that decode it, encoded on the machine by the encoder the core brings; pictures otherwise (off: always pictures); also per machine in the UI",
-		PerMachine: settings.ScopeRemote,
+	Migrations: []settings.Migration{
+		{From: "gui", To: SettingGUI, Convert: onOff},
+		{From: "gui-gpu", To: SettingGPU, Convert: func(s string) (any, bool) { return s, true }},
+		{From: "gui-video", To: SettingVideo, Convert: onOff},
 	},
 }
 
@@ -197,17 +218,22 @@ func New(st *settings.Store, logger *log.Logger) *Manager {
 	return m
 }
 
-// setting returns a setting's value for a machine.
-func (m *Manager) setting(key, machine string) string {
+// enabled tells whether program windows are shown for a machine.
+func (m *Manager) enabled(machine string) bool {
+	return m.Settings == nil || m.Settings.Bool(SettingGUI, machine)
+}
+
+// video tells whether moving windows of a machine are sent as video.
+func (m *Manager) video(machine string) bool {
+	return m.Settings == nil || m.Settings.Bool(SettingVideo, machine)
+}
+
+// gpu is the machine's VirtualGL mode.
+func (m *Manager) gpu(machine string) string {
 	if m.Settings == nil {
-		for _, d := range SettingDefs {
-			if d.Key == key {
-				return d.Default
-			}
-		}
-		return ""
+		return GPUVglrun
 	}
-	return m.Settings.GetFor(key, machine)
+	return m.Settings.String(SettingGPU, machine)
 }
 
 // get returns the display record of a machine; m.mu is held.
@@ -315,7 +341,7 @@ func (m *Manager) retryLater(d *display, sess *transport.Session) {
 // otherwise. A detached display keeps running until idle; its programs keep
 // their windows.
 func (m *Manager) Apply(mc *machines.Machine) {
-	if m.setting(SettingGUI, mc.ID()) != "off" {
+	if m.enabled(mc.ID()) {
 		m.ensure(mc, true)
 		return
 	}
@@ -455,7 +481,7 @@ func plan(st *agentproto.GUIStatus, readOnly bool) (actions []string, stop strin
 
 func (m *Manager) prepare(d *display, sess *transport.Session) {
 	mc := d.mc
-	if m.setting(SettingGUI, mc.ID()) == "off" {
+	if !m.enabled(mc.ID()) {
 		m.setPhase(d, PhaseOff, nil)
 		return
 	}
@@ -493,7 +519,7 @@ func (m *Manager) prepare(d *display, sess *transport.Session) {
 	}
 	m.mu.Lock()
 	// The setting may have been turned off while the display was prepared.
-	if m.setting(SettingGUI, mc.ID()) == "off" {
+	if !m.enabled(mc.ID()) {
 		m.mu.Unlock()
 		conn.Close()
 		m.setPhase(d, PhaseOff, nil)
@@ -528,7 +554,7 @@ func (m *Manager) prepare(d *display, sess *transport.Session) {
 	if keep, _ := afterAttach(m.ReadOnly, false); keep {
 		go m.keeper(d)
 	}
-	if _, push := afterAttach(m.ReadOnly, m.setting(SettingVideo, mc.ID()) != "off"); push {
+	if _, push := afterAttach(m.ReadOnly, m.video(mc.ID())); push {
 		go m.prepareVideo(d)
 	}
 }
@@ -553,7 +579,7 @@ func (m *Manager) ApplyVideo(mc *machines.Machine) {
 		}
 	}
 	m.mu.Unlock()
-	if _, push := afterAttach(m.ReadOnly, m.setting(SettingVideo, mc.ID()) != "off"); push {
+	if _, push := afterAttach(m.ReadOnly, m.video(mc.ID())); push {
 		go m.prepareVideo(d)
 	}
 }
@@ -883,7 +909,7 @@ var codecPreference = []string{"avc1", "vp8"}
 // codecsLocked returns the video streams every viewer of window id
 // decodes, in codecPreference order.
 func (m *Manager) codecsLocked(d *display, id uint32) []string {
-	if m.setting(SettingVideo, d.mc.ID()) == "off" {
+	if !m.video(d.mc.ID()) {
 		return nil
 	}
 	var out []string
@@ -975,7 +1001,7 @@ func (m *Manager) States() []State {
 
 // PaneEnv is the environment new panes on mc get, nil when they get none.
 func (m *Manager) PaneEnv(mc *machines.Machine) map[string]string {
-	if m.setting(SettingGUI, mc.ID()) == "off" || mc.Local() {
+	if !m.enabled(mc.ID()) || mc.Local() {
 		return nil
 	}
 	m.mu.Lock()
@@ -989,7 +1015,7 @@ func (m *Manager) PaneEnv(mc *machines.Machine) map[string]string {
 	env := map[string]string{"DISPLAY": d.status.Display, "XAUTHORITY": d.status.XAuthority}
 	if d.status.GPU {
 		env["VGL_DISPLAY"] = "egl0"
-		if m.setting(SettingGPU, mc.ID()) == GPUAll && d.status.VGLPreload != "" {
+		if m.gpu(mc.ID()) == GPUAll && d.status.VGLPreload != "" {
 			env["LD_PRELOAD"] = d.status.VGLPreload
 			env["VGL_ISACTIVE"] = "1"
 		}
@@ -1233,7 +1259,7 @@ func typeExport(send func(text string) error, cmd string) error {
 // pane that cannot be reached is reported in Failed; the result always
 // lists what was typed, also with an error.
 func (m *Manager) Enable(ctx context.Context, mc *machines.Machine, panes []string) (*EnableResult, error) {
-	if m.setting(SettingGUI, mc.ID()) == "off" {
+	if !m.enabled(mc.ID()) {
 		return nil, ErrOff
 	}
 	env := m.PaneEnv(mc)

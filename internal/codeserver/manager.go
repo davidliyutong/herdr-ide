@@ -40,26 +40,36 @@ const (
 
 // Setting keys.
 const (
-	SettingInstall = "code-server-install"
-	SettingPath    = "code-server-path"
+	SettingInstall = "codeServer.install"
+	SettingPath    = "codeServer.path"
 )
 
-// SettingDefs are the code-server settings that can be changed at runtime.
-var SettingDefs = []settings.Def{
-	{
-		Key: SettingInstall, Kind: settings.KindEnum, Default: InstallPush,
-		Options: []string{InstallPush, InstallDownload, InstallExisting},
-		Usage:   "how machines get code-server: push (the core downloads, verifies and uploads it), download (the machine downloads it, verified) or existing (use the machine's own code-server); the last two fall back to push",
-	},
-	{
-		Key: SettingPath, Kind: settings.KindString,
-		Usage: "code-server executable on machines for --" + SettingInstall + "=existing (absolute or ~/ path); empty searches PATH and the usual install locations",
-		Validate: func(v string) error {
-			if v != "" && !filepath.IsAbs(v) && !strings.HasPrefix(v, "~/") {
-				return errors.New("must be an absolute or ~/ path")
-			}
-			return nil
+// Settings are the code-server settings that can be changed at runtime,
+// with the flags and file keys of earlier versions.
+var Settings = settings.Module{
+	Sections: []settings.Section{{ID: "codeServer", Order: 60}},
+	Defs: []settings.Def{
+		{
+			Key: SettingInstall, Type: settings.TypeEnum, Default: InstallPush,
+			Enum: []string{InstallPush, InstallDownload, InstallExisting}, Section: "codeServer", Order: 10,
+			Flag:  "code-server-install",
+			Usage: "how machines get code-server: push (the core downloads, verifies and uploads it), download (the machine downloads it, verified) or existing (use the machine's own code-server); the last two fall back to push",
 		},
+		{
+			Key: SettingPath, Type: settings.TypeString, Default: "", Section: "codeServer", Order: 20,
+			Flag:  "code-server-path",
+			Usage: "code-server executable on machines for --code-server-install=existing (absolute or ~/ path); empty searches PATH and the usual install locations",
+			Validate: func(v any) error {
+				if s := v.(string); s != "" && !filepath.IsAbs(s) && !strings.HasPrefix(s, "~/") {
+					return errors.New("must be an absolute or ~/ path")
+				}
+				return nil
+			},
+		},
+	},
+	Migrations: []settings.Migration{
+		{From: "code-server-install", To: SettingInstall, Convert: func(s string) (any, bool) { return s, true }},
+		{From: "code-server-path", To: SettingPath, Convert: func(s string) (any, bool) { return s, true }},
 	},
 }
 
@@ -237,9 +247,9 @@ func (mg *Manager) install() (mode, bin string) {
 	if mg.Settings == nil {
 		return InstallPush, ""
 	}
-	mode = mg.Settings.Get(SettingInstall)
+	mode = mg.Settings.String(SettingInstall, "")
 	if mode == InstallExisting {
-		if bin = mg.Settings.Get(SettingPath); bin == "" {
+		if bin = mg.Settings.String(SettingPath, ""); bin == "" {
 			bin = "auto"
 		}
 	}

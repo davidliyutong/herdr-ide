@@ -1,41 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import type { ITheme } from '@xterm/xterm';
 import tokens from '../../../design/tokens.json';
-import { themes } from '../terminal/options';
-
-// The 16 ANSI colors in the order of the tokens' palettes.
-const ansi: Array<keyof ITheme> = [
-  'black',
-  'red',
-  'green',
-  'yellow',
-  'blue',
-  'magenta',
-  'cyan',
-  'white',
-  'brightBlack',
-  'brightRed',
-  'brightGreen',
-  'brightYellow',
-  'brightBlue',
-  'brightMagenta',
-  'brightCyan',
-  'brightWhite',
-];
+import { builtinDefaults } from '../settings';
 
 describe('design tokens', () => {
-  // The macOS application takes its terminal colors from the tokens, the
-  // web UI from terminal/options.ts: they are the same colors.
+  // The terminal colors' settings default to the tokens' (scripts/tokens
+  // writes the core's defaults), which the macOS application shares.
   for (const kind of ['dark', 'light'] as const) {
-    it(`has the ${kind} terminal palette of the web UI`, () => {
+    it(`are the ${kind} terminal colors' defaults`, () => {
       const token = tokens.terminal[kind];
-      const theme = themes[kind];
-      expect(ansi.map((k) => theme[k])).toEqual(token.palette);
-      expect(theme.background).toBe(token.background);
-      expect(theme.foreground).toBe(token.foreground);
-      expect(theme.cursor).toBe(token.cursor);
-      expect(theme.cursorAccent).toBe(token.background);
-      expect(theme.selectionBackground).toBe(token.selection);
+      const p = `terminal.colors.${kind}.`;
+      expect(builtinDefaults[p + 'palette']).toEqual(token.palette);
+      expect(builtinDefaults[p + 'background']).toBe(token.background);
+      expect(builtinDefaults[p + 'foreground']).toBe(token.foreground);
+      expect(builtinDefaults[p + 'cursor']).toBe(token.cursor);
+      expect(builtinDefaults[p + 'selection']).toBe(token.selection);
     });
   }
 

@@ -30,10 +30,12 @@ check:
 	pnpm -C desktop typecheck
 	pnpm -C desktop format:check
 
-# The design tokens of the web UI and the macOS application, from
-# design/tokens.json.
+# The design tokens of the web UI, the macOS application and the core's
+# terminal color defaults, from design/tokens.json; then what the clients
+# take from the registered settings and commands (design/generated).
 tokens:
 	go run ./scripts/tokens
+	go run ./scripts/registry
 
 it:
 	go test -tags integration -count=1 ./internal/agent -run Integration -v

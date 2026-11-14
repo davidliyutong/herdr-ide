@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../state/store';
 import { actions, attentionList } from '../actions';
-import { actionLabel, defaultBindings, getKeyConfig, keyLabel, runAction, runCommand } from '../keymap';
+import { commandLabel, getHerdrCommands, keyHint, runCommand, runHerdrCommand } from '../keymap';
+import { keyLabel } from '../keys';
+import { useKeys } from '../keybindings';
 import { locales, t, type MessageKey } from '../i18n';
-import { prefDefs, usePrefs } from '../prefs';
+import { usePrefs } from '../prefs';
 import { paneTitle } from '../lib/herdr';
 import { StatusDot } from './StatusDot';
 import { useGui } from '../gui/state';
@@ -41,7 +43,6 @@ export function Palette() {
   const items = useMemo<Item[]>(() => {
     if (!mode) return [];
     const s = useStore.getState();
-    const cfg = getKeyConfig();
     const ws: Item[] = [];
     for (const m of s.order) {
       const st = s.machines[m];
@@ -61,22 +62,20 @@ export function Palette() {
       icon: <StatusDot status={pane.agent_status} />,
       run: () => actions.focusAgent(m, pane.pane_id),
     }));
-    const cmds: Item[] = Object.entries(cfg.bindings)
-      .filter(([a]) => a in defaultBindings && !['help', 'command_palette', 'goto', 'workspace_picker', 'switch_tab'].includes(a))
-      .map(([a, spec]) => ({
-        id: `cmd:${a}`,
-        label: actionLabel(a),
-        hint: keyLabel(spec, cfg.prefix),
-        run: () => runAction(a),
-      }));
-    for (const c of cfg.commands) {
+    // Commands that open the palette, and the tabs by number, are left out.
+    const hidden = /^(app\.commandPalette|app\.keyboardShortcuts|workspace\.switch|tab\.select\d)$/;
+    const cmds: Item[] = useKeys
+      .getState()
+      .commands.filter((c) => !hidden.test(c.id))
+      .map((c) => ({ id: `cmd:${c.id}`, label: commandLabel(c.id), hint: keyHint(c.id) || undefined, run: () => runCommand(c.id) }));
+    getHerdrCommands().forEach((c, i) => {
       cmds.push({
-        id: `custom:${c.key}`,
+        id: `custom:${i}`,
         label: c.description || c.command,
-        hint: keyLabel(c.key, cfg.prefix),
-        run: () => runCommand(c),
+        hint: keyLabel(c.binding),
+        run: () => runHerdrCommand(c),
       });
-    }
+    });
     const kinds = ['claude', 'codex', 'gemini', 'opencode', 'kimi', 'grok', 'cursor', 'copilot', 'qwen', 'amp'];
     for (const k of kinds) {
       cmds.push({ id: `start:${k}`, label: t('action.startAgent', { kind: k }), run: () => actions.startAgent(k) });
@@ -88,10 +87,10 @@ export function Palette() {
         run: () => usePrefs.getState().setPref('locale', l.id),
       });
     }
-    for (const th of prefDefs.theme.options) {
+    for (const th of ['system', 'dark', 'light'] as const) {
       cmds.push({
         id: `theme:${th}`,
-        label: t('action.theme', { theme: t(`settings.theme.${th}` as MessageKey) }),
+        label: t('action.theme', { theme: t(`settings.appearance.theme.${th}` as MessageKey) }),
         run: () => usePrefs.getState().setPref('theme', th),
       });
     }

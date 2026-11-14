@@ -12,8 +12,11 @@
     /// rename-workspace:<name>, close-workspace (without asking),
     /// next-workspace, type:<text>, find:<text>, find-next, open:<path> (as
     /// if activated in the terminal), code (the VS Code panel), page (logs
-    /// the panel's page), settings, key:cmd+<key> (the key as the keyboard
-    /// sends it, with shift+ before the key).
+    /// the panel's page), settings, settings:<section> (a page of the
+    /// settings), keys (their keyboard shortcuts page), set:<key>=<json>
+    /// (changes a setting through the core), strokes:<stroke> <stroke>…
+    /// (strokes given to the key matcher, as "ctrl+b c"), key:cmd+<key>
+    /// (the key as the keyboard sends it, with shift+ before the key).
     enum DebugAids {
         static func start(window: NSWindow, model: AppModel, panes: PaneArea, webPanel: WebPanel, run: @escaping (String) -> Void) {
             let env = ProcessInfo.processInfo.environment
@@ -42,11 +45,20 @@
                     if let machine = model.selectedMachine, let workspace = model.layout.selectedWorkspace {
                         model.closeWorkspace(workspace.id, on: machine)
                     }
-                case "code", "settings": run(action)
+                case "code", "settings", "keys": run(action)
                 case "page": webPanel.debugDescribe { FileHandle.standardError.write(Data(("page: " + $0 + "\n").utf8)) }
                 case "find-next": panes.pane(containing: window.firstResponder as? NSView)?.findStep(true)
                 default:
-                    if action.hasPrefix("press:") {
+                    if action.hasPrefix("settings:") || action.hasPrefix("strokes:") {
+                        run(action)
+                    } else if action.hasPrefix("set:"), let eq = action.firstIndex(of: "=") {
+                        let key = String(action[action.index(action.startIndex, offsetBy: 4) ..< eq])
+                        let raw = String(action[action.index(after: eq)...])
+                        let value = (try? JSONSerialization.jsonObject(with: Data(raw.utf8), options: [.fragmentsAllowed])) ?? raw
+                        model.api.request("PUT", "api/settings", body: ["key": key, "value": value]) { status, _ in
+                            FileHandle.standardError.write(Data("set \(key): \(status)\n".utf8))
+                        }
+                    } else if action.hasPrefix("press:") {
                         // Plain keys as the keyboard sends them to the focused view.
                         let codes: [Character: UInt16] = ["a": 0, "b": 11, "c": 8, "e": 14, "h": 4, "o": 31, " ": 49, "k": 40, "y": 16, "\r": 36]
                         for ch in action.dropFirst(6).replacingOccurrences(of: "<cr>", with: "\r") {
@@ -101,11 +113,20 @@
         }
 
         /// The layer tree, with each terminal's own snapshot drawn over its
-        /// place: Metal layers do not render into a bitmap context.
+        /// place: Metal layers do not render into a bitmap context. Windows
+        /// without terminals (the settings) are taken from the window server.
         private static func snapshot(_ window: NSWindow, to path: String) {
-            guard let view = window.contentView, let layer = view.layer,
-                  let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds),
-                  let context = NSGraphicsContext(bitmapImageRep: rep) else { return }
+            guard let view = window.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+            func hasTerminal(_ v: NSView) -> Bool { v is TerminalView || v.subviews.contains(where: hasTerminal) }
+            if !hasTerminal(view) {
+                // The window's own pixels, as the window server has them (an
+                // application may read its own windows).
+                if let image = CGWindowListCreateImage(.null, .optionIncludingWindow, CGWindowID(window.windowNumber), [.boundsIgnoreFraming]) {
+                    try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+                }
+                return
+            }
+            guard let layer = view.layer, let context = NSGraphicsContext(bitmapImageRep: rep) else { return }
             NSGraphicsContext.saveGraphicsState()
             NSGraphicsContext.current = context
             layer.render(in: context.cgContext)

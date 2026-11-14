@@ -22,7 +22,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -32,11 +31,11 @@ import (
 	"herdr-ide/internal/brand"
 	"herdr-ide/internal/codeserver"
 	"herdr-ide/internal/embedded"
-	"herdr-ide/internal/gui"
+	"herdr-ide/internal/keybindings"
 	"herdr-ide/internal/machines"
+	"herdr-ide/internal/registry"
 	"herdr-ide/internal/server"
 	"herdr-ide/internal/settings"
-	"herdr-ide/internal/shortcuts"
 	"herdr-ide/internal/transport"
 	"herdr-ide/web"
 )
@@ -72,15 +71,15 @@ func (f *codeServerFlags) manager(logger *log.Logger) *codeserver.Manager {
 	return cs
 }
 
-// machinesPath is the file beside the settings file (settingsPath) holding
-// the machines enabled or disabled in the UI: machines.json, or
-// machines-<instance>.json.
-func machinesPath(settings string) string {
-	return filepath.Join(filepath.Dir(settings), strings.Replace(filepath.Base(settings), "settings", "machines", 1))
+// besideSettings is a file of the same instance beside the settings file
+// (settingsPath): machines.json or machines-<instance>.json for name
+// "machines".
+func besideSettings(settings, name string) string {
+	return filepath.Join(filepath.Dir(settings), strings.Replace(filepath.Base(settings), "settings", name, 1))
 }
 
-// settingsPath is the file holding settings changed in the UI, on the core
-// host. A directory left by a previous product name is moved first.
+// settingsPath is the settings file on the core host. A directory left by a
+// previous product name is moved first.
 func settingsPath(instance string) (string, error) {
 	base, err := os.UserConfigDir()
 	if err != nil {
@@ -198,7 +197,8 @@ func serve(args []string, logger *log.Logger) {
 		origins      listFlag
 		extraSSH     listFlag
 		csf          codeServerFlags
-		prefs        = settings.New("", slices.Concat(codeserver.SettingDefs, gui.SettingDefs, shortcuts.SettingDefs)...)
+		prefs        = settings.New("", registry.Settings()...)
+		keys         = keybindings.New("", registry.Commands())
 	)
 	fl.Var(&origins, "allowed-origin", "browser origin of the reverse proxy, e.g. https://ide.example.com (repeatable)")
 	fl.Var(&only, "machine", "connect only these machines, by id, label or ssh target (repeatable)")
@@ -217,11 +217,19 @@ func serve(args []string, logger *log.Logger) {
 	if p, err := settingsPath(*instance); err != nil {
 		logger.Printf("settings are not saved: %v", err)
 	} else {
+		keys.SetPath(besideSettings(p, "keybindings"))
+		// Before the settings drop the desktop app's old shortcut settings.
+		if _, err := keys.MigrateDesktopShortcuts(p, runtime.GOOS == "darwin"); err != nil {
+			logger.Printf("migrating shortcuts: %v", err)
+		}
+		if err := keys.Load(); err != nil {
+			logger.Printf("ignoring keybindings: %v", err)
+		}
 		prefs.SetPath(p)
 		if err := prefs.Load(); err != nil {
 			logger.Printf("ignoring settings: %v", err)
 		}
-		overridesFile = machinesPath(p)
+		overridesFile = besideSettings(p, "machines")
 	}
 	embedded.AgentDir = *agentDir
 	embedded.ExtDir = *extDir
@@ -333,6 +341,7 @@ func serve(args []string, logger *log.Logger) {
 		Audit:          audit,
 		UserHeader:     *userHeader,
 		Settings:       prefs,
+		Keybindings:    keys,
 		HC:             embedded.HC,
 		Catalog:        catalog,
 		Selected:       selected,
@@ -343,6 +352,9 @@ func serve(args []string, logger *log.Logger) {
 	if *parentStdio {
 		go stopWithParent(os.Stdin, cancel)
 	}
+	// Edits of the files by hand apply without a restart.
+	go prefs.Watch(ctx, 2*time.Second)
+	go keys.Watch(ctx, 2*time.Second)
 	// Bind before connecting to machines: a failed launch must not start agents.
 	ln, err := net.Listen("tcp", *listen)
 	if err != nil {

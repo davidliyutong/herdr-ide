@@ -4,8 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const api = vi.fn((..._args: unknown[]): Promise<unknown> => Promise.resolve({}));
 vi.mock('../lib/conn', () => ({ conn: { api: (...a: unknown[]) => api(...a), setTheme: () => {} } }));
 
-import { keyName } from '../shortcutKey';
-import { altOnly, runShortcut, shortcutConflict } from '../desktop';
+import { keyName } from '../keys';
+import { runShortcut } from '../desktop';
 import { useDialog } from '../dialog';
 import { PROCESS_INFO_TIMEOUT_MS } from '../actions';
 import { useStore, currentDock } from '../state/store';
@@ -27,38 +27,6 @@ describe('keyName', () => {
     expect(keyName({ key: 'ArrowLeft', code: 'ArrowLeft' })).toBe('left');
     expect(keyName({ key: 'F5', code: 'F5' })).toBe('f5');
     expect(keyName({ key: 'Meta', code: 'MetaLeft' })).toBeUndefined();
-  });
-});
-
-describe('shortcut conflicts', () => {
-  const list = [
-    { key: 'desktop-new-tab-key', value: 'cmd+t' },
-    { key: 'desktop-close-tab-key', value: 'cmd+w' },
-  ];
-  it('refuses another action’s key and herdr’s prefix', () => {
-    expect(shortcutConflict('desktop-close-tab-key', 'cmd+t', list, 'ctrl+b')).toEqual({
-      message: 'settings.shortcut.taken',
-      action: 'new_tab',
-    });
-    expect(
-      shortcutConflict('desktop-new-tab-key', 'shift+cmd+w', [list[0], { key: 'desktop-close-tab-key', value: 'cmd+shift+w' }], 'ctrl+b')
-        ?.action,
-    ).toBe('close_tab');
-    expect(shortcutConflict('desktop-new-tab-key', 'ctrl+b', list, 'ctrl+b')).toEqual({ message: 'settings.shortcut.prefix' });
-  });
-  it('accepts free keys, its own key, none and reset', () => {
-    expect(shortcutConflict('desktop-new-tab-key', 'cmd+t', list, 'ctrl+b')).toBeUndefined();
-    expect(shortcutConflict('desktop-new-tab-key', 'cmd+shift+t', list, 'ctrl+b')).toBeUndefined();
-    expect(
-      shortcutConflict('desktop-new-tab-key', 'none', [list[0], { key: 'desktop-close-tab-key', value: 'none' }], 'ctrl+b'),
-    ).toBeUndefined();
-    expect(shortcutConflict('desktop-new-tab-key', '', list, 'ctrl+b')).toBeUndefined();
-  });
-  it('flags Alt shortcuts without cmd or ctrl', () => {
-    expect(altOnly('alt+t')).toBe(true);
-    expect(altOnly('alt+shift+t')).toBe(true);
-    expect(altOnly('cmd+alt+t')).toBe(false);
-    expect(altOnly('cmd+t')).toBe(false);
   });
 });
 
@@ -126,14 +94,14 @@ describe('runShortcut', () => {
 
   it('closes a tab at once when its panes only have shells at the prompt', async () => {
     answer({ p1: shell, p2: Object.assign(new Error('pane not found'), { code: 'pane_not_found' }) });
-    runShortcut('close_tab');
+    runShortcut('tab.close');
     await vi.waitFor(() => expect(api).toHaveBeenCalledWith('m', 'tab.close', { tab_id: 't1' }));
     expect(dialog()).toBeUndefined();
   });
 
   it('asks before closing a tab with a program running, naming it', async () => {
     answer({ p1: shell, p2: running('vim') });
-    runShortcut('close_tab');
+    runShortcut('tab.close');
     expect(await reply(false)).toBe('Closing this tab ends the programs still running in it: vim.');
     expect(api).not.toHaveBeenCalledWith('m', 'tab.close', expect.anything());
 
@@ -142,14 +110,14 @@ describe('runShortcut', () => {
     mach.snapshot!.panes[0] = { ...mach.snapshot!.panes[0], agent: 'claude', agent_status: 'idle' };
     useStore.getState().upsertMachine(mach);
     answer({ p1: running('node'), p2: shell });
-    runShortcut('close_tab');
+    runShortcut('tab.close');
     expect(await reply(true)).toContain(': claude.');
     await vi.waitFor(() => expect(api).toHaveBeenCalledWith('m', 'tab.close', { tab_id: 't1' }));
   });
 
   it('asks when herdr cannot tell what runs, or a pane was started with another program', async () => {
     answer({ p1: shell, p2: new Error('unknown method') });
-    runShortcut('close_tab');
+    runShortcut('tab.close');
     expect(await reply(false)).toContain('2');
     expect(api).not.toHaveBeenCalledWith('m', 'tab.close', expect.anything());
 
@@ -157,7 +125,7 @@ describe('runShortcut', () => {
       p1: shell,
       p2: { process_info: { shell_pid: 30, foreground_process_group_id: 30, foreground_processes: [{ pid: 30, name: 'htop' }] } },
     });
-    runShortcut('close_tab');
+    runShortcut('tab.close');
     expect(await reply(false)).toContain(': htop.');
   });
 
@@ -165,9 +133,9 @@ describe('runShortcut', () => {
     vi.useFakeTimers();
     try {
       api.mockImplementation((_m, method) => (method === 'pane.process_info' ? new Promise(() => {}) : Promise.resolve({})));
-      runShortcut('close_tab');
+      runShortcut('tab.close');
       // A second key while the first is pending does nothing.
-      runShortcut('close_tab');
+      runShortcut('tab.close');
       await vi.advanceTimersByTimeAsync(PROCESS_INFO_TIMEOUT_MS);
       expect(dialog()?.kind).toBe('confirm');
       expect(api.mock.calls.filter((c) => c[1] === 'pane.process_info')).toHaveLength(2);
@@ -181,21 +149,21 @@ describe('runShortcut', () => {
     const backdrop = document.createElement('div');
     backdrop.className = 'modal-backdrop';
     document.body.append(backdrop);
-    runShortcut('close_tab');
-    runShortcut('new_tab');
+    runShortcut('tab.close');
+    runShortcut('tab.new');
     expect(useDialog.getState().current).toBeUndefined();
     expect(api).not.toHaveBeenCalled();
   });
 
   it('opens the settings', () => {
     useStore.getState().openSettings(false);
-    runShortcut('open_settings');
+    runShortcut('app.settings');
     expect(useStore.getState().settingsOpen).toBe(true);
     useStore.getState().openSettings(false);
   });
 
   it('asks for a new workspace', () => {
-    runShortcut('new_workspace');
+    runShortcut('workspace.new');
     expect(useDialog.getState().current?.kind).toBe('newWorkspace');
   });
 
@@ -204,30 +172,30 @@ describe('runShortcut', () => {
     s.openDock(undefined);
     useStore.setState({ docks: {} });
     // Nothing shown before: the focused pane's folder opens.
-    runShortcut('toggle_code');
+    runShortcut('view.toggleCode');
     expect(currentDock(useStore.getState())).toEqual({ kind: 'code', m: 'm', folder: undefined });
-    runShortcut('toggle_code');
+    runShortcut('view.toggleCode');
     expect(currentDock(useStore.getState())).toBeUndefined();
     // The panel shown last comes back, as it was.
     s.openDock({ kind: 'code', m: 'm', folder: '/srv/app' });
-    runShortcut('toggle_code');
+    runShortcut('view.toggleCode');
     expect(currentDock(useStore.getState())).toBeUndefined();
-    runShortcut('toggle_code');
+    runShortcut('view.toggleCode');
     expect(currentDock(useStore.getState())).toEqual({ kind: 'code', m: 'm', folder: '/srv/app' });
     // A preview panel hides too.
     s.openDock({ kind: 'preview', m: 'm', path: '/srv/a.png' });
-    runShortcut('toggle_code');
+    runShortcut('view.toggleCode');
     expect(currentDock(useStore.getState())).toBeUndefined();
     // Another machine's last panel is not brought back.
     s.openDock({ kind: 'code', m: 'other', folder: '/x' });
     s.openDock(undefined);
-    runShortcut('toggle_code');
+    runShortcut('view.toggleCode');
     expect(currentDock(useStore.getState())).toEqual({ kind: 'code', m: 'm', folder: undefined });
     s.openDock(undefined);
   });
 
-  it('ignores unknown actions', () => {
-    runShortcut('close_workspace');
+  it('ignores unknown commands', () => {
+    runShortcut('nope.command');
     expect(useDialog.getState().current).toBeUndefined();
     expect(api).not.toHaveBeenCalled();
   });

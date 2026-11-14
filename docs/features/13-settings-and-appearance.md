@@ -1,80 +1,225 @@
-# 13 · Settings and appearance
+# 13 · Settings, keybindings and appearance
 
 ## Context
 
-Some choices belong to each browser (language, theme, font sizes, where the
-VS Code panel sits), others to the core (how machines get code-server). They
-used to be hidden: a palette command for the language, a `localStorage` key
-for Option as Meta, command-line flags for everything on the core. New flags
-keep arriving, so adding a setting must not mean writing new UI.
+Settings used to live in three places: core settings in the core's file,
+browser preferences in each browser's `localStorage`, and the macOS
+application's menu keys hard-coded. A setting changed in one client did not
+reach the others, the desktop app kept five shortcut settings of its own,
+and adding a setting meant UI code in every client.
 
 ## Goals / non-goals
 
-Goals: one dialog for every setting; each setting defined once, with the
-dialog generated from the definitions; core settings changeable at runtime
-without losing the command line as the authority; a light theme that VS Code
-follows; terminals that look the same in every browser.
+Goals: one settings system and one keybinding system with the core as the
+only source; every client (web UI, desktop app, macOS application) renders
+its settings from the same definitions; a hand-editable file like VS Code's
+`settings.json` and `keybindings.json`; changes from any client or from the
+file reach every client at once; the command line stays the authority.
 
 Non-goals: per-user settings on a shared core (the core has no users);
-syncing browser settings between browsers; theming terminal applications.
+settings per browser; theming terminal applications.
 
 ## Design
 
-**Definitions**
+**Registry** (`internal/settings`, `internal/registry`)
 
-- Browser settings: `web/src/prefs.ts` (`prefDefs`: section, kind `enum` /
-  `string` / `number` / `bool`, default, options or range, whether a change
-  reloads the page). Values are stored as strings in `localStorage` under the setting's
-  key, which keeps the keys used before (`locale`, `optionIsMeta`).
-- Core settings: `internal/settings` (`Def`: key, kind `enum` / `string` /
-  `bool`, default, options, validation, flag usage). The package that uses a
-  setting defines it (`codeserver.SettingDefs`); the core registers each one
-  as a flag with the same name, so flag and setting cannot drift apart.
-- Labels are i18n keys derived from the key: `settings.<key>`,
-  `settings.<key>.desc`, `settings.<key>.<option>`, `settings.<key>.placeholder`.
+- A package defines the settings it uses as a `settings.Module`: sections
+  (`{id, order}`), definitions and migrations of its old keys
+  (`internal/uisettings` for the user interfaces, `codeserver.Settings`,
+  `gui.Settings`); `internal/registry` lists the modules the core
+  registers.
+- A definition (`settings.Def`) has a dotted key (`terminal.fontSize`), a
+  type (`bool`, `number`, `string`, `enum`, `color` `#rrggbb`, `list` of
+  strings or colors with an optional exact length), a default, the enum's
+  values, a range and whether numbers are whole, a scope (`app`; `machine`:
+  any machine may have its own value; `remote-machine`: machines other than
+  the core's host), its section and order, the platforms that use it
+  (`web`, `macos`; none means all), an optional command-line flag and a
+  validation function. Invalid definitions panic at start.
+- Descriptions are not in Go: the UIs translate `settings.<key>`,
+  `settings.<key>.desc`, `settings.<key>.<option>` and
+  `settings.section.<id>`. `scripts/registry` writes
+  `design/generated/registry.json` from the registry: each setting's
+  default, the commands and each platform's default bindings, and the
+  translation keys each UI needs (`i18n.web`, `i18n.macos`); a test of the
+  web UI and one of the macOS application fail when a listed key is
+  missing, and `make check` fails when the file is stale (`make tokens`
+  writes it).
+- The terminal colors' defaults (`terminal.colors.{dark,light}.*`) are the
+  design tokens' (`design/tokens.json`); `scripts/tokens` writes them into
+  `internal/uisettings/tokens.go` beside the Swift and CSS tokens
+  ([24](24-design-tokens.md)).
 
-**Core settings** (`/api/settings`)
+**File** (`settings[-<instance>].json`, core host)
 
-- Precedence: command line, then the machine's own value (settings defined
-  with `PerMachine`), then the settings file
-  (`<config dir>/herdr-ide/settings[-<instance>].json`), then the default. A
-  flag locks the setting, for every machine too; the dialog shows which flag.
-- Per-machine values live in the same file under
-  `"machines": {"<machine id>": {"<key>": "<value>"}}`; a definition's scope
-  is `all` or `remote` (machines other than the core's host). Values of
-  machines that are not configured at the moment are kept.
-- `GET /api/settings` lists definitions with value and source (`default`,
-  `saved`, `flag`), plus `per_machine` and the machines' own values;
-  `PUT /api/settings {key, value, machine?}` validates, saves atomically,
-  notifies subscribers (with the machine whose value changed) and returns the
-  new list. An empty machine value makes the machine follow the global one. Errors are codes
-  (`invalid`, `locked`, `unknown`, `save`). An empty value restores the
-  default. Saved values that no longer validate are ignored; unknown keys in
-  the file are kept for other versions.
-- Users of a setting read it when they need it (code-server's install mode is
-  read at each `Ensure`), so no restart is needed.
+- Global values are top-level `"key": value` pairs, typed JSON; a
+  machine's own values are under `"[machine:<id>]": {"key": value}`. The
+  file is written with global values first, keys sorted, two-space
+  indentation, atomically, mode 0600.
+- Keys the core does not know and values that do not validate are kept
+  when the file is rewritten (another version may know them); they count
+  as unset and are reported as problems (`unknown`, `invalid`, `scope` for
+  a machine's value of an `app` setting).
+- A file that is not JSON is reported (`parse`); the values read before
+  stay in effect and nothing is written over the file until it is fixed
+  (changes are refused with `file`).
+- The core polls the file every 2 s (modification time and size) and reads
+  it again when someone else changed it; a change through the API first
+  reads such an edit, so it is not lost.
+- Migration: on load, a file of the earlier format (string values under
+  the old names, machines' values under `"machines": {…}`) is converted
+  once and rewritten: `code-server-install` → `codeServer.install`,
+  `code-server-path` → `codeServer.path`, `gui` → `gui.enabled` (`on`/`off`
+  → `true`/`false`), `gui-gpu` → `gui.gpu`, `gui-video` → `gui.video`. The
+  desktop app's shortcut settings (`desktop-*-key`) become keybinding
+  rules first (below) and are dropped.
 
-**Dialog** (`web/src/components/SettingsDialog.tsx`)
+**Layering**
 
-- Opened from the sidebar's gear, `prefix ,`, the palette, and in the
-  desktop app `cmd+,` and the app menu's **Settings…**
-  ([04](04-layout-and-keyboard.md)). Sections:
-  appearance, layout, terminal (Option as Meta; what programs copying to
-  the clipboard do, see [03](03-pane-rendering-and-input.md); formulas under
-  the pointer, see [19](19-formulas-in-panes.md)), notifications (sounds, see
-  [07](07-agent-native-workflow.md)), VS Code (core settings whose key starts with
-  `code-server-`), program windows (`gui`, `gui-*`), server (other core
-  settings).
-- Settings that can differ per machine get a table below the section's rows:
-  one row per machine (remote machines only for `remote` scope), a select
-  per setting offering "Default (current global value)" and each option.
-  The program windows section adds each machine's display state and a button
-  that enables program windows in its open panes
-  ([14](14-gui-windows.md)).
-- Controls by kind: segmented buttons (up to three options) or a select,
-  steppers with reset for numbers, switches for booleans, text fields that
-  save on Enter or blur. Core settings are disabled when locked or in
-  read-only mode.
+- Command-line flag (locks the setting, for every machine too) → the
+  machine's own value (scope other than `app`) → the global value → the
+  default. Readers ask for the value of a machine (`Store.Bool(key,
+  machine)`); code-server's install mode is read at each start, GUI
+  settings when a display is prepared or a frame is sent.
+
+**API** (`internal/server/settings.go`)
+
+- `GET /api/settings` → `{sections, definitions, values, problems,
+  read_only, file}`; `values` has per key `{value, source:
+  default|global|flag, machines: {id: value}, locked}`.
+- `PUT /api/settings {key, value, machine?}` validates and saves; `DELETE
+  /api/settings?key=&machine=` removes a value (the global one falls back
+  to the default, a machine's to the global value). Errors are codes the
+  UIs translate: `invalid`, `locked` (409), `unknown` (404), `scope`,
+  `file` (409), `save`. A `remote-machine` setting cannot be set for the
+  core's own machine; the machine must be one the core has.
+- Every change, through the API or the file, is pushed to every `/ws`
+  client, events clients included, as `{t: "settings", values, problems}`:
+  clients replace their values without asking again.
+- Writes are refused in read-only mode, audited (`settings.set`,
+  `settings.reset`) and behind the Host/Origin and proxy-secret guards.
+
+**Keybindings** (`internal/keybindings`)
+
+- Commands are registered in Go: an id (`tab.new`, `pane.splitRight`,
+  `view.toggleCode`, `find.open`…), a section of the keyboard page, where
+  it applies (`when`: `terminal` — the main window outside VS Code and
+  dialogs, `vscode`, `dialog`, `always`) and default keys per platform.
+  Platforms: `mac` and `pc` (the desktop applications on macOS and on other
+  systems) and `mac-browser`, `pc-browser`. Labels are `command.<id>` and
+  `command.section.<id>`.
+- Key syntax: a stroke is modifiers (`cmd`, `ctrl`, `alt`, `shift`, with
+  aliases such as `meta`, `option`) and a key joined by `+`; a chord is
+  strokes separated by spaces (`ctrl+b c`), at most 4. The canonical form
+  orders modifiers cmd, ctrl, alt, shift and names keys after the US
+  layout's unshifted keys: `?` is `shift+slash`, `}` is
+  `shift+bracketright`. The first stroke needs cmd, ctrl or alt (or is a
+  function key), so a binding never takes a key that types text. Go
+  (`keys.go`), TypeScript (`web/src/keys.ts`) and Swift
+  (`macos/Sources/TermKit/Keys.swift`) each parse and normalize; all three
+  run the vectors of `design/testdata/keys` (`parse.json`; the clients also
+  `events.json`, how a key press is named, and `sequences.json`, how strokes
+  run bindings).
+- Defaults keep herdr's prefix keymap on every platform (`ctrl+b`, then a
+  key; the tab numbers are the commands `tab.select1`…`9`) and add each
+  application's direct shortcuts: the macOS application's menu keys on
+  `mac` (`cmd+t`, `cmd+d`, `cmd+w` closes the pane…), the desktop app's
+  `ctrl+shift` keys on `pc`. Browsers get the chords and the find key only:
+  they keep `cmd+t` and the like for themselves.
+- The user's file `keybindings[-<instance>].json` is an array of `{key,
+  command, when?}`; `"command": "-<id>"` removes the command's binding of
+  that key (every binding without a key), rules apply in order. Entries for
+  commands this version does not have are kept and reported (`unknown`), as
+  are entries that are not rules (`invalid`). Same watching, migration of
+  the desktop app's `desktop-*-key` settings (a changed key replaces the
+  command's direct keys, `none` removes them; once, while the file does not
+  exist), atomic writes and refusal over a broken file as the settings.
+- `GET /api/keybindings` → `{sections, commands, defaults, user, effective,
+  conflicts, problems, read_only, file}`, with `defaults`, `effective` and
+  `conflicts` per platform: the core works out the bindings in effect, so
+  clients only match keys. A conflict is a key bound to several commands
+  that apply in the same place, or a stroke bound alone that also starts
+  chords. `PUT /api/keybindings` replaces the user's array (each entry
+  validated, at most 1000, 256 KiB); pushed as `{t: "keybindings", user,
+  effective, conflicts, problems}`; refused in read-only mode, audited
+  (`keybindings.set`).
+
+**Web UI** (`web/src/settings.ts`, `prefs.ts`, `keybindings.ts`,
+`keymap.ts`)
+
+- The page reads `/api/settings` before it renders (the language must be
+  known) and again after each reconnect; pushes replace the values.
+  `prefs.ts` is the typed view the UI reads (`usePrefs`, `getPrefs`);
+  `setPref` saves through the API and shows the value at once. Until the
+  core answers, the defaults of `registry.json` apply.
+- Browser settings of earlier versions (11 `localStorage` keys: language,
+  theme, font sizes and weight, panel position, Option as Meta, program
+  clipboard, formulas, sounds, silent agents) are moved once: each value
+  the core still has at its default is saved there, then the key is
+  removed. Read-only mode leaves them for a writable session. State of one
+  browser (sidebar, panel sizes, selection, find options, transfer history)
+  stays in `localStorage`.
+- The settings dialog renders sections from the definitions shown on the
+  web (`platforms`): a page per section and **Keyboard shortcuts**, a search
+  across labels, descriptions, keys and options, a control per type
+  (switch, segmented or select, number with its range, text, color well,
+  the 16-color palette), a dot on changed settings, reset, a per-machine
+  table for settings with machine scope (inherit first; `remote-machine`
+  leaves the core's host out; the program windows section adds each
+  machine's display and Enable), the lock of a flag, the file's problems
+  and where the file is. Changing the language reloads the page that
+  changed it.
+- The keyboard page lists every command with its keys in effect, grouped
+  by section: × removes a key, + records one (press the strokes, Enter
+  keeps them, Escape cancels; in the desktop app the shell takes strokes
+  with cmd, ctrl or alt while recording, so neither its menu nor a shortcut
+  acts on them), reset returns to the defaults; conflicts are marked.
+  Changes become user rules (`rulesFor`) saved with `PUT`.
+- `keymap.ts` matches every keydown of the app (panes route theirs through
+  it) against the bindings in effect on the page's platform, chords
+  included: a stroke that starts chords waits 3 s for the next; the
+  chord's first stroke twice sends it to the pane (`ctrl+b ctrl+b`); a
+  chord matching nothing ends and its key is dropped. While a dialog or
+  the palette is open only `dialog` and `always` bindings run. Key hints
+  show the direct shortcut in the desktop app, else the first chord.
+  herdr's own `[[keys.command]]` entries (`/api/keymap`) still run as chords
+  of herdr's prefix.
+- Desktop app (`desktop/src/shortcuts.ts`): the shell reads
+  `/api/keybindings` (its platform's defaults from `registry.json` until
+  then, again when the page reports a push) and takes single-stroke
+  bindings with cmd, ctrl or alt in `before-input-event`: in a VS Code
+  frame only `vscode` and `always` ones, elsewhere `terminal` and `always`
+  ones. Menu items show their command's first direct shortcut.
+
+**macOS application** (`macos/Sources/TermKit/Settings.swift`, `Keys.swift`,
+`App/Settings.swift`, `App/main.swift`)
+
+- The application reads both endpoints when it connects and follows the
+  `settings` and `keybindings` messages of the event channel.
+- The settings window is built from the definitions shown on macOS: a
+  sidebar of sections and **Keyboard Shortcuts**, a search field, a switch,
+  menu, number field, text field, color well or a grid of 16 color wells
+  per type, a dot on changed settings, reset, a per-machine table, the
+  lock of a flag, the file's problems and **Show File**, which shows the
+  file in the Finder. Its keyboard page records keys in a sheet (strokes as
+  pressed, Cmd keys before the menu, Return keeps them), removes and resets
+  them, marks conflicts and commands the application does not have yet.
+- The main menu's key equivalents are the first single-stroke binding of
+  each command and are rebuilt on every change; Ghostty unbinds them (and
+  ⌘Q, ⌘H, ⌘M) so the menu gets them. A key matcher in front of the window
+  runs chords and keys no menu item shows, in the contexts `terminal`,
+  `vscode` (the web panel) and `dialog` (a text field); the chord's first
+  stroke twice reaches the terminal.
+- Settings apply live: `appearance.theme` sets the application's
+  appearance (the terminals' colors follow it), `appearance.uiFontSize`
+  scales the chrome's fonts and rows, and the terminal settings become
+  Ghostty configuration — font family, size and weight (`font-thicken`
+  for medium), line height (`adjust-cell-height`), cursor style and blink,
+  scrollback (Ghostty bounds it in bytes: 2 KiB a line; new attaches ask
+  the core for that many lines of history), copy on select, bold as
+  bright, Option as Alt, the colors of both themes and the program
+  clipboard (`clipboard-write`; "ask" shows a confirmation). The bell
+  beeps, flashes the pane or does nothing.
 
 **Appearance** (`web/src/appearance.ts`)
 
@@ -84,34 +229,32 @@ syncing browser settings between browsers; theming terminal applications.
   the desktop app the query reads the shell's `nativeTheme.themeSource`,
   which turns from dark to system only after the setting did, so switching
   from `dark` to `system` changes the resolved kind without changing the
-  settings). The resolved kind sets
-  `<html data-theme>`, whose CSS variables restyle the UI (`styles.css` has
-  no other colors; they are defined from the design tokens the macOS
-  application shares, [24](24-design-tokens.md)), the terminal palette of the pane surface and the dialogs'
-  terminals (`themes` in `web/src/terminal/options.ts`, backgrounds equal to
-  `--bg`) and
-  `theme-color`. The kind is sent to the core, which switches VS Code
-  ([05](05-vscode-panel.md)); in the desktop app the setting is also sent
-  to the shell, whose title bar follows it
+  settings). The resolved kind sets `<html data-theme>`, whose CSS variables
+  restyle the UI (`styles.css` has no other colors; they are defined from
+  the design tokens the macOS application shares,
+  [24](24-design-tokens.md)), the terminal palette of the pane surface and
+  the dialogs' terminals (`xtermTheme` of the theme's
+  `terminal.colors.*`) and `theme-color`. The kind is sent to the core,
+  which switches VS Code ([05](05-vscode-panel.md)); in the desktop app the
+  setting is also sent to the shell, whose title bar follows it
   ([16](16-desktop-packaging.md)).
 - Terminal palettes: dark is GitHub Dark Default (Ghostty's theme of that
-  name: colors made for a near-black background) on
-  the UI's `--bg` with its `--fg`; light is GitHub Light Default except for brighter
-  yellows. The palette only colors what programs leave to the terminal
-  (default colors and the 16 ANSI colors); programs that use 24-bit colors
-  look the same everywhere. The owning browser reports the palette's
-  foreground, background, 16 colors and dark or light to herdr
-  ([18](18-endpoint-surfaces.md)), so programs that ask the terminal for its
-  colors (OSC 10/11/4, `CSI ?996n`) get the UI theme's; programs keep the
-  colors they derived until they ask again or restart.
+  name: colors made for a near-black background) on the UI's `--bg` with
+  its `--fg`; light is GitHub Light Default except for brighter yellows.
+  The palette only colors what programs leave to the terminal (default
+  colors and the 16 ANSI colors); programs that use 24-bit colors look the
+  same everywhere. The owning browser reports the palette's foreground,
+  background, 16 colors and dark or light to herdr
+  ([18](18-endpoint-surfaces.md)), so programs that ask the terminal for
+  its colors (OSC 10/11/4, `CSI ?996n`) get the UI theme's; programs keep
+  the colors they derived until they ask again or restart.
 - Terminal font: JetBrains Mono 2.304, the official web fonts (regular,
   medium, bold, each upright and italic) in `web/src/terminal/fonts/` with
   their license (SIL OFL 1.1, appended to the generated `licenses.md`) and
-  checksums. Shipping it means every browser draws panes with the same
-  glyphs and cell size; before, the stack named a font few systems have and
-  most fell back to SF Mono or Menlo. Characters it lacks (CJK, some
-  symbols) come from the fallbacks: SF Mono, Menlo, …, PingFang SC.
-  Rows are 1.05 times the font's own line height (1.32 em).
+  checksums, after `terminal.fontFamily` when it names a font installed on
+  the computer. Characters it lacks (CJK, some symbols) come from the
+  fallbacks: SF Mono, Menlo, …, PingFang SC. Rows are
+  `terminal.lineHeight` times the font's own line height (1.05 by default).
 - Fonts and cell size: the pane surface measures the cell from the font, so
   it must not use the font before it is loaded. `fonts.ts` registers the
   faces with the `FontFace` API and loads them on demand; the page waits up
@@ -123,8 +266,12 @@ syncing browser settings between browsers; theming terminal applications.
   Medium gives the heavier strokes native terminals produce with stroke
   thickening (Ghostty's `font-thicken`), which canvas text does not get.
 - Interface font size sets the root font size; the chrome is sized in `rem`,
-  so it scales with it. Terminal font size and weight and Option as Meta are
-  applied at once; a new cell size resizes herdr's panes.
+  so it scales with it. Terminal font family, size, weight and line height,
+  colors and Option as Meta are applied at once; a new cell size resizes
+  herdr's panes. The bell flashes the panes, beeps or does nothing. The
+  pane surface drawn from herdr does not have a cursor style, blink,
+  scrollback or copy on select of its own; those settings take effect in
+  the macOS application.
 - Panel position (`right` or `bottom`) changes the grid: below the panes the
   panel spans the workspace column and is resized by its top edge.
 
@@ -132,35 +279,39 @@ syncing browser settings between browsers; theming terminal applications.
 
 | Option | Why not |
 | --- | --- |
-| A JSON-Schema form library (react-jsonschema-form) | Hundreds of KB and heavy restyling for a handful of controls; definitions in Go would need a second schema anyway. |
-| Settings only as flags | Needs a restart and shell access to change how VS Code is installed. |
+| Settings kept per browser (`localStorage`) | Every browser, profile and the native application had its own values; the desktop app's shell could not read them before the page. |
+| JSON Schema for the definitions | Clients would need a schema validator and still a list of sections, scopes and platforms; the definitions are small typed records. |
+| Descriptions in Go | Two UIs translate everything else; one place for text per UI keeps translators' files complete. |
+| A file watcher library (fsnotify) | A new dependency for two small files; polling the modification time every 2 s is enough for edits by hand. |
+| Clients working out the effective bindings | Three implementations of the rules and of the conflicts; the core serves them per platform and clients only match keys. |
+| One platform per OS | The desktop app and a browser on the same Mac need different defaults (`cmd+t` is the browser's). |
+| herdr's `config.toml` keys | Read only by herdr; the macOS application and the desktop shell need keys before and outside herdr, and herdr is going away. |
 | Settings file overriding flags | Breaks service definitions and scripts that rely on their flags. |
-| Core-side storage for browser settings | Every browser would get the same font size and theme; the core has no notion of users. |
 | CSS `zoom` for the font size | Distorts mouse coordinates and canvas sharpness. |
-| `window.autoDetectColorScheme` in VS Code | Follows the OS inside the iframe, not the theme chosen in the UI. |
-| Relying on installed fonts for terminals | Cell size and glyphs differ per system; most browsers ended up with SF Mono or Menlo. |
-| `@fontsource/jetbrains-mono` | Split into language subsets without the symbol ranges terminal programs draw (❯, ⏺, ✻, arrows), which would fall back glyph by glyph. |
-| The variable font (one file per style) | Only published as TTF (300 KB each); three static weights as WOFF2 are about as large and load per weight. |
-| Tokyo Night colors on the GitHub background (before) | Made for a navy background: pale on near-black, black at 1.1:1 and dim text at 3.1:1 contrast. |
+| Relying on installed fonts for terminals | Cell size and glyphs differ per system; the bundled font stays the default, an installed one is a choice. |
 
 ## Failure modes
 
-- **Settings file unreadable or invalid JSON** → logged at start; defaults
-  and flags apply; the next change rewrites the file.
+- **Settings or keybindings file not JSON** (an edit in progress) → the
+  values read before stay, the problem is shown in every settings UI,
+  changes are refused (`file`) until the file is fixed.
+- **A value in the file does not validate, or a key is unknown** → that
+  entry is ignored and shown; the rest applies. Rewrites keep it.
 - **Saving fails** (disk, permissions) → the old value stays, the dialog
   shows the error.
+- **A client was disconnected while settings changed** → it reads both
+  endpoints again when it reconnects.
+- **A Ghostty configuration value is refused** → the terminals keep the
+  previous configuration (Ghostty rejects the whole configuration).
 - **No VS Code window connected** → the theme is sent when one connects.
-- **Two browsers choose different themes** → VS Code follows the last one.
-- **A program derives its colors from the wrong theme** (Codex's input box
-  is dark on the light theme after a herdr TUI ran in a dark terminal, or
-  unfilled when no TUI client has reported colors) → herdr answered its
-  background query; the browser cannot. Restarting the program after a herdr
-  TUI in a terminal of the same kind reported its colors gives matching
-  ones.
-- **The terminal font loads slowly or not at all** (a slow link to the core,
-  a browser without `FontFace`) → the page renders after 1.5 s with the
-  fallback fonts; terminals switch when the font arrives, or keep the
-  fallbacks.
+- **Two browsers choose different themes** → the setting is the core's;
+  the last change wins for every client.
+- **A program derives its colors from the wrong theme** → herdr answered
+  its background query; the browser cannot. Restarting the program after a
+  herdr TUI in a terminal of the same kind reported its colors gives
+  matching ones.
+- **The terminal font loads slowly or not at all** → the page renders after
+  1.5 s with the fallback fonts; terminals switch when the font arrives.
 - **A page loaded before the core was replaced** has no labels for new
   settings and lacks new features. After every reconnect the page compares
   its entry script with the one the core serves and offers to reload
@@ -168,20 +319,34 @@ syncing browser settings between browsers; theming terminal applications.
 
 ## Security
 
-`PUT /api/settings` is a mutation like any herdr call: same Host/Origin and
-proxy-secret guards, refused in read-only mode, audited. See
+`PUT` and `DELETE /api/settings` and `PUT /api/keybindings` are mutations:
+same Host/Origin and proxy-secret guards, refused in read-only mode,
+audited, bodies bounded (64 KiB, 256 KiB). Values are typed and validated;
+strings refuse control characters, so a value cannot add lines to the
+Ghostty configuration the macOS application writes. See
 [SECURITY.md](../../SECURITY.md).
 
 ## Testing
 
-`internal/settings/settings_test.go` (precedence, persistence, validation,
-locked flags, per-machine values), `cmd/herdr-ide/main_test.go` (every core
-setting has a label, description and option labels), `internal/server/server_test.go` (`TestSettingsAPI`,
-`TestBridgeTheme`), `web/src/__tests__/settings.test.ts` (parsing and
-clamping, labels for every setting, theme resolution),
-`web/src/__tests__/termOptions.test.ts` (palette contrast, font fallback,
-weight mapping), `web/src/__tests__/theme.test.ts` (the theme kind follows
-the system's change after switching from `dark` to `system`). The dialog, live theme and font changes and both panel
-positions were checked in Chrome in both themes and languages; the bundled
-font (all weights loaded, live weight changes, `font/woff2` with immutable
-caching) in Chrome against the core.
+`internal/settings/settings_test.go` (order of definitions, merge order,
+validation, migration of the old format, unknown keys and invalid values
+kept and reported, reload after edits by hand, broken files),
+`internal/keybindings/keybindings_test.go` (the shared parse vectors,
+defaults per platform without conflicts, user rules and removals,
+conflicts and prefix shadowing, reload, migration of the desktop
+shortcuts), `internal/server/settings_test.go` (both APIs, error codes,
+read-only refusal, the Host/Origin guard, audit, pushes after API changes
+and file edits), `scripts/registry` and `scripts/tokens` (generated files
+current), `web/src/__tests__/keys.test.ts` (the shared vectors: parsing,
+key names, chords; key hints, user rules), `settings.test.ts` (labels for
+every registry key, store, optimistic changes and error codes, migration
+of the browser settings, search), `termOptions.test.ts`, `tokens.test.ts`,
+`desktop/src/shortcuts.test.ts` (direct shortcuts from the reply, layouts,
+VS Code frames, accelerators, recording),
+`macos/Tests/TermKitTests` (`KeysTests`: the shared vectors, labels, menu
+equivalents, Ghostty triggers; `SettingsModelTests`;
+`LocalizationTests.testRegistryKeys`). A dev core was changed through the
+API and by editing its file, with the pushes observed on `/ws`; the dialog's
+pages were checked in headless Chromium; the macOS debug build was driven
+through its debug actions (font size and a palette color changed live,
+the settings window's pages).

@@ -3,16 +3,17 @@
 ## Context
 
 herdr users already know its layout model (workspaces → tabs → binary split
-trees of panes) and its prefix keymap (`ctrl+b` by default, customizable in
-`~/.config/herdr/config.toml`, including custom commands such as plugin
-actions). In a browser, `Cmd+W`, `Cmd+T` and similar shortcuts belong to the
-browser and cannot be captured reliably.
+trees of panes) and its prefix keymap (`ctrl+b` by default). In a browser,
+`Cmd+W`, `Cmd+T` and similar shortcuts belong to the browser and cannot be
+captured reliably; the desktop app and the macOS application own their
+keys.
 
 ## Goals / non-goals
 
 Goals: the same topology as herdr (changes in either UI show up in the
-other); the user's own herdr bindings work unchanged; nothing important
-depends on browser-reserved shortcuts.
+other); herdr's default keys work unchanged in every client; one set of
+keybindings, changeable, for every client; nothing important depends on
+browser-reserved shortcuts.
 
 Non-goals: a separate herdr-ide layout model; arbitrary docking of panes.
 
@@ -137,94 +138,95 @@ Non-goals: a separate herdr-ide layout model; arbitrary docking of panes.
   the user moves to the confirm button. The browser's `prompt()` and
   `confirm()` are not used.
 
-**Keyboard** (`web/src/keymap.ts`)
+**Keyboard** (`internal/keybindings`, `web/src/keymap.ts`; the system is
+described in [13](13-settings-and-appearance.md))
 
-- `/api/keymap` returns the host's herdr `[keys]` section and
-  `[[keys.command]]` entries; defaults mirror herdr's.
-- Prefix mode lasts 3 s or until the next key. `prefix prefix` sends the
-  prefix key itself to the pane.
-- Custom commands take precedence over built-in bindings with the same key.
-  `plugin_action` commands call `plugin.action.invoke` on the pane's machine;
-  `pane`/`popup`/`shell` commands run in a new pane.
-- herdr-ide adds bindings for its own features (VS Code `prefix e`, diff
-  `prefix d`, Git Graph `prefix shift+g`, palette `prefix space`, settings
-  `prefix ,`).
+- Commands (`tab.new`, `pane.splitRight`, `view.toggleCode`…) have default
+  keys per platform; the user's rules in `keybindings[-<instance>].json` on
+  the core host add and remove keys, and the settings' **Keyboard
+  shortcuts** page edits them. Every client matches keys against the
+  bindings the core works out for its platform.
+- The defaults keep herdr's prefix keymap: `ctrl+b`, then a key (split
+  `v` / `-`, focus `h` `j` `k` `l`, tabs `c` `n` `p` `1`…`9`, workspaces
+  `shift+n` `shift+w` `shift+d`…). A chord lasts 3 s or until its next key;
+  the prefix twice (`ctrl+b ctrl+b`) sends it to the pane; a key that ends
+  no chord is dropped.
+- herdr-ide adds bindings for its own features (VS Code `ctrl+b e`, diff
+  `ctrl+b d`, Git Graph `ctrl+b shift+g`, palette `ctrl+b space`, settings
+  `ctrl+b ,`).
+- herdr's own custom commands (`[[keys.command]]` in `~/.config/herdr/
+  config.toml`, read through `/api/keymap`) keep working in the web UI as
+  chords of herdr's prefix and come before the other bindings:
+  `plugin_action` commands call `plugin.action.invoke` on the pane's
+  machine; `pane`/`popup`/`shell` commands run in a new pane.
 - The command palette lists commands with their keys, workspaces and agents
   on every machine, agent kinds to start, UI languages and themes.
 - The PWA manifest allows installing the app in its own window, where fewer
   shortcuts are taken by browser chrome.
 
-**Desktop shortcuts** (`internal/shortcuts`, `desktop/src/shortcuts.ts`,
-`web/src/desktop.ts`)
+**Direct shortcuts** (`desktop/src/shortcuts.ts`, `web/src/desktop.ts`,
+`macos/Sources/App/main.swift`)
 
-- The desktop app owns its keys, so it adds direct shortcuts without the
-  prefix: new tab (`cmd+t` on macOS, `ctrl+shift+t` elsewhere), close
-  tab (`cmd+w` / `ctrl+shift+w`; outside macOS, as in terminal emulators,
-  since `ctrl+w` deletes a word in shells), settings (`cmd+,` /
-  `ctrl+,`, the usual key for an application's settings), new workspace
-  (`cmd+n` / `ctrl+shift+n`, asking for its folder) and show or hide the
-  VS Code panel (`cmd+j` / `ctrl+shift+j`, [05](05-vscode-panel.md)).
-  Prefix bindings keep working; browsers get none of this and behave as
-  before.
-- They are core settings (`desktop-new-tab-key`, `desktop-close-tab-key`,
-  `desktop-settings-key`, `desktop-new-workspace-key`,
-  `desktop-toggle-code-key`), so
-  they survive restarts and the profile; the settings dialog shows them under
-  **Shortcuts** only in the desktop app. A spec is modifiers (`cmd`, `ctrl`,
-  `alt`, `shift`, at least one of the first three so a shortcut never takes
-  a typing key) and a key joined by `+`, or `none`.
+- The desktop applications own their keys, so their platforms add direct
+  shortcuts without the prefix. On macOS (both applications) they are the
+  macOS application's menu keys: `cmd+t` new tab, `cmd+d` / `cmd+shift+d`
+  split right / down, `cmd+w` close pane, `cmd+n` new workspace (asking for
+  its folder), `cmd+,` settings, `cmd+b` sidebar, `cmd+j` show or hide the
+  VS Code panel ([05](05-vscode-panel.md)), `cmd+}` / `cmd+{` next / previous
+  tab, `cmd+f` / `cmd+g` / `cmd+shift+g` find. On other systems the desktop
+  app has `ctrl+shift+t` new tab, `ctrl+shift+w` close tab (as in terminal
+  emulators, since `ctrl+w` deletes a word in shells), `ctrl+,` settings,
+  `ctrl+shift+n` new workspace and `ctrl+shift+j` VS Code. Browsers get
+  none of these (they keep them), except find (`cmd+f` on macOS,
+  `ctrl+shift+f` elsewhere: `ctrl+f` belongs to the programs in panes).
 - A key is named after the character the keyboard layout gives it, as macOS
-  names its shortcuts (`web/src/shortcutKey.ts`, shared by the shell and the
-  dialog): on AZERTY, `cmd+z` stays undo although its physical key is
-  QWERTY's W. Keys without an ASCII character (non-Latin layouts, Option
-  characters, dead keys) and keys that type nothing fall back to the
-  physical key, so `cmd+w` on a Russian layout is still `cmd+w`; Shift does
-  not change the name (`cmd+shift+1`, not `cmd+!`).
-- The dialog records a key press through the shell: while a shortcut field
-  has focus, the shell takes every key with `cmd`, `ctrl` or `alt` in
-  `before-input-event` (so neither the menu, e.g. `cmd+w` or `cmd+q`, nor a
-  shortcut acts on it) and sends its spec to the page; plain keys reach the
-  field, where Escape cancels and Backspace removes the shortcut. Reset
-  restores the default. The dialog refuses the other actions' keys and
-  herdr's prefix key, and notes that `alt` shortcuts without `cmd` or `ctrl`
-  take keys that type characters and act as Meta in terminals. Recording
-  stops when the field loses focus, the page navigates or its renderer
-  stops.
-- The shell starts with the platform's defaults and reads the settings from
-  `/api/settings` once the core is up (retrying a failed read) and when the
-  page reports a change. It matches them in `before-input-event` of the
-  main window: before the page, every frame in it and the menu. A match is
-  not passed on; the shell asks the page to run the action. Held keys do
-  not repeat the action.
+  names its shortcuts (`web/src/keys.ts`, shared by the shell and the page;
+  `Keys.stroke` in the macOS application): on AZERTY, `cmd+z` stays undo
+  although its physical key is QWERTY's W. Keys without an ASCII character
+  (non-Latin layouts, Option characters, dead keys) and keys that type
+  nothing fall back to the physical key, so `cmd+w` on a Russian layout is
+  still `cmd+w`; Shift does not change the name (`cmd+shift+1`, not
+  `cmd+!`).
+- The desktop app's shell starts with its platform's defaults
+  (`design/generated/registry.json`) and reads `/api/keybindings` once the
+  core is up (retrying a failed read) and when the page reports a change.
+  It takes single-stroke bindings with cmd, ctrl or alt in
+  `before-input-event` of the main window: before the page, every frame in
+  it and the menu. A match is not passed on; the shell asks the page to run
+  the command. Held keys do not repeat it. Chords and plain keys stay with
+  the page.
 - While VS Code has focus (the focused frame, or the frame containing it,
-  is a `/m/<machine>/code/` frame of the core), its keys belong to it: the
-  shell leaves matching keys to VS Code, so `cmd+w` closes the editor,
-  `cmd+t` opens VS Code's symbol search, `cmd+,` VS Code's settings and
-  `cmd+n` a new file. Showing or hiding the VS Code panel is the exception:
+  is a `/m/<machine>/code/` frame of the core), its keys belong to it: only
+  bindings for `vscode` or `always` run there, so `cmd+w` closes the
+  editor, `cmd+t` opens VS Code's symbol search, `cmd+,` VS Code's settings
+  and `cmd+n` a new file. Showing or hiding the VS Code panel is `always`:
   hiding it from inside VS Code is what the key is for, so VS Code loses its
-  own `cmd+j` (its bottom panel) in the desktop app. If VS Code does not take such a
-  key, the menu's Close Window does not act on it either, since closing the
-  main window quits the app.
-- The page ignores shortcuts while a dialog or the palette is open.
-  Closing a tab (the shortcut, the tab bar, the prefix binding, menus)
-  first asks herdr what runs in each of its panes (`pane.process_info`,
-  read-only, one request per pane at once). A pane counts as idle only when
-  the terminal's foreground process group is the pane's shell and that
-  shell is a known one (zsh, bash, fish, sh…), that is, the shell waits at
-  its prompt; a pane whose terminal is gone counts as idle too. When every
-  pane is idle the tab closes at once. Otherwise a confirmation names the
-  programs that end (an agent by its name, also while it waits for input;
-  Cancel has focus): the key is easy to press by habit, and unlike closing
-  a browser tab it ends programs. When herdr cannot tell within 1.5 s
-  (an older herdr, a slow link) it asks anyway, naming the number of panes.
-  Jobs sent to the background with `&` are not seen; they end with the tab.
-- The **File** menu lists new workspace, new tab and close tab with their
-  keys, **View** shows or hides VS Code, the app menu has **Settings…**; the
-  menu does not register them itself, so in program windows `cmd+w` (Window → Close Window) still
-  closes the window. The main window's `cmd+w` closes the tab instead; with
-  the shortcut removed it closes the window again.
-- Key hints (tooltips, context menus) show the direct shortcut instead of
-  the prefix binding.
+  own `cmd+j` (its bottom panel). If VS Code does not take such a key, the
+  menu's Close Window does not act on it either, since closing the main
+  window quits the app.
+- The page runs only `dialog` and `always` bindings while a dialog or the
+  palette is open. Closing a tab (the shortcut, the tab bar, the prefix
+  binding, menus) first asks herdr what runs in each of its panes
+  (`pane.process_info`, read-only, one request per pane at once). A pane
+  counts as idle only when the terminal's foreground process group is the
+  pane's shell and that shell is a known one (zsh, bash, fish, sh…), that
+  is, the shell waits at its prompt; a pane whose terminal is gone counts as
+  idle too. When every pane is idle the tab closes at once. Otherwise a
+  confirmation names the programs that end (an agent by its name, also
+  while it waits for input; Cancel has focus). When herdr cannot tell within
+  1.5 s (an older herdr, a slow link) it asks anyway, naming the number of
+  panes. Jobs sent to the background with `&` are not seen; they end with
+  the tab.
+- The desktop app's **File** menu lists new workspace, new tab, close pane
+  and close tab with their keys, **View** shows or hides VS Code, the app
+  menu has **Settings…**; the menu does not register them itself, so in
+  program windows `cmd+w` (Window → Close Window) still closes the window.
+- The macOS application's menu items show the first single-stroke key of
+  their command and are rebuilt when the keybindings change; Ghostty
+  unbinds those keys, so the menu gets them before a terminal. A key
+  matcher in front of the window runs chords and keys without a menu item.
+- Key hints (tooltips, context menus) show the direct shortcut in the
+  desktop app, else the first chord.
 
 ## Alternatives considered
 
@@ -238,9 +240,10 @@ Non-goals: a separate herdr-ide layout model; arbitrary docking of panes.
 | A "⋯" button on every header, tab and workspace row | Takes room on every tab and row; right-click covers desktop browsers. |
 | Desktop shell (Electron/Tauri) to own all shortcuts | Electron was replaced by browser access so the IDE works remotely; Tauri's WKWebView on macOS lacks service workers, which VS Code webviews need. |
 | Browser-specific bindings (`Cmd+…`) | Conflict with the browser and with muscle memory from herdr; browsers do not deliver `Cmd+T`/`Cmd+W` to pages. The desktop app has them (above). |
-| Desktop shortcuts in herdr's `config.toml` | herdr's TUI cannot see Cmd and would read the entries as its own bindings. |
+| Keys in herdr's `config.toml` | herdr's TUI cannot see Cmd and would read the entries as its own bindings; the shell and the macOS application need keys before and outside herdr. |
 | Desktop shortcuts as registered menu accelerators | Would also take the keys in program windows; the page's key handlers and frames (VS Code) would need their own exceptions. |
-| Desktop shortcuts per browser profile (localStorage) | The shell needs them before and outside the page; core settings also keep one set for all windows. |
+| Desktop shortcuts per browser profile (localStorage) | The shell needs them before and outside the page; the core's keybindings keep one set for all windows. |
+| `cmd+w` closing the tab on macOS, as the desktop app did | The macOS application's menu closes the focused terminal with it, like Ghostty and iTerm close a split; one set of macOS defaults for both applications. `ctrl+b shift+x` closes a tab. |
 | Keyboard Lock API | Fullscreen-only and Chromium-only. |
 
 ## Failure modes
@@ -253,16 +256,17 @@ Non-goals: a separate herdr-ide layout model; arbitrary docking of panes.
 
 ## Testing
 
-`internal/server/server_test.go` (`TestLoadKeyConfig`),
+`internal/keybindings/keybindings_test.go` (key syntax vectors, defaults,
+rules, conflicts), `internal/server/server_test.go` (`TestLoadKeyConfig`),
 `web/src/__tests__/core.test.ts` (pane geometry for directional focus),
-`web/src/__tests__/settings.test.ts` (drop zones, key labels, desktop
-shortcuts as key hints), `web/src/__tests__/desktop.test.ts` (key names on
-other layouts, shortcut conflicts, closing idle tabs at once and asking
-for running programs, unknown answers and timeouts, no shortcuts
-under dialogs), `internal/shortcuts/shortcuts_test.go` (spec validation,
-platform defaults), `desktop/src/shortcuts.test.ts` (matching inputs on
-AZERTY, Dvorak and non-Latin layouts, recorded keys, VS Code frames,
-defaults, menu accelerators, reading the settings),
+`web/src/__tests__/settings.test.ts` (drop zones),
+`web/src/__tests__/keys.test.ts` (key names, chords, key hints),
+`web/src/__tests__/desktop.test.ts` (key names on other layouts, closing
+idle tabs at once and asking for running programs, unknown answers and
+timeouts, no shortcuts under dialogs), `desktop/src/shortcuts.test.ts`
+(matching inputs on AZERTY, Dvorak and non-Latin layouts, recorded keys,
+VS Code frames, defaults, menu accelerators, reading the keybindings),
+`macos/Tests/TermKitTests` (`KeysTests`: chords, menu equivalents),
 `web/src/__tests__/menus.test.ts` (insertion slots, also on wrapped rows,
 the area a drop counts in, applying a move reply, menu items and their commands, moves from the
 current position, read-only, keyboard, focus and closing of the menu);

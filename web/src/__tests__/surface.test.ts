@@ -7,7 +7,10 @@ import { Selection, readRange, scrollRate, span, viewTop, wordAt } from '../surf
 import { keyEvent, pasteText, releaseOf } from '../surface/input';
 import { findLinks, safeUrl } from '../terminal/links';
 import vectorData from './testdata/surface.json';
-import { themes } from '../terminal/options';
+import { xtermTheme } from '../terminal/options';
+import { getPrefs } from '../prefs';
+
+const themes = { dark: xtermTheme(getPrefs().colors.dark), light: xtermTheme(getPrefs().colors.light) };
 import { moveRanges, paintRows, sameRanges } from '../surface/paint';
 
 /** The messages internal/server's TestSurfaceBinaryVector pins. */

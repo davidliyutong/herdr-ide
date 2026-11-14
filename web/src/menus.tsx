@@ -38,7 +38,7 @@ import type { MenuEntry } from './contextMenu';
 import { downloadDialog } from './dialog';
 import { canDownload, downloadPath } from './download';
 import { t } from './i18n';
-import { keyHint, keyLabel } from './keymap';
+import { keyHint } from './keymap';
 import { findKeyLabel } from './surface/find';
 import { paneCwd, workspaceTabs } from './lib/herdr';
 import { herdrMissing } from './lib/localHerdr';
@@ -72,20 +72,25 @@ export function paneMenu(m: string, pane: string, zoomed: boolean): MenuEntry[] 
   return [
     { label: t('menu.renamePane'), icon: <Pencil />, run: () => actions.startRename('pane', m, pane) },
     'sep',
-    { label: t('action.split_vertical'), hint: keyHint('split_vertical'), icon: <Columns2 />, run: () => actions.split(m, pane, 'right') },
-    { label: t('action.split_horizontal'), hint: keyHint('split_horizontal'), icon: <Rows2 />, run: () => actions.split(m, pane, 'down') },
+    {
+      label: t('command.pane.splitRight'),
+      hint: keyHint('pane.splitRight'),
+      icon: <Columns2 />,
+      run: () => actions.split(m, pane, 'right'),
+    },
+    { label: t('command.pane.splitDown'), hint: keyHint('pane.splitDown'), icon: <Rows2 />, run: () => actions.split(m, pane, 'down') },
     {
       label: t(zoomed ? 'menu.restore' : 'menu.zoom'),
-      hint: keyHint('zoom'),
+      hint: keyHint('pane.zoom'),
       icon: zoomed ? <Minimize2 /> : <Maximize2 />,
       run: () => actions.zoom(m, pane),
     },
     'sep',
-    { label: t('menu.openCode'), hint: keyHint('open_code'), icon: <SquareCode />, run: () => actions.openCode(m, cwd) },
-    { label: t('menu.diff'), hint: keyHint('open_diff'), icon: <FileDiff />, run: () => actions.openDiff(m, cwd) },
-    { label: t('menu.gitGraph'), hint: keyHint('open_git_graph'), icon: <GitGraph />, run: () => actions.openGitGraph(m, cwd) },
+    { label: t('menu.openCode'), hint: keyHint('code.open'), icon: <SquareCode />, run: () => actions.openCode(m, cwd) },
+    { label: t('menu.diff'), hint: keyHint('code.diff'), icon: <FileDiff />, run: () => actions.openDiff(m, cwd) },
+    { label: t('menu.gitGraph'), hint: keyHint('code.gitGraph'), icon: <GitGraph />, run: () => actions.openGitGraph(m, cwd) },
     'sep',
-    { label: t('action.close_pane'), hint: keyHint('close_pane'), icon: <X />, danger: true, run: () => actions.closePane(m, pane) },
+    { label: t('command.pane.close'), hint: keyHint('pane.close'), icon: <X />, danger: true, run: () => actions.closePane(m, pane) },
   ];
 }
 
@@ -105,7 +110,7 @@ export function surfaceMenu(o: {
 }): MenuEntry[] {
   const out: MenuEntry[] = [{ label: t('surface.copy'), icon: <Copy />, disabled: !o.copy, run: () => o.copy?.() }];
   if (o.paste) out.push({ label: t('surface.paste'), icon: <ClipboardPaste />, run: o.paste });
-  if (o.find) out.push({ label: t('find.menu'), hint: keyLabel(findKeyLabel()), icon: <Search />, run: o.find });
+  if (o.find) out.push({ label: t('find.menu'), hint: findKeyLabel(), icon: <Search />, run: o.find });
   const l = o.link;
   if (l?.kind === 'url' && safeUrl(l.text)) {
     out.push(
@@ -211,8 +216,13 @@ export function tabMenu(m: string, ws: string, tab: string): MenuEntry[] {
   const i = tabs.findIndex((x) => x.tab_id === tab);
   const current = s.machineId === m && s.workspaceId === ws && activeTabId(s, m, snap, ws) === tab;
   return [
-    { label: t('action.rename_tab'), hint: hintIf(current, 'rename_tab'), icon: <Pencil />, run: () => actions.startRename('tab', m, tab) },
-    { label: t('action.new_tab'), hint: keyHint('new_tab'), icon: <Plus />, run: () => actions.newTab(m, ws) },
+    {
+      label: t('command.tab.rename'),
+      hint: hintIf(current, 'tab.rename'),
+      icon: <Pencil />,
+      run: () => actions.startRename('tab', m, tab),
+    },
+    { label: t('command.tab.new'), hint: keyHint('tab.new'), icon: <Plus />, run: () => actions.newTab(m, ws) },
     'sep',
     {
       label: t('menu.moveLeft'),
@@ -239,7 +249,7 @@ export function tabMenu(m: string, ws: string, tab: string): MenuEntry[] {
         ),
     },
     'sep',
-    { label: t('action.close_tab'), hint: hintIf(current, 'close_tab'), icon: <X />, danger: true, run: () => actions.closeTab(m, tab) },
+    { label: t('command.tab.close'), hint: hintIf(current, 'tab.close'), icon: <X />, danger: true, run: () => actions.closeTab(m, tab) },
   ];
 }
 
@@ -252,12 +262,12 @@ export function workspaceMenu(m: string, ws: string): MenuEntry[] {
   const current = s.machineId === m && s.workspaceId === ws;
   return [
     {
-      label: t('action.rename_workspace'),
-      hint: hintIf(current, 'rename_workspace'),
+      label: t('command.workspace.rename'),
+      hint: hintIf(current, 'workspace.rename'),
       icon: <Pencil />,
       run: () => actions.startRename('workspace', m, ws),
     },
-    { label: t('action.new_tab'), hint: hintIf(current, 'new_tab'), icon: <Plus />, run: () => actions.newTab(m, ws) },
+    { label: t('command.tab.new'), hint: hintIf(current, 'tab.new'), icon: <Plus />, run: () => actions.newTab(m, ws) },
     'sep',
     {
       label: t('menu.moveUp'),
@@ -285,8 +295,8 @@ export function workspaceMenu(m: string, ws: string): MenuEntry[] {
     },
     'sep',
     {
-      label: t('action.close_workspace'),
-      hint: hintIf(current, 'close_workspace'),
+      label: t('command.workspace.close'),
+      hint: hintIf(current, 'workspace.close'),
       icon: <X />,
       danger: true,
       run: () => actions.closeWorkspace(m, ws),

@@ -37,7 +37,7 @@ export function PaneActions({
           <button
             disabled={off}
             className="code"
-            title={t('pane.openCode', { key: keyHint('open_code') })}
+            title={t('pane.openCode', { key: keyHint('code.open') })}
             onClick={() => actions.openCode(m, cwd)}
           >
             <SquareCode />
@@ -45,7 +45,7 @@ export function PaneActions({
           <button
             disabled={off}
             className="code"
-            title={t('pane.diff', { key: keyHint('open_diff') })}
+            title={t('pane.diff', { key: keyHint('code.diff') })}
             onClick={() => actions.openDiff(m, cwd)}
           >
             <FileDiff />
@@ -53,7 +53,7 @@ export function PaneActions({
           <button
             disabled={off}
             className="code"
-            title={t('pane.gitGraph', { key: keyHint('open_git_graph') })}
+            title={t('pane.gitGraph', { key: keyHint('code.gitGraph') })}
             onClick={() => actions.openGitGraph(m, cwd)}
           >
             <GitGraph />
@@ -62,7 +62,7 @@ export function PaneActions({
           <button
             disabled={off}
             className="split"
-            title={t('pane.splitRight', { key: keyHint('split_vertical') })}
+            title={t('pane.splitRight', { key: keyHint('pane.splitRight') })}
             onClick={() => actions.split(m, pane, 'right')}
           >
             <Columns2 />
@@ -70,7 +70,7 @@ export function PaneActions({
           <button
             disabled={off}
             className="split"
-            title={t('pane.splitDown', { key: keyHint('split_horizontal') })}
+            title={t('pane.splitDown', { key: keyHint('pane.splitDown') })}
             onClick={() => actions.split(m, pane, 'down')}
           >
             <Rows2 />
@@ -78,7 +78,7 @@ export function PaneActions({
           <button
             disabled={off}
             className="zoom"
-            title={t(zoomed ? 'pane.restore' : 'pane.zoom', { key: keyHint('zoom') })}
+            title={t(zoomed ? 'pane.restore' : 'pane.zoom', { key: keyHint('pane.zoom') })}
             onClick={() => actions.zoom(m, pane)}
           >
             {zoomed ? <Minimize2 /> : <Maximize2 />}
@@ -86,7 +86,7 @@ export function PaneActions({
           <button
             disabled={off}
             className="danger"
-            title={t('pane.close', { key: keyHint('close_pane') })}
+            title={t('pane.close', { key: keyHint('pane.close') })}
             onClick={() => actions.closePane(m, pane)}
           >
             <X />

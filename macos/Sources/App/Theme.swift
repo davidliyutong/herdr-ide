@@ -1,4 +1,5 @@
 import AppKit
+import TermKit
 
 /// Text of the interface in the user's language.
 func tr(_ key: String, _ args: CVarArg...) -> String {
@@ -62,28 +63,40 @@ enum Theme {
     }
 
     /// A terminal's colors as Ghostty configuration values: the 16 ANSI
-    /// colors (black to white, then their bright variants) are the web
-    /// UI's default palette (web/src/terminal/options.ts).
+    /// colors are black to white, then their bright variants.
     struct TerminalColors {
         var background, foreground, cursor, selection: String
         var palette: [String]
     }
 
-    static func terminalColors(dark: Bool) -> TerminalColors {
+    /// The terminal colors of a theme: the terminal.colors.* settings,
+    /// whose defaults are the design tokens (also before the settings are
+    /// read).
+    static func terminalColors(dark: Bool, settings: SettingsModel? = nil) -> TerminalColors {
         let token = dark ? Tokens.terminalDark : Tokens.terminalLight
-        return TerminalColors(background: token.background, foreground: token.foreground, cursor: token.cursor,
-                              selection: token.selection, palette: token.palette)
+        let prefix = "terminal.colors.\(dark ? "dark" : "light")."
+        func color(_ name: String, _ fallback: String) -> String {
+            settings?.string(prefix + name, fallback) ?? fallback
+        }
+        var palette = settings?.list(prefix + "palette") ?? []
+        if palette.count != 16 { palette = token.palette }
+        return TerminalColors(background: color("background", token.background), foreground: color("foreground", token.foreground),
+                              cursor: color("cursor", token.cursor), selection: color("selection", token.selection), palette: palette)
     }
 
-    static let rowHeight = Tokens.metricRowHeight
+    /// The interface's size relative to the design (appearance.uiFontSize,
+    /// whose default 13 is the web UI's root size).
+    static var scale: CGFloat = 1
+
+    static var rowHeight: CGFloat { (Tokens.metricRowHeight * scale).rounded() }
     static let tabHeight = Tokens.metricTabHeight
     static let sidebarWidth = Tokens.metricSidebarWidth
     static let radius = Tokens.metricRadius
     static let divider = Tokens.metricDivider
 
-    static let font = NSFont.systemFont(ofSize: Tokens.fontSizeBase)
-    static let fontStrong = NSFont.systemFont(ofSize: Tokens.fontSizeBase, weight: .medium)
-    static let fontSmall = NSFont.systemFont(ofSize: Tokens.fontSizeSmall)
+    static var font: NSFont { .systemFont(ofSize: Tokens.fontSizeBase * scale) }
+    static var fontStrong: NSFont { .systemFont(ofSize: Tokens.fontSizeBase * scale, weight: .medium) }
+    static var fontSmall: NSFont { .systemFont(ofSize: Tokens.fontSizeSmall * scale) }
     static let terminalFontSize = Float(Tokens.fontSizeTerminal)
 }
 

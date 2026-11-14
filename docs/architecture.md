@@ -30,7 +30,11 @@ browser (React, canvas)     ──WebSocket + HTTP──▶  core (Go, `herdr-id
 | `internal/herdrdist` | herdr release bundled in archives: version, upstream asset names and SHA-256 digests. |
 | `internal/checksum` | SHA-256 of files, shared by code-server and herdr downloads. |
 | `internal/codeserver` | code-server provisioning (artifacts, checksums, install modes, start/stop). |
-| `internal/settings` | Core settings changeable from the UI: definitions, flags, settings file. |
+| `internal/settings` | The settings system: typed definitions registered by packages, flags, the hand-editable settings file (watched, migrated), layered values per machine ([13](features/13-settings-and-appearance.md)). |
+| `internal/keybindings` | Commands, default keys per platform, the user's keybindings file, the bindings in effect and their conflicts; the key syntax shared with the clients. |
+| `internal/uisettings` | The user interfaces' settings (appearance, layout, terminal, colors, notifications); `tokens.go` is generated from the design tokens. |
+| `internal/registry` | What the core registers: the setting modules and the commands (used by the core and `scripts/registry`). |
+| `internal/userfile` | Atomic writes and change detection of the hand-editable files. |
 | `internal/gui` | Virtual displays on machines, their windows, frames and input between agents and browser windows. |
 | `internal/server` | HTTP/WS front: guards, session ownership and pane surfaces, files, proxy, bridge, audit. |
 | `internal/embedded` | Build artifacts compiled into the core (agents, bridge VSIX). |
@@ -38,7 +42,7 @@ browser (React, canvas)     ──WebSocket + HTTP──▶  core (Go, `herdr-id
 | `macos` | macOS application (Swift package): `TermKit`, the clients of `/api/v1/term` and of `/ws` as an events client, with the terminal, layout (workspaces, tabs, splits) and core-process models; `App`, the AppKit window drawing terminals with Ghostty's renderer. |
 | `desktop` | Electron main process and electron-builder config; macOS `.app`/DMG wrapping the embedded core. |
 | `extensions/herdr-ide-bridge` | VS Code extension installed into code-server. |
-| `design` | Design tokens (`tokens.json`): colors in light and dark, metrics, font sizes and terminal palettes; `scripts/tokens` generates `macos/Sources/App/Tokens.swift` and `web/src/tokens.css` from them. `testdata/layout`: the layout document's test vectors, run by the TypeScript and Swift clients ([22](features/22-terminal-protocol.md)). |
+| `design` | Design tokens (`tokens.json`): colors in light and dark, metrics, font sizes and terminal palettes; `scripts/tokens` generates `macos/Sources/App/Tokens.swift`, `web/src/tokens.css` and the terminal colors' setting defaults (`internal/uisettings/tokens.go`) from them. `generated/registry.json` (`scripts/registry`): setting defaults, commands, default bindings per platform and the translation keys each UI needs. `testdata/layout`: the layout document's test vectors, run by the TypeScript and Swift clients ([22](features/22-terminal-protocol.md)); `testdata/keys`: the key syntax's vectors, run by Go, TypeScript and Swift. |
 
 ## Desktop launcher
 
@@ -52,11 +56,12 @@ and waits up to 20 seconds before killing the owned core.
 
 The renderer reuses the browser UI with no Node APIs, sandboxing and context
 isolation. The main window's preload exposes only `desktopShell` for direct
-shortcuts (`cmd+t`/`cmd+w`/`cmd+,`/`cmd+n`/`cmd+j`): the shell intercepts them in
-`before-input-event`, reading their keys from the core settings
-`desktop-*-key`, leaves them to VS Code while one of its frames has focus
-(except showing or hiding the VS Code panel), and the page runs the action; the
-settings dialog records keys through the same bridge
+shortcuts (single-stroke keybindings with cmd, ctrl or alt, such as `cmd+t`):
+the shell intercepts them in `before-input-event`, reading them from
+`/api/keybindings`, leaves them to VS Code while one of its frames has focus
+(except bindings for everywhere, such as showing or hiding the VS Code
+panel), and the page runs the command; the settings dialog records keys
+through the same bridge
 ([04](features/04-layout-and-keyboard.md)), the page reports its theme
 setting, which the native title bar follows, and it asks the bridge where a
 file or folder dropped from Finder is on disk, to create a workspace there
@@ -154,7 +159,8 @@ Text frames are JSON with a `t` field; binary frames are pane surface updates
 `web/src/surface/protocol.ts`).
 
 `/ws?events=1` connects an events client (the macOS application): it gets
-the same messages except the pane session's (`session`, `surf*`, `clip`,
+the same messages, `settings` and `keybindings` included, except the pane
+session's (`session`, `surf*`, `clip`,
 `bell`, binary frames), never owns or takes over the session, and its
 `view`, `takeover`, `in`, `focus`, `host` and `api` are ignored. It plays
 no notification sounds (`agent {sound}`) before it reports `active`.
@@ -167,6 +173,7 @@ no notification sounds (`agent {sound}`) before it reports `active`.
 | `retry {m}`, `ping` | `machines {list}`, `machine {state}`, `agent {m, data}` (status change), `bridge.send {m, text, folders}` (the sending VS Code window's folders: the page picks the workspace whose panel shows it), `bridge.download {m, paths}` (files chosen in VS Code's explorer; the page with the focus downloads them) |
 | `download.watch {ids}` (downloads the page started with `dl=<id>`: before starting one and after reconnecting), `download.cancel {id}` | `download {id, state, sent, total, name, error}` to the page following the id: progress and how it ended (`unknown` for an id the core has not seen or no longer knows), for the downloads panel |
 | `theme {kind: dark\|light}` (VS Code follows it) | `gui {state: {m, phase, gpu, windows}}` (program windows per machine) |
+| – | `settings {values, problems}` and `keybindings {user, effective, conflicts, problems}` after every change, through the API or the files ([13](features/13-settings-and-appearance.md)) |
 | `active {idle}` (ms since the user last used the page) | `agent {…, sound}`: `sound` is true only for the most recently used page, which plays the notification sound |
 
 HTTP endpoints besides files (`GET /api/m/{id}/file`, `GET /api/m/{id}/list`,
@@ -175,10 +182,14 @@ anything else as a zip from `fs.archive`; `download.cancel` over `/ws`
 breaks a followed download off), uploads and the code-server proxy:
 `POST /api/m/{id}/find` (find in a pane through `pane.find`, also for
 read-only pages, see [20](features/20-find-in-panes.md)),
-`GET /api/config`, `GET /api/keymap`, `GET /api/machines`, `GET /api/gui`
-(the program windows of every machine, as the `gui` messages of `/ws`), and
-`GET`/`PUT /api/settings` (core settings with their definitions, see
-[13](features/13-settings-and-appearance.md)), and `PUT /api/m/{id}/enabled`
+`GET /api/config`, `GET /api/keymap` (herdr's custom commands from its
+`config.toml`), `GET /api/machines`, `GET /api/gui`
+(the program windows of every machine, as the `gui` messages of `/ws`),
+`GET`/`PUT`/`DELETE /api/settings` (definitions, values, problems; one
+value set or removed) and `GET`/`PUT /api/keybindings` (commands, defaults,
+the user's rules, the bindings in effect and conflicts per platform; the
+rules replaced), see [13](features/13-settings-and-appearance.md), and
+`PUT /api/m/{id}/enabled`
 (`{"enabled": bool}`: enables or disables a machine, see
 [02](features/02-multi-machine-transport.md)). The WebSocket
 `GET /api/machines/add?target=&label=&session=` runs the local herdr's
@@ -238,7 +249,7 @@ slow link does not queue a complete surface per size. See
 
 ## code-server lifecycle
 
-`codeserver.Manager.Ensure` (core): depending on the `code-server-install`
+`codeserver.Manager.Ensure` (core): depending on the `codeServer.install`
 setting, use an installed code-server, have the machine download the release
 (verified against the core's digest), or resolve it for the machine's
 platform (seed → cache → download, SHA-256 verified) → upload and unpack;

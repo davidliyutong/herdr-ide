@@ -42,7 +42,7 @@ import { mathAt } from '../terminal/math';
 import { renderMath } from '../terminal/mathRender';
 import { openMenu } from '../contextMenu';
 import { surfaceMenu } from '../menus';
-import { themes } from '../terminal/options';
+import { xtermTheme } from '../terminal/options';
 import { termFontFamily } from '../terminal/fonts';
 import type { Appearance } from '../appearance';
 
@@ -202,7 +202,7 @@ export class SurfaceController {
 
   setAppearance(a: Appearance) {
     this.appearance = a;
-    this.palette = makePalette(themes[a.theme]);
+    this.palette = makePalette(xtermTheme(a.colors));
     this.measureCell();
     grid.invalidate();
     this.measureSize();
@@ -217,7 +217,7 @@ export class SurfaceController {
       this.watchDpr();
     }
     const a = this.appearance;
-    const family = termFontFamily(a.fontWeight);
+    const family = termFontFamily(a.fontWeight, a.fontFamily);
     const fontPx = Math.round(a.fontSize * dpr);
     const ctx = this.ctx;
     ctx.font = `${a.fontWeight} ${fontPx}px ${family}`;
@@ -225,8 +225,9 @@ export class SurfaceController {
     const ascent = m.fontBoundingBoxAscent || fontPx * 0.95;
     const descent = m.fontBoundingBoxDescent || fontPx * 0.3;
     const cw = Math.max(1, Math.round(m.width || fontPx * 0.6));
-    // 5% more than the font's line height, as the dialogs' terminals do.
-    const ch = Math.max(1, Math.round((ascent + descent) * 1.05));
+    // The line height setting (1.05 by default: 5% more than the font's
+    // own, as the dialogs' terminals do).
+    const ch = Math.max(1, Math.round((ascent + descent) * a.lineHeight));
     const baseline = Math.round((ch - (ascent + descent)) / 2 + ascent);
     this.metrics = { cw, ch, fontPx, family, weight: a.fontWeight, baseline };
   }

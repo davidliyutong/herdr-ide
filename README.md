@@ -21,8 +21,8 @@ browser tab, with VS Code (code-server) one keystroke away.
   can take it over. Drag a pane by its header to swap or move it, click its title to
   rename it; drag tabs and workspaces to reorder them; right-click a pane
   header, tab or workspace for its commands, or a pane's text to copy,
-  paste or open a path. Keyboard shortcuts follow your
-  herdr configuration (prefix `ctrl+b`).
+  paste or open a path. Keyboard shortcuts keep herdr's defaults
+  (prefix `ctrl+b`) and can be changed in the settings.
 - **herdr included.** Release archives carry herdr 0.9.5 for Linux/macOS on
   amd64/arm64, used when this host has no herdr installed. It behaves like an
   installed herdr: same configuration, sessions and machines. Right-click a
@@ -83,10 +83,13 @@ browser tab, with VS Code (code-server) one keystroke away.
 - **Several browsers at once.** The active browser controls a pane; others
   watch at the same size and take over by typing.
 - **Settings.** Language (English, Chinese), light/dark theme followed by
-  VS Code, interface and terminal font sizes, terminal font weight, panel
-  position and the code-server installation method, in one dialog
-  (`ctrl+b ,`). Terminals use the included JetBrains Mono font in every
-  browser.
+  VS Code, interface size, the terminals' font, line height, cursor,
+  scrollback, bell and colors (both themes' 16 colors), panel position, the
+  code-server installation method and every keyboard shortcut, in one
+  dialog (`ctrl+b ,`) with search. Settings and keys are kept on the core's
+  host in two JSON files you can also edit by hand, and are the same in
+  every browser, the desktop app and the macOS application. Terminals use
+  the included JetBrains Mono font unless you choose another.
 
 ## Screenshots
 
@@ -155,10 +158,10 @@ Drag folders from Finder onto the sidebar or the app's Dock icon to create a
 workspace for each on the local machine. Files and folders dropped on a pane
 of the local machine are pasted as their own paths, without uploading.
 
-In the app, `cmd+t` opens a tab, `cmd+w` closes it (asking first when a
-program runs in it), `cmd+n` creates a workspace, `cmd+,` opens the
+In the app, `cmd+t` opens a tab, `cmd+w` closes the pane, `cmd+d` /
+`cmd+shift+d` split it, `cmd+n` creates a workspace, `cmd+,` opens the
 settings and `cmd+j` shows or hides the VS Code panel; while VS Code has focus, all but `cmd+j` stay VS Code's.
-Change or remove them under **Settings → Shortcuts**. Prefix bindings keep
+Change or remove them under **Settings → Keyboard shortcuts**. Prefix bindings keep
 working, and browsers keep their own `cmd+t` / `cmd+w`.
 
 The app starts its own core at `http://127.0.0.1:7781` with instance

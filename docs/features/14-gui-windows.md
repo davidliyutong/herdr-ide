@@ -106,7 +106,7 @@ input methods.
 - On machines with a working VirtualGL EGL back end (`vglrun` found, its
   `eglinfo egl0` succeeds) panes also get `VGL_DISPLAY=egl0`, so
   `vglrun program` renders on the GPU without a 3D X server. With
-  `gui-gpu=all` panes get VirtualGL's `LD_PRELOAD` and `VGL_ISACTIVE=1`, as
+  `gui.gpu` set to `all` panes get VirtualGL's `LD_PRELOAD` and `VGL_ISACTIVE=1`, as
   if the shell ran under `vglrun`.
 
 **Window manager and capture** (agent `internal/agent/guiwm.go`)
@@ -176,7 +176,7 @@ input methods.
   disconnects it when it does not support that. The pointer image follows
   XFIXES cursor changes.
 
-**Video** (setting `gui-video`, on by default; agent
+**Video** (setting `gui.video`, on by default; agent
 `internal/agent/guiwm_video.go`, `guivideo.go`, encoder `scripts/encoder/`)
 
 - A window that keeps changing (a simulator, a rotating plot) costs a whole
@@ -292,9 +292,10 @@ input methods.
   two seconds later unless a viewer is showing it again (a reload) or another
   browser window still shows it. Losing the connection closes nothing.
 
-**Settings**: `gui` (`on`, `off`), `gui-gpu` (`vglrun`, `all`) and
-`gui-video` (`on`, `off`), in the settings dialog's "Program windows"
-section and as flags ([13](13-settings-and-appearance.md)). All can be set
+**Settings**: `gui.enabled` (`true`, `false`), `gui.gpu` (`vglrun`, `all`)
+and `gui.video` (`true`, `false`), in the settings dialog's "Program
+windows" section and as the flags `--gui`, `--gui-gpu` and `--gui-video`
+([13](13-settings-and-appearance.md)). All can be set
 per remote machine ("Per machine" in the same section, which also shows each
 machine's display state); a machine without its own value follows the
 global one, and a flag fixes the value for every machine. Turning the GUI

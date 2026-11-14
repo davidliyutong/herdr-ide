@@ -13,6 +13,7 @@ import { createRoot, type Root } from 'react-dom/client';
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 
 import { usePrefs } from '../prefs';
+import { fakeSettingsApi } from './fakeSettings';
 import { appearanceOf, useSystemDark, useThemeKind } from '../appearance';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -27,6 +28,7 @@ describe('useThemeKind', () => {
 
   beforeEach(async () => {
     useSystemDark.setState({ dark: true });
+    fakeSettingsApi();
     usePrefs.getState().setPref('theme', 'dark');
     host = document.createElement('div');
     document.body.append(host);

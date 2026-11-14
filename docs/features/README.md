@@ -11,7 +11,7 @@ shortcuts, paths) lives in [reference.md](../reference.md).
 | 01 | [herdr integration](01-herdr-integration.md) | Talk to herdr through its public socket API and its endpoint protocol instead of embedding its TUI. |
 | 02 | [Multi-machine transport](02-multi-machine-transport.md) | One ssh session per machine running a static agent; yamux multiplexing; platform detection and upload. |
 | 03 | [Pane rendering and input](03-pane-rendering-and-input.md) | herdr's cell grid on a canvas; semantic input herdr encodes per pane; selections, links, clipboard. |
-| 04 | [Layout and keyboard](04-layout-and-keyboard.md) | herdr's split tree rendered natively; herdr-compatible prefix keymap; command palette. |
+| 04 | [Layout and keyboard](04-layout-and-keyboard.md) | herdr's split tree rendered natively; herdr's prefix keys as default bindings, direct shortcuts of the applications; command palette. |
 | 05 | [VS Code panel](05-vscode-panel.md) | code-server per machine behind the core's proxy; bridge extension; Git Graph and diffs. |
 | 06 | [Quick Look and files](06-quick-look-and-files.md) | Path detection in terminals, media preview with range streaming, uploads for agents, downloads with folders as zips. |
 | 07 | [Agent-native workflow](07-agent-native-workflow.md) | Attention inbox, notifications, starting agents, sending code to agents. |
@@ -20,7 +20,7 @@ shortcuts, paths) lives in [reference.md](../reference.md).
 | 10 | [Remote resource lifecycle](10-remote-resource-lifecycle.md) | Ownership and reclamation of every process and file created on machines. |
 | 11 | [Naming and renames](11-naming-and-renames.md) | Centralized product names, one-step renames and migration of persisted state. |
 | 12 | [Internationalization](12-internationalization.md) | English and Chinese UI, translated extension, codes instead of server prose. |
-| 13 | [Settings and appearance](13-settings-and-appearance.md) | Settings generated from definitions in the browser and the core; themes, terminal font and palette, font sizes, panel position. |
+| 13 | [Settings, keybindings and appearance](13-settings-and-appearance.md) | One settings and one keybinding system in the core, VS Code style files, settings UIs generated from definitions in every client; themes, terminal font, colors and cursor. |
 | 14 | [GUI windows](14-gui-windows.md) | Windows of programs on remote machines in browser windows: user-space Xvfb, per-window capture, VirtualGL. |
 | 15 | [Bundled herdr](15-bundled-herdr.md) | Release archives carry the native herdr, verified at build time and used when no herdr is installed. |
 | 16 | [Desktop packaging](16-desktop-packaging.md) | macOS Electron shell, owned core lifecycle, `.app` and DMG builds. |

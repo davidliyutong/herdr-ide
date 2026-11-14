@@ -1455,16 +1455,199 @@ button.primary:hover {
 
 /* ---------- settings ---------- */
 .modal.settings {
-  width: min(680px, 94vw);
-  max-height: 80vh;
+  width: min(940px, 96vw);
+  height: min(720px, 84vh);
   display: flex;
   flex-direction: column;
+}
+.settings-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.settings-nav {
+  flex: none;
+  width: 11.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 8px;
+  border-right: 1px solid var(--line);
+  overflow: auto;
+}
+.settings-nav button {
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--fg-dim);
+  padding: 5px 10px;
+  border-radius: 5px;
+}
+.settings-nav button:hover {
+  background: var(--bg-3);
+  color: var(--fg);
+}
+.settings-nav button.on {
+  background: var(--bg-3);
+  color: var(--fg);
+  font-weight: 500;
+}
+.settings-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 6px;
+  padding: 2px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg-mute);
+}
+.settings-search input {
+  width: 14rem;
+  font: inherit;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--fg);
+}
+.settings-name {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.settings-key {
+  font-family: var(--mono, monospace);
+  font-size: var(--fs-sm);
+  color: var(--fg-mute);
+}
+.settings-modified {
+  align-self: center;
+  width: 6px;
+  height: 6px;
+  margin-left: -12px;
+  border-radius: 50%;
+  background: var(--working);
+}
+.settings-problems {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-2);
+  border-left: 3px solid var(--blocked);
+  border-radius: 6px;
+}
+.settings-problems > svg {
+  flex: none;
+  color: var(--blocked);
+}
+.settings-file {
+  margin: 16px 0 0;
+  overflow-wrap: anywhere;
+}
+.settings-row.wide {
+  flex-wrap: wrap;
+}
+.settings-row.wide .settings-control {
+  max-width: none;
+}
+.settings-number {
+  width: 6.5rem;
+}
+.settings-color {
+  display: inline-flex;
+  align-items: center;
+}
+.settings-color input[type='color'] {
+  width: 2rem;
+  height: 1.5rem;
+  padding: 0 2px;
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  background: var(--bg);
+  cursor: pointer;
+}
+.settings-palette {
+  display: grid;
+  grid-template-columns: repeat(8, auto);
+  gap: 4px;
+}
+.settings-control .icon {
+  margin-left: 4px;
+}
+.keys-section h4 {
+  margin: 16px 0 2px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--fg-mute);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.keys-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--line);
+}
+.keys-label {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.keys-keys {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: 60%;
+}
+.key-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.key-chip kbd,
+.key-recorder {
+  font-family: var(--mono, monospace);
+  font-size: var(--fs-sm);
+  padding: 1px 6px;
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  background: var(--bg);
+  white-space: nowrap;
+}
+.key-chip .icon {
+  padding: 1px;
+}
+.key-chip.conflict kbd {
+  border-color: var(--blocked);
+}
+.key-chip.conflict svg {
+  color: var(--blocked);
+}
+.key-recorder {
+  min-width: 10rem;
+  outline: 2px solid var(--focus-ring);
+  cursor: text;
+}
+.key-recorder.invalid {
+  outline-color: var(--error);
 }
 .modal-title {
   font-weight: 600;
   margin-right: 8px;
 }
 .settings-body {
+  flex: 1;
+  min-width: 0;
   overflow: auto;
   padding: 4px 18px 18px;
 }
@@ -1603,6 +1786,18 @@ button.primary:hover {
   }
   .settings-control {
     max-width: none;
+  }
+  .settings-main {
+    flex-direction: column;
+  }
+  .settings-nav {
+    width: auto;
+    flex-direction: row;
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+  }
+  .settings-search input {
+    width: 8rem;
   }
   .crumb {
     display: none;

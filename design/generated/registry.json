@@ -1,0 +1,1347 @@
+{
+  "commands": [
+    {
+      "id": "app.commandPalette",
+      "section": "app",
+      "when": "terminal"
+    },
+    {
+      "id": "app.keyboardShortcuts",
+      "section": "app",
+      "when": "terminal"
+    },
+    {
+      "id": "app.settings",
+      "section": "app",
+      "when": "terminal"
+    },
+    {
+      "id": "app.agentAttention",
+      "section": "app",
+      "when": "terminal"
+    },
+    {
+      "id": "workspace.switch",
+      "section": "workspace",
+      "when": "terminal"
+    },
+    {
+      "id": "workspace.new",
+      "section": "workspace",
+      "when": "terminal"
+    },
+    {
+      "id": "workspace.rename",
+      "section": "workspace",
+      "when": "terminal"
+    },
+    {
+      "id": "workspace.close",
+      "section": "workspace",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.new",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.rename",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.next",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.previous",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.select1",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.select2",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.select3",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.select4",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.select5",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.select6",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.select7",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.select8",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.select9",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.close",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.splitRight",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.splitDown",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.close",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.zoom",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.focusLeft",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.focusDown",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.focusUp",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.focusRight",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.focusNext",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.focusPrevious",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "view.toggleSidebar",
+      "section": "view",
+      "when": "terminal"
+    },
+    {
+      "id": "view.toggleCode",
+      "section": "view",
+      "when": "always"
+    },
+    {
+      "id": "find.open",
+      "section": "find",
+      "when": "terminal"
+    },
+    {
+      "id": "find.next",
+      "section": "find",
+      "when": "terminal"
+    },
+    {
+      "id": "find.previous",
+      "section": "find",
+      "when": "terminal"
+    },
+    {
+      "id": "code.open",
+      "section": "code",
+      "when": "terminal"
+    },
+    {
+      "id": "code.diff",
+      "section": "code",
+      "when": "terminal"
+    },
+    {
+      "id": "code.gitGraph",
+      "section": "code",
+      "when": "terminal"
+    }
+  ],
+  "i18n": {
+    "macos": [
+      "command.app.agentAttention",
+      "command.app.commandPalette",
+      "command.app.keyboardShortcuts",
+      "command.app.settings",
+      "command.code.diff",
+      "command.code.gitGraph",
+      "command.code.open",
+      "command.find.next",
+      "command.find.open",
+      "command.find.previous",
+      "command.pane.close",
+      "command.pane.focusDown",
+      "command.pane.focusLeft",
+      "command.pane.focusNext",
+      "command.pane.focusPrevious",
+      "command.pane.focusRight",
+      "command.pane.focusUp",
+      "command.pane.splitDown",
+      "command.pane.splitRight",
+      "command.pane.zoom",
+      "command.section.app",
+      "command.section.code",
+      "command.section.find",
+      "command.section.pane",
+      "command.section.tab",
+      "command.section.view",
+      "command.section.workspace",
+      "command.tab.close",
+      "command.tab.new",
+      "command.tab.next",
+      "command.tab.previous",
+      "command.tab.rename",
+      "command.tab.select1",
+      "command.tab.select2",
+      "command.tab.select3",
+      "command.tab.select4",
+      "command.tab.select5",
+      "command.tab.select6",
+      "command.tab.select7",
+      "command.tab.select8",
+      "command.tab.select9",
+      "command.view.toggleCode",
+      "command.view.toggleSidebar",
+      "command.workspace.close",
+      "command.workspace.new",
+      "command.workspace.rename",
+      "command.workspace.switch",
+      "settings.appearance.theme",
+      "settings.appearance.theme.dark",
+      "settings.appearance.theme.light",
+      "settings.appearance.theme.system",
+      "settings.appearance.uiFontSize",
+      "settings.codeServer.install",
+      "settings.codeServer.install.download",
+      "settings.codeServer.install.existing",
+      "settings.codeServer.install.push",
+      "settings.codeServer.path",
+      "settings.gui.enabled",
+      "settings.gui.gpu",
+      "settings.gui.gpu.all",
+      "settings.gui.gpu.vglrun",
+      "settings.gui.video",
+      "settings.section.appearance",
+      "settings.section.codeServer",
+      "settings.section.colors",
+      "settings.section.gui",
+      "settings.section.terminal",
+      "settings.terminal.bell",
+      "settings.terminal.bell.none",
+      "settings.terminal.bell.sound",
+      "settings.terminal.bell.visual",
+      "settings.terminal.boldIsBright",
+      "settings.terminal.colors.dark.background",
+      "settings.terminal.colors.dark.cursor",
+      "settings.terminal.colors.dark.foreground",
+      "settings.terminal.colors.dark.palette",
+      "settings.terminal.colors.dark.selection",
+      "settings.terminal.colors.light.background",
+      "settings.terminal.colors.light.cursor",
+      "settings.terminal.colors.light.foreground",
+      "settings.terminal.colors.light.palette",
+      "settings.terminal.colors.light.selection",
+      "settings.terminal.copyOnSelect",
+      "settings.terminal.cursorBlink",
+      "settings.terminal.cursorStyle",
+      "settings.terminal.cursorStyle.bar",
+      "settings.terminal.cursorStyle.block",
+      "settings.terminal.cursorStyle.underline",
+      "settings.terminal.fontFamily",
+      "settings.terminal.fontSize",
+      "settings.terminal.fontWeight",
+      "settings.terminal.fontWeight.medium",
+      "settings.terminal.fontWeight.regular",
+      "settings.terminal.lineHeight",
+      "settings.terminal.optionIsMeta",
+      "settings.terminal.programClipboard",
+      "settings.terminal.programClipboard.ask",
+      "settings.terminal.programClipboard.auto",
+      "settings.terminal.programClipboard.off",
+      "settings.terminal.scrollback"
+    ],
+    "web": [
+      "command.app.agentAttention",
+      "command.app.commandPalette",
+      "command.app.keyboardShortcuts",
+      "command.app.settings",
+      "command.code.diff",
+      "command.code.gitGraph",
+      "command.code.open",
+      "command.find.next",
+      "command.find.open",
+      "command.find.previous",
+      "command.pane.close",
+      "command.pane.focusDown",
+      "command.pane.focusLeft",
+      "command.pane.focusNext",
+      "command.pane.focusPrevious",
+      "command.pane.focusRight",
+      "command.pane.focusUp",
+      "command.pane.splitDown",
+      "command.pane.splitRight",
+      "command.pane.zoom",
+      "command.section.app",
+      "command.section.code",
+      "command.section.find",
+      "command.section.pane",
+      "command.section.tab",
+      "command.section.view",
+      "command.section.workspace",
+      "command.tab.close",
+      "command.tab.new",
+      "command.tab.next",
+      "command.tab.previous",
+      "command.tab.rename",
+      "command.tab.select1",
+      "command.tab.select2",
+      "command.tab.select3",
+      "command.tab.select4",
+      "command.tab.select5",
+      "command.tab.select6",
+      "command.tab.select7",
+      "command.tab.select8",
+      "command.tab.select9",
+      "command.view.toggleCode",
+      "command.view.toggleSidebar",
+      "command.workspace.close",
+      "command.workspace.new",
+      "command.workspace.rename",
+      "command.workspace.switch",
+      "settings.appearance.language",
+      "settings.appearance.language.auto",
+      "settings.appearance.language.en",
+      "settings.appearance.language.zh-CN",
+      "settings.appearance.theme",
+      "settings.appearance.theme.dark",
+      "settings.appearance.theme.light",
+      "settings.appearance.theme.system",
+      "settings.appearance.uiFontSize",
+      "settings.codeServer.install",
+      "settings.codeServer.install.download",
+      "settings.codeServer.install.existing",
+      "settings.codeServer.install.push",
+      "settings.codeServer.path",
+      "settings.gui.enabled",
+      "settings.gui.gpu",
+      "settings.gui.gpu.all",
+      "settings.gui.gpu.vglrun",
+      "settings.gui.video",
+      "settings.layout.panelPosition",
+      "settings.layout.panelPosition.bottom",
+      "settings.layout.panelPosition.right",
+      "settings.notifications.mutedAgents",
+      "settings.notifications.sound",
+      "settings.section.appearance",
+      "settings.section.codeServer",
+      "settings.section.colors",
+      "settings.section.gui",
+      "settings.section.layout",
+      "settings.section.notifications",
+      "settings.section.terminal",
+      "settings.terminal.bell",
+      "settings.terminal.bell.none",
+      "settings.terminal.bell.sound",
+      "settings.terminal.bell.visual",
+      "settings.terminal.boldIsBright",
+      "settings.terminal.colors.dark.background",
+      "settings.terminal.colors.dark.cursor",
+      "settings.terminal.colors.dark.foreground",
+      "settings.terminal.colors.dark.palette",
+      "settings.terminal.colors.dark.selection",
+      "settings.terminal.colors.light.background",
+      "settings.terminal.colors.light.cursor",
+      "settings.terminal.colors.light.foreground",
+      "settings.terminal.colors.light.palette",
+      "settings.terminal.colors.light.selection",
+      "settings.terminal.copyOnSelect",
+      "settings.terminal.cursorBlink",
+      "settings.terminal.cursorStyle",
+      "settings.terminal.cursorStyle.bar",
+      "settings.terminal.cursorStyle.block",
+      "settings.terminal.cursorStyle.underline",
+      "settings.terminal.fontFamily",
+      "settings.terminal.fontSize",
+      "settings.terminal.fontWeight",
+      "settings.terminal.fontWeight.medium",
+      "settings.terminal.fontWeight.regular",
+      "settings.terminal.lineHeight",
+      "settings.terminal.mathHover",
+      "settings.terminal.optionIsMeta",
+      "settings.terminal.programClipboard",
+      "settings.terminal.programClipboard.ask",
+      "settings.terminal.programClipboard.auto",
+      "settings.terminal.programClipboard.off",
+      "settings.terminal.scrollback"
+    ]
+  },
+  "keybindings": {
+    "mac": [
+      {
+        "key": "ctrl+b space",
+        "command": "app.commandPalette",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b g",
+        "command": "app.commandPalette",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+slash",
+        "command": "app.keyboardShortcuts",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b comma",
+        "command": "app.settings",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+comma",
+        "command": "app.settings",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b o",
+        "command": "app.agentAttention",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b w",
+        "command": "workspace.switch",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+n",
+        "command": "workspace.new",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+n",
+        "command": "workspace.new",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+w",
+        "command": "workspace.rename",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+d",
+        "command": "workspace.close",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b c",
+        "command": "tab.new",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+t",
+        "command": "tab.new",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+t",
+        "command": "tab.rename",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b n",
+        "command": "tab.next",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+shift+bracketright",
+        "command": "tab.next",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b p",
+        "command": "tab.previous",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+shift+bracketleft",
+        "command": "tab.previous",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b 1",
+        "command": "tab.select1",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b 2",
+        "command": "tab.select2",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b 3",
+        "command": "tab.select3",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b 4",
+        "command": "tab.select4",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b 5",
+        "command": "tab.select5",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b 6",
+        "command": "tab.select6",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b 7",
+        "command": "tab.select7",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b 8",
+        "command": "tab.select8",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b 9",
+        "command": "tab.select9",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+x",
+        "command": "tab.close",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b v",
+        "command": "pane.splitRight",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+d",
+        "command": "pane.splitRight",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b minus",
+        "command": "pane.splitDown",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+shift+d",
+        "command": "pane.splitDown",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b x",
+        "command": "pane.close",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+w",
+        "command": "pane.close",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b z",
+        "command": "pane.zoom",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b h",
+        "command": "pane.focusLeft",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b j",
+        "command": "pane.focusDown",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b k",
+        "command": "pane.focusUp",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b l",
+        "command": "pane.focusRight",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b tab",
+        "command": "pane.focusNext",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+tab",
+        "command": "pane.focusPrevious",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b b",
+        "command": "view.toggleSidebar",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+b",
+        "command": "view.toggleSidebar",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+j",
+        "command": "view.toggleCode",
+        "when": "always"
+      },
+      {
+        "key": "cmd+f",
+        "command": "find.open",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+g",
+        "command": "find.next",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+shift+g",
+        "command": "find.previous",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b e",
+        "command": "code.open",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b d",
+        "command": "code.diff",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+g",
+        "command": "code.gitGraph",
+        "when": "terminal"
+      }
+    ],
+    "mac-browser": [
+      {
+        "key": "ctrl+b space",
+        "command": "app.commandPalette",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b g",
+        "command": "app.commandPalette",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+slash",
+        "command": "app.keyboardShortcuts",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b comma",
+        "command": "app.settings",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b o",
+        "command": "app.agentAttention",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b w",
+        "command": "workspace.switch",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+n",
+        "command": "workspace.new",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+w",
+        "command": "workspace.rename",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+d",
+        "command": "workspace.close",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b c",
+        "command": "tab.new",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+t",
+        "command": "tab.rename",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b n",
+        "command": "tab.next",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b p",
+        "command": "tab.previous",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b 1",
+        "command": "tab.select1",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b 2",
+        "command": "tab.select2",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b 3",
+        "command": "tab.select3",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b 4",
+        "command": "tab.select4",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b 5",
+        "command": "tab.select5",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b 6",
+        "command": "tab.select6",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b 7",
+        "command": "tab.select7",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b 8",
+        "command": "tab.select8",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b 9",
+        "command": "tab.select9",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+x",
+        "command": "tab.close",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b v",
+        "command": "pane.splitRight",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b minus",
+        "command": "pane.splitDown",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b x",
+        "command": "pane.close",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b z",
+        "command": "pane.zoom",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b h",
+        "command": "pane.focusLeft",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b j",
+        "command": "pane.focusDown",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b k",
+        "command": "pane.focusUp",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b l",
+        "command": "pane.focusRight",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b tab",
+        "command": "pane.focusNext",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+tab",
+        "command": "pane.focusPrevious",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b b",
+        "command": "view.toggleSidebar",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+f",
+        "command": "find.open",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b e",
+        "command": "code.open",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b d",
+        "command": "code.diff",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+g",
+        "command": "code.gitGraph",
+        "when": "terminal"
+      }
+    ],
+    "pc": [
+      {
+        "key": "ctrl+b space",
+        "command": "app.commandPalette",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b g",
+        "command": "app.commandPalette",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+slash",
+        "command": "app.keyboardShortcuts",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b comma",
+        "command": "app.settings",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+comma",
+        "command": "app.settings",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b o",
+        "command": "app.agentAttention",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b w",
+        "command": "workspace.switch",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+n",
+        "command": "workspace.new",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+n",
+        "command": "workspace.new",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+w",
+        "command": "workspace.rename",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+d",
+        "command": "workspace.close",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b c",
+        "command": "tab.new",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+t",
+        "command": "tab.new",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+t",
+        "command": "tab.rename",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b n",
+        "command": "tab.next",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b p",
+        "command": "tab.previous",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b 1",
+        "command": "tab.select1",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b 2",
+        "command": "tab.select2",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b 3",
+        "command": "tab.select3",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b 4",
+        "command": "tab.select4",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b 5",
+        "command": "tab.select5",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b 6",
+        "command": "tab.select6",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b 7",
+        "command": "tab.select7",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b 8",
+        "command": "tab.select8",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b 9",
+        "command": "tab.select9",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+x",
+        "command": "tab.close",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+w",
+        "command": "tab.close",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b v",
+        "command": "pane.splitRight",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b minus",
+        "command": "pane.splitDown",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b x",
+        "command": "pane.close",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b z",
+        "command": "pane.zoom",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b h",
+        "command": "pane.focusLeft",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b j",
+        "command": "pane.focusDown",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b k",
+        "command": "pane.focusUp",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b l",
+        "command": "pane.focusRight",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b tab",
+        "command": "pane.focusNext",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+tab",
+        "command": "pane.focusPrevious",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b b",
+        "command": "view.toggleSidebar",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+j",
+        "command": "view.toggleCode",
+        "when": "always"
+      },
+      {
+        "key": "ctrl+shift+f",
+        "command": "find.open",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b e",
+        "command": "code.open",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b d",
+        "command": "code.diff",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+g",
+        "command": "code.gitGraph",
+        "when": "terminal"
+      }
+    ],
+    "pc-browser": [
+      {
+        "key": "ctrl+b space",
+        "command": "app.commandPalette",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b g",
+        "command": "app.commandPalette",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+slash",
+        "command": "app.keyboardShortcuts",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b comma",
+        "command": "app.settings",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b o",
+        "command": "app.agentAttention",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b w",
+        "command": "workspace.switch",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+n",
+        "command": "workspace.new",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+w",
+        "command": "workspace.rename",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+d",
+        "command": "workspace.close",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b c",
+        "command": "tab.new",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+t",
+        "command": "tab.rename",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b n",
+        "command": "tab.next",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b p",
+        "command": "tab.previous",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b 1",
+        "command": "tab.select1",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b 2",
+        "command": "tab.select2",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b 3",
+        "command": "tab.select3",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b 4",
+        "command": "tab.select4",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b 5",
+        "command": "tab.select5",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b 6",
+        "command": "tab.select6",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b 7",
+        "command": "tab.select7",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b 8",
+        "command": "tab.select8",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b 9",
+        "command": "tab.select9",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+x",
+        "command": "tab.close",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b v",
+        "command": "pane.splitRight",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b minus",
+        "command": "pane.splitDown",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b x",
+        "command": "pane.close",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b z",
+        "command": "pane.zoom",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b h",
+        "command": "pane.focusLeft",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b j",
+        "command": "pane.focusDown",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b k",
+        "command": "pane.focusUp",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b l",
+        "command": "pane.focusRight",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b tab",
+        "command": "pane.focusNext",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+tab",
+        "command": "pane.focusPrevious",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b b",
+        "command": "view.toggleSidebar",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+f",
+        "command": "find.open",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b e",
+        "command": "code.open",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b d",
+        "command": "code.diff",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b shift+g",
+        "command": "code.gitGraph",
+        "when": "terminal"
+      }
+    ]
+  },
+  "settings": {
+    "appearance.language": "auto",
+    "appearance.theme": "system",
+    "appearance.uiFontSize": 13,
+    "codeServer.install": "push",
+    "codeServer.path": "",
+    "gui.enabled": true,
+    "gui.gpu": "vglrun",
+    "gui.video": true,
+    "layout.panelPosition": "right",
+    "notifications.mutedAgents": "droid",
+    "notifications.sound": true,
+    "terminal.bell": "visual",
+    "terminal.boldIsBright": false,
+    "terminal.colors.dark.background": "#0a0a0a",
+    "terminal.colors.dark.cursor": "#f0f0f0",
+    "terminal.colors.dark.foreground": "#f0f0f0",
+    "terminal.colors.dark.palette": [
+      "#484f58",
+      "#ff7b72",
+      "#3fb950",
+      "#d29922",
+      "#58a6ff",
+      "#bc8cff",
+      "#39c5cf",
+      "#b1bac4",
+      "#6e7681",
+      "#ffa198",
+      "#56d364",
+      "#e3b341",
+      "#79c0ff",
+      "#d2a8ff",
+      "#56d4dd",
+      "#ffffff"
+    ],
+    "terminal.colors.dark.selection": "#3b4a6b",
+    "terminal.colors.light.background": "#ffffff",
+    "terminal.colors.light.cursor": "#0a0a0a",
+    "terminal.colors.light.foreground": "#0a0a0a",
+    "terminal.colors.light.palette": [
+      "#24292f",
+      "#cf222e",
+      "#116329",
+      "#7d4e00",
+      "#0969da",
+      "#8250df",
+      "#1b7c83",
+      "#6e7781",
+      "#57606a",
+      "#a40e26",
+      "#1a7f37",
+      "#9a6700",
+      "#218bff",
+      "#a475f9",
+      "#3192aa",
+      "#8c959f"
+    ],
+    "terminal.colors.light.selection": "#b6d4fe",
+    "terminal.copyOnSelect": false,
+    "terminal.cursorBlink": true,
+    "terminal.cursorStyle": "block",
+    "terminal.fontFamily": "",
+    "terminal.fontSize": 13,
+    "terminal.fontWeight": "regular",
+    "terminal.lineHeight": 1.05,
+    "terminal.mathHover": true,
+    "terminal.optionIsMeta": false,
+    "terminal.programClipboard": "auto",
+    "terminal.scrollback": 10000
+  }
+}

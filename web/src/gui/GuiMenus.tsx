@@ -104,7 +104,7 @@ export function GuiErrorNote({ m, label, error }: { m: string; label: string; er
                 useStore.getState().openSettings(true);
               }}
             >
-              {t('action.open_settings')}
+              {t('command.app.settings')}
             </button>
             <button
               onClick={() => {

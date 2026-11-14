@@ -14,6 +14,8 @@ import { hasMessage, t } from '../i18n';
 import { conn } from '../lib/conn';
 import { useStore } from '../state/store';
 import { isMac } from './input';
+import { useKeys, type Binding } from '../keybindings';
+import { keyLabel, strokeOf } from '../keys';
 import type { Ranges } from './paint';
 import type { ScrollInfo } from './protocol';
 import { useSurface } from './session';
@@ -104,15 +106,19 @@ const empty = {
 
 export const useFind = create<FindState>(() => ({ open: false, query: '', options: loadOptions(), focusSeq: 0, ...empty }));
 
-/** Whether a keydown opens find: Cmd+F on macOS, Ctrl+Shift+F elsewhere
- * (Ctrl+F belongs to the programs in panes). */
-export function isFindKey(ev: KeyboardEvent, mac = isMac): boolean {
-  if (ev.code !== 'KeyF' || ev.altKey) return false;
-  return mac ? ev.metaKey && !ev.ctrlKey && !ev.shiftKey : ev.ctrlKey && ev.shiftKey && !ev.metaKey;
+/** Whether a keydown opens find: a key of the find.open command (by default
+ * Cmd+F on macOS, Ctrl+Shift+F elsewhere: Ctrl+F belongs to the programs in
+ * panes). */
+export function isFindKey(ev: KeyboardEvent, bindings: readonly Binding[] = useKeys.getState().effective): boolean {
+  const stroke = strokeOf(ev);
+  return !!stroke && bindings.some((b) => b.command === 'find.open' && b.key === stroke);
 }
 
 /** The find key's label, for menus. */
-export const findKeyLabel = (mac = isMac) => (mac ? 'cmd+f' : 'ctrl+shift+f');
+export function findKeyLabel(bindings: readonly Binding[] = useKeys.getState().effective): string {
+  const key = bindings.find((b) => b.command === 'find.open' && !b.key.includes(' '))?.key;
+  return key ? keyLabel(key) : '';
+}
 
 const optionCodes: Record<string, FindOption> = { KeyC: 'matchCase', KeyW: 'wholeWord', KeyR: 'regex' };
 

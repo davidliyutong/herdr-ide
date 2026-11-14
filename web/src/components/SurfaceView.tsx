@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../state/store';
 import { usePrefs } from '../prefs';
+import { playSound } from '../sound';
 import { appearanceOf, useThemeKind } from '../appearance';
 import { handleKey } from '../keymap';
 import { uploadPasted } from '../transfers';
@@ -151,8 +152,12 @@ export function SurfaceView({ m, tabId, layout }: Props) {
     if (findGone) closeFind();
   }, [findGone]);
 
+  // The bell flashes the panes, beeps or does nothing (terminal.bell).
   useEffect(() => {
     if (!bell) return;
+    const mode = usePrefs.getState().prefs.bell;
+    if (mode === 'sound') playSound('bell');
+    if (mode !== 'visual') return;
     setFlash(true);
     const id = setTimeout(() => setFlash(false), 150);
     return () => clearTimeout(id);

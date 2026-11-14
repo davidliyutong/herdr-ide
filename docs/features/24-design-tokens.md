@@ -52,8 +52,8 @@ panes, which stay the terminal settings'
     (`rowHeight`, `tabHeight`, `sidebarWidth`, `radius`, `divider`).
   - `font.size.<name>`: font sizes in points (`base`, `small`, `terminal`).
 - **The generator** is `scripts/tokens` (Go, standard library only).
-  `make tokens` runs it; it writes two files, both checked in so that
-  neither build needs Go to run first:
+  `make tokens` runs it; it writes three files, all checked in so that
+  no build needs Go to run first:
   - `macos/Sources/App/Tokens.swift`: `enum Tokens` with the raw values
     (`Tokens.colorBackground`, `Tokens.statusWorking`,
     `Tokens.terminalDark`, `Tokens.metricRowHeight`,
@@ -68,6 +68,11 @@ panes, which stay the terminal settings'
     `--ds-terminal-ansi-0` to `-15`, `--ds-metric-radius`,
     `--ds-font-size-base`). Lengths are written once, with `px`.
     `web/src/main.tsx` imports it before `styles.css`.
+  - `internal/uisettings/tokens.go`: the terminal palettes as the
+    defaults of the `terminal.colors.*` settings
+    ([13](13-settings-and-appearance.md)), from which the web UI's and the
+    macOS application's terminal colors come; a user's colors replace them
+    in every client.
   Names are written in sorted order and the output depends on nothing but
   the tokens, so generating twice gives the same bytes. The generator
   refuses unknown fields, colors that are not lower-case `#rrggbb`, an
@@ -100,9 +105,11 @@ panes, which stay the terminal settings'
   a token: the transparency of overlays, the dialog backdrop, shadows and
   the checkerboard behind images, all neutral. Sizes (`--fs-sm`,
   `--fs-md`, the tab row) stay in `rem`.
-- **Terminals.** The web UI's default terminal colors stay in
-  `web/src/terminal/options.ts`, where the pane surface and xterm.js read
-  them; a test keeps them equal to `terminal.light` and `terminal.dark`.
+- **Terminals.** The terminal colors are settings whose defaults are
+  `terminal.light` and `terminal.dark` (`internal/uisettings/tokens.go`);
+  the web UI reads them from the core (and from
+  `design/generated/registry.json` until the core answers), the macOS
+  application from the core with `Tokens` as its fallback.
   The page's background before the UI paints (`theme-color` in
   `web/index.html`, the web app manifest in `web/vite.config.ts`, the
   desktop shell's window in `desktop/src/main.ts`) is `color.background`
@@ -117,7 +124,7 @@ panes, which stay the terminal settings'
 | The web UI reading `tokens.json` at run time | Colors would arrive after the first paint, and CSS could not use them without scripting. |
 | Replacing the web UI's variables by the tokens in every rule | About two thousand lines of rules change for no visible difference from defining the variables once. |
 | A second theme switch for the tokens (class or media query) | Two mechanisms can disagree; `data-theme` already follows the setting and the system. |
-| Generating `options.ts`'s palettes | The terminal settings' code would import generated TypeScript for 40 values; a test that compares them is enough. |
+| Palettes written out in the web UI's code | A second copy to keep equal; the settings' defaults are generated from the tokens and every client reads those. |
 | Colors as `#rrggbbaa` | An alpha of 0.07 has no exact two-digit form; hex and alpha apart stay readable. |
 
 ## Failure modes
@@ -128,8 +135,10 @@ panes, which stay the terminal settings'
   of both files says where they come from.
 - **A malformed token** (wrong color form, unknown field, missing theme)
   → the generator stops with the reason and writes nothing.
-- **The web UI's default terminal colors changed in `options.ts` only** →
-  `web/src/__tests__/tokens.test.ts` fails.
+- **The terminal colors' defaults differ from the tokens** (a stale
+  `tokens.go` or `registry.json`) → `make check` fails;
+  `web/src/__tests__/tokens.test.ts` compares the registry's defaults with
+  the tokens.
 - **A token removed while `Theme.swift` or `styles.css` still uses it** →
   the Swift build fails on the missing member; in CSS the variable is
   undefined and the property falls back to its inherited or initial

@@ -59,7 +59,7 @@ export function Sidebar() {
         {!readOnly && (
           <button
             className="icon"
-            title={t('sidebar.newWorkspace', { key: keyHint('new_workspace') })}
+            title={t('sidebar.newWorkspace', { key: keyHint('workspace.new') })}
             onClick={() => actions.newWorkspace()}
           >
             <Plus />
@@ -72,7 +72,7 @@ export function Sidebar() {
         )}
         <button
           className="icon"
-          title={t('settings.open', { key: keyHint('open_settings') })}
+          title={t('settings.open', { key: keyHint('app.settings') })}
           onClick={() => useStore.getState().openSettings(true)}
         >
           <Settings />

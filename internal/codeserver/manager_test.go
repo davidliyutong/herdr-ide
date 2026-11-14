@@ -14,16 +14,16 @@ func TestInstallMode(t *testing.T) {
 	if mode, bin := mg.install(); mode != InstallPush || bin != "" {
 		t.Errorf("no settings: %s %q", mode, bin)
 	}
-	mg.Settings = settings.New("", SettingDefs...)
-	mg.Settings.Set(SettingInstall, InstallExisting)
+	mg.Settings = settings.New("", Settings)
+	mg.Settings.Set(SettingInstall, "", InstallExisting)
 	if mode, bin := mg.install(); mode != InstallExisting || bin != "auto" {
 		t.Errorf("existing: %s %q", mode, bin)
 	}
-	mg.Settings.Set(SettingPath, "~/bin/code-server")
+	mg.Settings.Set(SettingPath, "", "~/bin/code-server")
 	if _, bin := mg.install(); bin != "~/bin/code-server" {
 		t.Errorf("existing with path: %q", bin)
 	}
-	if err := mg.Settings.Set(SettingPath, "bin/code-server"); err == nil {
+	if err := mg.Settings.Set(SettingPath, "", "bin/code-server"); err == nil {
 		t.Error("relative path accepted")
 	}
 }

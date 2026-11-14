@@ -229,20 +229,182 @@ final class LocalizationTests: XCTestCase {
         for file in try FileManager.default.contentsOfDirectory(atPath: sources.path) where file.hasSuffix(".swift") {
             code += try String(contentsOf: sources.appendingPathComponent(file), encoding: .utf8)
         }
-        let literal = try NSRegularExpression(pattern: #"tr\("([a-z_.A-Z]+)"|add\(menu, "([a-z_.A-Z]+)""#)
+        let literal = try NSRegularExpression(pattern: #"tr\("([a-z_.A-Z]+)"|add\(menu, "([a-z_.A-Z]+)"|command\(menu, "([a-z_.A-Z]+)""#)
         var used: Set<String> = []
         for match in literal.matches(in: code, range: NSRange(code.startIndex..., in: code)) {
-            for group in 1...2 {
+            for group in 1...3 {
                 if let range = Range(match.range(at: group), in: code) { used.insert(String(code[range])) }
             }
         }
-        // Keys built from a state or code: tr("backend." + code).
-        let prefixes = ["backend.", "machine.", "status.", "quicklook.", "settings."]
+        // Keys built from a state or code: tr("backend." + code); the
+        // settings' and commands' come from the core's registry (below).
+        let prefixes = ["backend.", "machine.", "status.", "quicklook.", "settings.", "command.", "keys.error.", "keys.problem."]
         for key in used where !prefixes.contains(key) {
             XCTAssertNotNil(english[key], "missing string \(key)")
         }
         for key in english.keys where !used.contains(key) && !prefixes.contains(where: key.hasPrefix) {
             XCTFail("unused string \(key)")
         }
+    }
+
+    /// Every label the core's registry asks of this application
+    /// (design/generated/registry.json, written by scripts/registry): its
+    /// settings, their options and sections, and every command.
+    func testRegistryKeys() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../..").standardizedFileURL
+        let data = try Data(contentsOf: root.appendingPathComponent("design/generated/registry.json"))
+        let registry = JSONValue(any: try JSONSerialization.jsonObject(with: data))
+        let keys = registry["i18n"]?["macos"]?.array?.compactMap(\.string) ?? []
+        XCTAssertGreaterThan(keys.count, 80)
+        let english = try XCTUnwrap(NSDictionary(contentsOf: root.appendingPathComponent("macos/Sources/App/Resources/en.lproj/Localizable.strings")) as? [String: String])
+        for key in keys {
+            XCTAssertNotNil(english[key], "missing string \(key)")
+        }
+    }
+}
+
+/// The vectors of design/testdata/keys, which internal/keybindings and
+/// web/src/__tests__/keys.test.ts run too.
+final class KeysTests: XCTestCase {
+    private func vectors(_ name: String) throws -> JSONValue {
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("../../../design/testdata/keys/\(name).json").standardizedFileURL
+        return JSONValue(any: try JSONSerialization.jsonObject(with: try Data(contentsOf: url)))
+    }
+
+    func testParse() throws {
+        let cases = try vectors("parse")["cases"]?.array ?? []
+        XCTAssertGreaterThan(cases.count, 30)
+        for c in cases {
+            let input = c["input"]?.string ?? ""
+            if let code = c["error"]?.string {
+                XCTAssertThrowsError(try Keys.normalize(input), input) { error in
+                    XCTAssertEqual((error as? KeyParseError)?.code, code, input)
+                }
+            } else {
+                let key = c["key"]?.string ?? ""
+                XCTAssertEqual(try Keys.normalize(input), key, input)
+                XCTAssertEqual(try Keys.normalize(key), key, key)
+            }
+        }
+    }
+
+    func testEvents() throws {
+        for c in try vectors("events")["cases"]?.array ?? [] {
+            let mods = c["mods"]?.array?.compactMap(\.string) ?? []
+            let stroke = Keys.stroke(characters: c["chars"]?.string ?? "", keyCode: UInt16(c["keyCode"]?.number ?? 0),
+                                     cmd: mods.contains("cmd"), ctrl: mods.contains("ctrl"), alt: mods.contains("alt"), shift: mods.contains("shift"))
+            XCTAssertEqual(stroke, c["stroke"]?.string, c["description"]?.string ?? "")
+        }
+    }
+
+    func testSequences() throws {
+        let file = try vectors("sequences")
+        let bindings = (file["bindings"]?.array ?? []).map {
+            KeyBinding(key: $0["key"]?.string ?? "", command: $0["command"]?.string ?? "", when: $0["when"]?.string ?? "")
+        }
+        for c in file["cases"]?.array ?? [] {
+            var matcher = KeyMatcher()
+            let context = c["context"]?.string ?? "terminal"
+            let got = (c["strokes"]?.array ?? []).compactMap(\.string).map { stroke -> String in
+                switch matcher.feed(stroke, bindings: bindings, context: context) {
+                case .none: return "none"
+                case .pending: return "pending"
+                case .swallow: return "swallow"
+                case .literal: return "literal"
+                case let .run(command): return "run:" + command
+                }
+            }
+            XCTAssertEqual(got, (c["results"]?.array ?? []).compactMap(\.string), c["description"]?.string ?? "")
+        }
+    }
+
+    func testLabelsAndMenus() {
+        XCTAssertEqual(Keys.label("ctrl+b shift+slash"), "⌃B ?")
+        XCTAssertEqual(Keys.label("cmd+shift+bracketright"), "⌘}")
+        XCTAssertEqual(Keys.label("cmd+shift+d"), "⇧⌘D")
+        XCTAssertEqual(Keys.label("ctrl+b comma"), "⌃B ,")
+        XCTAssertEqual(Keys.menuEquivalent("cmd+shift+d")?.key, "D")
+        XCTAssertEqual(Keys.menuEquivalent("cmd+shift+d")?.shift, false)
+        XCTAssertEqual(Keys.menuEquivalent("cmd+shift+bracketright")?.key, "}")
+        XCTAssertEqual(Keys.menuEquivalent("cmd+comma")?.key, ",")
+        XCTAssertEqual(Keys.menuEquivalent("ctrl+alt+left")?.ctrl, true)
+        XCTAssertNil(Keys.menuEquivalent("ctrl+b c"))
+        XCTAssertEqual(Keys.ghosttyTriggers("cmd+shift+d"), ["super+shift+d"])
+        XCTAssertEqual(Keys.ghosttyTriggers("cmd+comma"), ["super+comma", "super+,"])
+        XCTAssertEqual(Keys.ghosttyTriggers("cmd+shift+bracketright"), ["super+shift+right_bracket", "super+shift+]"])
+        XCTAssertEqual(Keys.ghosttyTriggers("ctrl+b c"), [])
+    }
+}
+
+final class SettingsModelTests: XCTestCase {
+    func testLoadAndPush() throws {
+        let reply = JSONValue(any: [
+            "sections": [["id": "terminal", "order": 30], ["id": "appearance", "order": 10]],
+            "definitions": [
+                ["key": "terminal.fontSize", "type": "number", "default": 13, "min": 6, "max": 40, "scope": "app", "section": "terminal", "order": 20],
+                ["key": "terminal.mathHover", "type": "bool", "default": true, "scope": "app", "section": "terminal", "order": 30, "platforms": ["web"]],
+                ["key": "gui.enabled", "type": "bool", "default": true, "scope": "remote-machine", "section": "gui", "order": 10, "flag": "gui"],
+            ],
+            "values": ["terminal.fontSize": ["value": 15, "source": "global"],
+                       "gui.enabled": ["value": true, "source": "default", "machines": ["m1": false]]],
+            "problems": [["key": "x", "code": "unknown"]],
+            "read_only": false,
+            "file": "/tmp/settings-dev.json",
+        ] as [String: Any])
+        let model = SettingsModel()
+        model.load(reply)
+        XCTAssertEqual(model.sections, ["appearance", "terminal"])
+        XCTAssertEqual(model.number("terminal.fontSize", 0), 15)
+        XCTAssertTrue(model.values["terminal.fontSize"]?.isModified ?? false)
+        XCTAssertEqual(model.values["gui.enabled"]?.machines["m1"], .bool(false))
+        XCTAssertEqual(model.definitions(in: "terminal").map(\.key), ["terminal.fontSize"])
+        XCTAssertEqual(model.problems.first?.code, "unknown")
+        XCTAssertEqual(model.file, "/tmp/settings-dev.json")
+        // A value the core has not sent is the default.
+        XCTAssertTrue(model.bool("terminal.mathHover", false))
+        XCTAssertTrue(model.apply(JSONValue(any: ["t": "settings", "values": ["terminal.fontSize": ["value": 18, "source": "global"]], "problems": []] as [String: Any])))
+        XCTAssertEqual(model.number("terminal.fontSize", 0), 18)
+        XCTAssertTrue(model.problems.isEmpty)
+        XCTAssertFalse(model.apply(JSONValue(any: ["t": "other"])))
+        let fontSize = try XCTUnwrap(model.definition("terminal.fontSize"))
+        XCTAssertTrue(SettingsModel.matches(fontSize, query: "font SIZE") { $0 == "settings.terminal.fontSize" ? "Font size" : nil })
+        XCTAssertFalse(SettingsModel.matches(fontSize, query: "cursor") { _ in nil })
+    }
+
+    func testKeybindings() {
+        let reply = JSONValue(any: [
+            "sections": [["id": "tab", "order": 30]],
+            "commands": [["id": "tab.new", "section": "tab", "when": "terminal"], ["id": "tab.close", "section": "tab", "when": "terminal"]],
+            "defaults": ["mac": [["key": "ctrl+b c", "command": "tab.new", "when": "terminal"], ["key": "cmd+t", "command": "tab.new", "when": "terminal"]]],
+            "user": [["key": "ctrl+b x", "command": "tab.close"]],
+            "effective": ["mac": [["key": "ctrl+b c", "command": "tab.new", "when": "terminal"], ["key": "cmd+t", "command": "tab.new", "when": "terminal"],
+                                  ["key": "ctrl+b x", "command": "tab.close", "when": "terminal"]],
+                          "pc": []],
+            "conflicts": ["mac": [["key": "ctrl+b x", "commands": ["pane.close", "tab.close"]]]],
+            "problems": [],
+        ] as [String: Any])
+        let model = KeybindingsModel()
+        model.load(reply)
+        XCTAssertEqual(model.keys(of: "tab.new"), ["ctrl+b c", "cmd+t"])
+        XCTAssertTrue(model.isChanged("tab.close"))
+        XCTAssertFalse(model.isChanged("tab.new"))
+        XCTAssertEqual(model.conflicts(of: "tab.close", key: "ctrl+b x"), ["pane.close"])
+        let rules = KeybindingsModel.rules(for: "tab.new", keys: ["ctrl+b c", "cmd+shift+t"], user: model.user, defaults: model.defaults)
+        XCTAssertEqual(rules, [
+            .object(["key": .string("ctrl+b x"), "command": .string("tab.close")]),
+            .object(["key": .string("cmd+t"), "command": .string("-tab.new")]),
+            .object(["key": .string("cmd+shift+t"), "command": .string("tab.new")]),
+        ])
+        XCTAssertEqual(KeybindingsModel.reset("tab.close", user: model.user), [])
+    }
+
+    func testEvents() {
+        if case let .settings(message)? = EventConnection.decode(#"{"t":"settings","values":{},"problems":[]}"#) {
+            XCTAssertEqual(message["t"]?.string, "settings")
+        } else {
+            XCTFail("settings message")
+        }
+        if case .keybindings? = EventConnection.decode(#"{"t":"keybindings","effective":{"mac":[]}}"#) {} else { XCTFail("keybindings message") }
     }
 }
