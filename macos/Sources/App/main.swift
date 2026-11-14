@@ -101,6 +101,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         sidebar.dialogs = dialogs
         tabs.dialogs = dialogs
         let machineDialogs = MachineDialogs(model: model, window: window)
+        machineDialogs.toast = { [weak self] in self?.toasts.show($0) }
+        machineDialogs.controller = box.controller
         self.machineDialogs = machineDialogs
         sidebar.machineDialogs = machineDialogs
         palette = Palette(parent: window)
@@ -166,6 +168,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 if action.hasPrefix("command:") { perform(String(action.dropFirst(8))) }
                 if action.hasPrefix("folder:") { openFolders([String(action.dropFirst(7))]) }
                 if action.hasPrefix("palette:") { palette?.debugType(String(action.dropFirst(8))) }
+                if action == "add-machine" { machineDialogs?.add() }
+                if action.hasPrefix("machine:") {
+                    let spec = action.dropFirst(8).split(separator: ":", maxSplits: 1).map(String.init)
+                    if spec.count == 2 { machineDialogs?.debug(spec[0], spec[1]) }
+                }
                 if action.hasPrefix("drag:") { debugDrag(action.dropFirst(5).split(separator: ":").map(String.init)) }
                 if action.hasPrefix("strokes:") {
                     for stroke in action.dropFirst(8).split(separator: " ") {
@@ -542,6 +549,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             self.panes?.reattach()
             self.showPanelFolder()
             self.openPendingFolders()
+            self.machineDialogs?.machinesChanged()
         }
     }
 
@@ -624,6 +632,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// Workspaces change once the machine's layout was read; nothing
     /// changes while the core is read-only.
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        if item.action == #selector(addMachine) { return model?.readOnly == false }
         guard let command = item.representedObject as? String else { return true }
         let inPage = webPanel?.contains(window.firstResponder as? NSView) ?? false
         // Keys of commands for everywhere also work in the page.
@@ -706,6 +715,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             command(menu, "menu.renameTab", "tab.rename")
             command(menu, "menu.closeTerminal", "pane.close")
             command(menu, "menu.closeTab", "tab.close")
+            menu.addItem(.separator())
+            add(menu, "menu.addMachine", #selector(addMachine), "")
         }
         submenu(tr("menu.edit")) { menu in
             add(menu, "menu.copy", #selector(NSText.copy(_:)), "c")
@@ -750,6 +761,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
 
     private func showSettings() { settings?.show() }
+
+    @objc private func addMachine() { machineDialogs?.add() }
 
     private func toggleSidebar() {
         guard let sidebar, let sidebarWidth else { return }

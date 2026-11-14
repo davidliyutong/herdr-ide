@@ -134,10 +134,22 @@ final class SidebarView: NSView, NSTableViewDataSource, NSTableViewDelegate {
                 // Agents that are blocked or finished a turn nobody saw.
                 detail = tr("sidebar.waiting", String(waiting))
             }
-            cell.configure(title: machine.label, detail: detail, dot: nil, level: 0, strong: true, selected: false,
-                           action: readOnly || machine.status != "ready" ? nil : { [weak self] in self?.model.newTerminal(on: machine.id) })
-            cell.toolTip = detail.isEmpty ? nil : detail
-            cell.setAccessibilityLabel(tr("sidebar.newTerminal", machine.label))
+            // A connected machine's button opens a terminal; the others' sign
+            // in, retry or enable it.
+            if readOnly {
+                cell.configure(title: machine.label, detail: detail, dot: nil, level: 0, strong: true, selected: false, action: nil)
+            } else if machine.status == "ready" {
+                cell.configure(title: machine.label, detail: detail, dot: nil, level: 0, strong: true, selected: false) { [weak self] in
+                    self?.model.newTerminal(on: machine.id)
+                }
+                cell.setAccessibilityLabel(tr("sidebar.newTerminal", machine.label))
+            } else if let (symbol, tip, run) = machineDialogs?.rowAction(machine) {
+                cell.configure(title: machine.label, detail: detail, dot: nil, level: 0, strong: true, selected: false, symbol: symbol, action: run)
+                cell.setAccessibilityLabel(tip)
+            } else {
+                cell.configure(title: machine.label, detail: detail, dot: nil, level: 0, strong: true, selected: false, action: nil)
+            }
+            cell.toolTip = [detail, machine.error].filter { !$0.isEmpty }.joined(separator: "\n")
         case let .workspace(machine, workspace, _, selected):
             let name = Dialogs.name(of: workspace)
             cell.configure(title: name, detail: (workspace.cwd as NSString).abbreviatingWithTildeInPath, dot: nil, level: 1,
@@ -284,7 +296,8 @@ private final class SidebarRow: NSView {
     /// a workspace or a window of a terminal, 3 a window of a terminal of a
     /// workspace.
     func configure(title text: String, detail detailText: String, dot color: NSColor?, level: Int, strong: Bool, selected: Bool,
-                   action: (() -> Void)?) {
+                   symbol: String = "plus", action: (() -> Void)?) {
+        add.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
         title.stringValue = text
         title.font = strong ? Theme.fontStrong : Theme.font
         title.textColor = level == 0 ? Theme.muted : Theme.foreground

@@ -20,7 +20,9 @@
     /// command:<id> (a command of the keybindings), folder:<path> (a folder
     /// dropped on the Dock icon), palette:<text> (typed into the palette),
     /// drag:<from>:<to>:<zone> (a pane dragged by its header onto another,
-    /// zone center, left, right, top or bottom; or tab onto tab: "tab").
+    /// zone center, left, right, top or bottom; or tab onto tab: "tab"),
+    /// add-machine (its dialog), machine:<op>:<target> (add, signin, remove,
+    /// menu: see MachineDialogs.debug).
     enum DebugAids {
         static func start(window: NSWindow, model: AppModel, panes: PaneArea, webPanel: WebPanel, run: @escaping (String) -> Void) {
             let env = ProcessInfo.processInfo.environment
@@ -49,11 +51,11 @@
                     if let machine = model.selectedMachine, let workspace = model.layout.selectedWorkspace {
                         model.closeWorkspace(workspace.id, on: machine)
                     }
-                case "code", "settings", "keys": run(action)
+                case "code", "settings", "keys", "add-machine": run(action)
                 case "page": webPanel.debugDescribe { FileHandle.standardError.write(Data(("page: " + $0 + "\n").utf8)) }
                 case "find-next": panes.pane(containing: window.firstResponder as? NSView)?.findStep(true)
                 default:
-                    if ["settings:", "strokes:", "command:", "folder:", "palette:", "drag:"].contains(where: action.hasPrefix) {
+                    if ["settings:", "strokes:", "command:", "folder:", "palette:", "drag:", "machine:"].contains(where: action.hasPrefix) {
                         run(action)
                     } else if action.hasPrefix("set:"), let eq = action.firstIndex(of: "=") {
                         let key = String(action[action.index(action.startIndex, offsetBy: 4) ..< eq])

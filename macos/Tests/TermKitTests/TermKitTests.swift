@@ -37,7 +37,12 @@ final class EventTests: XCTestCase {
         XCTAssertEqual(EventConnection.decode(#"{"t":"machines","list":[{"id":"local","label":"Mac","status":"ready","snapshot":{}},{"id":"b","label":"","status":"connecting"},{"label":"no id"}]}"#),
                        .machines([Machine(id: "local", label: "Mac", status: "ready"), Machine(id: "b", label: "b", status: "connecting")]))
         XCTAssertEqual(EventConnection.decode(#"{"t":"machine","state":{"id":"b","label":"Box","status":"auth_required","error":"x"}}"#),
-                       .machine(Machine(id: "b", label: "Box", status: "auth_required")))
+                       .machine(Machine(id: "b", label: "Box", status: "auth_required", error: "x")))
+        XCTAssertEqual(EventConnection.decode(#"{"t":"machine","state":{"id":"c","kind":"ssh","target":"u@h","status":"ready","info":{"home":"/home/u"}}}"#),
+                       .machine(Machine(id: "c", label: "c", status: "ready", kind: "ssh", target: "u@h", home: "/home/u")))
+        XCTAssertTrue(Machine.validTarget(" user@host.example "))
+        XCTAssertTrue(Machine.validTarget("host:2222"))
+        for bad in ["", "-oProxyCommand=x", "a b", "日本", String(repeating: "h", count: 256)] { XCTAssertFalse(Machine.validTarget(bad), bad) }
         XCTAssertEqual(EventConnection.decode(#"{"t":"machine","state":{"id":"b","label":"Box","kind":"ssh","status":"ready","hc":{"state":"error","code":"stopped"}}}"#),
                        .machine(Machine(id: "b", label: "Box", status: "ready", kind: "ssh", hc: BackendState(phase: .error, code: "stopped"))))
         XCTAssertEqual(EventConnection.decode(#"{"t":"gui","state":{"m":"b","phase":"ready","windows":[{"id":3,"title":"plot","w":640,"h":480,"pid":9,"terminal":"t4"},{"id":4,"title":"Save","w":300,"h":200,"transient":3},{"title":"no id"}]}}"#),

@@ -139,14 +139,28 @@ terminal core, which get no virtual display; Linux and Windows.
   a tab bar of the selected workspace under a transparent title bar, and
   the selected tab's panes with draggable dividers. A workspace's row
   selects it, its plus button opens a terminal in it, and its menu creates
-  terminals and renames or closes it. A connected machine's menu starts its
-  terminal core when it was stopped, or restarts it (the programs keep
-  running) or stops it after asking, since every terminal there ends
-  (`MachineDialogs`, `POST /api/m/{id}/hc/{action}`,
-  [02](02-multi-machine-transport.md)); a refusal shows the core's code as
-  a sentence. A machine's row shows why its terminals are unavailable,
+  terminals and renames or closes it. A machine's row shows why its terminals are unavailable,
   also for machines the window is not subscribed to (the machine state's
-  `hc`). `Theme` holds the colors, in light
+  `hc`), and its button opens a terminal, or signs in, retries or enables
+  the machine when it is not connected.
+- **Machines** (`MachineDialogs`, as the web UI's
+  [02](02-multi-machine-transport.md)). **Add Machine…** (Shell menu, the
+  sidebar's menus) asks for an ssh target and a name, checks the target as
+  the core does (`Machine.validTarget`) and sends `POST /api/machines`;
+  refusals name the core's code (`machine.error.*`). A machine added here
+  that turns `auth_required` within two minutes gets its **login window**:
+  a Ghostty terminal of this Mac fed by the core's PTY
+  (`GET /api/m/{id}/auth?cols=&rows=`, `LoginWindow`), started with the
+  surface's size; it closes when the machine connects or goes, and closing
+  it ends the login. A machine's menu also signs in, retries the connection
+  (`{"t": "retry"}` on the event channel), enables or disables it
+  (`PUT /api/m/{id}/enabled`, disabling asks), renames
+  (`PUT /api/m/{id}/label`) and removes an ssh machine after asking
+  (`DELETE /api/m/{id}`: nothing on the machine is deleted), and starts,
+  restarts or stops its terminal core (`POST /api/m/{id}/hc/{action}`;
+  restarting and stopping ask; a refusal shows the core's code as a
+  sentence). None of these show while the core is read-only.
+- `Theme` holds the colors, in light
   and dark, and the metrics, whose values are the design tokens shared with
   the web UI ([24](24-design-tokens.md)); terminals use the web UI's
   default 16-color palette.

@@ -12,13 +12,31 @@ public struct Machine: Equatable {
     /// The core's connection to the machine's terminal core, while it has
     /// one: the same as the terminal protocol's backend state.
     public var hc: BackendState?
+    /// The ssh destination of an ssh machine.
+    public var target: String
+    /// Why the connection failed, as ssh or the agent said it.
+    public var error: String
+    /// The user's home directory there, once connected.
+    public var home: String
 
-    public init(id: String, label: String, status: String, kind: String = "", hc: BackendState? = nil) {
+    public init(id: String, label: String, status: String, kind: String = "", hc: BackendState? = nil, target: String = "",
+                error: String = "", home: String = "") {
         self.id = id
         self.label = label
         self.status = status
         self.kind = kind
         self.hc = hc
+        self.target = target
+        self.error = error
+        self.home = home
+    }
+
+    /// Why a target typed for a new machine cannot be one, as the core
+    /// checks it: an ssh destination of printable ASCII without spaces that
+    /// does not read as an option, at most 255 characters.
+    public static func validTarget(_ target: String) -> Bool {
+        let t = target.trimmingCharacters(in: .whitespaces)
+        return !t.isEmpty && !t.hasPrefix("-") && t.count <= 255 && t.unicodeScalars.allSatisfy { $0.value > 0x20 && $0.value < 0x7f }
     }
 }
 
@@ -87,6 +105,14 @@ public final class EventConnection {
 
     public func close() { socket.close() }
 
+    /// Sends a message while connected: retry ({"t": "retry", "m": id})
+    /// ends the wait before a machine's next connection attempt, active
+    /// tells the core this client is in use (it plays notification sounds),
+    /// theme the appearance VS Code windows follow.
+    public func send(_ message: [String: Any]) {
+        if socket.isConnected { socket.send(json: message) }
+    }
+
     /// The event a text message of `/ws` carries; nil for the messages the
     /// application does not use.
     public static func decode(_ text: String) -> Event? {
@@ -123,6 +149,7 @@ public final class EventConnection {
                          code: $0["code"] as? String ?? "", version: $0["version"] as? String ?? "")
         }
         return Machine(id: id, label: label.isEmpty ? id : label, status: raw["status"] as? String ?? "",
-                       kind: raw["kind"] as? String ?? "", hc: hc)
+                       kind: raw["kind"] as? String ?? "", hc: hc, target: raw["target"] as? String ?? "",
+                       error: raw["error"] as? String ?? "", home: (raw["info"] as? [String: Any])?["home"] as? String ?? "")
     }
 }
