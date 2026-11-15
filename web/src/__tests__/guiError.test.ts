@@ -51,13 +51,13 @@ describe('display error', () => {
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     });
     expect(host.querySelector('.gui-error')).toBeNull();
-    // The settings button opens the settings, where the machine's display
+    // The settings button opens the machine's settings, where its display
     // can be turned off.
     act(() => note.click());
     const buttons = [...host.querySelectorAll<HTMLButtonElement>('.gui-error-actions button')];
     expect(buttons).toHaveLength(3);
     act(() => buttons[1].click());
-    expect(useStore.getState().settingsOpen).toBe(true);
+    expect(useStore.getState().settings?.page).toBe('gui');
     expect(host.querySelector('.gui-error')).toBeNull();
   });
 

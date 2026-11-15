@@ -6,6 +6,7 @@
 
 import { create } from 'zustand';
 import { setSetting, settingValue, useSettings, type SettingValue } from './settings';
+import { schemeColors } from './terminal/schemes';
 
 /** A theme's terminal colors: the 16 ANSI colors are black to white, then
  * their bright variants. */
@@ -61,18 +62,25 @@ export interface Prefs {
   programClipboard: 'auto' | 'ask' | 'off';
   mathHover: boolean;
   notifySound: boolean;
-  notifySoundMuted: string;
+  notifySoundMuted: string[];
   colors: { dark: TermColors; light: TermColors };
 }
 
-function colors(theme: 'dark' | 'light'): TermColors {
-  const p = `terminal.colors.${theme}.`;
+/** A theme's terminal colors: its scheme's, each replaced by the user's
+ * own color when one is set. */
+export function colors(theme: 'dark' | 'light'): TermColors {
+  const base = schemeColors(String(settingValue(`terminal.colorScheme.${theme}`) ?? 'default'), theme);
+  const values = useSettings.getState().values;
+  const own = <T>(name: keyof TermColors, fallback: T): T => {
+    const v = values[`terminal.colors.${theme}.${name}`];
+    return v && v.source !== 'default' ? (v.value as T) : fallback;
+  };
   return {
-    foreground: settingValue(p + 'foreground') as string,
-    background: settingValue(p + 'background') as string,
-    cursor: settingValue(p + 'cursor') as string,
-    selection: settingValue(p + 'selection') as string,
-    palette: settingValue(p + 'palette') as string[],
+    foreground: own('foreground', base.foreground),
+    background: own('background', base.background),
+    cursor: own('cursor', base.cursor),
+    selection: own('selection', base.selection),
+    palette: own('palette', base.palette),
   };
 }
 

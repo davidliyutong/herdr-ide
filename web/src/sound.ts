@@ -6,14 +6,9 @@ import type { AgentStatusEvent } from './lib/machine';
 
 export type SoundKind = 'done' | 'request' | 'bell';
 
-/** Parses the muted agents setting: names separated by commas or spaces. */
-export function mutedAgents(raw: string): Set<string> {
-  return new Set(
-    raw
-      .split(/[\s,]+/)
-      .map((s) => s.trim().toLowerCase())
-      .filter(Boolean),
-  );
+/** The silent agents setting as a set of lowercase names. */
+export function mutedAgents(list: readonly string[]): Set<string> {
+  return new Set(list.map((s) => s.trim().toLowerCase()).filter(Boolean));
 }
 
 export interface SoundContext {

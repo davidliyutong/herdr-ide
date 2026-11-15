@@ -33,16 +33,16 @@ describe('soundFor', () => {
   it('stays silent when disabled, muted or not the chosen browser', () => {
     expect(soundFor(ev('blocked'), ctx({ enabled: false }))).toBeUndefined();
     expect(soundFor(ev('blocked'), ctx({ chosen: false }))).toBeUndefined();
-    expect(soundFor(ev('blocked', 'droid'), ctx({ muted: mutedAgents('droid') }))).toBeUndefined();
-    expect(soundFor({ ...ev('done', 'x'), display_agent: 'Droid' }, ctx({ muted: mutedAgents('droid') }))).toBeUndefined();
+    expect(soundFor(ev('blocked', 'droid'), ctx({ muted: mutedAgents(['droid']) }))).toBeUndefined();
+    expect(soundFor({ ...ev('done', 'x'), display_agent: 'Droid' }, ctx({ muted: mutedAgents(['droid']) }))).toBeUndefined();
   });
 });
 
 describe('sound settings', () => {
   it('parses muted agents and keeps an empty list', () => {
-    expect([...mutedAgents(' Droid, codex  kimi,,')]).toEqual(['droid', 'codex', 'kimi']);
-    expect(mutedAgents('').size).toBe(0);
-    expect(builtinDefaults['notifications.mutedAgents']).toBe('droid');
+    expect([...mutedAgents([' Droid', 'codex', 'kimi', ''])]).toEqual(['droid', 'codex', 'kimi']);
+    expect(mutedAgents([]).size).toBe(0);
+    expect(builtinDefaults['notifications.mutedAgents']).toEqual(['droid']);
     expect(builtinDefaults['notifications.sound']).toBe(true);
   });
 });

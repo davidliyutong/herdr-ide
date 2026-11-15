@@ -34,22 +34,28 @@ settings per browser; theming terminal applications.
 - A definition (`settings.Def`) has a dotted key (`terminal.fontSize`), a
   type (`bool`, `number`, `string`, `enum`, `color` `#rrggbb`, `list` of
   strings or colors with an optional exact length), a default, the enum's
-  values, a range and whether numbers are whole, a scope (`app`; `machine`:
-  any machine may have its own value; `remote-machine`: machines other than
-  the core's host), its section and order, an optional command-line flag
-  and a validation function. Lists
+  values, a range, whether numbers are whole and the step of the UIs'
+  stepper, the values offered for a list of strings (others can be added),
+  a scope (`app`; `machine`: any machine may have its own value;
+  `remote-machine`: machines other than the core's host), its section,
+  group (a heading within the section) and order, an optional command-line
+  flag and a validation function. A section can be advanced: the UIs list
+  it after the others, under **Advanced**. Lists
   hold at most 256 items; strings at most 4096 bytes, without control
   characters (C0 among them NUL, tab, CR, LF and ESC; DEL; C1). Invalid
   definitions panic at start.
 - The modules registered: the user interfaces' sections `appearance`,
-  `layout`, `terminal`, `colors` and `notifications`; code-server's
-  `codeServer` (`codeServer.install`, `codeServer.path`); the program
-  windows' `gui` (`gui.enabled`, `gui.gpu`, `gui.video`, scope
-  `remote-machine`). Every setting with its type, default, flag and scope
-  is listed in [reference](../reference.md#settings).
+  `terminal` (groups `text`, `cursor`, `behavior`, `clipboard`), `colors`
+  and `notifications`; code-server's advanced `codeServer`
+  (`codeServer.install`, `codeServer.path`, scope `machine`: one machine is
+  offline, another has its own code-server); the program windows' advanced
+  `gui` (`gui.enabled`, `gui.gpu`, `gui.video`, scope `remote-machine`).
+  Every setting with its type, default, flag and scope is listed in
+  [reference](../reference.md#settings).
 - Descriptions are not in Go: the UI translates `settings.<key>`,
-  `settings.<key>.desc`, `settings.<key>.<option>` and
-  `settings.section.<id>`. `scripts/registry` writes
+  `settings.<key>.desc`, `settings.<key>.<option>`, `settings.section.<id>`,
+  `settings.group.<id>` and, where they exist, `settings.<key>.unit` and
+  `settings.<key>.placeholder`. `scripts/registry` writes
   `design/generated/registry.json` from the registry: each setting's
   default, the commands and each platform's default bindings, and the
   translation keys the web UI needs for the settings and commands it shows
@@ -95,7 +101,13 @@ settings per browser; theming terminal applications.
   once and rewritten: `code-server-install` → `codeServer.install`,
   `code-server-path` → `codeServer.path`, `gui` → `gui.enabled` (`on`/`off`
   → `true`/`false`), `gui-gpu` → `gui.gpu`, `gui-video` → `gui.video`;
-  values of the current format win over migrated ones. The desktop app's
+  values of the current format win over migrated ones. Values of an older
+  type change in place, once: `notifications.mutedAgents`, a
+  comma-separated string before, becomes a list of agent names, and a
+  `terminal.scrollback` above 100,000 (earlier versions took a million,
+  which the terminals' memory cannot hold) comes down to 100,000
+  (`uisettings.TestMigrateValues`). A value already of the current type is
+  left as it is and the file is not rewritten. The desktop app's
   shortcut settings (`desktop-*-key`) become keybinding rules before the
   settings are read (below), and the settings' migration then drops them
   from the file (`internal/registry`, `TestLegacyShortcutsLeaveTheSettings`).
@@ -105,8 +117,9 @@ settings per browser; theming terminal applications.
 - Command-line flag (locks the setting, for every machine too) → the
   machine's own value (scope other than `app`) → the global value → the
   default. Readers ask for the value of a machine (`Store.Bool(key,
-  machine)`); code-server's install mode is read at each start, GUI
-  settings when a display is prepared or a frame is sent.
+  machine)`); code-server's install mode and path are read for the machine
+  at each start, GUI settings when a display is prepared or a frame is
+  sent.
 - The flags that lock settings are `--code-server-install`,
   `--code-server-path`, `--gui`, `--gui-gpu` and `--gui-video`
   (`Def.Flag`, registered with the other flags by `RegisterFlags`). A
@@ -216,28 +229,83 @@ settings per browser; theming terminal applications.
   core answers, the defaults of `registry.json` apply.
 - Browser settings of earlier versions (11 `localStorage` keys: language,
   theme, font sizes and weight, panel position, Option as Meta, program
-  clipboard, formulas, sounds, silent agents) are moved once: each value
+  clipboard, formulas, sounds, silent agents as a list) are moved once: each value
   the core still has at its default is saved there, then the key is
   removed. Read-only mode leaves them for a writable session. State of one
   browser (whether the sidebar is open, the panel's sizes and what each
-  workspace's panel shows, the selected machine, the transfer history)
-  stays in `localStorage`.
-- The settings dialog renders sections from the definitions: a page per
-  section and **Keyboard shortcuts**, a search
-  across labels, descriptions, keys and options, a control per type
-  (switch, segmented or select, number with its range, text, color well,
-  the 16-color palette), a dot on changed settings, reset, a per-machine
-  table for settings with machine scope (inherit first; `remote-machine`
-  leaves the core's host out; the program windows section adds each
-  machine's display and Enable), the lock of a flag, the file's problems
-  and where the file is. Changing the language reloads the page that
-  changed it.
-- The keyboard page lists every command with its keys in effect, grouped
-  by section: × removes a key, + records one (press the strokes, Enter
-  keeps them, Escape cancels; the recorder cancels every key, so in the
-  desktop app its menu, ⌘Q included, does not act on one), reset returns to
-  the defaults; conflicts are marked.
-  Changes become user rules (`rulesFor`) saved with `PUT`.
+  workspace's panel shows, the sidebar's width, the selected machine, the
+  transfer history) stays in `localStorage`.
+- The settings dialog (`components/SettingsDialog.tsx`, laid out as VS
+  Code's) renders the definitions:
+  - a scope bar: **User** (the global values) and one tab per machine that
+    can have its own values. A machine's scope lists only the settings it
+    can differ in (`remote-machine` leaves the core's host out), each
+    showing "Same as User (value)" until it is set and a reset that removes
+    the machine's own value; its **Overview** page has the machine's name
+    (renamed in place for SSH machines), address and platform, its
+    connection with Enable, Disable, Sign In… or Retry, and
+    **Troubleshooting**: restart, start or stop its terminal service. A
+    machine's menu in the sidebar opens it there (**Machine Settings…**), and
+    a program window error opens its **Program Windows** page;
+  - a list of sections, the advanced ones last under **Advanced**, each
+    with a dot when one of its settings is changed in the scope shown, and
+    **Keyboard Shortcuts** (User only);
+  - a search across labels, descriptions, keys, sections and options of the
+    scope shown (and the keyboard shortcuts in User);
+  - per setting: its name, its description, then its control; a bar on its
+    left and a **Modified** badge (in a machine's scope: **Set for this
+    machine**) when it is not at its default; a `⋯` button (shown while the
+    row is pointed at or focused) and a right-click open **Reset Setting**,
+    **Copy Setting ID** and **Copy Setting as JSON**: ids are not shown
+    otherwise. Settings of the user scope set for some machines say so,
+    with links to those machines' scopes;
+  - controls by type: a checkbox with the description for a bool; a
+    segmented control for up to four options, else a menu; a stepper (−,
+    the value, +) with the definition's step, unit and range written out
+    ("0–100,000 lines"; typed values are brought into the range) for a
+    number; a list of the offered values as checkboxes plus removable
+    chips and a field for others (`notifications.mutedAgents`: every agent
+    the terminals recognize); a text field otherwise. The terminal font is a
+    picker (`settings/FontPicker.tsx`): the bundled JetBrains Mono first,
+    then the monospace fonts installed on the computer, each drawn in
+    itself, searchable, and any other typed name; a preview line in the
+    chosen font and size below. The fonts are listed with the Local Font
+    Access API where the browser has it (Chromium, and the desktop app,
+    which grants its pages the permission), asked on the first opening, and
+    filtered to those whose narrow and wide letters are equally wide;
+    without it (Firefox, Safari, a refusal) the well-known monospace
+    families found installed by measuring them are listed;
+  - **Terminal Colors** (`settings/Colors.tsx`): for the dark and the light
+    theme a scheme (`terminal.colorScheme.dark`, `.light`: Default, which is
+    the app's own colors, Dracula, Gruvbox Dark and Light, Nord, One Dark
+    and Light, Solarized Dark and Light, Tomorrow and Tomorrow Night;
+    `web/src/terminal/schemes.ts`) with a preview of its background, text
+    and 16 colors, and **Customize colors**: named swatches for text,
+    background, cursor, selection and the 16 ANSI colors (Black … Bright
+    white), each set one replacing the scheme's (`terminal.colors.<theme>.*`;
+    a color left at its default follows the scheme) and with a reset of its
+    own. Choosing another scheme drops the theme's own colors after asking.
+    `terminal.boldIsBright` is on this page; Option as Meta is shown on
+    macOS only;
+  - read-only mode, a flag's lock and the file's problems as before; the
+    header's file button opens `settings.json` (or `keybindings.json` on the
+    shortcuts page) in the VS Code panel of the core's own machine, where
+    the file is, and copies its path where there is none (a core on
+    Windows, read-only mode).
+  Changing one setting re-renders only what changed: the field or button
+  used keeps the keyboard and the page its scroll position. Changing the
+  language reloads the page that changed it.
+- The keyboard page is a table of every command with its keys in effect,
+  grouped by section, and where they come from (Default or User, with a bar
+  on rows the user changed): double-clicking a row (or **Change
+  Keybinding…** in its menu) records keys that replace the command's, `+`
+  (**Add Keybinding…**) records one more, a key's × removes it, **Reset
+  Keybinding** returns to the defaults, **Copy Command ID** copies the id;
+  recording takes the strokes, Enter keeps them, Escape cancels (the
+  recorder cancels every key, so in the desktop app its menu, ⌘Q included,
+  does not act on one). The search matches names, ids and keys; its
+  keyboard button searches by the keys pressed instead. Conflicts are
+  marked. Changes become user rules (`rulesFor`) saved with `PUT`.
 - `keymap.ts` matches every keydown of the app (terminals route theirs
   through it) against the bindings in effect on the page's platform, chords
   included: a key no binding takes is left to the terminal, whose key
@@ -279,9 +347,11 @@ settings per browser; theming terminal applications.
   which switches VS Code ([05](05-vscode-panel.md)); in the desktop app the
   shell reads the setting from the core, and its title bar follows it
   ([16](16-desktop-packaging.md)).
-- Terminal palettes: dark is GitHub Dark Default (Ghostty's theme of that
-  name: colors made for a near-black background) on the UI's `--bg` with
-  its `--fg`; light is GitHub Light Default except for brighter yellows.
+- Terminal palettes: the Default scheme's dark colors are GitHub Dark
+  Default (Ghostty's theme of that name: colors made for a near-black
+  background) on the UI's `--bg` with its `--fg`; its light ones GitHub
+  Light Default except for brighter yellows. The other schemes and the
+  user's own colors replace them (above).
   The palette only colors what programs leave to the terminal (default
   colors and the 16 ANSI colors); programs that use 24-bit colors look the
   same everywhere. Programs that ask the terminal for its colors (OSC
@@ -291,7 +361,8 @@ settings per browser; theming terminal applications.
   medium, bold, each upright and italic) in `web/src/terminal/fonts/` with
   their license (SIL OFL 1.1, appended to the generated `licenses.md`) and
   checksums, after `terminal.fontFamily` when it names a font installed on
-  the computer. Characters it lacks (CJK, some symbols) come from the
+  the computer (the picker writes one family; a hand-written list of
+  families is used as written). Characters it lacks (CJK, some symbols) come from the
   fallbacks: SF Mono, Menlo, …, PingFang SC. Rows are
   `terminal.lineHeight` times the font's own line height (1.05 by default).
 - Fonts and cell size: a terminal measures its cell from the font, so it
@@ -305,8 +376,8 @@ settings per browser; theming terminal applications.
   Medium gives the heavier strokes native terminals produce with stroke
   thickening (Ghostty's `font-thicken`), which the browser's glyphs do not
   get.
-- Interface font size sets the root font size; the chrome is sized in `rem`,
-  so it scales with it. Every terminal setting applies at once in the
+- Interface text size (`appearance.uiFontSize`, 11–20 px) sets the root
+  font size; the chrome is sized in `rem`, so it scales with it. Every terminal setting applies at once in the
   browser's terminals ([26](26-web-terminals.md)): font family, size,
   weight and line height (a new cell size resizes the terminals), colors,
   cursor style and blink (the cursor a program's reset returns to),
@@ -335,6 +406,11 @@ settings per browser; theming terminal applications.
 | Settings file overriding flags | Breaks service definitions and scripts that rely on their flags. |
 | CSS `zoom` for the font size | Distorts mouse coordinates and canvas sharpness. |
 | Relying on installed fonts for terminals | Cell size and glyphs differ per system; the bundled font stays the default, an installed one is a choice. |
+| A text field for the font family, as VS Code has | The user must know a font's exact family name and the CSS list syntax; the picker lists what is installed and shows it. |
+| Ten loose color settings | Choosing a look meant picking 20 colors one by one, and the 16 colors had no names; schemes give a whole look at once, the swatches name each color. |
+| A per-machine table at the bottom of each page | Machine values were far from the settings they change and the table only took bools and options; a machine's scope shows its settings with the same controls, reachable from the machine's menu. |
+| Showing every setting's id beside its name | Ids are for the JSON file; they are copied from the setting's menu and still found by the search. |
+| A comma-separated string for the silent agents | The user had to know the agents' ids and the syntax; a list of the agents the terminals recognize, with others addable, says both. |
 
 ## Failure modes
 
@@ -396,6 +472,13 @@ unbound; user rules), `vt.test.ts` (the bytes the terminal sends for
 `ctrl+b`),
 `settings.test.ts` (labels for every registry key, store, optimistic
 changes and error codes, migration of the browser settings, search),
+`settingsDialog.test.ts` (sections and scopes, the stepper keeping the
+focus and the range, the list editor, a machine's own value set and
+removed, colors from schemes and the user's, every scheme defined),
+`internal/uisettings/uisettings_test.go` (`TestMigrateValues`: the silent
+agents and the scrollback changed once, current values not rewritten),
+`internal/agent/detect` (`TestSettingsListEveryAgent`),
+`internal/codeserver` (`TestInstallMode`: a machine's own mode and path),
 `theme.test.ts` (`system` after `dark`), `termOptions.test.ts`,
 `tokens.test.ts`, `desktop/src/follow.test.ts` (keybindings and settings
 from the replies and pushes, reconnecting), `desktop/src/menu.test.ts`
@@ -403,4 +486,7 @@ from the replies and pushes, reconnecting), `desktop/src/menu.test.ts`
 language). A dev core was changed through the API and by editing its
 file, with the pushes observed on `/ws`; the dialog's pages were checked in
 headless Chromium, and so were the browser's terminals following a font
-size and a palette color changed through the API.
+size and a palette color changed through the API; the dialog's pages, both
+scopes, the font picker, the list editor, schemes and swatches, search and
+the shortcuts page were used with pointer events in English and Chinese,
+light and dark, and the font picker in the desktop app.

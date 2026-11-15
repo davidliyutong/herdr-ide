@@ -24,11 +24,13 @@ automatically, scheduling agents.
   [25](25-agent-detection.md)); a status the program reports itself (OSC
   7501) counts too. The terminal records carry `agent` and `agent_status`,
   and the core sends `agent` messages on `/ws` with the terminal's address.
-- **Inbox** (sidebar): agents in `blocked` or `done` across the machines the
-  page follows, blocked first, with machine, terminal title and directory;
-  counts of working agents. Workspaces, tabs and pane headers show the most
+- **Inbox** (the sidebar's **Agents** section, at its top, translated as
+  the rest of the UI: 智能体 in Chinese): agents in `blocked` or `done`
+  across the machines the page follows, blocked first, with machine,
+  terminal title and directory; counts of working agents. Workspaces, tabs and pane headers show the most
   urgent status of their agents. **Jump to the agent that needs
-  attention** (`app.agentAttention`, in the palette; no default key) jumps
+  attention** (`app.agentAttention`, in the palette and the View menu;
+  `cmd+shift+a` in the desktop app on macOS, `ctrl+shift+a` elsewhere) jumps
   to the most urgent agent: its machine, workspace and tab are shown and
   its terminal focused.
 - **Seen**: a turn that ended (`done`) is seen when its terminal has the
@@ -53,8 +55,10 @@ automatically, scheduling agents.
   the page is visible and focused. The two chimes are synthesized with the
   Web Audio API, so no audio files are shipped. The setting **Notification
   sounds** (`notifications.sound`) is on by default; **Silent agents**
-  (`notifications.mutedAgents`) lists agents (matched by the detected
-  agent's name or display name) that never sound and starts with `droid`.
+  (`notifications.mutedAgents`, a list: every agent the terminals
+  recognize as a checkbox, others added by name) lists agents (matched by
+  the detected agent's name or display name) that never sound and starts
+  with `droid`.
   Both are settings of the core ([13](13-settings-and-appearance.md)).
 - **One browser sounds**: each page tells the core when it is used
   (`active` on the WebSocket: on connect with the time since its last input,

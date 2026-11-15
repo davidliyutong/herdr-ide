@@ -51,6 +51,14 @@ export interface WorkspaceDock {
   lastCode?: CodeView;
 }
 
+export interface SettingsView {
+  page?: string;
+  machine?: string;
+}
+
+/** The sidebar's default width and the range it can be dragged in. */
+export const SIDEBAR_WIDTH = { def: 260, min: 180, max: 520 };
+
 export interface UIState {
   connected: boolean;
   order: string[];
@@ -71,8 +79,12 @@ export interface UIState {
   dockWidth: number;
   /** Height of the dock when it sits below the panes. */
   dockHeight: number;
-  palette?: 'commands' | 'workspaces' | 'help';
-  settingsOpen: boolean;
+  palette?: 'commands' | 'workspaces';
+  /** The settings dialog when open: its page and scope (a machine's id, or
+   * none for the user's settings). */
+  settings?: SettingsView;
+  /** The sidebar's width in pixels. */
+  sidebarWidth: number;
   renaming?: Renaming;
   toasts: Toast[];
   auth?: string;
@@ -104,7 +116,9 @@ export interface UIState {
   setDockWidth(w: number): void;
   setDockHeight(h: number): void;
   setPalette(p: UIState['palette']): void;
-  openSettings(open: boolean): void;
+  /** Opens the settings dialog (on a page, in a scope), or closes it (false). */
+  openSettings(view: SettingsView | false): void;
+  setSidebarWidth(w: number): void;
   setRenaming(r: Renaming | undefined): void;
   /** Shows a toast for ttl ms (default: 5 s, 15 s with an action, or the
    * action's own) and returns its id. */
@@ -205,7 +219,7 @@ export const useStore = create<UIState>((set, get) => ({
   docks: loadDocks(),
   dockWidth: loadPref('dockWidth', 640),
   dockHeight: loadPref('dockHeight', 360),
-  settingsOpen: false,
+  sidebarWidth: loadPref('sidebarWidth', SIDEBAR_WIDTH.def),
   toasts: [],
 
   setConnected: (connected) => set({ connected }),
@@ -289,7 +303,12 @@ export const useStore = create<UIState>((set, get) => ({
     set({ dockHeight: h });
   },
   setPalette: (palette) => set({ palette }),
-  openSettings: (settingsOpen) => set({ settingsOpen }),
+  openSettings: (view) => set({ settings: view === false ? undefined : view }),
+  setSidebarWidth: (w) => {
+    const width = Math.round(Math.min(SIDEBAR_WIDTH.max, Math.max(SIDEBAR_WIDTH.min, w)));
+    savePref('sidebarWidth', width);
+    set({ sidebarWidth: width });
+  },
   setRenaming: (renaming) => set({ renaming }),
   openAuth: (auth) => set({ auth }),
   hcBusy: {},

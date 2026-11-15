@@ -21,10 +21,16 @@ export interface SettingDef {
   min?: number;
   max?: number;
   integer?: boolean;
+  /** What a stepper adds (1 when absent). */
+  step?: number;
   item?: SettingType;
   length?: number;
+  /** The values offered for a list of strings; others can be added. */
+  options?: string[];
   scope: 'app' | 'machine' | 'remote-machine';
   section: string;
+  /** A heading within the section. */
+  group?: string;
   order: number;
   flag?: string;
 }
@@ -46,6 +52,8 @@ export interface SettingProblem {
 export interface Section {
   id: string;
   order: number;
+  /** Listed after the others, under "Advanced". */
+  advanced?: boolean;
 }
 
 interface SettingsStore {
@@ -182,7 +190,14 @@ export const legacyPrefs: Record<string, { key: string; parse(raw: string): Sett
   programClipboard: { key: 'terminal.programClipboard', parse: (r) => (['auto', 'ask', 'off'].includes(r) ? r : undefined) },
   mathHover: { key: 'terminal.mathHover', parse: bool },
   notifySound: { key: 'notifications.sound', parse: bool },
-  notifySoundMuted: { key: 'notifications.mutedAgents', parse: (r) => r.trim() },
+  notifySoundMuted: {
+    key: 'notifications.mutedAgents',
+    parse: (r) =>
+      r
+        .split(/[\s,]+/)
+        .map((x) => x.trim().toLowerCase())
+        .filter(Boolean),
+  },
 };
 
 function num(raw: string, min: number, max: number, integer: boolean): number | undefined {

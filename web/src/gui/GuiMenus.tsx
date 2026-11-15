@@ -101,10 +101,10 @@ export function GuiErrorNote({ m, label, error }: { m: string; label: string; er
             <button
               onClick={() => {
                 setOpen(false);
-                useStore.getState().openSettings(true);
+                useStore.getState().openSettings({ page: 'gui', machine: m });
               }}
             >
-              {t('command.app.settings')}
+              {t('menu.machineSettings')}
             </button>
             <button
               onClick={() => {

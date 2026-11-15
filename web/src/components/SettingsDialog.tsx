@@ -1,18 +1,26 @@
 // Settings dialog, rendered from the definitions the core serves
-// (/api/settings, settings.ts): a page per section and one for the
-// keyboard shortcuts, a search across them, a control per type, a marker on
-// changed settings, reset, per-machine values for settings whose scope allows
-// them, and the lock of a command-line flag. Labels are the i18n keys
-// settings.<key>, settings.<key>.desc and settings.<key>.<option>; a setting
-// without them shows its key.
+// (/api/settings, settings.ts), laid out as VS Code's: a scope bar (the
+// user's settings, then each machine's own), a list of sections (the
+// advanced ones last) and the section's settings, a search across them, a
+// control per type, a bar on settings changed from their default, a menu per
+// setting (reset, copy its id or JSON), and settings.json opened in VS Code.
+// A machine's scope lists the settings it can have its own value of, each
+// following the user's value until set, and the machine's name, address and
+// troubleshooting. Labels are the i18n keys settings.<key>,
+// settings.<key>.desc, settings.<key>.<option> and settings.group.<id>; a
+// setting without them shows its key.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Lock, RotateCcw, Search, X } from 'lucide-react';
+import { AlertTriangle, Copy as CopyIcon, Ellipsis, FileJson, Lock, Minus, Plus, Search, X } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../state/store';
 import { GuiEnableButton, GuiMachineStatus } from '../gui/GuiMenus';
 import { hasMessage, t } from '../i18n';
-import { keyHint } from '../keymap';
+import { openMenu, type MenuEntry } from '../contextMenu';
+import { actions } from '../actions';
+import { isMac, useKeys } from '../keybindings';
+import { codeText, type MachineState } from '../lib/machine';
+import { conn } from '../lib/conn';
 import {
   resetSetting,
   setSetting,
@@ -23,15 +31,21 @@ import {
   type SettingValue,
 } from '../settings';
 import { KeyboardShortcuts } from './KeyboardShortcuts';
+import { FontPicker } from './settings/FontPicker';
+import { colorKeys, ThemeColors, schemeLabel } from './settings/Colors';
 
 export function settingLabel(key: string): string {
   const k = `settings.${key}`;
   return hasMessage(k) ? t(k) : key;
 }
 
-function desc(key: string): string | undefined {
-  const k = `settings.${key}.desc`;
+/** A translation that may not exist. */
+function maybe(k: string): string | undefined {
   return hasMessage(k) ? t(k) : undefined;
+}
+
+function desc(key: string): string | undefined {
+  return maybe(`settings.${key}.desc`);
 }
 
 function optionLabel(key: string, option: string): string {
@@ -44,11 +58,19 @@ function sectionLabel(id: string): string {
   return hasMessage(k) ? t(k) : id;
 }
 
+function groupLabel(id: string): string {
+  const k = `settings.group.${id}`;
+  return hasMessage(k) ? t(k) : id;
+}
+
 /** Whether a setting matches a search: its label, description, key or options. */
-export function matchesSearch(d: Pick<SettingDef, 'key' | 'enum'>, q: string): boolean {
+export function matchesSearch(d: Pick<SettingDef, 'key' | 'enum'> & { section?: string }, q: string): boolean {
   const words = q.toLowerCase().split(/\s+/).filter(Boolean);
   if (words.length === 0) return true;
-  const text = [settingLabel(d.key), desc(d.key) ?? '', d.key, ...(d.enum ?? []).map((o) => optionLabel(d.key, o))].join(' ').toLowerCase();
+  const options = (d.enum ?? []).map((o) => (d.key.startsWith('terminal.colorScheme.') ? schemeLabel(o) : optionLabel(d.key, o)));
+  const text = [settingLabel(d.key), desc(d.key) ?? '', d.key, d.section ? sectionLabel(d.section) : '', ...options]
+    .join(' ')
+    .toLowerCase();
   return words.every((w) => text.includes(w));
 }
 
@@ -60,52 +82,95 @@ export function problemText(p: SettingProblem): string {
   return [where, what, p.detail].filter(Boolean).join(' · ');
 }
 
+/** Settings the generic rows leave out: the theme colors are the colors
+ * page's swatches; Option as Meta exists on macOS only. */
+function shownInRows(d: SettingDef): boolean {
+  if (d.key.startsWith('terminal.colors.')) return false;
+  if (d.key === 'terminal.optionIsMeta' && !isMac) return false;
+  return true;
+}
+
+/** Whether a machine can have its own value of a setting. */
+export function machineScoped(d: SettingDef, m: Pick<MachineState, 'kind'>): boolean {
+  return d.scope === 'machine' || (d.scope === 'remote-machine' && m.kind !== 'local');
+}
+
 const KEYS_PAGE = 'keys';
+const MACHINE_PAGE = 'machine';
 
 export function SettingsDialog() {
-  const open = useStore((s) => s.settingsOpen);
+  const view = useStore((s) => s.settings);
+  return view ? <SettingsModal page={view.page} machine={view.machine} /> : null;
+}
+
+function SettingsModal({ page: askedPage, machine: askedMachine }: { page?: string; machine?: string }) {
   const close = () => useStore.getState().openSettings(false);
   const st = useSettings();
   const readOnly = useStore((s) => s.readOnly) || st.readOnly;
-  const [page, setPage] = useState('appearance');
+  const machines = useStore(useShallow((s) => s.order.map((id) => s.machines[id]).filter(Boolean)));
+  const [scope, setScope] = useState(askedMachine ?? '');
+  const [page, setPage] = useState(askedPage ?? (askedMachine ? MACHINE_PAGE : 'appearance'));
   const [query, setQuery] = useState('');
+  const keysFile = useKeys((k) => k.file);
+  const search = useRef<HTMLInputElement>(null);
+
+  // Opened again while open (a machine's menu, a key): show what was asked.
+  useEffect(() => {
+    setScope(askedMachine ?? '');
+    setPage(askedPage ?? (askedMachine ? MACHINE_PAGE : 'appearance'));
+  }, [askedPage, askedMachine]);
 
   useEffect(() => {
-    if (!open) return;
-    setQuery('');
+    search.current?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') close();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open]);
+  }, []);
 
-  const defs = st.defs;
-  const sections = useMemo(() => st.sections.filter((s) => defs.some((d) => d.section === s.id)), [st.sections, defs]);
-  useEffect(() => {
-    if (sections.length && page !== KEYS_PAGE && !sections.some((s) => s.id === page)) setPage(sections[0].id);
-  }, [sections, page]);
-
-  if (!open) return null;
+  const machine = scope ? machines.find((m) => m.id === scope) : undefined;
+  const defs = useMemo(
+    () =>
+      st.defs.filter((d) => shownInRows(d) || d.key.startsWith('terminal.colors.')).filter((d) => !machine || machineScoped(d, machine)),
+    [st.defs, machine],
+  );
+  const sections = st.sections.filter((s) => defs.some((d) => d.section === s.id && shownInRows(d)));
+  const pages = [
+    ...(machine ? [{ id: MACHINE_PAGE, advanced: false }] : []),
+    ...sections.filter((s) => !s.advanced),
+    ...(machine ? [] : [{ id: KEYS_PAGE, advanced: false }]),
+    ...sections.filter((s) => s.advanced),
+  ];
+  const current = pages.some((p) => p.id === page) ? page : pages[0]?.id;
   const searching = query.trim() !== '';
-  const fileProblems = st.problems.filter((p) => !p.key || !defs.some((d) => d.key === p.key));
+  const matching = defs.filter((d) => shownInRows(d) && matchesSearch(d, query));
+  const fileProblems = st.problems.filter((p) => !p.key || !st.defs.some((d) => d.key === p.key));
+  const modifiedIn = (section: string) =>
+    defs.some(
+      (d) =>
+        d.section === section && (machine ? st.values[d.key]?.machines?.[machine.id] !== undefined : st.values[d.key]?.source === 'global'),
+    );
   const go = (id: string) => {
     setQuery('');
     setPage(id);
   };
+  const scopes = [
+    { id: '', label: t('settings.scope.user') },
+    ...machines.filter((m) => st.defs.some((d) => machineScoped(d, m))).map((m) => ({ id: m.id, label: m.label })),
+  ];
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && close()}>
       <div className="modal settings" role="dialog" aria-label={t('settings.title')}>
         <div className="modal-head">
           <span className="modal-title">{t('settings.title')}</span>
-          <span className="muted small">{keyHint('app.settings')}</span>
-          <span className="spacer" />
           <label className="settings-search">
             <Search />
             <input
+              ref={search}
               value={query}
-              placeholder={t('settings.search')}
+              placeholder={current === KEYS_PAGE ? t('keys.search') : t('settings.search')}
               aria-label={t('settings.search')}
               spellCheck={false}
               onChange={(e) => setQuery(e.target.value)}
@@ -117,26 +182,70 @@ export function SettingsDialog() {
                 }
               }}
             />
+            {query && (
+              <button className="icon" title={t('settings.clearSearch')} onClick={() => setQuery('')}>
+                <X />
+              </button>
+            )}
           </label>
+          <OpenFileButton file={current === KEYS_PAGE ? keysFile : st.file} which={current === KEYS_PAGE ? 'keys' : 'settings'} />
           <button className="icon" title={t('settings.close')} onClick={close}>
             <X />
           </button>
         </div>
-        <div className="settings-main">
-          <nav className="settings-nav">
-            {sections.map((s) => (
-              <button key={s.id} className={!searching && page === s.id ? 'on' : ''} onClick={() => go(s.id)}>
-                {sectionLabel(s.id)}
-              </button>
-            ))}
-            <button className={!searching && page === KEYS_PAGE ? 'on' : ''} onClick={() => go(KEYS_PAGE)}>
-              {t('settings.section.keyboard')}
+        <div className="settings-scopes" role="tablist" aria-label={t('settings.scope')}>
+          {scopes.map((s) => (
+            <button
+              key={s.id}
+              role="tab"
+              aria-selected={scope === s.id}
+              className={scope === s.id ? 'on' : ''}
+              title={s.id ? t('settings.scope.machineHint', { machine: s.label }) : t('settings.scope.userHint')}
+              onClick={() => {
+                setScope(s.id);
+                if (
+                  s.id &&
+                  page !== MACHINE_PAGE &&
+                  !st.defs.some(
+                    (d) =>
+                      d.section === page &&
+                      machineScoped(
+                        d,
+                        machines.find((m) => m.id === s.id)!,
+                      ),
+                  )
+                )
+                  setPage(MACHINE_PAGE);
+              }}
+            >
+              {s.label}
             </button>
+          ))}
+        </div>
+        <div className="settings-main">
+          <nav className="settings-nav" aria-label={t('settings.sections')}>
+            {pages.map((s, i) => (
+              <div key={s.id}>
+                {s.advanced && !pages[i - 1]?.advanced && <div className="settings-nav-heading">{t('settings.section.advanced')}</div>}
+                <button className={!searching && current === s.id ? 'on' : ''} onClick={() => go(s.id)}>
+                  <span className="ellipsis">
+                    {s.id === KEYS_PAGE
+                      ? t('settings.section.keyboard')
+                      : s.id === MACHINE_PAGE
+                        ? t('settings.machine.overview')
+                        : sectionLabel(s.id)}
+                  </span>
+                  {s.id !== KEYS_PAGE && s.id !== MACHINE_PAGE && modifiedIn(s.id) && (
+                    <span className="nav-dot" title={t('settings.modifiedHere')} />
+                  )}
+                </button>
+              </div>
+            ))}
           </nav>
           <div className="settings-body">
             {readOnly && <p className="settings-note">{t('settings.serverReadOnly')}</p>}
             {!st.loaded && <p className="error small">{t('settings.error.network')}</p>}
-            {fileProblems.length > 0 && (page !== KEYS_PAGE || searching) && (
+            {fileProblems.length > 0 && current !== KEYS_PAGE && (
               <div className="settings-problems">
                 <AlertTriangle />
                 <div>
@@ -149,25 +258,30 @@ export function SettingsDialog() {
                 </div>
               </div>
             )}
-            {page === KEYS_PAGE && !searching ? (
-              <KeyboardShortcuts query="" readOnly={readOnly} />
+            {current === KEYS_PAGE && !machine ? (
+              <KeyboardShortcuts query={query} readOnly={readOnly} />
+            ) : searching ? (
+              <>
+                {sections
+                  .filter((s) => matching.some((d) => d.section === s.id))
+                  .map((s) => (
+                    <SectionView
+                      key={s.id}
+                      id={s.id}
+                      defs={matching.filter((d) => d.section === s.id)}
+                      heading
+                      machine={machine}
+                      readOnly={readOnly}
+                    />
+                  ))}
+                {!machine && <KeyboardShortcuts query={query} readOnly={readOnly} embedded />}
+                {matching.length === 0 && <p className="muted pad">{t('settings.noMatch')}</p>}
+              </>
+            ) : current === MACHINE_PAGE && machine ? (
+              <MachinePage m={machine} readOnly={readOnly} />
             ) : (
-              sections
-                .filter((s) => (searching ? defs.some((d) => d.section === s.id && matchesSearch(d, query)) : s.id === page))
-                .map((s) => (
-                  <SectionView
-                    key={s.id}
-                    id={s.id}
-                    defs={defs.filter((d) => d.section === s.id && (!searching || matchesSearch(d, query)))}
-                    values={st.values}
-                    problems={st.problems}
-                    readOnly={readOnly}
-                    heading={searching}
-                  />
-                ))
+              <SectionView id={current} defs={defs.filter((d) => d.section === current)} machine={machine} readOnly={readOnly} />
             )}
-            {searching && <KeyboardShortcuts query={query} readOnly={readOnly} />}
-            {st.file && !searching && <p className="settings-file muted small">{t('settings.file', { file: st.file })}</p>}
           </div>
         </div>
       </div>
@@ -175,92 +289,197 @@ export function SettingsDialog() {
   );
 }
 
+/** Opens settings.json (or keybindings.json) in the VS Code panel of the
+ * core's own machine, where the file is; without one (a core on Windows,
+ * read-only mode) it copies the file's path. */
+function OpenFileButton({ file, which }: { file: string; which: 'settings' | 'keys' }) {
+  const local = useStore((s) => s.order.map((id) => s.machines[id]).find((m) => m?.kind === 'local' && m.status === 'ready' && !m.code));
+  const readOnly = useStore((s) => s.readOnly);
+  if (!file) return null;
+  const name = file.split(/[\\/]/).pop() ?? file;
+  const canOpen = !!local && !readOnly;
+  return (
+    <button
+      className="icon"
+      title={t(canOpen ? 'settings.openFile' : 'settings.copyFilePath', { file: name, path: file })}
+      aria-label={t(canOpen ? 'settings.openFile' : 'settings.copyFilePath', { file: name, path: file })}
+      data-file={which}
+      onClick={() => {
+        if (canOpen) {
+          useStore.getState().openSettings(false);
+          actions.openPath(local.id, file, 1);
+        } else {
+          void navigator.clipboard?.writeText(file).catch(() => {});
+          useStore.getState().toast(t('transfers.copied', { path: file }));
+        }
+      }}
+    >
+      <FileJson />
+    </button>
+  );
+}
+
 function SectionView({
   id,
   defs,
-  values,
-  problems,
-  readOnly,
   heading,
+  machine,
+  readOnly,
 }: {
   id: string;
   defs: SettingDef[];
-  values: Record<string, SettingState>;
-  problems: SettingProblem[];
+  heading?: boolean;
+  machine?: MachineState;
   readOnly: boolean;
-  heading: boolean;
 }) {
-  const perMachine = defs.filter((d) => d.scope !== 'app');
+  const values = useSettings((s) => s.values);
+  const problems = useSettings((s) => s.problems);
+  const [error, setError] = useState<string>();
+  const rows = defs.filter(shownInRows);
+  const schemes = rows.filter((d) => d.key.startsWith('terminal.colorScheme.'));
   return (
     <section className="settings-section">
       {heading && <h3>{sectionLabel(id)}</h3>}
-      {defs.map((d) => (
-        <SettingRow key={d.key} d={d} state={values[d.key]} problems={problems.filter((p) => p.key === d.key)} readOnly={readOnly} />
-      ))}
-      {perMachine.length > 0 && <MachineSettings defs={perMachine} values={values} readOnly={readOnly} gui={id === 'gui'} />}
+      {!heading && <h2 className="settings-page-title">{sectionLabel(id)}</h2>}
+      {machine && !heading && <p className="settings-note">{t('settings.scope.machineNote', { machine: machine.label })}</p>}
+      {error && <p className="error small">{error}</p>}
+      {/* The colors page: a scheme and own colors per theme. */}
+      {!machine &&
+        schemes.map((d) => (
+          <ThemeColors key={d.key} theme={d.key.endsWith('.dark') ? 'dark' : 'light'} scheme={d} readOnly={readOnly} onError={setError} />
+        ))}
+      {rows
+        .filter((d) => !schemes.includes(d))
+        .map((d, i, list) => (
+          <div key={d.key}>
+            {d.group && d.group !== list[i - 1]?.group && <h4 className="settings-group">{groupLabel(d.group)}</h4>}
+            <SettingRow
+              d={d}
+              state={values[d.key]}
+              problems={problems.filter((p) => p.key === d.key && (machine ? p.machine === machine.id : !p.machine))}
+              machine={machine}
+              readOnly={readOnly}
+            />
+          </div>
+        ))}
+      {id === 'gui' && machine && machine.kind !== 'local' && (
+        <div className="setting">
+          <div className="setting-head">
+            <span className="setting-title">{t('gui.display')}</span>
+          </div>
+          <div className="setting-control row-gap">
+            <GuiMachineStatus m={machine.id} />
+            <GuiEnableButton m={machine.id} disabled={readOnly} />
+          </div>
+        </div>
+      )}
     </section>
   );
 }
 
+/** One setting in a scope: in the user's, its global value (the default
+ * until set); in a machine's, the machine's own value, or the user's value
+ * it follows until set. */
 function SettingRow({
   d,
   state,
   problems,
+  machine,
   readOnly,
 }: {
   d: SettingDef;
   state?: SettingState;
   problems: SettingProblem[];
+  machine?: MachineState;
   readOnly: boolean;
 }) {
   const [error, setError] = useState<string>();
-  const value = state?.value ?? d.default;
+  const own = machine ? state?.machines?.[machine.id] : undefined;
+  const global = state?.value ?? d.default;
+  const value = machine ? (own ?? global) : global;
   const locked = !!state?.locked;
-  const modified = state?.source === 'global';
+  const modified = machine ? own !== undefined : state?.source === 'global';
   const disabled = readOnly || locked;
+  const otherMachines = useStore(
+    useShallow((s) =>
+      machine
+        ? []
+        : Object.keys(state?.machines ?? {})
+            .map((id) => s.machines[id])
+            .filter(Boolean),
+    ),
+  );
   // The language is read once, when the page starts.
   const done = (err: string | undefined) => {
     if (err) setError(err);
     else if (d.key === 'appearance.language') location.reload();
   };
-  const save = async (v: SettingValue) => {
+  const save = async (v: SettingValue | undefined) => {
     setError(undefined);
-    if (JSON.stringify(v) !== JSON.stringify(value)) done(await setSetting(d.key, v));
+    if (v === undefined) return done(await resetSetting(d.key, machine?.id));
+    if (JSON.stringify(v) !== JSON.stringify(machine ? own : value)) done(await setSetting(d.key, v, machine?.id));
   };
-  const reset = async () => {
-    setError(undefined);
-    done(await resetSetting(d.key));
-  };
+  const reset = () => void save(undefined);
+  const menu = (): MenuEntry[] => [
+    { label: t('settings.reset'), disabled: disabled || !modified, run: reset },
+    'sep',
+    { label: t('settings.copyId'), run: () => void navigator.clipboard?.writeText(d.key).catch(() => {}) },
+    {
+      label: t('settings.copyJson'),
+      run: () => void navigator.clipboard?.writeText(`"${d.key}": ${JSON.stringify(value)}`).catch(() => {}),
+    },
+  ];
   const description = desc(d.key);
   return (
-    <div className={`settings-row ${d.type === 'list' ? 'wide' : ''}`} data-key={d.key}>
-      <div className="settings-label">
-        <div className="settings-name">
-          {modified && <span className="settings-modified" title={t('settings.modified')} />}
-          <span>{settingLabel(d.key)}</span>
-          <span className="settings-key">{d.key}</span>
-        </div>
-        {description && <div className="muted small">{description}</div>}
-        {locked && (
-          <div className="settings-locked small">
-            <Lock /> {t('settings.lockedByFlag', { flag: `--${d.flag ?? d.key}` })}
-          </div>
-        )}
-        {problems
-          .filter((p) => !p.machine)
-          .map((p, i) => (
-            <div key={i} className="error small">
-              {t('settings.problemInFile', { problem: problemText({ ...p, key: undefined }) })}
-            </div>
-          ))}
-        {error && <div className="error small">{error}</div>}
-      </div>
-      <div className="settings-control">
-        <Control d={d} value={value} disabled={disabled} onChange={save} />
-        <button className="icon" title={t('settings.reset')} disabled={disabled || !modified} onClick={reset}>
-          <RotateCcw />
+    <div
+      className={`setting ${modified ? 'modified' : ''}`}
+      data-key={d.key}
+      onContextMenu={(e) => !(e.target as HTMLElement).closest('input, select') && openMenu(e, menu())}
+    >
+      <div className="setting-head">
+        <span className="setting-title">{settingLabel(d.key)}</span>
+        {modified && <span className="setting-badge">{t(machine ? 'settings.ownValue' : 'settings.modified')}</span>}
+        <button
+          className="icon setting-more"
+          title={t('settings.more')}
+          aria-label={t('settings.more')}
+          onClick={(e) => openMenu(e, menu())}
+        >
+          <Ellipsis />
         </button>
       </div>
+      {description && d.type !== 'bool' && <div className="setting-desc">{description}</div>}
+      <div className="setting-control">
+        {machine ? (
+          <MachineControl d={d} own={own} inherited={global} disabled={disabled} onChange={save} />
+        ) : (
+          <Control d={d} value={value} disabled={disabled} onChange={save} />
+        )}
+      </div>
+      {locked && (
+        <div className="settings-locked small">
+          <Lock /> {t('settings.lockedByFlag', { flag: `--${d.flag ?? d.key}` })}
+        </div>
+      )}
+      {otherMachines.length > 0 && (
+        <div className="muted small">
+          {t('settings.alsoModifiedIn')}{' '}
+          {otherMachines.map((m, i) => (
+            <span key={m.id}>
+              {i > 0 && ', '}
+              <button className="link" onClick={() => useStore.getState().openSettings({ machine: m.id, page: d.section })}>
+                {m.label}
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      {problems.map((p, i) => (
+        <div key={i} className="error small">
+          {t('settings.problemInFile', { problem: problemText({ ...p, key: undefined, machine: undefined }) })}
+        </div>
+      ))}
+      {error && <div className="error small">{error}</div>}
     </div>
   );
 }
@@ -279,17 +498,13 @@ function Control({
   switch (d.type) {
     case 'bool':
       return (
-        <button
-          role="switch"
-          aria-checked={value === true}
-          aria-label={settingLabel(d.key)}
-          className={`toggle ${value === true ? 'on' : ''}`}
-          disabled={disabled}
-          onClick={() => onChange(!value)}
-        />
+        <label className="setting-check">
+          <input type="checkbox" checked={value === true} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
+          <span>{desc(d.key) ?? settingLabel(d.key)}</span>
+        </label>
       );
     case 'enum':
-      return (d.enum ?? []).length > 3 ? (
+      return (d.enum ?? []).length > 4 ? (
         <select value={String(value)} disabled={disabled} aria-label={settingLabel(d.key)} onChange={(e) => onChange(e.target.value)}>
           {(d.enum ?? []).map((o) => (
             <option key={o} value={o}>
@@ -316,28 +531,72 @@ function Control({
     case 'number':
       return <NumberInput d={d} value={value as number} disabled={disabled} onChange={onChange} />;
     case 'color':
-      return <ColorInput label={settingLabel(d.key)} value={value as string} disabled={disabled} onChange={onChange} />;
-    case 'list':
-      return d.item === 'color' ? (
-        <Palette d={d} value={value as string[]} disabled={disabled} onChange={onChange} />
-      ) : (
-        <TextInput
-          d={d}
-          value={(value as string[]).join(', ')}
+      return (
+        <input
+          type="color"
+          className="settings-color"
+          value={String(value)}
           disabled={disabled}
-          onChange={(v) =>
-            onChange(
-              v
-                .split(',')
-                .map((s) => s.trim())
-                .filter(Boolean),
-            )
-          }
+          aria-label={settingLabel(d.key)}
+          onChange={(e) => onChange(e.target.value)}
         />
       );
+    case 'list':
+      return <ListEditor d={d} value={value as string[]} disabled={disabled} onChange={onChange} />;
     default:
-      return <TextInput d={d} value={String(value)} disabled={disabled} onChange={onChange} />;
+      return d.key === 'terminal.fontFamily' ? (
+        <FontPicker value={String(value)} disabled={disabled} onChange={onChange} />
+      ) : (
+        <TextInput d={d} value={String(value)} disabled={disabled} onChange={onChange} />
+      );
   }
+}
+
+/** A machine's own value: "Same as User (value)" or a value of its own. */
+function MachineControl({
+  d,
+  own,
+  inherited,
+  disabled,
+  onChange,
+}: {
+  d: SettingDef;
+  own?: SettingValue;
+  inherited: SettingValue;
+  disabled: boolean;
+  onChange(v: SettingValue | undefined): void;
+}) {
+  if (d.type === 'bool' || d.type === 'enum') {
+    const options = d.type === 'bool' ? ['true', 'false'] : (d.enum ?? []);
+    const parse = (raw: string): SettingValue => (d.type === 'bool' ? raw === 'true' : raw);
+    return (
+      <select
+        value={own === undefined ? '' : String(own)}
+        disabled={disabled}
+        aria-label={settingLabel(d.key)}
+        onChange={(e) => onChange(e.target.value === '' ? undefined : parse(e.target.value))}
+      >
+        <option value="">{t('settings.inherit', { value: valueLabel(d, inherited) })}</option>
+        {options.map((o) => (
+          <option key={o} value={o}>
+            {valueLabel(d, parse(o))}
+          </option>
+        ))}
+      </select>
+    );
+  }
+  // Text: empty follows the user's value.
+  return (
+    <TextInput
+      d={d}
+      value={own === undefined ? '' : String(own)}
+      placeholder={t('settings.inherit', {
+        value: String(inherited) || (maybe(`settings.${d.key}.placeholder`) ?? t('settings.empty')),
+      })}
+      disabled={disabled}
+      onChange={(v) => onChange(v === '' ? undefined : v)}
+    />
+  );
 }
 
 /** Escape restores a field without closing the dialog. */
@@ -347,7 +606,19 @@ function stopEscape(e: React.KeyboardEvent) {
 }
 
 /** A text field that saves on Enter or blur; Escape restores the value. */
-function TextInput({ d, value, disabled, onChange }: { d: SettingDef; value: string; disabled: boolean; onChange(v: string): void }) {
+function TextInput({
+  d,
+  value,
+  placeholder,
+  disabled,
+  onChange,
+}: {
+  d: SettingDef;
+  value: string;
+  placeholder?: string;
+  disabled: boolean;
+  onChange(v: string): void;
+}) {
   const [draft, setDraft] = useState(value);
   useEffect(() => setDraft(value), [value]);
   const save = () => draft.trim() !== value && onChange(draft.trim());
@@ -359,7 +630,7 @@ function TextInput({ d, value, disabled, onChange }: { d: SettingDef; value: str
       disabled={disabled}
       spellCheck={false}
       aria-label={settingLabel(d.key)}
-      placeholder={hasMessage(ph) ? t(ph) : String(d.default)}
+      placeholder={placeholder ?? (hasMessage(ph) ? t(ph) : String(d.default))}
       onChange={(e) => setDraft(e.target.value)}
       onKeyDown={(e) => {
         if (e.key === 'Enter') save();
@@ -373,157 +644,249 @@ function TextInput({ d, value, disabled, onChange }: { d: SettingDef; value: str
   );
 }
 
-/** A number field with the definition's range; saves on Enter or blur. */
+/** How a number is written: grouped digits, no exponent. */
+export function formatNumber(n: number | undefined): string {
+  return n === undefined ? '' : n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
+/** A number with − and + buttons of the definition's step, its unit and its
+ * range; typed values are saved on Enter or blur, out-of-range ones are
+ * brought into the range. */
 function NumberInput({ d, value, disabled, onChange }: { d: SettingDef; value: number; disabled: boolean; onChange(v: number): void }) {
   const [draft, setDraft] = useState(String(value));
   useEffect(() => setDraft(String(value)), [value]);
-  const save = () => {
-    const n = Number(draft);
+  const step = d.step ?? 1;
+  const clamp = (n: number) => {
+    const r = Math.min(d.max ?? Infinity, Math.max(d.min ?? -Infinity, n));
+    return d.integer ? Math.round(r) : Math.round(r * 1000) / 1000;
+  };
+  const save = (n: number) => {
+    const v = clamp(n);
+    setDraft(String(v));
+    if (v !== value) onChange(v);
+  };
+  const commit = () => {
+    const n = Number(draft.replace(/[\s,]/g, ''));
     if (draft.trim() === '' || !Number.isFinite(n)) setDraft(String(value));
-    else if (n !== value) onChange(n);
+    else save(n);
   };
+  const unitKey = `settings.${d.key}.unit`;
+  const unit = hasMessage(unitKey) ? t(unitKey) : '';
+  const range =
+    d.min !== undefined && d.max !== undefined ? t('settings.range', { min: formatNumber(d.min), max: formatNumber(d.max) }) : '';
   return (
-    <input
-      className="settings-input settings-number"
-      type="number"
-      value={draft}
-      min={d.min}
-      max={d.max}
-      step={d.integer ? 1 : 'any'}
-      disabled={disabled}
-      aria-label={settingLabel(d.key)}
-      onChange={(e) => setDraft(e.target.value)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') save();
-        if (e.key === 'Escape') {
-          stopEscape(e);
-          setDraft(String(value));
-        }
-      }}
-      onBlur={save}
-    />
-  );
-}
-
-/** A color well and its hex value; the pick is saved once it rests. */
-function ColorInput({ label, value, disabled, onChange }: { label: string; value: string; disabled: boolean; onChange(v: string): void }) {
-  const [draft, setDraft] = useState(value);
-  const timer = useRef<number | undefined>(undefined);
-  useEffect(() => setDraft(value), [value]);
-  useEffect(() => () => clearTimeout(timer.current), []);
-  const pick = (v: string) => {
-    setDraft(v);
-    clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => v !== value && onChange(v), 300);
-  };
-  return (
-    <span className="settings-color" title={draft}>
-      <input type="color" value={draft} disabled={disabled} aria-label={label} onChange={(e) => pick(e.target.value)} />
-    </span>
-  );
-}
-
-/** The 16 ANSI colors: black to white, then their bright variants. */
-function Palette({ d, value, disabled, onChange }: { d: SettingDef; value: string[]; disabled: boolean; onChange(v: string[]): void }) {
-  return (
-    <div className="settings-palette">
-      {value.map((c, i) => (
-        <ColorInput
-          key={i}
-          label={`${settingLabel(d.key)} ${i}`}
-          value={c}
-          disabled={disabled}
-          onChange={(v) => onChange(value.map((x, j) => (j === i ? v : x)))}
-        />
-      ))}
+    <div className="stepper" title={range}>
+      <button
+        className="icon"
+        disabled={disabled || value <= (d.min ?? -Infinity)}
+        aria-label={t('settings.decrease')}
+        onClick={() => save(value - step)}
+      >
+        <Minus />
+      </button>
+      <input
+        className="settings-input stepper-value"
+        inputMode="decimal"
+        value={draft}
+        disabled={disabled}
+        aria-label={settingLabel(d.key)}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') commit();
+          else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+            e.preventDefault();
+            save(value + (e.key === 'ArrowUp' ? step : -step));
+          } else if (e.key === 'Escape') {
+            stopEscape(e);
+            setDraft(String(value));
+          }
+        }}
+        onBlur={commit}
+      />
+      <button
+        className="icon"
+        disabled={disabled || value >= (d.max ?? Infinity)}
+        aria-label={t('settings.increase')}
+        onClick={() => save(value + step)}
+      >
+        <Plus />
+      </button>
+      {unit && <span className="muted small">{unit}</span>}
+      {range && <span className="muted small stepper-range">{range}</span>}
     </div>
   );
 }
 
-/** One row per machine for the settings that can differ per machine: each
- * machine follows the global value or has its own. The program windows
- * section also shows each machine's display and enables it in open panes. */
-function MachineSettings({
-  defs,
-  values,
-  readOnly,
-  gui,
-}: {
-  defs: SettingDef[];
-  values: Record<string, SettingState>;
-  readOnly: boolean;
-  gui: boolean;
-}) {
-  const machines = useStore(useShallow((s) => s.order.map((id) => s.machines[id]).filter(Boolean)));
-  const [error, setError] = useState<string>();
-  const remoteOnly = defs.every((d) => d.scope === 'remote-machine');
-  const rows = machines.filter((m) => !remoteOnly || m.kind !== 'local');
-  if (rows.length === 0) return null;
-  const save = async (d: SettingDef, m: string, raw: string) => {
-    setError(undefined);
-    const err = raw === '' ? await resetSetting(d.key, m) : await setSetting(d.key, parseOption(d, raw), m);
-    if (err) setError(err);
+/** A list of strings: the offered values as checkboxes, other values as
+ * removable chips, and a field that adds one. */
+function ListEditor({ d, value, disabled, onChange }: { d: SettingDef; value: string[]; disabled: boolean; onChange(v: string[]): void }) {
+  const [draft, setDraft] = useState('');
+  const options = d.options ?? [];
+  const others = value.filter((v) => !options.includes(v));
+  const toggle = (o: string, on: boolean) => onChange(on ? [...value, o] : value.filter((v) => v !== o));
+  const add = () => {
+    const v = draft.trim();
+    setDraft('');
+    if (v && !value.includes(v)) onChange([...value, v]);
   };
   return (
-    <div className="settings-machines">
-      <div className="settings-machines-head">
-        <span>{t('settings.perMachine')}</span>
-        <span className="muted small">{t('settings.perMachine.desc')}</span>
-      </div>
-      <div
-        className="settings-machines-grid"
-        style={{ gridTemplateColumns: `minmax(8rem, 1fr) repeat(${defs.length}, auto)${gui ? ' auto' : ''}` }}
-      >
-        <span className="muted small">{t('settings.machine')}</span>
-        {defs.map((d) => (
-          <span key={d.key} className="muted small">
-            {settingLabel(d.key)}
+    <div className="list-editor">
+      {options.length > 0 && (
+        <div className="list-options">
+          {options.map((o) => (
+            <label key={o} className={`list-option ${value.includes(o) ? 'on' : ''}`}>
+              <input type="checkbox" checked={value.includes(o)} disabled={disabled} onChange={(e) => toggle(o, e.target.checked)} />
+              {o}
+            </label>
+          ))}
+        </div>
+      )}
+      <div className="list-items">
+        {others.map((v) => (
+          <span key={v} className="list-chip">
+            {v}
+            {!disabled && (
+              <button
+                className="icon"
+                title={t('settings.list.remove', { item: v })}
+                onClick={() => onChange(value.filter((x) => x !== v))}
+              >
+                <X />
+              </button>
+            )}
           </span>
         ))}
-        {gui && <span />}
-        {rows.map((m) => (
-          <div key={m.id} className="settings-machines-row">
-            <span className="settings-machine">
-              <span className="ellipsis">{m.label}</span>
-              {gui && <GuiMachineStatus m={m.id} />}
-            </span>
-            {defs.map((d) => {
-              const st = values[d.key];
-              const own = st?.machines?.[m.id];
-              const disabled = readOnly || !!st?.locked || (d.scope === 'remote-machine' && m.kind === 'local');
-              return (
-                <select
-                  key={d.key}
-                  value={own === undefined ? '' : String(own)}
-                  disabled={disabled}
-                  aria-label={`${m.label} · ${settingLabel(d.key)}`}
-                  onChange={(ev) => save(d, m.id, ev.target.value)}
-                >
-                  <option value="">{t('settings.inherit', { value: valueLabel(d, st?.value ?? d.default) })}</option>
-                  {machineOptions(d).map((o) => (
-                    <option key={o} value={o}>
-                      {valueLabel(d, parseOption(d, o))}
-                    </option>
-                  ))}
-                </select>
-              );
-            })}
-            {gui && <GuiEnableButton m={m.id} disabled={readOnly} />}
-          </div>
-        ))}
+        {!disabled && (
+          <span className="list-add">
+            <input
+              className="settings-input"
+              value={draft}
+              placeholder={maybe(`settings.${d.key}.placeholder`) ?? t('settings.list.addPlaceholder')}
+              aria-label={t('settings.list.add')}
+              spellCheck={false}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') add();
+                if (e.key === 'Escape' && draft) {
+                  stopEscape(e);
+                  setDraft('');
+                }
+              }}
+            />
+            <button disabled={!draft.trim()} onClick={add}>
+              {t('settings.list.add')}
+            </button>
+          </span>
+        )}
       </div>
-      {error && <p className="error small">{error}</p>}
     </div>
   );
 }
 
-/** The values a per-machine select offers. */
-function machineOptions(d: SettingDef): string[] {
-  return d.type === 'bool' ? ['true', 'false'] : (d.enum ?? []);
-}
-
-function parseOption(d: SettingDef, raw: string): SettingValue {
-  return d.type === 'bool' ? raw === 'true' : raw;
+/** A machine's page: its name (renamed in place), address, connection and
+ * troubleshooting. */
+function MachinePage({ m, readOnly }: { m: MachineState; readOnly: boolean }) {
+  const busy = useStore((s) => s.hcBusy[m.id] === true);
+  const sshLogin = useStore((s) => s.sshLogin);
+  const usable = m.status === 'ready' && !readOnly;
+  const [name, setName] = useState(m.label);
+  useEffect(() => setName(m.label), [m.label]);
+  const rename = () => {
+    const v = name.trim();
+    if (v && v !== m.label) void actions.renameMachine(m.id, v);
+    else setName(m.label);
+  };
+  return (
+    <section className="settings-section">
+      <h2 className="settings-page-title">{m.label}</h2>
+      <div className="setting">
+        <div className="setting-head">
+          <span className="setting-title">{t('settings.machine.name')}</span>
+        </div>
+        <div className="setting-control row-gap">
+          {m.kind === 'ssh' && !readOnly ? (
+            <input
+              className="settings-input"
+              value={name}
+              aria-label={t('settings.machine.name')}
+              spellCheck={false}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') rename();
+                if (e.key === 'Escape') {
+                  stopEscape(e);
+                  setName(m.label);
+                }
+              }}
+              onBlur={rename}
+            />
+          ) : (
+            <span>{m.label}</span>
+          )}
+        </div>
+      </div>
+      <div className="setting">
+        <div className="setting-head">
+          <span className="setting-title">{t(m.kind === 'local' ? 'settings.machine.host' : 'settings.machine.target')}</span>
+        </div>
+        <div className="setting-control row-gap">
+          <code>{m.kind === 'local' ? (m.info?.hostname ?? m.label) : (m.target ?? m.label)}</code>
+          {m.kind === 'ssh' && m.target && (
+            <button
+              className="icon"
+              title={t('menu.copyTarget')}
+              aria-label={t('menu.copyTarget')}
+              onClick={() => void navigator.clipboard?.writeText(m.target!).catch(() => {})}
+            >
+              <CopyIcon />
+            </button>
+          )}
+          {m.platform && <span className="muted small">{m.platform}</span>}
+        </div>
+      </div>
+      <div className="setting">
+        <div className="setting-head">
+          <span className="setting-title">{t('settings.machine.status')}</span>
+        </div>
+        <div className="setting-control row-gap">
+          <span className={`mstatus ms-${m.status}`} />
+          <span>{t(`machine.${m.status}` as 'machine.ready')}</span>
+          {!readOnly && !m.code && m.status === 'disabled' && (
+            <button onClick={() => void actions.setMachineEnabled(m.id, true)}>{t('menu.enableMachine')}</button>
+          )}
+          {!readOnly && !m.code && m.status === 'auth_required' && m.kind === 'ssh' && sshLogin && (
+            <button onClick={() => useStore.getState().openAuth(m.id)}>{t('sidebar.authenticate')}</button>
+          )}
+          {!readOnly && !m.code && (m.status === 'auth_required' || m.status === 'error') && (
+            <button onClick={() => conn.retry(m.id)}>{t('sidebar.retry')}</button>
+          )}
+          {!readOnly && !m.code && m.kind === 'ssh' && m.status !== 'disabled' && (
+            <button onClick={() => void actions.setMachineEnabled(m.id, false)}>{t('menu.disableMachine')}</button>
+          )}
+        </div>
+        {m.code && <div className="setting-desc">{codeText(m.code)}</div>}
+      </div>
+      {!m.code && (
+        <>
+          <h4 className="settings-group">{t('menu.troubleshooting')}</h4>
+          <div className="setting">
+            <div className="setting-desc">{t('settings.machine.troubleshootingDesc')}</div>
+            <div className="setting-control row-gap">
+              <button disabled={!usable || busy} onClick={() => void actions.terminalCore(m.id, 'restart')}>
+                {t('menu.restartCore')}
+              </button>
+              <button disabled={!usable || busy} onClick={() => void actions.terminalCore(m.id, 'start')}>
+                {t('menu.startCore')}
+              </button>
+              <button className="danger-text" disabled={!usable || busy} onClick={() => void actions.terminalCore(m.id, 'stop')}>
+                {t('menu.stopCore')}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </section>
+  );
 }
 
 /** How a value is shown: On/Off, an option's label, or the value. */
@@ -532,3 +895,5 @@ export function valueLabel(d: Pick<SettingDef, 'key' | 'type'>, v: SettingValue)
   if (d.type === 'enum') return optionLabel(d.key, String(v));
   return Array.isArray(v) ? v.join(', ') : String(v);
 }
+
+export { colorKeys };
