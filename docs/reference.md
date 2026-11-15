@@ -135,6 +135,7 @@ in the UI; a setting with a scope can have its own value per machine, under
 | `codeServer.install` | `push`, `download`, `existing` | `"push"` | `--code-server-install` | per machine |
 | `codeServer.path` | string | `""` | `--code-server-path` | per machine |
 | `plugins.files.enabled` | `true`, `false` | `true` | – | – |
+| `plugins.git.enabled` | `true`, `false` | `true` | – | – |
 | `plugins.usage.enabled` | `true`, `false` | `true` | – | – |
 | `plugins.vault.enabled` | `true`, `false` | `true` | – | – |
 | `usage.refresh` | `manual`, `1`, `2`, `5`, `15`, `30`, `adaptive` | `"adaptive"` | – | – |
@@ -255,12 +256,14 @@ by `scripts/registry`.
 | `view.zoomReset` | `always` | `cmd+0` | – | `ctrl+0` | – |
 | `view.panel.vault` | `terminal` | – | – | – | – |
 | `view.panel.usage` | `terminal` | – | – | – | – |
+| `view.panel.git` | `terminal` | `ctrl+shift+g` | – | `ctrl+shift+g` | – |
 | `find.open` | `terminal` | `cmd+f` | `cmd+f` | `ctrl+shift+f` | `ctrl+shift+f` |
 | `find.next` | `terminal` | `cmd+g` | – | – | – |
 | `find.previous` | `terminal` | `cmd+shift+g` | – | – | – |
 | `code.open` | `terminal` | `cmd+j` | – | `ctrl+shift+j` | – |
 | `code.diff` | `terminal` | – | – | – | – |
 | `code.gitGraph` | `terminal` | – | – | – | – |
+| `git.graph` | `terminal` | – | – | – | – |
 
 <!-- end of scripts/registry: commands -->
 
@@ -341,6 +344,8 @@ missing here.
 | `GET /api/m/{id}/p/files/stat` | – | The file explorer's poll: size, modification time and kind of 1–200 paths (`?path=`…) ([28](features/28-file-explorer.md)). |
 | `POST /api/m/{id}/p/files/{action}` | writes | The file explorer's changes (`{"path"}`, `{"path", "to"}`, `{"paths", "dir"}` or `{"paths"}`): `mkdir`, `create`, `rename` and `move` (never replacing), `copy`, `trash`, `remove` (for good); audited as `files.<action>`. |
 | `POST /api/m/{id}/p/files/write` | writes | Saves the body (at most 8 MiB) into `?path=` when the file still has `&mtime=&size=` (`&new=1`: is not there, `&force=1`: any); `409 conflict` with its state otherwise. |
+| `GET /api/m/{id}/p/git/{read}` | – | The Git plugin's reads ([31](features/31-git.md)) with their parameters in the query: `repo` (`?path=` a directory), `status`, `log` (`&skip=&limit=&branch=…&remotes=1`), `show` (`&rev=&parent=` or `&rev2=`), `blob` (`&path=&source=worktree\|index\|head\|<rev>&parent=`), `branches`, `tags`, `stashes`, `diffStat`, `watch`, each with `?repo=` the top level. |
+| `POST /api/m/{id}/p/git/{change}` | writes | The Git plugin's changes with a JSON body (at most 5 MiB; `repo` and the action's fields): `stage`, `unstage`, `applyPatch`, `discard`, `commit`, `checkout`, `branchCreate`, `branchDelete`, `branchRename`, `merge`, `rebase`, `abort`, `continue`, `cherryPick`, `revert`, `reset`, `tagCreate`, `tagDelete`, `stashPush`, `stashApply`, `stashPop`, `stashDrop`, `fetch`, `pull`, `push`; audited as `git.<action>`; failures `git_missing`, `not_a_repo`, `bad_ref`, `auth_required`, `conflicts`, `timeout`, `git_failed`. |
 | `GET /api/m/{id}/code/status` | – | Whether the machine's code-server is installed and runs. |
 | `POST /api/m/{id}/code/start` | writes | Installs and starts the machine's code-server. |
 | `POST /api/m/{id}/code/stop` | – | Releases the machine's code-server (allowed read-only: it only stops). |

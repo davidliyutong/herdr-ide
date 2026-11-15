@@ -31,6 +31,7 @@ shortcuts, paths) lives in [reference.md](../reference.md).
 | 28 | [File explorer](28-file-explorer.md) | A tree of the machine's files in the right sidebar following the focused terminal (VS Code's explorer: keys, menu, drags, uploads, the trash), and an editor pane (Monaco) whose saves never overwrite a change made on the machine. |
 | 29 | [AI usage](29-ai-usage.md) | The AI subscriptions signed in on the machines (Claude, Codex, Grok, Antigravity, Kimi Code, DeepSeek): windows, resets, pace, credits and balances per account across machines, status pages, alerts, and the local logs' cost at API prices. |
 | 30 | [Variable vault](30-variable-vault.md) | Environment variables encrypted on the core host (key in the system keychain or from a passphrase) that coding agents on every machine read through an MCP server, per machine allowed or approved in the UI. |
+| 31 | [Git](31-git.md) | VS Code's Source Control and the Git Graph extension without VS Code: a panel for the focused pane's repository (stage, commit, branches, stashes, fetch, pull, push), a graph pane with lanes, badges, details and context menus, diffs in Monaco with selected ranges staged as patches; git run with fixed arguments on machines. |
 
 ## Writing a feature document
 

@@ -105,6 +105,7 @@ on macOS) shows the panel shown last or hides it.
 | `files` | `plugins.files.enabled` | The file explorer's panel and its editor pane, with Monaco loaded on first use ([28](28-file-explorer.md)). |
 | `vault` | `plugins.vault.enabled` | The variable vault: its panel, approval prompts, the op `vault` and the `mcp` command ([30](30-variable-vault.md)). |
 | `usage` | `plugins.usage.enabled` | The AI usage panel, its status bar item and its scheduler in the core ([29](29-ai-usage.md)). |
+| `git` | `plugins.git.enabled` | Source Control's panel, the graph and diff panes, the file explorer's decorations of changed files ([31](31-git.md)). |
 
 ## Alternatives considered
 

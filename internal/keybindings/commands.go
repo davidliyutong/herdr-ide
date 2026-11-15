@@ -171,6 +171,8 @@ var Commands = func() []Command {
 		cmd("view.panel.vault", "view"),
 		// The AI usage plugin's panel (web/src/plugins/usage).
 		cmd("view.panel.usage", "view"),
+		// The Git plugin's panel, with VS Code's key for its Source Control.
+		cmd("view.panel.git", "view", on(macApp, "ctrl+shift+g"), on(pcApp, "ctrl+shift+g")),
 
 		cmd("find.open", "find", on(macAll, "cmd+f"), on(pcAll, "ctrl+shift+f")),
 		cmd("find.next", "find", on(macApp, "cmd+g")),
@@ -180,6 +182,8 @@ var Commands = func() []Command {
 		cmd("code.open", "code", on(macApp, "cmd+j"), on(pcApp, "ctrl+shift+j")),
 		cmd("code.diff", "code"),
 		cmd("code.gitGraph", "code"),
+		// The Git plugin's graph pane.
+		cmd("git.graph", "code"),
 	)
 	return out
 }()

@@ -236,6 +236,11 @@
       "when": "terminal"
     },
     {
+      "id": "view.panel.git",
+      "section": "view",
+      "when": "terminal"
+    },
+    {
       "id": "find.open",
       "section": "find",
       "when": "terminal"
@@ -264,6 +269,11 @@
       "id": "code.gitGraph",
       "section": "code",
       "when": "terminal"
+    },
+    {
+      "id": "git.graph",
+      "section": "code",
+      "when": "terminal"
     }
   ],
   "i18n": [
@@ -279,6 +289,7 @@
     "command.find.next",
     "command.find.open",
     "command.find.previous",
+    "command.git.graph",
     "command.pane.back",
     "command.pane.close",
     "command.pane.focusDown",
@@ -314,6 +325,7 @@
     "command.tab.select8",
     "command.tab.select9",
     "command.view.panel.files",
+    "command.view.panel.git",
     "command.view.panel.usage",
     "command.view.panel.vault",
     "command.view.togglePanel",
@@ -356,6 +368,7 @@
     "settings.notifications.sound",
     "settings.notifications.system",
     "settings.plugins.files.enabled",
+    "settings.plugins.git.enabled",
     "settings.plugins.usage.enabled",
     "settings.plugins.vault.enabled",
     "settings.section.appearance",
@@ -651,6 +664,11 @@
         "when": "always"
       },
       {
+        "key": "ctrl+shift+g",
+        "command": "view.panel.git",
+        "when": "terminal"
+      },
+      {
         "key": "cmd+f",
         "command": "find.open",
         "when": "terminal"
@@ -805,6 +823,11 @@
         "when": "always"
       },
       {
+        "key": "ctrl+shift+g",
+        "command": "view.panel.git",
+        "when": "terminal"
+      },
+      {
         "key": "ctrl+shift+f",
         "command": "find.open",
         "when": "terminal"
@@ -844,6 +867,7 @@
     "notifications.sound": true,
     "notifications.system": true,
     "plugins.files.enabled": true,
+    "plugins.git.enabled": true,
     "plugins.usage.enabled": true,
     "plugins.vault.enabled": true,
     "terminal.bell": "visual",

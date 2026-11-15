@@ -110,6 +110,16 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   download, open in a terminal or VS Code. A click shows a file in Quick
   Look; a double click opens text in an editor pane (Monaco) whose saves
   never overwrite a change made on the machine since it was opened.
+- **Git.** VS Code's Source Control and Git Graph without VS Code, for the
+  focused pane's repository on any machine: a panel (Ctrl+Shift+G in the
+  desktop app) with the branch, ahead/behind, fetch, pull and push, staged
+  and unstaged changes as a list or tree, commits (⌘/Ctrl+Enter, amend) and
+  stashes; a graph pane with lanes, branch and tag badges, search, a
+  branch filter, a commit's files and context menus (checkout, branches,
+  tags, merge, rebase, cherry-pick, revert, reset); diffs in Monaco, side by
+  side or inline, where selected ranges are staged, unstaged or discarded
+  and the working tree's side is editable. Changed files are colored in the
+  file explorer ([31](docs/features/31-git.md)).
 - **Variable vault.** API keys and other environment variables, encrypted
   on the core's computer (the key in the system keychain, or from a
   passphrase), for coding agents on every machine: Claude Code, Codex and

@@ -7,6 +7,7 @@ import { guiPlugin } from './gui';
 import { filesPlugin } from './files';
 import { usagePlugin } from './usage';
 import { vaultPlugin } from './vault';
+import { gitPlugin } from './git';
 
 setPanelCommand((panel) => ({ run: () => togglePanel(panel.id) }));
-definePlugins([transfersPlugin, guiPlugin, filesPlugin, usagePlugin, vaultPlugin]);
+definePlugins([transfersPlugin, guiPlugin, filesPlugin, gitPlugin, usagePlugin, vaultPlugin]);
