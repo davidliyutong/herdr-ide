@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { ChevronDown, ChevronRight, Plus, Settings } from 'lucide-react';
-import { useStore } from '../state/store';
+import { ChevronDown, ChevronRight, Ellipsis, FolderPlus, ServerPlus, Settings } from 'lucide-react';
+import { SIDEBAR_WIDTH, useStore } from '../state/store';
 import { terms, useTerms } from '../state/terms';
 import { conn } from '../lib/conn';
 import { actions, attentionList } from '../actions';
@@ -46,11 +46,31 @@ export function Sidebar() {
       <div className="sidebar-head">
         <span className="brand">{APP_NAME}</span>
         {!readOnly && (
-          <button className="icon" title={withKey(t('sidebar.newWorkspace'), 'workspace.new')} onClick={() => void actions.newWorkspace()}>
-            <Plus />
+          <button
+            className="icon"
+            title={withKey(t('command.workspace.new'), 'workspace.new')}
+            aria-label={t('command.workspace.new')}
+            onClick={() => void actions.newWorkspace()}
+          >
+            <FolderPlus />
           </button>
         )}
-        <button className="icon" title={withKey(t('settings.open'), 'app.settings')} onClick={() => useStore.getState().openSettings(true)}>
+        {!readOnly && (
+          <button
+            className="icon"
+            title={t('menu.addMachine')}
+            aria-label={t('menu.addMachine')}
+            onClick={() => useStore.getState().openAddMachine(true)}
+          >
+            <ServerPlus />
+          </button>
+        )}
+        <button
+          className="icon"
+          title={withKey(t('command.app.settings'), 'app.settings')}
+          aria-label={t('command.app.settings')}
+          onClick={() => useStore.getState().openSettings({})}
+        >
           <Settings />
         </button>
       </div>
@@ -64,7 +84,46 @@ export function Sidebar() {
         {order.map((id) => machines[id] && <MachineItem key={id} m={machines[id]} />)}
       </div>
       {dropOn && <div className="sidebar-drop">{t('sidebar.dropFolders', { machine: dropOn })}</div>}
+      <SidebarResizer />
     </aside>
+  );
+}
+
+/** The sidebar's right edge: dragging it sets the width (kept per
+ * browser), dragging it far left hides the sidebar, a double click gives
+ * the default width back. */
+function SidebarResizer() {
+  const onPointerDown = (ev: React.PointerEvent) => {
+    if (ev.button !== 0) return;
+    ev.preventDefault();
+    const s = useStore.getState();
+    const start = ev.clientX;
+    const startW = s.sidebarWidth;
+    document.body.classList.add('resizing');
+    const width = (e: PointerEvent) => startW + e.clientX - start;
+    const move = (e: PointerEvent) => useStore.getState().setSidebarWidth(width(e));
+    const up = (e: PointerEvent) => {
+      document.body.classList.remove('resizing');
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      // Dropped well below the narrowest width: hidden, at the width it had.
+      if (width(e) < SIDEBAR_WIDTH.min - 60) {
+        useStore.getState().setSidebarWidth(startW);
+        useStore.getState().toggleSidebar();
+      }
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+  return (
+    <div
+      className="sidebar-resizer"
+      role="separator"
+      aria-orientation="vertical"
+      title={t('sidebar.resize')}
+      onPointerDown={onPointerDown}
+      onDoubleClick={() => useStore.getState().setSidebarWidth(SIDEBAR_WIDTH.def)}
+    />
   );
 }
 
@@ -76,7 +135,7 @@ function Inbox() {
   const items = all.filter((i) => i.status === 'blocked' || i.status === 'done');
   const working = all.filter((i) => i.status === 'working').length;
   return (
-    <div className="inbox">
+    <div className="inbox" aria-label={t('sidebar.agents')}>
       <div className="section-title">
         {t('sidebar.agents')}
         <span className="muted">
@@ -133,11 +192,21 @@ function MachineItem({ m }: { m: MachineState }) {
     <div className="machine">
       <div
         className="machine-head"
-        onClick={() => !renamingMachine && setOpen(!open)}
+        // A click folds or unfolds; the second click of a double click
+        // leaves it as the first left it, and the double click renames.
+        onClick={(e) => !renamingMachine && e.detail < 2 && !(e.target as HTMLElement).closest('button') && setOpen(!open)}
+        onDoubleClick={(e) => {
+          if (renamingMachine || readOnly || m.kind !== 'ssh' || (e.target as HTMLElement).closest('button')) return;
+          setOpen((o) => !o);
+          actions.startRename('machine', m.id, m.id);
+        }}
         onContextMenu={(e) => !renamingMachine && openMenu(e, machineMenu(m.id))}
-        title={machineProblem(m) || m.platform}
+        title={[m.kind === 'ssh' && !readOnly ? t('sidebar.machineHint', { label: m.label }) : m.label, machineProblem(m) || m.platform]
+          .filter(Boolean)
+          .join('\n')}
       >
-        <span className={`mstatus ms-${m.status}`} />
+        <span className="caret">{open ? <ChevronDown /> : <ChevronRight />}</span>
+        <span className={`mstatus ms-${m.status}`} title={t(`machine.${m.status}` as MessageKey)} />
         {renamingMachine ? (
           <InlineEdit
             value={m.label}
@@ -149,8 +218,22 @@ function MachineItem({ m }: { m: MachineState }) {
         ) : (
           <span className="machine-label ellipsis">{m.label}</span>
         )}
-        <span className="muted small">{m.platform}</span>
-        <span className="caret">{open ? <ChevronDown /> : <ChevronRight />}</span>
+        {!readOnly && (
+          <button
+            className="icon row-action"
+            title={t('sidebar.machineActions')}
+            aria-label={t('sidebar.machineActions')}
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              openMenu(
+                { clientX: r.left, clientY: r.bottom, preventDefault() {}, stopPropagation: () => e.stopPropagation() },
+                machineMenu(m.id),
+              );
+            }}
+          >
+            <Ellipsis />
+          </button>
+        )}
       </div>
       {open && (
         <div className="machine-body" data-m={m.id}>
@@ -205,7 +288,9 @@ function MachineItem({ m }: { m: MachineState }) {
                 key={w.id}
                 className={`ws-item ${selected ? 'selected' : ''}`}
                 onClick={() => actions.selectWorkspace(m.id, w.id)}
-                onDoubleClick={() => !readOnly && actions.startRename('workspace', m.id, w.id)}
+                onDoubleClick={(e) =>
+                  !readOnly && !(e.target as HTMLElement).closest('button') && actions.startRename('workspace', m.id, w.id)
+                }
                 onPointerDown={(e) => {
                   if (e.button !== 0 || readOnly || editing || (e.target as HTMLElement).closest('button, input')) return;
                   startWorkspaceDrag(e, { m: m.id, ws: w.id, label: name });
@@ -233,12 +318,34 @@ function MachineItem({ m }: { m: MachineState }) {
                   {agg && <StatusDot status={agg} />}
                   <span className="muted small">{w.tabs.length > 1 ? t('sidebar.tabs', { n: w.tabs.length }) : ''}</span>
                 </span>
+                {!readOnly && !editing && (
+                  <button
+                    className="icon row-action"
+                    title={t('sidebar.workspaceActions')}
+                    aria-label={t('sidebar.workspaceActions')}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const r = e.currentTarget.getBoundingClientRect();
+                      openMenu(
+                        { clientX: r.left, clientY: r.bottom, preventDefault() {}, stopPropagation() {} },
+                        workspaceMenu(m.id, w.id),
+                      );
+                    }}
+                  >
+                    <Ellipsis />
+                  </button>
+                )}
               </div>
             );
           })}
           {layout && !readOnly && (
-            <div className="ws-item add" onClick={() => void actions.newWorkspace(m.id)}>
-              {t('sidebar.addWorkspace')}
+            <div
+              className="ws-item add"
+              title={t('sidebar.newWorkspaceOn', { machine: m.label })}
+              onClick={() => void actions.newWorkspace(m.id)}
+            >
+              <FolderPlus />
+              {t('command.workspace.new')}
             </div>
           )}
         </div>

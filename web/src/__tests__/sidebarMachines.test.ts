@@ -46,7 +46,7 @@ describe('Sidebar machines', () => {
     const core = new FakeCore();
     core.install();
     await settle();
-    const start = () => Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Start terminal core');
+    const start = () => Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Start Terminal Service');
     await act(async () =>
       useStore.getState().setMachines([{ id: 'gpu', label: 'gpu', kind: 'ssh', status: 'ready' } as unknown as MachineState]),
     );
@@ -105,7 +105,7 @@ describe('Sidebar machines', () => {
 
   it('folds disabled machines until opened, and unfolds them once enabled', async () => {
     const head = () => host.querySelector<HTMLElement>('.machine-head')!;
-    const enable = () => Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Enable machine');
+    const enable = () => Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Enable Machine');
     expect(host.querySelector('.machine-body')).toBeNull();
     expect(enable()).toBeUndefined();
     await act(async () => head().click());

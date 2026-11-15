@@ -5,14 +5,14 @@
   --ds-color-border: rgba(255, 255, 255, 0.07);
   --ds-color-border-strong: rgba(255, 255, 255, 0.14);
   --ds-color-faint: #7a7a7a;
-  --ds-color-focus-ring: #737373;
+  --ds-color-focus-ring: #8a8a8a;
   --ds-color-foreground: #f0f0f0;
   --ds-color-hover: #262626;
   --ds-color-muted: #acacac;
   --ds-color-on-primary: #171717;
   --ds-color-primary: #e5e5e5;
   --ds-color-sidebar: #171717;
-  --ds-color-tab-active: #262626;
+  --ds-color-tab-active: #2e2e2e;
   --ds-color-tab-bar: #171717;
   --ds-status-blocked: #f97316;
   --ds-status-done: #86efac;
@@ -54,7 +54,7 @@
   --ds-color-border: #e5e5e5;
   --ds-color-border-strong: #d4d4d4;
   --ds-color-faint: #8f8f8f;
-  --ds-color-focus-ring: #a1a1a1;
+  --ds-color-focus-ring: #767676;
   --ds-color-foreground: #0a0a0a;
   --ds-color-hover: #f0f0f0;
   --ds-color-muted: #696969;
@@ -62,7 +62,7 @@
   --ds-color-primary: #171717;
   --ds-color-sidebar: #fafafa;
   --ds-color-tab-active: #ffffff;
-  --ds-color-tab-bar: #f5f5f5;
+  --ds-color-tab-bar: #f0f0f0;
   --ds-status-blocked: #f97316;
   --ds-status-done: #147638;
   --ds-status-error: #e40014;

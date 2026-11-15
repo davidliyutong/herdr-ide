@@ -3,7 +3,7 @@
 // transfer, and how durations and times are written.
 
 import { useCallback, useRef, type ComponentType, type ReactNode } from 'react';
-import { Ban, CircleAlert, CircleCheck, type LucideIcon } from 'lucide-react';
+import { Ban, CircleAlert, CircleCheck, X, type LucideIcon } from 'lucide-react';
 import type { StoreApi, UseBoundStore } from 'zustand';
 import { locale, t } from '../i18n';
 import type { ListState } from '../transferList';
@@ -137,6 +137,9 @@ export function TransferTray<T extends { id: string }>(p: TrayProps<T>) {
             <span className="spacer" />
             {p.canCancelAll(active) && <button onClick={p.cancelAll}>{t('transfers.cancelAll')}</button>}
             {history.length > 0 && <button onClick={p.clear}>{t('transfers.clear')}</button>}
+            <button className="icon" title={t('dock.close')} aria-label={t('dock.close')} onClick={close}>
+              <X />
+            </button>
           </div>
           {!active.length && !history.length && <div className="muted small transfers-empty">{p.none}</div>}
           {active.map((x) => (

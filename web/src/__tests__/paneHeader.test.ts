@@ -73,13 +73,13 @@ describe('PaneHeader', () => {
     expect(host.querySelector('.dot-working')).not.toBeNull();
     expect(host.querySelector('.pane-cwd')?.textContent).toBe('~/src');
     expect(buttons().map((b) => b.title.replace(/ \(.*\)$/, ''))).toEqual([
-      'Open folder in VS Code',
-      'Changes of the repository',
-      'Git Graph',
-      'Split right',
-      'Split down',
-      'Zoom',
-      'Close pane',
+      'Open Folder in VS Code',
+      'Show Changes in VS Code',
+      'Open Git Graph',
+      'Split Right',
+      'Split Down',
+      'Maximize Pane',
+      'Close Pane',
     ]);
     await act(async () => buttons()[1].click());
     expect(command).toHaveBeenLastCalledWith('m', '/home/u/src', { cmd: 'openDiff', repo: '/home/u/src' });
@@ -102,12 +102,15 @@ describe('PaneHeader', () => {
     expect(down.defaultPrevented).toBe(true);
   });
 
-  it('focuses its terminal when pressed, renames it from its title and has its menu', async () => {
+  it('focuses its terminal when pressed, renames it by a double click on its title and has its menu', async () => {
     await render();
     await act(async () => host.querySelector('.pane-header')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
     await act(settle);
     expect(core.layout('m')!.workspaces[0].tabs[0].focused).toBe('p1');
+    // A click on the title only focuses; a double click renames, as tabs and workspaces.
     await act(async () => host.querySelector<HTMLElement>('.pane-title')!.click());
+    expect(host.querySelector('.pane-title-edit')).toBeNull();
+    await act(async () => host.querySelector<HTMLElement>('.pane-title')!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })));
     const input = host.querySelector<HTMLInputElement>('.pane-title-edit');
     expect(input?.value).toBe('build');
     input!.value = 'tests';

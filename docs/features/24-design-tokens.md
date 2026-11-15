@@ -90,7 +90,10 @@ panes, which stay the terminal settings'
   | `--radius` | `metric.radius` |
 
   The tab bar and the active tab use `color.tabBar` and `color.tabActive`
-  directly. The light theme's block in `styles.css` sets only what is not
+  directly; the active tab also has an outline (`--line-2`) and an accent
+  bar under it, so it stands out by more than its fill (WCAG 1.4.11), as
+  the selected workspace and settings section do with a 3-pixel accent bar.
+  `color.focusRing` keeps at least 3:1 against both themes' backgrounds. The light theme's block in `styles.css` sets only what is not
   a token: the transparency of overlays, the dialog backdrop, shadows and
   the checkerboard behind images, all neutral. Sizes (`--fs-sm`,
   `--fs-md`, the tab row) stay in `rem`.

@@ -184,19 +184,19 @@ describe('menus', () => {
 
   it('offers the pane commands, which act on that pane', async () => {
     expect(labels(paneMenu('m', 'p1'))).toEqual([
-      'Rename pane',
-      'Split right',
-      'Split down',
-      'Zoom',
-      'Open folder in VS Code',
-      'Changes of the repository',
-      'Git Graph',
-      'Close pane',
+      'Rename Pane',
+      'Split Right',
+      'Split Down',
+      'Maximize Pane',
+      'Open Folder in VS Code',
+      'Show Changes in VS Code',
+      'Open Git Graph',
+      'Close Pane',
     ]);
-    find(paneMenu('m', 'p1'), 'Zoom').run();
-    expect(labels(paneMenu('m', 'p1'))).toContain('Restore');
+    find(paneMenu('m', 'p1'), 'Maximize Pane').run!();
+    expect(labels(paneMenu('m', 'p1'))).toContain('Restore Pane');
     useStore.getState().setZoomed(undefined);
-    find(paneMenu('m', 'p1'), 'Split down').run();
+    find(paneMenu('m', 'p1'), 'Split Down').run!();
     await vi.waitFor(() => expect(core.calls.some((c) => c.method === 'terminal.run')).toBe(true));
     // The new terminal starts in the split one's folder and goes below it.
     expect(core.calls.find((c) => c.method === 'terminal.run')?.params).toEqual({ keep: false, cwd: '/src' });
@@ -209,18 +209,18 @@ describe('menus', () => {
 
   it('moves tabs and shows key hints only for the current tab', async () => {
     // No default binding renames a tab; a user's does.
-    expect(find(tabMenu('m', 'w1w1w1w1', 0), 'Rename tab').hint).toBeUndefined();
+    expect(find(tabMenu('m', 'w1w1w1w1', 0), 'Rename Tab').hint).toBeUndefined();
     const effective = useKeys.getState().effective;
     useKeys.setState({ effective: [...effective, { key: 'ctrl+k r', command: 'tab.rename', when: 'terminal' }] });
     const first = tabMenu('m', 'w1w1w1w1', 0);
-    expect(find(first, 'Move left').disabled).toBe(true);
-    expect(find(first, 'Move right').disabled).toBe(false);
-    expect(find(first, 'Rename tab').hint).toBe('ctrl+k r');
+    expect(find(first, 'Move Left').disabled).toBe(true);
+    expect(find(first, 'Move Right').disabled).toBe(false);
+    expect(find(first, 'Rename Tab').hint).toBe('Ctrl+K R');
     const last = tabMenu('m', 'w1w1w1w1', 2);
-    expect(find(last, 'Move right').disabled).toBe(true);
-    expect(find(last, 'Rename tab').hint).toBeUndefined();
+    expect(find(last, 'Move Right').disabled).toBe(true);
+    expect(find(last, 'Rename Tab').hint).toBeUndefined();
     useKeys.setState({ effective });
-    find(first, 'Move right').run();
+    find(first, 'Move Right').run!();
     await settle();
     expect(tabNames()).toEqual(['b', 'a', 'd']);
     // The selection stays with its tab.
@@ -228,8 +228,8 @@ describe('menus', () => {
   });
 
   it('moves from where the item is when the menu item runs', async () => {
-    const left = find(tabMenu('m', 'w1w1w1w1', 2), 'Move left');
-    const down = find(workspaceMenu('m', 'w1w1w1w1'), 'Move down');
+    const left = find(tabMenu('m', 'w1w1w1w1', 2), 'Move Left');
+    const down = find(workspaceMenu('m', 'w1w1w1w1'), 'Move Down');
     // Another client moves "d" to the front and "one" to the end meanwhile.
     const l = layout();
     l.workspaces[0].tabs = [l.workspaces[0].tabs[2], l.workspaces[0].tabs[0], l.workspaces[0].tabs[1]];
@@ -239,8 +239,8 @@ describe('menus', () => {
     fm.version++;
     core.event('m', 'doc', '', { name: 'layout', version: fm.version });
     await settle();
-    left.run();
-    down.run();
+    left.run!();
+    down.run!();
     await settle();
     expect(core.layout('m')!.workspaces.map((w) => w.name)).toEqual(['two', 'one']);
     expect(core.layout('m')!.workspaces[1].tabs.map((t) => t.name)).toEqual(['d', 'a', 'b']);
@@ -248,11 +248,11 @@ describe('menus', () => {
 
   it('moves workspaces', async () => {
     const w2 = workspaceMenu('m', 'w2w2w2w2');
-    expect(find(w2, 'Move down').disabled).toBe(true);
-    expect(find(w2, 'Close workspace').hint).toBeUndefined();
+    expect(find(w2, 'Move Down').disabled).toBe(true);
+    expect(find(w2, 'Close Workspace…').hint).toBeUndefined();
     // No default binding closes a workspace: the current one's item shows none either.
-    expect(find(workspaceMenu('m', 'w1w1w1w1'), 'Close workspace').hint).toBeUndefined();
-    find(w2, 'Move up').run();
+    expect(find(workspaceMenu('m', 'w1w1w1w1'), 'Close Workspace…').hint).toBeUndefined();
+    find(w2, 'Move Up').run!();
     await settle();
     expect(core.layout('m')!.workspaces.map((w) => w.name)).toEqual(['two', 'one']);
   });
@@ -312,6 +312,24 @@ describe('ContextMenu', () => {
     await act(async () => void before.dispatchEvent(new Event('scroll')));
     expect(useMenu.getState().menu).toBeUndefined();
     closeMenu(false);
+
+    // A submenu opens with → (or by pointing at its item), its items run, ← goes back.
+    const sub: MenuItem = { label: 'more', submenu: [item('x'), item('y')] };
+    await act(async () => openMenu(ev, [item('a'), sub]));
+    await key('ArrowDown');
+    await key('ArrowDown');
+    await key('ArrowRight');
+    const menus = () => [...host.querySelectorAll<HTMLElement>('[role=menu]')];
+    expect(menus()).toHaveLength(2);
+    expect(document.activeElement).toBe(menus()[1]);
+    await act(async () => void menus()[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })));
+    expect(menus()).toHaveLength(1);
+    await key('ArrowRight');
+    await act(async () => void menus()[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })));
+    await act(async () => void menus()[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })));
+    await act(async () => void menus()[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+    expect(ran).toEqual(['c', 'y']);
+    expect(menus()).toHaveLength(0);
     await act(async () => root.unmount());
   });
 });
@@ -329,18 +347,18 @@ describe('machineMenu', () => {
       useStore.getState().setMachines([ssh('ready')]);
       const entries = machineMenu('gpu');
       expect(labels(entries)).toEqual([
-        'Start terminal core',
-        'Restart terminal core…',
-        'Stop terminal core…',
+        'New Workspace…',
         '-',
-        'Disable machine',
+        'Machine Settings…',
+        'Rename Machine',
+        'Copy SSH Host',
         '-',
-        'Rename machine',
-        'Remove machine…',
+        'Troubleshooting',
+        'Disable Machine…',
         '-',
-        'Add machine…',
+        'Remove Machine…',
       ]);
-      (entries[4] as MenuItem).run();
+      (entries[7] as MenuItem).run!();
       const req = useDialog.getState().current;
       expect(req?.kind).toBe('confirm');
       if (req?.kind !== 'confirm') throw new Error('no dialog');
@@ -354,8 +372,19 @@ describe('machineMenu', () => {
       useDialog.setState({ current: undefined });
       useStore.getState().setMachines([ssh('disabled')]);
       const off = machineMenu('gpu');
-      expect(labels(off)).toEqual(['Enable machine', '-', 'Rename machine', 'Remove machine…', '-', 'Add machine…']);
-      (off[0] as MenuItem).run();
+      expect(labels(tidy(off))).toEqual([
+        'New Workspace…',
+        '-',
+        'Machine Settings…',
+        'Rename Machine',
+        'Copy SSH Host',
+        '-',
+        'Enable Machine',
+        '-',
+        'Remove Machine…',
+      ]);
+      expect((off[0] as MenuItem).disabled).toBe(true);
+      find(off, 'Enable Machine').run!();
       await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
       expect(fetchMock.mock.calls[0][1]).toMatchObject({ body: JSON.stringify({ enabled: true }) });
       expect(useDialog.getState().current).toBeUndefined();
@@ -363,10 +392,23 @@ describe('machineMenu', () => {
       // A machine whose stored target the core refuses is never connected:
       // rename and remove only.
       useStore.getState().setMachines([{ ...ssh('error'), code: 'invalid_target' }]);
-      expect(labels(tidy(machineMenu('gpu')))).toEqual(['Rename machine', 'Remove machine…', '-', 'Add machine…']);
+      expect(labels(tidy(machineMenu('gpu')))).toEqual([
+        'New Workspace…',
+        '-',
+        'Machine Settings…',
+        'Rename Machine',
+        'Copy SSH Host',
+        '-',
+        'Remove Machine…',
+      ]);
       // Nor is the local machine where no agent runs on it (Windows).
       useStore.getState().setMachines([{ ...ssh('error'), id: 'local', kind: 'local', code: 'local_unsupported' } as MachineState]);
-      expect(labels(tidy(machineMenu('local')))).toEqual(['Add machine…']);
+      expect(labels(tidy(machineMenu('local')))).toEqual(['New Workspace…', '-', 'Machine Settings…']);
+      // Machine Settings… opens the settings in the machine's scope.
+      useStore.getState().setMachines([ssh('ready')]);
+      find(machineMenu('gpu'), 'Machine Settings…').run!();
+      expect(useStore.getState().settings).toEqual({ machine: 'gpu' });
+      useStore.getState().openSettings(false);
 
       useStore.getState().setReadOnly(true);
       expect(machineMenu('gpu')).toEqual([]);
@@ -390,27 +432,29 @@ describe('machineMenu', () => {
     try {
       useStore.getState().setReadOnly(false);
       useStore.getState().setMachines([ssh('ready')]);
-      const start = find(machineMenu('gpu'), 'Start terminal core');
+      // The terminal service's actions are under Troubleshooting.
+      const service = (label: string) => find(find(machineMenu('gpu'), 'Troubleshooting').submenu!, label);
+      const start = service('Start Terminal Service');
       expect(start.disabled).toBe(false);
-      start.run();
+      start.run!();
       await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
       expect(fetchMock.mock.calls[0]).toEqual(['/api/m/gpu/hc/start', { method: 'POST' }]);
       // While it runs, the menu's actions are off and another does nothing.
-      expect(find(machineMenu('gpu'), 'Restart terminal core…').disabled).toBe(true);
+      expect(service('Restart Terminal Service…').disabled).toBe(true);
       release();
       await vi.waitFor(() => expect(useStore.getState().hcBusy.gpu).toBeUndefined());
 
-      find(machineMenu('gpu'), 'Stop terminal core…').run();
+      service('Stop Terminal Service (Ends All Terminals)…').run!();
       await vi.waitFor(() => expect(useDialog.getState().current?.kind).toBe('confirm'));
       const ask = useDialog.getState().current;
       if (ask?.kind !== 'confirm') throw new Error('no dialog');
-      expect(ask.title).toBe('Stop the terminal core of gpu?');
+      expect(ask.title).toBe('Stop the terminal service of gpu?');
       ask.resolve(false);
       await settle();
       expect(fetchMock).toHaveBeenCalledTimes(1);
       useDialog.setState({ current: undefined });
 
-      find(machineMenu('gpu'), 'Restart terminal core…').run();
+      service('Restart Terminal Service…').run!();
       await vi.waitFor(() => expect(useDialog.getState().current?.kind).toBe('confirm'));
       const again = useDialog.getState().current;
       if (again?.kind === 'confirm') again.resolve(true);
@@ -420,7 +464,7 @@ describe('machineMenu', () => {
 
       // Not connected: nothing to start there.
       useStore.getState().setMachines([ssh('error')]);
-      expect(find(machineMenu('gpu'), 'Start terminal core').disabled).toBe(true);
+      expect(service('Start Terminal Service').disabled).toBe(true);
     } finally {
       useDialog.setState({ current: undefined });
       vi.unstubAllGlobals();
@@ -437,18 +481,19 @@ describe('machineMenu', () => {
       const saved = (status: string) => ({ ...ssh(status), target: 'u@gpu' }) as unknown as MachineState;
       // The local machine keeps its name and stays.
       useStore.getState().setMachines([{ id: 'local', label: 'mac', kind: 'local', status: 'ready' } as unknown as MachineState]);
-      expect(labels(machineMenu('local'))).not.toContain('Remove machine…');
-      expect(labels(machineMenu('local'))).not.toContain('Rename machine');
+      expect(labels(machineMenu('local'))).not.toContain('Remove Machine…');
+      expect(labels(machineMenu('local'))).not.toContain('Rename Machine');
 
       for (const status of ['ready', 'disabled']) {
         useStore.getState().setMachines([saved(status)]);
-        expect(labels(machineMenu('gpu')).slice(-5)).toEqual(['-', 'Rename machine', 'Remove machine…', '-', 'Add machine…']);
+        expect(labels(machineMenu('gpu')).slice(-2)).toEqual(['-', 'Remove Machine…']);
+        expect(labels(machineMenu('gpu'))).toContain('Rename Machine');
       }
-      const remove = machineMenu('gpu').find((e) => isItem(e) && e.label === 'Remove machine…') as MenuItem;
+      const remove = machineMenu('gpu').find((e) => isItem(e) && e.label === 'Remove Machine…') as MenuItem;
       expect(remove.danger).toBe(true);
 
       // Declining sends nothing.
-      remove.run();
+      remove.run!();
       let req = useDialog.getState().current;
       expect(req?.kind === 'confirm' && req.message).toContain('u@gpu');
       if (req?.kind === 'confirm') req.resolve(false);
@@ -456,7 +501,7 @@ describe('machineMenu', () => {
       expect(fetchMock).not.toHaveBeenCalled();
 
       useDialog.setState({ current: undefined });
-      remove.run();
+      remove.run!();
       req = useDialog.getState().current;
       if (req?.kind === 'confirm') req.resolve(true);
       await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
@@ -466,7 +511,7 @@ describe('machineMenu', () => {
 
       fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: 'save', detail: 'read-only file system' }), { status: 500 }));
       useDialog.setState({ current: undefined });
-      remove.run();
+      remove.run!();
       req = useDialog.getState().current;
       if (req?.kind === 'confirm') req.resolve(true);
       await vi.waitFor(() =>
@@ -476,7 +521,7 @@ describe('machineMenu', () => {
       // Every code of the core is translated.
       fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: 'unknown' }), { status: 404 }));
       useDialog.setState({ current: undefined });
-      remove.run();
+      remove.run!();
       req = useDialog.getState().current;
       if (req?.kind === 'confirm') req.resolve(true);
       await vi.waitFor(() => expect(toast).toHaveBeenLastCalledWith('Could not remove gpu: the machine is no longer there.'));
@@ -490,8 +535,8 @@ describe('machineMenu', () => {
   it("offers to add a machine in the sidebar's free space, except read-only", () => {
     useStore.getState().setReadOnly(false);
     const entries = sidebarMenu();
-    expect(labels(entries)).toEqual(['Add machine…']);
-    (entries[0] as MenuItem).run();
+    expect(labels(entries)).toEqual(['New Workspace…', 'Add Machine…']);
+    (entries[1] as MenuItem).run!();
     expect(useStore.getState().addMachine).toBe(true);
     useStore.getState().openAddMachine(false);
     useStore.getState().setReadOnly(true);
@@ -506,7 +551,7 @@ describe('machineMenu', () => {
     try {
       useStore.getState().setReadOnly(false);
       useStore.getState().setMachines([ssh('ready')]);
-      (machineMenu('gpu').find((e) => isItem(e) && e.label === 'Rename machine') as MenuItem).run();
+      (machineMenu('gpu').find((e) => isItem(e) && e.label === 'Rename Machine') as MenuItem).run!();
       expect(useStore.getState().renaming).toEqual({ kind: 'machine', m: 'gpu', id: 'gpu' });
       useStore.getState().setRenaming(undefined);
 

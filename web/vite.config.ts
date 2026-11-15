@@ -86,7 +86,8 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/ws': { target: core, ws: true },
-      '/api': { target: core },
+      // The terminals' WebSocket (and the ssh login's) under /api.
+      '/api': { target: core, ws: true },
       '/m': {
         target: core,
         ws: true,

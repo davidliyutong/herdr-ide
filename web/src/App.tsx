@@ -20,7 +20,7 @@ import { applySettings, loadSettings } from './settings';
 import { applyKeybindings, loadKeybindings, useKeys } from './keybindings';
 import { t } from './i18n';
 import { notifyAgent, updateBadge } from './notify';
-import { shortPath } from './lib/machine';
+import { shortPath, terminalTitle } from './lib/machine';
 import * as L from './term/layout';
 import { useGui } from './gui/state';
 import { GuiTray } from './gui/GuiMenus';
@@ -86,6 +86,7 @@ function followTerms() {
 
 export function App() {
   const sidebarOpen = useStore((s) => s.sidebarOpen);
+  const sidebarWidth = useStore((s) => s.sidebarWidth);
   const dockPosition = usePrefs((s) => s.prefs.dockPosition);
   const connected = useStore((s) => s.connected);
   const toasts = useStore((s) => s.toasts);
@@ -142,7 +143,10 @@ export function App() {
   }, []);
 
   return (
-    <div className={`app ${sidebarOpen ? '' : 'no-sidebar'} dock-at-${dockPosition}`}>
+    <div
+      className={`app ${sidebarOpen ? '' : 'no-sidebar'} dock-at-${dockPosition}`}
+      style={{ '--sidebar-w': `${sidebarWidth}px` } as React.CSSProperties}
+    >
       {sidebarOpen && <Sidebar />}
       <Workspace />
       <Dock />
@@ -186,6 +190,7 @@ function StatusBar({ connected, chord }: { connected: boolean; chord: boolean })
     return layout ? L.focusedTerminal(layout) : undefined;
   });
   const cwd = useTerms(() => (m && focused ? terms.directory(m, focused) : undefined));
+  const title = useTerms((s) => (m && focused ? terminalTitle(s.machines[m]?.terminals[focused], focused) : undefined));
   const counts = useStore((s) => {
     let ready = 0;
     for (const id of s.order) if (s.machines[id]?.status === 'ready') ready++;
@@ -198,7 +203,7 @@ function StatusBar({ connected, chord }: { connected: boolean; chord: boolean })
       <span className="muted">{t('app.machines', { n: counts })}</span>
       {focused && machine && (
         <span className="muted ellipsis">
-          {machine.label} · {focused} · {shortPath(cwd, machine.info?.home)}
+          {machine.label} · {title} · {shortPath(cwd, machine.info?.home)}
         </span>
       )}
       <span className="spacer" />

@@ -16,7 +16,9 @@ import {
   Eye,
   FileDiff,
   FolderDown,
+  FolderPlus,
   GitGraph,
+  KeyRound,
   Link,
   Maximize2,
   Minimize2,
@@ -28,9 +30,12 @@ import {
   RotateCw,
   Rows2,
   Search,
+  ServerPlus,
+  Settings,
   Square,
   SquareCode,
   Trash2,
+  Wrench,
   X,
 } from 'lucide-react';
 import { actions, current } from './actions';
@@ -41,6 +46,7 @@ import { t } from './i18n';
 import { keyHint } from './keymap';
 import { mediaExt, openLink, resolvePath, safeUrl, type LinkContext } from './terminal/links';
 import { useStore } from './state/store';
+import { conn } from './lib/conn';
 import { terms } from './state/terms';
 import * as L from './term/layout';
 
@@ -73,15 +79,15 @@ export function paneMenu(m: string, terminal: string): MenuEntry[] {
       run: () => void actions.split(m, terminal, 'down'),
     },
     {
-      label: t(zoomed ? 'menu.restore' : 'menu.zoom'),
+      label: t(zoomed ? 'menu.restorePane' : 'command.pane.zoom'),
       hint: hint('pane.zoom'),
       icon: zoomed ? <Minimize2 /> : <Maximize2 />,
       run: () => actions.zoom(m, terminal),
     },
     'sep',
-    { label: t('menu.openCode'), hint: hint('code.open'), icon: <SquareCode />, run: () => actions.openCode(m, cwd) },
-    { label: t('menu.diff'), hint: hint('code.diff'), icon: <FileDiff />, run: () => actions.openDiff(m, cwd) },
-    { label: t('menu.gitGraph'), hint: hint('code.gitGraph'), icon: <GitGraph />, run: () => actions.openGitGraph(m, cwd) },
+    { label: t('command.code.open'), hint: hint('code.open'), icon: <SquareCode />, run: () => actions.openCode(m, cwd) },
+    { label: t('command.code.diff'), hint: hint('code.diff'), icon: <FileDiff />, run: () => actions.openDiff(m, cwd) },
+    { label: t('command.code.gitGraph'), hint: hint('code.gitGraph'), icon: <GitGraph />, run: () => actions.openGitGraph(m, cwd) },
     'sep',
     {
       label: t('command.pane.close'),
@@ -109,7 +115,7 @@ export function surfaceMenu(o: {
 }): MenuEntry[] {
   const out: MenuEntry[] = [{ label: t('surface.copy'), icon: <Copy />, disabled: !o.copy, run: () => o.copy?.() }];
   if (o.paste) out.push({ label: t('surface.paste'), icon: <ClipboardPaste />, run: o.paste });
-  if (o.find) out.push({ label: t('find.menu'), hint: hint('find.open'), icon: <Search />, run: o.find });
+  if (o.find) out.push({ label: t('command.find.open'), hint: hint('find.open'), icon: <Search />, run: o.find });
   const l = o.link;
   if (l?.kind === 'url' && safeUrl(l.text)) {
     out.push(
@@ -137,48 +143,76 @@ export function surfaceMenu(o: {
 /** Adds an SSH machine (AddMachineDialog). */
 const addMachineItem = (): MenuEntry => ({
   label: t('menu.addMachine'),
-  icon: <Plus />,
+  icon: <ServerPlus />,
   run: () => useStore.getState().openAddMachine(true),
 });
 
-/** The menu of the sidebar's free space: add a machine. */
+/** The menu of the sidebar's free space: add a machine, new workspace. */
 export function sidebarMenu(): MenuEntry[] {
-  return useStore.getState().readOnly ? [] : [addMachineItem()];
+  if (useStore.getState().readOnly) return [];
+  return [
+    { label: t('command.workspace.new'), hint: hint('workspace.new'), icon: <FolderPlus />, run: () => void actions.newWorkspace() },
+    addMachineItem(),
+  ];
 }
 
-/** A machine's menu in the sidebar: start, restart or stop its terminal
- * core (needs the agent connected), enable or disable it; rename or remove
- * an SSH machine, add one. */
+/** A machine's menu in the sidebar, in the order of the other menus: what
+ * it makes, its settings and name, its connection, troubleshooting (its
+ * terminal service: herdr-core), removal. */
 export function machineMenu(m: string): MenuEntry[] {
   const s = useStore.getState();
   const st = s.machines[m];
   if (s.readOnly || !st) return [];
-  const out: MenuEntry[] = [];
   // A machine with a code (a target the core refuses, the local machine
   // where no agent runs) is never connected: it can be renamed or removed
   // only.
   const usable = !st.code;
-  if (usable && st.status !== 'disabled') {
-    const off = st.status !== 'ready' || s.hcBusy[m] === true;
-    out.push(
-      { label: t('menu.startCore'), icon: <Play />, disabled: off, run: () => void actions.terminalCore(m, 'start') },
-      { label: t('menu.restartCore'), icon: <RotateCw />, disabled: off, run: () => void actions.terminalCore(m, 'restart') },
-      { label: t('menu.stopCore'), icon: <Square />, disabled: off, run: () => void actions.terminalCore(m, 'stop') },
-      'sep',
-      { label: t('menu.disableMachine'), icon: <PowerOff />, danger: true, run: () => void actions.setMachineEnabled(m, false) },
-    );
-  } else if (usable) {
-    out.push({ label: t('menu.enableMachine'), icon: <Power />, run: () => void actions.setMachineEnabled(m, true) });
-  }
-  // The local machine keeps its host's name and stays.
-  if (st.kind === 'ssh')
-    out.push(
-      'sep',
-      { label: t('menu.renameMachine'), icon: <Pencil />, run: () => actions.startRename('machine', m, m) },
-      { label: t('menu.removeMachine'), icon: <Trash2 />, danger: true, run: () => void actions.removeMachine(m) },
-    );
-  out.push('sep', addMachineItem());
-  return out;
+  const ready = usable && st.status === 'ready';
+  const ssh = st.kind === 'ssh';
+  const off = !ready || s.hcBusy[m] === true;
+  return [
+    { label: t('command.workspace.new'), icon: <FolderPlus />, disabled: !ready, run: () => void actions.newWorkspace(m) },
+    'sep',
+    { label: t('menu.machineSettings'), icon: <Settings />, run: () => s.openSettings({ machine: m }) },
+    ...(ssh
+      ? [
+          { label: t('menu.renameMachine'), icon: <Pencil />, run: () => actions.startRename('machine', m, m) },
+          {
+            label: t('menu.copyTarget'),
+            icon: <Copy />,
+            disabled: !st.target,
+            run: () => copyText(st.target ?? ''),
+          },
+        ]
+      : []),
+    'sep',
+    ...(usable && st.status === 'auth_required' && ssh && s.sshLogin
+      ? [{ label: t('sidebar.authenticate'), icon: <KeyRound />, run: () => s.openAuth(m) }]
+      : []),
+    ...(usable && (st.status === 'auth_required' || st.status === 'error')
+      ? [{ label: t('sidebar.retry'), icon: <RotateCw />, run: () => conn.retry(m) }]
+      : []),
+    ...(usable && st.status === 'disabled'
+      ? [{ label: t('menu.enableMachine'), icon: <Power />, run: () => void actions.setMachineEnabled(m, true) }]
+      : []),
+    ...(usable && st.status !== 'disabled'
+      ? [
+          {
+            label: t('menu.troubleshooting'),
+            icon: <Wrench />,
+            submenu: [
+              { label: t('menu.restartCore'), icon: <RotateCw />, disabled: off, run: () => void actions.terminalCore(m, 'restart') },
+              { label: t('menu.startCore'), icon: <Play />, disabled: off, run: () => void actions.terminalCore(m, 'start') },
+              'sep',
+              { label: t('menu.stopCore'), icon: <Square />, danger: true, disabled: off, run: () => void actions.terminalCore(m, 'stop') },
+            ] as MenuEntry[],
+          },
+          { label: t('menu.disableMachine'), icon: <PowerOff />, run: () => void actions.setMachineEnabled(m, false) },
+        ]
+      : []),
+    'sep',
+    ...(ssh ? [{ label: t('menu.removeMachine'), icon: <Trash2 />, danger: true, run: () => void actions.removeMachine(m) }] : []),
+  ];
 }
 
 /** A tab's menu: rename, new tab, move left or right, close. */
@@ -202,6 +236,7 @@ export function tabMenu(m: string, ws: string, index: number): MenuEntry[] {
       icon: <Pencil />,
       run: () => actions.startRename('tab', m, `${ws}:${index}`),
     },
+    'sep',
     { label: t('command.tab.new'), hint: hint('tab.new'), icon: <Plus />, run: () => void actions.newTab(m, ws) },
     'sep',
     { label: t('menu.moveLeft'), icon: <ArrowLeft />, disabled: index <= 0, run: move(-1) },
@@ -238,6 +273,7 @@ export function workspaceMenu(m: string, ws: string): MenuEntry[] {
       icon: <Pencil />,
       run: () => actions.startRename('workspace', m, ws),
     },
+    'sep',
     { label: t('command.tab.new'), hint: hintIf(isCurrent, 'tab.new'), icon: <Plus />, run: () => void actions.newTab(m, ws) },
     'sep',
     { label: t('menu.moveUp'), icon: <ArrowUp />, disabled: i <= 0, run: move(-1) },

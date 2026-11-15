@@ -53,7 +53,8 @@ export function Workspace() {
       <div className="tabbar">
         <button
           className="icon sidebar-toggle"
-          title={withKey(t('workspace.sidebar'), 'view.toggleSidebar')}
+          title={withKey(t('command.view.toggleSidebar'), 'view.toggleSidebar')}
+          aria-label={t('command.view.toggleSidebar')}
           onClick={() => actions.toggleSidebar()}
         >
           <PanelLeft />
@@ -80,6 +81,13 @@ export function Workspace() {
                   actions.selectTab(m, ws.id, i);
                   if (!readOnly) startTabDrag(e, { m, ws: ws.id, index: i, label: name });
                 }}
+                // A middle click closes the tab, as in browsers.
+                onAuxClick={(e) => {
+                  if (e.button !== 1 || readOnly || editing) return;
+                  e.preventDefault();
+                  void actions.closeTab(m, ws.id, i);
+                }}
+                onMouseDown={(e) => e.button === 1 && e.preventDefault()}
                 onContextMenu={(e) => !editing && openMenu(e, tabMenu(m, ws.id, i))}
                 title={readOnly ? name : t('workspace.tabHint', { label: name })}
                 data-tab={i}
@@ -106,7 +114,8 @@ export function Workspace() {
                 {!readOnly && (
                   <button
                     className="tab-close"
-                    title={withKey(t('workspace.closeTab'), 'tab.close')}
+                    title={withKey(t('command.tab.close'), 'tab.close')}
+                    aria-label={t('command.tab.close')}
                     onClick={(e) => {
                       e.stopPropagation();
                       void actions.closeTab(m, ws.id, i);
@@ -120,8 +129,9 @@ export function Workspace() {
           })}
           {!readOnly && (
             <button
-              className="icon"
-              title={withKey(t('workspace.newTab'), 'tab.new')}
+              className="icon new-tab"
+              title={withKey(t('command.tab.new'), 'tab.new')}
+              aria-label={t('command.tab.new')}
               onClick={() => void actions.newTab(m, ws.id)}
               data-new-tab={ws.id}
               data-m={m}
@@ -135,12 +145,12 @@ export function Workspace() {
         {tab ? (
           <TabView m={m} ws={ws.id} tab={tab} />
         ) : (
-          <div className="muted pad">
-            {t('workspace.noTabs')}
+          <div className="empty-state">
+            <div>{t('workspace.noTabs')}</div>
             {!readOnly && (
-              <div className="row">
-                <button onClick={() => void actions.newTab(m, ws.id)}>{t('command.tab.new')}</button>
-              </div>
+              <button className="primary" onClick={() => void actions.newTab(m, ws.id)}>
+                {withKey(t('command.tab.new'), 'tab.new')}
+              </button>
             )}
           </div>
         )}
@@ -204,11 +214,20 @@ function TabView({ m, ws, tab }: { m: string; ws: string; tab: L.Tab }) {
           : ((ev.clientY - box.top) / box.height - bar.area.y) / bar.area.h;
       return Math.min(0.9, Math.max(0.1, r));
     };
-    const move = (ev: PointerEvent) => setDragging({ path: bar.path, ratio: ratioAt(ev) });
+    let moved = false;
+    const cls = bar.axis === 'horizontal' ? 'resizing' : 'resizing-row';
+    const move = (ev: PointerEvent) => {
+      if (!moved) document.body.classList.add(cls);
+      moved = true;
+      setDragging({ path: bar.path, ratio: ratioAt(ev) });
+    };
     const up = (ev: PointerEvent) => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
+      document.body.classList.remove(cls);
       setDragging(undefined);
+      // A press without a move (the first click of a double click) leaves the ratio.
+      if (!moved) return;
       const ratio = ratioAt(ev);
       terms.mutate(m, (l) => L.setRatio(l, bar.path, ratio));
     };
@@ -247,7 +266,12 @@ function TabView({ m, ws, tab }: { m: string; ws: string; tab: L.Tab }) {
             key={b.path.map(Number).join('') || 'root'}
             className={`split-handle ${b.axis === 'horizontal' ? 'h' : 'v'} ${dragging?.path.join() === b.path.join() ? 'dragging' : ''}`}
             style={style}
-            onPointerDown={(e) => dragBar(e, b)}
+            role="separator"
+            aria-orientation={b.axis === 'horizontal' ? 'vertical' : 'horizontal'}
+            title={t('pane.dividerHint')}
+            onPointerDown={(e) => e.button === 0 && dragBar(e, b)}
+            // A double click shares the split equally again.
+            onDoubleClick={() => terms.mutate(m, (l) => L.setRatio(l, b.path, 0.5))}
           />
         );
       })}

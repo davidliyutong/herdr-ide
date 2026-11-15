@@ -20,22 +20,27 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   Claude Code goes straight to the clipboard), resizable splits, and
   programs see the UI theme's colors. Workspaces, tabs and splits are a
   layout document kept on each machine, the same in every browser and the
-  desktop app. Drag a pane by its header to swap or move it, click its title to rename it; drag tabs and workspaces to
-  reorder them; right-click a pane header, tab or workspace for its
-  commands, or a pane's text to copy, paste or open a path. Everything is
+  desktop app. Drag a pane by its header to swap or move it; double-click
+  a tab, workspace, pane title or machine to rename it in place; drag tabs
+  and workspaces to reorder them; drag the sidebar's edge, a split's
+  handle or the VS Code panel's edge to resize them (a double click
+  restores the default or equal sizes); every tab has a × and a middle
+  click closes it; right-click a pane header, tab, workspace or machine
+  for its commands, or a pane's text to copy, paste or open a path. Everything is
   in reach of the mouse; the few default keys take nothing from the
   programs in the terminals (`ctrl+b` reaches tmux), and every key can be
   bound in the settings.
 - **Terminal core included.** The binary carries herdr-core for Linux/macOS
   on amd64/arm64 and installs it on a machine the first time its terminals
   are shown; machines need nothing installed and no internet. Programs keep running
-  when the browser closes or the core stops. Right-click a machine to
-  **Start terminal core**, **Restart terminal core…** (its programs keep
-  running) or **Stop terminal core…**.
+  when the browser closes or the core stops. A machine's menu has
+  **Troubleshooting** ▸ **Restart Terminal Service…** (its programs keep
+  running), **Start Terminal Service** and **Stop Terminal Service…**.
 - **Multi-machine.** Keeps its own list of SSH machines (the machines saved
   in herdr are imported the first time); right-click the sidebar to add one
   (an ssh target and a label; a password or host key is asked for in a
-  terminal), or a machine to rename, remove, disable or enable it. One ssh
+  terminal), or a machine to rename, remove, disable or enable it or open
+  its **Machine Settings…**. One ssh
   connection per machine runs a small static agent
   (linux/macOS × amd64/arm64, uploaded automatically) that multiplexes
   everything; nothing listens on the machines.
@@ -87,10 +92,14 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   same terminals and type into them; the one used last sets a terminal's
   size.
 - **Settings.** Language (English, Chinese), light/dark theme followed by
-  VS Code, interface size, the terminals' font, line height, cursor,
-  scrollback, bell and colors (both themes' 16 colors), panel position, the
-  code-server installation method and every keyboard shortcut, in one
-  dialog (the sidebar's gear, `cmd+,` or `ctrl+,` in the desktop app) with search. Settings and keys are kept on the core's
+  VS Code, interface size, the terminals' font (picked from the monospace
+  fonts installed, with a preview), line height, cursor, scrollback, bell,
+  color schemes (Dracula, Nord, Solarized, One, Gruvbox, Tomorrow…) with
+  your own colors on top, silent agents, panel position, how each machine
+  gets VS Code, program windows per machine and every keyboard shortcut,
+  in one dialog laid out as VS Code's (the sidebar's gear, `cmd+,` or
+  `ctrl+,` in the desktop app; a machine's own settings from its menu) with
+  search. Settings and keys are kept on the core's
   host in two JSON files you can also edit by hand, and are the same in
   every browser and the desktop app. Terminals use
   the included JetBrains Mono font unless you choose another.
@@ -188,17 +197,19 @@ macOS, or open them with the app on Linux (**Open With**), to create a
 workspace for each on the local machine. Files and folders dropped on a
 pane of the local machine are pasted as their own paths, without uploading.
 
-On macOS `cmd+t` opens a tab, `cmd+w` closes the pane, `cmd+d` /
-`cmd+shift+d` split it, `cmd+n` creates a workspace, `cmd+,` opens the
-settings, `cmd+shift+p` the command palette and `cmd+j` shows or hides the
-VS Code panel. On Windows and Linux `ctrl+shift+t` opens a tab,
-`ctrl+shift+w` closes it, `ctrl+shift+n` creates a workspace, `ctrl+,`
-opens the settings, `ctrl+shift+p` the command palette and `ctrl+shift+j`
-the VS Code panel; every other key, `ctrl+c` and `ctrl+q` included, reaches
-the terminal. While VS Code has focus, its own keys come first. The menu
+On macOS `cmd+t` opens a tab, `cmd+1`…`cmd+9` select one (`cmd+9` the
+last), `cmd+shift+w` closes it, `cmd+w` closes the pane, `cmd+d` /
+`cmd+shift+d` split it, `cmd+alt+arrows` move between panes,
+`cmd+shift+enter` maximizes one, `cmd+n` creates a workspace, `cmd+,` opens
+the settings, `cmd+shift+p` the command palette and `cmd+j` shows or hides
+the VS Code panel. On Windows and Linux `ctrl+shift+t` opens a tab,
+`ctrl+tab` and `alt+1`…`alt+9` switch tabs, `ctrl+shift+w` closes one,
+`ctrl+shift+n` creates a workspace, `ctrl+,` opens the settings,
+`ctrl+shift+p` the command palette and `ctrl+shift+j` the VS Code panel;
+every other key, `ctrl+c` and `ctrl+q` included, reaches the terminal. While VS Code has focus, its own keys come first. The menu
 bar shows the keys in effect, in the UI's language; the title bar follows
 the UI's theme.
-Change or remove the keys under **Settings → Keyboard shortcuts**, where
+Change or remove the keys under **Settings → Keyboard Shortcuts**, where
 chords such as `ctrl+b c` can be bound too; browsers keep their own
 `cmd+t` / `cmd+w`.
 

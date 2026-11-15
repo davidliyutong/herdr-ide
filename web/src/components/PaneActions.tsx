@@ -15,38 +15,61 @@ export function PaneActions({ m, terminal, cwd, zoomed }: { m: string; terminal:
       <PaneGuiButton m={m} terminal={terminal} />
       {!readOnly && (
         <>
-          <button className="code" title={withKey(t('pane.openCode'), 'code.open')} onClick={() => actions.openCode(m, cwd)}>
+          <button
+            className="code"
+            title={withKey(t('command.code.open'), 'code.open')}
+            aria-label={t('command.code.open')}
+            onClick={() => actions.openCode(m, cwd)}
+          >
             <SquareCode />
           </button>
-          <button className="code" title={withKey(t('pane.diff'), 'code.diff')} onClick={() => actions.openDiff(m, cwd)}>
+          <button
+            className="code"
+            title={withKey(t('command.code.diff'), 'code.diff')}
+            aria-label={t('command.code.diff')}
+            onClick={() => actions.openDiff(m, cwd)}
+          >
             <FileDiff />
           </button>
-          <button className="code" title={withKey(t('pane.gitGraph'), 'code.gitGraph')} onClick={() => actions.openGitGraph(m, cwd)}>
+          <button
+            className="code"
+            title={withKey(t('command.code.gitGraph'), 'code.gitGraph')}
+            aria-label={t('command.code.gitGraph')}
+            onClick={() => actions.openGitGraph(m, cwd)}
+          >
             <GitGraph />
           </button>
           <span className="sep code" />
           <button
             className="split"
-            title={withKey(t('pane.splitRight'), 'pane.splitRight')}
+            title={withKey(t('command.pane.splitRight'), 'pane.splitRight')}
+            aria-label={t('command.pane.splitRight')}
             onClick={() => void actions.split(m, terminal, 'right')}
           >
             <Columns2 />
           </button>
           <button
             className="split"
-            title={withKey(t('pane.splitDown'), 'pane.splitDown')}
+            title={withKey(t('command.pane.splitDown'), 'pane.splitDown')}
+            aria-label={t('command.pane.splitDown')}
             onClick={() => void actions.split(m, terminal, 'down')}
           >
             <Rows2 />
           </button>
           <button
             className="zoom"
-            title={withKey(t(zoomed ? 'pane.restore' : 'pane.zoom'), 'pane.zoom')}
+            title={withKey(t(zoomed ? 'menu.restorePane' : 'command.pane.zoom'), 'pane.zoom')}
+            aria-label={t(zoomed ? 'menu.restorePane' : 'command.pane.zoom')}
             onClick={() => actions.zoom(m, terminal)}
           >
             {zoomed ? <Minimize2 /> : <Maximize2 />}
           </button>
-          <button className="danger" title={withKey(t('pane.close'), 'pane.close')} onClick={() => void actions.closePane(m, terminal)}>
+          <button
+            className="danger"
+            title={withKey(t('command.pane.close'), 'pane.close')}
+            aria-label={t('command.pane.close')}
+            onClick={() => void actions.closePane(m, terminal)}
+          >
             <X />
           </button>
         </>

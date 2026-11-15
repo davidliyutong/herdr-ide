@@ -20,8 +20,8 @@ interface Props {
 
 /** The header of one pane, above its terminal: the agent's state, the
  * title, the agent and the folder, then the pane's own buttons
- * (PaneActions). Clicking the title renames the pane, dragging the header
- * moves it, its menu has the pane's commands. */
+ * (PaneActions). Double-clicking the title renames the pane, dragging the
+ * header moves it, its menu has the pane's commands. */
 export function PaneHeader({ m, terminal, ws, focused, zoomed }: Props) {
   const record = useTerms((s) => s.machines[m]?.terminals[terminal]);
   const home = useStore((s) => s.machines[m]?.info?.home);
@@ -53,7 +53,8 @@ export function PaneHeader({ m, terminal, ws, focused, zoomed }: Props) {
   );
 }
 
-/** A pane's title; clicking it renames the pane (unless read-only). */
+/** A pane's title; double-clicking it renames the pane (unless read-only),
+ * as tabs and workspaces are renamed. */
 export function PaneTitle({ m, terminal, title, name }: { m: string; terminal: string; title: string; name: string }) {
   const readOnly = useStore((s) => s.readOnly);
   const renaming = useStore((s) => s.renaming?.kind === 'pane' && s.renaming.m === m && s.renaming.id === terminal);
@@ -73,8 +74,8 @@ export function PaneTitle({ m, terminal, title, name }: { m: string; terminal: s
   return (
     <span
       className={`pane-title ${readOnly ? '' : 'editable'}`}
-      title={readOnly ? title : t('pane.rename')}
-      onClick={() => !readOnly && setRenaming({ kind: 'pane', m, id: terminal })}
+      title={readOnly ? title : t('pane.rename', { label: name || title })}
+      onDoubleClick={() => !readOnly && setRenaming({ kind: 'pane', m, id: terminal })}
     >
       {name || title}
     </span>
