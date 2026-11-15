@@ -1,8 +1,7 @@
-// Command herdr-ide is the terminal-first, multi-machine, agent-native web IDE
-// for herdr. It serves the web UI and orchestrates agents on every machine.
+// Command herdr-ide is the terminal-first, multi-machine, agent-native web
+// IDE. It serves the web UI and orchestrates agents on every machine.
 //
 //	herdr-ide [serve] [flags]       run the server (default)
-//	herdr-ide herdr [args]          run the herdr bundled in the release
 //	herdr-ide fetch-assets DIR      download code-server and extensions for
 //	                               air-gapped installs (use with --seed-dir)
 //	herdr-ide version
@@ -22,21 +21,19 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
 	"syscall"
 	"time"
 
-	"herdr-ide/internal/agent"
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/brand"
 	"herdr-ide/internal/codeserver"
 	"herdr-ide/internal/embedded"
-	"herdr-ide/internal/gui"
+	"herdr-ide/internal/keybindings"
 	"herdr-ide/internal/machines"
+	"herdr-ide/internal/registry"
 	"herdr-ide/internal/server"
 	"herdr-ide/internal/settings"
-	"herdr-ide/internal/shortcuts"
 	"herdr-ide/internal/transport"
 	"herdr-ide/web"
 )
@@ -72,15 +69,15 @@ func (f *codeServerFlags) manager(logger *log.Logger) *codeserver.Manager {
 	return cs
 }
 
-// machinesPath is the file beside the settings file (settingsPath) holding
-// the machines enabled or disabled in the UI: machines.json, or
-// machines-<instance>.json.
-func machinesPath(settings string) string {
-	return filepath.Join(filepath.Dir(settings), strings.Replace(filepath.Base(settings), "settings", "machines", 1))
+// besideSettings is a file of the same instance beside the settings file
+// (settingsPath): machines.json or machines-<instance>.json for name
+// "machines".
+func besideSettings(settings, name string) string {
+	return filepath.Join(filepath.Dir(settings), strings.Replace(filepath.Base(settings), "settings", name, 1))
 }
 
-// settingsPath is the file holding settings changed in the UI, on the core
-// host. A directory left by a previous product name is moved first.
+// settingsPath is the settings file on the core host. A directory left by a
+// previous product name is moved first.
 func settingsPath(instance string) (string, error) {
 	base, err := os.UserConfigDir()
 	if err != nil {
@@ -115,40 +112,9 @@ func main() {
 		serve(args, logger)
 	case "fetch-assets":
 		fetchAssets(args, logger)
-	case "herdr":
-		runHerdr(args, logger)
 	default:
-		fmt.Fprintf(os.Stderr, "usage: %s [serve] [flags] | herdr [args] | fetch-assets [flags] DIR | version\n", brand.CoreBin)
+		fmt.Fprintf(os.Stderr, "usage: %s [serve] [flags] | fetch-assets [flags] DIR | version\n", brand.CoreBin)
 		os.Exit(2)
-	}
-}
-
-// bundledHerdr is the herdr shipped beside the real core executable in a
-// release directory (symlinks to the core are resolved).
-func bundledHerdr() (string, error) {
-	exe, err := os.Executable()
-	if err != nil {
-		return "", err
-	}
-	if exe, err = filepath.EvalSymlinks(exe); err != nil {
-		return "", err
-	}
-	p := filepath.Join(filepath.Dir(exe), "herdr")
-	if st, err := os.Stat(p); err != nil || !st.Mode().IsRegular() || st.Mode().Perm()&0o111 == 0 {
-		return "", fmt.Errorf("no herdr executable at %s; keep the release directory together", p)
-	}
-	return p, nil
-}
-
-// runHerdr replaces the process with the bundled herdr, passing the arguments
-// and environment through unchanged, for hosts without an installed herdr.
-func runHerdr(args []string, logger *log.Logger) {
-	bin, err := bundledHerdr()
-	if err != nil {
-		logger.Fatal(err)
-	}
-	if err := syscall.Exec(bin, append([]string{bin}, args...), os.Environ()); err != nil {
-		logger.Fatal(err)
 	}
 }
 
@@ -179,30 +145,29 @@ func fetchAssets(args []string, logger *log.Logger) {
 func serve(args []string, logger *log.Logger) {
 	fl := flag.NewFlagSet("serve", flag.ExitOnError)
 	var (
-		listen       = fl.String("listen", "127.0.0.1:7780", "address to listen on")
-		parentStdio  = fl.Bool("parent-stdio", false, "launcher lifecycle: write a ready JSON line to stdout and stop when stdin closes")
-		insecure     = fl.Bool("insecure-listen", false, "allow a non-loopback --listen without --proxy-secret-file (anyone reaching the port gets shell access)")
-		proxySecret  = fl.String("proxy-secret-file", "", "file with a secret the reverse proxy sends in the "+server.ProxySecretHeader+" header; required for requests that do not come from loopback")
-		readOnly     = fl.Bool("read-only", false, "watch only: no input, no mutating herdr calls, no uploads, no VS Code")
-		auditLog     = fl.String("audit-log", "", "append security-relevant events as JSON lines to this file")
-		userHeader   = fl.String("user-header", "", "request header carrying the authenticated user, for the audit log (e.g. Tailscale-User-Login)")
-		instance     = fl.String("instance", "", "state instance: machines use ~/"+brand.DataDirName+"-<instance> (lets a development core run next to the daily one)")
-		localSession = fl.String("local-session", "default", "herdr session name on the local machine")
-		remoteSess   = fl.String("remote-session", "", "herdr session name on every remote machine instead of the one saved in herdr (development and tests)")
-		localOnly    = fl.Bool("local-only", false, "do not connect to herdr's saved SSH machines")
-		csIdle       = fl.Duration("code-server-idle", 20*time.Minute, "stop a machine's code-server after this long without VS Code connections (0 disables)")
-		agentDir     = fl.String("agent-dir", "", "directory with uncompressed "+brand.AgentBin+"-<os>-<arch> builds (development)")
-		extDir       = fl.String("ext-dir", "", "directory containing "+brand.BridgeExt+".vsix (development)")
-		webDir       = fl.String("web-dir", "", "serve the UI from this directory instead of the embedded build (development)")
-		only         listFlag
-		origins      listFlag
-		extraSSH     listFlag
-		csf          codeServerFlags
-		prefs        = settings.New("", slices.Concat(codeserver.SettingDefs, gui.SettingDefs, shortcuts.SettingDefs)...)
+		listen      = fl.String("listen", "127.0.0.1:7780", "address to listen on")
+		parentStdio = fl.Bool("parent-stdio", false, "launcher lifecycle: write a ready JSON line to stdout and stop when stdin closes")
+		insecure    = fl.Bool("insecure-listen", false, "allow a non-loopback --listen without --proxy-secret-file (anyone reaching the port gets shell access)")
+		proxySecret = fl.String("proxy-secret-file", "", "file with a secret the reverse proxy sends in the "+server.ProxySecretHeader+" header; required for requests that do not come from loopback")
+		readOnly    = fl.Bool("read-only", false, "watch only: no input, no changes to terminals or settings, no uploads, no VS Code")
+		auditLog    = fl.String("audit-log", "", "append security-relevant events as JSON lines to this file")
+		userHeader  = fl.String("user-header", "", "request header carrying the authenticated user, for the audit log (e.g. Tailscale-User-Login)")
+		instance    = fl.String("instance", "", "state instance: machines use ~/"+brand.DataDirName+"-<instance> (lets a development core run next to the daily one)")
+		localOnly   = fl.Bool("local-only", false, "do not connect to the stored SSH machines (only to --ssh targets)")
+		csIdle      = fl.Duration("code-server-idle", 20*time.Minute, "stop a machine's code-server after this long without VS Code connections (0 disables)")
+		agentDir    = fl.String("agent-dir", "", "directory with uncompressed "+brand.AgentBin+"-<os>-<arch> builds (development)")
+		extDir      = fl.String("ext-dir", "", "directory containing "+brand.BridgeExt+".vsix (development)")
+		webDir      = fl.String("web-dir", "", "serve the UI from this directory instead of the embedded build (development)")
+		only        listFlag
+		origins     listFlag
+		extraSSH    listFlag
+		csf         codeServerFlags
+		prefs       = settings.New("", registry.Settings()...)
+		keys        = keybindings.New("", registry.Commands())
 	)
 	fl.Var(&origins, "allowed-origin", "browser origin of the reverse proxy, e.g. https://ide.example.com (repeatable)")
 	fl.Var(&only, "machine", "connect only these machines, by id, label or ssh target (repeatable)")
-	fl.Var(&extraSSH, "ssh", "extra ssh target (~/.ssh/config alias or user@host) not saved in herdr (repeatable)")
+	fl.Var(&extraSSH, "ssh", "extra ssh target (~/.ssh/config alias or user@host) for this run, not stored (repeatable)")
 	csf.register(fl)
 	prefs.RegisterFlags(fl)
 	fl.Parse(args)
@@ -213,15 +178,28 @@ func serve(args []string, logger *log.Logger) {
 	if !brand.ValidInstance(*instance) {
 		logger.Fatalf("--instance must be lowercase letters, digits and dashes")
 	}
-	overridesFile := ""
+	for _, t := range extraSSH {
+		if !machines.ValidTarget(t) {
+			logger.Fatalf("--ssh %q: a target is [user@]host, an ssh:// URL or a ~/.ssh/config alias of at most %d bytes, not starting with -, without whitespace, control characters or any of ! \" $ & ' ( ) * ; < > ? \\ ` { | }", t, machines.MaxTargetLen)
+		}
+	}
+	machinesFile := ""
 	if p, err := settingsPath(*instance); err != nil {
 		logger.Printf("settings are not saved: %v", err)
 	} else {
+		keys.SetPath(besideSettings(p, "keybindings"))
+		// Before the settings drop the desktop app's old shortcut settings.
+		if _, err := keys.MigrateDesktopShortcuts(p, runtime.GOOS == "darwin"); err != nil {
+			logger.Printf("migrating shortcuts: %v", err)
+		}
+		if err := keys.Load(); err != nil {
+			logger.Printf("ignoring keybindings: %v", err)
+		}
 		prefs.SetPath(p)
 		if err := prefs.Load(); err != nil {
 			logger.Printf("ignoring settings: %v", err)
 		}
-		overridesFile = machinesPath(p)
+		machinesFile = besideSettings(p, "machines")
 	}
 	embedded.AgentDir = *agentDir
 	embedded.ExtDir = *extDir
@@ -251,45 +229,36 @@ func serve(args []string, logger *log.Logger) {
 		}
 	}
 
-	specs := selectSpecs(machines.LoadSpecs(*localSession, extraSpecs(extraSSH)), *localOnly, extraSSH, only)
-	if *remoteSess != "" {
-		// The name becomes part of paths on the machines.
-		if !brand.ValidInstance(*remoteSess) {
-			logger.Fatalf("invalid --remote-session %q (lowercase letters, digits and -)", *remoteSess)
-		}
-		for i := range specs {
-			if specs[i].Kind != machines.KindLocal {
-				specs[i].Session = *remoteSess
-			}
+	// The core's own machines; herdr's saved machines are imported once,
+	// when the file does not exist yet.
+	registry, err := machines.OpenRegistry(machinesFile, machines.SavedSpecs)
+	if err != nil {
+		logger.Printf("machines are not stored: %v", err)
+	}
+	if n := registry.Kept(); n > 0 {
+		logger.Printf("%s: %d entries are not machines this version can use; they are kept in the file as they are", machinesFile, n)
+	}
+	for _, s := range registry.Specs() {
+		if s.Kind == machines.KindSSH && !machines.ValidTarget(s.Target) {
+			logger.Printf("machine %s: its ssh target is refused (%s); it is shown in error and never connected", s.ID, machines.CodeInvalidTarget)
 		}
 	}
-	// herdr's saved machines as configured here, for machines added,
-	// removed, renamed or reloaded from the UI (--remote-session applies to
-	// new ones too; a reload adds only those --local-only and --machine
-	// take).
-	catalog := func() ([]machines.Spec, error) {
-		saved, err := machines.SavedSpecs()
-		if *remoteSess != "" {
-			for i := range saved {
-				saved[i].Session = *remoteSess
-			}
-		}
-		return saved, err
-	}
-	selected := func(s machines.Spec) bool { return selectSpec(s, false, *localOnly, extraSSH, only) }
+	specs := selectSpecs(machines.LoadSpecs(registry.Specs(), extraSpecs(extraSSH)), *localOnly, extraSSH, only)
 	controlDir, err := transport.ControlDir()
 	if err != nil {
 		logger.Fatal(err)
 	}
-	// Only release directories carry a bundled herdr; development builds rely
-	// on an installed one.
-	bundled, _ := bundledHerdr()
 	dial := func(ctx context.Context, spec machines.Spec) (*transport.Session, string, error) {
 		switch spec.Kind {
 		case machines.KindLocal:
-			s, err := transport.DialLocal(ctx, agent.Options{Instance: *instance, Logger: logger, BundledHerdr: bundled})
+			s, err := dialLocal(ctx, *instance, logger)
 			return s, runtime.GOOS + "/" + runtime.GOARCH, err
 		case machines.KindSSH:
+			// Machines never dial such a target; this keeps it from ssh
+			// whatever calls.
+			if !machines.ValidTarget(spec.Target) {
+				return nil, "", machines.ErrInvalidTarget
+			}
 			s, p, err := transport.DialSSH(ctx, transport.SSHOptions{
 				Target: spec.Target, ControlDir: controlDir, Agents: embedded.Agent, Logger: logger, Instance: *instance,
 			})
@@ -302,8 +271,7 @@ func serve(args []string, logger *log.Logger) {
 		return nil, "", errors.New("unknown machine kind " + spec.Kind)
 	}
 	mg := machines.NewManager(specs, dial, logger)
-	// Machines enabled or disabled in the UI, over herdr's catalog.
-	mg.UseOverrides(machines.LoadOverrides(overridesFile))
+	mg.UseRegistry(registry)
 
 	var static fs.FS = web.Dist()
 	if *webDir != "" {
@@ -333,8 +301,8 @@ func serve(args []string, logger *log.Logger) {
 		Audit:          audit,
 		UserHeader:     *userHeader,
 		Settings:       prefs,
-		Catalog:        catalog,
-		Selected:       selected,
+		Keybindings:    keys,
+		HC:             embedded.HC,
 	})
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -342,6 +310,9 @@ func serve(args []string, logger *log.Logger) {
 	if *parentStdio {
 		go stopWithParent(os.Stdin, cancel)
 	}
+	// Edits of the files by hand apply without a restart.
+	go prefs.Watch(ctx, 2*time.Second)
+	go keys.Watch(ctx, 2*time.Second)
 	// Bind before connecting to machines: a failed launch must not start agents.
 	ln, err := net.Listen("tcp", *listen)
 	if err != nil {

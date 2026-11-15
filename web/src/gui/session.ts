@@ -48,6 +48,7 @@ export class GuiSession {
   private disposed = false;
   private gone = false;
   private backoff = 500;
+  private retry?: number;
   private stage: HTMLDivElement;
   private base: HTMLCanvasElement;
   private layers = new Map<number, { layer: Layer; el: HTMLCanvasElement }>();
@@ -90,6 +91,7 @@ export class GuiSession {
 
   dispose() {
     this.disposed = true;
+    window.clearTimeout(this.retry);
     for (const f of this.cleanup) f();
     this.ws?.close();
     this.video?.close();
@@ -122,7 +124,7 @@ export class GuiSession {
     ws.onclose = () => {
       if (this.disposed || this.gone) return;
       this.on.status('reconnecting');
-      setTimeout(() => !this.disposed && void this.connect(), this.backoff);
+      this.retry = window.setTimeout(() => !this.disposed && void this.connect(), this.backoff);
       this.backoff = Math.min(this.backoff * 2, 5000);
     };
   }

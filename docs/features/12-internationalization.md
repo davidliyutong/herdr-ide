@@ -20,22 +20,43 @@ reference documentation.
 - **Web UI** (`web/src/i18n`): `en.ts` is the source of keys; other locales
   are typed `Record<MessageKey, string>`, so a missing or extra key fails
   `tsc`. `t(key, vars)` substitutes `{placeholders}`; a test checks that every
-  translation uses the same placeholders. The locale comes from the saved
-  setting, then `navigator.languages`, then English; `<html lang>` is set
-  accordingly. The settings dialog and the palette switch language (reloads
-  the page). Settings defined by the core are labelled with keys built from
-  their names (`settings.<key>`, `.desc`, `.<option>`); a test checks that
-  the known ones exist, and an untranslated one shows its key.
-- **Desktop shell**: error dialogs reuse `desktop.*` keys from the web's
-  English/Chinese dictionaries and follow the OS locale. Native menu roles
-  use Electron's standard labels; the web UI keeps its own saved language.
-- **Server**: sends codes (code-server phases such as `download` with a
-  detail, pane notices such as `taken_over`, agent statuses) that the UI
-  translates. The code-server loading page, served inside the VS Code iframe,
-  carries its own small English/Chinese table for the same codes and uses
-  the embedding page's language. Settings errors are codes too (`invalid`,
-  `locked`, `unknown`, `save`). Error
-  messages from herdr, ssh or the OS are shown verbatim.
+  translation uses the same placeholders. The locale comes from the core's
+  `appearance.language` setting (`auto`, `en`, `zh-CN`; one value for every
+  client of the core), where `auto` follows `navigator.languages`, then
+  English; `<html lang>` is set accordingly. The settings dialog and the
+  palette switch language (the page that changed it reloads). Settings and
+  commands defined by the core are labelled with keys built from their
+  names (`settings.<key>`, `.desc`, `.<option>`, `command.<id>`);
+  `design/generated/registry.json` lists those keys (`scripts/registry`,
+  `"i18n"`), `settings.test.ts` checks that the web UI has them, and an
+  untranslated one shows its key.
+- **Vocabulary**: one name per thing and per command in every place (the
+  desktop app's menu, the command palette, the keyboard shortcuts page,
+  context menus and tooltips all use `command.<id>`), Title Case in English
+  menus and command names as in VS Code and macOS. Chinese uses the words
+  Chinese VS Code and Chrome use: 工作区 (workspace), 标签页 (tab), 窗格
+  (pane), 智能体 (agent, the coding agents; the sidebar's **Agents**
+  section is 智能体), 分屏, 侧栏, 程序窗口, 服务器 (the core). herdr-core
+  is the **terminal service** (终端服务), named only in the machine's
+  **Troubleshooting** submenu, its machine settings page and errors; the
+  everyday UI says terminals.
+- **Desktop shell**: the menu's titles (`desktop.menu.*`), its items of
+  commands (`command.<id>`) and the error dialogs (`desktop.*`) come from
+  the web's English/Chinese dictionaries, Electron's role items included. They follow
+  the core's `appearance.language`, which the shell reads itself; `auto`
+  follows the system's preferred languages, and so does a failure before the
+  core answers.
+- **Server**: sends codes that the UI translates: code-server phases such as
+  `download` with a detail, the terminal core's states (`machine_offline`,
+  `not_bundled`, `start_failed`, `stopped`…; `backend.<code>` in the UI),
+  machine states, agent statuses, program window phases (`gui.phase.*`).
+  The code-server loading page, served inside the VS Code iframe, carries
+  its own small English/Chinese table for the same codes and uses the
+  embedding page's language. Errors of the settings and keybindings API
+  are codes too (`invalid`, `locked`, `unknown`, `save`, `file`, `scope`),
+  and so are those of the machines API (`invalid`, `machine_exists`,
+  `label_taken`, `local`, `unknown`, `save`). Error messages from
+  herdr-core, ssh or the OS are shown verbatim.
 - **VS Code extension**: `package.nls.json` / `package.nls.zh-cn.json` for
   contributed titles; `vscode.l10n.t` with `l10n/bundle.l10n.zh-cn.json` for
   runtime strings.
@@ -45,11 +66,14 @@ reference documentation.
 
 ## Adding a locale
 
-1. Add `web/src/i18n/<locale>.ts` typed as `Messages`, register it in
+1. Add the locale to the `appearance.language` setting's values
+   (`internal/uisettings/uisettings.go`) and run `make tokens` to
+   regenerate `design/generated/registry.json`.
+2. Add `web/src/i18n/<locale>.ts` typed as `Messages`, register it in
    `i18n/index.ts` (`dicts`, `locales`, detection).
-2. Add `package.nls.<locale>.json` and `l10n/bundle.l10n.<locale>.json` to
+3. Add `package.nls.<locale>.json` and `l10n/bundle.l10n.<locale>.json` to
    the extension.
-3. Add the language to the loading-page table in
+4. Add the language to the loading-page table in
    `internal/server/codeserver.go`.
 
 ## Alternatives considered
@@ -62,5 +86,9 @@ reference documentation.
 ## Testing
 
 `web/src/__tests__/i18n.test.ts` (locale detection, placeholder
-substitution, placeholder parity); `tsc` enforces key completeness. Both
-languages were checked in Chrome.
+substitution, placeholder parity); `tsc` enforces key completeness;
+`web/src/__tests__/settings.test.ts` (every key the core's registry needs
+for the web UI). `desktop/src/menu.test.ts` (the menu's titles follow the
+language). `scripts/check.sh`
+(`scripts/registry -check`: the generated key lists are current; README
+sections). Both languages were checked in Chrome.

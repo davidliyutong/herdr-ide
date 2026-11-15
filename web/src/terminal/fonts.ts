@@ -1,9 +1,9 @@
 // The terminal font ships with the UI (fonts/README.md), so every browser
 // renders panes with the same glyphs and cell metrics whatever is installed.
-// xterm.js measures the cell when its font family changes and caches each
-// glyph the first time it draws it, so a terminal must not use the font
-// before its faces are loaded: it starts with the fallback stack and switches
-// once they are (TermController).
+// The renderer's glyph atlas (vt/atlas.ts) measures the cell from the font
+// stack and caches each glyph the first time it draws it, so a terminal must
+// not use the font before its faces are loaded: it starts with the fallback
+// stack and switches once they are (whenTermFont, TerminalView).
 
 import regular from './fonts/JetBrainsMono-Regular.woff2';
 import italic from './fonts/JetBrainsMono-Italic.woff2';
@@ -50,10 +50,13 @@ export function termFontLoaded(weight: TermFontWeight): boolean {
   return loaded.has(weight);
 }
 
-/** The font stack for terminals of this weight: the bundled font once
- *  loaded, else only the fallbacks. */
-export function termFontFamily(weight: TermFontWeight): string {
-  return loaded.has(weight) ? `"${family}", ${fallback}` : fallback;
+/** The font stack for terminals of this weight: the font family the
+ *  settings name (terminal.fontFamily), then the bundled font once loaded,
+ *  then the fallbacks. A family is quoted unless it is a list already. */
+export function termFontFamily(weight: TermFontWeight, custom = ''): string {
+  const own = custom.trim();
+  const first = !own ? '' : /[,"']/.test(own) ? `${own}, ` : `"${own}", `;
+  return first + (loaded.has(weight) ? `"${family}", ${fallback}` : fallback);
 }
 
 const pending = new Map<TermFontWeight, Promise<boolean>>();

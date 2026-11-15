@@ -10,30 +10,18 @@ import (
 
 	"github.com/coder/websocket"
 
-	"herdr-ide/internal/herdr"
-	"herdr-ide/internal/herdr/endpoint"
 	"herdr-ide/internal/machines"
 )
 
-// inMsg is any message from the browser.
+// /ws is the event channel of the clients (the browser UI and the desktop
+// app's page and shell): machines, program windows, agents, settings,
+// keybindings, the VS Code bridge and downloads. Terminals have their own
+// WebSocket (/api/v1/term, term.go).
+
+// inMsg is any message from a client.
 type inMsg struct {
-	T    string `json:"t"`
-	M    string `json:"m"`
-	Pane string `json:"pane"`
-
-	// view
-	Tab  string `json:"tab"`
-	Cols int    `json:"cols"`
-	Rows int    `json:"rows"`
-	CW   int    `json:"cw"`
-	CH   int    `json:"ch"`
-
-	// in: pane input events
-	Ev []endpoint.InputEvent `json:"ev"`
-	// focus
-	Focused bool `json:"focused"`
-	// host: the browser's terminal colors
-	Host *hostMsg `json:"host"`
+	T string `json:"t"`
+	M string `json:"m"`
 
 	// theme: "dark" or "light"
 	Kind string `json:"kind"`
@@ -46,9 +34,7 @@ type inMsg struct {
 	IDs []string `json:"ids"`
 	ID  string   `json:"id"`
 
-	RID    int64           `json:"rid"`
-	Method string          `json:"method"`
-	Params json.RawMessage `json:"params"`
+	RID int64 `json:"rid"`
 }
 
 type outMsg struct {
@@ -61,14 +47,16 @@ type wsClient struct {
 	conn   *websocket.Conn
 	ctx    context.Context
 	cancel context.CancelFunc
-	send   chan outMsg
+	send   chan []byte
 	// req is the upgrade request (identity for the audit log).
 	req *http.Request
-	// readOnly browsers watch: no input, and no takeover from a writable one.
+	// readOnly clients watch: they cannot make machines reconnect or change
+	// VS Code's theme.
 	readOnly bool
 
 	// active is when the user last used this page (guarded by
-	// Server.clientsMu); the most recently used page plays sounds.
+	// Server.clientsMu); the most recently used page plays sounds. A client
+	// plays none before it reports activity.
 	active time.Time
 }
 
@@ -83,14 +71,13 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	conn.SetReadLimit(64 << 20)
+	conn.SetReadLimit(1 << 20)
 	ctx, cancel := context.WithCancel(context.Background())
-	c := &wsClient{s: s, conn: conn, ctx: ctx, cancel: cancel, send: make(chan outMsg, sendQueue), req: r, readOnly: s.opts.ReadOnly}
+	c := &wsClient{s: s, conn: conn, ctx: ctx, cancel: cancel, send: make(chan []byte, sendQueue), req: r, readOnly: s.opts.ReadOnly}
 	s.audit.log(r, "ws.connect", nil)
 	defer s.audit.log(r, "ws.disconnect", nil)
 	defer c.close()
 	s.clientsMu.Lock()
-	c.active = time.Now()
 	s.clients[c] = true
 	s.clientsMu.Unlock()
 	defer func() {
@@ -111,7 +98,6 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		c.sendJSON(map[string]any{"t": "agent", "m": ev.Machine, "data": ev.Data, "sound": s.soundClient() == c})
 	})
 	defer unsub()
-	s.surfJoin(c)
 
 	for {
 		typ, data, err := conn.Read(ctx)
@@ -131,7 +117,6 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 func (c *wsClient) close() {
 	c.cancel()
-	c.s.surfLeave(c)
 	c.conn.Close(websocket.StatusNormalClosure, "")
 }
 
@@ -140,13 +125,9 @@ func (c *wsClient) writeLoop() {
 		select {
 		case <-c.ctx.Done():
 			return
-		case m := <-c.send:
-			typ := websocket.MessageText
-			if m.binary {
-				typ = websocket.MessageBinary
-			}
+		case b := <-c.send:
 			ctx, cancel := context.WithTimeout(c.ctx, 20*time.Second)
-			err := c.conn.Write(ctx, typ, m.data)
+			err := c.conn.Write(ctx, websocket.MessageText, b)
 			cancel()
 			if err != nil {
 				c.cancel()
@@ -156,45 +137,27 @@ func (c *wsClient) writeLoop() {
 	}
 }
 
-func (c *wsClient) enqueue(m outMsg) {
-	select {
-	case c.send <- m:
-	case <-c.ctx.Done():
-	default:
-		// A client this far behind cannot be repaired by dropping frames
-		// (they are diffs); drop the connection so it resyncs from scratch.
-		c.s.logger.Printf("ws: client send queue overflow, disconnecting")
-		c.cancel()
-	}
-}
-
 func (c *wsClient) sendJSON(v any) {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return
 	}
-	c.enqueue(outMsg{data: b})
+	select {
+	case c.send <- b:
+	case <-c.ctx.Done():
+	default:
+		// A client this far behind has missed events; drop the connection
+		// so that it reconnects and starts from the current state.
+		c.s.logger.Printf("ws: client send queue overflow, disconnecting")
+		c.cancel()
+	}
 }
 
 func (c *wsClient) dispatch(m *inMsg) {
 	switch m.T {
-	case "view":
-		c.s.surfView(c, viewMsg{M: m.M, Tab: m.Tab, Pane: m.Pane, Cols: m.Cols, Rows: m.Rows, CW: m.CW, CH: m.CH})
-	case "takeover":
-		c.s.surfTakeover(c)
-	case "in":
-		c.s.surfInput(c, m.M, m.Pane, m.Ev)
-	case "focus":
-		c.s.surfFocus(c, m.M, m.Focused)
-	case "host":
-		if m.Host != nil {
-			c.s.surfHost(c, *m.Host)
-		}
-	case "api":
-		go c.api(m)
 	case "retry":
-		// Retrying replaces a degraded machine's session, which ends every
-		// browser's surfaces, uploads and VS Code there: not for watchers.
+		// Ends the wait before a machine's next connection attempt; not for
+		// watchers, as an attempt may start an ssh login.
 		mc := c.s.mg.Get(m.M)
 		if mc == nil {
 			break
@@ -203,9 +166,7 @@ func (c *wsClient) dispatch(m *inMsg) {
 			c.s.audit.log(c.req, "denied.retry", map[string]any{"machine": m.M})
 			break
 		}
-		if mc.Retry() {
-			c.s.audit.log(c.req, "machine.retry", map[string]any{"machine": m.M})
-		}
+		mc.Wake()
 	case "download.watch":
 		// A page follows its own downloads, also in read-only mode, where
 		// it may download.
@@ -223,58 +184,6 @@ func (c *wsClient) dispatch(m *inMsg) {
 			c.s.bridge.setTheme(m.Kind)
 		}
 	}
-}
-
-func (c *wsClient) api(m *inMsg) {
-	reply := map[string]any{"t": "api.res", "rid": m.RID}
-	mc := c.s.mg.Get(m.M)
-	if mc == nil {
-		reply["error"] = map[string]string{"code": "unknown_machine", "message": "unknown machine " + m.M}
-		c.sendJSON(reply)
-		return
-	}
-	if !c.s.apiAllowed(m.Method) {
-		c.s.audit.log(c.req, "denied.api", map[string]any{"machine": m.M, "method": m.Method})
-		reply["error"] = map[string]string{"code": "forbidden", "message": m.Method + " is not allowed from the web UI"}
-		c.sendJSON(reply)
-		return
-	}
-	defer func() {
-		// A malformed request must not take the core down.
-		if r := recover(); r != nil {
-			c.s.logger.Printf("api %s: %v", m.Method, r)
-			reply["error"] = map[string]string{"code": "internal", "message": "internal error"}
-			c.sendJSON(reply)
-		}
-	}()
-	withEnv, added := c.s.withPaneEnv(mc, m.Method, m.Params)
-	if !machines.IsReadOnlyMethod(m.Method) {
-		ev := map[string]any{"machine": m.M, "method": m.Method, "params": json.RawMessage(m.Params)}
-		if len(added) > 0 {
-			ev["env_added"] = added
-		}
-		c.s.audit.log(c.req, "api", ev)
-	}
-	ctx, cancel := context.WithTimeout(c.ctx, 5*time.Minute)
-	defer cancel()
-	var params any = map[string]any{}
-	if len(added) > 0 {
-		params = withEnv
-	} else if len(m.Params) > 0 && string(m.Params) != "null" {
-		params = m.Params
-	}
-	res, err := mc.Call(ctx, m.Method, params)
-	if err != nil {
-		var ae *herdr.APIError
-		if errors.As(err, &ae) {
-			reply["error"] = ae
-		} else {
-			reply["error"] = map[string]string{"code": "transport", "message": err.Error()}
-		}
-	} else {
-		reply["result"] = res
-	}
-	c.sendJSON(reply)
 }
 
 func readFullLine(r *bufio.Reader) ([]byte, error) {

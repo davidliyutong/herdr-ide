@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { tmpdir } from 'node:os';
-import { APP_SLUG } from '../../web/src/brand';
-import { CoreProcess, coreArgs, coreEnv, corePort, DesktopError } from './core';
+import { CoreProcess, coreArgs, coreEnv, coreInstance, corePort, DesktopError } from './core';
 
 function fakeCore(source: string) {
   return ['-e', source];
@@ -10,22 +9,62 @@ function fakeCore(source: string) {
 const ready = `process.stdout.write(JSON.stringify({event:'ready',url:'http://127.0.0.1:7781'})+'\\n');`;
 
 test('development is isolated; packaged mode has its own instance', () => {
-  const args = coreArgs(true, 7791);
+  assert.equal(coreInstance(false, 'e3'), 'desktop');
+  assert.equal(coreInstance(true, undefined), 'dev');
+  assert.equal(coreInstance(true, '1'), 'dev');
+  assert.equal(coreInstance(true, 'e3'), 'e3');
+  for (const bad of ['E3', '-x', 'a b', '../x', 'x'.repeat(33), 'desktop'])
+    assert.throws(
+      () => coreInstance(true, bad),
+      (e: unknown) => e instanceof DesktopError && e.key === 'desktop.badInstance',
+    );
+  const args = coreArgs('dev', 7791);
   assert.ok(args.includes('--local-only'));
-  for (const flag of ['--local-session', '--remote-session']) assert.equal(args[args.indexOf(flag) + 1], `${APP_SLUG}-dev`);
   assert.equal(args[args.indexOf('--instance') + 1], 'dev');
-  const release = coreArgs(false, 7781);
+  assert.ok(coreArgs('e3', 7791).includes('--local-only'));
+  const release = coreArgs('desktop', 7781);
   assert.equal(release[release.indexOf('--instance') + 1], 'desktop');
-  assert.ok(!release.includes('--local-session'));
+  assert.ok(!release.includes('--local-only'));
   for (const port of ['-1', '65536', 'abc', '80;open', '0.0.0.0:7781'])
     assert.throws(
       () => corePort(port),
       (e: unknown) => e instanceof DesktopError && e.key === 'desktop.badPort',
     );
-  assert.ok(coreArgs(true, corePort('0')).includes('127.0.0.1:0'));
-  assert.ok(coreArgs(true, corePort('007791')).includes('127.0.0.1:7791'));
-  assert.ok(coreEnv({ PATH: '/custom/bin' }, '/Users/test').PATH?.includes('/Users/test/.local/bin'));
-  assert.ok(coreEnv({}, '/Users/test').PATH?.includes('/opt/homebrew/bin'));
+  assert.ok(coreArgs('dev', corePort('0')).includes('127.0.0.1:0'));
+  assert.ok(coreArgs('dev', corePort('007791')).includes('127.0.0.1:7791'));
+});
+
+test('PATH gains the usual installations on macOS and Linux; Windows keeps its own', () => {
+  for (const p of ['darwin', 'linux'] as const) {
+    assert.ok(coreEnv({ PATH: '/custom/bin' }, '/home/test', p).PATH?.startsWith('/custom/bin'));
+    assert.ok(coreEnv({ PATH: '/custom/bin' }, '/home/test', p).PATH?.includes('/home/test/.local/bin'));
+    assert.ok(coreEnv({}, '/Users/test', p).PATH?.includes('/opt/homebrew/bin'));
+  }
+  const env = { Path: 'C:\\Windows\\System32' };
+  assert.equal(coreEnv(env, 'C:\\Users\\test', 'win32'), env);
+});
+
+// Windows has no signal a program can clean up after: closing stdin is what
+// stops the core everywhere, and a core that does not end is killed.
+test('stopping closes stdin and sends no signal; a core that stays is killed after the deadline', async () => {
+  const graceful = new CoreProcess();
+  await graceful.start(process.execPath, fakeCore(ready + 'process.stdin.resume();'), 7781, process.env, tmpdir(), () => {});
+  const child = (graceful as unknown as { child: import('node:child_process').ChildProcess }).child;
+  await graceful.stop(10_000);
+  assert.deepEqual([child.exitCode, child.signalCode], [0, null]);
+
+  const stuck = new CoreProcess();
+  await stuck.start(
+    process.execPath,
+    fakeCore(ready + 'process.stdin.resume(); process.stdin.on("end", () => setInterval(() => {}, 1000));'),
+    7781,
+    process.env,
+    tmpdir(),
+    () => {},
+  );
+  const stuckChild = (stuck as unknown as { child: import('node:child_process').ChildProcess }).child;
+  await stuck.stop(200);
+  assert.equal(stuckChild.signalCode, 'SIGKILL');
 });
 
 test('waits for an owned child ready message and stops it idempotently', async () => {

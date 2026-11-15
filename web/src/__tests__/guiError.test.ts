@@ -12,7 +12,7 @@ vi.mock('../lib/conn', () => ({ conn: { api: () => Promise.resolve({}), setTheme
 import { GuiTray } from '../gui/GuiMenus';
 import { useGui } from '../gui/state';
 import { useStore } from '../state/store';
-import type { MachineState } from '../lib/herdr';
+import type { MachineState } from '../lib/machine';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -51,13 +51,13 @@ describe('display error', () => {
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     });
     expect(host.querySelector('.gui-error')).toBeNull();
-    // The settings button opens the settings, where the machine's display
+    // The settings button opens the machine's settings, where its display
     // can be turned off.
     act(() => note.click());
     const buttons = [...host.querySelectorAll<HTMLButtonElement>('.gui-error-actions button')];
     expect(buttons).toHaveLength(3);
     act(() => buttons[1].click());
-    expect(useStore.getState().settingsOpen).toBe(true);
+    expect(useStore.getState().settings?.page).toBe('gui');
     expect(host.querySelector('.gui-error')).toBeNull();
   });
 

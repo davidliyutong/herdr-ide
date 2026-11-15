@@ -19,7 +19,7 @@ import { actions } from './actions';
 import { desktopShell } from './desktop';
 import { t } from './i18n';
 import { shellQuote } from './lib/files';
-import { shortPath, type MachineState } from './lib/herdr';
+import { shortPath, type MachineState } from './lib/machine';
 import { useStore } from './state/store';
 import { uploadFiles, useTransfers } from './transfers';
 
@@ -65,11 +65,12 @@ export function refuseStrayFileDrops() {
 // ---- sidebar ----
 
 /** The machine dropped folders become workspaces on: the local one, in the
- * desktop app and not in read-only mode. */
+ * desktop app and not in read-only mode, unless it is never connected
+ * (Windows, where no agent runs on it). */
 export function folderDropTarget(): MachineState | undefined {
   const s = useStore.getState();
   if (!desktopShell?.pathForFile || s.readOnly) return undefined;
-  return Object.values(s.machines).find((m) => m.kind === 'local');
+  return Object.values(s.machines).find((m) => m.kind === 'local' && !m.code);
 }
 
 /** Creates a workspace on the local machine for each folder dropped. */
@@ -98,9 +99,10 @@ function readyLocal(ms = OPEN_WAIT_MS): Promise<MachineState | undefined> {
   const check = (): MachineState | null | undefined => {
     const s = useStore.getState();
     if (!desktopShell || s.readOnly) return null;
+    if (Object.values(s.machines).some((m) => m.kind === 'local' && m.code)) return null;
     const m = folderDropTarget();
     if (m?.status === 'disabled') return null;
-    return m?.status === 'ready' || m?.status === 'degraded' ? m : undefined;
+    return m?.status === 'ready' ? m : undefined;
   };
   const now = check();
   if (now !== undefined) return Promise.resolve(now ?? undefined);
@@ -144,10 +146,16 @@ async function openWaiting() {
   }
 }
 
-/** Takes the folders the desktop shell reports; returns a function that
+/** Takes the folders the desktop shell reports, saying how many other
+ * items it skipped, as for a drop on the sidebar; returns a function that
  * stops it. */
 export function takeOpenedFolders(): () => void {
-  return desktopShell?.onOpenFolder(openFolder) ?? (() => {});
+  return (
+    desktopShell?.onOpenFolders(({ folders, skipped }) => {
+      if (skipped) useStore.getState().toast(t('sidebar.dropFoldersOnly', { n: skipped }));
+      folders.forEach(openFolder);
+    }) ?? (() => {})
+  );
 }
 
 // ---- panes ----

@@ -1,22 +1,30 @@
 // Applies the appearance settings: light/dark theme (also sent to the core,
-// which switches VS Code windows to match, and to the desktop app's shell,
-// whose title bar follows it) and the UI font. The pane surface follows the
-// terminal settings itself (components/SurfaceView.tsx).
+// which switches VS Code windows to match) and the UI font. Terminals follow
+// the terminal settings themselves (components/TerminalView.tsx); the
+// desktop app's shell reads the theme from the core itself.
 
 import { create } from 'zustand';
-import { getPrefs, usePrefs, type Prefs } from './prefs';
+import { getPrefs, usePrefs, type Prefs, type TermColors } from './prefs';
 import { conn } from './lib/conn';
 import type { TermFontWeight } from './terminal/fonts';
-import type { DesktopShell } from './desktop';
+import type { Display } from './term/connection';
 
 export type ThemeKind = 'dark' | 'light';
 
 /** What terminals take from the settings. */
 export interface Appearance {
   theme: ThemeKind;
+  /** The resolved theme's terminal colors. */
+  colors: TermColors;
+  fontFamily: string;
   fontSize: number;
   fontWeight: TermFontWeight;
+  /** Rows are this many times the font's own line height. */
+  lineHeight: number;
   optionIsMeta: boolean;
+  boldIsBright: boolean;
+  cursorStyle: 'block' | 'bar' | 'underline';
+  cursorBlink: boolean;
 }
 
 const darkQuery = typeof matchMedia === 'undefined' ? undefined : matchMedia('(prefers-color-scheme: dark)');
@@ -25,7 +33,7 @@ const darkQuery = typeof matchMedia === 'undefined' ? undefined : matchMedia('(p
  * follows. In the desktop app it is Electron's nativeTheme.themeSource,
  * which the setting itself changes (apply): after switching from "dark" to
  * "system" it turns light only once the shell has been told. Components
- * that draw with the theme (the pane surface) subscribe to it, as they do
+ * that draw with the theme (terminals) subscribe to it, as they do
  * to the settings. */
 export const useSystemDark = create<{ dark: boolean }>(() => ({ dark: darkQuery?.matches ?? true }));
 
@@ -47,12 +55,44 @@ export function useThemeKind(): ThemeKind {
   return resolveTheme(pref, dark);
 }
 
+/** A color setting as the terminal core takes it (`#rrggbb`). */
+function coreColor(css: string): string | undefined {
+  const m = /^#?([0-9a-f]{6})/i.exec(css.trim());
+  return m ? `#${m[1].toLowerCase()}` : undefined;
+}
+
+/** The colors the terminal core answers programs with: the theme's
+ * terminal colors (term/connection.ts Display). */
+export function displayColors(colors: TermColors): Display {
+  const out: Display = {};
+  const fg = coreColor(colors.foreground);
+  const bg = coreColor(colors.background);
+  const cursor = coreColor(colors.cursor);
+  if (fg) out.fg = fg;
+  if (bg) out.bg = bg;
+  if (cursor) out.cursor = cursor;
+  return out;
+}
+
+/** The display of the current theme, for terminals started before a pane
+ * shows them. */
+export function currentDisplay(): Display {
+  return displayColors(appearanceOf(getPrefs()).colors);
+}
+
 export function appearanceOf(p: Prefs): Appearance {
+  const theme = resolveTheme(p.theme);
   return {
-    theme: resolveTheme(p.theme),
+    theme,
+    colors: p.colors[theme],
+    fontFamily: p.termFontFamily,
     fontSize: p.termFontSize,
     fontWeight: p.termFontWeight === 'medium' ? 500 : 400,
+    lineHeight: p.termLineHeight,
     optionIsMeta: p.optionIsMeta,
+    boldIsBright: p.boldIsBright,
+    cursorStyle: p.cursorStyle,
+    cursorBlink: p.cursorBlink,
   };
 }
 
@@ -68,8 +108,6 @@ function apply(p: Prefs) {
   root.style.fontSize = `${p.uiFontSize}px`;
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', getComputedStyle(root).getPropertyValue('--bg').trim());
   conn.setTheme(kind);
-  // The setting, not the kind: "system" keeps following the system.
-  (globalThis as { desktopShell?: DesktopShell }).desktopShell?.setTheme(p.theme);
 }
 
 /** Applies the current settings and follows later changes. */

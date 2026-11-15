@@ -11,7 +11,7 @@ describe('i18n', () => {
     expect(detectLocale('xx', ['de'])).toBe('en');
   });
   it('substitutes every occurrence of a placeholder', () => {
-    expect(t('app.hint', { prefix: 'ctrl+a' })).not.toContain('{prefix}');
+    expect(t('app.withKey', { label: 'Zoom', key: 'cmd+z' })).not.toMatch(/\{(label|key)\}/);
   });
   it('keeps placeholders consistent across locales', () => {
     const vars = (s: string) =>

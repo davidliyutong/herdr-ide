@@ -5,11 +5,11 @@
 Agents answer with markdown, and their math is LaTeX: `$…$` and `$$…$$`
 (Claude), `\(…\)` and `\[…\]` (GPT models). Claude Code and Codex render
 markdown in the terminal as text, so formulas stay source code, often hard
-to read once fractions, sums or matrices nest. Panes are herdr's cell grid
-painted on a canvas ([03](03-pane-rendering-and-input.md)): there is no
-DOM text to typeset in place, and a formula's rendering does not fit the
-grid's rows. Those renderers also treat a backslash before punctuation as
-a markdown escape and drop it: Claude Code printed `e^{-x^2}\,dx` as
+to read once fractions, sums or matrices nest. Terminals are drawn on a
+canvas ([26](26-web-terminals.md)): there is no DOM text to typeset in
+place, and a formula's rendering does not fit the grid's rows. The agents'
+markdown renderers also treat a backslash before punctuation as a markdown
+escape and drop it: Claude Code printed `e^{-x^2}\,dx` as
 `e^{-x^2},dx`, and `\[ … \]` and `\( … \)` arrive as `[ … ]` and `( … )`.
 
 ## Goals / non-goals
@@ -32,7 +32,8 @@ dropped (`\{` printed as `{`, `\\` as `\`).
   last column continue in the next row after its indentation, as for links
   ([06](06-quick-look-and-files.md)); other rows are separate lines, which
   is how a program's own word wrapping and multi-line display formulas
-  arrive. Cell columns come from `Grid.rowText`, so wide characters next to
+  arrive. Cell columns come from the emulator's rows (`rowCols` in
+  `vt/pane.ts`), so wide characters next to
   a formula (Chinese text) do not shift it. Found, in this order, without
   overlapping and never across an empty line:
   - display: `$$…$$`, `\[…\]`, and a line holding only `[` … a line holding
@@ -43,7 +44,7 @@ dropped (`\{` printed as `{`, `\\` as `\`).
     `$HOME`, `$5 and $10` and `$x$` alone; `( … )` not right after a word
     (a call) around a TeX command, up to 400 characters, with balanced
     parentheses.
-- **Showing one** (`web/src/surface/controller.ts`, `updateMath`). After the
+- **Showing one** (`web/src/vt/pane.ts`, `updateMath`). After the
   pointer rests 300 ms on a formula, KaTeX renders it; moving to another
   formula shows that one at once. KaTeX must parse the text first: text
   that only looks like a formula (`$\frac{a$`, a Windows path in
@@ -58,8 +59,8 @@ dropped (`\{` printed as `{`, `\\` as `\`).
   the pointer moves inside the triangle between its last position and the
   popover's nearest edge, the formula shown stays and is not replaced by the
   ones crossed; it goes after 800 ms if the pointer stops there. Typing,
-  clicking, scrolling and rows herdr moves under it hide it at once, and so
-  does a modifier showing links (⌘/Ctrl). When the text under a shown
+  clicking, scrolling and rows the terminal moves under it hide it at once,
+  and so does a modifier showing links (⌘/Ctrl). When the text under a shown
   formula changes, the formula under the pointer is looked for again.
 - **KaTeX** (`web/src/terminal/mathRender.ts`) is a separate chunk with its
   stylesheet, imported the first time a formula is shown; the last 200
@@ -68,8 +69,10 @@ dropped (`\{` printed as `{`, `\\` as `\`).
   a Vite plugin (`katexWoff2` in `web/vite.config.ts`) removes the woff and
   ttf alternatives from the stylesheet before Vite resolves its URLs, so
   the embedded UI grows by about 290 KB of fonts instead of 1.1 MB.
-- **Setting.** *Show formulas under the pointer* (Terminal, on by default)
-  turns it off for this browser.
+- **Setting.** `terminal.mathHover`, *Show formulas under the pointer*
+  (Terminal, on by default), is a setting of the core
+  ([13](13-settings-and-appearance.md)): turned off, no page looks for
+  formulas.
 
 ## Alternatives considered
 
@@ -104,11 +107,12 @@ existing Content-Security-Policy (inline styles were already allowed).
 
 ## Testing
 
-`web/src/__tests__/math.test.ts` covers what Claude Code printed, `\(…\)`
-and `\[…\]` with and without backslashes, matrices, shell variables,
-prices, calls and empty lines, display formulas over several rows,
-formulas wrapped by the terminal and by the program, pairing within a
-paragraph and wide characters. `web/src/__tests__/surfaceSelect.test.ts`
-(`formulas`) covers showing a formula after the pointer rests, the dotted
-underline, hiding after leaving, text KaTeX cannot read, ⌘ held, the
-setting and typing.
+`design/testdata/math/find.json` holds the cases: what Claude Code
+printed, `\(…\)` and `\[…\]` with and without backslashes, a display
+formula over several lines, matrices, shell variables, prices, calls,
+escaped dollars and empty lines. `web/src/__tests__/math.test.ts` runs
+them and covers display formulas over several rows, formulas wrapped by
+the terminal and by the program, pairing within a paragraph and wide
+characters. `web/src/__tests__/vt.test.ts` (`drawRow`) covers the dotted
+underline. Showing a formula after the pointer rests and hiding it after
+leaving were checked in Chromium.

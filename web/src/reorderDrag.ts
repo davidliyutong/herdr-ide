@@ -1,8 +1,10 @@
 // Dragging a tab within the tab bar, or a workspace within its machine's list
-// in the sidebar, reorders it (tab.move / workspace.move). herdr's
-// insert_index is a slot in the current order: 0 before the first item, n
-// after the last; the slots on either side of the dragged item change
-// nothing, so they show no marker.
+// in the sidebar, reorders it in the machine's layout document; dragging a
+// machine's header among the machines reorders the machines (the core stores
+// their order). A drop lands
+// in a slot of the current order: 0 before the first item, n after the
+// last; the slots on either side of the dragged item change nothing, so
+// they show no marker.
 
 import { actions } from './actions';
 import { trackDrag, type Box, type DragStart } from './drag';
@@ -88,15 +90,15 @@ function startReorder(
 }
 
 /** Starts tracking a possible drag of a tab within its tab bar. */
-export function startTabDrag(ev: DragStart, src: { m: string; ws: string; tab: string; label: string }) {
+export function startTabDrag(ev: DragStart, src: { m: string; ws: string; index: number; label: string }) {
   startReorder(ev, {
     label: src.label,
-    id: src.tab,
+    id: String(src.index),
     axis: 'x',
     list: () => document.querySelector(`.tabs[data-m="${CSS.escape(src.m)}"][data-ws="${CSS.escape(src.ws)}"]`),
-    items: '.tab[data-tab-id]',
-    idAttr: 'data-tab-id',
-    move: (index) => actions.moveTab(src.m, src.tab, index),
+    items: '.tab[data-tab]',
+    idAttr: 'data-tab',
+    move: async (index) => actions.moveTab(src.m, src.ws, src.index, index),
   });
 }
 
@@ -109,6 +111,19 @@ export function startWorkspaceDrag(ev: DragStart, src: { m: string; ws: string; 
     list: () => document.querySelector(`.machine-body[data-m="${CSS.escape(src.m)}"]`),
     items: '.ws-item[data-ws-id]',
     idAttr: 'data-ws-id',
-    move: (index) => actions.moveWorkspace(src.m, src.ws, index),
+    move: async (index) => actions.moveWorkspace(src.m, src.ws, index),
+  });
+}
+
+/** Starts tracking a possible drag of a machine among the machines. */
+export function startMachineDrag(ev: DragStart, src: { m: string; label: string }) {
+  startReorder(ev, {
+    label: src.label,
+    id: src.m,
+    axis: 'y',
+    list: () => document.querySelector('.sidebar-scroll'),
+    items: '.machine[data-machine]',
+    idAttr: 'data-machine',
+    move: (index) => actions.moveMachine(src.m, index),
   });
 }

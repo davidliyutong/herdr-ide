@@ -1,3 +1,5 @@
+//go:build unix
+
 package agent
 
 import (
@@ -126,9 +128,14 @@ func stopProcessGroup(pid int) {
 func (c *codeServer) serves() bool {
 	client := &http.Client{
 		Timeout: 10 * time.Second,
-		Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			return (&net.Dialer{}).DialContext(ctx, "unix", c.socket())
-		}},
+		// One request per probe: its connection closes with the response
+		// instead of idling in a pool nobody uses again.
+		Transport: &http.Transport{
+			DisableKeepAlives: true,
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				return (&net.Dialer{}).DialContext(ctx, "unix", c.socket())
+			},
+		},
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 	resp, err := client.Get("http://localhost/")

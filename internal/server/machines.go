@@ -1,55 +1,29 @@
 package server
 
-// Adding, removing, renaming and reloading SSH machines from the UI
-// (docs/features/02). Machines are herdr's saved machines, so changes go
-// through herdr's own commands on the core host: `herdr machine add` in a
-// terminal (it may ask questions), `herdr machine remove` and
-// `herdr machine rename`. The core then follows herdr's catalog; it never
-// writes the catalog itself.
+// Managing machines from the UI (docs/features/02): the core's own registry
+// of SSH machines (internal/machines). Adding one stores it and connects it;
+// a machine that needs an interactive login turns auth_required, and the
+// authentication terminal (auth.go) logs in. Renaming, enabling, disabling
+// and removing change the registry and the running machine at once.
 
 import (
-	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
-	"os"
-	"os/exec"
-	"regexp"
 	"strings"
-	"time"
 	"unicode"
 	"unicode/utf8"
 
 	"herdr-ide/internal/machines"
+	"herdr-ide/internal/sshconfig"
 )
 
-// Limits of what the forms accept. herdr checks them again; these keep a
-// target from reading as an option and odd bytes out of the audit log.
-const (
-	maxTargetLen = 255
-	maxLabelLen  = 64
-)
-
-var sessionName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
-
-// herdrCommandTimeout bounds herdr's non-interactive machine commands.
-const herdrCommandTimeout = 30 * time.Second
-
-// validTarget accepts an ssh destination (a ~/.ssh/config alias, host,
-// user@host or ssh:// URL): printable ASCII without spaces, not starting
-// with "-", which herdr and ssh would take for an option.
-func validTarget(t string) bool {
-	if t == "" || len(t) > maxTargetLen || t[0] == '-' {
-		return false
-	}
-	for i := 0; i < len(t); i++ {
-		if t[i] <= ' ' || t[i] > '~' {
-			return false
-		}
-	}
-	return true
-}
+// maxLabelLen bounds a label: no odd bytes in the audit log. Targets are
+// checked by machines.ValidTarget.
+const maxLabelLen = 64
 
 // validLabel accepts a short label without control characters.
 func validLabel(l string) bool {
@@ -64,249 +38,186 @@ func validLabel(l string) bool {
 	return true
 }
 
-// machineAddArgs are herdr's arguments to save target. Options take their
-// value in the same argument, so a value never reads as an option; the
-// target is checked not to start with "-" (herdr has no "--").
-func machineAddArgs(target, label, session string) []string {
-	args := []string{"machine", "add"}
-	if label != "" {
-		args = append(args, "--label="+label)
-	}
-	if session != "" {
-		args = append(args, "--remote-session="+session)
-	}
-	return append(args, target)
-}
-
-// machineRenameArgs are herdr's arguments to rename machine id. herdr's
-// rename takes the label as the argument after --label, whatever it starts
-// with (it has no --label=).
-func machineRenameArgs(id, label string) []string {
-	return []string{"machine", "rename", id, "--label", label}
-}
-
 func (s *Server) broadcastMachines() {
 	s.broadcast(map[string]any{"t": "machines", "list": s.mg.States()})
 }
 
-// catalogChanges are what following herdr's catalog changed, by machine id.
-type catalogChanges struct {
-	Added   []string `json:"added"`
-	Removed []string `json:"removed"`
-	Updated []string `json:"updated"`
+func (s *Server) handleMachines(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.mg.States())
 }
 
-func (c catalogChanges) any() bool { return len(c.Added)+len(c.Removed)+len(c.Updated) > 0 }
-
-// syncCatalog makes the machines follow herdr's catalog: saved machines it
-// no longer has are removed (their session ends), changed labels and
-// enabled flags are applied, and machines the core does not have are added
-// when take says so. Browsers get the new list when machines came or went;
-// a changed machine reaches them as its state.
-func (s *Server) syncCatalog(take func(machines.Spec) bool) (catalogChanges, error) {
-	var c catalogChanges
-	saved, err := s.opts.Catalog()
-	if err != nil {
-		return c, err
+// handleSSHHosts lists the Host aliases of the core host's ssh configuration
+// (~/.ssh/config and its includes) that are no machine's target yet, for
+// the Add Machine dialog: each alias with its HostName and User, nothing
+// else (internal/sshconfig). An alias the target rule refuses is left out,
+// since it could not be added. Only pages that may add machines get it.
+func (s *Server) handleSSHHosts(w http.ResponseWriter, r *http.Request) {
+	out := []sshconfig.Host{}
+	home, err := s.home()
+	if err != nil || home == "" {
+		writeJSON(w, http.StatusOK, out)
+		return
 	}
-	in := map[string]bool{}
-	for _, sp := range saved {
-		in[sp.ID] = true
-		if s.mg.Get(sp.ID) != nil {
-			if changed, err := s.mg.Update(sp); err == nil && changed {
-				c.Updated = append(c.Updated, sp.ID)
-			}
-			continue
-		}
-		if take(sp) && s.mg.Add(sp) == nil {
-			c.Added = append(c.Added, sp.ID)
-		}
-	}
+	added := map[string]bool{}
 	for _, st := range s.mg.States() {
-		if st.Saved && !in[st.ID] && s.mg.Remove(st.ID) == nil {
-			s.gui.Forget(st.ID)
-			c.Removed = append(c.Removed, st.ID)
+		if st.Kind == machines.KindSSH {
+			added[strings.ToLower(st.Target)] = true
+			added[strings.ToLower(targetHost(st.Target))] = true
 		}
 	}
-	if len(c.Added)+len(c.Removed) > 0 {
-		s.broadcastMachines()
+	for _, h := range sshconfig.Read(home) {
+		if machines.ValidTarget(h.Alias) && !added[strings.ToLower(h.Alias)] {
+			out = append(out, h)
+		}
 	}
-	return c, nil
+	writeJSON(w, http.StatusOK, out)
 }
 
-// selected reports whether the core's machine selection takes sp.
-func (s *Server) selected(sp machines.Spec) bool {
-	return s.opts.Selected == nil || s.opts.Selected(sp)
+// targetHost is the host of an ssh target: without ssh://, the user and the
+// port ("gpu" for "ssh://me@gpu:22" and "me@gpu").
+func targetHost(t string) string {
+	t = strings.TrimPrefix(t, "ssh://")
+	if i := strings.LastIndexByte(t, '@'); i >= 0 {
+		t = t[i+1:]
+	}
+	if strings.HasPrefix(t, "[") {
+		if i := strings.IndexByte(t, ']'); i > 0 {
+			return t[1:i]
+		}
+	}
+	if i := strings.IndexByte(t, ':'); i >= 0 && strings.Count(t, ":") == 1 {
+		t = t[:i]
+	}
+	return t
 }
 
-// runHerdr runs one of herdr's non-interactive machine commands with the
-// local herdr, bounded in time, and returns its output.
-func (s *Server) runHerdr(ctx context.Context, args ...string) (string, error) {
-	bin := s.herdrCLI()
-	if bin == "" {
-		return "", errNoLocalHerdr
-	}
-	ctx, cancel := context.WithTimeout(ctx, herdrCommandTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, bin, args...)
-	cmd.Env = herdrClientEnv(os.Environ())
-	out, err := cmd.CombinedOutput()
-	return strings.TrimSpace(string(out)), err
+// newMachineID is a random id: machine ids appear in URLs and in per-machine
+// settings, so they are never derived from what the user typed.
+func newMachineID() string {
+	b := make([]byte, 8)
+	rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
-var errNoLocalHerdr = errors.New("no_local_herdr")
-
-// herdrFailed answers a herdr command that did not do what was asked, with
-// its output as the detail.
-func herdrFailed(w http.ResponseWriter, out string, err error) {
-	if errors.Is(err, errNoLocalHerdr) {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "no_local_herdr"})
-		return
+// machineFailed answers a registry or manager error.
+func machineFailed(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, machines.ErrUnknownMachine):
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown"})
+	case errors.Is(err, machines.ErrMachineExists):
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "machine_exists"})
+	case errors.Is(err, machines.ErrLabelTaken):
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "label_taken"})
+	case errors.Is(err, machines.ErrLocalMachine):
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "local"})
+	case errors.Is(err, machines.ErrInvalidOrder):
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid"})
+	case errors.Is(err, machines.ErrInvalidTarget):
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": machines.CodeInvalidTarget})
+	default:
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "save", "detail": err.Error()})
 	}
-	if out == "" && err != nil {
-		out = err.Error()
-	}
-	writeJSON(w, http.StatusBadGateway, map[string]string{"error": "herdr", "detail": out})
 }
 
-// handleMachinesRefresh reloads herdr's machines, for changes made outside
-// the UI (herdr's own commands or TUI): new machines the core's selection
-// takes are added, removed ones dropped, renamed or enabled and disabled
-// ones updated. The reply lists the machines that changed.
-func (s *Server) handleMachinesRefresh(w http.ResponseWriter, r *http.Request) {
-	if s.opts.Catalog == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unsupported"})
-		return
-	}
-	c, err := s.syncCatalog(s.selected)
-	if err != nil {
-		s.audit.log(r, "machine.refresh", map[string]any{"error": err.Error()})
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "catalog", "detail": err.Error()})
-		return
-	}
-	if c.any() {
-		s.audit.log(r, "machine.refresh", map[string]any{"added": c.Added, "removed": c.Removed, "updated": c.Updated})
-	}
-	writeJSON(w, http.StatusOK, c)
-}
-
-// handleMachineAdd saves a new SSH machine the way herdr does it: a
-// terminal on the core host runs the local herdr's `herdr machine add`,
-// which checks the machine over ssh with the user's configuration, prepares
-// its herdr server and saves it in herdr's catalog, asking in the terminal
-// when it needs to (a password, a host key, which session). Query: target,
-// and optionally label and session. Machines that appeared in the catalog
-// meanwhile are added and connect; the socket closes with "added <id>" for
-// the first of them, or "none".
+// handleMachineAdd adds an SSH machine ({"target", "label"}): stored, then
+// connected. The reply is its state; whether it connects, needs a login
+// (auth_required) or fails follows as machine messages on /ws.
 func (s *Server) handleMachineAdd(w http.ResponseWriter, r *http.Request) {
-	if s.opts.Catalog == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unsupported"})
-		return
+	var body struct {
+		Target string `json:"target"`
+		Label  string `json:"label"`
 	}
-	q := r.URL.Query()
-	target := strings.TrimSpace(q.Get("target"))
-	label := strings.TrimSpace(q.Get("label"))
-	session := strings.TrimSpace(q.Get("session"))
-	if !validTarget(target) || !validLabel(label) || (session != "" && !sessionName.MatchString(session)) {
+	if err := json.NewDecoder(io.LimitReader(r.Body, 4<<10)).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid"})
 		return
 	}
-	bin := s.herdrCLI()
-	if bin == "" {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "no_local_herdr"})
+	target, label := strings.TrimSpace(body.Target), strings.TrimSpace(body.Label)
+	if !machines.ValidTarget(target) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": machines.CodeInvalidTarget})
 		return
 	}
-	saved, err := s.opts.Catalog()
-	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "catalog", "detail": err.Error()})
+	if !validLabel(label) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid"})
 		return
 	}
-	before := map[string]bool{}
-	for _, sp := range saved {
-		before[sp.ID] = true
+	if label == "" {
+		label = target
 	}
-	s.audit.log(r, "machine.add", map[string]any{"target": target, "label": label, "session": session})
-	servePTYThen(w, r, append([]string{bin}, machineAddArgs(target, label, session)...), herdrClientEnv(os.Environ()), func() string {
-		// Only what herdr saved now: machines the selection left out stay out.
-		c, err := s.syncCatalog(func(sp machines.Spec) bool { return !before[sp.ID] })
-		if err != nil || len(c.Added) == 0 {
-			return "none"
-		}
-		s.audit.log(r, "machine.added", map[string]any{"machines": c.Added, "target": target})
-		return "added " + c.Added[0]
-	})
+	spec := machines.Spec{ID: newMachineID(), Label: label, Kind: machines.KindSSH, Target: target, Enabled: true}
+	ev := map[string]any{"machine": spec.ID, "target": target, "label": label}
+	if err := s.mg.Add(spec); err != nil {
+		ev["error"] = err.Error()
+		s.audit.log(r, "machine.add", ev)
+		machineFailed(w, err)
+		return
+	}
+	s.audit.log(r, "machine.add", ev)
+	s.broadcastMachines()
+	writeJSON(w, http.StatusCreated, s.mg.Get(spec.ID).State())
 }
 
-// savedMachine returns the machine of the request if it is one of herdr's
-// saved machines; otherwise it answers.
-func (s *Server) savedMachine(w http.ResponseWriter, r *http.Request) *machines.Machine {
-	mc := s.machine(w, r)
-	if mc == nil {
-		return nil
+// handleMachineOrder puts the machines in an order ({"order": [ids]}, each
+// machine once), stored in the machines file; every browser gets the new
+// list.
+func (s *Server) handleMachineOrder(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Order []string `json:"order"`
 	}
-	if mc.Local() || !mc.State().Saved || s.opts.Catalog == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "not_saved"})
-		return nil
+	if err := json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&body); err != nil || body.Order == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid"})
+		return
 	}
-	return mc
+	ev := map[string]any{"order": body.Order}
+	if err := s.mg.SetOrder(body.Order); err != nil {
+		ev["error"] = err.Error()
+		s.audit.log(r, "machine.order", ev)
+		machineFailed(w, err)
+		return
+	}
+	s.audit.log(r, "machine.order", ev)
+	s.broadcastMachines()
+	writeJSON(w, http.StatusOK, s.mg.States())
 }
 
-// catalogEntry returns herdr's saved machine id, if the catalog has it.
-func (s *Server) catalogEntry(id string) (*machines.Spec, error) {
-	saved, err := s.opts.Catalog()
-	if err != nil {
-		return nil, err
-	}
-	for i := range saved {
-		if saved[i].ID == id {
-			return &saved[i], nil
-		}
-	}
-	return nil, nil
-}
-
-// handleMachineRemove removes a saved SSH machine with the local herdr's
-// `herdr machine remove`; once it is gone from herdr's catalog its session
-// ends (panes keep running in its herdr) and it leaves every browser.
-// Machines given with --ssh are not herdr's and the local machine stays.
+// handleMachineRemove removes a machine: its record goes, its session ends
+// (its terminal core and programs keep running there) and it leaves every
+// browser. The local machine stays.
 func (s *Server) handleMachineRemove(w http.ResponseWriter, r *http.Request) {
-	mc := s.savedMachine(w, r)
+	mc := s.machine(w, r)
 	if mc == nil {
 		return
 	}
 	id := mc.ID()
-	out, runErr := s.runHerdr(r.Context(), "machine", "remove", id)
 	ev := map[string]any{"machine": id, "target": mc.State().Target}
-	// herdr reports a machine removed elsewhere as not found: what counts is
-	// that the catalog no longer has it.
-	entry, err := s.catalogEntry(id)
-	if err != nil || entry != nil {
-		if err != nil {
-			out, runErr = err.Error(), err
-		}
-		ev["error"] = out
-		s.audit.log(r, "machine.remove", ev)
-		herdrFailed(w, out, runErr)
-		return
-	}
-	if err := s.mg.Remove(id); err != nil && !errors.Is(err, machines.ErrUnknownMachine) {
+	if err := s.mg.Remove(id); err != nil {
 		ev["error"] = err.Error()
 		s.audit.log(r, "machine.remove", ev)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "remove", "detail": err.Error()})
+		machineFailed(w, err)
 		return
 	}
-	s.gui.Forget(id)
+	s.forgetMachine(id)
 	s.audit.log(r, "machine.remove", ev)
 	s.broadcastMachines()
 	writeJSON(w, http.StatusOK, map[string]string{"removed": id})
 }
 
-// handleMachineRename renames a saved SSH machine ({"label": "..."}) with
-// the local herdr's `herdr machine rename`, after checking that no other
-// saved machine has the label (herdr's --machine selects by label). The
-// reply is the machine's state.
+// forgetMachine drops what the server keeps for a removed machine: its
+// display, its terminal backend, its code-server proxy and state, and
+// whether it was ready. Its id may come back with the same target.
+func (s *Server) forgetMachine(id string) {
+	s.gui.Forget(id)
+	s.term.forget(id)
+	s.csProxy.forget(id)
+	s.cs.Forget(id)
+	s.readyMu.Lock()
+	delete(s.ready, id)
+	s.readyMu.Unlock()
+}
+
+// handleMachineRename renames a machine, the local one too ({"label": "..."}, trimmed).
+// The reply is the machine's state.
 func (s *Server) handleMachineRename(w http.ResponseWriter, r *http.Request) {
-	mc := s.savedMachine(w, r)
+	mc := s.machine(w, r)
 	if mc == nil {
 		return
 	}
@@ -322,34 +233,42 @@ func (s *Server) handleMachineRename(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid"})
 		return
 	}
-	id := mc.ID()
-	saved, err := s.opts.Catalog()
-	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "catalog", "detail": err.Error()})
-		return
-	}
-	for _, sp := range saved {
-		if sp.ID != id && sp.Label == label {
-			writeJSON(w, http.StatusConflict, map[string]string{"error": "label_taken"})
-			return
-		}
-	}
-	ev := map[string]any{"machine": id, "from": mc.Label(), "label": label}
-	out, runErr := s.runHerdr(r.Context(), machineRenameArgs(id, label)...)
-	entry, err := s.catalogEntry(id)
-	if err != nil || entry == nil || entry.Label != label {
-		switch {
-		case err != nil:
-			out, runErr = err.Error(), err
-		case entry == nil && out == "":
-			out = "the machine is no longer saved in herdr"
-		}
-		ev["error"] = out
+	ev := map[string]any{"machine": mc.ID(), "from": mc.Label(), "label": label}
+	if err := s.mg.SetLabel(mc.ID(), label); err != nil {
+		ev["error"] = err.Error()
 		s.audit.log(r, "machine.rename", ev)
-		herdrFailed(w, out, runErr)
+		machineFailed(w, err)
 		return
 	}
-	s.mg.Update(*entry)
 	s.audit.log(r, "machine.rename", ev)
+	writeJSON(w, http.StatusOK, mc.State())
+}
+
+// handleMachineEnabled enables or disables a machine ({"enabled": bool}):
+// stored and applied at once. The reply is the machine's state.
+func (s *Server) handleMachineEnabled(w http.ResponseWriter, r *http.Request) {
+	mc := s.machine(w, r)
+	if mc == nil {
+		return
+	}
+	var body struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<10)).Decode(&body); err != nil || body.Enabled == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid"})
+		return
+	}
+	event := "machine.disable"
+	if *body.Enabled {
+		event = "machine.enable"
+	}
+	ev := map[string]any{"machine": mc.ID()}
+	if err := s.mg.SetEnabled(mc.ID(), *body.Enabled); err != nil {
+		ev["error"] = err.Error()
+		s.audit.log(r, event, ev)
+		machineFailed(w, err)
+		return
+	}
+	s.audit.log(r, event, ev)
 	writeJSON(w, http.StatusOK, mc.State())
 }

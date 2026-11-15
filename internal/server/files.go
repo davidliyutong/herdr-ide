@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/url"
 	"path"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -43,7 +42,7 @@ var extraTypes = map[string]string{
 }
 
 func contentType(name string) string {
-	ext := strings.ToLower(filepath.Ext(name))
+	ext := strings.ToLower(path.Ext(name))
 	if t, ok := extraTypes[ext]; ok {
 		return t
 	}
@@ -144,7 +143,7 @@ func serveFile(w http.ResponseWriter, r *http.Request, mc *machines.Machine, st 
 		h.Set("Content-Security-Policy", fileCSP)
 	}
 	if download {
-		h.Set("Content-Disposition", attachment(filepath.Base(st.Path)))
+		h.Set("Content-Disposition", attachment(path.Base(st.Path)))
 	}
 	if r.Header.Get("If-None-Match") == etag {
 		w.WriteHeader(http.StatusNotModified)
@@ -305,7 +304,7 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !rep.Stat.IsDir {
-			d.describe(filepath.Base(rep.Stat.Path), rep.Stat.Size)
+			d.describe(path.Base(rep.Stat.Path), rep.Stat.Size)
 			switch complete, code := serveFile(w, r, mc, rep.Stat, true); {
 			case complete:
 				d.done()
@@ -401,7 +400,7 @@ var unsafeName = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 // clipboard images are all called "image.png", so a timestamp alone would let
 // one overwrite another.
 func uploadName(original string, now time.Time) string {
-	base := unsafeName.ReplaceAllString(filepath.Base(original), "_")
+	base := unsafeName.ReplaceAllString(path.Base(original), "_")
 	base = strings.Trim(base, "._")
 	if base == "" {
 		base = "upload"
@@ -423,7 +422,7 @@ func keptName(original string) string {
 			return -1
 		}
 		return r
-	}, filepath.Base(original))
+	}, path.Base(original))
 	base = strings.TrimSpace(base)
 	if base == "." || base == ".." || base == "/" || base == "" {
 		base = "upload"
@@ -441,12 +440,12 @@ func keptName(original string) string {
 func uploadHeader(q url.Values, uploadDir string, now time.Time) (agentproto.Header, error) {
 	dir := q.Get("dir")
 	if dir == "" {
-		return agentproto.Header{Op: agentproto.OpFsWrite, Path: filepath.Join(uploadDir, uploadName(q.Get("name"), now)), Mkdirs: true}, nil
+		return agentproto.Header{Op: agentproto.OpFsWrite, Path: path.Join(uploadDir, uploadName(q.Get("name"), now)), Mkdirs: true}, nil
 	}
-	if !filepath.IsAbs(dir) && dir != "~" && !strings.HasPrefix(dir, "~/") {
+	if !path.IsAbs(dir) && dir != "~" && !strings.HasPrefix(dir, "~/") {
 		return agentproto.Header{}, errors.New("dir must be absolute")
 	}
-	return agentproto.Header{Op: agentproto.OpFsWrite, Path: filepath.Join(dir, keptName(q.Get("name"))), Unique: true}, nil
+	return agentproto.Header{Op: agentproto.OpFsWrite, Path: path.Join(dir, keptName(q.Get("name"))), Unique: true}, nil
 }
 
 // handleUpload writes the request body to a file on the machine (used for

@@ -1,13 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../lib/conn', () => ({ conn: { sendNow: () => {}, setSurfaceHandler: () => {} } }));
+vi.mock('../lib/conn', () => ({ conn: { sendNow: () => {} } }));
 
 import { useStore } from '../state/store';
 import { usePrefs } from '../prefs';
-import { CLIP_AUTO_MS, PROGRAM_CLIP_MS, handleSurfaceMessage, programClipboard, sendInput, useSurface } from '../surface/session';
+import { fakeSettingsApi } from './fakeSettings';
+import { CLIP_AUTO_MS, PROGRAM_CLIP_MS, forgetProgramClipboard, programClipboard, programCopied, userInput } from '../vt/clipboard';
 
-const clip = (text: string, m = 'm') => handleSurfaceMessage({ t: 'clip', m, data: btoa(text) });
-const typed = () => sendInput('m', 'w1:p1', [{ t: 'text', text: 'y' }]);
+const clip = (text: string, m = 'm') => programCopied(m, text);
+const typed = () => userInput();
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
 let writeText: ReturnType<typeof vi.fn>;
@@ -15,7 +16,7 @@ let writeText: ReturnType<typeof vi.fn>;
 beforeEach(() => {
   writeText = vi.fn(() => Promise.resolve());
   vi.stubGlobal('navigator', { clipboard: { writeText } });
-  useSurface.setState({ ownership: 'owner' });
+  fakeSettingsApi();
   usePrefs.getState().setPref('programClipboard', 'auto');
 });
 
@@ -25,7 +26,7 @@ afterEach(() => {
   useStore.setState({ toasts: [] });
 });
 
-describe('OSC 52 from pane programs', () => {
+describe('OSC 52 from programs', () => {
   it('copies at once right after input to a pane and says what it copied', async () => {
     typed();
     clip('copied text');
@@ -89,7 +90,7 @@ describe('OSC 52 from pane programs', () => {
     expect(useStore.getState().toasts.map((t) => t.msg)).toEqual([expect.stringContaining('second')]);
   });
 
-  it('keeps for the pane menu only copies that passed the gate, until the session is lost or it expires', () => {
+  it('keeps for the menu only copies that passed the gate, until the next input or it expires', () => {
     vi.useFakeTimers();
     usePrefs.getState().setPref('programClipboard', 'ask');
     typed();
@@ -110,7 +111,10 @@ describe('OSC 52 from pane programs', () => {
 
     typed();
     clip('kept');
-    handleSurfaceMessage({ t: 'session', state: 'taken_over' });
+    typed();
+    expect(programClipboard('m')).toBeUndefined();
+    clip('kept');
+    forgetProgramClipboard();
     expect(programClipboard('m')).toBeUndefined();
   });
 });

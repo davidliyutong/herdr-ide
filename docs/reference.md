@@ -9,11 +9,10 @@ here; both READMEs link to this page instead of repeating it.
 | Command | Description |
 | --- | --- |
 | `herdr-ide [serve] [flags]` | Run the server (default command). |
-| `herdr-ide herdr [args]` | Run the herdr bundled beside the core with `args` and the caller's environment unchanged (for hosts without an installed herdr), e.g. `herdr-ide herdr machine list`. |
 | `herdr-ide fetch-assets [flags] DIR` | Download and verify code-server releases and extensions into `DIR` for air-gapped installs. |
 | `herdr-ide version` | Print the version. |
 | `herdr-ide-agent serve [--instance NAME]` | Per-machine helper; started by the core over ssh, never by hand. |
-| `herdr-ide-agent gui-keep --instance NAME --session S` | Holds a machine's virtual display while the herdr server of session `S` runs; started by the agent, never by hand. |
+| `herdr-ide-agent gui-keep --instance NAME` | Holds a machine's virtual display while the instance's terminal core runs; started by the agent, never by hand. |
 
 ## `serve` flags
 
@@ -25,7 +24,7 @@ here; both READMEs link to this page instead of repeating it.
 | `--allowed-origin` | – | Public origin of the reverse proxy, e.g. `https://ide.example.com` (repeatable). Host and Origin headers are checked against loopback plus these. |
 | `--proxy-secret-file` | – | File with a secret (≥ 16 characters) that the reverse proxy sends in `X-herdr-ide-Proxy-Secret`. Required for requests not coming from loopback. |
 | `--insecure-listen` | `false` | Accept a non-loopback `--listen` without a proxy secret. Anyone reaching the port gets shell access to every machine. |
-| `--read-only` | `false` | Watch only: panes get no input, mutating herdr calls, uploads, ssh authentication and VS Code are refused. |
+| `--read-only` | `false` | Watch only: terminals get no input (they observe), writing terminal core calls (layout changes, new and ended terminals), uploads, ssh authentication and VS Code are refused, and no terminal core is installed or started. |
 | `--audit-log` | – | Append security-relevant events (connections, mutating API calls, uploads, VS Code and bridge use, denials) as JSON lines. |
 | `--user-header` | – | Header holding the authenticated user for the audit log. Without it, `Tailscale-User-Login`, `X-Forwarded-User`, `X-Auth-Request-User`, `Remote-User` and `X-Forwarded-Email` are tried. |
 
@@ -33,12 +32,10 @@ here; both READMEs link to this page instead of repeating it.
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--local-session` | `default` | herdr session used on the local machine. |
-| `--remote-session` | – | herdr session used on every remote machine instead of the one saved in herdr (development and tests against an isolated session). |
-| `--local-only` | `false` | Do not connect to herdr's saved SSH machines (`--ssh` targets are still used). |
+| `--local-only` | `false` | Do not connect to the stored SSH machines (`--ssh` targets are still used). |
 | `--machine` | – | Connect only these machines, by id, label or ssh target (repeatable). |
-| `--ssh` | – | Extra ssh target (`~/.ssh/config` alias or `user@host`) not saved in herdr (repeatable). |
-| `--instance` | – | State instance: machines use `~/.herdr-ide-<instance>` instead of `~/.herdr-ide`, with separate sockets, code-server process and settings. Lets a development core run next to the daily one. |
+| `--ssh` | – | Extra ssh target (`~/.ssh/config` alias or `user@host`) for this run, not stored; renaming or disabling it in the UI lasts until the core stops (repeatable). At most 255 bytes, not starting with `-`, without whitespace, control characters or any of ``! " $ & ' ( ) * ; < > ? \ ` { \| }`` (ASCII letters, digits, `# % + , - . / : = @ [ ] ^ _ ~` and Unicode letters, marks and numbers); the core refuses to start otherwise. |
+| `--instance` | – | State instance: machines use `~/.herdr-ide-<instance>` instead of `~/.herdr-ide`, with separate sockets, terminal core (session `herdr-ide-<instance>`), code-server process and settings. Lets a development core run next to the daily one. |
 
 ### code-server
 
@@ -50,33 +47,23 @@ here; both READMEs link to this page instead of repeating it.
 | `--extension-url` | Open VSX | Download URL template for extensions (`{publisher}`, `{name}`, `{version}`, `{file}`). |
 | `--seed-dir` | – | Directory with pre-downloaded tarballs and VSIXs (from `fetch-assets`), searched before the cache (repeatable). |
 | `--offline` | `false` | Never download; artifacts must come from `--seed-dir` or the cache. |
-| `--code-server-install` | `push` | How machines get code-server: `push` (the core resolves, verifies and uploads the release), `download` (the machine fetches it with curl or wget, verified against the same digest) or `existing` (a code-server already installed on the machine). `download` and `existing` fall back to `push`; `--offline` disables `download`. Also a setting in the UI. |
-| `--code-server-path` | – | code-server on machines for `existing` (absolute or `~/` path); empty searches `PATH`, `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin` and `/snap/bin`. Also a setting in the UI. |
+| `--code-server-install` | `push` | How machines get code-server: `push` (the core resolves, verifies and uploads the release), `download` (the machine fetches it with curl or wget, verified against the same digest) or `existing` (a code-server already installed on the machine). `download` and `existing` fall back to `push`; `--offline` disables `download`. The setting `codeServer.install`. |
+| `--code-server-path` | – | code-server on machines for `existing` (absolute or `~/` path); empty searches `PATH`, `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin` and `/snap/bin`. The setting `codeServer.path`. |
 
 ### Program windows
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--gui` | `on` | Show windows of programs on remote Linux machines in browser windows: new panes get a virtual display (`DISPLAY`, `XAUTHORITY`); Xvfb is fetched in user space when missing. Applies to panes created afterwards. Also a setting in the UI. |
-| `--gui-gpu` | `vglrun` | OpenGL on machines with VirtualGL: `vglrun` (programs started with `vglrun` render on the GPU) or `all` (every program in new panes runs under VirtualGL). Also a setting in the UI. |
-| `--gui-video` | `on` | Send program windows that keep changing as video (H.264 on machines with an NVIDIA, Intel or AMD GPU, else VP8 on the CPU) to browsers that decode it with WebCodecs, encoded on the machine by the encoder the core brings; pictures otherwise, and always with `off`. Release builds embed the encoder; a build without it (no `scripts/build-ffmpeg.sh` before `make build`) sends pictures. Also a setting in the UI. |
+| `--gui` | `true` | Show windows of programs on remote Linux machines in browser windows: new panes get a virtual display (`DISPLAY`, `XAUTHORITY`); Xvfb is fetched in user space when missing. Applies to panes created afterwards. `true` or `false` (`on` and `off` are accepted too). The setting `gui.enabled`. |
+| `--gui-gpu` | `vglrun` | OpenGL on machines with VirtualGL: `vglrun` (programs started with `vglrun` render on the GPU) or `all` (every program in new panes runs under VirtualGL). The setting `gui.gpu`. |
+| `--gui-video` | `true` | Send program windows that keep changing as video (H.264 on machines with an NVIDIA, Intel or AMD GPU, else VP8 on the CPU) to browsers that decode it with WebCodecs, encoded on the machine by the encoder the core brings; pictures otherwise, and always with `false` (`on`/`off` accepted). Release builds embed the encoder; a build without it (no `scripts/build-ffmpeg.sh` before `make build`) sends pictures. The setting `gui.video`. |
 
-### Desktop app shortcuts
-
-| Flag | Default | Description |
-| --- | --- | --- |
-| `--desktop-new-tab-key` | `cmd+t` (macOS), `ctrl+shift+t` | Desktop app: shortcut for a new tab. Modifiers (`cmd`, `ctrl`, `alt`, `shift`, at least one of the first three) and a key joined by `+`, or `none`. Also a setting in the UI (desktop app only). |
-| `--desktop-close-tab-key` | `cmd+w` (macOS), `ctrl+shift+w` | Desktop app: shortcut that closes the current tab, asking first when a program runs in it; same format. Also a setting in the UI (desktop app only). |
-| `--desktop-settings-key` | `cmd+comma` (macOS), `ctrl+comma` | Desktop app: shortcut that opens the settings; same format. Also a setting in the UI (desktop app only). |
-| `--desktop-new-workspace-key` | `cmd+n` (macOS), `ctrl+shift+n` | Desktop app: shortcut for a new workspace (asks for its folder); same format. Also a setting in the UI (desktop app only). |
-| `--desktop-toggle-code-key` | `cmd+j` (macOS), `ctrl+shift+j` | Desktop app: shortcut that shows or hides the VS Code panel, also while VS Code has focus; same format. Also a setting in the UI (desktop app only). |
-
-Settings marked "also a setting in the UI" can be changed in the settings
-dialog; the value is saved on the core host. code-server settings apply from
-the next code-server start on each machine, GUI settings to panes created
-afterwards, video from the next frame. `--gui`, `--gui-gpu` and `--gui-video` can also be set per remote machine in the
-dialog ("Per machine"); a machine without its own value uses the global one.
-A flag given on the command line wins, for every machine, and locks the
+These flags set settings ([settings](#settings)); the settings dialog and the
+settings file change them at runtime. code-server settings apply from the
+next code-server start on each machine, GUI settings to panes created
+afterwards, video from the next frame. The `gui.*` settings can also be set
+per remote machine; a machine without its own value uses the global one. A
+flag given on the command line wins, for every machine, and locks the
 setting in the UI.
 
 ### Development
@@ -94,86 +81,287 @@ setting in the UI.
 selects the code-server builds; `--code-server-version`, `--code-server-url`,
 `--extension-url`, `--seed-dir` and `--offline` behave as above.
 
+## Settings
+
+Every setting of the core and of the user interface is defined in the core
+(`internal/registry`) and shown by the UI's settings dialog
+([13](features/13-settings-and-appearance.md)). Values live in
+`settings[-<instance>].json` on the core host and can be edited there by
+hand; the core reads the file again within two seconds. A setting with a
+flag is fixed by that flag when it is given (for every machine) and locked
+in the UI; a setting with a scope can have its own value per machine, under
+`"[machine:<id>]"`. The table is generated from the registry by
+`scripts/registry` (`make tokens`; `make check` fails when it is stale).
+
+<!-- scripts/registry: settings -->
+
+| Setting | Values | Default | Flag | Scope |
+| --- | --- | --- | --- | --- |
+| `appearance.theme` | `system`, `light`, `dark` | `"system"` | – | – |
+| `appearance.language` | `auto`, `en`, `zh-CN` | `"auto"` | – | – |
+| `appearance.uiFontSize` | integer, 11–20 | `13` | – | – |
+| `window.zoom` | integer, 50–300 | `100` | – | – |
+| `terminal.fontFamily` | string | `""` | – | – |
+| `terminal.fontSize` | number, 6–40 | `13` | – | – |
+| `terminal.fontWeight` | `regular`, `medium` | `"regular"` | – | – |
+| `terminal.lineHeight` | number, 0.8–2 | `1.05` | – | – |
+| `terminal.cursorStyle` | `block`, `bar`, `underline` | `"block"` | – | – |
+| `terminal.cursorBlink` | `true`, `false` | `true` | – | – |
+| `terminal.scrollback` | integer, 0–100000 | `10000` | – | – |
+| `terminal.bell` | `none`, `sound`, `visual` | `"visual"` | – | – |
+| `terminal.optionIsMeta` | `true`, `false` | `false` | – | – |
+| `terminal.mathHover` | `true`, `false` | `true` | – | – |
+| `terminal.copyOnSelect` | `true`, `false` | `false` | – | – |
+| `terminal.programClipboard` | `auto`, `ask`, `off` | `"auto"` | – | – |
+| `terminal.colorScheme.dark` | `default`, `dracula`, `gruvbox-dark`, `gruvbox-light`, `nord`, `one-dark`, `one-light`, `solarized-dark`, `solarized-light`, `tomorrow`, `tomorrow-night` | `"default"` | – | – |
+| `terminal.colorScheme.light` | `default`, `dracula`, `gruvbox-dark`, `gruvbox-light`, `nord`, `one-dark`, `one-light`, `solarized-dark`, `solarized-light`, `tomorrow`, `tomorrow-night` | `"default"` | – | – |
+| `terminal.boldIsBright` | `true`, `false` | `false` | – | – |
+| `terminal.colors.dark.foreground` | color `#rrggbb` | `"#f0f0f0"` | – | – |
+| `terminal.colors.dark.background` | color `#rrggbb` | `"#0a0a0a"` | – | – |
+| `terminal.colors.dark.cursor` | color `#rrggbb` | `"#f0f0f0"` | – | – |
+| `terminal.colors.dark.selection` | color `#rrggbb` | `"#3b4a6b"` | – | – |
+| `terminal.colors.dark.palette` | 16 colors | 16 colors of `design/tokens.json` | – | – |
+| `terminal.colors.light.foreground` | color `#rrggbb` | `"#0a0a0a"` | – | – |
+| `terminal.colors.light.background` | color `#rrggbb` | `"#ffffff"` | – | – |
+| `terminal.colors.light.cursor` | color `#rrggbb` | `"#0a0a0a"` | – | – |
+| `terminal.colors.light.selection` | color `#rrggbb` | `"#b6d4fe"` | – | – |
+| `terminal.colors.light.palette` | 16 colors | 16 colors of `design/tokens.json` | – | – |
+| `notifications.sound` | `true`, `false` | `true` | – | – |
+| `notifications.system` | `true`, `false` | `true` | – | – |
+| `notifications.badge` | `true`, `false` | `true` | – | – |
+| `notifications.mutedAgents` | list of strings | `["droid"]` | – | – |
+| `codeServer.install` | `push`, `download`, `existing` | `"push"` | `--code-server-install` | per machine |
+| `codeServer.path` | string | `""` | `--code-server-path` | per machine |
+| `gui.enabled` | `true`, `false` | `true` | `--gui` | per remote machine |
+| `gui.gpu` | `vglrun`, `all` | `"vglrun"` | `--gui-gpu` | per remote machine |
+| `gui.video` | `true`, `false` | `true` | `--gui-video` | per remote machine |
+
+<!-- end of scripts/registry: settings -->
+
+```json
+{
+  "appearance.theme": "dark",
+  "terminal.fontSize": 14,
+  "terminal.colors.dark.palette": ["#484f58", "#ff7b72", "…14 more"],
+  "[machine:gpu-box]": { "gui.video": false }
+}
+```
+
 ## Keyboard shortcuts
 
-The prefix and bindings are read from the host's herdr configuration
-(`~/.config/herdr/config.toml`, `[keys]`), so they match the herdr TUI; the
-defaults are shown. Custom `[[keys.command]]` entries of type `plugin_action`
-run on the pane's machine.
+Keys come from the keybindings (`internal/keybindings`): defaults per
+platform, changed in **Settings → Keyboard Shortcuts** or in
+`keybindings[-<instance>].json` on the core host, an array of
+`{"key", "command", "when"}` rules (`"command": "-<id>"` removes a key;
+`when` is `terminal`, `vscode`, `dialog` or `always`). A key is modifiers
+(`cmd`, `ctrl`, `alt`, `shift`) and a key joined by `+`; a chord is strokes
+separated by spaces (`ctrl+k c`: ctrl+k, then c within 3 s). The first
+stroke needs `cmd`, `ctrl` or `alt` (or is a function key). While a chord
+starting with a stroke is bound, that stroke waits for the next one instead
+of reaching the terminal; typing it twice (`ctrl+k ctrl+k`) lets the second
+press through to the terminal as any key no binding takes.
 
-| Keys | Action | Keys | Action |
-| --- | --- | --- | --- |
-| `prefix v` / `prefix -` | Split right / down | `prefix h` `j` `k` `l` | Focus pane left / down / up / right |
-| `prefix z` | Zoom / restore pane | `prefix x` | Close pane |
-| `prefix tab` / `shift+tab` | Next / previous pane | `prefix c` | New tab |
-| `prefix n` / `p` / `1..9` | Next / previous / N-th tab | `prefix shift+x` | Close tab |
-| `prefix shift+n` | New workspace | `prefix shift+w` / `shift+d` | Rename / close workspace |
-| `prefix e` | Open the pane's folder in VS Code | `prefix d` | Diff of the pane's repository |
-| `prefix shift+g` | Git Graph | `prefix o` | Jump to the agent that needs attention |
-| `prefix space` | Command palette | `prefix w` | Switch workspace or agent |
-| `prefix b` | Toggle sidebar | `prefix ?` | Shortcut list |
-| `prefix shift+t` | Rename tab | `prefix ,` | Settings |
-| `prefix prefix` | Send the prefix key itself | | |
+The default keys differ by platform: `mac` is the desktop app on macOS,
+`mac-browser` browsers on macOS, `pc` the desktop app on other systems and
+`pc-browser` browsers there. No default is a chord, and none is `ctrl` or `alt` with a letter alone: `ctrl+b` and every
+other key that is not in the table reach the program in the terminal on
+their first press. The desktop app has direct shortcuts, which browsers
+keep for themselves (`cmd+t`, `cmd+w`…); browsers get find, the keyboard
+shortcuts and, on macOS, the command palette (`cmd+k`; in browsers on
+other systems the status bar's **Command Palette…** opens it). On Windows
+and Linux the desktop app's tab keys are `ctrl+tab`, `ctrl+shift+tab` and
+`alt+1`…`alt+9`, as in GNOME Terminal and Konsole; `tab.select9` is the
+last tab. A command
+without a key (–) runs from the menus, the command palette, its button and
+the context menus, and any key or chord can be bound to it. The desktop
+app's menu shows the keys; there the page runs the keys it sees, and on
+macOS the menu the keys the page leaves (on Windows and Linux the menu
+takes no key, so Ctrl keys reach the terminals). While a VS Code pane has
+the keyboard VS Code's own keys come first (`cmd+j` toggles its own bottom
+panel there), except the key of `pane.close`, which the page takes first
+to close the VS Code pane; in the desktop app on macOS a key VS Code
+leaves runs, through the menu, a command for `terminal`, `vscode` or
+`always`, on that pane. Rules naming `view.toggleCode` and
+`workspace.rename`, commands of earlier versions, apply to `code.open` and
+`workspace.edit`. `app.fullDiskAccess` (**Open
+Full Disk Access Settings…**) exists only in the desktop app on macOS, and
+the palette and the keyboard shortcuts page list it only there. Keys follow
+the keyboard layout's characters. The table is generated from the registry
+by `scripts/registry`.
 
-The desktop app adds direct shortcuts, without the prefix: `cmd+t` new tab,
-`cmd+w` close tab, which asks first when a program runs in it, `cmd+,` settings, `cmd+n` new
-workspace and `cmd+j` show or hide the VS Code panel (`ctrl+shift+t` /
-`ctrl+shift+w` / `ctrl+,` / `ctrl+shift+n` / `ctrl+shift+j` on other
-systems). They work wherever focus is except in VS Code, which keeps its own
-`cmd+t` / `cmd+w` / `cmd+,` / `cmd+n`; `cmd+j` hides the panel from VS Code
-too. They are changed or removed under **Settings → Shortcuts** (or
-`--desktop-new-tab-key`, `--desktop-close-tab-key`,
-`--desktop-settings-key`, `--desktop-new-workspace-key`,
-`--desktop-toggle-code-key`); a removed shortcut gives the key back to the
-window (`cmd+w` closes it again). Keys follow the keyboard layout's
-characters. Browsers keep these keys for themselves and use the prefix
-bindings.
+<!-- scripts/registry: commands -->
 
-Default prefix: `ctrl+b`. In panes: Shift+Enter sends `ESC CR` (newline in
-Claude Code and similar prompts; the bytes of every key are listed in
-[`keys.json`](../web/src/__tests__/testdata/keys.json)); Option/Alt-drag selects text locally;
-holding a selection drag above or below a pane scrolls it and extends the
-selection, and copying then copies all of it;
-⌘/Ctrl-click opens paths (media in the preview panel, code in VS Code) and
-URLs. `cmd+f` (macOS) or `ctrl+shift+f` (other systems) finds text in the
-focused pane and its scrollback: Enter goes to the older match,
-Shift+Enter to the newer one, Escape closes the bar; in the bar, `alt+c`
-matches case, `alt+w` whole words and `alt+r` takes the query as a
-regular expression (RE2 syntax; Option on macOS). Pasting or dropping files uploads them to the pane's machine (dropped
-files into the pane's directory) and pastes their paths; in the desktop app,
-files dropped on a local pane are pasted where they are. A pane's right-click
-menu downloads the path under the pointer and, with **Download files…**,
-files and folders chosen in the pane's directory (folders as zips; not for
-the desktop app's own machine). The downloads panel in the status bar shows
-each download's progress, speed and result, cancels it or downloads it
-again.
+| Command | When | `mac` | `mac-browser` | `pc` | `pc-browser` |
+| --- | --- | --- | --- | --- | --- |
+| `app.commandPalette` | `terminal` | `cmd+shift+p` | `cmd+k` | `ctrl+shift+p` | – |
+| `app.keyboardShortcuts` | `terminal` | `cmd+slash` | `cmd+slash` | `ctrl+shift+slash` | `ctrl+shift+slash` |
+| `app.settings` | `terminal` | `cmd+comma` | – | `ctrl+comma` | – |
+| `app.agentAttention` | `terminal` | `cmd+shift+a` | – | `ctrl+shift+a` | – |
+| `app.addMachine` | `terminal` | – | – | – | – |
+| `app.fullDiskAccess` | `terminal` | – | – | – | – |
+| `workspace.switch` | `terminal` | `cmd+p` | – | – | – |
+| `workspace.next` | `terminal` | `cmd+ctrl+down` | – | – | – |
+| `workspace.previous` | `terminal` | `cmd+ctrl+up` | – | – | – |
+| `workspace.new` | `terminal` | `cmd+n` | – | `ctrl+shift+n` | – |
+| `workspace.edit` | `terminal` | – | – | – | – |
+| `workspace.close` | `terminal` | – | – | – | – |
+| `tab.new` | `terminal` | `cmd+t` | – | `ctrl+shift+t` | – |
+| `tab.rename` | `terminal` | – | – | – | – |
+| `tab.next` | `terminal` | `cmd+shift+bracketright`, `ctrl+tab` | – | `ctrl+tab` | – |
+| `tab.previous` | `terminal` | `cmd+shift+bracketleft`, `ctrl+shift+tab` | – | `ctrl+shift+tab` | – |
+| `tab.select1` | `terminal` | `cmd+1` | – | `alt+1` | – |
+| `tab.select2` | `terminal` | `cmd+2` | – | `alt+2` | – |
+| `tab.select3` | `terminal` | `cmd+3` | – | `alt+3` | – |
+| `tab.select4` | `terminal` | `cmd+4` | – | `alt+4` | – |
+| `tab.select5` | `terminal` | `cmd+5` | – | `alt+5` | – |
+| `tab.select6` | `terminal` | `cmd+6` | – | `alt+6` | – |
+| `tab.select7` | `terminal` | `cmd+7` | – | `alt+7` | – |
+| `tab.select8` | `terminal` | `cmd+8` | – | `alt+8` | – |
+| `tab.select9` | `terminal` | `cmd+9` | – | `alt+9` | – |
+| `tab.close` | `terminal` | `cmd+shift+w` | – | `ctrl+shift+w` | – |
+| `pane.splitRight` | `terminal` | `cmd+d` | – | – | – |
+| `pane.splitDown` | `terminal` | `cmd+shift+d` | – | – | – |
+| `pane.close` | `terminal` | `cmd+w` | – | – | – |
+| `pane.zoom` | `terminal` | `cmd+shift+enter` | – | `ctrl+shift+enter` | – |
+| `pane.focusLeft` | `terminal` | `cmd+alt+left` | – | – | – |
+| `pane.focusDown` | `terminal` | `cmd+alt+down` | – | – | – |
+| `pane.focusUp` | `terminal` | `cmd+alt+up` | – | – | – |
+| `pane.focusRight` | `terminal` | `cmd+alt+right` | – | – | – |
+| `pane.focusNext` | `terminal` | `cmd+bracketright` | – | – | – |
+| `pane.focusPrevious` | `terminal` | `cmd+bracketleft` | – | – | – |
+| `view.toggleSidebar` | `terminal` | `cmd+b` | – | – | – |
+| `view.zoomIn` | `always` | `cmd+shift+equal`, `cmd+equal` | – | `ctrl+shift+equal`, `ctrl+equal` | – |
+| `view.zoomOut` | `always` | `cmd+minus` | – | `ctrl+minus` | – |
+| `view.zoomReset` | `always` | `cmd+0` | – | `ctrl+0` | – |
+| `find.open` | `terminal` | `cmd+f` | `cmd+f` | `ctrl+shift+f` | `ctrl+shift+f` |
+| `find.next` | `terminal` | `cmd+g` | – | – | – |
+| `find.previous` | `terminal` | `cmd+shift+g` | – | – | – |
+| `code.open` | `terminal` | `cmd+j` | – | `ctrl+shift+j` | – |
+| `code.diff` | `terminal` | – | – | – | – |
+| `code.gitGraph` | `terminal` | – | – | – | – |
 
-With the mouse: click a pane's title to rename it (empty restores the
-terminal title); double-click a tab or workspace to rename it; drag a pane by
-its header onto another pane to swap the two (centre) or to place it beside
-that pane (edges), onto a tab to move it there, or onto `+` to move it into a
-new tab; drag a tab along the tab bar, or a workspace along its machine's
-list, to reorder it. Escape cancels a drag.
+<!-- end of scripts/registry: commands -->
 
-Right-click a pane header (the toolbar above a lone pane), a tab or a
-workspace for a menu of its commands
-(rename, split, zoom, VS Code, new tab, move, close) with their bindings;
+In terminals, keys reach the program in the
+encoding it asked for (legacy, application cursor and keypad, kitty
+keyboard protocol); the bytes of the keys the browser could keep are listed
+in [`vt-keys.json`](../web/src/__tests__/testdata/vt-keys.json): Shift+Enter
+is `CSI 13;2u` once a program enables the kitty keyboard protocol (Claude
+Code and Codex insert a newline), Alt+Enter is `ESC CR`. Dragging selects
+text (double click: a word, triple click: a line; Shift-drag where the
+program takes the mouse); holding a selection drag above or below a
+terminal scrolls its scrollback; `terminal.copyOnSelect` copies at release.
+The wheel scrolls the scrollback (on the alternate screen it is the arrow
+keys; programs that take the mouse get it). ⌘/Ctrl-click opens paths (media
+in a preview pane, code in a VS Code pane, of the terminal's workspace or
+split beside the terminal) and URLs. `cmd+f` (macOS) or
+`ctrl+shift+f` (other systems) finds text in the focused terminal and its
+scrollback (`find.open`; ASCII letters in either case): Enter goes to the
+older match, Shift+Enter to the newer one, Escape closes the bar. Pasting or
+dropping files uploads them to the terminal's machine (dropped files into
+its directory) and pastes their paths; in the desktop app, files dropped on
+a local terminal are pasted where they are. A terminal's right-click menu
+downloads the path under the pointer and, with **Download files…**, files
+and folders chosen in its directory (folders as zips; not for the desktop
+app's own machine). The downloads panel in the status bar shows each
+download's progress, speed and result, cancels it or downloads it again.
+
+With the mouse: double-click a terminal pane's title to rename it (empty
+restores the terminal title); double-click a tab or workspace to rename it;
+drag a pane (a terminal, VS Code or a preview) by its header onto another
+pane to swap the two (centre) or to place it beside that pane (edges),
+onto a tab to move it there, or onto `+` to move it into a new tab; drag a
+tab along the tab bar, a workspace along its machine's list, or a machine
+by its header among the machines, to reorder it. Escape cancels a drag.
+
+Right-click a pane header (or press its ⋯ button, shown when the header is
+narrow), a tab, a workspace or a machine for a menu of its commands
+(rename, split, zoom, VS Code, new tab, move, close; a machine's terminal
+core) with their bindings;
 ↑↓ Home End select, Enter runs, Escape closes. In read-only mode the
 browser's menu shows instead.
+
+## HTTP and WebSocket endpoints
+
+Every endpoint passes the same guards (Host, Origin, proxy secret,
+[SECURITY.md](../SECURITY.md)); those marked *writes* are refused with
+`--read-only`. Protocols and messages are in
+[architecture](architecture.md); `{id}` is a machine's id. `make check`
+fails when a route the server registers (`internal/server/server.go`) is
+missing here.
+
+| Endpoint | Writes | Purpose |
+| --- | --- | --- |
+| `GET /ws` | – | The event channel (WebSocket): machines, agents, settings, keybindings, program windows, downloads. |
+| `GET /api/v1/term` | – | The terminal protocol (WebSocket): the machines' terminals, their events and byte streams ([22](features/22-terminal-protocol.md)). |
+| `GET /api/config` | – | Name, slug, version, whether the core is read-only (`read_only`) and whether it offers the interactive ssh login (`ssh_login`; false on Windows, whose ssh keeps no control sockets). |
+| `GET /api/settings` | – | Definitions, values (per machine too) and problems of the settings. |
+| `PUT /api/settings` | writes | Sets one value (`{"key", "value", "machine"?}`). |
+| `DELETE /api/settings` | writes | Removes one value, which falls back to the global value or the default. |
+| `GET /api/keybindings` | – | Commands, default keys per platform, the user's rules, the bindings in effect and their conflicts. |
+| `PUT /api/keybindings` | writes | Replaces the user's rules. |
+| `GET /api/machines` | – | Every machine's state, its agent's information and its terminal core's state. A machine that is never connected is in `error` with a `code`: `invalid_target` (a stored ssh target the core refuses) or `local_unsupported` (the local machine of a core on Windows, where no agent runs). |
+| `POST /api/machines` | writes | Adds and stores an SSH machine (`{"target", "label"}`). |
+| `PUT /api/machines/order` | writes | Puts the machines in an order and stores it (`{"order": [ids]}`, each machine once; `400 invalid` otherwise). |
+| `GET /api/ssh/hosts` | writes | The Host aliases of the core host's `~/.ssh/config` (and the files it includes) that are no machine's target yet, as `[{"alias", "hostname"?, "user"?}]`, for the Add Machine dialog; nothing else of the configuration ([02](features/02-multi-machine-transport.md)). Refused read-only, where no machine can be added. |
+| `DELETE /api/m/{id}` | writes | Removes a stored machine. |
+| `PUT /api/m/{id}/label` | writes | Renames a machine. |
+| `PUT /api/m/{id}/enabled` | writes | Enables or disables a machine. |
+| `GET /api/m/{id}/hc` | – | The machine's terminal core: installed, running, version. |
+| `POST /api/m/{id}/hc/{action}` | writes | `start`, `stop` or `restart` the machine's terminal core. |
+| `GET /api/m/{id}/privacy` | – | macOS's Full Disk Access on the machine: `files` (the agent's process; on the local machine the core's, which the desktop app started) and `terminals` (the terminal core's, which its terminals' programs have), each `granted`, `denied` or `unknown` (not macOS, no terminal core running, no protected folder to try), and `hc`, the terminal core's executable. Starts no terminal core. |
+| `GET /api/m/{id}/auth` | writes | Interactive ssh login of a machine that needs one (WebSocket, `?cols=&rows=`); `400 invalid_target` for a refused target, `501 ssh_login_unsupported` on a core without ssh control sockets (Windows). |
+| `POST /api/m/{id}/bridge` | writes | A command for a VS Code window (open a file at a line, diff, Git Graph): the one `window` names, else with `fresh` one that connects after the request, else the best one for `folder`; the reply names the window that took it. |
+| `GET /api/m/{id}/file` | – | A file (`?path=`, `&download=1` as an attachment), with HTTP ranges. |
+| `GET /api/m/{id}/download` | – | One file as an attachment, or several paths (folders included) as a zip (`?path=`…, `&dl=<id>` to follow it on `/ws`). |
+| `POST /api/m/{id}/upload` | writes | Writes the request body to a file (`?name=`, `&dir=` absolute, else the upload directory). |
+| `GET /api/m/{id}/list` | – | A directory's entries (`?path=`). |
+| `GET /api/m/{id}/code/status` | – | Whether the machine's code-server is installed and runs. |
+| `POST /api/m/{id}/code/start` | writes | Installs and starts the machine's code-server. |
+| `POST /api/m/{id}/code/stop` | – | Releases the machine's code-server (allowed read-only: it only stops). |
+| `/m/{id}/code/` | writes | The machine's code-server behind the core's proxy (`/m/{id}/code` redirects here). |
+| `GET /m/{id}/gui/{win}` | – | The page of a program window. |
+| `GET /m/{id}/gui/{win}/ws` | – | A program window's frames and events, its input (WebSocket; `?video=` names the video streams the browser decodes). |
+| `POST /m/{id}/gui/{win}/close` | writes | Asks a program window to close. |
+| `POST /api/m/{id}/gui/enable` | writes | Gives open terminals the machine's display (`{"terminals": [...]}`, empty for all). |
+| `GET /api/gui` | – | The program windows of every machine. |
+| `/` | – | The web UI (`/licenses.md`: the notices of its bundle); any other path gets the app shell for the UI's own routes, except `/api/…` paths no route takes, which are 404. |
 
 ## Environment variables
 
 | Variable | Where | Description |
 | --- | --- | --- |
 | `HERDR_IDE_BRIDGE_SOCKET` | set by the agent for code-server | Socket of the VS Code bridge extension. |
-| `HERDR_IDE_CORE` | `pnpm -C web dev` | Core URL the Vite dev server proxies to (default `http://127.0.0.1:7780`). |
-| `HERDR_IDE_DESKTOP_DEV` | Electron | `1` forces isolated development even in a packaged app: instance `dev`, local-only, local/remote session `herdr-ide-dev`, separate Electron profile. Unpackaged Electron always uses this mode. |
+| `HERDR_IDE_CORE` | `pnpm -C web dev` | Core URL the Vite dev server proxies to (default `http://127.0.0.1:7780`; `make dev-web` sets the development core's, `DEV_LISTEN`). |
+| `HERDR_IDE_DESKTOP_DEV` | Electron | Isolated development even in a packaged app: `1` runs instance `dev` (terminal core session `herdr-ide-dev`); another value names the instance (lowercase letters, digits and dashes, starting with a letter or digit, at most 32, not `desktop`; the app refuses to start otherwise), so a smoke test can run beside a development instance in use. Every development instance is local-only and has its own Electron profile and single-instance lock (`herdr-ide-desktop-<instance>`, `herdr-ide-desktop-dev` for `dev`). Unpackaged Electron always uses this mode. |
+| `HERDR_IDE_DESKTOP_NO_OPEN` | Electron, development instances only | Set (to anything): the Full Disk Access buttons write `no-open: …` with what they would open (System Settings' URL, the terminal core's executable in Finder, the app's relaunch) to stderr instead of opening it, for smoke tests. |
 | `HERDR_IDE_DESKTOP_PORT` | Electron | Loopback port (default `7781`, development `7791`); `0` chooses an ephemeral port, which gives a new browser storage origin. |
-| `ARCH` | `make desktop-app`, `make desktop-dmg` | `arm64` or `x64`; defaults to the host Node architecture. The Go core architecture is matched automatically. |
-| `VERSION` | desktop build | Semver for app metadata, DMG name and bundled core; a leading `v` (release tags such as `v0.2.0`) is kept for the core and dropped for the app metadata and DMG name. Without it the core reports `git describe` and the app uses the `desktop/package.json` version. |
-| `HERDR_BIN` | agent | herdr binary to use on a machine. Without it, an installed herdr is searched; the local machine falls back to its copy of the bundled one. |
-| `HERDR_TEST_BIN` | `make it` | herdr executable for the integration test (for example the bundled one); otherwise found on `PATH`. |
-| `XDG_STATE_HOME`, `XDG_CONFIG_HOME`, `HERDR_CONFIG_PATH`, `HERDR_SOCKET_PATH` | core, agent | Honoured like herdr does when locating its state, configuration and sockets. |
+| `--user-data-dir=<dir>` | Electron command line | Replaces the Electron profile and its single-instance lock, so a copy launched by its executable (on macOS not with `open`, which activates a running copy of the same bundle identifier) runs beside another one; for isolated smoke tests with `HERDR_IDE_DESKTOP_DEV`. |
+| `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` | core on Linux | The user configuration directory (settings, keybindings, machines; default `~/.config`) and the cache directory (code-server downloads; default `~/.cache`). |
+| `XDG_STATE_HOME` | core | Where the SSH machines herdr saved are read from for the one-time import (`$XDG_STATE_HOME/herdr/client/endpoints.json`, default `~/.local/state/herdr/client/endpoints.json`). |
+
+Variables of the build scripts and tests:
+
+| Variable | Where | Description |
+| --- | --- | --- |
+| `TARGETS` | `scripts/build.sh` | Core platforms to build and package (default the host's), e.g. `"linux/amd64 darwin/arm64"`; `windows/amd64` builds `dist/herdr-ide-windows-amd64.exe` for the desktop setup, without an archive. |
+| `AGENT_PLATFORMS` | `scripts/build.sh` | Agent and herdr-core platforms to embed (default all four). |
+| `SKIP_WEB`, `SKIP_EXT` | `scripts/build.sh` | `1` reuses `web/dist` or the built bridge extension. |
+| `REQUIRE_ENCODER` | `scripts/build.sh` | `1` (release builds) fails when a Linux video encoder (`scripts/build-ffmpeg.sh`) is missing. |
+| `VERSION` | `scripts/build.sh`, `scripts/desktop.sh` | The version the core and agents report (default `git describe`). Desktop builds take a semver for the app metadata and the installers' names (default `desktop/package.json`'s); a leading `v` (release tags such as `v0.2.0`) is kept for the core and dropped for the app metadata. |
+| `FFMPEG_PLATFORMS` | `scripts/build-ffmpeg.sh` | Linux platforms to build the video encoder for (default both). |
+| `GHOSTTY_SRC` | `make vt-wasm` | A Ghostty checkout to build libghostty-vt from instead of the pinned clone. |
+| `ARCH` | `scripts/desktop.sh` (`make desktop-app`, `make desktop-dist`, `make desktop-install`) | `arm64` or `x64`; defaults to the host Node architecture; the Windows app is `x64` only. The Go core architecture is matched automatically (`x64` is `amd64`). |
+| `DESKTOP_OS` | `scripts/desktop.sh` | `mac`, `win` or `linux` (default this system): packages another system's unpacked app (modes `build` and `app`) to check its packaging; installers (`dist`), `install` and `dev` run only on their own system. |
+| `SKIP_BUILD` | `scripts/desktop.sh` | `1` runs electron-builder alone on what an earlier `scripts/desktop.sh build` made (the release workflow's Package step). |
+| `INSTALL_DIR` | `make desktop-install` | macOS: where the Electron app is installed (default `/Applications`). |
+| `CSC_LINK`, `CSC_KEY_PASSWORD` | `scripts/desktop.sh` on macOS (electron-builder) | A Developer ID Application certificate (a `.p12`, base64-encoded or its path) and its password: the app is signed with it instead of ad hoc. |
+| `CSC_NAME` | `scripts/desktop.sh` on macOS (electron-builder) | The name of a Developer ID identity in the keychain, instead of `CSC_LINK`. |
+| `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` | `scripts/desktop.sh` on macOS (electron-builder) | With a Developer ID certificate: notarize the app with this Apple ID, its app-specific password and the team id. |
+| `ELECTRON_SKIP_BINARY_DOWNLOAD` | `make deps` | `1` installs the desktop packages without Electron's binary, which checks and the shell's tests do not need (CI's check jobs set it); running or packaging the app needs it. |
+| `DEV_LISTEN` | `make dev-core`, `make dev-web` | The development core's address (default `127.0.0.1:7790`). |
+| `HC_TEST_BIN` | `make it` | herdr-core executable for the integration tests; otherwise `hc` is found on `PATH`, and without one they are skipped. `go run ./scripts/fetch-hc -exe <file> <os>/<arch>` writes the pinned one. |
+| `GUI_TEST_INSTALL` | `go test ./internal/agent` on Linux | `1` lets the program-window tests fetch Xvfb when it is not installed. |
 
 ## Files and directories
 
@@ -183,9 +371,9 @@ On every machine (the agent's `$HOME`):
 | --- | --- | --- |
 | `~/.herdr-ide/agent/<build>/` | Uploaded agent binaries | Builds unused for 14 days are removed. |
 | `~/.herdr-ide/code-server/<version>/` | code-server releases (shared by instances) | Versions unused for 14 days are removed. |
-| `~/.herdr-ide/herdr/herdr` | Core host only: the application's copy of the bundled herdr (shared by instances) | Replaced by **Update** and by a newer bundled herdr; kept until removed. |
-| `~/.herdr-ide/herdr/server.log` | Output of the herdr server last started from the UI on that machine (core host or SSH machine) | Replaced at every start from the UI. |
-| `~/.herdr-ide[-<instance>]/run/` (0700) | `cs.sock`, `cs.pid`, `bridge.sock`; `gui.json` (reserved display and Xvfb pid), `xauth` (panes' display cookie) and `xauth.server` (Xvfb's copy), both 0600 and replaced at each Xvfb start, `gui.lock`, `gui-keep.lock` (held by the display keeper) | Sockets while the agent runs; the display files are kept so panes keep a valid environment. |
+| `~/.herdr-ide[-<instance>]/hc/herdr-core` (0700 directory) | The terminal core's executable, pushed by the core and accepted only with its SHA-256 | Replaced when the core brings another build; kept until removed. |
+| `~/.local/state/herdr-core/herdr-ide[-<instance>]/` (`$XDG_STATE_HOME` when set) | The terminal core's own state (herdr-core's: terminal records, saved screens, logs) | Kept by herdr-core until the user removes it. |
+| `~/.herdr-ide[-<instance>]/run/` (0700) | `hc.sock` (the terminal core's API socket, 0600) and its holders' sockets; `cs.sock`, `cs.pid`, `bridge.sock`; `gui.json` (reserved display and Xvfb pid), `xauth` (terminals' display cookie) and `xauth.server` (Xvfb's copy), both 0600 and replaced at each Xvfb start, `gui.lock`, `gui-keep.lock` (held by the display keeper) | Sockets while the agent (code-server, bridge) or the terminal core runs; the display files are kept so terminals keep a valid environment. |
 | `~/.herdr-ide/xvfb/<version>/` | Xvfb unpacked from the distribution's package (shared by instances) | Versions unused for 14 days are removed when another is unpacked. |
 | `~/.herdr-ide/video/<sha256 prefix>/encoder` | Video encoder pushed by the core (`gui-video`, shared by instances), run only while its SHA-256 matches | Builds unused for 14 days are removed when another is installed; unfinished installs after 1 h. |
 | `~/.herdr-ide[-<instance>]/xvfb.log` | Output of the last Xvfb started | Replaced at each start. |
@@ -193,47 +381,82 @@ On every machine (the agent's `$HOME`):
 | `~/.herdr-ide[-<instance>]/cs-data/`, `cs-ext/` | VS Code settings, extensions | Kept; logs older than 7 days are pruned. |
 | `~/.herdr-ide[-<instance>]/uploads/` | Pasted and dropped files | Files older than 7 days are pruned. |
 
-On the core host: ssh control sockets in `/tmp/herdr-ide-<uid>/s` (must be
-owned by you, mode 0700), downloads in the user cache directory
+On the core host: ssh control sockets in `/tmp/herdr-ide-<uid>/s` on Linux
+and macOS (must be owned by you, mode 0700; a core on Windows keeps none),
+downloads in the user cache directory
 (`~/Library/Caches/herdr-ide/code-server` on macOS, `~/.cache/herdr-ide/code-server`
-on Linux) with `.sha256` sidecars (also recorded for releases that machines
-downloaded themselves), settings changed in the UI in
-`settings[-<instance>].json` and machines enabled or disabled in the sidebar
-in `machines[-<instance>].json`, both in the user configuration directory
-(`~/Library/Application Support/herdr-ide/` on macOS, `~/.config/herdr-ide/` on
-Linux; directory 0700, files replaced atomically).
+on Linux, `%LocalAppData%\herdr-ide\code-server` on Windows) with `.sha256` sidecars (also recorded for releases that machines
+downloaded themselves), the settings in `settings[-<instance>].json`, the
+keybindings in `keybindings[-<instance>].json` and the machines in
+`machines[-<instance>].json` (`{"version": 1, "machines": [{id, label,
+kind, target, enabled}], "order": [ids]}`: the SSH machines, the local machine's
+enabled flag and name once they were changed, and the order the user put the machines
+in once they were reordered; the SSH machines herdr saved
+(`~/.local/state/herdr/client/endpoints.json`) are imported into it the
+first time a core of the instance starts without one), all in the
+user configuration directory (`~/Library/Application Support/herdr-ide/` on
+macOS, `$XDG_CONFIG_HOME/herdr-ide/` (default `~/.config/herdr-ide/`) on
+Linux, `%AppData%\herdr-ide\` on Windows; files replaced atomically, kept
+until removed; on Linux and macOS the directory is 0700 and the files
+0600, on Windows the profile's access control list keeps them the user's).
+The settings and keybindings files can be
+edited by hand: the core reads them again within two seconds, keeps entries
+it does not know and reports values it cannot use. The machines file is
+read when the core starts and written by it at every change, keeping the
+entries and fields it does not use; a stored machine whose target the core
+refuses is listed with the code `invalid_target` and never connected, and
+so is the local machine of a core on Windows, with `local_unsupported`.
 
-A release directory holds the core, the bundled `herdr`, `LICENSE`,
-`THIRD_PARTY_NOTICES.md`, `licenses.md` and `licenses/herdr/`; they stay until
-the user removes the directory and are not copied to SSH machines. herdr's own
-files (configuration, sessions, machine list) are where herdr puts them,
-whichever herdr is used.
+A release directory holds the core, `LICENSE`, `THIRD_PARTY_NOTICES.md`,
+`licenses.md` and `licenses/` (`herdr-core/` (the terminal core the core
+embeds for machines), `herdr-detect/` (herdr's agent detection rules, which
+the agents carry), `encoder/`); they stay until the user removes the
+directory and are not copied to SSH machines.
 
-In the browser, in `localStorage` under `herdr-ide.*`:
+In the browser, in `localStorage` under `herdr-ide.*` (state of that
+browser only; settings and keybindings are the core's, the workspaces,
+tabs and splits, VS Code and preview panes included, the terminal core's):
 
-- language
-- theme
-- font sizes
-- terminal font weight
-- panel position
-- Option as Meta
-- what programs copying to the clipboard do
-- whether formulas under the pointer are shown
-- sidebar and panel sizes
-- the selected workspace
-- the upload history (the last 50 finished uploads: file names, machines
-  and paths on them)
+- whether the sidebar is open (`sidebarOpen`) and its width
+  (`sidebarWidth`)
+- the selected machine (`machine`)
+- the upload and download histories (`uploads`, `downloads`: the last 50
+  finished transfers each, with file names, machines and paths, no
+  contents)
 
-Desktop artifacts: `dist/desktop/mac-arm64/herdr-ide.app` (arm64),
-`dist/desktop/mac/herdr-ide.app` (x64), and
-`dist/desktop/herdr-ide-<version>-mac-<arch>.dmg`. Generated shell code lives
-in `desktop/dist/`; `make clean` removes these build outputs.
-Icon sources and distributable PNG/ICNS are kept in `desktop/assets/`, with
-the small SVG in `web/public/icon.svg`; `make desktop-icons` regenerates the
-PNG and ICNS on macOS with librsvg and iconutil.
-Electron's persistent profile is
-`~/Library/Application Support/herdr-ide-desktop/` (`-dev` for development).
-It holds browser preferences and Chromium data until manually removed.
-The core uses `settings-desktop.json` and `~/.herdr-ide-desktop/` state;
-development uses the existing `dev` instance. No desktop log files are kept:
-stderr is streamed and the last 16 KiB is retained in memory for error dialogs.
+Browser settings of earlier versions kept there (language, theme, font
+sizes, …) are moved to the core's settings once, when a page of a writable
+core loads, and then removed. What earlier versions kept there for the
+VS Code panel (`docks`, `dockWidth`, `dockHeight`) is removed when a page
+loads, and its position (`dockPosition`) with the settings above.
+
+Desktop artifacts (`make desktop-app` writes the unpacked apps,
+`make desktop-dist` the installers of the system it runs on), in
+`dist/desktop/`:
+
+- macOS: `mac-arm64/herdr-ide.app` (arm64), `mac/herdr-ide.app` (x64),
+  `herdr-ide-<version>-mac-arm64.dmg`, `-mac-arm64.zip`, `-mac-x64.dmg`,
+  `-mac-x64.zip`
+- Windows: `win-unpacked/herdr-ide.exe`, `herdr-ide-<version>-win-x64.exe`
+  (the setup)
+- Linux: `linux-unpacked/herdr-ide` (x64), `linux-arm64-unpacked/herdr-ide`,
+  `herdr-ide-<version>-linux-x86_64.AppImage`, `-linux-arm64.AppImage`,
+  `-linux-amd64.deb`, `-linux-arm64.deb`
+
+The core is `bin/herdr-ide` (`bin/herdr-ide.exe` on Windows) in the app's
+resources, beside the licenses. Generated shell code lives in
+`desktop/dist/`; `make clean` removes these build outputs. Icon sources and
+the distributable PNG, ICNS and ICO are kept in `desktop/assets/`, with the
+small SVG in `web/public/icon.svg`; `make desktop-icons` regenerates the
+PNG, ICNS and ICO on macOS with librsvg and iconutil.
+Electron's persistent profile is `herdr-ide-desktop` (`-dev` for
+development, or the `--user-data-dir` given) in the system's application
+data directory: `~/Library/Application Support/` on macOS, `%AppData%` on
+Windows, `$XDG_CONFIG_HOME` (default `~/.config`) on Linux.
+It holds browser preferences and Chromium data until manually removed;
+uninstalling leaves it.
+The core uses `settings-desktop.json` and `~/.herdr-ide-desktop/` state
+(on Windows only on the SSH machines); development uses the existing `dev`
+instance or the one `HERDR_IDE_DESKTOP_DEV` names. No desktop log files are
+kept: stderr is streamed and the last 16 KiB is retained in memory for error
+dialogs.

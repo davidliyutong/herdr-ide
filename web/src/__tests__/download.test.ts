@@ -119,7 +119,7 @@ describe('pane menu', () => {
       '-',
       'Download files…',
     ]);
-    item(entries, 'Download a.txt').run();
+    item(entries, 'Download a.txt').run!();
     await flush();
     // Checked first, then downloaded with a same-origin link.
     expect(fetches).toEqual([{ url: '/api/m/gpu/download?path=%2Fhome%2Fu%2Fproj%2Fa.txt', method: 'HEAD' }]);
@@ -130,7 +130,7 @@ describe('pane menu', () => {
 
   it('makes a path that names nothing a note', async () => {
     const entries = menus.surfaceMenu({ ctx: { m: 'gpu', cwd: '/home/u' }, link: { kind: 'path', text: 'missing.txt' } });
-    item(entries, 'Download missing.txt').run();
+    item(entries, 'Download missing.txt').run!();
     await flush();
     expect(clicked).toEqual([]);
     expect(store.useStore.getState().toasts.map((x) => x.msg)).toEqual(['Could not download missing.txt: not found']);

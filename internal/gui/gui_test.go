@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -27,7 +28,7 @@ func testMachines() *machines.Manager {
 }
 
 func testManager(t *testing.T, args ...string) *Manager {
-	st := settings.New("", SettingDefs...)
+	st := settings.New("", Settings)
 	fs := flag.NewFlagSet("x", flag.ContinueOnError)
 	st.RegisterFlags(fs)
 	if err := fs.Parse(args); err != nil {
@@ -306,14 +307,14 @@ func TestVideoSettingChange(t *testing.T) {
 	if c := readCmd(t, agent); c.Cmd != "watch" || strings.Join(c.Codecs, ",") != "avc1" {
 		t.Fatalf("watch: %+v", c)
 	}
-	if err := m.Settings.SetFor(SettingVideo, "m1", "off"); err != nil {
+	if err := m.Settings.Set(SettingVideo, "m1", false); err != nil {
 		t.Fatal(err)
 	}
 	m.ApplyVideo(d.mc)
 	if c := readCmd(t, agent); c.Cmd != "codecs" || c.ID != 7 || len(c.Codecs) != 0 {
 		t.Fatalf("off: %+v", c)
 	}
-	m.Settings.SetFor(SettingVideo, "m1", "")
+	m.Settings.Reset(SettingVideo, "m1")
 	m.ApplyVideo(d.mc)
 	if c := readCmd(t, agent); c.Cmd != "codecs" || strings.Join(c.Codecs, ",") != "avc1" {
 		t.Fatalf("back on: %+v", c)
@@ -332,10 +333,10 @@ func TestAfterAttach(t *testing.T) {
 	}
 }
 
-// A keeper started while herdr's server was down leaves; the machine is
-// asked again each time the server is reachable again, not on every state
-// change, and never in read-only mode.
-func TestHerdrReadyKeeps(t *testing.T) {
+// A keeper started while the terminal core was down leaves; the machine is
+// asked again each time the terminal core is reachable again, not on every
+// state change, and never in read-only mode.
+func TestServerReadyKeeps(t *testing.T) {
 	for _, readOnly := range []bool{false, true} {
 		m, d, _ := attached(t)
 		m.ReadOnly = readOnly
@@ -345,20 +346,20 @@ func TestHerdrReadyKeeps(t *testing.T) {
 			time.Sleep(20 * time.Millisecond)
 			return len(kept)
 		}
-		m.HerdrReady(d.mc, false)
-		m.HerdrReady(d.mc, true)
-		m.HerdrReady(d.mc, true)
+		m.ServerReady(d.mc, false)
+		m.ServerReady(d.mc, true)
+		m.ServerReady(d.mc, true)
 		want := 1
 		if readOnly {
 			want = 0
 		}
 		if n := count(); n != want {
-			t.Fatalf("read-only %v: %d keep requests after herdr came up", readOnly, n)
+			t.Fatalf("read-only %v: %d keep requests after the terminal core came up", readOnly, n)
 		}
-		m.HerdrReady(d.mc, false)
-		m.HerdrReady(d.mc, true)
+		m.ServerReady(d.mc, false)
+		m.ServerReady(d.mc, true)
 		if n := count(); n != 2*want {
-			t.Fatalf("read-only %v: %d keep requests after herdr came back", readOnly, n)
+			t.Fatalf("read-only %v: %d keep requests after the terminal core came back", readOnly, n)
 		}
 	}
 }
@@ -453,26 +454,26 @@ func TestPaneEnvPerMachine(t *testing.T) {
 		d.status, d.phase = status, PhaseReady
 		m.mu.Unlock()
 	}
-	m.Settings.SetFor(SettingGUI, "a", "off")
-	m.Settings.SetFor(SettingGPU, "b", GPUAll)
+	m.Settings.Set(SettingGUI, "a", false)
+	m.Settings.Set(SettingGPU, "b", GPUAll)
 	if env := m.PaneEnv(mg.Get("a")); env != nil {
 		t.Errorf("machine turned off gets %v", env)
 	}
 	if env := m.PaneEnv(mg.Get("b")); env["LD_PRELOAD"] != status.VGLPreload {
 		t.Errorf("machine with gui-gpu=all gets %v", env)
 	}
-	m.Settings.SetFor(SettingGUI, "a", "")
+	m.Settings.Reset(SettingGUI, "a")
 	if env := m.PaneEnv(mg.Get("a")); env["DISPLAY"] != ":20" || env["LD_PRELOAD"] != "" {
 		t.Errorf("machine back on the global values gets %v", env)
 	}
 	m.mu.Lock()
 	m.ds["a"].phase = PhaseStarting
 	m.mu.Unlock()
-	if _, err := m.Enable(context.Background(), mg.Get("a"), nil); !errors.Is(err, ErrNotReady) {
+	if _, err := m.Enable(context.Background(), mg.Get("a"), nil, nil); !errors.Is(err, ErrNotReady) {
 		t.Errorf("enable while the display starts: %v", err)
 	}
-	m.Settings.SetFor(SettingGUI, "a", "off")
-	if _, err := m.Enable(context.Background(), mg.Get("a"), nil); !errors.Is(err, ErrOff) {
+	m.Settings.Set(SettingGUI, "a", false)
+	if _, err := m.Enable(context.Background(), mg.Get("a"), nil, nil); !errors.Is(err, ErrOff) {
 		t.Errorf("enable on a machine turned off: %v", err)
 	}
 }
@@ -567,6 +568,127 @@ func TestDecide(t *testing.T) {
 	}
 }
 
+// fakeShells stands in for the terminal core's terminals in Enable: each
+// terminal's answers to Shell in turn (the last one repeats), and what was
+// typed into it.
+type fakeShells struct {
+	answers map[string][]fakeShell
+	asked   map[string]int
+	sent    map[string][]string
+}
+
+type fakeShell struct {
+	pid  int
+	idle bool
+	err  error
+}
+
+func (f *fakeShells) All(context.Context) ([]string, error) {
+	var ids []string
+	for id := range f.answers {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids, nil
+}
+
+func (f *fakeShells) Shell(_ context.Context, id string) (int, bool, error) {
+	a := f.answers[id]
+	n := f.asked[id]
+	f.asked[id]++
+	if n >= len(a) {
+		n = len(a) - 1
+	}
+	return a[n].pid, a[n].idle, a[n].err
+}
+
+func (f *fakeShells) Send(_ context.Context, id, text string) error {
+	f.sent[id] = append(f.sent[id], text)
+	return nil
+}
+
+// Enable types only into known shells waiting at their prompt, also when
+// checked again right before; busy terminals (a program in front, a shell
+// that started one meanwhile, no shell), unreachable ones and shells started
+// with the display are reported, not typed into. Enabling again types into
+// no shell twice, until the display changes.
+func TestEnable(t *testing.T) {
+	old, oldProcs := interruptPause, shellProcs
+	interruptPause = time.Millisecond
+	defer func() { interruptPause, shellProcs = old, oldProcs }()
+	var askedPids [][]string
+	shellProcs = func(_ context.Context, _ *machines.Machine, pids []string) (map[int]*agentproto.GUIProc, error) {
+		askedPids = append(askedPids, pids)
+		procs := map[int]*agentproto.GUIProc{}
+		for _, p := range []agentproto.GUIProc{
+			{Pid: 11, Comm: "zsh"}, {Pid: 12, Comm: "bash"}, {Pid: 13, Comm: "claude"},
+			{Pid: 15, Comm: "zsh"}, {Pid: 16, Comm: "bash", Display: true},
+		} {
+			procs[p.Pid] = &p
+		}
+		return procs, nil
+	}
+	mc := testMachines().Get("m1")
+	m := testManager(t)
+	setDisplay := func(display string) {
+		m.mu.Lock()
+		d := m.get(mc)
+		d.status, d.phase = &agentproto.GUIStatus{Supported: true, Display: display, XAuthority: "/x"}, PhaseReady
+		m.mu.Unlock()
+	}
+	setDisplay(":20")
+	sh := &fakeShells{asked: map[string]int{}, sent: map[string][]string{}, answers: map[string][]fakeShell{
+		"idle":    {{pid: 11, idle: true}},
+		"running": {{pid: 12, idle: false}},                        // a program in front of its shell
+		"exec":    {{pid: 13, idle: true}},                         // claude replaced the shell
+		"noshell": {{pid: 0}},                                      // no shell
+		"started": {{pid: 15, idle: true}, {pid: 15, idle: false}}, // started a program meanwhile
+		"display": {{pid: 16, idle: true}},                         // started with the display
+		"gone":    {{err: errors.New("no such terminal")}},
+	}}
+	res, err := m.Enable(context.Background(), mc, sh, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Enabled != 1 || res.Already != 1 || fmt.Sprint(res.Typed) != "[idle]" || fmt.Sprint(res.Failed) != "[gone]" {
+		t.Errorf("result %+v", res)
+	}
+	busy := append([]string(nil), res.Busy...)
+	sort.Strings(busy)
+	if fmt.Sprint(busy) != "[exec noshell running started]" {
+		t.Errorf("busy %v", res.Busy)
+	}
+	if fmt.Sprint(sh.sent) != fmt.Sprintf("map[idle:[\x03 %s\r]]", res.Command) || !strings.Contains(res.Command, "DISPLAY=':20'") {
+		t.Errorf("typed %q, command %q", sh.sent, res.Command)
+	}
+	if len(askedPids) != 1 || len(askedPids[0]) != 5 {
+		t.Errorf("asked the agent about %v", askedPids)
+	}
+
+	// Again: the shell typed into has the display; nothing is typed.
+	sh.sent = map[string][]string{}
+	res, err = m.Enable(context.Background(), mc, sh, []string{"idle", "display"})
+	if err != nil || res.Enabled != 0 || res.Already != 2 || len(sh.sent) != 0 {
+		t.Errorf("enabled again: %+v %v, typed %q", res, err, sh.sent)
+	}
+
+	// A new display: the shell gets it.
+	setDisplay(":21")
+	res, err = m.Enable(context.Background(), mc, sh, []string{"idle"})
+	if err != nil || res.Enabled != 1 || len(sh.sent["idle"]) != 2 || !strings.Contains(sh.sent["idle"][1], "DISPLAY=':21'") {
+		t.Errorf("after the display changed: %+v %v, typed %q", res, err, sh.sent)
+	}
+
+	// The agent cannot be asked: nothing is typed.
+	shellProcs = func(context.Context, *machines.Machine, []string) (map[int]*agentproto.GUIProc, error) {
+		return nil, errors.New("machine not connected")
+	}
+	sh.sent = map[string][]string{}
+	if _, err := m.Enable(context.Background(), mc, sh, []string{"started"}); err == nil || len(sh.sent) != 0 {
+		t.Errorf("without the agent: %v, typed %q", err, sh.sent)
+	}
+}
+
 // Ctrl-C goes first, on its own, then the command with Enter; a failed
 // interrupt types nothing.
 func TestTypeExport(t *testing.T) {
@@ -589,9 +711,9 @@ func TestTypeExport(t *testing.T) {
 }
 
 // A display is prepared once per connection: the machine's state changes
-// (every herdr snapshot) do not start it again after a failure; forced
-// retries (backoff, setting changes) do, and one arriving while a
-// preparation runs is not lost.
+// (the terminal core's state, a rename) do not start it again after a
+// failure; forced retries (backoff, setting changes) do, and one arriving
+// while a preparation runs is not lost.
 func TestEnsureOncePerSession(t *testing.T) {
 	a, b := new(transport.Session), new(transport.Session)
 	d := &display{}

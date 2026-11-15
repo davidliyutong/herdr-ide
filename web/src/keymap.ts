@@ -1,361 +1,422 @@
-// herdr-compatible prefix keymap. The browser owns Cmd+W/T/N, so window-level
-// commands use herdr's prefix (default ctrl+b) exactly like the herdr TUI;
-// bindings are loaded from the host's herdr config.toml when available.
-// The desktop app adds direct shortcuts on top (desktop.ts).
+// Keys of the page: every keydown the app sees (terminals route theirs
+// through handleKey, the window the others) is matched against the bindings
+// in effect on this platform (keybindings.ts), chords included: "ctrl+k c"
+// is ctrl+k, then c within 3 s. A key no binding takes is left to the
+// terminal; so is the second press of a chord's first stroke, which the
+// terminal encodes as any other key. No default binding is a chord. In the
+// desktop app the page sees a key before the application menu, which gets
+// only the keys the page leaves (desktop.ts).
 
-import { actions } from './actions';
-import { conn } from './lib/conn';
+import { actions, attentionList, current } from './actions';
 import { useStore } from './state/store';
-import { t, type MessageKey } from './i18n';
+import * as L from './term/layout';
+import { hasMessage, t } from './i18n';
+import { keyLabel, strokeOf } from './keys';
+import { platform, useKeys, type Binding, type When } from './keybindings';
+import { findStep, openFind, useFind } from './vt/find';
+import { paneHandle } from './state/panes';
+import { currentZoom, zoom, zoomAvailable, ZOOM_LEVELS } from './zoom';
+import { fullDiskAccessAvailable, openFullDiskAccess } from './fullDiskAccess';
 
-export interface KeyConfig {
-  prefix: string;
-  bindings: Record<string, string>; // action -> key spec
-  commands: { key: string; type: string; command: string; description?: string }[];
+/** Where a key is pressed: the main UI, a VS Code pane, or a dialog. */
+export type KeyContext = 'terminal' | 'vscode' | 'dialog';
+
+/** What a stroke did: nothing (the key is not the app's), a chord goes on,
+ * a command ran, the chord's first stroke was pressed again (this press
+ * goes on to the terminal), or an unmatched chord ended and the key is
+ * dropped. */
+export type StrokeResult =
+  { kind: 'none' } | { kind: 'pending' } | { kind: 'run'; command: string } | { kind: 'literal' } | { kind: 'swallow' };
+
+/** Whether a binding for when runs where the key was pressed. A VS Code pane
+ * is a pane of the main UI: the main UI's bindings run there too, for the
+ * keys VS Code leaves (those it takes never reach the app). */
+export function applies(when: When, ctx: KeyContext): boolean {
+  return when === 'always' || when === ctx || (when === 'terminal' && ctx === 'vscode');
 }
 
-export const defaultBindings: Record<string, string> = {
-  help: 'prefix+?',
-  workspace_picker: 'prefix+w',
-  goto: 'prefix+g',
-  new_workspace: 'prefix+shift+n',
-  rename_workspace: 'prefix+shift+w',
-  close_workspace: 'prefix+shift+d',
-  new_tab: 'prefix+c',
-  rename_tab: 'prefix+shift+t',
-  previous_tab: 'prefix+p',
-  next_tab: 'prefix+n',
-  switch_tab: 'prefix+1..9',
-  close_tab: 'prefix+shift+x',
-  focus_pane_left: 'prefix+h',
-  focus_pane_down: 'prefix+j',
-  focus_pane_up: 'prefix+k',
-  focus_pane_right: 'prefix+l',
-  cycle_pane_next: 'prefix+tab',
-  cycle_pane_previous: 'prefix+shift+tab',
-  split_vertical: 'prefix+v',
-  split_horizontal: 'prefix+minus',
-  close_pane: 'prefix+x',
-  zoom: 'prefix+z',
-  toggle_sidebar: 'prefix+b',
-  open_notification_target: 'prefix+o',
-  // additions beyond herdr's own bindings
-  open_code: 'prefix+e',
-  open_diff: 'prefix+d',
-  open_git_graph: 'prefix+shift+g',
-  command_palette: 'prefix+space',
-  open_settings: 'prefix+comma',
-};
-
-/** Localized label of a keymap action. */
-export function actionLabel(action: string): string {
-  return t(`action.${action}` as MessageKey);
+/** One step of the matcher: the result of `stroke` after the strokes of an
+ * unfinished chord (`pending`, "" for none), and the chord that goes on. */
+export function feedStroke(
+  bindings: readonly Binding[],
+  pending: string,
+  stroke: string,
+  ctx: KeyContext,
+): { result: StrokeResult; pending: string } {
+  const live = bindings.filter((b) => applies(b.when, ctx));
+  const seq = pending ? `${pending} ${stroke}` : stroke;
+  const exact = live.find((b) => b.key === seq);
+  if (exact) return { result: { kind: 'run', command: exact.command }, pending: '' };
+  if (live.some((b) => b.key.startsWith(seq + ' '))) return { result: { kind: 'pending' }, pending: seq };
+  if (!pending) return { result: { kind: 'none' }, pending: '' };
+  if (!pending.includes(' ') && stroke === pending) return { result: { kind: 'literal' }, pending: '' };
+  return { result: { kind: 'swallow' }, pending: '' };
 }
 
-let config: KeyConfig = { prefix: 'ctrl+b', bindings: { ...defaultBindings }, commands: [] };
-let prefixActive = false;
-let prefixTimer: number | undefined;
+function bindings(): Binding[] {
+  return useKeys.getState().effective;
+}
+
+/** Whether a key press is a single-stroke binding of a command. */
+export function isCommandKey(ev: KeyboardEvent, command: string): boolean {
+  const stroke = strokeOf(ev);
+  return !!stroke && bindings().some((b) => b.command === command && b.key === stroke);
+}
+
+let pending = '';
+let pendingTimer: number | undefined;
 const listeners = new Set<(active: boolean) => void>();
 
-export function onPrefixChange(fn: (active: boolean) => void) {
+/** Calls fn when a chord starts or ends (the status bar shows it). */
+export function onChordChange(fn: (active: boolean) => void) {
   listeners.add(fn);
   return () => listeners.delete(fn);
 }
 
-function setPrefix(v: boolean) {
-  prefixActive = v;
-  window.clearTimeout(prefixTimer);
-  if (v) prefixTimer = window.setTimeout(() => setPrefix(false), 3000);
-  listeners.forEach((l) => l(v));
+function setPending(next: string) {
+  const was = pending !== '';
+  pending = next;
+  clearTimeout(pendingTimer);
+  if (next) pendingTimer = window.setTimeout(() => setPending(''), 3000);
+  if (was !== (next !== '')) listeners.forEach((l) => l(next !== ''));
 }
 
-export function getKeyConfig() {
-  return config;
+/** The chord typed so far, as shown ("ctrl+k"). */
+export function pendingChord(): string {
+  return pending ? keyLabel(pending) : '';
 }
 
-const configListeners = new Set<() => void>();
+const modifierKeys = new Set(['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'AltGraph', 'Fn']);
 
-/** Subscribe to keymap (re)loads; returns an unsubscribe function. */
-export function onKeyConfig(fn: () => void) {
-  configListeners.add(fn);
-  return () => configListeners.delete(fn);
+/** Where a key event happens: dialogs and the palette take the keyboard. */
+export function keyContext(): KeyContext {
+  return typeof document !== 'undefined' && document.querySelector('.modal-backdrop, .palette-backdrop') ? 'dialog' : 'terminal';
 }
 
-export async function loadKeymap() {
-  try {
-    const r = await fetch('/api/keymap');
-    if (!r.ok) return;
-    const j = (await r.json()) as Partial<KeyConfig>;
-    config = {
-      prefix: j.prefix || 'ctrl+b',
-      bindings: { ...defaultBindings, ...(j.bindings ?? {}) },
-      commands: j.commands ?? [],
-    };
-    configListeners.forEach((f) => f());
-  } catch {
-    /* keep defaults */
-  }
-}
+/** Commands a held key repeats, as in browsers and terminals: opening and
+ * closing tabs and panes, and stepping through tabs, workspaces, panes and
+ * matches. Toggles, dialogs and splits run once per press. */
+export const REPEATING_COMMANDS: ReadonlySet<string> = new Set([
+  'tab.new',
+  'tab.close',
+  'tab.next',
+  'tab.previous',
+  'pane.close',
+  'pane.focusLeft',
+  'pane.focusRight',
+  'pane.focusUp',
+  'pane.focusDown',
+  'pane.focusNext',
+  'pane.focusPrevious',
+  'workspace.next',
+  'workspace.previous',
+  'find.next',
+  'find.previous',
+]);
 
-// Display forms of key names used in herdr's key specs.
-const keySymbols: Record<string, string> = {
-  minus: '-',
-  plus: '+',
-  comma: ',',
-  period: '.',
-  slash: '/',
-  backslash: '\\',
-  semicolon: ';',
-  quote: "'",
-  backtick: '`',
-};
-
-/** Human-readable form of a key spec, e.g. "prefix+comma" → "ctrl+b ,". */
-export function keyLabel(spec: string, prefix = config.prefix): string {
-  const parts = spec.split('+').map((p) => keySymbols[p.toLowerCase()] ?? p);
-  return parts.join('+').replace(/^prefix\+/, prefix + ' ');
-}
-
-// Direct shortcuts of the desktop app (desktop.ts), shown instead of the
-// prefix binding of the same action.
-let direct: Record<string, string> = {};
-
-export function setDirectShortcuts(map: Record<string, string>) {
-  direct = map;
-  configListeners.forEach((f) => f());
-}
-
-/** Human-readable key for an action, e.g. "ctrl+b v". */
-export function keyHint(action: string): string {
-  if (direct[action]) return keyLabel(direct[action]);
-  const spec = config.bindings[action];
-  return spec ? keyLabel(spec) : '';
-}
-
-const keyAliases: Record<string, string> = {
-  minus: '-',
-  plus: '+',
-  space: ' ',
-  tab: 'tab',
-  enter: 'enter',
-  esc: 'escape',
-  escape: 'escape',
-  left: 'arrowleft',
-  right: 'arrowright',
-  up: 'arrowup',
-  down: 'arrowdown',
-  comma: ',',
-  period: '.',
-  slash: '/',
-  backslash: '\\',
-  semicolon: ';',
-  quote: "'",
-  backtick: '`',
-};
-
-interface Spec {
-  ctrl: boolean;
-  alt: boolean;
-  shift: boolean;
-  meta: boolean;
-  key: string;
-}
-
-function parseSpec(s: string): Spec {
-  const parts = s.toLowerCase().split('+');
-  // "prefix+plus" style and literal "+" keys both end up in the last part.
-  let key = parts.pop() ?? '';
-  if (key === '' && parts.length) key = '+';
-  const spec: Spec = { ctrl: false, alt: false, shift: false, meta: false, key: keyAliases[key] ?? key };
-  for (const p of parts) {
-    if (p === 'ctrl' || p === 'control') spec.ctrl = true;
-    else if (p === 'alt' || p === 'option') spec.alt = true;
-    else if (p === 'shift') spec.shift = true;
-    else if (p === 'cmd' || p === 'super' || p === 'meta') spec.meta = true;
-  }
-  return spec;
-}
-
-function eventKey(ev: KeyboardEvent): string {
-  if (ev.key === 'Tab') return 'tab';
-  // Use the physical key for letters/digits so shift/alt variants still match.
-  if (/^Key[A-Z]$/.test(ev.code)) return ev.code.slice(3).toLowerCase();
-  if (/^Digit\d$/.test(ev.code) && !ev.shiftKey) return ev.code.slice(5);
-  return ev.key.toLowerCase();
-}
-
-function matches(spec: Spec, ev: KeyboardEvent, ignoreShift = false): boolean {
-  const k = eventKey(ev);
-  if (spec.key !== k) {
-    // Shifted punctuation such as "?" arrives with shiftKey set.
-    if (!(spec.key.length === 1 && ev.key === spec.key)) return false;
-    return spec.ctrl === ev.ctrlKey && spec.alt === ev.altKey && spec.meta === ev.metaKey;
-  }
-  return spec.ctrl === ev.ctrlKey && spec.alt === ev.altKey && spec.meta === ev.metaKey && (ignoreShift || spec.shift === ev.shiftKey);
-}
-
-function stripPrefix(s: string): string | undefined {
-  return s.toLowerCase().startsWith('prefix+') ? s.slice(7) : undefined;
-}
-
-/** Key handler installed in every terminal. Returns true when consumed. */
-export function handleKey(ev: KeyboardEvent): boolean {
-  if (ev.type !== 'keydown') return prefixActive;
-  if (['Shift', 'Control', 'Alt', 'Meta', 'CapsLock'].includes(ev.key)) return prefixActive;
-  const prefix = parseSpec(config.prefix);
-  if (!prefixActive) {
-    if (matches(prefix, ev)) {
-      setPrefix(true);
+/** Key handler of the app (panes and the window). Returns true when the key
+ * was the app's; the caller cancels it. */
+export function handleKey(ev: KeyboardEvent, ctx: KeyContext = keyContext()): boolean {
+  if (ev.type !== 'keydown') return pending !== '';
+  if (modifierKeys.has(ev.key)) return pending !== '';
+  const stroke = strokeOf(ev);
+  if (!stroke) return pending !== '';
+  const prev = pending;
+  const step = feedStroke(bindings(), pending, stroke, ctx);
+  setPending(step.pending);
+  switch (step.result.kind) {
+    case 'none':
+    case 'literal':
+      // The terminal encodes the key (the same stroke as the chord's first,
+      // for literal) as it encodes every key no binding takes.
+      return false;
+    case 'pending':
+    case 'swallow':
       ev.preventDefault();
       return true;
-    }
-    return false;
-  }
-  setPrefix(false);
-  ev.preventDefault();
-  // prefix prefix sends the prefix key itself (e.g. ctrl+b to the shell).
-  if (matches(prefix, ev)) {
-    if (prefix.ctrl && prefix.key.length === 1) actions.sendLiteral(String.fromCharCode(prefix.key.charCodeAt(0) & 0x1f));
-    return true;
-  }
-  for (const c of config.commands) {
-    const k = stripPrefix(c.key);
-    if (k && matches(parseSpec(k), ev)) {
-      runCommand(c);
+    case 'run':
+      ev.preventDefault();
+      // A held key repeats only some commands; a chord's last stroke runs.
+      if (ev.repeat && !prev && !REPEATING_COMMANDS.has(step.result.command)) return true;
+      runCommand(step.result.command);
       return true;
-    }
   }
-  for (const [action, spec] of Object.entries(config.bindings)) {
-    const k = stripPrefix(spec);
-    if (!k) continue;
-    if (k.endsWith('1..9')) {
-      const mods = parseSpec(k.replace('1..9', '1'));
-      const digit = /^Digit([1-9])$/.exec(ev.code)?.[1];
-      if (digit && mods.ctrl === ev.ctrlKey && mods.alt === ev.altKey && mods.shift === ev.shiftKey) {
-        runAction(action, Number(digit) - 1);
-        return true;
-      }
-      continue;
-    }
-    if (matches(parseSpec(k), ev)) {
-      runAction(action);
-      return true;
-    }
+}
+
+/** Commands whose keys a VS Code pane gives the app before VS Code sees
+ * them, so that they act on the pane as on a terminal's: cmd+w closes it
+ * (VS Code would close an editor). VS Code keeps every other key. */
+export const PANE_COMMANDS: ReadonlySet<string> = new Set(['pane.close']);
+
+/** A key pressed in a VS Code pane, before VS Code: runs a PANE_COMMANDS
+ * command bound to it as one stroke, on that pane (focus makes it the
+ * focused one), and returns true (the caller keeps it from VS Code). */
+export function handleFrameKey(ev: KeyboardEvent, focus: () => void = () => {}): boolean {
+  if (ev.type !== 'keydown' || keyContext() === 'dialog' || pending) return false;
+  const stroke = strokeOf(ev);
+  const b = stroke ? bindings().find((x) => PANE_COMMANDS.has(x.command) && x.key === stroke && applies(x.when, 'vscode')) : undefined;
+  if (!b) return false;
+  focus();
+  if (!ev.repeat || REPEATING_COMMANDS.has(b.command)) runCommand(b.command);
+  return true;
+}
+
+/** The label of a command, e.g. "New Tab". */
+export function commandLabel(id: string): string {
+  const k = `command.${id}`;
+  return hasMessage(k) ? t(k) : id;
+}
+
+/** The key shown for a command: in the desktop app its direct shortcut when
+ * it has one, else its first key ("cmd+t", "ctrl+k c"); "" when it has
+ * none. */
+export function keyHint(command: string): string {
+  const keys = useKeys
+    .getState()
+    .effective.filter((b) => b.command === command)
+    .map((b) => b.key);
+  const direct = platform() === 'mac' || platform() === 'pc' ? keys.find((k) => !k.includes(' ')) : undefined;
+  const key = direct ?? keys[0];
+  return key ? keyLabel(key) : '';
+}
+
+/** A label with the command's key, as tooltips show it ("Split right
+ * (cmd+d)"), or the label alone when the command has no key. */
+export function withKey(label: string, command: string): string {
+  const key = keyHint(command);
+  return key ? t('app.withKey', { label, key }) : label;
+}
+
+/** Whether a command exists on this page at all: Open Full Disk Access
+ * Settings… only in the desktop app on macOS. The keyboard shortcuts page
+ * lists the others. */
+export function commandShown(id: string): boolean {
+  return id !== 'app.fullDiskAccess' || fullDiskAccessAvailable();
+}
+
+/** When pane.close last ran, and how soon after it another run counts as
+ * the key held (the desktop app's menu repeats without saying so; the first
+ * repeat comes after the system's delay, about 400 ms by default). */
+let lastPaneClose = 0;
+const HELD_CLOSE_MS = 600;
+
+/** Whether the selected workspace has no tab left: closing a pane closes it. */
+function emptyWorkspace(): boolean {
+  const ws = current()?.ws;
+  return !!ws && ws.tabs.length === 0;
+}
+
+/** Whether a command can run now: a pane, tab or workspace for it to act
+ * on, something to switch to, a page that may change things. The desktop
+ * app's menu shows the others disabled, the palette leaves them out. */
+export function commandEnabled(id: string): boolean {
+  const s = useStore.getState();
+  const c = actions.focusedContext();
+  const cur = current();
+  const layout = cur?.layout;
+  const tabs = cur?.ws?.tabs.length ?? 0;
+  const panes = cur?.tab ? L.tabPanes(cur.tab).length : 0;
+  const changes = !s.readOnly;
+  if (/^tab\.select[1-9]$/.test(id)) return tabs > 1;
+  switch (id) {
+    case 'workspace.new':
+      return changes && !!s.machineId && s.machines[s.machineId]?.status === 'ready';
+    case 'tab.new':
+      return changes && !!layout;
+    case 'workspace.edit':
+    case 'workspace.close':
+      return changes && !!cur?.ws;
+    case 'workspace.next':
+    case 'workspace.previous':
+      return (layout?.workspaces.length ?? 0) > 1;
+    case 'workspace.switch':
+      return Object.values(s.machines).length > 0;
+    case 'tab.rename':
+    case 'tab.close':
+      return changes && !!cur?.tab;
+    case 'tab.next':
+    case 'tab.previous':
+      return tabs > 1;
+    case 'pane.splitRight':
+    case 'pane.splitDown':
+      return changes && !!c?.pane;
+    case 'pane.close':
+      // With no pane left, it closes the empty workspace.
+      return changes && (!!c?.pane || emptyWorkspace());
+    case 'pane.zoom':
+      return !!c?.pane && panes > 1;
+    case 'pane.focusLeft':
+    case 'pane.focusRight':
+    case 'pane.focusUp':
+    case 'pane.focusDown':
+    case 'pane.focusNext':
+    case 'pane.focusPrevious':
+      return panes > 1;
+    case 'find.open':
+    case 'find.next':
+    case 'find.previous':
+      return !!c?.terminal;
+    case 'code.open':
+    case 'code.diff':
+    case 'code.gitGraph':
+      return changes && !!c;
+    case 'app.agentAttention':
+      return attentionList().length > 0;
+    case 'app.addMachine':
+      return changes;
+    case 'app.fullDiskAccess':
+      return fullDiskAccessAvailable();
+    case 'view.zoomIn':
+      return zoomAvailable(s.readOnly) && currentZoom() < ZOOM_LEVELS[ZOOM_LEVELS.length - 1];
+    case 'view.zoomOut':
+      return zoomAvailable(s.readOnly) && currentZoom() > ZOOM_LEVELS[0];
+    case 'view.zoomReset':
+      return zoomAvailable(s.readOnly) && currentZoom() !== 100;
   }
   return true;
 }
 
-export function runCommand(c: KeyConfig['commands'][number]) {
-  const ctx = actions.focusedContext();
-  if (!ctx) return;
-  if (c.type === 'plugin_action') {
-    const i = c.command.lastIndexOf('.');
-    const params: Record<string, unknown> = { action_id: c.command };
-    if (i > 0) {
-      params.plugin_id = c.command.slice(0, i);
-      params.action_id = c.command.slice(i + 1);
-    }
-    if (ctx.pane) params.context = { pane_id: ctx.pane };
-    conn.api(ctx.m, 'plugin.action.invoke', params).catch((e) => useStore.getState().toast?.(String(e.message ?? e)));
-  } else if (c.type === 'pane' || c.type === 'popup' || c.type === 'shell') {
-    actions.runInNewPane(ctx.m, c.command, ctx.cwd);
-  }
-}
-
-export function runAction(action: string, index?: number) {
+/** Runs a command; unknown ones do nothing. */
+export function runCommand(id: string) {
   const ctx = actions.focusedContext();
   const s = useStore.getState();
-  switch (action) {
-    case 'split_vertical':
-      if (ctx?.pane) actions.split(ctx.m, ctx.pane, 'right');
+  const select = /^tab\.select([1-9])$/.exec(id);
+  if (select) {
+    // The ninth is the last tab, as in browsers.
+    actions.switchTab(select[1] === '9' ? { last: true } : { index: Number(select[1]) - 1 });
+    return;
+  }
+  switch (id) {
+    case 'app.commandPalette':
+      s.setPalette?.('commands');
       break;
-    case 'split_horizontal':
-      if (ctx?.pane) actions.split(ctx.m, ctx.pane, 'down');
+    case 'app.keyboardShortcuts':
+      s.openSettings({ page: 'keys' });
       break;
-    case 'close_pane':
-      if (ctx?.pane) actions.closePane(ctx.m, ctx.pane);
+    case 'app.settings':
+      s.openSettings({});
       break;
-    case 'zoom':
-      if (ctx?.pane) actions.zoom(ctx.m, ctx.pane);
-      break;
-    case 'focus_pane_left':
-      actions.focusDirection('left');
-      break;
-    case 'focus_pane_right':
-      actions.focusDirection('right');
-      break;
-    case 'focus_pane_up':
-      actions.focusDirection('up');
-      break;
-    case 'focus_pane_down':
-      actions.focusDirection('down');
-      break;
-    case 'cycle_pane_next':
-      actions.cyclePane(1);
-      break;
-    case 'cycle_pane_previous':
-      actions.cyclePane(-1);
-      break;
-    case 'new_tab':
-      actions.newTab();
-      break;
-    case 'next_tab':
-      actions.switchTab(1);
-      break;
-    case 'previous_tab':
-      actions.switchTab(-1);
-      break;
-    case 'switch_tab':
-      actions.switchTab({ index: index ?? 0 });
-      break;
-    case 'close_tab': {
-      const c = actions.currentTab();
-      if (c) actions.closeTab(c.m, c.tab);
-      break;
-    }
-    case 'rename_tab': {
-      const c = actions.currentTab();
-      if (c) actions.startRename('tab', c.m, c.tab);
-      break;
-    }
-    case 'new_workspace':
-      actions.newWorkspace();
-      break;
-    case 'rename_workspace':
-    case 'close_workspace': {
-      if (!s.machineId || !s.workspaceId) break;
-      if (action === 'close_workspace') actions.closeWorkspace(s.machineId, s.workspaceId);
-      else actions.startRename('workspace', s.machineId, s.workspaceId);
-      break;
-    }
-    case 'toggle_sidebar':
-      actions.toggleSidebar();
-      break;
-    case 'open_notification_target':
+    case 'app.agentAttention':
       actions.openAttention();
       break;
-    case 'open_code':
-      if (ctx) actions.openCode(ctx.m, ctx.cwd);
+    case 'app.addMachine':
+      s.openAddMachine(true);
       break;
-    case 'toggle_code':
-      actions.toggleCode();
+    case 'app.fullDiskAccess':
+      openFullDiskAccess();
       break;
-    case 'open_diff':
-      if (ctx) actions.openDiff(ctx.m, ctx.cwd);
+    case 'workspace.switch':
+      s.setPalette?.('workspaces');
       break;
-    case 'open_git_graph':
-      if (ctx) actions.openGitGraph(ctx.m, ctx.cwd);
+    case 'workspace.next':
+      actions.cycleWorkspace(1);
       break;
-    case 'workspace_picker':
-    case 'goto':
-    case 'command_palette':
-      s.setPalette?.(action === 'workspace_picker' ? 'workspaces' : 'commands');
+    case 'workspace.previous':
+      actions.cycleWorkspace(-1);
       break;
-    case 'help':
-      s.setPalette?.('help');
+    case 'workspace.new':
+      actions.newWorkspace();
       break;
-    case 'open_settings':
-      s.openSettings(true);
+    case 'workspace.edit':
+      if (s.machineId && s.workspaceId) void actions.editWorkspace(s.machineId, s.workspaceId);
+      break;
+    case 'workspace.close':
+      if (s.machineId && s.workspaceId) void actions.closeWorkspace(s.machineId, s.workspaceId);
+      break;
+    case 'tab.new':
+      void actions.newTab();
+      break;
+    case 'tab.rename': {
+      const c = actions.currentTab();
+      if (c) actions.startRename('tab', c.m, `${c.ws}:${c.index}`);
+      break;
+    }
+    case 'tab.next':
+      actions.switchTab(1);
+      break;
+    case 'tab.previous':
+      actions.switchTab(-1);
+      break;
+    case 'tab.close': {
+      const c = actions.currentTab();
+      if (c) void actions.closeTab(c.m, c.ws, c.index);
+      break;
+    }
+    case 'pane.splitRight':
+      if (ctx?.pane) void actions.split(ctx.m, ctx.pane, 'right');
+      break;
+    case 'pane.splitDown':
+      if (ctx?.pane) void actions.split(ctx.m, ctx.pane, 'down');
+      break;
+    case 'pane.close': {
+      const now = Date.now();
+      const held = now - lastPaneClose < HELD_CLOSE_MS;
+      lastPaneClose = now;
+      if (ctx?.pane) void actions.closePane(ctx.m, ctx.pane);
+      // A press of its own closes the empty workspace, not a held key that
+      // closed its last pane.
+      else if (!held && emptyWorkspace()) {
+        const cur = current();
+        if (cur?.ws) void actions.closeWorkspace(cur.m, cur.ws.id);
+      }
+      break;
+    }
+    case 'pane.zoom':
+      if (ctx?.pane) actions.zoom(ctx.m, ctx.pane);
+      break;
+    case 'pane.focusLeft':
+      actions.focusDirection('left');
+      break;
+    case 'pane.focusRight':
+      actions.focusDirection('right');
+      break;
+    case 'pane.focusUp':
+      actions.focusDirection('up');
+      break;
+    case 'pane.focusDown':
+      actions.focusDirection('down');
+      break;
+    case 'pane.focusNext':
+      actions.cyclePane(1);
+      break;
+    case 'pane.focusPrevious':
+      actions.cyclePane(-1);
+      break;
+    case 'view.toggleSidebar':
+      actions.toggleSidebar();
+      break;
+    case 'view.zoomIn':
+      zoom(1);
+      break;
+    case 'view.zoomOut':
+      zoom(-1);
+      break;
+    case 'view.zoomReset':
+      zoom(0);
+      break;
+    case 'find.open': {
+      if (!ctx?.terminal) break;
+      const h = paneHandle(ctx.m, ctx.terminal);
+      if (h) h.openFind();
+      else openFind(ctx.m, ctx.terminal);
+      break;
+    }
+    case 'find.next':
+      if (useFind.getState().terminal) findStep(true);
+      else if (ctx?.terminal) openFind(ctx.m, ctx.terminal);
+      break;
+    case 'find.previous':
+      if (useFind.getState().terminal) findStep(false);
+      else if (ctx?.terminal) openFind(ctx.m, ctx.terminal);
+      break;
+    case 'code.open':
+      if (ctx) void actions.openCode(ctx.m, ctx.cwd);
+      break;
+    case 'code.diff':
+      if (ctx) void actions.openDiff(ctx.m, ctx.cwd, ctx.pane);
+      break;
+    case 'code.gitGraph':
+      if (ctx) void actions.openGitGraph(ctx.m, ctx.cwd, ctx.pane);
       break;
   }
 }

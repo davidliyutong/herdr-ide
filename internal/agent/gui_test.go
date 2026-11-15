@@ -1,3 +1,5 @@
+//go:build unix
+
 package agent
 
 import (
@@ -330,7 +332,7 @@ func TestGUIWindows(t *testing.T) {
 
 	helper := exec.Command(os.Args[0], "-test.run=^TestHelperXClient$")
 	helper.Env = append(os.Environ(), "GUI_TEST_SOCKET="+xSocket(n), "GUI_TEST_COOKIE="+hex.EncodeToString(cookie),
-		"HERDR_PANE_ID=w1:p2", "HERDR_SOCKET_PATH=/tmp/herdr-test.sock")
+		"HC_TERMINAL_ID=t2", "HC_TERMINAL_SOCKET="+g.a.hcSocket())
 	out, _ := helper.StdoutPipe()
 	if err := helper.Start(); err != nil {
 		t.Fatal(err)
@@ -359,7 +361,7 @@ func TestGUIWindows(t *testing.T) {
 	}
 
 	w := next("window event", func(m guiMsg) bool { return m.ev != nil && m.ev.Ev == "window" }).ev.Window
-	if w.Title != "helper window" || w.W != 200 || w.H != 100 || w.Pane != "w1:p2" || w.Socket != "/tmp/herdr-test.sock" || w.Pid != helper.Process.Pid {
+	if w.Title != "helper window" || w.W != 200 || w.H != 100 || w.Terminal != "t2" || w.Pid != helper.Process.Pid {
 		t.Fatalf("window = %+v", w)
 	}
 	expectLine("mapped")
@@ -390,13 +392,13 @@ func TestGUIWindows(t *testing.T) {
 	// Another program's window appears: it does not take the keys meant
 	// for the first one.
 	other := exec.Command(os.Args[0], "-test.run=^TestHelperXClient$")
-	other.Env = append(os.Environ(), "GUI_TEST_SOCKET="+xSocket(n), "GUI_TEST_COOKIE="+hex.EncodeToString(cookie), "HERDR_PANE_ID=w1:p3", "GUI_TEST_GRAB=1")
+	other.Env = append(os.Environ(), "GUI_TEST_SOCKET="+xSocket(n), "GUI_TEST_COOKIE="+hex.EncodeToString(cookie), "HC_TERMINAL_ID=t3", "HC_TERMINAL_SOCKET="+g.a.hcSocket(), "GUI_TEST_GRAB=1")
 	otherOut, _ := other.StdoutPipe()
 	if err := other.Start(); err != nil {
 		t.Fatal(err)
 	}
 	defer other.Process.Kill()
-	next("second window", func(m guiMsg) bool { return m.ev != nil && m.ev.Ev == "window" && m.ev.Window.Pane == "w1:p3" })
+	next("second window", func(m guiMsg) bool { return m.ev != nil && m.ev.Ev == "window" && m.ev.Window.Terminal == "t3" })
 	// The second program takes the focus itself once mapped.
 	if l, _ := bufio.NewReader(otherOut).ReadString('\n'); l != "mapped\n" {
 		t.Fatalf("second helper said %q", l)

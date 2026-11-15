@@ -14,6 +14,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -40,26 +41,38 @@ const (
 
 // Setting keys.
 const (
-	SettingInstall = "code-server-install"
-	SettingPath    = "code-server-path"
+	SettingInstall = "codeServer.install"
+	SettingPath    = "codeServer.path"
 )
 
-// SettingDefs are the code-server settings that can be changed at runtime.
-var SettingDefs = []settings.Def{
-	{
-		Key: SettingInstall, Kind: settings.KindEnum, Default: InstallPush,
-		Options: []string{InstallPush, InstallDownload, InstallExisting},
-		Usage:   "how machines get code-server: push (the core downloads, verifies and uploads it), download (the machine downloads it, verified) or existing (use the machine's own code-server); the last two fall back to push",
-	},
-	{
-		Key: SettingPath, Kind: settings.KindString,
-		Usage: "code-server executable on machines for --" + SettingInstall + "=existing (absolute or ~/ path); empty searches PATH and the usual install locations",
-		Validate: func(v string) error {
-			if v != "" && !filepath.IsAbs(v) && !strings.HasPrefix(v, "~/") {
-				return errors.New("must be an absolute or ~/ path")
-			}
-			return nil
+// Settings are the code-server settings that can be changed at runtime,
+// also per machine (where code-server comes from is a property of the
+// machine: one is offline, another has its own), with the flags and file
+// keys of earlier versions.
+var Settings = settings.Module{
+	Sections: []settings.Section{{ID: "codeServer", Order: 60, Advanced: true}},
+	Defs: []settings.Def{
+		{
+			Key: SettingInstall, Type: settings.TypeEnum, Default: InstallPush, Scope: settings.ScopeMachine,
+			Enum: []string{InstallPush, InstallDownload, InstallExisting}, Section: "codeServer", Order: 10,
+			Flag:  "code-server-install",
+			Usage: "how machines get code-server: push (the core downloads, verifies and uploads it), download (the machine downloads it, verified) or existing (use the machine's own code-server); the last two fall back to push",
 		},
+		{
+			Key: SettingPath, Type: settings.TypeString, Default: "", Scope: settings.ScopeMachine, Section: "codeServer", Order: 20,
+			Flag:  "code-server-path",
+			Usage: "code-server executable on machines for --code-server-install=existing (absolute or ~/ path); empty searches PATH and the usual install locations",
+			Validate: func(v any) error {
+				if s := v.(string); s != "" && !path.IsAbs(s) && !strings.HasPrefix(s, "~/") {
+					return errors.New("must be an absolute or ~/ path")
+				}
+				return nil
+			},
+		},
+	},
+	Migrations: []settings.Migration{
+		{From: "code-server-install", To: SettingInstall, Convert: settings.Renamed},
+		{From: "code-server-path", To: SettingPath, Convert: settings.Renamed},
 	},
 }
 
@@ -152,7 +165,18 @@ func (mg *Manager) state(id string) *machineState {
 func (mg *Manager) setStatus(id string, fn func(*Status)) {
 	mg.mu.Lock()
 	defer mg.mu.Unlock()
-	fn(&mg.states[id].status)
+	// A machine forgotten while it was being prepared keeps no state.
+	if s := mg.states[id]; s != nil {
+		fn(&s.status)
+	}
+}
+
+// Forget drops the state of a removed machine; one added again under the
+// same id is prepared afresh.
+func (mg *Manager) Forget(id string) {
+	mg.mu.Lock()
+	delete(mg.states, id)
+	mg.mu.Unlock()
 }
 
 // Status returns the preparation status for a machine.
@@ -231,15 +255,15 @@ func (mg *Manager) phase(id, p, detail string) {
 	mg.setStatus(id, func(s *Status) { *s = Status{Phase: p, Detail: detail} })
 }
 
-// install returns the install mode and, for InstallExisting, the Header.Bin
-// that finds the machine's code-server.
-func (mg *Manager) install() (mode, bin string) {
+// install returns a machine's install mode and, for InstallExisting, the
+// Header.Bin that finds its code-server.
+func (mg *Manager) install(machine string) (mode, bin string) {
 	if mg.Settings == nil {
 		return InstallPush, ""
 	}
-	mode = mg.Settings.Get(SettingInstall)
+	mode = mg.Settings.String(SettingInstall, machine)
 	if mode == InstallExisting {
-		if bin = mg.Settings.Get(SettingPath); bin == "" {
+		if bin = mg.Settings.String(SettingPath, machine); bin == "" {
 			bin = "auto"
 		}
 	}
@@ -318,7 +342,7 @@ func (mg *Manager) ensure(ctx context.Context, m *machines.Machine) error {
 	if st.Info == nil {
 		return machines.ErrNotConnected
 	}
-	mode, bin := mg.install()
+	mode, bin := mg.install(id)
 	s := mg.state(id)
 	mg.mu.Lock()
 	s.bin = ""

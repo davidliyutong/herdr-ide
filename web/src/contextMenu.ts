@@ -11,7 +11,10 @@ export interface MenuItem {
   icon?: ReactNode;
   danger?: boolean;
   disabled?: boolean;
-  run(): void;
+  /** Items shown beside this one when it is pointed at (or opened with →,
+   * Enter or a click); such an item runs nothing itself. */
+  submenu?: MenuEntry[];
+  run?(): void;
 }
 
 export type MenuEntry = MenuItem | 'sep';
@@ -55,7 +58,9 @@ export function stepIndex(entries: MenuEntry[], cur: number, step: 1 | -1): numb
 /** Opens a menu at the pointer instead of the browser's. With no items (for
  * example in read-only mode) the browser's menu shows as usual. */
 export function openMenu(ev: { clientX: number; clientY: number; preventDefault(): void; stopPropagation(): void }, entries: MenuEntry[]) {
-  const list = tidy(entries);
+  const list = tidy(entries.map((e) => (isItem(e) && e.submenu ? { ...e, submenu: tidy(e.submenu) } : e))).filter(
+    (e) => !isItem(e) || !e.submenu || e.submenu.some(isItem),
+  );
   if (!list.some(isItem)) return;
   ev.preventDefault();
   ev.stopPropagation();

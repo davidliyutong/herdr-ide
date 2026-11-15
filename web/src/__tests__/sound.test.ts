@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { mutedAgents, soundFor, type SoundContext } from '../sound';
-import { parsePref } from '../prefs';
-import type { AgentStatusEvent } from '../lib/herdr';
+import { builtinDefaults } from '../settings';
+import type { AgentStatusEvent } from '../lib/machine';
 
 const ev = (agent_status: AgentStatusEvent['agent_status'], agent = 'claude'): AgentStatusEvent => ({
-  pane_id: 'p1',
-  workspace_id: 'w1',
+  terminal: 't1',
   agent_status,
   agent,
 });
@@ -34,17 +33,16 @@ describe('soundFor', () => {
   it('stays silent when disabled, muted or not the chosen browser', () => {
     expect(soundFor(ev('blocked'), ctx({ enabled: false }))).toBeUndefined();
     expect(soundFor(ev('blocked'), ctx({ chosen: false }))).toBeUndefined();
-    expect(soundFor(ev('blocked', 'droid'), ctx({ muted: mutedAgents('droid') }))).toBeUndefined();
-    expect(soundFor({ ...ev('done', 'x'), display_agent: 'Droid' }, ctx({ muted: mutedAgents('droid') }))).toBeUndefined();
+    expect(soundFor(ev('blocked', 'droid'), ctx({ muted: mutedAgents(['droid']) }))).toBeUndefined();
+    expect(soundFor({ ...ev('done', 'x'), display_agent: 'Droid' }, ctx({ muted: mutedAgents(['droid']) }))).toBeUndefined();
   });
 });
 
 describe('sound settings', () => {
   it('parses muted agents and keeps an empty list', () => {
-    expect([...mutedAgents(' Droid, codex  kimi,,')]).toEqual(['droid', 'codex', 'kimi']);
-    expect(mutedAgents('').size).toBe(0);
-    expect(parsePref('notifySoundMuted', null)).toBe('droid');
-    expect(parsePref('notifySoundMuted', '')).toBe('');
-    expect(parsePref('notifySound', null)).toBe(true);
+    expect([...mutedAgents([' Droid', 'codex', 'kimi', ''])]).toEqual(['droid', 'codex', 'kimi']);
+    expect(mutedAgents([]).size).toBe(0);
+    expect(builtinDefaults['notifications.mutedAgents']).toEqual(['droid']);
+    expect(builtinDefaults['notifications.sound']).toBe(true);
   });
 });

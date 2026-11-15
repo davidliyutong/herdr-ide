@@ -1,14 +1,9 @@
 package main
 
 import (
-	"os"
-	"strings"
 	"testing"
 
-	"herdr-ide/internal/codeserver"
-	"herdr-ide/internal/gui"
 	"herdr-ide/internal/machines"
-	"herdr-ide/internal/settings"
 )
 
 func TestSelectSpecsDedup(t *testing.T) {
@@ -26,33 +21,9 @@ func TestSelectSpecsDedup(t *testing.T) {
 	if len(got) != 2 || got[1].ID != "x" {
 		t.Fatalf("--local-only with --ssh = %+v", got)
 	}
-	// A machine a reload finds in herdr's catalog is taken the same way.
+	// One machine at a time is taken the same way.
 	if selectSpec(specs[2], false, true, nil, nil) || !selectSpec(specs[2], false, false, nil, nil) ||
 		!selectSpec(specs[1], false, false, nil, []string{"gpu"}) || selectSpec(specs[2], false, false, nil, []string{"gpu"}) {
 		t.Fatal("selectSpec disagrees with --local-only or --machine")
-	}
-}
-
-// Every core setting has a label, a description and option labels in the
-// UI's messages; a browser shows the bare key otherwise.
-func TestSettingsTranslated(t *testing.T) {
-	b, err := os.ReadFile("../../web/src/i18n/en.ts")
-	if err != nil {
-		t.Fatal(err)
-	}
-	en := string(b)
-	defs := append(append([]settings.Def{}, codeserver.SettingDefs...), gui.SettingDefs...)
-	for _, d := range defs {
-		keys := []string{"settings." + d.Key, "settings." + d.Key + ".desc"}
-		if d.Kind == settings.KindEnum {
-			for _, o := range d.Options {
-				keys = append(keys, "settings."+d.Key+"."+o)
-			}
-		}
-		for _, k := range keys {
-			if !strings.Contains(en, "'"+k+"':") {
-				t.Errorf("web/src/i18n/en.ts lacks %s", k)
-			}
-		}
 	}
 }

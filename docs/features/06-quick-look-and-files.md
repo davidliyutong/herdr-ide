@@ -30,34 +30,60 @@ more); editing files (that is VS Code's job).
   with a slash, `~`-paths and bare file names with known extensions,
   optionally followed by `:line[:col]`; OSC 8 hyperlinks from the program
   come first. Cell columns are mapped from string indices so wide characters
-  do not shift ranges ([03](03-pane-rendering-and-input.md)).
+  do not shift ranges ([26](26-web-terminals.md)).
 - Long paths wrap. A row whose text reaches the pane's last column is
   joined with the next row, after that row's indentation (a program that
   wraps its own text may indent continued lines), up to 20 rows either
   way. A path that happens to end exactly at the last
   column joins the next row too; the underline shows what a click opens.
-  herdr's grid has no soft-wrap marks, so this is the only signal for both
-  terminal and program wrapping.
+  Programs that wrap their own text (Claude Code, Codex) leave no soft-wrap
+  marks, so this signal covers both terminal and program wrapping.
 - A right click offers the same for the path or URL under the pointer, or
   for the selection when it is one: **Preview**, **Open in VS Code** (not for
   media) and **Copy full path**, or **Open** and **Copy link** for URLs. A
   path wrapped in a way detection does not join (a margin before the last
   column, a diff's `+` in front of the next row) is opened by selecting it.
-- Relative paths resolve against the pane's `foreground_cwd` from herdr;
+- Relative paths resolve against the directory of the terminal's
+  foreground program (the terminal core's record), else where it started;
   `~` against the machine's home.
 - Activation requires ⌘ or Ctrl, so plain clicks still reach mouse-aware
-  applications. Media opens in the preview panel; other files open in VS Code
-  at the line ([05](05-vscode-panel.md)), falling back to the preview.
+  applications. What a path opens in is a pane of the terminal's
+  workspace (`actions.openPath`):
+  - media (images, video, audio, PDF) opens in a preview pane: the
+    workspace's preview pane (the one of the terminal's tab first), which
+    then shows that path, else a new one split beside the terminal;
+  - other files open in VS Code at the line ([05](05-vscode-panes.md)): in
+    a VS Code pane of the workspace, the one of the terminal's tab whose
+    folder holds the file first, then one of another tab that holds it,
+    then any of the terminal's tab, then any; else in a new VS Code pane
+    split beside the terminal, for the terminal's directory when it holds
+    the file, else the workspace's when it does, else the file's
+    directory.
 
-**Preview** (`web/src/components/Dock.tsx`)
+  The text menu's **Open in VS Code** does the same, and its **Preview**
+  opens the path in a preview pane the same way, also when it is not
+  media.
 
+**Preview** (`web/src/components/PreviewPane.tsx`)
+
+- A preview is a pane of the layout document (`{"preview": {"id",
+  "path"}}`, [22](22-terminal-protocol.md)): it is split, dragged by its
+  header, maximized and closed like any pane, can be a tab's only pane,
+  and comes back after a reload or a restart ([04](04-layout-and-keyboard.md)).
+  A split from it starts a terminal in its file's directory. Closing it
+  ends nothing.
 - `GET /api/m/<machine>/file?path=` streams through the agent (`fs.stat`,
   `fs.read` with offset/length) and supports single HTTP ranges, ETags and
   `download=1`.
 - Images, video and audio use native elements; PDFs an iframe; text files
   read the first 2 MiB and refuse binary content; directories list entries
   that open on click. Sibling media in the same directory are navigable with
-  ← →.
+  ← →. Stepping to a sibling or entering a directory shows that path in the
+  same preview pane (the layout document's path changes, so every client
+  follows).
+- Its toolbar has **Download** and **Open in VS Code** (also for media:
+  VS Code shows images), which opens the file in a VS Code pane of the
+  workspace as a path from a terminal does, beside the preview.
 - A video codec the browser cannot decode shows a hint with download and
   VS Code options.
 
@@ -102,20 +128,20 @@ more); editing files (that is VS Code's job).
   (reading a FIFO would block), and so is anything it cannot read. Nothing
   is written on the machine. Files are compressed at the fastest deflate
   level: the archive is made while it downloads.
-- VS Code's explorer downloads through the same endpoint
-  ([05](05-vscode-panel.md)).
+- VS Code's explorer downloads through the same endpoint: the page whose
+  VS Code pane shows the asking window starts the download, else the page
+  with the focus ([05](05-vscode-panes.md)).
 
 **Pasted and dropped files** (`web/src/drop.ts`, `web/src/lib/files.ts`)
 
 - Files pasted into a pane, or dragged from outside the page onto one, end
   up as their paths in the pane, shell-quoted and separated by spaces, sent
-  as a paste, the way a terminal delivers dropped files: herdr brackets it
-  when the program asked for that, so programs that tell pastes from typing
+  as a paste, the way a terminal delivers dropped files: the terminal
+  brackets it when the program asked for that, so programs that tell pastes from typing
   (shells, coding agents) handle it as a paste. The paths go to the pane
   under the drop, which gets the focus.
 - While files are dragged over a pane, it is outlined with what a drop does
-  there. Read-only mode and a page that does not use the session (another
-  browser has it) take no drop. Drops that nothing on the page takes are
+  there. Read-only mode takes no drop. Drops that nothing on the page takes are
   refused, so a file dropped beside a target is not opened by the browser in
   place of the app.
 - In the desktop app, files dropped on a pane of the local machine are
@@ -128,13 +154,14 @@ more); editing files (that is VS Code's job).
   the path. Folders are not uploaded; they are skipped with a note. A failed
   or cancelled upload shows in the uploads panel (a failure also as a note),
   and the paths of the others are still pasted.
-- Dropped files go into the pane's working directory (herdr's
-  `foreground_cwd`, so the directory of the agent running there), given as
+- Dropped files go into the pane's working directory (its foreground
+  program's, from the terminal core, so the directory of the agent running
+  there), given as
   `&dir=`: the user put them there on purpose, and the agent finds them next
   to its project. Each keeps its own name (without control characters); a
   name already taken gets `-1`, `-2`… before the extension, so nothing there
   is replaced. The overlay and the note name that directory. When it does
-  not take the file (not writable, gone) or herdr reports none, the file
+  not take the file (not writable, gone) or there is none, the file
   goes to the upload directory instead, with a note.
 - Pasted files (mostly clipboard screenshots) go to the machine's upload
   directory, where the server adds a timestamp and random suffix (several
@@ -163,7 +190,8 @@ more); editing files (that is VS Code's job).
 - Finished uploads (done, failed or cancelled) move to the history, newest
   first: the machine, where the file is (or the directory it was going to),
   its size, time and average speed, or the error. A done upload can be
-  opened in the preview panel and its path copied. The browser keeps the
+  opened in a preview pane (the workspace's, else a new one beside the
+  focused pane) and its path copied. The browser keeps the
   last 50 in `localStorage` (names, machines and paths, not contents);
   opening the panel shows the ones other tabs finished. Entries can be
   removed one by one or all at once; this does not touch the files.
@@ -234,7 +262,7 @@ more); editing files (that is VS Code's job).
 | Option | Why not |
 | --- | --- |
 | Preview only inside VS Code | Heavy for a glance; needs code-server running. |
-| Inline terminal images (sixel, Kitty) | Not carried by herdr's terminal-session stream. |
+| Inline terminal images (sixel, Kitty) | The browser's emulator has no image support ([26](26-web-terminals.md)). |
 | `ssh … cat` / `dd` per range request | One process per range; POSIX tool differences across platforms. |
 | Client-chosen upload paths | Collisions and path injection. The browser names at most an existing directory; the server owns the file name and the agent never replaces a file. |
 | Upload to the upload directory, then move | Two steps and a copy across file systems; writing in the target directory renames within it. |
@@ -276,13 +304,18 @@ on a machine) and is audited as `file.download.cancel`.
 
 ## Testing
 
-`internal/server/server_test.go` (range parsing, content types, upload
-names, uploads into a directory), `internal/agent/agent_test.go` (ranged
-reads, chunked writes, writes that keep existing files),
+`internal/server/server_test.go` (range parsing, `TestParseRange`; content
+types, `TestContentTypeNeverActive`; upload names,
+`TestUploadNameUniqueAndSafe`; uploads into a directory,
+`TestUploadIntoDirectory`), `internal/agent/agent_test.go` (ranged reads
+and chunked writes, `TestFileOps`; writes that keep existing files,
+`TestWriteKeepsExistingFiles`),
 `web/src/__tests__/core.test.ts` (path resolution, media detection, wrapped
-links, selected links), `web/src/__tests__/surfaceSelect.test.ts` (wrapped
-link underline, the pane menu's items, copy, paste and opening; which drags
-a pane takes and pasting dropped files' paths), `web/src/__tests__/drop.test.ts`
+links, selected links), `web/src/__tests__/codePanes.test.ts` (a path
+from a terminal in a VS Code pane of the workspace or beside the terminal,
+media in a preview pane beside it that then shows the next file),
+`web/src/__tests__/vt.test.ts` (hyperlinks and the
+link underline), `web/src/__tests__/drop.test.ts`
 (dropped files' paths on the local machine, uploads and skipped folders for
 another, refused stray drops), `web/src/__tests__/transfers.test.ts`
 (progress and speed, cancelling running and waiting uploads, the fallback
@@ -291,9 +324,10 @@ to the upload directory, the kept history, the panel), and
 aborted upload through a real agent leaves no file; a complete one arrives).
 Downloads: `internal/agent/archive_test.go` (archive contents, repeated
 names, links followed only at the top, modes, missing paths, an abandoned
-stream, the end mark of a chunked archive), `internal/server/download_test.go` (path checks, archive names, a
-file as itself and directories as zips through a real agent, `HEAD`,
-read-only mode, the audit record; `TestDownloadProgress`: events of a file
+stream, the end mark of a chunked archive), `internal/server/download_test.go`
+(path checks and archive names, `TestDownloadPaths`; a file as itself and
+directories as zips through a real agent, `HEAD`, read-only mode, the audit
+record, `TestDownload`; `TestDownloadProgress`: events of a file
 and an archive to the page following them only, failure codes, the state
 for a page that asks late and for an unknown id, cancelling from the panel
 and in the browser with the response broken off, an archive whose machine

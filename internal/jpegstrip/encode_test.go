@@ -125,3 +125,24 @@ func BenchmarkEncode(b *testing.B) {
 		}
 	})
 }
+
+// The scans' buffers are used again across images: an image encodes the
+// same after larger and smaller ones, in one group or several.
+func TestBuffersUsedAgain(t *testing.T) {
+	small, large := scene(64, 48, 256), scene(333, 251, 1400)
+	for _, groups := range []int{1, 4} {
+		first, err := Encode(nil, small, 256, 64, 48, 85, groups)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for range 3 {
+			if _, err := Encode(nil, large, 1400, 333, 251, 85, groups); err != nil {
+				t.Fatal(err)
+			}
+			again, err := Encode(nil, small, 256, 64, 48, 85, groups)
+			if err != nil || !bytes.Equal(again, first) {
+				t.Fatalf("groups %d: differs after a larger image (%v)", groups, err)
+			}
+		}
+	}
+}

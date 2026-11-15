@@ -1,3 +1,5 @@
+//go:build unix
+
 package agent
 
 import (
@@ -7,6 +9,7 @@ import (
 	"image/png"
 	"runtime"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/jezek/xgb/damage"
@@ -329,7 +332,8 @@ func (wm *windowManager) grab(jobs []capture) []grabbed {
 			case err == nil && r != nil && int(r.Size) >= size:
 				out[i].pix = seg.data[p.off : p.off+size]
 			case errors.As(err, new(shm.BadSegError)) || errors.As(err, new(xproto.AccessError)):
-				// The segment, not the window: capture without it from now on.
+				// The segment, not the window: capture without it from now on
+				// (the next batch frees it; this one's pixels may lie in it).
 				wm.logger.Printf("gui: shared memory capture failed, reading through the connection: %v", err)
 				wm.shmOK = false
 			}
@@ -345,6 +349,13 @@ func (wm *windowManager) grab(jobs []capture) []grabbed {
 // segment returns a shared segment of at least need bytes (up to
 // guiShmMax), nil without MIT-SHM.
 func (wm *windowManager) segment(need int) *shmBuf {
+	if !wm.shmOK && wm.seg != nil {
+		// Capture through the segment failed in the batch before, whose
+		// frames are encoded by now: give the segment back instead of
+		// keeping it until the window manager ends.
+		wm.seg.free(wm.x)
+		wm.seg = nil
+	}
 	if !wm.shmOK || need == 0 {
 		return nil
 	}
@@ -386,8 +397,10 @@ func (wm *windowManager) encode(j capture, g grabbed) (f frame) {
 		f.cost.convert = time.Since(t)
 		t = time.Now()
 		var buf bytes.Buffer
-		e := png.Encoder{CompressionLevel: png.BestSpeed}
-		if e.Encode(&buf, rgba) != nil {
+		e := png.Encoder{CompressionLevel: png.BestSpeed, BufferPool: pngBuffers}
+		err := e.Encode(&buf, rgba)
+		rgbaBufs.Put(&rgba.Pix)
+		if err != nil {
 			return f
 		}
 		f.data, f.cost.enc = buf.Bytes(), agentproto.GUIEncPNG
@@ -618,10 +631,32 @@ func (wm *windowManager) changed(m *managedWin) bool {
 	return false
 }
 
+// Windows' pixels are converted and PNG-encoded in parallel; the buffers
+// for both are used again across frames (rgbaBufs holds *[]byte).
+var (
+	rgbaBufs   sync.Pool
+	pngBuffers = &pngPool{}
+)
+
+type pngPool struct{ p sync.Pool }
+
+func (p *pngPool) Get() *png.EncoderBuffer {
+	b, _ := p.p.Get().(*png.EncoderBuffer)
+	return b
+}
+
+func (p *pngPool) Put(b *png.EncoderBuffer) { p.p.Put(b) }
+
 // bgrxToRGBA converts a 32 bits per pixel ZPixmap of a depth 24 visual.
 func bgrxToRGBA(data []byte, w, h int) *image.RGBA {
-	img := image.NewRGBA(image.Rect(0, 0, w, h))
-	p := img.Pix
+	n := w * h * 4
+	var p []byte
+	if b, ok := rgbaBufs.Get().(*[]byte); ok && cap(*b) >= n {
+		p = (*b)[:n]
+	} else {
+		p = make([]byte, n)
+	}
+	img := &image.RGBA{Pix: p, Stride: w * 4, Rect: image.Rect(0, 0, w, h)}
 	for i := 0; i < w*h*4; i += 4 {
 		p[i], p[i+1], p[i+2], p[i+3] = data[i+2], data[i+1], data[i], 0xff
 	}

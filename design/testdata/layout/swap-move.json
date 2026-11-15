@@ -1,0 +1,80 @@
+{
+  "description": "Swapping panes within a tab and across workspaces (each tab keeps its focus on the pane's place), moving a pane beside another (before or after it) and into a new tab of another workspace; leaves keep their fields.",
+  "input": {
+    "version": 2,
+    "workspaces": [
+      {
+        "id": "w1",
+        "name": "one",
+        "cwd": "",
+        "tabs": [
+          {
+            "root": { "split": "horizontal", "ratio": 0.4, "children": [{ "terminal": "a", "pin": 1 }, { "terminal": "b" }] },
+            "focused": "a"
+          },
+          { "root": { "terminal": "c" }, "focused": "c" }
+        ],
+        "selected": 0
+      },
+      {
+        "id": "w2",
+        "name": "two",
+        "cwd": "",
+        "tabs": [
+          {
+            "root": { "split": "vertical", "ratio": 0.5, "children": [{ "terminal": "d" }, { "terminal": "e" }] },
+            "focused": "e"
+          }
+        ],
+        "selected": 0
+      }
+    ],
+    "selected": 0
+  },
+  "ops": [
+    { "op": "swap", "a": "a", "b": "b" },
+    { "op": "swap", "a": "a", "b": "d" },
+    { "op": "swap", "a": "a", "b": "a" },
+    { "op": "moveTerminal", "terminal": "c", "target": "b", "axis": "vertical", "before": true },
+    { "op": "moveTerminal", "terminal": "e", "target": "d", "axis": "horizontal" },
+    { "op": "moveToNewTab", "terminal": "b", "workspace": "w2" },
+    { "op": "moveTerminal", "terminal": "a", "target": "zz", "axis": "horizontal" },
+    { "op": "moveToNewTab", "terminal": "a", "workspace": "nope" }
+  ],
+  "changed": true,
+  "expected": {
+    "version": 2,
+    "workspaces": [
+      {
+        "id": "w1",
+        "name": "one",
+        "cwd": "",
+        "tabs": [
+          {
+            "root": {
+              "split": "horizontal",
+              "ratio": 0.4,
+              "children": [
+                { "terminal": "c" },
+                { "split": "horizontal", "ratio": 0.5, "children": [{ "terminal": "d" }, { "terminal": "e" }] }
+              ]
+            },
+            "focused": "e"
+          }
+        ],
+        "selected": 0
+      },
+      {
+        "id": "w2",
+        "name": "two",
+        "cwd": "",
+        "tabs": [
+          { "root": { "terminal": "a", "pin": 1 }, "focused": "a" },
+          { "root": { "terminal": "b" }, "focused": "b" }
+        ],
+        "selected": 1
+      }
+    ],
+    "selected": 1
+  }
+}

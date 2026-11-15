@@ -12,15 +12,12 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import type { DesktopShell, OpenedFolders } from '../shell';
 import { FakeXhr } from './fakeXhr';
+import { workspaceTitle } from '../term/layout';
 
-const calls: Array<{ m: string; method: string; params: Record<string, unknown> }> = [];
 vi.mock('../lib/conn', () => ({
   conn: {
-    api: (m: string, method: string, params: Record<string, unknown>) => {
-      calls.push({ m, method, params });
-      return Promise.resolve(method === 'workspace.create' ? { workspace: { workspace_id: 'w9' }, root_pane: { pane_id: 'p9' } } : {});
-    },
     send: () => {},
     sendNow: () => {},
     setTheme: () => {},
@@ -32,19 +29,16 @@ vi.mock('../lib/conn', () => ({
 /** Files the fake desktop bridge knows the paths of. */
 const onDisk = new Map<File, string>();
 /** What the page gave the bridge for folders dropped on the Dock icon. */
-let openFolder: ((path: string) => void) | undefined;
-const shell = {
-  onOpenFolder: (fn: (path: string) => void) => {
-    openFolder = fn;
+let openFolders: ((opened: OpenedFolders) => void) | undefined;
+const shell: DesktopShell = {
+  onOpenFolders: (fn) => {
+    openFolders = fn;
     return () => {
-      openFolder = undefined;
+      openFolders = undefined;
     };
   },
-  onShortcut: () => () => {},
-  shortcutsChanged() {},
-  recordShortcut() {},
-  onRecordedKey: () => () => {},
-  setTheme() {},
+  onCommand: () => () => {},
+  setDisabledCommands: () => {},
   pathForFile: (f: File) => onDisk.get(f) ?? '',
 };
 
@@ -78,7 +72,11 @@ const uploads = () => FakeXhr.requests.map((r) => r.url);
 
 let store: typeof import('../state/store');
 let drop: typeof import('../drop');
+let fake: typeof import('./fakeTerms');
+let core: import('./fakeTerms').FakeCore;
 let Sidebar: typeof import('../components/Sidebar').Sidebar;
+/** The folders terminals were started in, by machine. */
+const runs = () => core.calls.filter((c) => c.method === 'terminal.run').map((c) => [c.m, c.params.cwd]);
 let root: Root | undefined;
 let host: HTMLDivElement;
 
@@ -86,11 +84,15 @@ beforeAll(async () => {
   (globalThis as { desktopShell?: unknown }).desktopShell = shell;
   store = await import('../state/store');
   drop = await import('../drop');
+  fake = await import('./fakeTerms');
   Sidebar = (await import('../components/Sidebar')).Sidebar;
 });
 
 beforeEach(() => {
-  calls.length = 0;
+  core = new fake.FakeCore();
+  core.machine('local');
+  core.machine('ws2');
+  core.install();
   FakeXhr.reset();
   FakeXhr.reply = answer;
   store.useStore.setState({
@@ -139,10 +141,21 @@ describe('dropped folders', () => {
       aside.dispatchEvent(dragEvent('drop', items));
     });
     expect(host.querySelector('.sidebar-drop')).toBeNull();
-    expect(calls.filter((c) => c.method === 'workspace.create')).toEqual([
-      { m: 'local', method: 'workspace.create', params: { cwd: '/Users/u/Projects/app', label: undefined, focus: false } },
-      { m: 'local', method: 'workspace.create', params: { cwd: '/Users/u/Projects/lib', label: undefined, focus: false } },
+    await vi.waitFor(() =>
+      expect(runs()).toEqual([
+        ['local', '/Users/u/Projects/app'],
+        ['local', '/Users/u/Projects/lib'],
+      ]),
+    );
+    await act(fake.settle);
+    // Each a workspace without a name of its own, shown with its folder's,
+    // the last one selected.
+    const layout = core.layout('local')!;
+    expect(layout.workspaces.slice(1).map((w) => [w.name, w.cwd, workspaceTitle(w)])).toEqual([
+      ['', '/Users/u/Projects/app', 'app'],
+      ['', '/Users/u/Projects/lib', 'lib'],
     ]);
+    expect(layout.selected).toBe(2);
     expect(store.useStore.getState().toasts.map((t) => t.msg)).toEqual([
       'Only folders become workspaces; 1 other dropped item(s) skipped.',
     ]);
@@ -156,6 +169,15 @@ describe('dropped folders', () => {
     });
     expect(over.defaultPrevented).toBe(false);
     expect(host.querySelector('.sidebar-drop')).toBeNull();
+  });
+
+  it('are not taken where no agent runs on the local machine (Windows)', () => {
+    const machines = store.useStore.getState().machines;
+    act(() =>
+      store.useStore.setState({ machines: { ...machines, local: { ...machines.local, status: 'error', code: 'local_unsupported' } } }),
+    );
+    expect(drop.folderDropTarget()).toBeUndefined();
+    act(() => store.useStore.setState({ machines }));
   });
 
   it('are not taken in a browser, which has no desktop bridge', async () => {
@@ -174,7 +196,7 @@ describe('dropped folders', () => {
 });
 
 describe('folders dropped on the Dock icon', () => {
-  const creates = () => calls.filter((c) => c.method === 'workspace.create').map((c) => [c.m, c.params.cwd]);
+  const creates = runs;
   const toasts = () => store.useStore.getState().toasts.map((t) => t.msg);
   const local = (status: string) => ({ id: 'local', label: 'Mac', kind: 'local', session: 'default', enabled: true, status });
 
@@ -184,18 +206,28 @@ describe('folders dropped on the Dock icon', () => {
     // Launched by the drop: the page does not know its machines yet.
     store.useStore.setState({ machines: {}, order: [] });
     const off = drop.takeOpenedFolders();
-    openFolder!('/Users/u/Projects/app');
-    openFolder!('/Users/u/Projects/lib');
+    openFolders!({ folders: ['/Users/u/Projects/app'], skipped: 0 });
+    openFolders!({ folders: ['/Users/u/Projects/lib'], skipped: 0 });
     await act(async () => store.useStore.setState({ machines: { local: local('connecting') } as never, order: ['local'] }));
     expect(creates()).toEqual([]);
     await act(async () => store.useStore.setState({ machines: { local: local('ready') } as never }));
+    await vi.waitFor(() => expect(creates()).toHaveLength(2));
     expect(creates()).toEqual([
       ['local', '/Users/u/Projects/app'],
       ['local', '/Users/u/Projects/lib'],
     ]);
     expect(toasts()).toEqual([]);
     off();
-    expect(openFolder).toBeUndefined();
+    expect(openFolders).toBeUndefined();
+  });
+
+  it('skip other items with a note, as a drop on the sidebar does', async () => {
+    store.useStore.setState({ machines: { local: local('ready') } as never, order: ['local'], toasts: [] });
+    const off = drop.takeOpenedFolders();
+    openFolders!({ folders: ['/Users/u/Projects/app'], skipped: 2 });
+    await vi.waitFor(() => expect(creates()).toEqual([['local', '/Users/u/Projects/app']]));
+    expect(toasts()).toEqual(['Only folders become workspaces; 2 other dropped item(s) skipped.']);
+    off();
   });
 
   it('are not opened, with a note, when the local machine does not connect or is disabled', async () => {
@@ -205,7 +237,7 @@ describe('folders dropped on the Dock icon', () => {
     await vi.advanceTimersByTimeAsync(drop.OPEN_WAIT_MS - 1);
     expect(toasts()).toEqual([]);
     await vi.advanceTimersByTimeAsync(1);
-    expect(toasts()).toEqual(['1 folder(s) dropped on the Dock icon not opened: the local machine is not connected.']);
+    expect(toasts()).toEqual(['1 folder(s) opened with the app not opened: the local machine is not connected.']);
 
     store.useStore.setState({ toasts: [], machines: { local: local('disabled') } as never });
     drop.openFolder('/Users/u/app');

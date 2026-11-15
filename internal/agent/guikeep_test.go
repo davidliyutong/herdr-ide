@@ -1,3 +1,5 @@
+//go:build unix
+
 package agent
 
 import (
@@ -13,10 +15,10 @@ import (
 	"github.com/jezek/xgb/res"
 )
 
-// TestHelperHerdrServer is not a test of its own: started by the keeper's
-// tests, it stands in for a herdr server listening on a socket.
-func TestHelperHerdrServer(t *testing.T) {
-	socket := os.Getenv("GUI_TEST_HERDR_SOCKET")
+// TestHelperServer is not a test of its own: started by the keeper's
+// tests, it stands in for a terminal core listening on a socket.
+func TestHelperServer(t *testing.T) {
+	socket := os.Getenv("GUI_TEST_SERVER_SOCKET")
 	if socket == "" {
 		t.Skip("helper")
 	}
@@ -34,12 +36,12 @@ func TestHelperHerdrServer(t *testing.T) {
 	}
 }
 
-// fakeServer starts a stand-in herdr server on socket and waits until it
+// fakeServer starts a stand-in terminal core on socket and waits until it
 // listens.
 func fakeServer(t *testing.T, socket string) *exec.Cmd {
 	t.Helper()
-	cmd := exec.Command(os.Args[0], "-test.run=^TestHelperHerdrServer$")
-	cmd.Env = append(os.Environ(), "GUI_TEST_HERDR_SOCKET="+socket)
+	cmd := exec.Command(os.Args[0], "-test.run=^TestHelperServer$")
+	cmd.Env = append(os.Environ(), "GUI_TEST_SERVER_SOCKET="+socket)
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -58,16 +60,18 @@ func stopServer(cmd *exec.Cmd) {
 	cmd.Wait()
 }
 
-// The watch lasts while a server runs, follows one that restarts within
+// The watch lasts while the server runs, follows one that restarts within
 // the grace period, and ends after the grace period without one.
 func TestWatchServer(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("reads /proc")
 	}
-	socket := filepath.Join(t.TempDir(), "herdr.sock")
+	socket := filepath.Join(t.TempDir(), "hc.sock")
 	srv := fakeServer(t, socket)
 	done := make(chan error, 1)
-	go func() { done <- watchServer(context.Background(), socket, 20*time.Millisecond, 500*time.Millisecond) }()
+	go func() {
+		done <- watchServer(context.Background(), socket, 20*time.Millisecond, 500*time.Millisecond)
+	}()
 	select {
 	case err := <-done:
 		t.Fatalf("ended while the server runs: %v", err)
@@ -96,14 +100,12 @@ func TestWatchServer(t *testing.T) {
 	}
 }
 
-// The keeper is a client of the display while the server runs; a second
-// keeper of the instance leaves at once.
+// The keeper is a client of the display while the terminal core runs; a
+// second keeper of the instance leaves at once.
 func TestKeeperHoldsDisplay(t *testing.T) {
 	g := guiTestXvfb(t)
 	n, _ := g.display()
-	socket := g.a.herdrSocket("keep")
-	os.MkdirAll(filepath.Dir(socket), 0o700)
-	srv := fakeServer(t, socket)
+	srv := fakeServer(t, g.a.hcSocket())
 
 	x, err := g.connect(n)
 	if err != nil {
@@ -122,14 +124,14 @@ func TestKeeperHoldsDisplay(t *testing.T) {
 	}
 	before := clients()
 	done := make(chan error, 1)
-	go func() { done <- g.keepDisplay(context.Background(), "keep", 20*time.Millisecond, 200*time.Millisecond) }()
+	go func() { done <- g.keepDisplay(context.Background(), 20*time.Millisecond, 200*time.Millisecond) }()
 	for i := 0; clients() != before+1; i++ {
 		if i > 200 {
 			t.Fatalf("keeper did not connect: %d clients, %d before", clients(), before)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if err := g.keepDisplay(context.Background(), "keep", time.Hour, time.Hour); err != nil {
+	if err := g.keepDisplay(context.Background(), time.Hour, time.Hour); err != nil {
 		t.Fatalf("second keeper: %v", err)
 	}
 	stopServer(srv)

@@ -1,7 +1,9 @@
 // Bridge: lets the web IDE drive this code-server window (open files at a
 // position, multi-file diff, Git Graph, media preview, light/dark theme),
-// sends editor selections back to the agent pane focused in the web IDE and
-// asks the browser to download files chosen in the explorer.
+// sends editor selections back to an agent pane of the workspace showing
+// this window and asks the browser to download files chosen in the explorer.
+// The window has a random id, sent with its hello and with every focus, by
+// which the page addresses the window of one of its VS Code panes.
 //
 // The extension host runs on the machine itself and connects to the agent's
 // unix socket, which the agent tunnels to the core. The agent passes the
@@ -27,11 +29,15 @@ function send(msg: Record<string, unknown>) {
   if (sock && !sock.destroyed) sock.write(JSON.stringify(msg) + '\n');
 }
 
+/** Announces this window: its id, its folders and whether it has the
+ * keyboard, by which the page showing it in a pane learns which window that
+ * pane is. */
 function hello() {
   send({
     type: 'hello',
     id: windowId,
     folders: (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath),
+    focused: vscode.window.state.focused,
   });
 }
 
@@ -186,7 +192,7 @@ async function sendToAgent(uri?: vscode.Uri) {
   const ref = sel.isEmpty ? `@${file}:${start}` : `@${file}:${start}-${end}`;
   const body = sel.isEmpty ? '' : '\n```\n' + ed.document.getText(sel) + '\n```\n';
   send({ type: 'sendToAgent', text: ref + body, file, line: start, end_line: end });
-  vscode.window.setStatusBarMessage(vscode.l10n.t('Sent to the focused agent'), 2500);
+  vscode.window.setStatusBarMessage(vscode.l10n.t('Sent to an agent of this workspace'), 2500);
 }
 
 /** Downloads the files and folders chosen in the explorer (or the active

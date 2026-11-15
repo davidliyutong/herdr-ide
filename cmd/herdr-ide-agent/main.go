@@ -1,3 +1,5 @@
+//go:build unix
+
 // Command herdr-ide-agent is the per-machine helper started by herdr-ide over
 // ssh. It speaks yamux on stdin/stdout; logs go to stderr.
 package main
@@ -45,16 +47,15 @@ func main() {
 			os.Exit(1)
 		}
 	case "gui-keep":
-		// Started by the agent: holds the virtual display while the herdr
-		// server of the session runs.
+		// Started by the agent: holds the virtual display while the
+		// instance's terminal core runs.
 		logger := log.New(os.Stderr, brand.AgentBin+" gui-keep: ", log.LstdFlags)
 		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 		defer cancel()
 		fs := flag.NewFlagSet("gui-keep", flag.ExitOnError)
 		instance := fs.String("instance", "", "state directory instance")
-		session := fs.String("session", "", "herdr session")
 		fs.Parse(os.Args[2:])
-		if err := agent.KeepDisplay(ctx, *instance, *session, logger); err != nil {
+		if err := agent.KeepDisplay(ctx, *instance, logger); err != nil {
 			logger.Printf("exit: %v", err)
 			os.Exit(1)
 		}

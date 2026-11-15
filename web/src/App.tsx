@@ -1,62 +1,102 @@
 import { useEffect, useState } from 'react';
 import { useStore } from './state/store';
+import { terms, useTerms } from './state/terms';
+import { rememberFollowed } from './state/followed';
+import { paneHandle } from './state/panes';
 import { conn } from './lib/conn';
 import { Sidebar } from './components/Sidebar';
 import { Workspace } from './components/Workspace';
-import { Dock } from './components/Dock';
+import { CodeLayer } from './components/CodeLayer';
 import { Palette } from './components/Palette';
 import { AuthDialog } from './components/AuthDialog';
-import { RemoteHerdrDialog } from './components/RemoteHerdrDialog';
 import { AddMachineDialog } from './components/AddMachineDialog';
 import { SettingsDialog } from './components/SettingsDialog';
 import { Dialogs } from './components/Dialogs';
 import { ContextMenu } from './components/ContextMenu';
-import { usePrefs } from './prefs';
 import { initDesktop } from './desktop';
 import { takeOpenedFolders } from './drop';
-import { getKeyConfig, handleKey, loadKeymap, onKeyConfig, onPrefixChange } from './keymap';
+import { commandLabel, handleFrameKey, handleKey, keyHint, onChordChange, pendingChord, runCommand } from './keymap';
+import { applySettings, loadSettings } from './settings';
+import { applyKeybindings, loadKeybindings, useKeys } from './keybindings';
 import { t } from './i18n';
 import { notifyAgent, updateBadge } from './notify';
-import { paneCwd, shortPath } from './lib/herdr';
-import { findPane } from './state/store';
-import { getTerm } from './terminal/registry';
-import { initSurface, surfaceDisconnected } from './surface/session';
-import { isFindKey, openFind } from './surface/find';
+import { shortPath, terminalTitle } from './lib/machine';
+import * as L from './term/layout';
 import { useGui } from './gui/state';
 import { GuiTray } from './gui/GuiMenus';
 import { bridgeDownload, downloadEvent, resyncDownloads } from './download';
-import { sendTarget } from './lib/bridge';
+import { noteFocusedTerminal, sendTarget } from './lib/bridge';
+import { onFrameKey, windowFocused } from './codeFrames';
 import { TransfersTray } from './components/Transfers';
 import { DownloadsTray } from './components/Downloads';
+import { actions, workspaceTitle } from './actions';
 
 /** Text sent from VS Code ("Send to agent") is pasted, not submitted, into
- * the pane sendTarget picks: the focused one, or an agent pane of the
- * workspace whose panel shows the sending window. */
-function pasteToAgent(m: string, text: string, folders?: string[]) {
+ * the terminal sendTarget picks: an agent of the sending VS Code pane's tab
+ * or workspace. The page whose pane that is takes it. */
+function pasteToAgent(m: string, text: string, window?: string, folders?: string[]) {
   const s = useStore.getState();
-  const { pane, workspace } = sendTarget(s, m, folders);
-  const term = pane ? getTerm(m, pane) : undefined;
-  if (!term) {
-    if (workspace) {
-      const label = s.machines[m]?.snapshot?.workspaces.find((w) => w.workspace_id === workspace)?.label || workspace;
-      s.toast(t('app.noAgentInWorkspace', { workspace: label }));
-    } else s.toast(t('app.noAgentPane'));
+  const target = sendTarget(m, window, folders);
+  if (!target) return;
+  const { terminal, workspace } = target;
+  if (!terminal) {
+    const ws = workspace ? terms.layout(m)?.workspaces.find((w) => w.id === workspace) : undefined;
+    s.toast(ws ? t('app.noAgentInWorkspace', { workspace: workspaceTitle(m, ws) }) : t('app.noAgentPane'));
     return;
   }
-  term.paste(text);
-  term.focus();
+  // Shown first, so the terminal is attached and takes the paste.
+  actions.focusPane(m, terminal);
+  const paste = () => {
+    const h = paneHandle(m, terminal);
+    if (!h) return false;
+    h.paste(text);
+    h.focus();
+    return true;
+  };
+  if (!paste()) setTimeout(paste, 300);
+}
+
+/** Follows the shown machine's terminals (and those followed before,
+ * state/followed.ts) and keeps the store's view of its
+ * layout current: the selected workspace, and the terminal focused last in
+ * it (Send to Agent's choice when the workspace has no agent). */
+function followTerms() {
+  terms.start();
+  const show = (m?: string) => m && terms.subscribe(m);
+  show(useStore.getState().machineId);
+  // The machines followed before are followed again once connected.
+  const offFollowed = rememberFollowed(() => terms);
+  const offStore = useStore.subscribe((s, prev) => {
+    if (s.machineId !== prev.machineId) show(s.machineId);
+    // Machines removed from the core are no longer followed.
+    for (const m of prev.order) if (!s.machines[m] && prev.machines[m]) terms.forget(m);
+  });
+  const offTerms = useTerms.subscribe((st, prev) => {
+    const s = useStore.getState();
+    const m = s.machineId;
+    const layout = m ? st.machines[m]?.layout : undefined;
+    if (layout && layout !== (m ? prev.machines[m]?.layout : undefined)) {
+      s.setWorkspace(L.selectedWorkspace(layout)?.id);
+      noteFocusedTerminal(m!, layout);
+    }
+    updateBadge();
+  });
+  return () => {
+    offStore();
+    offTerms();
+    offFollowed();
+  };
 }
 
 export function App() {
   const sidebarOpen = useStore((s) => s.sidebarOpen);
-  const dockPosition = usePrefs((s) => s.prefs.dockPosition);
+  const sidebarWidth = useStore((s) => s.sidebarWidth);
   const connected = useStore((s) => s.connected);
   const toasts = useStore((s) => s.toasts);
-  const [prefix, setPrefix] = useState(false);
+  const [chord, setChord] = useState(false);
 
   useEffect(() => {
     const s = useStore.getState();
-    initSurface();
     conn.start({
       onMachines: (list) => s.setMachines(list),
       onMachine: (st) => {
@@ -66,40 +106,42 @@ export function App() {
       onAgent: (m, data, sound) => notifyAgent(m, data, sound),
       onConnection: (c) => {
         useStore.getState().setConnected(c);
-        if (!c) surfaceDisconnected();
-        else resyncDownloads();
+        if (c) {
+          resyncDownloads();
+          // Changes made while the page was away (e.g. a core restart).
+          void loadSettings();
+          void loadKeybindings();
+        }
       },
-      onBridgeSend: (m, text, folders) => pasteToAgent(m, text, folders),
-      onBridgeDownload: (m, paths) => bridgeDownload(m, paths),
+      onBridgeSend: (m, text, window, folders) => pasteToAgent(m, text, window, folders),
+      onBridgeDownload: (m, paths, window) => bridgeDownload(m, paths, window),
+      onBridgeFocus: (m, window, folders) => void windowFocused(m, window, folders),
       onDownload: (ev) => downloadEvent(ev),
       onGui: (st) => useGui.getState().setState(st),
+      onSettings: (m) => applySettings(m),
+      onKeybindings: (m) => applyKeybindings(m),
     });
-    loadKeymap();
+    const offTerms = followTerms();
+    void loadKeybindings();
     const offDesktop = initDesktop();
     const offFolders = takeOpenedFolders();
     fetch('/api/config')
       .then((r) => r.json())
-      .then((c) => useStore.getState().setReadOnly(!!c.read_only))
+      .then((c) => useStore.setState({ readOnly: !!c.read_only, sshLogin: c.ssh_login !== false }))
       .catch(() => {});
-    const off = onPrefixChange(setPrefix);
-    // The prefix key also works when focus is outside a terminal.
+    const off = onChordChange(setChord);
+    // Bindings also work when the focus is outside a terminal.
     const onKey = (ev: KeyboardEvent) => {
-      const t = ev.target as HTMLElement | null;
-      if (t?.closest('.surface-host') || t?.closest('input, textarea, iframe, [contenteditable]')) return;
-      // Find also opens for the focused pane from outside it (the sidebar).
-      if (isFindKey(ev) && !document.querySelector('.modal-backdrop, .palette-backdrop')) {
-        const s = useStore.getState();
-        if (s.focused) {
-          ev.preventDefault();
-          openFind(s.focused.m, s.focused.pane);
-          return;
-        }
-      }
+      const el = ev.target as HTMLElement | null;
+      if (el?.closest('.term-host') || el?.closest('input, textarea, iframe, [contenteditable]')) return;
       handleKey(ev);
     };
     window.addEventListener('keydown', onKey);
+    // A VS Code pane gives the app its pane keys (cmd+w) before VS Code.
+    onFrameKey(handleFrameKey);
     return () => {
       off();
+      offTerms();
       offDesktop();
       offFolders();
       window.removeEventListener('keydown', onKey);
@@ -107,14 +149,15 @@ export function App() {
   }, []);
 
   return (
-    <div className={`app ${sidebarOpen ? '' : 'no-sidebar'} dock-at-${dockPosition}`}>
+    <div className={`app ${sidebarOpen ? '' : 'no-sidebar'}`} style={{ '--sidebar-w': `${sidebarWidth}px` } as React.CSSProperties}>
       {sidebarOpen && <Sidebar />}
+      {/* On a narrow screen the sidebar lies over the panes: a press beside it closes it. */}
+      {sidebarOpen && <div className="sidebar-backdrop" onClick={() => actions.toggleSidebar()} />}
       <Workspace />
-      <Dock />
-      <StatusBar connected={connected} prefix={prefix} />
+      <CodeLayer />
+      <StatusBar connected={connected} chord={chord} />
       <Palette />
       <SettingsDialog />
-      <RemoteHerdrDialog />
       <AddMachineDialog />
       <Dialogs />
       <AuthDialog />
@@ -141,16 +184,28 @@ export function App() {
   );
 }
 
-function StatusBar({ connected, prefix }: { connected: boolean; prefix: boolean }) {
+function StatusBar({ connected, chord }: { connected: boolean; chord: boolean }) {
   const readOnly = useStore((s) => s.readOnly);
-  const [keyPrefix, setKeyPrefix] = useState(getKeyConfig().prefix);
-  useEffect(() => {
-    const off = onKeyConfig(() => setKeyPrefix(getKeyConfig().prefix));
-    return () => void off();
-  }, []);
-  const focused = useStore((s) => s.focused);
-  const pane = useStore((s) => findPane(s, s.focused));
-  const machine = useStore((s) => (s.focused ? s.machines[s.focused.m] : undefined));
+  // Re-rendered when the bindings change.
+  useKeys((s) => s.effective);
+  const m = useStore((s) => s.machineId);
+  const machine = useStore((s) => (s.machineId ? s.machines[s.machineId] : undefined));
+  // The focused pane: a terminal (its title and directory), VS Code (its
+  // folder) or a preview (its file).
+  const leaf = useTerms((s) => {
+    const tab = m && s.machines[m]?.layout ? L.selectedTab(s.machines[m].layout!) : undefined;
+    return tab ? L.leafOf(tab.root, tab.focused) : null;
+  });
+  const terminal = leaf && L.isTerminalLeaf(leaf) ? leaf.terminal : undefined;
+  const cwd = useTerms(() => (m && terminal ? terms.directory(m, terminal) : undefined));
+  const title = useTerms((s) => (m && terminal ? terminalTitle(s.machines[m]?.terminals[terminal], terminal) : undefined));
+  const about = !leaf
+    ? undefined
+    : L.isCodeLeaf(leaf)
+      ? { title: t('code.title'), path: leaf.code.folder }
+      : L.isPreviewLeaf(leaf)
+        ? { title: t('preview.title'), path: leaf.preview.path }
+        : { title, path: cwd };
   const counts = useStore((s) => {
     let ready = 0;
     for (const id of s.order) if (s.machines[id]?.status === 'ready') ready++;
@@ -161,17 +216,29 @@ function StatusBar({ connected, prefix }: { connected: boolean; prefix: boolean 
       <span className={`conn ${connected ? 'on' : 'off'}`}>{connected ? t('app.connected') : t('app.reconnecting')}</span>
       {readOnly && <span className="prefix-badge ro">{t('app.readOnly')}</span>}
       <span className="muted">{t('app.machines', { n: counts })}</span>
-      {focused && machine && (
+      {about && machine && (
         <span className="muted ellipsis">
-          {machine.label} · {focused.pane} · {shortPath(paneCwd(pane), machine.info?.home)}
+          {machine.label} · {about.title} · {shortPath(about.path, machine.info?.home) || '~'}
         </span>
       )}
       <span className="spacer" />
       <TransfersTray />
       <DownloadsTray />
       <GuiTray />
-      {prefix && <span className="prefix-badge">PREFIX</span>}
-      <span className="muted small">{t('app.hint', { prefix: keyPrefix })}</span>
+      {chord && <span className="prefix-badge">{pendingChord()}</span>}
+      <StatusCommand command="app.keyboardShortcuts" />
+      <StatusCommand command="app.commandPalette" />
     </footer>
+  );
+}
+
+/** A command the status bar offers: its name, and its key when it has one. */
+function StatusCommand({ command }: { command: string }) {
+  const key = keyHint(command);
+  return (
+    <button className="status-command muted small" data-command={command} onClick={() => runCommand(command)}>
+      {commandLabel(command)}
+      {key && <kbd>{key}</kbd>}
+    </button>
   );
 }

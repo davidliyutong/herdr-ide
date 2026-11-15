@@ -5,12 +5,10 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
 	"herdr-ide/internal/brand"
-	"herdr-ide/internal/machines"
 )
 
 // Security model (see SECURITY.md): the core has no login of its own. It
@@ -20,8 +18,9 @@ import (
 //
 //   - Host/Origin allowlist (DNS rebinding, cross-site WebSocket hijacking);
 //   - optional proxy secret header for requests not from loopback;
-//   - herdr API method allowlist (the UI cannot stop servers, install
-//     integrations or link plugins);
+//   - the method allowlist of /api/v1/term (term.go): clients reach the
+//     terminal core's terminals and documents, never its machines, files
+//     or server;
 //   - read-only mode;
 //   - CSP and framing headers on our pages;
 //   - an audit log of security-relevant actions.
@@ -55,28 +54,12 @@ func (s *Server) proxySecretOK(r *http.Request) bool {
 	return subtle.ConstantTimeCompare([]byte(got), []byte(s.opts.ProxySecret)) == 1
 }
 
-// apiAllowed decides which herdr methods browsers may call. Everything the
-// UI needs is allowed; server administration, integrations, plugin
-// installation and raw event streams are not.
-func (s *Server) apiAllowed(method string) bool {
-	if s.opts.ReadOnly {
-		return machines.IsReadOnlyMethod(method)
-	}
-	switch method {
-	case "session.snapshot", "plugin.list", "plugin.action.list", "plugin.action.invoke", "notification.show":
-		return true
-	}
-	for _, p := range []string{"workspace.", "tab.", "pane.", "agent.", "layout.", "worktree."} {
-		if strings.HasPrefix(method, p) {
-			return true
-		}
-	}
-	return false
-}
-
 // appCSP applies to the UI shell. 'unsafe-inline' styles are needed by
-// xterm.js and React inline styles; scripts come only from our origin.
-const appCSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+// React inline styles; scripts come only from our origin. 'wasm-unsafe-eval'
+// lets the page compile WebAssembly (the terminal emulator, served from our
+// origin, and the small module that hands it the page's callbacks); it does
+// not allow eval or inline scripts.
+const appCSP = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; " +
 	"img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self'; " +
 	"frame-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; form-action 'self'"
 

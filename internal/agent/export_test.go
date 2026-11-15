@@ -1,3 +1,5 @@
+//go:build unix
+
 package agent
 
 import "herdr-ide/internal/brand"
@@ -7,4 +9,11 @@ func brandLegacy(names ...string) (restore func()) {
 	old := brand.LegacyDataDirNames
 	brand.LegacyDataDirNames = names
 	return func() { brand.LegacyDataDirNames = old }
+}
+
+// SetPrivacyOS makes op privacy check as on goos.
+func SetPrivacyOS(goos string) (restore func()) {
+	old := privacyOS
+	privacyOS = goos
+	return func() { privacyOS = old }
 }

@@ -3,7 +3,7 @@ import { ArrowUp, File, Folder, X } from 'lucide-react';
 import { closeDialog, completionParts, useDialog, type DialogRequest } from '../dialog';
 import { startDownload } from '../download';
 import { formatSize, listDir, type RemoteStat } from '../lib/files';
-import { shortPath } from '../lib/herdr';
+import { shortPath } from '../lib/machine';
 import { useStore } from '../state/store';
 import { t } from '../i18n';
 
@@ -20,7 +20,7 @@ export function Dialogs() {
   if (!req) return null;
   if (req.kind === 'confirm') return <ConfirmDialog req={req} />;
   if (req.kind === 'download') return <DownloadDialog req={req} />;
-  return <NewWorkspaceDialog req={req} />;
+  return <WorkspaceDialog req={req} />;
 }
 
 function Frame({ title, onCancel, children }: { title: string; onCancel(): void; children: React.ReactNode }) {
@@ -80,10 +80,13 @@ function ConfirmDialog({ req }: { req: Extract<DialogRequest, { kind: 'confirm' 
   );
 }
 
-function NewWorkspaceDialog({ req }: { req: Extract<DialogRequest, { kind: 'newWorkspace' }> }) {
+/** A new workspace's directory and name, or an existing one's (req.edit),
+ * whose directory may be left empty. */
+function WorkspaceDialog({ req }: { req: Extract<DialogRequest, { kind: 'workspace' }> }) {
   const machine = useStore((s) => s.machines[req.m]?.label ?? req.m);
+  const edit = !!req.edit;
   const [cwd, setCwd] = useState(req.cwd);
-  const [label, setLabel] = useState('');
+  const [label, setLabel] = useState(req.edit?.name ?? '');
   const [dirs, setDirs] = useState<string[]>([]);
   const [sel, setSel] = useState(-1);
   const [missing, setMissing] = useState(false);
@@ -123,7 +126,11 @@ function NewWorkspaceDialog({ req }: { req: Extract<DialogRequest, { kind: 'newW
   };
   const submit = async () => {
     const path = cwd.trim().replace(/(.)\/+$/, '$1');
-    if (!path) return;
+    if (!path) {
+      // An edited workspace without a directory follows its focused pane.
+      if (edit) done({ cwd: '', label: label.trim() });
+      return;
+    }
     try {
       const d = await listDir(req.m, path);
       if (!d.dir.is_dir) throw new Error('not a directory');
@@ -135,7 +142,7 @@ function NewWorkspaceDialog({ req }: { req: Extract<DialogRequest, { kind: 'newW
   };
 
   return (
-    <Frame title={t('newWorkspace.title', { machine })} onCancel={() => done(undefined)}>
+    <Frame title={t(edit ? 'editWorkspace.title' : 'newWorkspace.title', { machine })} onCancel={() => done(undefined)}>
       <div className="dialog-body form">
         <label>
           <span>{t('newWorkspace.cwd')}</span>
@@ -143,6 +150,7 @@ function NewWorkspaceDialog({ req }: { req: Extract<DialogRequest, { kind: 'newW
             autoFocus
             spellCheck={false}
             value={cwd}
+            placeholder={edit ? t('editWorkspace.cwdPlaceholder') : undefined}
             onChange={(e) => setCwd(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'ArrowDown' && dirs.length) {
@@ -182,12 +190,12 @@ function NewWorkspaceDialog({ req }: { req: Extract<DialogRequest, { kind: 'newW
             onKeyDown={(e) => e.key === 'Enter' && submit()}
           />
         </label>
-        <div className="muted small">{t('newWorkspace.hint')}</div>
+        <div className="muted small">{t(edit ? 'editWorkspace.hint' : 'newWorkspace.hint')}</div>
       </div>
       <div className="dialog-actions">
         <button onClick={() => done(undefined)}>{t('dialog.cancel')}</button>
         <button className="primary" onClick={submit}>
-          {t('newWorkspace.create')}
+          {t(edit ? 'editWorkspace.save' : 'newWorkspace.create')}
         </button>
       </div>
     </Frame>

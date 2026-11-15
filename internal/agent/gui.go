@@ -1,3 +1,5 @@
+//go:build unix
+
 package agent
 
 import (
@@ -29,7 +31,7 @@ import (
 	"herdr-ide/internal/brand"
 )
 
-// gui provides the virtual display that programs in panes draw their
+// gui provides the virtual display that programs in terminals draw their
 // windows on (see docs/features/14-gui-windows.md). It is Xvfb, found on the
 // machine or unpacked from the distribution's package in user space, so no
 // privileged installation is needed.
@@ -40,7 +42,7 @@ import (
 // runs in its own session and outlives the agent (programs would die with
 // their display); it exits by itself guiIdleSeconds after its last client
 // disconnected (-terminate). The display keeper (guikeep.go) is a client
-// while the herdr server runs.
+// while the instance's terminal core runs.
 //
 // Other users can bind X sockets in /tmp, abstract ones included, and X
 // clients cannot tell which server they reach. So a display number is only
@@ -66,7 +68,7 @@ type gui struct {
 const (
 	// guiIdleSeconds: Xvfb exits this long after its last client left. The
 	// window manager is a client while an agent is connected, the keeper
-	// while the herdr server runs.
+	// while the terminal core runs.
 	guiIdleSeconds = 60
 	// guiScreen is the size of the virtual screen; windows larger than it
 	// still work, but input reaches only the part on the screen.
@@ -758,7 +760,7 @@ func (g *gui) handle(ctx context.Context, st net.Conn, h agentproto.Header) erro
 		}
 		return agentproto.WriteLine(st, agentproto.Reply{OK: true, GUI: g.videoStatus(h.Digest)})
 	case "keep":
-		if err := g.keep(h.Session); err != nil {
+		if err := g.keep(); err != nil {
 			return agentproto.Fail(st, err)
 		}
 	case "attach":
@@ -792,6 +794,7 @@ func (g *gui) attach(st net.Conn) error {
 		return agentproto.Fail(st, err)
 	}
 	wm.tools = g.videoTools
+	wm.hcSocket = g.a.hcSocket()
 	g.wmMu.Lock()
 	g.wm = wm
 	g.wmMu.Unlock()

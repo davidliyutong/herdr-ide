@@ -5,13 +5,13 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"io/fs"
 	"log"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
 	"strings"
 	"sync"
@@ -21,6 +21,7 @@ import (
 	"herdr-ide/internal/brand"
 	"herdr-ide/internal/codeserver"
 	"herdr-ide/internal/gui"
+	"herdr-ide/internal/keybindings"
 	"herdr-ide/internal/machines"
 	"herdr-ide/internal/settings"
 )
@@ -33,7 +34,9 @@ type Options struct {
 	// Static serves the built web UI; nil disables static serving.
 	Static fs.FS
 	Logger *log.Logger
-	// ControlDir holds ssh control sockets (used by interactive auth).
+	// ControlDir holds ssh control sockets, which keep an interactive
+	// login for the connections that follow (handleAuth). Empty where ssh
+	// shares no connections (Windows): there is no login in the UI then.
 	ControlDir string
 	// CodeServer provisions code-server on machines.
 	CodeServer *codeserver.Manager
@@ -49,16 +52,14 @@ type Options struct {
 	Audit io.Writer
 	// UserHeader names the header with the authenticated user (audit log).
 	UserHeader string
-	// Settings are the core settings the UI can change; nil disables them.
+	// HC returns the gzip-compressed herdr-core executable this build
+	// carries for a platform and the SHA-256 of the executable; nil or an
+	// error leaves machines with the herdr-core they have.
+	HC func(goos, goarch string) (gz []byte, digest string, err error)
+	// Settings are the settings of the core and the UIs; nil disables them.
 	Settings *settings.Store
-	// Catalog returns herdr's saved SSH machines as the core configures
-	// them, read again after the UI adds, removes or renames one and when
-	// it reloads them; nil disables all of that.
-	Catalog func() ([]machines.Spec, error)
-	// Selected reports whether the core's machine selection (--machine,
-	// --local-only) takes a saved machine that a reload finds; nil takes
-	// all. Machines added from the UI are taken whatever it says.
-	Selected func(machines.Spec) bool
+	// Keybindings are the UIs' keybindings; nil disables them.
+	Keybindings *keybindings.Store
 }
 
 // Server is the HTTP front of the core.
@@ -74,14 +75,22 @@ type Server struct {
 	// downloads the pages follow in their downloads panel
 	downloads downloadsHub
 	gui       *gui.Manager
-	// herdrCLI is the herdr that runs herdr's machine commands on the core
-	// host ("" when unknown): the local machine's (tests replace it).
-	herdrCLI func() string
+	// displayEnv is the environment of a machine's virtual display that new
+	// terminals get (gui.Manager.PaneEnv; tests replace it).
+	displayEnv func(*machines.Machine) map[string]string
+	// home is the core host user's home directory, whose ~/.ssh/config the
+	// Add Machine dialog lists (os.UserHomeDir; tests replace it).
+	home func() (string, error)
 
 	clientsMu sync.Mutex
 	clients   map[*wsClient]bool
 
-	surf surfaces
+	term termHub
+
+	// ready records which machines were ready last, so a machine that
+	// connects (again) ends the wait of its terminal backend.
+	readyMu sync.Mutex
+	ready   map[string]bool
 
 	audit *auditor
 }
@@ -89,8 +98,8 @@ type Server struct {
 // New creates a server for the machine manager.
 func New(mg *machines.Manager, opts Options) *Server {
 	s := &Server{opts: opts, mg: mg, logger: opts.Logger, origins: map[string]bool{}, hosts: map[string]bool{},
-		cs: opts.CodeServer, clients: map[*wsClient]bool{}}
-	s.surf.sessions = map[string]*surfSession{}
+		cs: opts.CodeServer, clients: map[*wsClient]bool{}, home: os.UserHomeDir}
+	s.term = termHub{s: s, backends: map[string]*termBackend{}}
 	if s.cs == nil {
 		s.cs = codeserver.New(opts.Logger)
 	}
@@ -110,55 +119,85 @@ func New(mg *machines.Manager, opts Options) *Server {
 		s.hosts[strings.ToLower(u.Hostname())] = true
 	}
 	s.csProxy = newCodeServerProxy(s)
-	s.herdrCLI = s.localHerdr
 	s.initGUI()
+	s.displayEnv = s.gui.PaneEnv
+	s.initSettings()
+	// A machine that connects (again) ends the wait of its terminal backend.
+	s.ready = map[string]bool{}
 	mg.Subscribe(func(st machines.State) {
-		if st.Status == machines.StatusReady || st.Status == machines.StatusDegraded {
-			s.wakeSurface(st.ID)
+		now := st.Status == machines.StatusReady
+		s.readyMu.Lock()
+		prev := s.ready[st.ID]
+		s.ready[st.ID] = now
+		s.readyMu.Unlock()
+		if now && !prev {
+			s.term.wakeUp(st.ID)
 		}
 	}, func(machines.AgentEvent) {})
 	return s
 }
 
+// route is a pattern of the server's mux and its handler.
+type route struct {
+	pattern string
+	handler http.HandlerFunc
+}
+
+// routes are every pattern the server answers (Handler registers exactly
+// these; the tests walk them to check the guards of each).
+func (s *Server) routes() []route {
+	rs := []route{
+		{"GET /ws", s.handleWS},
+		{"GET /api/v1/term", s.handleTermWS},
+		{"GET /api/config", s.handleConfig},
+		{"GET /api/settings", s.handleSettings},
+		{"PUT /api/settings", s.writable(s.handleSetSetting)},
+		{"DELETE /api/settings", s.writable(s.handleResetSetting)},
+		{"GET /api/keybindings", s.handleKeybindings},
+		{"PUT /api/keybindings", s.writable(s.handleSetKeybindings)},
+		{"GET /api/machines", s.handleMachines},
+		{"POST /api/machines", s.writable(s.handleMachineAdd)},
+		{"PUT /api/machines/order", s.writable(s.handleMachineOrder)},
+		{"GET /api/ssh/hosts", s.writable(s.handleSSHHosts)},
+		{"DELETE /api/m/{id}", s.writable(s.handleMachineRemove)},
+		{"PUT /api/m/{id}/label", s.writable(s.handleMachineRename)},
+		{"PUT /api/m/{id}/enabled", s.writable(s.handleMachineEnabled)},
+		{"GET /api/m/{id}/hc", s.handleHCStatus},
+		{"POST /api/m/{id}/hc/{action}", s.writable(s.handleHCAction)},
+		{"GET /api/m/{id}/privacy", s.handlePrivacy},
+		{"GET /api/m/{id}/auth", s.writable(s.handleAuth)},
+		{"POST /api/m/{id}/bridge", s.writable(s.handleBridge)},
+		{"GET /api/m/{id}/file", s.handleFile},
+		{"GET /api/m/{id}/download", s.handleDownload},
+		{"POST /api/m/{id}/upload", s.writable(s.handleUpload)},
+		{"GET /api/m/{id}/list", s.handleList},
+		{"GET /api/m/{id}/code/status", s.handleCodeStatus},
+		{"POST /api/m/{id}/code/start", s.writable(s.handleCodeStart)},
+		{"POST /api/m/{id}/code/stop", s.handleCodeStop},
+		{"/m/{id}/code", func(w http.ResponseWriter, r *http.Request) {
+			u := *r.URL
+			u.Path += "/"
+			http.Redirect(w, r, u.String(), http.StatusFound)
+		}},
+		{"/m/{id}/code/", s.writable(s.csProxy.ServeHTTP)},
+		{"GET /m/{id}/gui/{win}", s.handleGUIPage},
+		{"GET /m/{id}/gui/{win}/ws", s.handleGUIWS},
+		{"POST /m/{id}/gui/{win}/close", s.writable(s.handleGUIClose)},
+		{"POST /api/m/{id}/gui/enable", s.writable(s.handleGUIEnable)},
+		{"GET /api/gui", s.handleGUIStates},
+	}
+	if s.opts.Static != nil {
+		rs = append(rs,
+			route{"/", spaHandler(s.opts.Static).ServeHTTP})
+	}
+	return rs
+}
+
 // Handler returns the root handler.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /ws", s.handleWS)
-	mux.HandleFunc("GET /api/config", s.handleConfig)
-	mux.HandleFunc("GET /api/settings", s.handleSettings)
-	mux.HandleFunc("PUT /api/settings", s.writable(s.handleSetSetting))
-	mux.HandleFunc("GET /api/machines", s.handleMachines)
-	mux.HandleFunc("GET /api/machines/add", s.writable(s.handleMachineAdd))
-	mux.HandleFunc("POST /api/machines/refresh", s.writable(s.handleMachinesRefresh))
-	mux.HandleFunc("DELETE /api/m/{id}", s.writable(s.handleMachineRemove))
-	mux.HandleFunc("PUT /api/m/{id}/label", s.writable(s.handleMachineRename))
-	mux.HandleFunc("GET /api/keymap", s.handleKeymap)
-	mux.HandleFunc("PUT /api/m/{id}/enabled", s.writable(s.handleMachineEnabled))
-	mux.HandleFunc("GET /api/m/{id}/auth", s.writable(s.handleAuth))
-	mux.HandleFunc("POST /api/m/{id}/bridge", s.writable(s.handleBridge))
-	mux.HandleFunc("GET /api/m/{id}/file", s.handleFile)
-	mux.HandleFunc("GET /api/m/{id}/download", s.handleDownload)
-	mux.HandleFunc("POST /api/m/{id}/upload", s.writable(s.handleUpload))
-	mux.HandleFunc("GET /api/m/{id}/list", s.handleList)
-	mux.HandleFunc("POST /api/m/{id}/find", s.handleFind)
-	mux.HandleFunc("GET /api/m/{id}/code/status", s.handleCodeStatus)
-	mux.HandleFunc("POST /api/m/{id}/code/start", s.writable(s.handleCodeStart))
-	mux.HandleFunc("POST /api/m/{id}/code/stop", s.handleCodeStop)
-	mux.HandleFunc("/m/{id}/code", func(w http.ResponseWriter, r *http.Request) {
-		u := *r.URL
-		u.Path += "/"
-		http.Redirect(w, r, u.String(), http.StatusFound)
-	})
-	mux.Handle("/m/{id}/code/", s.writable(s.csProxy.ServeHTTP))
-	mux.HandleFunc("GET /m/{id}/gui/{win}", s.handleGUIPage)
-	mux.HandleFunc("GET /m/{id}/gui/{win}/ws", s.handleGUIWS)
-	mux.HandleFunc("POST /m/{id}/gui/{win}/close", s.writable(s.handleGUIClose))
-	mux.HandleFunc("POST /api/m/{id}/gui/enable", s.writable(s.handleGUIEnable))
-	mux.HandleFunc("GET /api/m/{id}/herdr", s.handleHerdrStatus)
-	mux.HandleFunc("POST /api/m/{id}/herdr/{action}", s.writable(s.handleHerdrAction))
-	mux.HandleFunc("GET /api/m/{id}/herdr/remote", s.writable(s.handleHerdrRemote))
-	if s.opts.Static != nil {
-		mux.Handle("/", spaHandler(s.opts.Static))
+	for _, rt := range s.routes() {
+		mux.HandleFunc(rt.pattern, rt.handler)
 	}
 	return s.guard(mux)
 }
@@ -276,6 +315,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		"slug":      brand.Slug,
 		"version":   agentproto.Version,
 		"read_only": s.opts.ReadOnly,
+		"ssh_login": s.opts.ControlDir != "",
 	})
 }
 
@@ -310,96 +350,6 @@ func (s *Server) Run(ctx context.Context) {
 	}
 }
 
-// handleSettings lists the core settings with their definitions, so the UI
-// renders the form without knowing them in advance.
-func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
-	list := []settings.Entry{}
-	if s.opts.Settings != nil {
-		list = s.opts.Settings.List()
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"settings": list, "read_only": s.opts.ReadOnly})
-}
-
-// handleSetSetting changes one setting. Errors are codes the UI translates.
-func (s *Server) handleSetSetting(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Key   string `json:"key"`
-		Value string `json:"value"`
-		// Machine sets that machine's own value of a per-machine setting.
-		Machine string `json:"machine"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid", "detail": err.Error()})
-		return
-	}
-	if s.opts.Settings == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown"})
-		return
-	}
-	if req.Machine != "" {
-		mc := s.mg.Get(req.Machine)
-		if mc == nil {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown"})
-			return
-		}
-		for _, e := range s.opts.Settings.List() {
-			if e.Key == req.Key && e.PerMachine == settings.ScopeRemote && mc.Local() {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid", "detail": req.Key + " applies to remote machines only"})
-				return
-			}
-		}
-	}
-	err := s.opts.Settings.SetFor(req.Key, req.Machine, req.Value)
-	switch {
-	case err == nil:
-		s.audit.log(r, "settings.set", map[string]any{"key": req.Key, "value": req.Value, "machine": req.Machine})
-		writeJSON(w, http.StatusOK, map[string]any{"settings": s.opts.Settings.List()})
-	case errors.Is(err, settings.ErrUnknown):
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown"})
-	case errors.Is(err, settings.ErrLocked):
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "locked"})
-	case errors.Is(err, settings.ErrInvalid):
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid", "detail": err.Error()})
-	default:
-		s.logger.Printf("saving settings: %v", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "save", "detail": err.Error()})
-	}
-}
-
-func (s *Server) handleMachines(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.mg.States())
-}
-
-// handleMachineEnabled enables or disables a machine ({"enabled": bool}):
-// saved in the core's own file over herdr's catalog, applied at once. The
-// reply is the machine's state.
-func (s *Server) handleMachineEnabled(w http.ResponseWriter, r *http.Request) {
-	mc := s.machine(w, r)
-	if mc == nil {
-		return
-	}
-	var body struct {
-		Enabled *bool `json:"enabled"`
-	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<10)).Decode(&body); err != nil || body.Enabled == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid"})
-		return
-	}
-	event := "machine.disable"
-	if *body.Enabled {
-		event = "machine.enable"
-	}
-	ev := map[string]any{"machine": mc.ID()}
-	if err := s.mg.SetEnabled(mc.ID(), *body.Enabled); err != nil {
-		ev["error"] = err.Error()
-		s.audit.log(r, event, ev)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "save", "detail": err.Error()})
-		return
-	}
-	s.audit.log(r, event, ev)
-	writeJSON(w, http.StatusOK, mc.State())
-}
-
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
@@ -415,7 +365,16 @@ func spaHandler(fsys fs.FS) http.Handler {
 			io.WriteString(w, brand.Slug+": the web UI is not built into this binary; run scripts/build.sh\n")
 			return
 		}
+		// Every page served here, the app shell on any path among them,
+		// gets the policy that keeps scripts on our origin and the page out
+		// of other sites' frames.
+		w.Header().Set("Content-Security-Policy", appCSP)
 		p := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+		if p == "api" || strings.HasPrefix(p, "api/") {
+			// An API path no route took is not a page of the UI.
+			http.NotFound(w, r)
+			return
+		}
 		if p == "" {
 			p = "index.html"
 		}
@@ -427,7 +386,6 @@ func spaHandler(fsys fs.FS) http.Handler {
 			files.ServeHTTP(w, r2)
 			return
 		}
-		w.Header().Set("Content-Security-Policy", appCSP)
 		if strings.HasPrefix(p, "assets/") {
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		} else {

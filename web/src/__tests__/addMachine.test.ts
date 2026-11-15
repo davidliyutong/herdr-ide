@@ -2,44 +2,29 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 
-import { addMachineProblem, addMachineQuery } from '../components/AddMachineDialog';
-import { useStore, currentDock, currentLastCode } from '../state/store';
-import type { MachineState } from '../lib/herdr';
+import targetVectors from '../../../design/testdata/machines/targets.json';
+import { addMachineProblem } from '../components/AddMachineDialog';
+import { validTarget } from '../lib/machine';
 
-const form = (target: string, label = '', session = '') => ({ target, label, session });
+const form = (target: string, label = '') => ({ target, label });
 
-describe('the add machine form', () => {
-  it('takes ssh destinations that cannot read as options', () => {
-    for (const ok of ['gpu', 'user@gpu.example.com', 'ssh://u@h:2222', ' gpu ']) expect(addMachineProblem(form(ok)), ok).toBeUndefined();
-    for (const bad of ['', '  ', '-oProxyCommand=x', 'a b', 'gpü', 'x'.repeat(256)])
-      expect(addMachineProblem(form(bad)), bad).toBe('target');
-    expect(addMachineProblem(form('gpu', 'Any label at all', 'work-2'))).toBeUndefined();
-    expect(addMachineProblem(form('gpu', '', 'my work'))).toBe('session');
-    expect(addMachineProblem(form('gpu', '', '-x'))).toBe('session');
-  });
-
-  it('sends trimmed values and leaves out empty ones', () => {
-    const q = new URLSearchParams(addMachineQuery(form(' u@gpu ', ' GPU box ', ''), 100, 30));
-    expect(Object.fromEntries(q)).toEqual({ target: 'u@gpu', label: 'GPU box', cols: '100', rows: '30' });
-    expect(new URLSearchParams(addMachineQuery(form('gpu', '', 'work'), 80, 24)).get('session')).toBe('work');
+describe('ssh targets', () => {
+  // The vectors internal/machines runs too.
+  it('takes the destinations OpenSSH takes, and nothing that reads as an option or holds a shell character', () => {
+    expect(targetVectors.accept.length).toBeGreaterThan(20);
+    for (const ok of targetVectors.accept) expect(validTarget(ok), ok).toBe(true);
+    for (const bad of targetVectors.reject) expect(validTarget(bad), JSON.stringify(bad)).toBe(false);
+    // A lone surrogate is no character.
+    expect(validTarget('h\ud800')).toBe(false);
   });
 });
 
-describe('a removed machine', () => {
-  it('takes its panel and focus along', () => {
-    const m = (id: string) => ({ id, label: id, kind: 'ssh', status: 'ready', saved: true }) as unknown as MachineState;
-    const s = useStore.getState();
-    s.setMachines([m('a'), m('b')]);
-    s.openDock({ kind: 'code', m: 'b', folder: '/src' });
-    s.focusPane({ m: 'b', pane: 'p1' });
-    s.setMachines([m('a'), m('b')]);
-    expect(currentDock(useStore.getState())?.m).toBe('b');
-    s.setMachines([m('a')]);
-    const after = useStore.getState();
-    expect(currentDock(after)).toBeUndefined();
-    expect(currentLastCode(after)).toBeUndefined();
-    expect(after.docks).toEqual({});
-    expect(after.focused).toBeUndefined();
-    expect(after.order).toEqual(['a']);
+describe('the add machine form', () => {
+  it('checks the trimmed target', () => {
+    for (const ok of [' gpu ', 'user+tag@host', 'me@[fe80::1%en0]:2222', 'ssh://u@h:22', 'gpü'])
+      expect(addMachineProblem(form(ok)), ok).toBeUndefined();
+    for (const bad of ['', '  ', '-oProxyCommand=x', 'a b', 'h`id`', '$(x)', 'x'.repeat(256)])
+      expect(addMachineProblem(form(bad)), bad).toBe('target');
+    expect(addMachineProblem(form('gpu', 'Any label at all'))).toBeUndefined();
   });
 });

@@ -21,13 +21,6 @@ type Op string
 const (
 	// OpHello returns Info about the agent host.
 	OpHello Op = "hello"
-	// OpHerdrAPI dials the herdr public API socket and pipes raw bytes.
-	OpHerdrAPI Op = "herdr-api"
-	// OpHerdrClient dials herdr's client socket (the endpoint protocol used
-	// by client-rendered shells) and pipes raw bytes.
-	OpHerdrClient Op = "herdr-client"
-	// OpExec runs a command and returns buffered output in the reply.
-	OpExec Op = "exec"
 	// OpFsStat, OpFsList return metadata in the reply.
 	OpFsStat Op = "fs.stat"
 	OpFsList Op = "fs.list"
@@ -48,30 +41,41 @@ const (
 	// bridge extension connection.
 	OpBridge Op = "bridge"
 	// OpGUI manages the virtual display (actions status, install, start,
-	// shells) and, with action attach, streams its windows (see gui.go).
+	// keep, shells) and, with action attach, streams its windows (see
+	// gui.go).
 	OpGUI Op = "gui"
-	// OpHerdr manages the herdr in use and the server of Header.Session
-	// (actions status, start, stop, restart, check, update). An empty reply
-	// comes at once; a second reply line with Herdr follows when the action
-	// is done.
-	OpHerdr Op = "herdr"
-	// OpPaneFind searches the text of pane Header.Find.Pane next to herdr
-	// (internal/panefind) and answers with Reply.Find; nothing follows.
-	OpPaneFind Op = "pane.find"
+	// OpHC manages the agent's own herdr-core: the executable the core
+	// uploads and the terminal core of the agent's instance (actions status,
+	// install, start, restart, stop). An install carries the gzip-compressed
+	// executable as ChunkWriter chunks after a first reply, checked against
+	// Header.Digest; every action ends with a reply with HC.
+	OpHC Op = "hc"
+	// OpHCAPI dials the terminal core's socket and pipes raw bytes
+	// (internal/hc). It starts nothing.
+	OpHCAPI Op = "hc-api"
+	// OpDetect tells which coding agents run in the terminal core's
+	// terminals and what they do (internal/agent/detect): after the reply,
+	// DetectEvent lines from the agent until either side closes the stream.
+	// It starts nothing and writes nothing.
+	OpDetect Op = "detect"
+	// OpPrivacy reports in Privacy what macOS's Full Disk Access lets the
+	// agent's own process and the terminal core's do. It starts no terminal
+	// core and reads no file.
+	OpPrivacy Op = "privacy"
 )
+
+// DetectEvent is one line of an OpDetect stream: the agent a terminal runs
+// ("" when none does any more) and its status (working, blocked, idle,
+// done, unknown; "" without an agent).
+type DetectEvent struct {
+	Terminal string `json:"terminal"`
+	Agent    string `json:"agent"`
+	Status   string `json:"status"`
+}
 
 // Header is the first line of every stream.
 type Header struct {
 	Op Op `json:"op"`
-
-	// herdr selection
-	Session  string `json:"session,omitempty"`
-	HerdrBin string `json:"herdr_bin,omitempty"`
-
-	// exec
-	Argv    []string `json:"argv,omitempty"`
-	Cwd     string   `json:"cwd,omitempty"`
-	Timeout int      `json:"timeout_ms,omitempty"`
 
 	// fs
 	Path   string `json:"path,omitempty"`
@@ -97,53 +101,63 @@ type Header struct {
 	// "auto" to search PATH and the usual install locations.
 	Bin string `json:"bin,omitempty"`
 	// URL (action download) is fetched by the machine itself; Digest is the
-	// expected SHA-256, "" when unknown (the reply then reports it).
+	// expected SHA-256, "" when unknown (the reply then reports it). With
+	// OpHC, Digest is the SHA-256 of the executable to install, and of the
+	// one a start or restart may run.
 	URL    string `json:"url,omitempty"`
 	Digest string `json:"digest,omitempty"`
-
-	// pane.find
-	Find *FindRequest `json:"find,omitempty"`
 }
 
 // Reply is the first line written back by the acceptor.
 type Reply struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
-	// Code classifies Error for ops that define codes (pane.find).
+	// Code classifies Error for ops that define codes (hc).
 	Code string `json:"code,omitempty"`
 
-	Info    *Info        `json:"info,omitempty"`
-	Stat    *Stat        `json:"stat,omitempty"`
-	Entries []Stat       `json:"entries,omitempty"`
-	Exec    *ExecResult  `json:"exec,omitempty"`
-	CS      *CSStatus    `json:"cs,omitempty"`
-	Bridge  *BridgeInfo  `json:"bridge,omitempty"`
-	GUI     *GUIStatus   `json:"gui,omitempty"`
-	Herdr   *HerdrStatus `json:"herdr,omitempty"`
-	Find    *FindResult  `json:"find,omitempty"`
+	Info    *Info       `json:"info,omitempty"`
+	Stat    *Stat       `json:"stat,omitempty"`
+	Entries []Stat      `json:"entries,omitempty"`
+	Exec    *ExecResult `json:"exec,omitempty"`
+	CS      *CSStatus   `json:"cs,omitempty"`
+	Bridge  *BridgeInfo `json:"bridge,omitempty"`
+	GUI     *GUIStatus  `json:"gui,omitempty"`
+	HC      *HCStatus   `json:"hc,omitempty"`
+
+	Privacy *PrivacyStatus `json:"privacy,omitempty"`
 }
 
-// ErrHerdrNotFound: the agent found no herdr executable on its host (not
-// installed, or removed or moved since).
-var ErrHerdrNotFound = errors.New("herdr binary not found (set HERDR_BIN or install herdr)")
+// Full Disk Access as an OpPrivacy reply reports it.
+const (
+	AccessGranted = "granted"
+	AccessDenied  = "denied"
+	// AccessUnknown: not macOS, no terminal core running, no folder to
+	// try, or another error.
+	AccessUnknown = "unknown"
+)
+
+// PrivacyStatus is whether macOS's Full Disk Access lets a machine's
+// processes open a folder only it opens: Files for the agent's own process
+// (for the local machine the core's, which serves the file browser and
+// starts code-server), Terminals for the terminal core's (whose executable
+// is HC: the programs of its terminals have what it was granted).
+type PrivacyStatus struct {
+	Files     string `json:"files"`
+	Terminals string `json:"terminals"`
+	HC        string `json:"hc"`
+}
 
 // Info describes the agent host.
 type Info struct {
-	Version  string `json:"version"`
-	OS       string `json:"os"`
-	Arch     string `json:"arch"`
-	Hostname string `json:"hostname"`
-	Home     string `json:"home"`
-	User     string `json:"user"`
-	// HerdrBin is the herdr executable in use, with its version. Without
-	// one, HerdrError tells why; HerdrSocket is set either way.
-	HerdrBin     string `json:"herdr_bin,omitempty"`
-	HerdrVersion string `json:"herdr_version,omitempty"`
-	HerdrSocket  string `json:"herdr_socket,omitempty"`
-	HerdrError   string `json:"herdr_error,omitempty"`
-	DataDir      string `json:"data_dir"`
-	RunDir       string `json:"run_dir"`
-	UploadDir    string `json:"upload_dir"`
+	Version   string `json:"version"`
+	OS        string `json:"os"`
+	Arch      string `json:"arch"`
+	Hostname  string `json:"hostname"`
+	Home      string `json:"home"`
+	User      string `json:"user"`
+	DataDir   string `json:"data_dir"`
+	RunDir    string `json:"run_dir"`
+	UploadDir string `json:"upload_dir"`
 }
 
 type Stat struct {
@@ -156,6 +170,8 @@ type Stat struct {
 	IsLink  bool   `json:"is_link,omitempty"`
 }
 
+// ExecResult is the output of a command the agent ran for an op
+// (code-server's install-ext and uninstall-ext).
 type ExecResult struct {
 	ExitCode  int    `json:"exit_code"`
 	Stdout    string `json:"stdout"`
@@ -175,27 +191,25 @@ type CSStatus struct {
 	Digest string `json:"digest,omitempty"`
 }
 
-// HerdrStatus describes the herdr an agent uses and its session's server.
-type HerdrStatus struct {
-	Bin     string `json:"bin,omitempty"`
+// HCStatus describes the agent's herdr-core.
+type HCStatus struct {
+	// Digest is the SHA-256 of the installed executable, "" without one.
+	Digest string `json:"digest,omitempty"`
+	// Running: a core answers on Socket; Version is that core's.
+	Running bool   `json:"running"`
 	Version string `json:"version,omitempty"`
-	// Managed: Bin is the copy the application keeps and may update, not an
-	// installation of the user's.
-	Managed bool `json:"managed"`
-	// Running is reported without Bin too: a server can outlive the removal
-	// of its herdr.
-	Running       bool   `json:"running"`
-	ServerVersion string `json:"server_version,omitempty"`
-	// RestartNeeded: the running server is from another herdr build.
-	RestartNeeded bool `json:"restart_needed,omitempty"`
-	// Latest is herdr's newest release (action check).
-	Latest string `json:"latest,omitempty"`
-	// Error is a code: not_found, start_failed, stop_failed, check_failed,
-	// update_failed, not_managed. Output is herdr's own text for it, or the
-	// output of an update.
-	Error  string `json:"error,omitempty"`
-	Output string `json:"output,omitempty"`
+	// Session is the core's session name and Socket its API socket.
+	Session string `json:"session"`
+	Socket  string `json:"socket"`
 }
+
+// Codes of failed OpHC actions (Reply.Code).
+const (
+	HCNotInstalled = "not_installed"
+	HCBadDigest    = "bad_digest"
+	HCStartFailed  = "start_failed"
+	HCStopFailed   = "stop_failed"
+)
 
 type BridgeInfo struct {
 	ConnID string `json:"conn_id"`

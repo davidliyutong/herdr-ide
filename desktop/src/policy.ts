@@ -18,24 +18,21 @@ export function isExternal(url: string): boolean {
   }
 }
 
-// Clipboard reads match what the browser UI grants VS Code's frame
-// (allow="clipboard-read" in web/src/components/Dock.tsx), where a browser
+// Clipboard reads match what the browser UI grants VS Code panes' frames
+// (allow="clipboard-read" in web/src/components/CodeLayer.tsx), where a browser
 // asks once; the desktop app has no prompt, so it grants them to the core.
 // fileSystem is the File System Access API: VS Code's Download… saves
 // folders and files over 32 MB into a folder the user picks in the native
 // dialog, which is the consent (Electron keeps system folders out).
+// local-fonts lets the settings list the fonts installed on the computer
+// (names and font files, read-only) for the terminal font picker, as a
+// browser does after asking.
 export function allowPermission(permission: string, requestingURL: string, topURL: string, origin: string): boolean {
   return (
     isInternal(requestingURL, origin) &&
     isInternal(topURL, origin) &&
-    ['notifications', 'clipboard-read', 'clipboard-sanitized-write', 'fileSystem'].includes(permission)
+    ['notifications', 'clipboard-read', 'clipboard-sanitized-write', 'fileSystem', 'local-fonts'].includes(permission)
   );
-}
-
-/** The page's theme setting as Electron's nativeTheme.themeSource; anything
- * else is ignored. */
-export function themeSource(value: unknown): 'system' | 'light' | 'dark' | undefined {
-  return value === 'system' || value === 'light' || value === 'dark' ? value : undefined;
 }
 
 export const webPreferences = {

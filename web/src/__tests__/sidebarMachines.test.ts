@@ -1,16 +1,18 @@
 // @vitest-environment jsdom
 //
-// The sidebar reloads herdr's machines from its button and renames a saved
-// machine in place, in its header.
+// The sidebar folds disabled machines, renames a machine in place, in its
+// header, shows the workspaces of the machines followed, offers to start a
+// terminal core that failed, and says why a machine is never connected.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
-vi.mock('../lib/conn', () => ({ conn: { api: () => Promise.resolve({}), setTheme: () => {}, retry: () => {} } }));
+vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {}, retry: () => {} } }));
 
 import { useStore } from '../state/store';
-import type { MachineState } from '../lib/herdr';
+import { FakeCore, settle } from './fakeTerms';
+import type { MachineState } from '../lib/machine';
 import { Sidebar } from '../components/Sidebar';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -19,7 +21,7 @@ describe('Sidebar machines', () => {
   let host: HTMLDivElement;
   let root: Root;
   const fetchMock = vi.fn((_url: string, _init?: RequestInit) =>
-    Promise.resolve(new Response(JSON.stringify({ added: null, removed: null, updated: null }), { status: 200 })),
+    Promise.resolve(new Response(JSON.stringify({ managed: false, running: true }), { status: 200 })),
   );
 
   beforeEach(async () => {
@@ -27,7 +29,7 @@ describe('Sidebar machines', () => {
     fetchMock.mockClear();
     const s = useStore.getState();
     s.setReadOnly(false);
-    s.setMachines([{ id: 'gpu', label: 'gpu', kind: 'ssh', status: 'disabled', saved: true } as unknown as MachineState]);
+    s.setMachines([{ id: 'gpu', label: 'gpu', kind: 'ssh', status: 'disabled' } as unknown as MachineState]);
     host = document.createElement('div');
     document.body.append(host);
     root = createRoot(host);
@@ -40,17 +42,114 @@ describe('Sidebar machines', () => {
     vi.unstubAllGlobals();
   });
 
-  it('reloads the machines from its button, which read-only browsers lack', async () => {
-    const button = host.querySelector<HTMLButtonElement>('button[title^="Reload machines from herdr"]');
-    await act(async () => button!.click());
-    expect(fetchMock).toHaveBeenCalledWith('/api/machines/refresh', { method: 'POST' });
+  it('offers to start the terminal core where it failed, except read-only', async () => {
+    const core = new FakeCore();
+    core.install();
+    await settle();
+    const start = () => Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Start Terminal Service');
+    await act(async () =>
+      useStore.getState().setMachines([{ id: 'gpu', label: 'gpu', kind: 'ssh', status: 'ready' } as unknown as MachineState]),
+    );
+    // Not followed yet: the machine's terminals are one click away.
+    expect(host.textContent).toContain('Show its terminals');
+    await act(async () =>
+      Array.from(host.querySelectorAll<HTMLElement>('.ws-item'))
+        .find((e) => e.textContent === 'Show its terminals')!
+        .click(),
+    );
+    await act(settle);
+    expect(useStore.getState().machineId).toBe('gpu');
+    expect(host.textContent).toContain('The machine is not connected.');
+    await act(async () => start()!.click());
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/m/gpu/hc/start');
     await act(async () => useStore.getState().setReadOnly(true));
-    expect(host.querySelector('button[title^="Reload machines"]')).toBeNull();
+    expect(start()).toBeUndefined();
+  });
+
+  it('lists the workspaces of a followed machine with their agents', async () => {
+    const core = new FakeCore();
+    core.machine('gpu', [FakeCore.term('t1', { agent: 'claude', agent_status: 'blocked' }), FakeCore.term('t2')], {
+      version: 2,
+      workspaces: [
+        { id: 'aaaaaaaa', name: 'api', cwd: '/srv/api', tabs: [{ root: { terminal: 't1' }, focused: 't1' }], selected: 0 },
+        {
+          id: 'bbbbbbbb',
+          name: 'web',
+          cwd: '',
+          tabs: [
+            { root: { terminal: 't2' }, focused: 't2' },
+            { root: { terminal: 't3' }, focused: 't3' },
+          ],
+          selected: 0,
+        },
+      ],
+      selected: 1,
+    });
+    core.install();
+    await act(async () =>
+      useStore.getState().setMachines([{ id: 'gpu', label: 'gpu', kind: 'ssh', status: 'ready' } as unknown as MachineState]),
+    );
+    await act(async () => useStore.getState().selectMachine('gpu'));
+    await act(async () => core.model.subscribe('gpu'));
+    await act(settle);
+    const items = Array.from(host.querySelectorAll<HTMLElement>('.ws-item[data-ws-id]'));
+    expect(items.map((e) => e.querySelector('.ellipsis')?.textContent)).toEqual(['api', 'web']);
+    // The second workspace is selected; t3 is gone, so web has one tab.
+    expect(items[1].classList.contains('selected')).toBe(true);
+    expect(items[0].querySelector('.dot-blocked')).not.toBeNull();
+    expect(host.querySelector('.inbox')?.textContent).toContain('claude');
+    await act(async () => items[0].click());
+    await act(settle);
+    expect(core.layout('gpu')?.selected).toBe(0);
+  });
+
+  it('names workspaces without a name after their folder, keeps rows quiet and renames them in place', async () => {
+    const core = new FakeCore();
+    const tab = (t: string) => ({ root: { terminal: t }, focused: t });
+    core.machine('gpu', [FakeCore.term('t1'), FakeCore.term('t2'), FakeCore.term('t3'), FakeCore.term('t4', { cwd: '/home/u/notes' })], {
+      version: 2,
+      workspaces: [
+        { id: 'aaaaaaaa', name: '', cwd: '/home/u/src/website', tabs: [tab('t1'), tab('t2')], selected: 0 },
+        { id: 'bbbbbbbb', name: 'Workspace', cwd: '/home/u', tabs: [tab('t3')], selected: 0 },
+        { id: 'cccccccc', name: 'notes', cwd: '/home/u/notes', tabs: [tab('t4')], selected: 0 },
+      ],
+      selected: 0,
+    });
+    core.install();
+    await act(async () =>
+      useStore
+        .getState()
+        .setMachines([{ id: 'gpu', label: 'gpu', kind: 'ssh', status: 'ready', info: { home: '/home/u' } } as unknown as MachineState]),
+    );
+    await act(async () => useStore.getState().selectMachine('gpu'));
+    await act(async () => core.model.subscribe('gpu'));
+    await act(settle);
+    const items = () => Array.from(host.querySelectorAll<HTMLElement>('.ws-item[data-ws-id]'));
+    expect(items().map((e) => e.querySelector('.ws-name')?.textContent)).toEqual(['website', '~', 'notes']);
+    // No tab count in the row; the tooltip has it with the directory.
+    expect(items()[0].textContent).toBe('1website');
+    expect(items()[0].title).toBe('website · ~/src/website · 2 tabs · double-click to rename · drag to reorder');
+    expect(items()[1].title).toContain('~ · 1 tab ·');
+    // Renamed in place: the field starts with the name shown and has no
+    // placeholder; an emptied name gives the folder's back.
+    const rename = async (id: string, value: string) => {
+      await act(async () => useStore.getState().setRenaming({ kind: 'workspace', m: 'gpu', id }));
+      const input = host.querySelector<HTMLInputElement>('.ws-item input')!;
+      expect(input.placeholder).toBe('');
+      input.value = value;
+      await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+      await act(settle);
+    };
+    await rename('aaaaaaaa', 'site');
+    expect(core.layout('gpu')?.workspaces[0].name).toBe('site');
+    await rename('cccccccc', '');
+    expect(core.layout('gpu')?.workspaces[2].name).toBe('');
+    expect(items().map((e) => e.querySelector('.ws-name')?.textContent)).toEqual(['site', '~', 'notes']);
   });
 
   it('folds disabled machines until opened, and unfolds them once enabled', async () => {
     const head = () => host.querySelector<HTMLElement>('.machine-head')!;
-    const enable = () => Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Enable machine');
+    const enable = () => Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Enable Machine');
     expect(host.querySelector('.machine-body')).toBeNull();
     expect(enable()).toBeUndefined();
     await act(async () => head().click());
@@ -59,9 +158,7 @@ describe('Sidebar machines', () => {
     expect(host.querySelector('.machine-body')).toBeNull();
 
     const setStatus = (status: string) =>
-      act(async () =>
-        useStore.getState().setMachines([{ id: 'gpu', label: 'gpu', kind: 'ssh', status, saved: true } as unknown as MachineState]),
-      );
+      act(async () => useStore.getState().setMachines([{ id: 'gpu', label: 'gpu', kind: 'ssh', status } as unknown as MachineState]));
     await setStatus('connecting');
     expect(host.querySelector('.machine-body')).not.toBeNull();
     // Folding an enabled machine sticks while it connects.
@@ -71,6 +168,62 @@ describe('Sidebar machines', () => {
     await act(async () => head().click());
     await setStatus('disabled');
     expect(host.querySelector('.machine-body')).toBeNull();
+  });
+
+  it('shows why a machine with a refused target is never connected, without a retry', async () => {
+    await act(async () =>
+      useStore
+        .getState()
+        .setMachines([
+          { id: 'gpu', label: 'gpu', kind: 'ssh', status: 'error', code: 'invalid_target', enabled: true } as unknown as MachineState,
+        ]),
+    );
+    expect(host.querySelector('.machine-status')?.textContent).toContain('never connected');
+    expect(host.querySelector<HTMLElement>('.machine-head')?.title).toContain('never connected');
+    expect(Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Retry')).toBeUndefined();
+    // Another error keeps its retry.
+    await act(async () =>
+      useStore.getState().setMachines([
+        {
+          id: 'gpu',
+          label: 'gpu',
+          kind: 'ssh',
+          status: 'error',
+          error: 'ssh: connection refused',
+          enabled: true,
+        } as unknown as MachineState,
+      ]),
+    );
+    expect(host.querySelector('.machine-status')?.textContent).toContain('connection refused');
+    expect(Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Retry')).toBeDefined();
+  });
+
+  it('says the local machine needs Linux or macOS where no agent runs on it', async () => {
+    await act(async () =>
+      useStore.getState().setMachines([
+        {
+          id: 'local',
+          label: 'pc (local)',
+          kind: 'local',
+          status: 'error',
+          code: 'local_unsupported',
+          enabled: true,
+        } as unknown as MachineState,
+      ]),
+    );
+    expect(host.querySelector('.machine-status')?.textContent).toContain('needs Linux or macOS');
+    expect(host.querySelectorAll('.machine-status button')).toHaveLength(0);
+  });
+
+  it('offers Sign in only where the core keeps an ssh login, and says what to do elsewhere', async () => {
+    const machine = { id: 'gpu', label: 'gpu', kind: 'ssh', status: 'auth_required', enabled: true } as unknown as MachineState;
+    await act(async () => useStore.getState().setMachines([machine]));
+    const buttons = () => Array.from(host.querySelectorAll('.machine-status button')).map((b) => b.textContent);
+    expect(buttons()).toEqual(['Sign in…', 'Retry']);
+    await act(async () => useStore.setState({ sshLogin: false }));
+    expect(buttons()).toEqual(['Retry']);
+    expect(host.querySelector('.machine-status')?.textContent).toContain('ssh-add');
+    useStore.setState({ sshLogin: true });
   });
 
   it('renames a machine in its header', async () => {

@@ -1,0 +1,230 @@
+{
+  "description": "Key presses and the stroke each client names them by: a letter, digit or named character the layout gives the key without Shift, else the key at that place on a US layout. key and code are the browser's KeyboardEvent fields. Run by web/src/__tests__/keys.test.ts.",
+  "cases": [
+    {
+      "description": "a letter with Cmd",
+      "key": "t",
+      "code": "KeyT",
+      "mods": [
+        "cmd"
+      ],
+      "stroke": "cmd+t"
+    },
+    {
+      "description": "Shift does not change the name",
+      "key": "T",
+      "code": "KeyT",
+      "mods": [
+        "cmd",
+        "shift"
+      ],
+      "stroke": "cmd+shift+t"
+    },
+    {
+      "description": "AZERTY: Z where QWERTY has W",
+      "key": "z",
+      "code": "KeyW",
+      "mods": [
+        "cmd"
+      ],
+      "stroke": "cmd+z"
+    },
+    {
+      "description": "Dvorak: comma at QWERTY's W",
+      "key": ",",
+      "code": "KeyW",
+      "mods": [
+        "cmd"
+      ],
+      "stroke": "cmd+comma"
+    },
+    {
+      "description": "a non-Latin layout falls back to the physical key",
+      "key": "ц",
+      "code": "KeyW",
+      "mods": [
+        "cmd"
+      ],
+      "stroke": "cmd+w"
+    },
+    {
+      "description": "Option characters fall back to the physical key",
+      "key": "†",
+      "code": "KeyT",
+      "mods": [
+        "alt"
+      ],
+      "stroke": "alt+t"
+    },
+    {
+      "description": "a shifted character is Shift and its key",
+      "key": "?",
+      "code": "Slash",
+      "mods": [
+        "shift"
+      ],
+      "stroke": "shift+slash"
+    },
+    {
+      "description": "a shifted digit",
+      "key": "!",
+      "code": "Digit1",
+      "mods": [
+        "shift"
+      ],
+      "stroke": "shift+1"
+    },
+    {
+      "description": "a digit with Ctrl",
+      "key": "1",
+      "code": "Digit1",
+      "mods": [
+        "ctrl"
+      ],
+      "stroke": "ctrl+1"
+    },
+    {
+      "description": "the prefix",
+      "key": "b",
+      "code": "KeyB",
+      "mods": [
+        "ctrl"
+      ],
+      "stroke": "ctrl+b"
+    },
+    {
+      "description": "Cmd+Shift+]",
+      "key": "}",
+      "code": "BracketRight",
+      "mods": [
+        "cmd",
+        "shift"
+      ],
+      "stroke": "cmd+shift+bracketright"
+    },
+    {
+      "description": "Cmd+,",
+      "key": ",",
+      "code": "Comma",
+      "mods": [
+        "cmd"
+      ],
+      "stroke": "cmd+comma"
+    },
+    {
+      "description": "minus",
+      "key": "-",
+      "code": "Minus",
+      "mods": [],
+      "stroke": "minus"
+    },
+    {
+      "description": "space",
+      "key": " ",
+      "code": "Space",
+      "mods": [],
+      "stroke": "space"
+    },
+    {
+      "description": "tab",
+      "key": "Tab",
+      "code": "Tab",
+      "mods": [],
+      "stroke": "tab"
+    },
+    {
+      "description": "Shift+Tab",
+      "key": "Tab",
+      "code": "Tab",
+      "mods": [
+        "shift"
+      ],
+      "stroke": "shift+tab"
+    },
+    {
+      "description": "enter",
+      "key": "Enter",
+      "code": "Enter",
+      "mods": [],
+      "stroke": "enter"
+    },
+    {
+      "description": "escape",
+      "key": "Escape",
+      "code": "Escape",
+      "mods": [],
+      "stroke": "escape"
+    },
+    {
+      "description": "backspace",
+      "key": "Backspace",
+      "code": "Backspace",
+      "mods": [],
+      "stroke": "backspace"
+    },
+    {
+      "description": "forward delete",
+      "key": "Delete",
+      "code": "Delete",
+      "mods": [],
+      "stroke": "delete"
+    },
+    {
+      "description": "an arrow",
+      "key": "ArrowLeft",
+      "code": "ArrowLeft",
+      "mods": [],
+      "stroke": "left"
+    },
+    {
+      "description": "an arrow with Alt",
+      "key": "ArrowUp",
+      "code": "ArrowUp",
+      "mods": [
+        "alt"
+      ],
+      "stroke": "alt+up"
+    },
+    {
+      "description": "a function key",
+      "key": "F5",
+      "code": "F5",
+      "mods": [],
+      "stroke": "f5"
+    },
+    {
+      "description": "page down",
+      "key": "PageDown",
+      "code": "PageDown",
+      "mods": [],
+      "stroke": "pagedown"
+    },
+    {
+      "description": "backtick",
+      "key": "`",
+      "code": "Backquote",
+      "mods": [
+        "ctrl"
+      ],
+      "stroke": "ctrl+backtick"
+    },
+    {
+      "description": "a lone modifier is no stroke",
+      "key": "Meta",
+      "code": "MetaLeft",
+      "mods": [
+        "cmd"
+      ],
+      "stroke": null
+    },
+    {
+      "description": "Shift alone is no stroke",
+      "key": "Shift",
+      "code": "ShiftLeft",
+      "mods": [
+        "shift"
+      ],
+      "stroke": null
+    }
+  ]
+}

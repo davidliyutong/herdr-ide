@@ -1,10 +1,9 @@
 // Minimal i18n: t(key, vars) with English fallback. The locale comes from the
-// saved setting or the browser languages; changing the setting reloads the
-// page (see prefs.ts).
+// appearance.language setting or the browser languages (setLocale, before
+// the UI renders); changing the setting reloads the page that changed it.
 
 import { en, type MessageKey, type Messages } from './en';
 import { zhCN } from './zh-CN';
-import { storage } from '../brand';
 
 export type Locale = 'en' | 'zh-CN';
 
@@ -25,15 +24,25 @@ export function detectLocale(saved: string | null, languages: readonly string[])
   return 'en';
 }
 
-export const locale: Locale = detectLocale(
-  storage.get('locale'),
-  typeof navigator === 'undefined' ? [] : navigator.languages?.length ? navigator.languages : [navigator.language],
-);
+const browserLanguages = (): readonly string[] =>
+  typeof navigator === 'undefined' ? [] : navigator.languages?.length ? navigator.languages : [navigator.language];
 
-if (typeof document !== 'undefined') document.documentElement.lang = locale;
+export let locale: Locale = detectLocale(null, browserLanguages());
+
+/** Uses the language setting ("auto" follows the browser). */
+export function setLocale(setting: string) {
+  locale = detectLocale(setting === 'auto' ? null : setting, browserLanguages());
+  if (typeof document !== 'undefined') document.documentElement.lang = locale;
+}
+setLocale('auto');
 
 export function t(key: MessageKey, vars?: Record<string, string | number>): string {
-  let s: string = dicts[locale][key] ?? en[key];
+  return translate(locale, key, vars);
+}
+
+/** A message in the given locale (the desktop app's shell, which has no page locale). */
+export function translate(l: Locale, key: MessageKey, vars?: Record<string, string | number>): string {
+  let s: string = dicts[l][key] ?? en[key];
   if (vars) for (const [k, v] of Object.entries(vars)) s = s.split(`{${k}}`).join(String(v));
   return s;
 }

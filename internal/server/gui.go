@@ -17,6 +17,7 @@ import (
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/gui"
 	"herdr-ide/internal/machines"
+	"herdr-ide/internal/settings"
 )
 
 // GUI windows (docs/features/14-gui-windows.md): every /ws client gets the
@@ -35,9 +36,8 @@ func (s *Server) initGUI() {
 		if mc == nil {
 			return
 		}
-		if st.Status == machines.StatusReady || st.Status == machines.StatusDegraded {
+		if st.Status == machines.StatusReady {
 			s.gui.Ensure(mc)
-			s.gui.HerdrReady(mc, st.Status == machines.StatusReady)
 			return
 		}
 		// Disabled, reconnecting or failing: no display error or windows
@@ -45,20 +45,22 @@ func (s *Server) initGUI() {
 		s.gui.Disconnected(mc)
 	}, func(machines.AgentEvent) {})
 	if s.opts.Settings != nil {
-		s.opts.Settings.OnChange(func(key, machine, _ string) {
-			if key != gui.SettingGUI && key != gui.SettingVideo {
-				return
-			}
-			// A global change affects every machine without its own value.
-			for _, st := range s.mg.States() {
-				if machine != "" && st.ID != machine {
+		s.opts.Settings.OnChange(func(changes []settings.Change) {
+			for _, c := range changes {
+				if c.Key != gui.SettingGUI && c.Key != gui.SettingVideo {
 					continue
 				}
-				if mc := s.mg.Get(st.ID); mc != nil && (st.Status == machines.StatusReady || st.Status == machines.StatusDegraded) {
-					if key == gui.SettingVideo {
-						s.gui.ApplyVideo(mc)
-					} else {
-						s.gui.Apply(mc)
+				// A global change affects every machine without its own value.
+				for _, st := range s.mg.States() {
+					if c.Machine != "" && st.ID != c.Machine {
+						continue
+					}
+					if mc := s.mg.Get(st.ID); mc != nil && st.Status == machines.StatusReady {
+						if c.Key == gui.SettingVideo {
+							s.gui.ApplyVideo(mc)
+						} else {
+							s.gui.Apply(mc)
+						}
 					}
 				}
 			}
@@ -66,23 +68,29 @@ func (s *Server) initGUI() {
 	}
 }
 
-// handleGUIEnable gives open panes of a machine the display's environment
-// (see gui.Manager.Enable). Body: {"panes": [...]}, empty for all panes.
+// handleGUIEnable gives open terminals of a machine's terminal core the
+// display's environment (see gui.Manager.Enable). Body: {"terminals": [...]}
+// (empty or absent for all of them).
 func (s *Server) handleGUIEnable(w http.ResponseWriter, r *http.Request) {
 	mc := s.machine(w, r)
 	if mc == nil {
 		return
 	}
 	var req struct {
-		Panes []string `json:"panes"`
+		Terminals []string `json:"terminals"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid"})
 		return
 	}
+	b := s.term.existing(mc.ID())
+	if b == nil || b.connection() == nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "no_terminals"})
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), time.Minute)
 	defer cancel()
-	res, err := s.gui.Enable(ctx, mc, req.Panes)
+	res, err := s.gui.Enable(ctx, mc, termShells{b}, req.Terminals)
 	if res != nil {
 		ev := map[string]any{"machine": mc.ID(), "typed": res.Typed, "busy": res.Busy, "failed": res.Failed}
 		if err != nil {
@@ -102,57 +110,28 @@ func (s *Server) handleGUIEnable(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// paneCreating are the herdr methods that start a shell in a new pane.
-var paneCreating = map[string]bool{"workspace.create": true, "tab.create": true, "pane.split": true}
-
-// withPaneEnv adds the machine's display environment to the parameters of
-// a method that creates a pane. Variables the caller set win. It returns
-// the names of the variables it added.
-func (s *Server) withPaneEnv(mc *machines.Machine, method string, params json.RawMessage) (json.RawMessage, []string) {
-	if !paneCreating[method] {
-		return params, nil
-	}
-	return mergeEnv(params, s.gui.PaneEnv(mc))
-}
-
-// mergeEnv adds env to the "env" object of herdr request parameters and
-// returns the names it added; malformed parameters are left to herdr.
-func mergeEnv(params json.RawMessage, env map[string]string) (json.RawMessage, []string) {
-	if len(env) == 0 {
-		return params, nil
-	}
-	var p map[string]json.RawMessage
-	if len(params) > 0 && json.Unmarshal(params, &p) != nil {
-		return params, nil
-	}
-	if p == nil { // absent or null
-		p = map[string]json.RawMessage{}
-	}
+// addEnv sets env in the "env" object of parameters p, replacing the
+// caller's values for these names, and returns the names it set. ok is
+// false when "env" is not an object of strings (p is then unchanged).
+func addEnv(p map[string]json.RawMessage, env map[string]string) (names []string, ok bool) {
 	var given map[string]string
-	if raw, ok := p["env"]; ok && json.Unmarshal(raw, &given) != nil {
-		return params, nil
+	if raw, set := p["env"]; set && json.Unmarshal(raw, &given) != nil {
+		return nil, false
 	}
 	if given == nil {
 		given = map[string]string{}
 	}
-	var added []string
 	for k, v := range env {
-		if _, set := given[k]; !set {
-			given[k] = v
-			added = append(added, k)
-		}
+		given[k] = v
+		names = append(names, k)
 	}
-	sort.Strings(added)
+	sort.Strings(names)
 	b, err := json.Marshal(given)
 	if err != nil {
-		return params, nil
+		return nil, false
 	}
 	p["env"] = b
-	out, err := json.Marshal(p)
-	if err != nil {
-		return params, nil
-	}
-	return out, added
+	return names, true
 }
 
 // handleGUIPage serves the app shell, which shows one window on this path.
@@ -271,4 +250,14 @@ func (s *Server) handleGUIClose(w http.ResponseWriter, r *http.Request) {
 	s.audit.log(r, "gui.close", map[string]any{"machine": mc.ID(), "window": win})
 	s.gui.Close(mc.ID(), uint32(win))
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleGUIStates lists the program windows of every machine, as /ws sends
+// them, for clients that do not hold a /ws connection.
+func (s *Server) handleGUIStates(w http.ResponseWriter, r *http.Request) {
+	states := s.gui.States()
+	if states == nil {
+		states = []gui.State{}
+	}
+	writeJSON(w, http.StatusOK, states)
 }

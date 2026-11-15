@@ -1,0 +1,132 @@
+{
+  "description": "VS Code views ({\"code\": {id, folder}}) and previews ({\"preview\": {id, path}}) are panes like terminals, named code:<id> and preview:<id>: they are focused, split beside, swapped, moved and closed, a tab of them alone stays, pruning against the live terminals keeps them; a view without an id or a preview without a path is a node of an unknown kind.",
+  "input": {
+    "version": 2,
+    "workspaces": [
+      {
+        "id": "w1",
+        "name": "",
+        "cwd": "/srv/app",
+        "tabs": [
+          {
+            "root": {
+              "split": "horizontal",
+              "ratio": 0.5,
+              "children": [
+                { "terminal": "t1" },
+                { "code": { "id": "c1", "folder": "/srv/app" } }
+              ]
+            },
+            "focused": "code:c1"
+          },
+          {
+            "root": { "code": { "id": "c2", "theme": "x" }, "pinned": true },
+            "focused": "t9"
+          },
+          {
+            "root": {
+              "split": "vertical",
+              "ratio": 0.5,
+              "children": [
+                { "code": { "folder": "/no-id" } },
+                { "preview": { "id": "p1", "path": "" } }
+              ]
+            },
+            "focused": ""
+          }
+        ],
+        "selected": 0
+      }
+    ],
+    "selected": 0
+  },
+  "ops": [
+    { "op": "prune", "live": ["t1"] },
+    {
+      "op": "splitPane",
+      "target": "t1",
+      "axis": "vertical",
+      "leaf": { "preview": { "id": "p2", "path": "/srv/app/plot.png" } }
+    },
+    {
+      "op": "setPreviewPath",
+      "pane": "preview:p2",
+      "path": "/srv/app/plot2.png"
+    },
+    { "op": "focusDirection", "dir": "right" },
+    {
+      "op": "openPane",
+      "leaf": { "code": { "id": "c2", "folder": "/elsewhere" } }
+    },
+    {
+      "op": "openPane",
+      "leaf": { "code": { "id": "c3", "folder": "/srv/app/docs" } },
+      "workspace": "w1"
+    },
+    { "op": "dropOnPane", "pane": "code:c3", "target": "t1", "zone": "center" },
+    { "op": "closeTerminal", "terminal": "t1" },
+    {
+      "op": "movePane",
+      "pane": "code:c2",
+      "target": "code:c1",
+      "axis": "vertical",
+      "before": true
+    },
+    { "op": "closePane", "pane": "code:c1" },
+    {
+      "op": "splitPane",
+      "target": "code:c2",
+      "axis": "horizontal",
+      "leaf": { "preview": { "id": "p2", "path": "/elsewhere" } }
+    },
+    { "op": "setPreviewPath", "pane": "code:c2", "path": "/x" },
+    { "op": "focus", "pane": "code:nope" }
+  ],
+  "changed": true,
+  "expected": {
+    "version": 2,
+    "workspaces": [
+      {
+        "id": "w1",
+        "name": "",
+        "cwd": "/srv/app",
+        "tabs": [
+          {
+            "root": {
+              "split": "horizontal",
+              "ratio": 0.5,
+              "children": [
+                {
+                  "split": "vertical",
+                  "ratio": 0.5,
+                  "children": [
+                    { "code": { "id": "c3", "folder": "/srv/app/docs" } },
+                    { "preview": { "id": "p2", "path": "/srv/app/plot2.png" } }
+                  ]
+                },
+                {
+                  "code": { "id": "c2", "theme": "x", "folder": "" },
+                  "pinned": true
+                }
+              ]
+            },
+            "focused": "code:c2"
+          },
+          {
+            "root": {
+              "split": "vertical",
+              "ratio": 0.5,
+              "children": [
+                { "code": { "folder": "/no-id" } },
+                { "preview": { "id": "p1", "path": "" } }
+              ]
+            },
+            "focused": ""
+          }
+        ],
+        "selected": 0
+      }
+    ],
+    "selected": 0
+  }
+}

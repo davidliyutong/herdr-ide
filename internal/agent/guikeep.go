@@ -1,3 +1,5 @@
+//go:build unix
+
 package agent
 
 import (
@@ -17,14 +19,15 @@ import (
 	"herdr-ide/internal/brand"
 )
 
-// The display keeper ties Xvfb to the herdr server whose panes use it. Xvfb
-// exits guiIdleSeconds after its last client left; its clients are the
-// agent's window manager (while the core is connected), programs, and the
-// keeper: the agent binary run as "gui-keep", which holds a connection to
-// the display while the session's herdr server runs. So the display stays
-// while panes may start programs on it, and ends soon after the server
-// stops and the programs exit. One keeper runs per instance
-// (run/gui-keep.lock); it follows a server that restarts within keepGrace.
+// The display keeper ties Xvfb to the instance's terminal core, whose
+// programs use it. Xvfb exits guiIdleSeconds after its last client left;
+// its clients are the agent's window manager (while the core is connected),
+// programs, and the keeper: the agent binary run as "gui-keep", which holds
+// a connection to the display while the terminal core runs. So the display
+// stays while terminals may start programs on it, and ends soon after the
+// terminal core stops and the programs exit. One keeper runs per instance
+// (run/gui-keep.lock); it follows a terminal core that restarts within
+// keepGrace.
 
 const (
 	keepPoll  = 5 * time.Second
@@ -47,15 +50,14 @@ func lockKeeper(path string) *os.File {
 	return f
 }
 
-// keep starts a keeper for the session's server unless one runs or the
-// display does not. A keeper may be about to leave (its server was gone
-// for keepGrace) as the request comes: then it is tried once more after
-// keepPoll.
-func (g *gui) keep(session string) error {
-	started, err := g.startKeeper(session)
+// keep starts a keeper unless one runs or the display does not. A keeper
+// may be about to leave (the terminal core was gone for keepGrace) as the
+// request comes: then it is tried once more after keepPoll.
+func (g *gui) keep() error {
+	started, err := g.startKeeper()
 	if err == nil && !started {
 		time.AfterFunc(keepPoll+time.Second, func() {
-			if _, err := g.startKeeper(session); err != nil {
+			if _, err := g.startKeeper(); err != nil {
 				g.a.logger.Printf("gui: keeping the display: %v", err)
 			}
 		})
@@ -65,7 +67,7 @@ func (g *gui) keep(session string) error {
 
 // startKeeper starts a keeper unless one runs (false) or the display does
 // not (true: nothing to try again).
-func (g *gui) startKeeper(session string) (bool, error) {
+func (g *gui) startKeeper() (bool, error) {
 	st := g.readState()
 	if st.Display == 0 || !g.running(st.Display) {
 		return true, nil
@@ -79,7 +81,7 @@ func (g *gui) startKeeper(session string) (bool, error) {
 	if err != nil {
 		return true, err
 	}
-	cmd := exec.Command(exe, "gui-keep", "--instance", g.a.instance, "--session", session)
+	cmd := exec.Command(exe, "gui-keep", "--instance", g.a.instance)
 	cmd.Env = cleanEnv()
 	cmd.Dir = g.a.home
 	// Its own session: it outlives the agent and the ssh connection.
@@ -96,9 +98,9 @@ func (g *gui) startKeeper(session string) (bool, error) {
 }
 
 // KeepDisplay is the "gui-keep" command: it holds a connection to the
-// instance's display until the session's herdr server stopped (and no new
-// one came within keepGrace), the display ended or ctx is done.
-func KeepDisplay(ctx context.Context, instance, session string, logger *log.Logger) error {
+// instance's display until its terminal core no longer runs (and did not
+// come back within keepGrace), the display ended or ctx is done.
+func KeepDisplay(ctx context.Context, instance string, logger *log.Logger) error {
 	if !brand.ValidInstance(instance) {
 		return fmt.Errorf("invalid instance name %q", instance)
 	}
@@ -108,10 +110,10 @@ func KeepDisplay(ctx context.Context, instance, session string, logger *log.Logg
 	}
 	base := filepath.Join(home, brand.DataDir(instance))
 	a := &Agent{logger: logger, home: home, base: base, runDir: filepath.Join(base, "run"), instance: instance}
-	return (&gui{a: a}).keepDisplay(ctx, session, keepPoll, keepGrace)
+	return (&gui{a: a}).keepDisplay(ctx, keepPoll, keepGrace)
 }
 
-func (g *gui) keepDisplay(ctx context.Context, session string, poll, grace time.Duration) error {
+func (g *gui) keepDisplay(ctx context.Context, poll, grace time.Duration) error {
 	lock := lockKeeper(g.keepLockPath())
 	if lock == nil {
 		return nil // another keeper
@@ -137,24 +139,26 @@ func (g *gui) keepDisplay(ctx context.Context, session string, poll, grace time.
 			}
 		}
 	}()
-	socket := g.a.herdrSocket(session)
-	g.a.logger.Printf("keeping display :%d while the herdr server at %s runs", st.Display, socket)
+	socket := g.a.hcSocket()
+	g.a.logger.Printf("keeping display :%d while a server at %s runs", st.Display, socket)
 	err = watchServer(ctx, socket, poll, grace)
 	g.a.logger.Printf("done: %v", err)
 	return nil
 }
 
-// watchServer returns nil once the herdr server listening on socket has
-// stopped and none took its place within grace, or ctx's error.
+// watchServer returns nil once no server listens on socket and none came
+// back within grace, or ctx's error. A server is the user's process
+// listening there, told apart from a later one by its start time.
 func watchServer(ctx context.Context, socket string, poll, grace time.Duration) error {
 	t := time.NewTicker(poll)
 	defer t.Stop()
 	var srv serverProc
 	gone := time.Now()
 	for {
-		if srv.alive() {
-			gone = time.Now()
-		} else if srv = findServer(socket); srv.pid != 0 {
+		if !srv.alive() {
+			srv = findServer(socket)
+		}
+		if srv.pid != 0 {
 			gone = time.Now()
 		} else if time.Since(gone) > grace {
 			return nil

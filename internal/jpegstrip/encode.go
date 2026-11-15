@@ -82,6 +82,7 @@ func Encode(dst, pix []byte, stride, w, h, quality, parts int) ([]byte, error) {
 		if g < groups-1 {
 			dst = append(dst, 0xff, rst0Marker+byte(g%8))
 		}
+		scanBufs.Put(&s)
 	}
 	return append(dst, 0xff, 0xd9), nil // End Of Image
 }
@@ -138,6 +139,18 @@ func appendDHT(dst []byte) []byte {
 	return dst
 }
 
+// scanBufs keeps the scans' buffers between images: a scan is copied into
+// the image and its buffer used again for the next one.
+var scanBufs sync.Pool
+
+// scanBuf returns an empty buffer of at least n bytes' capacity.
+func scanBuf(n int) []byte {
+	if b, ok := scanBufs.Get().(*[]byte); ok && cap(*b) >= n {
+		return (*b)[:0]
+	}
+	return make([]byte, 0, n)
+}
+
 type picture struct {
 	pix    []byte
 	stride int
@@ -147,7 +160,7 @@ type picture struct {
 // scan entropy-codes the MCU rows [from, to), starting a restart interval:
 // DC predictions start from zero and the last byte is padded with ones.
 func (p *picture) scan(quant *[nQuantIndex][blockSize]byte, from, to, cols int) []byte {
-	e := bits{quant: quant, buf: make([]byte, 0, (to-from)*cols*16*16/8)}
+	e := bits{quant: quant, buf: scanBuf((to - from) * cols * 16 * 16 / 8)}
 	var (
 		b                           block
 		cb, cr                      [4]block

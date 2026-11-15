@@ -1,6 +1,10 @@
+//go:build unix
+
 // Package agent implements herdr-ide-agent: the per-machine helper that the
 // core reaches over a yamux session (ssh stdio for remote machines, an
-// in-process pipe for the local machine).
+// in-process pipe for the local machine). It runs on Linux and macOS only
+// (every file is built for unix): its sockets, peer checks, process groups,
+// code-server and program windows (Xvfb) are POSIX.
 package agent
 
 import (
@@ -34,26 +38,14 @@ type Agent struct {
 	runDir    string // base/run, mode 0700
 	uploadDir string // base/uploads
 
-	herdrMu      sync.Mutex
-	herdrCache   map[string]string // hint -> resolved binary
-	bundledHerdr string            // last resort when no installed herdr is found
-	herdrOp      sync.Mutex        // serializes starting, stopping and updating herdr
+	hcOp     sync.Mutex // serializes installing, starting and stopping herdr-core
+	hcMu     sync.Mutex
+	hcHashed hcHashed // the installed executable when it was last hashed
+
+	privacyMu sync.Mutex // one Full Disk Access check at a time
 
 	cs  *codeServer
 	gui *gui
-}
-
-// YamuxConfig is shared by both ends of the session.
-func YamuxConfig(logger *log.Logger) *yamux.Config {
-	cfg := yamux.DefaultConfig()
-	cfg.EnableKeepAlive = true
-	cfg.KeepAliveInterval = 15 * time.Second
-	cfg.ConnectionWriteTimeout = 30 * time.Second
-	cfg.MaxStreamWindowSize = 1 << 20
-	cfg.AcceptBacklog = 512
-	cfg.LogOutput = nil
-	cfg.Logger = logger
-	return cfg
 }
 
 // Options configure an agent.
@@ -61,9 +53,6 @@ type Options struct {
 	// Instance selects ~/<brand.DataDir(Instance)>; empty is the default.
 	Instance string
 	Logger   *log.Logger
-	// BundledHerdr is the herdr shipped beside the core, used by the local
-	// agent only when no installed herdr is found. Remote agents leave it empty.
-	BundledHerdr string
 }
 
 // Serve runs the agent over conn until the session ends.
@@ -93,20 +82,18 @@ func Serve(ctx context.Context, conn io.ReadWriteCloser, opts Options) error {
 	_ = os.Chmod(runDir, 0o700)
 	go housekeeping(base, logger)
 
-	sess, err := yamux.Server(conn, YamuxConfig(logger))
+	sess, err := yamux.Server(conn, agentproto.YamuxConfig(logger))
 	if err != nil {
 		return err
 	}
 	a := &Agent{
-		sess:         sess,
-		logger:       logger,
-		instance:     opts.Instance,
-		home:         home,
-		base:         base,
-		runDir:       runDir,
-		uploadDir:    filepath.Join(base, "uploads"),
-		herdrCache:   map[string]string{},
-		bundledHerdr: opts.BundledHerdr,
+		sess:      sess,
+		logger:    logger,
+		instance:  opts.Instance,
+		home:      home,
+		base:      base,
+		runDir:    runDir,
+		uploadDir: filepath.Join(base, "uploads"),
 	}
 	a.cs = newCodeServer(a)
 	defer a.cs.stopAll()
@@ -143,14 +130,8 @@ func (a *Agent) handle(ctx context.Context, st net.Conn) {
 	var err error
 	switch h.Op {
 	case agentproto.OpHello:
-		err = agentproto.WriteLine(st, agentproto.Reply{OK: true, Info: a.info(h)})
+		err = agentproto.WriteLine(st, agentproto.Reply{OK: true, Info: a.info()})
 		st.Close()
-	case agentproto.OpHerdrAPI:
-		err = a.handleHerdrAPI(st, h)
-	case agentproto.OpHerdrClient:
-		err = a.handleHerdrClient(st, h)
-	case agentproto.OpExec:
-		err = a.handleExec(ctx, st, h)
 	case agentproto.OpFsStat, agentproto.OpFsList, agentproto.OpFsRead, agentproto.OpFsWrite:
 		err = a.handleFS(st, h)
 	case agentproto.OpFsArchive:
@@ -161,10 +142,14 @@ func (a *Agent) handle(ctx context.Context, st net.Conn) {
 		err = a.cs.handle(ctx, st, h)
 	case agentproto.OpGUI:
 		err = a.gui.handle(ctx, st, h)
-	case agentproto.OpHerdr:
-		err = a.handleHerdr(ctx, st, h)
-	case agentproto.OpPaneFind:
-		err = a.handleFind(ctx, st, h)
+	case agentproto.OpHC:
+		err = a.handleHC(ctx, st, h)
+	case agentproto.OpHCAPI:
+		err = a.pipeUnix(st, a.hcSocket())
+	case agentproto.OpDetect:
+		err = a.handleDetect(ctx, st)
+	case agentproto.OpPrivacy:
+		err = a.handlePrivacy(ctx, st)
 	default:
 		err = agentproto.Fail(st, fmt.Errorf("unknown op %q", h.Op))
 		st.Close()
@@ -174,13 +159,13 @@ func (a *Agent) handle(ctx context.Context, st net.Conn) {
 	}
 }
 
-func (a *Agent) info(h agentproto.Header) *agentproto.Info {
+func (a *Agent) info() *agentproto.Info {
 	hostname, _ := os.Hostname()
 	username := os.Getenv("USER")
 	if u, err := user.Current(); err == nil && u.Username != "" {
 		username = u.Username
 	}
-	inf := &agentproto.Info{
+	return &agentproto.Info{
 		Version:   agentproto.Version,
 		OS:        runtime.GOOS,
 		Arch:      runtime.GOARCH,
@@ -191,21 +176,6 @@ func (a *Agent) info(h agentproto.Header) *agentproto.Info {
 		RunDir:    a.runDir,
 		UploadDir: a.uploadDir,
 	}
-	// The socket does not depend on the executable: a server may still run
-	// after its herdr was removed.
-	inf.HerdrSocket = a.herdrSocket(h.Session)
-	bin, err := a.resolveHerdr(h.HerdrBin)
-	if err != nil {
-		inf.HerdrError = err.Error()
-		return inf
-	}
-	inf.HerdrBin = bin
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if out, err := runOutput(ctx, bin, "--version"); err == nil {
-		inf.HerdrVersion = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(out), "herdr"))
-	}
-	return inf
 }
 
 // pipe copies in both directions and closes both ends when either side ends.
@@ -223,21 +193,12 @@ func pipe(a, b net.Conn) {
 	once.Do(closeBoth)
 }
 
-func (a *Agent) handleHerdrAPI(st net.Conn, h agentproto.Header) error {
-	return a.pipeUnix(st, a.herdrSocket(h.Session))
-}
-
-// handleHerdrClient pipes herdr's client socket. The core speaks the endpoint
-// protocol over it; the connection ends with the stream.
-func (a *Agent) handleHerdrClient(st net.Conn, h agentproto.Header) error {
-	return a.pipeUnix(st, a.herdrClientSocket(h.Session))
-}
-
+// pipeUnix pipes the socket at path; the connection ends with the stream.
 func (a *Agent) pipeUnix(st net.Conn, path string) error {
 	defer st.Close()
 	c, err := net.DialTimeout("unix", path, 5*time.Second)
 	if err != nil {
-		return agentproto.Fail(st, fmt.Errorf("herdr socket %s: %w", path, err))
+		return agentproto.Fail(st, fmt.Errorf("socket %s: %w", path, err))
 	}
 	if err := agentproto.WriteLine(st, agentproto.Reply{OK: true}); err != nil {
 		c.Close()

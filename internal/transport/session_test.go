@@ -1,20 +1,18 @@
 package transport
 
 import (
-	"bufio"
-	"context"
 	"io"
 	"log"
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/hashicorp/yamux"
 
-	"herdr-ide/internal/agent"
 	"herdr-ide/internal/agentproto"
 )
 
@@ -28,7 +26,7 @@ func pair(t *testing.T, lost func()) (*Session, *yamux.Session, net.Conn) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv, err := yamux.Server(c2, agent.YamuxConfig(logger))
+	srv, err := yamux.Server(c2, agentproto.YamuxConfig(logger))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,44 +35,6 @@ func pair(t *testing.T, lost func()) (*Session, *yamux.Session, net.Conn) {
 		srv.Close()
 	})
 	return s, srv, c2
-}
-
-func TestOpenWithSendsFirstBeforeTheReply(t *testing.T) {
-	s, srv, _ := pair(t, nil)
-	got := make(chan string, 1)
-	go func() {
-		st, err := srv.AcceptStream()
-		if err != nil {
-			got <- "accept: " + err.Error()
-			return
-		}
-		defer st.Close()
-		var h agentproto.Header
-		if err := agentproto.ReadLine(st, &h); err != nil {
-			got <- "header: " + err.Error()
-			return
-		}
-		// The request must already be there: the agent has not replied.
-		_ = st.SetReadDeadline(time.Now().Add(2 * time.Second))
-		line, err := bufio.NewReader(st).ReadString('\n')
-		if err != nil {
-			got <- "request: " + err.Error()
-			return
-		}
-		got <- string(h.Op) + " " + line
-		_ = st.SetReadDeadline(time.Time{})
-		_ = agentproto.WriteLine(st, agentproto.Reply{OK: true})
-	}()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	st, _, err := s.OpenWith(ctx, agentproto.Header{Op: agentproto.OpHerdrAPI}, []byte("{\"id\":\"1\"}\n"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	st.Close()
-	if g := <-got; g != "herdr-api {\"id\":\"1\"}\n" {
-		t.Fatalf("agent saw %q", g)
-	}
 }
 
 func TestLostRunsOnlyWhenTheSessionEndsByItself(t *testing.T) {
@@ -105,6 +65,9 @@ func TestLostRunsOnlyWhenTheSessionEndsByItself(t *testing.T) {
 // The control master is told to take no new sessions (not to exit, which
 // would end every session through it), with this core's control path.
 func TestStopMasterArgs(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("ssh on Windows has no control master; the stand-in for ssh is a shell script")
+	}
 	bin := t.TempDir()
 	out := filepath.Join(t.TempDir(), "args")
 	script := "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > " + out + "\n"
@@ -117,7 +80,7 @@ func TestStopMasterArgs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "-o\nControlPath=/tmp/ctl/%C\n-O\nstop\nuser@gpu\n"; string(got) != want {
+	if want := "-o\nControlPath=/tmp/ctl/%C\n-O\nstop\n--\nuser@gpu\n"; string(got) != want {
 		t.Fatalf("ssh args %q, want %q", got, want)
 	}
 }

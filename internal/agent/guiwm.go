@@ -1,3 +1,5 @@
+//go:build unix
+
 package agent
 
 import (
@@ -41,7 +43,10 @@ type windowManager struct {
 	out    io.ReadWriter
 	logger *log.Logger
 	resOK  bool
-	atoms  map[string]xproto.Atom
+	// hcSocket is the instance's terminal core: windows of programs in its
+	// terminals name their terminal.
+	hcSocket string
+	atoms    map[string]xproto.Atom
 
 	writeMu sync.Mutex
 
@@ -105,16 +110,17 @@ func (w *xwin) all() rect { return rect{0, 0, w.w, w.h} }
 
 type managedWin struct {
 	xwin
-	title, pane, socket string
-	pid                 int
-	transient           xproto.Window
-	deleteWin           bool
-	takeFocus           bool
-	watched             bool
-	seq, acked          uint32
-	layers              []xproto.Window
-	stats               agentproto.GUIStats
-	since               time.Time // start of the stats interval
+	title      string
+	terminal   string // the terminal its program was started in (terminalOf)
+	pid        int
+	transient  xproto.Window
+	deleteWin  bool
+	takeFocus  bool
+	watched    bool
+	seq, acked uint32
+	layers     []xproto.Window
+	stats      agentproto.GUIStats
+	since      time.Time // start of the stats interval
 	flow
 
 	// Video: the stream kinds all viewers decode, the encoder while the
@@ -425,7 +431,7 @@ func (wm *windowManager) manage(w xproto.Window) {
 	m.transient = wm.window(w, xproto.AtomWmTransientFor)
 	m.deleteWin, m.takeFocus = wm.protocols(w)
 	m.pid = wm.pid(w)
-	m.pane, m.socket = paneOf(m.pid)
+	m.terminal = terminalOf(m.pid, wm.hcSocket)
 	m.damage = wm.newDamage(w)
 	wm.wins[w] = m
 	wm.clientList()
@@ -440,7 +446,7 @@ func (wm *windowManager) manage(w xproto.Window) {
 func (wm *windowManager) emitWindow(m *managedWin) {
 	wm.emit(agentproto.GUIEvent{Ev: "window", Window: &agentproto.GUIWindow{
 		ID: uint32(m.id), Title: m.title, W: m.w, H: m.h, Pid: m.pid,
-		Pane: m.pane, Socket: m.socket, Transient: uint32(m.transient),
+		Terminal: m.terminal, Transient: uint32(m.transient),
 	}})
 }
 
@@ -668,27 +674,41 @@ func (wm *windowManager) pid(w xproto.Window) int {
 	return 0
 }
 
-// paneOf returns the herdr pane (and herdr socket) a process was started
-// in, from its environment or that of its nearest ancestor that has one.
-func paneOf(pid int) (pane, socket string) {
+// terminalOf returns the terminal of the instance's terminal core that
+// process pid was started in, from its environment or that of its nearest
+// ancestor that has one: HC_TERMINAL_ID, when HC_TERMINAL_SOCKET is
+// hcSocket. A terminal of another terminal core (the user's own) is not
+// named.
+func terminalOf(pid int, hcSocket string) string {
 	for i := 0; i < 8 && pid > 1; i++ {
 		if env, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/environ"); err == nil {
-			for _, kv := range bytes.Split(env, []byte{0}) {
-				k, v, _ := strings.Cut(string(kv), "=")
-				switch k {
-				case "HERDR_PANE_ID":
-					pane = v
-				case "HERDR_SOCKET_PATH":
-					socket = v
-				}
-			}
-			if pane != "" {
-				return pane, socket
+			if term, ok := terminalFromEnv(env, hcSocket); ok {
+				return term
 			}
 		}
 		pid = parentPid(pid)
 	}
-	return "", ""
+	return ""
+}
+
+// terminalFromEnv reads a process's environment (NUL-separated, as in
+// /proc/<pid>/environ); ok tells whether it names a terminal of any
+// terminal core, term is that terminal when it is one of hcSocket's.
+func terminalFromEnv(env []byte, hcSocket string) (term string, ok bool) {
+	var id, socket string
+	for _, kv := range bytes.Split(env, []byte{0}) {
+		k, v, _ := strings.Cut(string(kv), "=")
+		switch k {
+		case "HC_TERMINAL_ID":
+			id = v
+		case "HC_TERMINAL_SOCKET":
+			socket = v
+		}
+	}
+	if id != "" && hcSocket != "" && socket == hcSocket {
+		term = id
+	}
+	return term, id != ""
 }
 
 func parentPid(pid int) int {

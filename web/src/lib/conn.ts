@@ -1,29 +1,10 @@
-// WebSocket connection to the core.
-//
-// Text messages are JSON; binary messages are pane surface updates (see
-// surface/protocol.ts), handled with the surface messages by surface/session.ts.
+// The core's event channel (/ws): machines, program windows, agent states,
+// downloads, the VS Code bridge, settings and keybindings. Terminals use
+// their own protocol (term/connection.ts).
 
-import type { AgentStatusEvent, MachineState } from './herdr';
+import type { AgentStatusEvent, MachineState } from './machine';
 import type { GuiState } from '../gui/state';
 import type { DownloadEvent } from '../download';
-
-/** Receives the surface stream: session, surf* , clip and bell messages, and
- * binary updates. */
-export interface SurfaceHandler {
-  json(m: { t: string } & Record<string, unknown>): void;
-  binary(buf: ArrayBuffer): void;
-}
-
-const surfaceTypes = new Set(['session', 'surf', 'surf.meta', 'surf.tab', 'clip', 'bell']);
-
-export class ApiError extends Error {
-  constructor(
-    public code: string,
-    message: string,
-  ) {
-    super(message);
-  }
-}
 
 type Listener = {
   onMachines(list: MachineState[]): void;
@@ -31,25 +12,29 @@ type Listener = {
   /** sound: this page plays notification sounds (it was used most recently). */
   onAgent(machine: string, data: AgentStatusEvent, sound: boolean): void;
   onConnection(connected: boolean): void;
-  /** folders: those of the VS Code window that sent it. */
-  onBridgeSend(machine: string, text: string, folders?: string[]): void;
+  /** window and folders: the id and folders of the VS Code window that sent it. */
+  onBridgeSend(machine: string, text: string, window?: string, folders?: string[]): void;
   /** Files chosen in VS Code's explorer to download. */
-  onBridgeDownload(machine: string, paths: string[]): void;
+  onBridgeDownload(machine: string, paths: string[], window?: string): void;
+  /** A VS Code window got the keyboard. */
+  onBridgeFocus(machine: string, window: string, folders?: string[]): void;
   /** Progress or end of a download a page started (download.ts). */
   onDownload(ev: DownloadEvent): void;
   onGui(st: GuiState): void;
+  /** The settings or keybindings changed: their new state. */
+  onSettings?(m: Record<string, unknown>): void;
+  onKeybindings?(m: Record<string, unknown>): void;
 };
+
+const text = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
+const strings = (v: unknown) => (Array.isArray(v) ? v.filter((f): f is string => typeof f === 'string') : undefined);
 
 class Conn {
   private ws?: WebSocket;
-  private nextRid = 1;
-  private surface?: SurfaceHandler;
-  private pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>();
   private listener?: Listener;
   private backoff = 300;
-  // Messages sent while disconnected; api requests carry their rid so that a
-  // request rejected on disconnect is never replayed after reconnecting.
-  private queue: { data: string; rid?: number }[] = [];
+  // Messages sent while disconnected, sent once connected.
+  private queue: string[] = [];
   private theme?: string;
   // When the user last used the page (opening it counts) and when the core
   // was last told; the core lets the most recently used page play sounds.
@@ -64,8 +49,8 @@ class Conn {
 
   private connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    // The event channel; the page's terminals have their own (term/connection.ts).
     const ws = new WebSocket(`${proto}//${location.host}/ws`);
-    ws.binaryType = 'arraybuffer';
     this.ws = ws;
     ws.onopen = () => {
       this.connected = true;
@@ -73,31 +58,21 @@ class Conn {
       this.listener?.onConnection(true);
       this.rawSend({ t: 'active', idle: Date.now() - this.lastInput });
       if (this.theme) this.rawSend({ t: 'theme', kind: this.theme });
-      for (const q of this.queue.splice(0)) ws.send(q.data);
+      for (const q of this.queue.splice(0)) ws.send(q);
     };
     ws.onmessage = (e) => this.onMessage(e);
     ws.onclose = () => {
       const was = this.connected;
       this.connected = false;
       if (was) this.listener?.onConnection(false);
-      for (const [, p] of this.pending) p.reject(new ApiError('disconnected', 'connection lost'));
-      this.pending.clear();
-      this.queue = this.queue.filter((q) => q.rid === undefined);
       setTimeout(() => this.connect(), this.backoff);
       this.backoff = Math.min(this.backoff * 2, 5000);
     };
   }
 
   private onMessage(e: MessageEvent) {
-    if (typeof e.data !== 'string') {
-      this.surface?.binary(e.data as ArrayBuffer);
-      return;
-    }
+    if (typeof e.data !== 'string') return;
     const m = JSON.parse(e.data);
-    if (surfaceTypes.has(m.t)) {
-      this.surface?.json(m);
-      return;
-    }
     switch (m.t) {
       case 'machines':
         this.listener?.onMachines(m.list);
@@ -109,14 +84,13 @@ class Conn {
         this.listener?.onAgent(m.m, m.data, m.sound === true);
         break;
       case 'bridge.send':
-        this.listener?.onBridgeSend(
-          m.m,
-          m.text,
-          Array.isArray(m.folders) ? m.folders.filter((f: unknown) => typeof f === 'string') : undefined,
-        );
+        this.listener?.onBridgeSend(m.m, m.text, text(m.window), strings(m.folders));
         break;
       case 'bridge.download':
-        this.listener?.onBridgeDownload(m.m, m.paths);
+        this.listener?.onBridgeDownload(m.m, m.paths, text(m.window));
+        break;
+      case 'bridge.focus':
+        if (text(m.window)) this.listener?.onBridgeFocus(m.m, m.window, strings(m.folders));
         break;
       case 'download':
         this.listener?.onDownload(m);
@@ -124,14 +98,12 @@ class Conn {
       case 'gui':
         this.listener?.onGui(m.state);
         break;
-      case 'api.res': {
-        const p = this.pending.get(m.rid);
-        if (!p) break;
-        this.pending.delete(m.rid);
-        if (m.error) p.reject(new ApiError(m.error.code, m.error.message));
-        else p.resolve(m.result);
+      case 'settings':
+        this.listener?.onSettings?.(m);
         break;
-      }
+      case 'keybindings':
+        this.listener?.onKeybindings?.(m);
+        break;
     }
   }
 
@@ -140,29 +112,15 @@ class Conn {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(s);
   }
 
-  send(obj: unknown, rid?: number) {
+  send(obj: unknown) {
     const s = JSON.stringify(obj);
     if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(s);
-    else this.queue.push({ data: s, rid });
+    else this.queue.push(s);
   }
 
-  /** Sets the receiver of the surface stream. */
-  setSurfaceHandler(h: SurfaceHandler | undefined) {
-    this.surface = h;
-  }
-
-  /** Sends a message only while connected (surface messages are recomputed
-   * after a reconnect, never replayed). */
+  /** Sends a message only while connected (never replayed). */
   sendNow(obj: unknown) {
     this.rawSend(obj);
-  }
-
-  api<T = any>(machine: string, method: string, params: Record<string, unknown> = {}): Promise<T> {
-    const rid = this.nextRid++;
-    return new Promise<T>((resolve, reject) => {
-      this.pending.set(rid, { resolve, reject });
-      this.send({ t: 'api', rid, m: machine, method, params }, rid);
-    });
   }
 
   /** Tells the core the light/dark theme in use, now and after reconnects;

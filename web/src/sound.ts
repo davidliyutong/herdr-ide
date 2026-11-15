@@ -1,20 +1,14 @@
-// Notification sounds for agents, played in the browser because herdr plays
-// its own only in the herdr TUI client. Two short chimes are synthesized with
+// Notification sounds for agents, played in the page. Two short chimes are synthesized with
 // the Web Audio API, so there are no audio files: "request" when an agent
 // needs input, "done" when it finished.
 
-import type { AgentStatusEvent } from './lib/herdr';
+import type { AgentStatusEvent } from './lib/machine';
 
-export type SoundKind = 'done' | 'request';
+export type SoundKind = 'done' | 'request' | 'bell';
 
-/** Parses the muted agents setting: names separated by commas or spaces. */
-export function mutedAgents(raw: string): Set<string> {
-  return new Set(
-    raw
-      .split(/[\s,]+/)
-      .map((s) => s.trim().toLowerCase())
-      .filter(Boolean),
-  );
+/** The silent agents setting as a set of lowercase names. */
+export function mutedAgents(list: readonly string[]): Set<string> {
+  return new Set(list.map((s) => s.trim().toLowerCase()).filter(Boolean));
 }
 
 export interface SoundContext {
@@ -23,16 +17,16 @@ export interface SoundContext {
   /** The "Notification sounds" setting. */
   enabled: boolean;
   muted: Set<string>;
-  /** The pane is in the selected workspace and tab. */
+  /** The terminal is in the selected workspace and tab. */
   onScreen: boolean;
   /** The page is visible and has focus. */
   focused: boolean;
 }
 
 /**
- * Which sound an agent status change plays, following herdr: the request
- * sound always plays, the done sound not when the pane is on screen in a
- * focused window.
+ * Which sound an agent status change plays: the request sound always
+ * plays, the done sound not when the terminal is on screen in a focused
+ * window.
  */
 export function soundFor(ev: AgentStatusEvent, c: SoundContext): SoundKind | undefined {
   if (!c.chosen || !c.enabled) return undefined;
@@ -59,6 +53,8 @@ const tunes: Record<SoundKind, { wave: OscillatorType; notes: [number, number][]
       [1318.51, 0.32],
     ],
   },
+  // The terminal bell (terminal.bell "sound"): one short tone.
+  bell: { wave: 'sine', notes: [[880, 0]] },
 };
 
 let ctx: AudioContext | undefined;

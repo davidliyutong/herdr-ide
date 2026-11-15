@@ -1,3 +1,5 @@
+//go:build unix
+
 package agent_test
 
 import (
@@ -128,14 +130,10 @@ func TestWriteKeepsExistingFiles(t *testing.T) {
 	}
 }
 
-func TestExecAndDialRestriction(t *testing.T) {
+// Only sockets inside ~/.herdr-ide/run may be dialed.
+func TestDialRestriction(t *testing.T) {
 	s, _ := dialAgent(t)
 	ctx := context.Background()
-	rep, err := s.Request(ctx, agentproto.Header{Op: agentproto.OpExec, Argv: []string{"/bin/sh", "-c", "echo out; echo err >&2; exit 3"}})
-	if err != nil || rep.Exec.ExitCode != 3 || rep.Exec.Stdout != "out\n" || rep.Exec.Stderr != "err\n" {
-		t.Fatalf("exec = %+v %v", rep, err)
-	}
-	// Only sockets inside ~/.herdr-ide/run may be dialed.
 	ln, err := net.Listen("unix", filepath.Join(t.TempDir(), "x.sock"))
 	if err != nil {
 		t.Fatal(err)

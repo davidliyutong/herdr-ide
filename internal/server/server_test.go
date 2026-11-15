@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -13,7 +13,10 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -22,10 +25,8 @@ import (
 
 	"github.com/coder/websocket"
 
-	"herdr-ide/internal/agent"
 	"herdr-ide/internal/brand"
 	"herdr-ide/internal/machines"
-	"herdr-ide/internal/settings"
 	"herdr-ide/internal/transport"
 )
 
@@ -99,33 +100,6 @@ func TestGuard(t *testing.T) {
 	}
 }
 
-func TestLoadKeyConfig(t *testing.T) {
-	dir := t.TempDir()
-	cfg := filepath.Join(dir, "config.toml")
-	os.WriteFile(cfg, []byte(`
-[keys]
-prefix = "ctrl+a"
-split_vertical = "prefix+|"
-
-[[keys.command]]
-key = "prefix+v"
-type = "plugin_action"
-command = "hx-w.visuals.open"
-description = "Visual previews"
-
-[ui]
-mouse_capture = true
-`), 0o644)
-	t.Setenv("HERDR_CONFIG_PATH", cfg)
-	k := loadKeyConfig()
-	if k.Prefix != "ctrl+a" || k.Bindings["split_vertical"] != "prefix+|" {
-		t.Fatalf("keys = %+v", k)
-	}
-	if len(k.Commands) != 1 || k.Commands[0].Command != "hx-w.visuals.open" || k.Commands[0].Type != "plugin_action" {
-		t.Fatalf("commands = %+v", k.Commands)
-	}
-}
-
 func TestBridgePick(t *testing.T) {
 	h := newBridgeHub(newTestServer())
 	a := &bridgeWindow{m: "m1", folders: []string{"/home/u/proj"}}
@@ -161,7 +135,7 @@ func TestUploadNameUniqueAndSafe(t *testing.T) {
 func TestUploadIntoDirectory(t *testing.T) {
 	now := time.Date(2026, 10, 30, 2, 15, 0, 0, time.UTC)
 	h, err := uploadHeader(url.Values{"name": {"shot.png"}}, "/home/u/.herdr-ide/uploads", now)
-	if err != nil || !h.Mkdirs || h.Unique || filepath.Dir(h.Path) != "/home/u/.herdr-ide/uploads" {
+	if err != nil || !h.Mkdirs || h.Unique || path.Dir(h.Path) != "/home/u/.herdr-ide/uploads" {
 		t.Fatalf("upload directory: %+v %v", h, err)
 	}
 	// Into a pane's directory under the file's own name, without replacing.
@@ -188,30 +162,6 @@ func TestUploadIntoDirectory(t *testing.T) {
 	}
 	if n := keptName(strings.Repeat("é", 150) + ".png"); len(n) > 200 || !strings.HasSuffix(n, "é.png") || !utf8.ValidString(n) {
 		t.Errorf("long name kept as %q", n)
-	}
-}
-
-func TestAPIAllowlist(t *testing.T) {
-	s := newTestServer()
-	for m, want := range map[string]bool{
-		"pane.split": true, "agent.prompt": true, "session.snapshot": true, "plugin.action.invoke": true,
-		"tab.move": true, "workspace.move": true,
-		"server.stop": false, "server.live_handoff": false, "integration.install": false,
-		"plugin.link": false, "events.subscribe": false, "client_shell.surface.set": false,
-	} {
-		if s.apiAllowed(m) != want {
-			t.Errorf("apiAllowed(%s) != %v", m, want)
-		}
-	}
-	s.opts.ReadOnly = true
-	if s.apiAllowed("pane.split") || s.apiAllowed("tab.move") || s.apiAllowed("workspace.move") || !s.apiAllowed("pane.list") {
-		t.Error("read-only allowlist wrong")
-	}
-	// Find in panes goes through the agent (POST /api/m/{id}/find), so
-	// read-only pages need none of herdr's copy-mode methods; scrolling
-	// moves the pane for every client.
-	if s.apiAllowed("pane.copy_search") || s.apiAllowed("pane.copy_motion") || s.apiAllowed("pane.scroll") {
-		t.Error("read-only find methods wrong")
 	}
 }
 
@@ -247,17 +197,79 @@ func TestProxySecret(t *testing.T) {
 	}
 }
 
-func TestReadOnlyRefusesWrites(t *testing.T) {
-	s := newTestServer()
-	s.opts.ReadOnly = true
+// Every route that changes something, taken from the server's own route
+// table: a request from another site is refused, and so is the request in
+// read-only mode. A route added without writable fails here unless it is
+// one of the listed exceptions.
+func TestMutatingRoutesAreGuarded(t *testing.T) {
+	// Routes that change nothing although their method could, and GETs that
+	// do change something.
+	readOnlyAllowed := map[string]string{
+		"POST /api/m/{id}/code/stop": "only frees the machine's resources",
+		"/m/{id}/code":               "only redirects to /m/{id}/code/",
+	}
+	mutatingGET := map[string]bool{
+		"GET /api/m/{id}/auth": true, // starts an interactive ssh login
+		// Changes nothing, but only adding a machine needs the core host's
+		// ssh aliases: guarded as the changes are.
+		"GET /api/ssh/hosts": true,
+	}
+	s := newTestServer("https://ide.example.com")
+	s.opts.Static = fstest.MapFS{"index.html": {Data: []byte("<html></html>")}}
 	h := s.Handler()
-	for _, path := range []string{"/api/m/x/upload", "/api/m/x/bridge", "/api/m/x/code/start", "/api/m/x/gui/enable", "/m/x/gui/1/close"} {
-		r := httptest.NewRequest("POST", path, nil)
-		r.Host = "127.0.0.1:7780"
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, r)
-		if w.Code != http.StatusForbidden {
-			t.Errorf("%s = %d", path, w.Code)
+	ro := newTestServer("https://ide.example.com")
+	ro.opts.ReadOnly = true
+	hro := ro.Handler()
+	wild := strings.NewReplacer("{id}", "x", "{action}", "start", "{win}", "1")
+	checked := 0
+	for _, rt := range s.routes() {
+		method, path, found := strings.Cut(rt.pattern, " ")
+		if !found {
+			method, path = "", rt.pattern
+		}
+		mutating := method == "" || (method != "GET" && method != "HEAD") || mutatingGET[rt.pattern]
+		if !mutating || path == "/" {
+			continue
+		}
+		if method == "" {
+			method = "POST"
+		}
+		path = wild.Replace(path)
+		do := func(h http.Handler, origin string) *httptest.ResponseRecorder {
+			r := httptest.NewRequest(method, path, strings.NewReader("{}"))
+			r.Host = "127.0.0.1:7780"
+			if origin != "" {
+				r.Header.Set("Origin", origin)
+			}
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			return w
+		}
+		checked++
+		for _, origin := range []string{"https://evil.example", "null", "http://ide.example.com"} {
+			if w := do(h, origin); w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "origin not allowed") {
+				t.Errorf("%s from %s: %d %q", rt.pattern, origin, w.Code, w.Body.String())
+			}
+		}
+		if why, ok := readOnlyAllowed[rt.pattern]; ok {
+			t.Logf("%s: allowed in read-only mode (%s)", rt.pattern, why)
+			continue
+		}
+		if w := do(hro, "http://127.0.0.1:7780"); w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "read-only") {
+			t.Errorf("%s in read-only mode: %d %q", rt.pattern, w.Code, w.Body.String())
+		}
+	}
+	if checked < 15 {
+		t.Fatalf("only %d mutating routes found", checked)
+	}
+	for p := range mutatingGET {
+		if !slices.ContainsFunc(s.routes(), func(r route) bool { return r.pattern == p }) {
+			t.Errorf("no route %s", p)
+		}
+	}
+	for p := range readOnlyAllowed {
+		if !slices.ContainsFunc(s.routes(), func(r route) bool { return r.pattern == p }) {
+			t.Errorf("no route %s", p)
 		}
 	}
 }
@@ -267,15 +279,33 @@ func TestCSPOnAppShell(t *testing.T) {
 		Logger: log.New(os.Stderr, "", 0),
 		Static: fstest.MapFS{"index.html": {Data: []byte("<html></html>")}},
 	})
-	r := httptest.NewRequest("GET", "/", nil)
-	r.Host = "localhost:7780"
-	w := httptest.NewRecorder()
-	s.Handler().ServeHTTP(w, r)
-	if csp := w.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "frame-ancestors 'self'") || !strings.Contains(csp, "script-src 'self'") {
-		t.Fatalf("csp = %q", csp)
-	}
-	if w.Header().Get("X-Content-Type-Options") != "nosniff" {
-		t.Fatal("nosniff missing")
+	h := s.Handler()
+	// The shell itself, the shell served for a client-side route, and an
+	// API path no route takes, which is not the shell.
+	for _, c := range []struct {
+		path  string
+		code  int
+		shell bool
+	}{
+		{"/", 200, true},
+		{"/some/route", 200, true},
+		{"/m/x/gui/1", 200, true},
+		{"/api/unknown", 404, false},
+		{"/api", 404, false},
+	} {
+		r := httptest.NewRequest("GET", c.path, nil)
+		r.Host = "localhost:7780"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != c.code || strings.Contains(w.Body.String(), "<html>") != c.shell {
+			t.Errorf("%s: %d %q", c.path, w.Code, w.Body.String())
+		}
+		if csp := w.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "frame-ancestors 'self'") || !strings.Contains(csp, "script-src 'self' 'wasm-unsafe-eval';") || strings.Contains(csp, "'unsafe-eval'") || strings.Contains(csp, "script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline'") {
+			t.Errorf("%s: csp = %q", c.path, csp)
+		}
+		if w.Header().Get("X-Content-Type-Options") != "nosniff" {
+			t.Errorf("%s: nosniff missing", c.path)
+		}
 	}
 }
 
@@ -324,49 +354,6 @@ func TestCodeServerPortProxyRefused(t *testing.T) {
 	}
 }
 
-func TestSettingsAPI(t *testing.T) {
-	s := newTestServer()
-	st := settings.New("", settings.Def{Key: "mode", Kind: settings.KindEnum, Default: "a", Options: []string{"a", "b"}},
-		settings.Def{Key: "locked", Kind: settings.KindString})
-	fs := flag.NewFlagSet("x", flag.ContinueOnError)
-	st.RegisterFlags(fs)
-	fs.Parse([]string{"--locked", "x"})
-	s.opts.Settings = st
-	h := s.Handler()
-	do := func(method, body string) (int, string) {
-		r := httptest.NewRequest(method, "/api/settings", strings.NewReader(body))
-		r.RemoteAddr, r.Host = "127.0.0.1:5555", "127.0.0.1:7780"
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, r)
-		return w.Code, w.Body.String()
-	}
-	if c, b := do("GET", ""); c != 200 || !strings.Contains(b, `"key":"mode"`) || !strings.Contains(b, `"source":"flag"`) {
-		t.Fatalf("GET = %d %s", c, b)
-	}
-	for _, c := range []struct {
-		body, code string
-		status     int
-	}{
-		{`{"key":"mode","value":"b"}`, "", 200},
-		{`{"key":"mode","value":"z"}`, `"error":"invalid"`, 400},
-		{`{"key":"locked","value":"y"}`, `"error":"locked"`, 409},
-		{`{"key":"nope","value":"y"}`, `"error":"unknown"`, 404},
-		{`{"key":"mode","value":"a","machine":"no-such-machine"}`, `"error":"unknown"`, 404},
-		{`not json`, `"error":"invalid"`, 400},
-	} {
-		if code, b := do("PUT", c.body); code != c.status || !strings.Contains(b, c.code) {
-			t.Errorf("PUT %s = %d %s", c.body, code, b)
-		}
-	}
-	if st.Get("mode") != "b" {
-		t.Errorf("mode = %q", st.Get("mode"))
-	}
-	s.opts.ReadOnly = true
-	if code, _ := do("PUT", `{"key":"mode","value":"a"}`); code != 403 || st.Get("mode") != "b" {
-		t.Errorf("read-only PUT = %d, mode %q", code, st.Get("mode"))
-	}
-}
-
 // VS Code windows get the browser's theme kind when they connect and when it
 // changes.
 func TestBridgeTheme(t *testing.T) {
@@ -412,13 +399,105 @@ func TestBridgeTheme(t *testing.T) {
 
 // Send to Agent reaches the browsers with the sending window's folders, so
 // the page can pick the workspace whose panel shows that window.
+// fakeWindow is a VS Code window on the far end of a bridge connection: it
+// says hello and answers every command, reporting each on cmds.
+func fakeWindow(t *testing.T, s *Server, mc *machines.Machine, id, folder string, cmds chan<- string) {
+	t.Helper()
+	a, b := net.Pipe()
+	t.Cleanup(func() { b.Close() })
+	go s.bridge.serve(mc, a)
+	r := bufio.NewReader(b)
+	if _, err := r.ReadString('\n'); err != nil { // the bridge's reply
+		t.Fatal(err)
+	}
+	fmt.Fprintf(b, `{"type":"hello","id":%q,"folders":[%q]}`+"\n", id, folder)
+	go func() {
+		for {
+			line, err := r.ReadString('\n')
+			if err != nil {
+				return
+			}
+			var msg map[string]any
+			if json.Unmarshal([]byte(line), &msg) != nil || msg["type"] != "command" {
+				continue
+			}
+			cmds <- id
+			fmt.Fprintf(b, `{"type":"ack","id":%q,"ok":true}`+"\n", msg["id"])
+		}
+	}()
+	// The hub knows the window once its hello was read.
+	deadline := time.Now().Add(2 * time.Second)
+	for s.bridge.byID(mc.ID(), id) == nil {
+		if time.Now().After(deadline) {
+			t.Fatalf("window %s never said hello", id)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func TestBridgeTargets(t *testing.T) {
+	s := newTestServer()
+	mc := machines.NewManager([]machines.Spec{{ID: "m", Label: "m", Kind: machines.KindSSH, Target: "m"}}, nil, log.New(io.Discard, "", 0)).Get("m")
+	cmds := make(chan string, 8)
+	fakeWindow(t, s, mc, "a", "/srv/app", cmds)
+	time.Sleep(5 * time.Millisecond)
+	fakeWindow(t, s, mc, "b", "/srv/app", cmds)
+	ctx := context.Background()
+	send := func(target bridgeTarget) string {
+		t.Helper()
+		got, err := s.bridge.command(ctx, "m", target, map[string]any{"cmd": "openDiff"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if received := <-cmds; received != got {
+			t.Fatalf("%s received the command, the reply names %s", received, got)
+		}
+		return got
+	}
+	// Two windows show the folder: a named one gets it, else the one used
+	// last (b said hello last).
+	if got := send(bridgeTarget{folder: "/srv/app", window: "a"}); got != "a" {
+		t.Fatalf("named window: got %s", got)
+	}
+	if got := send(bridgeTarget{folder: "/srv/app"}); got != "b" {
+		t.Fatalf("by folder: got %s", got)
+	}
+	// A window that is gone counts as unnamed.
+	if got := send(bridgeTarget{folder: "/srv/app", window: "gone"}); got != "b" {
+		t.Fatalf("gone window: got %s", got)
+	}
+	// A fresh pane's command waits for a window that says hello after it,
+	// although others show the folder.
+	done := make(chan string, 1)
+	go func() {
+		got, err := s.bridge.command(ctx, "m", bridgeTarget{folder: "/srv/app", fresh: true}, map[string]any{"cmd": "gitGraph"})
+		if err != nil {
+			t.Error(err)
+		}
+		done <- got
+	}()
+	select {
+	case got := <-cmds:
+		t.Fatalf("fresh command went to %s, an older window", got)
+	case <-time.After(300 * time.Millisecond):
+	}
+	fakeWindow(t, s, mc, "c", "/srv/other", cmds)
+	fakeWindow(t, s, mc, "d", "/srv/app/", cmds)
+	if got := <-cmds; got != "d" {
+		t.Fatalf("fresh command went to %s", got)
+	}
+	if got := <-done; got != "d" {
+		t.Fatalf("fresh command's reply names %s", got)
+	}
+}
+
 func TestBridgeSendToAgent(t *testing.T) {
 	s := newTestServer()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	c := &wsClient{s: s, ctx: ctx, cancel: cancel, send: make(chan outMsg, 8)}
+	c := &wsClient{s: s, ctx: ctx, cancel: cancel, send: make(chan []byte, 8)}
 	s.clients[c] = true
-	mc := machines.NewManager([]machines.Spec{{ID: "m", Label: "m", Kind: machines.KindSSH}}, nil, log.New(io.Discard, "", 0)).Get("m")
+	mc := machines.NewManager([]machines.Spec{{ID: "m", Label: "m", Kind: machines.KindSSH, Target: "m"}}, nil, log.New(io.Discard, "", 0)).Get("m")
 	a, b := net.Pipe()
 	defer b.Close()
 	go s.bridge.serve(mc, a)
@@ -433,51 +512,25 @@ func TestBridgeSendToAgent(t *testing.T) {
 	b.Write([]byte(`{"type":"sendToAgent","text":"@/srv/app/x.go:3","file":"/srv/app/x.go","line":3,"end_line":3}` + "\n"))
 	b.Write([]byte(`{"type":"hello","id":"w1","folders":[]}` + "\n"))
 	b.Write([]byte(`{"type":"sendToAgent","text":"@/b:2"}` + "\n"))
+	// A window that gets the keyboard is announced, with its id, so the page
+	// showing it learns which window its pane is; so is one that has it as
+	// it says hello.
+	b.Write([]byte(`{"type":"focus"}` + "\n"))
+	b.Write([]byte(`{"type":"hello","id":"w1","folders":["/srv/app"],"focused":true}` + "\n"))
 	for _, want := range []string{
 		`{"end_line":0,"file":"","line":0,"m":"m","t":"bridge.send","text":"@/a:1"}`,
-		`{"end_line":3,"file":"/srv/app/x.go","folders":["/srv/app"],"line":3,"m":"m","t":"bridge.send","text":"@/srv/app/x.go:3"}`,
-		`{"end_line":0,"file":"","folders":[],"line":0,"m":"m","t":"bridge.send","text":"@/b:2"}`,
+		`{"end_line":3,"file":"/srv/app/x.go","folders":["/srv/app"],"line":3,"m":"m","t":"bridge.send","text":"@/srv/app/x.go:3","window":"w1"}`,
+		`{"end_line":0,"file":"","folders":[],"line":0,"m":"m","t":"bridge.send","text":"@/b:2","window":"w1"}`,
+		`{"folders":[],"m":"m","t":"bridge.focus","window":"w1"}`,
+		`{"folders":["/srv/app"],"m":"m","t":"bridge.focus","window":"w1"}`,
 	} {
 		select {
 		case m := <-c.send:
-			if string(m.data) != want {
-				t.Fatalf("got %s, want %s", m.data, want)
+			if string(m) != want {
+				t.Fatalf("got %s, want %s", m, want)
 			}
 		case <-time.After(2 * time.Second):
 			t.Fatal("no bridge.send")
-		}
-	}
-}
-
-// New panes get the machine's display environment; what the caller set wins.
-func TestMergeEnv(t *testing.T) {
-	env := map[string]string{"DISPLAY": ":20", "XAUTHORITY": "/x"}
-	got, added := mergeEnv(json.RawMessage(`{"pane_id":"p1","direction":"right","env":{"DISPLAY":":5","FOO":"1"}}`), env)
-	var p struct {
-		PaneID string            `json:"pane_id"`
-		Env    map[string]string `json:"env"`
-	}
-	if err := json.Unmarshal(got, &p); err != nil || p.PaneID != "p1" {
-		t.Fatalf("params = %s (%v)", got, err)
-	}
-	if p.Env["DISPLAY"] != ":5" || p.Env["XAUTHORITY"] != "/x" || p.Env["FOO"] != "1" {
-		t.Errorf("env = %v", p.Env)
-	}
-	if strings.Join(added, ",") != "XAUTHORITY" {
-		t.Errorf("added = %v", added)
-	}
-	for _, params := range []string{"", "null", " null ", `{"env":null}`, `{"pane_id":"p1","env":null}`} {
-		got, added := mergeEnv(json.RawMessage(params), env)
-		if !strings.Contains(string(got), `"DISPLAY":":20"`) || len(added) != 2 {
-			t.Errorf("%q: %s %v", params, got, added)
-		}
-	}
-	if got, _ := mergeEnv(json.RawMessage(`{"a":1}`), nil); string(got) != `{"a":1}` {
-		t.Errorf("no env changed params: %s", got)
-	}
-	for _, bad := range []string{`{"env":"bad"}`, `[1]`, `{"env":{"A":1}}`} {
-		if got, added := mergeEnv(json.RawMessage(bad), env); string(got) != bad || added != nil {
-			t.Errorf("malformed %s replaced: %s", bad, got)
 		}
 	}
 }
@@ -512,131 +565,13 @@ func TestGUICloseOrigin(t *testing.T) {
 	}
 }
 
-// A remote-only per-machine setting cannot be set for the core's own machine.
-func TestSettingsPerMachineScope(t *testing.T) {
-	mg := machines.NewManager([]machines.Spec{
-		{ID: "local", Kind: machines.KindLocal, Enabled: true},
-		{ID: "r1", Kind: machines.KindSSH, Target: "r1", Enabled: true},
-	}, nil, log.New(io.Discard, "", 0))
-	st := settings.New("", settings.Def{Key: "gui", Kind: settings.KindEnum, Default: "on", Options: []string{"on", "off"}, PerMachine: settings.ScopeRemote})
-	s := New(mg, Options{Logger: log.New(io.Discard, "", 0), Settings: st})
-	h := s.Handler()
-	put := func(body string) int {
-		r := httptest.NewRequest("PUT", "/api/settings", strings.NewReader(body))
-		r.RemoteAddr, r.Host = "127.0.0.1:5555", "127.0.0.1:7780"
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, r)
-		return w.Code
-	}
-	if c := put(`{"key":"gui","value":"off","machine":"local"}`); c != http.StatusBadRequest {
-		t.Errorf("local machine: %d", c)
-	}
-	if c := put(`{"key":"gui","value":"off","machine":"r1"}`); c != http.StatusOK || st.GetFor("gui", "r1") != "off" {
-		t.Errorf("remote machine: %d, %s", c, st.GetFor("gui", "r1"))
-	}
-}
-
-// Every machine's herdr server can be started, stopped and restarted; only
-// the core host's herdr is checked and updated. Actions are refused in
-// read-only mode and audited (feature 17).
-func TestHerdrEndpoints(t *testing.T) {
-	specs := []machines.Spec{
-		{ID: "local", Label: "local", Kind: machines.KindLocal, Enabled: true},
-		{ID: "gpu", Label: "gpu", Kind: machines.KindSSH, Target: "gpu", Enabled: true},
-	}
-	mg := machines.NewManager(specs, nil, log.New(io.Discard, "", 0))
-	var audit strings.Builder
-	do := func(opts Options, method, path string) *httptest.ResponseRecorder {
-		opts.Logger = log.New(io.Discard, "", 0)
-		r := httptest.NewRequest(method, path, nil)
-		r.Host = "127.0.0.1:7780"
-		w := httptest.NewRecorder()
-		New(mg, opts).Handler().ServeHTTP(w, r)
-		return w
-	}
-	for _, c := range []struct {
-		opts         Options
-		method, path string
-		code         int
-		body         string
-	}{
-		{Options{}, "GET", "/api/m/gpu/herdr", 502, "transport"}, // not connected
-		{Options{}, "POST", "/api/m/gpu/herdr/update", 400, "not_local"},
-		{Options{}, "POST", "/api/m/gpu/herdr/check", 400, "not_local"},
-		{Options{}, "POST", "/api/m/local/herdr/uninstall", 404, ""},
-		{Options{}, "POST", "/api/m/nope/herdr/restart", 404, ""},
-		{Options{ReadOnly: true}, "POST", "/api/m/local/herdr/start", 403, "read-only"},
-		{Options{ReadOnly: true}, "POST", "/api/m/gpu/herdr/restart", 403, "read-only"},
-		{Options{Audit: &audit}, "POST", "/api/m/local/herdr/stop", 502, "transport"},
-		{Options{Audit: &audit}, "POST", "/api/m/gpu/herdr/restart", 502, "transport"},
-		{Options{ReadOnly: true}, "GET", "/api/m/local/herdr", 502, "transport"},
-	} {
-		w := do(c.opts, c.method, c.path)
-		if w.Code != c.code || !strings.Contains(w.Body.String(), c.body) {
-			t.Errorf("%s %s: %d %s", c.method, c.path, w.Code, w.Body)
-		}
-	}
-	for _, want := range []string{`"event":"herdr.stop"`, `"machine":"local"`, `"event":"herdr.restart"`, `"machine":"gpu"`, `"session":`} {
-		if !strings.Contains(audit.String(), want) {
-			t.Fatalf("audit lacks %s: %s", want, audit.String())
-		}
-	}
-}
-
-func TestRemoteHerdrCommand(t *testing.T) {
-	for _, c := range []struct {
-		target, session string
-		handoff         bool
-		want            string
-	}{
-		{"gpu", "default", false, "--remote=gpu"},
-		{"user@gpu", "", false, "--remote=user@gpu"},
-		{"gpu", "herdr-ide-dev", true, "--remote=gpu --session herdr-ide-dev --handoff"},
-		{"-oProxyCommand=x", "default", false, "--remote=-oProxyCommand=x"}, // herdr rejects it; never an option
-	} {
-		if got := strings.Join(remoteHerdrArgs(c.target, c.session, c.handoff), " "); got != c.want {
-			t.Errorf("%+v: %q", c, got)
-		}
-	}
-	env := strings.Join(herdrClientEnv([]string{"HOME=/h", "HERDR_ENV=1", "HERDR_PANE_ID=p", "TERM=dumb", "HERDR_SOCKET_PATH=/s"}), " ")
-	if env != "HOME=/h HERDR_SOCKET_PATH=/s TERM=xterm-256color COLORTERM=truecolor" {
-		t.Fatalf("env %q", env)
-	}
-}
-
-// The remote update terminal is only for SSH machines, needs the local herdr
-// (whose version herdr installs there) and is refused in read-only mode.
-func TestHerdrRemoteEndpoint(t *testing.T) {
-	specs := []machines.Spec{
-		{ID: "local", Label: "local", Kind: machines.KindLocal, Enabled: true},
-		{ID: "gpu", Label: "gpu", Kind: machines.KindSSH, Target: "gpu", Enabled: true},
-	}
-	mg := machines.NewManager(specs, nil, log.New(io.Discard, "", 0))
-	for _, c := range []struct {
-		readOnly bool
-		path     string
-		code     int
-		body     string
-	}{
-		{false, "/api/m/local/herdr/remote", 400, "not_ssh"},
-		{false, "/api/m/gpu/herdr/remote", 409, "no_local_herdr"}, // the local agent has not reported herdr
-		{true, "/api/m/gpu/herdr/remote", 403, "read-only"},
-	} {
-		r := httptest.NewRequest("GET", c.path, nil)
-		r.Host = "127.0.0.1:7780"
-		w := httptest.NewRecorder()
-		New(mg, Options{ReadOnly: c.readOnly, Logger: log.New(io.Discard, "", 0)}).Handler().ServeHTTP(w, r)
-		if w.Code != c.code || !strings.Contains(w.Body.String(), c.body) {
-			t.Errorf("%s read-only=%v: %d %s", c.path, c.readOnly, w.Code, w.Body)
-		}
-	}
-}
-
 // servePTY carries the browser's keys to the command and its output back.
 func TestServePTY(t *testing.T) {
-	ran := make(chan bool, 1)
+	if runtime.GOOS == "windows" {
+		t.Skip("no PTY on Windows")
+	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ran <- servePTY(w, r, []string{"/bin/sh", "-c", "read l; echo got:$l"}, []string{"PATH=/usr/bin:/bin"})
+		servePTY(w, r, []string{"/bin/sh", "-c", "read l; echo got:$l"})
 	}))
 	defer srv.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -661,9 +596,6 @@ func TestServePTY(t *testing.T) {
 			break
 		}
 		out.Write(data)
-	}
-	if !<-ran {
-		t.Fatal("command not reported as run")
 	}
 }
 
@@ -695,6 +627,16 @@ func TestSoundClientMostRecentlyActive(t *testing.T) {
 }
 
 // Browsers name the video streams they decode; anything else is dropped.
+func TestGUIStatesEndpoint(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/gui", nil)
+	req.Host = "127.0.0.1:7780"
+	newTestServer().Handler().ServeHTTP(rec, req)
+	if rec.Code != 200 || strings.TrimSpace(rec.Body.String()) != "[]" {
+		t.Fatalf("GET /api/gui = %d %q", rec.Code, rec.Body.String())
+	}
+}
+
 func TestVideoCodecsParam(t *testing.T) {
 	for q, want := range map[string]string{
 		"":                       "",
@@ -710,19 +652,19 @@ func TestVideoCodecsParam(t *testing.T) {
 }
 
 // agentMachine runs machine "x" with an in-process agent (HOME is a temp
-// dir; no herdr session exists) and waits until it is connected.
+// dir) and waits until it is connected.
 func agentMachine(t *testing.T) (*machines.Manager, *machines.Machine, *log.Logger) {
 	t.Helper()
+	dialLocal := dialAgent(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
-	t.Setenv("HERDR_SOCKET_PATH", "")
 	logger := log.New(io.Discard, "", 0)
 	dial := func(ctx context.Context, spec machines.Spec) (*transport.Session, string, error) {
-		s, err := transport.DialLocal(ctx, agent.Options{Logger: logger})
+		s, err := dialLocal(ctx, logger)
 		return s, "test/test", err
 	}
-	mg := machines.NewManager([]machines.Spec{{ID: "x", Label: "x", Kind: machines.KindSSH, Session: "herdr-ide-none", Enabled: true}}, dial, logger)
+	mg := machines.NewManager([]machines.Spec{{ID: "x", Label: "x", Kind: machines.KindSSH, Target: "x", Enabled: true}}, dial, logger)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -822,40 +764,10 @@ func TestCancelledUploadLeavesNoFile(t *testing.T) {
 	}
 }
 
-// Enabling and disabling machines is a mutation: refused in read-only mode,
-// checked, audited and saved in the core's own file.
-func TestMachineEnabled(t *testing.T) {
-	specs := []machines.Spec{{ID: "gpu", Label: "gpu", Kind: machines.KindSSH, Target: "gpu", Enabled: true}}
-	mg := machines.NewManager(specs, nil, log.New(io.Discard, "", 0))
-	path := filepath.Join(t.TempDir(), "machines.json")
-	mg.UseOverrides(machines.LoadOverrides(path))
-	var audit strings.Builder
-	do := func(opts Options, path, body string) *httptest.ResponseRecorder {
-		opts.Logger = log.New(io.Discard, "", 0)
-		opts.Audit = &audit
-		r := httptest.NewRequest("PUT", path, strings.NewReader(body))
-		r.Host = "127.0.0.1:7780"
-		w := httptest.NewRecorder()
-		New(mg, opts).Handler().ServeHTTP(w, r)
-		return w
+func closeReason(err error) string {
+	var ce websocket.CloseError
+	if errors.As(err, &ce) {
+		return ce.Reason
 	}
-	if w := do(Options{ReadOnly: true}, "/api/m/gpu/enabled", `{"enabled":false}`); w.Code != 403 || !mg.Get("gpu").State().Enabled {
-		t.Fatalf("read-only: %d", w.Code)
-	}
-	if w := do(Options{}, "/api/m/nope/enabled", `{"enabled":false}`); w.Code != 404 {
-		t.Fatalf("unknown machine: %d", w.Code)
-	}
-	if w := do(Options{}, "/api/m/gpu/enabled", `{}`); w.Code != 400 {
-		t.Fatalf("no value: %d", w.Code)
-	}
-	w := do(Options{}, "/api/m/gpu/enabled", `{"enabled":false}`)
-	if w.Code != 200 || mg.Get("gpu").State().Status != machines.StatusDisabled {
-		t.Fatalf("disable: %d %s", w.Code, w.Body)
-	}
-	if b, err := os.ReadFile(path); err != nil || !strings.Contains(string(b), `"gpu": false`) {
-		t.Fatalf("saved: %s %v", b, err)
-	}
-	if !strings.Contains(audit.String(), `"event":"machine.disable"`) || !strings.Contains(audit.String(), `"machine":"gpu"`) {
-		t.Fatalf("audit: %s", audit.String())
-	}
+	return ""
 }

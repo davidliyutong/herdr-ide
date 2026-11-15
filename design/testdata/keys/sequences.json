@@ -1,0 +1,206 @@
+{
+  "description": "How a stream of strokes runs bindings, chords included (users bind chords; no default is one). Each stroke gives none (the key is not the application's: the terminal gets it), pending (a chord goes on), run:<command>, literal (the chord's first stroke pressed again: this press goes on to the terminal, through the same key encoder as none) or swallow (a chord that matches nothing ends; the key is dropped). Bindings apply where their when allows: always applies in every context, terminal also in vscode (a VS Code pane is a pane of the main UI; the keys VS Code takes never reach the application). Run by web/src/__tests__/keys.test.ts.",
+  "bindings": [
+    {
+      "key": "ctrl+b c",
+      "command": "tab.new",
+      "when": "terminal"
+    },
+    {
+      "key": "ctrl+b shift+slash",
+      "command": "app.keyboardShortcuts",
+      "when": "terminal"
+    },
+    {
+      "key": "ctrl+b 1",
+      "command": "tab.select1",
+      "when": "terminal"
+    },
+    {
+      "key": "cmd+t",
+      "command": "tab.new",
+      "when": "terminal"
+    },
+    {
+      "key": "cmd+j",
+      "command": "view.zoomIn",
+      "when": "always"
+    },
+    {
+      "key": "ctrl+k ctrl+s",
+      "command": "app.settings",
+      "when": "terminal"
+    },
+    {
+      "key": "ctrl+k ctrl+x ctrl+y",
+      "command": "pane.zoom",
+      "when": "terminal"
+    },
+    {
+      "key": "f5",
+      "command": "code.open",
+      "when": "vscode"
+    },
+    {
+      "key": "cmd+d",
+      "command": "pane.splitRight",
+      "when": "dialog"
+    }
+  ],
+  "cases": [
+    {
+      "description": "a chord",
+      "context": "terminal",
+      "strokes": [
+        "ctrl+b",
+        "c"
+      ],
+      "results": [
+        "pending",
+        "run:tab.new"
+      ]
+    },
+    {
+      "description": "a shifted key in a chord",
+      "context": "terminal",
+      "strokes": [
+        "ctrl+b",
+        "shift+slash"
+      ],
+      "results": [
+        "pending",
+        "run:app.keyboardShortcuts"
+      ]
+    },
+    {
+      "description": "the first stroke twice: the second press reaches the terminal",
+      "context": "terminal",
+      "strokes": [
+        "ctrl+b",
+        "ctrl+b",
+        "c"
+      ],
+      "results": [
+        "pending",
+        "literal",
+        "none"
+      ]
+    },
+    {
+      "description": "an unbound second stroke ends the chord",
+      "context": "terminal",
+      "strokes": [
+        "ctrl+b",
+        "q",
+        "c"
+      ],
+      "results": [
+        "pending",
+        "swallow",
+        "none"
+      ]
+    },
+    {
+      "description": "a direct shortcut",
+      "context": "terminal",
+      "strokes": [
+        "cmd+t",
+        "cmd+x",
+        "c"
+      ],
+      "results": [
+        "run:tab.new",
+        "none",
+        "none"
+      ]
+    },
+    {
+      "description": "a chord of three strokes",
+      "context": "terminal",
+      "strokes": [
+        "ctrl+k",
+        "ctrl+x",
+        "ctrl+y"
+      ],
+      "results": [
+        "pending",
+        "pending",
+        "run:pane.zoom"
+      ]
+    },
+    {
+      "description": "chords sharing a first stroke",
+      "context": "terminal",
+      "strokes": [
+        "ctrl+k",
+        "ctrl+s",
+        "ctrl+k",
+        "ctrl+k"
+      ],
+      "results": [
+        "pending",
+        "run:app.settings",
+        "pending",
+        "literal"
+      ]
+    },
+    {
+      "description": "a longer chord ends where nothing matches",
+      "context": "terminal",
+      "strokes": [
+        "ctrl+k",
+        "ctrl+x",
+        "ctrl+x"
+      ],
+      "results": [
+        "pending",
+        "pending",
+        "swallow"
+      ]
+    },
+    {
+      "description": "in a VS Code pane the main UI's bindings run, its own and always ones too",
+      "context": "vscode",
+      "strokes": [
+        "cmd+t",
+        "cmd+j",
+        "f5",
+        "ctrl+b",
+        "c"
+      ],
+      "results": [
+        "run:tab.new",
+        "run:view.zoomIn",
+        "run:code.open",
+        "pending",
+        "run:tab.new"
+      ]
+    },
+    {
+      "description": "in a dialog",
+      "context": "dialog",
+      "strokes": [
+        "ctrl+b",
+        "cmd+d",
+        "cmd+j"
+      ],
+      "results": [
+        "none",
+        "run:pane.splitRight",
+        "run:view.zoomIn"
+      ]
+    },
+    {
+      "description": "context bindings do not run elsewhere",
+      "context": "terminal",
+      "strokes": [
+        "f5",
+        "cmd+d"
+      ],
+      "results": [
+        "none",
+        "none"
+      ]
+    }
+  ]
+}

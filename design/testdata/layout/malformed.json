@@ -1,0 +1,44 @@
+{
+  "description": "Reading leaves out workspaces without an id or with a repeated one and tabs without a root, gives fields of the wrong type their empty value, clamps selections and keeps a node of an unknown kind, which closing a terminal inside it does not touch.",
+  "input": {
+    "version": 2,
+    "workspaces": [
+      "nonsense",
+      { "name": "no id" },
+      {
+        "id": "w1",
+        "name": 7,
+        "cwd": null,
+        "tabs": [
+          { "root": { "terminal": "t1" }, "focused": "t9" },
+          { "focused": "t2" },
+          "x",
+          { "root": { "split": "diagonal", "children": [{ "terminal": "t3" }, { "terminal": "t4" }] }, "focused": "t3", "name": "" }
+        ],
+        "selected": 7
+      },
+      { "id": "w1", "name": "duplicate" },
+      { "id": "w2", "tabs": "none", "selected": -3 }
+    ],
+    "selected": 1.5
+  },
+  "ops": [{ "op": "closeTerminal", "terminal": "t3" }],
+  "changed": false,
+  "expected": {
+    "version": 2,
+    "workspaces": [
+      {
+        "id": "w1",
+        "name": "",
+        "cwd": "",
+        "tabs": [
+          { "root": { "terminal": "t1" }, "focused": "t1" },
+          { "root": { "split": "diagonal", "children": [{ "terminal": "t3" }, { "terminal": "t4" }] }, "focused": "" }
+        ],
+        "selected": 1
+      },
+      { "id": "w2", "name": "", "cwd": "", "tabs": [], "selected": 0 }
+    ],
+    "selected": 0
+  }
+}

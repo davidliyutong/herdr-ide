@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../state/store';
-import { actions, attentionList } from '../actions';
-import { actionLabel, defaultBindings, getKeyConfig, keyLabel, runAction, runCommand } from '../keymap';
+import { actions, attentionList, terminalPlace, workspaceTitle } from '../actions';
+import { commandEnabled, commandLabel, keyHint, runCommand } from '../keymap';
+import { useKeys } from '../keybindings';
 import { locales, t, type MessageKey } from '../i18n';
-import { prefDefs, usePrefs } from '../prefs';
-import { paneTitle } from '../lib/herdr';
+import { usePrefs } from '../prefs';
+import { agentOf, terminalTitle } from '../lib/machine';
+import { useTerms } from '../state/terms';
 import { StatusDot } from './StatusDot';
 import { useGui } from '../gui/state';
 import { enableGui } from '../gui/enable';
@@ -17,12 +19,26 @@ interface Item {
   run(): void;
 }
 
-function fuzzy(q: string, s: string): boolean {
-  q = q.toLowerCase();
+const wordStart = (s: string, i: number) => i === 0 || /[\s·:/(（.-]/.test(s[i - 1]);
+
+/** How well an item matches a query: 3 when a word starts with it, 2 when
+ * it holds it, 1 when its letters are the starts of words or follow each
+ * other there ("fpl" for "Focus Pane Left", "spri" for "Split Right"), 0
+ * otherwise. */
+export function matchScore(q: string, s: string): number {
+  q = q.toLowerCase().trim();
   s = s.toLowerCase();
-  let i = 0;
-  for (const ch of s) if (ch === q[i]) i++;
-  return i === q.length;
+  const at = s.indexOf(q);
+  if (at >= 0 && wordStart(s, at)) return 3;
+  if (at > 0) return 2;
+  let j = -1;
+  for (const ch of q) {
+    let k = j + 1;
+    while (k < s.length && !(s[k] === ch && (k === j + 1 || wordStart(s, k)))) k++;
+    if (k >= s.length) return 0;
+    j = k;
+  }
+  return 1;
 }
 
 export function Palette() {
@@ -41,45 +57,37 @@ export function Palette() {
   const items = useMemo<Item[]>(() => {
     if (!mode) return [];
     const s = useStore.getState();
-    const cfg = getKeyConfig();
     const ws: Item[] = [];
+    const tm = useTerms.getState().machines;
     for (const m of s.order) {
       const st = s.machines[m];
-      for (const w of st?.snapshot?.workspaces ?? []) {
+      for (const w of tm[m]?.layout?.workspaces ?? []) {
         ws.push({
-          id: `ws:${m}:${w.workspace_id}`,
-          label: `${w.label}`,
-          hint: st.label,
-          run: () => s.selectWorkspace(m, w.workspace_id),
+          id: `ws:${m}:${w.id}`,
+          label: workspaceTitle(m, w),
+          hint: st?.label,
+          run: () => actions.selectWorkspace(m, w.id),
         });
       }
     }
-    const agents: Item[] = attentionList().map(({ m, pane }) => ({
-      id: `agent:${m}:${pane.pane_id}`,
-      label: `${pane.agent} · ${paneTitle(pane)}`,
+    // An agent by its name and where it is (its workspace and tab).
+    const agents: Item[] = attentionList().map(({ m, terminal, record, status }) => ({
+      id: `agent:${m}:${terminal}`,
+      label: `${agentOf(record) ?? terminalTitle(record, terminal)} · ${terminalPlace(m, terminal) || terminalTitle(record, terminal)}`,
       hint: s.machines[m]?.label,
-      icon: <StatusDot status={pane.agent_status} />,
-      run: () => actions.focusAgent(m, pane.pane_id),
+      icon: <StatusDot status={status} />,
+      run: () => actions.focusPane(m, terminal),
     }));
-    const cmds: Item[] = Object.entries(cfg.bindings)
-      .filter(([a]) => a in defaultBindings && !['help', 'command_palette', 'goto', 'workspace_picker', 'switch_tab'].includes(a))
-      .map(([a, spec]) => ({
-        id: `cmd:${a}`,
-        label: actionLabel(a),
-        hint: keyLabel(spec, cfg.prefix),
-        run: () => runAction(a),
-      }));
-    for (const c of cfg.commands) {
-      cmds.push({
-        id: `custom:${c.key}`,
-        label: c.description || c.command,
-        hint: keyLabel(c.key, cfg.prefix),
-        run: () => runCommand(c),
-      });
-    }
+    // Commands that open the palette, the tabs by number and commands that
+    // cannot run now are left out.
+    const hidden = /^(app\.commandPalette|workspace\.switch|tab\.select\d)$/;
+    const cmds: Item[] = useKeys
+      .getState()
+      .commands.filter((c) => !hidden.test(c.id) && commandEnabled(c.id))
+      .map((c) => ({ id: `cmd:${c.id}`, label: commandLabel(c.id), hint: keyHint(c.id) || undefined, run: () => runCommand(c.id) }));
     const kinds = ['claude', 'codex', 'gemini', 'opencode', 'kimi', 'grok', 'cursor', 'copilot', 'qwen', 'amp'];
     for (const k of kinds) {
-      cmds.push({ id: `start:${k}`, label: t('action.startAgent', { kind: k }), run: () => actions.startAgent(k) });
+      cmds.push({ id: `start:${k}`, label: t('action.startAgent', { kind: k }), run: () => void actions.startAgent(k) });
     }
     for (const l of locales) {
       cmds.push({
@@ -88,16 +96,17 @@ export function Palette() {
         run: () => usePrefs.getState().setPref('locale', l.id),
       });
     }
-    for (const th of prefDefs.theme.options) {
+    for (const th of ['system', 'dark', 'light'] as const) {
       cmds.push({
         id: `theme:${th}`,
-        label: t('action.theme', { theme: t(`settings.theme.${th}` as MessageKey) }),
+        label: t('action.theme', { theme: t(`settings.appearance.theme.${th}` as MessageKey) }),
         run: () => usePrefs.getState().setPref('theme', th),
       });
     }
-    const f = s.focused;
-    if (f && useGui.getState().machines[f.m]?.phase === 'ready') {
-      cmds.push({ id: 'gui:pane', label: t('action.enableGuiPane'), run: () => void enableGui(f.m, [f.pane]) });
+    const f = actions.focusedContext();
+    const focused = f?.terminal;
+    if (f && focused && useGui.getState().machines[f.m]?.phase === 'ready') {
+      cmds.push({ id: 'gui:pane', label: t('action.enableGuiPane'), run: () => void enableGui(f.m, [focused]) });
     }
     for (const st of Object.values(useGui.getState().machines)) {
       if (st.phase !== 'ready') continue;
@@ -108,11 +117,16 @@ export function Palette() {
       });
     }
     if (mode === 'workspaces') return [...ws, ...agents];
-    if (mode === 'help') return cmds;
     return [...cmds, ...ws, ...agents];
   }, [mode]);
 
-  const filtered = q ? items.filter((i) => fuzzy(q, i.label + ' ' + (i.hint ?? ''))) : items;
+  const filtered = q
+    ? items
+        .map((i) => ({ i, score: matchScore(q, i.label + ' · ' + (i.hint ?? '')) }))
+        .filter((x) => x.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .map((x) => x.i)
+    : items;
   if (!mode) return null;
 
   const close = () => setPalette(undefined);
@@ -127,9 +141,7 @@ export function Palette() {
         <input
           ref={inputRef}
           value={q}
-          placeholder={t(
-            mode === 'workspaces' ? 'palette.placeholderWorkspaces' : mode === 'help' ? 'palette.placeholderHelp' : 'palette.placeholder',
-          )}
+          placeholder={t(mode === 'workspaces' ? 'palette.placeholderWorkspaces' : 'palette.placeholder')}
           onChange={(e) => {
             setQ(e.target.value);
             setSel(0);

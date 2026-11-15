@@ -11,45 +11,25 @@ const texts = (s: string) =>
     .sort((a, b) => a.start - b.start)
     .map((m) => [m.tex, m.display]);
 
+/** The vectors of design/testdata/math. */
+interface MathVectors {
+  cases: Array<{ description: string; text: string; expected: Array<[string, boolean]> }>;
+}
+
+const vectors = import.meta.glob<MathVectors>('../../../design/testdata/math/*.json', { eager: true, import: 'default' });
+
 describe('findMath', () => {
-  it('finds what Claude Code prints', () => {
-    // As Claude Code showed it: its markdown dropped the \ of \,.
-    const s = [
-      '⏺ 二次方公式: 对于方程 $ax^2+bx+c=0$($a\\neq 0$),其解为',
-      '',
-      '  $$x=\\frac{-b\\pm\\sqrt{b^2-4ac}}{2a}$$',
-      '',
-      '  高斯积分: 行内形式为 $\\int_{-\\infty}^{\\infty} e^{-x^2},dx=\\sqrt{\\pi}$,更一般地,',
-    ].join('\n');
-    expect(texts(s)).toEqual([
-      ['ax^2+bx+c=0', false],
-      ['a\\neq 0', false],
-      ['x=\\frac{-b\\pm\\sqrt{b^2-4ac}}{2a}', true],
-      ['\\int_{-\\infty}^{\\infty} e^{-x^2},dx=\\sqrt{\\pi}', false],
-    ]);
+  it('has vectors', () => {
+    expect(Object.keys(vectors).length).toBeGreaterThan(0);
   });
 
-  it('finds \\( \\) and \\[ \\], also without their backslashes', () => {
-    expect(texts('root \\(x_1\\) and \\[\\sum_{k=1}^n k\\]')).toEqual([
-      ['x_1', false],
-      ['\\sum_{k=1}^n k', true],
-    ]);
-    expect(texts('Area:\n[\n  A = \\pi r^2\n]\nwhere (\\alpha + \\beta) is (a sum)')).toEqual([
-      ['A = \\pi r^2', true],
-      ['\\alpha + \\beta', false],
-    ]);
-    expect(texts('$$\n\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}\n$$')).toEqual([
-      ['\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}', true],
-    ]);
-  });
-
-  it('leaves shell variables, prices and calls alone', () => {
-    expect(texts('echo "$HOME" "$PATH"; cost $5 and $10; awk \'{print $1}\'')).toEqual([]);
-    expect(texts('f(\\n) and print(\\alpha) and [x] and \\$a_1\\$')).toEqual([]);
-    expect(texts('$x$ alone, $ a_1 $ spaced, $a_1$5')).toEqual([]);
-    // Not across an empty line.
-    expect(texts('$$a^2\n\n$$ and $b_1\n\nc$')).toEqual([]);
-  });
+  for (const file of Object.values(vectors)) {
+    for (const c of file.cases) {
+      it(c.description, () => {
+        expect(texts(c.text)).toEqual(c.expected);
+      });
+    }
+  }
 });
 
 describe('mathAround', () => {

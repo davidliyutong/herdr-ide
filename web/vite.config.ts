@@ -14,8 +14,8 @@ function brand(): Plugin {
       start_url: '/',
       display: 'standalone',
       display_override: ['window-controls-overlay', 'standalone'],
-      background_color: '#0e1116',
-      theme_color: '#0e1116',
+      background_color: '#0a0a0a',
+      theme_color: '#0a0a0a',
       icons: [{ src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }],
     },
     null,
@@ -38,18 +38,23 @@ function brand(): Plugin {
   };
 }
 
-// The bundled terminal font is not an npm package, so Vite's license list
-// leaves it out (src/terminal/fonts/README.md).
-function fontLicense(): Plugin {
+// The bundled terminal font, terminal emulator and VSCodium logo are not npm
+// packages, so Vite's license list leaves them out
+// (src/terminal/fonts/README.md, scripts/fetch-ghostty-vt.sh,
+// src/assets/vscodium/README.md).
+function bundledLicenses(): Plugin {
   return {
-    name: 'font-license',
+    name: 'bundled-licenses',
     generateBundle: {
       order: 'post',
       handler(_, bundle) {
         const out = bundle['licenses.md'];
         if (out?.type !== 'asset') return;
-        const ofl = readFileSync(new URL('./src/terminal/fonts/OFL.txt', import.meta.url), 'utf8').trim();
-        out.source = `${String(out.source).trimEnd()}\n\n## JetBrains Mono - 2.304 (OFL-1.1)\n\n${ofl}\n`;
+        const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8').trim();
+        out.source =
+          `${String(out.source).trimEnd()}\n\n## JetBrains Mono - 2.304 (OFL-1.1)\n\n${read('./src/terminal/fonts/OFL.txt')}\n` +
+          `\n## libghostty-vt (Ghostty cf5519b22f91, MIT)\n\n${read('./src/vt/LICENSE')}\n` +
+          `\n## VSCodium logo (VSCodium ca7f7b44b5e5, MIT)\n\n${read('./src/assets/vscodium/LICENSE')}\n`;
       },
     },
   };
@@ -70,7 +75,7 @@ function katexWoff2(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), brand(), fontLicense(), katexWoff2()],
+  plugins: [react(), brand(), bundledLicenses(), katexWoff2()],
   build: {
     outDir: 'dist',
     emptyOutDir: true,
@@ -83,7 +88,8 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/ws': { target: core, ws: true },
-      '/api': { target: core },
+      // The terminals' WebSocket (and the ssh login's) under /api.
+      '/api': { target: core, ws: true },
       '/m': {
         target: core,
         ws: true,

@@ -18,35 +18,58 @@ automatically, scheduling agents.
 
 ## Design
 
-- **States** come from herdr (`idle`, `working`, `blocked`, `done`,
-  `unknown`), per pane, through the agent-status subscription
-  ([01](01-herdr-integration.md)).
-- **Inbox** (sidebar): agents in `blocked` or `done` across all machines,
-  blocked first, with machine, pane title and cwd; counts of working agents.
-  Workspaces and tabs show the most urgent status of their agents.
-  `prefix o` jumps to the most urgent agent.
-- **Seen** (`web/src/seen.ts`): herdr reports `done` for an agent that
-  finished outside its active workspace and clears it only when the pane is
-  focused in herdr (`pane.focus`; verified with herdr 0.9.5). Selection in
-  the web UI is local, so when the pane focused in the UI is `done`, on
-  screen and the page visible — opened from the inbox, from a notification
-  or by hand, or finishing while looked at — the UI focuses it in herdr.
-  Showing a tab focuses one of its panes (herdr's focused pane of the tab).
-- **Notifications**: a status change to `blocked` or `done` raises a desktop
-  notification when the page is hidden (a toast when visible for `blocked`);
-  clicking it focuses the agent. The title and the PWA badge count blocked
-  agents.
-- **Sounds** (`web/src/sound.ts`): herdr plays its sounds only in the herdr
-  TUI client, which the IDE does not run, so the browser plays them on the
-  same transitions: `blocked` plays the request chime, `done` the done chime,
-  except — as in herdr — when the pane is on screen (selected workspace and
-  tab) and the page is visible and focused. The two chimes are synthesized
-  with the Web Audio API, so no audio files are shipped. The setting
-  **Notification sounds** is on by default, like herdr's `[ui.sound]`;
-  **Silent agents** lists agents (matched by herdr's agent name or display
-  name) that never sound and starts with `droid`, which herdr mutes by
-  default. Both are browser settings
-  ([13](13-settings-and-appearance.md)).
+- **States**: the machine's agent identifies the coding agent in each
+  terminal of its terminal core and reads its state from the screen with
+  herdr's rules (`idle`, `working`, `blocked`, `done`, `unknown`;
+  [25](25-agent-detection.md)); a status the program reports itself (OSC
+  7501) counts too. The terminal records carry `agent` and `agent_status`,
+  and the core sends `agent` messages on `/ws` with the terminal's address.
+- **Inbox** (the sidebar's **Agents** section, at its top, translated as
+  the rest of the UI: 智能体 in Chinese): agents in `blocked` or `done`
+  across the machines the page follows, blocked first, each with its
+  workspace and tab (`website · 2`), its terminal's title and its machine
+  (in this order, so a long machine name does not cut off where the agent
+  is), the directory in its tooltip; counts of working agents. Workspaces, tabs and pane headers show the most
+  urgent status of their agents. **Jump to the agent that needs
+  attention** (`app.agentAttention`, in the palette and the View menu;
+  `cmd+shift+a` in the desktop app on macOS, `ctrl+shift+a` elsewhere) jumps
+  to the most urgent agent: its machine, workspace and tab are shown and
+  its terminal focused.
+- **Seen**: a turn that ended (`done`) is seen when its terminal has the
+  focus in a client: the page tells the core when a terminal's input gets or
+  loses the focus (`focus` on its stream), and the core reports the agent
+  idle ([22](22-terminal-protocol.md)). Opening an agent from the inbox or a
+  notification focuses its terminal.
+- **Notifications** (`web/src/notify.ts`): a status change to `blocked` or
+  `done` raises a notification of the system, one per terminal, when the
+  page is hidden or not focused, the setting **System notifications**
+  (`notifications.system`) is on and the browser allows notifications,
+  which the page asks for on its first click while the setting is on (a
+  toast when visible for `blocked`, whatever the setting), saying where
+  the agent is (machine, workspace and tab) and its terminal's title;
+  clicking it focuses the agent. With **Badge count** (`notifications.badge`) on, the
+  title and the app badge (the Badging API, `navigator.setAppBadge`) count
+  blocked agents; turned off, both are cleared at once. The badge is an
+  installed PWA's icon, and in the desktop app the Dock icon on macOS, an
+  overlay on the taskbar button on Windows, and the launcher icon on Linux
+  in docks that implement the Unity launcher API. The desktop app
+  grants the page notifications; Windows shows those of the installed app
+  (its Start menu shortcut carries the app's id), and Linux needs a
+  notification daemon ([16](16-desktop-packaging.md)).
+- **Sounds** (`web/src/sound.ts`): the page plays a sound on the same
+  transitions: `blocked` plays the request chime, `done` the done chime,
+  except when the terminal is on screen (selected workspace and tab) and
+  the page is visible and focused. The two chimes are synthesized with the
+  Web Audio API, so no audio files are shipped. The setting **Notification
+  sounds** (`notifications.sound`) is on by default; **Silent agents**
+  (`notifications.mutedAgents`, a list: every agent the terminals
+  recognize as a checkbox, others added by name) lists agents (matched by
+  the detected agent's name or display name) that never sound and starts
+  with `droid`; their notifications and their count on the badge follow
+  the two settings above, as the dialog says.
+  The three switches are separate, each on by default (sounds,
+  notifications and the badge, as before they could be turned off), and
+  all four are settings of the core ([13](13-settings-and-appearance.md)).
 - **One browser sounds**: each page tells the core when it is used
   (`active` on the WebSocket: on connect with the time since its last input,
   then on pointer, key or focus events at most every 2 s; durations, so
@@ -57,46 +80,64 @@ automatically, scheduling agents.
   user gesture on the page, so a page not clicked since it was loaded can
   stay silent; the desktop app's main window allows autoplay
   ([16](16-desktop-packaging.md)).
-- **Starting agents**: the palette offers common agent kinds; the focused pane
-  is split to the right in the same cwd and `agent.start` launches the agent
-  with a unique name.
+- **Starting agents**: the palette offers common agent kinds (`claude`,
+  `codex`, `gemini`, `opencode`, `kimi`, `grok`, `cursor`, `copilot`,
+  `qwen`, `amp`); the focused pane is split to the right and the agent runs
+  in the new terminal (`terminal.run` with the agent's name as the program)
+  in the focused terminal's directory, or in a new tab when no pane has the
+  focus.
 - **Context to agents**: VS Code's *Send to Agent* pastes `@file:lines` and
-  the selection into the focused agent pane without submitting; pasted or
-  dropped images are uploaded and their paths typed
+  the selection into a terminal without submitting (`web/src/lib/bridge.ts`).
+  From a VS Code pane it goes to an agent of the pane's tab, else of the
+  pane's workspace (those waiting for input, idle or done, first), else to
+  the workspace's terminal focused last on this page; never to another
+  workspace's terminal: without one, a note names the workspace. The page
+  whose VS Code pane shows the sending window takes it: the core sends the
+  window's id, and a page learns which window each of its VS Code panes
+  shows when that window reports the keyboard while the pane's iframe has
+  it ([05](05-vscode-panes.md)). A window no page shows is handled by the
+  page with the keyboard: its focused terminal on that machine, else the
+  machine's agent waiting for input. The extension's status bar then says
+  *Sent to an agent of this workspace*. The paste goes through the
+  terminal's stream, bracketed when the program asked; pasted or dropped
+  images are uploaded and their paths typed
   ([06](06-quick-look-and-files.md)).
-- **Review**: from a pane, `prefix d` opens the multi-file diff and
-  `prefix shift+g` Git Graph of its repository ([05](05-vscode-panel.md)).
+- **Review**: from a pane, its header's buttons (and the palette's
+  `code.diff` and `code.gitGraph`) open the multi-file diff and Git Graph
+  of its repository in VS Code, split to the right of the pane (reusing
+  the tab's VS Code pane for the same folder) ([05](05-vscode-panes.md)).
 
 ## Alternatives considered
 
 | Option | Why not |
 | --- | --- |
-| Agent prompt box calling `agent.prompt` | The pane itself is the prompt; a second input duplicates it and hides the agent's own UI (approvals, slash commands). |
-| herdr's own sound files | They carry no separate attribution in herdr's repository; synthesized chimes need no asset or license notice. |
+| A prompt box sending text to the agent | The terminal itself is the prompt; a second input duplicates it and hides the agent's own UI (approvals, slash commands). |
+| Sound files | Shipped audio needs an asset and its license notice; synthesized chimes need neither. |
 | Every browser plays | With several browsers or tabs open, each would sound at once. |
 | Web Push for closed tabs | Requires a push service and subscription storage; the reverse-proxy model has no user accounts. |
 
 ## Failure modes
 
-- Agents herdr cannot classify show `unknown` and never notify.
+- Agents the rules cannot classify show `unknown` and never notify.
 - Notifications need permission (asked on the first click) and a secure
   context.
 - The chosen browser may be one the user has walked away from (another
   browser was opened earlier and not used since); its sounds play there.
-- herdr's `[ui.sound]` configuration on the core host (custom sound files,
-  per-agent overrides, `HERDR_DISABLE_SOUND`) is not read; the browser
-  settings apply.
 
 ## Testing
 
-Inbox ordering and notification triggering are driven by snapshot state and
-status events; they were verified against live machines with idle and working
-agents. `internal/herdr/client_test.go` covers status event parsing;
-`web/src/__tests__/dialog.test.ts` the seen marking (once, only on screen).
-`web/src/__tests__/sound.test.ts` covers which sound a status change plays
-(suppression, muted agents, the chosen browser);
+`TestTermAgents` (`internal/server`) and `TestIntegrationDetect` cover the
+agent messages and the seen marking by focus ([25](25-agent-detection.md)).
+`web/src/__tests__/terms.test.ts` covers the attention order,
+`sidebarMachines.test.ts` the inbox and the workspaces' dots,
+`codePanes.test.ts` where *Send to Agent* goes, and
+`web/src/__tests__/sound.test.ts` which sound a status change plays
+(suppression, muted agents, the chosen browser), `notify.test.ts` the
+three switches (a notification only while its setting is on, the
+permission asked for only then, the badge and title count cleared when the
+badge is turned off);
 `TestSoundClientMostRecentlyActive` (`internal/server`) the choice of the
-browser. Playing in only the most recently used of two browsers was verified
-in Chromium against herdr 0.9.5 with `pane report-agent`.
-Clearing `done` by opening a workspace by hand was verified against herdr
-0.9.5 with `pane report-agent`.
+browser. An agent's
+working, blocked and done states in the sidebar, a tab,
+a pane header and a toast were checked in headless Chromium against a dev
+core with a script named like Claude Code.

@@ -1,0 +1,43 @@
+{
+  "description": "Splitting the focused terminal (the new one second and focused), setting ratios by the path to their split (clamped; a path ending at a leaf changes nothing) and focusing a terminal.",
+  "input": {
+    "version": 2,
+    "workspaces": [{ "id": "w", "name": "", "cwd": "/p", "tabs": [{ "root": { "terminal": "t1" }, "focused": "t1" }], "selected": 0 }],
+    "selected": 0
+  },
+  "ops": [
+    { "op": "splitFocused", "axis": "horizontal", "terminal": "t2" },
+    { "op": "splitFocused", "axis": "vertical", "terminal": "t3" },
+    { "op": "splitFocused", "axis": "vertical", "terminal": "t3" },
+    { "op": "setRatio", "path": [true], "ratio": 0.99 },
+    { "op": "setRatio", "path": [false], "ratio": 0.2 },
+    { "op": "setRatio", "path": [true, false], "ratio": 0.3 },
+    { "op": "focus", "terminal": "t1" }
+  ],
+  "changed": true,
+  "expected": {
+    "version": 2,
+    "workspaces": [
+      {
+        "id": "w",
+        "name": "",
+        "cwd": "/p",
+        "tabs": [
+          {
+            "root": {
+              "split": "horizontal",
+              "ratio": 0.5,
+              "children": [
+                { "terminal": "t1" },
+                { "split": "vertical", "ratio": 0.9, "children": [{ "terminal": "t2" }, { "terminal": "t3" }] }
+              ]
+            },
+            "focused": "t1"
+          }
+        ],
+        "selected": 0
+      }
+    ],
+    "selected": 0
+  }
+}

@@ -23,7 +23,7 @@ try {
   /* storage unavailable */
 }
 
-/** Per-browser preferences (localStorage), namespaced by the product slug. */
+/** Per-browser state (localStorage), namespaced by the product slug. */
 export const storage = {
   get(key: string): string | null {
     try {
@@ -35,6 +35,13 @@ export const storage = {
   set(key: string, value: string) {
     try {
       localStorage.setItem(prefix + key, value);
+    } catch {
+      /* storage unavailable */
+    }
+  },
+  remove(key: string) {
+    try {
+      localStorage.removeItem(prefix + key);
     } catch {
       /* storage unavailable */
     }

@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Builds the web UI, the VS Code bridge extension, the per-platform agents
-# (embedded gzip), then the core for TARGETS (default: host platform), packaged
-# beside native herdr and license notices. Names come from internal/brand.
+# (embedded gzip), fetches the pinned herdr-core of each agent platform
+# (embedded gzip), then builds the core for TARGETS (default: host platform),
+# packaged with its license notices (a Windows core, which goes into the
+# desktop installer only, gets no archive). Names come from internal/brand.
 #
 #   scripts/build.sh                       # host archive in dist/release/
 #   TARGETS="linux/amd64 darwin/arm64" scripts/build.sh
@@ -15,9 +17,6 @@ SLUG=$(sed -n 's/^[[:space:]]*Slug = "\(.*\)"$/\1/p' internal/brand/brand.go)
 LDFLAGS="-s -w -X ${MODULE}/internal/agentproto.Version=${VERSION}"
 AGENT_PLATFORMS=${AGENT_PLATFORMS:-"linux/amd64 linux/arm64 darwin/amd64 darwin/arm64"}
 TARGETS=${TARGETS:-"$(go env GOOS)/$(go env GOARCH)"}
-
-echo "==> native herdr companions"
-go run ./scripts/fetch-herdr $TARGETS
 
 if [[ -z "${SKIP_WEB:-}" ]]; then
   echo "==> web"
@@ -45,6 +44,13 @@ for p in $AGENT_PLATFORMS; do
   echo "    $os/$arch $(du -h "$out" | cut -f1)"
 done
 
+# herdr-core for machines: the pinned upstream release of every agent
+# platform, verified and embedded; the build fails without it.
+echo "==> herdr-core for machines"
+mkdir -p internal/embedded/hc
+rm -f internal/embedded/hc/*.gz
+go run ./scripts/fetch-hc $AGENT_PLATFORMS
+
 # The encoder Linux machines send program windows as video with, built by
 # scripts/build-ffmpeg.sh; without it windows are always pictures.
 # REQUIRE_ENCODER=1 (release builds) fails when one is missing.
@@ -65,7 +71,9 @@ done
 echo "==> ${SLUG}"
 for p in $TARGETS; do
   os=${p%/*}; arch=${p#*/}
-  out=dist/${SLUG}-$os-$arch
+  exe=
+  [[ $os == windows ]] && exe=.exe
+  out=dist/${SLUG}-$os-$arch$exe
   CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -ldflags "$LDFLAGS" -o "$out" "./cmd/${SLUG}"
   echo "    $out $(du -h "$out" | cut -f1)"
 done

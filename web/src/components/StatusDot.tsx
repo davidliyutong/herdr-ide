@@ -1,4 +1,4 @@
-import type { AgentStatus } from '../lib/herdr';
+import type { AgentStatus } from '../lib/machine';
 import { t } from '../i18n';
 
 export function statusLabel(s: AgentStatus): string {

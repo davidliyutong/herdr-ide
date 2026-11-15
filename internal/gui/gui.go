@@ -27,30 +27,51 @@ import (
 
 // Settings.
 const (
-	SettingGUI   = "gui"
-	SettingGPU   = "gui-gpu"
-	SettingVideo = "gui-video"
+	SettingGUI   = "gui.enabled"
+	SettingGPU   = "gui.gpu"
+	SettingVideo = "gui.video"
 
 	GPUVglrun = "vglrun"
 	GPUAll    = "all"
 )
 
-// SettingDefs are the GUI settings that can be changed at runtime.
-var SettingDefs = []settings.Def{
-	{
-		Key: SettingGUI, Kind: settings.KindEnum, Default: "on", Options: []string{"on", "off"},
-		Usage:      "show windows of programs on remote Linux machines: new panes get a virtual display (DISPLAY), Xvfb is fetched in user space when missing; also per machine in the UI",
-		PerMachine: settings.ScopeRemote,
+// onOff reads the on/off values of earlier versions.
+func onOff(v any) (any, bool) {
+	switch v {
+	case "on":
+		return true, true
+	case "off":
+		return false, true
+	}
+	return nil, false
+}
+
+// Settings are the GUI settings that can be changed at runtime, also per
+// remote machine, with the flags and file keys of earlier versions.
+var Settings = settings.Module{
+	Sections: []settings.Section{{ID: "gui", Order: 70, Advanced: true}},
+	Defs: []settings.Def{
+		{
+			Key: SettingGUI, Type: settings.TypeBool, Default: true, Scope: settings.ScopeRemoteMachine, Section: "gui", Order: 10,
+			Flag:  "gui",
+			Usage: "show windows of programs on remote Linux machines: new panes get a virtual display (DISPLAY), Xvfb is fetched in user space when missing; true or false (on or off); also per machine in the UI",
+		},
+		{
+			Key: SettingGPU, Type: settings.TypeEnum, Default: GPUVglrun, Enum: []string{GPUVglrun, GPUAll},
+			Scope: settings.ScopeRemoteMachine, Section: "gui", Order: 20,
+			Flag:  "gui-gpu",
+			Usage: "OpenGL on machines with VirtualGL: vglrun (programs started with vglrun render on the GPU) or all (every program in new panes runs under VirtualGL); also per machine in the UI",
+		},
+		{
+			Key: SettingVideo, Type: settings.TypeBool, Default: true, Scope: settings.ScopeRemoteMachine, Section: "gui", Order: 30,
+			Flag:  "gui-video",
+			Usage: "send program windows that keep changing as video (H.264 on NVIDIA, Intel or AMD GPUs, else VP8 on the CPU) to browsers that decode it, encoded on the machine by the encoder the core brings; pictures otherwise (false: always pictures); also per machine in the UI",
+		},
 	},
-	{
-		Key: SettingGPU, Kind: settings.KindEnum, Default: GPUVglrun, Options: []string{GPUVglrun, GPUAll},
-		Usage:      "OpenGL on machines with VirtualGL: vglrun (programs started with vglrun render on the GPU) or all (every program in new panes runs under VirtualGL); also per machine in the UI",
-		PerMachine: settings.ScopeRemote,
-	},
-	{
-		Key: SettingVideo, Kind: settings.KindEnum, Default: "on", Options: []string{"on", "off"},
-		Usage:      "send program windows that keep changing as video (H.264 on NVIDIA, Intel or AMD GPUs, else VP8 on the CPU) to browsers that decode it, encoded on the machine by the encoder the core brings; pictures otherwise (off: always pictures); also per machine in the UI",
-		PerMachine: settings.ScopeRemote,
+	Migrations: []settings.Migration{
+		{From: "gui", To: SettingGUI, Convert: onOff},
+		{From: "gui-gpu", To: SettingGPU, Convert: settings.Renamed},
+		{From: "gui-video", To: SettingVideo, Convert: onOff},
 	},
 }
 
@@ -152,9 +173,9 @@ type Manager struct {
 type display struct {
 	mc    *machines.Machine
 	phase string
-	// herdrUp: the machine's herdr server was reachable at the last state
-	// change seen while the display was attached.
-	herdrUp  bool
+	// up: the machine's terminal core was reachable at the last change
+	// seen while the display was attached.
+	up       bool
 	err      string
 	status   *agentproto.GUIStatus
 	ensuring bool
@@ -185,7 +206,8 @@ type display struct {
 	viewers map[uint32]map[*Viewer]bool
 	acked   map[uint32]uint32
 	closing map[uint32]*time.Timer
-	// typed: panes whose shell got the export command, with the display.
+	// typed: the terminals whose shell got the export command, with the
+	// display.
 	// A shell's environment as seen in /proc does not show it.
 	typed map[string]string
 }
@@ -197,17 +219,22 @@ func New(st *settings.Store, logger *log.Logger) *Manager {
 	return m
 }
 
-// setting returns a setting's value for a machine.
-func (m *Manager) setting(key, machine string) string {
+// enabled tells whether program windows are shown for a machine.
+func (m *Manager) enabled(machine string) bool {
+	return m.Settings == nil || m.Settings.Bool(SettingGUI, machine)
+}
+
+// video tells whether moving windows of a machine are sent as video.
+func (m *Manager) video(machine string) bool {
+	return m.Settings == nil || m.Settings.Bool(SettingVideo, machine)
+}
+
+// gpu is the machine's VirtualGL mode.
+func (m *Manager) gpu(machine string) string {
 	if m.Settings == nil {
-		for _, d := range SettingDefs {
-			if d.Key == key {
-				return d.Default
-			}
-		}
-		return ""
+		return GPUVglrun
 	}
-	return m.Settings.GetFor(key, machine)
+	return m.Settings.String(SettingGPU, machine)
 }
 
 // get returns the display record of a machine; m.mu is held.
@@ -315,7 +342,7 @@ func (m *Manager) retryLater(d *display, sess *transport.Session) {
 // otherwise. A detached display keeps running until idle; its programs keep
 // their windows.
 func (m *Manager) Apply(mc *machines.Machine) {
-	if m.setting(SettingGUI, mc.ID()) != "off" {
+	if m.enabled(mc.ID()) {
 		m.ensure(mc, true)
 		return
 	}
@@ -382,8 +409,7 @@ func onSession(mc *machines.Machine, sess *transport.Session) bool {
 	if mc.Session() != sess {
 		return false
 	}
-	st := mc.State().Status
-	return st == machines.StatusReady || st == machines.StatusDegraded
+	return mc.State().Status == machines.StatusReady
 }
 
 // fail shows that preparing or attaching the display over sess failed and
@@ -455,7 +481,7 @@ func plan(st *agentproto.GUIStatus, readOnly bool) (actions []string, stop strin
 
 func (m *Manager) prepare(d *display, sess *transport.Session) {
 	mc := d.mc
-	if m.setting(SettingGUI, mc.ID()) == "off" {
+	if !m.enabled(mc.ID()) {
 		m.setPhase(d, PhaseOff, nil)
 		return
 	}
@@ -493,7 +519,7 @@ func (m *Manager) prepare(d *display, sess *transport.Session) {
 	}
 	m.mu.Lock()
 	// The setting may have been turned off while the display was prepared.
-	if m.setting(SettingGUI, mc.ID()) == "off" {
+	if !m.enabled(mc.ID()) {
 		m.mu.Unlock()
 		conn.Close()
 		m.setPhase(d, PhaseOff, nil)
@@ -507,9 +533,9 @@ func (m *Manager) prepare(d *display, sess *transport.Session) {
 		close(d.cmds)
 	}
 	d.status, d.sess, d.stream = st, sess, conn
-	// The keeper is asked for below; the next state change with herdr
-	// reachable asks again, in case herdr was down meanwhile.
-	d.herdrUp = false
+	// The keeper is asked for below; the next change with the terminal
+	// core reachable asks again, in case it was down meanwhile.
+	d.up = false
 	d.cmds = make(chan []byte, 256)
 	d.windows, d.order, d.layers = map[uint32]*agentproto.GUIWindow{}, nil, map[uint32]agentproto.GUILayer{}
 	// The new window manager numbers frames from the start and has no
@@ -528,7 +554,7 @@ func (m *Manager) prepare(d *display, sess *transport.Session) {
 	if keep, _ := afterAttach(m.ReadOnly, false); keep {
 		go m.keeper(d)
 	}
-	if _, push := afterAttach(m.ReadOnly, m.setting(SettingVideo, mc.ID()) != "off"); push {
+	if _, push := afterAttach(m.ReadOnly, m.video(mc.ID())); push {
 		go m.prepareVideo(d)
 	}
 }
@@ -553,7 +579,7 @@ func (m *Manager) ApplyVideo(mc *machines.Machine) {
 		}
 	}
 	m.mu.Unlock()
-	if _, push := afterAttach(m.ReadOnly, m.setting(SettingVideo, mc.ID()) != "off"); push {
+	if _, push := afterAttach(m.ReadOnly, m.video(mc.ID())); push {
 		go m.prepareVideo(d)
 	}
 }
@@ -568,26 +594,27 @@ func afterAttach(readOnly, video bool) (keep, push bool) {
 	return true, video
 }
 
-// HerdrReady follows the machine's herdr server: each time it is reachable
-// again (or for the first time) while the display is attached, the machine
-// is asked to keep the display while that server runs, since a keeper
-// started while the server was down has left.
-func (m *Manager) HerdrReady(mc *machines.Machine, ready bool) {
+// ServerReady follows the machine's terminal core, whose programs get the
+// display: each time it is reachable again (or for the first time) while
+// the display is attached, the machine is asked to keep the display while
+// the terminal core runs, since a keeper started while it was down has
+// left.
+func (m *Manager) ServerReady(mc *machines.Machine, ready bool) {
 	m.mu.Lock()
 	d := m.ds[mc.ID()]
 	if d == nil {
 		m.mu.Unlock()
 		return
 	}
-	start := ready && !d.herdrUp && d.stream != nil && d.phase == PhaseReady
-	d.herdrUp = ready && (d.herdrUp || start)
+	start := ready && !d.up && d.stream != nil && d.phase == PhaseReady
+	d.up = ready && (d.up || start)
 	m.mu.Unlock()
 	if keep, _ := afterAttach(m.ReadOnly, false); start && keep {
 		go m.keeper(d)
 	}
 }
 
-// keep has the machine keep its display while its herdr server runs, also
+// keep has the machine keep its display while its terminal core runs, also
 // after this connection ends.
 func (m *Manager) keep(d *display) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
@@ -726,10 +753,6 @@ func (m *Manager) event(d *display, payload []byte) {
 			break
 		}
 		w := *ev.Window
-		// A program from another herdr session has no pane here.
-		if info := d.mc.State().Info; w.Socket != "" && info != nil && info.HerdrSocket != "" && w.Socket != info.HerdrSocket {
-			w.Pane = ""
-		}
 		isNew := d.windows[w.ID] == nil
 		if isNew {
 			d.order = append(d.order, w.ID)
@@ -883,7 +906,7 @@ var codecPreference = []string{"avc1", "vp8"}
 // codecsLocked returns the video streams every viewer of window id
 // decodes, in codecPreference order.
 func (m *Manager) codecsLocked(d *display, id uint32) []string {
-	if m.setting(SettingVideo, d.mc.ID()) == "off" {
+	if !m.video(d.mc.ID()) {
 		return nil
 	}
 	var out []string
@@ -975,7 +998,7 @@ func (m *Manager) States() []State {
 
 // PaneEnv is the environment new panes on mc get, nil when they get none.
 func (m *Manager) PaneEnv(mc *machines.Machine) map[string]string {
-	if m.setting(SettingGUI, mc.ID()) == "off" || mc.Local() {
+	if !m.enabled(mc.ID()) || mc.Local() {
 		return nil
 	}
 	m.mu.Lock()
@@ -989,7 +1012,7 @@ func (m *Manager) PaneEnv(mc *machines.Machine) map[string]string {
 	env := map[string]string{"DISPLAY": d.status.Display, "XAUTHORITY": d.status.XAuthority}
 	if d.status.GPU {
 		env["VGL_DISPLAY"] = "egl0"
-		if m.setting(SettingGPU, mc.ID()) == GPUAll && d.status.VGLPreload != "" {
+		if m.gpu(mc.ID()) == GPUAll && d.status.VGLPreload != "" {
 			env["LD_PRELOAD"] = d.status.VGLPreload
 			env["VGL_ISACTIVE"] = "1"
 		}
@@ -1143,10 +1166,10 @@ var (
 type EnableResult struct {
 	Enabled int      `json:"enabled"` // shells that got the variables typed in
 	Already int      `json:"already"` // shells started with the display
-	Busy    []string `json:"busy"`    // panes running a program
-	Typed   []string `json:"typed"`   // panes typed into
-	Failed  []string `json:"failed"`  // panes that could not be reached
-	Command string   `json:"command"` // what was typed, for the busy panes
+	Busy    []string `json:"busy"`    // terminals running a program
+	Typed   []string `json:"typed"`   // terminals typed into
+	Failed  []string `json:"failed"`  // terminals that could not be reached
+	Command string   `json:"command"` // what was typed, for the busy terminals
 }
 
 // ExportCommand is the shell command that sets env (values single-quoted;
@@ -1165,26 +1188,17 @@ func ExportCommand(env map[string]string) string {
 	return b.String()
 }
 
-// shellAt returns a pane's shell and whether it waits at its prompt: an
-// interactive shell is its own process group, in the foreground while it
-// reads a command line.
-func shellAt(ctx context.Context, mc *machines.Machine, pane string) (pid int, idle bool, err error) {
-	raw, err := mc.Call(ctx, "pane.process_info", map[string]string{"pane_id": pane})
-	if err != nil {
-		return 0, false, err
-	}
-	var info struct {
-		ProcessInfo struct {
-			ShellPid *int `json:"shell_pid"`
-			FG       *int `json:"foreground_process_group_id"`
-		} `json:"process_info"`
-	}
-	json.Unmarshal(raw, &info)
-	pi := info.ProcessInfo
-	if pi.ShellPid == nil {
-		return 0, false, nil
-	}
-	return *pi.ShellPid, pi.FG != nil && *pi.FG == *pi.ShellPid, nil
+// Shells reaches the terminals that Enable types into: those of the
+// machine's terminal core.
+type Shells interface {
+	// All lists every terminal, for an Enable without a list.
+	All(ctx context.Context) ([]string, error)
+	// Shell returns the pid of id's shell (0 when it has none) and whether
+	// it waits at its prompt: an interactive shell is its own process
+	// group, in the foreground while it reads a command line.
+	Shell(ctx context.Context, id string) (pid int, idle bool, err error)
+	// Send types text into id.
+	Send(ctx context.Context, id, text string) error
 }
 
 // interruptPause lets a shell handle Ctrl-C before the command follows: the
@@ -1192,18 +1206,18 @@ func shellAt(ctx context.Context, mc *machines.Machine, pane string) (pid int, i
 var interruptPause = 200 * time.Millisecond
 
 // shellNames are the shells the export command is written for, by
-// executable name; anything else in a pane (a program that replaced its
+// executable name; anything else in a terminal (a program that replaced its
 // shell with exec, an agent) is never typed into.
 var shellNames = map[string]bool{"bash": true, "zsh": true, "fish": true, "dash": true, "sh": true, "ksh": true, "mksh": true, "yash": true, "ash": true}
 
-// Decisions of Enable for one pane.
+// Decisions of Enable for one terminal.
 const (
 	enableAlready = "already"
 	enableBusy    = "busy"
 	enableType    = "type"
 )
 
-// decide tells what Enable does with a pane whose shell is p (nil when the
+// decide tells what Enable does with a terminal whose shell is p (nil when the
 // agent could not see it): idle means it waits at its prompt, typed that
 // the core typed the export into it before.
 func decide(p *agentproto.GUIProc, idle, typed bool) string {
@@ -1216,6 +1230,24 @@ func decide(p *agentproto.GUIProc, idle, typed bool) string {
 	return enableType
 }
 
+// shellProcs asks the machine's agent about the processes pids (action
+// shells): which were started with the display, and their executables'
+// names. A variable so tests can stand in for the agent.
+var shellProcs = func(ctx context.Context, mc *machines.Machine, pids []string) (map[int]*agentproto.GUIProc, error) {
+	conn, rep, err := mc.Open(ctx, agentproto.Header{Op: agentproto.OpGUI, Action: "shells", Args: pids})
+	if err != nil {
+		return nil, err
+	}
+	conn.Close()
+	procs := map[int]*agentproto.GUIProc{}
+	if rep.GUI != nil {
+		for i := range rep.GUI.Procs {
+			procs[rep.GUI.Procs[i].Pid] = &rep.GUI.Procs[i]
+		}
+	}
+	return procs, nil
+}
+
 // typeExport discards a half-typed command line with Ctrl-C, then types
 // cmd and Enter.
 func typeExport(send func(text string) error, cmd string) error {
@@ -1226,100 +1258,87 @@ func typeExport(send func(text string) error, cmd string) error {
 	return send(cmd + "\r")
 }
 
-// Enable gives panes that were opened without the display (before it
-// existed, or outside the UI) the display's environment: a known shell
-// waiting at its prompt gets Ctrl-C and the export command; other panes are
-// left alone and reported. Panes defaults to every pane of the machine. A
-// pane that cannot be reached is reported in Failed; the result always
-// lists what was typed, also with an error.
-func (m *Manager) Enable(ctx context.Context, mc *machines.Machine, panes []string) (*EnableResult, error) {
-	if m.setting(SettingGUI, mc.ID()) == "off" {
+// Enable gives the shells of terminals that were opened without the
+// display (before it existed, or outside the UI), reached through shells,
+// the display's environment: a known shell waiting at its prompt gets
+// Ctrl-C and the export command; the others are left alone and reported.
+// ids defaults to all of them. One that cannot be reached is reported in
+// Failed; the result always lists what was typed, also with an error.
+func (m *Manager) Enable(ctx context.Context, mc *machines.Machine, shells Shells, ids []string) (*EnableResult, error) {
+	if !m.enabled(mc.ID()) {
 		return nil, ErrOff
 	}
 	env := m.PaneEnv(mc)
 	if env == nil {
 		return nil, ErrNotReady
 	}
-	if len(panes) == 0 {
-		var snap struct {
-			Panes []struct {
-				PaneID string `json:"pane_id"`
-			} `json:"panes"`
+	if len(ids) == 0 {
+		all, err := shells.All(ctx)
+		if err != nil {
+			return nil, err
 		}
-		json.Unmarshal(mc.State().Snapshot, &snap)
-		for _, p := range snap.Panes {
-			panes = append(panes, p.PaneID)
-		}
+		ids = all
 	}
 	type shell struct {
-		pane string
+		id   string
 		pid  int
 		idle bool
 	}
 	res := &EnableResult{Busy: []string{}, Typed: []string{}, Failed: []string{}, Command: ExportCommand(env)}
-	var shells []shell
+	var found []shell
 	var pids []string
-	for _, p := range panes {
-		pid, idle, err := shellAt(ctx, mc, p)
+	for _, id := range ids {
+		pid, idle, err := shells.Shell(ctx, id)
 		switch {
 		case err != nil:
-			res.Failed = append(res.Failed, p)
+			res.Failed = append(res.Failed, id)
 		case pid == 0:
-			res.Busy = append(res.Busy, p)
+			res.Busy = append(res.Busy, id)
 		default:
-			shells = append(shells, shell{p, pid, idle})
+			found = append(found, shell{id, pid, idle})
 			pids = append(pids, strconv.Itoa(pid))
 		}
 	}
 	procs := map[int]*agentproto.GUIProc{}
 	if len(pids) > 0 {
-		conn, rep, err := mc.Open(ctx, agentproto.Header{Op: agentproto.OpGUI, Action: "shells", Args: pids})
-		if err != nil {
+		var err error
+		if procs, err = shellProcs(ctx, mc, pids); err != nil {
 			return res, err // nothing typed yet
 		}
-		conn.Close()
-		if rep.GUI != nil {
-			for i := range rep.GUI.Procs {
-				procs[rep.GUI.Procs[i].Pid] = &rep.GUI.Procs[i]
-			}
-		}
 	}
-	for _, sh := range shells {
+	for _, sh := range found {
 		m.mu.Lock()
-		typed := m.ds[mc.ID()].typed[sh.pane] == env["DISPLAY"]
+		typed := m.ds[mc.ID()].typed[sh.id] == env["DISPLAY"]
 		m.mu.Unlock()
 		switch decide(procs[sh.pid], sh.idle, typed) {
 		case enableAlready:
 			res.Already++
 			continue
 		case enableBusy:
-			res.Busy = append(res.Busy, sh.pane)
+			res.Busy = append(res.Busy, sh.id)
 			continue
 		}
 		// Check again right before typing: the user may have started a
 		// program meanwhile.
-		pid, idle, err := shellAt(ctx, mc, sh.pane)
+		pid, idle, err := shells.Shell(ctx, sh.id)
 		if err != nil {
-			res.Failed = append(res.Failed, sh.pane)
+			res.Failed = append(res.Failed, sh.id)
 			continue
 		}
 		if !idle || pid != sh.pid {
-			res.Busy = append(res.Busy, sh.pane)
+			res.Busy = append(res.Busy, sh.id)
 			continue
 		}
-		send := func(text string) error {
-			_, err := mc.Call(ctx, "pane.send_text", map[string]string{"pane_id": sh.pane, "text": text})
-			return err
-		}
+		send := func(text string) error { return shells.Send(ctx, sh.id, text) }
 		if err := typeExport(send, res.Command); err != nil {
-			res.Failed = append(res.Failed, sh.pane)
+			res.Failed = append(res.Failed, sh.id)
 			continue
 		}
 		m.mu.Lock()
-		m.ds[mc.ID()].typed[sh.pane] = env["DISPLAY"]
+		m.ds[mc.ID()].typed[sh.id] = env["DISPLAY"]
 		m.mu.Unlock()
 		res.Enabled++
-		res.Typed = append(res.Typed, sh.pane)
+		res.Typed = append(res.Typed, sh.id)
 	}
 	return res, nil
 }

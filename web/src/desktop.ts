@@ -1,112 +1,85 @@
-// The desktop app's bridge (desktop/src/preload.ts) and its direct shortcuts:
-// keys without herdr's prefix, such as Cmd+T, held in core settings. The shell
-// intercepts them before the page and calls onShortcut; in a browser there is
-// no bridge and none of this is active.
+// The desktop app's menu (desktop/src/menu.ts) sends the page the command of
+// an item chosen. Its keys reach the menu only when the page leaves them:
+// the page matches every key it sees itself (keymap.ts), as in browsers,
+// with the desktop app's bindings, and cancels those it runs. In a browser
+// there is no bridge and none of this is active.
 
-import { actions } from './actions';
-import { getKeyConfig, runAction, setDirectShortcuts } from './keymap';
-import type { MessageKey } from './i18n';
+import { applies, commandEnabled, keyContext, runCommand, type KeyContext } from './keymap';
+import { useKeys } from './keybindings';
+import { desktopShell } from './shell';
+import { useStore } from './state/store';
+import { terms, useTerms } from './state/terms';
+import { focusedFrame, useFrames } from './codeFrames';
+import * as L from './term/layout';
+import { useDialog } from './dialog';
+import { useSettings } from './settings';
 
-/** Same interface as desktop/src/bridge.ts. */
-export interface DesktopShell {
-  onShortcut(fn: (action: string) => void): () => void;
-  shortcutsChanged(): void;
-  recordShortcut(active: boolean): void;
-  onRecordedKey(fn: (spec: string) => void): () => void;
-  setTheme(theme: string): void;
-  pathForFile(file: File): string;
-  onOpenFolder(fn: (path: string) => void): () => void;
+export { desktopShell, type DesktopShell } from './shell';
+
+/** Where the keyboard is: a dialog, a VS Code pane or the main UI. */
+function menuContext(): KeyContext {
+  if (keyContext() === 'dialog') return 'dialog';
+  return document.activeElement?.classList.contains('code-frame') ? 'vscode' : 'terminal';
 }
 
-export const desktopShell: DesktopShell | undefined = (globalThis as { desktopShell?: DesktopShell }).desktopShell;
-
-/** Action → core setting holding its shortcut. */
-export const shortcutSettings: Record<string, string> = {
-  new_tab: 'desktop-new-tab-key',
-  close_tab: 'desktop-close-tab-key',
-  open_settings: 'desktop-settings-key',
-  new_workspace: 'desktop-new-workspace-key',
-  toggle_code: 'desktop-toggle-code-key',
-};
-
-export function isShortcutSetting(key: string): boolean {
-  return Object.values(shortcutSettings).includes(key);
+/** Runs a command of the menu: while a dialog or the palette is open only
+ * commands for dialogs or everywhere run; while a VS Code pane has the
+ * keyboard the main UI's commands act on that pane (keymap.ts applies), so
+ * cmd+w, which VS Code leaves, closes it. Closing a tab asks first unless
+ * its panes only have shells waiting at their prompt (actions.closeTab). */
+export function runMenuCommand(command: string) {
+  const when = useKeys.getState().commands.find((c) => c.id === command)?.when ?? 'terminal';
+  const ctx = menuContext();
+  if (ctx !== 'terminal' && !applies(when, ctx)) return;
+  // The pane whose VS Code has the keyboard is the focused one, also when
+  // its focus event has not reached the layout yet.
+  const frame = focusedFrame();
+  const fr = frame ? useFrames.getState().frames[frame] : undefined;
+  if (fr) terms.mutate(fr.m, (l) => L.focusPane(l, L.codeKey(fr.id)));
+  runCommand(command);
 }
 
-/** Direct shortcuts from a /api/settings list ("none" leaves an action without one). */
-export function shortcutsFrom(list: { key: string; value: string }[]): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [action, key] of Object.entries(shortcutSettings)) {
-    const v = list.find((s) => s.key === key)?.value;
-    if (v && v !== 'none') out[action] = v;
-  }
-  return out;
+/** The commands the menu shows disabled: those that cannot run now, and
+ * while a dialog or the palette is open those for the main UI. */
+export function disabledCommands(): string[] {
+  const s = useStore.getState();
+  const dialog = !!(s.settings || s.palette || s.addMachine || s.auth || useDialog.getState().current);
+  return useKeys
+    .getState()
+    .commands.filter((c) => (dialog && !applies(c.when, 'dialog')) || !commandEnabled(c.id))
+    .map((c) => c.id);
 }
 
-/** Tells the shell and the key hints that the shortcut settings are now list. */
-export function shortcutsSaved(list: { key: string; value: string }[]) {
-  if (!desktopShell) return;
-  setDirectShortcuts(shortcutsFrom(list));
-  desktopShell.shortcutsChanged();
-}
-
-/** A spec's modifiers and key, independent of the order they are written in. */
-function normalize(spec: string): string {
-  const parts = spec.toLowerCase().split('+');
-  const key = parts.pop();
-  return [...parts.sort(), key].join('+');
-}
-
-/**
- * Why spec cannot be the shortcut held by setting key: another action's
- * shortcut, or herdr's prefix key, which would stop reaching the page.
- */
-export function shortcutConflict(
-  key: string,
-  spec: string,
-  list: { key: string; value: string }[],
-  prefix = getKeyConfig().prefix,
-): { message: MessageKey; action?: string } | undefined {
-  if (!spec || spec === 'none') return;
-  const n = normalize(spec);
-  for (const [action, k] of Object.entries(shortcutSettings)) {
-    if (k === key) continue;
-    const v = list.find((s) => s.key === k)?.value;
-    if (v && v !== 'none' && normalize(v) === n) return { message: 'settings.shortcut.taken', action };
-  }
-  if (prefix && normalize(prefix) === n) return { message: 'settings.shortcut.prefix' };
-}
-
-/** Whether spec takes Alt/Option without Cmd or Ctrl: such keys also type
- * characters on macOS and are Meta keys in terminals. */
-export function altOnly(spec: string): boolean {
-  const mods = spec.split('+').slice(0, -1);
-  return mods.includes('alt') && !mods.includes('cmd') && !mods.includes('ctrl');
-}
-
-/** Runs a shortcut the shell reports. Nothing runs while a dialog is open
- * (settings, confirmations, the palette…): the key belongs to it. Closing a
- * tab asks first unless its panes only have shells waiting at their prompt
- * (actions.closeTab). */
-export function runShortcut(action: string) {
-  if (!Object.hasOwn(shortcutSettings, action)) return;
-  if (document.querySelector('.modal-backdrop, .palette-backdrop')) return;
-  if (action === 'close_tab') {
-    const c = actions.currentTab();
-    if (c) void actions.closeTab(c.m, c.tab);
-    return;
-  }
-  runAction(action);
-}
-
-/** Runs the shell's shortcuts and loads them for key hints; returns a
- * function that stops it. */
+/** Runs the menu's commands and keeps its items' enabled states current;
+ * returns a function that stops it. */
 export function initDesktop(): () => void {
-  if (!desktopShell) return () => {};
-  const off = desktopShell.onShortcut(runShortcut);
-  fetch('/api/settings')
-    .then((r) => r.json())
-    .then((j) => setDirectShortcuts(shortcutsFrom(j.settings ?? [])))
-    .catch(() => {});
-  return off;
+  const shell = desktopShell;
+  if (!shell) return () => {};
+  const off = shell.onCommand(runMenuCommand);
+  let last = '';
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const update = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      const list = disabledCommands();
+      const key = list.join(' ');
+      if (key === last) return;
+      last = key;
+      shell.setDisabledCommands(list);
+    }, 50);
+  };
+  // The zoom's items depend on the zoom (settings).
+  const subs = [
+    useStore.subscribe(update),
+    useTerms.subscribe(update),
+    useDialog.subscribe(update),
+    useKeys.subscribe(update),
+    useSettings.subscribe(update),
+  ];
+  update();
+  return () => {
+    off();
+    clearTimeout(timer);
+    for (const u of subs) u();
+  };
 }

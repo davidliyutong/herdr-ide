@@ -1,0 +1,827 @@
+{
+  "commands": [
+    {
+      "id": "app.commandPalette",
+      "section": "app",
+      "when": "terminal"
+    },
+    {
+      "id": "app.keyboardShortcuts",
+      "section": "app",
+      "when": "terminal"
+    },
+    {
+      "id": "app.settings",
+      "section": "app",
+      "when": "terminal"
+    },
+    {
+      "id": "app.agentAttention",
+      "section": "app",
+      "when": "terminal"
+    },
+    {
+      "id": "app.addMachine",
+      "section": "app",
+      "when": "terminal"
+    },
+    {
+      "id": "app.fullDiskAccess",
+      "section": "app",
+      "when": "terminal"
+    },
+    {
+      "id": "workspace.switch",
+      "section": "workspace",
+      "when": "terminal"
+    },
+    {
+      "id": "workspace.next",
+      "section": "workspace",
+      "when": "terminal"
+    },
+    {
+      "id": "workspace.previous",
+      "section": "workspace",
+      "when": "terminal"
+    },
+    {
+      "id": "workspace.new",
+      "section": "workspace",
+      "when": "terminal"
+    },
+    {
+      "id": "workspace.edit",
+      "section": "workspace",
+      "when": "terminal"
+    },
+    {
+      "id": "workspace.close",
+      "section": "workspace",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.new",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.rename",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.next",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.previous",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.select1",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.select2",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.select3",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.select4",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.select5",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.select6",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.select7",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.select8",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.select9",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.close",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.splitRight",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.splitDown",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.close",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.zoom",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.focusLeft",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.focusDown",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.focusUp",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.focusRight",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.focusNext",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.focusPrevious",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "view.toggleSidebar",
+      "section": "view",
+      "when": "terminal"
+    },
+    {
+      "id": "view.zoomIn",
+      "section": "view",
+      "when": "always"
+    },
+    {
+      "id": "view.zoomOut",
+      "section": "view",
+      "when": "always"
+    },
+    {
+      "id": "view.zoomReset",
+      "section": "view",
+      "when": "always"
+    },
+    {
+      "id": "find.open",
+      "section": "find",
+      "when": "terminal"
+    },
+    {
+      "id": "find.next",
+      "section": "find",
+      "when": "terminal"
+    },
+    {
+      "id": "find.previous",
+      "section": "find",
+      "when": "terminal"
+    },
+    {
+      "id": "code.open",
+      "section": "code",
+      "when": "terminal"
+    },
+    {
+      "id": "code.diff",
+      "section": "code",
+      "when": "terminal"
+    },
+    {
+      "id": "code.gitGraph",
+      "section": "code",
+      "when": "terminal"
+    }
+  ],
+  "i18n": [
+    "command.app.addMachine",
+    "command.app.agentAttention",
+    "command.app.commandPalette",
+    "command.app.fullDiskAccess",
+    "command.app.keyboardShortcuts",
+    "command.app.settings",
+    "command.code.diff",
+    "command.code.gitGraph",
+    "command.code.open",
+    "command.find.next",
+    "command.find.open",
+    "command.find.previous",
+    "command.pane.close",
+    "command.pane.focusDown",
+    "command.pane.focusLeft",
+    "command.pane.focusNext",
+    "command.pane.focusPrevious",
+    "command.pane.focusRight",
+    "command.pane.focusUp",
+    "command.pane.splitDown",
+    "command.pane.splitRight",
+    "command.pane.zoom",
+    "command.section.app",
+    "command.section.code",
+    "command.section.find",
+    "command.section.pane",
+    "command.section.tab",
+    "command.section.view",
+    "command.section.workspace",
+    "command.tab.close",
+    "command.tab.new",
+    "command.tab.next",
+    "command.tab.previous",
+    "command.tab.rename",
+    "command.tab.select1",
+    "command.tab.select2",
+    "command.tab.select3",
+    "command.tab.select4",
+    "command.tab.select5",
+    "command.tab.select6",
+    "command.tab.select7",
+    "command.tab.select8",
+    "command.tab.select9",
+    "command.view.toggleSidebar",
+    "command.view.zoomIn",
+    "command.view.zoomOut",
+    "command.view.zoomReset",
+    "command.workspace.close",
+    "command.workspace.edit",
+    "command.workspace.new",
+    "command.workspace.next",
+    "command.workspace.previous",
+    "command.workspace.switch",
+    "settings.appearance.language",
+    "settings.appearance.language.auto",
+    "settings.appearance.language.en",
+    "settings.appearance.language.zh-CN",
+    "settings.appearance.theme",
+    "settings.appearance.theme.dark",
+    "settings.appearance.theme.light",
+    "settings.appearance.theme.system",
+    "settings.appearance.uiFontSize",
+    "settings.codeServer.install",
+    "settings.codeServer.install.download",
+    "settings.codeServer.install.existing",
+    "settings.codeServer.install.push",
+    "settings.codeServer.path",
+    "settings.group.behavior",
+    "settings.group.clipboard",
+    "settings.group.cursor",
+    "settings.group.text",
+    "settings.gui.enabled",
+    "settings.gui.gpu",
+    "settings.gui.gpu.all",
+    "settings.gui.gpu.vglrun",
+    "settings.gui.video",
+    "settings.notifications.badge",
+    "settings.notifications.mutedAgents",
+    "settings.notifications.sound",
+    "settings.notifications.system",
+    "settings.section.appearance",
+    "settings.section.codeServer",
+    "settings.section.colors",
+    "settings.section.gui",
+    "settings.section.notifications",
+    "settings.section.terminal",
+    "settings.terminal.bell",
+    "settings.terminal.bell.none",
+    "settings.terminal.bell.sound",
+    "settings.terminal.bell.visual",
+    "settings.terminal.boldIsBright",
+    "settings.terminal.colorScheme.dark",
+    "settings.terminal.colorScheme.dark.default",
+    "settings.terminal.colorScheme.dark.dracula",
+    "settings.terminal.colorScheme.dark.gruvbox-dark",
+    "settings.terminal.colorScheme.dark.gruvbox-light",
+    "settings.terminal.colorScheme.dark.nord",
+    "settings.terminal.colorScheme.dark.one-dark",
+    "settings.terminal.colorScheme.dark.one-light",
+    "settings.terminal.colorScheme.dark.solarized-dark",
+    "settings.terminal.colorScheme.dark.solarized-light",
+    "settings.terminal.colorScheme.dark.tomorrow",
+    "settings.terminal.colorScheme.dark.tomorrow-night",
+    "settings.terminal.colorScheme.light",
+    "settings.terminal.colorScheme.light.default",
+    "settings.terminal.colorScheme.light.dracula",
+    "settings.terminal.colorScheme.light.gruvbox-dark",
+    "settings.terminal.colorScheme.light.gruvbox-light",
+    "settings.terminal.colorScheme.light.nord",
+    "settings.terminal.colorScheme.light.one-dark",
+    "settings.terminal.colorScheme.light.one-light",
+    "settings.terminal.colorScheme.light.solarized-dark",
+    "settings.terminal.colorScheme.light.solarized-light",
+    "settings.terminal.colorScheme.light.tomorrow",
+    "settings.terminal.colorScheme.light.tomorrow-night",
+    "settings.terminal.colors.dark.background",
+    "settings.terminal.colors.dark.cursor",
+    "settings.terminal.colors.dark.foreground",
+    "settings.terminal.colors.dark.palette",
+    "settings.terminal.colors.dark.selection",
+    "settings.terminal.colors.light.background",
+    "settings.terminal.colors.light.cursor",
+    "settings.terminal.colors.light.foreground",
+    "settings.terminal.colors.light.palette",
+    "settings.terminal.colors.light.selection",
+    "settings.terminal.copyOnSelect",
+    "settings.terminal.cursorBlink",
+    "settings.terminal.cursorStyle",
+    "settings.terminal.cursorStyle.bar",
+    "settings.terminal.cursorStyle.block",
+    "settings.terminal.cursorStyle.underline",
+    "settings.terminal.fontFamily",
+    "settings.terminal.fontSize",
+    "settings.terminal.fontWeight",
+    "settings.terminal.fontWeight.medium",
+    "settings.terminal.fontWeight.regular",
+    "settings.terminal.lineHeight",
+    "settings.terminal.mathHover",
+    "settings.terminal.optionIsMeta",
+    "settings.terminal.programClipboard",
+    "settings.terminal.programClipboard.ask",
+    "settings.terminal.programClipboard.auto",
+    "settings.terminal.programClipboard.off",
+    "settings.terminal.scrollback",
+    "settings.window.zoom"
+  ],
+  "keybindings": {
+    "mac": [
+      {
+        "key": "cmd+shift+p",
+        "command": "app.commandPalette",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+slash",
+        "command": "app.keyboardShortcuts",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+comma",
+        "command": "app.settings",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+shift+a",
+        "command": "app.agentAttention",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+p",
+        "command": "workspace.switch",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+ctrl+down",
+        "command": "workspace.next",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+ctrl+up",
+        "command": "workspace.previous",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+n",
+        "command": "workspace.new",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+t",
+        "command": "tab.new",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+shift+bracketright",
+        "command": "tab.next",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+tab",
+        "command": "tab.next",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+shift+bracketleft",
+        "command": "tab.previous",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+tab",
+        "command": "tab.previous",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+1",
+        "command": "tab.select1",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+2",
+        "command": "tab.select2",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+3",
+        "command": "tab.select3",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+4",
+        "command": "tab.select4",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+5",
+        "command": "tab.select5",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+6",
+        "command": "tab.select6",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+7",
+        "command": "tab.select7",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+8",
+        "command": "tab.select8",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+9",
+        "command": "tab.select9",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+shift+w",
+        "command": "tab.close",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+d",
+        "command": "pane.splitRight",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+shift+d",
+        "command": "pane.splitDown",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+w",
+        "command": "pane.close",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+shift+enter",
+        "command": "pane.zoom",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+alt+left",
+        "command": "pane.focusLeft",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+alt+down",
+        "command": "pane.focusDown",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+alt+up",
+        "command": "pane.focusUp",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+alt+right",
+        "command": "pane.focusRight",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+bracketright",
+        "command": "pane.focusNext",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+bracketleft",
+        "command": "pane.focusPrevious",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+b",
+        "command": "view.toggleSidebar",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+shift+equal",
+        "command": "view.zoomIn",
+        "when": "always"
+      },
+      {
+        "key": "cmd+equal",
+        "command": "view.zoomIn",
+        "when": "always"
+      },
+      {
+        "key": "cmd+minus",
+        "command": "view.zoomOut",
+        "when": "always"
+      },
+      {
+        "key": "cmd+0",
+        "command": "view.zoomReset",
+        "when": "always"
+      },
+      {
+        "key": "cmd+f",
+        "command": "find.open",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+g",
+        "command": "find.next",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+shift+g",
+        "command": "find.previous",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+j",
+        "command": "code.open",
+        "when": "terminal"
+      }
+    ],
+    "mac-browser": [
+      {
+        "key": "cmd+k",
+        "command": "app.commandPalette",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+slash",
+        "command": "app.keyboardShortcuts",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+f",
+        "command": "find.open",
+        "when": "terminal"
+      }
+    ],
+    "pc": [
+      {
+        "key": "ctrl+shift+p",
+        "command": "app.commandPalette",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+slash",
+        "command": "app.keyboardShortcuts",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+comma",
+        "command": "app.settings",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+a",
+        "command": "app.agentAttention",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+n",
+        "command": "workspace.new",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+t",
+        "command": "tab.new",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+tab",
+        "command": "tab.next",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+tab",
+        "command": "tab.previous",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+1",
+        "command": "tab.select1",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+2",
+        "command": "tab.select2",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+3",
+        "command": "tab.select3",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+4",
+        "command": "tab.select4",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+5",
+        "command": "tab.select5",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+6",
+        "command": "tab.select6",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+7",
+        "command": "tab.select7",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+8",
+        "command": "tab.select8",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+9",
+        "command": "tab.select9",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+w",
+        "command": "tab.close",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+enter",
+        "command": "pane.zoom",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+equal",
+        "command": "view.zoomIn",
+        "when": "always"
+      },
+      {
+        "key": "ctrl+equal",
+        "command": "view.zoomIn",
+        "when": "always"
+      },
+      {
+        "key": "ctrl+minus",
+        "command": "view.zoomOut",
+        "when": "always"
+      },
+      {
+        "key": "ctrl+0",
+        "command": "view.zoomReset",
+        "when": "always"
+      },
+      {
+        "key": "ctrl+shift+f",
+        "command": "find.open",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+j",
+        "command": "code.open",
+        "when": "terminal"
+      }
+    ],
+    "pc-browser": [
+      {
+        "key": "ctrl+shift+slash",
+        "command": "app.keyboardShortcuts",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+f",
+        "command": "find.open",
+        "when": "terminal"
+      }
+    ]
+  },
+  "settings": {
+    "appearance.language": "auto",
+    "appearance.theme": "system",
+    "appearance.uiFontSize": 13,
+    "codeServer.install": "push",
+    "codeServer.path": "",
+    "gui.enabled": true,
+    "gui.gpu": "vglrun",
+    "gui.video": true,
+    "notifications.badge": true,
+    "notifications.mutedAgents": [
+      "droid"
+    ],
+    "notifications.sound": true,
+    "notifications.system": true,
+    "terminal.bell": "visual",
+    "terminal.boldIsBright": false,
+    "terminal.colorScheme.dark": "default",
+    "terminal.colorScheme.light": "default",
+    "terminal.colors.dark.background": "#0a0a0a",
+    "terminal.colors.dark.cursor": "#f0f0f0",
+    "terminal.colors.dark.foreground": "#f0f0f0",
+    "terminal.colors.dark.palette": [
+      "#484f58",
+      "#ff7b72",
+      "#3fb950",
+      "#d29922",
+      "#58a6ff",
+      "#bc8cff",
+      "#39c5cf",
+      "#b1bac4",
+      "#6e7681",
+      "#ffa198",
+      "#56d364",
+      "#e3b341",
+      "#79c0ff",
+      "#d2a8ff",
+      "#56d4dd",
+      "#ffffff"
+    ],
+    "terminal.colors.dark.selection": "#3b4a6b",
+    "terminal.colors.light.background": "#ffffff",
+    "terminal.colors.light.cursor": "#0a0a0a",
+    "terminal.colors.light.foreground": "#0a0a0a",
+    "terminal.colors.light.palette": [
+      "#24292f",
+      "#cf222e",
+      "#116329",
+      "#7d4e00",
+      "#0969da",
+      "#8250df",
+      "#1b7c83",
+      "#6e7781",
+      "#57606a",
+      "#a40e26",
+      "#1a7f37",
+      "#9a6700",
+      "#218bff",
+      "#a475f9",
+      "#3192aa",
+      "#8c959f"
+    ],
+    "terminal.colors.light.selection": "#b6d4fe",
+    "terminal.copyOnSelect": false,
+    "terminal.cursorBlink": true,
+    "terminal.cursorStyle": "block",
+    "terminal.fontFamily": "",
+    "terminal.fontSize": 13,
+    "terminal.fontWeight": "regular",
+    "terminal.lineHeight": 1.05,
+    "terminal.mathHover": true,
+    "terminal.optionIsMeta": false,
+    "terminal.programClipboard": "auto",
+    "terminal.scrollback": 10000,
+    "window.zoom": 100
+  }
+}
