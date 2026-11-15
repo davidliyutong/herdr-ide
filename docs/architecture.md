@@ -49,6 +49,9 @@ machines only ([02](features/02-multi-machine-transport.md)).
 | `internal/vault` | The variable vault's store on the core host: values encrypted one by one (AES-256-GCM, the name as additional data) in `vault[-<instance>].json`, the master key in the system keychain or from a passphrase (Argon2id) ([30](features/30-variable-vault.md)). Builds for Windows too. |
 | `internal/plugins/vault` | The vault plugin's core side: its routes, the MCP servers' requests (op `vault`, a `plugin.Streamer`), approvals and the access log. |
 | `internal/vaultmcp` | The vault's MCP server (the `mcp` command of the core and the agent): JSON-RPC over stdio, the tools `list_variables`, `get_variable`, `run_with_env`. |
+| `internal/usage` | What AI subscriptions have left on one machine: the CLIs' credentials read only, the providers' usage endpoints, Antigravity's local language server, the logs' token cost at the prices of `pricing.json` with an incremental cache; portable, run by the agent ([29](features/29-ai-usage.md)). |
+| `internal/agent/plugin/usage` | The AI usage plugin's machine side: actions `limits`, `cost` and `setDeepseekKey` of the `plugin` op. |
+| `internal/plugins/usage` | The AI usage plugin's core side: its settings, a scheduler that asks the machines and merges the accounts several share, history for burndown and pace, the providers' status pages, its routes and `/ws` messages. |
 | `internal/gui` | Virtual displays on machines, their windows, frames and input between agents and browser windows. |
 | `internal/jpegstrip` | JPEG encoding of a window capture in independent row groups, encoded in parallel (from Go's `image/jpeg`, BSD). |
 | `internal/server` | HTTP/WS front: guards, the event channel, terminal streams, files, proxy, bridge, audit. |

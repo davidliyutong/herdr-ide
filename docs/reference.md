@@ -135,7 +135,18 @@ in the UI; a setting with a scope can have its own value per machine, under
 | `codeServer.install` | `push`, `download`, `existing` | `"push"` | `--code-server-install` | per machine |
 | `codeServer.path` | string | `""` | `--code-server-path` | per machine |
 | `plugins.files.enabled` | `true`, `false` | `true` | – | – |
+| `plugins.usage.enabled` | `true`, `false` | `true` | – | – |
 | `plugins.vault.enabled` | `true`, `false` | `true` | – | – |
+| `usage.refresh` | `manual`, `1`, `2`, `5`, `15`, `30`, `adaptive` | `"adaptive"` | – | – |
+| `usage.thresholds` | list of strings | `["80","95"]` | – | – |
+| `usage.providers.claude` | `true`, `false` | `true` | – | – |
+| `usage.providers.codex` | `true`, `false` | `true` | – | – |
+| `usage.providers.grok` | `true`, `false` | `true` | – | – |
+| `usage.providers.antigravity` | `true`, `false` | `true` | – | – |
+| `usage.providers.kimi` | `true`, `false` | `true` | – | – |
+| `usage.providers.deepseek` | `true`, `false` | `true` | – | – |
+| `usage.codexHomes` | list of strings | `[]` | – | – |
+| `usage.claudeKeychain` | `true`, `false` | `true` | – | – |
 | `gui.enabled` | `true`, `false` | `true` | `--gui` | per remote machine |
 | `gui.gpu` | `vglrun`, `all` | `"vglrun"` | `--gui-gpu` | per remote machine |
 | `gui.video` | `true`, `false` | `true` | `--gui-video` | per remote machine |
@@ -243,6 +254,7 @@ by `scripts/registry`.
 | `view.zoomOut` | `always` | `cmd+minus` | – | `ctrl+minus` | – |
 | `view.zoomReset` | `always` | `cmd+0` | – | `ctrl+0` | – |
 | `view.panel.vault` | `terminal` | – | – | – | – |
+| `view.panel.usage` | `terminal` | – | – | – | – |
 | `find.open` | `terminal` | `cmd+f` | `cmd+f` | `ctrl+shift+f` | `ctrl+shift+f` |
 | `find.next` | `terminal` | `cmd+g` | – | – | – |
 | `find.previous` | `terminal` | `cmd+shift+g` | – | – | – |
@@ -347,6 +359,10 @@ missing here.
 | `GET /api/p/vault/requests` | – | The MCP requests waiting for an answer. |
 | `POST /api/p/vault/requests/{id}` | writes | Answers one (`{"answer": "once"\|"always"\|"deny"}`), audited as `vault.answered`; the first answer wins, later ones and those after the request expired get `404`, so `200` means the requester gets this answer. |
 | `GET /api/p/vault/log` | – | The last 500 accesses since the core started (time, machine, client, terminal, tool, names, result: `allowed`, `approved`, `approved_always`, `listed` or an error's code such as `denied` or `busy`; `count` for repeated list calls or busy refusals merged into one), newest first; never values. |
+| `GET /api/p/usage` | – | The AI usage plugin's snapshot: accounts (provider, id, email, plan, windows with pace and history, credits, balances, status and code, machines seen on), each machine's last poll, the providers' status pages; `?watch=1` marks the panel open for the adaptive refresh ([29](features/29-ai-usage.md)). |
+| `GET /api/p/usage/cost` | – | The cost of the machines' AI CLI logs at API prices by day, provider, model, project and machine (`?days=` 1–90, `&tz=` the user's offset east of UTC in minutes). |
+| `POST /api/p/usage/refresh` | writes | Asks every connected machine for its limits now. |
+| `PUT /api/m/{id}/p/usage/deepseek-key` | writes | Writes the machine's DeepSeek key file (`{"key"}`; `""` removes it); never read back, audited without the key. |
 | `/` | – | The web UI (`/licenses.md`: the notices of its bundle); any other path gets the app shell for the UI's own routes, except `/api/…` paths no route takes, which are 404. |
 
 ## Environment variables
@@ -361,6 +377,9 @@ missing here.
 | `--user-data-dir=<dir>` | Electron command line | Replaces the Electron profile and its single-instance lock, so a copy launched by its executable (on macOS not with `open`, which activates a running copy of the same bundle identifier) runs beside another one; for isolated smoke tests with `HERDR_IDE_DESKTOP_DEV`. |
 | `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` | core on Linux | The user configuration directory (settings, keybindings, machines; default `~/.config`) and the cache directory (code-server downloads; default `~/.cache`). |
 | `XDG_STATE_HOME` | core | Where the SSH machines herdr saved are read from for the one-time import (`$XDG_STATE_HOME/herdr/client/endpoints.json`, default `~/.local/state/herdr/client/endpoints.json`). |
+| `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GROK_HOME`, `KIMI_CODE_HOME` | agent (AI usage plugin) | Where the AI CLIs keep their credentials and logs when not in `~/.claude`, `~/.codex`, `~/.grok`, `~/.kimi-code`. |
+| `DEEPSEEK_API_KEY` | agent (AI usage plugin) | The DeepSeek key whose balance is shown; before Claude Code's DeepSeek settings and the key file. |
+| `HTTPS_PROXY`, `NO_PROXY` | agent (AI usage plugin), core (status pages) | The proxy for the AI providers' hosts. |
 
 Variables of the build scripts and tests:
 
@@ -403,6 +422,8 @@ On every machine (the agent's `$HOME`):
 | `~/.herdr-ide[-<instance>]/cs-data/`, `cs-ext/` | VS Code settings, extensions | Kept; logs older than 7 days are pruned. |
 | `~/.herdr-ide[-<instance>]/uploads/` | Pasted and dropped files | Files older than 7 days are pruned. |
 | `~/.herdr-ide[-<instance>]/bin/herdr-ide-mcp` (0700 directory) | Link to the executable that serves the vault's MCP server (the agent's, or on the local machine the core's) | Pointed at the running executable whenever an agent starts; kept so MCP configurations stay valid. |
+| `~/.herdr-ide[-<instance>]/usage/cost-cache.json` (0600) | The AI usage plugin's records of the AI CLIs' logs, per log file | Records and logs older than 90 days leave it at each scan. |
+| `~/.herdr-ide[-<instance>]/usage/deepseek.key` (0600) | A DeepSeek API key set in the AI usage panel | Until removed in the panel or by hand. |
 
 On the core host: ssh control sockets in `/tmp/herdr-ide-<uid>/s` on Linux
 and macOS (must be owned by you, mode 0700; a core on Windows keeps none),
@@ -411,6 +432,8 @@ downloads in the user cache directory
 on Linux, `%LocalAppData%\herdr-ide\code-server` on Windows) with `.sha256` sidecars (also recorded for releases that machines
 downloaded themselves), the settings in `settings[-<instance>].json`, the
 variable vault in `vault[-<instance>].json` (values encrypted, [30](features/30-variable-vault.md); its key in the system keychain under the service `herdr-ide-vault` and the account `vault[-<instance>].json`), the
+AI usage plugin's history in `usage-history[-<instance>].json` (the last
+accounts and 30 days of their windows' use), the
 keybindings in `keybindings[-<instance>].json` and the machines in
 `machines[-<instance>].json` (`{"version": 1, "machines": [{id, label,
 kind, target, enabled}], "order": [ids]}`: the SSH machines, the local machine's

@@ -231,6 +231,11 @@
       "when": "terminal"
     },
     {
+      "id": "view.panel.usage",
+      "section": "view",
+      "when": "terminal"
+    },
+    {
       "id": "find.open",
       "section": "find",
       "when": "terminal"
@@ -309,6 +314,7 @@
     "command.tab.select8",
     "command.tab.select9",
     "command.view.panel.files",
+    "command.view.panel.usage",
     "command.view.panel.vault",
     "command.view.togglePanel",
     "command.view.toggleSidebar",
@@ -339,6 +345,7 @@
     "settings.group.clipboard",
     "settings.group.cursor",
     "settings.group.text",
+    "settings.group.usageProviders",
     "settings.gui.enabled",
     "settings.gui.gpu",
     "settings.gui.gpu.all",
@@ -349,6 +356,7 @@
     "settings.notifications.sound",
     "settings.notifications.system",
     "settings.plugins.files.enabled",
+    "settings.plugins.usage.enabled",
     "settings.plugins.vault.enabled",
     "settings.section.appearance",
     "settings.section.codeServer",
@@ -357,6 +365,7 @@
     "settings.section.notifications",
     "settings.section.plugins",
     "settings.section.terminal",
+    "settings.section.usage",
     "settings.terminal.bell",
     "settings.terminal.bell.none",
     "settings.terminal.bell.sound",
@@ -415,6 +424,23 @@
     "settings.terminal.programClipboard.auto",
     "settings.terminal.programClipboard.off",
     "settings.terminal.scrollback",
+    "settings.usage.claudeKeychain",
+    "settings.usage.codexHomes",
+    "settings.usage.providers.antigravity",
+    "settings.usage.providers.claude",
+    "settings.usage.providers.codex",
+    "settings.usage.providers.deepseek",
+    "settings.usage.providers.grok",
+    "settings.usage.providers.kimi",
+    "settings.usage.refresh",
+    "settings.usage.refresh.1",
+    "settings.usage.refresh.15",
+    "settings.usage.refresh.2",
+    "settings.usage.refresh.30",
+    "settings.usage.refresh.5",
+    "settings.usage.refresh.adaptive",
+    "settings.usage.refresh.manual",
+    "settings.usage.thresholds",
     "settings.window.zoom"
   ],
   "keybindings": {
@@ -818,6 +844,7 @@
     "notifications.sound": true,
     "notifications.system": true,
     "plugins.files.enabled": true,
+    "plugins.usage.enabled": true,
     "plugins.vault.enabled": true,
     "terminal.bell": "visual",
     "terminal.boldIsBright": false,
@@ -878,6 +905,19 @@
     "terminal.optionIsMeta": false,
     "terminal.programClipboard": "auto",
     "terminal.scrollback": 10000,
+    "usage.claudeKeychain": true,
+    "usage.codexHomes": [],
+    "usage.providers.antigravity": true,
+    "usage.providers.claude": true,
+    "usage.providers.codex": true,
+    "usage.providers.deepseek": true,
+    "usage.providers.grok": true,
+    "usage.providers.kimi": true,
+    "usage.refresh": "adaptive",
+    "usage.thresholds": [
+      "80",
+      "95"
+    ],
     "window.zoom": 100
   }
 }

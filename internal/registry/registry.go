@@ -10,6 +10,7 @@ import (
 	"herdr-ide/internal/keybindings"
 	"herdr-ide/internal/plugin"
 	"herdr-ide/internal/plugins/files"
+	usageplugin "herdr-ide/internal/plugins/usage"
 	vaultplugin "herdr-ide/internal/plugins/vault"
 	"herdr-ide/internal/settings"
 	"herdr-ide/internal/uisettings"
@@ -19,13 +20,13 @@ import (
 // the desktop app's shortcut settings of earlier versions, which became
 // keybinding rules before the settings are loaded.
 func Settings() []settings.Module {
-	return []settings.Module{uisettings.Module, codeserver.Settings, gui.Settings, plugin.Settings(Plugins(), pluginsOff), legacyShortcuts()}
+	return []settings.Module{uisettings.Module, codeserver.Settings, gui.Settings, plugin.Settings(Plugins(), pluginsOff), legacyShortcuts(), usageplugin.Settings}
 }
 
 // Plugins are the core's plugins (internal/plugin), in the order the UIs
 // list them.
 func Plugins() []plugin.Plugin {
-	return []plugin.Plugin{files.New(), vaultplugin.New()}
+	return []plugin.Plugin{files.New(), usageplugin.New(), vaultplugin.New()}
 }
 
 // pluginsOff are the plugins that are off until the user turns them on.

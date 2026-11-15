@@ -1,0 +1,192 @@
+// Package usage is the core's side of the AI usage plugin: a scheduler that
+// asks the connected machines' agents for the limits of the AI
+// subscriptions signed in there (internal/agent/plugin/usage), merges the
+// accounts seen on several machines, keeps their history for burndown and
+// pace, polls the providers' status pages, and serves the result to the
+// UIs (GET /api/p/usage, /ws plugin messages). The web UI's side is
+// web/src/plugins/usage; docs/features/29-ai-usage.md has the design.
+package usage
+
+import (
+	"errors"
+	"net/http"
+	"slices"
+	"strconv"
+	"time"
+
+	"herdr-ide/internal/plugin"
+	"herdr-ide/internal/settings"
+	"herdr-ide/internal/usage"
+)
+
+// ID is the plugin's id.
+const ID = "usage"
+
+// Settings of the plugin.
+const (
+	SettingRefresh        = "usage.refresh"
+	SettingThresholds     = "usage.thresholds"
+	SettingCodexHomes     = "usage.codexHomes"
+	SettingClaudeKeychain = "usage.claudeKeychain"
+)
+
+// providerSetting is the switch of a provider.
+func providerSetting(p string) string { return "usage.providers." + p }
+
+// Refresh modes: manual, every n minutes, or adaptive.
+const (
+	RefreshManual   = "manual"
+	RefreshAdaptive = "adaptive"
+)
+
+var refreshModes = []string{RefreshManual, "1", "2", "5", "15", "30", RefreshAdaptive}
+
+// Settings is the plugin's settings module (internal/registry).
+var Settings = func() settings.Module {
+	m := settings.Module{Sections: []settings.Section{{ID: "usage", Order: 66}}}
+	m.Defs = append(m.Defs,
+		settings.Def{Key: SettingRefresh, Type: settings.TypeEnum, Default: RefreshAdaptive, Enum: refreshModes,
+			Scope: settings.ScopeApp, Section: "usage", Order: 10},
+		settings.Def{Key: SettingThresholds, Type: settings.TypeList, Item: settings.TypeString, Default: []string{"80", "95"},
+			Options: []string{"50", "80", "90", "95"}, Scope: settings.ScopeApp, Section: "usage", Order: 20, Validate: validThresholds},
+	)
+	for i, p := range usage.Providers {
+		m.Defs = append(m.Defs, settings.Def{Key: providerSetting(p), Type: settings.TypeBool, Default: true,
+			Scope: settings.ScopeApp, Section: "usage", Group: "usageProviders", Order: 30 + i})
+	}
+	m.Defs = append(m.Defs,
+		settings.Def{Key: SettingCodexHomes, Type: settings.TypeList, Item: settings.TypeString, Default: []string{},
+			Scope: settings.ScopeApp, Section: "usage", Order: 50},
+		settings.Def{Key: SettingClaudeKeychain, Type: settings.TypeBool, Default: true,
+			Scope: settings.ScopeApp, Section: "usage", Order: 60},
+	)
+	return m
+}()
+
+// validThresholds accepts percentages from 1 to 100.
+func validThresholds(v any) error {
+	l, _ := v.([]string)
+	if len(l) > 8 {
+		return errors.New("at most 8 thresholds")
+	}
+	for _, s := range l {
+		n, err := strconv.Atoi(s)
+		if err != nil || n < 1 || n > 100 {
+			return errors.New("thresholds are whole percentages from 1 to 100")
+		}
+	}
+	return nil
+}
+
+// Routes of the plugin.
+func (p *Plugin) Routes() []plugin.Route {
+	return []plugin.Route{
+		{Method: "GET", Path: "", Handler: p.getSnapshot},
+		{Method: "GET", Path: "cost", Handler: p.getCost},
+		{Method: "POST", Path: "refresh", Mutating: true, Audit: "refresh", Handler: p.postRefresh},
+		{Method: "PUT", Path: "deepseek-key", Machine: true, Mutating: true, Audit: "deepseek_key", Handler: p.putDeepseekKey},
+	}
+}
+
+// ID names the plugin.
+func (p *Plugin) ID() string { return ID }
+
+// getSnapshot answers with the current snapshot; ?watch=1 (the open panel,
+// every minute) makes the adaptive refresh ask every 2 minutes.
+func (p *Plugin) getSnapshot(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("watch") == "1" {
+		p.watch()
+	}
+	plugin.WriteJSON(w, http.StatusOK, p.Snapshot())
+}
+
+func (p *Plugin) postRefresh(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
+	p.Refresh()
+	plugin.WriteJSON(w, http.StatusAccepted, map[string]bool{"queued": true})
+}
+
+// getCost answers with the cost of the machines' logs: ?days= (1–90,
+// default 30), &tz= (the user's offset east of UTC in minutes).
+func (p *Plugin) getCost(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	days, err := strconv.Atoi(q.Get("days"))
+	if err != nil || days < 1 {
+		days = 30
+	}
+	days = min(days, 90)
+	tz, _ := strconv.Atoi(q.Get("tz"))
+	if tz < -14*60 || tz > 14*60 {
+		tz = 0
+	}
+	plugin.WriteJSON(w, http.StatusOK, p.cost(r.Context(), days, tz))
+}
+
+// putDeepseekKey writes the DeepSeek key file on a machine ({"key"}; ""
+// removes it). The key is not audited or returned.
+func (p *Plugin) putDeepseekKey(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Key string `json:"key"`
+	}
+	if err := plugin.ReadJSON(r, 4096, &body); err != nil {
+		plugin.WriteError(w, err)
+		return
+	}
+	if err := p.call(r.Context(), c.Machine.ID(), "setDeepseekKey", body, nil); err != nil {
+		plugin.WriteError(w, err)
+		return
+	}
+	p.Refresh()
+	plugin.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// options are what the agents get from the settings.
+func (p *Plugin) options() usage.Options {
+	o := usage.Options{ClaudeKeychain: true}
+	st := p.settings()
+	if st == nil {
+		return o
+	}
+	for _, pr := range usage.Providers {
+		if st.Bool(providerSetting(pr), "") {
+			o.Providers = append(o.Providers, pr)
+		}
+	}
+	if len(o.Providers) == 0 {
+		o.Providers = []string{"none"}
+	}
+	o.CodexHomes, _ = st.GetFor(SettingCodexHomes, "").([]string)
+	o.ClaudeKeychain = st.Bool(SettingClaudeKeychain, "")
+	return o
+}
+
+func (p *Plugin) refreshMode() string {
+	if st := p.settings(); st != nil {
+		if m := st.String(SettingRefresh, ""); slices.Contains(refreshModes, m) {
+			return m
+		}
+	}
+	return RefreshAdaptive
+}
+
+// Interval is how often the scheduler asks in mode: none (0) for manual;
+// adaptive asks every 2 minutes while a panel is open, every 5 while a
+// coding agent works, otherwise every 30.
+func Interval(mode string, watching, working bool) time.Duration {
+	switch mode {
+	case RefreshManual:
+		return 0
+	case RefreshAdaptive, "":
+		switch {
+		case watching:
+			return 2 * time.Minute
+		case working:
+			return 5 * time.Minute
+		}
+		return 30 * time.Minute
+	}
+	n, err := strconv.Atoi(mode)
+	if err != nil || n <= 0 {
+		return 30 * time.Minute
+	}
+	return time.Duration(n) * time.Minute
+}

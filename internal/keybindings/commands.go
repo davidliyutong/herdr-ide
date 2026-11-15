@@ -169,6 +169,8 @@ var Commands = func() []Command {
 		always("view.zoomReset", "view", on(macApp, "cmd+0"), on(pcApp, "ctrl+0")),
 		// The variable vault's panel (plugin vault).
 		cmd("view.panel.vault", "view"),
+		// The AI usage plugin's panel (web/src/plugins/usage).
+		cmd("view.panel.usage", "view"),
 
 		cmd("find.open", "find", on(macAll, "cmd+f"), on(pcAll, "ctrl+shift+f")),
 		cmd("find.next", "find", on(macApp, "cmd+g")),
