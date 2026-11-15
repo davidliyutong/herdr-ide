@@ -24,6 +24,7 @@ const (
 	Language     = "appearance.language"
 	Theme        = "appearance.theme"
 	UIFontSize   = "appearance.uiFontSize"
+	Zoom         = "window.zoom"
 	FontFamily   = "terminal.fontFamily"
 	FontSize     = "terminal.fontSize"
 	Scrollback   = "terminal.scrollback"
@@ -34,6 +35,12 @@ const (
 
 // MaxScrollback is the most lines a terminal keeps above its screen.
 const MaxScrollback = 100_000
+
+// MinZoom and MaxZoom bound the desktop app's zoom, in percent.
+const (
+	MinZoom = 50
+	MaxZoom = 300
+)
 
 // Agents are the coding agents the terminals recognize (the manifests'
 // ids, internal/agent/detect), offered by the list of silent agents.
@@ -54,6 +61,7 @@ func rng(min, max float64) (*float64, *float64) { return settings.Range(min, max
 
 func defs() []settings.Def {
 	uiMin, uiMax := rng(11, 20)
+	zoomMin, zoomMax := rng(MinZoom, MaxZoom)
 	fontMin, fontMax := rng(6, 40)
 	lineMin, lineMax := rng(0.8, 2)
 	scrollMin, scrollMax := rng(0, MaxScrollback)
@@ -65,6 +73,10 @@ func defs() []settings.Def {
 			Section: "appearance", Order: 20},
 		{Key: UIFontSize, Type: settings.TypeNumber, Default: 13, Min: uiMin, Max: uiMax, Integer: true,
 			Section: "appearance", Order: 30},
+		// The desktop app's windows, terminals included, in percent: its shell
+		// applies it; browsers zoom pages themselves.
+		{Key: Zoom, Type: settings.TypeNumber, Default: 100, Min: zoomMin, Max: zoomMax, Integer: true, Step: 10,
+			Section: "appearance", Order: 35},
 		{Key: "layout.panelPosition", Type: settings.TypeEnum, Default: "right", Enum: []string{"right", "bottom"},
 			Section: "appearance", Order: 40},
 

@@ -69,11 +69,13 @@ The shell is a client of its core (`desktop/src/follow.ts`): it holds its
 own `/ws` connection, reads `GET /api/settings` and `GET /api/keybindings`
 when it opens and applies the `settings` and `keybindings` messages after
 every change. The theme setting becomes the native title bar's and
-controls', the language the menu's. The application menu
+controls', the language the menu's, the zoom (`window.zoom`) its
+windows'. The application menu
 (`desktop/src/menu.ts`: on macOS the application's, Shell, Edit, View and
 Window; on Windows and Linux File, Shell, Edit, View, Window and Help)
 holds the keybindings' commands for terminals, splits, workspaces, tabs,
-find, the palette, the sidebar, VS Code, zoom and focus, named as the
+find, the palette, the sidebar, VS Code, maximizing a pane, the window's
+zoom and focus, named as the
 commands are everywhere; each command item shows the first single-stroke
 key its command has and is disabled while the page says its command
 cannot run, and the menu is rebuilt when the keybindings or the language

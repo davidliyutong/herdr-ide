@@ -100,6 +100,7 @@ in the UI; a setting with a scope can have its own value per machine, under
 | `appearance.theme` | `system`, `light`, `dark` | `"system"` | – | – |
 | `appearance.language` | `auto`, `en`, `zh-CN` | `"auto"` | – | – |
 | `appearance.uiFontSize` | integer, 11–20 | `13` | – | – |
+| `window.zoom` | integer, 50–300 | `100` | – | – |
 | `layout.panelPosition` | `right`, `bottom` | `"right"` | – | – |
 | `terminal.fontFamily` | string | `""` | – | – |
 | `terminal.fontSize` | number, 6–40 | `13` | – | – |
@@ -221,6 +222,9 @@ layout's characters. The table is generated from the registry by
 | `pane.focusPrevious` | `terminal` | `cmd+bracketleft` | – | – | – |
 | `view.toggleSidebar` | `terminal` | `cmd+b` | – | – | – |
 | `view.toggleCode` | `always` | `cmd+j` | – | `ctrl+shift+j` | – |
+| `view.zoomIn` | `always` | `cmd+shift+equal`, `cmd+equal` | – | `ctrl+shift+equal`, `ctrl+equal` | – |
+| `view.zoomOut` | `always` | `cmd+minus` | – | `ctrl+minus` | – |
+| `view.zoomReset` | `always` | `cmd+0` | – | `ctrl+0` | – |
 | `find.open` | `terminal` | `cmd+f` | `cmd+f` | `ctrl+shift+f` | `ctrl+shift+f` |
 | `find.next` | `terminal` | `cmd+g` | – | – | – |
 | `find.previous` | `terminal` | `cmd+shift+g` | – | – | – |

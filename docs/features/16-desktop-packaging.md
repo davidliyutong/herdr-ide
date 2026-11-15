@@ -202,6 +202,28 @@ system's rules run in the tests on any of them:
   theme, also when it differs from the system's appearance; `system`
   follows the system. `appearance.language` is the language of the menu
   and the error dialogs; `auto` follows the system's preferred languages.
+- **Zoom.** `window.zoom` (percent, 50–300, 100 by default) is the zoom of
+  the app's windows, as VS Code's `window.zoomLevel` is: the shell sets
+  the main window's page to it (`webContents.setZoomFactor`) whenever the
+  setting changes and after each page load. Chromium keeps a zoom per
+  origin, so the app's other windows on the core's origin (program
+  windows, VS Code's own) have it too. **Zoom In**, **Zoom Out** and
+  **Reset Zoom** (`view.zoomIn`, `view.zoomOut`, `view.zoomReset`, in the
+  View menu and the palette; ⌘+ or ⌘=, ⌘− and ⌘0 on macOS, Ctrl with the
+  same keys on Windows and Linux; commands for everywhere, so they run
+  while a dialog is open too, and on macOS from a text field or VS Code
+  through the menu, which holds ⌘+, ⌘− and ⌘0) step the setting through Chromium's levels (50, 67, 75, 80,
+  90, 100, 110, 125, 150, 175, 200, 250, 300); the settings dialog sets
+  any whole percent. The setting is the only place the zoom is kept:
+  Electron's own zoom is not persisted, the menu has no zoom roles and the
+  page's keys never zoom by themselves. A zoom scales everything,
+  terminals included: their pixel ratio changes with it, so each terminal
+  measures its cells again at the new ratio (sharp text) and fits its grid
+  to its pane's new size, which resizes the program
+  ([26](26-web-terminals.md)). Interface text size
+  (`appearance.uiFontSize`) and the terminal font size stay what they are
+  inside the zoom. In a browser the commands do not run, the setting is
+  not shown, and the browser's zoom keys work as ever.
 
 **The menu** (`desktop/src/menu.ts`, `menusFor`)
 
@@ -217,7 +239,7 @@ system's rules run in the tests on any of them:
   Find Previous), **View** (Command Palette…, Go to Workspace…, Go to Agent
   Needing Attention, Toggle Sidebar, Toggle VS Code Panel, Maximize Pane,
   next and previous tab, workspace and pane, focusing the pane in each
-  direction, Toggle Full Screen). Items of commands have the commands'
+  direction, Zoom In, Zoom Out, Reset Zoom, Toggle Full Screen). Items of commands have the commands'
   names (`command.<id>`), as the palette, the keyboard shortcuts page and
   the tooltips have them; menus and Electron's roles (Edit's Undo … Select
   All, Hide, Zoom, Full Screen…) are titled with the web UI's
@@ -428,14 +450,17 @@ failures, malformed readiness, ephemeral ports, unexpected exits, late
 child errors and idempotent child shutdown, with fake Node children),
 opened folders waiting for the page (`folders`), the settings and
 keybindings read and followed over a stand-in event channel, which is
-opened again when it drops (`follow`), the menu (`menu`: every item a
+opened again when it drops, and the zoom taken from them only within
+Chromium's limits (`follow`), the menu (`menu`: every item a
 registered command or a standard role titled in both languages,
 accelerators, a rebinding, an unbinding, chords, and the Windows and Linux
 menus: File to Help, Exit on Windows, no key registered), URL and
 permission policy (`policy`) and the preload's functions against a
 stand-in for Electron (`preload`), with no network or real terminal cores.
 `web/src/__tests__/desktop.test.ts` covers the page's side of menu
-commands (dialogs, VS Code with the keyboard) and `drop.test.ts` dropped
+commands (dialogs, VS Code with the keyboard), `zoom.test.ts` the zoom
+commands (levels, the setting they change, when they are enabled, their
+keys taken from the terminal only while bound) and `drop.test.ts` dropped
 and opened folders, which a local machine with `local_unsupported` does not
 take. `make check test` includes desktop type, format and unit checks
 (without Electron's binary when `ELECTRON_SKIP_BINARY_DOWNLOAD=1`), and

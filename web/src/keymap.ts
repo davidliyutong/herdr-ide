@@ -15,6 +15,7 @@ import { keyLabel, strokeOf } from './keys';
 import { platform, useKeys, type Binding, type When } from './keybindings';
 import { findStep, openFind, useFind } from './vt/find';
 import { paneHandle } from './state/panes';
+import { currentZoom, zoom, zoomAvailable, ZOOM_LEVELS } from './zoom';
 
 /** Where a key is pressed: the main UI, VS Code, or a dialog. */
 export type KeyContext = 'terminal' | 'vscode' | 'dialog';
@@ -201,6 +202,12 @@ export function commandEnabled(id: string): boolean {
       return attentionList().length > 0;
     case 'app.addMachine':
       return changes;
+    case 'view.zoomIn':
+      return zoomAvailable(s.readOnly) && currentZoom() < ZOOM_LEVELS[ZOOM_LEVELS.length - 1];
+    case 'view.zoomOut':
+      return zoomAvailable(s.readOnly) && currentZoom() > ZOOM_LEVELS[0];
+    case 'view.zoomReset':
+      return zoomAvailable(s.readOnly) && currentZoom() !== 100;
   }
   return true;
 }
@@ -303,6 +310,15 @@ export function runCommand(id: string) {
       break;
     case 'view.toggleCode':
       actions.toggleCode();
+      break;
+    case 'view.zoomIn':
+      zoom(1);
+      break;
+    case 'view.zoomOut':
+      zoom(-1);
+      break;
+    case 'view.zoomReset':
+      zoom(0);
       break;
     case 'find.open': {
       if (!ctx?.terminal) break;

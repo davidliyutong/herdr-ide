@@ -10,6 +10,7 @@ import { desktopShell } from './shell';
 import { useStore } from './state/store';
 import { useTerms } from './state/terms';
 import { useDialog } from './dialog';
+import { useSettings } from './settings';
 
 export { desktopShell, type DesktopShell } from './shell';
 
@@ -60,7 +61,14 @@ export function initDesktop(): () => void {
       shell.setDisabledCommands(list);
     }, 50);
   };
-  const subs = [useStore.subscribe(update), useTerms.subscribe(update), useDialog.subscribe(update), useKeys.subscribe(update)];
+  // The zoom's items depend on the zoom (settings).
+  const subs = [
+    useStore.subscribe(update),
+    useTerms.subscribe(update),
+    useDialog.subscribe(update),
+    useKeys.subscribe(update),
+    useSettings.subscribe(update),
+  ];
   update();
   return () => {
     off();

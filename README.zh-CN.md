@@ -64,7 +64,7 @@
   VS Code 的资源管理器里也有同样的下载。
   状态栏的下载面板显示每个下载的进度、速度和结果，可以取消或重新下载。
 - **多浏览器同时使用**：所有浏览器和桌面应用看到同样的终端，都可以输入；终端的尺寸由最近使用它的一方决定。
-- **设置**：界面语言（中文、英文）、浅色/深色主题（VS Code 同步切换）、界面大小、终端的字体（从已安装的等宽字体中选择，带预览）、行高、光标、回滚行数、响铃、配色方案（Dracula、Nord、Solarized、One、Gruvbox、Tomorrow 等）及自定义颜色、静音的智能体、面板位置、每台机器获取 VS Code 的方式、每台机器的程序窗口以及所有快捷键，集中在一个与 VS Code 布局相同、可搜索的设置对话框里（侧栏的齿轮按钮，桌面应用里按 `cmd+,` 或 `ctrl+,`；机器的右键菜单可打开它自己的设置）。
+- **设置**：界面语言（中文、英文）、浅色/深色主题（VS Code 同步切换）、界面大小、桌面应用的界面缩放、终端的字体（从已安装的等宽字体中选择，带预览）、行高、光标、回滚行数、响铃、配色方案（Dracula、Nord、Solarized、One、Gruvbox、Tomorrow 等）及自定义颜色、静音的智能体、面板位置、每台机器获取 VS Code 的方式、每台机器的程序窗口以及所有快捷键，集中在一个与 VS Code 布局相同、可搜索的设置对话框里（侧栏的齿轮按钮，桌面应用里按 `cmd+,` 或 `ctrl+,`；机器的右键菜单可打开它自己的设置）。
   设置和快捷键保存在 core 所在主机上的两个 JSON 文件里，也可以直接手改；浏览器和桌面应用看到的都一样。
   终端默认使用内置的 JetBrains Mono 字体，也可以换成其他字体。
 
@@ -143,8 +143,8 @@ ARCH=x64 make desktop-dist       # 其他架构；默认使用当前 Node 的架
 从文件管理器把文件夹拖到侧栏、在 macOS 上拖到 Dock 图标，或在 Linux 上用「打开方式」以本应用打开，即可在本机为每个文件夹新建一个工作区。
 拖到本机窗格上的文件和文件夹直接粘贴原路径，不会上传。
 
-在 macOS 上，`cmd+t` 新建标签页，`cmd+1`…`cmd+9` 切换标签页（`cmd+9` 为最后一个），`cmd+shift+w` 关闭标签页，`cmd+w` 关闭窗格，`cmd+d` / `cmd+shift+d` 分屏，`cmd+alt+方向键` 在窗格间移动，`cmd+shift+enter` 最大化窗格，`cmd+n` 新建工作区，`cmd+,` 打开设置，`cmd+shift+p` 打开命令面板，`cmd+j` 显示或隐藏 VS Code 面板。
-在 Windows 和 Linux 上，`ctrl+shift+t` 新建标签页，`ctrl+tab` 和 `alt+1`…`alt+9` 切换标签页，`ctrl+shift+w` 关闭标签页，`ctrl+shift+n` 新建工作区，`ctrl+,` 打开设置，`ctrl+shift+p` 打开命令面板，`ctrl+shift+j` 显示或隐藏 VS Code 面板；
+在 macOS 上，`cmd+t` 新建标签页，`cmd+1`…`cmd+9` 切换标签页（`cmd+9` 为最后一个），`cmd+shift+w` 关闭标签页，`cmd+w` 关闭窗格，`cmd+d` / `cmd+shift+d` 分屏，`cmd+alt+方向键` 在窗格间移动，`cmd+shift+enter` 最大化窗格，`cmd+n` 新建工作区，`cmd+,` 打开设置，`cmd+shift+p` 打开命令面板，`cmd+j` 显示或隐藏 VS Code 面板，`cmd++`、`cmd+-` 和 `cmd+0` 缩放窗口（终端一起缩放）。
+在 Windows 和 Linux 上，`ctrl+shift+t` 新建标签页，`ctrl+tab` 和 `alt+1`…`alt+9` 切换标签页，`ctrl+shift+w` 关闭标签页，`ctrl+shift+n` 新建工作区，`ctrl+,` 打开设置，`ctrl+shift+p` 打开命令面板，`ctrl+shift+j` 显示或隐藏 VS Code 面板，`ctrl++`、`ctrl+-` 和 `ctrl+0` 缩放窗口；
 其他按键（包括 `ctrl+c` 和 `ctrl+q`）都会发给终端。
 焦点在 VS Code 里时，VS Code 自己的快捷键优先。
 菜单栏显示当前生效的快捷键，使用界面的语言；

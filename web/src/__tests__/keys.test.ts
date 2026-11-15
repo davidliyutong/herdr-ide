@@ -9,7 +9,7 @@ import sequenceVectors from '../../../design/testdata/keys/sequences.json';
 import defaultVectors from '../../../design/testdata/keys/defaults.json';
 import registry from '../../../design/generated/registry.json';
 import { altOnly, KeyError, keyLabel, normalizeKeys, strokeOf } from '../keys';
-import { feedStroke, handleKey, keyHint, withKey, type KeyContext } from '../keymap';
+import { commandEnabled, feedStroke, handleKey, keyHint, withKey, type KeyContext } from '../keymap';
 import { keysOf, platform, resetRules, rulesFor, useKeys, type Binding, type Platform } from '../keybindings';
 import { conflictsOf } from '../components/KeyboardShortcuts';
 
@@ -139,6 +139,24 @@ describe('keybindings', () => {
         expect(ev.defaultPrevented, `${p} ${init.code}`).toBe(false);
       }
     }
+  });
+
+  it('leaves the zoom keys to browsers, where the zoom commands do not run', () => {
+    for (const p of ['mac-browser', 'pc-browser'] as Platform[]) {
+      useKeys.setState({ effective: (registry.keybindings as Record<Platform, Binding[]>)[p] });
+      for (const init of [
+        { key: '=', code: 'Equal', metaKey: true },
+        { key: '+', code: 'Equal', metaKey: true, shiftKey: true },
+        { key: '-', code: 'Minus', ctrlKey: true },
+        { key: '0', code: 'Digit0', ctrlKey: true },
+      ]) {
+        const ev = new KeyboardEvent('keydown', { cancelable: true, ...init });
+        expect(handleKey(ev, 'terminal'), `${p} ${init.code}`).toBe(false);
+        expect(ev.defaultPrevented).toBe(false);
+      }
+    }
+    // A page without the desktop app's shell has no zoom to change.
+    for (const id of ['view.zoomIn', 'view.zoomOut', 'view.zoomReset']) expect(commandEnabled(id), id).toBe(false);
   });
 
   it('turns key changes into the user’s rules', () => {

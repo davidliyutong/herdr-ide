@@ -186,6 +186,21 @@
       "when": "always"
     },
     {
+      "id": "view.zoomIn",
+      "section": "view",
+      "when": "always"
+    },
+    {
+      "id": "view.zoomOut",
+      "section": "view",
+      "when": "always"
+    },
+    {
+      "id": "view.zoomReset",
+      "section": "view",
+      "when": "always"
+    },
+    {
       "id": "find.open",
       "section": "find",
       "when": "terminal"
@@ -261,6 +276,9 @@
     "command.tab.select9",
     "command.view.toggleCode",
     "command.view.toggleSidebar",
+    "command.view.zoomIn",
+    "command.view.zoomOut",
+    "command.view.zoomReset",
     "command.workspace.close",
     "command.workspace.new",
     "command.workspace.next",
@@ -358,7 +376,8 @@
     "settings.terminal.programClipboard.ask",
     "settings.terminal.programClipboard.auto",
     "settings.terminal.programClipboard.off",
-    "settings.terminal.scrollback"
+    "settings.terminal.scrollback",
+    "settings.window.zoom"
   ],
   "keybindings": {
     "mac": [
@@ -538,6 +557,26 @@
         "when": "always"
       },
       {
+        "key": "cmd+shift+equal",
+        "command": "view.zoomIn",
+        "when": "always"
+      },
+      {
+        "key": "cmd+equal",
+        "command": "view.zoomIn",
+        "when": "always"
+      },
+      {
+        "key": "cmd+minus",
+        "command": "view.zoomOut",
+        "when": "always"
+      },
+      {
+        "key": "cmd+0",
+        "command": "view.zoomReset",
+        "when": "always"
+      },
+      {
         "key": "cmd+f",
         "command": "find.open",
         "when": "terminal"
@@ -672,6 +711,26 @@
         "when": "always"
       },
       {
+        "key": "ctrl+shift+equal",
+        "command": "view.zoomIn",
+        "when": "always"
+      },
+      {
+        "key": "ctrl+equal",
+        "command": "view.zoomIn",
+        "when": "always"
+      },
+      {
+        "key": "ctrl+minus",
+        "command": "view.zoomOut",
+        "when": "always"
+      },
+      {
+        "key": "ctrl+0",
+        "command": "view.zoomReset",
+        "when": "always"
+      },
+      {
         "key": "ctrl+shift+f",
         "command": "find.open",
         "when": "terminal"
@@ -762,6 +821,7 @@
     "terminal.mathHover": true,
     "terminal.optionIsMeta": false,
     "terminal.programClipboard": "auto",
-    "terminal.scrollback": 10000
+    "terminal.scrollback": 10000,
+    "window.zoom": 100
   }
 }

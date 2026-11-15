@@ -330,7 +330,8 @@ settings per browser; theming terminal applications.
   ([04](04-layout-and-keyboard.md)). `appearance.theme` becomes Electron's
   `nativeTheme.themeSource` (title bar, native controls, window
   background), `appearance.language` the language of the menu and the
-  error dialogs.
+  error dialogs, `window.zoom` the windows' zoom
+  ([16](16-desktop-packaging.md)).
 
 **Appearance** (`web/src/appearance.ts`)
 
@@ -377,7 +378,11 @@ settings per browser; theming terminal applications.
   thickening (Ghostty's `font-thicken`), which the browser's glyphs do not
   get.
 - Interface text size (`appearance.uiFontSize`, 11–20 px) sets the root
-  font size; the chrome is sized in `rem`, so it scales with it. Every terminal setting applies at once in the
+  font size; the chrome is sized in `rem`, so it scales with it. Zoom
+  (`window.zoom`, 50–300 %, the desktop app only, where its shell applies
+  it; hidden in browsers, which zoom pages themselves) scales the whole
+  window, terminals included, on top of both sizes
+  ([16](16-desktop-packaging.md)). Every terminal setting applies at once in the
   browser's terminals ([26](26-web-terminals.md)): font family, size,
   weight and line height (a new cell size resizes the terminals), colors,
   cursor style and blink (the cursor a program's reset returns to),

@@ -82,14 +82,22 @@ func cmd(id, section string, defaults ...Default) Command {
 	return Command{ID: id, Section: section, When: WhenTerminal, Defaults: defaults}
 }
 
+// always is a command that also runs while a dialog or VS Code has the
+// keyboard.
+func always(id, section string, defaults ...Default) Command {
+	return Command{ID: id, Section: section, When: WhenAlways, Defaults: defaults}
+}
+
 // Commands are every command, with the desktop app's direct shortcuts as
 // defaults: on macOS the Cmd keys of Terminal.app, iTerm, Chrome and VS Code
 // (Cmd+T, Cmd+1…9, Cmd+Option+arrows, Cmd+Shift+Enter…); on other systems
 // Ctrl+Shift keys (as terminal emulators use, since Ctrl+W and Ctrl+T are
 // keys of shells), Ctrl+Tab and Alt with a digit (as GNOME Terminal and
-// Konsole switch tabs). No default is a chord, and none is Ctrl or Alt with
-// a letter alone or a function key, which programs in terminals read: every
-// key that is not a default reaches the terminal on its first press.
+// Konsole switch tabs), and Ctrl with +, - or 0 for the zoom (as GNOME
+// Terminal and Windows Terminal change the font size). No default is a
+// chord, and none is Ctrl or Alt with a letter alone or a function key,
+// which programs in terminals read: every key that is not a default reaches
+// the terminal on its first press.
 // Browsers get only keys they leave to pages: find, the command palette on
 // macOS (Cmd+K; Cmd+Shift+P opens a private window in Firefox, as
 // Ctrl+Shift+P does elsewhere, where no key is left for it and the status
@@ -138,6 +146,15 @@ var Commands = func() []Command {
 		// Hiding the VS Code panel from inside VS Code is what the key is for.
 		Command{ID: "view.toggleCode", Section: "view", When: WhenAlways,
 			Defaults: []Default{on(macApp, "cmd+j"), on(pcApp, "ctrl+shift+j")}},
+		// The desktop app's zoom (the window.zoom setting), with the keys
+		// browsers zoom pages with, which they keep for themselves; also in
+		// dialogs and VS Code, as the window's zoom is. Ctrl+= is Zoom In
+		// too, as it is in terminal emulators and browsers on Windows and
+		// Linux.
+		always("view.zoomIn", "view", on(macApp, "cmd+shift+equal"), on(macApp, "cmd+equal"),
+			on(pcApp, "ctrl+shift+equal"), on(pcApp, "ctrl+equal")),
+		always("view.zoomOut", "view", on(macApp, "cmd+minus"), on(pcApp, "ctrl+minus")),
+		always("view.zoomReset", "view", on(macApp, "cmd+0"), on(pcApp, "ctrl+0")),
 
 		cmd("find.open", "find", on(macAll, "cmd+f"), on(pcAll, "ctrl+shift+f")),
 		cmd("find.next", "find", on(macApp, "cmd+g")),

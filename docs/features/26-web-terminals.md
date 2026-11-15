@@ -92,7 +92,10 @@ changed are worked out again.
 - The cell is the width of "W" in the terminal font and its line height
   times `terminal.lineHeight`, in whole device pixels; it is measured again
   when the font, its size or the pixel ratio changes (another display, page
-  zoom), which resizes the terminal.
+  zoom, the desktop app's zoom), which resizes the terminal. A zoom changes
+  the pane's size and the pixel ratio at once, and the pane may see the new
+  size first: a size measured at another ratio than the cells' measures the
+  cells again before the grid.
 
 **Input** (`vt/input.ts`). A key becomes the encoder's key event: the
 physical key (`KeyboardEvent.code`), the modifiers, those the layout used

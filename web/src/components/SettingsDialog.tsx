@@ -32,6 +32,8 @@ import {
 } from '../settings';
 import { KeyboardShortcuts } from './KeyboardShortcuts';
 import { FontPicker } from './settings/FontPicker';
+import { desktopShell } from '../shell';
+import { ZOOM_KEY } from '../zoom';
 import { colorKeys, ThemeColors, schemeLabel } from './settings/Colors';
 
 export function settingLabel(key: string): string {
@@ -83,10 +85,12 @@ export function problemText(p: SettingProblem): string {
 }
 
 /** Settings the generic rows leave out: the theme colors are the colors
- * page's swatches; Option as Meta exists on macOS only. */
+ * page's swatches; Option as Meta exists on macOS only, the zoom in the
+ * desktop app only (browsers zoom pages themselves). */
 function shownInRows(d: SettingDef): boolean {
   if (d.key.startsWith('terminal.colors.')) return false;
   if (d.key === 'terminal.optionIsMeta' && !isMac) return false;
+  if (d.key === ZOOM_KEY && !desktopShell) return false;
   return true;
 }
 

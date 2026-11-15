@@ -66,6 +66,10 @@ const keys = keyPlatform(platform);
 let bindings = registry.keybindings[keys] as Binding[];
 // appearance.language: "auto" follows the system's languages.
 let language = 'auto';
+// window.zoom as a factor: the main window's zoom, which Chromium keeps per
+// origin, so the app's other windows (program windows, VS Code's own) share
+// it. The setting is the only place it is kept.
+let zoomFactor = 1;
 // The commands whose menu items are disabled, as the page last said.
 let disabled = new Set<string>();
 // Folders opened with the app, until the page takes them.
@@ -163,11 +167,19 @@ function applyDisabled(next: Set<string>) {
   }
 }
 
+/** Zooms the main window's page to the zoom setting. */
+function applyZoom() {
+  const contents = mainWindow?.webContents;
+  if (contents && !contents.isDestroyed() && contents.getZoomFactor() !== zoomFactor) contents.setZoomFactor(zoomFactor);
+}
+
 // The core's settings and keybindings: the theme becomes the title bar's and
 // native controls' (also when it differs from the system's appearance), the
-// language the menu's.
+// language the menu's, the zoom the windows'.
 function applySettings(s: ShellSettings) {
   nativeTheme.themeSource = s.theme;
+  zoomFactor = s.zoom;
+  applyZoom();
   if (s.language === language) return;
   language = s.language;
   buildMenu();
@@ -233,6 +245,8 @@ function createWindow() {
   win.on('session-end', () => {
     systemShutdown = true;
   });
+  // Each page loaded (also after a reload) gets the zoom.
+  win.webContents.on('did-finish-load', applyZoom);
   win.once('ready-to-show', () => win.show());
   win.on('closed', () => {
     nativeTheme.off('updated', onTheme);

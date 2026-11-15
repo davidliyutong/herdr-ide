@@ -283,15 +283,20 @@ described in [13](13-settings-and-appearance.md))
   settings, `cmd+b` sidebar, `cmd+j` the VS Code panel
   ([05](05-vscode-panel.md)), `cmd+f` / `cmd+g` / `cmd+shift+g` find,
   `cmd+shift+p` the command palette (as in VS Code and Ghostty), `cmd+/` the
-  keyboard shortcuts. On other systems the desktop app has `ctrl+shift`
+  keyboard shortcuts, `cmd++` (or `cmd+=`), `cmd+-` and `cmd+0` the
+  window's zoom ([16](16-desktop-packaging.md)), also in dialogs and,
+  through the menu, from text fields and VS Code. On other systems the desktop app has `ctrl+shift`
   keys as terminal emulators do, since `ctrl+w` deletes a word in shells:
   `ctrl+shift+t` new tab, `ctrl+shift+w` close tab, `ctrl+shift+enter`
   maximize the pane, `ctrl+shift+n` new workspace, `ctrl+shift+a` the agent
   needing attention, `ctrl+shift+j` VS Code, `ctrl+shift+p` the palette,
   `ctrl+shift+/` the shortcuts, `ctrl+,` settings, `ctrl+tab` /
   `ctrl+shift+tab` next / previous tab and `alt+1`…`alt+9` the tabs (as
-  GNOME Terminal and Konsole). Browsers get none of these (they keep
-  them), except find (`cmd+f` on macOS, `ctrl+shift+f` elsewhere: `ctrl+f`
+  GNOME Terminal and Konsole), and `ctrl++` (or `ctrl+=`), `ctrl+-` and
+  `ctrl+0` the zoom (as GNOME Terminal and Windows Terminal size their
+  text; `ctrl+shift+-`, undo in shells, stays the terminal's). Browsers
+  get none of these (they keep them; their zoom keys zoom the page),
+  except find (`cmd+f` on macOS, `ctrl+shift+f` elsewhere: `ctrl+f`
   belongs to the programs in panes), the keyboard shortcuts and, on macOS,
   the palette as `cmd+k` (Firefox opens a private window on `cmd+shift+p`
   and `ctrl+shift+p` and gives pages neither).

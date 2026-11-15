@@ -97,6 +97,11 @@ test('items show the first single-stroke key of their command and run it', () =>
   assert.equal(byCommand('tab.close').accelerator, 'Super+Shift+W');
   assert.equal(byCommand('pane.focusLeft').accelerator, 'Super+Alt+Left');
   assert.equal(byCommand('pane.zoom').accelerator, 'Super+Shift+Enter');
+  // The window's zoom, shown with the key it is known by (⌘+).
+  assert.equal(byCommand('view.zoomIn').label, 'Zoom In');
+  assert.equal(byCommand('view.zoomIn').accelerator, 'Super+Plus');
+  assert.equal(byCommand('view.zoomOut').accelerator, 'Super+-');
+  assert.equal(byCommand('view.zoomReset').accelerator, 'Super+0');
   assert.deepEqual(
     items
       .filter((it) => it.role && ['minimize', 'zoom', 'front', 'togglefullscreen', 'hideOthers', 'unhide'].includes(it.role))

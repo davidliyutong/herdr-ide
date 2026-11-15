@@ -262,6 +262,10 @@ export class TermPane {
   private measureSize() {
     const m = this.metrics;
     if (this.disposed || !m || !this.renderer) return;
+    // A zoom changes the pixel ratio and the pane's size at once; the size
+    // may be seen first. The cells are measured again for the new ratio
+    // (setAppearance measures the size after them), so text stays sharp.
+    if ((window.devicePixelRatio || 1) !== this.dpr) return this.setAppearance(this.appearance);
     const w = Math.round(this.host.clientWidth * this.dpr);
     const h = Math.round(this.host.clientHeight * this.dpr);
     if (w <= 0 || h <= 0) return;

@@ -92,7 +92,7 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   same terminals and type into them; the one used last sets a terminal's
   size.
 - **Settings.** Language (English, Chinese), light/dark theme followed by
-  VS Code, interface size, the terminals' font (picked from the monospace
+  VS Code, interface size, the desktop app's zoom, the terminals' font (picked from the monospace
   fonts installed, with a preview), line height, cursor, scrollback, bell,
   color schemes (Dracula, Nord, Solarized, One, Gruvbox, Tomorrow…) with
   your own colors on top, silent agents, panel position, how each machine
@@ -201,11 +201,13 @@ On macOS `cmd+t` opens a tab, `cmd+1`…`cmd+9` select one (`cmd+9` the
 last), `cmd+shift+w` closes it, `cmd+w` closes the pane, `cmd+d` /
 `cmd+shift+d` split it, `cmd+alt+arrows` move between panes,
 `cmd+shift+enter` maximizes one, `cmd+n` creates a workspace, `cmd+,` opens
-the settings, `cmd+shift+p` the command palette and `cmd+j` shows or hides
-the VS Code panel. On Windows and Linux `ctrl+shift+t` opens a tab,
+the settings, `cmd+shift+p` the command palette, `cmd+j` shows or hides
+the VS Code panel and `cmd++`, `cmd+-` and `cmd+0` zoom the window,
+terminals included. On Windows and Linux `ctrl+shift+t` opens a tab,
 `ctrl+tab` and `alt+1`…`alt+9` switch tabs, `ctrl+shift+w` closes one,
 `ctrl+shift+n` creates a workspace, `ctrl+,` opens the settings,
-`ctrl+shift+p` the command palette and `ctrl+shift+j` the VS Code panel;
+`ctrl+shift+p` the command palette, `ctrl+shift+j` the VS Code panel and
+`ctrl++`, `ctrl+-` and `ctrl+0` zoom;
 every other key, `ctrl+c` and `ctrl+q` included, reaches the terminal. While VS Code has focus, its own keys come first. The menu
 bar shows the keys in effect, in the UI's language; the title bar follows
 the UI's theme.

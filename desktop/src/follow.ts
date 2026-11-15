@@ -1,5 +1,5 @@
 // What the shell takes from its core: the keybindings in effect on its
-// platform (for the menu), the theme and the language. It is a client of the event channel like the page: once /ws is
+// platform (for the menu), the theme, the language and the zoom. It is a client of the event channel like the page: once /ws is
 // open it reads GET /api/keybindings and GET /api/settings, then applies the
 // "keybindings" and "settings" messages the core sends after every change.
 // The core is the shell's own child; the channel is opened again if it drops.
@@ -11,6 +11,8 @@ export interface ShellSettings {
   theme: 'system' | 'light' | 'dark';
   /** appearance.language: "auto", "en", "zh-CN"… */
   language: string;
+  /** window.zoom as a zoom factor (1 is 100%), within Chromium's 0.25 to 5. */
+  zoom: number;
 }
 
 /** The bindings in effect on platform in a /api/keybindings reply or a
@@ -31,9 +33,11 @@ export function settingsOf(reply: unknown): ShellSettings | undefined {
   if (!values || typeof values !== 'object') return;
   const theme = values['appearance.theme']?.value;
   const language = values['appearance.language']?.value;
+  const zoom = values['window.zoom']?.value;
   return {
     theme: theme === 'light' || theme === 'dark' ? theme : 'system',
     language: typeof language === 'string' ? language : 'auto',
+    zoom: typeof zoom === 'number' && zoom >= 25 && zoom <= 500 ? zoom / 100 : 1,
   };
 }
 

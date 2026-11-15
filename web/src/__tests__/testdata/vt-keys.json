@@ -488,6 +488,81 @@
       "bytes": null
     },
     {
+      "name": "Cmd+= (the desktop app's Zoom In; else the browser zooms)",
+      "event": {
+        "key": "=",
+        "code": "Equal",
+        "metaKey": true
+      },
+      "bytes": null
+    },
+    {
+      "name": "Cmd+- (the desktop app's Zoom Out; else the browser zooms)",
+      "event": {
+        "key": "-",
+        "code": "Minus",
+        "metaKey": true
+      },
+      "bytes": null
+    },
+    {
+      "name": "Cmd+0 (the desktop app's Reset Zoom; else the browser's)",
+      "event": {
+        "key": "0",
+        "code": "Digit0",
+        "metaKey": true
+      },
+      "bytes": null
+    },
+    {
+      "name": "Ctrl+= (Zoom In of the desktop app on Windows and Linux; the terminal's where unbound)",
+      "event": {
+        "key": "=",
+        "code": "Equal",
+        "ctrlKey": true
+      },
+      "options": {
+        "mac": false
+      },
+      "bytes": {
+        "legacy": "\u001b[61;5u",
+        "app": "\u001b[61;5u",
+        "kitty": "\u001b[61;5u"
+      }
+    },
+    {
+      "name": "Ctrl+- (Zoom Out of the desktop app on Windows and Linux; the terminal's where unbound)",
+      "event": {
+        "key": "-",
+        "code": "Minus",
+        "ctrlKey": true
+      },
+      "options": {
+        "mac": false
+      },
+      "bytes": {
+        "legacy": "\u001b[45;5u",
+        "app": "\u001b[45;5u",
+        "kitty": "\u001b[45;5u"
+      }
+    },
+    {
+      "name": "Ctrl+0 (Reset Zoom of the desktop app on Windows and Linux; the terminal's where unbound)",
+      "event": {
+        "key": "0",
+        "code": "Digit0",
+        "ctrlKey": true
+      },
+      "options": {
+        "mac": false
+      },
+      "bytes": {
+        "legacy": "0",
+        "app": "0",
+        "kitty": "\u001b[48;5u"
+      }
+    },
+    {
       "name": "Shift+Enter while composing",
       "event": {
         "key": "Enter",

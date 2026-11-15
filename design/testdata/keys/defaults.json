@@ -177,6 +177,93 @@
         "none",
         "none"
       ]
+    },
+    {
+      "description": "the zoom keys zoom the desktop app's windows, also while a dialog or VS Code has the keyboard (⌘+ is cmd+shift+equal on a US layout)",
+      "platforms": [
+        "mac"
+      ],
+      "context": "terminal",
+      "strokes": [
+        "cmd+shift+equal",
+        "cmd+equal",
+        "cmd+minus",
+        "cmd+0",
+        "cmd+shift+minus"
+      ],
+      "results": [
+        "run:view.zoomIn",
+        "run:view.zoomIn",
+        "run:view.zoomOut",
+        "run:view.zoomReset",
+        "none"
+      ]
+    },
+    {
+      "description": "the zoom keys in a dialog and in VS Code",
+      "platforms": [
+        "mac"
+      ],
+      "context": "vscode",
+      "strokes": [
+        "cmd+equal",
+        "cmd+minus",
+        "cmd+0"
+      ],
+      "results": [
+        "run:view.zoomIn",
+        "run:view.zoomOut",
+        "run:view.zoomReset"
+      ]
+    },
+    {
+      "description": "on Windows and Linux Ctrl with +, = , - or 0 zooms, as in terminal emulators; Ctrl+Shift+- (Ctrl+_, undo in shells) reaches the terminal",
+      "platforms": [
+        "pc"
+      ],
+      "context": "dialog",
+      "strokes": [
+        "ctrl+shift+equal",
+        "ctrl+equal",
+        "ctrl+minus",
+        "ctrl+0",
+        "ctrl+shift+minus"
+      ],
+      "results": [
+        "run:view.zoomIn",
+        "run:view.zoomIn",
+        "run:view.zoomOut",
+        "run:view.zoomReset",
+        "none"
+      ]
+    },
+    {
+      "description": "browsers keep their zoom keys: no default takes them",
+      "platforms": [
+        "mac-browser",
+        "pc-browser"
+      ],
+      "context": "terminal",
+      "strokes": [
+        "cmd+equal",
+        "cmd+shift+equal",
+        "cmd+minus",
+        "cmd+0",
+        "ctrl+equal",
+        "ctrl+shift+equal",
+        "ctrl+minus",
+        "ctrl+0"
+      ],
+      "results": [
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none"
+      ]
     }
   ]
 }

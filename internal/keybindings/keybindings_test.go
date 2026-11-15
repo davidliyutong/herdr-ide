@@ -94,6 +94,12 @@ func TestDefaults(t *testing.T) {
 		{PlatformMacBrowser, "pane.zoom", nil},
 		{PlatformMac, "view.toggleCode", []string{"cmd+j"}},
 		{PlatformPCBrowser, "view.toggleCode", nil},
+		// Browsers zoom pages with these keys themselves.
+		{PlatformMac, "view.zoomIn", []string{"cmd+shift+equal", "cmd+equal"}},
+		{PlatformPC, "view.zoomOut", []string{"ctrl+minus"}},
+		{PlatformPC, "view.zoomReset", []string{"ctrl+0"}},
+		{PlatformMacBrowser, "view.zoomIn", nil},
+		{PlatformPCBrowser, "view.zoomReset", nil},
 	} {
 		if got := find(c.platform, c.command); !slices.Equal(got, c.keys) {
 			t.Errorf("%s %s = %v, want %v", c.platform, c.command, got, c.keys)
