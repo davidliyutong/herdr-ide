@@ -23,7 +23,8 @@ pane that never overwrites a change made on the machine since it loaded the
 file.
 
 Non-goals: an IDE (language services beyond what Monaco has for JSON, CSS
-and HTML, search across files, version control: VS Code panes do that); a
+and HTML, search across files: VS Code panes do that; version control:
+the Git plugin, [31](31-git.md)); a
 watch of the file system on machines (the panel polls what it shows);
 restoring files from the trash (the system's file manager does that).
 

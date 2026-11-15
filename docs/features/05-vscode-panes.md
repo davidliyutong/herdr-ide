@@ -84,7 +84,10 @@ Code leaves (and `pane.close`, below).
   | **Show Changes in VS Code** (`code.diff`), **Open Git Graph** (`code.gitGraph`) | a split to the right of the pane they came from, then runs the command there | the VS Code pane of that tab for that folder |
   | cmd/ctrl+click on a file in a terminal, **Open … in VS Code** in its menu | the file at its line in a VS Code pane of the terminal's workspace, else in a split beside the terminal, for the terminal's directory or the workspace's when the file is below it, else for the file's directory | of the workspace's VS Code panes: one of the terminal's tab whose folder holds the file, then one of another tab that holds it, then any of the terminal's tab, then any |
 
-  A pane opened or reused this way is shown and gets the keyboard.
+  A pane opened or reused this way is shown and gets the keyboard. The Git
+  plugin ([31](31-git.md)) shows changes, diffs and the graph without VS
+  Code (**Show Source Control**, **Show Git Graph**); these commands stay
+  for VS Code's own views.
 - Each VS Code pane on screen is a same-origin iframe of its own
   (`/m/<machine>/code/?folder=`), a VS Code window. Moving an iframe in the
   document reloads it, so the iframes live in one layer over the panes and
