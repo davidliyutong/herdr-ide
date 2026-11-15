@@ -444,6 +444,9 @@
   outline: none;
 }
 .git-diff-bar {
+  /* A narrow pane hides what does not fit rather than stacking letters. */
+  white-space: nowrap;
+  overflow: hidden;
   gap: 2px;
   padding: 2px 6px 2px 10px;
   border-bottom: 1px solid var(--line);
@@ -474,4 +477,18 @@
 .git-diff-host {
   flex: 1;
   min-height: 0;
+}
+
+.git-diff-bar > *,
+.git-diff-actions > * {
+  flex-shrink: 0;
+}
+.git-diff-bar .git-diff-path {
+  flex-shrink: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.git-diff-actions {
+  flex-wrap: wrap;
+  white-space: nowrap;
 }

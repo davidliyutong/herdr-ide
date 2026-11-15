@@ -138,7 +138,8 @@ the answer through.
   change it makes (`state.ts`). Panes showing the repository share this.
 
 **Graph pane** (`GraphPane.tsx`, `{view: {plugin: 'git', kind: 'graph',
-repo}}`, one per repository):
+repo}}`, one per repository, in a tab of its own: it is as wide as Git
+Graph's editor; `actions.openView` with `tab`):
 
 - Lanes (`graph.ts`, a pure function): commits in date order, each in the
   first lane waiting for it (else a free or new one); other lanes waiting
@@ -175,7 +176,9 @@ repo}}`, one per repository):
 
 **Diff pane** (`DiffPane.tsx`, `{view: {plugin: 'git', kind: 'diff', repo,
 path, mode, rev?, rev2?, orig?, parent?}}`; the same file and mode reuse
-their pane):
+their pane, and a change of the working tree or the index opened from
+Source Control takes over any such pane without unsaved edits, as VS
+Code's preview editor does, so going through the changes keeps one pane):
 
 | Mode | Left | Right |
 | --- | --- | --- |

@@ -76,7 +76,8 @@ A plugin (`PluginDef`, `web/src/plugins/api.ts`) contributes:
   `view:<id>`, drawn by the plugin's component for that kind; the fields
   besides `id`, `plugin` and `kind` are the plugin's
   (`L.setViewFields`, `actions.openView`, which reuses a pane of the kind
-  the caller accepts);
+  the caller accepts, else splits beside the focused pane or, for wide
+  content, opens a tab);
 - **commands**: handlers of commands declared in
   `internal/keybindings/commands.go`, checked before the app's own;
 - **status bar items**, **palette items** and a handler of its `/ws`

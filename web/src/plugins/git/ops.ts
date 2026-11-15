@@ -10,6 +10,7 @@ import { openEditor } from '../files/ops';
 import type { StatusFile } from './api';
 import { badRefName, promptDialog } from './prompt';
 import { runGit } from './state';
+import { dirtyDiffs } from './DiffPane';
 
 export type DiffMode = 'worktree' | 'staged' | 'commit' | 'compare';
 
@@ -34,16 +35,23 @@ export const baseName = (p: string) => p.slice(p.lastIndexOf('/') + 1) || p;
 export const join = (root: string, rel: string) => `${root.replace(/\/+$/, '')}/${rel}`;
 export const short = (h: string) => h.slice(0, 7);
 
-/** Opens a file's diff, reusing the pane that shows the same one. */
+/** Opens a file's diff, reusing the pane that shows the same one; a
+ * change of the working tree or the index (Source Control's rows) takes
+ * over any such pane without unsaved edits, as VS Code's preview editor
+ * does, so going through the changes opens one pane. */
 export function openDiff(m: string, d: DiffView, from?: string) {
   const same = (v: Record<string, unknown>) =>
     v.repo === d.repo && v.path === d.path && v.mode === d.mode && (v.rev ?? '') === (d.rev ?? '') && (v.rev2 ?? '') === (d.rev2 ?? '');
-  return actions.openView(m, { plugin: 'git', kind: 'diff', ...d }, { from, reuse: same });
+  const local = (mode: unknown) => mode === 'worktree' || mode === 'staged';
+  const reuse = (v: Record<string, unknown>) => same(v) || (local(d.mode) && local(v.mode) && !dirtyDiffs.has(`view:${String(v.id)}`));
+  // Fields of the other file it showed are dropped.
+  const view = { rev: undefined, rev2: undefined, orig: undefined, parent: undefined, untracked: undefined, ...d };
+  return actions.openView(m, { plugin: 'git', kind: 'diff', ...view }, { from, reuse });
 }
 
-/** Opens the graph of a repository (one pane per repository). */
+/** Opens the graph of a repository in a tab of its own (one pane per repository). */
 export function openGraph(m: string, repo: string) {
-  return actions.openView(m, { plugin: 'git', kind: 'graph', repo }, { reuse: (v) => v.repo === repo });
+  return actions.openView(m, { plugin: 'git', kind: 'graph', repo }, { reuse: (v) => v.repo === repo, tab: true });
 }
 
 /** Opens a file of the working tree in the file explorer's editor. */

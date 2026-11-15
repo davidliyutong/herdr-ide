@@ -729,7 +729,7 @@ export const actions = {
   async openView(
     m: string,
     view: { plugin: string; kind: string } & Record<string, unknown>,
-    opts: { from?: string; reuse?: (v: L.PluginView) => boolean } = {},
+    opts: { from?: string; reuse?: (v: L.PluginView) => boolean; tab?: boolean } = {},
   ) {
     await whenLoaded(m);
     const layout = terms.layout(m)!;
@@ -743,7 +743,9 @@ export const actions = {
       return found.key;
     }
     const id = L.newId();
-    openBeside(m, { view: { ...view, id } }, o.ws, o.from);
+    // Wide content (a graph) takes a tab of its own.
+    if (opts.tab) terms.mutate(m, (l) => L.openPane(l, { view: { ...view, id } }, o.ws?.id));
+    else openBeside(m, { view: { ...view, id } }, o.ws, o.from);
     focusDom(m, L.viewKey(id));
     return L.viewKey(id);
   },

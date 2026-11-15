@@ -91,6 +91,9 @@ export function selectedLines(sels: { startLineNumber: number; endLineNumber: nu
 
 type Status = { kind: 'loading' } | { kind: 'ready' } | { kind: 'binary' | 'tooLarge' } | { kind: 'error'; message: string };
 
+/** The keys of diff panes with unsaved edits. */
+export const dirtyDiffs = new Set<string>();
+
 export function DiffPane({ m, pane, view, focused }: PaneViewProps) {
   const d = diffOf(view);
   const readOnly = useStore((s) => s.readOnly);
@@ -105,6 +108,12 @@ export function DiffPane({ m, pane, view, focused }: PaneViewProps) {
   const [fold, setFold] = useState(true);
   const [dirty, setDirty] = useState(false);
   const [changes, setChanges] = useState(0);
+  // Panes with unsaved edits keep their file when another one opens (ops.ts openDiff).
+  useEffect(() => {
+    if (dirty) dirtyDiffs.add(pane);
+    else dirtyDiffs.delete(pane);
+    return () => void dirtyDiffs.delete(pane);
+  }, [dirty, pane]);
   const editable = d.mode === 'worktree' && !readOnly;
   const key = `${d.repo}\u0000${d.path}\u0000${d.mode}\u0000${d.rev ?? ''}\u0000${d.rev2 ?? ''}\u0000${d.parent ?? ''}\u0000${d.orig ?? ''}`;
 
