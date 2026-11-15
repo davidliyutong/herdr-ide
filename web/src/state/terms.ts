@@ -28,6 +28,10 @@ interface TermsState {
 
 export const useTerms = create<TermsState>(() => ({ connected: false, machines: {} }));
 
+/** The label of a terminal whose pane was closed: when it ends (Date.now()
+ * in ms); empty or absent for one that is not closing. */
+export const CLOSING_LABEL = 'closing';
+
 /** Where a new terminal starts and how it is placed. */
 export interface RunOptions {
   /** The workspace whose directory a new tab starts in (the selected one by default). */
@@ -53,6 +57,8 @@ export class TermModel {
   private readonly pending = new Map<string, Array<(m: string) => void>>();
   private readonly listeners = new Set<(up: boolean) => void>();
   private readonly subscribed = new Set<string>();
+  /** Terminals whose pane closed, ending at their deadline, by machine and address. */
+  private readonly closing = new Map<string, { timer: ReturnType<typeof setTimeout>; value: string }>();
   private started = false;
 
   constructor(connection: TermConnection) {
@@ -146,6 +152,7 @@ export class TermModel {
     const m = msg.m;
     if (typeof m !== 'string') return;
     this.store.apply(msg);
+    this.watchLabels(m, msg);
     if (msg.t === 'snapshot') {
       this.loadLayout(m, () => {
         const waiting = this.pending.get(m);
@@ -236,6 +243,77 @@ export class TermModel {
     this.save(m);
     this.publish();
     return true;
+  }
+
+  /** Ends a terminal whose pane was closed at deadline (Date.now()), unless
+   * cancelClose comes first. Its CLOSING_LABEL holds the deadline, so that
+   * every client showing the machine ends it then, also when this page is
+   * gone by that time; one whose pane is back is left alone. */
+  closeLater(m: string, address: string, deadline: number) {
+    const value = String(deadline);
+    this.watchClosing(m, address, value, true);
+    void this.call(m, 'terminal.label', { terminal: address, labels: { ...this.labels(m, address), [CLOSING_LABEL]: value } }).catch(
+      () => {},
+    );
+  }
+
+  /** Keeps a terminal closeLater would end: its pane is back. */
+  cancelClose(m: string, address: string) {
+    this.unwatch(m, address);
+    void this.call(m, 'terminal.label', { terminal: address, labels: { ...this.labels(m, address), [CLOSING_LABEL]: '' } }).catch(() => {});
+  }
+
+  private labels(m: string, address: string): Record<string, string> {
+    const labels = this.store.terminal(m, address)?.labels;
+    return labels && typeof labels === 'object' ? { ...(labels as Record<string, string>) } : {};
+  }
+
+  /** Follows the closing labels of a machine's terminals: a snapshot, or an
+   * event that changed a terminal's labels. */
+  private watchLabels(m: string, msg: Record<string, unknown>) {
+    const records =
+      msg.t === 'snapshot'
+        ? this.store.terminals(m)
+        : msg.t === 'event' && (msg.type === 'labels' || msg.type === 'created') && typeof msg.terminal === 'string'
+          ? [this.store.terminal(m, msg.terminal)].filter((r) => r !== undefined)
+          : [];
+    for (const r of records) {
+      const value = (r.labels as Record<string, unknown> | undefined)?.[CLOSING_LABEL];
+      const key = `${m}\n${r.address}`;
+      if (typeof value === 'string' && value) {
+        if (this.closing.get(key)?.value !== value) this.watchClosing(m, r.address, value, false);
+      } else if (this.closing.has(key)) {
+        // Brought back by another client.
+        this.unwatch(m, r.address);
+      }
+    }
+  }
+
+  private watchClosing(m: string, address: string, value: string, own: boolean) {
+    this.unwatch(m, address);
+    const deadline = Number(value);
+    if (!Number.isFinite(deadline)) return;
+    const timer = setTimeout(
+      () => {
+        this.closing.delete(`${m}\n${address}`);
+        const r = this.store.terminal(m, address);
+        if (!r || !isLive(r)) return;
+        // Another client's close ends only while its label still says so.
+        if (!own && (r.labels as Record<string, unknown> | undefined)?.[CLOSING_LABEL] !== value) return;
+        const layout = this.layouts.get(m);
+        if (layout && L.locate(layout, address)) return;
+        void this.kill(m, address);
+      },
+      Math.max(0, deadline - Date.now()),
+    );
+    this.closing.set(`${m}\n${address}`, { timer, value });
+  }
+
+  private unwatch(m: string, address: string) {
+    const key = `${m}\n${address}`;
+    const c = this.closing.get(key);
+    if (c) clearTimeout(c.timer);
+    this.closing.delete(key);
   }
 
   /** The directory of a terminal: its foreground program's, else the one it started in. */

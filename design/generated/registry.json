@@ -181,6 +181,21 @@
       "when": "terminal"
     },
     {
+      "id": "pane.back",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.forward",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.undoClose",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
       "id": "view.toggleSidebar",
       "section": "view",
       "when": "terminal"
@@ -244,6 +259,7 @@
     "command.find.next",
     "command.find.open",
     "command.find.previous",
+    "command.pane.back",
     "command.pane.close",
     "command.pane.focusDown",
     "command.pane.focusLeft",
@@ -251,8 +267,10 @@
     "command.pane.focusPrevious",
     "command.pane.focusRight",
     "command.pane.focusUp",
+    "command.pane.forward",
     "command.pane.splitDown",
     "command.pane.splitRight",
+    "command.pane.undoClose",
     "command.pane.zoom",
     "command.section.app",
     "command.section.code",
@@ -536,13 +554,18 @@
         "when": "terminal"
       },
       {
-        "key": "cmd+bracketright",
-        "command": "pane.focusNext",
+        "key": "cmd+bracketleft",
+        "command": "pane.back",
         "when": "terminal"
       },
       {
-        "key": "cmd+bracketleft",
-        "command": "pane.focusPrevious",
+        "key": "cmd+bracketright",
+        "command": "pane.forward",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+z",
+        "command": "pane.undoClose",
         "when": "terminal"
       },
       {

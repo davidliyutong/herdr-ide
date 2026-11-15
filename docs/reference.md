@@ -227,8 +227,11 @@ by `scripts/registry`.
 | `pane.focusDown` | `terminal` | `cmd+alt+down` | – | – | – |
 | `pane.focusUp` | `terminal` | `cmd+alt+up` | – | – | – |
 | `pane.focusRight` | `terminal` | `cmd+alt+right` | – | – | – |
-| `pane.focusNext` | `terminal` | `cmd+bracketright` | – | – | – |
-| `pane.focusPrevious` | `terminal` | `cmd+bracketleft` | – | – | – |
+| `pane.focusNext` | `terminal` | – | – | – | – |
+| `pane.focusPrevious` | `terminal` | – | – | – | – |
+| `pane.back` | `terminal` | `cmd+bracketleft` | – | – | – |
+| `pane.forward` | `terminal` | `cmd+bracketright` | – | – | – |
+| `pane.undoClose` | `terminal` | `cmd+z` | – | – | – |
 | `view.toggleSidebar` | `terminal` | `cmd+b` | – | – | – |
 | `view.zoomIn` | `always` | `cmd+shift+equal`, `cmd+equal` | – | `ctrl+shift+equal`, `ctrl+equal` | – |
 | `view.zoomOut` | `always` | `cmd+minus` | – | `ctrl+minus` | – |

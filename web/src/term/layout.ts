@@ -675,3 +675,103 @@ function jsonEqual(a: unknown, b: unknown): boolean {
 export function sameLayout(a: Layout, b: Layout): boolean {
   return jsonEqual(a, b);
 }
+
+// ---- reopening closed panes ----
+
+/** A tab as it was when panes of it were closed (all of them when the tab
+ * closed), for reopening them. */
+export interface Closed {
+  /** The workspace of the tab, and the tab's place in it. */
+  ws: string;
+  index: number;
+  tab: Tab;
+  /** The panes closed, in the tree's order. */
+  closed: string[];
+}
+
+/** A tree with leaves replaced (by key) and the others pruned: a split
+ * left with one child is that child. */
+function rebuild(node: Node, leafFor: (key: string) => Leaf | undefined): Node | null {
+  if (isLeaf(node)) return leafFor(paneKey(node)!) ?? null;
+  if (!isSplit(node)) return null;
+  const [a, b] = node.children;
+  const first = rebuild(a, leafFor);
+  const second = rebuild(b, leafFor);
+  if (!first) return second;
+  if (!second) return first;
+  return { ...node, children: [first, second] };
+}
+
+/** The split holding a pane directly in a tree, and whether the pane is
+ * its first child. */
+function parentOf(node: Node, key: string): { split: Split; first: boolean } | null {
+  if (!isSplit(node)) return null;
+  const [a, b] = node.children;
+  if (isLeaf(a) && paneKey(a) === key) return { split: node, first: true };
+  if (isLeaf(b) && paneKey(b) === key) return { split: node, first: false };
+  return parentOf(a, key) ?? parentOf(b, key);
+}
+
+/**
+ * Puts closed panes back, as far as they are restored (restored maps a
+ * closed pane's key to its new leaf: a new terminal for a terminal, the same
+ * view for VS Code and previews). In the tab that holds what is left of the
+ * closed one, unchanged since but for the closing, the tab is as it was,
+ * with its splits' shares; a tab that changed meanwhile gets each pane split
+ * in beside its neighbor of then; a closed tab comes back at its place in
+ * its workspace (the selected one when that is gone). The reopened pane, or
+ * the tab's focused one, is focused.
+ */
+export function reopen(layout: Layout, c: Closed, restored: ReadonlyMap<string, Leaf>): Layout {
+  const added = new Map([...restored].filter(([, leaf]) => paneKey(leaf)));
+  const addedKeys = new Set([...added.values()].map((l) => paneKey(l)!));
+  const before = panesOf(c.tab.root);
+  const survivors = before.filter((k) => !c.closed.includes(k));
+  const at = [...survivors, ...addedKeys].map((k) => locate(layout, k)).find((x) => x !== null) ?? null;
+  const keyOf = (old: string) => (added.has(old) ? paneKey(added.get(old)!)! : old);
+  const focusOld = added.has(c.tab.focused) ? c.tab.focused : [...added.keys()].pop();
+  const focused = focusOld ? keyOf(focusOld) : undefined;
+
+  if (at) {
+    const ws = layout.workspaces[at.workspace];
+    const tab = ws.tabs[at.tab];
+    const now = tabPanes(tab);
+    const known = new Set([...survivors, ...addedKeys]);
+    let next: Tab;
+    if (now.every((k) => known.has(k))) {
+      // Unchanged but for the closing: the tab as it was.
+      const kept = new Set(now);
+      const root = rebuild(c.tab.root, (k) => (added.has(k) ? added.get(k) : kept.has(k) ? leafOf(tab.root, k)! : undefined));
+      if (!root) return layout;
+      next = { ...tab, root, focused: focused && panesOf(root).includes(focused) ? focused : tab.focused };
+    } else {
+      // Changed meanwhile: each pane missing beside its neighbor of then.
+      let root = tab.root;
+      for (const [old, leaf] of added) {
+        const key = paneKey(leaf)!;
+        if (panesOf(root).includes(key)) continue;
+        const parent = parentOf(c.tab.root, old);
+        const near = parent ? panesOf(parent.split.children[parent.first ? 1 : 0]).map(keyOf) : [];
+        const target = near.find((k) => panesOf(root).includes(k)) ?? panesOf(root)[0];
+        if (!target) continue;
+        root = splitting(root, target, parent?.split.split ?? 'horizontal', { ...leaf }, parent?.first ?? false);
+      }
+      if (root === tab.root) return layout;
+      next = { ...tab, root, focused: focused && panesOf(root).includes(focused) ? focused : tab.focused };
+    }
+    const tabs = ws.tabs.map((t, i) => (i === at.tab ? next : t));
+    return withWorkspace(layout, at.workspace, { ...ws, tabs, selected: at.tab }, true);
+  }
+
+  // The tab is gone: it comes back with what is restored of it.
+  const root = rebuild(c.tab.root, (k) => added.get(k));
+  if (!root) return layout;
+  let index = workspaceIndex(layout, c.ws);
+  if (index < 0) index = layout.selected;
+  const ws = layout.workspaces[index];
+  if (!ws) return layout;
+  const place = Math.min(Math.max(c.index, 0), ws.tabs.length);
+  const tab: Tab = { ...c.tab, root, focused: focused ?? panesOf(root)[0] };
+  const tabs = [...ws.tabs.slice(0, place), tab, ...ws.tabs.slice(place)];
+  return withWorkspace(layout, index, { ...ws, tabs, selected: place }, true);
+}

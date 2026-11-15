@@ -141,8 +141,16 @@ var Commands = func() []Command {
 		cmd("pane.focusDown", "pane", on(macApp, "cmd+alt+down")),
 		cmd("pane.focusUp", "pane", on(macApp, "cmd+alt+up")),
 		cmd("pane.focusRight", "pane", on(macApp, "cmd+alt+right")),
-		cmd("pane.focusNext", "pane", on(macApp, "cmd+bracketright")),
-		cmd("pane.focusPrevious", "pane", on(macApp, "cmd+bracketleft")),
+		cmd("pane.focusNext", "pane"),
+		cmd("pane.focusPrevious", "pane"),
+		// Back and forward through the panes focused, with the keys of
+		// Safari, Finder and Xcode.
+		cmd("pane.back", "pane", on(macApp, "cmd+bracketleft")),
+		cmd("pane.forward", "pane", on(macApp, "cmd+bracketright")),
+		// Brings back what Close Pane or Close Tab closed in the last
+		// seconds. Cmd+Z in a terminal: the page takes it there; text fields
+		// and VS Code keep it for Undo (desktop/src/menu.ts).
+		cmd("pane.undoClose", "pane", on(macApp, "cmd+z")),
 
 		cmd("view.toggleSidebar", "view", on(macApp, "cmd+b")),
 		// The desktop app's zoom (the window.zoom setting), with the keys

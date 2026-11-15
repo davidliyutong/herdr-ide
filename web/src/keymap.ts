@@ -7,7 +7,9 @@
 // desktop app the page sees a key before the application menu, which gets
 // only the keys the page leaves (desktop.ts).
 
-import { actions, attentionList, current } from './actions';
+import { actions, attentionList, current, spotOpen } from './actions';
+import { hasClosed } from './closedPanes';
+import { canGo } from './paneHistory';
 import { useStore } from './state/store';
 import * as L from './term/layout';
 import { hasMessage, t } from './i18n';
@@ -107,6 +109,8 @@ export const REPEATING_COMMANDS: ReadonlySet<string> = new Set([
   'pane.focusUp',
   'pane.focusDown',
   'pane.focusNext',
+  'pane.back',
+  'pane.forward',
   'pane.focusPrevious',
   'workspace.next',
   'workspace.previous',
@@ -252,6 +256,12 @@ export function commandEnabled(id: string): boolean {
     case 'pane.focusNext':
     case 'pane.focusPrevious':
       return panes > 1;
+    case 'pane.back':
+      return canGo(-1, spotOpen);
+    case 'pane.forward':
+      return canGo(1, spotOpen);
+    case 'pane.undoClose':
+      return changes && hasClosed();
     case 'find.open':
     case 'find.next':
     case 'find.previous':
@@ -378,6 +388,15 @@ export function runCommand(id: string) {
       break;
     case 'pane.focusNext':
       actions.cyclePane(1);
+      break;
+    case 'pane.back':
+      actions.goPane(-1);
+      break;
+    case 'pane.forward':
+      actions.goPane(1);
+      break;
+    case 'pane.undoClose':
+      actions.undoClose();
       break;
     case 'pane.focusPrevious':
       actions.cyclePane(-1);

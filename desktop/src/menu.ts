@@ -96,6 +96,7 @@ export const menus: Menu[] = [
       { command: 'tab.rename' },
       { command: 'pane.close' },
       { command: 'tab.close' },
+      { command: 'pane.undoClose' },
       '-',
       { command: 'app.addMachine' },
     ],
@@ -132,6 +133,8 @@ export const menus: Menu[] = [
       { command: 'workspace.next' },
       { command: 'workspace.previous' },
       '-',
+      { command: 'pane.back' },
+      { command: 'pane.forward' },
       { command: 'pane.focusNext' },
       { command: 'pane.focusPrevious' },
       { command: 'pane.focusLeft' },
@@ -204,6 +207,9 @@ export function parseDisabled(value: unknown): Set<string> | undefined {
   return new Set((value as string[]).filter((v) => known.has(v)));
 }
 
+/** The keys of Edit's items on macOS (Undo, Redo, Cut, Copy, Paste, Select All). */
+const EDIT_KEYS: ReadonlySet<string> = new Set(['cmd+z', 'cmd+shift+z', 'cmd+x', 'cmd+c', 'cmd+v', 'cmd+a']);
+
 /** The menu's template of a platform for the bindings in effect: titles
  * from text (with the application's name for {app}), commands run through
  * run, the disabled commands' items disabled. */
@@ -224,13 +230,16 @@ export function menuTemplate(
         label: text(`desktop.menu.${roleTitles[it.role] ?? it.title}`, { app: appName }),
         ...(!mac && { registerAccelerator: false }),
       };
-    const key = bindings.map((b) => (b.command === it.command ? accelerator(b.key) : undefined)).find(Boolean);
+    const bound = bindings.find((b) => b.command === it.command && accelerator(b.key));
+    const key = bound && { ...accelerator(bound.key)!, binding: bound.key };
     return {
       id: it.command,
       label: text(`command.${it.command}` as MessageKey),
       click: run(it.command),
       enabled: !disabled.has(it.command),
-      ...(key && { accelerator: key.accelerator, registerAccelerator: mac && key.cmd }),
+      // A key an Edit item holds (cmd+z for Undo) is only shown: the page
+      // takes it in a terminal, and Edit has it in text fields and VS Code.
+      ...(key && { accelerator: key.accelerator, registerAccelerator: mac && key.cmd && !EDIT_KEYS.has(key.binding) }),
     };
   };
   return menusFor(platform).map(({ title, items, role }) => ({

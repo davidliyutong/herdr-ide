@@ -14,6 +14,7 @@ import type { MachineState } from '../lib/machine';
 import * as L from '../term/layout';
 import { resetFrames, useFrames } from '../codeFrames';
 import { FakeCore, settle } from './fakeTerms';
+import { resetClosed } from '../closedPanes';
 
 describe('keyName', () => {
   it('names a key after its character on the current layout', () => {
@@ -66,32 +67,36 @@ describe('runMenuCommand', () => {
     core.model.subscribe('m');
     await settle();
   };
-  beforeEach(() => setup([shell('t1'), shell('t2')]));
+  beforeEach(() => {
+    // A short time to undo a close: terminals end soon after.
+    resetClosed(50);
+    return setup([shell('t1'), shell('t2')]);
+  });
   afterEach(() => {
     useDialog.setState({ current: undefined });
     document.body.innerHTML = '';
   });
 
   const dialog = () => useDialog.getState().current;
-  /** Answers the confirmation shown, as Dialogs.tsx does, and returns its
-   * message. */
-  const reply = async (ok: boolean) => {
-    await vi.waitFor(() => expect(dialog()?.kind).toBe('confirm'));
-    const req = dialog()!;
-    useDialog.setState({ current: undefined });
-    if (req.kind !== 'confirm') throw new Error(req.kind);
-    req.resolve(ok);
-    await new Promise((r) => setTimeout(r));
-    return req.message;
-  };
   const killed = () => core.calls.filter((c) => c.method === 'terminal.kill').map((c) => c.params.terminal);
 
-  it('closes a tab at once when its terminals only have shells at the prompt', async () => {
+  it('closes a tab at once, without asking, its terminals ending once it can no longer be undone', async () => {
+    await setup([shell('t1'), running('t2', 'vim')]);
     runMenuCommand('tab.close');
-    await vi.waitFor(() => expect(killed()).toEqual(['t1', 't2']));
-    expect(dialog()).toBeUndefined();
     await settle();
+    expect(dialog()).toBeUndefined();
     expect(core.layout('m')?.workspaces[0].tabs).toEqual([]);
+    expect(killed()).toEqual([]);
+    await vi.waitFor(() => expect(killed().sort()).toEqual(['t1', 't2']));
+  });
+
+  it('closes a pane at once, without asking, a program running in it or not', async () => {
+    await setup([running('t1', 'htop'), shell('t2')]);
+    runMenuCommand('pane.close');
+    await settle();
+    expect(dialog()).toBeUndefined();
+    expect(core.layout('m')?.workspaces[0].tabs[0].root).toEqual({ terminal: 't2' });
+    await vi.waitFor(() => expect(killed()).toEqual(['t1']));
   });
 
   it('closes a workspace with no tab left at the next press of the pane’s key, not while it is held', async () => {
@@ -102,7 +107,6 @@ describe('runMenuCommand', () => {
       // workspace, empty now.
       now.mockReturnValue(1_000_000);
       runMenuCommand('pane.close');
-      await vi.waitFor(() => expect(killed()).toEqual(['t1']));
       await settle();
       expect(core.layout('m')?.workspaces[0].tabs).toEqual([]);
       expect(disabledCommands()).not.toContain('pane.close');
@@ -122,31 +126,6 @@ describe('runMenuCommand', () => {
     } finally {
       now.mockRestore();
     }
-  });
-
-  it('asks before closing a tab with a program running, naming it', async () => {
-    await setup([shell('t1'), running('t2', 'vim')]);
-    runMenuCommand('tab.close');
-    expect(await reply(false)).toBe('Closing this tab ends the programs still running in it: vim.');
-    expect(killed()).toEqual([]);
-
-    // An agent waiting for input still runs: it goes by its name.
-    await setup([running('t1', 'node', { agent: 'claude', agent_status: 'idle' }), shell('t2')]);
-    runMenuCommand('tab.close');
-    expect(await reply(true)).toContain(': claude.');
-    await vi.waitFor(() => expect(killed()).toEqual(['t1', 't2']));
-  });
-
-  it('asks before closing a pane with a program running; a shell closes at once', async () => {
-    await setup([running('t1', 'htop'), shell('t2')]);
-    runMenuCommand('pane.close');
-    expect(await reply(false)).toBe('Closing this pane ends the program still running in it: htop.');
-    expect(killed()).toEqual([]);
-    core.model.mutate('m', (l) => ({ ...l, workspaces: [{ ...l.workspaces[0], tabs: [{ ...l.workspaces[0].tabs[0], focused: 't2' }] }] }));
-    runMenuCommand('pane.close');
-    await vi.waitFor(() => expect(killed()).toEqual(['t2']));
-    await settle();
-    expect(core.layout('m')?.workspaces[0].tabs[0].root).toEqual({ terminal: 't1' });
   });
 
   it('does nothing while a dialog is open', async () => {

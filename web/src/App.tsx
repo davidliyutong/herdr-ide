@@ -29,7 +29,8 @@ import { noteFocusedTerminal, sendTarget } from './lib/bridge';
 import { onFrameKey, windowFocused } from './codeFrames';
 import { TransfersTray } from './components/Transfers';
 import { DownloadsTray } from './components/Downloads';
-import { actions, workspaceTitle } from './actions';
+import { actions, current, workspaceTitle } from './actions';
+import { noteFocus } from './paneHistory';
 
 /** Text sent from VS Code ("Send to agent") is pasted, not submitted, into
  * the terminal sendTarget picks: an agent of the sending VS Code pane's tab
@@ -66,8 +67,16 @@ function followTerms() {
   show(useStore.getState().machineId);
   // The machines followed before are followed again once connected.
   const offFollowed = rememberFollowed(() => terms);
+  // The panes focused, for Go Back and Go Forward.
+  const noteFocused = () => {
+    const c = current();
+    if (c?.focused) noteFocus({ m: c.m, pane: c.focused });
+  };
   const offStore = useStore.subscribe((s, prev) => {
-    if (s.machineId !== prev.machineId) show(s.machineId);
+    if (s.machineId !== prev.machineId) {
+      show(s.machineId);
+      noteFocused();
+    }
     // Machines removed from the core are no longer followed.
     for (const m of prev.order) if (!s.machines[m] && prev.machines[m]) terms.forget(m);
   });
@@ -78,6 +87,7 @@ function followTerms() {
     if (layout && layout !== (m ? prev.machines[m]?.layout : undefined)) {
       s.setWorkspace(L.selectedWorkspace(layout)?.id);
       noteFocusedTerminal(m!, layout);
+      noteFocused();
     }
     updateBadge();
   });

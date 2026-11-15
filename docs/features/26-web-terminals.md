@@ -247,7 +247,7 @@ versions, ended programs, terminals asked for early, attention order),
 `termOptions.test.ts` (the terminal settings as the emulator's options,
 the font stack before and after the bundled font loads, the colors'
 contrast), `clipToast.test.ts`, `paneHeader.test.ts`, `menus.test.ts`,
-`desktop.test.ts` (closing asks when a program runs), `drop.test.ts`,
+`desktop.test.ts` (closing at once, terminals ending after the time to undo), `drop.test.ts`,
 `codePanes.test.ts` (paths from a terminal opened in panes beside it). In
 headless Chromium against a dev core: a shell
 with colors, 256 and true colors, box drawing, CJK and emoji; typing; vim

@@ -209,6 +209,11 @@ field; binary frames are `[stream u32 LE][kind u8][payload]`.
 | binary kind 0 (input bytes), kind 6 (the client terminal's automatic answers) | binary kind 0 (output bytes: a first paint, then the program's output), kind 3 (`cols u16 LE, rows u16 LE`: an observed terminal's new grid) |
 | `ping {rid}` | `pong {rid}` |
 
+Terminal labels the UI sets with `terminal.label`: `name` (a pane's name)
+and `closing` (the time, in ms since the epoch, when a terminal whose pane
+was closed ends unless Undo Close brings it back; empty when brought back,
+[04](features/04-layout-and-keyboard.md)).
+
 User-facing text is never produced by the server: it sends codes (phases,
 notices) that the UI translates.
 
