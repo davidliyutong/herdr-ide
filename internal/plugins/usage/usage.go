@@ -100,9 +100,11 @@ func (p *Plugin) getSnapshot(c *plugin.Call, w http.ResponseWriter, r *http.Requ
 	plugin.WriteJSON(w, http.StatusOK, p.Snapshot())
 }
 
+// postRefresh asks for a poll: at once, or when minRefreshGap since the
+// last one has passed ({"queued": true, "at": Unix seconds}).
 func (p *Plugin) postRefresh(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
-	p.Refresh()
-	plugin.WriteJSON(w, http.StatusAccepted, map[string]bool{"queued": true})
+	at := p.Refresh()
+	plugin.WriteJSON(w, http.StatusAccepted, map[string]any{"queued": true, "at": at.Unix()})
 }
 
 // getCost answers with the cost of the machines' logs: ?days= (1–90,

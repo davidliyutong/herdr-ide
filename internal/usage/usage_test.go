@@ -86,7 +86,7 @@ func testEnv(t *testing.T, api *fakeAPI) *Env {
 			return nil, errors.New("no commands in tests")
 		},
 		LookPath: func(string) (string, error) { return "", errors.New("none") },
-		ProcRoot: filepath.Join(home, "proc"),
+		UID:      501, ProcRoot: filepath.Join(home, "proc"),
 	}
 	if api != nil {
 		u := api.URL
@@ -436,9 +436,12 @@ func TestAntigravityLanguageServer(t *testing.T) {
 	e := testEnv(t, nil)
 	e.GOOS = "darwin"
 	e.Command = func(_ context.Context, _ []string, name string, args ...string) ([]byte, error) {
-		switch name {
+		switch filepath.Base(name) {
 		case "ps":
-			return []byte("  12 /usr/bin/zsh\n 345 /Applications/Antigravity.app/Contents/Resources/bin/language_server_macos_arm --csrf_token tok-1 --random_port\n"), nil
+			if strings.Join(args, " ") != "-ax -o uid=,pid=,command=" {
+				t.Errorf("ps %q", args)
+			}
+			return []byte("  501    12 /usr/bin/zsh\n  502   300 /Applications/Antigravity.app/Contents/Resources/bin/language_server_macos_arm --csrf_token other-user\n  501   345 /Applications/Antigravity.app/Contents/Resources/bin/language_server_macos_arm --csrf_token tok-1 --random_port\n"), nil
 		case "lsof":
 			if strings.Join(args, " ") != "-nP -a -p 345 -iTCP -sTCP:LISTEN -Fn" {
 				t.Errorf("lsof %q", args)
@@ -467,7 +470,7 @@ func TestAntigravityAgyFallback(t *testing.T) {
 	var gotEnv []string
 	e.LookPath = func(name string) (string, error) { return "/opt/bin/agy", nil }
 	e.Command = func(ctx context.Context, env []string, name string, args ...string) ([]byte, error) {
-		if name == "ps" {
+		if filepath.Base(name) == "ps" {
 			return []byte(""), nil
 		}
 		if name != "/opt/bin/agy" || strings.Join(args, " ") != "-p /usage --output-format json" {
@@ -568,5 +571,72 @@ func TestParseAgyGroups(t *testing.T) {
 	}
 	if w[2].Kind != KindModel || w[2].Label != "Gemini 4 Argon Weekly Limit" || w[2].UsedPct != 0 {
 		t.Errorf("model %+v", w[2])
+	}
+}
+
+func TestParsePSOwnUserOnly(t *testing.T) {
+	out := []byte("  0   10 /opt/antigravity/language_server_linux_x64 --csrf_token=root-tok\n" +
+		"1001   20 /opt/antigravity/language_server_linux_x64 --csrf_token=other-tok\n" +
+		"1000   30 /opt/antigravity/language_server_linux_x64 --csrf_token=mine\n" +
+		"bad    40 /opt/antigravity/language_server_linux_x64 --csrf_token=junk\n")
+	ps := parsePS(out, 1000)
+	if len(ps) != 1 || ps[0].PID != 30 || ps[0].CSRF != "mine" {
+		t.Errorf("processes %+v", ps)
+	}
+}
+
+func TestNoRedirects(t *testing.T) {
+	var followed bool
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		followed = true
+		w.Write([]byte(`{}`))
+	}))
+	defer target.Close()
+	api := newFakeAPI(t)
+	api.replies["/user/balance"] = func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+"/steal", http.StatusFound)
+	}
+	e := testEnv(t, api)
+	e.Client = NewClient()
+	e.Client.Transport.(*http.Transport).Proxy = nil
+	e.Getenv = func(k string) string {
+		if k == "DEEPSEEK_API_KEY" {
+			return "sk-redirect"
+		}
+		return ""
+	}
+	a := one(t, Limits(context.Background(), e, Options{Providers: []string{DeepSeek}}))
+	if followed || a.Status != StatusError || a.Code != "http_302" {
+		t.Errorf("followed %v, account %+v", followed, a)
+	}
+}
+
+func TestDeepSeekLookalikeGateway(t *testing.T) {
+	api := newFakeAPI(t)
+	api.json("/user/balance", `{"is_available":true}`)
+	e := testEnv(t, api)
+	for _, u := range []string{"https://deepseek.evil.example/anthropic", "https://api.deepseek.com.evil.example", "http://api.deepseek.com/anthropic", "https://notdeepseek.com/x", "https://user@evil.example@api.deepseek.com"} {
+		write(t, filepath.Join(e.Home, ".claude/settings.json"), `{"env":{"ANTHROPIC_BASE_URL":"`+u+`","ANTHROPIC_AUTH_TOKEN":"sk-gateway"}}`)
+		if a := one(t, Limits(context.Background(), e, Options{Providers: []string{DeepSeek}})); a.Status != StatusMissing {
+			t.Errorf("%s: %+v", u, a)
+		}
+	}
+	if api.asked("/user/balance") {
+		t.Errorf("a gateway's token was sent")
+	}
+	for _, u := range []string{"https://api.deepseek.com/anthropic", "https://API.DeepSeek.com.", "https://eu.api.deepseek.com"} {
+		if !isDeepSeekURL(u) {
+			t.Errorf("%s refused", u)
+		}
+	}
+}
+
+func TestSkipLocal(t *testing.T) {
+	api := newFakeAPI(t)
+	e := testEnv(t, api)
+	write(t, filepath.Join(e.Home, ".kimi-code/credentials/kimi-code.json"), `{"access_token":"opaque"}`)
+	accs := Limits(context.Background(), e, Options{Providers: []string{Kimi}, SkipLocal: []string{"kimi"}})
+	if a := one(t, accs); a.Status != StatusSkipped || api.asked("/coding/v1/usages") {
+		t.Errorf("id-less account not skipped: %+v", a)
 	}
 }

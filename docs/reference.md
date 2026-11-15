@@ -361,7 +361,7 @@ missing here.
 | `GET /api/p/vault/log` | – | The last 500 accesses since the core started (time, machine, client, terminal, tool, names, result: `allowed`, `approved`, `approved_always`, `listed` or an error's code such as `denied` or `busy`; `count` for repeated list calls or busy refusals merged into one), newest first; never values. |
 | `GET /api/p/usage` | – | The AI usage plugin's snapshot: accounts (provider, id, email, plan, windows with pace and history, credits, balances, status and code, machines seen on), each machine's last poll, the providers' status pages; `?watch=1` marks the panel open for the adaptive refresh ([29](features/29-ai-usage.md)). |
 | `GET /api/p/usage/cost` | – | The cost of the machines' AI CLI logs at API prices by day, provider, model, project and machine (`?days=` 1–90, `&tz=` the user's offset east of UTC in minutes). |
-| `POST /api/p/usage/refresh` | writes | Asks every connected machine for its limits now. |
+| `POST /api/p/usage/refresh` | writes | Asks every connected machine for its limits now, or 30 s after the last poll when that was sooner (202 `{queued, at}`: when the poll runs). |
 | `PUT /api/m/{id}/p/usage/deepseek-key` | writes | Writes the machine's DeepSeek key file (`{"key"}`; `""` removes it); never read back, audited without the key. |
 | `/` | – | The web UI (`/licenses.md`: the notices of its bundle); any other path gets the app shell for the UI's own routes, except `/api/…` paths no route takes, which are 404. |
 

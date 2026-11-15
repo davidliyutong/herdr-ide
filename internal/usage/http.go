@@ -25,12 +25,16 @@ const Timeout = 15 * time.Second
 const maxBody = 4 << 20
 
 // NewClient is the client for the providers: the proxy of HTTPS_PROXY (and
-// NO_PROXY), a 15 s timeout, no cookies.
+// NO_PROXY), a 15 s timeout, no cookies, and no redirects (a provider's
+// 3xx is an error, http_3xx, so credentials go to the fixed hosts only).
 func NewClient() *http.Client {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.Proxy = http.ProxyFromEnvironment
-	return &http.Client{Timeout: Timeout, Transport: tr}
+	return &http.Client{Timeout: Timeout, Transport: tr, CheckRedirect: noRedirect}
 }
+
+// noRedirect stops at the first answer: a redirect is returned as it is.
+func noRedirect(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 
 // httpError is a request that failed: Code for the account, RetryAfter in
 // seconds for a 429.
@@ -164,7 +168,9 @@ func keychain(ctx context.Context, service string) (string, error) {
 }
 
 // runCommand runs a program with env and returns its standard output (at
-// most maxBody); ctx bounds it and kills it when it ends.
+// most maxBody); ctx bounds it. On Unix it runs in a process group of its
+// own, which is killed when ctx ends and again once the program exited, so
+// nothing it started (agy's helpers) outlives it.
 func runCommand(ctx context.Context, env []string, name string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Env = env
@@ -172,8 +178,19 @@ func runCommand(ctx context.Context, env []string, name string, args ...string) 
 	var out bytes.Buffer
 	cmd.Stdout = &limitWriter{w: &out, n: maxBody}
 	cmd.WaitDelay = 2 * time.Second
+	ownGroup(cmd)
 	err := cmd.Run()
+	killGroup(cmd)
 	return out.Bytes(), err
+}
+
+// systemTool is the program at abs when it is there, else its name looked
+// up on the PATH.
+func systemTool(abs string) string {
+	if st, err := os.Stat(abs); err == nil && !st.IsDir() {
+		return abs
+	}
+	return path.Base(abs)
 }
 
 type limitWriter struct {
@@ -237,5 +254,5 @@ func localClient(port int) *http.Client {
 		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true}, // the language server's own certificate, on loopback only
 		TLSHandshakeTimeout: 5 * time.Second,
 	}
-	return &http.Client{Timeout: 5 * time.Second, Transport: tr}
+	return &http.Client{Timeout: 5 * time.Second, Transport: tr, CheckRedirect: noRedirect}
 }

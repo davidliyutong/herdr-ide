@@ -63,7 +63,7 @@ func kimiAccount(ctx context.Context, e *Env, o *Options, file string) Account {
 		a.ID = str(first(c, "user_id", "sub", "uid"))
 		a.Email = str(c["email"])
 	}
-	if o.skips(Kimi, a.ID) {
+	if o.skips(Kimi, a.ID, "") {
 		return skipped(a)
 	}
 	if exp := timeOf(creds.ExpiresAt); exp > 0 && exp < e.now().Unix() {

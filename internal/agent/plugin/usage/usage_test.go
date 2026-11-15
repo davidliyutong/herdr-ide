@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"herdr-ide/internal/agent/plugin"
 	"herdr-ide/internal/agentproto"
@@ -60,5 +61,18 @@ func TestActions(t *testing.T) {
 	}
 	if rep = call(t, e, "limits", `[1]`); rep.OK || rep.Code != "bad_params" {
 		t.Errorf("bad params %+v", rep)
+	}
+}
+
+func TestCostEndsWhenTheCoreStopsWaiting(t *testing.T) {
+	a, b := net.Pipe()
+	defer a.Close()
+	ctx, cancel := untilClosed(context.Background(), a, time.Minute)
+	defer cancel()
+	b.Close()
+	select {
+	case <-ctx.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("not cancelled when the stream closed")
 	}
 }

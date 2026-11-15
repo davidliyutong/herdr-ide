@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"errors"
 	"hash/fnv"
@@ -186,9 +187,14 @@ func providerOf(kind string) string {
 	return Grok
 }
 
+// costSaveEvery is how often a long scan saves what it read so far.
+const costSaveEvery = 20 * time.Second
+
 // Cost reads the CLIs' logs (only what changed since the cache was
-// written) and returns the days' tokens and cost at API prices.
-func Cost(e *Env, o CostOptions) (*CostReport, error) {
+// written) and returns the days' tokens and cost at API prices. ctx is
+// checked between files: a scan that ends early keeps what it read in the
+// cache (saved every costSaveEvery as well) and returns ctx's error.
+func Cost(ctx context.Context, e *Env, o CostOptions) (*CostReport, error) {
 	costMu.Lock()
 	defer costMu.Unlock()
 	now := e.now()
@@ -204,7 +210,18 @@ func Cost(e *Env, o CostOptions) (*CostReport, error) {
 	seen := map[string]bool{}
 	logs := costLogs(e, o)
 	changed := false
+	lastSave := time.Now()
 	for _, lf := range logs {
+		if err := ctx.Err(); err != nil {
+			if changed && cachePath != "" {
+				saveCostCache(cachePath, cache)
+			}
+			return nil, err
+		}
+		if changed && cachePath != "" && time.Since(lastSave) >= costSaveEvery {
+			saveCostCache(cachePath, cache)
+			lastSave = time.Now()
+		}
 		st, err := os.Stat(lf.path)
 		if err != nil || st.ModTime().Unix() < cutoff {
 			continue

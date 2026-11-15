@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"os"
 	"path"
 	"strings"
@@ -25,7 +26,7 @@ func deepseekKey(e *Env) string {
 		var s struct {
 			Env map[string]string `json:"env"`
 		}
-		if json.Unmarshal(b, &s) == nil && strings.Contains(strings.ToLower(s.Env["ANTHROPIC_BASE_URL"]), "deepseek") {
+		if json.Unmarshal(b, &s) == nil && isDeepSeekURL(s.Env["ANTHROPIC_BASE_URL"]) {
 			if k := strings.TrimSpace(s.Env["ANTHROPIC_AUTH_TOKEN"]); k != "" {
 				return k
 			}
@@ -39,6 +40,18 @@ func deepseekKey(e *Env) string {
 	return ""
 }
 
+// isDeepSeekURL tells whether Claude Code's base URL is DeepSeek's own
+// (https on api.deepseek.com or below deepseek.com): only then is its token
+// a DeepSeek key, not one of a gateway that merely has deepseek in its name.
+func isDeepSeekURL(s string) bool {
+	u, err := url.Parse(strings.TrimSpace(s))
+	if err != nil || u.Scheme != "https" || u.User != nil {
+		return false
+	}
+	h := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
+	return h == "api.deepseek.com" || strings.HasSuffix(h, ".deepseek.com")
+}
+
 // deepseekAccounts reads the DeepSeek balance: GET /user/balance.
 func deepseekAccounts(ctx context.Context, e *Env, o *Options) []Account {
 	key := deepseekKey(e)
@@ -46,7 +59,7 @@ func deepseekAccounts(ctx context.Context, e *Env, o *Options) []Account {
 		return []Account{{Provider: DeepSeek, Status: StatusMissing}}
 	}
 	a := Account{Provider: DeepSeek, ID: HashID(key), Source: "api"}
-	if o.skips(DeepSeek, a.ID) {
+	if o.skips(DeepSeek, a.ID, "") {
 		return []Account{skipped(a)}
 	}
 	m, err := getMap(ctx, e.Client, "GET", e.URLs.DeepSeekBalance, map[string]string{"Authorization": "Bearer " + key}, nil)

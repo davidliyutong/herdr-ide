@@ -3,6 +3,7 @@ package usage
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"math"
 	"os"
 	"path/filepath"
@@ -77,7 +78,7 @@ func rowsBy(rep *CostReport) map[string]CostRow {
 func TestCost(t *testing.T) {
 	e := testEnv(t, nil)
 	costFixtures(t, e)
-	rep, err := Cost(e, CostOptions{Since: testNow.Add(-30 * 24 * time.Hour).Unix()})
+	rep, err := Cost(context.Background(), e, CostOptions{Since: testNow.Add(-30 * 24 * time.Hour).Unix()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,12 +114,12 @@ func TestCost(t *testing.T) {
 		t.Errorf("files %d unpriced %v", rep.Files, rep.Unpriced)
 	}
 	// Days are the user's.
-	rep, _ = Cost(e, CostOptions{Since: testNow.Add(-30 * 24 * time.Hour).Unix(), TZOffset: 15 * 60, Providers: []string{Claude}})
+	rep, _ = Cost(context.Background(), e, CostOptions{Since: testNow.Add(-30 * 24 * time.Hour).Unix(), TZOffset: 15 * 60, Providers: []string{Claude}})
 	if len(rep.Rows) != 1 || rep.Rows[0].Day != "2026-11-16" {
 		t.Errorf("tz rows %+v", rep.Rows)
 	}
 	// Since leaves out what was before.
-	rep, _ = Cost(e, CostOptions{Since: time.Date(2026, 11, 15, 0, 0, 0, 0, time.UTC).Unix(), Providers: []string{Codex}})
+	rep, _ = Cost(context.Background(), e, CostOptions{Since: time.Date(2026, 11, 15, 0, 0, 0, 0, time.UTC).Unix(), Providers: []string{Codex}})
 	if len(rep.Rows) != 1 || rep.Rows[0].Model != "gpt-5.5" {
 		t.Errorf("since rows %+v", rep.Rows)
 	}
@@ -128,7 +129,7 @@ func TestCostCache(t *testing.T) {
 	e := testEnv(t, nil)
 	costFixtures(t, e)
 	since := testNow.Add(-30 * 24 * time.Hour).Unix()
-	if _, err := Cost(e, CostOptions{Since: since}); err != nil {
+	if _, err := Cost(context.Background(), e, CostOptions{Since: since}); err != nil {
 		t.Fatal(err)
 	}
 	cache := filepath.Join(e.Base, CostCacheFile)
@@ -142,7 +143,7 @@ func TestCostCache(t *testing.T) {
 	ent := c.Files[p]
 	ent.Records[0].O = 999
 	saveCostCache(cache, c)
-	rep, _ := Cost(e, CostOptions{Since: since, Providers: []string{Codex}})
+	rep, _ := Cost(context.Background(), e, CostOptions{Since: since, Providers: []string{Codex}})
 	if rowsBy(rep)["codex|gpt-5.3-codex|gamma"].Output != 999+20 {
 		t.Errorf("cache not used: %+v", rep.Rows)
 	}
@@ -153,14 +154,14 @@ func TestCostCache(t *testing.T) {
 	fh.Close()
 	later := time.Now().Add(time.Minute)
 	os.Chtimes(f, later, later)
-	rep, _ = Cost(e, CostOptions{Since: since, Providers: []string{Claude}})
+	rep, _ = Cost(context.Background(), e, CostOptions{Since: since, Providers: []string{Claude}})
 	rows := rowsBy(rep)
 	if rows["claude|claude-haiku-4-5|alpha"].Requests != 1 || rows["claude|claude-opus-4-6|alpha"].Requests != 1 {
 		t.Errorf("grown log: %+v", rep.Rows)
 	}
 	// A log gone leaves the cache.
 	os.Remove(f)
-	Cost(e, CostOptions{Since: since, Providers: []string{Claude}})
+	Cost(context.Background(), e, CostOptions{Since: since, Providers: []string{Claude}})
 	if _, ok := loadCostCache(cache).Files[f]; ok {
 		t.Errorf("removed log still cached")
 	}
@@ -176,7 +177,7 @@ func TestCostRetention(t *testing.T) {
 	recent := filepath.Join(e.Home, ".claude/projects/p/new.jsonl")
 	write(t, recent, strings.ReplaceAll(claudeLog2, "2026-11-15T09:00:02Z", old.UTC().Format(time.RFC3339))+
 		strings.ReplaceAll(strings.ReplaceAll(claudeLog2, "2026-11-15T09:00:02Z", time.Now().UTC().Format(time.RFC3339)), "req-1", "req-9"))
-	rep, _ := Cost(e, CostOptions{Since: 0})
+	rep, _ := Cost(context.Background(), e, CostOptions{Since: 0})
 	if len(rep.Rows) != 1 || rep.Rows[0].Requests != 1 || rep.Since < time.Now().Add(-Retention-time.Minute).Unix() {
 		t.Errorf("rows %+v since %d", rep.Rows, rep.Since)
 	}
@@ -212,5 +213,37 @@ func TestPricingTiers(t *testing.T) {
 	}
 	if Pricing.WeekHours != 168 || Pricing.MonthHours != 750 {
 		t.Errorf("hours %+v", Pricing)
+	}
+}
+
+// cancelAfter is a context whose Err turns to Canceled after n checks.
+type cancelAfter struct {
+	context.Context
+	n int
+}
+
+func (c *cancelAfter) Err() error {
+	if c.n--; c.n < 0 {
+		return context.Canceled
+	}
+	return nil
+}
+
+func TestCostCancelKeepsProgress(t *testing.T) {
+	e := testEnv(t, nil)
+	costFixtures(t, e)
+	since := testNow.Add(-30 * 24 * time.Hour).Unix()
+	rep, err := Cost(&cancelAfter{Context: context.Background(), n: 2}, e, CostOptions{Since: since})
+	if err != context.Canceled || rep != nil {
+		t.Fatalf("cancelled scan: %v %+v", err, rep)
+	}
+	// What was read before the cancel is in the cache.
+	c := loadCostCache(filepath.Join(e.Base, CostCacheFile))
+	if len(c.Files) != 2 {
+		t.Errorf("cached %d files after a cancel, want 2", len(c.Files))
+	}
+	rep, err = Cost(context.Background(), e, CostOptions{Since: since})
+	if err != nil || rep.Files != 6 {
+		t.Errorf("full scan after a cancel: %v %+v", err, rep)
 	}
 }

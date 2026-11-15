@@ -57,7 +57,7 @@ func grokAccounts(ctx context.Context, e *Env, o *Options) []Account {
 		return []Account{{Provider: Grok, Status: StatusMissing, Code: "no_key"}}
 	}
 	a := Account{Provider: Grok, ID: entry.UserID, Email: entry.Email, Source: "api"}
-	if o.skips(Grok, a.ID) {
+	if o.skips(Grok, a.ID, "") {
 		return []Account{skipped(a)}
 	}
 	if exp := timeOf(entry.ExpiresAt); exp > 0 && exp < e.now().Unix() {

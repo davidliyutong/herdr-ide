@@ -16,6 +16,8 @@ const (
 	costTimeout = 120 * time.Second
 	// costFresh is how long a cost report is served again.
 	costFresh = time.Minute
+	// costKeep is how many reports (days|tz) are kept.
+	costKeep = 4
 )
 
 // CostRow is a machine's row of a cost report.
@@ -47,6 +49,15 @@ type CostReport struct {
 type costEntry struct {
 	at  time.Time
 	rep *CostReport
+}
+
+// costFlight is a machine's scan in progress: one at a time per machine,
+// which requests with the same parameters share.
+type costFlight struct {
+	key  string
+	done chan struct{}
+	rep  usage.CostReport
+	err  error
 }
 
 // cost asks the connected machines for their logs' cost of the last days
@@ -82,10 +93,7 @@ func (p *Plugin) cost(ctx context.Context, days, tz int) *CostReport {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			cctx, cancel := context.WithTimeout(ctx, costTimeout)
-			defer cancel()
-			var r usage.CostReport
-			err := p.call(cctx, m, "cost", params, &r)
+			r, err := p.machineCost(ctx, m, key, params)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
@@ -103,8 +111,57 @@ func (p *Plugin) cost(ctx context.Context, days, tz int) *CostReport {
 		}()
 	}
 	wg.Wait()
+	if ctx.Err() != nil {
+		// The request gave up: what it missed is not served to others.
+		return rep
+	}
 	p.mu.Lock()
-	p.costCache = map[string]costEntry{key: {at: now, rep: rep}}
+	p.costCache[key] = costEntry{at: now, rep: rep}
+	for len(p.costCache) > costKeep {
+		oldest := ""
+		for k, e := range p.costCache {
+			if oldest == "" || e.at.Before(p.costCache[oldest].at) {
+				oldest = k
+			}
+		}
+		delete(p.costCache, oldest)
+	}
 	p.mu.Unlock()
 	return rep
+}
+
+// machineCost asks machine m for the cost of key's days: a scan of the
+// same parameters in progress is shared, one of others is waited for (the
+// agent scans one at a time anyway). The scan is bounded by costTimeout,
+// not by the request that started it, so that the others can share it.
+func (p *Plugin) machineCost(ctx context.Context, m, key string, params usage.CostOptions) (usage.CostReport, error) {
+	for {
+		p.mu.Lock()
+		if p.costFlights == nil {
+			p.costFlights = map[string]*costFlight{}
+		}
+		f := p.costFlights[m]
+		if f == nil {
+			f = &costFlight{key: key, done: make(chan struct{})}
+			p.costFlights[m] = f
+			p.mu.Unlock()
+			cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), costTimeout)
+			f.err = p.call(cctx, m, "cost", params, &f.rep)
+			cancel()
+			p.mu.Lock()
+			delete(p.costFlights, m)
+			p.mu.Unlock()
+			close(f.done)
+			return f.rep, f.err
+		}
+		p.mu.Unlock()
+		select {
+		case <-f.done:
+		case <-ctx.Done():
+			return usage.CostReport{}, ctx.Err()
+		}
+		if f.key == key {
+			return f.rep, f.err
+		}
+	}
 }

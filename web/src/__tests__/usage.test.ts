@@ -12,6 +12,7 @@ vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 
 import { useStore } from '../state/store';
 import { useSettings } from '../settings';
+import type { MachineState } from '../lib/machine';
 import { UsagePanel } from '../plugins/usage/UsagePanel';
 import { UsageStatusItem } from '../plugins/usage/StatusItem';
 import { applySnapshot, setView, useUsage } from '../plugins/usage/state';
@@ -219,6 +220,28 @@ describe('usage panel and status item', () => {
     // Refresh asks the core.
     await act(async () => host.querySelector<HTMLButtonElement>('.usage-refresh')!.click());
     expect(calls).toContain('POST /api/p/usage/refresh');
+  });
+
+  it('renders with ready machines in the store (no render loop)', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      useStore
+        .getState()
+        .setMachines([
+          { id: 'local', label: 'This Mac', kind: 'local', status: 'ready' } as unknown as MachineState,
+          { id: 'box', label: 'box', kind: 'ssh', status: 'ready' } as unknown as MachineState,
+        ]);
+      useUsage.setState({ snapshot: snapshot([account('claude:b', [30], { machines: ['local', 'box'] })]) });
+      await act(async () => root.render(createElement(UsagePanel)));
+      await act(async () => {});
+      expect(host.querySelector('.usage-card')).not.toBeNull();
+      const options = [...host.querySelectorAll<HTMLOptionElement>('.usage-deepseek option')].map((o) => o.textContent);
+      expect(options).toEqual(['This Mac', 'box']);
+      expect(errors).not.toHaveBeenCalled();
+    } finally {
+      errors.mockRestore();
+      useStore.getState().setMachines([]);
+    }
   });
 
   it('shows the cost tab: totals, daily bars, ranking and machines that failed', async () => {

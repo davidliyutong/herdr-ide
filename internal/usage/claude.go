@@ -51,7 +51,7 @@ func claudeAccounts(ctx context.Context, e *Env, o *Options) []Account {
 	oc := creds.ClaudeAiOauth
 	a.Plan = claudePlan(oc.SubscriptionType, oc.RateLimitTier)
 	a.ID, a.Email = claudeIdentity(e, dir)
-	if o.skips(Claude, a.ID) {
+	if o.skips(Claude, a.ID, "") {
 		return []Account{skipped(a)}
 	}
 	if exp := timeOf(oc.ExpiresAt); exp > 0 && exp < e.now().Unix() {
@@ -69,7 +69,7 @@ func claudeAccounts(ctx context.Context, e *Env, o *Options) []Account {
 			if a.Email == "" {
 				a.Email = str(first(acc, "email", "email_address"))
 			}
-			if o.skips(Claude, a.ID) {
+			if o.skips(Claude, a.ID, "") {
 				return []Account{skipped(a)}
 			}
 		}

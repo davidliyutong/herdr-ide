@@ -131,9 +131,14 @@ type Options struct {
 	// ClaudeKeychain lets Claude's credentials come from the macOS
 	// keychain when the file has none.
 	ClaudeKeychain bool `json:"claudeKeychain,omitempty"`
-	// Skip are accounts (provider:id) the core already has: they are
-	// returned with StatusSkipped and asked nothing.
+	// Skip are accounts (provider:id) the core already has, or holds back
+	// after a provider asked to wait (Retry-After): they are returned with
+	// StatusSkipped and asked nothing.
 	Skip []string `json:"skip,omitempty"`
+	// SkipLocal are this machine's accounts without an id that the core
+	// holds back after a provider asked to wait: provider, or
+	// provider:home for a Codex home other than the default.
+	SkipLocal []string `json:"skipLocal,omitempty"`
 }
 
 // URLs are the providers' endpoints (tests point them at httptest servers).
@@ -176,6 +181,8 @@ type Env struct {
 	Command func(ctx context.Context, env []string, name string, args ...string) ([]byte, error)
 	// LookPath finds a program (agy).
 	LookPath func(name string) (string, error)
+	// UID is the agent's user: only its own language servers are asked.
+	UID int
 	// ProcRoot is /proc on Linux (tests point it at a fixture).
 	ProcRoot string
 	// LocalClient is the client for the local language server (its
@@ -192,7 +199,7 @@ func NewEnv(home, base string, environ func() []string) *Env {
 	return &Env{
 		Home: home, Base: base, Getenv: os.Getenv, Environ: environ,
 		Client: NewClient(), URLs: DefaultURLs, Now: time.Now, GOOS: runtime.GOOS,
-		Keychain: keychain, Command: runCommand, LookPath: lookPath(environ), ProcRoot: "/proc",
+		Keychain: keychain, Command: runCommand, LookPath: lookPath(environ), UID: os.Getuid(), ProcRoot: "/proc",
 		LocalClient: localClient,
 	}
 }
@@ -271,8 +278,17 @@ func Limits(ctx context.Context, e *Env, o Options) []Account {
 // Key is how the core tells accounts apart across machines.
 func (a Account) Key() string { return a.Provider + ":" + a.ID }
 
-func (o *Options) skips(provider, id string) bool {
-	return id != "" && slices.Contains(o.Skip, provider+":"+id)
+// skips tells whether an account is not to be asked: by its id, or, for
+// one without an id, by provider and home (Options.SkipLocal).
+func (o *Options) skips(provider, id, home string) bool {
+	if id != "" {
+		return slices.Contains(o.Skip, provider+":"+id)
+	}
+	k := provider
+	if home != "" {
+		k += ":" + home
+	}
+	return slices.Contains(o.SkipLocal, k)
 }
 
 // skipped is the answer for an account the core already has.

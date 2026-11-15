@@ -5,10 +5,10 @@
 // logs' cost on the machine with internal/usage and answers with numbers
 // only. Actions:
 //
-//   - limits {providers, codexHomes, claudeKeychain, skip}: the accounts
+//   - limits {providers, codexHomes, claudeKeychain, skip, skipLocal}: the accounts
 //     the CLIs are signed in to, with their windows and balances;
 //   - cost {since, tzOffset, codexHomes, providers}: the logs' tokens and
-//     cost by day, model and project;
+//     cost by day, model and project, until the core stops waiting;
 //   - setDeepseekKey {key}: writes (or with "" removes) the DeepSeek key
 //     file; the key is never read back.
 package usage
@@ -27,6 +27,9 @@ import (
 // limitsTimeout bounds one limits action: the providers run in parallel,
 // each request within usage.Timeout, agy within usage.AgyTimeout.
 const limitsTimeout = 45 * time.Second
+
+// costTimeout bounds a cost scan (the core waits 2 minutes).
+const costTimeout = 150 * time.Second
 
 func init() { plugin.Register("usage", handle) }
 
@@ -49,7 +52,9 @@ func handle(ctx context.Context, st net.Conn, action string, params json.RawMess
 		if err := plugin.Decode(params, &o); err != nil {
 			return plugin.Reply(st, nil, err)
 		}
-		rep, err := usage.Cost(env(e), o)
+		ctx, cancel := untilClosed(ctx, st, costTimeout)
+		defer cancel()
+		rep, err := usage.Cost(ctx, env(e), o)
 		return plugin.Reply(st, rep, err)
 	case "setDeepseekKey":
 		var p struct {
@@ -65,4 +70,17 @@ func handle(ctx context.Context, st net.Conn, action string, params json.RawMess
 		return plugin.Reply(st, map[string]bool{"set": p.Key != ""}, err)
 	}
 	return plugin.Reply(st, nil, plugin.Errorf("bad_params", "usage: unknown action %q", action))
+}
+
+// untilClosed is ctx ended after d or when the core closes st (it stopped
+// waiting): the core sends nothing after the request, so a read returns
+// only then (or once the reply closed st).
+func untilClosed(ctx context.Context, st net.Conn, d time.Duration) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(ctx, d)
+	go func() {
+		var b [1]byte
+		st.Read(b[:])
+		cancel()
+	}()
+	return ctx, cancel
 }

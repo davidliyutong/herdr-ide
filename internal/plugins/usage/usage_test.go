@@ -390,3 +390,175 @@ func TestSettings(t *testing.T) {
 		t.Errorf("options %+v", o)
 	}
 }
+
+func TestRefreshMinimumGap(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	polls := 0
+	p, _ := testPlugin(t, &now, []string{"local"}, func(string, usage.Options) ([]usage.Account, error) {
+		polls++
+		return nil, nil
+	})
+	p.settings().Set(SettingRefresh, "", RefreshManual)
+	// The first refresh runs at once.
+	if at := p.Refresh(); !at.Equal(now) || !p.due() {
+		t.Fatalf("first refresh at %v, due %v", at, p.due())
+	}
+	p.Poll(context.Background())
+	if p.due() {
+		t.Fatal("still due after the poll")
+	}
+	// Refreshes within the gap wait for it and share one poll.
+	now = now.Add(10 * time.Second)
+	w := httptest.NewRecorder()
+	p.postRefresh(&plugin.Call{}, w, httptest.NewRequest("POST", "/api/p/usage/refresh", nil))
+	var res struct {
+		Queued bool  `json:"queued"`
+		At     int64 `json:"at"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &res)
+	want := now.Add(-10 * time.Second).Add(minRefreshGap).Unix()
+	if w.Code != http.StatusAccepted || !res.Queued || res.At != want {
+		t.Fatalf("refresh answer %d %s, want at %d", w.Code, w.Body, want)
+	}
+	if at := p.Refresh(); at.Unix() != want {
+		t.Errorf("second refresh at %v", at)
+	}
+	if p.due() {
+		t.Error("due within the gap")
+	}
+	if s := p.Snapshot(); s.NextAt != want {
+		t.Errorf("snapshot nextAt %d, want %d", s.NextAt, want)
+	}
+	now = now.Add(20 * time.Second)
+	if !p.due() {
+		t.Fatal("not due after the gap")
+	}
+	p.Poll(context.Background())
+	if p.due() || polls != 2 {
+		t.Errorf("polls %d, due %v", polls, p.due())
+	}
+	// A refresh while a poll runs waits for the gap after it.
+	p.mu.Lock()
+	p.polling = true
+	p.mu.Unlock()
+	if at := p.Refresh(); !at.Equal(now.Add(minRefreshGap)) {
+		t.Errorf("refresh during a poll at %v", at)
+	}
+	p.mu.Lock()
+	p.polling = false
+	p.mu.Unlock()
+	if p.due() {
+		t.Error("due right after a poll")
+	}
+	p.refreshTimer.Stop()
+}
+
+func TestRetryAfterWithoutID(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	got := map[string][]string{}
+	limited := true
+	p, _ := testPlugin(t, &now, []string{"local", "box"}, func(m string, o usage.Options) ([]usage.Account, error) {
+		got[m] = o.SkipLocal
+		if slices.Contains(o.SkipLocal, "codex:/srv/codex2") {
+			return []usage.Account{{Provider: "codex", Home: "/srv/codex2", Status: "skipped"}}, nil
+		}
+		if m == "local" && limited {
+			return []usage.Account{{Provider: "codex", Home: "/srv/codex2", Status: "error", Code: "rate_limited", RetryAfter: 300}}, nil
+		}
+		return []usage.Account{{Provider: "codex", Home: "/srv/codex2", Status: "ok", AsOf: now.Unix(), Windows: []usage.Window{win("weekly", 5, 0, 0)}}}, nil
+	})
+	p.Poll(context.Background())
+	if a := find(p.Snapshot(), "codex:@local:/srv/codex2"); a == nil || a.Code != "rate_limited" {
+		t.Fatalf("limited account %+v", a)
+	}
+	// Until Retry-After has passed, only that machine skips it.
+	now = now.Add(time.Minute)
+	p.Poll(context.Background())
+	if !slices.Equal(got["local"], []string{"codex:/srv/codex2"}) || len(got["box"]) != 0 {
+		t.Errorf("skips %v", got)
+	}
+	if a := find(p.Snapshot(), "codex:@local:/srv/codex2"); a == nil || a.Code != "rate_limited" || !slices.Equal(a.Machines, []string{"local"}) {
+		t.Errorf("skipped account %+v", a)
+	}
+	// Afterwards it is asked again.
+	limited = false
+	now = now.Add(5 * time.Minute)
+	p.Poll(context.Background())
+	if len(got["local"]) != 0 {
+		t.Errorf("still skipped: %v", got)
+	}
+	if a := find(p.Snapshot(), "codex:@local:/srv/codex2"); a == nil || a.Status != "ok" {
+		t.Errorf("account %+v", a)
+	}
+}
+
+func TestCostSharedScansAndCache(t *testing.T) {
+	now := time.Date(2026, 11, 16, 3, 0, 0, 0, time.UTC)
+	p, _ := testPlugin(t, &now, []string{"local"}, nil)
+	release := make(chan struct{})
+	var mu sync.Mutex
+	calls := 0
+	p.fetch = func(ctx context.Context, m, action string, params, out any) error {
+		mu.Lock()
+		calls++
+		mu.Unlock()
+		<-release
+		b, _ := json.Marshal(usage.CostReport{Files: 1})
+		return json.Unmarshal(b, out)
+	}
+	var wg sync.WaitGroup
+	for range 3 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			p.cost(context.Background(), 30, 0)
+		}()
+	}
+	// Let the requests meet the scan in progress, then end it.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		p.mu.Lock()
+		n := len(p.costFlights)
+		p.mu.Unlock()
+		if n == 1 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+	wg.Wait()
+	if calls != 1 {
+		t.Errorf("%d scans for one machine and one range", calls)
+	}
+	// A few ranges are kept.
+	p.cost(context.Background(), 7, 0)
+	p.cost(context.Background(), 30, 0)
+	p.cost(context.Background(), 7, 0)
+	if calls != 2 {
+		t.Errorf("%d scans, want 2", calls)
+	}
+	// A request that gives up does not wait for the scan.
+	p.costCache = nil
+	block := make(chan struct{})
+	p.fetch = func(ctx context.Context, m, action string, params, out any) error {
+		<-block
+		return nil
+	}
+	go p.cost(context.Background(), 1, 0)
+	for {
+		p.mu.Lock()
+		n := len(p.costFlights)
+		p.mu.Unlock()
+		if n == 1 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if rep := p.cost(ctx, 1, 0); rep.Machines["local"].Error != "failed" {
+		t.Errorf("cancelled request %+v", rep.Machines)
+	}
+	close(block)
+}

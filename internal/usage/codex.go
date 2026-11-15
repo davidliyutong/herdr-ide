@@ -36,7 +36,11 @@ func codexAccounts(ctx context.Context, e *Env, o *Options) []Account {
 	var out []Account
 	homes := codexHomes(e, o.CodexHomes)
 	for i, home := range homes {
-		a := codexAccount(ctx, e, o, home)
+		label := ""
+		if i > 0 {
+			label = home
+		}
+		a := codexAccount(ctx, e, o, home, label)
 		if i > 0 {
 			a.Home = home
 		}
@@ -48,7 +52,9 @@ func codexAccounts(ctx context.Context, e *Env, o *Options) []Account {
 	return out
 }
 
-func codexAccount(ctx context.Context, e *Env, o *Options, home string) Account {
+// codexAccount reads one Codex home; label is its Account.Home ("" for the
+// default one).
+func codexAccount(ctx context.Context, e *Env, o *Options, home, label string) Account {
 	a := Account{Provider: Codex, Source: "api"}
 	b, err := readFile(path.Join(home, "auth.json"))
 	var auth struct {
@@ -78,7 +84,7 @@ func codexAccount(ctx context.Context, e *Env, o *Options, home string) Account 
 			}
 		}
 	}
-	if o.skips(Codex, a.ID) {
+	if o.skips(Codex, a.ID, label) {
 		return skipped(a)
 	}
 	if c := jwtClaims(t.AccessToken); c != nil {

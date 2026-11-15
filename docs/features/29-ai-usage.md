@@ -36,17 +36,21 @@ script run over ssh).
 `internal/usage` reads one machine; the agent's plugin
 (`internal/agent/plugin/usage`) runs its actions:
 
-- `limits {providers, codexHomes, claudeKeychain, skip}`: each provider in
-  parallel, each request within 15 s through `HTTPS_PROXY`; a 429 returns
+- `limits {providers, codexHomes, claudeKeychain, skip, skipLocal}`: each
+  provider in parallel, each request within 15 s through `HTTPS_PROXY`,
+  following no redirect (a 3xx is `http_3xx`); a 429 returns
   `rate_limited` with its `Retry-After`. The answer is a list of accounts
   `{provider, id, email, plan, windows[{kind, label, usedPct, resetsAt,
   windowSec}], credits, balances, available, status, code, source, asOf}`;
   `status` is `ok`, `stale` (an expired token: run the CLI once to renew
   it; or numbers from a log), `unauth` (the provider refused the
   credentials), `error` (with `code`) or `missing`. An account the core
-  names in `skip` (`provider:id`) is answered `skipped` without a request.
+  names in `skip` (`provider:id`), or one without an id named in
+  `skipLocal` (`provider`, or `provider:home` for a Codex home), is answered
+  `skipped` without a request.
 - `cost {since, tzOffset, codexHomes, providers}`: the logs' tokens and
-  cost by day (the user's), provider, model and project.
+  cost by day (the user's), provider, model and project. The scan stops
+  between files when the request ends, keeping what it read.
 - `setDeepseekKey {key}`: writes or removes the key file.
 
 | Provider | Credentials | Asks | Account id |
@@ -54,9 +58,9 @@ script run over ssh).
 | Claude | `~/.claude/.credentials.json` (`$CLAUDE_CONFIG_DIR`) `claudeAiOauth`; on macOS the keychain item `Claude Code-credentials` when the file has none (`usage.claudeKeychain`) | `GET api.anthropic.com/api/oauth/usage` (`anthropic-beta: oauth-2025-04-20`): `five_hour`, `seven_day`, `seven_day_opus`, `seven_day_sonnet` (`utilization`, `resets_at`), `extra_usage` (amounts in cents) | `~/.claude.json`'s `oauthAccount.accountUuid`, else `/api/oauth/profile` |
 | Codex | `$CODEX_HOME` or `~/.codex/auth.json`, and each of `usage.codexHomes` | `GET chatgpt.com/backend-api/wham/usage` with `ChatGPT-Account-Id`: `rate_limit.primary_window`/`secondary_window`, `additional_rate_limits`, `credits`, `plan_type`. Without an answer (network) or with an expired token: the newest session log's `rate_limits`, as `stale` with `code: from_log` | `tokens.account_id`; email and plan from the id token's claims |
 | Grok | `$GROK_HOME` or `~/.grok/auth.json`, x.ai's issuer first | `GET cli-chat-proxy.grok.com/v1/billing?format=credits` (`X-XAI-Token-Auth: xai-grok-cli`): `creditUsagePercent` (else on-demand used over cap) for the period, `productUsage`; `/v1/settings` for the plan | `user_id` |
-| Antigravity | none: the running language server | `ps` for Antigravity's `language_server` and its `--csrf_token`; its loopback ports (`/proc` on Linux, `lsof` on macOS); `POST https://127.0.0.1:<port>/exa.language_server_pb.LanguageServerService/GetUserStatus` (then HTTP, then an empty body); without one, `agy -p /usage --output-format json` (20 s) | a hash of the email |
+| Antigravity | none: the running language server | `/bin/ps` (else `ps` on the `PATH`) for the agent's user's own Antigravity `language_server` and its `--csrf_token`; its loopback ports (`/proc` on Linux, `/usr/sbin/lsof` on macOS); `POST https://127.0.0.1:<port>/exa.language_server_pb.LanguageServerService/GetUserStatus` (then HTTP, then an empty body); without one, `agy -p /usage --output-format json` (20 s, in a process group of its own that is killed when it exits or times out) | a hash of the email |
 | Kimi Code | `$KIMI_CODE_HOME` or `~/.kimi-code/credentials/kimi-code*.json` | `GET api.kimi.com/coding/v1/usages`: `usage` (weekly), `limits[]` (`window.duration` × `timeUnit`); numbers may be strings | the token's `user_id` (or `sub`) claim |
-| DeepSeek | `DEEPSEEK_API_KEY`, Claude Code's `settings.json` when its `ANTHROPIC_BASE_URL` is DeepSeek's, or the key file the panel writes | `GET api.deepseek.com/user/balance`: `balance_infos`, `is_available` (no windows) | a hash of the key |
+| DeepSeek | `DEEPSEEK_API_KEY`, Claude Code's `settings.json` when its `ANTHROPIC_BASE_URL` is DeepSeek's (`https` on `api.deepseek.com` or another host below `deepseek.com`; a gateway that only has deepseek in its name does not count), or the key file the panel writes | `GET api.deepseek.com/user/balance`: `balance_infos`, `is_available` (no windows) | a hash of the key |
 
 Tokens are read from the files at each poll, sent only to their provider's
 host and never returned; expiry is checked first, so an expired token is not
@@ -82,7 +86,9 @@ month 750 for the equivalents (cost × 168 or 750 / the range's hours).
 The scanner keeps `usage/cost-cache.json` below the agent's data directory
 (0600): per log its size, time and records. An unchanged log is not read
 again; a Claude log that grew is read on from its last complete line. Logs
-and records older than 90 days leave the cache.
+and records older than 90 days leave the cache. A long scan saves the cache
+every 20 s, and one that is cancelled saves what it read, so the next one
+goes on from there.
 
 ### Core
 
@@ -92,12 +98,16 @@ minutes, or `adaptive` (default): every 2 minutes while a panel is open (its
 `GET /api/p/usage?watch=1` every minute counts for 3), every 5 while a coding
 agent works in any terminal (the agent detection's events,
 [25](25-agent-detection.md)), else every 30. `POST /api/p/usage/refresh`
-polls at once.
+(and a new DeepSeek key) polls at once if the last poll is at least 30 s
+old, else when it is: it answers 202 with `at`, when that poll runs, and
+requests before then share it, so a client cannot make the machines ask
+the providers more often than twice a minute.
 
 A poll asks the connected machines one after the other, the local one
 first, with the accounts already fetched (and those waiting out a
 `Retry-After`) in `skip`: an account signed in on several machines is asked
-once and lists every machine it was seen on. Accounts are keyed
+once and lists every machine it was seen on. An account without an id
+waiting out a `Retry-After` is in its own machine's `skipLocal`. Accounts are keyed
 `provider:id`; one without an id stays apart per machine. An answer without
 numbers keeps the last good ones with the new status and code (the card
 says how old they are). Accounts no machine reported for 7 days are
@@ -118,7 +128,9 @@ does not answer keeps what it said last.
 Each poll's result goes to every page as `/ws` `plugin {plugin: "usage",
 data: snapshot}`; `GET /api/p/usage` returns the same snapshot.
 `GET /api/p/usage/cost?days=&tz=` asks the machines in parallel (2 min each)
-and is served again for a minute.
+and is served again for a minute; the reports of the last 4 ranges are
+kept. A machine scans one range at a time: requests for the range being
+scanned share that scan, others wait for it.
 
 On a core on Windows no agent runs on the local machine, so its CLIs are
 not read; SSH machines are.
@@ -168,7 +180,10 @@ browser's storage, so a reload or another tab does not repeat it.
   out, an unreadable answer is `bad_response`, the last numbers stay.
 - An expired token: `stale` with `token_expired` and the hint to run the
   CLI; nothing is sent.
-- 429: the account is skipped until its `Retry-After` (at most a day).
+- 429: the account is skipped until its `Retry-After` (at most a day), also
+  one without an id, on its machine.
+- A redirect: not followed; `http_3xx`, so credentials reach only the
+  fixed hosts.
 - A machine offline: its poll fails with `offline`; its accounts keep their
   numbers and machines until another poll sees them.
 - macOS keychain over ssh: `security` cannot ask, the provider counts as
@@ -186,15 +201,23 @@ status pages. Resources and retention:
 - `internal/usage/usage_test.go`: each provider against an `httptest`
   server or fixture files: headers, windows, credits, expired tokens (not
   sent), 401, 429 with `Retry-After`, Kimi's string numbers, Codex's log
-  fallback, the keychain, Antigravity's `ps`, `lsof`, `/proc` and `agy`
-  paths, the loopback client, the key file's modes, no token in a reply.
+  fallback, the keychain, Antigravity's `ps` (other users' servers left
+  out), `lsof`, `/proc` and `agy` paths, the loopback client, the key
+  file's modes, no token in a reply, redirects not followed, a lookalike
+  DeepSeek gateway, `skipLocal`.
+- `internal/usage/proc_unix_test.go`: a fake `agy` leaving `sleep 300`
+  behind; its process group is killed after it exits and when it times
+  out.
 - `internal/usage/cost_test.go`: the logs' dedupe rules, tiers and cache
-  writes, the user's days, the incremental cache and its retention.
+  writes, the user's days, the incremental cache and its retention, a
+  cancelled scan keeping its progress.
 - `internal/agent/plugin/usage/usage_test.go`: the actions and their codes.
 - `internal/plugins/usage/usage_test.go`: cadence, dedupe across machines,
-  last good numbers, `Retry-After`, history and pace, status pages, the cost
-  report, settings.
+  last good numbers, `Retry-After` (also without an id), the manual
+  refresh's minimum gap on a fake clock, history and pace, status pages,
+  the cost report, shared scans and its cache, settings.
 - `web/src/__tests__/usage.test.ts`: ordering, alerts, the cost sums, the
-  panel and the status bar item against a stubbed core.
+  panel and the status bar item against a stubbed core, the panel with
+  ready machines in the store (no render loop).
 - `internal/server`: `TestMutatingRoutesAreGuarded` covers the plugin's
   routes.

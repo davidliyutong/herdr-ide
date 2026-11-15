@@ -27,6 +27,10 @@ const (
 	forgetAfter = 7 * 24 * time.Hour
 	// statusEvery is how often the status pages are asked.
 	statusEvery = 10 * time.Minute
+	// minRefreshGap is the least time between polls a manual refresh
+	// (POST refresh, a new DeepSeek key) makes: requests sooner wait for
+	// it and share that poll.
+	minRefreshGap = 30 * time.Second
 )
 
 // WindowView is a window with its pace and recent history.
@@ -122,9 +126,15 @@ type Plugin struct {
 	polling   bool
 	working   map[string]bool // machine|terminal of agents working
 	costCache map[string]costEntry
+	// costFlights are the machines' scans in progress.
+	costFlights map[string]*costFlight
+	// refreshPending: a manual refresh waits for minRefreshGap.
+	refreshPending bool
 
 	refresh chan struct{}
-	saveMu  sync.Mutex
+	// refreshTimer wakes the scheduler when a pending refresh is due.
+	refreshTimer *time.Timer
+	saveMu       sync.Mutex
 	// hostMu guards host, fetch and ready, which Start sets.
 	hostMu sync.RWMutex
 }
@@ -212,7 +222,7 @@ func (p *Plugin) Start(ctx context.Context, h plugin.Host) {
 			return
 		case <-t.C:
 		case <-p.refresh:
-			if p.enabled() {
+			if p.enabled() && p.due() {
 				p.Poll(ctx)
 			}
 		}
@@ -296,8 +306,33 @@ func (p *Plugin) watch() {
 	p.mu.Unlock()
 }
 
-// Refresh asks for a poll now.
-func (p *Plugin) Refresh() {
+// Refresh asks for a poll as soon as minRefreshGap since the last one
+// allows, and returns when that is; requests before then share it.
+func (p *Plugin) Refresh() time.Time {
+	p.mu.Lock()
+	now := p.now()
+	at := now
+	if p.polling {
+		at = now.Add(minRefreshGap)
+	} else if !p.lastPoll.IsZero() && p.lastPoll.Add(minRefreshGap).After(now) {
+		at = p.lastPoll.Add(minRefreshGap)
+	}
+	p.refreshPending = true
+	if d := at.Sub(now); d > 0 {
+		if p.refreshTimer != nil {
+			p.refreshTimer.Stop()
+		}
+		p.refreshTimer = time.AfterFunc(d, p.wake)
+	}
+	p.mu.Unlock()
+	if !at.After(now) {
+		p.wake()
+	}
+	return at
+}
+
+// wake makes the scheduler look whether a poll is due.
+func (p *Plugin) wake() {
 	select {
 	case p.refresh <- struct{}{}:
 	default:
@@ -309,16 +344,24 @@ func (p *Plugin) interval() time.Duration {
 	return Interval(p.refreshMode(), p.now().Sub(p.lastWatch) < watchFor, len(p.working) > 0)
 }
 
-// due tells whether a poll is due: the cadence has passed since the last
-// one (and a machine is connected to ask).
+// due tells whether a poll is due: a manual refresh is pending and
+// minRefreshGap has passed, or the cadence has passed since the last poll
+// (and a machine is connected to ask).
 func (p *Plugin) due() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	iv := p.interval()
-	if iv == 0 || p.polling {
+	if p.polling {
 		return false
 	}
-	return p.lastPoll.IsZero() && len(p.readyList()) > 0 || !p.lastPoll.IsZero() && p.now().Sub(p.lastPoll) >= iv
+	since := p.now().Sub(p.lastPoll)
+	if p.refreshPending && (p.lastPoll.IsZero() || since >= minRefreshGap) {
+		return true
+	}
+	iv := p.interval()
+	if iv == 0 {
+		return false
+	}
+	return p.lastPoll.IsZero() && len(p.readyList()) > 0 || !p.lastPoll.IsZero() && since >= iv
 }
 
 // keyOf is how an account is told apart: provider:id, else per machine.
@@ -333,6 +376,15 @@ func keyOf(a usage.Account, machine string) string {
 	return k
 }
 
+// localSkip is the Options.SkipLocal entry of an account without an id:
+// provider, or provider:home.
+func localSkip(a usage.Account) string {
+	if a.Home != "" {
+		return a.Provider + ":" + a.Home
+	}
+	return a.Provider
+}
+
 // Poll asks every connected machine in turn; an account one machine
 // reported is not asked again on the next (Options.Skip).
 func (p *Plugin) Poll(ctx context.Context) {
@@ -342,12 +394,25 @@ func (p *Plugin) Poll(ctx context.Context) {
 		return
 	}
 	p.polling = true
+	p.refreshPending = false
 	ready := p.readyList()
 	now := p.now()
+	// Accounts a provider asked to wait for (Retry-After) are skipped
+	// until then: by id on every machine, those without an id on theirs.
 	var skip []string
+	local := map[string][]string{}
 	for k, a := range p.accounts {
-		if a.notBefore.After(now) && a.view.ID != "" {
+		if !a.notBefore.After(now) {
+			continue
+		}
+		if a.view.ID != "" {
 			skip = append(skip, k)
+			continue
+		}
+		for _, m := range ready {
+			if k == keyOf(a.view.Account, m) {
+				local[m] = append(local[m], localSkip(a.view.Account))
+			}
 		}
 	}
 	p.mu.Unlock()
@@ -364,6 +429,7 @@ func (p *Plugin) Poll(ctx context.Context) {
 	for _, m := range ready {
 		o := opts
 		o.Skip = slices.Clone(skip)
+		o.SkipLocal = local[m]
 		var res struct {
 			Accounts []usage.Account `json:"accounts"`
 		}
@@ -482,6 +548,11 @@ func (p *Plugin) Snapshot() Snapshot {
 	s.Interval = int64(iv.Seconds())
 	if iv > 0 && !p.lastPoll.IsZero() {
 		s.NextAt = p.lastPoll.Add(iv).Unix()
+	}
+	if p.refreshPending && !p.lastPoll.IsZero() {
+		if at := p.lastPoll.Add(minRefreshGap).Unix(); s.NextAt == 0 || at < s.NextAt {
+			s.NextAt = at
+		}
 	}
 	for _, a := range p.accounts {
 		v := a.view

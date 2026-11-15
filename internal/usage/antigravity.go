@@ -49,36 +49,41 @@ func antigravityAccounts(ctx context.Context, e *Env, o *Options) []Account {
 	return []Account{{Provider: Antigravity, Status: StatusMissing, Code: "not_running"}}
 }
 
-// findLanguageServers lists Antigravity's language servers from ps.
+// findLanguageServers lists the agent's user's Antigravity language
+// servers from ps (/bin/ps, else ps on the PATH).
 func findLanguageServers(ctx context.Context, e *Env) []lsProcess {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	out, err := e.Command(ctx, e.Environ(), "ps", "-ax", "-o", "pid=,command=")
+	out, err := e.Command(ctx, e.Environ(), systemTool("/bin/ps"), "-ax", "-o", "uid=,pid=,command=")
 	if err != nil && len(out) == 0 {
 		return nil
 	}
-	return parsePS(out)
+	return parsePS(out, e.UID)
 }
 
-func parsePS(out []byte) []lsProcess {
+// parsePS reads ps's uid, pid and command lines: the language servers of
+// user uid with their CSRF token (other users' are never asked).
+func parsePS(out []byte, uid int) []lsProcess {
 	var ps []lsProcess
 	sc := bufio.NewScanner(bytes.NewReader(out))
 	sc.Buffer(make([]byte, 64<<10), 1<<20)
 	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		pidS, cmd, ok := strings.Cut(line, " ")
-		if !ok {
+		f := strings.Fields(sc.Text())
+		if len(f) < 3 {
 			continue
 		}
-		pid, err := strconv.Atoi(pidS)
+		if u, err := strconv.Atoi(f[0]); err != nil || u != uid {
+			continue
+		}
+		pid, err := strconv.Atoi(f[1])
 		if err != nil {
 			continue
 		}
-		low := strings.ToLower(cmd)
+		low := strings.ToLower(strings.Join(f[2:], " "))
 		if !strings.Contains(low, "language_server") || !strings.Contains(low, "antigravity") {
 			continue
 		}
-		f := strings.Fields(cmd)
+		f = f[2:]
 		csrf := ""
 		for i, a := range f {
 			if v, ok := strings.CutPrefix(a, "--csrf_token="); ok {
@@ -95,14 +100,14 @@ func parsePS(out []byte) []lsProcess {
 }
 
 // listeningPorts are the loopback TCP ports pid listens on: from /proc on
-// Linux, from lsof elsewhere.
+// Linux, from lsof (/usr/sbin/lsof, else on the PATH) elsewhere.
 func listeningPorts(ctx context.Context, e *Env, pid int) []int {
 	if e.GOOS == "linux" {
 		return procPorts(e.ProcRoot, pid)
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	out, _ := e.Command(ctx, e.Environ(), "lsof", "-nP", "-a", "-p", strconv.Itoa(pid), "-iTCP", "-sTCP:LISTEN", "-Fn")
+	out, _ := e.Command(ctx, e.Environ(), systemTool("/usr/sbin/lsof"), "-nP", "-a", "-p", strconv.Itoa(pid), "-iTCP", "-sTCP:LISTEN", "-Fn")
 	return parseLsof(out)
 }
 
