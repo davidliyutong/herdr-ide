@@ -2803,3 +2803,238 @@ button.gui-note:hover {
   flex: 1;
   min-width: 0;
 }
+
+/* ---------- usage plugin ---------- */
+.usage-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 10px 12px;
+}
+.usage-tabs,
+.usage-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.usage-tabs button,
+.usage-toggle {
+  height: 1.5rem;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+.usage-tabs button.active,
+.usage-toggle.on {
+  color: var(--fg);
+  background: var(--accent-soft);
+}
+.usage-toolbar .spacer {
+  flex: 1;
+}
+.usage-refresh .spin {
+  animation: usage-spin 1s linear infinite;
+}
+@keyframes usage-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.usage-accounts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.usage-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.usage-card.compact {
+  gap: 2px;
+  padding: 6px 8px;
+}
+.usage-card-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.usage-card-head .spacer {
+  flex: 1;
+}
+.usage-provider {
+  font-weight: 600;
+}
+.usage-plan {
+  color: var(--fg-dim);
+  font-size: var(--fs-sm);
+}
+.usage-status {
+  font-size: var(--fs-sm);
+  color: var(--working);
+}
+.usage-status.error,
+.usage-status.unauth {
+  color: var(--error);
+}
+.usage-hint {
+  color: var(--fg-dim);
+}
+.usage-incident {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: var(--fs-sm);
+  color: var(--working);
+  text-decoration: none;
+}
+.usage-incident.major,
+.usage-incident.critical {
+  color: var(--error);
+}
+.usage-incident .lucide {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+.usage-window-line {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.usage-window-name {
+  flex: 1;
+  min-width: 0;
+}
+.usage-bar {
+  position: relative;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-3);
+  overflow: hidden;
+}
+.usage-bar-fill {
+  height: 100%;
+  background: var(--fg-dim);
+}
+.usage-window.warn .usage-bar-fill {
+  background: var(--blocked);
+}
+.usage-window.warn .usage-pct,
+.usage-window.out .usage-pct {
+  color: var(--blocked);
+}
+.usage-window.out .usage-bar-fill {
+  background: var(--error);
+}
+.usage-pace {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--fg);
+  opacity: 0.6;
+}
+.usage-pace-warn {
+  color: var(--blocked);
+}
+.usage-burndown {
+  display: block;
+  width: 100%;
+  height: 24px;
+}
+.usage-burndown path {
+  fill: none;
+  stroke: var(--fg-dim);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+.usage-deepseek summary {
+  cursor: pointer;
+  color: var(--fg-dim);
+}
+.usage-deepseek-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.usage-deepseek-form input {
+  flex: 1;
+  min-width: 8rem;
+}
+.usage-totals {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+.usage-total-value {
+  font-weight: 600;
+}
+.usage-daily {
+  display: block;
+  width: 100%;
+  height: 80px;
+}
+.usage-daily rect {
+  fill: var(--fg-dim);
+}
+.usage-rank {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.usage-rank li {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 0 5px;
+}
+.usage-rank li > .ellipsis {
+  flex: 1;
+  min-width: 0;
+}
+.usage-rank-bar {
+  position: absolute;
+  left: 0;
+  bottom: 1px;
+  height: 2px;
+  background: var(--accent-soft);
+}
+.usage-status-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 1.5rem;
+  padding: 0 6px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  cursor: pointer;
+}
+.usage-status-item:hover {
+  color: var(--fg);
+  background: var(--bg-3);
+}
+.usage-status-item .lucide {
+  width: 1rem;
+  height: 1rem;
+}
+.usage-status-item.warn {
+  color: var(--blocked);
+}
+.usage-status-item.out {
+  color: var(--error);
+}

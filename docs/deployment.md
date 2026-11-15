@@ -393,7 +393,10 @@ See [SECURITY.md](../SECURITY.md) for the threat model.
 ## Air-gapped networks
 
 Machines never need internet access: code-server releases and extensions are
-resolved on the core host and pushed through the agent. When the core host is
+resolved on the core host and pushed through the agent. The AI usage plugin is the
+one exception: it asks the AI providers' hosts from the machines whose CLIs
+are signed in to them ([29](features/29-ai-usage.md)); without internet its
+requests fail and the panel says so. When the core host is
 offline too, prepare a bundle on a connected machine:
 
 ```bash
@@ -452,6 +455,10 @@ What herdr-ide starts on a machine and how it is reclaimed:
 | Shared memory for captures | while the agent's window manager runs | One System V segment of at most 64 MB, 0600, marked for removal as soon as the agent attached it (on Linux; elsewhere once Xvfb attached it): it disappears when the agent and its connection to the display are gone, also when the agent is killed. A segment whose capture failed is freed with the next captures, which go through the X connection. |
 | curl or wget (`--code-server-install=download`) | while a machine downloads code-server | Ends with the download (20 min limit); the partial file in `~/.herdr-ide/code-server/` is removed, or with the unused versions after 14 days if the agent was killed. |
 | Download archives (`fs.archive`) | while a folder or several files download | No process and nothing on disk: the agent zips into the download's stream and its walk ends with the stream, also when the download is cancelled. |
+| AI usage limits (plugin `usage`, action `limits`) | the core's scheduler, while the plugin is on: by hand, every 1–30 min, or adaptive (2 min while a panel is open, 5 while a coding agent works, else 30) | No process except below: HTTPS requests to the providers (15 s each, the action at most 45 s); nothing is written. On macOS, `security find-generic-password` for Claude's keychain item (10 s limit); `ps` and `lsof` (5 s each) to find Antigravity's language server. |
+| `agy -p /usage` (plugin `usage`) | when no Antigravity language server answers and `agy` is installed | Killed after 20 s (`AGY_CLI_DISABLE_AUTO_UPDATE=true`, so it updates nothing); its output is read, at most 4 MiB. |
+| AI usage cost cache (plugin `usage`, action `cost`) | when the Cost tab is shown (at most once a minute per range) | `~/.herdr-ide[-<instance>]/usage/cost-cache.json` (0600): per log file its size, time and usage records; records older than 90 days and logs that are gone or older than 90 days leave it at each scan. |
+| DeepSeek key file (plugin `usage`) | **Save** in the panel's DeepSeek section (`PUT /api/m/{id}/p/usage/deepseek-key`, audited) | `~/.herdr-ide[-<instance>]/usage/deepseek.key` (0600) until **Remove** (an empty key) or the user deletes it. |
 | Disk | see [reference](reference.md#files-and-directories) | Uploads and logs after 7 days; agent builds and code-server versions unused for 14 days; Xvfb packages and video encoders unused for 14 days when another one is installed. Files dropped on a pane are written into its terminal's directory and belong to the user, like files copied there by hand. A cancelled or interrupted upload leaves nothing: the agent removes its temporary file (`.herdr-ide-upload-*` beside the target) when the stream ends early; only an agent killed during an upload leaves one. |
 
 The licenses stay in the extracted release directory until the user removes

@@ -102,6 +102,15 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   panes of their own, commands and status bar items; each can be turned
   off in Settings › Plugins. Uploads and downloads and program windows are
   plugins too.
+- **AI usage.** A panel of the right sidebar and a status bar item show
+  what the AI subscriptions signed in on your machines have left — Claude,
+  Codex, Grok, Antigravity, Kimi Code and DeepSeek: each window's use, its
+  reset countdown and whether its pace runs it out first, credits and
+  balances, incidents of the providers' status pages — one card per
+  account even when several machines share it, with notifications at the
+  thresholds you choose. A Cost tab adds up what the CLIs' local logs
+  would cost at API prices, by day, model, project and machine. Credentials
+  are read where they are, read only, and never leave the machine.
 - **Settings.** Language (English, Chinese), light/dark theme followed by
   VS Code, interface size, the desktop app's zoom, the terminals' font (picked from the monospace
   fonts installed, with a preview), line height, cursor, scrollback, bell,
@@ -252,7 +261,9 @@ header, a read-only mode and an audit log. See
 
 ## Air-gapped networks
 
-Machines never download anything. If the host running herdr-ide is offline
+Machines never download anything (the AI usage plugin asks the AI
+providers' hosts from the machines whose CLIs are signed in to them; it
+fails quietly without internet). If the host running herdr-ide is offline
 too, run `herdr-ide fetch-assets DIR` on a connected machine, carry `DIR` over
 and start with `--offline --seed-dir DIR`. Downloads are verified against
 pinned SHA-256 digests. Details in
