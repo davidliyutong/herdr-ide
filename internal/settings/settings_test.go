@@ -6,6 +6,7 @@ import (
 	"flag"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -24,7 +25,7 @@ func testModule() Module {
 			{Key: "a.lines", Type: TypeNumber, Default: 100, Integer: true, Section: "a", Order: 3},
 			{Key: "b.on", Type: TypeBool, Default: true, Scope: ScopeRemoteMachine, Section: "b", Flag: "on"},
 			{Key: "b.path", Type: TypeString, Default: "", Scope: ScopeMachine, Section: "b", Order: 1, Validate: func(v any) error {
-				if s := v.(string); s != "" && !filepath.IsAbs(s) {
+				if s := v.(string); s != "" && !path.IsAbs(s) {
 					return errors.New("not absolute")
 				}
 				return nil

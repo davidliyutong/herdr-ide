@@ -600,6 +600,10 @@ func TestAddAndRemoveAtRuntime(t *testing.T) {
 // and the local machine's name is stored once given. Enabling or disabling
 // the local machine stores a record of it, without its host's name.
 func TestSetLabelAndLocalRecord(t *testing.T) {
+	// Disabling the local machine is what is tested: on Windows it has no
+	// agent and stays in error otherwise.
+	defer func(was bool) { LocalSupported = was }(LocalSupported)
+	LocalSupported = true
 	path := filepath.Join(t.TempDir(), "machines.json")
 	reg, _ := OpenRegistry(path, nil)
 	reg.Put(Spec{ID: "a", Label: "a", Target: "a", Enabled: true})

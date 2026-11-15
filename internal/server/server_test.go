@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -134,7 +135,7 @@ func TestUploadNameUniqueAndSafe(t *testing.T) {
 func TestUploadIntoDirectory(t *testing.T) {
 	now := time.Date(2026, 10, 30, 2, 15, 0, 0, time.UTC)
 	h, err := uploadHeader(url.Values{"name": {"shot.png"}}, "/home/u/.herdr-ide/uploads", now)
-	if err != nil || !h.Mkdirs || h.Unique || filepath.Dir(h.Path) != "/home/u/.herdr-ide/uploads" {
+	if err != nil || !h.Mkdirs || h.Unique || path.Dir(h.Path) != "/home/u/.herdr-ide/uploads" {
 		t.Fatalf("upload directory: %+v %v", h, err)
 	}
 	// Into a pane's directory under the file's own name, without replacing.
