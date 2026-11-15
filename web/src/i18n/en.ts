@@ -1161,6 +1161,7 @@ export const en = {
   'git.error.git_failed': 'Git failed:',
   'git.error.timeout': 'Git took too long and was stopped.',
   'git.error.too_large': 'Git’s output is too large.',
+  'git.error.busy': 'Git is busy on this machine; try again in a moment.',
   'git.error.bad_ref': 'Not a valid branch, tag or commit.',
   'git.error.bad_params': 'The request was not valid.',
   'git.error.not_found': 'Not found.',

@@ -15,7 +15,8 @@
 // true); a fetch, pull or push that would need a password fails with
 // auth_required. Each run has a timeout (reads 15 s, network and
 // committing 120 s) after which its process group is killed, and its
-// output is bounded.
+// output is bounded; at most MaxRuns run at once. Reads run no file system
+// monitor and start no maintenance.
 package git
 
 import (
@@ -216,16 +217,36 @@ func open(env *plugin.Env, dir string, read bool) (*repo, error) {
 // lookGit finds the git executable; it is a variable for tests.
 var lookGit = func() (string, error) { return exec.LookPath("git") }
 
-// hidden are variables of the agent's environment git must not see: they
-// would point it at another repository or index, or run a program that
-// asks for credentials.
-var hidden = map[string]bool{
-	"GIT_DIR": true, "GIT_WORK_TREE": true, "GIT_INDEX_FILE": true, "GIT_OBJECT_DIRECTORY": true,
-	"GIT_ALTERNATE_OBJECT_DIRECTORIES": true, "GIT_COMMON_DIR": true, "GIT_NAMESPACE": true,
-	"GIT_CEILING_DIRECTORIES": true, "GIT_ASKPASS": true, "SSH_ASKPASS": true, "GIT_EXEC_PATH": true,
-	"GIT_PAGER": true, "GIT_EDITOR": true, "GIT_SEQUENCE_EDITOR": true, "LC_ALL": true, "LANG": true, "LANGUAGE": true,
-	"GIT_CONFIG_PARAMETERS": true, "GIT_CONFIG_COUNT": true, "GIT_LITERAL_PATHSPECS": true, "GIT_GLOB_PATHSPECS": true,
-	"GIT_NOGLOB_PATHSPECS": true, "GIT_ICASE_PATHSPECS": true,
+// kept are the variables of git's own (GIT_*) a run of git keeps from the
+// agent's environment: how ssh is run and who authors and commits. Every
+// other GIT_* variable is dropped (GIT_DIR, GIT_CONFIG_*, GIT_ATTR_SOURCE,
+// GIT_EXEC_PATH, GIT_TRACE*…: they would point git at another repository,
+// configuration or program, or write files elsewhere), and so are the
+// askpass programs and the locale; the run sets its own below.
+var kept = map[string]bool{"GIT_SSH": true, "GIT_SSH_COMMAND": true, "GIT_SSH_VARIANT": true}
+
+// keptPrefixes are the kept families: GIT_AUTHOR_NAME, _EMAIL, _DATE and
+// the committer's.
+var keptPrefixes = []string{"GIT_AUTHOR_", "GIT_COMMITTER_"}
+
+// dropped are other variables a run of git does not get.
+var dropped = map[string]bool{"SSH_ASKPASS": true, "LC_ALL": true, "LANG": true, "LANGUAGE": true}
+
+// keepVar reports whether the variable k of the agent's environment is
+// passed to git.
+func keepVar(k string) bool {
+	if dropped[k] {
+		return false
+	}
+	if !strings.HasPrefix(k, "GIT_") || kept[k] {
+		return true
+	}
+	for _, p := range keptPrefixes {
+		if strings.HasPrefix(k, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // environ is the environment of a run of git.
@@ -239,10 +260,9 @@ func environ(env *plugin.Env, read bool) []string {
 	out := make([]string, 0, len(base)+12)
 	for _, kv := range base {
 		k, _, _ := strings.Cut(kv, "=")
-		if hidden[k] || strings.HasPrefix(k, "GIT_CONFIG_KEY_") || strings.HasPrefix(k, "GIT_CONFIG_VALUE_") {
-			continue
+		if keepVar(k) {
+			out = append(out, kv)
 		}
-		out = append(out, kv)
 	}
 	out = append(out,
 		"LC_ALL=C",
@@ -285,6 +305,34 @@ func (r *repo) git(ctx context.Context, rn run) (result, error) {
 	return execGit(ctx, r.env, r.root, r.read, rn)
 }
 
+// MaxRuns bounds the runs of git at once on a machine; a run that finds
+// no free slot within slotWait fails with busy.
+const MaxRuns = 8
+
+var (
+	slots    = make(chan struct{}, MaxRuns)
+	slotWait = 3 * time.Second
+	// waitDelay is how long a run waits, after git exited, for its output
+	// to close: a program a hook left in the background may hold it.
+	waitDelay = 2 * time.Second
+)
+
+// Options of every run: no colors, pager or signatures; no maintenance
+// detached into the background (an automatic gc a change starts runs in
+// the run's process group, under its timeout).
+var baseConfig = []string{
+	"-c", "core.quotePath=false", "-c", "color.ui=false", "-c", "log.showSignature=false",
+	"-c", "gc.autoDetach=false", "-c", "maintenance.autoDetach=false",
+}
+
+// readConfig are the options of reads: a read runs no file system monitor
+// (a hook or daemon from the repository's configuration), uses no
+// untracked cache and starts no maintenance.
+var readConfig = []string{
+	"-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false",
+	"-c", "maintenance.auto=false", "-c", "gc.auto=0",
+}
+
 func execGit(ctx context.Context, env *plugin.Env, dir string, read bool, rn run) (result, error) {
 	bin, err := lookGit()
 	if err != nil {
@@ -298,7 +346,22 @@ func execGit(ctx context.Context, env *plugin.Env, dir string, read bool, rn run
 	}
 	ctx, cancel := context.WithTimeout(ctx, rn.timeout)
 	defer cancel()
-	args := append([]string{"-C", dir, "-c", "core.quotePath=false", "-c", "color.ui=false", "-c", "log.showSignature=false", "--no-pager"}, rn.args...)
+	wait := time.NewTimer(slotWait)
+	select {
+	case slots <- struct{}{}:
+		wait.Stop()
+	case <-wait.C:
+		return result{}, plugin.Errorf("busy", "%d runs of git are in progress", MaxRuns)
+	case <-ctx.Done():
+		wait.Stop()
+		return result{}, plugin.Errorf("cancelled", "git %s: %v", rn.args[0], ctx.Err())
+	}
+	defer func() { <-slots }()
+	args := append([]string{"-C", dir}, baseConfig...)
+	if read {
+		args = append(args, readConfig...)
+	}
+	args = append(append(args, "--no-pager"), rn.args...)
 	cmd := exec.Command(bin, args...)
 	cmd.Env = environ(env, read)
 	if !rn.magic {
@@ -308,6 +371,10 @@ func execGit(ctx context.Context, env *plugin.Env, dir string, read bool, rn run
 	// A session of its own: no controlling terminal (nothing can prompt)
 	// and a process group to kill.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	// git has exited when a program it left behind holds its output: Wait
+	// closes the pipes after waitDelay. Those programs (a hook's
+	// background jobs) are the user's and keep running.
+	cmd.WaitDelay = waitDelay
 	if rn.stdin != nil {
 		cmd.Stdin = bytes.NewReader(rn.stdin)
 	}
@@ -334,6 +401,10 @@ func execGit(ctx context.Context, env *plugin.Env, dir string, read bool, rn run
 		syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		<-done
 		return result{}, plugin.Errorf("too_large", "git %s printed more than %d bytes", rn.args[0], rn.limit)
+	}
+	if errors.Is(werr, exec.ErrWaitDelay) {
+		// git succeeded; what kept its output open is not git.
+		werr = nil
 	}
 	res := result{out: out.buf.Bytes(), err: errb.buf.Bytes()}
 	if werr != nil {

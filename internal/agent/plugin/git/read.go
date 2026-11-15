@@ -7,12 +7,15 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"unicode/utf8"
 
 	"herdr-ide/internal/agent/plugin"
@@ -521,11 +524,11 @@ func (r *repo) emptyTree(ctx context.Context) (string, error) {
 
 // changes are the files that differ between two commits (or trees).
 func (r *repo) changes(ctx context.Context, base, target string) ([]Change, error) {
-	ns, err := r.git(ctx, run{args: []string{"diff", "--no-ext-diff", "-z", "-M", "--name-status", base, target, "--"}})
+	ns, err := r.git(ctx, run{args: []string{"diff", "--no-ext-diff", "--no-textconv", "-z", "-M", "--name-status", base, target, "--"}})
 	if err != nil {
 		return nil, err
 	}
-	num, err := r.git(ctx, run{args: []string{"diff", "--no-ext-diff", "-z", "-M", "--numstat", base, target, "--"}})
+	num, err := r.git(ctx, run{args: []string{"diff", "--no-ext-diff", "--no-textconv", "-z", "-M", "--numstat", base, target, "--"}})
 	if err != nil {
 		return nil, err
 	}
@@ -651,8 +654,22 @@ func (r *repo) blob(ctx context.Context, p Params) (*Blob, error) {
 	return blobOf(res.out, size, 0), nil
 }
 
+// worktreeBlob reads a file of the working tree. A link is shown as its
+// target; a directory on the way that is a link must lead into the
+// repository, so a link to "/" does not make the rest of the machine a
+// part of it. The file is opened without following a link put there
+// meanwhile, without blocking on a FIFO, and read up to MaxBlob.
 func (r *repo) worktreeBlob(rel string) (*Blob, error) {
+	root, err := filepath.EvalSymlinks(r.root)
+	if err != nil {
+		return &Blob{}, nil
+	}
 	full := filepath.Join(r.root, filepath.FromSlash(rel))
+	dir, err := filepath.EvalSymlinks(filepath.Dir(full))
+	if err != nil || (dir != root && !strings.HasPrefix(dir, root+string(filepath.Separator))) {
+		return &Blob{}, nil
+	}
+	full = filepath.Join(dir, filepath.Base(full))
 	fi, err := os.Lstat(full)
 	if err != nil || fi.IsDir() {
 		return &Blob{}, nil
@@ -668,12 +685,27 @@ func (r *repo) worktreeBlob(rel string) (*Blob, error) {
 	if !fi.Mode().IsRegular() {
 		return &Blob{}, nil
 	}
+	f, err := os.OpenFile(full, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ELOOP) {
+			return &Blob{}, nil
+		}
+		return nil, plugin.Errorf("denied", "%v", err)
+	}
+	defer f.Close()
+	if fi, err = f.Stat(); err != nil || !fi.Mode().IsRegular() {
+		return &Blob{}, nil
+	}
+	mtime = fi.ModTime().UnixMilli()
 	if fi.Size() > MaxBlob {
 		return &Blob{Exists: true, TooLarge: true, Size: fi.Size(), MTime: mtime}, nil
 	}
-	b, err := os.ReadFile(full)
+	b, err := io.ReadAll(io.LimitReader(f, MaxBlob+1))
 	if err != nil {
 		return nil, plugin.Errorf("denied", "%v", err)
+	}
+	if len(b) > MaxBlob {
+		return &Blob{Exists: true, TooLarge: true, Size: int64(len(b)), MTime: mtime}, nil
 	}
 	return blobOf(b, int64(len(b)), mtime), nil
 }
@@ -791,8 +823,8 @@ func (r *repo) diffStat(ctx context.Context) (*DiffStat, error) {
 		args []string
 		into map[string][2]int
 	}{
-		{[]string{"diff", "--no-ext-diff", "-z", "--numstat", "--"}, out.Worktree},
-		{[]string{"diff", "--no-ext-diff", "-z", "--numstat", "--cached", "--"}, out.Staged},
+		{[]string{"diff", "--no-ext-diff", "--no-textconv", "-z", "--numstat", "--"}, out.Worktree},
+		{[]string{"diff", "--no-ext-diff", "--no-textconv", "-z", "--numstat", "--cached", "--"}, out.Staged},
 	} {
 		res, err := r.git(ctx, run{args: side.args})
 		if err != nil {

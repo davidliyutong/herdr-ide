@@ -2,12 +2,14 @@
 // (docs/features/31-git.md): routes below /api/m/{id}/p/git/ that run the
 // actions of its machine side (internal/agent/plugin/git). Reads are GETs
 // with their parameters in the query; changes are POSTs with a JSON body,
-// refused in read-only mode and audited as git.<action>.
+// refused in read-only mode and audited as git.<action> and, with what
+// they acted on and how they ended, git.<action>.done.
 package git
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -106,16 +108,71 @@ func change(action string) func(c *plugin.Call, w http.ResponseWriter, r *http.R
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), writeTimeout)
 		defer cancel()
-		forward(ctx, c, w, action, p)
+		err := forward(ctx, c, w, action, p)
+		// The framework audited git.<action> before the body was read;
+		// this records what was changed and how it ended.
+		fields := auditFields(p)
+		if c.Machine != nil {
+			fields["machine"] = c.Machine.ID()
+		}
+		fields["ok"] = err == nil
+		var pe *plugin.Error
+		if errors.As(err, &pe) {
+			fields["code"] = pe.Code
+		}
+		if c.Host != nil {
+			c.Host.Audit(r, "git."+action+".done", fields)
+		}
 	}
 }
 
-// forward runs the action on the machine and answers its result.
-func forward(ctx context.Context, c *plugin.Call, w http.ResponseWriter, action string, p map[string]any) {
+// auditNames are the parameters of a change an audit records (what it
+// acted on); auditFlags its switches. Patches and messages are never
+// recorded; paths only by their number.
+var (
+	auditNames = []string{"repo", "rev", "rev2", "ref", "onto", "name", "to", "at", "remote", "branch", "tag", "mode", "op"}
+	auditFlags = []string{"force", "forceWithLease", "amend", "all"}
+)
+
+// auditFields are the fields of a change's audit record.
+func auditFields(p map[string]any) map[string]any {
+	f := map[string]any{}
+	for _, k := range auditNames {
+		if v, ok := p[k].(string); ok && v != "" {
+			if len(v) > 512 {
+				v = v[:512]
+			}
+			f[k] = v
+		}
+	}
+	for _, k := range auditFlags {
+		if v, ok := p[k].(bool); ok && v {
+			f[k] = true
+		}
+	}
+	n := 0
+	for _, k := range []string{"paths", "untracked"} {
+		if ps, ok := p[k].([]any); ok {
+			n += len(ps)
+		}
+	}
+	if n > 0 {
+		f["paths"] = n
+	}
+	return f
+}
+
+// forward runs the action on the machine and answers its result, or the
+// error it returns.
+func forward(ctx context.Context, c *plugin.Call, w http.ResponseWriter, action string, p map[string]any) error {
+	if c.Machine == nil {
+		plugin.WriteError(w, plugin.ErrOffline)
+		return plugin.ErrOffline
+	}
 	var out json.RawMessage
 	if err := plugin.Request(ctx, c.Machine, "git", action, p, &out); err != nil {
 		plugin.WriteError(w, err)
-		return
+		return err
 	}
 	if len(out) == 0 {
 		out = json.RawMessage("{}")
@@ -123,4 +180,5 @@ func forward(ctx context.Context, c *plugin.Call, w http.ResponseWriter, action 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Write(out)
+	return nil
 }

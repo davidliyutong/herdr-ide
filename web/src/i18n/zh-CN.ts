@@ -1139,6 +1139,7 @@ export const zhCN: Messages = {
   'git.error.git_failed': 'Git 执行失败：',
   'git.error.timeout': 'Git 运行时间过长，已停止。',
   'git.error.too_large': 'Git 的输出过大。',
+  'git.error.busy': '此机器上的 Git 正忙，请稍后再试。',
   'git.error.bad_ref': '不是有效的分支、标签或提交。',
   'git.error.bad_params': '请求无效。',
   'git.error.not_found': '未找到。',

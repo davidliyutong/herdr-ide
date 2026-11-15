@@ -13,7 +13,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -30,8 +32,9 @@ func TestLiteralPaths(t *testing.T) {
 	sh(t, dir, "diff", "--cached", "--exit-code")
 }
 
-// testEnv is an agent's environment with HOME in a temporary directory
-// and no system or global git configuration.
+// testEnv is an agent's environment with HOME (so the global git
+// configuration) in a temporary directory; the setup's git reads no system
+// configuration.
 func testEnv(t *testing.T) *plugin.Env {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
@@ -268,6 +271,169 @@ func TestTimeout(t *testing.T) {
 	_, err = execGit(context.Background(), env, dir, true, run{args: []string{"log"}, limit: 1000})
 	if !errors.As(err, &pe) || pe.Code != "too_large" {
 		t.Fatalf("err %v", err)
+	}
+}
+
+// fakeGit makes lookGit find a script as git for the test.
+func fakeGit(t *testing.T, script string) string {
+	t.Helper()
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "git")
+	write(t, fake, "#!/bin/sh\n"+script)
+	os.Chmod(fake, 0o755)
+	old := lookGit
+	lookGit = func() (string, error) { return fake, nil }
+	t.Cleanup(func() { lookGit = old })
+	return dir
+}
+
+// killPids kills the processes whose ids a fake git wrote to file.
+func killPids(t *testing.T, file string) {
+	t.Cleanup(func() {
+		b, _ := os.ReadFile(file)
+		for _, f := range strings.Fields(string(b)) {
+			if pid, err := strconv.Atoi(f); err == nil && pid > 0 {
+				syscall.Kill(pid, syscall.SIGKILL)
+			}
+		}
+	})
+}
+
+// A program git leaves in the background holding its output (a hook's
+// "indexer &") does not hold the run: git's success is answered within
+// the wait delay, and the program keeps running, also when it left the
+// process group.
+func TestBackgroundChild(t *testing.T) {
+	env := testEnv(t)
+	detach := ""
+	if p, err := exec.LookPath("setsid"); err == nil {
+		detach = p
+	} else if p, err := exec.LookPath("perl"); err == nil {
+		detach = p + " -MPOSIX -e 'POSIX::setsid(); exec @ARGV'"
+	}
+	cases := map[string]string{"same group": "sleep 30"}
+	if detach != "" {
+		cases["own session"] = detach + " sleep 30"
+	}
+	for name, child := range cases {
+		t.Run(name, func(t *testing.T) {
+			pids := filepath.Join(t.TempDir(), "pids")
+			killPids(t, pids)
+			dir := fakeGit(t, child+" &\necho $! > "+pids+"\necho ok\n")
+			start := time.Now()
+			res, err := execGit(context.Background(), env, dir, true, run{args: []string{"status"}})
+			if err != nil || res.code != 0 || string(res.out) != "ok\n" {
+				t.Fatalf("res %+v err %v", res, err)
+			}
+			if d := time.Since(start); d > 3500*time.Millisecond {
+				t.Errorf("took %s", d)
+			}
+			// The child is the user's: still running after the success.
+			b, _ := os.ReadFile(pids)
+			pid, _ := strconv.Atoi(strings.TrimSpace(string(b)))
+			if pid <= 0 || syscall.Kill(pid, 0) != nil {
+				t.Errorf("background child %d gone", pid)
+			}
+		})
+	}
+	if detach != "" {
+		// A run over its time ends although a child that left the group
+		// keeps its output open.
+		pids := filepath.Join(t.TempDir(), "pids")
+		killPids(t, pids)
+		dir := fakeGit(t, detach+" sleep 30 &\necho $! > "+pids+"\nsleep 30\n")
+		start := time.Now()
+		_, err := execGit(context.Background(), env, dir, true, run{args: []string{"status"}, timeout: 300 * time.Millisecond})
+		var pe *plugin.Error
+		if !errors.As(err, &pe) || pe.Code != "timeout" {
+			t.Fatalf("err %v", err)
+		}
+		if d := time.Since(start); d > 4*time.Second {
+			t.Errorf("took %s", d)
+		}
+	}
+}
+
+// At most MaxRuns runs at once; another waits briefly, then fails busy.
+func TestBusy(t *testing.T) {
+	env := testEnv(t)
+	pids := filepath.Join(t.TempDir(), "pids")
+	killPids(t, pids)
+	dir := fakeGit(t, "echo $$ >> "+pids+"\nexec sleep 30\n")
+	old := slotWait
+	slotWait = 200 * time.Millisecond
+	defer func() { slotWait = old }()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, MaxRuns)
+	for i := 0; i < MaxRuns; i++ {
+		go func() {
+			_, err := execGit(ctx, env, dir, true, run{args: []string{"status"}, timeout: time.Minute})
+			done <- err
+		}()
+	}
+	for deadline := time.Now().Add(5 * time.Second); len(slots) < MaxRuns; {
+		if time.Now().After(deadline) {
+			t.Fatalf("%d runs started", len(slots))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	_, err := execGit(context.Background(), env, dir, true, run{args: []string{"status"}})
+	var pe *plugin.Error
+	if !errors.As(err, &pe) || pe.Code != "busy" {
+		t.Errorf("err %v, want busy", err)
+	}
+	cancel()
+	for i := 0; i < MaxRuns; i++ {
+		if err := <-done; !errors.As(err, &pe) || pe.Code != "cancelled" {
+			t.Errorf("err %v", err)
+		}
+	}
+	// The slots are free again.
+	if _, err := execGit(context.Background(), env, t.TempDir(), true, run{args: []string{"version"}, timeout: 50 * time.Millisecond}); err == nil || errors.As(err, &pe) && pe.Code == "busy" {
+		t.Errorf("after the runs: %v", err)
+	}
+}
+
+// Reads run no file system monitor of the repository's configuration
+// and no textconv driver; a change may (as in a terminal).
+func TestReadsRunNoMonitor(t *testing.T) {
+	env := testEnv(t)
+	dir := newRepo(t, env)
+	marker := filepath.Join(env.Home, "marker")
+	hook := filepath.Join(env.Home, "fsmonitor.sh")
+	write(t, hook, "#!/bin/sh\ntouch "+marker+"\nexit 1\n")
+	os.Chmod(hook, 0o755)
+	tc := filepath.Join(env.Home, "textconv.sh")
+	write(t, tc, "#!/bin/sh\ntouch "+marker+".tc\ncat \"$1\"\n")
+	os.Chmod(tc, 0o755)
+	sh(t, dir, "config", "core.fsmonitor", hook)
+	sh(t, dir, "config", "diff.evil.textconv", tc)
+	write(t, filepath.Join(dir, ".gitattributes"), "*.txt diff=evil\n")
+	sh(t, dir, "add", ".gitattributes")
+	sh(t, dir, "commit", "-q", "-m", "attrs")
+	os.Remove(marker)
+	write(t, filepath.Join(dir, "a.txt"), "changed\n")
+	var st Status
+	ok(t, env, "status", Params{Repo: dir}, &st)
+	var ds DiffStat
+	ok(t, env, "diffStat", Params{Repo: dir}, &ds)
+	var info Repo
+	ok(t, env, "repo", Params{Path: dir}, &info)
+	var shown Shown
+	ok(t, env, "show", Params{Repo: dir, Rev: sh(t, dir, "rev-parse", "HEAD~1"), Rev2: "HEAD"}, &shown)
+	for _, m := range []string{marker, marker + ".tc"} {
+		if _, err := os.Stat(m); err == nil {
+			t.Errorf("a read ran %s", filepath.Base(m))
+		}
+	}
+	if len(st.Files) != 1 || ds.Worktree["a.txt"] != [2]int{1, 3} {
+		t.Errorf("status %+v diffStat %+v", st, ds)
+	}
+	// The same repository makes git itself run the monitor: the test
+	// tests something.
+	sh(t, dir, "status")
+	if _, err := os.Stat(marker); err != nil {
+		t.Log("this git runs no fsmonitor hook of core.fsmonitor")
 	}
 }
 
@@ -759,15 +925,19 @@ func TestAuthRequired(t *testing.T) {
 // for credentials; no optional locks for reads.
 func TestEnviron(t *testing.T) {
 	env := &plugin.Env{Environ: func() []string {
-		return []string{"PATH=/bin", "GIT_DIR=/x", "GIT_ASKPASS=/a", "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=core.pager", "LANG=de_DE"}
+		return []string{"PATH=/bin", "GIT_DIR=/x", "GIT_ASKPASS=/a", "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=core.pager", "LANG=de_DE",
+			"GIT_CONFIG_GLOBAL=/tmp/evil", "GIT_ATTR_SOURCE=HEAD~1", "GIT_TRACE=/tmp/trace", "GIT_EXEC_PATH=/x", "GIT_PAGER=less",
+			"SSH_ASKPASS=/a", "GIT_SSH_COMMAND=ssh -i k", "GIT_SSH=/usr/bin/ssh", "GIT_SSH_VARIANT=ssh", "GIT_AUTHOR_NAME=A", "GIT_COMMITTER_EMAIL=c@x"}
 	}}
 	got := strings.Join(environ(env, true), "\n")
-	for _, bad := range []string{"GIT_DIR", "GIT_ASKPASS", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "LANG="} {
+	for _, bad := range []string{"GIT_DIR", "GIT_ASKPASS", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "LANG=", "GIT_CONFIG_GLOBAL",
+		"GIT_ATTR_SOURCE", "GIT_TRACE", "GIT_EXEC_PATH", "GIT_PAGER=less", "SSH_ASKPASS="} {
 		if strings.Contains(got, bad) {
 			t.Errorf("%s passed: %s", bad, got)
 		}
 	}
-	for _, want := range []string{"PATH=/bin", "LC_ALL=C", "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0"} {
+	for _, want := range []string{"PATH=/bin", "LC_ALL=C", "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0",
+		"GIT_SSH_COMMAND=ssh -i k", "GIT_SSH=/usr/bin/ssh", "GIT_SSH_VARIANT=ssh", "GIT_AUTHOR_NAME=A", "GIT_COMMITTER_EMAIL=c@x"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("%s missing: %s", want, got)
 		}
@@ -819,6 +989,39 @@ func TestRangePatchVectors(t *testing.T) {
 		}
 		if string(got) != *v.Result {
 			t.Errorf("%s: index %q, want %q", v.Name, got, *v.Result)
+		}
+	}
+}
+
+// A file of the working tree is read only inside the repository: a link
+// to a directory outside does not lead there; a link is shown as its
+// target.
+func TestWorktreeBlobLinks(t *testing.T) {
+	env := testEnv(t)
+	dir := newRepo(t, env)
+	if err := os.Symlink("/", filepath.Join(dir, "out")); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(dir, "sub/x.txt"), "x\n")
+	os.Symlink("sub", filepath.Join(dir, "in"))
+	os.Symlink("/etc/hosts", filepath.Join(dir, "hosts"))
+	blob := func(path string) Blob {
+		var b Blob
+		ok(t, env, "blob", Params{Repo: dir, Source: "worktree", Path: path}, &b)
+		return b
+	}
+	if b := blob("out/etc/hosts"); b.Exists || b.Text != "" {
+		t.Errorf("out/etc/hosts %+v", b)
+	}
+	if b := blob("in/x.txt"); b.Text != "x\n" {
+		t.Errorf("in/x.txt %+v", b)
+	}
+	if b := blob("hosts"); b.Text != "/etc/hosts" {
+		t.Errorf("hosts %+v", b)
+	}
+	if err := syscall.Mkfifo(filepath.Join(dir, "fifo"), 0o600); err == nil {
+		if b := blob("fifo"); b.Exists {
+			t.Errorf("fifo %+v", b)
 		}
 	}
 }

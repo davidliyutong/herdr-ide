@@ -55,24 +55,43 @@ vector the agent builds: no shell, no option from the request.
   resolves to a commit; an existing branch or tag must exist
   (`show-ref --verify`), a new one pass `check-ref-format`; a remote must be
   one of `git remote`'s.
-- The environment is the agent's (`Env.Environ`) without git's variables
-  that point elsewhere (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`,
-  `GIT_CONFIG_*`…) or ask for credentials (`GIT_ASKPASS`, `SSH_ASKPASS`),
-  with `LC_ALL=C`, `GIT_TERMINAL_PROMPT=0`, `SSH_ASKPASS_REQUIRE=never`,
+- The environment is the agent's (`Env.Environ`) without any of git's
+  `GIT_*` variables except `GIT_SSH`, `GIT_SSH_COMMAND`, `GIT_SSH_VARIANT`,
+  `GIT_AUTHOR_*` and `GIT_COMMITTER_*` (so none points git at another
+  repository, configuration, attributes source or program: `GIT_DIR`,
+  `GIT_CONFIG_*`, `GIT_ATTR_SOURCE`, `GIT_EXEC_PATH`, `GIT_TRACE*`…), without
+  `SSH_ASKPASS` and the locale (`LANG`, `LANGUAGE`, `LC_ALL`), and with
+  `LC_ALL=C`, `GIT_TERMINAL_PROMPT=0`, `SSH_ASKPASS_REQUIRE=never`,
   `GIT_EDITOR=true` (a merge or rebase takes its default message),
-  `GIT_PAGER=cat`, and `GIT_OPTIONAL_LOCKS=0` for reads. git runs in a
+  `GIT_PAGER=cat`, `GIT_MERGE_AUTOEDIT=no`, `GIT_LITERAL_PATHSPECS=1` (but
+  for the stash) and `GIT_OPTIONAL_LOCKS=0` for reads. git runs in a
   session of its own (no terminal to prompt on) with standard input from
   the request or empty. A fetch, pull or push that needs credentials git
   does not have fails, and its message is classified `auth_required`; the
   UI says to run it in a terminal or set up a helper or key.
+- Configuration: every run sets `gc.autoDetach=false` and
+  `maintenance.autoDetach=false`, so automatic maintenance a change starts
+  runs inside the run (its process group, its timeout) instead of in the
+  background. Reads also set `core.fsmonitor=false`,
+  `core.untrackedCache=false`, `maintenance.auto=false` and `gc.auto=0`, and
+  their diffs `--no-ext-diff --no-textconv`: looking at a repository runs no
+  file system monitor hook or daemon and no textconv driver it configures.
+  Clean filters (`filter.<name>.clean` of the repository's attributes) still
+  run when `status` or `diffStat` compare a changed file of the working
+  tree, as a git-aware shell prompt runs them.
 - Time: reads 15 s, changes (network, hooks of a commit) 120 s; then, or
   when the core closes the request's stream, git's process group is
-  killed. Output: 32 MiB per run (`too_large`), files 8 MiB, the status
-  20 000 entries, patches and messages 4 MiB.
+  killed. A run whose git exited while a program it started (a hook's
+  background job) still holds its output ends 2 s later with git's result;
+  that program, the user's, keeps running. At most 8 runs at once per
+  machine; another waits up to 3 s for one to end, then fails with `busy`.
+  Output: 32 MiB per run (`too_large`), files 8 MiB, the status 20 000
+  entries, patches and messages 4 MiB.
 - Failures carry codes: `git_missing` (no git on the machine),
   `not_a_repo`, `bad_ref`, `bad_params`, `not_found`, `auth_required`,
   `conflicts` (a merge, rebase, cherry-pick, revert or stash that stopped on
-  conflicts), `timeout`, `too_large`, `git_failed` with git's message.
+  conflicts), `timeout`, `too_large`, `busy`, `git_failed` with git's
+  message.
 
 | Read | What it answers |
 | --- | --- |
@@ -80,7 +99,7 @@ vector the agent builds: no shell, no option from the request.
 | `status` | `status --porcelain=v2 -z --branch --untracked-files=all`: files with the index's and the working tree's letters, renames with their old path, conflicts, untracked files; branch, upstream, ahead/behind. |
 | `log` | `log --date-order` of the branches, tags and HEAD (with `remotes=1` the remote branches; `branch=` names some instead), pages of 300 (at most 1000, `skip=`): hash, parents, author, e-mail, date, subject; with the first page the refs (`for-each-ref`, tags peeled), the stashes, HEAD and its branch. |
 | `show` | `rev=` a commit's message and committer and its files (status, lines added and deleted, binary) against its parent `parent=` (1 by default; the empty tree for a root commit), or with `rev2=` the files between two commits. |
-| `blob` | `path=` at `source=`: `worktree` (with its size and modification time), `index` (stage 0), `head`, or a revision (with `parent=`: its parent's); `exists`, `binary` (a NUL in the first 8000 bytes or not UTF-8), `tooLarge` over 8 MiB. |
+| `blob` | `path=` at `source=`: `worktree` (with its size and modification time; a link is answered as its target, a path through a directory link that leads out of the repository does not exist, FIFOs and devices are not read), `index` (stage 0), `head`, or a revision (with `parent=`: its parent's); `exists`, `binary` (a NUL in the first 8000 bytes or not UTF-8), `tooLarge` over 8 MiB. |
 | `branches`, `tags`, `stashes` | Local and remote branches with upstream and ahead/behind; tags with their commit and whether annotated; stashes with their base. |
 | `diffStat` | Lines added and deleted per file in the working tree and in the index. |
 | `watch` | A token of the modification times of the index, `HEAD`, the operation's files, `logs/HEAD`, `packed-refs`, `FETCH_HEAD` and `refs/` (at most 4000 entries) in the git directory and the common one, found without running git (a `.git` file names a worktree's or submodule's directory, its `commondir` the common one). |
@@ -105,7 +124,11 @@ vector the agent builds: no shell, no option from the request.
 **Core side.** Reads are `GET /api/m/{id}/p/git/<action>` with their
 parameters in the query; changes `POST /api/m/{id}/p/git/<action>` with a
 JSON body (at most 5 MiB), mutating: refused in read-only mode, audited as
-`git.<action>`. The core forwards to the agent's `plugin` op and passes
+`git.<action>` when it arrives and as `git.<action>.done` when it ended,
+with what it acted on (`repo`, `rev`, `rev2`, `ref`, `onto`, `name`, `to`,
+`at`, `remote`, `branch`, `tag`, `mode`, `op`), the flags `force`,
+`forceWithLease`, `amend` and `all`, the number of paths, `ok` and the
+failure's `code`; never a patch or a message. The core forwards to the agent's `plugin` op and passes
 the answer through.
 
 **Panel** (`GitPanel.tsx`), as VS Code's Source Control view:
@@ -238,6 +261,10 @@ and their folders with the most pressing change inside.
 - git hanging (a hook, a slow remote): killed after its timeout
   (`timeout`); when the browser goes away the core closes the stream and
   the agent kills it.
+- Many runs at once (several pages, a slow remote): beyond 8 a run waits
+  up to 3 s, then fails with `busy` and the panel's next poll tries again.
+- A hook that leaves a program in the background holding git's output:
+  the run ends 2 s after git exited, with git's result.
 - A patch that no longer applies (the file changed after the diff loaded):
   `git_failed` with git's message; the pane reads both sides again.
 - Machine offline: requests fail with `offline`; the panel shows the error
@@ -259,15 +286,22 @@ terminal; what the plugin adds is a way to reach it from the browser:
 - No credential prompts: no terminal, no askpass programs, `GIT_TERMINAL_PROMPT=0`;
   a fetch, pull or push that needs credentials fails (`auth_required`).
 - Every change is a mutating route: refused in read-only mode, audited as
-  `git.<action>`, behind the core's Origin/Host checks; reads change
-  nothing (`GIT_OPTIONAL_LOCKS=0`).
-- Bounded: timeouts with the process group killed, output, files, patches
-  and messages capped.
+  `git.<action>` and `git.<action>.done` (its targets and flags, never its
+  patch or message), behind the core's Origin/Host checks; reads change
+  nothing (`GIT_OPTIONAL_LOCKS=0`) and run no file system monitor, textconv
+  driver or maintenance from the repository's configuration; its clean
+  filters, like a shell prompt's `git status`, still run (also for a
+  read-only viewer).
+- The working tree's files are read inside the repository only: a
+  directory link out of it is not followed, the file is opened without
+  following a link or blocking on a FIFO.
+- Bounded: timeouts with the process group killed, at most 8 runs at once,
+  output, files, patches and messages capped.
 
 ## Testing
 
 - `internal/agent/plugin/git/git_test.go` (HOME in a temporary directory,
-  `GIT_CONFIG_NOSYSTEM=1`, user name and e-mail set in each repository):
+  user name and e-mail set in each repository):
   name and path checks, options refused in every change's arguments, each
   read on a repository with a merge, a rename, a tag, a stash, staged,
   modified, untracked and binary files; a conflict (state, unmerged status,
@@ -277,12 +311,17 @@ terminal; what the plugin adds is a way to reach it from the browser:
   standard input, branches, tags, stashes, cherry-pick, revert, merge,
   reset, rebase); push, fetch and pull with a bare repository; a remote
   that asks for a password (`auth_required`); timeouts and output limits
-  with a fake git; the environment; literal paths; the shared range
-  patches applied with `git apply`.
+  with a fake git, a background child holding git's output (also one in a
+  session of its own), the limit of runs (`busy`); the environment; reads
+  with a file system monitor and a textconv driver configured
+  (`TestReadsRunNoMonitor`); a link to `/` in the working tree
+  (`TestWorktreeBlobLinks`); literal paths; the shared range patches
+  applied with `git apply`.
 - `internal/agent/plugins_git_test.go`: the core's routes are the agent's
   actions, reads as reads.
 - `internal/plugins/git/git_test.go`: routes (reads GET, changes mutating
-  and audited), the read's query; `TestMutatingRoutesAreGuarded`
+  and audited), the read's query, a change's audit record
+  (`TestChangeAudit`); `TestMutatingRoutesAreGuarded`
   (`internal/server`) checks them.
 - `design/testdata/git/range-patches.json`: range patches (additions,
   deletions, parts of changes, ranges over several hunks, unstaging,
