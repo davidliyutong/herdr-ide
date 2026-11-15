@@ -95,7 +95,8 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   VS Code, interface size, the desktop app's zoom, the terminals' font (picked from the monospace
   fonts installed, with a preview), line height, cursor, scrollback, bell,
   color schemes (Dracula, Nord, Solarized, One, Gruvbox, Tomorrow…) with
-  your own colors on top, silent agents, panel position, how each machine
+  your own colors on top, notification sounds, system notifications and
+  the Dock/taskbar badge each on or off, silent agents, panel position, how each machine
   gets VS Code, program windows per machine and every keyboard shortcut,
   in one dialog laid out as VS Code's (the sidebar's gear, `cmd+,` or
   `ctrl+,` in the desktop app; a machine's own settings from its menu) with

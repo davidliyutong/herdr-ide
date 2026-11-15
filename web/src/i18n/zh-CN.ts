@@ -489,8 +489,13 @@ export const zhCN: Messages = {
   'settings.notifications.sound': '提示音',
   'settings.notifications.sound.desc':
     '智能体需要输入时播放一段提示音，完成时播放另一段（其窗格显示在当前聚焦的窗口中时不播放）。打开多个浏览器时，只由最近使用的那个播放。',
+  'settings.notifications.system': '系统通知',
+  'settings.notifications.system.desc': '窗口在后台时，智能体需要输入或已完成会弹出系统通知；点击通知即显示该智能体。浏览器会先请求权限。',
+  'settings.notifications.badge': '图标角标',
+  'settings.notifications.badge.desc':
+    '在应用图标（macOS 的程序坞、Windows 的任务栏、已安装网页应用的图标）和窗口标题上显示等待输入的智能体数量。',
   'settings.notifications.mutedAgents': '静音的智能体',
-  'settings.notifications.mutedAgents.desc': '这些智能体不播放提示音。',
+  'settings.notifications.mutedAgents.desc': '这些智能体不播放提示音；它们的系统通知和图标角标按上面的设置显示。',
   'settings.notifications.mutedAgents.placeholder': '其他智能体',
   'settings.codeServer.install': 'VS Code 如何安装到机器上',
   'settings.codeServer.install.desc':

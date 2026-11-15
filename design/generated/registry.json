@@ -311,8 +311,10 @@
     "settings.layout.panelPosition",
     "settings.layout.panelPosition.bottom",
     "settings.layout.panelPosition.right",
+    "settings.notifications.badge",
     "settings.notifications.mutedAgents",
     "settings.notifications.sound",
+    "settings.notifications.system",
     "settings.section.appearance",
     "settings.section.codeServer",
     "settings.section.colors",
@@ -759,10 +761,12 @@
     "gui.gpu": "vglrun",
     "gui.video": true,
     "layout.panelPosition": "right",
+    "notifications.badge": true,
     "notifications.mutedAgents": [
       "droid"
     ],
     "notifications.sound": true,
+    "notifications.system": true,
     "terminal.bell": "visual",
     "terminal.boldIsBright": false,
     "terminal.colorScheme.dark": "default",

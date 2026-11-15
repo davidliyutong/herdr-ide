@@ -391,8 +391,11 @@ settings per browser; theming terminal applications.
   the bell flashes the pane, beeps or does nothing.
 - Panel position (`right` or `bottom`) changes the grid: below the panes the
   panel spans the workspace column and is resized by its top edge.
-- `notifications.sound` and `notifications.mutedAgents` decide which
-  agents' changes play a sound ([07](07-agent-native-workflow.md));
+- `notifications.sound`, `notifications.system` and `notifications.badge`
+  turn the sounds, the system's notifications and the count of blocked
+  agents on the app's icon and in the title on or off, each on its own;
+  `notifications.mutedAgents` lists the agents that play no sound
+  ([07](07-agent-native-workflow.md));
   `terminal.mathHover` turns the formula preview on or off
   ([19](19-formulas-in-panes.md)).
 

@@ -499,8 +499,15 @@ export const en = {
   'settings.notifications.sound': 'Notification sounds',
   'settings.notifications.sound.desc':
     'A chime when an agent needs input, another when it finishes (not while its pane is on screen in a focused window). With several browsers open, the one used most recently plays it.',
+  'settings.notifications.system': 'System notifications',
+  'settings.notifications.system.desc':
+    'A notification of the system when an agent needs input or finishes while this window is in the background; clicking it shows the agent. The browser asks for permission first.',
+  'settings.notifications.badge': 'Badge count',
+  'settings.notifications.badge.desc':
+    'The number of agents waiting for input on the app’s icon (the Dock on macOS, the taskbar on Windows, an installed web app’s icon) and in the window title.',
   'settings.notifications.mutedAgents': 'Silent agents',
-  'settings.notifications.mutedAgents.desc': 'Agents that never play a notification sound.',
+  'settings.notifications.mutedAgents.desc':
+    'Agents that never play a notification sound. Their system notifications and the badge count follow the settings above.',
   'settings.notifications.mutedAgents.placeholder': 'Another agent',
   'settings.codeServer.install': 'How VS Code gets onto the machine',
   'settings.codeServer.install.desc':

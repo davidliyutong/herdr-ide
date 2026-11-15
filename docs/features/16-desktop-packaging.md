@@ -323,7 +323,9 @@ system's rules run in the tests on any of them:
 **Notifications and the badge.** The page's notifications are the web
 Notification API, granted by the shell's permission policy, and its count
 of blocked agents is the Badging API (`navigator.setAppBadge`,
-[07](07-agent-native-workflow.md)). Electron shows the count as the Dock
+[07](07-agent-native-workflow.md)); the settings **System notifications**
+and **Badge count** turn each off, and the page then shows none and clears
+the badge. Electron shows the count as the Dock
 icon's badge on macOS, as an overlay on the taskbar button on Windows, and
 on Linux through the Unity launcher API (D-Bus `LauncherEntry`), which
 docks that implement it show for the desktop entry `<slug>.desktop`.

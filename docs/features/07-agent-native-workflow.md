@@ -39,13 +39,17 @@ automatically, scheduling agents.
   idle ([22](22-terminal-protocol.md)). Opening an agent from the inbox or a
   notification focuses its terminal.
 - **Notifications** (`web/src/notify.ts`): a status change to `blocked` or
-  `done` raises a desktop notification, one per terminal, when the page is
-  hidden or not focused and the browser allows notifications (a toast when
-  visible for `blocked`); clicking it focuses the agent. The title and the
-  app badge (the Badging API, `navigator.setAppBadge`) count blocked
-  agents: an installed PWA's icon, and in the desktop app the Dock icon on
-  macOS, an overlay on the taskbar button on Windows, and the launcher icon
-  on Linux in docks that implement the Unity launcher API. The desktop app
+  `done` raises a notification of the system, one per terminal, when the
+  page is hidden or not focused, the setting **System notifications**
+  (`notifications.system`) is on and the browser allows notifications,
+  which the page asks for on its first click while the setting is on (a
+  toast when visible for `blocked`, whatever the setting); clicking it
+  focuses the agent. With **Badge count** (`notifications.badge`) on, the
+  title and the app badge (the Badging API, `navigator.setAppBadge`) count
+  blocked agents; turned off, both are cleared at once. The badge is an
+  installed PWA's icon, and in the desktop app the Dock icon on macOS, an
+  overlay on the taskbar button on Windows, and the launcher icon on Linux
+  in docks that implement the Unity launcher API. The desktop app
   grants the page notifications; Windows shows those of the installed app
   (its Start menu shortcut carries the app's id), and Linux needs a
   notification daemon ([16](16-desktop-packaging.md)).
@@ -58,8 +62,11 @@ automatically, scheduling agents.
   (`notifications.mutedAgents`, a list: every agent the terminals
   recognize as a checkbox, others added by name) lists agents (matched by
   the detected agent's name or display name) that never sound and starts
-  with `droid`.
-  Both are settings of the core ([13](13-settings-and-appearance.md)).
+  with `droid`; their notifications and their count on the badge follow
+  the two settings above, as the dialog says.
+  The three switches are separate, each on by default (sounds,
+  notifications and the badge, as before they could be turned off), and
+  all four are settings of the core ([13](13-settings-and-appearance.md)).
 - **One browser sounds**: each page tells the core when it is used
   (`active` on the WebSocket: on connect with the time since its last input,
   then on pointer, key or focus events at most every 2 s; durations, so
@@ -113,7 +120,10 @@ agent messages and the seen marking by focus ([25](25-agent-detection.md)).
 `sidebarMachines.test.ts` the inbox and the workspaces' dots,
 `workspaceDock.test.ts` where *Send to Agent* goes, and
 `web/src/__tests__/sound.test.ts` which sound a status change plays
-(suppression, muted agents, the chosen browser);
+(suppression, muted agents, the chosen browser), `notify.test.ts` the
+three switches (a notification only while its setting is on, the
+permission asked for only then, the badge and title count cleared when the
+badge is turned off);
 `TestSoundClientMostRecentlyActive` (`internal/server`) the choice of the
 browser. An agent's
 working, blocked and done states in the sidebar, a tab,

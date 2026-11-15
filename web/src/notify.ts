@@ -1,4 +1,7 @@
-// Agent attention: desktop notifications, sounds, title and app badge.
+// Agent attention: sounds, the system's notifications, and the count of
+// blocked agents on the app's icon (the Badging API) and in the title; each
+// has its setting (notifications.sound, .system, .badge). The silent agents
+// play no sound; their notifications and count follow the other settings.
 
 import type { AgentStatusEvent } from './lib/machine';
 import { useTerms } from './state/terms';
@@ -7,16 +10,28 @@ import { useStore } from './state/store';
 import { actions } from './actions';
 import { t } from './i18n';
 import { APP_NAME } from './brand';
-import { getPrefs } from './prefs';
+import { getPrefs, usePrefs } from './prefs';
 import { terminalOnScreen } from './seen';
 import { mutedAgents, playSound, soundFor } from './sound';
 
 let asked = false;
 
+/** Asks for the permission to show notifications, once, when they are on
+ * (called from the page's first click: browsers ask only after one). */
 export function requestNotifyPermission() {
-  if (asked || typeof Notification === 'undefined' || Notification.permission !== 'default') return;
+  if (asked || !getPrefs().notifySystem || typeof Notification === 'undefined' || Notification.permission !== 'default') return;
   asked = true;
   Notification.requestPermission().catch(() => {});
+}
+
+/** Whether a status change shows a notification of the system: blocked or
+ * done, while the page is in the background, with the setting on and the
+ * browser's permission. */
+export function showsNotification(
+  ev: Pick<AgentStatusEvent, 'agent_status'>,
+  c: { enabled: boolean; granted: boolean; visible: boolean },
+): boolean {
+  return c.enabled && c.granted && !c.visible && (ev.agent_status === 'blocked' || ev.agent_status === 'done');
 }
 
 /** sound: the core chose this page to play sounds (see soundClient). */
@@ -36,7 +51,8 @@ export function notifyAgent(m: string, ev: AgentStatusEvent, sound: boolean) {
     focused: visible,
   });
   if (kind) playSound(kind);
-  if (!visible && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+  const granted = typeof Notification !== 'undefined' && Notification.permission === 'granted';
+  if (showsNotification(ev, { enabled: prefs.notifySystem, granted, visible })) {
     const n = new Notification(title, { body: `${label}${ev.title ? ' · ' + ev.title : ''}`, tag: `${m}|${ev.terminal}` });
     n.onclick = () => {
       window.focus();
@@ -48,13 +64,31 @@ export function notifyAgent(m: string, ev: AgentStatusEvent, sound: boolean) {
   }
 }
 
+/** The count shown on the app's icon and in the title: the blocked agents,
+ * none when the setting is off. */
+export function badgeCount(blocked: number, enabled: boolean): number {
+  return enabled ? blocked : 0;
+}
+
+type BadgeNavigator = Navigator & { setAppBadge?(n: number): Promise<void>; clearAppBadge?(): Promise<void> };
+
+let shown = -1;
+
 export function updateBadge() {
   const s = useStore.getState();
   let blocked = 0;
   const tm = useTerms.getState().machines;
   for (const id of s.order) for (const r of Object.values(tm[id]?.terminals ?? {})) if (agentStatus(r) === 'blocked') blocked++;
-  document.title = blocked ? `(${blocked}) ${APP_NAME}` : APP_NAME;
-  const nav = navigator as Navigator & { setAppBadge?(n: number): Promise<void>; clearAppBadge?(): Promise<void> };
-  if (blocked) nav.setAppBadge?.(blocked).catch(() => {});
+  const n = badgeCount(blocked, getPrefs().notifyBadge);
+  document.title = n ? `(${n}) ${APP_NAME}` : APP_NAME;
+  if (n === shown) return;
+  shown = n;
+  const nav = navigator as BadgeNavigator;
+  if (n) nav.setAppBadge?.(n).catch(() => {});
   else nav.clearAppBadge?.().catch(() => {});
 }
+
+// Turning the badge off clears it at once, turning it on shows the count.
+usePrefs.subscribe((st, prev) => {
+  if (st.prefs.notifyBadge !== prev.prefs.notifyBadge) updateBadge();
+});

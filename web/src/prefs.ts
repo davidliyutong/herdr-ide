@@ -38,6 +38,8 @@ export const prefKeys = {
   programClipboard: 'terminal.programClipboard',
   mathHover: 'terminal.mathHover',
   notifySound: 'notifications.sound',
+  notifySystem: 'notifications.system',
+  notifyBadge: 'notifications.badge',
   notifySoundMuted: 'notifications.mutedAgents',
 } as const;
 
@@ -62,6 +64,8 @@ export interface Prefs {
   programClipboard: 'auto' | 'ask' | 'off';
   mathHover: boolean;
   notifySound: boolean;
+  notifySystem: boolean;
+  notifyBadge: boolean;
   notifySoundMuted: string[];
   colors: { dark: TermColors; light: TermColors };
 }

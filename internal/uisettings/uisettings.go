@@ -109,10 +109,13 @@ func defs() []settings.Def {
 		{Key: SchemePrefix + "light", Type: settings.TypeEnum, Default: "default", Enum: Schemes, Section: "colors", Order: 20},
 		{Key: "terminal.boldIsBright", Type: settings.TypeBool, Default: false, Section: "colors", Order: 30},
 
-		// Notifications: on by default, with droid silent.
+		// Notifications: sounds, the system's notifications and the badge,
+		// each on by default, with droid silent (sounds only).
 		{Key: "notifications.sound", Type: settings.TypeBool, Default: true, Section: "notifications", Order: 10},
+		{Key: "notifications.system", Type: settings.TypeBool, Default: true, Section: "notifications", Order: 20},
+		{Key: "notifications.badge", Type: settings.TypeBool, Default: true, Section: "notifications", Order: 30},
 		{Key: MutedAgents, Type: settings.TypeList, Item: settings.TypeString, Options: Agents, Default: []string{"droid"},
-			Section: "notifications", Order: 20},
+			Section: "notifications", Order: 40},
 	}
 	// The colors of each theme that replace its scheme's, defaulting to the
 	// design tokens (the default scheme).

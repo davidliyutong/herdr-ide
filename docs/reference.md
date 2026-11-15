@@ -128,6 +128,8 @@ in the UI; a setting with a scope can have its own value per machine, under
 | `terminal.colors.light.selection` | color `#rrggbb` | `"#b6d4fe"` | – | – |
 | `terminal.colors.light.palette` | 16 colors | 16 colors of `design/tokens.json` | – | – |
 | `notifications.sound` | `true`, `false` | `true` | – | – |
+| `notifications.system` | `true`, `false` | `true` | – | – |
+| `notifications.badge` | `true`, `false` | `true` | – | – |
 | `notifications.mutedAgents` | list of strings | `["droid"]` | – | – |
 | `codeServer.install` | `push`, `download`, `existing` | `"push"` | `--code-server-install` | per machine |
 | `codeServer.path` | string | `""` | `--code-server-path` | per machine |
