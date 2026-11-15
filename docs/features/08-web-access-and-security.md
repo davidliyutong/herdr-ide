@@ -46,6 +46,11 @@ core on `127.0.0.1:7781`, [16](16-desktop-packaging.md)).
    windows; retrying machines over `/ws` is refused too (`denied.retry`).
    Viewing and downloading files and cancelling one's own download stay
    allowed, and so does stopping code-server, which only releases it.
+   `TestMutatingRoutesAreGuarded` walks the server's route table
+   (`Server.routes`) and requires every route that can change something to
+   refuse another site's Origin and to answer `403` in read-only mode, the
+   stop of code-server excepted, so a route added without `writable`
+   fails.
 5. **Terminal protocol allowlist** (`termReadMethods`, `termWriteMethods`
    in `internal/server/term.go`): clients reach the terminal core's
    methods about terminals and documents only, never `machine.*`,
@@ -53,7 +58,9 @@ core on `127.0.0.1:7781`, [16](16-desktop-packaging.md)).
    refused calls are audited (`denied.term`); attaching is a message of its
    own ([22](22-terminal-protocol.md)).
 6. **CSP** on the UI (`script-src 'self' 'wasm-unsafe-eval'` for the
-   terminal emulator's WebAssembly, `frame-ancestors 'self'`, …).
+   terminal emulator's WebAssembly, `frame-ancestors 'self'`, …), on every
+   page the core serves, the app shell served for the UI's own routes
+   included; an `/api/…` path no route takes is 404, not the shell.
 7. **Audit log** (`--audit-log`): JSON lines for connections (`ws.*`,
    `term.*`), mutating calls (settings, keybindings, machines, terminal
    cores, terminals run and ended), uploads and downloads, VS Code and
@@ -89,9 +96,11 @@ reaches only sockets there ([02](02-multi-machine-transport.md)).
 
 - `internal/server/server_test.go`: Host/Origin guard (`TestGuard`), proxy
   secret: local, remote, wrong secret, same-host proxy
-  (`TestProxySecret`), CSP and headers (`TestCSPOnAppShell`), read-only
-  refusals (`TestReadOnlyRefusesWrites`, `TestReadOnlyRetryKeepsTheSession`),
-  refused port proxy paths (`TestCodeServerPortProxyRefused`).
+  (`TestProxySecret`), CSP and headers on the shell, a client-side route
+  and an unknown API path (`TestCSPOnAppShell`), every mutating route
+  refusing other origins and read-only mode (`TestMutatingRoutesAreGuarded`,
+  `TestReadOnlyRetryKeepsTheSession`), refused port proxy paths
+  (`TestCodeServerPortProxyRefused`).
 - `internal/server/term_test.go`: the terminal protocol's allowlist and its
   audit (`TestTermProtocol`), read-only terminals (`TestTermReadOnly`,
   `TestTermWithoutCore`).

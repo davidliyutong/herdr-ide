@@ -58,11 +58,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
-        // A core that already runs (development), else the bundled one.
+        // A core that already runs on this Mac's loopback (development),
+        // else the bundled one.
         let env = ProcessInfo.processInfo.environment
-        if let text = env[Brand.envPrefix + "CORE"], let url = URL(string: text) {
-            connect(url)
-            return
+        if let text = env[Brand.envPrefix + "CORE"] {
+            if let url = CoreProcess.loopbackURL(text) {
+                connect(url)
+                return
+            }
+            NSLog("%@", "\(Brand.envPrefix)CORE is not a core on loopback (http://127.0.0.1:PORT or http://localhost:PORT); starting the bundled core")
         }
         let dev = env[Brand.envPrefix + "DEV"] == "1"
         let binary = (Bundle.main.resourceURL ?? Bundle.main.bundleURL).appendingPathComponent("bin/" + Brand.appSlug)

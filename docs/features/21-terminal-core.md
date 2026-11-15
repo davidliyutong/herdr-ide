@@ -112,8 +112,12 @@ directory, short enough for the holders' sockets beside it. Op `hc`:
   nothing.
 - `start` runs `herdr-core server start`, which returns at once when the
   core runs, and makes the socket 0600. `restart` runs `server restart`:
-  the core's successor adopts the programs. `stop` runs `server stop`,
-  which ends the session's programs.
+  the core's successor adopts the programs, and makes the socket 0600 too.
+  The core sends both with the digest of the executable this build
+  carries; the agent hashes `hc/herdr-core` again (not from its cache)
+  and answers `bad_digest` without running it when it differs. A build
+  without an executable sends none, and the installed one runs. `stop`
+  runs `server stop`, which ends the session's programs.
 - `status`, and the reply of every action, report the installed digest and
   whether a core answers on the socket, with its version.
 
@@ -146,6 +150,10 @@ machine's menu ([02](02-multi-machine-transport.md)).
 - **No executable installed** → `start` and `stop` answer `not_installed`.
 - **Upload damaged or cut off** → `bad_digest`; the temporary file is
   removed and the installed executable stays.
+- **Executable changed after its install** → `start` and `restart` answer
+  `bad_digest` (the terminal backend reports `start_failed`); its next
+  attempt finds the new digest in `status` and installs this build's
+  executable again.
 - **Core does not start** (unsupported system, socket path too long) →
   `start_failed` with herdr-core's output.
 - **Nothing listens** → `hc-api` fails; `status` reports `running: false`.
@@ -181,10 +189,13 @@ before its reply, a core ignoring credit, events split across frames with
 their credit, a cancelled dial. `internal/agent/hc_test.go` with a script as
 the executable: digest checks, replacement, the session and socket of
 default and named instances, the environment of commands, failure codes,
-the status of a core on the socket and the API pipe.
+the status of a core on the socket and the API pipe;
+`TestHCVerifiedBeforeStartAndSocketPrivate` an executable of another
+digest or changed in place (same size and time) refused by `start` and
+`restart`, and the socket made 0600 after both.
 `internal/agent/procutil_test.go` (`TestCleanEnv`): the variables of
-terminals and multiplexers removed, `TMUX_TMPDIR`, `TERM_PROGRAM` and the
-product's own kept. `TestIntegrationTerminal` (`internal/hc`) and `TestIntegrationHC`
+terminals and multiplexers removed (every `HC_*`), `TMUX_TMPDIR`,
+`TERM_PROGRAM` and the product's own kept. `TestIntegrationTerminal` (`internal/hc`) and `TestIntegrationHC`
 (`internal/agent`) run with `make it` against a real herdr-core
 (`HC_TEST_BIN`, else `hc` on `PATH`) in the sessions `herdr-ide-it` with
 temporary state: first paint, input and output, sizes of two viewers,

@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -194,17 +195,76 @@ func TestProxySecret(t *testing.T) {
 	}
 }
 
-func TestReadOnlyRefusesWrites(t *testing.T) {
-	s := newTestServer()
-	s.opts.ReadOnly = true
+// Every route that changes something, taken from the server's own route
+// table: a request from another site is refused, and so is the request in
+// read-only mode. A route added without writable fails here unless it is
+// one of the listed exceptions.
+func TestMutatingRoutesAreGuarded(t *testing.T) {
+	// Routes that change nothing although their method could, and GETs that
+	// do change something.
+	readOnlyAllowed := map[string]string{
+		"POST /api/m/{id}/code/stop": "only frees the machine's resources",
+		"/m/{id}/code":               "only redirects to /m/{id}/code/",
+	}
+	mutatingGET := map[string]bool{
+		"GET /api/m/{id}/auth": true, // starts an interactive ssh login
+	}
+	s := newTestServer("https://ide.example.com")
+	s.opts.Static = fstest.MapFS{"index.html": {Data: []byte("<html></html>")}}
 	h := s.Handler()
-	for _, path := range []string{"/api/m/x/upload", "/api/m/x/bridge", "/api/m/x/code/start", "/api/m/x/gui/enable", "/m/x/gui/1/close"} {
-		r := httptest.NewRequest("POST", path, nil)
-		r.Host = "127.0.0.1:7780"
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, r)
-		if w.Code != http.StatusForbidden {
-			t.Errorf("%s = %d", path, w.Code)
+	ro := newTestServer("https://ide.example.com")
+	ro.opts.ReadOnly = true
+	hro := ro.Handler()
+	wild := strings.NewReplacer("{id}", "x", "{action}", "start", "{win}", "1")
+	checked := 0
+	for _, rt := range s.routes() {
+		method, path, found := strings.Cut(rt.pattern, " ")
+		if !found {
+			method, path = "", rt.pattern
+		}
+		mutating := method == "" || (method != "GET" && method != "HEAD") || mutatingGET[rt.pattern]
+		if !mutating || path == "/" {
+			continue
+		}
+		if method == "" {
+			method = "POST"
+		}
+		path = wild.Replace(path)
+		do := func(h http.Handler, origin string) *httptest.ResponseRecorder {
+			r := httptest.NewRequest(method, path, strings.NewReader("{}"))
+			r.Host = "127.0.0.1:7780"
+			if origin != "" {
+				r.Header.Set("Origin", origin)
+			}
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			return w
+		}
+		checked++
+		for _, origin := range []string{"https://evil.example", "null", "http://ide.example.com"} {
+			if w := do(h, origin); w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "origin not allowed") {
+				t.Errorf("%s from %s: %d %q", rt.pattern, origin, w.Code, w.Body.String())
+			}
+		}
+		if why, ok := readOnlyAllowed[rt.pattern]; ok {
+			t.Logf("%s: allowed in read-only mode (%s)", rt.pattern, why)
+			continue
+		}
+		if w := do(hro, "http://127.0.0.1:7780"); w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "read-only") {
+			t.Errorf("%s in read-only mode: %d %q", rt.pattern, w.Code, w.Body.String())
+		}
+	}
+	if checked < 15 {
+		t.Fatalf("only %d mutating routes found", checked)
+	}
+	for p := range mutatingGET {
+		if !slices.ContainsFunc(s.routes(), func(r route) bool { return r.pattern == p }) {
+			t.Errorf("no route %s", p)
+		}
+	}
+	for p := range readOnlyAllowed {
+		if !slices.ContainsFunc(s.routes(), func(r route) bool { return r.pattern == p }) {
+			t.Errorf("no route %s", p)
 		}
 	}
 }
@@ -214,15 +274,33 @@ func TestCSPOnAppShell(t *testing.T) {
 		Logger: log.New(os.Stderr, "", 0),
 		Static: fstest.MapFS{"index.html": {Data: []byte("<html></html>")}},
 	})
-	r := httptest.NewRequest("GET", "/", nil)
-	r.Host = "localhost:7780"
-	w := httptest.NewRecorder()
-	s.Handler().ServeHTTP(w, r)
-	if csp := w.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "frame-ancestors 'self'") || !strings.Contains(csp, "script-src 'self' 'wasm-unsafe-eval';") || strings.Contains(csp, "'unsafe-eval'") || strings.Contains(csp, "script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline'") {
-		t.Fatalf("csp = %q", csp)
-	}
-	if w.Header().Get("X-Content-Type-Options") != "nosniff" {
-		t.Fatal("nosniff missing")
+	h := s.Handler()
+	// The shell itself, the shell served for a client-side route, and an
+	// API path no route takes, which is not the shell.
+	for _, c := range []struct {
+		path  string
+		code  int
+		shell bool
+	}{
+		{"/", 200, true},
+		{"/some/route", 200, true},
+		{"/m/x/gui/1", 200, true},
+		{"/api/unknown", 404, false},
+		{"/api", 404, false},
+	} {
+		r := httptest.NewRequest("GET", c.path, nil)
+		r.Host = "localhost:7780"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != c.code || strings.Contains(w.Body.String(), "<html>") != c.shell {
+			t.Errorf("%s: %d %q", c.path, w.Code, w.Body.String())
+		}
+		if csp := w.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "frame-ancestors 'self'") || !strings.Contains(csp, "script-src 'self' 'wasm-unsafe-eval';") || strings.Contains(csp, "'unsafe-eval'") || strings.Contains(csp, "script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline'") {
+			t.Errorf("%s: csp = %q", c.path, csp)
+		}
+		if w.Header().Get("X-Content-Type-Options") != "nosniff" {
+			t.Errorf("%s: nosniff missing", c.path)
+		}
 	}
 }
 

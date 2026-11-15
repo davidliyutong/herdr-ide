@@ -76,7 +76,7 @@ func TestStopMasterArgs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "-o\nControlPath=/tmp/ctl/%C\n-O\nstop\nuser@gpu\n"; string(got) != want {
+	if want := "-o\nControlPath=/tmp/ctl/%C\n-O\nstop\n--\nuser@gpu\n"; string(got) != want {
 		t.Fatalf("ssh args %q, want %q", got, want)
 	}
 }

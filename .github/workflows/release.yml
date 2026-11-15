@@ -18,16 +18,16 @@ jobs:
     runs-on: ubuntu-24.04
     needs: encoder
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           package_json_file: web/package.json
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
@@ -38,7 +38,7 @@ jobs:
       - run: make deps
       - run: make check
       - run: go test ./...
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: encoder-*
           path: dist/ffmpeg
@@ -50,7 +50,7 @@ jobs:
           VERSION: ${{ github.ref_name }}
           TARGETS: linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
           REQUIRE_ENCODER: 1
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: archives
           path: dist/release/*.tar.gz
@@ -65,14 +65,14 @@ jobs:
       matrix:
         arch: [arm64, x64]
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           package_json_file: desktop/package.json
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
@@ -80,7 +80,7 @@ jobs:
             web/pnpm-lock.yaml
             desktop/pnpm-lock.yaml
             extensions/*/pnpm-lock.yaml
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: encoder-*
           path: dist/ffmpeg
@@ -91,35 +91,29 @@ jobs:
           ARCH: ${{ matrix.arch }}
           VERSION: ${{ github.ref_name }}
           REQUIRE_ENCODER: 1
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: desktop-${{ matrix.arch }}
           path: dist/desktop/*.dmg
           if-no-files-found: error
 
-  # The macOS application (arm64, the runner's architecture), zipped. With
-  # the optional MACOS_* secrets it is signed with a Developer ID
-  # certificate and notarized; without them it is signed ad hoc, like the
-  # Electron app.
+  # The macOS application (arm64, the runner's architecture), zipped. It is
+  # built and tested without any secret and signed ad hoc; with the
+  # optional MACOS_* secrets the step "Sign and notarize", the only one that
+  # sees them, signs it again with a Developer ID certificate and notarizes
+  # it.
   macos-app:
     runs-on: macos-26
     needs: encoder
-    env:
-      SIGN_CERTIFICATE: ${{ secrets.MACOS_SIGN_CERTIFICATE }}
-      SIGN_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_SIGN_CERTIFICATE_PASSWORD }}
-      SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
-      NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
-      NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
-      NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           package_json_file: web/package.json
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
@@ -127,44 +121,57 @@ jobs:
             web/pnpm-lock.yaml
             desktop/pnpm-lock.yaml
             extensions/*/pnpm-lock.yaml
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: encoder-*
           path: dist/ffmpeg
       - name: Place the video encoders
         run: for d in dist/ffmpeg/encoder-*; do mv "$d" "dist/ffmpeg/${d#dist/ffmpeg/encoder-}"; done
-      # A keychain of this job with the certificate (base64 .p12) and, when
-      # given, notarytool's credentials as the profile scripts/macos-app.sh
-      # uses.
-      - name: Signing keychain
-        if: env.SIGN_CERTIFICATE != '' && env.SIGN_IDENTITY != ''
-        run: |
-          kc="$RUNNER_TEMP/sign.keychain-db"
-          pw=$(uuidgen)
-          security create-keychain -p "$pw" "$kc"
-          security set-keychain-settings -lut 21600 "$kc"
-          security unlock-keychain -p "$pw" "$kc"
-          security default-keychain -s "$kc"
-          security list-keychains -d user -s "$kc"
-          printf '%s' "$SIGN_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/sign.p12"
-          security import "$RUNNER_TEMP/sign.p12" -k "$kc" -P "$SIGN_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-          rm -f "$RUNNER_TEMP/sign.p12"
-          security set-key-partition-list -S apple-tool:,apple: -s -k "$pw" "$kc"
-          if [[ -n "$NOTARY_APPLE_ID" ]]; then
-            xcrun notarytool store-credentials release --apple-id "$NOTARY_APPLE_ID" --team-id "$NOTARY_TEAM_ID" --password "$NOTARY_PASSWORD"
-            echo "NOTARY_PROFILE=release" >> "$GITHUB_ENV"
-          fi
       - run: brew install xcodegen
       - run: make macos-test
       - run: make macos-app
         env:
           VERSION: ${{ github.ref_name }}
           REQUIRE_ENCODER: 1
+      # A keychain of this step with the certificate (base64 .p12) and, when
+      # given, notarytool's credentials as the profile scripts/macos-app.sh
+      # uses; it is deleted when the step ends.
+      - name: Sign and notarize
+        env:
+          SIGN_CERTIFICATE: ${{ secrets.MACOS_SIGN_CERTIFICATE }}
+          SIGN_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_SIGN_CERTIFICATE_PASSWORD }}
+          SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+        run: |
+          if [[ -z "$SIGN_CERTIFICATE" || -z "$SIGN_IDENTITY" ]]; then
+            echo "No signing certificate: the application stays signed ad hoc."
+            exit 0
+          fi
+          kc="$RUNNER_TEMP/sign.keychain-db"
+          p12="$RUNNER_TEMP/sign.p12"
+          trap 'rm -f "$p12"; security delete-keychain "$kc" || true' EXIT
+          pw=$(uuidgen)
+          security create-keychain -p "$pw" "$kc"
+          security set-keychain-settings -lut 21600 "$kc"
+          security unlock-keychain -p "$pw" "$kc"
+          security default-keychain -s "$kc"
+          security list-keychains -d user -s "$kc"
+          printf '%s' "$SIGN_CERTIFICATE" | base64 --decode > "$p12"
+          security import "$p12" -k "$kc" -P "$SIGN_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          rm -f "$p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$pw" "$kc"
+          if [[ -n "$NOTARY_APPLE_ID" ]]; then
+            xcrun notarytool store-credentials release --apple-id "$NOTARY_APPLE_ID" --team-id "$NOTARY_TEAM_ID" --password "$NOTARY_PASSWORD"
+            export NOTARY_PROFILE=release
+          fi
+          scripts/macos-app.sh sign
       - name: Archive
         run: |
           name=$(sed -n 's/^[[:space:]]*Name = "\(.*\)"$/\1/p' internal/brand/brand.go)
           ditto -c -k --keepParent "dist/macos/$name.app" "dist/macos/$name-${GITHUB_REF_NAME#v}-mac-native-arm64.zip"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: macos-app
           path: dist/macos/*.zip
@@ -178,8 +185,8 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: dist/release
           merge-multiple: true
@@ -188,7 +195,7 @@ jobs:
       # GitHub stores attestations for public repositories (private ones need
       # GitHub Enterprise Cloud); a private repository releases without
       # provenance.
-      - uses: actions/attest-build-provenance@v4
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         if: ${{ !github.event.repository.private }}
         with:
           subject-checksums: dist/release/SHA256SUMS

@@ -323,7 +323,7 @@
 "addMachine.label" = "名称";
 "addMachine.labelPlaceholder" = "可选，默认为主机名";
 "addMachine.add" = "添加";
-"addMachine.badTarget" = "请输入不含空格、且不以“-”开头的 ssh 目标。";
+"addMachine.badTarget" = "请输入只含字母、数字和 . _ - @ : / [ ] %、且不以“-”开头的 ssh 目标。";
 "machine.addFailed" = "未能添加 %@";
 "machine.added" = "已添加 %@。";
 "machine.enableFailed" = "未能修改这台机器";

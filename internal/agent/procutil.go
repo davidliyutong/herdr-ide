@@ -34,19 +34,20 @@ func cleanEnv() []string {
 }
 
 // inheritedVar says whether a variable of the agent's environment is
-// passed on (cleanEnv): not the terminal core's (HC_SESSION, HC_SOCKET,
-// HC_TERMINAL_ID, HC_TERMINAL_SOCKET), herdr's (HERDR_*; the product's own
-// variables, brand.EnvPrefix, are kept), tmux's (TMUX, TMUX_PANE), GNU
-// screen's (STY) or zellij's (ZELLIJ, ZELLIJ_*).
+// passed on (cleanEnv): not the terminal core's (HC_*, among them
+// HC_SESSION, HC_SOCKET, HC_TERMINAL_ID and HC_TERMINAL_SOCKET), herdr's
+// (HERDR_*; the product's own variables, brand.EnvPrefix, are kept),
+// tmux's (TMUX, TMUX_PANE), GNU screen's (STY) or zellij's (ZELLIJ,
+// ZELLIJ_*).
 func inheritedVar(k string) bool {
 	switch k {
-	case "HC_SESSION", "HC_SOCKET", "HC_TERMINAL_ID", "HC_TERMINAL_SOCKET", "TMUX", "TMUX_PANE", "STY", "ZELLIJ":
+	case "TMUX", "TMUX_PANE", "STY", "ZELLIJ":
 		return false
 	}
-	if strings.HasPrefix(k, "HERDR_") && !strings.HasPrefix(k, brand.EnvPrefix) {
+	if strings.HasPrefix(k, "HC_") || strings.HasPrefix(k, "ZELLIJ_") {
 		return false
 	}
-	return !strings.HasPrefix(k, "ZELLIJ_")
+	return !strings.HasPrefix(k, "HERDR_") || strings.HasPrefix(k, brand.EnvPrefix)
 }
 
 func isExecutable(p string) bool {

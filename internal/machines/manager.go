@@ -187,9 +187,13 @@ func (mg *Manager) start(m *Machine) {
 }
 
 // Add adds an SSH machine, stores it and connects it unless it is
-// disabled. A machine with its id or its target exists already.
+// disabled. A machine with its id or its target exists already; a target
+// ValidTarget refuses is ErrInvalidTarget.
 func (mg *Manager) Add(s Spec) error {
 	s.Kind = KindSSH
+	if !ValidTarget(s.Target) {
+		return ErrInvalidTarget
+	}
 	if s.ID == "" || mg.taken("", func(o Spec) bool { return o.ID == s.ID || (o.Kind == KindSSH && o.Target == s.Target) }) {
 		return ErrMachineExists
 	}

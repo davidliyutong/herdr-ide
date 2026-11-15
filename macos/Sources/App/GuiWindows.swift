@@ -57,8 +57,7 @@ final class ProgramWindows: NSObject, NSWindowDelegate, WKNavigationDelegate {
     }
 
     func webView(_: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        let url = action.request.url
-        let ours = url?.scheme == core.scheme && url?.host == core.host && url?.port == core.port
-        decisionHandler(ours || url?.scheme == "about" || url?.scheme == "blob" ? .allow : .cancel)
+        let mainFrame = action.targetFrame?.isMainFrame ?? true
+        decisionHandler(WebNavigation.allows(action.request.url, core: core, mainFrame: mainFrame) ? .allow : .cancel)
     }
 }

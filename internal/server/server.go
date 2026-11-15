@@ -127,46 +127,64 @@ func New(mg *machines.Manager, opts Options) *Server {
 	return s
 }
 
+// route is a pattern of the server's mux and its handler.
+type route struct {
+	pattern string
+	handler http.HandlerFunc
+}
+
+// routes are every pattern the server answers (Handler registers exactly
+// these; the tests walk them to check the guards of each).
+func (s *Server) routes() []route {
+	rs := []route{
+		{"GET /ws", s.handleWS},
+		{"GET /api/v1/term", s.handleTermWS},
+		{"GET /api/config", s.handleConfig},
+		{"GET /api/settings", s.handleSettings},
+		{"PUT /api/settings", s.writable(s.handleSetSetting)},
+		{"DELETE /api/settings", s.writable(s.handleResetSetting)},
+		{"GET /api/keybindings", s.handleKeybindings},
+		{"PUT /api/keybindings", s.writable(s.handleSetKeybindings)},
+		{"GET /api/machines", s.handleMachines},
+		{"POST /api/machines", s.writable(s.handleMachineAdd)},
+		{"DELETE /api/m/{id}", s.writable(s.handleMachineRemove)},
+		{"PUT /api/m/{id}/label", s.writable(s.handleMachineRename)},
+		{"PUT /api/m/{id}/enabled", s.writable(s.handleMachineEnabled)},
+		{"GET /api/m/{id}/hc", s.handleHCStatus},
+		{"POST /api/m/{id}/hc/{action}", s.writable(s.handleHCAction)},
+		{"GET /api/m/{id}/auth", s.writable(s.handleAuth)},
+		{"POST /api/m/{id}/bridge", s.writable(s.handleBridge)},
+		{"GET /api/m/{id}/file", s.handleFile},
+		{"GET /api/m/{id}/download", s.handleDownload},
+		{"POST /api/m/{id}/upload", s.writable(s.handleUpload)},
+		{"GET /api/m/{id}/list", s.handleList},
+		{"GET /api/m/{id}/code/status", s.handleCodeStatus},
+		{"POST /api/m/{id}/code/start", s.writable(s.handleCodeStart)},
+		{"POST /api/m/{id}/code/stop", s.handleCodeStop},
+		{"/m/{id}/code", func(w http.ResponseWriter, r *http.Request) {
+			u := *r.URL
+			u.Path += "/"
+			http.Redirect(w, r, u.String(), http.StatusFound)
+		}},
+		{"/m/{id}/code/", s.writable(s.csProxy.ServeHTTP)},
+		{"GET /m/{id}/gui/{win}", s.handleGUIPage},
+		{"GET /m/{id}/gui/{win}/ws", s.handleGUIWS},
+		{"POST /m/{id}/gui/{win}/close", s.writable(s.handleGUIClose)},
+		{"POST /api/m/{id}/gui/enable", s.writable(s.handleGUIEnable)},
+		{"GET /api/gui", s.handleGUIStates},
+	}
+	if s.opts.Static != nil {
+		rs = append(rs,
+			route{"/", spaHandler(s.opts.Static).ServeHTTP})
+	}
+	return rs
+}
+
 // Handler returns the root handler.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /ws", s.handleWS)
-	mux.HandleFunc("GET /api/v1/term", s.handleTermWS)
-	mux.HandleFunc("GET /api/config", s.handleConfig)
-	mux.HandleFunc("GET /api/settings", s.handleSettings)
-	mux.HandleFunc("PUT /api/settings", s.writable(s.handleSetSetting))
-	mux.HandleFunc("DELETE /api/settings", s.writable(s.handleResetSetting))
-	mux.HandleFunc("GET /api/keybindings", s.handleKeybindings)
-	mux.HandleFunc("PUT /api/keybindings", s.writable(s.handleSetKeybindings))
-	mux.HandleFunc("GET /api/machines", s.handleMachines)
-	mux.HandleFunc("POST /api/machines", s.writable(s.handleMachineAdd))
-	mux.HandleFunc("DELETE /api/m/{id}", s.writable(s.handleMachineRemove))
-	mux.HandleFunc("PUT /api/m/{id}/label", s.writable(s.handleMachineRename))
-	mux.HandleFunc("PUT /api/m/{id}/enabled", s.writable(s.handleMachineEnabled))
-	mux.HandleFunc("GET /api/m/{id}/hc", s.handleHCStatus)
-	mux.HandleFunc("POST /api/m/{id}/hc/{action}", s.writable(s.handleHCAction))
-	mux.HandleFunc("GET /api/m/{id}/auth", s.writable(s.handleAuth))
-	mux.HandleFunc("POST /api/m/{id}/bridge", s.writable(s.handleBridge))
-	mux.HandleFunc("GET /api/m/{id}/file", s.handleFile)
-	mux.HandleFunc("GET /api/m/{id}/download", s.handleDownload)
-	mux.HandleFunc("POST /api/m/{id}/upload", s.writable(s.handleUpload))
-	mux.HandleFunc("GET /api/m/{id}/list", s.handleList)
-	mux.HandleFunc("GET /api/m/{id}/code/status", s.handleCodeStatus)
-	mux.HandleFunc("POST /api/m/{id}/code/start", s.writable(s.handleCodeStart))
-	mux.HandleFunc("POST /api/m/{id}/code/stop", s.handleCodeStop)
-	mux.HandleFunc("/m/{id}/code", func(w http.ResponseWriter, r *http.Request) {
-		u := *r.URL
-		u.Path += "/"
-		http.Redirect(w, r, u.String(), http.StatusFound)
-	})
-	mux.Handle("/m/{id}/code/", s.writable(s.csProxy.ServeHTTP))
-	mux.HandleFunc("GET /m/{id}/gui/{win}", s.handleGUIPage)
-	mux.HandleFunc("GET /m/{id}/gui/{win}/ws", s.handleGUIWS)
-	mux.HandleFunc("POST /m/{id}/gui/{win}/close", s.writable(s.handleGUIClose))
-	mux.HandleFunc("POST /api/m/{id}/gui/enable", s.writable(s.handleGUIEnable))
-	mux.HandleFunc("GET /api/gui", s.handleGUIStates)
-	if s.opts.Static != nil {
-		mux.Handle("/", spaHandler(s.opts.Static))
+	for _, rt := range s.routes() {
+		mux.HandleFunc(rt.pattern, rt.handler)
 	}
 	return s.guard(mux)
 }
@@ -333,7 +351,16 @@ func spaHandler(fsys fs.FS) http.Handler {
 			io.WriteString(w, brand.Slug+": the web UI is not built into this binary; run scripts/build.sh\n")
 			return
 		}
+		// Every page served here, the app shell on any path among them,
+		// gets the policy that keeps scripts on our origin and the page out
+		// of other sites' frames.
+		w.Header().Set("Content-Security-Policy", appCSP)
 		p := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+		if p == "api" || strings.HasPrefix(p, "api/") {
+			// An API path no route took is not a page of the UI.
+			http.NotFound(w, r)
+			return
+		}
 		if p == "" {
 			p = "index.html"
 		}
@@ -345,7 +372,6 @@ func spaHandler(fsys fs.FS) http.Handler {
 			files.ServeHTTP(w, r2)
 			return
 		}
-		w.Header().Set("Content-Security-Policy", appCSP)
 		if strings.HasPrefix(p, "assets/") {
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		} else {

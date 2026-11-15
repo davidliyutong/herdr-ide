@@ -40,8 +40,9 @@ settings per browser; theming terminal applications.
   the core's host), its section and order, the platforms that use it
   (`web`, `macos`; none, which every registered setting has, means all),
   an optional command-line flag and a validation function. Lists
-  hold at most 256 items; strings at most 4096 bytes, without NUL, CR or
-  LF. Invalid definitions panic at start.
+  hold at most 256 items; strings at most 4096 bytes, without control
+  characters (C0 among them NUL, tab, CR, LF and ESC; DEL; C1). Invalid
+  definitions panic at start.
 - The modules registered: the user interfaces' sections `appearance`,
   `layout`, `terminal`, `colors` and `notifications`; code-server's
   `codeServer` (`codeServer.install`, `codeServer.path`); the program
@@ -76,7 +77,10 @@ settings per browser; theming terminal applications.
 - Global values are top-level `"key": value` pairs, typed JSON; a
   machine's own values are under `"[machine:<id>]": {"key": value}`. The
   file is written with global values first, keys sorted, two-space
-  indentation, atomically, mode 0600.
+  indentation, atomically, mode 0600; the directory is created 0700, and
+  an existing one of the user's that others may access is made 0700 when
+  a file is written (a link to a directory is left as it is;
+  `internal/userfile`).
 - Keys the core does not know and values that do not validate are kept
   when the file is rewritten (another version may know them); they count
   as unset and are reported as problems (`unknown`, `invalid`, `scope` for
@@ -393,8 +397,9 @@ settings per browser; theming terminal applications.
 `PUT` and `DELETE /api/settings` and `PUT /api/keybindings` are mutations:
 same Host/Origin and proxy-secret guards, refused in read-only mode,
 audited, bodies bounded (64 KiB, 256 KiB). Values are typed and validated;
-strings refuse NUL, CR and LF, so a value cannot add lines to the
-Ghostty configuration the macOS application writes. Machine ids in the
+strings refuse every control character (C0, DEL, C1), so a value cannot
+add lines to the Ghostty configuration the macOS application writes or
+carry escape sequences. Machine ids in the
 file and in requests are bounded and refuse brackets and line breaks. See
 [SECURITY.md](../../SECURITY.md).
 

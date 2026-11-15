@@ -83,7 +83,13 @@ them. Reading
 methods: `terminal.list`, `terminal.get`, `terminal.read`, `doc.get`,
 `templates.list`. Writing methods: `terminal.run`, `terminal.kill`,
 `terminal.rm`, `terminal.keep`, `terminal.label`, `terminal.interrupt`,
-`doc.set`. A call with the parameter `on` is refused.
+`doc.set`. A call with the parameter `on` is refused. Refused calls are
+audited as `denied.term` (method, machine; `param: on` for a call refused
+for `on`); `terminal.run` (with its `argv`, `cwd` and the names, not the
+values, of the variables the client gave in `env` as `client_env`, and of
+those the core added as `env`), `terminal.kill`, `terminal.rm`,
+`terminal.interrupt` and `terminal.keep` are audited with their terminal.
+An `env` that is not an object of strings is refused (`usage`).
 
 **Streams.** `attach` opens a herdr-core attach stream and answers
 `attached` with a stream number of the client's connection; the reply is
@@ -92,12 +98,17 @@ the first paint, then the program's bytes. The client sends `ack {s, n}`
 for the bytes it has drawn, which the core returns to herdr-core as credit:
 a terminal has at most 256 KiB on its way to a client, and a client that
 falls 4 MiB behind gets a new paint from herdr-core instead of the
-backlog. Input is a binary frame of kind 0, or kind 6 for the answers the
+backlog. The core returns at most the output it sent on that stream and
+has not had credit for yet, so an `ack` beyond it is cut to it.
+Input is a binary frame of kind 0, or kind 6 for the answers the
 client's terminal produces by itself. `resize`, `focus` and `facts` go to
 herdr-core as they are; the viewer that was active last sets the
 terminal's size. An observing attach (asked for, or any attach of a
 read-only core) gets the terminal's grid as kind 3 frames before the
-output drawn for it, and sends nothing. `closed` ends a stream with
+output drawn for it, and sends nothing: no display facts with the attach
+or later, no input, size or focus; its focus does not mark a finished
+turn seen either. A connection reads messages of at most 16 MiB.
+`closed` ends a stream with
 herdr-core's reason, or `disconnected` when the backend's connection went.
 
 **Layout document.** Clients arrange a machine's terminals in herdr-core's
@@ -218,13 +229,17 @@ machine's socket behind a real agent: the lifecycle from the UI (a stopped
 core kept stopped while subscribed, started and restarted, the machine's
 `hc` state), backend states and the snapshot with
 unknown fields kept, events forwarded and applied for a later subscriber,
-allowed and refused calls with their audit entries, the display's
+allowed and refused calls with their audit entries (a call with `on`,
+`terminal.interrupt`, `terminal.keep`, `terminal.run`'s `cwd` and the
+names of its variables), the display's
 variables in `terminal.run`, detected agents in records and events and
 seen by focus, typing into a terminal's shell, a stream's reply before
 its first frame, input, automatic input, credit, size, focus and display
-facts reaching the terminal core, detaching, a program's end, the terminal
+facts reaching the terminal core, credit cut to the output sent,
+detaching, a program's end, the terminal
 core going away and coming back, read-only (writing calls refused, attaches
-observe, input dropped, nothing installed), and a machine without a
+observe without display facts, input, size, focus and facts dropped, a
+finished turn not seen, nothing installed), and a machine without a
 terminal core. `web/src/__tests__/term.test.ts` covers the TypeScript client against a
 scripted socket (frames, names, the store's events, every layout vector,
 subscribing, calls, a stream's reply before its frames, input, credit,

@@ -365,8 +365,19 @@ func TestTermProtocol(t *testing.T) {
 	if m := c.until("res"); m["error"].(map[string]any)["kind"] != "unavailable" {
 		t.Fatalf("call on a machine not subscribed to: %v", m)
 	}
-	if a := audit.String(); !strings.Contains(a, `"denied.term"`) || !strings.Contains(a, `"machine.exec"`) || !strings.Contains(a, `"terminal.kill"`) {
+	if a := audit.String(); !strings.Contains(a, `"denied.term"`) || !strings.Contains(a, `"machine.exec"`) || !strings.Contains(a, `"terminal.kill"`) ||
+		!strings.Contains(a, `"method":"terminal.read","param":"on"`) {
 		t.Fatalf("audit %s", a)
+	}
+	// Interrupting and keeping terminals are audited like killing them.
+	for i, method := range []string{"terminal.interrupt", "terminal.keep"} {
+		c.send(map[string]any{"t": "call", "rid": 30 + i, "m": "x", "method": method, "params": map[string]any{"terminal": "t1"}})
+		if m := c.until("res"); m["result"] == nil {
+			t.Fatalf("%s: %v", method, m)
+		}
+		if a := audit.String(); !strings.Contains(a, `"event":"`+method+`"`) || !strings.Contains(a, `"terminal":"t1"`) {
+			t.Fatalf("%s not audited: %s", method, a)
+		}
 	}
 
 	// A stream: the reply, then output; input, credit and size reach the core.
@@ -391,8 +402,16 @@ func TestTermProtocol(t *testing.T) {
 	core.waitFor("6:\x1b[?1;2c")
 	c.send(map[string]any{"t": "ack", "s": sid, "n": 5})
 	core.waitFor("1:\x05\x00\x00\x00")
+	// Credit is returned for output the client was sent, no more: of 13
+	// bytes ("paint", "echo:ls\r") 8 are left, and then none.
+	c.send(map[string]any{"t": "ack", "s": sid, "n": 1000})
+	core.waitFor("1:\x08\x00\x00\x00")
+	c.send(map[string]any{"t": "ack", "s": sid, "n": 50})
 	c.send(map[string]any{"t": "resize", "s": sid, "cols": 120, "rows": 40})
 	core.waitFor("3:\x78\x00\x28\x00")
+	if core.seen("1:\xe8\x03") || core.seen("1:2\x00") {
+		t.Fatalf("credit beyond the output sent: %q", core.frames)
+	}
 	c.send(map[string]any{"t": "focus", "s": sid, "focused": true})
 	core.waitFor("4:\x01")
 	c.send(map[string]any{"t": "facts", "s": sid, "display": map[string]any{"bg": "#101010"}})
@@ -453,24 +472,43 @@ func TestTermReadOnly(t *testing.T) {
 	if m := c.until("res"); m["result"] == nil {
 		t.Fatalf("read %v", m)
 	}
-	// A watcher's attach observes: the terminal's size comes in the stream,
-	// and nothing it sends reaches the program.
-	c.send(map[string]any{"t": "attach", "rid": 3, "m": "x", "terminal": "t1", "cols": 80, "rows": 24})
+	// A watcher's attach observes, without display facts: the terminal's
+	// size comes in the stream, and nothing it sends reaches the program.
+	b := s.term.existing("x")
+	b.applyAgent(agentproto.DetectEvent{Terminal: "t1", Agent: "claude", Status: "done"})
+	c.send(map[string]any{"t": "attach", "rid": 3, "m": "x", "terminal": "t1", "cols": 80, "rows": 24,
+		"display": map[string]any{"bg": "#101010"}})
 	at := c.until("attached")
 	if at["observe"] != true {
 		t.Fatalf("attached %v", at)
 	}
 	core.waitFor(`"observe":true`)
+	if core.seen(`"display"`) {
+		t.Fatalf("an observer's attach carried display facts: %q", core.attach)
+	}
 	if m := c.next(); m["kind"] != float64(termResize) || m["data"] != "\x64\x00\x1e\x00" {
 		t.Fatalf("size frame %v", m)
+	}
+	if m := c.next(); m["data"] != "paint" {
+		t.Fatalf("paint %v", m)
 	}
 	sid := uint32(at["s"].(float64))
 	c.ws.Write(context.Background(), websocket.MessageBinary, append(append(binary.LittleEndian.AppendUint32(nil, sid), termData), "rm -rf\r"...))
 	c.send(map[string]any{"t": "resize", "s": sid, "cols": 10, "rows": 10})
-	c.send(map[string]any{"t": "ack", "s": sid, "n": 5})
+	c.send(map[string]any{"t": "focus", "s": sid, "focused": true})
+	c.send(map[string]any{"t": "facts", "s": sid, "display": map[string]any{"bg": "#202020"}})
+	// Credit only for the 5 bytes of output sent.
+	c.send(map[string]any{"t": "ack", "s": sid, "n": 500})
 	core.waitFor("1:\x05\x00\x00\x00") // the credit arrived, after the rest would have
-	if core.seen("rm -rf") || core.seen("3:") {
+	if core.seen("rm -rf") || core.seen("3:") || core.seen("4:") || core.seen("5:") || core.seen("1:\xf4\x01") {
 		t.Fatalf("a watcher's input reached the core: %q", core.frames)
+	}
+	// A watcher looking at a finished turn does not mark it seen.
+	b.mu.Lock()
+	status := b.agents["t1"].Status
+	b.mu.Unlock()
+	if status != "done" {
+		t.Fatalf("a watcher's focus saw the turn: %s", status)
 	}
 }
 
@@ -610,18 +648,21 @@ func TestTermRunGetsTheDisplay(t *testing.T) {
 	c := dialTerm(t, s)
 	c.ready()
 	c.send(map[string]any{"t": "call", "rid": 1, "m": "x", "method": "terminal.run",
-		"params": map[string]any{"argv": []string{"sh"}, "env": map[string]string{"DISPLAY": ":0", "FOO": "1"}}})
+		"params": map[string]any{"argv": []string{"sh"}, "cwd": "/srv/api", "env": map[string]string{"DISPLAY": ":0", "TOKEN": "s3cret"}}})
 	if m := c.until("res"); m["error"] != nil {
 		t.Fatalf("run %v", m)
 	}
 	core.mu.Lock()
 	got := strings.Join(core.calls, " ")
 	core.mu.Unlock()
-	if !strings.Contains(got, `"DISPLAY":":20"`) || !strings.Contains(got, `"FOO":"1"`) || !strings.Contains(got, `"XAUTHORITY":"/home/u/.herdr-ide/run/xauth"`) {
+	if !strings.Contains(got, `"DISPLAY":":20"`) || !strings.Contains(got, `"TOKEN":"s3cret"`) || !strings.Contains(got, `"XAUTHORITY":"/home/u/.herdr-ide/run/xauth"`) {
 		t.Fatalf("run params %s", got)
 	}
-	if !strings.Contains(audit.String(), `"env":["DISPLAY","XAUTHORITY"]`) {
-		t.Fatalf("audit %s", audit.String())
+	// The audit entry names the variables added and those the client gave,
+	// with its working directory, but no values.
+	if a := audit.String(); !strings.Contains(a, `"env":["DISPLAY","XAUTHORITY"]`) || !strings.Contains(a, `"client_env":["DISPLAY","TOKEN"]`) ||
+		!strings.Contains(a, `"cwd":"/srv/api"`) || strings.Contains(a, "s3cret") {
+		t.Fatalf("audit %s", a)
 	}
 	c.send(map[string]any{"t": "call", "rid": 2, "m": "x", "method": "terminal.run", "params": map[string]any{"env": "DISPLAY=:0"}})
 	if m := c.until("res"); m["error"].(map[string]any)["kind"] != "usage" {

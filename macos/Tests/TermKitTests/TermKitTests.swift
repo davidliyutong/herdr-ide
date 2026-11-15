@@ -44,7 +44,9 @@ final class EventTests: XCTestCase {
                        .machine(Machine(id: "c", label: "c", status: "ready", kind: "ssh", target: "u@h", home: "/home/u")))
         XCTAssertTrue(Machine.validTarget(" user@host.example "))
         XCTAssertTrue(Machine.validTarget("host:2222"))
-        for bad in ["", "-oProxyCommand=x", "a b", "日本", String(repeating: "h", count: 256)] { XCTAssertFalse(Machine.validTarget(bad), bad) }
+        XCTAssertTrue(Machine.validTarget("ssh://u@h:2222"))
+        XCTAssertTrue(Machine.validTarget("[fe80::1%en0]"))
+        for bad in ["", "-oProxyCommand=x", "a b", "日本", "h;id", "$(id)", "h|x", "h'x", "h\tx", String(repeating: "h", count: 256)] { XCTAssertFalse(Machine.validTarget(bad), bad) }
         XCTAssertEqual(EventConnection.decode(#"{"t":"machine","state":{"id":"b","label":"Box","kind":"ssh","status":"ready","hc":{"state":"error","code":"stopped"}}}"#),
                        .machine(Machine(id: "b", label: "Box", status: "ready", kind: "ssh", hc: BackendState(phase: .error, code: "stopped"))))
         XCTAssertEqual(EventConnection.decode(#"{"t":"gui","state":{"m":"b","phase":"ready","windows":[{"id":3,"title":"plot","w":640,"h":480,"pid":9,"terminal":"t4"},{"id":4,"title":"Save","w":300,"h":200,"transient":3},{"title":"no id"}]}}"#),
@@ -226,6 +228,20 @@ final class CoreProcessTests: XCTestCase {
         let env = CoreProcess.environment(["PATH": "/x"], home: "/Users/u")
         XCTAssertEqual(env["PATH"], "/x:/Users/u/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin")
         XCTAssertEqual(Brand.envPrefix, Brand.appSlug.uppercased().replacingOccurrences(of: "-", with: "_") + "_")
+    }
+
+    /// The application talks only to a core on loopback, whether the core
+    /// announced it or the development variable names it.
+    func testLoopbackURL() {
+        for ok in ["http://127.0.0.1:7781", "http://localhost:7781", "http://LOCALHOST:7781/", "https://localhost:1"] {
+            XCTAssertNotNil(CoreProcess.loopbackURL(ok), ok)
+        }
+        for bad in ["http://example.com:7781", "http://10.0.0.2:7781", "http://127.0.0.1.example.com:7781", "http://localhost.example.com",
+                    "http://127.0.0.1@example.com:7781", "http://u:p@127.0.0.1:7781", "file://localhost/etc/passwd",
+                    "ftp://127.0.0.1:21", "ws://127.0.0.1:7781", "127.0.0.1:7781", "", "not a url"] {
+            XCTAssertNil(CoreProcess.loopbackURL(bad), bad)
+        }
+        XCTAssertNil(CoreProcess.readyURL(#"{"event":"ready","url":"file://localhost/x"}"#))
     }
 
     func testMissingBinary() {
@@ -668,4 +684,101 @@ final class FeatureTests: XCTestCase {
 
 private extension Result {
     var failure: Failure? { if case let .failure(f) = self { return f } else { return nil } }
+}
+
+final class WebNavigationTests: XCTestCase {
+    private let core = URL(string: "http://localhost:7781")!
+
+    func testCoreOriginOnly() {
+        for main in [true, false] {
+            XCTAssertTrue(WebNavigation.allows(URL(string: "http://localhost:7781/m/x/code/?folder=/src"), core: core, mainFrame: main))
+            for other in ["http://localhost:7782/", "https://localhost:7781/", "http://127.0.0.1:7781/", "http://example.com/", "file:///etc/passwd", "javascript:alert(1)"] {
+                XCTAssertFalse(WebNavigation.allows(URL(string: other), core: core, mainFrame: main), other)
+            }
+        }
+        XCTAssertFalse(WebNavigation.allows(nil, core: core, mainFrame: false))
+    }
+
+    /// Documents without an origin of their own load only inside the core's
+    /// pages; as the page itself only the empty about:blank does.
+    func testFramesOnlySchemes() {
+        for url in ["about:srcdoc", "blob:http://localhost:7781/1b7a", "data:text/html,%3Cp%3Ex%3C/p%3E", "about:blank"] {
+            XCTAssertTrue(WebNavigation.allows(URL(string: url), core: core, mainFrame: false), url)
+        }
+        for url in ["about:srcdoc", "blob:http://localhost:7781/1b7a", "data:text/html,%3Cscript%3Ex()%3C/script%3E", "DATA:text/html,x"] {
+            XCTAssertFalse(WebNavigation.allows(URL(string: url), core: core, mainFrame: true), url)
+        }
+        XCTAssertTrue(WebNavigation.allows(URL(string: "about:blank"), core: core, mainFrame: true))
+    }
+}
+
+/// A stand-in server for downloads: a body of `size` bytes in 1 KiB chunks,
+/// announced with a Content-Length when `announce` is set.
+final class StubDownloads: URLProtocol {
+    static var size = 0
+    static var announce = true
+    static var status = 200
+
+    override class func canInit(with _: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let headers = Self.announce ? ["Content-Length": String(Self.size)] : [:]
+        let response = HTTPURLResponse(url: request.url!, statusCode: Self.status, httpVersion: "HTTP/1.1", headerFields: headers)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        var left = Self.size
+        while left > 0 {
+            let n = min(left, 1024)
+            client?.urlProtocol(self, didLoad: Data(repeating: 0x61, count: n))
+            left -= n
+        }
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
+final class BoundedDownloadTests: XCTestCase {
+    private func fetch(size: Int, announce: Bool, status: Int = 200, limit: Int64) throws -> (Result<URL, BoundedDownload.Failure>, URL) {
+        StubDownloads.size = size
+        StubDownloads.announce = announce
+        StubDownloads.status = status
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [StubDownloads.self]
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("part")
+        let done = expectation(description: "done")
+        var result: Result<URL, BoundedDownload.Failure>?
+        let download = BoundedDownload(URL(string: "http://localhost:7781/api/m/x/file?path=/f")!, to: file, limit: limit,
+                                       configuration: configuration) { result = $0; done.fulfill() }
+        wait(for: [done], timeout: 10)
+        _ = download
+        return (result!, file)
+    }
+
+    func testWithinTheLimit() throws {
+        let (result, file) = try fetch(size: 3000, announce: true, limit: 3000)
+        XCTAssertEqual(try? result.get(), file)
+        XCTAssertEqual(try Data(contentsOf: file).count, 3000)
+        let mode = try FileManager.default.attributesOfItem(atPath: file.path)[.posixPermissions] as? NSNumber
+        XCTAssertEqual(mode?.intValue, 0o600)
+    }
+
+    /// Refused by its Content-Length before a byte is written, or by the
+    /// bytes counted while it streams; no file is left either way.
+    func testOverTheLimit() throws {
+        for announce in [true, false] {
+            let (result, file) = try fetch(size: 5000, announce: announce, limit: 4096)
+            XCTAssertEqual(result, .failure(.tooLarge), "announced: \(announce)")
+            XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+        }
+    }
+
+    func testStatus() throws {
+        let (result, file) = try fetch(size: 10, announce: true, status: 404, limit: 4096)
+        XCTAssertEqual(result, .failure(.status(404)))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+    }
 }

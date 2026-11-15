@@ -62,14 +62,18 @@ func (a *Agent) hcEnv() []string {
 }
 
 // hcDigest returns the SHA-256 of the installed executable, "" without one.
-func (a *Agent) hcDigest() string {
+func (a *Agent) hcDigest() string { return a.hcHash(false) }
+
+// hcHash hashes the installed executable; without fresh, a digest computed
+// before for the same size and modification time is reused.
+func (a *Agent) hcHash(fresh bool) string {
 	info, err := os.Lstat(a.hcBin())
 	if err != nil || !info.Mode().IsRegular() || info.Mode()&0o100 == 0 {
 		return ""
 	}
 	a.hcMu.Lock()
 	defer a.hcMu.Unlock()
-	if c := a.hcHashed; c.digest != "" && c.size == info.Size() && c.mtime.Equal(info.ModTime()) {
+	if c := a.hcHashed; !fresh && c.digest != "" && c.size == info.Size() && c.mtime.Equal(info.ModTime()) {
 		return c.digest
 	}
 	f, err := os.Open(a.hcBin())
@@ -182,6 +186,16 @@ func (a *Agent) handleHC(ctx context.Context, st net.Conn, h agentproto.Header) 
 	}
 	a.hcOp.Lock()
 	defer a.hcOp.Unlock()
+	// Before a start or restart the executable is hashed again: it runs only
+	// while it is the one the core expects (h.Digest, the executable the
+	// core carries and installed; empty when the core carries none).
+	if (h.Action == "start" || h.Action == "restart") && h.Digest != "" {
+		if got := a.hcHash(true); got == "" {
+			return fail(agentproto.HCNotInstalled, errors.New("herdr-core is not installed"))
+		} else if got != h.Digest {
+			return fail(agentproto.HCBadDigest, fmt.Errorf("herdr-core's sha256 %s does not match expected %s", got, h.Digest))
+		}
+	}
 	switch h.Action {
 	case "install":
 		if err := agentproto.WriteLine(st, agentproto.Reply{OK: true}); err != nil {

@@ -43,6 +43,10 @@ match; the bridge extension is reinstalled whenever its content changes.
    `scripts/macos-app.sh`); with `MACOS_NOTARY_APPLE_ID`,
    `MACOS_NOTARY_TEAM_ID` and `MACOS_NOTARY_PASSWORD` (an app-specific
    password) as well, it is notarized and stapled (`NOTARY_PROFILE`). The
+   bundle is built and tested without them; only the step that signs it
+   again (`scripts/macos-app.sh sign`) gets these secrets, in a keychain
+   it deletes when it ends. Every action the workflows use is pinned by
+   its commit (with the version in a comment). The
    workflow then writes `SHA256SUMS` over the archives, DMGs and the zip,
    attests build provenance for them (only while the repository is public:
    GitHub stores no attestations for private repositories outside

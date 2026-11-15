@@ -10,8 +10,9 @@ const form = (target: string, label = '') => ({ target, label });
 
 describe('the add machine form', () => {
   it('takes ssh destinations that cannot read as options', () => {
-    for (const ok of ['gpu', 'user@gpu.example.com', 'ssh://u@h:2222', ' gpu ']) expect(addMachineProblem(form(ok)), ok).toBeUndefined();
-    for (const bad of ['', '  ', '-oProxyCommand=x', 'a b', 'gpü', 'x'.repeat(256)])
+    for (const ok of ['gpu', 'user@gpu.example.com', 'ssh://u@h:2222', ' gpu ', '[fe80::1%en0]', 'u_1@10.0.0.2'])
+      expect(addMachineProblem(form(ok)), ok).toBeUndefined();
+    for (const bad of ['', '  ', '-oProxyCommand=x', 'a b', 'gpü', 'h;id', '$(id)', 'h|x', "h'x", 'h\\x', 'x'.repeat(256)])
       expect(addMachineProblem(form(bad)), bad).toBe('target');
     expect(addMachineProblem(form('gpu', 'Any label at all'))).toBeUndefined();
   });

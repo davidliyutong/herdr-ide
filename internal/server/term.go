@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -326,7 +328,9 @@ func (b *termBackend) ensure(ctx context.Context, mc *machines.Machine, restart 
 	if stopped && !st.Running {
 		return termCodeStopped
 	}
-	rep, err = sess.Request(ctx, agentproto.Header{Op: agentproto.OpHC, Action: action})
+	// The agent hashes the executable again and runs it only when it is
+	// this build's.
+	rep, err = sess.Request(ctx, agentproto.Header{Op: agentproto.OpHC, Action: action, Digest: digest})
 	if err != nil || rep.HC == nil || !rep.HC.Running {
 		msg := ""
 		if rep != nil {
@@ -655,6 +659,9 @@ type termStream struct {
 	// focus report for it.
 	machine, terminal string
 	focused           bool
+	// unacked is the output sent to the client that it has not returned as
+	// credit; an ack returns at most this much (termClient.mu).
+	unacked int64
 }
 
 type termClient struct {
@@ -823,25 +830,36 @@ func (c *termClient) dispatch(m *termIn) {
 	case "attach":
 		go c.attach(m)
 	case "ack":
-		if ts := c.stream(m.S); ts != nil {
-			ts.st.Ack(m.N)
+		// Credit for output the client was sent and has not returned yet,
+		// no more: a client cannot make the terminal core send ahead of
+		// what it draws.
+		c.mu.Lock()
+		ts := c.streams[m.S]
+		n := 0
+		if ts != nil && m.N > 0 {
+			n = int(min(int64(m.N), ts.unacked))
+			ts.unacked -= int64(n)
+		}
+		c.mu.Unlock()
+		if n > 0 {
+			ts.st.Ack(n)
 		}
 	case "resize":
 		if ts := c.stream(m.S); ts != nil && !ts.observe {
 			ts.st.Resize(m.Cols, m.Rows)
 		}
 	case "focus":
+		// An observer's focus changes nothing: neither the terminal core's
+		// viewer nor whether a finished turn counts as seen.
 		ts := c.stream(m.S)
-		if ts == nil {
+		if ts == nil || ts.observe {
 			break
 		}
 		c.mu.Lock()
 		ts.focused = m.Focused
 		b := c.subs[ts.machine]
 		c.mu.Unlock()
-		if !ts.observe {
-			ts.st.Focus(m.Focused)
-		}
+		ts.st.Focus(m.Focused)
 		// Looking at a terminal whose turn ended has seen it.
 		if m.Focused && b != nil {
 			b.seen(ts.terminal)
@@ -891,6 +909,7 @@ func (c *termClient) call(m *termIn) {
 	}
 	// "on" would address a machine the terminal core itself added.
 	if _, other := params["on"]; other {
+		c.s.audit.log(c.req, "denied.term", map[string]any{"machine": m.M, "method": m.Method, "param": "on"})
 		c.fail(m.RID, "refused", "")
 		return
 	}
@@ -901,6 +920,17 @@ func (c *termClient) call(m *termIn) {
 	}
 	ev := map[string]any{"machine": m.M, "terminal": params["terminal"], "argv": params["argv"]}
 	if m.Method == "terminal.run" {
+		// The audit entry names the variables the client gave, not their
+		// values, which may be secrets.
+		var given map[string]string
+		if raw, set := params["env"]; set && json.Unmarshal(raw, &given) != nil {
+			c.fail(m.RID, "usage", "")
+			return
+		}
+		if len(given) > 0 {
+			ev["client_env"] = slices.Sorted(maps.Keys(given))
+		}
+		ev["cwd"] = params["cwd"]
 		// New programs get the machine's virtual display (feature 14); its
 		// variables replace any the client gave, so a client cannot point
 		// them elsewhere.
@@ -916,7 +946,7 @@ func (c *termClient) call(m *termIn) {
 		}
 	}
 	switch m.Method {
-	case "terminal.run", "terminal.kill", "terminal.rm":
+	case "terminal.run", "terminal.kill", "terminal.rm", "terminal.interrupt", "terminal.keep":
 		c.s.audit.log(c.req, m.Method, ev)
 	}
 	ctx, cancel := context.WithTimeout(c.ctx, 60*time.Second)
@@ -936,11 +966,17 @@ func (c *termClient) attach(m *termIn) {
 		return
 	}
 	observe := m.Observe || c.readOnly
+	// A viewer's display facts are what the terminal answers programs with;
+	// an observer sends none, as it sends no facts later.
+	display := m.Display
+	if observe {
+		display = nil
+	}
 	ctx, cancel := context.WithTimeout(c.ctx, 30*time.Second)
 	defer cancel()
 	st, a, err := conn.Attach(ctx, hc.AttachParams{
 		Terminal: m.Terminal, Cols: m.Cols, Rows: m.Rows, History: m.History,
-		Observe: observe, ResizeNotifications: observe, Display: m.Display,
+		Observe: observe, ResizeNotifications: observe, Display: display,
 	})
 	if err != nil {
 		c.failErr(m.RID, err)
@@ -991,6 +1027,11 @@ func (c *termClient) pump(id uint32, st *hc.Stream) {
 		} else {
 			frame = append(append(make([]byte, 0, 5+len(o.Data)), head...), termData)
 			frame = append(frame, o.Data...)
+			c.mu.Lock()
+			if ts := c.streams[id]; ts != nil {
+				ts.unacked += int64(len(o.Data))
+			}
+			c.mu.Unlock()
 		}
 		c.enqueue(outMsg{binary: true, data: frame})
 	}

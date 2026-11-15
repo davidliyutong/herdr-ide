@@ -2,6 +2,7 @@ package machines
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log"
 	"os"
@@ -141,15 +142,64 @@ func TestRegistryRoundTripAndErrors(t *testing.T) {
 }
 
 // The local machine comes first, then the stored SSH machines and the --ssh
-// targets, each once.
+// targets, each once; targets that could read as options are left out.
 func TestLoadSpecs(t *testing.T) {
-	stored := []Spec{{ID: "a1", Label: "gpu", Kind: KindSSH, Target: "gpu-host", Enabled: true}, {ID: LocalID, Kind: KindLocal, Enabled: true}}
-	specs := LoadSpecs(stored, []Spec{{Target: "extra"}, {ID: "a1", Target: "dup"}})
+	stored := []Spec{{ID: "a1", Label: "gpu", Kind: KindSSH, Target: "gpu-host", Enabled: true}, {ID: LocalID, Kind: KindLocal, Enabled: true},
+		{ID: "evil", Kind: KindSSH, Target: "-oProxyCommand=touch /tmp/x", Enabled: true}}
+	specs := LoadSpecs(stored, []Spec{{Target: "extra"}, {ID: "a1", Target: "dup"}, {Target: "-oProxyCommand=sh"}, {Target: "host;id"}})
 	if len(specs) != 3 || specs[0].ID != LocalID || !specs[0].Enabled || specs[1].ID != "a1" {
 		t.Fatalf("specs = %+v", specs)
 	}
 	if s := specs[2]; s.ID != "extra" || s.Kind != KindSSH || s.Label != "extra" {
 		t.Fatalf("extra = %+v", s)
+	}
+}
+
+// Targets are ssh destinations that can never read as an option or carry a
+// shell metacharacter.
+func TestValidTarget(t *testing.T) {
+	for _, ok := range []string{"gpu", "gpu-host", "u@gpu", "user@gpu.example.com", "ssh://u@h:2222", "host:22", "[fe80::1%en0]", "u_1@10.0.0.2", "a.b-c_d"} {
+		if !ValidTarget(ok) {
+			t.Errorf("%q refused", ok)
+		}
+	}
+	for _, bad := range []string{"", "-oProxyCommand=x", "-p", "a b", "gpü", "h\tx", "h\nx", "h\x00", "h;id", "h|x", "h&x", "$(id)", "`id`", "h'x", `h"x`, "h*", "h?", "h>x", "h<x", "h\\x", "h~", "h=x", "h,x", "h!x", "h#x", "h{x}", "h(x)", "h\x7f", strings.Repeat("x", 256)} {
+		if ValidTarget(bad) {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+}
+
+// A stored record or a machine of herdr's catalog whose target could read
+// as an option of ssh is dropped when the file is read or imported, and
+// never stored.
+func TestRegistryDropsInvalidTargets(t *testing.T) {
+	herdrCatalog(t, `{"version":1,"ssh":[{"id":"a1","label":"gpu","target":"gpu-host","enabled":true},
+		{"id":"p1","label":"proxy","target":"-oProxyCommand=touch /tmp/pwned","enabled":true},
+		{"id":"s1","label":"semi","target":"host;id","enabled":true}]}`)
+	path := filepath.Join(t.TempDir(), "machines.json")
+	r, err := OpenRegistry(path, SavedSpecs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := r.Specs(); len(got) != 1 || got[0].ID != "a1" {
+		t.Fatalf("imported %+v", got)
+	}
+	if b, _ := os.ReadFile(path); strings.Contains(string(b), "ProxyCommand") || strings.Contains(string(b), ";") {
+		t.Fatalf("stored %s", b)
+	}
+	if err := r.Put(Spec{ID: "p2", Target: "-oProxyCommand=x"}); !errors.Is(err, ErrInvalidTarget) {
+		t.Fatalf("put: %v", err)
+	}
+	os.WriteFile(path, []byte(`{"version":1,"machines":[{"id":"a1","kind":"ssh","target":"gpu-host","enabled":true},
+		{"id":"p1","kind":"ssh","target":"-oProxyCommand=touch /tmp/pwned","enabled":true}]}`), 0o600)
+	r, err = OpenRegistry(path, nil)
+	if err != nil || len(r.Specs()) != 1 || r.Specs()[0].ID != "a1" {
+		t.Fatalf("read %+v %v", r.Specs(), err)
+	}
+	mg := NewManager(nil, nil, log.New(io.Discard, "", 0))
+	if err := mg.Add(Spec{ID: "p3", Target: "-oProxyCommand=x"}); !errors.Is(err, ErrInvalidTarget) {
+		t.Fatalf("add: %v", err)
 	}
 }
 

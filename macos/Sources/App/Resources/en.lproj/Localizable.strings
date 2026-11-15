@@ -323,7 +323,7 @@
 "addMachine.label" = "Name";
 "addMachine.labelPlaceholder" = "optional; defaults to the host";
 "addMachine.add" = "Add";
-"addMachine.badTarget" = "Enter an ssh destination without spaces that does not start with “-”.";
+"addMachine.badTarget" = "Enter an ssh destination of letters, digits and . _ - @ : / [ ] % that does not start with “-”.";
 "machine.addFailed" = "%@ was not added";
 "machine.added" = "Added %@.";
 "machine.enableFailed" = "The machine was not changed";

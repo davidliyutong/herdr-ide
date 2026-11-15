@@ -32,6 +32,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"herdr-ide/internal/userfile"
 )
@@ -242,7 +243,10 @@ func (d Def) normalize(v any) (any, error) {
 }
 
 func normalizeString(t Type, enum []string, s string) (any, error) {
-	if strings.ContainsAny(s, "\x00\n\r") || len(s) > maxString {
+	// No control character: C0 (line breaks, ESC, NUL…), DEL and C1. A
+	// string becomes a line of the macOS application's Ghostty
+	// configuration, among others.
+	if strings.IndexFunc(s, unicode.IsControl) >= 0 || len(s) > maxString {
 		return nil, errors.New("contains control characters or is too long")
 	}
 	switch t {

@@ -115,8 +115,12 @@ Non-goals: managing ssh keys; Windows machines.
   [23](23-macos-application.md)) asks for an SSH target and an optional
   label (the target names it otherwise): `POST /api/machines {target,
   label}`, answered `201` with the machine's state. The target is an ssh
-  destination of printable ASCII without spaces that does not start with
-  `-` (ssh would read it as an option), at most 255 bytes, and the label at
+  destination (`[user@]host[:port]`, `[IPv6]`, an `ssh://` URL or a
+  `~/.ssh/config` alias) of letters, digits and `. _ - @ : / [ ] %` that
+  does not start with `-` (ssh would read it as an option), at most 255
+  bytes (`machines.ValidTarget`; the stored and imported machines and
+  `--ssh` are held to it as well, and every ssh command puts `--` before
+  the target), and the label at
   most 64 characters without control characters (both trimmed); a target or
   id the core has already, running or stored, is refused
   (`machine_exists`). The core gives the machine a random id (never derived

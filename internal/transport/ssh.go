@@ -95,7 +95,24 @@ func SSHArgs(controlDir string, batch bool) []string {
 // AuthCommand is run in an interactive terminal to authenticate a target.
 func AuthCommand(controlDir, target string) []string {
 	args := append([]string{"ssh"}, SSHArgs(controlDir, false)...)
-	return append(args, "-t", target, "echo "+brand.Name+": authenticated; sleep 1")
+	return append(args, "-t", "--", target, "echo "+brand.Name+": authenticated; sleep 1")
+}
+
+// sshCommand returns ssh's arguments: options, then "--", so that ssh reads
+// no option after it, then the target and the remote command. ssh would
+// otherwise also parse options given after the target.
+func sshCommand(opts []string, target string, command ...string) []string {
+	return append(append(append([]string(nil), opts...), "--", target), command...)
+}
+
+// runArgs are ssh's arguments for running a script on the target.
+func (o SSHOptions) runArgs(script string) []string {
+	return sshCommand(append([]string{"-T"}, SSHArgs(o.ControlDir, true)...), o.Target, remoteSh(script))
+}
+
+// stopArgs are ssh's arguments for stopping the target's control master.
+func (o SSHOptions) stopArgs() []string {
+	return sshCommand([]string{"-o", "ControlPath=" + filepath.Join(o.ControlDir, "%C"), "-O", "stop"}, o.Target)
 }
 
 func shQuote(s string) string {
@@ -135,8 +152,7 @@ func lastLines(s string, n int) string {
 }
 
 func (o SSHOptions) run(ctx context.Context, stdin io.Reader, script string) (string, error) {
-	args := append(append([]string{"-T"}, SSHArgs(o.ControlDir, true)...), o.Target, remoteSh(script))
-	cmd := exec.CommandContext(ctx, "ssh", args...)
+	cmd := exec.CommandContext(ctx, "ssh", o.runArgs(script)...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdin = stdin
 	cmd.Stdout = &stdout
@@ -213,8 +229,7 @@ func DialSSH(ctx context.Context, o SSHOptions) (*Session, *Platform, error) {
 		}
 	}
 
-	args := append(append([]string{"-T"}, SSHArgs(o.ControlDir, true)...), o.Target, remoteSh(`exec "`+remotePath+`" serve --instance '`+o.Instance+`'`))
-	cmd := exec.Command("ssh", args...)
+	cmd := exec.Command("ssh", o.runArgs(`exec "`+remotePath+`" serve --instance '`+o.Instance+`'`)...)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, p, err
@@ -287,8 +302,7 @@ func stopMasterIfStuck(exited <-chan struct{}, grace time.Duration, stop func())
 func (o SSHOptions) stopMaster() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	args := []string{"-o", "ControlPath=" + filepath.Join(o.ControlDir, "%C"), "-O", "stop", o.Target}
-	if out, err := exec.CommandContext(ctx, "ssh", args...).CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(ctx, "ssh", o.stopArgs()...).CombinedOutput(); err != nil {
 		o.Logger.Printf("ssh %s: stopping the control master: %v: %s", o.Target, err, strings.TrimSpace(string(out)))
 	}
 }

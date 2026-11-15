@@ -185,8 +185,8 @@ final class MathHover: NSObject, WKScriptMessageHandler, WKNavigationDelegate, N
 
     /// Only the core's page loads in it.
     func webView(_: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        let url = action.request.url
-        decisionHandler(url?.host == core.host && url?.port == core.port ? .allow : .cancel)
+        let mainFrame = action.targetFrame?.isMainFrame ?? true
+        decisionHandler(WebNavigation.allows(action.request.url, core: core, mainFrame: mainFrame) ? .allow : .cancel)
     }
 
     func userContentController(_: WKUserContentController, didReceive message: WKScriptMessage) {

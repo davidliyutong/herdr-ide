@@ -97,6 +97,8 @@ func TestMachineAdd(t *testing.T) {
 		{false, "POST", "/api/machines", `{"target":"a b"}`, 400, "invalid"},
 		{false, "POST", "/api/machines", `{"target":""}`, 400, "invalid"},
 		{false, "POST", "/api/machines", `{"target":"gpü"}`, 400, "invalid"},
+		{false, "POST", "/api/machines", `{"target":"box;id"}`, 400, "invalid"},
+		{false, "POST", "/api/machines", `{"target":"$(id)"}`, 400, "invalid"},
 		{false, "POST", "/api/machines", `{"target":"box","label":"a\nb"}`, 400, "invalid"},
 		{false, "POST", "/api/machines", `{"target":"box","label":"` + strings.Repeat("x", 65) + `"}`, 400, "invalid"},
 		{false, "POST", "/api/machines", `{`, 400, "invalid"},

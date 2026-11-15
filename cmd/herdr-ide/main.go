@@ -179,6 +179,11 @@ func serve(args []string, logger *log.Logger) {
 	if !brand.ValidInstance(*instance) {
 		logger.Fatalf("--instance must be lowercase letters, digits and dashes")
 	}
+	for _, t := range extraSSH {
+		if !machines.ValidTarget(t) {
+			logger.Fatalf("--ssh %q: a target is [user@]host[:port], an ssh:// URL or a ~/.ssh/config alias of letters, digits and . _ - @ : / [ ] %%, not starting with -", t)
+		}
+	}
 	machinesFile := ""
 	if p, err := settingsPath(*instance); err != nil {
 		logger.Printf("settings are not saved: %v", err)

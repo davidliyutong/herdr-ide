@@ -9,6 +9,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 )
 
@@ -41,11 +42,17 @@ func Read(path string) ([]byte, Sig, error) {
 	return b, sig, err
 }
 
-// Write replaces the file atomically (mode 0600, its directory created with
-// 0700) and returns its new signature.
+// Write replaces the file atomically (mode 0600) and returns its new
+// signature. Its directory is created with 0700; one that exists, is a
+// directory (not a link) and belongs to this user is made 0700 when others
+// may access it. The directory is the product's own configuration
+// directory, which holds nothing for other users.
 func Write(path string, data []byte) (Sig, error) {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return Sig{}, err
+	}
+	if err := private(dir); err != nil {
 		return Sig{}, err
 	}
 	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+"-*")
@@ -64,6 +71,21 @@ func Write(path string, data []byte) (Sig, error) {
 		return Sig{}, err
 	}
 	return Stat(path), nil
+}
+
+// private takes group and other access away from dir when it is a
+// directory of this user; a link or another user's directory is left as it
+// is.
+func private(dir string) error {
+	st, err := os.Lstat(dir)
+	if err != nil {
+		return err
+	}
+	sys, ok := st.Sys().(*syscall.Stat_t)
+	if !st.IsDir() || !ok || int(sys.Uid) != os.Getuid() || st.Mode().Perm()&0o077 == 0 {
+		return nil
+	}
+	return os.Chmod(dir, st.Mode().Perm()&0o700)
 }
 
 // Poll calls check every interval until ctx ends. Stores use it to notice

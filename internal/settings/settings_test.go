@@ -188,6 +188,13 @@ func TestValidation(t *testing.T) {
 		{"b.on", "", "true", ErrInvalid},
 		{"b.path", "", "relative", ErrInvalid},
 		{"b.path", "", "/a\nb", ErrInvalid},
+		// Every control character: C0, DEL and C1.
+		{"b.path", "", "/a\tb", ErrInvalid},
+		{"b.path", "", "/a\x1b[31mb", ErrInvalid},
+		{"b.path", "", "/a\x00b", ErrInvalid},
+		{"b.path", "", "/a\x7fb", ErrInvalid},
+		{"b.path", "", "/a\u0085b", ErrInvalid},
+		{"b.path", "", "/a\u009bb", ErrInvalid},
 		{"b.color", "", "red", ErrInvalid},
 		{"b.palette", "", []any{"#000000"}, ErrInvalid},
 		{"b.palette", "", []any{"#000000", 3.0}, ErrInvalid},
@@ -198,6 +205,9 @@ func TestValidation(t *testing.T) {
 		if err := s.Set(c.key, c.machine, c.value); !errors.Is(err, c.want) {
 			t.Errorf("Set(%s, %q, %v) = %v, want %v", c.key, c.machine, c.value, err, c.want)
 		}
+	}
+	if err := s.Set("b.path", "", "/srv/données é"); err != nil {
+		t.Errorf("printable non-ASCII path: %v", err)
 	}
 	if err := s.Set("b.color", "", "#ABCDEF"); err != nil || s.String("b.color", "") != "#abcdef" {
 		t.Errorf("color: %v %q", err, s.String("b.color", ""))

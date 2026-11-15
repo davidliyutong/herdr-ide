@@ -183,7 +183,7 @@ export const en = {
   'machine.renameFailed': 'Could not rename {machine}: {detail}',
   'machine.labelTaken': 'another machine has this name.',
   'machine.exists': 'the machine is there already.',
-  'machine.invalid': 'the target or name was refused: a target has no spaces and does not start with “-”.',
+  'machine.invalid': 'the target or name was refused: a target has only letters, digits and . _ - @ : / [ ] % and does not start with “-”.',
   'machine.gone': 'the machine is no longer there.',
   'machine.localOnly': 'the local machine cannot be changed this way.',
   'machine.notSaved': 'the machines file could not be saved.',
@@ -401,7 +401,7 @@ export const en = {
   'addMachine.targetPlaceholder': 'host alias from ~/.ssh/config, or user@host',
   'addMachine.label': 'Name',
   'addMachine.labelPlaceholder': 'optional; defaults to the host',
-  'addMachine.badTarget': 'Enter an ssh destination without spaces that does not start with “-”.',
+  'addMachine.badTarget': 'Enter an ssh destination of letters, digits and . _ - @ : / [ ] % that does not start with “-”.',
   'addMachine.explain':
     'It connects with your ssh configuration (aliases, keys, jump hosts). A password, a key’s passphrase or a new host key is asked for in a terminal.',
   'addMachine.start': 'Add',

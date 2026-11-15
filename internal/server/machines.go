@@ -20,27 +20,9 @@ import (
 	"herdr-ide/internal/machines"
 )
 
-// Limits of what the forms accept: a target that cannot read as an option to
-// ssh, and no odd bytes in the audit log.
-const (
-	maxTargetLen = 255
-	maxLabelLen  = 64
-)
-
-// validTarget accepts an ssh destination (a ~/.ssh/config alias, host,
-// user@host or ssh:// URL): printable ASCII without spaces, not starting
-// with "-", which ssh would take for an option.
-func validTarget(t string) bool {
-	if t == "" || len(t) > maxTargetLen || t[0] == '-' {
-		return false
-	}
-	for i := 0; i < len(t); i++ {
-		if t[i] <= ' ' || t[i] > '~' {
-			return false
-		}
-	}
-	return true
-}
+// maxLabelLen bounds a label: no odd bytes in the audit log. Targets are
+// checked by machines.ValidTarget.
+const maxLabelLen = 64
 
 // validLabel accepts a short label without control characters.
 func validLabel(l string) bool {
@@ -82,6 +64,8 @@ func machineFailed(w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "label_taken"})
 	case errors.Is(err, machines.ErrLocalMachine):
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "local"})
+	case errors.Is(err, machines.ErrInvalidTarget):
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid"})
 	default:
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "save", "detail": err.Error()})
 	}
@@ -100,7 +84,7 @@ func (s *Server) handleMachineAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	target, label := strings.TrimSpace(body.Target), strings.TrimSpace(body.Label)
-	if !validTarget(target) || !validLabel(label) {
+	if !machines.ValidTarget(target) || !validLabel(label) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid"})
 		return
 	}

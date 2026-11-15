@@ -57,8 +57,18 @@ public final class CoreProcess {
     /// {"event":"ready","url":"http://127.0.0.1:PORT"}.
     public static func readyURL(_ line: String) -> URL? {
         guard let obj = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any],
-              obj["event"] as? String == "ready", let text = obj["url"] as? String,
-              let url = URL(string: text), url.host == "127.0.0.1" || url.host == "localhost" else { return nil }
+              obj["event"] as? String == "ready", let text = obj["url"] as? String else { return nil }
+        return loopbackURL(text)
+    }
+
+    /// The URL of a core on this Mac's loopback interface: http(s) to
+    /// 127.0.0.1 or localhost, without user information. The application
+    /// talks to no other core, whether the core announced itself
+    /// (`readyURL`) or a development variable names it.
+    public static func loopbackURL(_ text: String) -> URL? {
+        guard let url = URL(string: text), let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              let host = url.host?.lowercased(), host == "127.0.0.1" || host == "localhost",
+              url.user == nil, url.password == nil else { return nil }
         return url
     }
 

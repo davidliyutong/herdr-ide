@@ -97,7 +97,9 @@ type Header struct {
 	// "auto" to search PATH and the usual install locations.
 	Bin string `json:"bin,omitempty"`
 	// URL (action download) is fetched by the machine itself; Digest is the
-	// expected SHA-256, "" when unknown (the reply then reports it).
+	// expected SHA-256, "" when unknown (the reply then reports it). With
+	// OpHC, Digest is the SHA-256 of the executable to install, and of the
+	// one a start or restart may run.
 	URL    string `json:"url,omitempty"`
 	Digest string `json:"digest,omitempty"`
 }

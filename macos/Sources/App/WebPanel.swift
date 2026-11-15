@@ -101,25 +101,21 @@ final class WebPanel: NSView, WKNavigationDelegate, WKUIDelegate {
     /// Whether `view` is in one of the panel's pages.
     func contains(_ view: NSView?) -> Bool { view?.isDescendant(of: self) ?? false }
 
-    private func isCore(_ url: URL?) -> Bool {
-        guard let url else { return false }
-        if url.scheme == "about" || url.scheme == "blob" || url.scheme == "data" { return true }
-        return url.scheme == core.scheme && url.host == core.host && url.port == core.port
-    }
-
     private func openOutside(_ url: URL?) {
         if let url, ["http", "https", "mailto"].contains(url.scheme?.lowercased() ?? "") { NSWorkspace.shared.open(url) }
     }
 
     func webView(_: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        if isCore(action.request.url) { return decisionHandler(.allow) }
-        if action.targetFrame?.isMainFrame != false { openOutside(action.request.url) }
+        let mainFrame = action.targetFrame?.isMainFrame ?? true
+        if WebNavigation.allows(action.request.url, core: core, mainFrame: mainFrame) { return decisionHandler(.allow) }
+        if mainFrame { openOutside(action.request.url) }
         decisionHandler(.cancel)
     }
 
-    /// window.open: nothing opens inside the application.
+    /// window.open: nothing opens inside the application; web links open in
+    /// the browser.
     func webView(_: WKWebView, createWebViewWith _: WKWebViewConfiguration, for action: WKNavigationAction, windowFeatures _: WKWindowFeatures) -> WKWebView? {
-        if !isCore(action.request.url) || action.request.url?.scheme?.hasPrefix("http") == true { openOutside(action.request.url) }
+        openOutside(action.request.url)
         return nil
     }
 }

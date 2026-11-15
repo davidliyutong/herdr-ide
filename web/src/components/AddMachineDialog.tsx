@@ -13,7 +13,8 @@ export interface AddMachineForm {
  * ssh destination without spaces that does not read as an option. */
 export function addMachineProblem(f: AddMachineForm): 'target' | undefined {
   const target = f.target.trim();
-  if (!target || target.startsWith('-') || /[^\x21-\x7e]/.test(target) || target.length > 255) return 'target';
+  // As the core checks it (machines.ValidTarget): letters, digits and . _ - @ : / [ ] %.
+  if (!target || target.startsWith('-') || /[^A-Za-z0-9._@:/[\]%-]/.test(target) || target.length > 255) return 'target';
   return undefined;
 }
 

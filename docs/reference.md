@@ -34,7 +34,7 @@ here; both READMEs link to this page instead of repeating it.
 | --- | --- | --- |
 | `--local-only` | `false` | Do not connect to the stored SSH machines (`--ssh` targets are still used). |
 | `--machine` | – | Connect only these machines, by id, label or ssh target (repeatable). |
-| `--ssh` | – | Extra ssh target (`~/.ssh/config` alias or `user@host`) for this run, not stored; renaming or disabling it in the UI lasts until the core stops (repeatable). |
+| `--ssh` | – | Extra ssh target (`~/.ssh/config` alias or `user@host`) for this run, not stored; renaming or disabling it in the UI lasts until the core stops (repeatable). Letters, digits and `. _ - @ : / [ ] %` only, not starting with `-`; the core refuses to start otherwise. |
 | `--instance` | – | State instance: machines use `~/.herdr-ide-<instance>` instead of `~/.herdr-ide`, with separate sockets, terminal core (session `herdr-ide-<instance>`), code-server process and settings. Lets a development core run next to the daily one. |
 
 ### code-server
@@ -292,14 +292,14 @@ missing here.
 | `POST /m/{id}/gui/{win}/close` | writes | Asks a program window to close. |
 | `POST /api/m/{id}/gui/enable` | writes | Gives open terminals the machine's display (`{"terminals": [...]}`, empty for all). |
 | `GET /api/gui` | – | The program windows of every machine. |
-| `/` | – | The web UI (`/licenses.md`: the notices of its bundle). |
+| `/` | – | The web UI (`/licenses.md`: the notices of its bundle); any other path gets the app shell for the UI's own routes, except `/api/…` paths no route takes, which are 404. |
 
 ## Environment variables
 
 | Variable | Where | Description |
 | --- | --- | --- |
 | `HERDR_IDE_BRIDGE_SOCKET` | set by the agent for code-server | Socket of the VS Code bridge extension. |
-| `HERDR_IDE_CORE` | `pnpm -C web dev`, the macOS application | Core URL the Vite dev server proxies to (default `http://127.0.0.1:7780`); the macOS application uses that core instead of starting the one in its bundle. |
+| `HERDR_IDE_CORE` | `pnpm -C web dev`, the macOS application | Core URL the Vite dev server proxies to (default `http://127.0.0.1:7780`); the macOS application uses that core instead of starting the one in its bundle when it is on loopback (`http(s)://127.0.0.1` or `localhost`), and ignores it otherwise. |
 | `HERDR_IDE_DEV` | the macOS application | `1` starts the bundled core as instance `dev`, local-only, like `make dev-desktop`. |
 | `HERDR_IDE_SNAPSHOT`, `HERDR_IDE_ACTIONS` | debug builds of the macOS application | Development aids: a path the window is written to as a PNG every two seconds, and actions run two seconds apart (`new`, `split-right`, `split-down`, `close`, `next-tab`, `workspace:<name>[:<cwd>]` (a new workspace with a terminal, without the dialog), `rename-workspace:<name>`, `close-workspace` (without asking), `close-workspace:<names>`, `next-workspace`, `type:<text>`, `find:<text>`, `find-next`, `open:<path>`, `code`, `page`, `settings`, `settings:<section>`, `keys` (the keyboard shortcuts page), `set:<key>=<json>` (a setting changed through the core), `strokes:<stroke> <stroke>…` (strokes given to the key matcher), `key:cmd+<key>`, `command:<id>` (a command of the keybindings), `folder:<path>` (a folder dropped on the Dock icon), `palette:<text>`, `drag:<from>:<to>:<zone>` (a pane dragged by its header, or `tab`), `add-machine`, `machine:<add\|signin\|remove\|menu>:<target>`, `transfers`, `files:<dir>`, `select:<names>`, `download-to:<file>`, `upload-file:<file>`, `paste-file:<file>`, `paste-image:<png>`, `record:<command>:<strokes>` (the key recorder), `hover:<column>,<row>` (the pointer resting on a cell), separated by `;`); the window's other windows are written beside it as `<path>.window.png`, `.window2.png`…. |
 | `HERDR_IDE_DESKTOP_DEV` | Electron | `1` forces isolated development even in a packaged app: instance `dev` (terminal core session `herdr-ide-dev`), local-only, separate Electron profile. Unpackaged Electron always uses this mode. |
@@ -320,7 +320,7 @@ Variables of the build scripts and tests:
 | `GHOSTTY_SRC` | `make vt-wasm` | A Ghostty checkout to build libghostty-vt from instead of the pinned clone. |
 | `ARCH` | `make desktop-app`, `make desktop-dmg` | `arm64` or `x64`; defaults to the host Node architecture. The Go core architecture is matched automatically. |
 | `INSTALL_DIR` | `make desktop-install` | Where the Electron app is installed (default `/Applications`). |
-| `SIGN_IDENTITY`, `NOTARY_PROFILE` | `make macos-app` | A code-signing certificate's name (default `-`, an ad hoc signature) and a `notarytool` keychain profile; with both the application is notarized and stapled. `SKIP_CORE=1` reuses the core in `dist/`; `OUT_DIR` is where the `.app` goes (default `dist/macos`). |
+| `SIGN_IDENTITY`, `NOTARY_PROFILE` | `make macos-app`, `scripts/macos-app.sh sign` | A code-signing certificate's name (default `-`, an ad hoc signature) and a `notarytool` keychain profile; with both the application is notarized and stapled. `scripts/macos-app.sh sign` signs (and notarizes) a bundle built before again. `SKIP_CORE=1` reuses the core in `dist/`; `OUT_DIR` is where the `.app` goes (default `dist/macos`). |
 | `DEVELOPER_DIR` | `make macos-*` | The Xcode to use; the script picks `/Applications/Xcode.app` when the active developer directory is the command line tools. |
 | `DEV_LISTEN` | `make dev-core`, `make dev-web` | The development core's address (default `127.0.0.1:7790`). |
 | `HC_TEST_BIN` | `make it` | herdr-core executable for the integration tests; otherwise `hc` is found on `PATH`, and without one they are skipped. `go run ./scripts/fetch-hc -exe <file> <os>/<arch>` writes the pinned one. |
@@ -388,8 +388,8 @@ The macOS application keeps, in its preferences (`dev.herdr-ide.mac`), the
 window's frames and the transfers' history (the last 50 finished uploads
 and downloads: file names, machines and paths, no contents), until the user
 clears the history in the transfers panel or removes the preferences; its
-Quick Look copies are in a private temporary directory emptied before each
-preview and at quit.
+Quick Look copies are in a private temporary directory emptied when the
+next preview is complete and at quit.
 
 Desktop artifacts: `dist/desktop/mac-arm64/herdr-ide.app` (arm64),
 `dist/desktop/mac/herdr-ide.app` (x64), and

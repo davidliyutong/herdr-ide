@@ -183,3 +183,65 @@ func TestHCSessionOfDefaultInstance(t *testing.T) {
 		t.Fatalf("status = %+v %v", rep.HC, err)
 	}
 }
+
+// Before a start or restart the agent hashes the executable again: one that
+// changed since it was installed (even keeping its size and time) does not
+// run. After a start or restart the API socket is private (0600) whatever
+// mode the terminal core created it with.
+func TestHCVerifiedBeforeStartAndSocketPrivate(t *testing.T) {
+	s, home := hcAgent(t, "dev")
+	ctx := context.Background()
+	rep, digest := installHC(t, s, fakeHC, "")
+	if !rep.OK {
+		t.Fatalf("install: %+v", rep)
+	}
+	socket := filepath.Join(home, ".herdr-ide-dev", "run", "hc.sock")
+	ln, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() { // no core answers: the status after an action says so at once
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			c.Close()
+		}
+	}()
+	for _, action := range []string{"start", "restart"} {
+		os.Chmod(socket, 0o755) // as herdr-core creates it
+		rep, err := s.Request(ctx, agentproto.Header{Op: agentproto.OpHC, Action: action, Digest: digest})
+		if err != nil || !rep.OK {
+			t.Fatalf("%s: %+v %v", action, rep, err)
+		}
+		if st, err := os.Stat(socket); err != nil || st.Mode().Perm() != 0o600 {
+			t.Fatalf("%s: socket %v %v", action, st.Mode(), err)
+		}
+	}
+	// Another build's digest: refused, nothing runs.
+	os.Remove(filepath.Join(home, "ran"))
+	if rep, err := s.Request(ctx, agentproto.Header{Op: agentproto.OpHC, Action: "start", Digest: strings.Repeat("ab", 32)}); err == nil || rep.Code != agentproto.HCBadDigest {
+		t.Fatalf("start of another digest: %+v %v", rep, err)
+	}
+	// The file changes in place, keeping its size and modification time.
+	bin := filepath.Join(home, ".herdr-ide-dev", "hc", "herdr-core")
+	st, _ := os.Stat(bin)
+	tampered := []byte(strings.Replace(fakeHC, "exit 0", "exit 1", 1))
+	if len(tampered) != int(st.Size()) {
+		t.Fatal("the stand-in changed its size")
+	}
+	if err := os.WriteFile(bin, tampered, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	os.Chtimes(bin, st.ModTime(), st.ModTime())
+	for _, action := range []string{"start", "restart"} {
+		if rep, err := s.Request(ctx, agentproto.Header{Op: agentproto.OpHC, Action: action, Digest: digest}); err == nil || rep.Code != agentproto.HCBadDigest {
+			t.Fatalf("%s of a changed executable: %+v %v", action, rep, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(home, "ran")); err == nil {
+		t.Fatal("a refused executable ran")
+	}
+}

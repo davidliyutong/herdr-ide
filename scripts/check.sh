@@ -45,8 +45,11 @@ for f in $( (go run "./cmd/${slug}" serve -h; go run "./cmd/${slug}" fetch-asset
 done
 
 echo "==> endpoints documented"
-# Every route of the server's mux, as `METHOD /path` or `/path`.
-for route in $(sed -n 's/^[[:space:]]*mux\.Handle\(Func\)\{0,1\}("\([^"]*\)".*/\2/p' internal/server/server.go | tr ' ' '_'); do
+# Every route of the server's route table (Server.routes), as `METHOD /path`
+# or `/path`.
+routes=$(sed -n 's/^[[:space:]]*\(route\)\{0,1\}{"\([^"]*\)", .*/\2/p' internal/server/server.go | tr ' ' '_')
+if [[ $(wc -w <<<"$routes") -lt 20 ]]; then echo "found only $(wc -w <<<"$routes") routes in internal/server/server.go"; fail=1; fi
+for route in $routes; do
   route=${route//_/ }
   grep -qF -- "\`$route\`" docs/reference.md || { echo "endpoint $route missing from docs/reference.md"; fail=1; }
 done

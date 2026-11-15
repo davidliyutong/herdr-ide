@@ -123,13 +123,41 @@ func OpenRegistry(path string, imp func() ([]Spec, error)) (*Registry, error) {
 	return r, r.save()
 }
 
+// MaxTargetLen bounds an ssh target.
+const MaxTargetLen = 255
+
+// ValidTarget accepts an ssh destination: a ~/.ssh/config alias, host,
+// user@host, host:port, [IPv6] or ssh://user@host:port URL. Only letters,
+// digits and . _ - @ : / [ ] % are allowed, so a target holds no space,
+// control character or shell metacharacter, and it does not start with "-",
+// which ssh would take for an option. Every ssh command also puts "--"
+// before it (internal/transport).
+func ValidTarget(t string) bool {
+	if t == "" || len(t) > MaxTargetLen || t[0] == '-' {
+		return false
+	}
+	for i := 0; i < len(t); i++ {
+		switch c := t[i]; {
+		case 'a' <= c && c <= 'z', 'A' <= c && c <= 'Z', '0' <= c && c <= '9':
+		case strings.IndexByte("._-@:/[]%", c) >= 0:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// ErrInvalidTarget is returned for a machine whose ssh target ValidTarget
+// refuses.
+var ErrInvalidTarget = errors.New("invalid ssh target")
+
 // valid returns a record as it is stored: an SSH machine with an id and a
-// target, or the local machine's.
+// valid target, or the local machine's.
 func valid(s Spec) (Spec, bool) {
 	switch {
 	case s.ID == LocalID:
 		return Spec{ID: LocalID, Kind: KindLocal, Enabled: s.Enabled}, true
-	case s.ID == "" || s.Target == "":
+	case s.ID == "" || !ValidTarget(s.Target):
 		return s, false
 	}
 	s.Kind = KindSSH
@@ -170,7 +198,7 @@ func (r *Registry) Get(id string) (Spec, bool) {
 func (r *Registry) Put(s Spec) error {
 	s, ok := valid(s)
 	if !ok {
-		return errors.New("machine record without an id or a target")
+		return fmt.Errorf("machine record without an id or a valid target: %w", ErrInvalidTarget)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -266,7 +294,8 @@ func SavedSpecs() ([]Spec, error) {
 
 // LoadSpecs returns the local machine, the stored SSH machines and the
 // extra (--ssh) ones not stored, each once. The local machine's stored
-// record gives its enabled flag; its label is the host's name.
+// record gives its enabled flag; its label is the host's name. Machines
+// whose target ValidTarget refuses are left out.
 func LoadSpecs(stored, extra []Spec) []Spec {
 	hostname, _ := os.Hostname()
 	hostname = strings.TrimSuffix(hostname, ".local")
@@ -278,7 +307,7 @@ func LoadSpecs(stored, extra []Spec) []Spec {
 			specs[0].Enabled = s.Enabled
 			continue
 		}
-		if seen[s.ID] || s.Kind != KindSSH {
+		if seen[s.ID] || s.Kind != KindSSH || !ValidTarget(s.Target) {
 			continue
 		}
 		specs = append(specs, s)
@@ -288,7 +317,7 @@ func LoadSpecs(stored, extra []Spec) []Spec {
 		if s.ID == "" {
 			s.ID = s.Target
 		}
-		if seen[s.ID] {
+		if seen[s.ID] || !ValidTarget(s.Target) {
 			continue
 		}
 		s.Kind = KindSSH

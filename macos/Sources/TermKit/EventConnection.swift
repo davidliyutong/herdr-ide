@@ -31,12 +31,16 @@ public struct Machine: Equatable {
         self.home = home
     }
 
-    /// Why a target typed for a new machine cannot be one, as the core
-    /// checks it: an ssh destination of printable ASCII without spaces that
-    /// does not read as an option, at most 255 characters.
+    /// Whether a target typed for a new machine can be one, as the core
+    /// checks it (`machines.ValidTarget`): an ssh destination of letters,
+    /// digits and `. _ - @ : / [ ] %` that does not read as an option, at
+    /// most 255 characters.
     public static func validTarget(_ target: String) -> Bool {
         let t = target.trimmingCharacters(in: .whitespaces)
-        return !t.isEmpty && !t.hasPrefix("-") && t.count <= 255 && t.unicodeScalars.allSatisfy { $0.value > 0x20 && $0.value < 0x7f }
+        let allowed = Set("._-@:/[]%".unicodeScalars)
+        return !t.isEmpty && !t.hasPrefix("-") && t.utf8.count <= 255 && t.unicodeScalars.allSatisfy {
+            ("a"..."z").contains($0) || ("A"..."Z").contains($0) || ("0"..."9").contains($0) || allowed.contains($0)
+        }
     }
 }
 

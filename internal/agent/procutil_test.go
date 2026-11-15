@@ -12,11 +12,11 @@ import (
 func TestCleanEnv(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	drop := []string{
-		"HC_SESSION", "HC_SOCKET", "HC_TERMINAL_ID", "HC_TERMINAL_SOCKET",
+		"HC_SESSION", "HC_SOCKET", "HC_TERMINAL_ID", "HC_TERMINAL_SOCKET", "HC_LOG", "HC_CONFIG_DIR", "HC_",
 		"HERDR_PANE_ID", "HERDR_SOCKET_PATH", "HERDR_ENV", "HERDR_WORKSPACE_ID",
 		"TMUX", "TMUX_PANE", "STY", "ZELLIJ", "ZELLIJ_SESSION_NAME",
 	}
-	keep := []string{"PATH", "LANG", "TERM_PROGRAM", "TMUX_TMPDIR", "WINDOW", brand.EnvPrefix + "CORE"}
+	keep := []string{"PATH", "LANG", "TERM_PROGRAM", "TMUX_TMPDIR", "WINDOW", "HCX", "MY_HC_VAR", brand.EnvPrefix + "CORE"}
 	for _, k := range append(append([]string{}, drop...), keep...) {
 		t.Setenv(k, "x")
 	}

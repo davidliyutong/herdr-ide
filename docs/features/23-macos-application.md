@@ -85,8 +85,10 @@ Non-goals: Linux and Windows.
   `PATH` extended by the usual install locations, and reads the URL from
   the core's ready line; it keeps the last 40 lines the core logged.
   `HERDR_IDE_DEV=1` starts it as instance `dev`, local-only;
-  `HERDR_IDE_CORE` names a running core to use instead
-  ([reference](../reference.md#environment-variables)).
+  `HERDR_IDE_CORE` names a running core to use instead, taken only when it
+  is on loopback (`http(s)://127.0.0.1` or `localhost`, the check the
+  ready line gets too; `CoreProcess.loopbackURL`), otherwise the bundled
+  core starts ([reference](../reference.md#environment-variables)).
 
 **App** (`macos/Sources/App`, AppKit).
 
@@ -262,10 +264,13 @@ Non-goals: Linux and Windows.
 - **Formulas** under the pointer ([19](19-formulas-in-panes.md)).
 - **Quick Look** (`QuickLook.swift`). The path is fetched with
   `GET /api/m/<machine>/file` into a directory of its own in the
-  temporary directory (0700; emptied before each preview and at quit) and
-  shown in the system's Quick Look panel, which previews what macOS can:
-  images, PDF, media, text, source code, archives. Files over 512 MiB,
-  folders and missing files are reported in a sheet.
+  temporary directory (0700; emptied when the next preview is complete and
+  at quit) and shown in the system's Quick Look panel, which previews what
+  macOS can: images, PDF, media, text, source code, archives. The file is
+  streamed into a file of its own (0600, `BoundedDownload`): a body whose
+  length is over 512 MiB is refused before a byte is written, and one
+  without a length is stopped once 512 MiB arrived. Such files, folders
+  and missing files are reported in a sheet.
 - **VS Code** (⌘J, `WebPanel.swift`). A panel takes half of the room
   beside the terminals and shows the core's code-server page
   (`/m/<machine>/code/?folder=…`) for the directory of the focused
@@ -273,6 +278,10 @@ Non-goals: Linux and Windows.
   The page is addressed as `localhost`, a secure context, which VS Code's
   web views need. The three most recently shown folders stay loaded. Only
   the core's origin loads in the panel; other links open in the browser.
+  `about:`, `blob:` and `data:` documents load only in frames inside the
+  core's pages (VS Code's webviews), never as the page itself, except the
+  empty `about:blank` (`WebNavigation`, which the program windows and the
+  formula preview use too).
   While a page has the keyboard, the terminal commands of the menu are
   off, so their keys reach VS Code.
 - **Settings** (⌘,, `Settings.swift`). A window built from the core's
@@ -340,8 +349,10 @@ builds the application that ships:
 
 CI runs `make macos-test` and `make macos-app` on a macOS runner for pull
 requests and `main`. The release workflow builds the arm64 application
-with the release's video encoder, signs and notarizes it when the
-repository has the certificate and the notary's credentials, and
+with the release's video encoder (signed ad hoc, without any secret),
+then, in the one step that gets the certificate and the notary's
+credentials when the repository has them, signs it again and notarizes it
+(`scripts/macos-app.sh sign`), and
 publishes it as `<name>-<version>-mac-native-arm64.zip` beside the
 archives and DMGs, in the same `SHA256SUMS`.
 
@@ -427,7 +438,12 @@ labels, menu equivalents, Ghostty's triggers, that the closing commands
 are the core's), `SettingsModelTests`, `FeatureTests` (the formula
 vectors of `design/testdata/math`, the programs' clipboard rule, the
 core's log kept for its failure), `CoreProcessTests` (the core's
-arguments, environment and ready line, a missing core) and
+arguments, environment and ready line, the loopback check of the ready
+line and `HERDR_IDE_CORE`, a missing core), `WebNavigationTests` (the
+core's origin only; `about:`, `blob:` and `data:` in frames only),
+`BoundedDownloadTests` (Quick Look's download: within the limit 0600,
+over it by its length and by the bytes streamed, an error status; no file
+left) and
 `LocalizationTests`, the localization checks of
 [12](12-internationalization.md) and the registry's keys. `internal/brand/brand_test.go` keeps
 `Brand.swift` in step. The window is
