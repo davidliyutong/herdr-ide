@@ -26,6 +26,7 @@ import {
   selectedWorkspace,
   selectTab,
   selectWorkspace,
+  workspaceTitle,
   setRatio,
   splitFocused,
   swapTerminals,
@@ -122,6 +123,9 @@ interface LayoutVector {
   ops: Array<Record<string, unknown>>;
   changed: boolean;
   expected: unknown;
+  /** The workspaces' names as shown (workspaceTitle), with home as the
+   * machine's home directory. */
+  titles?: { home: string; names: string[] };
 }
 
 const vectors = import.meta.glob<LayoutVector>('../../../design/testdata/layout/*.json', { eager: true, import: 'default' });
@@ -190,6 +194,7 @@ describe('layout', () => {
       expect(sameLayout(input, result)).toBe(!vector.changed);
       // The document reads back as the same layout.
       expect(sameLayout(parseLayout(JSON.parse(JSON.stringify(result))), result)).toBe(true);
+      if (vector.titles) expect(result.workspaces.map((w) => workspaceTitle(w, vector.titles!.home))).toEqual(vector.titles.names);
     });
   }
 

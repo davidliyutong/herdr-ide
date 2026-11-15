@@ -39,7 +39,7 @@ describe('TermModel', () => {
     const m = useTerms.getState().machines.m;
     expect(m.backend?.phase).toBe('ready');
     expect(Object.keys(m.terminals)).toEqual(['t1']);
-    expect(m.layout?.workspaces.map((w) => w.name)).toEqual(['Workspace']);
+    expect(m.layout?.workspaces.map((w) => w.name)).toEqual(['']);
     // Both changes are written back.
     expect(core.layout('m')?.workspaces).toHaveLength(1);
     expect(core.layout('n')?.workspaces[0].tabs.map((x) => L.tabTerminals(x))).toEqual([['a'], ['b']]);

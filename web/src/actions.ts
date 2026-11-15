@@ -371,8 +371,8 @@ export const actions = {
   },
 
   /** Creates a workspace and opens a terminal in it. Without a directory the
-   * dialog asks for one and a name; without a name it is called after its
-   * directory. */
+   * dialog asks for one and a name; without a name it is shown with its
+   * directory's (L.workspaceTitle). */
   async newWorkspace(m?: string, cwd?: string, name = '') {
     m ??= useStore.getState().machineId;
     if (!m) return;
@@ -387,10 +387,10 @@ export const actions = {
       name = input.label;
     }
     const id = L.newWorkspaceId();
-    const title = name || cwd.replace(/\/+$/, '').split('/').pop() || t('workspace.default');
+    const own = name.trim();
     const dir = cwd;
     await whenLoaded(m);
-    terms.mutate(m, (l) => L.createWorkspace(l, id, title, dir));
+    terms.mutate(m, (l) => L.createWorkspace(l, id, own, dir));
     await actions.newTab(m, id);
   },
 
@@ -402,7 +402,7 @@ export const actions = {
     if (
       !(await confirmDialog({
         title: t('confirm.closeWorkspaceTitle'),
-        message: t('confirm.closeWorkspace', { label: w.name || t('workspace.default') }),
+        message: t('confirm.closeWorkspace', { label: workspaceTitle(m, w) }),
         confirm: t('confirm.close'),
         danger: true,
       }))
@@ -438,8 +438,9 @@ export const actions = {
     terms.mutate(m, (l) => L.renameTab(l, ws, index, name));
   },
 
+  /** Names a workspace; an empty name shows its folder's again. */
   renameWorkspace(m: string, ws: string, name: string) {
-    if (name) terms.mutate(m, (l) => L.renameWorkspace(l, ws, name));
+    terms.mutate(m, (l) => L.renameWorkspace(l, ws, name.trim()));
   },
 
   /** Names a terminal's pane (its "name" label); empty shows its title again. */
@@ -579,6 +580,12 @@ export const actions = {
     else await actions.newTab(c.m, undefined, [kind]);
   },
 };
+
+/** A workspace's name as shown: the user's, else its folder's, the home
+ * directory of its machine as "~". */
+export function workspaceTitle(m: string, ws: Pick<L.Workspace, 'name' | 'cwd'>): string {
+  return L.workspaceTitle(ws, useStore.getState().machines[m]?.info?.home);
+}
 
 /** A tab's name: its own, else its focused terminal's title. */
 export function tabName(m: string, tab: L.Tab): string {

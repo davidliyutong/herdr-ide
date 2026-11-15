@@ -364,6 +364,7 @@ export const en = {
   'sidebar.signInElsewhere':
     'Windows’s ssh cannot keep a sign-in for the app: connect once with ssh in a terminal to accept the host key, use a key the ssh agent holds (ssh-add), then retry.',
   'sidebar.tabs': '{n} tabs',
+  'sidebar.oneTab': '1 tab',
   'sidebar.workspaceHint': '{label} · double-click to rename · drag to reorder',
   'sidebar.showTerminals': 'Show its terminals',
 
@@ -372,7 +373,6 @@ export const en = {
   'workspace.pick': 'Pick a workspace on the left, or create one.',
   'workspace.tabHint': '{label} · double-click to rename · drag to reorder',
   'workspace.paneCount': '{n} panes',
-  'workspace.default': 'Workspace',
   'workspace.hcStarting': 'Starting the terminals of {machine}…',
   'workspace.hcError': '{machine}: {error}',
   'workspace.noTabs': 'This workspace has no open terminals.',

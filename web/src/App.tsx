@@ -28,7 +28,7 @@ import { bridgeDownload, downloadEvent, resyncDownloads } from './download';
 import { sendTarget } from './lib/bridge';
 import { TransfersTray } from './components/Transfers';
 import { DownloadsTray } from './components/Downloads';
-import { actions } from './actions';
+import { actions, workspaceTitle } from './actions';
 
 /** Text sent from VS Code ("Send to agent") is pasted, not submitted, into
  * the terminal sendTarget picks: the focused one, or an agent of the
@@ -37,8 +37,8 @@ function pasteToAgent(m: string, text: string, folders?: string[]) {
   const s = useStore.getState();
   const { terminal, workspace } = sendTarget(s, m, folders);
   if (!terminal) {
-    const name = workspace && terms.layout(m)?.workspaces.find((w) => w.id === workspace)?.name;
-    s.toast(workspace ? t('app.noAgentInWorkspace', { workspace: name || t('workspace.default') }) : t('app.noAgentPane'));
+    const ws = workspace ? terms.layout(m)?.workspaces.find((w) => w.id === workspace) : undefined;
+    s.toast(ws ? t('app.noAgentInWorkspace', { workspace: workspaceTitle(m, ws) }) : t('app.noAgentPane'));
     return;
   }
   // Shown first, so the terminal is attached and takes the paste.

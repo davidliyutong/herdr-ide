@@ -399,6 +399,10 @@ body.resizing .sidebar-resizer::after {
   font-variant-numeric: tabular-nums;
   width: 14px;
 }
+.ws-name {
+  flex: 1;
+  min-width: 0;
+}
 .ws-meta {
   margin-left: auto;
   display: flex;

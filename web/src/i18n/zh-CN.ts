@@ -357,6 +357,7 @@ export const zhCN: Messages = {
   'sidebar.signInElsewhere':
     'Windows 的 ssh 无法为应用保留登录：请先在终端里用 ssh 连接一次以接受主机密钥，并使用 ssh agent 持有的密钥（ssh-add），然后重试。',
   'sidebar.tabs': '{n} 个标签页',
+  'sidebar.oneTab': '1 个标签页',
   'sidebar.workspaceHint': '{label} · 双击重命名 · 拖动可调整顺序',
   'sidebar.showTerminals': '显示终端',
 
@@ -365,7 +366,6 @@ export const zhCN: Messages = {
   'workspace.pick': '在左侧选择一个工作区，或新建一个。',
   'workspace.tabHint': '{label} · 双击重命名 · 拖动可调整顺序',
   'workspace.paneCount': '{n} 个窗格',
-  'workspace.default': '工作区',
   'workspace.hcStarting': '正在启动 {machine} 的终端…',
   'workspace.hcError': '{machine}：{error}',
   'workspace.noTabs': '这个工作区没有打开的终端。',

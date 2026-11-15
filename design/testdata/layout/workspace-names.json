@@ -1,0 +1,126 @@
+{
+  "description": "A workspace without a name of the user's is shown with the last component of its directory: \"~\" for the home directory or none, \"/\" for the root; the names earlier versions gave the workspaces they made (Workspace, 工作区) count as none, and an emptied name shows the folder's again. titles: the names shown (workspaceTitle) with home as the machine's home directory.",
+  "input": null,
+  "ops": [
+    {
+      "op": "createWorkspace",
+      "id": "w1",
+      "name": "",
+      "cwd": "/home/u/src/website/"
+    },
+    {
+      "op": "createWorkspace",
+      "id": "w2",
+      "name": "",
+      "cwd": "/home/u"
+    },
+    {
+      "op": "createWorkspace",
+      "id": "w3",
+      "name": "",
+      "cwd": ""
+    },
+    {
+      "op": "createWorkspace",
+      "id": "w4",
+      "name": "Workspace",
+      "cwd": "/srv/app"
+    },
+    {
+      "op": "createWorkspace",
+      "id": "w5",
+      "name": "工作区",
+      "cwd": "/"
+    },
+    {
+      "op": "createWorkspace",
+      "id": "w6",
+      "name": "notes",
+      "cwd": "~/notes"
+    },
+    {
+      "op": "createWorkspace",
+      "id": "w7",
+      "name": "",
+      "cwd": "~"
+    },
+    {
+      "op": "renameWorkspace",
+      "workspace": "w1",
+      "name": "site"
+    },
+    {
+      "op": "renameWorkspace",
+      "workspace": "w6",
+      "name": ""
+    }
+  ],
+  "changed": true,
+  "expected": {
+    "version": 2,
+    "workspaces": [
+      {
+        "id": "w1",
+        "name": "site",
+        "cwd": "/home/u/src/website/",
+        "tabs": [],
+        "selected": 0
+      },
+      {
+        "id": "w2",
+        "name": "",
+        "cwd": "/home/u",
+        "tabs": [],
+        "selected": 0
+      },
+      {
+        "id": "w3",
+        "name": "",
+        "cwd": "",
+        "tabs": [],
+        "selected": 0
+      },
+      {
+        "id": "w4",
+        "name": "Workspace",
+        "cwd": "/srv/app",
+        "tabs": [],
+        "selected": 0
+      },
+      {
+        "id": "w5",
+        "name": "工作区",
+        "cwd": "/",
+        "tabs": [],
+        "selected": 0
+      },
+      {
+        "id": "w6",
+        "name": "",
+        "cwd": "~/notes",
+        "tabs": [],
+        "selected": 0
+      },
+      {
+        "id": "w7",
+        "name": "",
+        "cwd": "~",
+        "tabs": [],
+        "selected": 0
+      }
+    ],
+    "selected": 6
+  },
+  "titles": {
+    "home": "/home/u",
+    "names": [
+      "site",
+      "~",
+      "~",
+      "app",
+      "/",
+      "notes",
+      "~"
+    ]
+  }
+}

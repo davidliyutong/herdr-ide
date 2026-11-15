@@ -14,6 +14,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { DesktopShell, OpenedFolders } from '../shell';
 import { FakeXhr } from './fakeXhr';
+import { workspaceTitle } from '../term/layout';
 
 vi.mock('../lib/conn', () => ({
   conn: {
@@ -147,11 +148,12 @@ describe('dropped folders', () => {
       ]),
     );
     await act(fake.settle);
-    // Each a workspace named after its folder, the last one selected.
+    // Each a workspace without a name of its own, shown with its folder's,
+    // the last one selected.
     const layout = core.layout('local')!;
-    expect(layout.workspaces.slice(1).map((w) => [w.name, w.cwd])).toEqual([
-      ['app', '/Users/u/Projects/app'],
-      ['lib', '/Users/u/Projects/lib'],
+    expect(layout.workspaces.slice(1).map((w) => [w.name, w.cwd, workspaceTitle(w)])).toEqual([
+      ['', '/Users/u/Projects/app', 'app'],
+      ['', '/Users/u/Projects/lib', 'lib'],
     ]);
     expect(layout.selected).toBe(2);
     expect(store.useStore.getState().toasts.map((t) => t.msg)).toEqual([

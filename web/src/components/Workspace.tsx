@@ -3,7 +3,7 @@ import { PanelLeft, Plus, X } from 'lucide-react';
 import { useStore } from '../state/store';
 import { terms, useTerms } from '../state/terms';
 import * as L from '../term/layout';
-import { actions, paneRects, tabName } from '../actions';
+import { actions, paneRects, tabName, workspaceTitle } from '../actions';
 import { TerminalView } from './TerminalView';
 import { PaneHeader } from './PaneHeader';
 import { StatusDot } from './StatusDot';
@@ -60,7 +60,7 @@ export function Workspace() {
           <PanelLeft />
         </button>
         <span className="crumb">
-          <span className="muted">{machine.label}</span> / {ws.name || t('workspace.default')}
+          <span className="muted">{machine.label}</span> / {workspaceTitle(m, ws)}
         </span>
         <div className="tabs" data-m={m} data-ws={ws.id}>
           {ws.tabs.map((tb, i) => {

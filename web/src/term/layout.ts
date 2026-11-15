@@ -31,6 +31,7 @@ export type Tab = Extra & {
 
 export type Workspace = Extra & {
   id: string;
+  /** The user's name for it; empty for none (workspaceTitle). */
   name: string;
   /** Where new terminals start; empty for none. */
   cwd: string;
@@ -83,6 +84,26 @@ export function locate(layout: Layout, address: string): { workspace: number; ta
     if (t >= 0) return { workspace: w, tab: t };
   }
   return null;
+}
+
+/** The names earlier versions gave the workspaces they made themselves, in
+ * the languages they had: a workspace with one has no name of the user's. */
+const GENERATED_NAMES = new Set(['Workspace', '工作区']);
+
+/** The last component of a directory as a workspace is named after it: "~"
+ * for the home directory or none, "/" for the root. */
+export function folderName(cwd: string, home = ''): string {
+  const strip = (p: string) => p.trim().replace(/\/+$/, '');
+  const dir = strip(cwd);
+  if (!cwd.trim() || dir === '~' || (home && dir === strip(home))) return '~';
+  return dir ? dir.slice(dir.lastIndexOf('/') + 1) : '/';
+}
+
+/** A workspace's name as shown: the user's, else its folder's
+ * (folderName). An emptied name gives it its folder's again. */
+export function workspaceTitle(ws: Pick<Workspace, 'name' | 'cwd'>, home?: string): string {
+  const name = ws.name.trim();
+  return name && !GENERATED_NAMES.has(name) ? name : folderName(ws.cwd, home);
 }
 
 /** A short random id for a new workspace. */

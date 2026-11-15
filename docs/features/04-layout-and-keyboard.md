@@ -42,8 +42,9 @@ Non-goals: arbitrary docking of panes; floating panes.
   when selected in the sidebar or the palette): it subscribes to their
   terminals, which installs and starts their terminal cores
   ([02](02-multi-machine-transport.md)), then reads their layout documents.
-  A machine whose document has no workspace gets one, named in the user's
-  language. Terminals that no longer run are dropped from it.
+  A machine whose document has no workspace gets one without a name or a
+  directory (shown as `~`). Terminals that no longer run are dropped from
+  it.
 - The shown machine's selected workspace, its selected tab and the focused
   terminal are the document's: selecting a workspace or tab, or focusing a
   pane, writes it, and every client follows. Edits are written one at a time
@@ -86,10 +87,17 @@ Non-goals: arbitrary docking of panes; floating panes.
   the last tab, and a label longer than 16em is cut with an ellipsis (the
   tooltip has it in full). The active tab has its own background, an
   outline and an accent bar under it. A tab is called by its name, else by
-  its focused terminal's pane name or title. The sidebar lists every
+  its focused terminal's pane name or title. A workspace is called by its
+  name, else by its folder: the last component of its directory, `~` for
+  the home directory or none, `/` for the root (`layout.workspaceTitle`;
+  `Workspace` and `工作区`, which earlier versions named the workspaces they
+  made, count as none), in the sidebar, the tab bar's breadcrumb (machine /
+  workspace), the palette, menus and messages. The sidebar lists every
   workspace of a followed machine one below the other (the selected one
   with an accent bar); a machine not followed yet offers to show its
-  terminals.
+  terminals. A workspace's row stays quiet: its number, its name and,
+  while one of its agents has a state, the most urgent one's dot; its
+  directory and number of tabs are in its tooltip.
 - Creating things: each button does one thing, named by its tooltip with
   its key. `+` at the end of the tab bar is **New Tab** in the workspace
   shown; the sidebar's head has **New Workspace…** (a folder with a plus,
@@ -132,8 +140,9 @@ Non-goals: arbitrary docking of panes; floating panes.
   cancels. A pane's name is the terminal's `name` label in the terminal
   core, which also names it in tabs, the sidebar and the palette (empty
   shows the terminal's title again); tab and workspace names are in the
-  layout document (an empty tab name shows its terminal's title again); a
-  machine's name is the core's ([02](02-multi-machine-transport.md)). A
+  layout document (an empty tab name shows its terminal's title again, an
+  emptied workspace name its folder's, which the field shows as its
+  placeholder); a machine's name is the core's ([02](02-multi-machine-transport.md)). A
   single click on a pane's title only focuses the pane; the first click
   of a double click on a machine folds or unfolds it and the second puts
   it back.
@@ -204,12 +213,12 @@ Non-goals: arbitrary docking of panes; floating panes.
 
 - Creating a workspace asks for its directory (the focused terminal's to
   begin with, else the machine's home), with completion of folders on the
-  machine (Tab, ↑↓; the folder must exist) and an optional name (else the
-  folder's). The workspace is added at the end of the layout document,
+  machine (Tab, ↑↓; the folder must exist) and an optional name (else it
+  is shown with the folder's, and stays without a name of its own). The workspace is added at the end of the layout document,
   selected, and opens a tab with a terminal in that directory. In the
   desktop app on macOS and Linux, folders dragged from
   the file manager onto the sidebar create a workspace each on the local machine,
-  without the dialog (named after the folder; the last one is selected); the sidebar shows where they go while they are over it, and
+  without the dialog (shown with the folder's name; the last one is selected); the sidebar shows where they go while they are over it, and
   dropped files that are not folders are skipped with a note. Folders
   opened with the app (dropped on its Dock icon on macOS, **Open With** in
   a Linux file manager) do the same, also
@@ -417,9 +426,12 @@ described in [13](13-settings-and-appearance.md))
 - `web/src/__tests__/term.test.ts`: the layout vectors of
   `design/testdata/layout` (workspaces, tabs, splits, closing, swaps and
   moves, directional focus and pane drops, version 1 documents, unknown
-  fields, malformed documents).
+  fields, malformed documents, the names workspaces are shown with).
+- `web/src/__tests__/sidebarMachines.test.ts`: workspaces shown with their
+  folder's name, rows without the tab count (in the tooltip), renaming in
+  place and an emptied name giving the folder's back.
 - `web/src/__tests__/terms.test.ts`: reading the document after the
-  terminals, with a workspace named in the language and without ended
+  terminals, with a workspace without a name and without ended
   terminals; one write at a time and another client's newer version; ended
   programs closing their panes; terminals asked for early.
 - `web/src/__tests__/core.test.ts` (pane geometry of split trees),

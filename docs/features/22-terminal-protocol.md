@@ -143,9 +143,12 @@ so every client of the machine shows the same arrangement. Version 2:
 ```
 
 - A workspace has an `id` (eight random lowercase letters and digits from
-  the client that created it, unique in the document), a `name`, the `cwd`
-  new terminals start in (empty for none), its `tabs` and its `selected`
-  tab. The top-level `selected` is the selected workspace.
+  the client that created it, unique in the document), a `name` (the
+  user's; empty for none), the `cwd` new terminals start in (empty for
+  none), its `tabs` and its `selected` tab. A workspace without a name is
+  shown with the last component of its `cwd`: `~` for the home directory or
+  none, `/` for the root (`workspaceTitle`); `Workspace` and `工作区`, the
+  names earlier clients gave the workspaces they made, count as none. The top-level `selected` is the selected workspace.
 - A tab has a `root` node and the `focused` terminal, and a `name` only
   when the user named it.
 - A node is a leaf `{"terminal": address}` or a split
@@ -176,7 +179,8 @@ so every client of the machine shows the same arrangement. Version 2:
   them.
 - `design/testdata/layout/*.json` holds the contract as vectors: an input
   document, operations, whether they change the layout, and the expected
-  document. The web UI's tests run every vector.
+  document, with the workspaces' names as shown for a home directory
+  (`titles`) where they matter. The web UI's tests run every vector.
 
 **Client.** `web/src/term` (TypeScript) follows the protocol and the
 layout document for the browser UI and the desktop app

@@ -11,7 +11,6 @@ import { TermConnection } from '../term/connection';
 import { TerminalStore } from '../term/store';
 import { isLive, type BackendState, type TerminalRecord } from '../term/protocol';
 import * as L from '../term/layout';
-import { t } from '../i18n';
 
 export interface MachineTerms {
   backend?: BackendState;
@@ -158,10 +157,10 @@ export class TermModel {
     this.publish();
   }
 
-  /** A layout always has a workspace to open terminals in, named in the
-   * user's language. */
+  /** A layout always has a workspace to open terminals in: one without a
+   * name or a directory, shown as the home directory (L.workspaceTitle). */
   private ensureWorkspace(l: L.Layout): L.Layout {
-    return l.workspaces.length ? l : L.createWorkspace(l, L.newWorkspaceId(), t('workspace.default'));
+    return l.workspaces.length ? l : L.createWorkspace(l, L.newWorkspaceId(), '');
   }
 
   private loadLayout(m: string, done?: () => void) {

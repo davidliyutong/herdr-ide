@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../state/store';
-import { actions, attentionList } from '../actions';
+import { actions, attentionList, workspaceTitle } from '../actions';
 import { commandEnabled, commandLabel, keyHint, runCommand } from '../keymap';
 import { useKeys } from '../keybindings';
 import { locales, t, type MessageKey } from '../i18n';
@@ -64,7 +64,7 @@ export function Palette() {
       for (const w of tm[m]?.layout?.workspaces ?? []) {
         ws.push({
           id: `ws:${m}:${w.id}`,
-          label: w.name || t('workspace.default'),
+          label: workspaceTitle(m, w),
           hint: st?.label,
           run: () => actions.selectWorkspace(m, w.id),
         });

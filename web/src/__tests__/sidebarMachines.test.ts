@@ -103,6 +103,50 @@ describe('Sidebar machines', () => {
     expect(core.layout('gpu')?.selected).toBe(0);
   });
 
+  it('names workspaces without a name after their folder, keeps rows quiet and renames them in place', async () => {
+    const core = new FakeCore();
+    const tab = (t: string) => ({ root: { terminal: t }, focused: t });
+    core.machine('gpu', [FakeCore.term('t1'), FakeCore.term('t2'), FakeCore.term('t3'), FakeCore.term('t4')], {
+      version: 2,
+      workspaces: [
+        { id: 'aaaaaaaa', name: '', cwd: '/home/u/src/website', tabs: [tab('t1'), tab('t2')], selected: 0 },
+        { id: 'bbbbbbbb', name: 'Workspace', cwd: '/home/u', tabs: [tab('t3')], selected: 0 },
+        { id: 'cccccccc', name: 'notes', cwd: '/home/u/notes', tabs: [tab('t4')], selected: 0 },
+      ],
+      selected: 0,
+    });
+    core.install();
+    await act(async () =>
+      useStore
+        .getState()
+        .setMachines([{ id: 'gpu', label: 'gpu', kind: 'ssh', status: 'ready', info: { home: '/home/u' } } as unknown as MachineState]),
+    );
+    await act(async () => useStore.getState().selectMachine('gpu'));
+    await act(async () => core.model.subscribe('gpu'));
+    await act(settle);
+    const items = () => Array.from(host.querySelectorAll<HTMLElement>('.ws-item[data-ws-id]'));
+    expect(items().map((e) => e.querySelector('.ws-name')?.textContent)).toEqual(['website', '~', 'notes']);
+    // No tab count in the row; the tooltip has it with the directory.
+    expect(items()[0].textContent).toBe('1website');
+    expect(items()[0].title).toBe('website · ~/src/website · 2 tabs · double-click to rename · drag to reorder');
+    expect(items()[1].title).toContain('~ · 1 tab ·');
+    // Renamed in place: the field starts with the name shown, an emptied
+    // name gives the folder's back.
+    const rename = async (id: string, value: string) => {
+      await act(async () => useStore.getState().setRenaming({ kind: 'workspace', m: 'gpu', id }));
+      const input = host.querySelector<HTMLInputElement>('.ws-item input')!;
+      expect(input.placeholder).toBe(id === 'cccccccc' ? 'notes' : 'website');
+      input.value = value;
+      await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+      await act(settle);
+    };
+    await rename('aaaaaaaa', 'site');
+    expect(core.layout('gpu')?.workspaces[0].name).toBe('site');
+    await rename('cccccccc', '');
+    expect(core.layout('gpu')?.workspaces[2].name).toBe('');
+    expect(items().map((e) => e.querySelector('.ws-name')?.textContent)).toEqual(['site', '~', 'notes']);
+  });
+
   it('folds disabled machines until opened, and unfolds them once enabled', async () => {
     const head = () => host.querySelector<HTMLElement>('.machine-head')!;
     const enable = () => Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Enable Machine');

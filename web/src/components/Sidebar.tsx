@@ -3,7 +3,7 @@ import { ChevronDown, ChevronRight, Ellipsis, FolderPlus, ServerPlus, Settings }
 import { SIDEBAR_WIDTH, useStore } from '../state/store';
 import { terms, useTerms } from '../state/terms';
 import { conn } from '../lib/conn';
-import { actions, attentionList } from '../actions';
+import { actions, attentionList, workspaceTitle } from '../actions';
 import { aggregate, agentOf, agentStatus, codeText, shortPath, terminalTitle, type MachineState } from '../lib/machine';
 import * as L from '../term/layout';
 import { StatusDot, statusLabel } from './StatusDot';
@@ -282,7 +282,15 @@ function MachineItem({ m }: { m: MachineState }) {
             const agg = aggregate(L.workspaceTerminals(w).map((a) => agentStatus(mt?.terminals[a])));
             const selected = selM === m.id && layout.selected === i;
             const editing = renaming === w.id;
-            const name = w.name || t('workspace.default');
+            const name = workspaceTitle(m.id, w);
+            // The row stays quiet: the tab count is in the tooltip.
+            const about = [
+              name,
+              w.cwd && shortPath(w.cwd, m.info?.home),
+              w.tabs.length === 1 ? t('sidebar.oneTab') : t('sidebar.tabs', { n: w.tabs.length }),
+            ]
+              .filter(Boolean)
+              .join(' · ');
             return (
               <div
                 key={w.id}
@@ -296,28 +304,29 @@ function MachineItem({ m }: { m: MachineState }) {
                   startWorkspaceDrag(e, { m: m.id, ws: w.id, label: name });
                 }}
                 onContextMenu={(e) => !editing && openMenu(e, workspaceMenu(m.id, w.id))}
-                title={
-                  readOnly ? name : t('sidebar.workspaceHint', { label: w.cwd ? `${name} · ${shortPath(w.cwd, m.info?.home)}` : name })
-                }
+                title={readOnly ? about : t('sidebar.workspaceHint', { label: about })}
                 data-ws-id={w.id}
                 data-m={m.id}
               >
                 <span className="ws-num">{i + 1}</span>
                 {editing ? (
                   <InlineEdit
-                    value={w.name}
+                    value={name}
+                    placeholder={L.folderName(w.cwd, m.info?.home)}
                     onDone={(v) => {
                       setRenaming(undefined);
-                      if (v && v !== w.name) actions.renameWorkspace(m.id, w.id, v);
+                      // Emptied, it is named after its folder again.
+                      if (v !== undefined && v !== name) actions.renameWorkspace(m.id, w.id, v);
                     }}
                   />
                 ) : (
-                  <span className="ellipsis">{name}</span>
+                  <span className="ellipsis ws-name">{name}</span>
                 )}
-                <span className="ws-meta">
-                  {agg && <StatusDot status={agg} />}
-                  <span className="muted small">{w.tabs.length > 1 ? t('sidebar.tabs', { n: w.tabs.length }) : ''}</span>
-                </span>
+                {agg && (
+                  <span className="ws-meta">
+                    <StatusDot status={agg} />
+                  </span>
+                )}
                 {!readOnly && !editing && (
                   <button
                     className="icon row-action"
