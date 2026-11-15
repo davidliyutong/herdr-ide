@@ -94,7 +94,7 @@ Non-goals: arbitrary docking of panes; floating panes.
   its position (1, 2, 3…, a short number: several tabs of shells would
   otherwise all read `user@host:~`), a named tab its name, and a tab
   holding no terminal (VS Code alone, a preview alone) the pane's mark
-  (a code mark, an eye) and its name (the folder's, the file's); all
+  (VSCodium's logo, an eye) and its name (the folder's, the file's); all
   keep their agents' status dot and their ×, a tab of several panes shows a small
   split mark, and the tooltip has the focused pane's name or title (a
   terminal's program and directory, `VS Code · <folder>`,
@@ -173,10 +173,11 @@ Non-goals: arbitrary docking of panes; floating panes.
 
 - Every pane has a header above its body. A terminal's shows the agent's
   state, the pane's name (else the terminal's title), the agent and the
-  folder; a VS Code pane's shows a code mark, the folder's name (its
+  folder; a VS Code pane's shows VSCodium's mark, the folder's name (its
   tooltip `VS Code on <machine>: <folder>`) and its short path; a
   preview's shows an eye, the file's name and its directory. Then its buttons: a terminal's
-  program windows ([14](14-gui-windows.md)), **Open in VS Code**, changes and Git Graph of the folder; a VS Code pane's
+  program windows ([14](14-gui-windows.md)), **Open in VS Code** (with
+  VSCodium's logo), changes and Git Graph of the folder; a VS Code pane's
   **Reload VS Code**; then split right / down, zoom or restore, **More
   Pane Actions** (⋯, only while the header is narrow, below) and close
   (1.85rem targets, the tab bar's icon size, with 1.15rem icons in a

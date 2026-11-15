@@ -1,8 +1,15 @@
-// Icons beside lucide's.
+// Icons beside lucide's: VSCodium's logo for VS Code (assets/vscodium, MIT),
+// drawn in the color of the text like the other icons.
 
-import { SquareCode } from 'lucide-react';
+import codium from '../assets/vscodium/codium.svg?raw';
 
-/** VS Code: a code mark, sized and colored like a lucide icon. */
+const codiumPath = /\sd="([^"]+)"/.exec(codium)?.[1] ?? '';
+
+/** VS Code: VSCodium's logo, sized and colored like a lucide icon. */
 export function CodeIcon({ className = '' }: { className?: string }) {
-  return <SquareCode className={`code-icon ${className}`} aria-hidden="true" />;
+  return (
+    <svg className={`lucide code-icon ${className}`} viewBox="0 0 100 100" aria-hidden="true">
+      <path fill="currentColor" d={codiumPath} />
+    </svg>
+  );
 }

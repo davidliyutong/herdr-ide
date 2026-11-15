@@ -102,7 +102,8 @@ Code leaves (and `pane.close`, below).
   a machine whose layout is not read keeps it until it expires.
 - Pressing a VS Code pane (its header or VS Code itself) gives it the
   keyboard and makes it its tab's focused pane, as a terminal pane is made.
-- The header: a code mark, the folder's name (its tooltip names the
+- The header: VSCodium's mark (`web/src/assets/vscodium`, MIT, recolored
+  to the text's color), the folder's name (its tooltip names the
   machine and the folder), the folder's path, and **Reload VS Code**, the
   split buttons, maximize, the pane's menu on narrow panes, close. The menu
   has these and **Stop VS Code on <machine>**, which stops that machine's
