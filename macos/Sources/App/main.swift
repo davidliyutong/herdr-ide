@@ -35,7 +35,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// Chords (and keys no menu item shows) are matched here, before the
     /// terminal sees them.
     private var matcher = KeyMatcher()
-    private var pendingKey: NSEvent?
     private var pendingTimer: Timer?
     /// The keys the menu shows, by command; the matcher leaves them to it.
     private var menuKeys: [String: String] = [:]
@@ -734,7 +733,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             // A chord waits 3 s for its next stroke, as the browser UI's does.
             pendingTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: false) { [weak self] _ in
                 self?.matcher.reset()
-                self?.pendingKey = nil
             }
         }
         if case let .run(command) = result { perform(command) }
@@ -752,21 +750,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         guard let stroke = Keys.stroke(characters: event.charactersIgnoringModifiers ?? "", keyCode: event.keyCode,
                                        cmd: flags.contains(.command), ctrl: flags.contains(.control),
                                        alt: flags.contains(.option), shift: flags.contains(.shift)) else { return event }
-        let first = pendingKey
         switch feed(stroke, context: context) {
-        case .none:
-            pendingKey = nil
+        case .none, .literal:
+            // A key no binding takes goes on to the terminal, which encodes
+            // it; so does the second press of a chord's first stroke.
             return event
-        case .pending:
-            if first == nil { pendingKey = event }
-            return nil
-        case .literal:
-            // The chord's first stroke twice: the terminal gets it.
-            pendingKey = nil
-            if let first { window.firstResponder?.keyDown(with: first) }
-            return nil
-        case .run, .swallow:
-            pendingKey = nil
+        case .pending, .run, .swallow:
             return nil
         }
     }

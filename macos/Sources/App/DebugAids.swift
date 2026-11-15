@@ -16,7 +16,7 @@
     /// the panel's page), settings, settings:<section> (a page of the
     /// settings), keys (their keyboard shortcuts page), set:<key>=<json>
     /// (changes a setting through the core), strokes:<stroke> <stroke>…
-    /// (strokes given to the key matcher, as "ctrl+b c"), key:cmd+<key>
+    /// (strokes given to the key matcher, as "ctrl+k c"), key:cmd+<key>
     /// (the key as the keyboard sends it, with shift+ before the key),
     /// command:<id> (a command of the keybindings), folder:<path> (a folder
     /// dropped on the Dock icon), palette:<text> (typed into the palette),

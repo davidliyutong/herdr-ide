@@ -6,10 +6,11 @@ vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {}, api: () => Promise.r
 import parseVectors from '../../../design/testdata/keys/parse.json';
 import eventVectors from '../../../design/testdata/keys/events.json';
 import sequenceVectors from '../../../design/testdata/keys/sequences.json';
+import defaultVectors from '../../../design/testdata/keys/defaults.json';
 import registry from '../../../design/generated/registry.json';
 import { altOnly, KeyError, keyLabel, normalizeKeys, strokeOf } from '../keys';
-import { feedStroke, handleKey, keyHint, type KeyContext } from '../keymap';
-import { keysOf, platform, resetRules, rulesFor, useKeys, type Binding } from '../keybindings';
+import { feedStroke, handleKey, keyHint, withKey, type KeyContext } from '../keymap';
+import { keysOf, platform, resetRules, rulesFor, useKeys, type Binding, type Platform } from '../keybindings';
 import { conflictsOf } from '../components/KeyboardShortcuts';
 
 // The vectors of design/testdata/keys, which internal/keybindings and the
@@ -60,6 +61,26 @@ describe('key sequences', () => {
     }
   });
 
+  it('runs strokes against every platform’s defaults: no key waits for another', () => {
+    const defaults = registry.keybindings as Record<Platform, Binding[]>;
+    for (const p of ['mac', 'mac-browser', 'pc', 'pc-browser'] as Platform[]) {
+      expect(defaults[p].length, p).toBeGreaterThan(0);
+      for (const b of defaults[p]) expect(b.key, `${p} ${b.command}`).not.toContain(' ');
+    }
+    expect(defaultVectors.cases.length).toBeGreaterThan(4);
+    for (const c of defaultVectors.cases) {
+      for (const p of c.platforms as Platform[]) {
+        let pending = '';
+        const got = c.strokes.map((s) => {
+          const step = feedStroke(defaults[p], pending, s, c.context as KeyContext);
+          pending = step.pending;
+          return step.result.kind === 'run' ? `run:${step.result.command}` : step.result.kind;
+        });
+        expect(got, `${p}: ${c.description}`).toEqual(c.results);
+      }
+    }
+  });
+
   it('shows keys as they are typed', () => {
     expect(keyLabel('ctrl+b shift+slash')).toBe('ctrl+b ?');
     expect(keyLabel('ctrl+b comma')).toBe('ctrl+b ,');
@@ -82,9 +103,34 @@ describe('keybindings', () => {
     expect(platform(false, true)).toBe('pc');
     expect(platform(false, false)).toBe('pc-browser');
     // jsdom: a browser on another system.
-    expect(keyHint('tab.new')).toBe('ctrl+b c');
+    expect(keyHint('app.keyboardShortcuts')).toBe('ctrl+?');
     expect(keyHint('find.open')).toBe('ctrl+shift+f');
+    // Unbound commands show no key.
+    expect(keyHint('tab.new')).toBe('');
     expect(keyHint('view.toggleCode')).toBe('');
+    expect(keyHint('app.commandPalette')).toBe('');
+    expect(withKey('Find', 'find.open')).toBe('Find (ctrl+shift+f)');
+    expect(withKey('New tab', 'tab.new')).toBe('New tab');
+  });
+
+  it('leaves ctrl+b and every key without a binding to the terminal on every platform', () => {
+    const key = (init: KeyboardEventInit) => new KeyboardEvent('keydown', { cancelable: true, ...init });
+    for (const p of ['mac', 'mac-browser', 'pc', 'pc-browser'] as Platform[]) {
+      useKeys.setState({ effective: (registry.keybindings as Record<Platform, Binding[]>)[p] });
+      for (const init of [
+        { key: 'b', code: 'KeyB', ctrlKey: true },
+        { key: 'b', code: 'KeyB', ctrlKey: true },
+        { key: 'c', code: 'KeyC' },
+        { key: 'a', code: 'KeyA', ctrlKey: true },
+        { key: 'k', code: 'KeyK', ctrlKey: true },
+        { key: 'b', code: 'KeyB', altKey: true },
+        { key: 'F1', code: 'F1' },
+      ]) {
+        const ev = key(init);
+        expect(handleKey(ev, 'terminal'), `${p} ${init.code}`).toBe(false);
+        expect(ev.defaultPrevented, `${p} ${init.code}`).toBe(false);
+      }
+    }
   });
 
   it('turns key changes into the user’s rules', () => {
@@ -93,10 +139,11 @@ describe('keybindings', () => {
     expect(rulesFor(user, defaults, 'tab.new', ['ctrl+b c', 'cmd+shift+t'])).toEqual([
       { key: 'ctrl+k x', command: 'pane.close' },
       { key: 'cmd+t', command: '-tab.new' },
+      { key: 'ctrl+b c', command: 'tab.new' },
       { key: 'cmd+shift+t', command: 'tab.new' },
     ]);
     expect(resetRules([...user, { key: 'cmd+t', command: '-tab.new' }], 'tab.new')).toEqual(user);
-    expect(keysOf(defaults, 'tab.new')).toEqual(['ctrl+b c', 'cmd+t']);
+    expect(keysOf(defaults, 'tab.new')).toEqual(['cmd+t']);
     expect(conflictsOf([{ key: 'ctrl+b x', commands: ['pane.close', 'tab.close'] }], 'tab.close', 'ctrl+b x')).toEqual(['pane.close']);
     expect(conflictsOf([{ key: 'ctrl+b', commands: ['a', 'b'], prefix: true }], 'b', 'ctrl+b c')).toEqual(['a']);
   });
@@ -114,5 +161,21 @@ describe('keybindings', () => {
     expect(handleKey(key({ key: 'x', code: 'KeyX' }), 'terminal')).toBe(false);
     expect(handleKey(key({ key: 'k', code: 'KeyK', ctrlKey: true }), 'vscode')).toBe(false);
     expect(run).not.toHaveBeenCalled();
+  });
+
+  it('lets the second press of a chord’s first stroke through to the terminal’s encoder', () => {
+    // A user's chords on a first stroke other than ctrl+letter: the second
+    // press is not cancelled, so the pane encodes it as any other key.
+    useKeys.setState({ effective: [{ key: 'ctrl+shift+space z', command: 'pane.zoom', when: 'terminal' }] });
+    const key = (init: KeyboardEventInit) => new KeyboardEvent('keydown', { cancelable: true, ...init });
+    const first = key({ key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
+    expect(handleKey(first, 'terminal')).toBe(true);
+    expect(first.defaultPrevented).toBe(true);
+    const again = key({ key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
+    expect(handleKey(again, 'terminal')).toBe(false);
+    expect(again.defaultPrevented).toBe(false);
+    // The chord is over: the next key is the terminal's too.
+    const next = key({ key: 'z', code: 'KeyZ' });
+    expect(handleKey(next, 'terminal')).toBe(false);
   });
 });

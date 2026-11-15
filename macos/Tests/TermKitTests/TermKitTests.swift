@@ -380,6 +380,46 @@ final class KeysTests: XCTestCase {
         }
     }
 
+    /// Strokes against each platform's default bindings (the core's, in
+    /// design/generated/registry.json): no default is a chord, so ctrl+b
+    /// and every key that is not a default go on to the terminal.
+    func testDefaults() throws {
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("../../../design/generated/registry.json").standardizedFileURL
+        let registry = JSONValue(any: try JSONSerialization.jsonObject(with: try Data(contentsOf: url)))
+        func defaults(_ platform: String) -> [KeyBinding] {
+            (registry["keybindings"]?[platform]?.array ?? []).map {
+                KeyBinding(key: $0["key"]?.string ?? "", command: $0["command"]?.string ?? "", when: $0["when"]?.string ?? "")
+            }
+        }
+        for platform in ["mac", "mac-browser", "pc", "pc-browser"] {
+            XCTAssertFalse(defaults(platform).isEmpty, platform)
+            for b in defaults(platform) { XCTAssertFalse(b.key.contains(" "), "\(platform) \(b.command): \(b.key)") }
+        }
+        let cases = try vectors("keys/defaults.json")["cases"]?.array ?? []
+        XCTAssertGreaterThan(cases.count, 4)
+        for c in cases {
+            for platform in (c["platforms"]?.array ?? []).compactMap(\.string) {
+                var matcher = KeyMatcher()
+                let context = c["context"]?.string ?? "terminal"
+                let got = (c["strokes"]?.array ?? []).compactMap(\.string).map { stroke -> String in
+                    switch matcher.feed(stroke, bindings: defaults(platform), context: context) {
+                    case .none: return "none"
+                    case .pending: return "pending"
+                    case .swallow: return "swallow"
+                    case .literal: return "literal"
+                    case let .run(command): return "run:" + command
+                    }
+                }
+                XCTAssertEqual(got, (c["results"]?.array ?? []).compactMap(\.string), "\(platform): \(c["description"]?.string ?? "")")
+            }
+        }
+        // The menu shows the palette's and the shortcuts' keys.
+        XCTAssertEqual(Keys.menuEquivalent("cmd+shift+p")?.key, "P")
+        XCTAssertEqual(Keys.menuEquivalent("cmd+slash")?.key, "/")
+        XCTAssertEqual(Keys.ghosttyTriggers("cmd+slash"), ["super+slash", "super+/"])
+    }
+
     func testLabelsAndMenus() {
         XCTAssertEqual(Keys.label("ctrl+b shift+slash"), "⌃B ?")
         XCTAssertEqual(Keys.label("cmd+shift+bracketright"), "⌘}")

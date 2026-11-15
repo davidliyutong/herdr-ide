@@ -38,7 +38,7 @@ public struct KeyParseError: Error, Equatable {
 }
 
 /// Key sequences: one stroke ("cmd+t") or a chord of several separated by
-/// spaces ("ctrl+b c").
+/// spaces ("ctrl+k c").
 public enum Keys {
     public static let maxStrokes = 4
 
@@ -287,17 +287,19 @@ public struct KeyBinding: Equatable {
     }
 }
 
-/// Matches strokes against bindings, chords included: a stroke that starts
-/// a chord waits for the next; the chord's first stroke twice is sent to
-/// the terminal (so the prefix can still be typed); a chord that matches
-/// nothing ends and its last key is dropped.
+/// Matches strokes against bindings, chords included (users bind chords; no
+/// default is one): a stroke that starts a chord waits for the next; the
+/// chord's first stroke pressed again goes on to the terminal like a key no
+/// binding takes (so it can still be typed); a chord that matches nothing
+/// ends and its last key is dropped.
 public struct KeyMatcher {
     public enum Result: Equatable {
         /// The key is not the application's.
         case none
         case pending
         case run(String)
-        /// Send the chord's first stroke to the terminal.
+        /// The chord's first stroke, pressed again: this press goes on to
+        /// the terminal.
         case literal(String)
         case swallow
     }

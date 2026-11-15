@@ -155,7 +155,7 @@ settings per browser; theming terminal applications.
   bridge is present.
 - Key syntax: a stroke is modifiers (`cmd`, `ctrl`, `alt`, `shift`, with
   aliases such as `meta`, `option`) and a key joined by `+`; a chord is
-  strokes separated by spaces (`ctrl+b c`), at most 4. The canonical form
+  strokes separated by spaces (`ctrl+k c`), at most 4. The canonical form
   orders modifiers cmd, ctrl, alt, shift and names keys after the US
   layout's unshifted keys: `?` is `shift+slash`, `}` is
   `shift+bracketright`. The first stroke needs cmd, ctrl or alt (or is a
@@ -163,14 +163,26 @@ settings per browser; theming terminal applications.
   (`keys.go`), TypeScript (`web/src/keys.ts`) and Swift
   (`macos/Sources/TermKit/Keys.swift`) each parse and normalize; all three
   run the vectors of `design/testdata/keys` (`parse.json`; the clients also
-  `events.json`, how a key press is named, and `sequences.json`, how strokes
-  run bindings).
-- Defaults are a prefix keymap on every platform (`ctrl+b`, then a
-  key; the tab numbers are the commands `tab.select1`…`9`) and add each
-  application's direct shortcuts: the macOS application's menu keys on
-  `mac` (`cmd+t`, `cmd+d`, `cmd+w` closes the pane…), the desktop app's
-  `ctrl+shift` keys on `pc`. Browsers get the chords and the find key only:
-  they keep `cmd+t` and the like for themselves.
+  `events.json`, how a key press is named, `sequences.json`, how strokes
+  run bindings, and `defaults.json`, how strokes run each platform's
+  defaults).
+- Defaults are each application's direct shortcuts, single strokes only:
+  the macOS application's menu keys on `mac` (`cmd+t`, `cmd+d`, `cmd+w`
+  closes the pane, `cmd+shift+p` the command palette, `cmd+/` the list of
+  shortcuts…), the desktop app's `ctrl+shift` keys on `pc`
+  (`ctrl+shift+p`, `ctrl+shift+/`…). Browsers keep `cmd+t` and the like
+  for themselves and get find, the list of shortcuts (`cmd+/`,
+  `ctrl+shift+/`) and on macOS the palette (`cmd+k`); a browser elsewhere
+  has no key left for the palette (Firefox opens a private window on
+  `ctrl+shift+p`, and `ctrl` with a letter belongs to the programs in the
+  terminals), and the status bar's **Command palette** opens it. The
+  application is used with the mouse: no default is a chord and none is
+  `ctrl` or `alt` with a letter alone, so `ctrl+b` (tmux's prefix) and
+  every other key that is not a default reach the program in the terminal
+  on their first press. Commands without a key (the tab numbers
+  `tab.select1`…`9`, focus moves, renames, zoom, VS Code's diff and Git
+  Graph…) run from the menus, the context menus, the pane headers' buttons
+  and the command palette, and the user can bind keys or chords to them.
 - The user's file `keybindings[-<instance>].json` is an array of `{key,
   command, when?}`; `"command": "-<id>"` removes the command's binding of
   that key (every binding without a key; only those of the rule's `when`
@@ -231,13 +243,18 @@ settings per browser; theming terminal applications.
   Changes become user rules (`rulesFor`) saved with `PUT`.
 - `keymap.ts` matches every keydown of the app (terminals route theirs
   through it) against the bindings in effect on the page's platform, chords
-  included: a stroke that starts chords waits 3 s for the next; the
-  chord's first stroke twice sends it to the pane (`ctrl+b ctrl+b`); a
+  included: a key no binding takes is left to the terminal, whose key
+  encoder sends it; a stroke that starts a user's chords waits 3 s for the
+  next; the chord's first stroke pressed again is left to the terminal in
+  the same way (`ctrl+k ctrl+k` types `ctrl+k`, whatever the stroke is); a
   chord matching nothing ends and its key is dropped. While a dialog or
   the palette is open only `dialog` and `always` bindings run. Keys typed
   in VS Code's panel do not reach the page; in the desktop app its menu
-  runs the `vscode` and `always` commands there. Key hints show the
-  direct shortcut in the desktop app, else the first chord.
+  runs the `vscode` and `always` commands there. Key hints (tooltips,
+  context menus, the palette, the status bar) show the command's direct
+  shortcut in the desktop app, else its first key, and nothing when it has
+  none. The status bar offers **Keyboard shortcuts** and **Command
+  palette** as buttons, with their keys when they have one.
 - Desktop app (`desktop/src/follow.ts`, `desktop/src/menu.ts`): the page
   matches its keys as above with the `mac` or `pc` bindings. The shell
   reads both endpoints when its own event channel opens and follows the
@@ -275,8 +292,9 @@ settings per browser; theming terminal applications.
   ⌘Q, ⌘H, ⌘M and ⌘V, `TerminalControllerBox.systemKeys`) so the menu gets
   them. A key matcher in front of the window
   runs chords and keys no menu item shows, in the contexts `terminal`,
-  `vscode` (the web panel) and `dialog` (a text field); the chord's first
-  stroke twice reaches the terminal.
+  `vscode` (the web panel) and `dialog` (a text field); a key it does not
+  take, and a chord's first stroke pressed again, go on to the terminal as
+  the key event itself.
 - Settings apply live: `appearance.language` switches the menus, the
   sidebar and the settings to English or Chinese (or the system's
   language), `appearance.theme` sets the application's
@@ -362,6 +380,8 @@ settings per browser; theming terminal applications.
 | A file watcher library (fsnotify) | A new dependency for two small files; polling the modification time every 2 s is enough for edits by hand. |
 | Clients working out the effective bindings | Three implementations of the rules and of the conflicts; the core serves them per platform and clients only match keys. |
 | One platform per OS | The desktop app and a browser on the same Mac need different defaults (`cmd+t` is the browser's). |
+| A prefix keymap by default (`ctrl+b`, then a key, as herdr and tmux), as earlier versions had | The application is used with the mouse; a default prefix takes its key from the programs in the terminals (tmux inside a pane needs `ctrl+b` on the first press) and makes every press of it wait for a second key. Users who want chords bind them in the keybindings file. |
+| Sending a chord's first stroke twice as its control character | Worked only for `ctrl` with a letter; letting the second press through to the terminal's key encoder sends whatever stroke it is, in the terminal's current keyboard mode. |
 | Settings file overriding flags | Breaks service definitions and scripts that rely on their flags. |
 | CSS `zoom` for the font size | Distorts mouse coordinates and canvas sharpness. |
 | Relying on installed fonts for terminals | Cell size and glyphs differ per system; the bundled font stays the default, an installed one is a choice. |
@@ -410,24 +430,33 @@ file and in requests are bounded and refuse brackets and line breaks. See
 `TestMigration` of the old format; `TestUnknownAndInvalidKept`;
 `TestReload` after edits by hand and over a broken file;
 `TestMemoryStore`), `internal/keybindings/keybindings_test.go`
-(`TestParseVectors`, the shared vectors; `TestDefaults` per platform
-without conflicts; `TestUserRules`, additions, removals and kept unknown
-entries; `TestConflicts` with prefix shadowing; `TestReload`;
+(`TestParseVectors`, the shared vectors; `TestDefaults` per platform:
+single strokes only, none a key of terminal programs, no conflicts, keys
+for the palette and the shortcuts; `TestUserChords`, chords of the user's
+file, the earlier `ctrl+b` ones included; `TestUserRules`, additions,
+removals and kept unknown entries; `TestConflicts` with prefix shadowing;
+`TestReload`;
 `TestMigrateDesktopShortcuts`), `internal/server/settings_test.go`
 (`TestSettingsAPI`, `TestSettingsReadOnly`, `TestKeybindingsAPI`,
 `TestSettingsPush`: both APIs, error codes, read-only refusal, the
 Host/Origin guard, audit, pushes after API changes and file edits),
 `scripts/registry/main_test.go` and `scripts/tokens/main_test.go`
 (generated files current), `web/src/__tests__/keys.test.ts` (the shared
-vectors: parsing, key names, chords; key hints, user rules),
+vectors: parsing, key names, chords, each platform's defaults; `ctrl+b`
+and other unbound keys left to the terminal on every platform, the second
+press of a chord's first stroke left to it; key hints, empty when
+unbound; user rules), `vt.test.ts` (the bytes the terminal sends for
+`ctrl+b`),
 `settings.test.ts` (labels for every registry key, store, optimistic
 changes and error codes, migration of the browser settings, search),
 `theme.test.ts` (`system` after `dark`), `termOptions.test.ts`,
 `tokens.test.ts`, `desktop/src/follow.test.ts` (keybindings and settings
 from the replies and pushes, reconnecting), `desktop/src/menu.test.ts`
-(accelerators, rebinding and unbinding, titles per language),
+(accelerators, rebinding and unbinding, items without a key, titles per
+language),
 `macos/Tests/TermKitTests/TermKitTests.swift` (`KeysTests`: the shared
-vectors, labels, menu equivalents, Ghostty triggers, the closing
+vectors, each platform's defaults, labels, menu equivalents, Ghostty
+triggers, the closing
 commands; `SettingsModelTests`: loading and pushes, the keybindings
 model's rules and clashes; `LocalizationTests.testRegistryKeys`). A dev core was changed through the
 API and by editing its file, with the pushes observed on `/ws`; the dialog's

@@ -576,12 +576,6 @@ export const actions = {
     if (c.focused) await actions.split(c.m, c.focused, 'right', [kind]);
     else await actions.newTab(c.m, undefined, [kind]);
   },
-
-  /** Types text into the focused terminal (a chord's prefix sent on). */
-  sendLiteral(text: string) {
-    const c = current();
-    if (c?.focused) paneHandle(c.m, c.focused)?.type(text);
-  },
 };
 
 /** A tab's name: its own, else its focused terminal's title. */

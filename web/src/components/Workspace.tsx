@@ -9,7 +9,7 @@ import { PaneHeader } from './PaneHeader';
 import { StatusDot } from './StatusDot';
 import { aggregate, agentStatus } from '../lib/machine';
 import { t, type MessageKey } from '../i18n';
-import { keyHint } from '../keymap';
+import { withKey } from '../keymap';
 import { InlineEdit } from './InlineEdit';
 import { startTabDrag } from '../reorderDrag';
 import { openMenu } from '../contextMenu';
@@ -52,7 +52,7 @@ export function Workspace() {
       <div className="tabbar">
         <button
           className="icon sidebar-toggle"
-          title={t('workspace.sidebar', { key: keyHint('view.toggleSidebar') })}
+          title={withKey(t('workspace.sidebar'), 'view.toggleSidebar')}
           onClick={() => actions.toggleSidebar()}
         >
           <PanelLeft />
@@ -105,7 +105,7 @@ export function Workspace() {
                 {!readOnly && (
                   <button
                     className="tab-close"
-                    title={t('workspace.closeTab', { key: keyHint('tab.close') })}
+                    title={withKey(t('workspace.closeTab'), 'tab.close')}
                     onClick={(e) => {
                       e.stopPropagation();
                       void actions.closeTab(m, ws.id, i);
@@ -120,7 +120,7 @@ export function Workspace() {
           {!readOnly && (
             <button
               className="icon"
-              title={t('workspace.newTab', { key: keyHint('tab.new') })}
+              title={withKey(t('workspace.newTab'), 'tab.new')}
               onClick={() => void actions.newTab(m, ws.id)}
               data-new-tab={ws.id}
               data-m={m}

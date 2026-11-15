@@ -13,6 +13,7 @@ import { FakeCore, settle } from './fakeTerms';
 import { closeMenu, isItem, openMenu, stepIndex, tidy, useMenu, type MenuEntry, type MenuItem } from '../contextMenu';
 import { machineMenu, paneMenu, sidebarMenu, tabMenu, workspaceMenu } from '../menus';
 import { actions } from '../actions';
+import { useKeys } from '../keybindings';
 import { ContextMenu } from '../components/ContextMenu';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -207,13 +208,18 @@ describe('menus', () => {
   });
 
   it('moves tabs and shows key hints only for the current tab', async () => {
+    // No default binding renames a tab; a user's does.
+    expect(find(tabMenu('m', 'w1w1w1w1', 0), 'Rename tab').hint).toBeUndefined();
+    const effective = useKeys.getState().effective;
+    useKeys.setState({ effective: [...effective, { key: 'ctrl+k r', command: 'tab.rename', when: 'terminal' }] });
     const first = tabMenu('m', 'w1w1w1w1', 0);
     expect(find(first, 'Move left').disabled).toBe(true);
     expect(find(first, 'Move right').disabled).toBe(false);
-    expect(find(first, 'Rename tab').hint).toBeTruthy();
+    expect(find(first, 'Rename tab').hint).toBe('ctrl+k r');
     const last = tabMenu('m', 'w1w1w1w1', 2);
     expect(find(last, 'Move right').disabled).toBe(true);
     expect(find(last, 'Rename tab').hint).toBeUndefined();
+    useKeys.setState({ effective });
     find(first, 'Move right').run();
     await settle();
     expect(tabNames()).toEqual(['b', 'a', 'd']);
@@ -244,7 +250,8 @@ describe('menus', () => {
     const w2 = workspaceMenu('m', 'w2w2w2w2');
     expect(find(w2, 'Move down').disabled).toBe(true);
     expect(find(w2, 'Close workspace').hint).toBeUndefined();
-    expect(find(workspaceMenu('m', 'w1w1w1w1'), 'Close workspace').hint).toBeTruthy();
+    // No default binding closes a workspace: the current one's item shows none either.
+    expect(find(workspaceMenu('m', 'w1w1w1w1'), 'Close workspace').hint).toBeUndefined();
     find(w2, 'Move up').run();
     await settle();
     expect(core.layout('m')!.workspaces.map((w) => w.name)).toEqual(['two', 'one']);

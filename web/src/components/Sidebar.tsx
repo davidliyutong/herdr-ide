@@ -8,7 +8,7 @@ import { aggregate, agentOf, agentStatus, shortPath, terminalTitle, type Machine
 import * as L from '../term/layout';
 import { StatusDot, statusLabel } from './StatusDot';
 import { t, type MessageKey } from '../i18n';
-import { keyHint } from '../keymap';
+import { withKey } from '../keymap';
 import { APP_NAME } from '../brand';
 import { InlineEdit } from './InlineEdit';
 import { startWorkspaceDrag } from '../reorderDrag';
@@ -46,19 +46,11 @@ export function Sidebar() {
       <div className="sidebar-head">
         <span className="brand">{APP_NAME}</span>
         {!readOnly && (
-          <button
-            className="icon"
-            title={t('sidebar.newWorkspace', { key: keyHint('workspace.new') })}
-            onClick={() => void actions.newWorkspace()}
-          >
+          <button className="icon" title={withKey(t('sidebar.newWorkspace'), 'workspace.new')} onClick={() => void actions.newWorkspace()}>
             <Plus />
           </button>
         )}
-        <button
-          className="icon"
-          title={t('settings.open', { key: keyHint('app.settings') })}
-          onClick={() => useStore.getState().openSettings(true)}
-        >
+        <button className="icon" title={withKey(t('settings.open'), 'app.settings')} onClick={() => useStore.getState().openSettings(true)}>
           <Settings />
         </button>
       </div>

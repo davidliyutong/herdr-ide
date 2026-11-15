@@ -1,0 +1,182 @@
+{
+  "description": "Strokes against each platform's default bindings (the keybindings of design/generated/registry.json, which internal/keybindings writes): each gives none (the key reaches the program in the terminal on its first press) or run:<command>. No default is a chord, so ctrl+b and every key that is not a default give none. Run by web/src/__tests__/keys.test.ts and macos/Tests/TermKitTests.",
+  "cases": [
+    {
+      "description": "ctrl+b (tmux's prefix) and the keys of shells and editors reach the terminal on their first press",
+      "platforms": [
+        "mac",
+        "mac-browser",
+        "pc",
+        "pc-browser"
+      ],
+      "context": "terminal",
+      "strokes": [
+        "ctrl+b",
+        "c",
+        "ctrl+b",
+        "ctrl+b",
+        "shift+slash",
+        "space",
+        "ctrl+a",
+        "ctrl+c",
+        "ctrl+d",
+        "ctrl+k",
+        "ctrl+r",
+        "ctrl+w",
+        "ctrl+z",
+        "ctrl+space",
+        "ctrl+backslash",
+        "ctrl+bracketleft",
+        "alt+b",
+        "alt+f",
+        "alt+period",
+        "f1",
+        "f10",
+        "escape",
+        "tab",
+        "enter",
+        "q",
+        "ctrl+left"
+      ],
+      "results": [
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none"
+      ]
+    },
+    {
+      "description": "the macOS applications' direct shortcuts",
+      "platforms": [
+        "mac"
+      ],
+      "context": "terminal",
+      "strokes": [
+        "cmd+t",
+        "cmd+shift+p",
+        "cmd+slash",
+        "cmd+w",
+        "cmd+k",
+        "ctrl+b"
+      ],
+      "results": [
+        "run:tab.new",
+        "run:app.commandPalette",
+        "run:app.keyboardShortcuts",
+        "run:pane.close",
+        "none",
+        "none"
+      ]
+    },
+    {
+      "description": "browsers on macOS keep cmd+t; the palette is cmd+k",
+      "platforms": [
+        "mac-browser"
+      ],
+      "context": "terminal",
+      "strokes": [
+        "cmd+k",
+        "cmd+slash",
+        "cmd+f",
+        "cmd+t",
+        "cmd+shift+p",
+        "ctrl+b"
+      ],
+      "results": [
+        "run:app.commandPalette",
+        "run:app.keyboardShortcuts",
+        "run:find.open",
+        "none",
+        "none",
+        "none"
+      ]
+    },
+    {
+      "description": "the desktop app elsewhere: ctrl+shift keys, as terminal emulators use",
+      "platforms": [
+        "pc"
+      ],
+      "context": "terminal",
+      "strokes": [
+        "ctrl+shift+p",
+        "ctrl+shift+slash",
+        "ctrl+shift+t",
+        "ctrl+shift+w",
+        "ctrl+t",
+        "ctrl+w",
+        "ctrl+b"
+      ],
+      "results": [
+        "run:app.commandPalette",
+        "run:app.keyboardShortcuts",
+        "run:tab.new",
+        "run:tab.close",
+        "none",
+        "none",
+        "none"
+      ]
+    },
+    {
+      "description": "browsers elsewhere: find and the list of shortcuts only",
+      "platforms": [
+        "pc-browser"
+      ],
+      "context": "terminal",
+      "strokes": [
+        "ctrl+shift+slash",
+        "ctrl+shift+f",
+        "ctrl+shift+p",
+        "ctrl+shift+t",
+        "ctrl+b"
+      ],
+      "results": [
+        "run:app.keyboardShortcuts",
+        "run:find.open",
+        "none",
+        "none",
+        "none"
+      ]
+    },
+    {
+      "description": "while VS Code has the keyboard only always bindings run",
+      "platforms": [
+        "mac"
+      ],
+      "context": "vscode",
+      "strokes": [
+        "cmd+j",
+        "cmd+shift+p",
+        "cmd+t",
+        "ctrl+b"
+      ],
+      "results": [
+        "run:view.toggleCode",
+        "none",
+        "none",
+        "none"
+      ]
+    }
+  ]
+}

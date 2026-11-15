@@ -117,8 +117,8 @@ Non-goals: Linux and Windows.
   for the name; its menu also moves it up or down; closing removes the
   workspace and kills its terminals after asking, as the web UI does. The
   last workspace closed is replaced by an empty one. **Next / previous
-  workspace** (`ctrl+b )` / `(`) cycle through the machine's workspaces,
-  **Switch workspace** (`ctrl+b w`) opens the palette with every machine's
+  workspace** (View menu) cycle through the machine's workspaces,
+  **Switch workspace** (View menu) opens the palette with every machine's
   workspaces, numbered.
 - **Folders** dropped on the sidebar or on the Dock icon
   (`CFBundleDocumentTypes` for folders, `macos/xcode/Info.plist`) become
@@ -136,16 +136,17 @@ Non-goals: Linux and Windows.
   zoom and close. Dragging the header onto another pane swaps the two
   (middle) or places the pane on that side (edges); onto a tab, beside
   that tab's focused terminal; onto the plus button, into a new tab
-  (`Layout.drop`, `DragTracker`). **Zoom** (`ctrl+b z`) shows the focused
+  (`Layout.drop`, `DragTracker`). **Zoom** (View menu, the header's
+  button) shows the focused
   pane alone in this window until zoomed again or the pane leaves the tab.
-  **Focus left / right / up / down** (`ctrl+b h` `l` `k` `j`) move to the
+  **Focus left / right / up / down** (View menu) move to the
   pane whose centre is nearest on that side (`Layout.neighbor`, the same
   rule as the web UI's, run on the vectors of `design/testdata/layout`).
 - **Closing** a pane or a tab asks first when a program runs in front of
   a terminal's shell (`Activity.runningProgram`: the foreground process is
   not the shell itself, or an agent was detected), naming the programs;
   Cancel is the default button.
-- **Command palette** (`ctrl+b space`, View menu): a sheet with a field and
+- **Command palette** (⌘⇧P, View menu): a sheet with a field and
   the commands this application runs with their keys and every
   workspace; ↑ ↓ choose, Return runs, Escape closes (`fuzzyMatch`).
 - `TerminalPane` owns one Ghostty surface and one stream. It attaches when
@@ -235,7 +236,7 @@ Non-goals: Linux and Windows.
 - **Agents** ([07](07-agent-native-workflow.md)): the inbox at the top of
   the sidebar (how many agents work and wait, then those waiting:
   blocked, or a turn that ended unseen), **Jump to the agent that needs
-  attention** (`ctrl+b o`), notifications, sounds and the Dock badge
+  attention** (in the palette), notifications, sounds and the Dock badge
   (`Notifier`; notifications need the application bundle, so a SwiftPM
   development build posts none), and *Send to Agent* from VS Code
   (`bridge.send`); `bridge.download` downloads what VS Code's explorer
@@ -243,8 +244,9 @@ Non-goals: Linux and Windows.
   front. The palette also lists the agents, the agent kinds to start
   beside the focused terminal, the themes and **Enable program windows**
   for the focused terminal or a whole machine.
-- **VS Code commands**: **Open Folder in VS Code** (`ctrl+b e`), **Show
-  Changes** (`ctrl+b d`) and **Open Git Graph** (`ctrl+b shift+g`) show the
+- **VS Code commands**: **Open Folder in VS Code**, **Show
+  Changes** and **Open Git Graph** (the pane header's menu, the palette)
+  show the
   panel for the focused terminal's directory and send the bridge's
   `openDiff` or `gitGraph` (`POST /api/m/{id}/bridge`); a ⌘-click on a path
   that is not media opens it in VS Code at its line (`openFile`), and

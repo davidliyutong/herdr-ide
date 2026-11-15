@@ -448,23 +448,13 @@
   "keybindings": {
     "mac": [
       {
-        "key": "ctrl+b space",
+        "key": "cmd+shift+p",
         "command": "app.commandPalette",
         "when": "terminal"
       },
       {
-        "key": "ctrl+b g",
-        "command": "app.commandPalette",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+slash",
+        "key": "cmd+slash",
         "command": "app.keyboardShortcuts",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b comma",
-        "command": "app.settings",
         "when": "terminal"
       },
       {
@@ -473,48 +463,8 @@
         "when": "terminal"
       },
       {
-        "key": "ctrl+b o",
-        "command": "app.agentAttention",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b w",
-        "command": "workspace.switch",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+0",
-        "command": "workspace.next",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+9",
-        "command": "workspace.previous",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+n",
-        "command": "workspace.new",
-        "when": "terminal"
-      },
-      {
         "key": "cmd+n",
         "command": "workspace.new",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+w",
-        "command": "workspace.rename",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+d",
-        "command": "workspace.close",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b c",
-        "command": "tab.new",
         "when": "terminal"
       },
       {
@@ -523,23 +473,8 @@
         "when": "terminal"
       },
       {
-        "key": "ctrl+b shift+t",
-        "command": "tab.rename",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b n",
-        "command": "tab.next",
-        "when": "terminal"
-      },
-      {
         "key": "cmd+shift+bracketright",
         "command": "tab.next",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b p",
-        "command": "tab.previous",
         "when": "terminal"
       },
       {
@@ -548,68 +483,8 @@
         "when": "terminal"
       },
       {
-        "key": "ctrl+b 1",
-        "command": "tab.select1",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b 2",
-        "command": "tab.select2",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b 3",
-        "command": "tab.select3",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b 4",
-        "command": "tab.select4",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b 5",
-        "command": "tab.select5",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b 6",
-        "command": "tab.select6",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b 7",
-        "command": "tab.select7",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b 8",
-        "command": "tab.select8",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b 9",
-        "command": "tab.select9",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+x",
-        "command": "tab.close",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b v",
-        "command": "pane.splitRight",
-        "when": "terminal"
-      },
-      {
         "key": "cmd+d",
         "command": "pane.splitRight",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b minus",
-        "command": "pane.splitDown",
         "when": "terminal"
       },
       {
@@ -618,53 +493,8 @@
         "when": "terminal"
       },
       {
-        "key": "ctrl+b x",
-        "command": "pane.close",
-        "when": "terminal"
-      },
-      {
         "key": "cmd+w",
         "command": "pane.close",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b z",
-        "command": "pane.zoom",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b h",
-        "command": "pane.focusLeft",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b j",
-        "command": "pane.focusDown",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b k",
-        "command": "pane.focusUp",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b l",
-        "command": "pane.focusRight",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b tab",
-        "command": "pane.focusNext",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+tab",
-        "command": "pane.focusPrevious",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b b",
-        "command": "view.toggleSidebar",
         "when": "terminal"
       },
       {
@@ -691,244 +521,34 @@
         "key": "cmd+shift+g",
         "command": "find.previous",
         "when": "terminal"
-      },
-      {
-        "key": "ctrl+b e",
-        "command": "code.open",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b d",
-        "command": "code.diff",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+g",
-        "command": "code.gitGraph",
-        "when": "terminal"
       }
     ],
     "mac-browser": [
       {
-        "key": "ctrl+b space",
+        "key": "cmd+k",
         "command": "app.commandPalette",
         "when": "terminal"
       },
       {
-        "key": "ctrl+b g",
-        "command": "app.commandPalette",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+slash",
+        "key": "cmd+slash",
         "command": "app.keyboardShortcuts",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b comma",
-        "command": "app.settings",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b o",
-        "command": "app.agentAttention",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b w",
-        "command": "workspace.switch",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+0",
-        "command": "workspace.next",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+9",
-        "command": "workspace.previous",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+n",
-        "command": "workspace.new",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+w",
-        "command": "workspace.rename",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+d",
-        "command": "workspace.close",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b c",
-        "command": "tab.new",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+t",
-        "command": "tab.rename",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b n",
-        "command": "tab.next",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b p",
-        "command": "tab.previous",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b 1",
-        "command": "tab.select1",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b 2",
-        "command": "tab.select2",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b 3",
-        "command": "tab.select3",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b 4",
-        "command": "tab.select4",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b 5",
-        "command": "tab.select5",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b 6",
-        "command": "tab.select6",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b 7",
-        "command": "tab.select7",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b 8",
-        "command": "tab.select8",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b 9",
-        "command": "tab.select9",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+x",
-        "command": "tab.close",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b v",
-        "command": "pane.splitRight",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b minus",
-        "command": "pane.splitDown",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b x",
-        "command": "pane.close",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b z",
-        "command": "pane.zoom",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b h",
-        "command": "pane.focusLeft",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b j",
-        "command": "pane.focusDown",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b k",
-        "command": "pane.focusUp",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b l",
-        "command": "pane.focusRight",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b tab",
-        "command": "pane.focusNext",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+tab",
-        "command": "pane.focusPrevious",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b b",
-        "command": "view.toggleSidebar",
         "when": "terminal"
       },
       {
         "key": "cmd+f",
         "command": "find.open",
         "when": "terminal"
-      },
-      {
-        "key": "ctrl+b e",
-        "command": "code.open",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b d",
-        "command": "code.diff",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+g",
-        "command": "code.gitGraph",
-        "when": "terminal"
       }
     ],
     "pc": [
       {
-        "key": "ctrl+b space",
+        "key": "ctrl+shift+p",
         "command": "app.commandPalette",
         "when": "terminal"
       },
       {
-        "key": "ctrl+b g",
-        "command": "app.commandPalette",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+slash",
+        "key": "ctrl+shift+slash",
         "command": "app.keyboardShortcuts",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b comma",
-        "command": "app.settings",
         "when": "terminal"
       },
       {
@@ -937,48 +557,8 @@
         "when": "terminal"
       },
       {
-        "key": "ctrl+b o",
-        "command": "app.agentAttention",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b w",
-        "command": "workspace.switch",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+0",
-        "command": "workspace.next",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+9",
-        "command": "workspace.previous",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+n",
-        "command": "workspace.new",
-        "when": "terminal"
-      },
-      {
         "key": "ctrl+shift+n",
         "command": "workspace.new",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+w",
-        "command": "workspace.rename",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+d",
-        "command": "workspace.close",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b c",
-        "command": "tab.new",
         "when": "terminal"
       },
       {
@@ -987,128 +567,8 @@
         "when": "terminal"
       },
       {
-        "key": "ctrl+b shift+t",
-        "command": "tab.rename",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b n",
-        "command": "tab.next",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b p",
-        "command": "tab.previous",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b 1",
-        "command": "tab.select1",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b 2",
-        "command": "tab.select2",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b 3",
-        "command": "tab.select3",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b 4",
-        "command": "tab.select4",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b 5",
-        "command": "tab.select5",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b 6",
-        "command": "tab.select6",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b 7",
-        "command": "tab.select7",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b 8",
-        "command": "tab.select8",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b 9",
-        "command": "tab.select9",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+x",
-        "command": "tab.close",
-        "when": "terminal"
-      },
-      {
         "key": "ctrl+shift+w",
         "command": "tab.close",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b v",
-        "command": "pane.splitRight",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b minus",
-        "command": "pane.splitDown",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b x",
-        "command": "pane.close",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b z",
-        "command": "pane.zoom",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b h",
-        "command": "pane.focusLeft",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b j",
-        "command": "pane.focusDown",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b k",
-        "command": "pane.focusUp",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b l",
-        "command": "pane.focusRight",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b tab",
-        "command": "pane.focusNext",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+tab",
-        "command": "pane.focusPrevious",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b b",
-        "command": "view.toggleSidebar",
         "when": "terminal"
       },
       {
@@ -1120,222 +580,17 @@
         "key": "ctrl+shift+f",
         "command": "find.open",
         "when": "terminal"
-      },
-      {
-        "key": "ctrl+b e",
-        "command": "code.open",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b d",
-        "command": "code.diff",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+g",
-        "command": "code.gitGraph",
-        "when": "terminal"
       }
     ],
     "pc-browser": [
       {
-        "key": "ctrl+b space",
-        "command": "app.commandPalette",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b g",
-        "command": "app.commandPalette",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+slash",
+        "key": "ctrl+shift+slash",
         "command": "app.keyboardShortcuts",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b comma",
-        "command": "app.settings",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b o",
-        "command": "app.agentAttention",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b w",
-        "command": "workspace.switch",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+0",
-        "command": "workspace.next",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+9",
-        "command": "workspace.previous",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+n",
-        "command": "workspace.new",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+w",
-        "command": "workspace.rename",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+d",
-        "command": "workspace.close",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b c",
-        "command": "tab.new",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+t",
-        "command": "tab.rename",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b n",
-        "command": "tab.next",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b p",
-        "command": "tab.previous",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b 1",
-        "command": "tab.select1",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b 2",
-        "command": "tab.select2",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b 3",
-        "command": "tab.select3",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b 4",
-        "command": "tab.select4",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b 5",
-        "command": "tab.select5",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b 6",
-        "command": "tab.select6",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b 7",
-        "command": "tab.select7",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b 8",
-        "command": "tab.select8",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b 9",
-        "command": "tab.select9",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+x",
-        "command": "tab.close",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b v",
-        "command": "pane.splitRight",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b minus",
-        "command": "pane.splitDown",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b x",
-        "command": "pane.close",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b z",
-        "command": "pane.zoom",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b h",
-        "command": "pane.focusLeft",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b j",
-        "command": "pane.focusDown",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b k",
-        "command": "pane.focusUp",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b l",
-        "command": "pane.focusRight",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b tab",
-        "command": "pane.focusNext",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+tab",
-        "command": "pane.focusPrevious",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b b",
-        "command": "view.toggleSidebar",
         "when": "terminal"
       },
       {
         "key": "ctrl+shift+f",
         "command": "find.open",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b e",
-        "command": "code.open",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b d",
-        "command": "code.diff",
-        "when": "terminal"
-      },
-      {
-        "key": "ctrl+b shift+g",
-        "command": "code.gitGraph",
         "when": "terminal"
       }
     ]

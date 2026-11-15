@@ -2,7 +2,7 @@
 
 [English](README.md) | 简体中文
 
-基于 [herdr-core](https://github.com/herdrdev/herdr-core) 终端核心的 Web IDE，以终端为中心，支持多台机器，围绕 agent 工作流设计：在一个浏览器标签页里使用所有机器上的 workspace 和终端，VS Code（code-server）一个快捷键就能打开。
+基于 [herdr-core](https://github.com/herdrdev/herdr-core) 终端核心的 Web IDE，以终端为中心，支持多台机器，围绕 agent 工作流设计：在一个浏览器标签页里使用所有机器上的 workspace 和终端，VS Code（code-server）点一下就能打开。
 
 > 英文版 README 为主版本，本文与其保持相同的章节结构。
 > 参数、快捷键等参考资料统一维护在英文文档 [docs/reference.md](docs/reference.md) 中。
@@ -19,7 +19,8 @@
   拖动 pane 标题栏可交换或移动 pane，点击标题即可重命名；
   拖动 tab 和 workspace 可调整顺序；
   右键 pane 标题栏、tab 或 workspace 可打开对应的命令菜单，右键 pane 里的文字可复制、粘贴或打开路径。
-  快捷键使用前缀 `ctrl+b`，可在设置中修改。
+  所有功能都能用鼠标完成；
+  默认快捷键很少，不占用终端里程序要用的按键（`ctrl+b` 会直接发给 tmux），所有快捷键都可以在设置中绑定。
 - **自带终端核心**：程序内置 Linux/macOS × amd64/arm64 的 herdr-core，第一次显示某台机器的终端时自动装到那台机器上；
   机器上不需要预先安装任何东西，也不需要外网。
   关闭浏览器或停止 core 后，程序继续运行。
@@ -38,7 +39,7 @@
   - code-server 默认由本机下载后推送到各机器，机器本身不需要外网；
     也可以让机器自行下载，或直接使用机器上已安装的 code-server。
     会一并装好 Git Graph 和桥接扩展。
-  - 一个快捷键或 pane 标题栏里的按钮就能打开 pane 所在的目录、它的 Diff 或 Git Graph；
+  - 用 pane 标题栏里的按钮或命令面板就能打开 pane 所在的目录、它的 Diff 或 Git Graph；
     终端里的 `path:line` 可以直接跳到编辑器。
   - 每个 workspace 有自己的 VS Code 面板，可以同时开着多个 VS Code，切换 workspace 就切换到对应的那个。
   - 面板可以放在终端右侧或下方。
@@ -60,7 +61,7 @@
   VS Code 的资源管理器里也有同样的下载。
   状态栏的下载面板显示每个下载的进度、速度和结果，可以取消或重新下载。
 - **多浏览器同时使用**：所有浏览器、桌面应用和 macOS 应用看到同样的终端，都可以输入；终端的尺寸由最近使用它的一方决定。
-- **设置**：界面语言（中文、英文）、浅色/深色主题（VS Code 同步切换）、界面大小、终端的字体、行高、光标、回滚行数、响铃和配色（两种主题的 16 色），面板位置、code-server 安装方式以及所有快捷键，集中在一个可搜索的设置对话框里（`ctrl+b ,`）。
+- **设置**：界面语言（中文、英文）、浅色/深色主题（VS Code 同步切换）、界面大小、终端的字体、行高、光标、回滚行数、响铃和配色（两种主题的 16 色），面板位置、code-server 安装方式以及所有快捷键，集中在一个可搜索的设置对话框里（侧栏的齿轮按钮，应用里按 `cmd+,`）。
   设置和快捷键保存在 core 所在主机上的两个 JSON 文件里，也可以直接手改；浏览器、桌面应用和 macOS 应用看到的都一样。
   终端默认使用内置的 JetBrains Mono 字体，也可以换成其他字体。
 
@@ -98,7 +99,7 @@ SSH 机器用侧栏的「添加机器…」添加。
 从使用 herdr 绘制 pane 的旧版本升级时，设置、快捷键和机器会在第一次启动时迁移过来，终端仍留在 herdr 里（见[迁移说明](docs/deployment.md#migrating-from-versions-that-used-herdr)）。
 
 打开 <http://127.0.0.1:7780>。
-`ctrl+b space` 打开命令面板，`ctrl+b ?` 查看快捷键。
+状态栏可以打开命令面板和快捷键列表（macOS 上的浏览器里分别是 `cmd+k` 和 `cmd+/`，其他系统的浏览器里按 `ctrl+shift+/` 查看快捷键）。
 全部参数见 [docs/reference.md](docs/reference.md)。
 
 ## macOS 桌面应用
@@ -120,12 +121,11 @@ macOS 版包含适用于 Finder 和 Dock 的多尺寸图标。
 从 Finder 把文件夹拖到侧栏或应用的 Dock 图标上，即可在本机为每个文件夹新建一个 workspace。
 拖到本机 pane 上的文件和文件夹直接粘贴原路径，不会上传。
 
-在桌面应用中，`cmd+t` 新建 tab，`cmd+w` 关闭 pane，`cmd+d` / `cmd+shift+d` 分屏，`cmd+n` 新建 workspace，`cmd+,` 打开设置，`cmd+j` 显示或隐藏 VS Code 面板；
+在桌面应用中，`cmd+t` 新建 tab，`cmd+w` 关闭 pane，`cmd+d` / `cmd+shift+d` 分屏，`cmd+n` 新建 workspace，`cmd+,` 打开设置，`cmd+shift+p` 打开命令面板，`cmd+j` 显示或隐藏 VS Code 面板；
 焦点在 VS Code 里时，VS Code 自己的快捷键优先。
 菜单与原生应用相同，显示当前生效的快捷键，使用界面的语言；
 标题栏跟随界面的主题。
-可在**设置 → 快捷键**中修改或移除快捷键。
-前缀快捷键仍然可用；
+可在**设置 → 快捷键**中修改或移除快捷键，也可以绑定 `ctrl+b c` 这样的组合键；
 浏览器里 `cmd+t` / `cmd+w` 仍归浏览器自己使用。
 
 原生 macOS 应用用 Ghostty 的渲染器绘制终端，并通过同一个 core 提供浏览器界面的全部功能：workspace、tab 和分屏（拖动、最大化、重命名），添加和管理机器（含 ssh 登录），文件窗口与上传下载，把文件粘贴或拖入终端，可按机器覆盖的设置和全部快捷键，命令面板，agent 的通知、提示音和 Dock 角标，终端旁的 VS Code，以及鼠标悬停显示公式。

@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 )
@@ -45,8 +44,10 @@ func TestParseVectors(t *testing.T) {
 	}
 }
 
-// The defaults keep the prefix keymap and the applications' direct
-// shortcuts.
+// The defaults are the applications' direct shortcuts and a few keys
+// browsers leave to pages; no default is a chord, so no key waits for a
+// second one and Ctrl+B (tmux's prefix) and every other key that is not a
+// default reach the terminal.
 func TestDefaults(t *testing.T) {
 	s := New("", Commands)
 	find := func(platform, command string) []string {
@@ -62,15 +63,23 @@ func TestDefaults(t *testing.T) {
 		platform, command string
 		keys              []string
 	}{
-		{PlatformMac, "tab.new", []string{"ctrl+b c", "cmd+t"}},
-		{PlatformPC, "tab.new", []string{"ctrl+b c", "ctrl+shift+t"}},
-		{PlatformMacBrowser, "tab.new", []string{"ctrl+b c"}},
+		{PlatformMac, "tab.new", []string{"cmd+t"}},
+		{PlatformPC, "tab.new", []string{"ctrl+shift+t"}},
+		{PlatformMacBrowser, "tab.new", nil},
 		{PlatformPCBrowser, "find.open", []string{"ctrl+shift+f"}},
 		{PlatformMacBrowser, "find.open", []string{"cmd+f"}},
-		{PlatformMac, "pane.close", []string{"ctrl+b x", "cmd+w"}},
-		{PlatformPC, "tab.close", []string{"ctrl+b shift+x", "ctrl+shift+w"}},
-		{PlatformMac, "app.commandPalette", []string{"ctrl+b space", "ctrl+b g"}},
-		{PlatformPCBrowser, "tab.select9", []string{"ctrl+b 9"}},
+		{PlatformMac, "pane.close", []string{"cmd+w"}},
+		{PlatformPC, "tab.close", []string{"ctrl+shift+w"}},
+		{PlatformMac, "app.commandPalette", []string{"cmd+shift+p"}},
+		{PlatformPC, "app.commandPalette", []string{"ctrl+shift+p"}},
+		{PlatformMacBrowser, "app.commandPalette", []string{"cmd+k"}},
+		{PlatformPCBrowser, "app.commandPalette", nil},
+		{PlatformMac, "app.keyboardShortcuts", []string{"cmd+slash"}},
+		{PlatformMacBrowser, "app.keyboardShortcuts", []string{"cmd+slash"}},
+		{PlatformPC, "app.keyboardShortcuts", []string{"ctrl+shift+slash"}},
+		{PlatformPCBrowser, "app.keyboardShortcuts", []string{"ctrl+shift+slash"}},
+		{PlatformPCBrowser, "tab.select9", nil},
+		{PlatformMac, "pane.zoom", nil},
 		{PlatformMac, "view.toggleCode", []string{"cmd+j"}},
 		{PlatformPCBrowser, "view.toggleCode", nil},
 	} {
@@ -78,22 +87,55 @@ func TestDefaults(t *testing.T) {
 			t.Errorf("%s %s = %v, want %v", c.platform, c.command, got, c.keys)
 		}
 	}
-	// The prefix chords: the terminal keymap (tabs 1 to 9 each a command)
-	// and the IDE's own.
-	chords := 0
-	for _, r := range s.Defaults(PlatformPCBrowser) {
-		if strings.HasPrefix(r.Key, "ctrl+b ") {
-			chords++
-		}
-	}
-	if chords != 39 {
-		t.Errorf("%d prefix chords", chords)
-	}
-	// No platform has conflicting defaults.
 	for _, p := range Platforms {
+		for _, r := range s.Defaults(p) {
+			seq, err := Parse(r.Key)
+			if err != nil || len(seq) != 1 {
+				t.Errorf("%s: %s's default %q is not a single stroke", p, r.Command, r.Key)
+				continue
+			}
+			// Keys programs in terminals read: Ctrl or Alt with a letter
+			// alone, function keys.
+			k := seq[0]
+			if (k.Ctrl || k.Alt) && !k.Cmd && !k.Shift && len(k.Key) == 1 && k.Key[0] >= 'a' && k.Key[0] <= 'z' || functionKey.MatchString(k.Key) {
+				t.Errorf("%s: %s's default %q is a key of terminal programs", p, r.Command, r.Key)
+			}
+		}
+		// No platform has conflicting defaults.
 		if c := Conflicts(s.Defaults(p)); len(c) != 0 {
 			t.Errorf("%s: default conflicts %v", p, c)
 		}
+		// The command palette and the list of shortcuts are on the keyboard
+		// wherever a key is left for them.
+		if len(find(p, "app.keyboardShortcuts")) == 0 || (p != PlatformPCBrowser && len(find(p, "app.commandPalette")) == 0) {
+			t.Errorf("%s: no key for the command palette or the shortcuts", p)
+		}
+	}
+}
+
+// Chords bound in the user's file still work, those of the earlier
+// defaults (ctrl+b, then a key) included.
+func TestUserChords(t *testing.T) {
+	s := New(filepath.Join(t.TempDir(), "keybindings.json"), Commands)
+	err := s.SetUser(rules(t,
+		`{"key": "ctrl+b c", "command": "tab.new"}`,
+		`{"key": "ctrl+b shift+slash", "command": "app.keyboardShortcuts"}`,
+		`{"key": "ctrl+b x", "command": "pane.close"}`,
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := s.State()
+	for _, p := range Platforms {
+		if got := effective(st, p, "tab.new"); !slices.Contains(got, "ctrl+b c@terminal") {
+			t.Errorf("%s: tab.new = %v", p, got)
+		}
+		if c := st.Conflicts[p]; len(c) != 0 {
+			t.Errorf("%s: conflicts %v", p, c)
+		}
+	}
+	if got := effective(st, PlatformPCBrowser, "app.keyboardShortcuts"); !slices.Equal(got, []string{"ctrl+shift+slash@terminal", "ctrl+b shift+slash@terminal"}) {
+		t.Errorf("app.keyboardShortcuts = %v", got)
 	}
 }
 
@@ -132,17 +174,17 @@ func TestUserRules(t *testing.T) {
 		`{"command": "-pane.zoom"}`,
 		`{"key": "ctrl+k z", "command": "pane.zoom", "when": "always"}`,
 		`{"key": "ctrl+k x", "command": "future.command", "args": {"x": 1}}`,
-		`{"key": "ctrl+b x", "command": "tab.close"}`,
+		`{"key": "cmd+w", "command": "tab.close"}`,
 	))
 	if err != nil {
 		t.Fatal(err)
 	}
 	st := s.State()
-	if got := effective(st, PlatformMac, "tab.new"); !slices.Equal(got, []string{"ctrl+b c@terminal", "cmd+shift+t@terminal"}) {
+	if got := effective(st, PlatformMac, "tab.new"); !slices.Equal(got, []string{"cmd+shift+t@terminal"}) {
 		t.Errorf("tab.new = %v", got)
 	}
 	// User rules apply on every platform.
-	if got := effective(st, PlatformPC, "tab.new"); !slices.Equal(got, []string{"ctrl+b c@terminal", "ctrl+shift+t@terminal", "cmd+shift+t@terminal"}) {
+	if got := effective(st, PlatformPC, "tab.new"); !slices.Equal(got, []string{"ctrl+shift+t@terminal", "cmd+shift+t@terminal"}) {
 		t.Errorf("tab.new on pc = %v", got)
 	}
 	if got := effective(st, PlatformMac, "pane.zoom"); !slices.Equal(got, []string{"ctrl+k z@always"}) {
@@ -151,8 +193,8 @@ func TestUserRules(t *testing.T) {
 	if len(st.Problems) != 1 || st.Problems[0].Index != 4 || st.Problems[0].Code != "unknown" {
 		t.Errorf("problems = %+v", st.Problems)
 	}
-	// ctrl+b x closes the pane and the tab now.
-	if c := st.Conflicts[PlatformMac]; len(c) != 1 || c[0].Key != "ctrl+b x" || !slices.Equal(c[0].Commands, []string{"pane.close", "tab.close"}) {
+	// cmd+w closes the pane and the tab now.
+	if c := st.Conflicts[PlatformMac]; len(c) != 1 || c[0].Key != "cmd+w" || !slices.Equal(c[0].Commands, []string{"pane.close", "tab.close"}) {
 		t.Errorf("conflicts = %+v", c)
 	}
 	if changed != 1 {
@@ -225,18 +267,18 @@ func TestReload(t *testing.T) {
 		s.Reload()
 	}
 	edit(`[{"key": "ctrl+k m", "command": "tab.new"}]`)
-	if got := effective(s.State(), PlatformPCBrowser, "tab.new"); !slices.Equal(got, []string{"ctrl+b c@terminal", "ctrl+k m@terminal"}) || notified != 1 {
+	if got := effective(s.State(), PlatformPC, "tab.new"); !slices.Equal(got, []string{"ctrl+shift+t@terminal", "ctrl+k m@terminal"}) || notified != 1 {
 		t.Errorf("after edit: %v (%d)", got, notified)
 	}
 	edit(`[{"key": `)
-	if got := effective(s.State(), PlatformPCBrowser, "tab.new"); len(got) != 2 || s.State().Problems[0].Code != "parse" {
+	if got := effective(s.State(), PlatformPC, "tab.new"); len(got) != 2 || s.State().Problems[0].Code != "parse" {
 		t.Errorf("broken file: %v %v", got, s.State().Problems)
 	}
 	if err := s.SetUser(nil); !errors.Is(err, ErrFile) {
 		t.Errorf("write over a broken file: %v", err)
 	}
 	edit(`[]`)
-	if got := effective(s.State(), PlatformPCBrowser, "tab.new"); len(got) != 1 || len(s.State().Problems) != 0 {
+	if got := effective(s.State(), PlatformPC, "tab.new"); len(got) != 1 || len(s.State().Problems) != 0 {
 		t.Errorf("fixed file: %v", got)
 	}
 }
@@ -256,13 +298,15 @@ func TestMigrateDesktopShortcuts(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := s.State()
-	if got := effective(st, PlatformMac, "tab.new"); !slices.Equal(got, []string{"ctrl+b c@terminal", "cmd+shift+t@terminal"}) {
+	if got := effective(st, PlatformMac, "tab.new"); !slices.Equal(got, []string{"cmd+shift+t@terminal"}) {
 		t.Errorf("tab.new = %v", got)
 	}
-	if got := effective(st, PlatformMac, "app.settings"); !slices.Equal(got, []string{"ctrl+b comma@terminal"}) {
+	if got := effective(st, PlatformMac, "app.settings"); len(got) != 0 {
 		t.Errorf("app.settings = %v", got)
 	}
-	if got := effective(st, PlatformMac, "tab.close"); !slices.Equal(got, []string{"ctrl+b shift+x@terminal"}) {
+	// cmd+w was the desktop app's default for closing the tab: nothing to
+	// carry over (on macOS it closes the pane now).
+	if got := effective(st, PlatformMac, "tab.close"); len(got) != 0 {
 		t.Errorf("tab.close = %v", got)
 	}
 	// Once only.

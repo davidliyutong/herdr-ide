@@ -1351,6 +1351,27 @@ body.dragging * {
   border-radius: 3px;
   font-weight: 600;
 }
+/* The commands the status bar offers (the list of shortcuts, the palette),
+   with their keys when they have one. */
+.status-command {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  padding: 0 2px;
+  color: var(--fg-dim);
+  white-space: nowrap;
+}
+.status-command:hover {
+  color: var(--fg);
+}
+.status-command kbd {
+  font-family: var(--mono, monospace);
+  padding: 0 4px;
+  border: 1px solid var(--line-2);
+  border-radius: 3px;
+}
 
 /* ---------- palette / modal / toast ---------- */
 .palette-backdrop,

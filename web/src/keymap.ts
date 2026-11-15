@@ -1,9 +1,11 @@
 // Keys of the page: every keydown the app sees (terminals route theirs
 // through handleKey, the window the others) is matched against the bindings
-// in effect on this platform (keybindings.ts), chords included: "ctrl+b c"
-// is ctrl+b, then c within 3 s. The same chord's first stroke twice sends it
-// to the terminal. In the desktop app the page sees a key before the
-// application menu, which gets only the keys the page leaves (desktop.ts).
+// in effect on this platform (keybindings.ts), chords included: "ctrl+k c"
+// is ctrl+k, then c within 3 s. A key no binding takes is left to the
+// terminal; so is the second press of a chord's first stroke, which the
+// terminal encodes as any other key. No default binding is a chord. In the
+// desktop app the page sees a key before the application menu, which gets
+// only the keys the page leaves (desktop.ts).
 
 import { actions } from './actions';
 import { useStore } from './state/store';
@@ -17,8 +19,9 @@ import { paneHandle } from './state/panes';
 export type KeyContext = 'terminal' | 'vscode' | 'dialog';
 
 /** What a stroke did: nothing (the key is not the app's), a chord goes on,
- * a command ran, the chord's first stroke is sent to the terminal, or an
- * unmatched chord ended and the key is dropped. */
+ * a command ran, the chord's first stroke was pressed again (this press
+ * goes on to the terminal), or an unmatched chord ended and the key is
+ * dropped. */
 export type StrokeResult =
   { kind: 'none' } | { kind: 'pending' } | { kind: 'run'; command: string } | { kind: 'literal' } | { kind: 'swallow' };
 
@@ -59,7 +62,7 @@ let pendingTimer: number | undefined;
 const listeners = new Set<(active: boolean) => void>();
 
 /** Calls fn when a chord starts or ends (the status bar shows it). */
-export function onPrefixChange(fn: (active: boolean) => void) {
+export function onChordChange(fn: (active: boolean) => void) {
   listeners.add(fn);
   return () => listeners.delete(fn);
 }
@@ -72,7 +75,7 @@ function setPending(next: string) {
   if (was !== (next !== '')) listeners.forEach((l) => l(next !== ''));
 }
 
-/** The chord typed so far, as shown ("ctrl+b"). */
+/** The chord typed so far, as shown ("ctrl+k"). */
 export function pendingChord(): string {
   return pending ? keyLabel(pending) : '';
 }
@@ -96,18 +99,14 @@ export function handleKey(ev: KeyboardEvent, ctx: KeyContext = keyContext()): bo
   setPending(step.pending);
   switch (step.result.kind) {
     case 'none':
+    case 'literal':
+      // The terminal encodes the key (the same stroke as the chord's first,
+      // for literal) as it encodes every key no binding takes.
       return false;
     case 'pending':
     case 'swallow':
       ev.preventDefault();
       return true;
-    case 'literal': {
-      ev.preventDefault();
-      // A Ctrl+letter prefix reaches the terminal as its control character.
-      const m = /^ctrl\+([a-z])$/.exec(prev);
-      if (m) actions.sendLiteral(String.fromCharCode(m[1].charCodeAt(0) & 0x1f));
-      return true;
-    }
     case 'run':
       ev.preventDefault();
       if (ev.repeat && !prev) return true;
@@ -123,7 +122,8 @@ export function commandLabel(id: string): string {
 }
 
 /** The key shown for a command: in the desktop app its direct shortcut when
- * it has one, else its first chord ("cmd+t", "ctrl+b c"). */
+ * it has one, else its first key ("cmd+t", "ctrl+k c"); "" when it has
+ * none. */
 export function keyHint(command: string): string {
   const keys = useKeys
     .getState()
@@ -132,6 +132,13 @@ export function keyHint(command: string): string {
   const direct = platform() === 'mac' || platform() === 'pc' ? keys.find((k) => !k.includes(' ')) : undefined;
   const key = direct ?? keys[0];
   return key ? keyLabel(key) : '';
+}
+
+/** A label with the command's key, as tooltips show it ("Split right
+ * (cmd+d)"), or the label alone when the command has no key. */
+export function withKey(label: string, command: string): string {
+  const key = keyHint(command);
+  return key ? t('app.withKey', { label, key }) : label;
 }
 
 /** Runs a command; unknown ones do nothing. */

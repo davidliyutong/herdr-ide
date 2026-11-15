@@ -340,6 +340,19 @@
       }
     },
     {
+      "name": "Ctrl+B (tmux's prefix; no default binding takes it)",
+      "event": {
+        "key": "b",
+        "code": "KeyB",
+        "ctrlKey": true
+      },
+      "bytes": {
+        "legacy": "\u0002",
+        "app": "\u0002",
+        "kitty": "\u001b[98;5u"
+      }
+    },
+    {
       "name": "Ctrl+C",
       "event": {
         "key": "c",

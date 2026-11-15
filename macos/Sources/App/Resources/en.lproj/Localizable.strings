@@ -115,7 +115,7 @@
 "settings.error.save" = "Could not save the file";
 "settings.error.file" = "The file has errors; fix it first";
 "settings.error.scope" = "Not available for this machine";
-"keys.note" = "The keys in effect in this application, saved on the core’s host for every window. A chord such as ⌃B C is ⌃B, then C.";
+"keys.note" = "The keys in effect in this application, saved on the core’s host for every window. A command without a key runs from the menus or the command palette. A chord is keys pressed one after another; its first key then waits for the next instead of reaching the terminal.";
 "keys.problems" = "The keybindings file has entries that are ignored:";
 "keys.problemAt" = "Entry %@";
 "keys.problem.invalid" = "not a valid rule";

@@ -25,7 +25,7 @@ func validWhen(w When) bool {
 // Platforms the default bindings differ by: the desktop applications on
 // macOS and on other systems, and browsers on either. Browsers keep
 // Cmd+T, Cmd+W and similar keys for themselves, so most direct shortcuts
-// exist only in the applications; the prefix chords work everywhere.
+// exist only in the applications.
 const (
 	PlatformMac        = "mac"
 	PlatformPC         = "pc"
@@ -69,19 +69,12 @@ var Sections = []Section{
 }
 
 var (
-	macApp = []string{PlatformMac}
-	pcApp  = []string{PlatformPC}
-	macAll = []string{PlatformMac, PlatformMacBrowser}
-	pcAll  = []string{PlatformPC, PlatformPCBrowser}
+	macApp     = []string{PlatformMac}
+	pcApp      = []string{PlatformPC}
+	macBrowser = []string{PlatformMacBrowser}
+	macAll     = []string{PlatformMac, PlatformMacBrowser}
+	pcAll      = []string{PlatformPC, PlatformPCBrowser}
 )
-
-func keys(all ...string) []Default {
-	out := make([]Default, len(all))
-	for i, k := range all {
-		out[i] = Default{Key: k}
-	}
-	return out
-}
 
 func on(platforms []string, key string) Default { return Default{Key: key, Platforms: platforms} }
 
@@ -89,48 +82,55 @@ func cmd(id, section string, defaults ...Default) Command {
 	return Command{ID: id, Section: section, When: WhenTerminal, Defaults: defaults}
 }
 
-// Commands are every command, with the defaults of the prefix keymap
-// (ctrl+b, then a key) on every platform and the applications' direct
-// shortcuts: those of the macOS application's menu on macOS (Cmd), the
+// Commands are every command, with the applications' direct shortcuts as
+// defaults: those of the macOS application's menu on macOS (Cmd), the
 // desktop app's on other systems (Ctrl+Shift, as terminal emulators use,
-// since Ctrl+W and Ctrl+T are keys of shells).
+// since Ctrl+W and Ctrl+T are keys of shells). No default is a chord, and
+// none is Ctrl or Alt with a letter alone or a function key, which programs
+// in terminals read: every key that is not a default reaches the terminal
+// on its first press. Browsers get only keys they leave to pages: find, the
+// command palette on macOS (Cmd+K; Cmd+Shift+P opens a private window in
+// Firefox, as Ctrl+Shift+P does elsewhere, where no key is left for it and
+// the status bar opens it) and the list of shortcuts. A command without a
+// key runs from the menus, the command palette or its button, and the user
+// can bind any key or chord to it.
 var Commands = func() []Command {
 	out := []Command{
-		cmd("app.commandPalette", "app", keys("ctrl+b space", "ctrl+b g")...),
-		cmd("app.keyboardShortcuts", "app", keys("ctrl+b shift+slash")...),
-		cmd("app.settings", "app", Default{Key: "ctrl+b comma"}, on(macApp, "cmd+comma"), on(pcApp, "ctrl+comma")),
-		cmd("app.agentAttention", "app", keys("ctrl+b o")...),
+		cmd("app.commandPalette", "app", on(macApp, "cmd+shift+p"), on(pcApp, "ctrl+shift+p"), on(macBrowser, "cmd+k")),
+		cmd("app.keyboardShortcuts", "app", on(macAll, "cmd+slash"), on(pcAll, "ctrl+shift+slash")),
+		cmd("app.settings", "app", on(macApp, "cmd+comma"), on(pcApp, "ctrl+comma")),
+		cmd("app.agentAttention", "app"),
 
-		cmd("workspace.switch", "workspace", keys("ctrl+b w")...),
-		cmd("workspace.next", "workspace", keys("ctrl+b shift+0")...),
-		cmd("workspace.previous", "workspace", keys("ctrl+b shift+9")...),
-		cmd("workspace.new", "workspace", Default{Key: "ctrl+b shift+n"}, on(macApp, "cmd+n"), on(pcApp, "ctrl+shift+n")),
-		cmd("workspace.rename", "workspace", keys("ctrl+b shift+w")...),
-		cmd("workspace.close", "workspace", keys("ctrl+b shift+d")...),
+		cmd("workspace.switch", "workspace"),
+		cmd("workspace.next", "workspace"),
+		cmd("workspace.previous", "workspace"),
+		cmd("workspace.new", "workspace", on(macApp, "cmd+n"), on(pcApp, "ctrl+shift+n")),
+		cmd("workspace.rename", "workspace"),
+		cmd("workspace.close", "workspace"),
 
-		cmd("tab.new", "tab", Default{Key: "ctrl+b c"}, on(macApp, "cmd+t"), on(pcApp, "ctrl+shift+t")),
-		cmd("tab.rename", "tab", keys("ctrl+b shift+t")...),
-		cmd("tab.next", "tab", Default{Key: "ctrl+b n"}, on(macApp, "cmd+shift+bracketright")),
-		cmd("tab.previous", "tab", Default{Key: "ctrl+b p"}, on(macApp, "cmd+shift+bracketleft")),
+		cmd("tab.new", "tab", on(macApp, "cmd+t"), on(pcApp, "ctrl+shift+t")),
+		cmd("tab.rename", "tab"),
+		cmd("tab.next", "tab", on(macApp, "cmd+shift+bracketright")),
+		cmd("tab.previous", "tab", on(macApp, "cmd+shift+bracketleft")),
 	}
 	for i := 1; i <= 9; i++ {
-		out = append(out, cmd(fmt.Sprintf("tab.select%d", i), "tab", keys(fmt.Sprintf("ctrl+b %d", i))...))
+		out = append(out, cmd(fmt.Sprintf("tab.select%d", i), "tab"))
 	}
 	out = append(out,
-		cmd("tab.close", "tab", Default{Key: "ctrl+b shift+x"}, on(pcApp, "ctrl+shift+w")),
+		cmd("tab.close", "tab", on(pcApp, "ctrl+shift+w")),
 
-		cmd("pane.splitRight", "pane", Default{Key: "ctrl+b v"}, on(macApp, "cmd+d")),
-		cmd("pane.splitDown", "pane", Default{Key: "ctrl+b minus"}, on(macApp, "cmd+shift+d")),
-		cmd("pane.close", "pane", Default{Key: "ctrl+b x"}, on(macApp, "cmd+w")),
-		cmd("pane.zoom", "pane", keys("ctrl+b z")...),
-		cmd("pane.focusLeft", "pane", keys("ctrl+b h")...),
-		cmd("pane.focusDown", "pane", keys("ctrl+b j")...),
-		cmd("pane.focusUp", "pane", keys("ctrl+b k")...),
-		cmd("pane.focusRight", "pane", keys("ctrl+b l")...),
-		cmd("pane.focusNext", "pane", keys("ctrl+b tab")...),
-		cmd("pane.focusPrevious", "pane", keys("ctrl+b shift+tab")...),
+		cmd("pane.splitRight", "pane", on(macApp, "cmd+d")),
+		cmd("pane.splitDown", "pane", on(macApp, "cmd+shift+d")),
+		cmd("pane.close", "pane", on(macApp, "cmd+w")),
+		cmd("pane.zoom", "pane"),
+		cmd("pane.focusLeft", "pane"),
+		cmd("pane.focusDown", "pane"),
+		cmd("pane.focusUp", "pane"),
+		cmd("pane.focusRight", "pane"),
+		cmd("pane.focusNext", "pane"),
+		cmd("pane.focusPrevious", "pane"),
 
-		cmd("view.toggleSidebar", "view", Default{Key: "ctrl+b b"}, on(macApp, "cmd+b")),
+		cmd("view.toggleSidebar", "view", on(macApp, "cmd+b")),
 		// Hiding the VS Code panel from inside VS Code is what the key is for.
 		Command{ID: "view.toggleCode", Section: "view", When: WhenAlways,
 			Defaults: []Default{on(macApp, "cmd+j"), on(pcApp, "ctrl+shift+j")}},
@@ -139,9 +139,9 @@ var Commands = func() []Command {
 		cmd("find.next", "find", on(macApp, "cmd+g")),
 		cmd("find.previous", "find", on(macApp, "cmd+shift+g")),
 
-		cmd("code.open", "code", keys("ctrl+b e")...),
-		cmd("code.diff", "code", keys("ctrl+b d")...),
-		cmd("code.gitGraph", "code", keys("ctrl+b shift+g")...),
+		cmd("code.open", "code"),
+		cmd("code.diff", "code"),
+		cmd("code.gitGraph", "code"),
 	)
 	return out
 }()

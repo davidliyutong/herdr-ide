@@ -44,8 +44,11 @@ import { useStore } from './state/store';
 import { terms } from './state/terms';
 import * as L from './term/layout';
 
+/** A command's key, as menu items show it; none when it is unbound. */
+const hint = (action: string) => keyHint(action) || undefined;
+
 /** Bindings act on the current tab or workspace, so other targets show none. */
-const hintIf = (current: boolean, action: string) => (current ? keyHint(action) : undefined);
+const hintIf = (current: boolean, action: string) => (current ? hint(action) : undefined);
 
 const workspaceOf = (m: string, ws: string) => terms.layout(m)?.workspaces.find((w) => w.id === ws);
 
@@ -59,30 +62,30 @@ export function paneMenu(m: string, terminal: string): MenuEntry[] {
     'sep',
     {
       label: t('command.pane.splitRight'),
-      hint: keyHint('pane.splitRight'),
+      hint: hint('pane.splitRight'),
       icon: <Columns2 />,
       run: () => void actions.split(m, terminal, 'right'),
     },
     {
       label: t('command.pane.splitDown'),
-      hint: keyHint('pane.splitDown'),
+      hint: hint('pane.splitDown'),
       icon: <Rows2 />,
       run: () => void actions.split(m, terminal, 'down'),
     },
     {
       label: t(zoomed ? 'menu.restore' : 'menu.zoom'),
-      hint: keyHint('pane.zoom'),
+      hint: hint('pane.zoom'),
       icon: zoomed ? <Minimize2 /> : <Maximize2 />,
       run: () => actions.zoom(m, terminal),
     },
     'sep',
-    { label: t('menu.openCode'), hint: keyHint('code.open'), icon: <SquareCode />, run: () => actions.openCode(m, cwd) },
-    { label: t('menu.diff'), hint: keyHint('code.diff'), icon: <FileDiff />, run: () => actions.openDiff(m, cwd) },
-    { label: t('menu.gitGraph'), hint: keyHint('code.gitGraph'), icon: <GitGraph />, run: () => actions.openGitGraph(m, cwd) },
+    { label: t('menu.openCode'), hint: hint('code.open'), icon: <SquareCode />, run: () => actions.openCode(m, cwd) },
+    { label: t('menu.diff'), hint: hint('code.diff'), icon: <FileDiff />, run: () => actions.openDiff(m, cwd) },
+    { label: t('menu.gitGraph'), hint: hint('code.gitGraph'), icon: <GitGraph />, run: () => actions.openGitGraph(m, cwd) },
     'sep',
     {
       label: t('command.pane.close'),
-      hint: keyHint('pane.close'),
+      hint: hint('pane.close'),
       icon: <X />,
       danger: true,
       run: () => void actions.closePane(m, terminal),
@@ -106,7 +109,7 @@ export function surfaceMenu(o: {
 }): MenuEntry[] {
   const out: MenuEntry[] = [{ label: t('surface.copy'), icon: <Copy />, disabled: !o.copy, run: () => o.copy?.() }];
   if (o.paste) out.push({ label: t('surface.paste'), icon: <ClipboardPaste />, run: o.paste });
-  if (o.find) out.push({ label: t('find.menu'), hint: keyHint('find.open'), icon: <Search />, run: o.find });
+  if (o.find) out.push({ label: t('find.menu'), hint: hint('find.open'), icon: <Search />, run: o.find });
   const l = o.link;
   if (l?.kind === 'url' && safeUrl(l.text)) {
     out.push(
@@ -195,7 +198,7 @@ export function tabMenu(m: string, ws: string, index: number): MenuEntry[] {
       icon: <Pencil />,
       run: () => actions.startRename('tab', m, `${ws}:${index}`),
     },
-    { label: t('command.tab.new'), hint: keyHint('tab.new'), icon: <Plus />, run: () => void actions.newTab(m, ws) },
+    { label: t('command.tab.new'), hint: hint('tab.new'), icon: <Plus />, run: () => void actions.newTab(m, ws) },
     'sep',
     { label: t('menu.moveLeft'), icon: <ArrowLeft />, disabled: index <= 0, run: move(-1) },
     { label: t('menu.moveRight'), icon: <ArrowRight />, disabled: index >= n - 1, run: move(1) },

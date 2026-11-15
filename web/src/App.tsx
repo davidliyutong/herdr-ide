@@ -15,7 +15,7 @@ import { ContextMenu } from './components/ContextMenu';
 import { usePrefs } from './prefs';
 import { initDesktop } from './desktop';
 import { takeOpenedFolders } from './drop';
-import { handleKey, keyHint, onPrefixChange, pendingChord } from './keymap';
+import { commandLabel, handleKey, keyHint, onChordChange, pendingChord, runCommand } from './keymap';
 import { applySettings, loadSettings } from './settings';
 import { applyKeybindings, loadKeybindings, useKeys } from './keybindings';
 import { t } from './i18n';
@@ -89,7 +89,7 @@ export function App() {
   const dockPosition = usePrefs((s) => s.prefs.dockPosition);
   const connected = useStore((s) => s.connected);
   const toasts = useStore((s) => s.toasts);
-  const [prefix, setPrefix] = useState(false);
+  const [chord, setChord] = useState(false);
 
   useEffect(() => {
     const s = useStore.getState();
@@ -124,7 +124,7 @@ export function App() {
       .then((r) => r.json())
       .then((c) => useStore.getState().setReadOnly(!!c.read_only))
       .catch(() => {});
-    const off = onPrefixChange(setPrefix);
+    const off = onChordChange(setChord);
     // Bindings also work when the focus is outside a terminal.
     const onKey = (ev: KeyboardEvent) => {
       const el = ev.target as HTMLElement | null;
@@ -146,7 +146,7 @@ export function App() {
       {sidebarOpen && <Sidebar />}
       <Workspace />
       <Dock />
-      <StatusBar connected={connected} prefix={prefix} />
+      <StatusBar connected={connected} chord={chord} />
       <Palette />
       <SettingsDialog />
       <AddMachineDialog />
@@ -175,7 +175,7 @@ export function App() {
   );
 }
 
-function StatusBar({ connected, prefix }: { connected: boolean; prefix: boolean }) {
+function StatusBar({ connected, chord }: { connected: boolean; chord: boolean }) {
   const readOnly = useStore((s) => s.readOnly);
   // Re-rendered when the bindings change.
   useKeys((s) => s.effective);
@@ -205,10 +205,20 @@ function StatusBar({ connected, prefix }: { connected: boolean; prefix: boolean 
       <TransfersTray />
       <DownloadsTray />
       <GuiTray />
-      {prefix && <span className="prefix-badge">{pendingChord()}</span>}
-      <span className="muted small">
-        {t('app.hint', { shortcuts: keyHint('app.keyboardShortcuts'), palette: keyHint('app.commandPalette') })}
-      </span>
+      {chord && <span className="prefix-badge">{pendingChord()}</span>}
+      <StatusCommand command="app.keyboardShortcuts" />
+      <StatusCommand command="app.commandPalette" />
     </footer>
+  );
+}
+
+/** A command the status bar offers: its name, and its key when it has one. */
+function StatusCommand({ command }: { command: string }) {
+  const key = keyHint(command);
+  return (
+    <button className="status-command muted small" data-command={command} onClick={() => runCommand(command)}>
+      {commandLabel(command)}
+      {key && <kbd>{key}</kbd>}
+    </button>
   );
 }

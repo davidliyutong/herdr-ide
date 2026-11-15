@@ -5,7 +5,7 @@ English | [简体中文](README.zh-CN.md)
 A terminal-first, multi-machine, agent-native web IDE built on the
 [herdr-core](https://github.com/herdrdev/herdr-core) terminal core: the
 workspaces and terminals of every machine in one browser tab, with VS Code
-(code-server) one keystroke away.
+(code-server) one click away.
 
 ![Two SSH machines in one tab: Claude Code waiting for confirmation and codex done in the agent inbox, with git history and a GPU monitor in split panes](docs/images/overview.png)
 
@@ -23,8 +23,10 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   desktop app and the macOS application. Drag a pane by its header to swap
   or move it, click its title to rename it; drag tabs and workspaces to
   reorder them; right-click a pane header, tab or workspace for its
-  commands, or a pane's text to copy, paste or open a path. Keyboard
-  shortcuts use the prefix `ctrl+b` and can be changed in the settings.
+  commands, or a pane's text to copy, paste or open a path. Everything is
+  in reach of the mouse; the few default keys take nothing from the
+  programs in the terminals (`ctrl+b` reaches tmux), and every key can be
+  bound in the settings.
 - **Terminal core included.** The binary carries herdr-core for Linux/macOS
   on amd64/arm64 and installs it on a machine the first time its terminals
   are shown; machines need nothing installed and no internet. Programs keep running
@@ -48,8 +50,8 @@ workspaces and terminals of every machine in one browser tab, with VS Code
 - **VS Code on demand.** code-server is installed per machine from the core
   host (no internet needed on machines), downloaded by the machines
   themselves, or taken from an existing install, with Git Graph and a bridge
-  extension: open a pane's folder, its diff or Git Graph with one key or
-  from the buttons in the pane's header; jump from a `path:line` in the terminal
+  extension: open a pane's folder, its diff or Git Graph from the buttons
+  in the pane's header or the command palette; jump from a `path:line` in the terminal
   to the editor. Each workspace has its own panel, so several VS Code
   windows stay open and switching workspace switches between them. The
   panel sits beside or below the terminals. Idle instances are stopped.
@@ -89,7 +91,7 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   VS Code, interface size, the terminals' font, line height, cursor,
   scrollback, bell and colors (both themes' 16 colors), panel position, the
   code-server installation method and every keyboard shortcut, in one
-  dialog (`ctrl+b ,`) with search. Settings and keys are kept on the core's
+  dialog (the sidebar's gear, `cmd+,` in the apps) with search. Settings and keys are kept on the core's
   host in two JSON files you can also edit by hand, and are the same in
   every browser, the desktop app and the macOS application. Terminals use
   the included JetBrains Mono font unless you choose another.
@@ -133,8 +135,9 @@ sidebar. Coming from a version that drew its panes from herdr: settings,
 keys and machines move over on the first start, terminals stay in herdr
 ([migration](docs/deployment.md#migrating-from-versions-that-used-herdr)).
 
-Open <http://127.0.0.1:7780>. Press `ctrl+b space` for the command palette and
-`ctrl+b ?` for shortcuts. All flags are listed in
+Open <http://127.0.0.1:7780>. The status bar opens the command palette and
+the list of shortcuts (`cmd+k` and `cmd+/` in a browser on macOS,
+`ctrl+shift+/` for the shortcuts elsewhere). All flags are listed in
 [docs/reference.md](docs/reference.md).
 
 ## macOS desktop app
@@ -161,12 +164,13 @@ of the local machine are pasted as their own paths, without uploading.
 
 In the app, `cmd+t` opens a tab, `cmd+w` closes the pane, `cmd+d` /
 `cmd+shift+d` split it, `cmd+n` creates a workspace, `cmd+,` opens the
-settings and `cmd+j` shows or hides the VS Code panel; while VS Code has
-focus, its own keys come first. The menus are the native application's,
+settings, `cmd+shift+p` the command palette and `cmd+j` shows or hides the
+VS Code panel; while VS Code has focus, its own keys come first. The menus are the native application's,
 with the keys in effect, in the UI's language; the title bar follows the
 UI's theme.
-Change or remove the keys under **Settings → Keyboard shortcuts**. Prefix bindings keep
-working, and browsers keep their own `cmd+t` / `cmd+w`.
+Change or remove the keys under **Settings → Keyboard shortcuts**, where
+chords such as `ctrl+b c` can be bound too; browsers keep their own
+`cmd+t` / `cmd+w`.
 
 A native macOS application draws the terminals with Ghostty's renderer and
 offers what the browser UI does over the same core: workspaces, tabs and

@@ -27,9 +27,10 @@ automatically, scheduling agents.
 - **Inbox** (sidebar): agents in `blocked` or `done` across the machines the
   page follows, blocked first, with machine, terminal title and directory;
   counts of working agents. Workspaces, tabs and pane headers show the most
-  urgent status of their agents. `ctrl+b o` (`app.agentAttention`) jumps to
-  the most urgent agent: its machine, workspace and tab are shown and its
-  terminal focused.
+  urgent status of their agents. **Jump to the agent that needs
+  attention** (`app.agentAttention`, in the palette; no default key) jumps
+  to the most urgent agent: its machine, workspace and tab are shown and
+  its terminal focused.
 - **Seen**: a turn that ended (`done`) is seen when its terminal has the
   focus in a client: the page tells the core when a terminal's input gets or
   loses the focus (`focus` on its stream), and the core reports the agent
@@ -73,11 +74,13 @@ automatically, scheduling agents.
   the terminal's stream, bracketed when the program asked; pasted or
   dropped images are uploaded and their paths typed
   ([06](06-quick-look-and-files.md)).
-- **Review**: from a pane, `ctrl+b d` opens the multi-file diff and
-  `ctrl+b shift+g` Git Graph of its repository ([05](05-vscode-panel.md)).
+- **Review**: from a pane, its header's buttons (and the palette's
+  `code.diff` and `code.gitGraph`) open the multi-file diff and Git Graph
+  of its repository ([05](05-vscode-panel.md)).
 - **The macOS application** ([23](23-macos-application.md)) does the
   same with native means (`Activity` in `macos/Sources/TermKit`, the same
-  rules, unit-tested): the inbox at the top of the sidebar, `ctrl+b o`, the
+  rules, unit-tested): the inbox at the top of the sidebar, the jump to the
+  agent that needs attention, the
   agents in the palette and the kinds to start; system notifications
   (`UNUserNotificationCenter`, one per terminal, replaced by the next;
   clicking one shows the terminal) when the window is not in front, a

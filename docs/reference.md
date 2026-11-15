@@ -151,67 +151,76 @@ platform, changed in **Settings → Keyboard shortcuts** or in
 `{"key", "command", "when"}` rules (`"command": "-<id>"` removes a key;
 `when` is `terminal`, `vscode`, `dialog` or `always`). A key is modifiers
 (`cmd`, `ctrl`, `alt`, `shift`) and a key joined by `+`; a chord is strokes
-separated by spaces (`ctrl+b c`: ctrl+b, then c within 3 s). The first
-stroke needs `cmd`, `ctrl` or `alt` (or is a function key). The chord's
-first stroke typed twice (`ctrl+b ctrl+b`) sends it to the terminal.
+separated by spaces (`ctrl+k c`: ctrl+k, then c within 3 s). The first
+stroke needs `cmd`, `ctrl` or `alt` (or is a function key). While a chord
+starting with a stroke is bound, that stroke waits for the next one instead
+of reaching the terminal; typing it twice (`ctrl+k ctrl+k`) lets the second
+press through to the terminal as any key no binding takes.
 
 The default keys differ by platform: `mac` is the macOS application and
 the desktop app on macOS, `mac-browser` browsers on macOS, `pc` the desktop
-app on other systems and `pc-browser` browsers there. Every platform has
-the prefix chords (`ctrl+b`); the applications add direct shortcuts, which
-browsers keep for themselves (`cmd+t`, `cmd+w`…). Both applications' menus
-show the keys; in the desktop app the page runs the keys it sees and the
-menu the keys the page leaves. While VS Code has the keyboard its own keys
-come first; a key it leaves runs a command only for `always` (show or hide
-VS Code) or `vscode`. Keys follow the keyboard layout's characters. The
-table is generated from the registry by `scripts/registry`.
+app on other systems and `pc-browser` browsers there. No default is a
+chord, and none is `ctrl` or `alt` with a letter alone: `ctrl+b` and every
+other key that is not in the table reach the program in the terminal on
+their first press. The applications have direct shortcuts, which browsers
+keep for themselves (`cmd+t`, `cmd+w`…); browsers get find, the list of
+shortcuts and, on macOS, the command palette (`cmd+k`; in browsers on
+other systems the status bar's **Command palette** opens it). A command
+without a key (–) runs from the menus, the command palette, its button and
+the context menus, and any key or chord can be bound to it. Both
+applications' menus show the keys; in the desktop app the page runs the
+keys it sees and the menu the keys the page leaves. While VS Code has the
+keyboard its own keys come first; a key it leaves runs a command only for
+`always` (show or hide VS Code) or `vscode`. Keys follow the keyboard
+layout's characters. The table is generated from the registry by
+`scripts/registry`.
 
 <!-- scripts/registry: commands -->
 
 | Command | When | `mac` | `mac-browser` | `pc` | `pc-browser` |
 | --- | --- | --- | --- | --- | --- |
-| `app.commandPalette` | `terminal` | `ctrl+b space`, `ctrl+b g` | `ctrl+b space`, `ctrl+b g` | `ctrl+b space`, `ctrl+b g` | `ctrl+b space`, `ctrl+b g` |
-| `app.keyboardShortcuts` | `terminal` | `ctrl+b shift+slash` | `ctrl+b shift+slash` | `ctrl+b shift+slash` | `ctrl+b shift+slash` |
-| `app.settings` | `terminal` | `ctrl+b comma`, `cmd+comma` | `ctrl+b comma` | `ctrl+b comma`, `ctrl+comma` | `ctrl+b comma` |
-| `app.agentAttention` | `terminal` | `ctrl+b o` | `ctrl+b o` | `ctrl+b o` | `ctrl+b o` |
-| `workspace.switch` | `terminal` | `ctrl+b w` | `ctrl+b w` | `ctrl+b w` | `ctrl+b w` |
-| `workspace.next` | `terminal` | `ctrl+b shift+0` | `ctrl+b shift+0` | `ctrl+b shift+0` | `ctrl+b shift+0` |
-| `workspace.previous` | `terminal` | `ctrl+b shift+9` | `ctrl+b shift+9` | `ctrl+b shift+9` | `ctrl+b shift+9` |
-| `workspace.new` | `terminal` | `ctrl+b shift+n`, `cmd+n` | `ctrl+b shift+n` | `ctrl+b shift+n`, `ctrl+shift+n` | `ctrl+b shift+n` |
-| `workspace.rename` | `terminal` | `ctrl+b shift+w` | `ctrl+b shift+w` | `ctrl+b shift+w` | `ctrl+b shift+w` |
-| `workspace.close` | `terminal` | `ctrl+b shift+d` | `ctrl+b shift+d` | `ctrl+b shift+d` | `ctrl+b shift+d` |
-| `tab.new` | `terminal` | `ctrl+b c`, `cmd+t` | `ctrl+b c` | `ctrl+b c`, `ctrl+shift+t` | `ctrl+b c` |
-| `tab.rename` | `terminal` | `ctrl+b shift+t` | `ctrl+b shift+t` | `ctrl+b shift+t` | `ctrl+b shift+t` |
-| `tab.next` | `terminal` | `ctrl+b n`, `cmd+shift+bracketright` | `ctrl+b n` | `ctrl+b n` | `ctrl+b n` |
-| `tab.previous` | `terminal` | `ctrl+b p`, `cmd+shift+bracketleft` | `ctrl+b p` | `ctrl+b p` | `ctrl+b p` |
-| `tab.select1` | `terminal` | `ctrl+b 1` | `ctrl+b 1` | `ctrl+b 1` | `ctrl+b 1` |
-| `tab.select2` | `terminal` | `ctrl+b 2` | `ctrl+b 2` | `ctrl+b 2` | `ctrl+b 2` |
-| `tab.select3` | `terminal` | `ctrl+b 3` | `ctrl+b 3` | `ctrl+b 3` | `ctrl+b 3` |
-| `tab.select4` | `terminal` | `ctrl+b 4` | `ctrl+b 4` | `ctrl+b 4` | `ctrl+b 4` |
-| `tab.select5` | `terminal` | `ctrl+b 5` | `ctrl+b 5` | `ctrl+b 5` | `ctrl+b 5` |
-| `tab.select6` | `terminal` | `ctrl+b 6` | `ctrl+b 6` | `ctrl+b 6` | `ctrl+b 6` |
-| `tab.select7` | `terminal` | `ctrl+b 7` | `ctrl+b 7` | `ctrl+b 7` | `ctrl+b 7` |
-| `tab.select8` | `terminal` | `ctrl+b 8` | `ctrl+b 8` | `ctrl+b 8` | `ctrl+b 8` |
-| `tab.select9` | `terminal` | `ctrl+b 9` | `ctrl+b 9` | `ctrl+b 9` | `ctrl+b 9` |
-| `tab.close` | `terminal` | `ctrl+b shift+x` | `ctrl+b shift+x` | `ctrl+b shift+x`, `ctrl+shift+w` | `ctrl+b shift+x` |
-| `pane.splitRight` | `terminal` | `ctrl+b v`, `cmd+d` | `ctrl+b v` | `ctrl+b v` | `ctrl+b v` |
-| `pane.splitDown` | `terminal` | `ctrl+b minus`, `cmd+shift+d` | `ctrl+b minus` | `ctrl+b minus` | `ctrl+b minus` |
-| `pane.close` | `terminal` | `ctrl+b x`, `cmd+w` | `ctrl+b x` | `ctrl+b x` | `ctrl+b x` |
-| `pane.zoom` | `terminal` | `ctrl+b z` | `ctrl+b z` | `ctrl+b z` | `ctrl+b z` |
-| `pane.focusLeft` | `terminal` | `ctrl+b h` | `ctrl+b h` | `ctrl+b h` | `ctrl+b h` |
-| `pane.focusDown` | `terminal` | `ctrl+b j` | `ctrl+b j` | `ctrl+b j` | `ctrl+b j` |
-| `pane.focusUp` | `terminal` | `ctrl+b k` | `ctrl+b k` | `ctrl+b k` | `ctrl+b k` |
-| `pane.focusRight` | `terminal` | `ctrl+b l` | `ctrl+b l` | `ctrl+b l` | `ctrl+b l` |
-| `pane.focusNext` | `terminal` | `ctrl+b tab` | `ctrl+b tab` | `ctrl+b tab` | `ctrl+b tab` |
-| `pane.focusPrevious` | `terminal` | `ctrl+b shift+tab` | `ctrl+b shift+tab` | `ctrl+b shift+tab` | `ctrl+b shift+tab` |
-| `view.toggleSidebar` | `terminal` | `ctrl+b b`, `cmd+b` | `ctrl+b b` | `ctrl+b b` | `ctrl+b b` |
+| `app.commandPalette` | `terminal` | `cmd+shift+p` | `cmd+k` | `ctrl+shift+p` | – |
+| `app.keyboardShortcuts` | `terminal` | `cmd+slash` | `cmd+slash` | `ctrl+shift+slash` | `ctrl+shift+slash` |
+| `app.settings` | `terminal` | `cmd+comma` | – | `ctrl+comma` | – |
+| `app.agentAttention` | `terminal` | – | – | – | – |
+| `workspace.switch` | `terminal` | – | – | – | – |
+| `workspace.next` | `terminal` | – | – | – | – |
+| `workspace.previous` | `terminal` | – | – | – | – |
+| `workspace.new` | `terminal` | `cmd+n` | – | `ctrl+shift+n` | – |
+| `workspace.rename` | `terminal` | – | – | – | – |
+| `workspace.close` | `terminal` | – | – | – | – |
+| `tab.new` | `terminal` | `cmd+t` | – | `ctrl+shift+t` | – |
+| `tab.rename` | `terminal` | – | – | – | – |
+| `tab.next` | `terminal` | `cmd+shift+bracketright` | – | – | – |
+| `tab.previous` | `terminal` | `cmd+shift+bracketleft` | – | – | – |
+| `tab.select1` | `terminal` | – | – | – | – |
+| `tab.select2` | `terminal` | – | – | – | – |
+| `tab.select3` | `terminal` | – | – | – | – |
+| `tab.select4` | `terminal` | – | – | – | – |
+| `tab.select5` | `terminal` | – | – | – | – |
+| `tab.select6` | `terminal` | – | – | – | – |
+| `tab.select7` | `terminal` | – | – | – | – |
+| `tab.select8` | `terminal` | – | – | – | – |
+| `tab.select9` | `terminal` | – | – | – | – |
+| `tab.close` | `terminal` | – | – | `ctrl+shift+w` | – |
+| `pane.splitRight` | `terminal` | `cmd+d` | – | – | – |
+| `pane.splitDown` | `terminal` | `cmd+shift+d` | – | – | – |
+| `pane.close` | `terminal` | `cmd+w` | – | – | – |
+| `pane.zoom` | `terminal` | – | – | – | – |
+| `pane.focusLeft` | `terminal` | – | – | – | – |
+| `pane.focusDown` | `terminal` | – | – | – | – |
+| `pane.focusUp` | `terminal` | – | – | – | – |
+| `pane.focusRight` | `terminal` | – | – | – | – |
+| `pane.focusNext` | `terminal` | – | – | – | – |
+| `pane.focusPrevious` | `terminal` | – | – | – | – |
+| `view.toggleSidebar` | `terminal` | `cmd+b` | – | – | – |
 | `view.toggleCode` | `always` | `cmd+j` | – | `ctrl+shift+j` | – |
 | `find.open` | `terminal` | `cmd+f` | `cmd+f` | `ctrl+shift+f` | `ctrl+shift+f` |
 | `find.next` | `terminal` | `cmd+g` | – | – | – |
 | `find.previous` | `terminal` | `cmd+shift+g` | – | – | – |
-| `code.open` | `terminal` | `ctrl+b e` | `ctrl+b e` | `ctrl+b e` | `ctrl+b e` |
-| `code.diff` | `terminal` | `ctrl+b d` | `ctrl+b d` | `ctrl+b d` | `ctrl+b d` |
-| `code.gitGraph` | `terminal` | `ctrl+b shift+g` | `ctrl+b shift+g` | `ctrl+b shift+g` | `ctrl+b shift+g` |
+| `code.open` | `terminal` | – | – | – | – |
+| `code.diff` | `terminal` | – | – | – | – |
+| `code.gitGraph` | `terminal` | – | – | – | – |
 
 <!-- end of scripts/registry: commands -->
 

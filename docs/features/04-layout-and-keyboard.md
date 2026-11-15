@@ -3,7 +3,9 @@
 ## Context
 
 Terminal multiplexer users know a layout model (workspaces → tabs → binary
-split trees of panes) and a prefix keymap (`ctrl+b` by default). The
+split trees of panes). Their prefix keymaps (`ctrl+b` in tmux) belong to
+the multiplexer running in a pane: this application is used with the
+mouse, so its default keys leave that key to the terminal. The
 terminal core keeps terminals, not layouts; every client of a machine arranges its
 terminals in the machine's layout document ([22](22-terminal-protocol.md)),
 so the browser, the desktop app and the macOS application show the same
@@ -13,10 +15,11 @@ application own their keys.
 
 ## Goals / non-goals
 
-Goals: that topology, shared by every client of a machine; the prefix
-keys work unchanged in every client; one set of keybindings,
-changeable, for every client; nothing important depends on
-browser-reserved shortcuts.
+Goals: that topology, shared by every client of a machine; every command
+within reach of the mouse (menus, context menus, buttons, the palette);
+default keys that take nothing from the programs in the terminals; one
+set of keybindings, changeable, for every client; nothing important
+depends on browser-reserved shortcuts.
 
 Non-goals: arbitrary docking of panes; floating panes.
 
@@ -142,7 +145,7 @@ Non-goals: arbitrary docking of panes; floating panes.
   workspace has when it runs, which another client may have changed since
   the menu opened.
 - The menu takes the keyboard: ↑↓ (skipping disabled items), Home/End,
-  Enter or Space runs, Escape or Tab closes; prefix bindings do not run
+  Enter or Space runs, Escape or Tab closes; key bindings do not run
   while it is open. Running an item or closing from the keyboard gives focus
   back to what had it, before the item runs, so items that move focus
   (rename, split) keep it. A click elsewhere, scrolling, leaving the window
@@ -190,19 +193,22 @@ described in [13](13-settings-and-appearance.md))
   platform, and follows the core's `keybindings` messages after every
   change. The full table is in
   [reference](../reference.md#keyboard-shortcuts).
-- Every platform has the prefix chords: `ctrl+b`, then a key. Panes: split
-  `v` / `-`, focus `h` `j` `k` `l`, next and previous `tab` /
-  `shift+tab`, zoom `z`, close `x`. Tabs: new `c`, next and previous `n` /
-  `p`, `1`…`9`, rename `shift+t`, close `shift+x`. Workspaces: switch `w`,
-  new `shift+n`, rename `shift+w`, close `shift+d`, next and previous
-  `shift+0` / `shift+9` (`)` / `(` on US layouts). The application:
-  palette `space` or `g`, the list of shortcuts `shift+slash` (`?`),
-  settings `comma`, sidebar `b`, the most urgent agent `o`
-  ([07](07-agent-native-workflow.md)), and VS Code `e`, diff `d`, Git Graph
-  `shift+g` of the focused pane's folder ([05](05-vscode-panel.md)). A
-  chord lasts 3 s or until its next key; the prefix twice
-  (`ctrl+b ctrl+b`) sends it to the pane; a key that ends no chord is
-  dropped.
+- No default is a chord, and no default is `ctrl` or `alt` with a letter
+  alone or a function key: `ctrl+b` and every key that is not a default
+  reach the program in the terminal on their first press. The defaults
+  are the direct shortcuts below and, on every platform, the list of
+  shortcuts (`cmd+/` on macOS, `ctrl+shift+/` elsewhere) and the command
+  palette (`cmd+shift+p` and `ctrl+shift+p` in the applications, `cmd+k`
+  in browsers on macOS; browsers elsewhere leave no key for it, and the
+  status bar's **Command palette** button opens it everywhere). Commands
+  without a key (tab numbers, focus moves, renames, zoom, workspace
+  switching, the most urgent agent, VS Code's folder, diff and Git
+  Graph…) are in the menus, the context menus, the pane headers and the
+  palette, and keys or chords can be bound to any of them.
+- A user's chord lasts 3 s or until its next key; its first stroke
+  pressed again is not taken (the terminal's key encoder sends it, so
+  `ctrl+k ctrl+k` types `ctrl+k` with `ctrl+k` chords bound); a key that
+  ends no chord is dropped.
 - The command palette (`components/Palette.tsx`) lists the commands with
   their keys, the workspaces and agents of the machines followed, the agent
   kinds to start, the UI languages and themes, and enabling program windows
@@ -214,19 +220,25 @@ described in [13](13-settings-and-appearance.md))
 **Direct shortcuts** (`desktop/src/menu.ts`, `web/src/desktop.ts`,
 `macos/Sources/App/main.swift`)
 
-- The desktop applications own their keys, so their platforms add direct
-  shortcuts without the prefix. On macOS (both applications) they are the
+- The desktop applications own their keys, so their platforms have direct
+  shortcuts. On macOS (both applications) they are the
   macOS application's menu keys: `cmd+t` new tab, `cmd+d` / `cmd+shift+d`
   split right / down, `cmd+w` close the focused pane (its terminal, not
   the tab), `cmd+n` new workspace (asking for
   its folder), `cmd+,` settings, `cmd+b` sidebar, `cmd+j` show or hide the
   VS Code panel ([05](05-vscode-panel.md)), `cmd+}` / `cmd+{` next / previous
-  tab, `cmd+f` / `cmd+g` / `cmd+shift+g` find. On other systems the desktop
+  tab, `cmd+f` / `cmd+g` / `cmd+shift+g` find, `cmd+shift+p` the command
+  palette (as in VS Code and Ghostty), `cmd+/` the list of shortcuts. On
+  other systems the desktop
   app has `ctrl+shift+t` new tab, `ctrl+shift+w` close tab (as in terminal
   emulators, since `ctrl+w` deletes a word in shells), `ctrl+,` settings,
-  `ctrl+shift+n` new workspace and `ctrl+shift+j` VS Code. Browsers get
+  `ctrl+shift+n` new workspace, `ctrl+shift+j` VS Code, `ctrl+shift+p` the
+  palette and `ctrl+shift+/` the shortcuts. Browsers get
   none of these (they keep them), except find (`cmd+f` on macOS,
-  `ctrl+shift+f` elsewhere: `ctrl+f` belongs to the programs in panes).
+  `ctrl+shift+f` elsewhere: `ctrl+f` belongs to the programs in panes),
+  the list of shortcuts and, on macOS, the palette as `cmd+k` (Firefox
+  opens a private window on `cmd+shift+p` and `ctrl+shift+p` and gives
+  pages neither).
 - A key is named after the character the keyboard layout gives it, as macOS
   names its shortcuts (`web/src/keys.ts`, shared by the shell and the page;
   `Keys.stroke` in the macOS application): on AZERTY, `cmd+z` stays undo
@@ -236,7 +248,7 @@ described in [13](13-settings-and-appearance.md))
   still `cmd+w`; Shift does not change the name (`cmd+shift+1`, not
   `cmd+!`).
 - In the desktop app the page matches every key it sees itself
-  (`web/src/keymap.ts`), direct shortcuts and chords alike, with the
+  (`web/src/keymap.ts`), direct shortcuts and users' chords alike, with the
   desktop platform's bindings, and cancels the keys it runs. Held keys do
   not repeat a command. The application menu shows on each command item the
   first single-stroke key the keybindings give that command. Keys with Cmd
@@ -263,8 +275,8 @@ described in [13](13-settings-and-appearance.md))
   its own event channel ([16](16-desktop-packaging.md)); the page follows
   them on its own.
 - The page runs only `dialog` and `always` bindings while a dialog or the
-  palette is open. Closing a pane or a tab (the shortcut, the tab bar, the
-  prefix binding, menus) first looks at what runs in its terminals, from
+  palette is open. Closing a pane or a tab (the shortcut, the tab bar, a
+  binding, menus) first looks at what runs in its terminals, from
   the terminal core's records: a terminal counts as idle when its
   foreground process is its shell and that shell is a known one (zsh,
   bash, fish, sh…), that is, the shell waits at its prompt, or when its
@@ -281,12 +293,14 @@ described in [13](13-settings-and-appearance.md))
   VS Code, zoom, next and previous tab, workspace and pane, focus on a
   side) and Window ([16](16-desktop-packaging.md),
   [23](23-macos-application.md)). Items show the first single-stroke key
-  of their command and are rebuilt when the keybindings change.
+  of their command, none when it has none, and are rebuilt when the
+  keybindings change.
 - In the macOS application Ghostty unbinds the menu's keys, so the menu gets
   them before a terminal; a key matcher in front of the window runs chords
-  and keys without a menu item.
-- Key hints (tooltips, context menus) show the direct shortcut in the
-  desktop app, else the first chord.
+  and keys without a menu item, and passes every other key on.
+- Key hints (tooltips, context menus, the palette, the status bar) show
+  the direct shortcut in the desktop app, else the first key, and nothing
+  for a command without one.
 
 ## Alternatives considered
 
@@ -300,11 +314,12 @@ described in [13](13-settings-and-appearance.md))
 | A "more tabs" menu for the tabs that do not fit | Hides tabs again and costs a click. |
 | Bindings to move tabs and workspaces | Rarely needed; the context menu's move items work from the keyboard. |
 | A "⋯" button on every header, tab and workspace row | Takes room on every tab and row; right-click covers desktop browsers. |
-| A desktop shell as the only client, owning all shortcuts | Browser access lets the IDE work from other devices, so the prefix keys work everywhere and the applications add direct shortcuts on top; Tauri's WKWebView on macOS lacks service workers, which VS Code webviews need. |
+| A desktop shell as the only client, owning all shortcuts | Browser access lets the IDE work from other devices, with the mouse and the keys browsers leave to pages, and the applications add direct shortcuts on top; Tauri's WKWebView on macOS lacks service workers, which VS Code webviews need. |
+| The prefix chords as defaults (`ctrl+b`, then a key), as earlier versions had | They took `ctrl+b` from tmux and other programs in the terminals, and every press of it waited for a second key; the application is used with the mouse, and chords stay available to users who bind them. |
 | Browser-specific bindings (`Cmd+…`) | Conflict with the browser; browsers do not deliver `Cmd+T`/`Cmd+W` to pages. The desktop app has them (above). |
 | The desktop shell taking direct shortcuts before the page (`before-input-event`), as it did | Two key matchers (the shell's and the page's) with their own rules for VS Code, dialogs and recording keys; with the page matching every key and the menu getting the rest, the desktop app behaves as the macOS application, where VS Code also keeps its own keys. |
 | Desktop shortcuts per browser profile (localStorage) | The shell needs them before and outside the page; the core's keybindings keep one set for all windows. |
-| `cmd+w` closing the tab on macOS, as the desktop app did | The macOS application's menu closes the focused terminal with it, like Ghostty and iTerm close a split; one set of macOS defaults for both applications. `ctrl+b shift+x` closes a tab. |
+| `cmd+w` closing the tab on macOS, as the desktop app did | The macOS application's menu closes the focused terminal with it, like Ghostty and iTerm close a split; one set of macOS defaults for both applications. **Close Tab** in the Shell menu and the tab's × close a tab. |
 | Keyboard Lock API | Fullscreen-only and Chromium-only. |
 
 ## Failure modes
@@ -340,17 +355,21 @@ described in [13](13-settings-and-appearance.md))
 - `web/src/__tests__/core.test.ts` (pane geometry of split trees),
   `web/src/__tests__/settings.test.ts` (drop zones).
 - `web/src/__tests__/keys.test.ts`: key names, chords from the page's keys,
-  the platform's defaults, key changes as the user's rules, key hints.
+  every platform's defaults (`design/testdata/keys/defaults.json`: `ctrl+b`
+  and other keys without a binding left to the terminal), the second press
+  of a chord's first stroke left to the terminal, key changes as the
+  user's rules, key hints (none for unbound commands);
+  `web/src/__tests__/vt.test.ts`: the bytes `ctrl+b` sends.
 - `web/src/__tests__/desktop.test.ts`: key names on other layouts, the
   menu's commands: closing idle tabs and panes at once and asking for
   running programs, none under dialogs, only those for VS Code or
   everywhere while VS Code has the keyboard, showing and hiding VS Code.
 - `desktop/src/menu.test.ts` (the menu's structure and titles against the
   macOS application's, accelerators, a rebinding, an unbinding, chords
-  without accelerators, keys without Cmd shown only),
+  and unbound commands without accelerators, keys without Cmd shown only),
   `desktop/src/follow.test.ts` (reading the keybindings and settings, their
   pushes, reconnecting), `macos/Tests/TermKitTests` (`KeysTests`: chords,
-  menu equivalents, closing commands).
+  every platform's defaults, menu equivalents, closing commands).
 - `web/src/__tests__/menus.test.ts`: insertion slots, also on wrapped rows,
   the area a drop counts in, drags measured on the screen, menu items and
   their commands, moves from the current position, read-only, keyboard,

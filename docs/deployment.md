@@ -385,9 +385,31 @@ files.
   become rules of a new `keybindings[-<instance>].json` once, while that
   file does not exist, and are dropped from the settings; otherwise the
   file is created by the first change of a key. Keys set in herdr's own
-  configuration no longer apply: the defaults have the same prefix chords
-  (`ctrl+b` …), and ⌘W in the macOS application and the desktop app now
-  closes the focused pane (`pane.close`), not the tab.
+  configuration no longer apply, and ⌘W in the macOS application and the
+  desktop app now closes the focused pane (`pane.close`), not the tab.
+- **The prefix chords are gone.** The defaults no longer have the
+  `ctrl+b` chords of herdr's keymap (`ctrl+b c` new tab, `ctrl+b v` split,
+  `ctrl+b space` palette…): `ctrl+b` and every key that is not a default
+  now reach the program in the terminal on their first press, and the
+  commands are in the menus, the context menus, the pane headers and the
+  command palette (the status bar's button; `cmd+shift+p` in the
+  applications). The defaults left are in the
+  [reference](reference.md#keyboard-shortcuts). Chords can be bound again,
+  one rule per key, under **Settings → Keyboard shortcuts** or in
+  `keybindings[-<instance>].json` in the core host's user configuration
+  directory (`keybindings-desktop.json` for the desktop app and the macOS
+  application), for example:
+
+  ```json
+  [
+    { "key": "ctrl+b c", "command": "tab.new" },
+    { "key": "ctrl+b v", "command": "pane.splitRight" },
+    { "key": "ctrl+b space", "command": "app.commandPalette" }
+  ]
+  ```
+
+  While a chord starting with `ctrl+b` is bound, `ctrl+b` waits for its
+  next key; pressed twice it reaches the terminal.
 - **Machines.** The first start of an instance without a
   `machines[-<instance>].json` imports the SSH machines herdr saved
   (`$XDG_STATE_HOME/herdr/client/endpoints.json`, default
