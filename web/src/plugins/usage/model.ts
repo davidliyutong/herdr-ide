@@ -136,8 +136,10 @@ export function duration(sec: number): string {
 
 /** A window's name: its label, else its kind's. */
 export function windowName(w: UsageWindow): string {
-  if (w.label) return w.label;
-  return t(`usage.kind.${w.kind}` as 'usage.kind.session');
+  const kind = t(`usage.kind.${w.kind}` as 'usage.kind.session');
+  // A labelled session or weekly window (a group of models) says which it is.
+  if (w.label) return w.kind === 'model' ? w.label : `${w.label} · ${kind}`;
+  return kind;
 }
 
 export function providerName(p: string): string {

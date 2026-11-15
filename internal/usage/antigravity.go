@@ -268,6 +268,37 @@ func parseAgy(a *Account, out []byte) bool {
 		return false
 	}
 	v = normalizeJSON(v)
+	// agy 1.5: {status, response (a table), command: {name: "usage", data:
+	// {groups: [{name, buckets: [{name, window: weekly|5h,
+	// remaining_fraction, reset_time}]}]}}}.
+	if groups := arr(obj(obj(obj(v)["command"])["data"])["groups"]); len(groups) > 0 {
+		for _, g := range groups {
+			g := obj(g)
+			group := str(g["name"])
+			for _, b := range arr(g["buckets"]) {
+				b := obj(b)
+				r, ok := num(b["remaining_fraction"])
+				if !ok {
+					continue
+				}
+				kind, sec := KindModel, int64(0)
+				switch str(b["window"]) {
+				case "5h":
+					kind, sec = KindSession, 5*3600
+				case "weekly":
+					kind, sec = KindWeekly, 7*86400
+				}
+				label := group
+				if kind == KindModel {
+					label = str(first(b, "name", "id"))
+				}
+				a.Windows = append(a.Windows, Window{Kind: kind, Label: label, UsedPct: clampPct((1 - r) * 100), ResetsAt: timeOf(b["reset_time"]), WindowSec: sec})
+			}
+		}
+		if len(a.Windows) > 0 {
+			return true
+		}
+	}
 	if m := obj(v); m != nil {
 		if r := obj(first(m, "result", "usage", "data")); r != nil {
 			m = r

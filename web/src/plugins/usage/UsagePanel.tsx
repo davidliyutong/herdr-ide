@@ -260,9 +260,10 @@ function Money({ account: a }: { account: UsageAccount }) {
 
 /** The DeepSeek key file of a machine (written there, never shown). */
 function DeepseekKey() {
-  const machines = useStore(
-    useShallow((s) => s.order.filter((id) => s.machines[id]?.status === 'ready').map((id) => ({ id, label: s.machines[id]?.label ?? id }))),
-  );
+  // Strings only: useShallow compares the items, and new objects would differ every time.
+  const ids = useStore(useShallow((s) => s.order.filter((id) => s.machines[id]?.status === 'ready')));
+  const names = useStore(useShallow((s) => ids.map((id) => s.machines[id]?.label ?? id)));
+  const machines = ids.map((id, i) => ({ id, label: names[i] }));
   const [open, setOpen] = useState(false);
   const [m, setM] = useState('');
   const [key, setKey] = useState('');

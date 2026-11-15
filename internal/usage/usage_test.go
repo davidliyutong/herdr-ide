@@ -548,3 +548,25 @@ func TestLocalClientStaysOnLoopback(t *testing.T) {
 		t.Error("proxy set")
 	}
 }
+
+// agy 1.5's output: a table in response, and groups of buckets in command.data.
+func TestParseAgyGroups(t *testing.T) {
+	out := []byte(`{"conversation_id":"","status":"SUCCESS","response":"Gemini Models\tWeekly Limit Remaining\t85%\n","command":{"name":"usage","data":{"groups":[` +
+		`{"name":"Gemini Models","buckets":[{"id":"gemini-weekly","name":"Weekly Limit Remaining","window":"weekly","remaining_fraction":0.85,"reset_time":"2026-11-21T06:22:44Z"},` +
+		`{"id":"gemini-5h","name":"Five Hour Limit Remaining","window":"5h","remaining_fraction":0.65,"reset_time":"2026-11-15T19:55:53Z"}]},` +
+		`{"name":"Gemini 4 Argon","buckets":[{"id":"argon-weekly","name":"Gemini 4 Argon Weekly Limit","window":"monthly-ish","remaining_fraction":1,"reset_time":"2026-11-22T19:48:33Z"}]}]}}}`)
+	var a Account
+	if !parseAgy(&a, out) || len(a.Windows) != 3 {
+		t.Fatalf("windows %+v", a.Windows)
+	}
+	w := a.Windows
+	if w[0].Kind != KindWeekly || w[0].Label != "Gemini Models" || w[0].UsedPct < 14.9 || w[0].UsedPct > 15.1 || w[0].ResetsAt != 1795242164 {
+		t.Errorf("weekly %+v", w[0])
+	}
+	if w[1].Kind != KindSession || w[1].WindowSec != 5*3600 {
+		t.Errorf("session %+v", w[1])
+	}
+	if w[2].Kind != KindModel || w[2].Label != "Gemini 4 Argon Weekly Limit" || w[2].UsedPct != 0 {
+		t.Errorf("model %+v", w[2])
+	}
+}
