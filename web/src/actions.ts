@@ -533,12 +533,13 @@ export const actions = {
     await actions.newTab(m, id);
   },
 
-  /** Closes a workspace after asking, and ends its terminals. */
+  /** Closes a workspace after asking, unless it has no tab, and ends its terminals. */
   async closeWorkspace(m: string, ws: string) {
     const w = terms.layout(m)?.workspaces.find((x) => x.id === ws);
     if (!w) return;
     const addresses = L.workspaceTerminals(w);
     if (
+      w.tabs.length > 0 &&
       !(await confirmDialog({
         title: t('confirm.closeWorkspaceTitle'),
         message: t('confirm.closeWorkspace', { label: workspaceTitle(m, w) }),

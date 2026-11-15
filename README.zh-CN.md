@@ -148,7 +148,7 @@ ARCH=x64 make desktop-dist       # 其他架构；默认使用当前 Node 的架
 从文件管理器把文件夹拖到侧栏、在 macOS 上拖到 Dock 图标，或在 Linux 上用「打开方式」以本应用打开，即可在本机为每个文件夹新建一个工作区。
 拖到本机窗格上的文件和文件夹直接粘贴原路径，不会上传。
 
-在 macOS 上，`cmd+t` 新建标签页，`cmd+1`…`cmd+9` 切换标签页（`cmd+9` 为最后一个），`cmd+shift+w` 关闭标签页，`cmd+w` 关闭窗格，`cmd+d` / `cmd+shift+d` 分屏，`cmd+alt+方向键` 在窗格间移动，`cmd+shift+enter` 最大化窗格，`cmd+n` 新建工作区，`cmd+,` 打开设置，`cmd+shift+p` 打开命令面板，`cmd+j` 在 VS Code 中打开当前窗格的文件夹，`cmd++`、`cmd+-` 和 `cmd+0` 缩放窗口（终端一起缩放）。
+在 macOS 上，`cmd+t` 新建标签页，`cmd+1`…`cmd+9` 切换标签页（`cmd+9` 为最后一个），`cmd+shift+w` 关闭标签页，`cmd+w` 关闭窗格（工作区里已没有标签页时关闭工作区），`cmd+d` / `cmd+shift+d` 分屏，`cmd+alt+方向键` 在窗格间移动，`cmd+shift+enter` 最大化窗格，`cmd+n` 新建工作区，`cmd+,` 打开设置，`cmd+shift+p` 打开命令面板，`cmd+j` 在 VS Code 中打开当前窗格的文件夹，`cmd++`、`cmd+-` 和 `cmd+0` 缩放窗口（终端一起缩放）。
 在 Windows 和 Linux 上，`ctrl+shift+t` 新建标签页，`ctrl+tab` 和 `alt+1`…`alt+9` 切换标签页，`ctrl+shift+w` 关闭标签页，`ctrl+shift+n` 新建工作区，`ctrl+,` 打开设置，`ctrl+shift+p` 打开命令面板，`ctrl+shift+j` 在 VS Code 中打开，`ctrl++`、`ctrl+-` 和 `ctrl+0` 缩放窗口；
 其他按键（包括 `ctrl+c` 和 `ctrl+q`）都会发给终端。
 焦点在 VS Code 里时，VS Code 自己的快捷键优先（`cmd+j` 会切换它自己的底部面板），只有 macOS 上的 `cmd+w` 例外，它会关闭 VS Code 窗格。

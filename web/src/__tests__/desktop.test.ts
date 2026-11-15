@@ -94,6 +94,36 @@ describe('runMenuCommand', () => {
     expect(core.layout('m')?.workspaces[0].tabs).toEqual([]);
   });
 
+  it('closes a workspace with no tab left at the next press of the pane’s key, not while it is held', async () => {
+    await setup([shell('t1')]);
+    const now = vi.spyOn(Date, 'now');
+    try {
+      // The key held: its press closes the last pane, its repeats leave the
+      // workspace, empty now.
+      now.mockReturnValue(1_000_000);
+      runMenuCommand('pane.close');
+      await vi.waitFor(() => expect(killed()).toEqual(['t1']));
+      await settle();
+      expect(core.layout('m')?.workspaces[0].tabs).toEqual([]);
+      expect(disabledCommands()).not.toContain('pane.close');
+      for (let t = 1_000_400; t < 1_000_700; t += 30) {
+        now.mockReturnValue(t);
+        runMenuCommand('pane.close');
+      }
+      await settle();
+      expect(core.layout('m')?.workspaces.map((w) => w.id)).toEqual(['wwwwwwww']);
+      // Pressed again: it goes, without asking, as it has nothing to lose
+      // (a machine left with none gets a new, empty one).
+      now.mockReturnValue(1_002_000);
+      runMenuCommand('pane.close');
+      await settle();
+      expect(dialog()).toBeUndefined();
+      expect(core.layout('m')?.workspaces.map((w) => w.id)).not.toContain('wwwwwwww');
+    } finally {
+      now.mockRestore();
+    }
+  });
+
   it('asks before closing a tab with a program running, naming it', async () => {
     await setup([shell('t1'), running('t2', 'vim')]);
     runMenuCommand('tab.close');

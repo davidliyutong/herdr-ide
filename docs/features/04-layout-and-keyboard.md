@@ -161,7 +161,11 @@ Non-goals: arbitrary docking of panes; floating panes.
   workspace is asked for as when creating one, with the pane's directory
   to begin with, and holds just the moved pane (`actions.movePaneToWorkspace`,
   `layout.moveToNewTab`). A workspace the last pane leaves stays, without
-  tabs, until it is closed. Panes move only between workspaces of one
+  tabs, until it is closed; `pane.close` (`cmd+w`) closes it then, without
+  asking, as there is nothing in it to lose. Only a press of its own does:
+  a held key that closed the last pane repeats without closing the
+  workspace (a run within 600 ms of the one before counts as held, since
+  the desktop app's menu repeats without saying so). Panes move only between workspaces of one
   machine: a terminal runs in its machine's terminal core.
 - Dragging a tab along the tab bar, or a workspace along its machine's list
   in the sidebar, shows an insertion bar and reorders it. A drop lands in a
@@ -346,7 +350,8 @@ described in [13](13-settings-and-appearance.md))
   last one, `cmd+shift+}` / `cmd+shift+{` and `ctrl+tab` /
   `ctrl+shift+tab` next / previous tab, `cmd+shift+w` close the tab,
   `cmd+d` / `cmd+shift+d` split right / down, `cmd+w` close the focused
-  pane (its terminal, not the tab), `cmd+shift+enter` maximize or restore
+  pane (its terminal, not the tab; in a workspace with no tab left, the
+  workspace), `cmd+shift+enter` maximize or restore
   the pane, `cmd+alt+arrows` focus the pane in that direction, `cmd+]` /
   `cmd+[` the next / previous pane, `cmd+n` new workspace (asking for its
   folder), `cmd+p` go to a workspace, `cmd+ctrl+down` / `cmd+ctrl+up` next /

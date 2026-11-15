@@ -194,6 +194,18 @@ export function commandShown(id: string): boolean {
   return id !== 'app.fullDiskAccess' || fullDiskAccessAvailable();
 }
 
+/** When pane.close last ran, and how soon after it another run counts as
+ * the key held (the desktop app's menu repeats without saying so; the first
+ * repeat comes after the system's delay, about 400 ms by default). */
+let lastPaneClose = 0;
+const HELD_CLOSE_MS = 600;
+
+/** Whether the selected workspace has no tab left: closing a pane closes it. */
+function emptyWorkspace(): boolean {
+  const ws = current()?.ws;
+  return !!ws && ws.tabs.length === 0;
+}
+
 /** Whether a command can run now: a pane, tab or workspace for it to act
  * on, something to switch to, a page that may change things. The desktop
  * app's menu shows the others disabled, the palette leaves them out. */
@@ -227,8 +239,10 @@ export function commandEnabled(id: string): boolean {
       return tabs > 1;
     case 'pane.splitRight':
     case 'pane.splitDown':
-    case 'pane.close':
       return changes && !!c?.pane;
+    case 'pane.close':
+      // With no pane left, it closes the empty workspace.
+      return changes && (!!c?.pane || emptyWorkspace());
     case 'pane.zoom':
       return !!c?.pane && panes > 1;
     case 'pane.focusLeft':
@@ -334,9 +348,19 @@ export function runCommand(id: string) {
     case 'pane.splitDown':
       if (ctx?.pane) void actions.split(ctx.m, ctx.pane, 'down');
       break;
-    case 'pane.close':
+    case 'pane.close': {
+      const now = Date.now();
+      const held = now - lastPaneClose < HELD_CLOSE_MS;
+      lastPaneClose = now;
       if (ctx?.pane) void actions.closePane(ctx.m, ctx.pane);
+      // A press of its own closes the empty workspace, not a held key that
+      // closed its last pane.
+      else if (!held && emptyWorkspace()) {
+        const cur = current();
+        if (cur?.ws) void actions.closeWorkspace(cur.m, cur.ws.id);
+      }
       break;
+    }
     case 'pane.zoom':
       if (ctx?.pane) actions.zoom(ctx.m, ctx.pane);
       break;

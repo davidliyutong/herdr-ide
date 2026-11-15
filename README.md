@@ -211,7 +211,7 @@ workspace for each on the local machine. Files and folders dropped on a
 pane of the local machine are pasted as their own paths, without uploading.
 
 On macOS `cmd+t` opens a tab, `cmd+1`…`cmd+9` select one (`cmd+9` the
-last), `cmd+shift+w` closes it, `cmd+w` closes the pane, `cmd+d` /
+last), `cmd+shift+w` closes it, `cmd+w` closes the pane (or a workspace with no tab left), `cmd+d` /
 `cmd+shift+d` split it, `cmd+alt+arrows` move between panes,
 `cmd+shift+enter` maximizes one, `cmd+n` creates a workspace, `cmd+,` opens
 the settings, `cmd+shift+p` the command palette, `cmd+j` opens the focused
