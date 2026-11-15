@@ -28,7 +28,11 @@ const (
 // State is what clients see for one machine.
 type State struct {
 	Spec
-	Status   Status           `json:"status"`
+	Status Status `json:"status"`
+	// Code says why a machine in error is never dialed:
+	// CodeInvalidTarget for a stored ssh target ValidTarget refuses. Error
+	// is what ssh or the agent said when a connection failed.
+	Code     string           `json:"code,omitempty"`
 	Error    string           `json:"error,omitempty"`
 	Platform string           `json:"platform,omitempty"`
 	Info     *agentproto.Info `json:"info,omitempty"`
@@ -85,6 +89,9 @@ type Machine struct {
 	enabled  bool
 	stopRun  context.CancelFunc
 	enableCh chan struct{}
+	// unusable is the code of a machine that is never dialed
+	// (CodeInvalidTarget); "" for the others.
+	unusable string
 
 	streams StreamHandler
 }
@@ -102,6 +109,13 @@ func newMachine(spec Spec, dial Dialer, logger *log.Logger, publish func(State))
 	m.state = State{Spec: spec, Status: StatusConnecting}
 	if !spec.Enabled {
 		m.state.Status = StatusDisabled
+	}
+	if spec.Kind == KindSSH && !ValidTarget(spec.Target) {
+		// A stored record whose target could reach ssh as an option or a
+		// shell's metacharacter: shown, so that it can be renamed or
+		// removed, and never dialed, enabled or not.
+		m.unusable = CodeInvalidTarget
+		m.state.Status, m.state.Code = StatusError, CodeInvalidTarget
 	}
 	return m
 }
@@ -176,8 +190,13 @@ func (m *Machine) Open(ctx context.Context, h agentproto.Header) (net.Conn, *age
 	return sess.Open(ctx, h)
 }
 
-// Run keeps the machine connected while it is enabled, until ctx ends.
+// Run keeps the machine connected while it is enabled, until ctx ends. A
+// machine that is never dialed waits for ctx only.
 func (m *Machine) Run(ctx context.Context) {
+	if m.unusable != "" {
+		<-ctx.Done()
+		return
+	}
 	for ctx.Err() == nil {
 		m.mu.Lock()
 		on := m.enabled
@@ -234,6 +253,11 @@ func (m *Machine) setEnabled(on bool) bool {
 	m.mu.Unlock()
 	if !changed {
 		return false
+	}
+	if m.unusable != "" {
+		// Its flag is kept; it stays in error, and is never dialed.
+		m.update(func(st *State) { st.Enabled = on })
+		return true
 	}
 	if on {
 		m.update(func(st *State) {

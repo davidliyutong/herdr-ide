@@ -360,6 +360,11 @@ describe('machineMenu', () => {
       expect(fetchMock.mock.calls[0][1]).toMatchObject({ body: JSON.stringify({ enabled: true }) });
       expect(useDialog.getState().current).toBeUndefined();
 
+      // A machine whose stored target the core refuses is never connected:
+      // rename and remove only.
+      useStore.getState().setMachines([{ ...ssh('error'), code: 'invalid_target' }]);
+      expect(labels(tidy(machineMenu('gpu')))).toEqual(['Rename machine', 'Remove machine…', '-', 'Add machine…']);
+
       useStore.getState().setReadOnly(true);
       expect(machineMenu('gpu')).toEqual([]);
     } finally {

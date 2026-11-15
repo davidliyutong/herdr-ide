@@ -417,7 +417,11 @@ files.
   and whether they were enabled. Names of herdr sessions other than the
   default that machines used are not kept; every machine gets the
   instance's own terminal core. Later changes to herdr's file are not
-  read.
+  read. A machine whose target the core refuses (one that starts with `-`
+  or holds whitespace, a control character or a shell character such as
+  `$`, `;` or `|`) is imported too and shown in error (`invalid_target`),
+  never connected, until it is renamed, removed or corrected in the
+  machines file.
 - **Terminals.** Terminals, workspaces and tabs that lived in herdr
   sessions are not migrated: each machine now has a terminal core of the
   instance's own (herdr-core, session `herdr-ide[-<instance>]`,

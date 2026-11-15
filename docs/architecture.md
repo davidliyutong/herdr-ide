@@ -27,7 +27,7 @@ instead of ssh), so both paths run the same code.
 | `internal/agent` | Agent: the terminal core, agent detection, files, code-server supervision, virtual displays, bridge listener, housekeeping. |
 | `internal/agent/detect` | Which coding agent a terminal's foreground process is and its state from the screen, by herdr's method and manifests (embedded, Apache-2.0), with the state machine for debouncing and done ([25](features/25-agent-detection.md)). |
 | `internal/transport` | yamux sessions: in-process for the local machine, ssh stdio for others; agent upload. |
-| `internal/machines` | The core's machines (`Registry`: SSH machines in `machines[-<instance>].json`, the SSH machines herdr saved imported once when that file does not exist), added, removed, renamed, enabled and disabled at runtime; the connection state machine. |
+| `internal/machines` | The core's machines (`Registry`: SSH machines in `machines[-<instance>].json`, the SSH machines herdr saved imported once when that file does not exist; entries and fields it does not use are written back as they were), added, removed, renamed, enabled and disabled at runtime; the connection state machine; the ssh target rule (`ValidTarget`; a stored machine whose target fails is listed with `invalid_target` and never dialed). |
 | `internal/hc` | Client of herdr-core's API (protocol generation 1): JSON-RPC calls, attached terminals as raw byte streams with credit, event subscriptions. |
 | `internal/hcdist` | herdr-core release embedded for machines: version, upstream archive names and SHA-256 digests ([21](features/21-terminal-core.md)). |
 | `internal/checksum` | SHA-256 of files, shared by the code-server downloads. |

@@ -31,11 +31,35 @@ export interface MachineState {
   target?: string;
   enabled: boolean;
   status: MachineStatus;
+  /** Why a machine in error is never connected: invalid_target for a
+   * stored ssh target the core refuses (machines.ValidTarget). */
+  code?: string;
   error?: string;
   platform?: string;
   info?: AgentInfo;
   hc?: MachineHC;
   updated_at: number;
+}
+
+/** The code of a machine whose stored ssh target the core refuses. */
+export const INVALID_TARGET = 'invalid_target';
+
+/** Printable ASCII a target may hold besides letters and digits. */
+const targetPunct = new Set('#%+,-./:=@[]^_~');
+
+/** Whether an ssh target is one the core takes (machines.ValidTarget; the
+ * vectors of design/testdata/machines/targets.json): at most 255 bytes of
+ * UTF-8, not starting with "-", of ASCII letters, digits and
+ * # % + , - . / : = @ [ ] ^ _ ~ and Unicode letters, marks and numbers. */
+export function validTarget(t: string): boolean {
+  if (!t || t.startsWith('-') || new TextEncoder().encode(t).length > 255) return false;
+  for (const ch of t) {
+    const c = ch.codePointAt(0)!;
+    if (c < 0x80) {
+      if (!/[A-Za-z0-9]/.test(ch) && !targetPunct.has(ch)) return false;
+    } else if (!/^[\p{L}\p{M}\p{N}]$/u.test(ch)) return false;
+  }
+  return true;
 }
 
 /** An agent's status change in a terminal of a machine's terminal core. */

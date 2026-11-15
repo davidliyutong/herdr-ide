@@ -4,10 +4,10 @@ import { useStore } from '../state/store';
 import { terms, useTerms } from '../state/terms';
 import { conn } from '../lib/conn';
 import { actions, attentionList } from '../actions';
-import { aggregate, agentOf, agentStatus, shortPath, terminalTitle, type MachineState } from '../lib/machine';
+import { aggregate, agentOf, agentStatus, INVALID_TARGET, shortPath, terminalTitle, type MachineState } from '../lib/machine';
 import * as L from '../term/layout';
 import { StatusDot, statusLabel } from './StatusDot';
-import { t, type MessageKey } from '../i18n';
+import { hasMessage, t, type MessageKey } from '../i18n';
 import { withKey } from '../keymap';
 import { APP_NAME } from '../brand';
 import { InlineEdit } from './InlineEdit';
@@ -102,6 +102,17 @@ function Inbox() {
   );
 }
 
+/** What a machine's code means (invalid_target…), else the code. */
+function codeText(code: string): string {
+  const k = `machine.code.${code}`;
+  return hasMessage(k) ? t(k as MessageKey) : code;
+}
+
+/** Why a machine is not connected, as its tooltip says it. */
+function machineProblem(m: MachineState): string {
+  return [m.code && codeText(m.code), m.error].filter(Boolean).join('\n');
+}
+
 function MachineItem({ m }: { m: MachineState }) {
   // Disabled machines start folded: their body only holds the Enable button
   // (also in the machine's menu). Disabling folds a machine and enabling
@@ -129,7 +140,7 @@ function MachineItem({ m }: { m: MachineState }) {
         className="machine-head"
         onClick={() => !renamingMachine && setOpen(!open)}
         onContextMenu={(e) => !renamingMachine && openMenu(e, machineMenu(m.id))}
-        title={m.error || m.platform}
+        title={machineProblem(m) || m.platform}
       >
         <span className={`mstatus ms-${m.status}`} />
         {renamingMachine ? (
@@ -151,13 +162,14 @@ function MachineItem({ m }: { m: MachineState }) {
           {m.status !== 'ready' && (
             <div className={`machine-status ms-${m.status}`}>
               {t(`machine.${m.status}` as MessageKey)}
+              {m.code && <div className="small">{codeText(m.code)}</div>}
               {m.error && <div className="small ellipsis2">{m.error}</div>}
               {m.status === 'disabled' && !readOnly && (
                 <div className="row">
                   <button onClick={() => void actions.setMachineEnabled(m.id, true)}>{t('menu.enableMachine')}</button>
                 </div>
               )}
-              {(m.status === 'auth_required' || m.status === 'error') && (
+              {(m.status === 'auth_required' || m.status === 'error') && m.code !== INVALID_TARGET && (
                 <div className="row">
                   {m.status === 'auth_required' && m.kind === 'ssh' && (
                     <button onClick={() => useStore.getState().openAuth?.(m.id)}>{t('sidebar.authenticate')}</button>

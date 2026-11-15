@@ -1,12 +1,15 @@
 package machines
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"sync"
 
@@ -47,36 +50,49 @@ var (
 	ErrLabelTaken = errors.New("another machine has this label")
 )
 
-// registryFile is the content of machines[-<instance>].json.
-type registryFile struct {
-	Version  int    `json:"version"`
-	Machines []Spec `json:"machines"`
-	// Enabled is what an earlier version kept in the file: the machines the
-	// user enabled or disabled over herdr's saved machines. It is read once,
-	// when the machines are imported.
-	Enabled map[string]bool `json:"enabled,omitempty"`
-}
-
+// registryVersion is the version of the machines file this core writes.
 const registryVersion = 1
+
+// specFields are the fields of a record Spec reads; a record's other fields
+// are kept as they are.
+var specFields = []string{"id", "label", "kind", "target", "enabled"}
+
+// record is one entry of the machines file: a machine (spec) with the
+// fields this version does not know (extra), or, when raw is set, an entry
+// that is no machine this version can use (not an object, no id, an id
+// already taken, a kind it does not have), kept as written.
+type record struct {
+	spec  Spec
+	extra map[string]json.RawMessage
+	raw   json.RawMessage
+}
 
 // Registry is the core's own list of machines, in the machines file beside
 // its settings: the SSH machines added from the UI (or imported once from
 // herdr's saved machines) and, once it was enabled or disabled, a record of
 // the local machine. Machines given with --ssh are not in it. Every change
-// is written at once; the file is the core's, read when it starts.
+// is written at once; the file is the core's, read when it starts. Writing
+// it keeps what the core does not use: entries it cannot read as machines,
+// fields of records and of the file it does not know, and machines whose
+// target ValidTarget refuses (they are listed, in an error state, and
+// never dialed: Machine).
 type Registry struct {
 	path string
 	mu   sync.Mutex
-	list []Spec
+	list []record
+	// version and extra are the file's version and its fields other than
+	// "version" and "machines".
+	version int
+	extra   map[string]json.RawMessage
 }
 
 // OpenRegistry reads the machines file at path. When there is none, or it
-// holds what an earlier version kept there, the machines come once from imp
-// (herdr's saved machines, SavedSpecs) with the user's earlier choices
-// applied, and are written: herdr's catalog is not read again. An empty
-// path keeps the machines in memory only. On an error the registry returned
-// keeps its machines in memory only, so that a file that could not be read
-// is not overwritten.
+// holds what an earlier version kept there ({"enabled": {...}}), the
+// machines come once from imp (herdr's saved machines, SavedSpecs) with the
+// user's earlier choices applied, and are written: herdr's catalog is not
+// read again. An empty path keeps the machines in memory only. On an error
+// the registry returned keeps its machines in memory only, so that a file
+// that could not be read is not overwritten.
 func OpenRegistry(path string, imp func() ([]Spec, error)) (*Registry, error) {
 	if path == "" {
 		return &Registry{}, nil
@@ -85,103 +101,144 @@ func OpenRegistry(path string, imp func() ([]Spec, error)) (*Registry, error) {
 	if err != nil {
 		return &Registry{}, err
 	}
-	var f registryFile
+	var top map[string]json.RawMessage
 	if b != nil {
-		if err := json.Unmarshal(b, &f); err != nil {
+		if err := json.Unmarshal(b, &top); err != nil {
 			return &Registry{}, fmt.Errorf("%s: %w", path, err)
 		}
-		if f.Version != 0 || f.Machines != nil {
-			r := &Registry{path: path}
-			for _, s := range f.Machines {
-				if s, ok := valid(s); ok && r.index(s.ID) < 0 {
-					r.list = append(r.list, s)
-				}
-			}
-			return r, nil
-		}
 	}
-	r := &Registry{path: path}
+	_, hasVersion := top["version"]
+	_, hasMachines := top["machines"]
+	if hasVersion || hasMachines {
+		r := &Registry{path: path, version: registryVersion}
+		if hasVersion && json.Unmarshal(top["version"], &r.version) != nil {
+			return &Registry{}, fmt.Errorf("%s: version is not a number", path)
+		}
+		var entries []json.RawMessage
+		if hasMachines && string(top["machines"]) != "null" && json.Unmarshal(top["machines"], &entries) != nil {
+			return &Registry{}, fmt.Errorf("%s: machines is not a list", path)
+		}
+		for _, e := range entries {
+			r.list = append(r.list, r.parse(e))
+		}
+		for k, v := range top {
+			if k != "version" && k != "machines" {
+				if r.extra == nil {
+					r.extra = map[string]json.RawMessage{}
+				}
+				r.extra[k] = v
+			}
+		}
+		return r, nil
+	}
+	var old struct {
+		Enabled map[string]bool `json:"enabled"`
+	}
+	if b != nil && json.Unmarshal(b, &old) != nil {
+		return &Registry{}, fmt.Errorf("%s: enabled is not a map of flags", path)
+	}
+	r := &Registry{path: path, version: registryVersion}
 	if imp != nil {
 		saved, err := imp()
 		if err != nil {
 			return &Registry{}, fmt.Errorf("importing herdr's machines: %w", err)
 		}
 		for _, s := range saved {
-			if on, ok := f.Enabled[s.ID]; ok {
+			if on, ok := old.Enabled[s.ID]; ok {
 				s.Enabled = on
 			}
-			if s, ok := valid(s); ok && r.index(s.ID) < 0 {
-				r.list = append(r.list, s)
-			}
+			e, _ := json.Marshal(s)
+			r.list = append(r.list, r.parse(e))
 		}
 	}
-	if on, ok := f.Enabled[LocalID]; ok && !on {
-		r.list = append(r.list, Spec{ID: LocalID, Kind: KindLocal})
+	if on, ok := old.Enabled[LocalID]; ok && !on && r.index(LocalID) < 0 {
+		r.list = append(r.list, record{spec: Spec{ID: LocalID, Kind: KindLocal}})
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r, r.save()
 }
 
-// MaxTargetLen bounds an ssh target.
-const MaxTargetLen = 255
-
-// ValidTarget accepts an ssh destination: a ~/.ssh/config alias, host,
-// user@host, host:port, [IPv6] or ssh://user@host:port URL. Only letters,
-// digits and . _ - @ : / [ ] % are allowed, so a target holds no space,
-// control character or shell metacharacter, and it does not start with "-",
-// which ssh would take for an option. Every ssh command also puts "--"
-// before it (internal/transport).
-func ValidTarget(t string) bool {
-	if t == "" || len(t) > MaxTargetLen || t[0] == '-' {
-		return false
+// parse reads one entry of the file; entries that are no machine this
+// version can use come back raw. r is not shared yet.
+func (r *Registry) parse(e json.RawMessage) record {
+	var fields map[string]json.RawMessage
+	var s Spec
+	if json.Unmarshal(e, &fields) != nil || fields == nil || json.Unmarshal(e, &s) != nil {
+		return record{raw: e}
 	}
-	for i := 0; i < len(t); i++ {
-		switch c := t[i]; {
-		case 'a' <= c && c <= 'z', 'A' <= c && c <= 'Z', '0' <= c && c <= '9':
-		case strings.IndexByte("._-@:/[]%", c) >= 0:
-		default:
-			return false
-		}
+	s, ok := normalize(s)
+	if !ok || r.index(s.ID) >= 0 {
+		return record{raw: e}
 	}
-	return true
+	for _, k := range specFields {
+		delete(fields, k)
+	}
+	if len(fields) == 0 {
+		fields = nil
+	}
+	return record{spec: s, extra: fields}
 }
 
-// ErrInvalidTarget is returned for a machine whose ssh target ValidTarget
-// refuses.
-var ErrInvalidTarget = errors.New("invalid ssh target")
-
-// valid returns a record as it is stored: an SSH machine with an id and a
-// valid target, or the local machine's.
-func valid(s Spec) (Spec, bool) {
+// normalize returns a record as the core uses it: the local machine's, or
+// an SSH machine's with an id, labelled by its target when it has no label
+// (by its id when the target is refused, so that no label shows what
+// ValidTarget refuses). A record without an id, or of a kind this version
+// does not have, is not one.
+func normalize(s Spec) (Spec, bool) {
 	switch {
 	case s.ID == LocalID:
 		return Spec{ID: LocalID, Kind: KindLocal, Enabled: s.Enabled}, true
-	case s.ID == "" || !ValidTarget(s.Target):
+	case s.ID == "" || (s.Kind != "" && s.Kind != KindSSH):
 		return s, false
 	}
 	s.Kind = KindSSH
 	if s.Label == "" {
 		s.Label = s.Target
+		if !ValidTarget(s.Target) {
+			s.Label = s.ID
+		}
 	}
 	return s, true
 }
 
-// index returns the position of machine id; r.mu is held or r is not shared.
+// index returns the position of machine id's record; r.mu is held or r is
+// not shared.
 func (r *Registry) index(id string) int {
-	for i, s := range r.list {
-		if s.ID == id {
+	for i, e := range r.list {
+		if e.raw == nil && e.spec.ID == id {
 			return i
 		}
 	}
 	return -1
 }
 
-// Specs returns the stored machines in their order.
+// Specs returns the stored machines in their order, those whose target
+// ValidTarget refuses included.
 func (r *Registry) Specs() []Spec {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return append([]Spec(nil), r.list...)
+	var out []Spec
+	for _, e := range r.list {
+		if e.raw == nil {
+			out = append(out, e.spec)
+		}
+	}
+	return out
+}
+
+// Kept returns how many entries of the file are no machine this version
+// can use; they stay in the file as written.
+func (r *Registry) Kept() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for _, e := range r.list {
+		if e.raw != nil {
+			n++
+		}
+	}
+	return n
 }
 
 // Get returns machine id's record.
@@ -189,24 +246,31 @@ func (r *Registry) Get(id string) (Spec, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if i := r.index(id); i >= 0 {
-		return r.list[i], true
+		return r.list[i].spec, true
 	}
 	return Spec{}, false
 }
 
-// Put adds a record, or replaces the one with its id, and writes the file.
+// Put adds a record, or replaces the one with its id (keeping the fields
+// the core does not know), and writes the file. A new record, and a changed
+// target, must pass ValidTarget; a stored record whose target fails it can
+// still be renamed, enabled and disabled.
 func (r *Registry) Put(s Spec) error {
-	s, ok := valid(s)
+	s, ok := normalize(s)
 	if !ok {
-		return fmt.Errorf("machine record without an id or a valid target: %w", ErrInvalidTarget)
+		return errors.New("machine record without an id")
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	prev := append([]Spec(nil), r.list...)
-	if i := r.index(s.ID); i >= 0 {
-		r.list[i] = s
+	i := r.index(s.ID)
+	if s.Kind == KindSSH && !ValidTarget(s.Target) && (i < 0 || r.list[i].spec.Target != s.Target) {
+		return ErrInvalidTarget
+	}
+	prev := append([]record(nil), r.list...)
+	if i >= 0 {
+		r.list[i].spec = s
 	} else {
-		r.list = append(r.list, s)
+		r.list = append(r.list, record{spec: s})
 	}
 	if err := r.save(); err != nil {
 		r.list = prev
@@ -223,7 +287,7 @@ func (r *Registry) Delete(id string) error {
 	if i < 0 {
 		return nil
 	}
-	prev := append([]Spec(nil), r.list...)
+	prev := append([]record(nil), r.list...)
 	r.list = append(r.list[:i:i], r.list[i+1:]...)
 	if err := r.save(); err != nil {
 		r.list = prev
@@ -232,21 +296,83 @@ func (r *Registry) Delete(id string) error {
 	return nil
 }
 
-// save writes the file atomically (0600); r.mu is held.
+// save writes the file atomically (0600); r.mu is held. Known fields come
+// first, in their usual order, then the others, sorted.
 func (r *Registry) save() error {
 	if r.path == "" {
 		return nil
 	}
-	list := r.list
-	if list == nil {
-		list = []Spec{}
+	entries := make([]json.RawMessage, 0, len(r.list))
+	for _, e := range r.list {
+		if e.raw != nil {
+			entries = append(entries, e.raw)
+			continue
+		}
+		s := e.spec
+		known := map[string]any{"id": s.ID, "label": s.Label, "kind": s.Kind, "enabled": s.Enabled}
+		if s.Target != "" {
+			known["target"] = s.Target
+		}
+		b, err := object(specFields, known, e.extra)
+		if err != nil {
+			return err
+		}
+		entries = append(entries, b)
 	}
-	b, err := json.MarshalIndent(registryFile{Version: registryVersion, Machines: list}, "", "  ")
+	b, err := object([]string{"version", "machines"},
+		map[string]any{"version": max(r.version, registryVersion), "machines": entries}, r.extra)
 	if err != nil {
 		return err
 	}
-	_, err = userfile.Write(r.path, append(b, '\n'))
+	var out bytes.Buffer
+	if err := json.Indent(&out, b, "", "  "); err != nil {
+		return err
+	}
+	out.WriteByte('\n')
+	_, err = userfile.Write(r.path, out.Bytes())
 	return err
+}
+
+// object encodes a JSON object: the keys of order that known has, then the
+// other fields of extra, sorted.
+func object(order []string, known map[string]any, extra map[string]json.RawMessage) ([]byte, error) {
+	var b bytes.Buffer
+	b.WriteByte('{')
+	field := func(k string, v any) error {
+		if b.Len() > 1 {
+			b.WriteByte(',')
+		}
+		kb, _ := json.Marshal(k)
+		vb, err := json.Marshal(v)
+		if err != nil {
+			return err
+		}
+		b.Write(kb)
+		b.WriteByte(':')
+		b.Write(vb)
+		return nil
+	}
+	for _, k := range order {
+		if v, ok := known[k]; ok {
+			if err := field(k, v); err != nil {
+				return nil, err
+			}
+		}
+	}
+	rest := make([]string, 0, len(extra))
+	for k := range extra {
+		if _, ok := known[k]; !ok && !slices.Contains(order, k) {
+			rest = append(rest, k)
+		}
+	}
+	sort.Strings(rest)
+	for _, k := range rest {
+		if err := field(k, extra[k]); err != nil {
+			return nil, err
+		}
+	}
+	b.WriteByte('}')
+	return b.Bytes(), nil
 }
 
 // herdr's saved machine catalog, imported once (SavedSpecs).
@@ -294,8 +420,10 @@ func SavedSpecs() ([]Spec, error) {
 
 // LoadSpecs returns the local machine, the stored SSH machines and the
 // extra (--ssh) ones not stored, each once. The local machine's stored
-// record gives its enabled flag; its label is the host's name. Machines
-// whose target ValidTarget refuses are left out.
+// record gives its enabled flag; its label is the host's name. Stored
+// machines whose target ValidTarget refuses are kept (they show an error
+// and are never dialed); extra ones are left out (the core refuses to start
+// with one).
 func LoadSpecs(stored, extra []Spec) []Spec {
 	hostname, _ := os.Hostname()
 	hostname = strings.TrimSuffix(hostname, ".local")
@@ -307,7 +435,7 @@ func LoadSpecs(stored, extra []Spec) []Spec {
 			specs[0].Enabled = s.Enabled
 			continue
 		}
-		if seen[s.ID] || s.Kind != KindSSH || !ValidTarget(s.Target) {
+		if seen[s.ID] || s.Kind != KindSSH {
 			continue
 		}
 		specs = append(specs, s)

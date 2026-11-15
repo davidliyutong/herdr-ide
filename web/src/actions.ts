@@ -66,6 +66,7 @@ const machineErrors: Record<string, MessageKey> = {
   label_taken: 'machine.labelTaken',
   machine_exists: 'machine.exists',
   invalid: 'machine.invalid',
+  invalid_target: 'machine.invalidTarget',
   unknown: 'machine.gone',
   local: 'machine.localOnly',
   save: 'machine.notSaved',

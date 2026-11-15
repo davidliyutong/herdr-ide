@@ -34,6 +34,7 @@ import {
   X,
 } from 'lucide-react';
 import { actions, current } from './actions';
+import { INVALID_TARGET } from './lib/machine';
 import type { MenuEntry } from './contextMenu';
 import { downloadDialog } from './dialog';
 import { canDownload, downloadPath } from './download';
@@ -154,7 +155,10 @@ export function machineMenu(m: string): MenuEntry[] {
   const st = s.machines[m];
   if (s.readOnly || !st) return [];
   const out: MenuEntry[] = [];
-  if (st.status !== 'disabled') {
+  // A machine whose target the core refuses is never connected: it can be
+  // renamed or removed only.
+  const usable = st.code !== INVALID_TARGET;
+  if (usable && st.status !== 'disabled') {
     const off = st.status !== 'ready' || s.hcBusy[m] === true;
     out.push(
       { label: t('menu.startCore'), icon: <Play />, disabled: off, run: () => void actions.terminalCore(m, 'start') },
@@ -163,7 +167,7 @@ export function machineMenu(m: string): MenuEntry[] {
       'sep',
       { label: t('menu.disableMachine'), icon: <PowerOff />, danger: true, run: () => void actions.setMachineEnabled(m, false) },
     );
-  } else {
+  } else if (usable) {
     out.push({ label: t('menu.enableMachine'), icon: <Power />, run: () => void actions.setMachineEnabled(m, true) });
   }
   // The local machine keeps its host's name and stays.

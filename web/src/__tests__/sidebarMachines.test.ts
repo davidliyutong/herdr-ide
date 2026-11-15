@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 //
 // The sidebar folds disabled machines, renames a machine in place, in its
-// header, shows the workspaces of the machines followed, and offers to start
-// a terminal core that failed.
+// header, shows the workspaces of the machines followed, offers to start a
+// terminal core that failed, and says why a machine is never connected.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
@@ -124,6 +124,34 @@ describe('Sidebar machines', () => {
     await act(async () => head().click());
     await setStatus('disabled');
     expect(host.querySelector('.machine-body')).toBeNull();
+  });
+
+  it('shows why a machine with a refused target is never connected, without a retry', async () => {
+    await act(async () =>
+      useStore
+        .getState()
+        .setMachines([
+          { id: 'gpu', label: 'gpu', kind: 'ssh', status: 'error', code: 'invalid_target', enabled: true } as unknown as MachineState,
+        ]),
+    );
+    expect(host.querySelector('.machine-status')?.textContent).toContain('never connected');
+    expect(host.querySelector<HTMLElement>('.machine-head')?.title).toContain('never connected');
+    expect(Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Retry')).toBeUndefined();
+    // Another error keeps its retry.
+    await act(async () =>
+      useStore.getState().setMachines([
+        {
+          id: 'gpu',
+          label: 'gpu',
+          kind: 'ssh',
+          status: 'error',
+          error: 'ssh: connection refused',
+          enabled: true,
+        } as unknown as MachineState,
+      ]),
+    );
+    expect(host.querySelector('.machine-status')?.textContent).toContain('connection refused');
+    expect(Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Retry')).toBeDefined();
   });
 
   it('renames a machine in its header', async () => {

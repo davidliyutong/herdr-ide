@@ -183,7 +183,11 @@ export const en = {
   'machine.renameFailed': 'Could not rename {machine}: {detail}',
   'machine.labelTaken': 'another machine has this name.',
   'machine.exists': 'the machine is there already.',
-  'machine.invalid': 'the target or name was refused: a target has only letters, digits and . _ - @ : / [ ] % and does not start with “-”.',
+  'machine.invalid': 'the name was refused: up to 64 characters without control characters.',
+  'machine.invalidTarget':
+    'the ssh target was refused: it must not start with “-” nor hold whitespace, control characters or any of ! " $ & \' ( ) * ; < > ? \\ ` { | }.',
+  'machine.code.invalid_target':
+    'Its ssh target is refused (it starts with “-” or holds whitespace, control characters or shell characters such as $ ; |), so it is never connected. Rename or remove it, or correct the target in the machines file and restart.',
   'machine.gone': 'the machine is no longer there.',
   'machine.localOnly': 'the local machine cannot be changed this way.',
   'machine.notSaved': 'the machines file could not be saved.',
@@ -401,7 +405,8 @@ export const en = {
   'addMachine.targetPlaceholder': 'host alias from ~/.ssh/config, or user@host',
   'addMachine.label': 'Name',
   'addMachine.labelPlaceholder': 'optional; defaults to the host',
-  'addMachine.badTarget': 'Enter an ssh destination of letters, digits and . _ - @ : / [ ] % that does not start with “-”.',
+  'addMachine.badTarget':
+    'Enter an ssh destination (a host alias, user@host or ssh://user@host:port) that does not start with “-” and has no whitespace, control characters or any of ! " $ & \' ( ) * ; < > ? \\ ` { | }.',
   'addMachine.explain':
     'It connects with your ssh configuration (aliases, keys, jump hosts). A password, a key’s passphrase or a new host key is asked for in a terminal.',
   'addMachine.start': 'Add',

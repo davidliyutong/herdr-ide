@@ -34,6 +34,22 @@ final class ProtocolTests: XCTestCase {
     }
 }
 
+/// The vectors of design/testdata/machines/targets.json, which
+/// internal/machines and web/src/__tests__/addMachine.test.ts run too.
+final class TargetTests: XCTestCase {
+    func testTargets() throws {
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("../../../design/testdata/machines/targets.json").standardizedFileURL
+        let file = JSONValue(any: try JSONSerialization.jsonObject(with: try Data(contentsOf: url)))
+        let accept = (file["accept"]?.array ?? []).compactMap(\.string)
+        let reject = (file["reject"]?.array ?? []).compactMap(\.string)
+        XCTAssertGreaterThan(accept.count, 20)
+        XCTAssertGreaterThan(reject.count, 30)
+        for t in accept { XCTAssertTrue(Machine.validTarget(t), t) }
+        for t in reject { XCTAssertFalse(Machine.validTarget(t), t.debugDescription) }
+    }
+}
+
 final class EventTests: XCTestCase {
     func testDecode() {
         XCTAssertEqual(EventConnection.decode(#"{"t":"machines","list":[{"id":"local","label":"Mac","status":"ready","snapshot":{}},{"id":"b","label":"","status":"connecting"},{"label":"no id"}]}"#),
@@ -42,11 +58,11 @@ final class EventTests: XCTestCase {
                        .machine(Machine(id: "b", label: "Box", status: "auth_required", error: "x")))
         XCTAssertEqual(EventConnection.decode(#"{"t":"machine","state":{"id":"c","kind":"ssh","target":"u@h","status":"ready","info":{"home":"/home/u"}}}"#),
                        .machine(Machine(id: "c", label: "c", status: "ready", kind: "ssh", target: "u@h", home: "/home/u")))
-        XCTAssertTrue(Machine.validTarget(" user@host.example "))
-        XCTAssertTrue(Machine.validTarget("host:2222"))
-        XCTAssertTrue(Machine.validTarget("ssh://u@h:2222"))
-        XCTAssertTrue(Machine.validTarget("[fe80::1%en0]"))
-        for bad in ["", "-oProxyCommand=x", "a b", "日本", "h;id", "$(id)", "h|x", "h'x", "h\tx", String(repeating: "h", count: 256)] { XCTAssertFalse(Machine.validTarget(bad), bad) }
+        // A stored target the core refuses: shown with its code, never connected.
+        let refused = EventConnection.decode(#"{"t":"machine","state":{"id":"x","label":"x","kind":"ssh","target":"h$(id)","status":"error","code":"invalid_target"}}"#)
+        XCTAssertEqual(refused, .machine(Machine(id: "x", label: "x", status: "error", kind: "ssh", target: "h$(id)", code: "invalid_target")))
+        if case let .machine(m)? = refused { XCTAssertFalse(m.usable) }
+        XCTAssertTrue(Machine(id: "c", label: "c", status: "error").usable)
         XCTAssertEqual(EventConnection.decode(#"{"t":"machine","state":{"id":"b","label":"Box","kind":"ssh","status":"ready","hc":{"state":"error","code":"stopped"}}}"#),
                        .machine(Machine(id: "b", label: "Box", status: "ready", kind: "ssh", hc: BackendState(phase: .error, code: "stopped"))))
         XCTAssertEqual(EventConnection.decode(#"{"t":"gui","state":{"m":"b","phase":"ready","windows":[{"id":3,"title":"plot","w":640,"h":480,"pid":9,"terminal":"t4"},{"id":4,"title":"Save","w":300,"h":200,"transient":3},{"title":"no id"}]}}"#),
@@ -297,7 +313,7 @@ final class LocalizationTests: XCTestCase {
         }
         // Keys built from a state or code: tr("backend." + code); the
         // settings' and commands' come from the core's registry (below).
-        let prefixes = ["backend.", "machine.", "status.", "quicklook.", "settings.", "command.", "keys.error.", "keys.problem.", "gui.error."]
+        let prefixes = ["backend.", "machine.", "machine.code.", "status.", "quicklook.", "settings.", "command.", "keys.error.", "keys.problem.", "gui.error."]
         for key in used where !prefixes.contains(key) {
             XCTAssertNotNil(english[key], "missing string \(key)")
         }

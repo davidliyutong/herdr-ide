@@ -29,6 +29,11 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not an ssh machine", http.StatusBadRequest)
 		return
 	}
+	// A stored target ValidTarget refuses never reaches ssh.
+	if !machines.ValidTarget(st.Target) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": machines.CodeInvalidTarget})
+		return
+	}
 	s.audit.log(r, "ssh.auth", map[string]any{"machine": mc.ID(), "target": st.Target})
 	servePTY(w, r, transport.AuthCommand(s.opts.ControlDir, st.Target))
 	mc.Wake()

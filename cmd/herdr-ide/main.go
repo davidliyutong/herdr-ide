@@ -181,7 +181,7 @@ func serve(args []string, logger *log.Logger) {
 	}
 	for _, t := range extraSSH {
 		if !machines.ValidTarget(t) {
-			logger.Fatalf("--ssh %q: a target is [user@]host[:port], an ssh:// URL or a ~/.ssh/config alias of letters, digits and . _ - @ : / [ ] %%, not starting with -", t)
+			logger.Fatalf("--ssh %q: a target is [user@]host, an ssh:// URL or a ~/.ssh/config alias of at most %d bytes, not starting with -, without whitespace, control characters or any of ! \" $ & ' ( ) * ; < > ? \\ ` { | }", t, machines.MaxTargetLen)
 		}
 	}
 	machinesFile := ""
@@ -236,6 +236,14 @@ func serve(args []string, logger *log.Logger) {
 	if err != nil {
 		logger.Printf("machines are not stored: %v", err)
 	}
+	if n := registry.Kept(); n > 0 {
+		logger.Printf("%s: %d entries are not machines this version can use; they are kept in the file as they are", machinesFile, n)
+	}
+	for _, s := range registry.Specs() {
+		if s.Kind == machines.KindSSH && !machines.ValidTarget(s.Target) {
+			logger.Printf("machine %s: its ssh target is refused (%s); it is shown in error and never connected", s.ID, machines.CodeInvalidTarget)
+		}
+	}
 	specs := selectSpecs(machines.LoadSpecs(registry.Specs(), extraSpecs(extraSSH)), *localOnly, extraSSH, only)
 	controlDir, err := transport.ControlDir()
 	if err != nil {
@@ -247,6 +255,11 @@ func serve(args []string, logger *log.Logger) {
 			s, err := transport.DialLocal(ctx, agent.Options{Instance: *instance, Logger: logger})
 			return s, runtime.GOOS + "/" + runtime.GOARCH, err
 		case machines.KindSSH:
+			// Machines never dial such a target; this keeps it from ssh
+			// whatever calls.
+			if !machines.ValidTarget(spec.Target) {
+				return nil, "", machines.ErrInvalidTarget
+			}
 			s, p, err := transport.DialSSH(ctx, transport.SSHOptions{
 				Target: spec.Target, ControlDir: controlDir, Agents: embedded.Agent, Logger: logger, Instance: *instance,
 			})

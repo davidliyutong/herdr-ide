@@ -182,7 +182,7 @@ func termServer(t *testing.T, opts Options, core bool) (*Server, *fakeTermCore, 
 		s, err := transport.DialLocal(ctx, agent.Options{Logger: logger})
 		return s, "test/test", err
 	}
-	mg := machines.NewManager([]machines.Spec{{ID: "x", Label: "x", Kind: machines.KindSSH, Enabled: true}}, dial, logger)
+	mg := machines.NewManager([]machines.Spec{{ID: "x", Label: "x", Kind: machines.KindSSH, Target: "x", Enabled: true}}, dial, logger)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {

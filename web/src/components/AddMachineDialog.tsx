@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import { useStore } from '../state/store';
 import { actions } from '../actions';
 import { t } from '../i18n';
+import { validTarget } from '../lib/machine';
 
 export interface AddMachineForm {
   target: string;
@@ -10,12 +11,10 @@ export interface AddMachineForm {
 }
 
 /** Why the form cannot be sent, as the core checks it too: a target is an
- * ssh destination without spaces that does not read as an option. */
+ * ssh destination that does not read as an option and holds no whitespace,
+ * control character or shell metacharacter (validTarget). */
 export function addMachineProblem(f: AddMachineForm): 'target' | undefined {
-  const target = f.target.trim();
-  // As the core checks it (machines.ValidTarget): letters, digits and . _ - @ : / [ ] %.
-  if (!target || target.startsWith('-') || /[^A-Za-z0-9._@:/[\]%-]/.test(target) || target.length > 255) return 'target';
-  return undefined;
+  return validTarget(f.target.trim()) ? undefined : 'target';
 }
 
 /** Adds an SSH machine to the core's machines: it appears in the sidebar

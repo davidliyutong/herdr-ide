@@ -400,7 +400,7 @@ func TestBridgeSendToAgent(t *testing.T) {
 	defer cancel()
 	c := &wsClient{s: s, ctx: ctx, cancel: cancel, send: make(chan []byte, 8)}
 	s.clients[c] = true
-	mc := machines.NewManager([]machines.Spec{{ID: "m", Label: "m", Kind: machines.KindSSH}}, nil, log.New(io.Discard, "", 0)).Get("m")
+	mc := machines.NewManager([]machines.Spec{{ID: "m", Label: "m", Kind: machines.KindSSH, Target: "m"}}, nil, log.New(io.Discard, "", 0)).Get("m")
 	a, b := net.Pipe()
 	defer b.Close()
 	go s.bridge.serve(mc, a)
@@ -556,7 +556,7 @@ func agentMachine(t *testing.T) (*machines.Manager, *machines.Machine, *log.Logg
 		s, err := transport.DialLocal(ctx, agent.Options{Logger: logger})
 		return s, "test/test", err
 	}
-	mg := machines.NewManager([]machines.Spec{{ID: "x", Label: "x", Kind: machines.KindSSH, Enabled: true}}, dial, logger)
+	mg := machines.NewManager([]machines.Spec{{ID: "x", Label: "x", Kind: machines.KindSSH, Target: "x", Enabled: true}}, dial, logger)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {

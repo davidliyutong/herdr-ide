@@ -57,13 +57,17 @@ final class MachineDialogs {
         if machine.status == "auth_required", machine.kind == "ssh" {
             menu.item(tr("menu.signIn"), symbol: "key") { [weak self] in self?.signIn(id) }
         }
-        if machine.status == "error" || machine.status == "auth_required" {
-            menu.item(tr("menu.retry"), symbol: "arrow.clockwise") { [weak self] in self?.retry(id) }
-        }
-        if machine.status == "disabled" {
-            menu.item(tr("menu.enableMachine"), symbol: "power") { [weak self] in self?.setEnabled(id, true) }
-        } else {
-            menu.item(tr("menu.disableMachine"), symbol: "poweroff") { [weak self] in self?.setEnabled(id, false) }
+        // A machine whose target the core refuses is never connected: it
+        // can be renamed or removed only.
+        if machine.usable {
+            if machine.status == "error" || machine.status == "auth_required" {
+                menu.item(tr("menu.retry"), symbol: "arrow.clockwise") { [weak self] in self?.retry(id) }
+            }
+            if machine.status == "disabled" {
+                menu.item(tr("menu.enableMachine"), symbol: "power") { [weak self] in self?.setEnabled(id, true) }
+            } else {
+                menu.item(tr("menu.disableMachine"), symbol: "poweroff") { [weak self] in self?.setEnabled(id, false) }
+            }
         }
         // The local machine keeps its host's name and stays.
         if machine.kind == "ssh" {
@@ -76,9 +80,10 @@ final class MachineDialogs {
     }
 
     /// The one action a machine's row offers, by its state: sign in, retry,
-    /// enable; nil when it is connected.
+    /// enable; nil when it is connected or never is.
     func rowAction(_ machine: Machine) -> (symbol: String, tip: String, run: () -> Void)? {
         let id = machine.id
+        guard machine.usable else { return nil }
         switch machine.status {
         case "auth_required" where machine.kind == "ssh": return ("key", tr("menu.signIn"), { [weak self] in self?.signIn(id) })
         case "error": return ("arrow.clockwise", tr("menu.retry"), { [weak self] in self?.retry(id) })
@@ -117,8 +122,8 @@ final class MachineDialogs {
         dialogs?.ask(tr("addMachine.title"), info: problem ?? tr("addMachine.explain"),
                      rows: [(tr("addMachine.target"), targetField), (tr("addMachine.label"), labelField)],
                      confirm: tr("addMachine.add")) { [weak self] in
-            let target = targetField.stringValue.trimmingCharacters(in: .whitespaces)
-            let label = labelField.stringValue.trimmingCharacters(in: .whitespaces)
+            let target = targetField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            let label = labelField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             guard Machine.validTarget(target) else {
                 // Asked again with what was typed and why it was refused.
                 DispatchQueue.main.async { self?.add(target: target, label: label, problem: tr("addMachine.badTarget")) }

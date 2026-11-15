@@ -310,7 +310,9 @@
 "menu.disableMachine" = "Disable Machine";
 "menu.renameMachine" = "Rename Machine…";
 "menu.removeMachine" = "Remove Machine…";
-"machine.error.invalid" = "The target or name was refused: a target has no spaces and does not start with “-”.";
+"machine.error.invalid" = "The name was refused: up to 64 characters without control characters.";
+"machine.error.invalid_target" = "The ssh target was refused: it must not start with “-” nor hold whitespace, control characters or any of ! \" $ & ' ( ) * ; < > ? \\ ` { | }.";
+"machine.code.invalid_target" = "Its ssh target is refused (it starts with “-” or holds whitespace, control characters or shell characters such as $ ; |), so it is never connected. Rename or remove it, or correct the target in the machines file and restart.";
 "machine.error.label_taken" = "Another machine has this name.";
 "machine.error.machine_exists" = "The machine is there already.";
 "machine.error.unknown" = "The machine is no longer there.";
@@ -323,7 +325,7 @@
 "addMachine.label" = "Name";
 "addMachine.labelPlaceholder" = "optional; defaults to the host";
 "addMachine.add" = "Add";
-"addMachine.badTarget" = "Enter an ssh destination of letters, digits and . _ - @ : / [ ] % that does not start with “-”.";
+"addMachine.badTarget" = "Enter an ssh destination (a host alias, user@host or ssh://user@host:port) that does not start with “-” and has no whitespace, control characters or any of ! \" $ & ' ( ) * ; < > ? \\ ` { | }.";
 "machine.addFailed" = "%@ was not added";
 "machine.added" = "Added %@.";
 "machine.enableFailed" = "The machine was not changed";

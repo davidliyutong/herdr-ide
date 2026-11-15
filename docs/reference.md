@@ -34,7 +34,7 @@ here; both READMEs link to this page instead of repeating it.
 | --- | --- | --- |
 | `--local-only` | `false` | Do not connect to the stored SSH machines (`--ssh` targets are still used). |
 | `--machine` | – | Connect only these machines, by id, label or ssh target (repeatable). |
-| `--ssh` | – | Extra ssh target (`~/.ssh/config` alias or `user@host`) for this run, not stored; renaming or disabling it in the UI lasts until the core stops (repeatable). Letters, digits and `. _ - @ : / [ ] %` only, not starting with `-`; the core refuses to start otherwise. |
+| `--ssh` | – | Extra ssh target (`~/.ssh/config` alias or `user@host`) for this run, not stored; renaming or disabling it in the UI lasts until the core stops (repeatable). At most 255 bytes, not starting with `-`, without whitespace, control characters or any of ``! " $ & ' ( ) * ; < > ? \ ` { \| }`` (ASCII letters, digits, `# % + , - . / : = @ [ ] ^ _ ~` and Unicode letters, marks and numbers); the core refuses to start otherwise. |
 | `--instance` | – | State instance: machines use `~/.herdr-ide-<instance>` instead of `~/.herdr-ide`, with separate sockets, terminal core (session `herdr-ide-<instance>`), code-server process and settings. Lets a development core run next to the daily one. |
 
 ### code-server
@@ -369,7 +369,9 @@ macOS, `~/.config/herdr-ide/` on Linux; directory 0700, files 0600 replaced
 atomically, kept until removed). The settings and keybindings files can be
 edited by hand: the core reads them again within two seconds, keeps entries
 it does not know and reports values it cannot use. The machines file is
-read when the core starts and written by it at every change.
+read when the core starts and written by it at every change, keeping the
+entries and fields it does not use; a stored machine whose target the core
+refuses is listed with the code `invalid_target` and never connected.
 
 A release directory holds the core, `LICENSE`, `THIRD_PARTY_NOTICES.md`,
 `licenses.md` and `licenses/` (`herdr-core/` (the terminal core the core

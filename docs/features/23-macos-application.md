@@ -172,11 +172,14 @@ Non-goals: Linux and Windows.
   terminals and renames or closes it. A machine's row shows why its terminals are unavailable,
   also for machines the window is not subscribed to (the machine state's
   `hc`), and its button opens a terminal, or signs in, retries or enables
-  the machine when it is not connected.
+  the machine when it is not connected; a machine whose stored target the
+  core refuses shows why (`invalid_target`) and offers only renaming and
+  removing in its menu.
 - **Machines** (`MachineDialogs`, as the web UI's
   [02](02-multi-machine-transport.md)). **Add Machine…** (Shell menu, the
-  sidebar's menus) asks for an ssh target and a name, checks the target as
-  the core does (`Machine.validTarget`) and sends `POST /api/machines`;
+  sidebar's menus) asks for an ssh target and a name, checks the trimmed
+  target as the core does (`Machine.validTarget`, run on the vectors of
+  `design/testdata/machines/targets.json`) and sends `POST /api/machines`;
   refusals name the core's code (`machine.error.*`). A machine added here
   that turns `auth_required` within two minutes gets its **login window**:
   a Ghostty terminal of this Mac fed by the core's PTY

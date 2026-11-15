@@ -61,7 +61,7 @@ Non-goals: managing ssh keys; Windows machines.
   and connects again after 1 s with the backoff reset. The authentication
   terminal closing and the UI's **Retry** end a wait at once and reset the
   backoff. **Retry** is offered to writable browsers in every state but
-  *ready* and *disabled*; read-only browsers cannot retry (`denied.retry`),
+  *ready*, *disabled* and *error* with `invalid_target`; read-only browsers cannot retry (`denied.retry`),
   since an attempt may start an ssh login. Every change of state goes to
   every `/ws` client as `machine {state}`.
 - **The machines and their file** (`internal/machines/registry.go`). The
@@ -81,9 +81,17 @@ Non-goals: managing ssh keys; Windows machines.
   ```
 
   One record per SSH machine, and one of the local machine (only its
-  `enabled` flag counts) once it was enabled or disabled. Records without
-  an id or a target are skipped, a repeated id counts once, and an SSH
-  machine without a label is called by its target. The file is read when
+  `enabled` flag counts) once it was enabled or disabled. An SSH machine
+  without a label is called by its target. A record whose target the core
+  refuses (below) is listed as a machine in *error* with the code
+  `invalid_target` and never dialed, enabled or not: its connection loop
+  does not run, and the core's dialer and the authentication terminal
+  refuse the target too; it can be renamed or removed, and is called by
+  its id when it has no label. Entries this version cannot use (not an
+  object, no id, an id already taken, a `kind` other than `ssh` and
+  `local`) are kept as written and not shown (the core logs how many), and
+  fields of a record or of the file it does not know are kept: writing the
+  file never loses an entry or a field. The file is read when
   the core starts and written whole (atomically, 0600, in a 0700
   directory) at the first start and at once after every change: adding,
   removing, renaming, enabling or disabling a stored machine, and enabling
@@ -101,6 +109,8 @@ Non-goals: managing ssh keys; Windows machines.
   session it used. The result is written at once, also when it is empty,
   so the import happens once; after that herdr's catalog is never read
   ([deployment](../deployment.md#migrating-from-versions-that-used-herdr)).
+  Imported machines whose target the core refuses are stored and shown in
+  error as above.
 - **Choosing machines for a run** (`cmd/herdr-ide`, `selectSpecs`).
   `--ssh TARGET` (repeatable) adds a machine for this run only, with the
   target as id and label; it is not stored, so renaming or disabling it
@@ -114,14 +124,35 @@ Non-goals: managing ssh keys; Windows machines.
   machine; the macOS application's machine menu has the same items,
   [23](23-macos-application.md)) asks for an SSH target and an optional
   label (the target names it otherwise): `POST /api/machines {target,
-  label}`, answered `201` with the machine's state. The target is an ssh
-  destination (`[user@]host[:port]`, `[IPv6]`, an `ssh://` URL or a
-  `~/.ssh/config` alias) of letters, digits and `. _ - @ : / [ ] %` that
-  does not start with `-` (ssh would read it as an option), at most 255
-  bytes (`machines.ValidTarget`; the stored and imported machines and
-  `--ssh` are held to it as well, and every ssh command puts `--` before
-  the target), and the label at
-  most 64 characters without control characters (both trimmed); a target or
+  label}`, answered `201` with the machine's state. The target is what
+  OpenSSH takes as a destination: `[user@]host`, `ssh://[user@]host[:port]`,
+  a `~/.ssh/config` alias, an IPv6 literal with its zone id
+  (`[fe80::1%en0]`), user names such as `user+tag` or `a=b,c~#`, Unicode
+  letters and digits (`machines.ValidTarget`). The rule: at most 255 bytes
+  of UTF-8, not starting with `-` (ssh would read it as an option), of
+  ASCII letters, digits and `# % + , - . / : = @ [ ] ^ _ ~` and, outside
+  ASCII, Unicode letters, marks and numbers; so no whitespace, control or
+  format character and none of ``! " $ & ' ( ) * ; < > ? \ ` { | }``, the
+  characters a shell acts on when a user's `ProxyCommand` or `Match exec`
+  expands `%h`, `%r` or `%n`. It follows OpenSSH's own check of
+  destinations given on its command line (9.6 and later; checked with
+  `ssh -G` of OpenSSH 10.3, which connects nowhere): a leading `-`,
+  whitespace, control characters and ``' ` " $ \ ; & < > | ( ) { } ,`` in
+  host names, the same but `$`, `\`, `,` and whitespace not before a `-`
+  in user names. The core adds `! * ?`, which ssh passes on, and `$`, `\`
+  and whitespace in user names, and leaves `,` to ssh. OpenSSH reads
+  `host:port` without `ssh://` as a host name, and OpenSSH 10.3 refuses a
+  bracketed IPv6 address in an `ssh://` URL; such targets are accepted as
+  typed and ssh says what it makes of them, as for a `,` in a host name.
+  On macOS in a UTF-8 locale OpenSSH also refuses host and user names
+  whose UTF-8 holds bytes 0x80–0x9F (many non-Latin names; it accepts them
+  in the C locale), and the machine then shows ssh's error. Typing a refused target answers
+  `invalid_target`; `--ssh` with one stops the core at start; every ssh
+  command puts `--` before the target. The web UI and the macOS
+  application check typed targets the same way before sending them (the
+  vectors of `design/testdata/machines/targets.json`). The label is at
+  most 64 characters without control characters (both trimmed;
+  `invalid` otherwise); a target or
   id the core has already, running or stored, is refused
   (`machine_exists`). The core gives the machine a random id (never derived
   from the target, since ids appear in URLs and per-machine settings),
@@ -248,6 +279,12 @@ Non-goals: managing ssh keys; Windows machines.
 - **The file is edited by hand while the core runs** → the core does not
   read it again; its next change writes its own list over the edit. Edit it
   while the core is stopped.
+- **A stored or imported target the core refuses** (written by hand, by
+  an earlier version, or saved by herdr) → the machine is listed in
+  *error* with `invalid_target`, which every client translates, and is
+  never dialed; **Retry**, enabling and disabling are not offered. Rename
+  or remove it, or correct the target in the file while the core is
+  stopped.
 - **Writing the file fails** (disk full, read-only directory) → the change
   is refused with `save` and the machine stays as it was.
 - **Unsupported platform** → no embedded agent for the `uname` pair; the
@@ -272,7 +309,14 @@ Non-goals: managing ssh keys; Windows machines.
   (`TestRegistryMigratesEnabledChoices`); records written 0600 and read
   back, a damaged file reported and left alone, an unreadable catalog
   imports and writes nothing (`TestRegistryRoundTripAndErrors`); the order
-  of the local, stored and `--ssh` machines (`TestLoadSpecs`); a machine is
+  of the local, stored and `--ssh` machines (`TestLoadSpecs`); the
+  targets accepted and refused, from the shared vectors
+  (`TestValidTarget`); stored and imported machines with refused targets
+  kept, entries and fields this version does not use written back as they
+  were, new records and changed targets refused
+  (`TestRegistryKeepsInvalidTargets`); such a machine in error with its
+  code, never dialed when run, enabled, woken or renamed
+  (`TestInvalidTargetNeverDialed`); a machine is
   ready once its agent answers and logs nothing
   (`TestReadyWhenTheAgentAnswers`); disabling at runtime ends the session,
   enabling connects again, both stored (`TestDisableAndEnableAtRuntime`);
@@ -285,9 +329,12 @@ Non-goals: managing ssh keys; Windows machines.
   is disabled (`TestSetLabelAndLocalRecord`).
 - `internal/server/machines_test.go`: adding, renaming, removing and
   enabling over HTTP (`TestMachineAdd`, `TestMachineRename`,
-  `TestMachineRemove`, `TestMachineEnabled`): odd targets and labels
-  refused, a known target refused, read-only browsers refused, the file and
-  the audit log; the terminal core's endpoints refused read-only, for
+  `TestMachineRemove`, `TestMachineEnabled`): refused targets
+  (`invalid_target`) and odd labels (`invalid`), targets OpenSSH takes
+  accepted, a known target refused, read-only browsers refused, the file and
+  the audit log; a stored machine with a refused target listed with its
+  code, refused by the authentication terminal, renamed and removed
+  (`TestMachineWithInvalidTarget`); the terminal core's endpoints refused read-only, for
   unknown actions and for machines without an agent
   (`TestHCEndpointsGuard`).
 - `internal/server/term_test.go`: `TestHCLifecycle` (status, a stopped core

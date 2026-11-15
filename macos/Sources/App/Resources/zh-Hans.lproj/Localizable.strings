@@ -310,7 +310,9 @@
 "menu.disableMachine" = "禁用机器";
 "menu.renameMachine" = "重命名机器…";
 "menu.removeMachine" = "移除机器…";
-"machine.error.invalid" = "目标或名称被拒绝：目标不能含空格，也不能以“-”开头。";
+"machine.error.invalid" = "名称被拒绝：名称最多 64 个字符，不能含控制字符。";
+"machine.error.invalid_target" = "ssh 目标被拒绝：不能以“-”开头，也不能含空白、控制字符或 ! \" $ & ' ( ) * ; < > ? \\ ` { | } 中的任何字符。";
+"machine.code.invalid_target" = "它的 ssh 目标被拒绝（以“-”开头，或含空白、控制字符或 $ ; | 等 shell 字符），因此不会连接。可以重命名或移除它，或在机器列表文件中改正目标后重启。";
 "machine.error.label_taken" = "已有另一台机器使用这个名称。";
 "machine.error.machine_exists" = "这台机器已经在列表中。";
 "machine.error.unknown" = "这台机器已不在列表中。";
@@ -323,7 +325,7 @@
 "addMachine.label" = "名称";
 "addMachine.labelPlaceholder" = "可选，默认为主机名";
 "addMachine.add" = "添加";
-"addMachine.badTarget" = "请输入只含字母、数字和 . _ - @ : / [ ] %、且不以“-”开头的 ssh 目标。";
+"addMachine.badTarget" = "请输入 ssh 目标（主机别名、user@host 或 ssh://user@host:port），不能以“-”开头，也不能含空白、控制字符或 ! \" $ & ' ( ) * ; < > ? \\ ` { | } 中的任何字符。";
 "machine.addFailed" = "未能添加 %@";
 "machine.added" = "已添加 %@。";
 "machine.enableFailed" = "未能修改这台机器";

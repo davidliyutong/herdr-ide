@@ -144,7 +144,10 @@ final class SidebarView: NSView, NSTableViewDataSource, NSTableViewDelegate {
             cell.toolTip = [machine, item.record.displayName, (item.record.cwd as NSString).abbreviatingWithTildeInPath].joined(separator: " · ")
         case let .machine(machine):
             var detail = ""
-            if machine.status != "ready" {
+            if !machine.code.isEmpty {
+                // Why it is never connected (invalid_target).
+                detail = tr("machine.code." + machine.code)
+            } else if machine.status != "ready" {
                 detail = tr("machine." + machine.status)
             } else if let state = model.backend(of: machine.id) ?? machine.hc, state.phase == .error {
                 detail = tr("backend." + state.code)

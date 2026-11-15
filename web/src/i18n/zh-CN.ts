@@ -178,7 +178,10 @@ export const zhCN: Messages = {
   'machine.renameFailed': '无法重命名 {machine}：{detail}',
   'machine.labelTaken': '已有另一台机器使用这个名称。',
   'machine.exists': '这台机器已经在列表中。',
-  'machine.invalid': '目标或名称被拒绝：目标只能含字母、数字和 . _ - @ : / [ ] %，且不能以“-”开头。',
+  'machine.invalid': '名称被拒绝：名称最多 64 个字符，不能含控制字符。',
+  'machine.invalidTarget': 'ssh 目标被拒绝：不能以“-”开头，也不能含空白、控制字符或 ! " $ & \' ( ) * ; < > ? \\ ` { | } 中的任何字符。',
+  'machine.code.invalid_target':
+    '它的 ssh 目标被拒绝（以“-”开头，或含空白、控制字符或 $ ; | 等 shell 字符），因此不会连接。可以重命名或移除它，或在机器列表文件中改正目标后重启。',
   'machine.gone': '这台机器已不在列表中。',
   'machine.localOnly': '本机不能这样修改。',
   'machine.notSaved': '无法保存机器列表文件。',
@@ -395,7 +398,8 @@ export const zhCN: Messages = {
   'addMachine.targetPlaceholder': '~/.ssh/config 中的主机别名，或 user@host',
   'addMachine.label': '名称',
   'addMachine.labelPlaceholder': '可选，默认为主机名',
-  'addMachine.badTarget': '请输入只含字母、数字和 . _ - @ : / [ ] %、且不以“-”开头的 ssh 目标。',
+  'addMachine.badTarget':
+    '请输入 ssh 目标（主机别名、user@host 或 ssh://user@host:port），不能以“-”开头，也不能含空白、控制字符或 ! " $ & \' ( ) * ; < > ? \\ ` { | } 中的任何字符。',
   'addMachine.explain': '使用你的 ssh 配置连接（别名、密钥、跳板机）。需要密码、密钥口令或确认新的主机指纹时，会在终端里询问。',
   'addMachine.start': '添加',
   'addMachine.addedToast': '已添加 {machine}。',

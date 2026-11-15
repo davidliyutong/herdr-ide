@@ -1,16 +1,20 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"herdr-ide/internal/machines"
+	"herdr-ide/internal/transport"
 )
 
 // machinesFixture is a core with the local machine, a stored SSH machine
@@ -93,15 +97,16 @@ func (f *machinesFixture) run(cases []httpCase) {
 func TestMachineAdd(t *testing.T) {
 	f := newMachinesFixture(t)
 	f.run([]httpCase{
-		{false, "POST", "/api/machines", `{"target":"-oProxyCommand=x"}`, 400, "invalid"},
-		{false, "POST", "/api/machines", `{"target":"a b"}`, 400, "invalid"},
-		{false, "POST", "/api/machines", `{"target":""}`, 400, "invalid"},
-		{false, "POST", "/api/machines", `{"target":"gpü"}`, 400, "invalid"},
-		{false, "POST", "/api/machines", `{"target":"box;id"}`, 400, "invalid"},
-		{false, "POST", "/api/machines", `{"target":"$(id)"}`, 400, "invalid"},
-		{false, "POST", "/api/machines", `{"target":"box","label":"a\nb"}`, 400, "invalid"},
-		{false, "POST", "/api/machines", `{"target":"box","label":"` + strings.Repeat("x", 65) + `"}`, 400, "invalid"},
-		{false, "POST", "/api/machines", `{`, 400, "invalid"},
+		{false, "POST", "/api/machines", `{"target":"-oProxyCommand=x"}`, 400, `"error":"invalid_target"`},
+		{false, "POST", "/api/machines", `{"target":"a b"}`, 400, `"error":"invalid_target"`},
+		{false, "POST", "/api/machines", `{"target":""}`, 400, `"error":"invalid_target"`},
+		{false, "POST", "/api/machines", `{"target":"h!x"}`, 400, `"error":"invalid_target"`},
+		{false, "POST", "/api/machines", `{"target":"box;id"}`, 400, `"error":"invalid_target"`},
+		{false, "POST", "/api/machines", `{"target":"$(id)"}`, 400, `"error":"invalid_target"`},
+		{false, "POST", "/api/machines", `{"target":"box\u000aid"}`, 400, `"error":"invalid_target"`},
+		{false, "POST", "/api/machines", `{"target":"box","label":"a\nb"}`, 400, `"error":"invalid"`},
+		{false, "POST", "/api/machines", `{"target":"box","label":"` + strings.Repeat("x", 65) + `"}`, 400, `"error":"invalid"`},
+		{false, "POST", "/api/machines", `{`, 400, `"error":"invalid"`},
 		{false, "POST", "/api/machines", `{"target":"u@gpu"}`, 409, "machine_exists"},
 		{false, "POST", "/api/machines", `{"target":"extra"}`, 409, "machine_exists"},
 		{true, "POST", "/api/machines", `{"target":"box"}`, 403, "read-only"},
@@ -129,6 +134,13 @@ func TestMachineAdd(t *testing.T) {
 	w = f.request(f.srv, "POST", "/api/machines", `{"target":"plain"}`)
 	if w.Code != http.StatusCreated || !strings.Contains(w.Body.String(), `"label":"plain"`) {
 		t.Fatalf("add without a label: %d %s", w.Code, w.Body)
+	}
+	// User names and aliases OpenSSH takes.
+	for _, target := range []string{"user+tag@host", "me@[fe80::1%en0]:2222", "ssh://u@h:22", "ユーザー@ホスト"} {
+		body, _ := json.Marshal(map[string]string{"target": target})
+		if w := f.request(f.srv, "POST", "/api/machines", string(body)); w.Code != http.StatusCreated {
+			t.Fatalf("add %q: %d %s", target, w.Code, w.Body)
+		}
 	}
 	f.audited(`"event":"machine.add"`, `"target":"u@new-host"`, `"error":"machine exists"`)
 }
@@ -216,5 +228,40 @@ func TestHCEndpointsGuard(t *testing.T) {
 	})
 	if strings.Contains(f.audit.String(), `"hc.`) {
 		t.Fatalf("audited a refused action: %s", f.audit.String())
+	}
+}
+
+// A stored machine whose target ValidTarget refuses is listed in error with
+// its code, can be renamed and removed, and never reaches ssh, not even
+// through the authentication terminal.
+func TestMachineWithInvalidTarget(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "machines.json")
+	os.WriteFile(path, []byte(`{"version":1,"machines":[{"id":"bad","label":"bad","kind":"ssh","target":"-oProxyCommand=touch /tmp/x","enabled":true,"future":1}]}`), 0o600)
+	reg, err := machines.OpenRegistry(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mg := machines.NewManager(machines.LoadSpecs(reg.Specs(), nil), func(context.Context, machines.Spec) (*transport.Session, string, error) {
+		t.Error("dialed")
+		return nil, "", errors.New("dialed")
+	}, log.New(io.Discard, "", 0))
+	mg.UseRegistry(reg)
+	f := &machinesFixture{t: t, path: path, mg: mg, audit: &strings.Builder{}}
+	f.srv = f.server(false)
+	w := f.request(f.srv, "GET", "/api/machines", "")
+	if !strings.Contains(w.Body.String(), `"id":"bad","label":"bad","kind":"ssh","target":"-oProxyCommand=touch /tmp/x","enabled":true,"status":"error","code":"invalid_target"`) {
+		t.Fatalf("machines: %s", w.Body)
+	}
+	f.run([]httpCase{
+		{false, "GET", "/api/m/bad/auth", "", 400, `"error":"invalid_target"`},
+	})
+	if w := f.request(f.srv, "PUT", "/api/m/bad/label", `{"label":"Old box"}`); w.Code != http.StatusOK || f.stored()[0].Label != "Old box" {
+		t.Fatalf("rename: %d %s %+v", w.Code, w.Body, f.stored())
+	}
+	if b, _ := os.ReadFile(path); !strings.Contains(string(b), `"future": 1`) || !strings.Contains(string(b), "ProxyCommand") {
+		t.Fatalf("stored %s", b)
+	}
+	if w := f.request(f.srv, "DELETE", "/api/m/bad", ""); w.Code != http.StatusOK || len(f.stored()) != 0 {
+		t.Fatalf("remove: %d %s", w.Code, w.Body)
 	}
 }

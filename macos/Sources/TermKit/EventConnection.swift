@@ -16,11 +16,17 @@ public struct Machine: Equatable {
     public var target: String
     /// Why the connection failed, as ssh or the agent said it.
     public var error: String
+    /// Why a machine in error is never connected: `invalid_target` for a
+    /// stored ssh target the core refuses; "" otherwise.
+    public var code: String
     /// The user's home directory there, once connected.
     public var home: String
 
+    /// The code of a machine whose stored ssh target the core refuses.
+    public static let invalidTarget = "invalid_target"
+
     public init(id: String, label: String, status: String, kind: String = "", hc: BackendState? = nil, target: String = "",
-                error: String = "", home: String = "") {
+                error: String = "", code: String = "", home: String = "") {
         self.id = id
         self.label = label
         self.status = status
@@ -28,18 +34,36 @@ public struct Machine: Equatable {
         self.hc = hc
         self.target = target
         self.error = error
+        self.code = code
         self.home = home
     }
 
-    /// Whether a target typed for a new machine can be one, as the core
-    /// checks it (`machines.ValidTarget`): an ssh destination of letters,
-    /// digits and `. _ - @ : / [ ] %` that does not read as an option, at
-    /// most 255 characters.
-    public static func validTarget(_ target: String) -> Bool {
-        let t = target.trimmingCharacters(in: .whitespaces)
-        let allowed = Set("._-@:/[]%".unicodeScalars)
-        return !t.isEmpty && !t.hasPrefix("-") && t.utf8.count <= 255 && t.unicodeScalars.allSatisfy {
-            ("a"..."z").contains($0) || ("A"..."Z").contains($0) || ("0"..."9").contains($0) || allowed.contains($0)
+    /// Whether the core ever connects to the machine: not to one whose
+    /// target it refuses.
+    public var usable: Bool { code != Self.invalidTarget }
+
+    /// Printable ASCII a target may hold besides letters and digits.
+    private static let targetPunct = Set("#%+,-./:=@[]^_~".unicodeScalars)
+
+    /// Whether a target can be one, as the core checks it
+    /// (`machines.ValidTarget`; the vectors of
+    /// design/testdata/machines/targets.json): an ssh destination of at most
+    /// 255 bytes of UTF-8 that does not start with "-", of ASCII letters,
+    /// digits and `# % + , - . / : = @ [ ] ^ _ ~` and Unicode letters, marks
+    /// and numbers. Callers trim what was typed first, as the core does.
+    public static func validTarget(_ t: String) -> Bool {
+        guard !t.isEmpty, !t.hasPrefix("-"), t.utf8.count <= 255 else { return false }
+        return t.unicodeScalars.allSatisfy { c in
+            if c.isASCII {
+                return ("a"..."z").contains(c) || ("A"..."Z").contains(c) || ("0"..."9").contains(c) || targetPunct.contains(c)
+            }
+            switch c.properties.generalCategory {
+            case .uppercaseLetter, .lowercaseLetter, .titlecaseLetter, .modifierLetter, .otherLetter,
+                 .nonspacingMark, .spacingMark, .enclosingMark, .decimalNumber, .letterNumber, .otherNumber:
+                return true
+            default:
+                return false
+            }
         }
     }
 }
@@ -173,6 +197,7 @@ public final class EventConnection {
         }
         return Machine(id: id, label: label.isEmpty ? id : label, status: raw["status"] as? String ?? "",
                        kind: raw["kind"] as? String ?? "", hc: hc, target: raw["target"] as? String ?? "",
-                       error: raw["error"] as? String ?? "", home: (raw["info"] as? [String: Any])?["home"] as? String ?? "")
+                       error: raw["error"] as? String ?? "", code: raw["code"] as? String ?? "",
+                       home: (raw["info"] as? [String: Any])?["home"] as? String ?? "")
     }
 }

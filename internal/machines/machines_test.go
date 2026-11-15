@@ -1,7 +1,9 @@
 package machines
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log"
@@ -142,64 +144,195 @@ func TestRegistryRoundTripAndErrors(t *testing.T) {
 }
 
 // The local machine comes first, then the stored SSH machines and the --ssh
-// targets, each once; targets that could read as options are left out.
+// targets, each once. A stored machine whose target is refused stays (it
+// shows an error); an --ssh one does not (the core refuses to start with
+// it).
 func TestLoadSpecs(t *testing.T) {
 	stored := []Spec{{ID: "a1", Label: "gpu", Kind: KindSSH, Target: "gpu-host", Enabled: true}, {ID: LocalID, Kind: KindLocal, Enabled: true},
 		{ID: "evil", Kind: KindSSH, Target: "-oProxyCommand=touch /tmp/x", Enabled: true}}
 	specs := LoadSpecs(stored, []Spec{{Target: "extra"}, {ID: "a1", Target: "dup"}, {Target: "-oProxyCommand=sh"}, {Target: "host;id"}})
-	if len(specs) != 3 || specs[0].ID != LocalID || !specs[0].Enabled || specs[1].ID != "a1" {
+	if len(specs) != 4 || specs[0].ID != LocalID || !specs[0].Enabled || specs[1].ID != "a1" || specs[2].ID != "evil" {
 		t.Fatalf("specs = %+v", specs)
 	}
-	if s := specs[2]; s.ID != "extra" || s.Kind != KindSSH || s.Label != "extra" {
+	if s := specs[3]; s.ID != "extra" || s.Kind != KindSSH || s.Label != "extra" {
 		t.Fatalf("extra = %+v", s)
 	}
 }
 
-// Targets are ssh destinations that can never read as an option or carry a
-// shell metacharacter.
+// Targets are the destinations OpenSSH takes, never one that reads as an
+// option or holds whitespace, a control character or a shell
+// metacharacter: the vectors every client runs
+// (design/testdata/machines/targets.json).
 func TestValidTarget(t *testing.T) {
-	for _, ok := range []string{"gpu", "gpu-host", "u@gpu", "user@gpu.example.com", "ssh://u@h:2222", "host:22", "[fe80::1%en0]", "u_1@10.0.0.2", "a.b-c_d"} {
+	b, err := os.ReadFile("../../design/testdata/machines/targets.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var v struct{ Accept, Reject []string }
+	if err := json.Unmarshal(b, &v); err != nil {
+		t.Fatal(err)
+	}
+	if len(v.Accept) < 20 || len(v.Reject) < 30 {
+		t.Fatalf("%d and %d vectors", len(v.Accept), len(v.Reject))
+	}
+	for _, ok := range append(v.Accept, "user+tag@host", "me@[fe80::1%en0]:2222", "ssh://u@h:22", "~alias", "日本") {
 		if !ValidTarget(ok) {
 			t.Errorf("%q refused", ok)
 		}
 	}
-	for _, bad := range []string{"", "-oProxyCommand=x", "-p", "a b", "gpü", "h\tx", "h\nx", "h\x00", "h;id", "h|x", "h&x", "$(id)", "`id`", "h'x", `h"x`, "h*", "h?", "h>x", "h<x", "h\\x", "h~", "h=x", "h,x", "h!x", "h#x", "h{x}", "h(x)", "h\x7f", strings.Repeat("x", 256)} {
+	for _, bad := range append(v.Reject, "-oProxyCommand=x", "a b", "h`id`", "$(x)", "h\xff", "h\xc3") {
 		if ValidTarget(bad) {
 			t.Errorf("%q accepted", bad)
 		}
 	}
 }
 
-// A stored record or a machine of herdr's catalog whose target could read
-// as an option of ssh is dropped when the file is read or imported, and
-// never stored.
-func TestRegistryDropsInvalidTargets(t *testing.T) {
+// A stored record or a machine of herdr's catalog whose target is refused
+// is kept: it is stored, written back with the file's other entries and
+// the fields this version does not know, and listed; new records with
+// such a target are refused.
+func TestRegistryKeepsInvalidTargets(t *testing.T) {
 	herdrCatalog(t, `{"version":1,"ssh":[{"id":"a1","label":"gpu","target":"gpu-host","enabled":true},
 		{"id":"p1","label":"proxy","target":"-oProxyCommand=touch /tmp/pwned","enabled":true},
-		{"id":"s1","label":"semi","target":"host;id","enabled":true}]}`)
+		{"id":"s1","label":"","target":"host;id","enabled":true}]}`)
 	path := filepath.Join(t.TempDir(), "machines.json")
 	r, err := OpenRegistry(path, SavedSpecs)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := r.Specs(); len(got) != 1 || got[0].ID != "a1" {
+	got := r.Specs()
+	if len(got) != 3 || got[1].ID != "p1" || got[1].Target != "-oProxyCommand=touch /tmp/pwned" || got[2].Label != "s1" {
 		t.Fatalf("imported %+v", got)
 	}
-	if b, _ := os.ReadFile(path); strings.Contains(string(b), "ProxyCommand") || strings.Contains(string(b), ";") {
+	if b, _ := os.ReadFile(path); !strings.Contains(string(b), "ProxyCommand") || !strings.Contains(string(b), "host;id") {
 		t.Fatalf("stored %s", b)
 	}
+	// New records and changed targets must be valid; a stored record keeps
+	// its own target through a rename.
 	if err := r.Put(Spec{ID: "p2", Target: "-oProxyCommand=x"}); !errors.Is(err, ErrInvalidTarget) {
 		t.Fatalf("put: %v", err)
 	}
-	os.WriteFile(path, []byte(`{"version":1,"machines":[{"id":"a1","kind":"ssh","target":"gpu-host","enabled":true},
-		{"id":"p1","kind":"ssh","target":"-oProxyCommand=touch /tmp/pwned","enabled":true}]}`), 0o600)
+	if err := r.Put(Spec{ID: "a1", Label: "gpu", Target: "a;b", Enabled: true}); !errors.Is(err, ErrInvalidTarget) {
+		t.Fatalf("put a changed target: %v", err)
+	}
+	if err := r.Put(Spec{ID: "p1", Label: "renamed", Kind: KindSSH, Target: "-oProxyCommand=touch /tmp/pwned"}); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+
+	// The file's own entries: what this version cannot use is kept as
+	// written, unknown fields too, across a read and a write.
+	os.WriteFile(path, []byte(`{"version":1,"note":{"by":"hand"},"machines":[
+		{"id":"a1","kind":"ssh","target":"gpu-host","enabled":true,"jump":"bastion"},
+		{"id":"p1","kind":"ssh","target":"-oProxyCommand=touch /tmp/pwned","enabled":true},
+		{"id":"n1","label":"no target","kind":"ssh","enabled":true},
+		{"label":"no id","target":"x"},
+		{"id":"a1","target":"duplicate"},
+		{"id":"d1","kind":"docker","target":"c1"},
+		"not a record",
+		{"id":"local","kind":"local","enabled":false,"pinned":true}]}`), 0o600)
 	r, err = OpenRegistry(path, nil)
-	if err != nil || len(r.Specs()) != 1 || r.Specs()[0].ID != "a1" {
-		t.Fatalf("read %+v %v", r.Specs(), err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := []string{}
+	for _, s := range r.Specs() {
+		ids = append(ids, s.ID+":"+s.Label)
+	}
+	if strings.Join(ids, " ") != "a1:gpu-host p1:p1 n1:no target local:" || r.Kept() != 4 {
+		t.Fatalf("read %v, kept %d", ids, r.Kept())
+	}
+	if err := r.Put(Spec{ID: "a1", Label: "GPU", Kind: KindSSH, Target: "gpu-host", Enabled: false}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Delete("n1"); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(path)
+	var file struct {
+		Version  int
+		Note     map[string]string
+		Machines []json.RawMessage
+	}
+	if err := json.Unmarshal(b, &file); err != nil || file.Version != 1 || file.Note["by"] != "hand" || len(file.Machines) != 7 {
+		t.Fatalf("written %s (%v)", b, err)
+	}
+	for i, want := range []string{
+		`{"id":"a1","label":"GPU","kind":"ssh","target":"gpu-host","enabled":false,"jump":"bastion"}`,
+		`{"id":"p1","label":"p1","kind":"ssh","target":"-oProxyCommand=touch /tmp/pwned","enabled":true}`,
+		`{"label":"no id","target":"x"}`,
+		`{"id":"a1","target":"duplicate"}`,
+		`{"id":"d1","kind":"docker","target":"c1"}`,
+		`"not a record"`,
+		`{"id":"local","label":"","kind":"local","enabled":false,"pinned":true}`,
+	} {
+		var got bytes.Buffer
+		json.Compact(&got, file.Machines[i])
+		if got.String() != want {
+			t.Errorf("entry %d = %s, want %s", i, got.String(), want)
+		}
+	}
+	// Read again, the same.
+	r, err = OpenRegistry(path, nil)
+	if err != nil || len(r.Specs()) != 3 || r.Kept() != 4 {
+		t.Fatalf("read back %+v %d %v", r.Specs(), r.Kept(), err)
 	}
 	mg := NewManager(nil, nil, log.New(io.Discard, "", 0))
 	if err := mg.Add(Spec{ID: "p3", Target: "-oProxyCommand=x"}); !errors.Is(err, ErrInvalidTarget) {
 		t.Fatalf("add: %v", err)
+	}
+}
+
+// A machine whose stored target is refused shows an error with its code
+// and is never dialed: not when the manager runs it, not when it is
+// enabled, retried or renamed. Removing it ends it.
+func TestInvalidTargetNeverDialed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "machines.json")
+	os.WriteFile(path, []byte(`{"version":1,"machines":[{"id":"bad","kind":"ssh","target":"h$(id)","enabled":false}]}`), 0o600)
+	reg, err := OpenRegistry(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dials atomic.Int32
+	dial := func(ctx context.Context, s Spec) (*transport.Session, string, error) {
+		if s.ID == "bad" {
+			dials.Add(1)
+		}
+		return nil, "", errors.New("no")
+	}
+	mg := NewManager(LoadSpecs(reg.Specs(), nil), dial, log.New(io.Discard, "", 0))
+	mg.UseRegistry(reg)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		mg.Run(ctx)
+		close(done)
+	}()
+	st := mg.Get("bad").State()
+	if st.Status != StatusError || st.Code != CodeInvalidTarget || st.Label != "bad" {
+		t.Fatalf("state %+v", st)
+	}
+	if err := mg.SetEnabled("bad", true); err != nil {
+		t.Fatal(err)
+	}
+	mg.Get("bad").Wake()
+	if err := mg.SetLabel("bad", "old box"); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	st = mg.Get("bad").State()
+	if st.Status != StatusError || st.Code != CodeInvalidTarget || !st.Enabled || st.Label != "old box" {
+		t.Fatalf("state %+v", st)
+	}
+	if got, _ := reg.Get("bad"); !got.Enabled || got.Label != "old box" || got.Target != "h$(id)" {
+		t.Fatalf("stored %+v", got)
+	}
+	if err := mg.Remove("bad"); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	<-done
+	if n := dials.Load(); n != 0 {
+		t.Fatalf("dialed %d times", n)
 	}
 }
 
@@ -220,7 +353,7 @@ func TestReadyWhenTheAgentAnswers(t *testing.T) {
 		s, err := transport.DialLocal(ctx, agent.Options{Logger: log.New(io.Discard, "", 0)})
 		return s, "test/test", err
 	}
-	m := newMachine(Spec{ID: "x", Label: "x", Kind: KindSSH, Enabled: true}, dial, logger, func(State) {})
+	m := newMachine(Spec{ID: "x", Label: "x", Kind: KindSSH, Target: "x", Enabled: true}, dial, logger, func(State) {})
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {

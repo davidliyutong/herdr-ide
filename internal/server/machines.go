@@ -65,7 +65,7 @@ func machineFailed(w http.ResponseWriter, err error) {
 	case errors.Is(err, machines.ErrLocalMachine):
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "local"})
 	case errors.Is(err, machines.ErrInvalidTarget):
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": machines.CodeInvalidTarget})
 	default:
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "save", "detail": err.Error()})
 	}
@@ -84,7 +84,11 @@ func (s *Server) handleMachineAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	target, label := strings.TrimSpace(body.Target), strings.TrimSpace(body.Label)
-	if !machines.ValidTarget(target) || !validLabel(label) {
+	if !machines.ValidTarget(target) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": machines.CodeInvalidTarget})
+		return
+	}
+	if !validLabel(label) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid"})
 		return
 	}
