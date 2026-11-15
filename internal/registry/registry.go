@@ -9,6 +9,7 @@ import (
 	"herdr-ide/internal/gui"
 	"herdr-ide/internal/keybindings"
 	"herdr-ide/internal/plugin"
+	"herdr-ide/internal/plugins/files"
 	vaultplugin "herdr-ide/internal/plugins/vault"
 	"herdr-ide/internal/settings"
 	"herdr-ide/internal/uisettings"
@@ -24,7 +25,7 @@ func Settings() []settings.Module {
 // Plugins are the core's plugins (internal/plugin), in the order the UIs
 // list them.
 func Plugins() []plugin.Plugin {
-	return []plugin.Plugin{vaultplugin.New()}
+	return []plugin.Plugin{files.New(), vaultplugin.New()}
 }
 
 // pluginsOff are the plugins that are off until the user turns them on.

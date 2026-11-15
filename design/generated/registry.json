@@ -206,6 +206,11 @@
       "when": "terminal"
     },
     {
+      "id": "view.panel.files",
+      "section": "view",
+      "when": "terminal"
+    },
+    {
       "id": "view.zoomIn",
       "section": "view",
       "when": "always"
@@ -303,6 +308,7 @@
     "command.tab.select7",
     "command.tab.select8",
     "command.tab.select9",
+    "command.view.panel.files",
     "command.view.panel.vault",
     "command.view.togglePanel",
     "command.view.toggleSidebar",
@@ -342,6 +348,7 @@
     "settings.notifications.mutedAgents",
     "settings.notifications.sound",
     "settings.notifications.system",
+    "settings.plugins.files.enabled",
     "settings.plugins.vault.enabled",
     "settings.section.appearance",
     "settings.section.codeServer",
@@ -593,6 +600,11 @@
         "when": "terminal"
       },
       {
+        "key": "cmd+shift+e",
+        "command": "view.panel.files",
+        "when": "terminal"
+      },
+      {
         "key": "cmd+shift+equal",
         "command": "view.zoomIn",
         "when": "always"
@@ -805,6 +817,7 @@
     ],
     "notifications.sound": true,
     "notifications.system": true,
+    "plugins.files.enabled": true,
     "plugins.vault.enabled": true,
     "terminal.bell": "visual",
     "terminal.boldIsBright": false,

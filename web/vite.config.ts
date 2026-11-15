@@ -41,7 +41,8 @@ function brand(): Plugin {
 // The bundled terminal font, terminal emulator and VSCodium logo are not npm
 // packages, so Vite's license list leaves them out
 // (src/terminal/fonts/README.md, scripts/fetch-ghostty-vt.sh,
-// src/assets/vscodium/README.md).
+// src/assets/vscodium/README.md). Monaco bundles code of other projects,
+// whose notices it ships beside its license.
 function bundledLicenses(): Plugin {
   return {
     name: 'bundled-licenses',
@@ -54,7 +55,8 @@ function bundledLicenses(): Plugin {
         out.source =
           `${String(out.source).trimEnd()}\n\n## JetBrains Mono - 2.304 (OFL-1.1)\n\n${read('./src/terminal/fonts/OFL.txt')}\n` +
           `\n## libghostty-vt (Ghostty cf5519b22f91, MIT)\n\n${read('./src/vt/LICENSE')}\n` +
-          `\n## VSCodium logo (VSCodium ca7f7b44b5e5, MIT)\n\n${read('./src/assets/vscodium/LICENSE')}\n`;
+          `\n## VSCodium logo (VSCodium ca7f7b44b5e5, MIT)\n\n${read('./src/assets/vscodium/LICENSE')}\n` +
+          `\n## Third-party notices of monaco-editor\n\n${read('./node_modules/monaco-editor/ThirdPartyNotices.txt')}\n`;
       },
     },
   };
@@ -74,8 +76,29 @@ function katexWoff2(): Plugin {
   };
 }
 
+// Monaco (src/plugins/monaco.ts) is shipped without source maps: its maps
+// would be most of the embedded UI's size, for code that is not ours.
+function monacoWithoutMaps(): Plugin {
+  const ours = (id: string) => !/[\\/]node_modules[\\/]monaco-editor[\\/]/.test(id) && !id.startsWith('\0');
+  return {
+    name: 'monaco-without-maps',
+    generateBundle: {
+      order: 'post',
+      handler(_, bundle) {
+        for (const out of Object.values(bundle)) {
+          if (out.type !== 'chunk' || !Object.keys(out.modules).length || Object.keys(out.modules).some(ours)) continue;
+          delete bundle[`${out.fileName}.map`];
+          out.map = null;
+          out.code = out.code.replace(/\n?\/\/# sourceMappingURL=\S+\s*$/, '\n');
+        }
+      },
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), brand(), bundledLicenses(), katexWoff2()],
+  plugins: [react(), brand(), bundledLicenses(), katexWoff2(), monacoWithoutMaps()],
+  worker: { plugins: () => [monacoWithoutMaps()] },
   build: {
     outDir: 'dist',
     emptyOutDir: true,

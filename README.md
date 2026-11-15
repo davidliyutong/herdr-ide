@@ -102,6 +102,14 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   panes of their own, commands and status bar items; each can be turned
   off in Settings › Plugins. Uploads and downloads and program windows are
   plugins too.
+- **File explorer.** A tree of the machine's files in the right sidebar
+  (⌘⇧E in the desktop app on macOS) that follows the focused terminal's
+  directory, as VS Code's explorer works: filter, hidden files, keys,
+  new files and folders, rename, cut, copy and paste, drag to move, drop
+  files from your computer to upload them, Move to Trash, copy paths,
+  download, open in a terminal or VS Code. A click shows a file in Quick
+  Look; a double click opens text in an editor pane (Monaco) whose saves
+  never overwrite a change made on the machine since it was opened.
 - **Variable vault.** API keys and other environment variables, encrypted
   on the core's computer (the key in the system keychain, or from a
   passphrase), for coding agents on every machine: Claude Code, Codex and

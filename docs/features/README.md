@@ -28,6 +28,7 @@ shortcuts, paths) lives in [reference.md](../reference.md).
 | 25 | [Agent detection in terminals](25-agent-detection.md) | herdr's method for the terminal core's terminals: the foreground process names the agent, herdr's rules over the screen give its state, done when a turn ends; in the agent, next to the terminals. |
 | 26 | [Web terminals](26-web-terminals.md) | Ghostty's terminal library as WebAssembly emulates the browser's terminals; WebGL2 (or Canvas 2D) draws them; keys, mouse and pastes encoded for each program's modes; selections, links, clipboard and find in the page. |
 | 27 | [Plugins](27-plugins.md) | Features built in with one shape on each side: routes below `/api/p/<id>` and `/api/m/{id}/p/<id>`, the agent's `plugin` op, panels of the right sidebar, panes of their own, commands and status bar items; a switch per plugin. |
+| 28 | [File explorer](28-file-explorer.md) | A tree of the machine's files in the right sidebar following the focused terminal (VS Code's explorer: keys, menu, drags, uploads, the trash), and an editor pane (Monaco) whose saves never overwrite a change made on the machine. |
 | 30 | [Variable vault](30-variable-vault.md) | Environment variables encrypted on the core host (key in the system keychain or from a passphrase) that coding agents on every machine read through an MCP server, per machine allowed or approved in the UI. |
 
 ## Writing a feature document
