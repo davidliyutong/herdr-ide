@@ -165,6 +165,8 @@ var Commands = func() []Command {
 			on(pcApp, "ctrl+shift+equal"), on(pcApp, "ctrl+equal")),
 		always("view.zoomOut", "view", on(macApp, "cmd+minus"), on(pcApp, "ctrl+minus")),
 		always("view.zoomReset", "view", on(macApp, "cmd+0"), on(pcApp, "ctrl+0")),
+		// The variable vault's panel (plugin vault).
+		cmd("view.panel.vault", "view"),
 
 		cmd("find.open", "find", on(macAll, "cmd+f"), on(pcAll, "ctrl+shift+f")),
 		cmd("find.next", "find", on(macApp, "cmd+g")),

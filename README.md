@@ -102,6 +102,14 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   panes of their own, commands and status bar items; each can be turned
   off in Settings › Plugins. Uploads and downloads and program windows are
   plugins too.
+- **Variable vault.** API keys and other environment variables, encrypted
+  on the core's computer (the key in the system keychain, or from a
+  passphrase), for coding agents on every machine: Claude Code, Codex and
+  other MCP clients read them through the vault's MCP server, which the
+  panel shows how to add per machine. Each variable names the machines that
+  may read it; others ask on every page (allow once, always, deny), and
+  `run_with_env` runs a command with the variables set without showing
+  their values to the model ([30](docs/features/30-variable-vault.md)).
 - **Settings.** Language (English, Chinese), light/dark theme followed by
   VS Code, interface size, the desktop app's zoom, the terminals' font (picked from the monospace
   fonts installed, with a preview), line height, cursor, scrollback, bell,

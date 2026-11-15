@@ -106,6 +106,8 @@ func Serve(ctx context.Context, conn io.ReadWriteCloser, opts Options) error {
 		sess.Close()
 	}()
 	go a.serveBridge(ctx)
+	go a.serveVault(ctx)
+	go a.linkMCP()
 
 	for {
 		st, err := sess.AcceptStream()

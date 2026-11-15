@@ -388,6 +388,9 @@ func (s *Server) handleAgentStream(mc *machines.Machine, conn net.Conn, h agentp
 	case agentproto.OpBridge:
 		s.bridge.serve(mc, conn)
 	default:
+		if s.servePluginStream(mc, conn, h) {
+			return
+		}
 		agentproto.Fail(conn, errors.New("unsupported op"))
 		conn.Close()
 	}

@@ -16,6 +16,7 @@ import (
 
 	"herdr-ide/internal/agent"
 	"herdr-ide/internal/agentproto"
+	"herdr-ide/internal/vaultmcp"
 )
 
 type stdio struct{}
@@ -28,8 +29,13 @@ func (stdio) Close() error {
 }
 
 func main() {
+	// Started by the stable link <data dir>/bin/<slug>-mcp: the vault's MCP
+	// server.
+	if vaultmcp.IsLink(os.Args[0]) {
+		os.Exit(vaultmcp.Main(os.Args[0], os.Args[1:]))
+	}
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: "+brand.AgentBin+" serve [--instance NAME] | version")
+		fmt.Fprintln(os.Stderr, "usage: "+brand.AgentBin+" serve [--instance NAME] | mcp [--instance NAME] | version")
 		os.Exit(2)
 	}
 	switch os.Args[1] {
@@ -46,6 +52,8 @@ func main() {
 			logger.Printf("exit: %v", err)
 			os.Exit(1)
 		}
+	case "mcp":
+		os.Exit(vaultmcp.Main(os.Args[0], os.Args[2:]))
 	case "gui-keep":
 		// Started by the agent: holds the virtual display while the
 		// instance's terminal core runs.

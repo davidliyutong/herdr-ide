@@ -10,8 +10,10 @@ here; both READMEs link to this page instead of repeating it.
 | --- | --- |
 | `herdr-ide [serve] [flags]` | Run the server (default command). |
 | `herdr-ide fetch-assets [flags] DIR` | Download and verify code-server releases and extensions into `DIR` for air-gapped installs. |
+| `herdr-ide mcp [--instance NAME] [--socket PATH]` | The variable vault's MCP server on stdio, for coding agents' CLIs; asks the instance's agent through `vault.sock` and exits when stdin closes ([30](features/30-variable-vault.md)). |
 | `herdr-ide version` | Print the version. |
 | `herdr-ide-agent serve [--instance NAME]` | Per-machine helper; started by the core over ssh, never by hand. |
+| `herdr-ide-agent mcp [--instance NAME] [--socket PATH]`, `~/.herdr-ide[-<instance>]/bin/herdr-ide-mcp` | The same MCP server on a machine; started by the stable link's name it takes no arguments and asks the agent of the data directory the link is in. |
 | `herdr-ide-agent gui-keep --instance NAME` | Holds a machine's virtual display while the instance's terminal core runs; started by the agent, never by hand. |
 
 ## `serve` flags
@@ -132,6 +134,7 @@ in the UI; a setting with a scope can have its own value per machine, under
 | `notifications.mutedAgents` | list of strings | `["droid"]` | – | – |
 | `codeServer.install` | `push`, `download`, `existing` | `"push"` | `--code-server-install` | per machine |
 | `codeServer.path` | string | `""` | `--code-server-path` | per machine |
+| `plugins.vault.enabled` | `true`, `false` | `true` | – | – |
 | `gui.enabled` | `true`, `false` | `true` | `--gui` | per remote machine |
 | `gui.gpu` | `vglrun`, `all` | `"vglrun"` | `--gui-gpu` | per remote machine |
 | `gui.video` | `true`, `false` | `true` | `--gui-video` | per remote machine |
@@ -237,6 +240,7 @@ by `scripts/registry`.
 | `view.zoomIn` | `always` | `cmd+shift+equal`, `cmd+equal` | – | `ctrl+shift+equal`, `ctrl+equal` | – |
 | `view.zoomOut` | `always` | `cmd+minus` | – | `ctrl+minus` | – |
 | `view.zoomReset` | `always` | `cmd+0` | – | `ctrl+0` | – |
+| `view.panel.vault` | `terminal` | – | – | – | – |
 | `find.open` | `terminal` | `cmd+f` | `cmd+f` | `ctrl+shift+f` | `ctrl+shift+f` |
 | `find.next` | `terminal` | `cmd+g` | – | – | – |
 | `find.previous` | `terminal` | `cmd+shift+g` | – | – | – |
@@ -329,6 +333,15 @@ missing here.
 | `POST /m/{id}/gui/{win}/close` | writes | Asks a program window to close. |
 | `POST /api/m/{id}/gui/enable` | writes | Gives open terminals the machine's display (`{"terminals": [...]}`, empty for all). |
 | `GET /api/gui` | – | The program windows of every machine. |
+| `GET /api/p/vault` | – | The variable vault ([30](features/30-variable-vault.md)): `status` (`mode` `""`, `keychain` or `passphrase`, `locked`, `setup`, `error`) and the `variables` (`name`, `description`, `machines` (`*`: all), `injectOnly`, `created`, `updated`), never values; `503 unavailable` without a settings file. |
+| `PUT /api/p/vault/vars/{name}` | writes | Creates or changes a variable (`{"description"?, "machines"?, "injectOnly"?, "value"?}`; a new one needs `value`, absent keeps it); names `^[A-Za-z_][A-Za-z0-9_]*$` (≤ 128), values ≤ 64 KiB, descriptions ≤ 1 KiB; `409 vault_locked` when a value cannot be sealed. |
+| `DELETE /api/p/vault/vars/{name}` | writes | Removes a variable (also while locked). |
+| `POST /api/p/vault/vars/{name}/reveal` | writes | The value (`{"value"}`): the only way one reaches a browser; refused read-only, audited. |
+| `POST /api/p/vault/unlock` | writes | Unlocks: from the keychain, or with `{"passphrase"}` (sets it the first time in passphrase mode). |
+| `POST /api/p/vault/lock` | writes | Forgets the key until unlocked. |
+| `GET /api/p/vault/requests` | – | The MCP requests waiting for an answer. |
+| `POST /api/p/vault/requests/{id}` | writes | Answers one (`{"answer": "once"\|"always"\|"deny"}`); the first answer wins, later ones get `404`. |
+| `GET /api/p/vault/log` | – | The last 500 accesses since the core started (time, machine, client, terminal, tool, names, result), newest first; never values. |
 | `/` | – | The web UI (`/licenses.md`: the notices of its bundle); any other path gets the app shell for the UI's own routes, except `/api/…` paths no route takes, which are 404. |
 
 ## Environment variables
@@ -377,13 +390,14 @@ On every machine (the agent's `$HOME`):
 | `~/.herdr-ide/code-server/<version>/` | code-server releases (shared by instances) | Versions unused for 14 days are removed. |
 | `~/.herdr-ide[-<instance>]/hc/herdr-core` (0700 directory) | The terminal core's executable, pushed by the core and accepted only with its SHA-256 | Replaced when the core brings another build; kept until removed. |
 | `~/.local/state/herdr-core/herdr-ide[-<instance>]/` (`$XDG_STATE_HOME` when set) | The terminal core's own state (herdr-core's: terminal records, saved screens, logs) | Kept by herdr-core until the user removes it. |
-| `~/.herdr-ide[-<instance>]/run/` (0700) | `hc.sock` (the terminal core's API socket, 0600) and its holders' sockets; `cs.sock`, `cs.pid`, `bridge.sock`; `gui.json` (reserved display and Xvfb pid), `xauth` (terminals' display cookie) and `xauth.server` (Xvfb's copy), both 0600 and replaced at each Xvfb start, `gui.lock`, `gui-keep.lock` (held by the display keeper) | Sockets while the agent (code-server, bridge) or the terminal core runs; the display files are kept so terminals keep a valid environment. |
+| `~/.herdr-ide[-<instance>]/run/` (0700) | `hc.sock` (the terminal core's API socket, 0600) and its holders' sockets; `cs.sock`, `cs.pid`, `bridge.sock`, `vault.sock` (0600, the vault's MCP servers); `gui.json` (reserved display and Xvfb pid), `xauth` (terminals' display cookie) and `xauth.server` (Xvfb's copy), both 0600 and replaced at each Xvfb start, `gui.lock`, `gui-keep.lock` (held by the display keeper) | Sockets while the agent (code-server, bridge) or the terminal core runs; the display files are kept so terminals keep a valid environment. |
 | `~/.herdr-ide/xvfb/<version>/` | Xvfb unpacked from the distribution's package (shared by instances) | Versions unused for 14 days are removed when another is unpacked. |
 | `~/.herdr-ide/video/<sha256 prefix>/encoder` | Video encoder pushed by the core (`gui-video`, shared by instances), run only while its SHA-256 matches | Builds unused for 14 days are removed when another is installed; unfinished installs after 1 h. |
 | `~/.herdr-ide[-<instance>]/xvfb.log` | Output of the last Xvfb started | Replaced at each start. |
 | `~/.herdr-ide[-<instance>]/gui-keep.log` | Output of the last display keeper | Replaced at each start. |
 | `~/.herdr-ide[-<instance>]/cs-data/`, `cs-ext/` | VS Code settings, extensions | Kept; logs older than 7 days are pruned. |
 | `~/.herdr-ide[-<instance>]/uploads/` | Pasted and dropped files | Files older than 7 days are pruned. |
+| `~/.herdr-ide[-<instance>]/bin/herdr-ide-mcp` (0700 directory) | Link to the executable that serves the vault's MCP server (the agent's, or on the local machine the core's) | Pointed at the running executable whenever an agent starts; kept so MCP configurations stay valid. |
 
 On the core host: ssh control sockets in `/tmp/herdr-ide-<uid>/s` on Linux
 and macOS (must be owned by you, mode 0700; a core on Windows keeps none),
@@ -391,6 +405,7 @@ downloads in the user cache directory
 (`~/Library/Caches/herdr-ide/code-server` on macOS, `~/.cache/herdr-ide/code-server`
 on Linux, `%LocalAppData%\herdr-ide\code-server` on Windows) with `.sha256` sidecars (also recorded for releases that machines
 downloaded themselves), the settings in `settings[-<instance>].json`, the
+variable vault in `vault[-<instance>].json` (values encrypted, [30](features/30-variable-vault.md); its key in the system keychain under the service `herdr-ide-vault` and the account `vault[-<instance>].json`), the
 keybindings in `keybindings[-<instance>].json` and the machines in
 `machines[-<instance>].json` (`{"version": 1, "machines": [{id, label,
 kind, target, enabled}], "order": [ids]}`: the SSH machines, the local machine's

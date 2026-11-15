@@ -14,6 +14,8 @@ export interface AgentInfo {
   hostname: string;
   home: string;
   user: string;
+  /** The agent's data directory (~/.<slug>[-<instance>]). */
+  data_dir?: string;
 }
 
 export type MachineStatus = 'connecting' | 'ready' | 'auth_required' | 'error' | 'disabled';

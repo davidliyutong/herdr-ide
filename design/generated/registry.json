@@ -221,6 +221,11 @@
       "when": "always"
     },
     {
+      "id": "view.panel.vault",
+      "section": "view",
+      "when": "terminal"
+    },
+    {
       "id": "find.open",
       "section": "find",
       "when": "terminal"
@@ -298,6 +303,7 @@
     "command.tab.select7",
     "command.tab.select8",
     "command.tab.select9",
+    "command.view.panel.vault",
     "command.view.togglePanel",
     "command.view.toggleSidebar",
     "command.view.zoomIn",
@@ -336,11 +342,13 @@
     "settings.notifications.mutedAgents",
     "settings.notifications.sound",
     "settings.notifications.system",
+    "settings.plugins.vault.enabled",
     "settings.section.appearance",
     "settings.section.codeServer",
     "settings.section.colors",
     "settings.section.gui",
     "settings.section.notifications",
+    "settings.section.plugins",
     "settings.section.terminal",
     "settings.terminal.bell",
     "settings.terminal.bell.none",
@@ -797,6 +805,7 @@
     ],
     "notifications.sound": true,
     "notifications.system": true,
+    "plugins.vault.enabled": true,
     "terminal.bell": "visual",
     "terminal.boldIsBright": false,
     "terminal.colorScheme.dark": "default",

@@ -3,8 +3,12 @@ package server
 import (
 	"context"
 	"log"
+	"net"
 	"net/http"
+	"regexp"
+	"slices"
 
+	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/machines"
 	"herdr-ide/internal/plugin"
 	"herdr-ide/internal/settings"
@@ -51,6 +55,13 @@ func (s *Server) pluginRoutes() []route {
 					if c.Machine != nil {
 						fields["machine"] = c.Machine.ID()
 					}
+					// The route's wildcards (a variable's name, a request's
+					// id) tell what was changed.
+					for _, w := range wildcards.FindAllStringSubmatch(rt.Path, -1) {
+						if v := r.PathValue(w[1]); v != "" {
+							fields[w[1]] = v
+						}
+					}
 					event := p.ID()
 					if rt.Audit != "" {
 						event += "." + rt.Audit
@@ -66,6 +77,28 @@ func (s *Server) pluginRoutes() []route {
 		}
 	}
 	return rs
+}
+
+var wildcards = regexp.MustCompile(`\{([A-Za-z_][A-Za-z0-9_]*)\}`)
+
+// servePluginStream hands a stream an agent opened with a plugin's op to
+// that plugin (plugin.Streamer); false when no plugin serves the op. While
+// the plugin is off the stream fails with plugin_disabled.
+func (s *Server) servePluginStream(mc *machines.Machine, conn net.Conn, h agentproto.Header) bool {
+	for _, p := range s.opts.Plugins {
+		st, ok := p.(plugin.Streamer)
+		if !ok || !slices.Contains(st.AgentOps(), h.Op) {
+			continue
+		}
+		if !plugin.Enabled(s.opts.Settings, p) {
+			agentproto.WriteLine(conn, agentproto.Reply{Error: "plugin is off", Code: "plugin_disabled"})
+			conn.Close()
+			return true
+		}
+		st.ServeAgent(pluginHost{s}, mc, conn, h)
+		return true
+	}
+	return false
 }
 
 // startPlugins runs the plugins that work while the core does.

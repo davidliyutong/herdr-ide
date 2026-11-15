@@ -78,6 +78,15 @@ type Toggled interface {
 	EnableSetting() string
 }
 
+// Streamer is a plugin that serves streams agents open towards the core
+// with ops of its own (internal/agentproto), as the vault's MCP requests.
+// The core hands it each stream of those ops after the header, while the
+// plugin is on; it writes the reply and closes the stream.
+type Streamer interface {
+	AgentOps() []agentproto.Op
+	ServeAgent(h Host, mc *machines.Machine, conn net.Conn, hdr agentproto.Header)
+}
+
 var validID = regexp.MustCompile(`^[a-z][a-z0-9]*$`)
 
 // ValidID reports whether id can name a plugin.

@@ -4,6 +4,7 @@
 //	herdr-ide [serve] [flags]       run the server (default)
 //	herdr-ide fetch-assets DIR      download code-server and extensions for
 //	                               air-gapped installs (use with --seed-dir)
+//	herdr-ide mcp [--instance NAME]   the variable vault's MCP server (stdio)
 //	herdr-ide version
 package main
 
@@ -35,6 +36,7 @@ import (
 	"herdr-ide/internal/server"
 	"herdr-ide/internal/settings"
 	"herdr-ide/internal/transport"
+	"herdr-ide/internal/vaultmcp"
 	"herdr-ide/web"
 )
 
@@ -99,6 +101,11 @@ func settingsPath(instance string) (string, error) {
 }
 
 func main() {
+	// Started by the stable link <data dir>/bin/<slug>-mcp (the local
+	// machine's agent runs in this process): the vault's MCP server.
+	if vaultmcp.IsLink(os.Args[0]) {
+		os.Exit(vaultmcp.Main(os.Args[0], os.Args[1:]))
+	}
 	args := os.Args[1:]
 	cmd := "serve"
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
@@ -112,8 +119,10 @@ func main() {
 		serve(args, logger)
 	case "fetch-assets":
 		fetchAssets(args, logger)
+	case "mcp":
+		os.Exit(vaultmcp.Main(os.Args[0], args))
 	default:
-		fmt.Fprintf(os.Stderr, "usage: %s [serve] [flags] | fetch-assets [flags] DIR | version\n", brand.CoreBin)
+		fmt.Fprintf(os.Stderr, "usage: %s [serve] [flags] | fetch-assets [flags] DIR | mcp [--instance NAME] | version\n", brand.CoreBin)
 		os.Exit(2)
 	}
 }

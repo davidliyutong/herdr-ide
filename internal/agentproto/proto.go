@@ -67,6 +67,11 @@ const (
 	// writes JSON lines after the reply until either side closes the stream
 	// (internal/agent/plugin).
 	OpPlugin Op = "plugin"
+	// OpVault is opened by the agent towards the core for every connection
+	// of an MCP server (the mcp command) to <run>/vault.sock: after the
+	// core's reply, one VaultRequest line and one VaultResponse line
+	// (vault.go).
+	OpVault Op = "vault"
 )
 
 // DetectEvent is one line of an OpDetect stream: the agent a terminal runs

@@ -31,10 +31,15 @@ A plugin (`plugin.Plugin`) has an id (lower-case letters and digits) and
 routes. Its routes are mounted below `/api/p/<id>/` (the core's) or
 `/api/m/{id}/p/<id>/` (a machine's: the handler gets the machine, an unknown
 one is a 404). A route marked `Mutating` is wrapped by `writable` (refused
-in read-only mode) and audited as `<plugin>[.<event>]`;
+in read-only mode) and audited as `<plugin>[.<event>]` with the values of
+the path's wildcards (a variable's name);
 `TestMutatingRoutesAreGuarded` walks the plugins' routes with the core's.
 While a plugin is off, its routes answer `404 plugin_disabled`. A plugin that
-works while the core runs (a scheduler) implements `Starter`.
+works while the core runs (a scheduler) implements `Starter`. A plugin
+that serves streams agents open towards the core with ops of its own
+(`agentproto`, as the vault's `vault`) implements `Streamer`: the core hands
+it each such stream while it is on and refuses the stream with
+`plugin_disabled` while it is off.
 
 `plugin.Host` is the core as plugins see it: the machines, `Broadcast`
 (a `/ws` message `plugin {plugin, m, data}` to every page), the audit log,
@@ -94,6 +99,7 @@ on macOS) shows the panel shown last or hides it.
 | --- | --- | --- |
 | `transfers` | always on | The uploads and downloads trays of the status bar ([06](06-quick-look-and-files.md)). |
 | `gui` | `gui` | The program windows' tray and palette items ([14](14-gui-windows.md)). |
+| `vault` | `plugins.vault.enabled` | The variable vault: its panel, approval prompts, the op `vault` and the `mcp` command ([30](30-variable-vault.md)). |
 
 ## Alternatives considered
 
@@ -116,7 +122,7 @@ on macOS) shows the panel shown last or hides it.
 ## Testing
 
 - `internal/server/plugins_test.go`: patterns, unknown machines, the switch,
-  default values; `TestMutatingRoutesAreGuarded` includes a fake plugin's routes.
+  default values, agents' streams of a plugin's op; `TestMutatingRoutesAreGuarded` includes a fake plugin's routes.
 - `internal/agent/plugin/plugin_test.go`: replies, codes, streams that end
   when the core closes them.
 - `web/src/__tests__/plugins.test.ts`: switches, the rail and panels,

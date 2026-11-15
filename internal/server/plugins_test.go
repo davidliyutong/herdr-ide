@@ -1,11 +1,14 @@
 package server
 
 import (
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"herdr-ide/internal/agentproto"
+	"herdr-ide/internal/machines"
 	"herdr-ide/internal/plugin"
 	"herdr-ide/internal/registry"
 	"herdr-ide/internal/settings"
@@ -80,6 +83,42 @@ func TestPluginDisabled(t *testing.T) {
 	s.Handler().ServeHTTP(w, r)
 	if w.Code != 404 || !strings.Contains(w.Body.String(), "plugin_disabled") {
 		t.Fatalf("disabled plugin: %d %s", w.Code, w.Body)
+	}
+}
+
+// fakeStreamer serves an op of its own.
+type fakeStreamer struct{ fakePlugin }
+
+func (fakeStreamer) AgentOps() []agentproto.Op { return []agentproto.Op{"fake-op"} }
+func (fakeStreamer) ServeAgent(_ plugin.Host, _ *machines.Machine, conn net.Conn, _ agentproto.Header) {
+	agentproto.WriteLine(conn, agentproto.Reply{OK: true, Code: "served"})
+	conn.Close()
+}
+
+// Streams agents open with a plugin's op reach the plugin while it is on.
+func TestPluginStreams(t *testing.T) {
+	ps := []plugin.Plugin{fakeStreamer{}}
+	st := settings.New("", plugin.Settings(ps, nil))
+	s := newTestServer()
+	s.opts.Plugins = ps
+	s.opts.Settings = st
+	open := func(op agentproto.Op) agentproto.Reply {
+		a, b := net.Pipe()
+		go s.handleAgentStream(nil, b, agentproto.Header{Op: op})
+		defer a.Close()
+		var rep agentproto.Reply
+		agentproto.ReadLine(a, &rep)
+		return rep
+	}
+	if rep := open("fake-op"); !rep.OK || rep.Code != "served" {
+		t.Errorf("served %+v", rep)
+	}
+	if rep := open("other"); rep.OK {
+		t.Errorf("unknown op %+v", rep)
+	}
+	st.Set("plugins.fake.enabled", "", false)
+	if rep := open("fake-op"); rep.OK || rep.Code != "plugin_disabled" {
+		t.Errorf("disabled %+v", rep)
 	}
 }
 

@@ -13,7 +13,8 @@ desktop app (Electron shell)                            ├─ machines: registr
                                                                                                     ├─ code-server (unix socket only)
                                                                                                     ├─ Xvfb + window manager (programs' windows)
                                                                                                     ├─ plugins' machine sides (op plugin)
-                                                                                                    └─ bridge.sock ◀── VS Code bridge extension
+                                                                                                    ├─ bridge.sock ◀── VS Code bridge extension
+                                                                                                    └─ vault.sock ◀── the vault's MCP server (`<slug>-mcp`) ◀──stdio── coding agents' CLIs
 ```
 
 The local machine's agent runs inside the core (an in-process socket pair
@@ -24,11 +25,11 @@ machines only ([02](features/02-multi-machine-transport.md)).
 
 | Directory | Role |
 | --- | --- |
-| `cmd/herdr-ide` | Core entry point: flags, `serve`, `fetch-assets`, `version`; the local machine's in-process agent (`local_unix.go`; `local_windows.go` dials none). Builds for Linux, macOS and Windows. |
-| `cmd/herdr-ide-agent` | Agent entry point (`serve` over stdio); Linux and macOS only (`//go:build unix`). |
+| `cmd/herdr-ide` | Core entry point: flags, `serve`, `fetch-assets`, `mcp` (the vault's MCP server, also run by the name `<slug>-mcp`), `version`; the local machine's in-process agent (`local_unix.go`; `local_windows.go` dials none). Builds for Linux, macOS and Windows. |
+| `cmd/herdr-ide-agent` | Agent entry point (`serve` over stdio; `mcp`, the vault's MCP server, also run by the name `<slug>-mcp`); Linux and macOS only (`//go:build unix`). |
 | `internal/brand` | Product names; the only place they are defined in Go. |
 | `internal/agentproto` | Stream protocol shared by core and agent, and the yamux configuration of both ends (`yamux.go`). |
-| `internal/agent` | Agent: the terminal core, agent detection, files, code-server supervision, virtual displays, bridge listener, housekeeping. Every file is `//go:build unix` (unix sockets with peer checks, process groups, Xvfb), so code the core runs on Windows does not import it. |
+| `internal/agent` | Agent: the terminal core, agent detection, files, code-server supervision, virtual displays, the bridge and vault listeners and the MCP link, housekeeping. Every file is `//go:build unix` (unix sockets with peer checks, process groups, Xvfb), so code the core runs on Windows does not import it. |
 | `internal/agent/detect` | Which coding agent a terminal's foreground process is and its state from the screen, by herdr's method and manifests (embedded, Apache-2.0), with the state machine for debouncing and done ([25](features/25-agent-detection.md)). |
 | `internal/transport` | yamux sessions: in-process for the local machine (`local.go`, unix), ssh stdio for others; agent upload; the ssh control directory (`sys_unix.go`: private, under `/tmp`; `sys_windows.go`: none, since Win32-OpenSSH has no ControlMaster, and ssh started without a console window). |
 | `internal/sshconfig` | The Host aliases of the core host's OpenSSH configuration (`~/.ssh/config` and its includes) with their HostName and User, read with bounds for the Add Machine dialog ([02](features/02-multi-machine-transport.md)). |
@@ -44,6 +45,9 @@ machines only ([02](features/02-multi-machine-transport.md)).
 | `internal/userfile` | Atomic writes and change detection of the hand-editable files; the configuration directory made private on Linux and macOS (`private_unix.go`; on Windows its access control list keeps it the user's). |
 | `internal/plugin` | The core's side of plugins: their routes below `/api/p/<id>` and `/api/m/{id}/p/<id>` (guarded and audited as the core's own), `/ws` messages, switches (`plugins.<id>.enabled`) and the calls to their machine sides ([27](features/27-plugins.md)). |
 | `internal/agent/plugin` | The machine side of plugins: handlers of the agent's `plugin` op, registered per plugin. |
+| `internal/vault` | The variable vault's store on the core host: values encrypted one by one (AES-256-GCM, the name as additional data) in `vault[-<instance>].json`, the master key in the system keychain or from a passphrase (Argon2id) ([30](features/30-variable-vault.md)). Builds for Windows too. |
+| `internal/plugins/vault` | The vault plugin's core side: its routes, the MCP servers' requests (op `vault`, a `plugin.Streamer`), approvals and the access log. |
+| `internal/vaultmcp` | The vault's MCP server (the `mcp` command of the core and the agent): JSON-RPC over stdio, the tools `list_variables`, `get_variable`, `run_with_env`. |
 | `internal/gui` | Virtual displays on machines, their windows, frames and input between agents and browser windows. |
 | `internal/jpegstrip` | JPEG encoding of a window capture in independent row groups, encoded in parallel (from Go's `image/jpeg`, BSD). |
 | `internal/server` | HTTP/WS front: guards, the event channel, terminal streams, files, proxy, bridge, audit. |
@@ -131,6 +135,7 @@ after a successful reply it carries op-specific bytes.
 | `privacy` | core → agent | – (reply has `Privacy`: whether macOS's Full Disk Access lets the agent's process (`files`; on the local machine the core's) and the terminal core (`terminals`, a probe it runs with `machine.exec`) open a folder only it opens, each `granted`, `denied` or `unknown`, and the terminal core's executable); starts no terminal core, reads no file |
 | `plugin` | core → agent | `Action` of `Plugin` with `Params` (the plugin's JSON); the reply's `Plugin` is its result, or JSON lines follow until either side closes the stream; failures carry `Code` (`unknown_plugin`, `bad_params`, the plugin's own) ([27](features/27-plugins.md)) |
 | `bridge` | agent → core | JSON lines between the VS Code extension and the core |
+| `vault` | agent → core | one `VaultRequest` line `{tool: list\|get\|env, names, client, terminal, cwd}` from the vault's MCP server, relayed from `vault.sock`, and one `VaultResponse` line `{ok, code, error, variables, values}`; the core decides from the machine the stream came from; refused with `Code` `plugin_disabled` while the plugin is off ([30](features/30-variable-vault.md)) |
 | `gui` | core → agent | actions `status`, `install` (fetch Xvfb in user space), `start`, `keep` (start the display keeper, which holds the display while the instance's terminal core runs), `shells` (which of the pids in `Args` were started with the display) (reply `GUI`); `video` and `video-install` (`Digest`: the video encoder's SHA-256; the second streams the gzip-compressed encoder, chunked) reply whether it is installed and the stream kinds it makes here (`GUI.Video`, `GUI.VideoEncoders`); `attach`: messages `[kind u8][len u32][payload]`, JSON events (`window`, `gone`, `layer`, `layer_gone`, `cursor`, `stats`, `video` (a window's stream starts, or ends without a codec)) and frames (`GUIFrameHeader` + JPEG/PNG, or a video frame of the whole window, `Enc` 3, 4 for key frames) from the agent, JSON commands (`watch`, `ack`, `refresh`, `codecs` (the stream kinds all viewers decode, also sent with `watch` and `refresh`), `keyframe`, input, `close`) from the core |
 
 yamux streams cannot be half-closed, so uploads use `ChunkWriter` framing
@@ -150,7 +155,7 @@ own protocol (`/api/v1/term`, below). A client plays no notification sounds
 | `retry {m}` (ends the wait before a disconnected machine's next connection attempt; refused for read-only clients), `ping {rid}` | `pong {rid}`, `machines {list}`, `machine {state}`, `agent {m, data}` (status change), `bridge.send {m, text, file, line, end_line, folders, window}` (text for an agent, with the file and lines it came from; `folders` and `window` are the sending VS Code window's, absent while unknown: the page whose VS Code pane shows that window picks a terminal of the pane's workspace), `bridge.download {m, paths, window}` (files chosen in VS Code's explorer; the page showing that window, else the page with the focus, downloads them), `bridge.focus {m, window, folders}` (a VS Code window got the keyboard: the page whose pane has it learns the pane's window and names it in its commands, `POST /api/m/{id}/bridge`) |
 | `download.watch {ids}` (downloads the page started with `dl=<id>`: before starting one and after reconnecting), `download.cancel {id}` | `download {id, state, sent, total, name, error}` to the page following the id: progress and how it ended (`unknown` for an id the core has not seen or no longer knows), for the downloads panel |
 | `theme {kind: dark\|light}` (VS Code follows it) | `gui {state: {m, phase, gpu, windows}}` (program windows per machine) |
-| – | `plugin {plugin, m, data}`: a plugin's message for machine `m` (`""` for the core's), handed to the plugin's web side while it is on ([27](features/27-plugins.md)) |
+| – | `plugin {plugin, m, data}`: a plugin's message for machine `m` (`""` for the core's), handed to the plugin's web side while it is on ([27](features/27-plugins.md)); the vault's: `{type: request, request: {id, m, tool, names, client, terminal, cwd, created, expires}}` (an approval to ask), `{type: resolved, id, answer}` (answered or expired: every page closes it), `{type: changed}` (load the variables and the log again) ([30](features/30-variable-vault.md)) |
 | – | `settings {values, problems}` and `keybindings {user, effective, conflicts, problems}` after every change, through the API or the files ([13](features/13-settings-and-appearance.md)) |
 | `active {idle}` (ms since the user last used the page) | `agent {…, sound}`: `sound` is true only for the most recently used page, which plays the notification sound; a terminal core's terminal sends `data {terminal, agent, display_agent, agent_status, title}` ([25](features/25-agent-detection.md)) |
 
