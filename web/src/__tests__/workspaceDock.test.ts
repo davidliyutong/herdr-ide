@@ -61,7 +61,7 @@ function select(m: string, ws: string) {
 function focus(m: string, terminal: string | undefined) {
   core.model.mutate(m, (l) =>
     terminal
-      ? L.focusTerminal(l, terminal)
+      ? L.focusPane(l, terminal)
       : { ...l, workspaces: l.workspaces.map((w) => ({ ...w, tabs: w.tabs.map((tb) => ({ ...tb, focused: '' })) })) },
   );
 }

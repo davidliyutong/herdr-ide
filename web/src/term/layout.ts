@@ -1,10 +1,11 @@
-// The arrangement of a machine's terminals that every client shares:
-// workspaces (a name and a directory), each with tabs, each a tree of split
-// panes whose leaves are terminals. It is the document "layout" in the
-// machine's terminal core (docs/features/22-terminal-protocol.md), tested
-// with the vectors in design/testdata/layout. The functions return new
-// values and never change their arguments; a layout is its own document
-// value, and fields this version does not know are kept at every level.
+// The arrangement of a machine's panes that every client shares: workspaces
+// (a name and a directory), each with tabs, each a tree of split panes whose
+// leaves are terminals, VS Code views and previews of a file. It is the
+// document "layout" in the machine's terminal core
+// (docs/features/22-terminal-protocol.md), tested with the vectors in
+// design/testdata/layout. The functions return new values and never change
+// their arguments; a layout is its own document value, and fields this
+// version does not know are kept at every level.
 
 export const LAYOUT_DOCUMENT = 'layout';
 /** The id of the workspace a version 1 document's tabs are read into. */
@@ -15,7 +16,16 @@ export type Axis = 'horizontal' | 'vertical';
 /** Fields of a newer client, written back as they were. */
 type Extra = { [key: string]: unknown };
 
-export type Leaf = Extra & { terminal: string };
+/** A terminal of the machine's terminal core, by its address. */
+export type TerminalLeaf = Extra & { terminal: string };
+/** VS Code of the machine for a folder ("" for the one code-server opens). */
+export type CodeView = Extra & { id: string; folder: string };
+export type CodeLeaf = Extra & { code: CodeView };
+/** A file or directory of the machine, shown by the preview. */
+export type PreviewView = Extra & { id: string; path: string };
+export type PreviewLeaf = Extra & { preview: PreviewView };
+/** A pane: a terminal, a VS Code view or a preview. */
+export type Leaf = TerminalLeaf | CodeLeaf | PreviewLeaf;
 /** ratio is the first child's share, 0.1 to 0.9. */
 export type Split = Extra & { split: Axis; ratio: number; children: [Node, Node] };
 /** A leaf, a split, or a node of a kind this version does not know, kept as it is. */
@@ -25,7 +35,7 @@ export type Tab = Extra & {
   /** Set only when the user named the tab. */
   name?: string;
   root: Node;
-  /** The terminal with the keyboard focus. */
+  /** The pane with the keyboard focus (paneKey). */
   focused: string;
 };
 
@@ -48,8 +58,28 @@ const clampRatio = (ratio: number) => Math.min(Math.max(ratio, 0.1), 0.9);
 const clampIndex = (index: number, count: number) => (count ? Math.min(Math.max(index, 0), count - 1) : 0);
 const readIndex = (v: unknown, count: number) => (typeof v === 'number' && Number.isInteger(v) ? clampIndex(v, count) : 0);
 const text = (v: unknown) => (typeof v === 'string' ? v : '');
+const id = (v: unknown) => isObject(v) && typeof v.id === 'string' && v.id !== '';
 
-export const isLeaf = (node: Node): node is Leaf => typeof node.terminal === 'string' && node.terminal !== '';
+/** The key of a VS Code view's pane: what a tab's focus and the functions
+ * here name it by. Terminals go by their address. */
+export const codeKey = (id: string) => `code:${id}`;
+export const previewKey = (id: string) => `preview:${id}`;
+
+export const isTerminalLeaf = (node: Node): node is TerminalLeaf => typeof node.terminal === 'string' && node.terminal !== '';
+export const isCodeLeaf = (node: Node): node is CodeLeaf => !isTerminalLeaf(node) && id(node.code);
+export const isPreviewLeaf = (node: Node): node is PreviewLeaf =>
+  !isTerminalLeaf(node) && !isCodeLeaf(node) && id(node.preview) && text((node.preview as Extra).path) !== '';
+
+/** A pane's key: a terminal's address, code:<id> or preview:<id>; undefined
+ * for splits and nodes of unknown kinds. */
+export function paneKey(node: Node): string | undefined {
+  if (isTerminalLeaf(node)) return node.terminal;
+  if (isCodeLeaf(node)) return codeKey(node.code.id);
+  if (isPreviewLeaf(node)) return previewKey(node.preview.id);
+  return undefined;
+}
+
+export const isLeaf = (node: Node): node is Leaf => paneKey(node) !== undefined;
 
 export function isSplit(node: Node): node is Split {
   const children = node.children;
@@ -62,11 +92,19 @@ export function isSplit(node: Node): node is Split {
   );
 }
 
-export function terminalsOf(node: Node): string[] {
-  if (isLeaf(node)) return [node.terminal];
-  return isSplit(node) ? [...terminalsOf(node.children[0]), ...terminalsOf(node.children[1])] : [];
+/** The leaves of a tree, in order. */
+export function leavesOf(node: Node): Leaf[] {
+  if (isLeaf(node)) return [node];
+  return isSplit(node) ? [...leavesOf(node.children[0]), ...leavesOf(node.children[1])] : [];
 }
 
+/** The keys of a tree's panes, in order. */
+export const panesOf = (node: Node): string[] => leavesOf(node).map((l) => paneKey(l)!);
+
+/** The addresses of a tree's terminals, in order. */
+export const terminalsOf = (node: Node): string[] => leavesOf(node).flatMap((l) => (isTerminalLeaf(l) ? [l.terminal] : []));
+
+export const tabPanes = (tab: Tab): string[] => panesOf(tab.root);
 export const tabTerminals = (tab: Tab): string[] => terminalsOf(tab.root);
 export const workspaceTerminals = (ws: Workspace): string[] => ws.tabs.flatMap(tabTerminals);
 export const layoutTerminals = (layout: Layout): string[] => layout.workspaces.flatMap(workspaceTerminals);
@@ -75,12 +113,19 @@ export const selectedTab = (layout: Layout): Tab | undefined => {
   const ws = selectedWorkspace(layout);
   return ws?.tabs[ws.selected];
 };
-export const focusedTerminal = (layout: Layout): string | undefined => selectedTab(layout)?.focused || undefined;
+/** The selected tab's focused pane. */
+export const focusedPane = (layout: Layout): string | undefined => selectedTab(layout)?.focused || undefined;
 
-/** Where a terminal is: the indexes of its workspace and tab. */
-export function locate(layout: Layout, address: string): { workspace: number; tab: number } | null {
+/** The selected tab's focused pane when it is a terminal. */
+export function focusedTerminal(layout: Layout): string | undefined {
+  const tab = selectedTab(layout);
+  return tab && tabTerminals(tab).includes(tab.focused) ? tab.focused : undefined;
+}
+
+/** Where a pane is: the indexes of its workspace and tab. */
+export function locate(layout: Layout, key: string): { workspace: number; tab: number } | null {
   for (const [w, ws] of layout.workspaces.entries()) {
-    const t = ws.tabs.findIndex((tab) => tabTerminals(tab).includes(address));
+    const t = ws.tabs.findIndex((tab) => tabPanes(tab).includes(key));
     if (t >= 0) return { workspace: w, tab: t };
   }
   return null;
@@ -106,8 +151,19 @@ export function workspaceTitle(ws: Pick<Workspace, 'name' | 'cwd'>, home?: strin
   return name && !GENERATED_NAMES.has(name) ? name : folderName(ws.cwd, home);
 }
 
-/** A short random id for a new workspace. */
-export function newWorkspaceId(): string {
+/** A folder without trailing slashes, so one folder is one VS Code view. */
+export function normFolder(folder: string): string {
+  return folder.length > 1 ? folder.replace(/\/+$/, '') || '/' : folder;
+}
+
+/** Whether path is folder or below it. */
+export function folderHolds(folder: string, path: string): boolean {
+  const f = normFolder(folder);
+  return !!f && (path === f || path.startsWith(f === '/' ? '/' : f + '/'));
+}
+
+/** A short random id for a new workspace or pane. */
+export function newId(): string {
   const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
   return Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => alphabet[b % alphabet.length]).join('');
 }
@@ -116,6 +172,11 @@ export function newWorkspaceId(): string {
 
 function parseNode(raw: Extra): Node {
   if (typeof raw.terminal === 'string' && raw.terminal) return { ...raw };
+  if (id(raw.code)) {
+    const code = raw.code as Extra;
+    return { ...raw, code: { ...code, id: code.id as string, folder: text(code.folder) } };
+  }
+  if (isPreviewLeaf(raw)) return { ...raw, preview: { ...raw.preview } };
   const { split, ratio, children, ...extra } = raw;
   if ((split === 'horizontal' || split === 'vertical') && Array.isArray(children) && children.length === 2 && children.every(isObject)) {
     const r = typeof ratio === 'number' && Number.isFinite(ratio) ? clampRatio(ratio) : 0.5;
@@ -128,20 +189,20 @@ function parseTab(raw: unknown): Tab | null {
   if (!isObject(raw) || !isObject(raw.root)) return null;
   const { name, root: rawRoot, focused, ...extra } = raw;
   const root = parseNode(rawRoot);
-  const terminals = terminalsOf(root);
+  const panes = panesOf(root);
   return {
     ...extra,
     ...(typeof name === 'string' && name ? { name } : {}),
     root,
-    focused: typeof focused === 'string' && terminals.includes(focused) ? focused : (terminals[0] ?? ''),
+    focused: typeof focused === 'string' && panes.includes(focused) ? focused : (panes[0] ?? ''),
   };
 }
 
 function parseWorkspace(raw: unknown, seen: ReadonlySet<string>): Workspace | null {
   if (!isObject(raw) || typeof raw.id !== 'string' || !raw.id || seen.has(raw.id)) return null;
-  const { id, name, cwd, tabs: rawTabs, selected, ...extra } = raw;
+  const { id: wsId, name, cwd, tabs: rawTabs, selected, ...extra } = raw;
   const tabs = (Array.isArray(rawTabs) ? rawTabs : []).map(parseTab).filter((t): t is Tab => t !== null);
-  return { ...extra, id: id as string, name: text(name), cwd: text(cwd), tabs, selected: readIndex(selected, tabs.length) };
+  return { ...extra, id: wsId as string, name: text(name), cwd: text(cwd), tabs, selected: readIndex(selected, tabs.length) };
 }
 
 /**
@@ -190,47 +251,51 @@ function moved<T>(list: readonly T[], from: number, to: number): T[] {
 const afterRemoval = (selected: number, index: number, count: number) =>
   clampIndex(index < selected || (index === selected && index === count - 1) ? selected - 1 : selected, count - 1);
 
-const workspaceIndex = (layout: Layout, id: string) => layout.workspaces.findIndex((w) => w.id === id);
+const workspaceIndex = (layout: Layout, wsId: string) => layout.workspaces.findIndex((w) => w.id === wsId);
 
 /** The layout with the workspace at index replaced, and selected when select is set. */
 function withWorkspace(layout: Layout, index: number, ws: Workspace, select = false): Layout {
   return { ...layout, workspaces: layout.workspaces.map((w, i) => (i === index ? ws : w)), ...(select ? { selected: index } : {}) };
 }
 
-function updateWorkspace(layout: Layout, id: string, change: (ws: Workspace) => Workspace): Layout {
-  const index = workspaceIndex(layout, id);
+function updateWorkspace(layout: Layout, wsId: string, change: (ws: Workspace) => Workspace): Layout {
+  const index = workspaceIndex(layout, wsId);
   if (index < 0) return layout;
   const ws = change(layout.workspaces[index]);
   return ws === layout.workspaces[index] ? layout : withWorkspace(layout, index, ws);
 }
 
 /** Adds an empty workspace at the end and selects it; nothing for an id in use. */
-export function createWorkspace(layout: Layout, id: string, name: string, cwd = ''): Layout {
-  if (!id || workspaceIndex(layout, id) >= 0) return layout;
-  return { ...layout, workspaces: [...layout.workspaces, { id, name, cwd, tabs: [], selected: 0 }], selected: layout.workspaces.length };
+export function createWorkspace(layout: Layout, wsId: string, name: string, cwd = ''): Layout {
+  if (!wsId || workspaceIndex(layout, wsId) >= 0) return layout;
+  return {
+    ...layout,
+    workspaces: [...layout.workspaces, { id: wsId, name, cwd, tabs: [], selected: 0 }],
+    selected: layout.workspaces.length,
+  };
 }
 
-export function renameWorkspace(layout: Layout, id: string, name: string): Layout {
-  return updateWorkspace(layout, id, (ws) => (ws.name === name ? ws : { ...ws, name }));
+export function renameWorkspace(layout: Layout, wsId: string, name: string): Layout {
+  return updateWorkspace(layout, wsId, (ws) => (ws.name === name ? ws : { ...ws, name }));
 }
 
 /** Removes a workspace with its tabs; its terminals keep running until the caller ends them. */
-export function closeWorkspace(layout: Layout, id: string): Layout {
-  const index = workspaceIndex(layout, id);
+export function closeWorkspace(layout: Layout, wsId: string): Layout {
+  const index = workspaceIndex(layout, wsId);
   if (index < 0) return layout;
   const workspaces = layout.workspaces.filter((_, i) => i !== index);
   return { ...layout, workspaces, selected: afterRemoval(layout.selected, index, layout.workspaces.length) };
 }
 
-export function moveWorkspace(layout: Layout, id: string, to: number): Layout {
-  const from = workspaceIndex(layout, id);
+export function moveWorkspace(layout: Layout, wsId: string, to: number): Layout {
+  const from = workspaceIndex(layout, wsId);
   const target = clampIndex(to, layout.workspaces.length);
   if (from < 0 || from === target) return layout;
   return { ...layout, workspaces: moved(layout.workspaces, from, target), selected: afterMove(layout.selected, from, target) };
 }
 
-export function selectWorkspace(layout: Layout, id: string): Layout {
-  const index = workspaceIndex(layout, id);
+export function selectWorkspace(layout: Layout, wsId: string): Layout {
+  const index = workspaceIndex(layout, wsId);
   return index < 0 || index === layout.selected ? layout : { ...layout, selected: index };
 }
 
@@ -267,31 +332,38 @@ export function selectTab(layout: Layout, workspace: string, tab: number): Layou
   return withWorkspace(layout, index, ws.selected === tab ? ws : { ...ws, selected: tab }, true);
 }
 
-/** Selects a terminal's workspace and tab and gives it the focus. */
-export function focusTerminal(layout: Layout, address: string): Layout {
-  const at = locate(layout, address);
+/** Selects a pane's workspace and tab and gives it the focus. */
+export function focusPane(layout: Layout, key: string): Layout {
+  const at = locate(layout, key);
   if (!at) return layout;
   const ws = layout.workspaces[at.workspace];
   const tab = ws.tabs[at.tab];
-  if (layout.selected === at.workspace && ws.selected === at.tab && tab.focused === address) return layout;
-  const tabs = ws.tabs.map((t, i) => (i === at.tab ? { ...t, focused: address } : t));
+  if (layout.selected === at.workspace && ws.selected === at.tab && tab.focused === key) return layout;
+  const tabs = ws.tabs.map((t, i) => (i === at.tab ? { ...t, focused: key } : t));
   return withWorkspace(layout, at.workspace, { ...ws, tabs, selected: at.tab }, true);
+}
+
+/** Opens a pane in a new tab of a workspace (the selected one by default) and
+ * selects it; a pane already open is focused where it is. */
+export function openPane(layout: Layout, leaf: Leaf, workspace?: string): Layout {
+  const key = paneKey(leaf);
+  if (!key) return layout;
+  if (locate(layout, key)) return focusPane(layout, key);
+  const index = workspace === undefined ? layout.selected : workspaceIndex(layout, workspace);
+  const ws = layout.workspaces[index];
+  if (!ws) return layout;
+  const tabs = [...ws.tabs, { root: { ...leaf }, focused: key }];
+  return withWorkspace(layout, index, { ...ws, tabs, selected: tabs.length - 1 }, true);
 }
 
 /** Opens a terminal in a new tab of a workspace (the selected one by default) and selects it; an open one is focused where it is. */
 export function openTerminal(layout: Layout, address: string, workspace?: string): Layout {
-  if (!address) return layout;
-  if (locate(layout, address)) return focusTerminal(layout, address);
-  const index = workspace === undefined ? layout.selected : workspaceIndex(layout, workspace);
-  const ws = layout.workspaces[index];
-  if (!ws) return layout;
-  const tabs = [...ws.tabs, { root: { terminal: address }, focused: address }];
-  return withWorkspace(layout, index, { ...ws, tabs, selected: tabs.length - 1 }, true);
+  return address ? openPane(layout, { terminal: address }, workspace) : layout;
 }
 
 function splitting(node: Node, target: string, axis: Axis, added: Node, before: boolean): Node {
   if (isLeaf(node)) {
-    if (node.terminal !== target) return node;
+    if (paneKey(node) !== target) return node;
     return { split: axis, ratio: 0.5, children: before ? [added, node] : [node, added] };
   }
   if (!isSplit(node)) return node;
@@ -299,64 +371,77 @@ function splitting(node: Node, target: string, axis: Axis, added: Node, before: 
   return { ...node, children: [splitting(a, target, axis, added, before), splitting(b, target, axis, added, before)] };
 }
 
-function removing(node: Node, address: string): Node | null {
-  if (isLeaf(node)) return node.terminal === address ? null : node;
+function removing(node: Node, key: string): Node | null {
+  if (isLeaf(node)) return paneKey(node) === key ? null : node;
   if (!isSplit(node)) return node;
   const [a, b] = node.children;
-  const first = removing(a, address);
-  const second = removing(b, address);
+  const first = removing(a, key);
+  const second = removing(b, key);
   if (!first) return second;
   if (!second) return first;
   return first === a && second === b ? node : { ...node, children: [first, second] };
 }
 
-/** The other child of the split holding the leaf of address. */
-function siblingOf(node: Node, address: string): Node | null {
+/** The other child of the split holding the leaf of key. */
+function siblingOf(node: Node, key: string): Node | null {
   if (!isSplit(node)) return null;
   const [a, b] = node.children;
-  if (isLeaf(a) && a.terminal === address) return b;
-  if (isLeaf(b) && b.terminal === address) return a;
-  return siblingOf(a, address) ?? siblingOf(b, address);
+  if (isLeaf(a) && paneKey(a) === key) return b;
+  if (isLeaf(b) && paneKey(b) === key) return a;
+  return siblingOf(a, key) ?? siblingOf(b, key);
 }
 
-function leafOf(node: Node, address: string): Leaf | null {
-  if (isLeaf(node)) return node.terminal === address ? node : null;
-  return isSplit(node) ? (leafOf(node.children[0], address) ?? leafOf(node.children[1], address)) : null;
+/** The leaf of a pane in a tree. */
+export function leafOf(node: Node, key: string): Leaf | null {
+  if (isLeaf(node)) return paneKey(node) === key ? node : null;
+  return isSplit(node) ? (leafOf(node.children[0], key) ?? leafOf(node.children[1], key)) : null;
 }
 
-function findLeaf(layout: Layout, address: string): Leaf | null {
-  const at = locate(layout, address);
-  return at && leafOf(layout.workspaces[at.workspace].tabs[at.tab].root, address);
+/** The leaf of a pane anywhere in the layout. */
+export function findLeaf(layout: Layout, key: string): Leaf | null {
+  const at = locate(layout, key);
+  return at && leafOf(layout.workspaces[at.workspace].tabs[at.tab].root, key);
 }
 
-/** Splits the focused terminal of the selected tab, the new terminal second and focused. */
+/** Splits a pane with a new one, placed after it (or before) and focused; its
+ * tab and workspace are selected. Nothing when the new pane is open already. */
+export function splitPane(layout: Layout, target: string, axis: Axis, leaf: Leaf, before = false): Layout {
+  const key = paneKey(leaf);
+  const at = locate(layout, target);
+  if (!key || !at || locate(layout, key)) return layout;
+  const ws = layout.workspaces[at.workspace];
+  const tabs = ws.tabs.map((t, i) =>
+    i === at.tab ? { ...t, root: splitting(t.root, target, axis, { ...leaf }, before), focused: key } : t,
+  );
+  return withWorkspace(layout, at.workspace, { ...ws, tabs, selected: at.tab }, true);
+}
+
+/** Splits the focused pane of the selected tab, the new terminal second and focused. */
 export function splitFocused(layout: Layout, axis: Axis, address: string): Layout {
-  const ws = selectedWorkspace(layout);
-  const tab = ws?.tabs[ws.selected];
-  if (!ws || !tab || !address || locate(layout, address) || !tabTerminals(tab).includes(tab.focused)) return layout;
-  const next = { ...tab, root: splitting(tab.root, tab.focused, axis, { terminal: address }, false), focused: address };
-  return withWorkspace(layout, layout.selected, { ...ws, tabs: ws.tabs.map((t, i) => (i === ws.selected ? next : t)) });
+  const tab = selectedTab(layout);
+  if (!tab || !address || !tabPanes(tab).includes(tab.focused)) return layout;
+  return splitPane(layout, tab.focused, axis, { terminal: address });
 }
 
 /**
- * Removes a terminal from every tab: its sibling takes its parent's place and
- * the focus, and a tab without terminals goes. Workspaces stay.
+ * Removes a pane from every tab: its sibling takes its parent's place and the
+ * focus, and a tab without panes goes. Workspaces stay.
  */
-export function closeTerminal(layout: Layout, address: string): Layout {
+export function closePane(layout: Layout, key: string): Layout {
   let changed = false;
   const workspaces = layout.workspaces.map((ws) => {
-    if (!workspaceTerminals(ws).includes(address)) return ws;
+    if (!ws.tabs.some((t) => tabPanes(t).includes(key))) return ws;
     changed = true;
     const tabs: Tab[] = [];
     let selected = ws.selected;
     for (const [index, tab] of ws.tabs.entries()) {
-      const root = removing(tab.root, address);
+      const root = removing(tab.root, key);
       if (root === tab.root) {
         tabs.push(tab);
       } else if (root) {
-        const terminals = terminalsOf(root);
-        const sibling = terminalsOf(siblingOf(tab.root, address) ?? root)[0];
-        tabs.push({ ...tab, root, focused: terminals.includes(tab.focused) ? tab.focused : (sibling ?? terminals[0] ?? '') });
+        const panes = panesOf(root);
+        const sibling = panesOf(siblingOf(tab.root, key) ?? root)[0];
+        tabs.push({ ...tab, root, focused: panes.includes(tab.focused) ? tab.focused : (sibling ?? panes[0] ?? '') });
       } else if (index < ws.selected || (index === ws.selected && index === ws.tabs.length - 1)) {
         selected--;
       }
@@ -366,11 +451,11 @@ export function closeTerminal(layout: Layout, address: string): Layout {
   return changed ? { ...layout, workspaces } : layout;
 }
 
-/** Drops terminals that no longer exist. */
+/** Drops terminals that no longer exist; other panes stay. */
 export function pruneLayout(layout: Layout, live: ReadonlySet<string>): Layout {
   return layoutTerminals(layout)
     .filter((a) => !live.has(a))
-    .reduce(closeTerminal, layout);
+    .reduce(closePane, layout);
 }
 
 /** Sets the ratio of the split at path (false: first child, true: second) in the selected tab. */
@@ -389,47 +474,67 @@ export function setRatio(layout: Layout, path: readonly boolean[], ratio: number
   return withWorkspace(layout, layout.selected, { ...ws, tabs: ws.tabs.map((t, i) => (i === ws.selected ? next : t)) });
 }
 
-/** Swaps the panes of two terminals, also across tabs and workspaces; each keeps the focus it had. */
-export function swapTerminals(layout: Layout, a: string, b: string): Layout {
+/** Swaps two panes, also across tabs and workspaces; each tab keeps the focus it had. */
+export function swapPanes(layout: Layout, a: string, b: string): Layout {
   const leafA = findLeaf(layout, a);
   const leafB = findLeaf(layout, b);
   if (a === b || !leafA || !leafB) return layout;
   const swap = (node: Node): Node => {
-    if (isLeaf(node)) return node.terminal === a ? leafB : node.terminal === b ? leafA : node;
+    if (isLeaf(node)) return paneKey(node) === a ? leafB : paneKey(node) === b ? leafA : node;
     return isSplit(node) ? { ...node, children: [swap(node.children[0]), swap(node.children[1])] } : node;
   };
   const workspaces = layout.workspaces.map((ws) => ({
     ...ws,
     tabs: ws.tabs.map((tab) => {
       const root = swap(tab.root);
-      const terminals = terminalsOf(root);
-      const focused = terminals.includes(tab.focused) ? tab.focused : tab.focused === a ? b : tab.focused === b ? a : tab.focused;
+      const panes = panesOf(root);
+      const focused = panes.includes(tab.focused) ? tab.focused : tab.focused === a ? b : tab.focused === b ? a : tab.focused;
       return { ...tab, root, focused };
     }),
   }));
   return { ...layout, workspaces };
 }
 
-/** Moves a terminal's pane beside another terminal's (after it, or before), selects it and gives it the focus. */
-export function moveTerminal(layout: Layout, address: string, target: string, axis: Axis, before = false): Layout {
-  const leaf = findLeaf(layout, address);
-  if (!leaf || address === target || !locate(layout, target)) return layout;
-  const removed = closeTerminal(layout, address);
-  const at = locate(removed, target)!;
-  const ws = removed.workspaces[at.workspace];
-  const tabs = ws.tabs.map((t, i) => (i === at.tab ? { ...t, root: splitting(t.root, target, axis, leaf, before), focused: address } : t));
-  return withWorkspace(removed, at.workspace, { ...ws, tabs, selected: at.tab }, true);
+/** Moves a pane beside another one (after it, or before), selects it and gives it the focus. */
+export function movePane(layout: Layout, key: string, target: string, axis: Axis, before = false): Layout {
+  const leaf = findLeaf(layout, key);
+  if (!leaf || key === target || !locate(layout, target)) return layout;
+  return splitPane(closePane(layout, key), target, axis, leaf, before);
 }
 
-/** Moves a terminal's pane into a new tab at the end of a workspace and selects it. */
-export function moveToNewTab(layout: Layout, address: string, workspace: string): Layout {
-  const leaf = findLeaf(layout, address);
+/** Moves a pane into a new tab at the end of a workspace and selects it. */
+export function moveToNewTab(layout: Layout, key: string, workspace: string): Layout {
+  const leaf = findLeaf(layout, key);
   if (!leaf || workspaceIndex(layout, workspace) < 0) return layout;
-  const removed = closeTerminal(layout, address);
-  const index = workspaceIndex(removed, workspace);
-  const ws = removed.workspaces[index];
-  const tabs = [...ws.tabs, { root: leaf, focused: address }];
-  return withWorkspace(removed, index, { ...ws, tabs, selected: tabs.length - 1 }, true);
+  return openPane(closePane(layout, key), leaf, workspace);
+}
+
+/** Shows another path in a preview pane. */
+export function setPreviewPath(layout: Layout, key: string, path: string): Layout {
+  const leaf = findLeaf(layout, key);
+  if (!leaf || !isPreviewLeaf(leaf) || !path || leaf.preview.path === path) return layout;
+  const next: PreviewLeaf = { ...leaf, preview: { ...leaf.preview, path } };
+  const swap = (node: Node): Node => {
+    if (isLeaf(node)) return paneKey(node) === key ? next : node;
+    return isSplit(node) ? { ...node, children: [swap(node.children[0]), swap(node.children[1])] } : node;
+  };
+  const at = locate(layout, key)!;
+  const ws = layout.workspaces[at.workspace];
+  return withWorkspace(layout, at.workspace, { ...ws, tabs: ws.tabs.map((t, i) => (i === at.tab ? { ...t, root: swap(t.root) } : t)) });
+}
+
+/** A workspace's VS Code views, in the order of its tabs and their trees. */
+export function codeViews(ws: Workspace): { key: string; view: CodeView; tab: number }[] {
+  return ws.tabs.flatMap((t, tab) =>
+    leavesOf(t.root).flatMap((l) => (isCodeLeaf(l) ? [{ key: codeKey(l.code.id), view: l.code, tab }] : [])),
+  );
+}
+
+/** A workspace's previews, in the order of its tabs and their trees. */
+export function previewViews(ws: Workspace): { key: string; view: PreviewView; tab: number }[] {
+  return ws.tabs.flatMap((t, tab) =>
+    leavesOf(t.root).flatMap((l) => (isPreviewLeaf(l) ? [{ key: previewKey(l.preview.id), view: l.preview, tab }] : [])),
+  );
 }
 
 /** A part of a tab, as shares of its width and height. */
@@ -440,10 +545,10 @@ export interface Rect {
   h: number;
 }
 
-/** Each terminal's share of its tab, from the split tree. */
+/** Each pane's share of its tab, from the split tree. */
 export function paneRects(node: Node, r: Rect = { x: 0, y: 0, w: 1, h: 1 }, out = new Map<string, Rect>()): Map<string, Rect> {
   if (isLeaf(node)) {
-    out.set(node.terminal, r);
+    out.set(paneKey(node)!, r);
     return out;
   }
   if (!isSplit(node)) return out;
@@ -462,8 +567,8 @@ export function paneRects(node: Node, r: Rect = { x: 0, y: 0, w: 1, h: 1 }, out 
 
 export type Direction = 'left' | 'right' | 'up' | 'down';
 
-/** The terminal of the selected tab beside the focused one in a direction:
- * of the panes wholly on that side, the one whose centre is nearest, a step
+/** The pane of the selected tab beside the focused one in a direction: of
+ * the panes wholly on that side, the one whose centre is nearest, a step
  * across counting twice a step along. The first pane when none is focused;
  * undefined when nothing is there. */
 export function neighbor(layout: Layout, dir: Direction): string | undefined {
@@ -477,8 +582,8 @@ export function neighbor(layout: Layout, dir: Direction): string | undefined {
   const eps = 1e-6;
   let best: string | undefined;
   let bestScore = Infinity;
-  for (const [id, r] of rects) {
-    if (id === tab.focused) continue;
+  for (const [key, r] of rects) {
+    if (key === tab.focused) continue;
     const ok =
       dir === 'left'
         ? r.x + r.w <= from.x + eps
@@ -493,16 +598,16 @@ export function neighbor(layout: Layout, dir: Direction): string | undefined {
     const score = dir === 'left' || dir === 'right' ? dx + 2 * dy : dy + 2 * dx;
     if (score < bestScore) {
       bestScore = score;
-      best = id;
+      best = key;
     }
   }
   return best;
 }
 
-/** Focuses the terminal beside the focused one (neighbor). */
+/** Focuses the pane beside the focused one (neighbor). */
 export function focusDirection(layout: Layout, dir: Direction): Layout {
   const next = neighbor(layout, dir);
-  return next ? focusTerminal(layout, next) : layout;
+  return next ? focusPane(layout, next) : layout;
 }
 
 /** Where on a pane another one is dropped: its middle swaps them, an edge
@@ -517,11 +622,11 @@ export function dropZone(fx: number, fy: number): DropZone {
   return (Object.keys(d) as (keyof typeof d)[]).reduce((a, b) => (d[b] < d[a] ? b : a));
 }
 
-/** The layout after dropping a terminal's pane on a zone of another's. */
-export function dropOnPane(layout: Layout, address: string, target: string, zone: DropZone): Layout {
-  if (zone === 'center') return swapTerminals(layout, address, target);
+/** The layout after dropping a pane on a zone of another one. */
+export function dropOnPane(layout: Layout, key: string, target: string, zone: DropZone): Layout {
+  if (zone === 'center') return swapPanes(layout, key, target);
   const axis: Axis = zone === 'left' || zone === 'right' ? 'horizontal' : 'vertical';
-  return moveTerminal(layout, address, target, axis, zone === 'left' || zone === 'top');
+  return movePane(layout, key, target, axis, zone === 'left' || zone === 'top');
 }
 
 function jsonEqual(a: unknown, b: unknown): boolean {

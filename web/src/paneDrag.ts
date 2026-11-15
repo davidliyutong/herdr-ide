@@ -70,7 +70,7 @@ export function dropped(l: L.Layout, src: DragSource, tg: DropTarget): L.Layout 
   if (tg.kind === 'tab') {
     // Beside the tab's focused terminal.
     const target = l.workspaces.find((w) => w.id === tg.ws)?.tabs[tg.index]?.focused;
-    return target ? L.moveTerminal(l, src.terminal, target, 'horizontal') : l;
+    return target ? L.movePane(l, src.terminal, target, 'horizontal') : l;
   }
   return L.moveToNewTab(l, src.terminal, tg.ws);
 }

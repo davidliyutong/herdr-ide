@@ -130,9 +130,9 @@ so every client of the machine shows the same arrangement. Version 2:
           "root": {
             "split": "horizontal",
             "ratio": 0.5,
-            "children": [{ "terminal": "t1" }, { "terminal": "t2" }]
+            "children": [{ "terminal": "t1" }, { "code": { "id": "q2m8x0vb", "folder": "/srv/api" } }]
           },
-          "focused": "t2"
+          "focused": "t1"
         }
       ],
       "selected": 0
@@ -149,34 +149,50 @@ so every client of the machine shows the same arrangement. Version 2:
   shown with the last component of its `cwd`: `~` for the home directory or
   none, `/` for the root (`workspaceTitle`); `Workspace` and `工作区`, the
   names earlier clients gave the workspaces they made, count as none. The top-level `selected` is the selected workspace.
-- A tab has a `root` node and the `focused` terminal, and a `name` only
+- A tab has a `root` node and the `focused` pane, and a `name` only
   when the user named it.
-- A node is a leaf `{"terminal": address}` or a split
+- A node is a leaf or a split
   `{"split": "horizontal" | "vertical", "ratio", "children": [first, second]}`;
   `horizontal` places the children side by side, and `ratio`, the first
-  child's share, is clamped to 0.1–0.9.
+  child's share, is clamped to 0.1–0.9. A leaf is a pane, of one of these
+  kinds, named by its key in `focused` and the operations:
+  - a terminal `{"terminal": address}`, named by its address;
+  - VS Code `{"code": {"id", "folder"}}` for a folder of the machine
+    (`""`: the one code-server opens), named `code:<id>`
+    ([05](05-vscode-panel.md));
+  - a preview `{"preview": {"id", "path"}}` of a file or directory of the
+    machine, named `preview:<id>` ([06](06-quick-look-and-files.md)).
+
+  A view's `id` is eight random lowercase letters and digits from the
+  client that opened it; the same view keeps it wherever it moves, so every
+  client finds it again (VS Code's window, the preview's file). A `code`
+  without an `id` and a `preview` without an `id` or a `path` are nodes of
+  an unknown kind.
 - A document with `tabs` instead of `workspaces` (version 1) reads as one
   workspace with the id `default`, an empty name and directory, and those
   tabs. Workspaces without an id or with a repeated one and tabs without a
-  root are left out, fields of the wrong type read as empty, a focus outside
-  its tab moves to the tab's first terminal, and selections are clamped.
-- Fields a client does not know, at every level, and nodes of a kind it
-  does not know are kept and written back: a newer client's additions
-  survive an older client's change. Such a node holds no terminals and
-  stays where it is. Clients write version 2.
+  root are left out, fields of the wrong type read as empty (a view's
+  missing `folder` too), a focus outside its tab moves to the tab's first
+  pane, and selections are clamped.
+- Fields a client does not know, at every level (inside `code` and
+  `preview` too), and nodes of a kind it does not know are kept and written
+  back: a newer client's additions survive an older client's change. Such
+  a node holds no panes and stays where it is; a client that knows
+  terminals only keeps VS Code views and previews this way, so its tab of
+  them alone stays as well. Clients write version 2.
 - Operations, with the same results in every client: workspaces are
   created (at the end, selected), renamed, closed (the selection moves to
-  the next one, else the one before), moved and selected; a terminal opens
-  in a new tab of a workspace, or is focused where it already is; tabs are
-  named (an empty name removes the name), closed, moved and selected; the
-  focused terminal is split, the new terminal second and focused; a closed
-  terminal's sibling takes its parent's place and, if it had it, the focus,
-  a tab left without terminals goes and its workspace stays; pruning closes
-  the terminals that no longer live; a ratio is set by the path to its
-  split; two terminals' panes swap, also across tabs and workspaces; a pane
-  moves beside another one, before or after it, or into a new tab of a
-  workspace. Closing a workspace or tab ends no program; the client ends
-  them.
+  the next one, else the one before), moved and selected; a pane opens in
+  a new tab of a workspace, or is focused where it already is; tabs are
+  named (an empty name removes the name), closed, moved and selected; a
+  pane is split, the new pane after it (or before) and focused, its tab
+  selected; a closed pane's sibling takes its parent's place and, if it
+  had it, the focus, a tab left without panes goes and its workspace stays;
+  pruning closes the terminals that no longer live and keeps the other
+  panes; a ratio is set by the path to its split; two panes swap, also
+  across tabs and workspaces; a pane moves beside another one, before or
+  after it, or into a new tab of a workspace; a preview shows another
+  path. Closing a workspace or tab ends no program; the client ends them.
 - `design/testdata/layout/*.json` holds the contract as vectors: an input
   document, operations, whether they change the layout, and the expected
   document, with the workspaces' names as shown for a home directory

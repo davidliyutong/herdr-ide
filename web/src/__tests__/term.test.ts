@@ -1,22 +1,25 @@
 import { describe, expect, it } from 'vitest';
 import { TermConnection, type Socket, type StreamHandler } from '../term/connection';
 import {
+  closePane,
   closeTab,
-  closeTerminal,
   closeWorkspace,
+  codeViews,
   createWorkspace,
   dropOnPane,
   emptyLayout,
   focusDirection,
+  focusedPane,
   focusedTerminal,
-  focusTerminal,
+  focusPane,
   layoutTerminals,
   locate,
   moveTab,
-  moveTerminal,
+  movePane,
   moveToNewTab,
   moveWorkspace,
-  newWorkspaceId,
+  newId,
+  openPane,
   openTerminal,
   parseLayout,
   pruneLayout,
@@ -26,12 +29,16 @@ import {
   selectedWorkspace,
   selectTab,
   selectWorkspace,
+  setPreviewPath,
   workspaceTitle,
   setRatio,
   splitFocused,
-  swapTerminals,
+  splitPane,
+  swapPanes,
+  tabPanes,
   type Axis,
   type Layout,
+  type Leaf,
   type Direction,
   type DropZone,
 } from '../term/layout';
@@ -157,23 +164,32 @@ function applyOp(layout: Layout, op: Record<string, unknown>): Layout {
     case 'splitFocused':
       return splitFocused(layout, op.axis as Axis, s('terminal'));
     case 'closeTerminal':
-      return closeTerminal(layout, s('terminal'));
+      return closePane(layout, s('terminal'));
+    case 'closePane':
+      return closePane(layout, s('pane'));
+    case 'openPane':
+      return openPane(layout, op.leaf as Leaf, op.workspace as string | undefined);
+    case 'splitPane':
+      return splitPane(layout, s('target'), op.axis as Axis, op.leaf as Leaf, op.before === true);
+    case 'setPreviewPath':
+      return setPreviewPath(layout, s('pane'), s('path'));
     case 'prune':
       return pruneLayout(layout, new Set(op.live as string[]));
     case 'setRatio':
       return setRatio(layout, op.path as boolean[], n('ratio'));
     case 'focus':
-      return focusTerminal(layout, s('terminal'));
+      return focusPane(layout, s('terminal') ?? s('pane'));
     case 'swap':
-      return swapTerminals(layout, s('a'), s('b'));
+      return swapPanes(layout, s('a'), s('b'));
     case 'moveTerminal':
-      return moveTerminal(layout, s('terminal'), s('target'), op.axis as Axis, op.before === true);
+    case 'movePane':
+      return movePane(layout, s('terminal') ?? s('pane'), s('target'), op.axis as Axis, op.before === true);
     case 'moveToNewTab':
-      return moveToNewTab(layout, s('terminal'), s('workspace'));
+      return moveToNewTab(layout, s('terminal') ?? s('pane'), s('workspace'));
     case 'focusDirection':
       return focusDirection(layout, op.dir as Direction);
     case 'dropOnPane':
-      return dropOnPane(layout, s('terminal'), s('target'), op.zone as DropZone);
+      return dropOnPane(layout, s('terminal') ?? s('pane'), s('target'), op.zone as DropZone);
   }
   throw new Error(`unknown op ${String(op.op)}`);
 }
@@ -203,9 +219,9 @@ describe('layout', () => {
     expect(sameLayout(a, { workspaces: [], selected: 0, version: 2 })).toBe(true);
     expect(sameLayout(a, { ...a, extra: 1 })).toBe(false);
     expect(sameLayout(emptyLayout, parseLayout('nonsense'))).toBe(true);
-    const id = newWorkspaceId();
+    const id = newId();
     expect(id).toMatch(/^[a-z0-9]{8}$/);
-    expect(newWorkspaceId()).not.toBe(id);
+    expect(newId()).not.toBe(id);
     let layout = openTerminal(createWorkspace(emptyLayout, id, 'x', '/w'), 't1');
     layout = splitFocused(layout, 'vertical', 't2');
     expect(layoutTerminals(layout)).toEqual(['t1', 't2']);
@@ -213,6 +229,20 @@ describe('layout', () => {
     expect(selectedWorkspace(layout)?.cwd).toBe('/w');
     expect(locate(layout, 't2')).toEqual({ workspace: 0, tab: 0 });
     expect(locate(layout, 't3')).toBeNull();
+  });
+
+  it('names panes of every kind and lists the VS Code views of a workspace', () => {
+    let layout = openTerminal(createWorkspace(emptyLayout, 'w', '', '/w'), 't1');
+    layout = splitPane(layout, 't1', 'horizontal', { code: { id: 'c1', folder: '/w' } });
+    layout = openPane(layout, { code: { id: 'c2', folder: '/w/docs' } });
+    expect(focusedPane(layout)).toBe('code:c2');
+    expect(focusedTerminal(layout)).toBeUndefined();
+    expect(layoutTerminals(layout)).toEqual(['t1']);
+    expect(tabPanes(layout.workspaces[0].tabs[0])).toEqual(['t1', 'code:c1']);
+    expect(codeViews(layout.workspaces[0]).map((v) => [v.key, v.view.folder, v.tab])).toEqual([
+      ['code:c1', '/w', 0],
+      ['code:c2', '/w/docs', 1],
+    ]);
   });
 });
 

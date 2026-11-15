@@ -203,7 +203,10 @@ function TabView({ m, ws, tab }: { m: string; ws: string; tab: L.Tab }) {
   const readOnly = useStore((s) => s.readOnly);
   const terminals = L.tabTerminals(tab);
   const zoom = zoomed && terminals.includes(zoomed) ? zoomed : undefined;
-  const rects = zoom ? new Map([[zoom, { x: 0, y: 0, w: 1, h: 1 }]]) : paneRects(tab.root);
+  // Panes of kinds other than terminals are not shown yet.
+  const rects = zoom
+    ? new Map([[zoom, { x: 0, y: 0, w: 1, h: 1 }]])
+    : new Map([...paneRects(tab.root)].filter(([key]) => terminals.includes(key)));
   const bars = zoom || readOnly ? [] : splitBars(tab.root);
   const body = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState<{ path: boolean[]; ratio: number }>();
@@ -261,7 +264,7 @@ function TabView({ m, ws, tab }: { m: string; ws: string; tab: L.Tab }) {
             m={m}
             terminal={terminal}
             focused={terminal === tab.focused}
-            onActivate={() => terminal !== tab.focused && terms.mutate(m, (l) => L.focusTerminal(l, terminal))}
+            onActivate={() => terminal !== tab.focused && terms.mutate(m, (l) => L.focusPane(l, terminal))}
           />
         </div>
       ))}

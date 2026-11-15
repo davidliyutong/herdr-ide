@@ -187,7 +187,7 @@ const axisOf = (dir: 'right' | 'down'): L.Axis => (dir === 'right' ? 'horizontal
 export const actions = {
   /** Splits a terminal's pane: the new terminal starts in its directory. */
   async split(m: string, terminal: string, dir: 'right' | 'down', argv?: string[]) {
-    terms.mutate(m, (l) => L.focusTerminal(l, terminal));
+    terms.mutate(m, (l) => L.focusPane(l, terminal));
     try {
       const address = await terms.run(m, { split: true, argv }, (l, a) => {
         const next = L.splitFocused(l, axisOf(dir), a);
@@ -211,7 +211,7 @@ export const actions = {
   async closePane(m: string, terminal: string) {
     await once(`pane ${m} ${terminal}`, async () => {
       if (!(await confirmEnd(m, [terminal], 'confirm.closePaneTitle', true))) return;
-      terms.mutate(m, (l) => L.closeTerminal(l, terminal));
+      terms.mutate(m, (l) => L.closePane(l, terminal));
       await terms.kill(m, terminal);
     });
   },
@@ -386,7 +386,7 @@ export const actions = {
       cwd = input.cwd;
       name = input.label;
     }
-    const id = L.newWorkspaceId();
+    const id = L.newId();
     const own = name.trim();
     const dir = cwd;
     await whenLoaded(m);
@@ -468,7 +468,7 @@ export const actions = {
   focusTerminal(m: string, terminal: string) {
     useStore.getState().selectMachine(m);
     terms.subscribe(m);
-    terms.mutate(m, (l) => L.focusTerminal(l, terminal));
+    terms.mutate(m, (l) => L.focusPane(l, terminal));
     focusDom(m, terminal);
   },
 

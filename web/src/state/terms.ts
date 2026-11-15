@@ -150,7 +150,7 @@ export class TermModel {
       }
       const address = msg.terminal;
       if ((msg.type === 'removed' || msg.type === 'finished') && typeof address === 'string') {
-        this.mutate(m, (l) => L.closeTerminal(l, address));
+        this.mutate(m, (l) => L.closePane(l, address));
         if (msg.type === 'finished') void this.call(m, 'terminal.rm', { terminal: address }).catch(() => {});
       }
     }
@@ -160,7 +160,7 @@ export class TermModel {
   /** A layout always has a workspace to open terminals in: one without a
    * name or a directory, shown as the home directory (L.workspaceTitle). */
   private ensureWorkspace(l: L.Layout): L.Layout {
-    return l.workspaces.length ? l : L.createWorkspace(l, L.newWorkspaceId(), '');
+    return l.workspaces.length ? l : L.createWorkspace(l, L.newId(), '');
   }
 
   private loadLayout(m: string, done?: () => void) {
