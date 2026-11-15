@@ -73,6 +73,12 @@ if [[ -z "${SKIP_BUILD:-}" ]]; then
   pnpm -C desktop build
 fi
 
+# Signing secrets the release workflow passes are empty when they are not
+# set; electron-builder would take an empty CSC_LINK as a path (the current
+# directory) instead of signing ad hoc.
+for v in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_TEAM_ID APPLE_APP_SPECIFIC_PASSWORD; do
+  [[ -n "${!v:-}" ]] || unset "$v"
+done
 builder=(pnpm -C desktop exec electron-builder "--$os" "--$DESKTOP_ARCH" --publish never)
 case "$mode" in
   build) ;;
