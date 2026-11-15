@@ -546,15 +546,18 @@ body.resizing .sidebar-resizer::after {
 .tab.active .tab-close {
   visibility: visible;
 }
-.tab-count {
-  min-width: 1.3em;
-  padding: 0 4px;
-  border-radius: 999px;
-  background: var(--line);
-  color: var(--fg-dim);
-  font-size: var(--fs-sm);
+/* A tab the user has not named shows its position, as a short number. */
+.tab-num {
+  min-width: 1.4ch;
   text-align: center;
   font-variant-numeric: tabular-nums;
+}
+/* A tab of several panes: a small split mark (the count is in its tooltip). */
+.tab-split.lucide {
+  width: 0.95rem;
+  height: 0.95rem;
+  color: var(--fg-mute);
+  margin: 0 -2px;
 }
 .tab .inline-edit {
   width: 10em;

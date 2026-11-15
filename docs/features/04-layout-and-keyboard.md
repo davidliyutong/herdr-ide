@@ -86,8 +86,18 @@ Non-goals: arbitrary docking of panes; floating panes.
   The sidebar toggle and the breadcrumb stay on the first row, `+` follows
   the last tab, and a label longer than 16em is cut with an ellipsis (the
   tooltip has it in full). The active tab has its own background, an
-  outline and an accent bar under it. A tab is called by its name, else by
-  its focused terminal's pane name or title. A workspace is called by its
+  outline and an accent bar under it. A tab the user has not named shows
+  its position (1, 2, 3…, a short number: several tabs of shells would
+  otherwise all read `user@host:~`), a named tab its name; both keep their
+  agents' status dot and their ×, a tab of several panes shows a small
+  split mark, and the tooltip has the focused terminal's pane name or title
+  (program, directory) and the number of panes. Outside the tab bar a tab
+  is named with its workspace, never by a bare number: the Agents section,
+  the palette's agents, notifications and toasts say where an agent is as
+  `website · 2` (or the tab's name); the pane headers and the status bar
+  keep the terminal's title, and a dragged tab's ghost shows the tab's name
+  or its terminal's title. The window title stays the app's name, with the
+  count of blocked agents. A workspace is called by its
   name, else by its folder: the last component of its directory, `~` for
   the home directory or none, `/` for the root (`layout.workspaceTitle`;
   `Workspace` and `工作区`, which earlier versions named the workspaces they
@@ -140,9 +150,10 @@ Non-goals: arbitrary docking of panes; floating panes.
   cancels. A pane's name is the terminal's `name` label in the terminal
   core, which also names it in tabs, the sidebar and the palette (empty
   shows the terminal's title again); tab and workspace names are in the
-  layout document (an empty tab name shows its terminal's title again, an
-  emptied workspace name its folder's, which the field shows as its
-  placeholder); a machine's name is the core's ([02](02-multi-machine-transport.md)). A
+  layout document (a tab's field starts with its name or its terminal's
+  title and saves only a change: an emptied tab name shows its number
+  again, an emptied workspace name its folder's, which the field shows as
+  its placeholder); a machine's name is the core's ([02](02-multi-machine-transport.md)). A
   single click on a pane's title only focuses the pane; the first click
   of a double click on a machine folds or unfolds it and the second puts
   it back.
@@ -427,6 +438,10 @@ described in [13](13-settings-and-appearance.md))
   `design/testdata/layout` (workspaces, tabs, splits, closing, swaps and
   moves, directional focus and pane drops, version 1 documents, unknown
   fields, malformed documents, the names workspaces are shown with).
+- `web/src/__tests__/tabLabels.test.ts`: tabs numbered unless named, the
+  terminal's title and pane count in the tooltip, renaming from the title
+  (unchanged keeps the number, emptied gives it back), and agents named by
+  workspace and tab in the Agents section and the palette.
 - `web/src/__tests__/sidebarMachines.test.ts`: workspaces shown with their
   folder's name, rows without the tab count (in the tooltip), renaming in
   place and an emptied name giving the folder's back.

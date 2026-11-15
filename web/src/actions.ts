@@ -592,6 +592,24 @@ export function tabName(m: string, tab: L.Tab): string {
   return tab.name || terminalTitle(terms.terminal(m, tab.focused), tab.focused);
 }
 
+/** What a tab is called in its tab bar: its own name, else its position
+ * (1 for the first); its terminals' titles are in its tooltip and their
+ * pane headers. */
+export function tabLabel(tab: L.Tab, index: number): string {
+  return tab.name || String(index + 1);
+}
+
+/** Where a terminal is, as places outside the tab bar name it: its
+ * workspace and its tab ("website · 2", or the tab's own name); '' when it
+ * is in no tab. */
+export function terminalPlace(m: string, terminal: string): string {
+  const layout = terms.layout(m);
+  const at = layout && L.locate(layout, terminal);
+  if (!layout || !at) return '';
+  const ws = layout.workspaces[at.workspace];
+  return `${workspaceTitle(m, ws)} · ${tabLabel(ws.tabs[at.tab], at.tab)}`;
+}
+
 /** Resolves once a machine's layout was read. */
 function whenLoaded(m: string): Promise<void> {
   if (terms.layout(m)) return Promise.resolve();

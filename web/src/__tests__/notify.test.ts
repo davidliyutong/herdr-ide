@@ -82,7 +82,7 @@ describe('the page', () => {
 
   it('shows the system notification only while it is on', () => {
     notifyAgent('m', { terminal: 't1', agent: 'claude', agent_status: 'blocked', title: 'fix tests' }, false);
-    expect(shown).toEqual([{ title: 'claude needs your input', body: 'gpu · fix tests' }]);
+    expect(shown).toEqual([{ title: 'claude needs your input', body: 'gpu\nfix tests' }]);
     set('notifications.system', false);
     notifyAgent('m', { terminal: 't1', agent: 'claude', agent_status: 'done' }, false);
     expect(shown.length).toBe(1);

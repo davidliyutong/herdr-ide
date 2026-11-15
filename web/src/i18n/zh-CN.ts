@@ -366,6 +366,7 @@ export const zhCN: Messages = {
   'workspace.pick': '在左侧选择一个工作区，或新建一个。',
   'workspace.tabHint': '{label} · 双击重命名 · 拖动可调整顺序',
   'workspace.paneCount': '{n} 个窗格',
+  'workspace.tabNumber': '标签页 {n}：{title}',
   'workspace.hcStarting': '正在启动 {machine} 的终端…',
   'workspace.hcError': '{machine}：{error}',
   'workspace.noTabs': '这个工作区没有打开的终端。',

@@ -26,8 +26,10 @@ automatically, scheduling agents.
   and the core sends `agent` messages on `/ws` with the terminal's address.
 - **Inbox** (the sidebar's **Agents** section, at its top, translated as
   the rest of the UI: 智能体 in Chinese): agents in `blocked` or `done`
-  across the machines the page follows, blocked first, with machine,
-  terminal title and directory; counts of working agents. Workspaces, tabs and pane headers show the most
+  across the machines the page follows, blocked first, each with its
+  workspace and tab (`website · 2`), its terminal's title and its machine
+  (in this order, so a long machine name does not cut off where the agent
+  is), the directory in its tooltip; counts of working agents. Workspaces, tabs and pane headers show the most
   urgent status of their agents. **Jump to the agent that needs
   attention** (`app.agentAttention`, in the palette and the View menu;
   `cmd+shift+a` in the desktop app on macOS, `ctrl+shift+a` elsewhere) jumps
@@ -43,8 +45,9 @@ automatically, scheduling agents.
   page is hidden or not focused, the setting **System notifications**
   (`notifications.system`) is on and the browser allows notifications,
   which the page asks for on its first click while the setting is on (a
-  toast when visible for `blocked`, whatever the setting); clicking it
-  focuses the agent. With **Badge count** (`notifications.badge`) on, the
+  toast when visible for `blocked`, whatever the setting), saying where
+  the agent is (machine, workspace and tab) and its terminal's title;
+  clicking it focuses the agent. With **Badge count** (`notifications.badge`) on, the
   title and the app badge (the Badging API, `navigator.setAppBadge`) count
   blocked agents; turned off, both are cleared at once. The badge is an
   installed PWA's icon, and in the desktop app the Dock icon on macOS, an

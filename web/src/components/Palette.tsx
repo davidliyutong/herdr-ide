@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../state/store';
-import { actions, attentionList, workspaceTitle } from '../actions';
+import { actions, attentionList, terminalPlace, workspaceTitle } from '../actions';
 import { commandEnabled, commandLabel, keyHint, runCommand } from '../keymap';
 import { useKeys } from '../keybindings';
 import { locales, t, type MessageKey } from '../i18n';
@@ -70,9 +70,10 @@ export function Palette() {
         });
       }
     }
+    // An agent by its name and where it is (its workspace and tab).
     const agents: Item[] = attentionList().map(({ m, terminal, record, status }) => ({
       id: `agent:${m}:${terminal}`,
-      label: `${agentOf(record) ?? terminalTitle(record, terminal)} · ${terminalTitle(record, terminal)}`,
+      label: `${agentOf(record) ?? terminalTitle(record, terminal)} · ${terminalPlace(m, terminal) || terminalTitle(record, terminal)}`,
       hint: s.machines[m]?.label,
       icon: <StatusDot status={status} />,
       run: () => actions.focusTerminal(m, terminal),

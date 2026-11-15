@@ -373,6 +373,7 @@ export const en = {
   'workspace.pick': 'Pick a workspace on the left, or create one.',
   'workspace.tabHint': '{label} · double-click to rename · drag to reorder',
   'workspace.paneCount': '{n} panes',
+  'workspace.tabNumber': 'Tab {n}: {title}',
   'workspace.hcStarting': 'Starting the terminals of {machine}…',
   'workspace.hcError': '{machine}: {error}',
   'workspace.noTabs': 'This workspace has no open terminals.',

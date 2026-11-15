@@ -7,7 +7,7 @@ import type { AgentStatusEvent } from './lib/machine';
 import { useTerms } from './state/terms';
 import { agentStatus } from './lib/machine';
 import { useStore } from './state/store';
-import { actions } from './actions';
+import { actions, terminalPlace } from './actions';
 import { t } from './i18n';
 import { APP_NAME } from './brand';
 import { getPrefs, usePrefs } from './prefs';
@@ -38,7 +38,8 @@ export function showsNotification(
 export function notifyAgent(m: string, ev: AgentStatusEvent, sound: boolean) {
   if (ev.agent_status !== 'blocked' && ev.agent_status !== 'done') return;
   const s = useStore.getState();
-  const label = s.machines[m]?.label ?? m;
+  // Where the agent is: its machine, workspace and tab.
+  const label = [s.machines[m]?.label ?? m, terminalPlace(m, ev.terminal)].filter(Boolean).join(' · ');
   const who = ev.display_agent || ev.agent || 'agent';
   const title = t(ev.agent_status === 'blocked' ? 'notify.blocked' : 'notify.done', { who });
   const visible = document.visibilityState === 'visible' && document.hasFocus();
@@ -53,7 +54,7 @@ export function notifyAgent(m: string, ev: AgentStatusEvent, sound: boolean) {
   if (kind) playSound(kind);
   const granted = typeof Notification !== 'undefined' && Notification.permission === 'granted';
   if (showsNotification(ev, { enabled: prefs.notifySystem, granted, visible })) {
-    const n = new Notification(title, { body: `${label}${ev.title ? ' · ' + ev.title : ''}`, tag: `${m}|${ev.terminal}` });
+    const n = new Notification(title, { body: ev.title ? `${label}\n${ev.title}` : label, tag: `${m}|${ev.terminal}` });
     n.onclick = () => {
       window.focus();
       actions.focusTerminal(m, ev.terminal);

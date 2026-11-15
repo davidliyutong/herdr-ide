@@ -3,7 +3,7 @@ import { ChevronDown, ChevronRight, Ellipsis, FolderPlus, ServerPlus, Settings }
 import { SIDEBAR_WIDTH, useStore } from '../state/store';
 import { terms, useTerms } from '../state/terms';
 import { conn } from '../lib/conn';
-import { actions, attentionList, workspaceTitle } from '../actions';
+import { actions, attentionList, terminalPlace, workspaceTitle } from '../actions';
 import { aggregate, agentOf, agentStatus, codeText, shortPath, terminalTitle, type MachineState } from '../lib/machine';
 import * as L from '../term/layout';
 import { StatusDot, statusLabel } from './StatusDot';
@@ -144,19 +144,29 @@ function Inbox() {
         </span>
       </div>
       {items.length === 0 && <div className="muted small pad">{t('sidebar.noPending')}</div>}
-      {items.map(({ m, terminal, record, status }) => (
-        <div key={`${m} ${terminal}`} className={`inbox-item st-${status}`} onClick={() => actions.focusTerminal(m, terminal)}>
-          <StatusDot status={status} />
-          <div className="inbox-text">
-            <div className="inbox-title">
-              {agentOf(record) ?? terminalTitle(record, terminal)} · {statusLabel(status)}
-            </div>
-            <div className="muted small ellipsis">
-              {machines[m]?.label} · {terminalTitle(record, terminal)} · {shortPath(terms.directory(m, terminal), machines[m]?.info?.home)}
+      {items.map(({ m, terminal, record, status }) => {
+        // Where the agent is (workspace and tab, which a long machine name
+        // must not cut off), its terminal's title, its machine; the
+        // directory is in the tooltip.
+        const title = terminalTitle(record, terminal);
+        const where = [terminalPlace(m, terminal), title, machines[m]?.label].filter(Boolean).join(' · ');
+        return (
+          <div
+            key={`${m} ${terminal}`}
+            className={`inbox-item st-${status}`}
+            title={[where, shortPath(terms.directory(m, terminal), machines[m]?.info?.home)].filter(Boolean).join('\n')}
+            onClick={() => actions.focusTerminal(m, terminal)}
+          >
+            <StatusDot status={status} />
+            <div className="inbox-text">
+              <div className="inbox-title">
+                {agentOf(record) ?? title} · {statusLabel(status)}
+              </div>
+              <div className="muted small ellipsis">{where}</div>
             </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

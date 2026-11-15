@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { PanelLeft, Plus, X } from 'lucide-react';
+import { Columns2, PanelLeft, Plus, X } from 'lucide-react';
 import { useStore } from '../state/store';
 import { terms, useTerms } from '../state/terms';
 import * as L from '../term/layout';
-import { actions, paneRects, tabName, workspaceTitle } from '../actions';
+import { actions, paneRects, tabLabel, tabName, workspaceTitle } from '../actions';
 import { TerminalView } from './TerminalView';
 import { PaneHeader } from './PaneHeader';
 import { StatusDot } from './StatusDot';
-import { aggregate, agentStatus, codeText } from '../lib/machine';
+import { aggregate, agentStatus, codeText, terminalTitle } from '../lib/machine';
 import { t, type MessageKey } from '../i18n';
 import { withKey } from '../keymap';
 import { InlineEdit } from './InlineEdit';
@@ -66,9 +66,18 @@ export function Workspace() {
           {ws.tabs.map((tb, i) => {
             const st = tabStatus(tb);
             const id = `${ws.id}:${i}`;
+            // A tab the user has not named shows its number; the focused
+            // terminal's title (program, directory) is its tooltip.
             const name = tabName(m, tb);
+            const title = terminalTitle(mt.terminals[tb.focused], tb.focused);
             const editing = renaming?.m === m && renaming.id === id;
             const count = L.tabTerminals(tb).length;
+            const about = [
+              tb.name && tb.name !== title ? `${tb.name} · ${title}` : title,
+              count > 1 && t('workspace.paneCount', { n: count }),
+            ]
+              .filter(Boolean)
+              .join(' · ');
             return (
               <div
                 key={`${i}:${tb.focused}`}
@@ -89,7 +98,8 @@ export function Workspace() {
                 }}
                 onMouseDown={(e) => e.button === 1 && e.preventDefault()}
                 onContextMenu={(e) => !editing && openMenu(e, tabMenu(m, ws.id, i))}
-                title={readOnly ? name : t('workspace.tabHint', { label: name })}
+                title={readOnly ? about : t('workspace.tabHint', { label: about })}
+                aria-label={tb.name ? name : t('workspace.tabNumber', { n: i + 1, title })}
                 data-tab={i}
                 data-ws={ws.id}
                 data-m={m}
@@ -97,20 +107,20 @@ export function Workspace() {
                 {st && <StatusDot status={st} />}
                 {editing ? (
                   <InlineEdit
-                    value={tb.name ?? name}
+                    value={name}
+                    placeholder={String(i + 1)}
                     onDone={(v) => {
                       setRenaming(undefined);
-                      if (v !== undefined && v !== (tb.name ?? '')) actions.renameTab(m, ws.id, i, v);
+                      // Unchanged keeps it as it was; emptied, it shows its number again.
+                      if (v !== undefined && v !== name) actions.renameTab(m, ws.id, i, v);
                     }}
                   />
+                ) : tb.name ? (
+                  <span className="tab-label ellipsis">{tb.name}</span>
                 ) : (
-                  <span className="tab-label ellipsis">{name}</span>
+                  <span className="tab-label tab-num">{tabLabel(tb, i)}</span>
                 )}
-                {count > 1 && (
-                  <span className="tab-count" title={t('workspace.paneCount', { n: count })}>
-                    {count}
-                  </span>
-                )}
+                {count > 1 && <Columns2 className="tab-split" aria-label={t('workspace.paneCount', { n: count })} />}
                 {!readOnly && (
                   <button
                     className="tab-close"
