@@ -272,9 +272,20 @@ settings per browser; theming terminal applications.
     chosen font and size below. The fonts are listed with the Local Font
     Access API where the browser has it (Chromium, and the desktop app,
     which grants its pages the permission), asked on the first opening, and
-    filtered to those whose narrow and wide letters are equally wide;
-    without it (Firefox, Safari, a refusal) the well-known monospace
-    families found installed by measuring them are listed;
+    filtered to the families that are really fixed-pitch
+    (`terminal/localFonts.ts`): each is loaded by its name and measured at
+    40 px on a canvas; it must draw the text itself (the same width with a
+    serif or a monospace fallback behind it), draw `i`, `m`, `W`, the
+    space, `0`, `.`, `_` and `@` equally wide (Ayuthaya's narrower space
+    leaves it out), and draw letters as letters (`x` on the baseline, `p`
+    below it, `H` a fifth taller than `x`; symbol fonts such as Wingdings
+    put pictures there). Names that do not print (not starting with a
+    letter or digit, or holding `?`, U+FFFD, control, format or private-use
+    characters, as a name that did not decode, `???®™??-`) are left out,
+    each family is listed once (without regard to case), sorted after the
+    bundled font; without the API (Firefox, Safari, a refusal) the
+    well-known monospace families found installed by measuring them are
+    listed the same way;
   - **Terminal Colors** (`settings/Colors.tsx`): for the dark and the light
     theme a scheme (`terminal.colorScheme.dark`, `.light`: Default, which is
     the app's own colors, Dracula, Gruvbox Dark and Light, Nord, One Dark
@@ -483,6 +494,9 @@ changes and error codes, migration of the browser settings, search),
 `settingsDialog.test.ts` (sections and scopes, the stepper keeping the
 focus and the range, the list editor, a machine's own value set and
 removed, colors from schemes and the user's, every scheme defined),
+`localFonts.test.ts` (the font picker's list with Chromium's metrics of
+fixed-pitch, proportional, symbol and undecoded fonts and one drawn by a
+fallback: names that print, each once, sorted),
 `internal/uisettings/uisettings_test.go` (`TestMigrateValues`: the silent
 agents and the scrollback changed once, current values not rewritten),
 `internal/agent/detect` (`TestSettingsListEveryAgent`),

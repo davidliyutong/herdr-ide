@@ -16,7 +16,6 @@ import { schemeColors, schemes } from '../terminal/schemes';
 import { useStore } from '../state/store';
 import type { MachineState } from '../lib/machine';
 import { matchScore } from '../components/Palette';
-import { pickMonospace } from '../terminal/localFonts';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -253,16 +252,5 @@ describe('command palette', () => {
     expect(matchScore('fpl', 'Focus Pane Left')).toBe(1);
     expect(matchScore('spri', 'Split Right')).toBe(1);
     expect(matchScore('nwt', 'New Tab')).toBe(0);
-  });
-});
-
-describe('local fonts', () => {
-  it('lists the monospace families, each once, with readable names', () => {
-    const mono = new Set(['Menlo', 'Fira Code', '???®™??-', '楷体']);
-    expect(pickMonospace(['Menlo', 'Menlo', 'Helvetica', '???®™??-', 'Fira Code', '楷体'], (f) => mono.has(f))).toEqual([
-      'Fira Code',
-      'Menlo',
-      '楷体',
-    ]);
   });
 });
