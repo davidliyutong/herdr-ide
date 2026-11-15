@@ -9,19 +9,48 @@ theirs under Added, Changed and Fixed, after
 
 ## [Unreleased]
 
-- **Add machine…**, **Rename machine** and **Remove machine…** in the
-  sidebar. Right-click the sidebar's free space or a machine to add an SSH
-  machine: herdr's own `herdr machine add` runs in a terminal (it may ask
-  for a password, a host key, a session or approval to install herdr
-  there), and the machine appears and connects without restarting.
-  Renaming edits the machine's name in place (`herdr machine rename`;
-  names must stay unique). Removing one of herdr's saved machines runs
-  `herdr machine remove` after asking; its herdr and terminals on that
-  machine keep running.
+## [0.4.0] - 2026-11-16
 
-- A **Reload** button in the sidebar picks up machines added, renamed,
-  removed, enabled or disabled with herdr's own commands while the core
-  runs.
+- **Breaking:** herdr is no longer used or shipped. Each machine's
+  terminals now live in a terminal core of herdr-ide's own (herdr-core),
+  which the binary carries for Linux and macOS on amd64 and arm64 and
+  installs on a machine the first time its terminals are shown; the
+  browser emulates every terminal itself with Ghostty's terminal library
+  (WebGL, Canvas 2D without it). Programs keep running when the browser
+  closes or the core stops. Terminals, workspaces and tabs of herdr
+  sessions are not carried over (they keep running in herdr); herdr's
+  saved SSH machines, browser preferences and the desktop app's shortcut
+  settings are imported once (see "Migrating from versions that used
+  herdr" in the deployment guide). **Manage herdr**, **Restart herdr…**
+  and the `herdr` subcommand are gone; a machine's menu has
+  **Troubleshooting** ▸ **Start Terminal Service**, **Restart Terminal
+  Service…** and **Stop Terminal Service…**. The `--local-session` and
+  `--remote-session` flags are removed. Which coding agent runs in a
+  terminal and whether it works, waits or is done is still recognized
+  with herdr's rules.
+
+- **Breaking:** the `ctrl+b` prefix chords are gone. `ctrl+b` and every
+  key that is not a default reach the program in the terminal; the
+  commands are in the menus, context menus, pane headers and the command
+  palette (`cmd+shift+p` on macOS, `ctrl+shift+p` on Windows and Linux in
+  the desktop app, `cmd+k` in a browser on macOS). Chords can be bound
+  again. In the desktop app `cmd+w` closes the focused pane, not the tab,
+  and closes a workspace that has no tab left; the app also gets the keys
+  of Terminal.app, iTerm, Chrome and VS Code on macOS (`cmd+1`…`cmd+9`,
+  `cmd+shift+w`, `cmd+alt+arrows`, `ctrl+tab`…) and safe `ctrl+shift`,
+  `ctrl+tab` and `alt+digit` keys elsewhere. Held keys repeat opening,
+  closing and stepping commands.
+
+- **Add Machine…**, **Rename Machine** and **Remove Machine…** in the
+  sidebar's menus. Right-click the sidebar's free space (or use the
+  command palette) to add an SSH machine: pick a host of your
+  `~/.ssh/config` from the list or type any ssh destination OpenSSH
+  accepts, and a label; a password or host key is asked for in a
+  terminal, and the machine appears and connects without restarting.
+  Targets holding whitespace, control or shell characters (`$`, `;`,
+  `|`…) are refused; such a machine already saved is listed in error,
+  never connected, and can be renamed or removed. Rename a machine in
+  place by a double click; machines can be reordered by dragging.
 
 - An uploads panel for pasted and dropped files, opened from the status
   bar: each upload's progress, speed and time left, **Cancel** for running
@@ -33,41 +62,106 @@ theirs under Added, Changed and Fixed, after
   from **Dark** in the desktop app (and did not follow a later change of the
   system's theme) while the rest of the UI turned light.
 
-- An SSH machine whose herdr was removed, moved or lost with a reinstalled
-  system was only *degraded* with a socket error, **Manage herdr** said
-  "herdr was not found" without a way on, and **Restart herdr…** failed. The
-  machine now says that herdr is missing there and offers **Install herdr**
-  (herdr's own `herdr --remote` flow) in its status block, its context menu
-  and **Manage herdr**; a server that outlived its herdr is shown as running,
-  with a warning, and is left alone. Every herdr status looks herdr up
-  again, so a herdr removed, reinstalled or moved while connected is
-  noticed without reconnecting, and **Check again** picks up one installed
-  by hand.
+- Disabled machines are folded in the sidebar; open one, or use its menu,
+  to enable it.
 
-- Disabled machines are folded in the sidebar instead of showing an
-  **Enable machine** button; open one, or use its menu, to enable it.
-
-- Closing a tab (`cmd+w` in the desktop app, the tab bar, the prefix
-  binding) no longer asks when each of its panes only has a shell waiting
-  at its prompt; otherwise it asks and names the programs that would end,
-  also when they are not agents (`vim`, a build, `ssh`).
+- Closing a tab or a pane no longer asks when each of its terminals only
+  has a shell waiting at its prompt; otherwise it asks and names the
+  programs that would end, also when they are not agents (`vim`, a build,
+  `ssh`).
 
 - Formulas: rest the pointer on a LaTeX formula in a pane (`$…$`,
   `$$…$$`, `\(…\)`, `\[…\]`, also as agents' markdown renderers print
-  them, without some backslashes) to see it typeset by KaTeX
-  in a popover, with a button that copies its source. KaTeX loads the
-  first time a formula is shown; **Settings → Terminal → Show formulas
-  under the pointer** turns it off.
-
-- Formulas: the popover stays while the pointer moves towards it across
-  the rows of other formulas, so the copy button can be reached when
-  display formulas follow one another.
+  them, without some backslashes) to see it typeset by KaTeX in a
+  popover, with a button that copies its source. The popover stays while
+  the pointer moves towards it across the rows of other formulas. KaTeX
+  loads the first time a formula is shown; **Settings → Terminal →
+  Formula preview** turns it off.
 
 - Program windows: a machine that is disabled, removed or disconnected no
   longer leaves its display's error (or its windows) in the status bar;
   the settings show its display as not connected. A display error can be
   dismissed; it shows again only after the display recovered and failed
   anew.
+
+- Settings and keyboard shortcuts are kept by the core in two JSON files
+  that can also be edited by hand, the same in every browser and the
+  desktop app. **Settings** is laid out as VS Code's: search, a scope
+  bar for the user's settings and each machine's own (a machine's menu
+  has **Machine Settings…**), a reset menu per setting, and a
+  **Keyboard Shortcuts** page that records, removes and resets keys and
+  names conflicts. New terminal settings: font (picked from the
+  monospace fonts installed, with a preview), line height, cursor style
+  and blink, scrollback (up to 100,000 lines), copy on select, bell, bold
+  as bright, and color schemes per theme (Dracula, Nord, Solarized, One,
+  Gruvbox, Tomorrow…) with your own colors on top. The desktop app's
+  `--desktop-*-key` flags are replaced by keybindings.
+
+- Notification sounds, system notifications and the Dock/taskbar badge
+  each have their own switch under **Settings → Notifications**.
+
+- The desktop app runs on Windows (x64 setup) and Linux (AppImage and
+  deb, x64 and arm64) as well as macOS. On Windows it reaches SSH
+  machines with keys from the ssh agent; the local machine needs Linux
+  or macOS.
+
+- Desktop app: **Zoom In**, **Zoom Out** and **Reset Zoom** (`cmd+=`,
+  `cmd+-`, `cmd+0`; `ctrl` on Windows and Linux) zoom the interface, also
+  from dialogs and VS Code, and are kept as a setting. Menu items carry
+  the commands' names and keys and are disabled when they cannot run;
+  the menus add **Add Machine…**, **Go to Agent Needing Attention** and
+  full screen, and the **Window** menu is macOS's.
+
+- Desktop app on macOS: **Settings → Terminal → Permissions** shows
+  whether terminals and the app have Full Disk Access, opens System
+  Settings, shows herdr-core in Finder to add it, and says what to restart
+  afterwards (**Restart Terminal Service…** or **Quit and Reopen…**). The
+  command palette has **Open Full Disk Access Settings…**.
+
+- VS Code is a pane like a terminal instead of a side panel: **Open in
+  VS Code** (pane header, pane menu, command palette, `cmd+j` in the
+  desktop app) opens a folder as a tab of the workspace or selects its
+  VS Code pane; changes and Git Graph open beside the pane they come
+  from, and a `path:line` clicked in a terminal opens in the workspace's
+  VS Code pane, else beside the terminal; media opens in a preview pane.
+  VS Code panes split, move, maximize and survive restarts without
+  reloading. **Send to Agent** goes to an agent of the VS Code pane's own
+  workspace. VS Code is shown with VSCodium's logo. The
+  `layout.panelPosition` setting is dropped.
+
+- Downloads: right-click in a pane to download the path under the
+  pointer, or **Download files…** to choose several files and folders of
+  the pane's directory; VS Code's explorer gets **Download (folders as
+  zip)**. Folders arrive as zip archives streamed from the machine. A
+  downloads panel in the status bar shows each download's progress, speed
+  and result, and cancels or repeats it. In the desktop app, code-server's
+  own **Download…** of folders and of files over 32 MB works (it failed
+  silently).
+
+- Find: `cmd+f` (`ctrl+shift+f` on Windows and Linux, so `ctrl+f` stays
+  with the program) or **Find…** in a pane's menu finds text in the
+  pane's scrollback, highlights every match on screen and shows "n of
+  N"; Enter and Shift+Enter step to older and newer matches.
+
+- Workspaces: **Edit Workspace…** changes a workspace's name and folder
+  (without a folder, new tabs start in the focused pane's); a workspace
+  without a name of its own is shown with its folder's name. Move a pane
+  to another workspace of its machine by dropping it on the workspace in
+  the sidebar or with **Move to Workspace** (also into a new one). Tabs
+  the user has not named show their number, and agents are named by
+  workspace and tab ("website · 2") in the inbox, palette and
+  notifications.
+
+- Layout: drag the sidebar's edge to resize it; split handles are easier
+  to grab and a double click shares the space equally; tabs, workspaces,
+  pane titles and machines rename in place by a double click; a middle
+  click closes a tab; rows have a ⋯ menu; pane buttons are larger and
+  shown on the focused or pointed pane, moving into a menu when the
+  header is narrow; status bar panels have a close button. The command
+  palette ranks word starts first and leaves out what cannot run.
+
+- The machines a browser or the desktop app showed are shown again when
+  it reopens, each once it is connected.
 
 ## [0.3.0] - 2026-11-08
 
