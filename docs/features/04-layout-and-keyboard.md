@@ -162,16 +162,18 @@ Non-goals: arbitrary docking of panes; floating panes.
   machine (Tab, ↑↓; the folder must exist) and an optional name (else the
   folder's). The workspace is added at the end of the layout document,
   selected, and opens a tab with a terminal in that directory. In the
-  desktop app, folders dragged from
-  Finder onto the sidebar create a workspace each on the local machine,
+  desktop app on macOS and Linux, folders dragged from
+  the file manager onto the sidebar create a workspace each on the local machine,
   without the dialog (named after the folder; the last one is selected); the sidebar shows where they go while they are over it, and
   dropped files that are not folders are skipped with a note. Folders
-  dropped on the app's Dock icon or opened with it do the same, also
-  skipping other items with that note; when the drop launched the app,
+  opened with the app (dropped on its Dock icon on macOS, **Open With** in
+  a Linux file manager) do the same, also
+  skipping other items with that note; when they launched the app,
   they wait up to 30 s for the local machine to connect, else a note says
   they were not opened. Browsers do
   not tell the page where a dropped folder is, so they do not offer this, nor
-  does read-only mode (`web/src/drop.ts`,
+  does read-only mode, nor the app on Windows, whose local machine has no
+  agent (`local_unsupported`; `web/src/drop.ts`,
   [16](16-desktop-packaging.md)). Closing a pane or a tab where a program
   runs (below) and a workspace ask for confirmation;
   Enter cancels these unless
@@ -246,13 +248,17 @@ described in [13](13-settings-and-appearance.md))
   (`web/src/keymap.ts`), direct shortcuts and users' chords alike, with the
   desktop platform's bindings, and cancels the keys it runs. Held keys do
   not repeat a command. The application menu shows on each command item the
-  first single-stroke key the keybindings give that command. Keys with Cmd
-  are the menu's accelerators, but Chromium on macOS gives a Cmd key to the
-  page first, so the menu acts only on keys the page left: a text field
-  has the keyboard (the page's window handler skips them), VS Code does, a
-  dialog is open, or another window has it. A key thus runs its command
-  once. Keys without Cmd are shown but not registered (macOS would offer
-  them to a menu before the page), and the page runs them.
+  first single-stroke key the keybindings give that command. On macOS keys
+  with Cmd are the menu's accelerators, but Chromium on macOS gives a Cmd
+  key to the page first, so the menu acts only on keys the page left: a
+  text field has the keyboard (the page's window handler skips them),
+  VS Code does, a dialog is open, or another window has it. A key thus runs
+  its command once. Keys without Cmd are shown but not registered (macOS
+  would offer them to a menu before the page), and the page runs them. On
+  Windows and Linux the menu registers no key at all, so Ctrl+C, Ctrl+M,
+  Ctrl+Q and every other key reach the page and its terminals: the page
+  runs the `pc` bindings it matches, and a key typed in a text field, in
+  VS Code or in another window runs no menu command.
 - A menu command the page receives (`runMenuCommand`) runs in the same
   contexts as its key: while VS Code has the keyboard (its frame is the
   page's focused element) only commands for `vscode` or `always`, while a
@@ -280,8 +286,10 @@ described in [13](13-settings-and-appearance.md))
   its name, also while it waits for input; Cancel has focus). Jobs sent to
   the background with `&` are not seen; they end with the tab.
 - The desktop app's menu (`desktop/src/menu.ts`; its titles are the web
-  UI's `desktop.menu.*` strings) has the application's menu (about,
-  settings, keyboard shortcuts, hide, quit), Shell (new terminal, splits,
+  UI's `desktop.menu.*` strings) has, on macOS, the application's menu
+  (about, settings, keyboard shortcuts, hide, quit) and, on Windows and
+  Linux, File (settings, keyboard shortcuts, quit, titled Exit on Windows)
+  and Help (about) around the others: Shell (new terminal, splits,
   workspaces, rename tab, close terminal or tab), Edit (undo, redo, cut,
   copy, paste, select all, find), View (palette, switch workspace,
   sidebar, VS Code, zoom, next and previous tab, workspace and pane, focus
@@ -355,7 +363,8 @@ described in [13](13-settings-and-appearance.md))
   everywhere while VS Code has the keyboard, showing and hiding VS Code.
 - `desktop/src/menu.test.ts` (the menu's structure and titles,
   accelerators, a rebinding, an unbinding, chords and unbound commands
-  without accelerators, keys without Cmd shown only),
+  without accelerators, keys without Cmd shown only, the Windows and Linux
+  menus with File and Help and no key registered),
   `desktop/src/follow.test.ts` (reading the keybindings and settings, their
   pushes, reconnecting).
 - `web/src/__tests__/menus.test.ts`: insertion slots, also on wrapped rows,

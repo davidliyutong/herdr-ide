@@ -40,7 +40,13 @@ automatically, scheduling agents.
   `done` raises a desktop notification, one per terminal, when the page is
   hidden or not focused and the browser allows notifications (a toast when
   visible for `blocked`); clicking it focuses the agent. The title and the
-  PWA badge count blocked agents.
+  app badge (the Badging API, `navigator.setAppBadge`) count blocked
+  agents: an installed PWA's icon, and in the desktop app the Dock icon on
+  macOS, an overlay on the taskbar button on Windows, and the launcher icon
+  on Linux in docks that implement the Unity launcher API. The desktop app
+  grants the page notifications; Windows shows those of the installed app
+  (its Start menu shortcut carries the app's id), and Linux needs a
+  notification daemon ([16](16-desktop-packaging.md)).
 - **Sounds** (`web/src/sound.ts`): the page plays a sound on the same
   transitions: `blocked` plays the request chime, `done` the done chime,
   except when the terminal is on screen (selected workspace and tab) and

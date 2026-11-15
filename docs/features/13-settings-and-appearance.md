@@ -66,7 +66,8 @@ settings per browser; theming terminal applications.
 
 - The file is in the user's configuration directory on the core host
   (`~/Library/Application Support/<slug>/` on macOS, `~/.config/<slug>/`
-  on Linux), beside `keybindings[-<instance>].json` and the machines file
+  on Linux, `%AppData%\<slug>\` on Windows), beside
+  `keybindings[-<instance>].json` and the machines file
   ([reference](../reference.md#files-and-directories)). A missing file has
   no values. The desktop app starts its core as instance `desktop`, so it
   uses `settings-desktop.json` and `keybindings-desktop.json`.
@@ -76,7 +77,9 @@ settings per browser; theming terminal applications.
   indentation, atomically, mode 0600; the directory is created 0700, and
   an existing one of the user's that others may access is made 0700 when
   a file is written (a link to a directory is left as it is;
-  `internal/userfile`).
+  `internal/userfile`). On Windows, which has no such modes, the
+  directory is left to its access control list, which keeps `%AppData%`
+  the user's.
 - Keys the core does not know and values that do not validate are kept
   when the file is rewritten (another version may know them); they count
   as unset and are reported as problems (`unknown`, `invalid`, `scope` for
@@ -254,7 +257,8 @@ settings per browser; theming terminal applications.
   reads both endpoints when its own event channel opens and follows the
   `settings` and `keybindings` messages (its platform's defaults from
   `registry.json` and the system's languages until then). Its menu's items
-  show their command's first single-stroke key and get only the keys the page leaves
+  show their command's first single-stroke key and get only the keys the
+  page leaves, on macOS; on Windows and Linux they get none
   ([04](04-layout-and-keyboard.md)). `appearance.theme` becomes Electron's
   `nativeTheme.themeSource` (title bar, native controls, window
   background), `appearance.language` the language of the menu and the

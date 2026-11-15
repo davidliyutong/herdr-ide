@@ -13,9 +13,10 @@ ssh. Every machine's terminals live in a terminal core of the agent's own
 (herdr-core, `hc`, in a session apart from the user's); the browser emulates
 them with Ghostty's libghostty-vt as WebAssembly through the core's terminal
 protocol (`/api/v1/term`), and an Electron desktop app (`desktop/`) wraps the
-same UI and a core of its own on macOS. code-server provides VS Code panels.
-One binary embeds the UI, the agents and herdr-core for 4 platforms, and a
-VS Code extension.
+same UI and a core of its own on macOS, Windows and Linux. The agent runs on
+Linux and macOS only, so a core on Windows reaches SSH machines only.
+code-server provides VS Code panels. One binary embeds the UI, the agents
+and herdr-core for 4 platforms, and a VS Code extension.
 
 ## Commands
 
@@ -23,13 +24,13 @@ VS Code extension.
 | --- | --- |
 | Install JS deps | `make deps` |
 | Unit tests (Go + web + desktop) | `make test` |
-| All checks (gofmt, vet, tsc, prettier, brand/doc/README consistency, generated tokens, the terminal emulator's digest, shared test vectors run by the web tests) | `make check` |
+| All checks (gofmt, vet, also for linux/amd64, darwin/arm64 and windows/amd64, tsc, prettier, brand/doc/README consistency, generated tokens, the terminal emulator's digest, shared test vectors run by the web tests) | `make check` |
 | Regenerate the design tokens' CSS and Go after editing `design/tokens.json`, and `design/generated/registry.json` with the settings and commands tables of `docs/reference.md` after changing settings or commands | `make tokens` |
 | Rebuild the web UI's terminal emulator (Ghostty's libghostty-vt as WebAssembly; zig 0.17) | `make vt-wasm` |
 | Integration test with a real terminal core (`HC_TEST_BIN=<herdr-core>`; the pinned one: `go run ./scripts/fetch-hc -exe <file> <os>/<arch>`) | `make it` |
 | Full build into `dist/` | `make build` (or `scripts/build.sh`) |
-| macOS `.app` / DMG | `make desktop-app` / `make desktop-dmg` |
-| Build the `.app` and install it into `/Applications` | `make desktop-install` |
+| Desktop app of this system (macOS, Windows, Linux): unpacked / installers (DMG and zip, NSIS setup, AppImage and deb) | `make desktop-app` / `make desktop-dist` (`scripts/desktop.sh app` / `dist` in Git Bash on Windows) |
+| macOS: build the `.app` and install it into `/Applications` | `make desktop-install` |
 | Isolated desktop development | `make dev-desktop` |
 | Run for development | `make dev-core` and `make dev-web` |
 
@@ -120,5 +121,11 @@ playbooks):
   `README.zh-CN.md` has one sentence per line, and enumerations in the docs
   that grow with features are lists with one item per line.
 - macOS limits unix socket paths to 104 bytes; keep socket paths short.
+- The core builds for Windows, the agent does not: `internal/agent` and
+  `cmd/herdr-ide-agent` are `//go:build unix`, so code the core runs on
+  Windows must not import them (put what both need in
+  `internal/agentproto`); POSIX-only tests skip on Windows. Paths on
+  machines are POSIX: use package `path`, not `filepath`, for them.
+  `.gitattributes` keeps LF line endings on Windows checkouts.
 - code-server's webviews need a secure context; test VS Code features on
   `http://localhost` or HTTPS, not a LAN IP.

@@ -154,6 +154,34 @@ describe('Sidebar machines', () => {
     expect(Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Retry')).toBeDefined();
   });
 
+  it('says the local machine needs Linux or macOS where no agent runs on it', async () => {
+    await act(async () =>
+      useStore.getState().setMachines([
+        {
+          id: 'local',
+          label: 'pc (local)',
+          kind: 'local',
+          status: 'error',
+          code: 'local_unsupported',
+          enabled: true,
+        } as unknown as MachineState,
+      ]),
+    );
+    expect(host.querySelector('.machine-status')?.textContent).toContain('needs Linux or macOS');
+    expect(host.querySelectorAll('.machine-status button')).toHaveLength(0);
+  });
+
+  it('offers Sign in only where the core keeps an ssh login, and says what to do elsewhere', async () => {
+    const machine = { id: 'gpu', label: 'gpu', kind: 'ssh', status: 'auth_required', enabled: true } as unknown as MachineState;
+    await act(async () => useStore.getState().setMachines([machine]));
+    const buttons = () => Array.from(host.querySelectorAll('.machine-status button')).map((b) => b.textContent);
+    expect(buttons()).toEqual(['Sign in…', 'Retry']);
+    await act(async () => useStore.setState({ sshLogin: false }));
+    expect(buttons()).toEqual(['Retry']);
+    expect(host.querySelector('.machine-status')?.textContent).toContain('ssh-add');
+    useStore.setState({ sshLogin: true });
+  });
+
   it('renames a machine in its header', async () => {
     await act(async () => useStore.getState().setRenaming({ kind: 'machine', m: 'gpu', id: 'gpu' }));
     const input = host.querySelector<HTMLInputElement>('.machine-head input');

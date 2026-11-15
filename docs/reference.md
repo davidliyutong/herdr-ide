@@ -167,8 +167,9 @@ shortcuts and, on macOS, the command palette (`cmd+k`; in browsers on
 other systems the status bar's **Command palette** opens it). A command
 without a key (–) runs from the menus, the command palette, its button and
 the context menus, and any key or chord can be bound to it. The desktop
-app's menu shows the keys; there the page runs the keys it sees and the menu
-the keys the page leaves. While VS Code has the keyboard its own keys come
+app's menu shows the keys; there the page runs the keys it sees, and on
+macOS the menu the keys the page leaves (on Windows and Linux the menu
+takes no key, so Ctrl keys reach the terminals). While VS Code has the keyboard its own keys come
 first; a key it leaves runs a command only for
 `always` (show or hide VS Code) or `vscode`. Keys follow the keyboard
 layout's characters. The table is generated from the registry by
@@ -272,20 +273,20 @@ missing here.
 | --- | --- | --- |
 | `GET /ws` | – | The event channel (WebSocket): machines, agents, settings, keybindings, program windows, downloads. |
 | `GET /api/v1/term` | – | The terminal protocol (WebSocket): the machines' terminals, their events and byte streams ([22](features/22-terminal-protocol.md)). |
-| `GET /api/config` | – | Name, slug, version and whether the core is read-only. |
+| `GET /api/config` | – | Name, slug, version, whether the core is read-only (`read_only`) and whether it offers the interactive ssh login (`ssh_login`; false on Windows, whose ssh keeps no control sockets). |
 | `GET /api/settings` | – | Definitions, values (per machine too) and problems of the settings. |
 | `PUT /api/settings` | writes | Sets one value (`{"key", "value", "machine"?}`). |
 | `DELETE /api/settings` | writes | Removes one value, which falls back to the global value or the default. |
 | `GET /api/keybindings` | – | Commands, default keys per platform, the user's rules, the bindings in effect and their conflicts. |
 | `PUT /api/keybindings` | writes | Replaces the user's rules. |
-| `GET /api/machines` | – | Every machine's state, its agent's information and its terminal core's state. |
+| `GET /api/machines` | – | Every machine's state, its agent's information and its terminal core's state. A machine that is never connected is in `error` with a `code`: `invalid_target` (a stored ssh target the core refuses) or `local_unsupported` (the local machine of a core on Windows, where no agent runs). |
 | `POST /api/machines` | writes | Adds and stores an SSH machine (`{"target", "label"}`). |
 | `DELETE /api/m/{id}` | writes | Removes a stored machine. |
 | `PUT /api/m/{id}/label` | writes | Renames a machine. |
 | `PUT /api/m/{id}/enabled` | writes | Enables or disables a machine. |
 | `GET /api/m/{id}/hc` | – | The machine's terminal core: installed, running, version. |
 | `POST /api/m/{id}/hc/{action}` | writes | `start`, `stop` or `restart` the machine's terminal core. |
-| `GET /api/m/{id}/auth` | writes | Interactive ssh login of a machine that needs one (WebSocket, `?cols=&rows=`). |
+| `GET /api/m/{id}/auth` | writes | Interactive ssh login of a machine that needs one (WebSocket, `?cols=&rows=`); `400 invalid_target` for a refused target, `501 ssh_login_unsupported` on a core without ssh control sockets (Windows). |
 | `POST /api/m/{id}/bridge` | writes | A command for the VS Code window of a folder (open a file at a line, diff, Git Graph). |
 | `GET /api/m/{id}/file` | – | A file (`?path=`, `&download=1` as an attachment), with HTTP ranges. |
 | `GET /api/m/{id}/download` | – | One file as an attachment, or several paths (folders included) as a zip (`?path=`…, `&dl=<id>` to follow it on `/ws`). |
@@ -308,24 +309,31 @@ missing here.
 | --- | --- | --- |
 | `HERDR_IDE_BRIDGE_SOCKET` | set by the agent for code-server | Socket of the VS Code bridge extension. |
 | `HERDR_IDE_CORE` | `pnpm -C web dev` | Core URL the Vite dev server proxies to (default `http://127.0.0.1:7780`; `make dev-web` sets the development core's, `DEV_LISTEN`). |
-| `HERDR_IDE_DESKTOP_DEV` | Electron | `1` forces isolated development even in a packaged app: instance `dev` (terminal core session `herdr-ide-dev`), local-only, separate Electron profile. Unpackaged Electron always uses this mode. |
+| `HERDR_IDE_DESKTOP_DEV` | Electron | Isolated development even in a packaged app: `1` runs instance `dev` (terminal core session `herdr-ide-dev`); another value names the instance (lowercase letters, digits and dashes, starting with a letter or digit, at most 32, not `desktop`; the app refuses to start otherwise), so a smoke test can run beside a development instance in use. Every development instance is local-only and has its own Electron profile and single-instance lock (`herdr-ide-desktop-<instance>`, `herdr-ide-desktop-dev` for `dev`). Unpackaged Electron always uses this mode. |
 | `HERDR_IDE_DESKTOP_PORT` | Electron | Loopback port (default `7781`, development `7791`); `0` chooses an ephemeral port, which gives a new browser storage origin. |
-| `--user-data-dir=<dir>` | Electron command line | Replaces the Electron profile and its single-instance lock, so a copy launched by its executable (not with `open`, which activates a running copy of the same bundle identifier) runs beside an installed one; for isolated smoke tests with `HERDR_IDE_DESKTOP_DEV=1`. |
+| `--user-data-dir=<dir>` | Electron command line | Replaces the Electron profile and its single-instance lock, so a copy launched by its executable (on macOS not with `open`, which activates a running copy of the same bundle identifier) runs beside another one; for isolated smoke tests with `HERDR_IDE_DESKTOP_DEV`. |
+| `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` | core on Linux | The user configuration directory (settings, keybindings, machines; default `~/.config`) and the cache directory (code-server downloads; default `~/.cache`). |
 | `XDG_STATE_HOME` | core | Where the SSH machines herdr saved are read from for the one-time import (`$XDG_STATE_HOME/herdr/client/endpoints.json`, default `~/.local/state/herdr/client/endpoints.json`). |
 
 Variables of the build scripts and tests:
 
 | Variable | Where | Description |
 | --- | --- | --- |
-| `TARGETS` | `scripts/build.sh` | Core platforms to build and package (default the host's), e.g. `"linux/amd64 darwin/arm64"`. |
+| `TARGETS` | `scripts/build.sh` | Core platforms to build and package (default the host's), e.g. `"linux/amd64 darwin/arm64"`; `windows/amd64` builds `dist/herdr-ide-windows-amd64.exe` for the desktop setup, without an archive. |
 | `AGENT_PLATFORMS` | `scripts/build.sh` | Agent and herdr-core platforms to embed (default all four). |
 | `SKIP_WEB`, `SKIP_EXT` | `scripts/build.sh` | `1` reuses `web/dist` or the built bridge extension. |
 | `REQUIRE_ENCODER` | `scripts/build.sh` | `1` (release builds) fails when a Linux video encoder (`scripts/build-ffmpeg.sh`) is missing. |
-| `VERSION` | `scripts/build.sh`, desktop builds | The version the core and agents report (default `git describe`). Desktop builds take a semver for the app metadata and DMG name; a leading `v` (release tags such as `v0.2.0`) is kept for the core and dropped for the app metadata. |
+| `VERSION` | `scripts/build.sh`, `scripts/desktop.sh` | The version the core and agents report (default `git describe`). Desktop builds take a semver for the app metadata and the installers' names (default `desktop/package.json`'s); a leading `v` (release tags such as `v0.2.0`) is kept for the core and dropped for the app metadata. |
 | `FFMPEG_PLATFORMS` | `scripts/build-ffmpeg.sh` | Linux platforms to build the video encoder for (default both). |
 | `GHOSTTY_SRC` | `make vt-wasm` | A Ghostty checkout to build libghostty-vt from instead of the pinned clone. |
-| `ARCH` | `make desktop-app`, `make desktop-dmg` | `arm64` or `x64`; defaults to the host Node architecture. The Go core architecture is matched automatically. |
-| `INSTALL_DIR` | `make desktop-install` | Where the Electron app is installed (default `/Applications`). |
+| `ARCH` | `scripts/desktop.sh` (`make desktop-app`, `make desktop-dist`, `make desktop-install`) | `arm64` or `x64`; defaults to the host Node architecture; the Windows app is `x64` only. The Go core architecture is matched automatically (`x64` is `amd64`). |
+| `DESKTOP_OS` | `scripts/desktop.sh` | `mac`, `win` or `linux` (default this system): packages another system's unpacked app (modes `build` and `app`) to check its packaging; installers (`dist`), `install` and `dev` run only on their own system. |
+| `SKIP_BUILD` | `scripts/desktop.sh` | `1` runs electron-builder alone on what an earlier `scripts/desktop.sh build` made (the release workflow's Package step). |
+| `INSTALL_DIR` | `make desktop-install` | macOS: where the Electron app is installed (default `/Applications`). |
+| `CSC_LINK`, `CSC_KEY_PASSWORD` | `scripts/desktop.sh` on macOS (electron-builder) | A Developer ID Application certificate (a `.p12`, base64-encoded or its path) and its password: the app is signed with it instead of ad hoc. |
+| `CSC_NAME` | `scripts/desktop.sh` on macOS (electron-builder) | The name of a Developer ID identity in the keychain, instead of `CSC_LINK`. |
+| `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` | `scripts/desktop.sh` on macOS (electron-builder) | With a Developer ID certificate: notarize the app with this Apple ID, its app-specific password and the team id. |
+| `ELECTRON_SKIP_BINARY_DOWNLOAD` | `make deps` | `1` installs the desktop packages without Electron's binary, which checks and the shell's tests do not need (CI's check jobs set it); running or packaging the app needs it. |
 | `DEV_LISTEN` | `make dev-core`, `make dev-web` | The development core's address (default `127.0.0.1:7790`). |
 | `HC_TEST_BIN` | `make it` | herdr-core executable for the integration tests; otherwise `hc` is found on `PATH`, and without one they are skipped. `go run ./scripts/fetch-hc -exe <file> <os>/<arch>` writes the pinned one. |
 | `GUI_TEST_INSTALL` | `go test ./internal/agent` on Linux | `1` lets the program-window tests fetch Xvfb when it is not installed. |
@@ -348,10 +356,11 @@ On every machine (the agent's `$HOME`):
 | `~/.herdr-ide[-<instance>]/cs-data/`, `cs-ext/` | VS Code settings, extensions | Kept; logs older than 7 days are pruned. |
 | `~/.herdr-ide[-<instance>]/uploads/` | Pasted and dropped files | Files older than 7 days are pruned. |
 
-On the core host: ssh control sockets in `/tmp/herdr-ide-<uid>/s` (must be
-owned by you, mode 0700), downloads in the user cache directory
+On the core host: ssh control sockets in `/tmp/herdr-ide-<uid>/s` on Linux
+and macOS (must be owned by you, mode 0700; a core on Windows keeps none),
+downloads in the user cache directory
 (`~/Library/Caches/herdr-ide/code-server` on macOS, `~/.cache/herdr-ide/code-server`
-on Linux) with `.sha256` sidecars (also recorded for releases that machines
+on Linux, `%LocalAppData%\herdr-ide\code-server` on Windows) with `.sha256` sidecars (also recorded for releases that machines
 downloaded themselves), the settings in `settings[-<instance>].json`, the
 keybindings in `keybindings[-<instance>].json` and the machines in
 `machines[-<instance>].json` (`{"version": 1, "machines": [{id, label,
@@ -360,13 +369,17 @@ enabled flag once it was changed; the SSH machines herdr saved
 (`~/.local/state/herdr/client/endpoints.json`) are imported into it the
 first time a core of the instance starts without one), all in the
 user configuration directory (`~/Library/Application Support/herdr-ide/` on
-macOS, `~/.config/herdr-ide/` on Linux; directory 0700, files 0600 replaced
-atomically, kept until removed). The settings and keybindings files can be
+macOS, `$XDG_CONFIG_HOME/herdr-ide/` (default `~/.config/herdr-ide/`) on
+Linux, `%AppData%\herdr-ide\` on Windows; files replaced atomically, kept
+until removed; on Linux and macOS the directory is 0700 and the files
+0600, on Windows the profile's access control list keeps them the user's).
+The settings and keybindings files can be
 edited by hand: the core reads them again within two seconds, keeps entries
 it does not know and reports values it cannot use. The machines file is
 read when the core starts and written by it at every change, keeping the
 entries and fields it does not use; a stored machine whose target the core
-refuses is listed with the code `invalid_target` and never connected.
+refuses is listed with the code `invalid_target` and never connected, and
+so is the local machine of a core on Windows, with `local_unsupported`.
 
 A release directory holds the core, `LICENSE`, `THIRD_PARTY_NOTICES.md`,
 `licenses.md` and `licenses/` (`herdr-core/` (the terminal core the core
@@ -390,17 +403,33 @@ Browser settings of earlier versions kept there (language, theme, font
 sizes, …) are moved to the core's settings once, when a page of a writable
 core loads, and then removed.
 
-Desktop artifacts: `dist/desktop/mac-arm64/herdr-ide.app` (arm64),
-`dist/desktop/mac/herdr-ide.app` (x64), and
-`dist/desktop/herdr-ide-<version>-mac-<arch>.dmg`. Generated shell code
-lives in `desktop/dist/`; `make clean` removes these build outputs.
-Icon sources and distributable PNG/ICNS are kept in `desktop/assets/`, with
-the small SVG in `web/public/icon.svg`; `make desktop-icons` regenerates the
-PNG and ICNS on macOS with librsvg and iconutil.
-Electron's persistent profile is
-`~/Library/Application Support/herdr-ide-desktop/` (`-dev` for development,
-or the `--user-data-dir` given).
-It holds browser preferences and Chromium data until manually removed.
-The core uses `settings-desktop.json` and `~/.herdr-ide-desktop/` state;
-development uses the existing `dev` instance. No desktop log files are kept:
-stderr is streamed and the last 16 KiB is retained in memory for error dialogs.
+Desktop artifacts (`make desktop-app` writes the unpacked apps,
+`make desktop-dist` the installers of the system it runs on), in
+`dist/desktop/`:
+
+- macOS: `mac-arm64/herdr-ide.app` (arm64), `mac/herdr-ide.app` (x64),
+  `herdr-ide-<version>-mac-arm64.dmg`, `-mac-arm64.zip`, `-mac-x64.dmg`,
+  `-mac-x64.zip`
+- Windows: `win-unpacked/herdr-ide.exe`, `herdr-ide-<version>-win-x64.exe`
+  (the setup)
+- Linux: `linux-unpacked/herdr-ide` (x64), `linux-arm64-unpacked/herdr-ide`,
+  `herdr-ide-<version>-linux-x86_64.AppImage`, `-linux-arm64.AppImage`,
+  `-linux-amd64.deb`, `-linux-arm64.deb`
+
+The core is `bin/herdr-ide` (`bin/herdr-ide.exe` on Windows) in the app's
+resources, beside the licenses. Generated shell code lives in
+`desktop/dist/`; `make clean` removes these build outputs. Icon sources and
+the distributable PNG, ICNS and ICO are kept in `desktop/assets/`, with the
+small SVG in `web/public/icon.svg`; `make desktop-icons` regenerates the
+PNG, ICNS and ICO on macOS with librsvg and iconutil.
+Electron's persistent profile is `herdr-ide-desktop` (`-dev` for
+development, or the `--user-data-dir` given) in the system's application
+data directory: `~/Library/Application Support/` on macOS, `%AppData%` on
+Windows, `$XDG_CONFIG_HOME` (default `~/.config`) on Linux.
+It holds browser preferences and Chromium data until manually removed;
+uninstalling leaves it.
+The core uses `settings-desktop.json` and `~/.herdr-ide-desktop/` state
+(on Windows only on the SSH machines); development uses the existing `dev`
+instance or the one `HERDR_IDE_DESKTOP_DEV` names. No desktop log files are
+kept: stderr is streamed and the last 16 KiB is retained in memory for error
+dialogs.

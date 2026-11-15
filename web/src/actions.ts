@@ -100,7 +100,7 @@ function awaitLogin(m: string) {
     if (!d) return false;
     off();
     clearTimeout(timer);
-    if (d === 'login') useStore.getState().openAuth(m);
+    if (d === 'login' && useStore.getState().sshLogin) useStore.getState().openAuth(m);
     return true;
   };
   if (settle(decide())) return;

@@ -364,6 +364,9 @@ describe('machineMenu', () => {
       // rename and remove only.
       useStore.getState().setMachines([{ ...ssh('error'), code: 'invalid_target' }]);
       expect(labels(tidy(machineMenu('gpu')))).toEqual(['Rename machine', 'Remove machine…', '-', 'Add machine…']);
+      // Nor is the local machine where no agent runs on it (Windows).
+      useStore.getState().setMachines([{ ...ssh('error'), id: 'local', kind: 'local', code: 'local_unsupported' } as MachineState]);
+      expect(labels(tidy(machineMenu('local')))).toEqual(['Add machine…']);
 
       useStore.getState().setReadOnly(true);
       expect(machineMenu('gpu')).toEqual([]);

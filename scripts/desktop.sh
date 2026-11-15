@@ -1,27 +1,61 @@
 #!/usr/bin/env bash
-# Native macOS packaging. ARCH=arm64|x64; VERSION, when set, must be a semver,
-# optionally with the release tag's leading v (dropped for the app metadata).
+# The Electron desktop app on macOS, Windows and Linux, for this machine's
+# system (DESKTOP_OS=mac|win|linux packages another one's --dir app, to
+# check the packaging; installers are built on their own system).
+# ARCH=arm64|x64 (default: this machine's); VERSION, when set, must be a
+# semver, optionally with the release tag's leading v (dropped for the app
+# metadata).
 #
-#   app      the .app in dist/desktop/mac[-arm64]/
-#   dmg      the .app and a DMG
-#   install  the .app, copied over INSTALL_DIR/<app> (default /Applications).
-#            A copy running from there is quit first (its core stops, the
-#            terminal cores keep running) and started again afterwards.
-#   dev      unpackaged Electron in development mode
+#   build    the core for the app's platform, the web UI and the shell
+#   app      build, then the unpacked app in dist/desktop/<os>[-<arch>][-unpacked]/
+#   dist     build, then the installers: macOS DMG and zip, Windows NSIS
+#            setup, Linux AppImage and deb
+#   install  (macOS) the .app, copied over INSTALL_DIR/<app> (default
+#            /Applications). A copy running from there is quit first (its
+#            core stops, the terminal cores keep running) and started again
+#            afterwards.
+#   dev      build, then unpackaged Electron in development mode
+#
+# SKIP_BUILD=1 packages what `build` made (the release workflow's signing
+# step, the only one with the secrets, runs only electron-builder).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-[[ $(uname -s) == Darwin ]] || { echo "Desktop packaging requires macOS." >&2; exit 1; }
-mode=${1:-dmg}
-case "$mode" in app|dmg|install|dev) ;; *) echo "usage: $0 app|dmg|install|dev" >&2; exit 2 ;; esac
+mode=${1:-dist}
+case "$mode" in build|app|dist|install|dev) ;; *) echo "usage: $0 build|app|dist|install|dev" >&2; exit 2 ;; esac
+case "$(uname -s)" in
+  Darwin) host=mac ;;
+  Linux) host=linux ;;
+  MINGW*|MSYS*|CYGWIN*) host=win ;;
+  *) echo "unsupported system $(uname -s)" >&2; exit 1 ;;
+esac
+os=${DESKTOP_OS:-$host}
+case "$os" in
+  mac) goos=darwin ;;
+  win) goos=windows ;;
+  linux) goos=linux ;;
+  *) echo "DESKTOP_OS must be mac, win or linux" >&2; exit 2 ;;
+esac
 DESKTOP_ARCH=${ARCH:-$(node -p process.arch)}
 case "$DESKTOP_ARCH" in
   arm64) go_arch=arm64 ;;
   x64) go_arch=amd64 ;;
   *) echo "ARCH must be arm64 or x64" >&2; exit 2 ;;
 esac
+if [[ "$os" == win && "$DESKTOP_ARCH" != x64 ]]; then
+  echo "The Windows app is built for x64." >&2
+  exit 2
+fi
+if [[ "$os" != "$host" && "$mode" != build && "$mode" != app ]]; then
+  echo "Installers and development runs are built on their own system ($os)." >&2
+  exit 2
+fi
 if [[ "$mode" == dev && "$DESKTOP_ARCH" != "$(node -p process.arch)" ]]; then
   echo "Development requires the host Node/Electron architecture." >&2
+  exit 2
+fi
+if [[ "$mode" == install && "$os" != mac ]]; then
+  echo "install copies the macOS app; use the installers elsewhere (mode dist)." >&2
   exit 2
 fi
 export DESKTOP_ARCH
@@ -33,14 +67,18 @@ fi
 # VERSION is optional. Without it the core reports `git describe` like
 # scripts/build.sh, and the app metadata uses desktop/package.json.
 
-pnpm -C desktop install --frozen-lockfile
-TARGETS="darwin/$go_arch" scripts/build.sh
-pnpm -C desktop build
+if [[ -z "${SKIP_BUILD:-}" ]]; then
+  pnpm -C desktop install --frozen-lockfile
+  TARGETS="$goos/$go_arch" scripts/build.sh
+  pnpm -C desktop build
+fi
 
+builder=(pnpm -C desktop exec electron-builder "--$os" "--$DESKTOP_ARCH" --publish never)
 case "$mode" in
+  build) ;;
   dev) pnpm -C desktop start ;; # unpackaged Electron always runs in development mode
-  app|install) pnpm -C desktop exec electron-builder --mac --dir "--$DESKTOP_ARCH" --publish never ;;
-  dmg) pnpm -C desktop exec electron-builder --mac dmg "--$DESKTOP_ARCH" --publish never ;;
+  app|install) "${builder[@]}" --dir ;;
+  dist) "${builder[@]}" ;;
 esac
 [[ "$mode" == install ]] || exit 0
 

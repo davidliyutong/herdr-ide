@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 	"time"
@@ -207,7 +208,7 @@ func TestUserRules(t *testing.T) {
 	if err := json.Unmarshal(b, &file); err != nil || len(file) != 6 || file[4]["args"] == nil || file[0]["key"] != "Cmd+Shift+T" {
 		t.Errorf("file = %s (%v)", b, err)
 	}
-	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o600 {
+	if fi, _ := os.Stat(path); runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600 {
 		t.Errorf("mode %v", fi.Mode())
 	}
 

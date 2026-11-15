@@ -4,10 +4,10 @@ import { useStore } from '../state/store';
 import { terms, useTerms } from '../state/terms';
 import { conn } from '../lib/conn';
 import { actions, attentionList } from '../actions';
-import { aggregate, agentOf, agentStatus, INVALID_TARGET, shortPath, terminalTitle, type MachineState } from '../lib/machine';
+import { aggregate, agentOf, agentStatus, codeText, shortPath, terminalTitle, type MachineState } from '../lib/machine';
 import * as L from '../term/layout';
 import { StatusDot, statusLabel } from './StatusDot';
-import { hasMessage, t, type MessageKey } from '../i18n';
+import { t, type MessageKey } from '../i18n';
 import { withKey } from '../keymap';
 import { APP_NAME } from '../brand';
 import { InlineEdit } from './InlineEdit';
@@ -102,12 +102,6 @@ function Inbox() {
   );
 }
 
-/** What a machine's code means (invalid_target…), else the code. */
-function codeText(code: string): string {
-  const k = `machine.code.${code}`;
-  return hasMessage(k) ? t(k as MessageKey) : code;
-}
-
 /** Why a machine is not connected, as its tooltip says it. */
 function machineProblem(m: MachineState): string {
   return [m.code && codeText(m.code), m.error].filter(Boolean).join('\n');
@@ -126,6 +120,7 @@ function MachineItem({ m }: { m: MachineState }) {
   }
   const selM = useStore((s) => s.machineId);
   const readOnly = useStore((s) => s.readOnly);
+  const sshLogin = useStore((s) => s.sshLogin);
   const renaming = useStore((s) => (s.renaming?.kind === 'workspace' && s.renaming.m === m.id ? s.renaming.id : undefined));
   const renamingMachine = useStore((s) => s.renaming?.kind === 'machine' && s.renaming.m === m.id);
   const setRenaming = useStore((s) => s.setRenaming);
@@ -169,9 +164,10 @@ function MachineItem({ m }: { m: MachineState }) {
                   <button onClick={() => void actions.setMachineEnabled(m.id, true)}>{t('menu.enableMachine')}</button>
                 </div>
               )}
-              {(m.status === 'auth_required' || m.status === 'error') && m.code !== INVALID_TARGET && (
+              {m.status === 'auth_required' && m.kind === 'ssh' && !sshLogin && <div className="small">{t('sidebar.signInElsewhere')}</div>}
+              {(m.status === 'auth_required' || m.status === 'error') && !m.code && (
                 <div className="row">
-                  {m.status === 'auth_required' && m.kind === 'ssh' && (
+                  {m.status === 'auth_required' && m.kind === 'ssh' && sshLogin && (
                     <button onClick={() => useStore.getState().openAuth?.(m.id)}>{t('sidebar.authenticate')}</button>
                   )}
                   {!readOnly && <button onClick={() => conn.retry(m.id)}>{t('sidebar.retry')}</button>}

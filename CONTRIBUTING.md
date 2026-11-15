@@ -6,12 +6,13 @@ Chinese (中文也可以). Participation is governed by the
 
 ## Setup
 
-Requirements: Go (see `go.mod`), Node.js 22.12+ and pnpm. The build
-downloads the pinned herdr-core, the terminal core the agents install on
-machines, into `dist/hc/` and embeds it.
+Requirements: Go (see `go.mod`), Node.js 22.12+ and pnpm (and, on
+Windows, Git for Windows for its bash). The build downloads the pinned
+herdr-core, the terminal core the agents install on machines, into
+`dist/hc/` and embeds it.
 
 ```bash
-make deps            # pnpm install for web/, the extension and desktop/
+make deps            # pnpm install for web/, the extension and desktop/ (with Electron's binary)
 make build           # web UI, extension, agents, core; release archives
 make test            # Go, web and desktop unit tests
 make check           # formatting, vet, typecheck, brand/doc consistency
@@ -39,22 +40,33 @@ archive digests in `internal/hcdist`; its license and notices are taken
 from the release archive by `scripts/fetch-hc`. Rerun the integration tests
 with the new executable before distributing a release.
 
-On macOS, `make dev-desktop` builds and launches Electron with the embedded
-UI, the same isolated session and instance `dev` (port 7791). Stop other dev
-cores first. `make desktop-app` / `make desktop-dmg` build the `.app` / DMG;
-`make desktop-install` builds the `.app` and replaces the one in
-`/Applications`, quitting and reopening it if it runs; see
-[desktop deployment](docs/deployment.md#macos-desktop-app). Branch
+The desktop app builds on the system it is for. `make dev-desktop` builds
+and launches Electron with the embedded UI, the same isolated session and
+instance `dev` (port 7791); stop other dev cores first. On Windows that
+run connects no machine (it is local-only, and the local machine has no
+agent there). `make desktop-app` builds the unpacked app and
+`make desktop-dist` the installers: the DMG and zip on macOS, the NSIS
+setup on Windows, the AppImage and deb on Linux; `make desktop-install`
+(macOS) builds the `.app` and replaces the one in `/Applications`,
+quitting and reopening it if it runs. On Windows, install Git for Windows
+and run `scripts/desktop.sh dev|app|dist` in Git Bash (the make targets
+call the same script). `DESKTOP_OS=win` or `linux` packages another
+system's unpacked app to check its packaging (`scripts/desktop.sh app`);
+see [desktop deployment](docs/deployment.md#desktop-app). Branch
 workspaces can live in the ignored `.worktrees/` directory.
 
 ## Pull requests
 
 - Keep each PR focused; describe the user-visible change and how you tested
   it (the template asks for this).
-- `make check test` must pass; CI (`.github/workflows/ci.yml`) runs the
-  same, plus `go test -race`, `make it` against the pinned herdr-core, the
-  cross-compiled release archives and, on macOS, the Go tests and the
-  packaged Electron app (`make desktop-app`).
+- `make check test` must pass (`make check` also vets the Go code for
+  linux/amd64, darwin/arm64 and windows/amd64); CI
+  (`.github/workflows/ci.yml`) runs the same on Linux, plus
+  `go test -race`, `make it` against the pinned herdr-core, the
+  cross-compiled release archives and Windows core, and a `desktop` job on
+  Linux, macOS and Windows: the Go tests (on macOS and Windows), the web
+  and desktop tests and the packaged Electron app
+  (`scripts/desktop.sh app`). POSIX-only Go tests skip on Windows.
 - New Go dependencies: run `scripts/notices.sh` and commit
   `THIRD_PARTY_NOTICES.md` (checked by CI); make sure the license is
   compatible with MIT.

@@ -7,7 +7,7 @@ import { actions, paneRects, tabName } from '../actions';
 import { TerminalView } from './TerminalView';
 import { PaneHeader } from './PaneHeader';
 import { StatusDot } from './StatusDot';
-import { aggregate, agentStatus } from '../lib/machine';
+import { aggregate, agentStatus, codeText } from '../lib/machine';
 import { t, type MessageKey } from '../i18n';
 import { withKey } from '../keymap';
 import { InlineEdit } from './InlineEdit';
@@ -39,6 +39,7 @@ export function Workspace() {
       <main className="workspace empty">
         <div className="muted">
           {status}
+          {machine?.code && <div className="small">{codeText(machine.code)}</div>}
           <div className="small">{t('workspace.pick')}</div>
         </div>
       </main>

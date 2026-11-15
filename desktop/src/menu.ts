@@ -3,11 +3,18 @@
 // single-stroke key the keybindings give it; chords have none, the page
 // matches them.
 //
+// On macOS the application's menu (About, Settings, Hide, Quit) comes
+// first; on Windows and Linux a File menu holds Settings and Quit (Exit on
+// Windows) and Help holds About.
+//
 // The page sees a key before the menu and cancels the keys it runs
-// (web/src/keymap.ts), so a key runs once: the menu gets only keys the page
-// leaves, while a text field, VS Code or another window has the keyboard.
-// macOS offers keys without Cmd to a menu before the page, so the menu only
-// shows those and leaves them to the page.
+// (web/src/keymap.ts), so a key runs once: on macOS the menu gets only keys
+// the page leaves, while a text field, VS Code or another window has the
+// keyboard. macOS offers keys without Cmd to a menu before the page, so the
+// menu only shows those and leaves them to the page. On Windows and Linux
+// the menu registers no key at all, only shows them: every key goes to the
+// page and its terminals (Ctrl+C, Ctrl+M, Ctrl+Q are programs' keys there),
+// and Chromium's text fields edit with Ctrl keys by themselves.
 //
 // Edit's Undo, Redo, Cut, Copy, Paste and Select All are the standard
 // roles: text fields in Chromium on macOS edit with Cmd keys only through
@@ -16,6 +23,7 @@
 import type { MenuItemConstructorOptions } from 'electron';
 import type { MessageKey } from '../../web/src/i18n/en';
 import { acceleratorKey, parseKeys, shiftedChar, type Stroke } from '../../web/src/keys';
+import type { Platform } from './platform';
 
 export interface Binding {
   key: string;
@@ -32,8 +40,11 @@ export type Role = 'about' | 'hide' | 'quit' | 'undo' | 'redo' | 'cut' | 'copy' 
  * separator. */
 export type Item = { title: Title; command: string } | { title: Title; role: Role } | '-';
 
-/** The menus: the application's (titled with its name), then the others. */
-export const menus: { title: Title | 'app'; items: Item[] }[] = [
+export type Menu = { title: Title | 'app'; items: Item[] };
+
+/** The menus on macOS: the application's (titled with its name), then the
+ * others. */
+export const menus: Menu[] = [
   {
     title: 'app',
     items: [
@@ -104,6 +115,22 @@ export const menus: { title: Title | 'app'; items: Item[] }[] = [
   { title: 'window', items: [{ title: 'minimize', role: 'minimize' }] },
 ];
 
+/** The menus of a platform: macOS's, or on Windows and Linux File first
+ * and Help last. */
+export function menusFor(p: Platform): Menu[] {
+  if (p === 'darwin') return menus;
+  const file: Menu = {
+    title: 'file',
+    items: [
+      { title: 'settings', command: 'app.settings' },
+      { title: 'keyboardShortcuts', command: 'app.keyboardShortcuts' },
+      '-',
+      { title: p === 'win32' ? 'exit' : 'quit', role: 'quit' },
+    ],
+  };
+  return [file, ...menus.slice(1), { title: 'help', items: [{ title: 'about', role: 'about' }] }];
+}
+
 /** The Electron accelerator of a single stroke and whether it holds Cmd
  * ("Super+T", "Super+}" for cmd+shift+bracketright, as macOS menus name a
  * shifted key); undefined for chords and invalid keys. */
@@ -122,27 +149,30 @@ export function accelerator(key: string): { accelerator: string; cmd: boolean } 
   return { accelerator: [...mods, name].join('+'), cmd: s.cmd };
 }
 
-/** The menu's template for the bindings in effect: titles from text (with
- * the application's name for {app}), commands run through run. */
+/** The menu's template of a platform for the bindings in effect: titles
+ * from text (with the application's name for {app}), commands run through
+ * run. */
 export function menuTemplate(
   bindings: readonly Binding[],
   appName: string,
   text: (key: MessageKey, vars?: Record<string, string>) => string,
   run: (command: string) => MenuItemConstructorOptions['click'],
+  platform: Platform,
 ): MenuItemConstructorOptions[] {
+  const mac = platform === 'darwin';
   const item = (it: Item): MenuItemConstructorOptions => {
     if (it === '-') return { type: 'separator' };
     const label = text(`desktop.menu.${it.title}`, { app: appName });
-    if ('role' in it) return { role: it.role, label };
+    if ('role' in it) return { role: it.role, label, ...(!mac && { registerAccelerator: false }) };
     const key = bindings.map((b) => (b.command === it.command ? accelerator(b.key) : undefined)).find(Boolean);
     return {
       id: it.command,
       label,
       click: run(it.command),
-      ...(key && { accelerator: key.accelerator, registerAccelerator: key.cmd }),
+      ...(key && { accelerator: key.accelerator, registerAccelerator: mac && key.cmd }),
     };
   };
-  return menus.map(({ title, items }) => ({
+  return menusFor(platform).map(({ title, items }) => ({
     label: title === 'app' ? appName : text(`desktop.menu.${title}`),
     submenu: items.map(item),
   }));

@@ -25,7 +25,6 @@ import (
 	"syscall"
 	"time"
 
-	"herdr-ide/internal/agent"
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/brand"
 	"herdr-ide/internal/codeserver"
@@ -252,7 +251,7 @@ func serve(args []string, logger *log.Logger) {
 	dial := func(ctx context.Context, spec machines.Spec) (*transport.Session, string, error) {
 		switch spec.Kind {
 		case machines.KindLocal:
-			s, err := transport.DialLocal(ctx, agent.Options{Instance: *instance, Logger: logger})
+			s, err := dialLocal(ctx, *instance, logger)
 			return s, runtime.GOOS + "/" + runtime.GOARCH, err
 		case machines.KindSSH:
 			// Machines never dial such a target; this keeps it from ssh

@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -38,52 +37,22 @@ type Platform struct {
 	OS, Arch, Home string
 }
 
-// ControlDir returns the private directory holding our ssh control sockets.
-// It lives in /tmp because unix socket paths are limited to ~104 bytes; as
-// /tmp is shared, both levels must be real directories owned by us and not
-// accessible to anyone else, otherwise another local user could plant
-// control sockets and hijack every ssh connection.
-func ControlDir() (string, error) {
-	parent := filepath.Join("/tmp", fmt.Sprintf("%s-%d", brand.Slug, os.Getuid()))
-	dir := filepath.Join(parent, "s")
-	for _, d := range []string{parent, dir} {
-		if err := os.Mkdir(d, 0o700); err != nil && !os.IsExist(err) {
-			return "", err
-		}
-		if err := checkPrivateDir(d); err != nil {
-			return "", err
-		}
-	}
-	return dir, nil
-}
-
-func checkPrivateDir(d string) error {
-	st, err := os.Lstat(d)
-	if err != nil {
-		return err
-	}
-	sys, ok := st.Sys().(*syscall.Stat_t)
-	if !st.IsDir() || !ok || int(sys.Uid) != os.Getuid() {
-		return fmt.Errorf("%s is not a directory owned by uid %d; refusing to use it for ssh control sockets", d, os.Getuid())
-	}
-	if st.Mode().Perm()&0o077 != 0 {
-		return fmt.Errorf("%s is accessible by other users (mode %v); run: chmod 700 %s", d, st.Mode().Perm(), d)
-	}
-	return nil
-}
-
 // SSHArgs returns the options shared by every ssh invocation for a target.
 // The ControlMaster lets an interactive authentication (see AuthCommand) be
-// reused by the BatchMode connections that follow.
+// reused by the BatchMode connections that follow; without a controlDir
+// (Windows) every connection authenticates on its own.
 func SSHArgs(controlDir string, batch bool) []string {
-	args := []string{
-		"-o", "ControlMaster=auto",
-		"-o", "ControlPath=" + filepath.Join(controlDir, "%C"),
-		"-o", "ControlPersist=600",
+	var args []string
+	if controlDir != "" {
+		args = append(args,
+			"-o", "ControlMaster=auto",
+			"-o", "ControlPath="+filepath.Join(controlDir, "%C"),
+			"-o", "ControlPersist=600")
+	}
+	args = append(args,
 		"-o", "ServerAliveInterval=15",
 		"-o", "ServerAliveCountMax=4",
-		"-o", "ConnectTimeout=10",
-	}
+		"-o", "ConnectTimeout=10")
 	if batch {
 		args = append(args, "-o", "BatchMode=yes", "-o", "NumberOfPasswordPrompts=0")
 	} else {
@@ -153,6 +122,7 @@ func lastLines(s string, n int) string {
 
 func (o SSHOptions) run(ctx context.Context, stdin io.Reader, script string) (string, error) {
 	cmd := exec.CommandContext(ctx, "ssh", o.runArgs(script)...)
+	noConsole(cmd)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdin = stdin
 	cmd.Stdout = &stdout
@@ -230,6 +200,7 @@ func DialSSH(ctx context.Context, o SSHOptions) (*Session, *Platform, error) {
 	}
 
 	cmd := exec.Command("ssh", o.runArgs(`exec "`+remotePath+`" serve --instance '`+o.Instance+`'`)...)
+	noConsole(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, p, err
@@ -300,9 +271,14 @@ func stopMasterIfStuck(exited <-chan struct{}, grace time.Duration, stop func())
 // other instances of this user, which share the control directory, keep
 // running until they end or the master's checks end them.
 func (o SSHOptions) stopMaster() {
+	if o.ControlDir == "" {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if out, err := exec.CommandContext(ctx, "ssh", o.stopArgs()...).CombinedOutput(); err != nil {
+	cmd := exec.CommandContext(ctx, "ssh", o.stopArgs()...)
+	noConsole(cmd)
+	if out, err := cmd.CombinedOutput(); err != nil {
 		o.Logger.Printf("ssh %s: stopping the control master: %v: %s", o.Target, err, strings.TrimSpace(string(out)))
 	}
 }

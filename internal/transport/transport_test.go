@@ -2,7 +2,9 @@ package transport
 
 import (
 	"errors"
+	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -55,11 +57,27 @@ func TestSSHTargetAfterDoubleDash(t *testing.T) {
 			}
 		}
 		// The options are all before "--".
-		if !slices.Contains(args[:i-1], "ControlPath=/tmp/c/%C") {
+		if !slices.Contains(args[:i-1], "ControlPath="+filepath.Join("/tmp/c", "%C")) {
 			t.Errorf("%s: options after the target: %q", name, args)
 		}
 	}
 	if got := o.runArgs("uname"); got[len(got)-1] != remoteSh("uname") || got[len(got)-2] != o.Target {
 		t.Errorf("run: the command follows the target: %q", got)
+	}
+}
+
+// Without a control directory (ssh on Windows shares no connections) no
+// Control option is passed; the other options stay.
+func TestSSHArgsWithoutControlDir(t *testing.T) {
+	for _, a := range SSHArgs("", true) {
+		if strings.HasPrefix(a, "Control") {
+			t.Errorf("control option %q", a)
+		}
+	}
+	if args := SSHArgs("", true); !slices.Contains(args, "BatchMode=yes") || !slices.Contains(args, "ServerAliveInterval=15") {
+		t.Errorf("args %q", args)
+	}
+	if args := SSHArgs("/tmp/c", false); !slices.Contains(args, "ControlMaster=auto") || !slices.Contains(args, "BatchMode=no") {
+		t.Errorf("args %q", args)
 	}
 }

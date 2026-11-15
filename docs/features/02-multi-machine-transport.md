@@ -9,7 +9,9 @@ arm64, sometimes with old userlands, sometimes without internet access. The
 core needs many concurrent channels per machine: the terminal core's API
 and terminal streams ([21](21-terminal-core.md)), agent detection, file
 reads, uploads, program windows, a code-server proxy and a reverse channel
-for the VS Code extension.
+for the VS Code extension. The core runs on Linux and macOS and, in the
+desktop app ([16](16-desktop-packaging.md)), on Windows, whose OpenSSH
+(Win32-OpenSSH) has no ControlMaster.
 
 ## Goals / non-goals
 
@@ -17,7 +19,8 @@ Goals: reuse the user's ssh setup unchanged; no listening ports on machines;
 no runtime dependencies on machines (no Node, Python or specific glibc);
 bounded ssh session count; the same code path for the local machine.
 
-Non-goals: managing ssh keys; Windows machines.
+Non-goals: managing ssh keys; Windows machines; a local machine on a
+Windows core host; the interactive ssh login from a core on Windows.
 
 ## Design
 
@@ -25,7 +28,10 @@ Non-goals: managing ssh keys; Windows machines.
   built for linux/darwin × amd64/arm64 and embedded gzipped in the core
   (`internal/embedded`). Its version is the content hash, so a changed build
   is always re-uploaded and core and agent can never disagree on the
-  protocol.
+  protocol. The agent and `internal/agent` are `//go:build unix`: unix
+  sockets with peer checks, process groups, code-server and Xvfb are
+  POSIX. The yamux configuration both ends share is
+  `agentproto.YamuxConfig`, so the core builds without the agent.
 - **Connect** (`internal/transport/ssh.go`, `DialSSH`):
   1. probe `uname -s`, `uname -m`, `$HOME` through `/bin/sh -c` (works with
      any login shell; 30 s);
@@ -43,8 +49,40 @@ Non-goals: managing ssh keys; Windows machines.
   BatchMode connections. That terminal (`GET /api/m/{id}/auth`, WebSocket)
   runs `ssh -t` with `BatchMode=no` and the same control path in a PTY on
   the core host; when it closes, the machine tries again at once.
-- **Local machine.** `transport.DialLocal` runs the same agent in-process over
-  a socketpair: identical protocol, no ssh.
+- **ssh on Windows.** Win32-OpenSSH cannot share connections, so
+  `transport.ControlDir` is empty there (`sys_windows.go`; the private
+  `/tmp` directory and its checks are `sys_unix.go`): `SSHArgs` passes no
+  `Control*` option, the control master is never told to stop, and every
+  connection (probe, upload, agent session) authenticates by itself in
+  BatchMode. Each ssh starts with `CREATE_NO_WINDOW`, so no console window
+  appears. A login typed in a terminal would hold nothing for the
+  connections that follow, so the core offers none: `GET /api/config`
+  answers `ssh_login: false` and `GET /api/m/{id}/auth` `501
+  ssh_login_unsupported`. The web UI then shows an *auth_required*
+  machine without **Sign in…**, with what to do instead
+  (`sidebar.signInElsewhere`: connect once with `ssh` in a terminal to
+  accept the host key, use a key the ssh agent holds, `ssh-add`, then
+  **Retry**), and does not open the authentication terminal after adding
+  a machine. SSH machines of a core on Windows therefore need key
+  authentication (Windows' ssh-agent service, or a key without a
+  passphrase) and a host key already accepted.
+- **Local machine.** `transport.DialLocal` (`local.go`, unix) runs the same
+  agent in-process over a socketpair: identical protocol, no ssh. A core on
+  Windows has no local agent (`cmd/herdr-ide/local_windows.go` dials
+  none): the agent is POSIX, and the herdr-core this repository pins is for
+  Linux and macOS. Its local machine is listed in *error* with the code
+  `local_unsupported` (`machines.LocalSupported`, `CodeLocalUnsupported`)
+  and never dialed, like a refused target; the web UI says what it means
+  (`machine.code.local_unsupported`, in the sidebar and the empty
+  workspace), offers only **Add machine…** in its menu, and folders dropped
+  on the sidebar or opened with the app make no workspaces. WSL is not
+  built in; a WSL distribution running an ssh server is added as an SSH
+  machine.
+- **Paths on machines.** Machines are Linux or macOS, so the core handles
+  their paths with Go's `path` (POSIX), not `filepath`: uploads' directory
+  and name, downloads' names (`internal/server/files.go`) and the
+  `codeServer.path` setting's check. A core on Windows addresses them as one
+  on Linux does.
 - **Multiplexing.** One yamux session per machine; streams start with a JSON
   header and reply ([architecture](../architecture.md#core--agent-protocol-internalagentproto)).
   This avoids sshd's `MaxSessions` (default 10) and any dependence on
@@ -61,7 +99,8 @@ Non-goals: managing ssh keys; Windows machines.
   and connects again after 1 s with the backoff reset. The authentication
   terminal closing and the UI's **Retry** end a wait at once and reset the
   backoff. **Retry** is offered to writable browsers in every state but
-  *ready*, *disabled* and *error* with `invalid_target`; read-only browsers cannot retry (`denied.retry`),
+  *ready*, *disabled* and *error* with a code (`invalid_target`,
+  `local_unsupported`); read-only browsers cannot retry (`denied.retry`),
   since an attempt may start an ssh login. Every change of state goes to
   every `/ws` client as `machine {state}`.
 - **The machines and their file** (`internal/machines/registry.go`). The
@@ -147,9 +186,9 @@ Non-goals: managing ssh keys; Windows machines.
   whose UTF-8 holds bytes 0x80–0x9F (many non-Latin names; it accepts them
   in the C locale), and the machine then shows ssh's error. Typing a refused target answers
   `invalid_target`; `--ssh` with one stops the core at start; every ssh
-  command puts `--` before the target. The web UI and the macOS
-  application check typed targets the same way before sending them (the
-  vectors of `design/testdata/machines/targets.json`). The label is at
+  command puts `--` before the target. The web UI checks typed targets the
+  same way before sending them (the vectors of
+  `design/testdata/machines/targets.json`). The label is at
   most 64 characters without control characters (both trimmed;
   `invalid` otherwise); a target or
   id the core has already, running or stored, is refused
@@ -159,7 +198,7 @@ Non-goals: managing ssh keys; Windows machines.
   the user's ssh configuration. A machine that needs an interactive login
   (a password, a key's passphrase, a host key to confirm) turns
   *auth_required*, and the page that added it opens the authentication
-  terminal for it.
+  terminal for it where the core offers one (`ssh_login`).
 - **Renaming, removing, enabling and disabling.** The machine's menu renames
   an SSH machine in its header (`PUT /api/m/{id}/label`, `{"label": "…"}`,
   trimmed; a label another machine has, running or stored, is refused with
@@ -245,7 +284,11 @@ Non-goals: managing ssh keys; Windows machines.
 
 - **Authentication needed** → stderr classified as auth (`Permission
   denied`, host key prompts) → *auth_required*, with an authentication
-  terminal in the UI.
+  terminal in the UI; on a core on Windows, with the steps to take in a
+  terminal instead, and **Retry**.
+- **The local machine of a core on Windows** → listed in *error* with
+  `local_unsupported`, never dialed, enabled or not; SSH machines connect
+  as anywhere else.
 - **Network loss** → yamux keepalive (15 s, 30 s write timeout) ends the
   session on both sides; the agent exits and releases what it owns
   ([10](10-remote-resource-lifecycle.md)); the core reconnects with backoff.
@@ -288,19 +331,25 @@ Non-goals: managing ssh keys; Windows machines.
   is refused with `save` and the machine stays as it was.
 - **Unsupported platform** → no embedded agent for the `uname` pair; the
   machine shows the error.
-- **Hijacked control directory** → refused: `/tmp/herdr-ide-<uid>/s` must be
-  a real directory owned by the user with no group/other access
-  ([08](08-web-access-and-security.md)).
+- **Hijacked control directory** (Linux, macOS) → refused:
+  `/tmp/herdr-ide-<uid>/s` must be a real directory owned by the user with
+  no group/other access ([08](08-web-access-and-security.md)).
 
 ## Testing
 
 - `internal/agent/agent_test.go`: the agent over the in-process transport
   (`TestHelloAndPrivateRunDir`), file ops, dial restrictions.
 - `internal/transport/*_test.go`: ssh error classification, arch
-  normalization, quoting, control directory checks (`TestCheckPrivateDir`),
-  the lost-session hook runs only when the session ends by itself, the
-  control master is stopped (`-O stop`) only while ssh stays up
-  (`TestStopMasterOnlyWhenSSHStaysUp`).
+  normalization, quoting, control directory checks (`TestCheckPrivateDir`
+  in `sys_unix_test.go`), no `Control*` option without a control directory
+  (`TestSSHArgsWithoutControlDir`), the lost-session hook runs only when
+  the session ends by itself, the control master is stopped (`-O stop`)
+  only while ssh stays up (`TestStopMasterOnlyWhenSSHStaysUp`).
+- Tests that need an agent get it from a `dialAgent` helper
+  (`internal/{machines,server}/agent_unix_test.go`), which skips them on
+  Windows (`agent_windows_test.go`); the agent's own tests build on unix
+  only. `scripts/check.sh` vets everything for linux/amd64, darwin/arm64
+  and windows/amd64, and CI runs the Go tests on Linux, macOS and Windows.
 - `internal/machines/machines_test.go`: herdr's catalog imported once, also
   when empty, never again, without its session names
   (`TestRegistryImportsHerdrOnce`); the earlier file's enabled choices
@@ -315,7 +364,9 @@ Non-goals: managing ssh keys; Windows machines.
   were, new records and changed targets refused
   (`TestRegistryKeepsInvalidTargets`); such a machine in error with its
   code, never dialed when run, enabled, woken or renamed
-  (`TestInvalidTargetNeverDialed`); a machine is
+  (`TestInvalidTargetNeverDialed`); where no agent runs, the local machine
+  in error with `local_unsupported` and never dialed while SSH machines
+  are (`TestLocalMachineWithoutAnAgent`); a machine is
   ready once its agent answers and logs nothing
   (`TestReadyWhenTheAgentAnswers`); disabling at runtime ends the session,
   enabling connects again, both stored (`TestDisableAndEnableAtRuntime`);
@@ -333,7 +384,9 @@ Non-goals: managing ssh keys; Windows machines.
   accepted, a known target refused, read-only browsers refused, the file and
   the audit log; a stored machine with a refused target listed with its
   code, refused by the authentication terminal, renamed and removed
-  (`TestMachineWithInvalidTarget`); the terminal core's endpoints refused read-only, for
+  (`TestMachineWithInvalidTarget`); without a control directory
+  `ssh_login` false and the authentication terminal refused with
+  `ssh_login_unsupported` (`TestSSHLoginNeedsAControlDir`); the terminal core's endpoints refused read-only, for
   unknown actions and for machines without an agent
   (`TestHCEndpointsGuard`).
 - `internal/server/term_test.go`: `TestHCLifecycle` (status, a stopped core
@@ -351,10 +404,13 @@ Non-goals: managing ssh keys; Windows machines.
   and before removing, offers renaming and removal for SSH machines, the
   sidebar's free space offers adding; adding opens the authentication
   terminal once the new machine needs a login; starting, restarting and
-  stopping the terminal core, one action at a time.
+  stopping the terminal core, one action at a time; a machine with a code
+  offers only what applies.
 - `web/src/__tests__/sidebarMachines.test.ts`: renaming in the machine's
   header, a machine's terminals followed when shown, disabled machines
-  folded, starting a terminal core that failed.
+  folded, starting a terminal core that failed, the local machine that
+  needs Linux or macOS (`local_unsupported`), **Sign in…** only where the
+  core keeps an ssh login and the steps to take elsewhere.
 - `web/src/__tests__/addMachine.test.ts`: the form's checks, a removed
   machine takes its VS Code panel along.
 - `make it` (`TestIntegrationHC`, `TestIntegrationTerm`) for the terminal

@@ -14,6 +14,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -60,7 +61,7 @@ var Settings = settings.Module{
 			Flag:  "code-server-path",
 			Usage: "code-server executable on machines for --code-server-install=existing (absolute or ~/ path); empty searches PATH and the usual install locations",
 			Validate: func(v any) error {
-				if s := v.(string); s != "" && !filepath.IsAbs(s) && !strings.HasPrefix(s, "~/") {
+				if s := v.(string); s != "" && !path.IsAbs(s) && !strings.HasPrefix(s, "~/") {
 					return errors.New("must be an absolute or ~/ path")
 				}
 				return nil

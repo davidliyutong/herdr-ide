@@ -6,13 +6,14 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/hashicorp/yamux"
 
-	"herdr-ide/internal/agent"
+	"herdr-ide/internal/agentproto"
 )
 
 // pair connects a core session to a bare yamux server standing in for the
@@ -25,7 +26,7 @@ func pair(t *testing.T, lost func()) (*Session, *yamux.Session, net.Conn) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv, err := yamux.Server(c2, agent.YamuxConfig(logger))
+	srv, err := yamux.Server(c2, agentproto.YamuxConfig(logger))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,6 +65,9 @@ func TestLostRunsOnlyWhenTheSessionEndsByItself(t *testing.T) {
 // The control master is told to take no new sessions (not to exit, which
 // would end every session through it), with this core's control path.
 func TestStopMasterArgs(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("ssh on Windows has no control master; the stand-in for ssh is a shell script")
+	}
 	bin := t.TempDir()
 	out := filepath.Join(t.TempDir(), "args")
 	script := "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > " + out + "\n"

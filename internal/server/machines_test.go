@@ -265,3 +265,31 @@ func TestMachineWithInvalidTarget(t *testing.T) {
 		t.Fatalf("remove: %d %s", w.Code, w.Body)
 	}
 }
+
+// Without a control directory (Windows: ssh shares no connections) the UI
+// offers no ssh login, and the endpoint refuses one; with one it is offered.
+func TestSSHLoginNeedsAControlDir(t *testing.T) {
+	mg := machines.NewManager([]machines.Spec{{ID: "gpu", Label: "gpu", Kind: machines.KindSSH, Target: "gpu", Enabled: true}},
+		func(ctx context.Context, _ machines.Spec) (*transport.Session, string, error) {
+			<-ctx.Done()
+			return nil, "", ctx.Err()
+		}, log.New(io.Discard, "", 0))
+	get := func(s *Server, path string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("GET", path, nil)
+		r.Host = "127.0.0.1:7780"
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		return w
+	}
+	without := New(mg, Options{Logger: log.New(io.Discard, "", 0)})
+	if w := get(without, "/api/config"); !strings.Contains(w.Body.String(), `"ssh_login":false`) {
+		t.Errorf("config: %s", w.Body)
+	}
+	if w := get(without, "/api/m/gpu/auth"); w.Code != http.StatusNotImplemented || !strings.Contains(w.Body.String(), `"error":"ssh_login_unsupported"`) {
+		t.Errorf("auth: %d %s", w.Code, w.Body)
+	}
+	with := New(mg, Options{Logger: log.New(io.Discard, "", 0), ControlDir: t.TempDir()})
+	if w := get(with, "/api/config"); !strings.Contains(w.Body.String(), `"ssh_login":true`) {
+		t.Errorf("config: %s", w.Body)
+	}
+}

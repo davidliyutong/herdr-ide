@@ -5,7 +5,7 @@ from browsers. It reaches its machines over ssh; nothing listens on the
 machines.
 
 - [Local use](#local-use)
-- [macOS desktop app](#macos-desktop-app)
+- [Desktop app](#desktop-app)
 - [Remote access through a reverse proxy](#remote-access-through-a-reverse-proxy)
 - [Air-gapped networks](#air-gapped-networks)
 - [Remote resources](#remote-resources)
@@ -22,7 +22,11 @@ cd dist/packages/herdr-ide-$(go env GOOS)-$(go env GOARCH)
 ```
 
 Each `dist/release/` archive contains the core and its licenses
-(`licenses/`). Supported hosts are Linux/macOS on amd64/arm64.
+(`licenses/`). Release archives are for Linux and macOS on amd64 and arm64.
+A core for Windows x64 ships only inside the [desktop app](#desktop-app)'s
+setup (`TARGETS=windows/amd64 scripts/build.sh` writes
+`dist/herdr-ide-windows-amd64.exe` and no archive); it reaches SSH machines
+only, since the agent runs on Linux and macOS.
 
 The core embeds the video encoder it puts on Linux machines to send program
 windows as video ([14](features/14-gui-windows.md)). `scripts/build.sh`
@@ -62,36 +66,93 @@ with `--ssh`. herdr-ide uses OpenSSH with your `~/.ssh/config`
 (ProxyJump, agent, keys) in BatchMode. A machine that needs a password, 2FA or
 a host-key confirmation shows **Sign-in required**; **Sign in…**
 opens a terminal for it, and later connections reuse that ssh ControlMaster.
+Windows' OpenSSH has no ControlMaster, so a core there offers no sign-in:
+its SSH machines need a key the ssh agent holds (or one without a
+passphrase) and a host key accepted beforehand
+([Windows](#windows)).
 
-## macOS desktop app
+## Desktop app
 
-Each GitHub release attaches `herdr-ide-<version>-mac-arm64.dmg` (Apple
-Silicon) and `herdr-ide-<version>-mac-x64.dmg` (Intel), built by the release
-workflow from the tag and listed in `SHA256SUMS` with the archives. Check the
-digest (`shasum -a 256 -c SHA256SUMS --ignore-missing`) and, for a public
-repository, the provenance (`gh attestation verify <dmg> --repo <owner>/<repo>`)
-before the first launch. The released DMGs are signed ad hoc like local
-builds, so macOS blocks the first launch of the downloaded app; allow it once
-under System Settings → Privacy & Security.
+The desktop app is the browser UI in an Electron window with a core of its
+own, for macOS (Apple Silicon and Intel), Windows (x64) and Linux (x64 and
+arm64) ([16](features/16-desktop-packaging.md)). Each GitHub release
+attaches, built by the release workflow from the tag:
+
+| System | Files |
+| --- | --- |
+| macOS | `herdr-ide-<version>-mac-arm64.dmg` and `.zip` (Apple Silicon), `herdr-ide-<version>-mac-x64.dmg` and `.zip` (Intel) |
+| Windows | `herdr-ide-<version>-win-x64.exe` (setup) |
+| Linux | `herdr-ide-<version>-linux-amd64.deb`, `-linux-arm64.deb`, `-linux-x86_64.AppImage`, `-linux-arm64.AppImage` |
+
+They are listed in `SHA256SUMS` with the archives. Check the digest
+(`shasum -a 256 -c SHA256SUMS --ignore-missing`; on Windows compare
+`Get-FileHash <file>` with its line) and, for a public repository, the
+provenance (`gh attestation verify <file> --repo <owner>/<repo>`) before the
+first launch. There are no automatic updates: install a newer release over
+the old one.
+
+What the app does on each system:
+
+| | macOS | Windows | Linux |
+| --- | --- | --- | --- |
+| Local machine (terminals, files, VS Code) | yes | no: shown as needing Linux or macOS (`local_unsupported`) | yes |
+| SSH machines | yes, with **Sign in…** for passwords and host keys | yes, with keys in the ssh agent and host keys accepted beforehand | yes, with **Sign in…** |
+| Program windows | of remote Linux machines | of remote Linux machines | of remote Linux machines |
+| Folders opened with the app | dropped on the sidebar or the Dock icon | – | dropped on the sidebar, or **Open With** in the file manager |
+| Notifications and the blocked-agents badge | the Dock icon's badge | the taskbar button's overlay; notifications of the installed app | with a notification daemon; the badge in docks that implement the Unity launcher API |
+| Closing the main window | the app stays in the Dock until quit | quits | quits |
+| Signature | ad hoc, or Developer ID and notarized when the release has the secrets | none | none |
+
+The core listens at `127.0.0.1:7781` with instance `desktop`, separate from
+the CLI default and `dev`. The app follows the core's settings: its theme
+colors the title bar, its language the menu, and the menu shows the
+keybindings in effect. A fixed origin preserves UI preferences across
+launches. `HERDR_IDE_DESKTOP_PORT` overrides the port; changing it changes
+the browser storage origin. An occupied port fails visibly; the app never
+attaches to an existing listener. Opening the app twice focuses the
+original window (on macOS, opens it again when it was closed). Quitting
+stops its core and agents, not the machines' terminal cores; closing a
+program window leaves the main app running. HTTP(S) external links open in
+the default browser; custom URL schemes are refused. OpenSSH is the
+system's, with the user's SSH configuration.
+
+### macOS
+
+Open the DMG, drag the app to Applications, eject the image, then launch
+it (or unpack the zip and move the app there). A release built without the
+Developer ID secrets is signed ad hoc, and Gatekeeper refuses the
+downloaded app's first launch: "“herdr-ide” cannot be opened because Apple
+cannot check it for malicious software" (or that it is damaged). Allow it
+once: on macOS 14 and earlier Control-click the app and choose **Open**; on
+macOS 15 and later try to open it, then choose **Open Anyway** under System
+Settings → Privacy & Security. Removing the quarantine attribute does the
+same: `xattr -dr com.apple.quarantine /Applications/herdr-ide.app`. A
+release built with the secrets is signed with a Developer ID and notarized,
+and opens without this. To update, quit the app and replace it with the
+newer one; to uninstall, quit it and move it to the Trash (the files below
+stay).
+
+Finder launches include `~/.local/bin`, `/opt/homebrew/bin`,
+`/usr/local/bin` and system paths in the core's PATH. The launcher does not
+execute shell startup files, so variables exported there reach the core only
+when the app is started from that shell.
 
 To build on a Mac, install Go, Node.js 22.12+ and pnpm:
 
 ```bash
-make desktop-app                       # host-architecture .app
-VERSION=0.1.0 make desktop-dmg           # .app and DMG in dist/desktop/
-ARCH=x64 make desktop-dmg               # Intel core and Electron
-ARCH=arm64 make desktop-dmg             # Apple Silicon core and Electron
+make desktop-app                        # host-architecture .app in dist/desktop/mac-arm64/ or mac/
+VERSION=0.1.0 make desktop-dist         # .app, DMG and zip in dist/desktop/
+ARCH=x64 make desktop-dist              # Intel core and Electron
+ARCH=arm64 make desktop-dist            # Apple Silicon core and Electron
 make desktop-install                    # host-architecture .app into /Applications
 ```
 
 Each command builds the UI, bridge extension, four agents and the matching
-macOS core before bundling Electron. Versions are pinned in the desktop
-lockfile. The DMG contains an app and an Applications shortcut; drag the app
-to Applications, eject the image, then launch it. The build is ad-hoc signed,
-without a Developer ID or notarization; Gatekeeper may require explicit
-approval for a downloaded copy. Public signed distribution and automatic
-updates are outside this packaging mode. Windows and Linux installers are
-not implemented. The app and disk image use the project's terminal-pane icon.
+core before bundling Electron. Versions are pinned in the desktop lockfile.
+Local builds are signed ad hoc; with `CSC_LINK` and `CSC_KEY_PASSWORD` (or
+`CSC_NAME`) they are signed with that Developer ID, and with `APPLE_ID`,
+`APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID` also notarized
+([reference](reference.md#environment-variables)).
 
 `make desktop-install` builds the `.app` like `make desktop-app` and copies it
 over `/Applications/herdr-ide.app` (`INSTALL_DIR=~/Applications` picks another
@@ -101,53 +162,142 @@ does not quit within 30 s is left as is and nothing is installed. The new
 copy is assembled next to the old one, so a failed copy leaves the old app in
 place.
 
-Editable icon sources live in `desktop/assets/icon.svg` and
-`web/public/icon.svg` (the simpler small-size version). The 1024-pixel PNG
-and multi-resolution ICNS are committed, so ordinary builds need no graphics
-tools. After editing the sources, run `brew install librsvg` if needed, then
-`make desktop-icons` on macOS and rebuild the app/DMG.
+### Windows
 
-OpenSSH is an external prerequisite; the SSH configuration is reused.
-Finder launches include `~/.local/bin`, `/opt/homebrew/bin`,
-`/usr/local/bin` and system paths in the core's PATH. The launcher does not
-execute shell startup files, so variables exported there reach the core only
-when the app is started from that shell.
+The app needs Windows' OpenSSH Client (Settings → System → Optional
+features; installed by default on Windows 10 1809 and later and on
+Windows 11). Run the setup; it is not signed, so SmartScreen may show
+"Windows protected your PC": choose **More info**, then **Run anyway**. It
+installs for the current user, without administrator rights, into
+`%LOCALAPPDATA%\Programs\herdr-ide-desktop\` with a Start menu shortcut.
+To update, run a newer setup with the app closed; to uninstall, use
+Settings → Apps → Installed apps (the files below stay).
 
-The core listens at `127.0.0.1:7781` with instance `desktop`, separate from
-the CLI default and `dev`. The app follows the core's settings: its theme
-colors the title bar, its language the menu, and the menu shows the
-keybindings in effect. A fixed origin preserves UI preferences across
-launches. `HERDR_IDE_DESKTOP_PORT` overrides the port; changing it changes
-the browser storage origin. An occupied port fails visibly; the app never
-attaches to an existing listener. Opening the app twice focuses the original
-window. Closing the main window or quitting stops its core and agents;
-closing a program window leaves the main app running. HTTP(S) external links
-open in the default browser; custom URL schemes are refused.
+On Windows the app reaches SSH machines only: the agent runs on Linux and
+macOS, so the local machine is listed with a note and never connected
+(WSL is not built in; a WSL distribution running an ssh server can be added
+as an SSH machine). Windows' ssh cannot share a connection (no
+ControlMaster), so the app has no **Sign in…**: every connection
+authenticates by itself in BatchMode, with the configuration in
+`%USERPROFILE%\.ssh\config`. Before adding a machine, accept its host key
+and make the key available, in PowerShell:
 
-For development run:
+```powershell
+ssh user@host            # once: accept the host key, then exit
+# a key with a passphrase: let Windows' ssh agent hold it
+# (the service, once, in a PowerShell run as administrator)
+Get-Service ssh-agent | Set-Service -StartupType Automatic; Start-Service ssh-agent
+ssh-add                  # adds ~/.ssh/id_* to the agent
+```
+
+A key without a passphrase needs no agent. A machine that still needs a
+password, 2FA or a host key shows **Sign-in required** with these steps;
+**Retry** it afterwards. ssh runs without console windows. Windows shows
+the notifications of the installed app (its Start menu shortcut carries
+the app's id), not of a copy run from `win-unpacked/`.
+
+To build on Windows, install Go, Node.js 22.12+, pnpm and Git for Windows,
+and run `scripts/desktop.sh app` (the unpacked app in
+`dist/desktop/win-unpacked/`) or `scripts/desktop.sh dist` (the setup) in
+Git Bash; the `make desktop-*` targets run the same script where `make` is
+installed.
+
+### Linux
+
+Install the Debian package for your architecture:
+
+```bash
+sudo apt install ./herdr-ide-<version>-linux-amd64.deb   # or -linux-arm64.deb
+```
+
+It installs into `/opt/herdr-ide/`, adds the `herdr-ide` command, a desktop
+entry (Development) and icons, depends on the libraries Electron needs
+(ALSA's `libasound2` among them) and recommends `openssh-client`. On
+Ubuntu 24.04 and later it also installs an AppArmor profile, without which
+Chromium's sandbox cannot start there. To update, install a newer package
+the same way; to uninstall, `sudo apt remove herdr-ide-desktop` (the files
+below stay).
+
+The AppImage runs without installing: `chmod +x
+herdr-ide-<version>-linux-x86_64.AppImage`, then start it. It needs FUSE 2
+(`sudo apt install libfuse2`, `libfuse2t64` on Ubuntu 24.04). On Ubuntu
+24.04 and later AppArmor's restriction of unprivileged user namespaces keeps
+Chromium's sandbox from starting in an AppImage, and the app exits: use the
+deb there. The app never turns the sandbox off (`--no-sandbox`). To update,
+replace the file.
+
+The desktop entry offers the app for folders: **Open With** in the file
+manager makes a workspace of each on the local machine, as dropping them on
+the sidebar does. Notifications need a notification daemon on the session
+bus (`org.freedesktop.Notifications`), which desktop environments run; the
+count of blocked agents shows on the app's icon in docks that implement the
+Unity launcher API. Launchers include `~/.local/bin`, `/usr/local/bin` and
+system paths in the core's PATH, as on macOS.
+
+To build on Linux, install Go, Node.js 22.12+ and pnpm:
+
+```bash
+make desktop-app                        # dist/desktop/linux-unpacked/ (x64) or linux-arm64-unpacked/
+make desktop-dist                       # AppImage and deb in dist/desktop/
+ARCH=arm64 make desktop-dist            # arm64 packages, also on an x64 host
+```
+
+### Where the app keeps its files
+
+| | macOS | Windows | Linux |
+| --- | --- | --- | --- |
+| The app | `/Applications/herdr-ide.app` | `%LOCALAPPDATA%\Programs\herdr-ide-desktop\` | `/opt/herdr-ide/` (deb), or the AppImage where you put it |
+| Settings, keybindings, machines (`settings-desktop.json`, `keybindings-desktop.json`, `machines-desktop.json`) | `~/Library/Application Support/herdr-ide/` | `%AppData%\herdr-ide\` | `$XDG_CONFIG_HOME/herdr-ide/` (default `~/.config/herdr-ide/`) |
+| Electron profile (browser storage, permissions, the single-instance lock) | `~/Library/Application Support/herdr-ide-desktop/` | `%AppData%\herdr-ide-desktop\` | `~/.config/herdr-ide-desktop/` |
+| code-server downloads | `~/Library/Caches/herdr-ide/code-server` | `%LocalAppData%\herdr-ide\code-server` | `~/.cache/herdr-ide/code-server` |
+| The local machine's agent state | `~/.herdr-ide-desktop/` | – | `~/.herdr-ide-desktop/` |
+| ssh control sockets | `/tmp/herdr-ide-<uid>/s` | – | `/tmp/herdr-ide-<uid>/s` |
+
+Every SSH machine keeps the instance's state in its own
+`~/.herdr-ide-desktop/` ([remote resources](#remote-resources)). Uninstalling
+removes only the app; remove the rest by hand. Removing the Electron
+profile resets the app's browser preferences, which are separate from a
+browser's.
+
+### Development
 
 ```bash
 make dev-desktop
 ```
 
-This builds the embedded UI (no hot reload) and uses port 7791, instance
-`dev` (terminal core session `herdr-ide-dev`) and local-only connections. For packaged
-smoke tests, launch the executable with `HERDR_IDE_DESKTOP_DEV=1` and, beside
-an installed copy, a profile of its own, e.g.:
+This builds the embedded UI (no hot reload) and runs unpackaged Electron
+with port 7791, instance `dev` (terminal core session `herdr-ide-dev`) and
+local-only connections; on Windows such a run connects no machine, since it
+is local-only and the local machine has no agent there. Quit other
+development cores using the `dev` instance first. For packaged smoke tests,
+launch the executable with `HERDR_IDE_DESKTOP_DEV`: `1` for the `dev`
+instance, or a name of its own (lowercase letters, digits and dashes) to run
+beside a development instance in use (`desktop` is refused), with port
+`0`, e.g.:
 
 ```bash
-HERDR_IDE_DESKTOP_DEV=1 dist/desktop/mac-arm64/herdr-ide.app/Contents/MacOS/herdr-ide \
-  --user-data-dir="$TMPDIR/herdr-ide-smoke"
+HERDR_IDE_DESKTOP_DEV=smoke HERDR_IDE_DESKTOP_PORT=0 \
+  dist/desktop/mac-arm64/herdr-ide.app/Contents/MacOS/herdr-ide --user-data-dir="$TMPDIR/herdr-ide-smoke"
+HERDR_IDE_DESKTOP_DEV=smoke HERDR_IDE_DESKTOP_PORT=0 \
+  dist/desktop/linux-unpacked/herdr-ide --user-data-dir=/tmp/herdr-ide-smoke
 ```
 
-Launch the executable rather than `open` the bundle: `open` activates a
-running copy with the same bundle identifier instead. Quit other development
-cores using the `dev` instance first. Electron uses its own persistent
-profile (`herdr-ide-desktop`, or `herdr-ide-desktop-dev`) under Application
-Support, which also holds its single-instance lock; `--user-data-dir`
-replaces both. Remove that directory manually to reset desktop
-preferences. Browser and desktop preferences are separate. Core state and
-resource retention follow [Remote resources](#remote-resources).
+On macOS launch the executable rather than `open` the bundle: `open`
+activates a running copy with the same bundle identifier instead. Every
+development instance is local-only and has an Electron profile and
+single-instance lock of its own (`herdr-ide-desktop-dev`,
+`herdr-ide-desktop-smoke`); `--user-data-dir` replaces both. A named instance leaves its own state like any instance
+(`settings-smoke.json` beside the others, `~/.herdr-ide-smoke/` and the
+terminal core session `herdr-ide-smoke` on the local machine); stop that
+terminal core from the machine's menu (**Stop terminal core…**) before
+removing them. Core state and resource retention follow
+[Remote resources](#remote-resources).
+
+Editable icon sources live in `desktop/assets/icon.svg` and
+`web/public/icon.svg` (the simpler small-size version). The 1024-pixel PNG,
+the multi-resolution ICNS and the ICO are committed, so ordinary builds need
+no graphics tools. After editing the sources, run `brew install librsvg` if
+needed, then `make desktop-icons` on macOS and rebuild the app.
 
 ## Remote access through a reverse proxy
 
@@ -260,8 +410,8 @@ What herdr-ide starts on a machine and how it is reclaimed:
 
 | Resource | Started | Reclaimed |
 | --- | --- | --- |
-| Desktop core | Electron launches its bundled binary | SIGTERM on normal quit, with a 20 s deadline before SIGKILL of that owned child; parent-stdin EOF also stops it if Electron crashes. The machines' terminal cores and their programs remain running. |
-| Electron profile | First desktop launch | Kept until manually removed; Chromium manages its caches. Development has a separate profile. Core stderr is bounded to 16 KiB in memory; no desktop log files accumulate. |
+| Desktop core | Electron launches its bundled binary | The app closes the core's stdin when it quits (on Windows and Linux also when the main window closes; on macOS the app and its core keep running in the Dock until quit), and when Electron crashes the pipe closes as well; the core then stops its agents. That owned child alone is killed after 20 s. No signal is sent, on any system. The machines' terminal cores and their programs remain running. |
+| Electron profile | First desktop launch | Kept until manually removed, also by uninstalling ([where](#where-the-app-keeps-its-files)); Chromium manages its caches. Development has a separate profile. Core stderr is bounded to 16 KiB in memory; no desktop log files accumulate. |
 | `herdr-ide-agent` | one per core while connected | Exits when its ssh session ends; a dead link is detected by keepalives within about 45 s. |
 | A machine added from the UI | **Add machine…** (`POST /api/machines`) | Only a record in the core's `machines[-<instance>].json` and an agent while it is connected. **Remove machine…** deletes the record and ends the session (the agent exits and stops what it started); the machine's terminal core and terminals keep running there; the agent builds left in `~/.herdr-ide/agent/` follow their usual retention. |
 | Terminal core (herdr-core) | when a client of `/api/v1/term` first subscribes to the machine's terminals and no core answers (never in `--read-only`; audited as `term.start`), or **Start terminal core** / **Restart terminal core…** in the machine's menu (browser UI, desktop app) (`POST /api/m/{id}/hc/{start\|restart}`, audited as `hc.start`, `hc.restart`) | Started by herdr-core detached from the agent (a systemd user service on Linux, a launchd job on macOS) in the session `herdr-ide[-<instance>]`, with its socket in `~/.herdr-ide[-<instance>]/run/hc.sock`. It belongs to the user and outlives the agent and the core, so its programs keep running; it ends with **Stop terminal core…** in the machine's menu (`POST /api/m/{id}/hc/stop`, asked first, audited as `hc.stop`: every terminal there ends, and the core starts none again until it is started from the menu or a client subscribes to the machine anew), with the agent op `hc` action `stop`, with `HC_SESSION=herdr-ide[-<instance>] HC_SOCKET=<socket> herdr-core server stop`, and with the machine. A restart keeps the programs (the core's successor adopts them). Its state (terminal records, saved screens, logs) is herdr-core's, in `~/.local/state/herdr-core/herdr-ide[-<instance>]/`, and stays until the user removes it. |
@@ -270,7 +420,7 @@ What herdr-ide starts on a machine and how it is reclaimed:
 | Agent detection (op `detect`) | while the core's connection to a machine's terminal core lasts | In the agent: one more connection to the terminal core, an event subscription, and for each terminal running a coding agent an observing attach and screen reads (`terminal.read`, at most every 300 ms after output); everything ends when the core closes the stream (10 s after the last subscriber left, or the connection to the terminal core ended) or with the agent. No process is started and nothing is written to disk. |
 | code-server | on first VS Code use | Stopped after `--code-server-idle` (default 20 min) without VS Code connections, when the agent exits (if that agent started it; for the local machine, when the core stops), or by the stop button in the VS Code panel. Hidden VS Code windows (each workspace has its own panel) disconnect after 10 min, and at most 3 stay loaded per page. A process left behind by a killed agent is stopped by the next agent, and code-server exits by itself after 1 h without connections. |
 | VS Code extension hosts | one per VS Code window | Disposed 5 min after the window disconnects. |
-| ssh ControlMaster | per machine | Exits after 10 min unused or after 1 min without answers from the server. When the core finds its connection dead (an agent session lost while ssh kept running, a probe timing out) it tells it to take no new sessions (`ssh -O stop`), and it exits with the last session open through it. |
+| ssh ControlMaster | per machine, on a core on Linux or macOS (Windows' ssh has none, and each connection ends with its session) | Exits after 10 min unused or after 1 min without answers from the server. When the core finds its connection dead (an agent session lost while ssh kept running, a probe timing out) it tells it to take no new sessions (`ssh -O stop`), and it exits with the last session open through it. |
 | Xvfb (virtual display) | when a remote Linux machine connects with the GUI setting on | Runs in its own session so programs keep their windows across disconnects; exits 1 min after its last client (programs, the agent's window manager, the display keeper) disconnected, so soon after the terminal core stopped and its programs exited; the agent connects once after starting it, so this also holds when nothing attaches. With xorg-server before 21.1 it exits as soon as its last client leaves, and one that never got a client stays until an agent attaches. |
 | Display keeper (`herdr-ide-agent gui-keep`) | when a display is ready and each time the machine's terminal core becomes reachable again (never in `--read-only`; audited as `gui.keep`) | One per instance (`run/gui-keep.lock`), in its own session; holds a connection to the display while the instance's terminal core runs (checked every 5 s by the socket's peer process and its start time), follows a terminal core restarted within 30 s, and exits once it no longer runs or when the display ends. |
 | `apt-get download xvfb` | when a machine has no Xvfb (never in `--read-only`) | Ends with the download (5 min limit); the package is unpacked into `~/.herdr-ide/xvfb/` and the download removed; a download left by a killed agent is removed by the next agent after 1 h. A failed install or start is retried after 5 s, doubling up to 5 min, while the machine stays connected. |
@@ -376,7 +526,8 @@ files.
   now reach the program in the terminal on their first press, and the
   commands are in the menus, the context menus, the pane headers and the
   command palette (the status bar's button; `cmd+shift+p` in the
-  desktop app). The defaults left are in the
+  desktop app on macOS, `ctrl+shift+p` on Windows and Linux). The defaults
+  left are in the
   [reference](reference.md#keyboard-shortcuts). Chords can be bound again,
   one rule per key, under **Settings → Keyboard shortcuts** or in
   `keybindings[-<instance>].json` in the core host's user configuration

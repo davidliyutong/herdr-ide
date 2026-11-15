@@ -34,7 +34,6 @@ import {
   X,
 } from 'lucide-react';
 import { actions, current } from './actions';
-import { INVALID_TARGET } from './lib/machine';
 import type { MenuEntry } from './contextMenu';
 import { downloadDialog } from './dialog';
 import { canDownload, downloadPath } from './download';
@@ -155,9 +154,10 @@ export function machineMenu(m: string): MenuEntry[] {
   const st = s.machines[m];
   if (s.readOnly || !st) return [];
   const out: MenuEntry[] = [];
-  // A machine whose target the core refuses is never connected: it can be
-  // renamed or removed only.
-  const usable = st.code !== INVALID_TARGET;
+  // A machine with a code (a target the core refuses, the local machine
+  // where no agent runs) is never connected: it can be renamed or removed
+  // only.
+  const usable = !st.code;
   if (usable && st.status !== 'disabled') {
     const off = st.status !== 'ready' || s.hcBusy[m] === true;
     out.push(

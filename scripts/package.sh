@@ -8,11 +8,15 @@ HC_VERSION=$(sed -n 's/^const Version = "\(.*\)"$/\1/p' internal/hcdist/release.
 test -n "$HC_VERSION"
 TARGETS=${TARGETS:-"$(go env GOOS)/$(go env GOARCH)"}
 mkdir -p dist/packages dist/release
+packaged=
 for p in $TARGETS; do
   case "$p" in
     linux/amd64|linux/arm64|darwin/amd64|darwin/arm64) ;;
+    # The Windows core ships in the desktop installer (scripts/desktop.sh).
+    windows/amd64) continue ;;
     *) echo "unsupported release platform: $p" >&2; exit 1 ;;
   esac
+  packaged=1
   os=${p%/*}; arch=${p#*/}
   name=${SLUG}-${os}-${arch}
   dir=dist/packages/$name
@@ -42,4 +46,4 @@ EOF
   tar -C dist/packages -czf "dist/release/$name.tar.gz" "$name"
   echo "    dist/release/$name.tar.gz"
 done
-(cd dist/release && shasum -a 256 *.tar.gz > SHA256SUMS)
+[[ -z "$packaged" ]] || (cd dist/release && shasum -a 256 *.tar.gz > SHA256SUMS)

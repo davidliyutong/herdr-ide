@@ -65,11 +65,12 @@ export function refuseStrayFileDrops() {
 // ---- sidebar ----
 
 /** The machine dropped folders become workspaces on: the local one, in the
- * desktop app and not in read-only mode. */
+ * desktop app and not in read-only mode, unless it is never connected
+ * (Windows, where no agent runs on it). */
 export function folderDropTarget(): MachineState | undefined {
   const s = useStore.getState();
   if (!desktopShell?.pathForFile || s.readOnly) return undefined;
-  return Object.values(s.machines).find((m) => m.kind === 'local');
+  return Object.values(s.machines).find((m) => m.kind === 'local' && !m.code);
 }
 
 /** Creates a workspace on the local machine for each folder dropped. */
@@ -98,6 +99,7 @@ function readyLocal(ms = OPEN_WAIT_MS): Promise<MachineState | undefined> {
   const check = (): MachineState | null | undefined => {
     const s = useStore.getState();
     if (!desktopShell || s.readOnly) return null;
+    if (Object.values(s.machines).some((m) => m.kind === 'local' && m.code)) return null;
     const m = folderDropTarget();
     if (m?.status === 'disabled') return null;
     return m?.status === 'ready' ? m : undefined;

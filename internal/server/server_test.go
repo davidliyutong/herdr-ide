@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -22,7 +23,6 @@ import (
 
 	"github.com/coder/websocket"
 
-	"herdr-ide/internal/agent"
 	"herdr-ide/internal/brand"
 	"herdr-ide/internal/machines"
 	"herdr-ide/internal/transport"
@@ -463,6 +463,9 @@ func TestGUICloseOrigin(t *testing.T) {
 
 // servePTY carries the browser's keys to the command and its output back.
 func TestServePTY(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no PTY on Windows")
+	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		servePTY(w, r, []string{"/bin/sh", "-c", "read l; echo got:$l"})
 	}))
@@ -548,12 +551,13 @@ func TestVideoCodecsParam(t *testing.T) {
 // dir) and waits until it is connected.
 func agentMachine(t *testing.T) (*machines.Manager, *machines.Machine, *log.Logger) {
 	t.Helper()
+	dialLocal := dialAgent(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	logger := log.New(io.Discard, "", 0)
 	dial := func(ctx context.Context, spec machines.Spec) (*transport.Session, string, error) {
-		s, err := transport.DialLocal(ctx, agent.Options{Logger: logger})
+		s, err := dialLocal(ctx, logger)
 		return s, "test/test", err
 	}
 	mg := machines.NewManager([]machines.Spec{{ID: "x", Label: "x", Kind: machines.KindSSH, Target: "x", Enabled: true}}, dial, logger)

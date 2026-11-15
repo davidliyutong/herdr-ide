@@ -33,7 +33,9 @@ type Options struct {
 	// Static serves the built web UI; nil disables static serving.
 	Static fs.FS
 	Logger *log.Logger
-	// ControlDir holds ssh control sockets (used by interactive auth).
+	// ControlDir holds ssh control sockets, which keep an interactive
+	// login for the connections that follow (handleAuth). Empty where ssh
+	// shares no connections (Windows): there is no login in the UI then.
 	ControlDir string
 	// CodeServer provisions code-server on machines.
 	CodeServer *codeserver.Manager
@@ -302,6 +304,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		"slug":      brand.Slug,
 		"version":   agentproto.Version,
 		"read_only": s.opts.ReadOnly,
+		"ssh_login": s.opts.ControlDir != "",
 	})
 }
 

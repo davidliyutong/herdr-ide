@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Repository checks run by `make check` and CI (besides tests):
-#   1. gofmt / go vet
+#   1. gofmt / go vet, also for the other desktop systems (the core and
+#      its tests build for Linux, macOS and Windows; the agent for unix)
 #   2. the product slug appears in string literals only in the brand files
 #      (so a rename stays a one-file change plus scripts/rename.sh)
 #   3. every command-line flag and every HTTP route is documented in
@@ -25,6 +26,10 @@ unformatted=$(gofmt -l cmd internal scripts web/*.go)
 if [[ -n "$unformatted" ]]; then echo "gofmt needed:"; echo "$unformatted"; fail=1; fi
 go vet ./... || fail=1
 go vet -tags integration ./... || fail=1
+for target in linux/amd64 darwin/arm64 windows/amd64; do
+  [[ "$target" == "$(go env GOOS)/$(go env GOARCH)" ]] && continue
+  GOOS=${target%/*} GOARCH=${target#*/} go vet ./... || fail=1
+done
 
 echo "==> brand literals"
 # String literals containing the slug outside the brand files, ignoring Go

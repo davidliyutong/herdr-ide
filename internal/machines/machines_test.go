@@ -9,13 +9,13 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agent"
 	"herdr-ide/internal/transport"
 )
 
@@ -47,7 +47,7 @@ func TestRegistryImportsHerdrOnce(t *testing.T) {
 		t.Fatalf("imported %+v", got)
 	}
 	st, err := os.Stat(path)
-	if err != nil || st.Mode().Perm() != 0o600 {
+	if err != nil || runtime.GOOS != "windows" && st.Mode().Perm() != 0o600 {
 		t.Fatalf("file: %v %v", st, err)
 	}
 	b, _ := os.ReadFile(path)
@@ -336,8 +336,48 @@ func TestInvalidTargetNeverDialed(t *testing.T) {
 	}
 }
 
+// Where no agent runs (Windows) the local machine is listed in error with
+// its code and never dialed; SSH machines connect as anywhere else.
+func TestLocalMachineWithoutAnAgent(t *testing.T) {
+	defer func(was bool) { LocalSupported = was }(LocalSupported)
+	LocalSupported = false
+	var local, ssh atomic.Int32
+	dial := func(ctx context.Context, s Spec) (*transport.Session, string, error) {
+		if s.Kind == KindLocal {
+			local.Add(1)
+		} else {
+			ssh.Add(1)
+		}
+		return nil, "", errors.New("no")
+	}
+	mg := NewManager([]Spec{{ID: LocalID, Label: "box (local)", Kind: KindLocal, Enabled: true},
+		{ID: "gpu", Label: "gpu", Kind: KindSSH, Target: "gpu", Enabled: true}}, dial, log.New(io.Discard, "", 0))
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		mg.Run(ctx)
+		close(done)
+	}()
+	for deadline := time.Now().Add(5 * time.Second); ssh.Load() == 0; time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the SSH machine was not dialed")
+		}
+	}
+	mg.Get(LocalID).Wake()
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	<-done
+	if st := mg.Get(LocalID).State(); st.Status != StatusError || st.Code != CodeLocalUnsupported {
+		t.Fatalf("local %+v", st)
+	}
+	if n := local.Load(); n != 0 {
+		t.Fatalf("the local machine was dialed %d times", n)
+	}
+}
+
 // A machine is ready once its agent answers, quietly.
 func TestReadyWhenTheAgentAnswers(t *testing.T) {
+	dialLocal := dialAgent(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
@@ -350,7 +390,7 @@ func TestReadyWhenTheAgentAnswers(t *testing.T) {
 		return logs.Write(p)
 	}), "", 0)
 	dial := func(ctx context.Context, spec Spec) (*transport.Session, string, error) {
-		s, err := transport.DialLocal(ctx, agent.Options{Logger: log.New(io.Discard, "", 0)})
+		s, err := dialLocal(ctx, log.New(io.Discard, "", 0))
 		return s, "test/test", err
 	}
 	m := newMachine(Spec{ID: "x", Label: "x", Kind: KindSSH, Target: "x", Enabled: true}, dial, logger, func(State) {})
@@ -387,6 +427,7 @@ func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
 // Disabling a connected machine ends its session at once; enabling it
 // connects again.
 func TestDisableAndEnableAtRuntime(t *testing.T) {
+	dialLocal := dialAgent(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
@@ -394,7 +435,7 @@ func TestDisableAndEnableAtRuntime(t *testing.T) {
 	var dials atomic.Int32
 	dial := func(ctx context.Context, spec Spec) (*transport.Session, string, error) {
 		dials.Add(1)
-		s, err := transport.DialLocal(ctx, agent.Options{Logger: logger})
+		s, err := dialLocal(ctx, logger)
 		return s, "test/test", err
 	}
 	path := filepath.Join(t.TempDir(), "machines.json")
@@ -460,12 +501,13 @@ func TestDisableAndEnableAtRuntime(t *testing.T) {
 // more for it. A target or id the core has is refused, and the local machine
 // cannot be removed.
 func TestAddAndRemoveAtRuntime(t *testing.T) {
+	dialLocal := dialAgent(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	logger := log.New(io.Discard, "", 0)
 	dial := func(ctx context.Context, spec Spec) (*transport.Session, string, error) {
-		s, err := transport.DialLocal(ctx, agent.Options{Logger: logger})
+		s, err := dialLocal(ctx, logger)
 		return s, "test/test", err
 	}
 	path := filepath.Join(t.TempDir(), "machines.json")

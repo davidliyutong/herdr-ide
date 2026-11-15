@@ -1,3 +1,5 @@
+//go:build unix
+
 package agent
 
 import "herdr-ide/internal/brand"

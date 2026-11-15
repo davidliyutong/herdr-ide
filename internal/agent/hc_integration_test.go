@@ -1,4 +1,4 @@
-//go:build integration
+//go:build unix && integration
 
 package agent_test
 

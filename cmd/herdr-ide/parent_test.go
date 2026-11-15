@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"syscall"
 	"testing"
 	"time"
@@ -41,6 +42,9 @@ func TestStopWithParent(t *testing.T) {
 // A launcher that crashed leaves stdout and stderr as pipes without readers.
 // The core must keep running (and clean up) instead of dying of SIGPIPE.
 func TestBrokenPipesDoNotKill(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no SIGPIPE; a write to a broken pipe fails there anyway")
+	}
 	if os.Getenv("PARENT_PIPE_CHILD") == "1" {
 		ignoreBrokenPipes()
 		for i := 0; i < 3; i++ {

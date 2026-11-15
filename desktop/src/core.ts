@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { delimiter, join } from 'node:path';
 import { APP_SLUG } from '../../web/src/brand';
 import type { MessageKey } from '../../web/src/i18n/en';
+import type { Platform } from './platform';
 
 export const ENV_PREFIX = APP_SLUG.toUpperCase().replaceAll('-', '_') + '_';
 
@@ -21,21 +22,35 @@ export function corePort(port: string): number {
   return Number(port);
 }
 
-export function coreArgs(dev: boolean, port: number): string[] {
+/** The instance of a run: `desktop`, or in development `dev` or the one
+ * <prefix>DESKTOP_DEV names (`1` is `dev`), so that a smoke test can run
+ * beside a development instance in use; never `desktop` itself. */
+export function coreInstance(dev: boolean, devValue: string | undefined): string {
+  if (!dev) return 'desktop';
+  if (!devValue || devValue === '1') return 'dev';
+  if (!/^[a-z0-9][a-z0-9-]{0,31}$/.test(devValue) || devValue === 'desktop') throw new DesktopError('desktop.badInstance', devValue);
+  return devValue;
+}
+
+export function coreArgs(instance: string, port: number): string[] {
   return [
     'serve',
     '--parent-stdio',
     '--listen',
     `127.0.0.1:${port}`,
     '--instance',
-    dev ? 'dev' : 'desktop',
-    ...(dev ? ['--local-only'] : []),
+    instance,
+    ...(instance === 'desktop' ? [] : ['--local-only']),
   ];
 }
 
-export function coreEnv(env: NodeJS.ProcessEnv, home: string): NodeJS.ProcessEnv {
-  // Finder does not load shell rc files. Include common installations without
-  // executing the user's login shell or interpolating shell commands.
+export function coreEnv(env: NodeJS.ProcessEnv, home: string, platform: Platform): NodeJS.ProcessEnv {
+  // Windows keeps its Path as it is (its name differs in case, which a copy
+  // of the environment would duplicate).
+  if (platform === 'win32') return env;
+  // Finder and desktop launchers do not load shell rc files. Include common
+  // installations without executing the user's login shell or interpolating
+  // shell commands.
   const paths = [env.PATH || '', join(home, '.local/bin'), '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin'];
   return { ...env, PATH: paths.filter(Boolean).join(delimiter) };
 }
@@ -52,7 +67,8 @@ export class CoreProcess {
 
   // port is the one passed in --listen; 0 accepts the port the core chose.
   async start(binary: string, args: string[], port: number, env: NodeJS.ProcessEnv, cwd: string, onExit: () => void): Promise<string> {
-    const child = spawn(binary, args, { env, cwd, stdio: 'pipe', shell: false });
+    // windowsHide: the core is a console program, which would get a window.
+    const child = spawn(binary, args, { env, cwd, stdio: 'pipe', shell: false, windowsHide: true });
     this.child = child;
     child.stdin.on('error', () => {});
     child.stderr.on('data', (data: Buffer) => {
@@ -118,21 +134,23 @@ export class CoreProcess {
     });
   }
 
-  stop(): Promise<void> {
+  /** Stops the core by closing its stdin (--parent-stdio), which works on
+   * every platform: Windows has no signal a process can clean up after
+   * (Node's kill terminates it there). The core allows 3 s for HTTP and 15 s
+   * for agents; only this owned child is killed if it has not ended within
+   * deadline ms, never the terminal cores. */
+  stop(deadline = 20_000): Promise<void> {
     if (this.stopped) return this.stopped;
     this.stopping = true;
     const child = this.child;
     if (!child || child.exitCode !== null || child.signalCode !== null || !child.pid) return Promise.resolve();
     this.stopped = new Promise((resolve) => {
-      // The core allows 3 s for HTTP and 15 s for agents. Force only this
-      // owned child if it cannot finish; never signal the terminal cores.
-      const force = setTimeout(() => child.kill('SIGKILL'), 20_000);
+      const force = setTimeout(() => child.kill('SIGKILL'), deadline);
       child.once('exit', () => {
         clearTimeout(force);
         resolve();
       });
       child.stdin.end();
-      child.kill('SIGTERM');
     });
     return this.stopped;
   }

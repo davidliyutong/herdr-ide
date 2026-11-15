@@ -1,6 +1,7 @@
 // The core's machines as /ws and GET /api/machines report them, the agent
 // states of their terminals, and helpers shared by the views that show them.
 
+import { hasMessage, t, type MessageKey } from '../i18n';
 import { displayName, statusOf, type TerminalRecord } from '../term/protocol';
 
 /** What a coding agent in a terminal is doing (docs/features/25-agent-detection.md). */
@@ -32,7 +33,9 @@ export interface MachineState {
   enabled: boolean;
   status: MachineStatus;
   /** Why a machine in error is never connected: invalid_target for a
-   * stored ssh target the core refuses (machines.ValidTarget). */
+   * stored ssh target the core refuses (machines.ValidTarget),
+   * local_unsupported for the local machine where no agent runs
+   * (Windows). */
   code?: string;
   error?: string;
   platform?: string;
@@ -40,9 +43,6 @@ export interface MachineState {
   hc?: MachineHC;
   updated_at: number;
 }
-
-/** The code of a machine whose stored ssh target the core refuses. */
-export const INVALID_TARGET = 'invalid_target';
 
 /** Printable ASCII a target may hold besides letters and digits. */
 const targetPunct = new Set('#%+,-./:=@[]^_~');
@@ -112,4 +112,11 @@ export function aggregate(list: Array<AgentStatus | undefined>): AgentStatus | u
   let best: AgentStatus | undefined;
   for (const s of list) if (s && (!best || statusRank[s] > statusRank[best])) best = s;
   return best;
+}
+
+/** What a machine's code means (invalid_target, local_unsupported), else
+ * the code. */
+export function codeText(code: string): string {
+  const k = `machine.code.${code}`;
+  return hasMessage(k) ? t(k as MessageKey) : code;
 }

@@ -20,20 +20,38 @@ import { detectLocale, translate } from '../../web/src/i18n';
 import type { MessageKey } from '../../web/src/i18n/en';
 import type { OpenedFolders } from '../../web/src/shell';
 import { channels } from './bridge';
-import { CoreProcess, coreArgs, coreEnv, corePort, DesktopError, ENV_PREFIX } from './core';
+import { CoreProcess, coreArgs, coreEnv, coreInstance, corePort, DesktopError, ENV_PREFIX } from './core';
 import { FolderQueue } from './folders';
 import { followCore, type ShellSettings } from './follow';
 import { menuTemplate, type Binding } from './menu';
+import { APP_ID, coreBinary, foldersOf, keyPlatform, quitsWithLastWindow, type Platform } from './platform';
 import { allowPermission, isExternal, isInternal, mainWindowPreferences, webPreferences } from './policy';
 
+const platform = process.platform as Platform;
 app.setName(APP_NAME);
+// Windows shows the notifications of an app under its AppUserModelID, the
+// one its installer gives the Start menu shortcut.
+if (platform === 'win32') app.setAppUserModelId(APP_ID);
 app.enableSandbox();
-const dev = !app.isPackaged || process.env[`${ENV_PREFIX}DESKTOP_DEV`] === '1';
-// Each mode has its own profile and single-instance lock; an explicit
-// --user-data-dir (isolated smoke tests) takes the place of both.
-if (!app.commandLine.hasSwitch('user-data-dir')) {
-  app.setPath('userData', join(app.getPath('appData'), `${APP_SLUG}-desktop${dev ? '-dev' : ''}`));
+const devValue = process.env[`${ENV_PREFIX}DESKTOP_DEV`];
+const dev = !app.isPackaged || !!devValue;
+// The core's instance; a name refused is reported once the app is ready.
+let instance: string | DesktopError;
+try {
+  instance = coreInstance(dev, devValue);
+} catch (error) {
+  instance = error as DesktopError;
 }
+// Each instance has its own profile and single-instance lock (`dev`'s ends
+// in -dev); an explicit --user-data-dir (isolated smoke tests) takes the
+// place of both.
+if (!app.commandLine.hasSwitch('user-data-dir')) {
+  const suffix = typeof instance === 'string' && instance !== 'desktop' ? `-${instance}` : dev ? '-dev' : '';
+  app.setPath('userData', join(app.getPath('appData'), `${APP_SLUG}-desktop${suffix}`));
+}
+// The arguments before the ones the user gave: the executable, and the
+// app's directory when Electron runs it unpackaged.
+const leadingArgs = process.defaultApp ? 2 : 1;
 
 const core = new CoreProcess();
 let mainWindow: BrowserWindow | undefined;
@@ -44,8 +62,8 @@ let systemShutdown = false;
 let reportingError = false;
 let stopFollowing = () => {};
 // The keybindings of this platform: its defaults until the core's are read.
-const platform = process.platform === 'darwin' ? 'mac' : 'pc';
-let bindings = registry.keybindings[platform] as Binding[];
+const keys = keyPlatform(platform);
+let bindings = registry.keybindings[keys] as Binding[];
 // appearance.language: "auto" follows the system's languages.
 let language = 'auto';
 // Folders opened with the app, until the page takes them.
@@ -103,8 +121,13 @@ app.on('web-contents-created', (_event, contents) => {
   });
 });
 
+/** Brings the main window forward; on macOS, where closing it leaves the app
+ * running, opens it again. */
 function showMain() {
-  if (!mainWindow) return;
+  if (!mainWindow) {
+    if (origin && !quitting) createWindow();
+    return;
+  }
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   mainWindow.focus();
@@ -117,13 +140,13 @@ function runCommand(command: string, focused: BaseWindow | undefined) {
     focused.close();
     return;
   }
-  if (!mainWindow) return;
+  if (!mainWindow) return showMain();
   if (!mainWindow.isFocused()) showMain();
   mainWindow.webContents.send(channels.command, command);
 }
 
 function buildMenu() {
-  const template = menuTemplate(bindings, APP_NAME, t, (command) => (_item, focused) => runCommand(command, focused));
+  const template = menuTemplate(bindings, APP_NAME, t, (command) => (_item, focused) => runCommand(command, focused), platform);
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
@@ -170,12 +193,14 @@ function createWindow() {
     minHeight: 500,
     show: false,
     backgroundColor: windowBackground(),
+    // Linux takes the window's icon from the window (macOS and Windows from
+    // the application).
+    ...(platform === 'linux' && { icon: join(app.getAppPath(), 'assets', 'icon.png') }),
     webPreferences: { ...mainWindowPreferences, preload: join(__dirname, 'preload.cjs') },
   });
   mainWindow = win;
   const onTheme = () => win.setBackgroundColor(windowBackground());
   nativeTheme.on('updated', onTheme);
-  win.on('closed', () => nativeTheme.off('updated', onTheme));
   // Folders opened from now on wait for the next page, which asks for them;
   // this runs before that page can.
   win.webContents.on('did-start-navigation', (details) => {
@@ -185,10 +210,17 @@ function createWindow() {
     folders.takenBy(undefined);
     if (!quitting) void fail(new DesktopError('desktop.rendererGone', details.reason));
   });
+  // Windows ends a session (log off, restart, shut down) with this.
+  win.on('session-end', () => {
+    systemShutdown = true;
+  });
   win.once('ready-to-show', () => win.show());
   win.on('closed', () => {
+    nativeTheme.off('updated', onTheme);
+    folders.takenBy(undefined);
     mainWindow = undefined;
-    app.quit();
+    // Program windows do not keep the app open.
+    if (quitsWithLastWindow(platform)) app.quit();
   });
   void win.loadURL(origin).catch(fail);
 }
@@ -198,8 +230,8 @@ app.on('before-quit', (event) => {
   stopFollowing();
   if (stopped) return;
   if (systemShutdown) {
-    // Delaying a logout, restart or shutdown would cancel it. Signal the core
-    // and let it clean up on its own; the closed stdin pipe stops it as well.
+    // Delaying a logout, restart or shutdown would cancel it. Stop the core
+    // and let it clean up on its own.
     void core.stop();
     return;
   }
@@ -209,14 +241,35 @@ app.on('before-quit', (event) => {
     app.quit();
   });
 });
-// Closing the main window quits (its 'closed' handler); program windows do not.
-app.on('second-instance', showMain);
+// On macOS the app stays in the Dock when its windows close, as Mac apps do;
+// elsewhere closing the main window quits (its 'closed' handler).
+app.on('window-all-closed', () => {
+  if (quitsWithLastWindow(platform)) app.quit();
+});
 app.on('activate', showMain);
 
-// Folders dropped on the Dock icon or opened with the app, also those it was
-// launched with (before ready). macOS reports each item of one request in a
-// row; they go to the page together, with the number of items that are not
-// folders (`open -a` passes any file), which the page skips with a note.
+/** Opened folders go to the page together, with the number of items that
+ * are not folders, which the page skips with a note. */
+function openFolders(opened: OpenedFolders) {
+  if (opened.folders.length || opened.skipped) folders.add(opened);
+  showMain();
+}
+
+// A second launch brings the window forward; on Linux it may name folders
+// (a file manager's Open With), as the first launch's command line may.
+// Windows opens none: no agent runs on its local machine.
+app.on('second-instance', (_event, argv, cwd) => {
+  if (platform === 'linux') openFolders(foldersOf(argv, leadingArgs, cwd));
+  else showMain();
+});
+if (platform === 'linux') {
+  const first = foldersOf(process.argv, leadingArgs, process.cwd());
+  if (first.folders.length || first.skipped) folders.add(first);
+}
+
+// macOS: folders dropped on the Dock icon or opened with the app, also those
+// it was launched with (before ready). macOS reports each item of one
+// request in a row; `open -a` passes any file.
 let opening: OpenedFolders | undefined;
 app.on('open-file', (event, path) => {
   event.preventDefault();
@@ -224,8 +277,7 @@ app.on('open-file', (event, path) => {
     const batch: OpenedFolders = (opening = { folders: [], skipped: 0 });
     setImmediate(() => {
       opening = undefined;
-      folders.add(batch);
-      showMain();
+      openFolders(batch);
     });
   }
   let folder = false;
@@ -245,21 +297,22 @@ if (!app.requestSingleInstanceLock()) {
     .whenReady()
     .then(async () => {
       if (quitting) return;
+      if (typeof instance !== 'string') throw instance;
+      // Linux and macOS report a logout, restart or shutdown here.
       powerMonitor.on('shutdown', () => {
         systemShutdown = true;
       });
       if (!app.isPackaged) app.dock?.setIcon(join(app.getAppPath(), 'assets', 'icon.png'));
+      // Windows and Linux show these in About (macOS reads its bundle).
+      app.setAboutPanelOptions({ applicationName: APP_NAME, applicationVersion: app.getVersion() });
       buildMenu();
       const port = corePort(process.env[`${ENV_PREFIX}DESKTOP_PORT`] || (dev ? '7791' : '7781'));
-      const goArch = process.arch === 'x64' ? 'amd64' : process.arch;
-      const binary = app.isPackaged
-        ? join(process.resourcesPath, 'bin', APP_SLUG)
-        : join(app.getAppPath(), '..', 'dist', `${APP_SLUG}-darwin-${goArch}`);
+      const binary = coreBinary(platform, process.arch, app.isPackaged ? process.resourcesPath : undefined, join(app.getAppPath(), '..'));
       origin = await core.start(
         binary,
-        coreArgs(dev, port),
+        coreArgs(instance, port),
         port,
-        coreEnv(process.env, app.getPath('home')),
+        coreEnv(process.env, app.getPath('home'), platform),
         app.getPath('home'),
         () => void fail(new DesktopError('desktop.coreLost')),
       );
@@ -271,7 +324,7 @@ if (!app.requestSingleInstanceLock()) {
       ses.setPermissionCheckHandler((contents, permission, requestingOrigin) => {
         return allowPermission(permission, requestingOrigin, contents?.getURL() || '', origin);
       });
-      stopFollowing = followCore(origin, platform, { bindings: applyBindings, settings: applySettings });
+      stopFollowing = followCore(origin, keys, { bindings: applyBindings, settings: applySettings });
       createWindow();
     })
     .catch(fail);

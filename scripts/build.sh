@@ -2,7 +2,8 @@
 # Builds the web UI, the VS Code bridge extension, the per-platform agents
 # (embedded gzip), fetches the pinned herdr-core of each agent platform
 # (embedded gzip), then builds the core for TARGETS (default: host platform),
-# packaged with its license notices. Names come from internal/brand.
+# packaged with its license notices (a Windows core, which goes into the
+# desktop installer only, gets no archive). Names come from internal/brand.
 #
 #   scripts/build.sh                       # host archive in dist/release/
 #   TARGETS="linux/amd64 darwin/arm64" scripts/build.sh
@@ -70,7 +71,9 @@ done
 echo "==> ${SLUG}"
 for p in $TARGETS; do
   os=${p%/*}; arch=${p#*/}
-  out=dist/${SLUG}-$os-$arch
+  exe=
+  [[ $os == windows ]] && exe=.exe
+  out=dist/${SLUG}-$os-$arch$exe
   CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -ldflags "$LDFLAGS" -o "$out" "./cmd/${SLUG}"
   echo "    $out $(du -h "$out" | cut -f1)"
 done

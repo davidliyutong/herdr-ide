@@ -1,6 +1,10 @@
+//go:build unix
+
 // Package agent implements herdr-ide-agent: the per-machine helper that the
 // core reaches over a yamux session (ssh stdio for remote machines, an
-// in-process pipe for the local machine).
+// in-process pipe for the local machine). It runs on Linux and macOS only
+// (every file is built for unix): its sockets, peer checks, process groups,
+// code-server and program windows (Xvfb) are POSIX.
 package agent
 
 import (
@@ -42,19 +46,6 @@ type Agent struct {
 	gui *gui
 }
 
-// YamuxConfig is shared by both ends of the session.
-func YamuxConfig(logger *log.Logger) *yamux.Config {
-	cfg := yamux.DefaultConfig()
-	cfg.EnableKeepAlive = true
-	cfg.KeepAliveInterval = 15 * time.Second
-	cfg.ConnectionWriteTimeout = 30 * time.Second
-	cfg.MaxStreamWindowSize = 1 << 20
-	cfg.AcceptBacklog = 512
-	cfg.LogOutput = nil
-	cfg.Logger = logger
-	return cfg
-}
-
 // Options configure an agent.
 type Options struct {
 	// Instance selects ~/<brand.DataDir(Instance)>; empty is the default.
@@ -89,7 +80,7 @@ func Serve(ctx context.Context, conn io.ReadWriteCloser, opts Options) error {
 	_ = os.Chmod(runDir, 0o700)
 	go housekeeping(base, logger)
 
-	sess, err := yamux.Server(conn, YamuxConfig(logger))
+	sess, err := yamux.Server(conn, agentproto.YamuxConfig(logger))
 	if err != nil {
 		return err
 	}

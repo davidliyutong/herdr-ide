@@ -90,7 +90,7 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   VS Code, interface size, the terminals' font, line height, cursor,
   scrollback, bell and colors (both themes' 16 colors), panel position, the
   code-server installation method and every keyboard shortcut, in one
-  dialog (the sidebar's gear, `cmd+,` in the desktop app) with search. Settings and keys are kept on the core's
+  dialog (the sidebar's gear, `cmd+,` or `ctrl+,` in the desktop app) with search. Settings and keys are kept on the core's
   host in two JSON files you can also edit by hand, and are the same in
   every browser and the desktop app. Terminals use
   the included JetBrains Mono font unless you choose another.
@@ -139,44 +139,73 @@ the list of shortcuts (`cmd+k` and `cmd+/` in a browser on macOS,
 `ctrl+shift+/` for the shortcuts elsewhere). All flags are listed in
 [docs/reference.md](docs/reference.md).
 
-## macOS desktop app
+## Desktop app
 
-On macOS, download the DMG for your Mac from GitHub Releases
-(`…-mac-arm64.dmg` for Apple Silicon, `…-mac-x64.dmg` for Intel) and drag
-the app to Applications. It is not notarized, so allow the first launch under
-System Settings → Privacy & Security. Or build the Electron app, with the
-same embedded core, UI, agents and VS Code bridge, yourself:
+The same UI in an Electron app with a core of its own
+(`http://127.0.0.1:7781`, instance `desktop`), for macOS, Windows and Linux.
+Download it from GitHub Releases:
+
+| | macOS | Windows | Linux |
+| --- | --- | --- | --- |
+| Packages | `…-mac-arm64.dmg` (Apple Silicon), `…-mac-x64.dmg` (Intel), also as `.zip` | `…-win-x64.exe`, a setup for your user (no administrator) | `…-linux-amd64.deb`, `…-linux-arm64.deb`, `…-linux-x86_64.AppImage`, `…-linux-arm64.AppImage` |
+| Signing | ad hoc, unless the release was built with a Developer ID (then notarized) | none | none |
+| Local terminals | yes | no: the local machine needs Linux or macOS | yes |
+| SSH machines | yes | yes, with key authentication | yes |
+| VS Code | every machine | SSH machines | every machine |
+| Program windows | of remote Linux machines | of remote Linux machines | of remote Linux machines |
+| Notifications | yes, with a badge on the Dock icon | yes, with an overlay on the taskbar button | with a notification daemon (desktop environments run one) |
+
+- **macOS:** drag the app from the DMG to Applications. If macOS says it
+  cannot check the app for malicious software, Control-click the app and
+  choose **Open** (on macOS 15 and later: **Open Anyway** under System
+  Settings → Privacy & Security). The app stays in the Dock when its
+  window closes, until you quit it.
+- **Windows:** run the setup; if SmartScreen says "Windows protected your
+  PC", choose **More info** → **Run anyway**. The app needs Windows'
+  OpenSSH Client (installed by default on Windows 10 1809 and later).
+  It works on SSH machines: accept each machine's host key once with
+  `ssh <target>` in a terminal, and use a key the ssh agent holds
+  (`ssh-add`), since the app cannot ask for a password. WSL is not built in;
+  a WSL distribution running an ssh server can be added as an SSH machine.
+- **Linux:** `sudo apt install ./herdr-ide-<version>-linux-amd64.deb`
+  (Ubuntu 24.04 and later need the deb, which lets Chromium's sandbox run).
+  The AppImage needs `chmod +x` and FUSE 2 (`libfuse2`, `libfuse2t64` on
+  Ubuntu 24.04).
+
+There are no automatic updates: install a newer release over the old one.
+Or build the app, with the same embedded core, UI, agents and VS Code
+bridge, for the system you are on:
 
 ```bash
-make desktop-app                 # .app in dist/desktop/mac[-arm64]/
-make desktop-dmg                 # .app plus a drag-to-Applications .dmg
-make desktop-install             # .app, copied into /Applications
-ARCH=x64 make desktop-dmg        # Intel; default is the host Node architecture
+make desktop-app                 # the unpacked app in dist/desktop/
+make desktop-dist                # this system's installers: DMG and zip, setup, or AppImage and deb
+make desktop-install             # macOS: the .app, copied into /Applications
+ARCH=x64 make desktop-dist       # another architecture; default is the host Node architecture
 ```
 
-The desktop and browser share a terminal-pane icon, with a multi-resolution
-macOS version for Finder and the Dock.
+Drag folders from the file manager onto the sidebar, onto the Dock icon on
+macOS, or open them with the app on Linux (**Open With**), to create a
+workspace for each on the local machine. Files and folders dropped on a
+pane of the local machine are pasted as their own paths, without uploading.
 
-Drag folders from Finder onto the sidebar or the app's Dock icon to create a
-workspace for each on the local machine. Files and folders dropped on a pane
-of the local machine are pasted as their own paths, without uploading.
-
-In the app, `cmd+t` opens a tab, `cmd+w` closes the pane, `cmd+d` /
+On macOS `cmd+t` opens a tab, `cmd+w` closes the pane, `cmd+d` /
 `cmd+shift+d` split it, `cmd+n` creates a workspace, `cmd+,` opens the
 settings, `cmd+shift+p` the command palette and `cmd+j` shows or hides the
-VS Code panel; while VS Code has focus, its own keys come first. The menu
+VS Code panel. On Windows and Linux `ctrl+shift+t` opens a tab,
+`ctrl+shift+w` closes it, `ctrl+shift+n` creates a workspace, `ctrl+,`
+opens the settings, `ctrl+shift+p` the command palette and `ctrl+shift+j`
+the VS Code panel; every other key, `ctrl+c` and `ctrl+q` included, reaches
+the terminal. While VS Code has focus, its own keys come first. The menu
 bar shows the keys in effect, in the UI's language; the title bar follows
 the UI's theme.
 Change or remove the keys under **Settings → Keyboard shortcuts**, where
 chords such as `ctrl+b c` can be bound too; browsers keep their own
 `cmd+t` / `cmd+w`.
 
-The Electron app starts its own core at `http://127.0.0.1:7781` with
-instance `desktop`; quitting or closing the main window stops that core. OpenSSH
-must already be installed. Released and local builds use ad-hoc signing,
-without Apple notarization or automatic updates. See
-[desktop deployment](docs/deployment.md#macos-desktop-app) for paths,
-versioning and isolated development. Only macOS packaging is implemented.
+Quitting the app stops its core; the machines' terminals keep running.
+OpenSSH must already be installed. See
+[desktop deployment](docs/deployment.md#desktop-app) for paths, versioning
+and isolated development.
 
 ## Remote access
 

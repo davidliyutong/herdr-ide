@@ -168,6 +168,15 @@ describe('dropped folders', () => {
     expect(host.querySelector('.sidebar-drop')).toBeNull();
   });
 
+  it('are not taken where no agent runs on the local machine (Windows)', () => {
+    const machines = store.useStore.getState().machines;
+    act(() =>
+      store.useStore.setState({ machines: { ...machines, local: { ...machines.local, status: 'error', code: 'local_unsupported' } } }),
+    );
+    expect(drop.folderDropTarget()).toBeUndefined();
+    act(() => store.useStore.setState({ machines }));
+  });
+
   it('are not taken in a browser, which has no desktop bridge', async () => {
     vi.resetModules();
     delete (globalThis as { desktopShell?: unknown }).desktopShell;
@@ -225,7 +234,7 @@ describe('folders dropped on the Dock icon', () => {
     await vi.advanceTimersByTimeAsync(drop.OPEN_WAIT_MS - 1);
     expect(toasts()).toEqual([]);
     await vi.advanceTimersByTimeAsync(1);
-    expect(toasts()).toEqual(['1 folder(s) dropped on the Dock icon not opened: the local machine is not connected.']);
+    expect(toasts()).toEqual(['1 folder(s) opened with the app not opened: the local machine is not connected.']);
 
     store.useStore.setState({ toasts: [], machines: { local: local('disabled') } as never });
     drop.openFolder('/Users/u/app');

@@ -20,7 +20,6 @@ import (
 
 	"github.com/coder/websocket"
 
-	"herdr-ide/internal/agent"
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/machines"
 	"herdr-ide/internal/transport"
@@ -170,6 +169,7 @@ func (f *fakeTermCore) serve(c net.Conn) {
 // the machine's socket.
 func termServer(t *testing.T, opts Options, core bool) (*Server, *fakeTermCore, *lockedWriter) {
 	t.Helper()
+	dialLocal := dialAgent(t)
 	home, err := os.MkdirTemp("/tmp", "hct")
 	if err != nil {
 		t.Fatal(err)
@@ -179,7 +179,7 @@ func termServer(t *testing.T, opts Options, core bool) (*Server, *fakeTermCore, 
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	logger := log.New(io.Discard, "", 0)
 	dial := func(ctx context.Context, spec machines.Spec) (*transport.Session, string, error) {
-		s, err := transport.DialLocal(ctx, agent.Options{Logger: logger})
+		s, err := dialLocal(ctx, logger)
 		return s, "test/test", err
 	}
 	mg := machines.NewManager([]machines.Spec{{ID: "x", Label: "x", Kind: machines.KindSSH, Target: "x", Enabled: true}}, dial, logger)

@@ -61,7 +61,7 @@
   VS Code 的资源管理器里也有同样的下载。
   状态栏的下载面板显示每个下载的进度、速度和结果，可以取消或重新下载。
 - **多浏览器同时使用**：所有浏览器和桌面应用看到同样的终端，都可以输入；终端的尺寸由最近使用它的一方决定。
-- **设置**：界面语言（中文、英文）、浅色/深色主题（VS Code 同步切换）、界面大小、终端的字体、行高、光标、回滚行数、响铃和配色（两种主题的 16 色），面板位置、code-server 安装方式以及所有快捷键，集中在一个可搜索的设置对话框里（侧栏的齿轮按钮，桌面应用里按 `cmd+,`）。
+- **设置**：界面语言（中文、英文）、浅色/深色主题（VS Code 同步切换）、界面大小、终端的字体、行高、光标、回滚行数、响铃和配色（两种主题的 16 色），面板位置、code-server 安装方式以及所有快捷键，集中在一个可搜索的设置对话框里（侧栏的齿轮按钮，桌面应用里按 `cmd+,` 或 `ctrl+,`）。
   设置和快捷键保存在 core 所在主机上的两个 JSON 文件里，也可以直接手改；浏览器和桌面应用看到的都一样。
   终端默认使用内置的 JetBrains Mono 字体，也可以换成其他字体。
 
@@ -102,38 +102,56 @@ SSH 机器用侧栏的「添加机器…」添加。
 状态栏可以打开命令面板和快捷键列表（macOS 上的浏览器里分别是 `cmd+k` 和 `cmd+/`，其他系统的浏览器里按 `ctrl+shift+/` 查看快捷键）。
 全部参数见 [docs/reference.md](docs/reference.md)。
 
-## macOS 桌面应用
+## 桌面应用
 
-在 macOS 上，可从 GitHub Releases 下载对应的 DMG（Apple Silicon 用 `…-mac-arm64.dmg`，Intel 用 `…-mac-x64.dmg`），把应用拖入 Applications。
-应用未经 Apple 公证，首次启动需在“系统设置 → 隐私与安全性”中允许。
-也可以自行将同一套 core、Web UI、agent 和 VS Code 桥接扩展打包为 Electron 应用：
+同一套界面也提供 Electron 桌面应用，自带一个 core（`http://127.0.0.1:7781`，instance 为 `desktop`），支持 macOS、Windows 和 Linux。
+可从 GitHub Releases 下载：
+
+| | macOS | Windows | Linux |
+| --- | --- | --- | --- |
+| 安装包 | `…-mac-arm64.dmg`（Apple Silicon）、`…-mac-x64.dmg`（Intel），另有 `.zip` | `…-win-x64.exe`，为当前用户安装（无需管理员权限） | `…-linux-amd64.deb`、`…-linux-arm64.deb`、`…-linux-x86_64.AppImage`、`…-linux-arm64.AppImage` |
+| 签名 | ad-hoc 签名；发布时配置了 Developer ID 则正式签名并经过公证 | 无 | 无 |
+| 本机终端 | 支持 | 不支持：本机需要 Linux 或 macOS | 支持 |
+| SSH 机器 | 支持 | 支持，需使用密钥认证 | 支持 |
+| VS Code | 所有机器 | SSH 机器 | 所有机器 |
+| 程序窗口 | 来自远端 Linux 机器 | 来自远端 Linux 机器 | 来自远端 Linux 机器 |
+| 通知 | 支持，Dock 图标上显示角标 | 支持，任务栏按钮上显示叠加图标 | 需要通知守护进程（桌面环境都自带） |
+
+- **macOS**：把 DMG 里的应用拖入 Applications。
+  如果 macOS 提示无法检查该应用是否包含恶意软件，按住 Control 点按应用并选择「打开」（macOS 15 及以后：在“系统设置 → 隐私与安全性”中选择「仍要打开」）。
+  关闭窗口后应用仍留在 Dock 中，直到退出。
+- **Windows**：运行安装程序；如果 SmartScreen 提示“Windows 已保护你的电脑”，点「更多信息」→「仍要运行」。
+  需要 Windows 的 OpenSSH 客户端（Windows 10 1809 及以后默认已安装）。
+  应用只能使用 SSH 机器：先在终端里用 `ssh <目标>` 连接每台机器一次以接受主机密钥，并使用 ssh agent 持有的密钥（`ssh-add`），因为应用无法询问密码。
+  没有内置 WSL 支持；运行 ssh 服务的 WSL 发行版可以作为 SSH 机器添加。
+- **Linux**：`sudo apt install ./herdr-ide-<version>-linux-amd64.deb`（Ubuntu 24.04 及以后需要用 deb 包，它让 Chromium 的沙箱能够运行）。
+  AppImage 需要先 `chmod +x`，并需要 FUSE 2（`libfuse2`，Ubuntu 24.04 上为 `libfuse2t64`）。
+
+没有自动更新：把新版本安装到旧版本上即可。
+也可以在当前系统上自行打包，内含同一套 core、Web UI、agent 和 VS Code 桥接扩展：
 
 ```bash
-make desktop-app                 # .app 位于 dist/desktop/mac[-arm64]/
-make desktop-dmg                 # .app 和可拖入 Applications 安装的 .dmg
-make desktop-install             # .app，并复制到 /Applications
-ARCH=x64 make desktop-dmg        # Intel；默认使用当前 Node 的架构
+make desktop-app                 # 未打包的应用，位于 dist/desktop/
+make desktop-dist                # 当前系统的安装包：DMG 和 zip、安装程序，或 AppImage 和 deb
+make desktop-install             # macOS：.app，并复制到 /Applications
+ARCH=x64 make desktop-dist       # 其他架构；默认使用当前 Node 的架构
 ```
 
-桌面版与浏览器使用统一的终端 pane 图标；
-macOS 版包含适用于 Finder 和 Dock 的多尺寸图标。
-
-从 Finder 把文件夹拖到侧栏或应用的 Dock 图标上，即可在本机为每个文件夹新建一个 workspace。
+从文件管理器把文件夹拖到侧栏、在 macOS 上拖到 Dock 图标，或在 Linux 上用「打开方式」以本应用打开，即可在本机为每个文件夹新建一个 workspace。
 拖到本机 pane 上的文件和文件夹直接粘贴原路径，不会上传。
 
-在桌面应用中，`cmd+t` 新建 tab，`cmd+w` 关闭 pane，`cmd+d` / `cmd+shift+d` 分屏，`cmd+n` 新建 workspace，`cmd+,` 打开设置，`cmd+shift+p` 打开命令面板，`cmd+j` 显示或隐藏 VS Code 面板；
+在 macOS 上，`cmd+t` 新建 tab，`cmd+w` 关闭 pane，`cmd+d` / `cmd+shift+d` 分屏，`cmd+n` 新建 workspace，`cmd+,` 打开设置，`cmd+shift+p` 打开命令面板，`cmd+j` 显示或隐藏 VS Code 面板。
+在 Windows 和 Linux 上，`ctrl+shift+t` 新建 tab，`ctrl+shift+w` 关闭 tab，`ctrl+shift+n` 新建 workspace，`ctrl+,` 打开设置，`ctrl+shift+p` 打开命令面板，`ctrl+shift+j` 显示或隐藏 VS Code 面板；
+其他按键（包括 `ctrl+c` 和 `ctrl+q`）都会发给终端。
 焦点在 VS Code 里时，VS Code 自己的快捷键优先。
 菜单栏显示当前生效的快捷键，使用界面的语言；
 标题栏跟随界面的主题。
 可在**设置 → 快捷键**中修改或移除快捷键，也可以绑定 `ctrl+b c` 这样的组合键；
 浏览器里 `cmd+t` / `cmd+w` 仍归浏览器自己使用。
 
-Electron 应用会以 `desktop` instance 启动自己的 core，监听 `http://127.0.0.1:7781`；
-退出应用或关闭主窗口时回收该 core。
+退出应用时会回收它的 core；各机器上的终端继续运行。
 仍需预先安装 OpenSSH。
-发布版和本地构建都使用 ad-hoc 签名，不含 Apple 公证或自动更新。
-版本号、数据目录和隔离开发方式见[桌面部署说明](docs/deployment.md#macos-desktop-app)。
-目前仅实现 macOS 打包。
+版本号、数据目录和隔离开发方式见[桌面部署说明](docs/deployment.md#desktop-app)。
 
 ## 远程访问
 

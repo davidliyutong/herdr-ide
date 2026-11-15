@@ -7,12 +7,27 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"runtime"
 	"sync"
 	"time"
 
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/transport"
 )
+
+// LocalSupported tells whether the local machine has an agent: the agent
+// (terminals, files, VS Code, program windows) runs on Linux and macOS. On
+// Windows the core reaches SSH machines only, and lists the local machine
+// in error with CodeLocalUnsupported.
+var LocalSupported = runtime.GOOS != "windows"
+
+// CodeLocalUnsupported is the code of the local machine where no agent runs
+// (State.Code): it is shown, never dialed.
+const CodeLocalUnsupported = "local_unsupported"
+
+// ErrLocalUnsupported is returned for dialing the local machine where no
+// agent runs.
+var ErrLocalUnsupported = errors.New("the local machine needs Linux or macOS")
 
 // Status of a machine connection.
 type Status string
@@ -30,7 +45,8 @@ type State struct {
 	Spec
 	Status Status `json:"status"`
 	// Code says why a machine in error is never dialed:
-	// CodeInvalidTarget for a stored ssh target ValidTarget refuses. Error
+	// CodeInvalidTarget for a stored ssh target ValidTarget refuses,
+	// CodeLocalUnsupported for the local machine on Windows. Error
 	// is what ssh or the agent said when a connection failed.
 	Code     string           `json:"code,omitempty"`
 	Error    string           `json:"error,omitempty"`
@@ -90,7 +106,7 @@ type Machine struct {
 	stopRun  context.CancelFunc
 	enableCh chan struct{}
 	// unusable is the code of a machine that is never dialed
-	// (CodeInvalidTarget); "" for the others.
+	// (CodeInvalidTarget, CodeLocalUnsupported); "" for the others.
 	unusable string
 
 	streams StreamHandler
@@ -115,7 +131,12 @@ func newMachine(spec Spec, dial Dialer, logger *log.Logger, publish func(State))
 		// shell's metacharacter: shown, so that it can be renamed or
 		// removed, and never dialed, enabled or not.
 		m.unusable = CodeInvalidTarget
-		m.state.Status, m.state.Code = StatusError, CodeInvalidTarget
+	}
+	if spec.Kind == KindLocal && !LocalSupported {
+		m.unusable = CodeLocalUnsupported
+	}
+	if m.unusable != "" {
+		m.state.Status, m.state.Code = StatusError, m.unusable
 	}
 	return m
 }

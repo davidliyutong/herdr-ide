@@ -56,14 +56,31 @@ jobs:
           path: dist/release/*.tar.gz
           if-no-files-found: error
 
-  # Ad-hoc signed macOS DMGs; electron-builder packages x64 on the arm64
-  # runner with the Intel Electron and a cross-compiled core.
+  # The desktop app's installers, each built on its own system: macOS DMG
+  # and zip (x64 on the arm64 runner, with the Intel Electron and a
+  # cross-compiled core), the Windows setup, Linux AppImage and deb (arm64
+  # packaged on x64). Everything is built without any secret; only the
+  # Package step, which runs electron-builder alone, gets the optional macOS
+  # Developer ID certificate and notarization credentials (ad hoc without
+  # them; Windows and Linux are not signed).
   desktop:
-    runs-on: macos-latest
     needs: encoder
     strategy:
+      fail-fast: false
       matrix:
-        arch: [arm64, x64]
+        include:
+          - { os: macos-26, platform: mac, arch: arm64 }
+          - { os: macos-26, platform: mac, arch: x64 }
+          - { os: windows-2025, platform: win, arch: x64 }
+          - { os: ubuntu-24.04, platform: linux, arch: x64 }
+          - { os: ubuntu-24.04, platform: linux, arch: arm64 }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      ARCH: ${{ matrix.arch }}
+      VERSION: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -86,15 +103,27 @@ jobs:
           path: dist/ffmpeg
       - name: Place the video encoders
         run: for d in dist/ffmpeg/encoder-*; do mv "$d" "dist/ffmpeg/${d#dist/ffmpeg/encoder-}"; done
-      - run: make desktop-dmg
+      - run: scripts/desktop.sh build
         env:
-          ARCH: ${{ matrix.arch }}
-          VERSION: ${{ github.ref_name }}
           REQUIRE_ENCODER: 1
+      - name: Package
+        run: scripts/desktop.sh dist
+        env:
+          SKIP_BUILD: 1
+          CSC_LINK: ${{ matrix.platform == 'mac' && secrets.MACOS_SIGN_CERTIFICATE || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.platform == 'mac' && secrets.MACOS_SIGN_CERTIFICATE_PASSWORD || '' }}
+          APPLE_ID: ${{ matrix.platform == 'mac' && secrets.MACOS_NOTARY_APPLE_ID || '' }}
+          APPLE_TEAM_ID: ${{ matrix.platform == 'mac' && secrets.MACOS_NOTARY_TEAM_ID || '' }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.platform == 'mac' && secrets.MACOS_NOTARY_PASSWORD || '' }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: desktop-${{ matrix.arch }}
-          path: dist/desktop/*.dmg
+          name: desktop-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            dist/desktop/*.dmg
+            dist/desktop/*.zip
+            dist/desktop/*.exe
+            dist/desktop/*.AppImage
+            dist/desktop/*.deb
           if-no-files-found: error
 
   publish:
@@ -111,7 +140,7 @@ jobs:
           path: dist/release
           merge-multiple: true
       - name: Checksums
-        run: cd dist/release && shasum -a 256 *.tar.gz *.dmg > SHA256SUMS && cat SHA256SUMS
+        run: cd dist/release && shasum -a 256 *.tar.gz *.dmg *.zip *.exe *.AppImage *.deb > SHA256SUMS && cat SHA256SUMS
       # GitHub stores attestations for public repositories (private ones need
       # GitHub Enterprise Cloud); a private repository releases without
       # provenance.
@@ -125,4 +154,4 @@ jobs:
         run: |
           ver=${GITHUB_REF_NAME#v}
           awk -v v="$ver" '$0 ~ "^## \\[" v "\\]" {p=1; next} /^## \[/ {p=0} p' CHANGELOG.md > notes.md
-          gh release create "$GITHUB_REF_NAME" dist/release/*.tar.gz dist/release/*.dmg dist/release/SHA256SUMS --notes-file notes.md --verify-tag
+          gh release create "$GITHUB_REF_NAME" dist/release/*.tar.gz dist/release/*.dmg dist/release/*.zip dist/release/*.exe dist/release/*.AppImage dist/release/*.deb dist/release/SHA256SUMS --notes-file notes.md --verify-tag

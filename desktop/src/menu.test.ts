@@ -5,7 +5,8 @@ import registry from '../../design/generated/registry.json';
 import { translate } from '../../web/src/i18n';
 import { en, type MessageKey } from '../../web/src/i18n/en';
 import { zhCN } from '../../web/src/i18n/zh-CN';
-import { accelerator, menus, menuTemplate, type Binding } from './menu';
+import { accelerator, menus, menusFor, menuTemplate, type Binding } from './menu';
+import type { Platform } from './platform';
 
 const mac = registry.keybindings.mac as Binding[];
 
@@ -37,14 +38,16 @@ test('accelerators: one stroke, shifted punctuation as its character', () => {
 
 type Built = MenuItemConstructorOptions & { submenu: MenuItemConstructorOptions[] };
 
-/** The built menu for bindings, in English, with the commands its items ran. */
-function build(bindings: Binding[]) {
+/** The built menu of a platform for bindings, in English, with the commands
+ * its items ran. */
+function build(bindings: Binding[], platform: Platform = 'darwin') {
   const ran: string[] = [];
   const template = menuTemplate(
     bindings,
     'App',
     (key, vars) => translate('en', key, vars),
     (command) => () => ran.push(command),
+    platform,
   ) as Built[];
   const items = template.flatMap((m) => m.submenu);
   const byCommand = (id: string) => items.find((it) => it.id === id)!;
@@ -76,12 +79,35 @@ test('items show the first single-stroke key of their command and run it', () =>
   assert.deepEqual(ran, ['tab.new']);
 });
 
-test('on other systems the menu shows the Ctrl+Shift keys and leaves them to the page', () => {
-  const { byCommand } = build(registry.keybindings.pc as Binding[]);
-  assert.equal(byCommand('app.commandPalette').accelerator, 'Control+Shift+P');
-  assert.equal(byCommand('app.commandPalette').registerAccelerator, false);
-  assert.equal(byCommand('tab.new').accelerator, 'Control+Shift+T');
-  assert.equal(byCommand('pane.splitRight').accelerator, undefined);
+test('on Windows and Linux, File and Help menus; the keys are shown and every one is left to the page', () => {
+  for (const p of ['win32', 'linux'] as const) {
+    const { template, byCommand, items } = build(registry.keybindings.pc as Binding[], p);
+    assert.deepEqual(
+      template.map((m) => m.label),
+      ['File', 'Shell', 'Edit', 'View', 'Window', 'Help'],
+    );
+    assert.deepEqual(
+      template[0].submenu.map((it) => it.label ?? '-'),
+      ['Settings…', 'Keyboard Shortcuts…', '-', p === 'win32' ? 'Exit' : 'Quit App'],
+    );
+    assert.equal(template.at(-1)!.submenu[0].role, 'about');
+    assert.equal(
+      items.find((it) => it.role === 'hide'),
+      undefined,
+    );
+    assert.equal(byCommand('app.commandPalette').accelerator, 'Control+Shift+P');
+    assert.equal(byCommand('tab.new').accelerator, 'Control+Shift+T');
+    assert.equal(byCommand('pane.splitRight').accelerator, undefined);
+    // Ctrl+C, Ctrl+M, Ctrl+Q… are programs' keys in terminals: no item takes one.
+    for (const it of items) if (it.role || it.accelerator) assert.equal(it.registerAccelerator, false, String(it.label));
+  }
+  // The same commands everywhere.
+  const commands = (p: Platform) =>
+    menusFor(p)
+      .flatMap((m) => m.items)
+      .flatMap((it) => (it !== '-' && 'command' in it ? [it.command] : []))
+      .sort();
+  assert.deepEqual(commands('win32'), commands('darwin'));
 });
 
 /** The bindings the core works out after the user's rules: a rule adds its
@@ -120,6 +146,7 @@ test('titles follow the language', () => {
     'App',
     (key, vars) => translate('zh-CN', key, vars),
     () => () => {},
+    'darwin',
   ) as Built[];
   assert.deepEqual(
     template.map((m) => m.label),

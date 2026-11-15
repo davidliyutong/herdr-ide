@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -132,7 +133,7 @@ func TestMergeOrder(t *testing.T) {
 	if v := st.Values["a.mode"]; v.Value != "x" || v.Source != SourceDefault {
 		t.Errorf("state = %+v", v)
 	}
-	if fi, err := os.Stat(path); err != nil || fi.Mode().Perm() != 0o600 {
+	if fi, err := os.Stat(path); err != nil || runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600 {
 		t.Errorf("file mode: %v %v", fi, err)
 	}
 

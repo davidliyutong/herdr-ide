@@ -122,7 +122,7 @@ export function App() {
     const offFolders = takeOpenedFolders();
     fetch('/api/config')
       .then((r) => r.json())
-      .then((c) => useStore.getState().setReadOnly(!!c.read_only))
+      .then((c) => useStore.setState({ readOnly: !!c.read_only, sshLogin: c.ssh_login !== false }))
       .catch(() => {});
     const off = onChordChange(setChord);
     // Bindings also work when the focus is outside a terminal.

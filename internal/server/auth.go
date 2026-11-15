@@ -18,7 +18,9 @@ import (
 
 // handleAuth runs an interactive ssh login for a machine in a PTY on the core
 // host and bridges it to a WebSocket. The ControlMaster it creates is reused
-// by the BatchMode agent connection afterwards.
+// by the BatchMode agent connection afterwards; without a control directory
+// (Windows, whose ssh shares no connections and which has no PTY here) a
+// login would hold nothing, and it is refused.
 func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
 	mc := s.machine(w, r)
 	if mc == nil {
@@ -32,6 +34,10 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
 	// A stored target ValidTarget refuses never reaches ssh.
 	if !machines.ValidTarget(st.Target) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": machines.CodeInvalidTarget})
+		return
+	}
+	if s.opts.ControlDir == "" {
+		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "ssh_login_unsupported"})
 		return
 	}
 	s.audit.log(r, "ssh.auth", map[string]any{"machine": mc.ID(), "target": st.Target})

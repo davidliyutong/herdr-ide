@@ -61,7 +61,9 @@ Non-goals: emulating terminals (the browser UI does,
 [26](26-web-terminals.md)); clients
 reach these terminals through [22](22-terminal-protocol.md); herdr-core's own machine links
 (`machine.add`): machines are reached through the agent
-([02](02-multi-machine-transport.md)); Windows.
+([02](02-multi-machine-transport.md)); Windows (a core on Windows has no
+local machine and reaches the terminal cores of SSH machines,
+[02](02-multi-machine-transport.md)).
 
 ## Design
 

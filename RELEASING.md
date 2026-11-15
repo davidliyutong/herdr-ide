@@ -30,19 +30,34 @@ match; the bridge extension is reinstalled whenever its content changes.
    agent platform and the encoders, and is packaged with `LICENSE`,
    `THIRD_PARTY_NOTICES.md`, the web UI's `licenses.md` and `licenses/`
    (`herdr-core/`, `herdr-detect/`, `encoder/`). No herdr is built or
-   shipped. On macOS runners it builds the Electron app's DMGs for arm64
-   and x64 (`make desktop-dmg` with the tag as `VERSION`; ad-hoc signed,
-   not notarized); no signing secrets are used. Every action the workflows
-   use is pinned by its commit (with the version in a comment). The
-   workflow then writes `SHA256SUMS` over the archives and DMGs,
-   attests build provenance for them (only while the repository is public:
-   GitHub stores no attestations for private repositories outside
-   Enterprise Cloud) and creates the GitHub release with the changelog
-   section as notes. Nothing is published unless every build succeeds.
+   shipped. Its `desktop` job builds the Electron app's installers, each
+   on its own system with the tag as `VERSION`: the macOS DMG and zip for
+   arm64 and x64 (`macos-26`), the Windows setup for x64 (`windows-2025`)
+   and the Linux AppImage and deb for x64 and arm64 (`ubuntu-24.04`). Its
+   build step (`scripts/desktop.sh build`) has no secrets; the Package
+   step (`SKIP_BUILD=1 scripts/desktop.sh dist`) gets, on macOS only, the
+   optional repository secrets `MACOS_SIGN_CERTIFICATE` (a Developer ID
+   Application certificate, base64 of the `.p12`, as `CSC_LINK`),
+   `MACOS_SIGN_CERTIFICATE_PASSWORD` (`CSC_KEY_PASSWORD`),
+   `MACOS_NOTARY_APPLE_ID`, `MACOS_NOTARY_TEAM_ID` and
+   `MACOS_NOTARY_PASSWORD` (an app-specific password). With the
+   certificate the macOS app is signed with that Developer ID, notarized
+   when the notary secrets are set too; without it it is signed ad hoc.
+   The Windows and Linux packages are not signed. Every action the
+   workflows use is pinned by its commit (with the version in a comment).
+   The workflow then writes `SHA256SUMS` over the archives and installers
+   (`*.tar.gz`, `*.dmg`, `*.zip`, `*.exe`, `*.AppImage`, `*.deb`), attests
+   build provenance for them (only while the repository is public: GitHub
+   stores no attestations for private repositories outside Enterprise
+   Cloud) and creates the GitHub release with the changelog section as
+   notes. Nothing is published unless every build succeeds.
 7. Smoke test a downloaded archive: `sha256sum -c SHA256SUMS`, `version`,
-   then start with `--local-only` and open the UI. On a Mac, open the DMG,
-   drag the app to Applications, allow it once under System Settings →
-   Privacy & Security, and check that it starts its core and loads the UI.
+   then start with `--local-only` and open the UI. Install the desktop app
+   on each system ([deployment](docs/deployment.md#desktop-app)) and check
+   that it starts its core and loads the UI: on a Mac from the DMG
+   (allowing it once if it is signed ad hoc), on Windows with the setup
+   (adding an SSH machine with a key in the ssh agent), on Linux with the
+   deb (and the AppImage where FUSE 2 is installed).
 
 Builds are reproducible for a given commit and toolchain (fixed timestamps in
 gzip and the VSIX, `-trimpath`), so a local

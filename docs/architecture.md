@@ -16,18 +16,21 @@ desktop app (Electron shell)                            ├─ machines: registr
 ```
 
 The local machine's agent runs inside the core (an in-process socket pair
-instead of ssh), so both paths run the same code.
+instead of ssh), so both paths run the same code. The agent is built for
+Linux and macOS only: a core on Windows (the desktop app's) has no local
+machine, lists it with the code `local_unsupported`, and reaches SSH
+machines only ([02](features/02-multi-machine-transport.md)).
 
 | Directory | Role |
 | --- | --- |
-| `cmd/herdr-ide` | Core entry point: flags, `serve`, `fetch-assets`, `version`. |
-| `cmd/herdr-ide-agent` | Agent entry point (`serve` over stdio). |
+| `cmd/herdr-ide` | Core entry point: flags, `serve`, `fetch-assets`, `version`; the local machine's in-process agent (`local_unix.go`; `local_windows.go` dials none). Builds for Linux, macOS and Windows. |
+| `cmd/herdr-ide-agent` | Agent entry point (`serve` over stdio); Linux and macOS only (`//go:build unix`). |
 | `internal/brand` | Product names; the only place they are defined in Go. |
-| `internal/agentproto` | Stream protocol shared by core and agent. |
-| `internal/agent` | Agent: the terminal core, agent detection, files, code-server supervision, virtual displays, bridge listener, housekeeping. |
+| `internal/agentproto` | Stream protocol shared by core and agent, and the yamux configuration of both ends (`yamux.go`). |
+| `internal/agent` | Agent: the terminal core, agent detection, files, code-server supervision, virtual displays, bridge listener, housekeeping. Every file is `//go:build unix` (unix sockets with peer checks, process groups, Xvfb), so code the core runs on Windows does not import it. |
 | `internal/agent/detect` | Which coding agent a terminal's foreground process is and its state from the screen, by herdr's method and manifests (embedded, Apache-2.0), with the state machine for debouncing and done ([25](features/25-agent-detection.md)). |
-| `internal/transport` | yamux sessions: in-process for the local machine, ssh stdio for others; agent upload. |
-| `internal/machines` | The core's machines (`Registry`: SSH machines in `machines[-<instance>].json`, the SSH machines herdr saved imported once when that file does not exist; entries and fields it does not use are written back as they were), added, removed, renamed, enabled and disabled at runtime; the connection state machine; the ssh target rule (`ValidTarget`; a stored machine whose target fails is listed with `invalid_target` and never dialed). |
+| `internal/transport` | yamux sessions: in-process for the local machine (`local.go`, unix), ssh stdio for others; agent upload; the ssh control directory (`sys_unix.go`: private, under `/tmp`; `sys_windows.go`: none, since Win32-OpenSSH has no ControlMaster, and ssh started without a console window). |
+| `internal/machines` | The core's machines (`Registry`: SSH machines in `machines[-<instance>].json`, the SSH machines herdr saved imported once when that file does not exist; entries and fields it does not use are written back as they were), added, removed, renamed, enabled and disabled at runtime; the connection state machine; the ssh target rule (`ValidTarget`; a stored machine whose target fails is listed with `invalid_target` and never dialed); the local machine of a core on Windows, listed with `local_unsupported` and never dialed (`LocalSupported`). |
 | `internal/hc` | Client of herdr-core's API (protocol generation 1): JSON-RPC calls, attached terminals as raw byte streams with credit, event subscriptions. |
 | `internal/hcdist` | herdr-core release embedded for machines: version, upstream archive names and SHA-256 digests ([21](features/21-terminal-core.md)). |
 | `internal/checksum` | SHA-256 of files, shared by the code-server downloads. |
@@ -36,33 +39,39 @@ instead of ssh), so both paths run the same code.
 | `internal/keybindings` | Commands, default keys per platform, the user's keybindings file, the bindings in effect and their conflicts; the key syntax shared with the clients. |
 | `internal/uisettings` | The user interfaces' settings (appearance, layout, terminal, colors, notifications); `tokens.go` is generated from the design tokens. |
 | `internal/registry` | What the core registers: the setting modules and the commands (used by the core and `scripts/registry`). |
-| `internal/userfile` | Atomic writes and change detection of the hand-editable files. |
+| `internal/userfile` | Atomic writes and change detection of the hand-editable files; the configuration directory made private on Linux and macOS (`private_unix.go`; on Windows its access control list keeps it the user's). |
 | `internal/gui` | Virtual displays on machines, their windows, frames and input between agents and browser windows. |
 | `internal/jpegstrip` | JPEG encoding of a window capture in independent row groups, encoded in parallel (from Go's `image/jpeg`, BSD). |
 | `internal/server` | HTTP/WS front: guards, the event channel, terminal streams, files, proxy, bridge, audit. |
 | `internal/embedded` | Build artifacts compiled into the core (agents, herdr-core, the video encoder, bridge VSIX). |
 | `web` | Browser UI (Vite, React, zustand): the terminals of the machines' terminal cores (`src/term`: the client of `/api/v1/term` and the layout document; `src/state/terms.ts`: the machines' terminals and layouts; `src/vt`: Ghostty's terminal library as WebAssembly with its renderer and input encoders, also for the PTY dialogs, [26](features/26-web-terminals.md)); `web/embed.go` embeds `web/dist`. |
-| `desktop` | Electron shell (`src`: the owned core process, the client of its settings and keybindings, the application menu, the main window's preload and policy) and electron-builder config; macOS `.app`/DMG wrapping the embedded core. |
+| `desktop` | Electron shell for macOS, Windows and Linux (`src`: the owned core process, what differs per system (`platform.ts`), the client of its settings and keybindings, the application menu, the main window's preload and policy) and electron-builder config: macOS DMG and zip, Windows NSIS setup, Linux AppImage and deb, each wrapping the core built for its system. |
 | `extensions/herdr-ide-bridge` | VS Code extension installed into code-server. |
-| `scripts` | Build, packaging and check scripts (`build.sh`, `package.sh`, `desktop.sh`, `check.sh`), the pinned downloads (`fetch-hc`, `fetch-ghostty-vt.sh` for the web UI's emulator, `build-ffmpeg.sh` for the video encoder) and the generators (`tokens`, `registry`). |
+| `scripts` | Build, packaging and check scripts (`build.sh`, which also builds a Windows core; `package.sh`, archives for Linux and macOS; `desktop.sh`, the desktop app of each system; `icons.sh`; `check.sh`, which vets for Linux, macOS and Windows too), the pinned downloads (`fetch-hc`, `fetch-ghostty-vt.sh` for the web UI's emulator, `build-ffmpeg.sh` for the video encoder) and the generators (`tokens`, `registry`). |
 | `design` | Design tokens (`tokens.json`): colors in light and dark, metrics, font sizes and terminal palettes; `scripts/tokens` generates `web/src/tokens.css` and the terminal colors' setting defaults (`internal/uisettings/tokens.go`) from them. `generated/registry.json` (`scripts/registry`): setting defaults, commands, default bindings per platform and the translation keys the web UI needs for them. `testdata/layout`: the layout document's test vectors (directional focus and pane drops included), run by the web UI's tests ([22](features/22-terminal-protocol.md)); `testdata/keys`: the key syntax's vectors, run by the web UI's tests (`parse.json` by Go's too); `testdata/math`: the formulas found in terminal text, run by the web UI's tests ([19](features/19-formulas-in-panes.md)); `testdata/machines`: the ssh target rule's vectors, run by Go and the web UI's tests. |
 
 ## Desktop launcher
 
-The optional Electron shell (`desktop/src/main.ts`) spawns the bundled core
-from `Contents/Resources/bin/` with `--parent-stdio`, loopback port 7781 and
-instance `desktop`. The core writes one `{ "event": "ready", "url": "…" }`
-line to stdout after binding its listener; stderr carries logs. The shell
-loads only that owned core's URL. Closing the parent stdin pipe cancels the
-core's context, including when Electron crashes. Normal quit sends SIGTERM
-and waits up to 20 seconds before killing the owned core.
+The optional Electron shell (`desktop/src/main.ts`) runs on macOS, Windows
+and Linux (`desktop/src/platform.ts` holds what differs). It spawns the
+bundled core from its resources (`bin/herdr-ide`, `bin/herdr-ide.exe` on
+Windows) with `--parent-stdio`, loopback port 7781 and instance `desktop`.
+The core writes one `{ "event": "ready", "url": "…" }` line to stdout after
+binding its listener; stderr carries logs. The shell loads only that owned
+core's URL. Closing the parent stdin pipe cancels the core's context, and
+it is how the shell stops the core on every system (no signal is sent;
+Windows has none a process can clean up after), also when Electron
+crashes; a core that has not exited after 20 seconds is killed. On macOS
+the app and its core keep running in the Dock when the main window closes;
+on Windows and Linux closing it quits.
 
 The shell is a client of its core (`desktop/src/follow.ts`): it holds its
 own `/ws` connection, reads `GET /api/settings` and `GET /api/keybindings`
 when it opens and applies the `settings` and `keybindings` messages after
 every change. The theme setting becomes the native title bar's and
 controls', the language the menu's. The application menu
-(`desktop/src/menu.ts`: the application's, Shell, Edit, View and Window)
+(`desktop/src/menu.ts`: on macOS the application's, Shell, Edit, View and
+Window; on Windows and Linux File, Shell, Edit, View, Window and Help)
 holds the keybindings' commands for terminals, splits, workspaces, tabs,
 find, the palette, the sidebar, VS Code, zoom and focus; each command item
 shows the first single-stroke key its command has, and is rebuilt when the
@@ -70,17 +79,19 @@ keybindings or the language change.
 
 The renderer reuses the browser UI with no Node APIs, sandboxing and context
 isolation. The page matches every key it sees itself (`web/src/keymap.ts`),
-with the desktop platform's bindings, and cancels the keys it runs; the menu
-acts only on keys the page left (a text field, VS Code or another window has
-the keyboard), so a key runs once
-([04](features/04-layout-and-keyboard.md)). The main window's preload exposes
-only `desktopShell`: the commands of menu items chosen, where a file or folder
-dropped from Finder is on disk (to create a workspace there or paste its path
-into a pane of the local machine), and the folders dropped on the Dock icon,
-also when the drop launched the app. Same-origin popups become equally
-restricted native windows; HTTP(S) links outside the core open in the default
-browser. Packaging and lifecycle details are in
-[16](features/16-desktop-packaging.md).
+with the desktop platform's bindings (`mac`, or `pc` on Windows and Linux),
+and cancels the keys it runs. On macOS the menu acts only on keys the page
+left (a text field, VS Code or another window has the keyboard), so a key
+runs once; on Windows and Linux it registers no key and every key goes to
+the page ([04](features/04-layout-and-keyboard.md)). The main window's
+preload exposes only `desktopShell`: the commands of menu items chosen,
+where a file or folder dropped from the file manager is on disk (to create a
+workspace there or paste its path into a pane of the local machine), and
+the folders opened with the app (dropped on the Dock icon on macOS, named
+on the command line by a file manager's Open With on Linux), also when they
+launched it. Same-origin popups become equally restricted native windows;
+HTTP(S) links outside the core open in the default browser. Packaging and
+lifecycle details are in [16](features/16-desktop-packaging.md).
 
 ## Core ↔ agent protocol (`internal/agentproto`)
 
@@ -128,9 +139,12 @@ HTTP endpoints besides files (`GET /api/m/{id}/file`, `GET /api/m/{id}/list`,
 and `GET /api/m/{id}/download?path=…[&dl=<id>]`: one file as an attachment,
 anything else as a zip from `fs.archive`; `download.cancel` over `/ws`
 breaks a followed download off), uploads and the code-server proxy:
-`GET /api/config`, `GET /api/machines` (every machine's state: the record,
-`status`, the agent's `info`, `hc {state, code, version}` while the core
-has a connection to the machine's terminal core), `GET /api/gui`
+`GET /api/config` (with `ssh_login`: whether the core offers the
+interactive ssh login, false on Windows), `GET /api/machines` (every
+machine's state: the record, `status`, `code` for a machine never
+connected (`invalid_target`, `local_unsupported`), the agent's `info`,
+`hc {state, code, version}` while the core has a connection to the
+machine's terminal core), `GET /api/gui`
 (the program windows of every machine, as the `gui` messages of `/ws`),
 `GET`/`PUT`/`DELETE /api/settings` (definitions, values, problems; one
 value set or removed) and `GET`/`PUT /api/keybindings` (commands, defaults,
@@ -143,7 +157,8 @@ machine; `201` with its state, `409 machine_exists`),
 `PUT /api/m/{id}/enabled` (`{"enabled": bool}`) and `DELETE /api/m/{id}`
 change the core's machines file and the running machine; the WebSocket
 `GET /api/m/{id}/auth` is the interactive ssh login of an *auth_required*
-machine. `GET /api/m/{id}/hc` and `POST /api/m/{id}/hc/{start|stop|restart}`
+machine (`501 ssh_login_unsupported` on a core without ssh control
+sockets, Windows). `GET /api/m/{id}/hc` and `POST /api/m/{id}/hc/{start|stop|restart}`
 report, start, stop and restart its terminal core. When machines come or
 go the core sends every browser a new `machines {list}`; a renamed machine
 arrives as its `machine {state}`. A program window is shown by

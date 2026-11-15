@@ -1,3 +1,5 @@
+//go:build unix
+
 // Command herdr-ide-agent is the per-machine helper started by herdr-ide over
 // ssh. It speaks yamux on stdin/stdout; logs go to stderr.
 package main

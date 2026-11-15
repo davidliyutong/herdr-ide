@@ -68,8 +68,10 @@ core on `127.0.0.1:7781`, [16](16-desktop-packaging.md)).
    user from `--user-header` or common proxy headers.
 
 **Startup checks** (`cmd/herdr-ide`): a non-loopback `--listen` is refused
-unless a proxy secret is configured or `--insecure-listen` is given; the ssh
-control directory must be private ([02](02-multi-machine-transport.md)).
+unless a proxy secret is configured or `--insecure-listen` is given; on
+Linux and macOS the ssh control directory must be private (a core on
+Windows keeps none and offers no ssh login,
+[02](02-multi-machine-transport.md)).
 
 **On machines**: nothing listens on TCP; sockets (the terminal core's
 `hc.sock`, code-server's `cs.sock`, the bridge's `bridge.sock`) live in the
@@ -107,7 +109,10 @@ reaches only sockets there ([02](02-multi-machine-transport.md)).
 - `internal/server/settings_test.go` (`TestSettingsReadOnly`),
   `internal/server/machines_test.go` (read-only browsers refused, the
   terminal core's endpoints guarded: `TestHCEndpointsGuard`).
-- `internal/transport/controldir_test.go`: control directory ownership and
-  modes (`TestCheckPrivateDir`); `internal/agent/agent_test.go`: the private
+- `internal/transport/sys_unix_test.go`: control directory ownership and
+  modes (`TestCheckPrivateDir`); `internal/transport/transport_test.go`:
+  no control options without one (`TestSSHArgsWithoutControlDir`);
+  `internal/server/machines_test.go`: no ssh login without one
+  (`TestSSHLoginNeedsAControlDir`); `internal/agent/agent_test.go`: the private
   run directory and `dial-unix` restricted to it
   (`TestHelloAndPrivateRunDir`, `TestDialRestriction`).

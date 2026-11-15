@@ -41,15 +41,25 @@ Cutting a release:
 3. Tag `vX.Y.Z` (semantic versioning; the version is injected from
    `git describe` by `scripts/build.sh`).
 4. Build: `TARGETS="linux/amd64 linux/arm64 darwin/amd64 darwin/arm64" scripts/build.sh`
-   writes the archives and `dist/release/SHA256SUMS`. On a Mac,
-   `ARCH=arm64 VERSION=vX.Y.Z make desktop-dmg` (and `ARCH=x64`) builds the
-   DMGs into `dist/desktop/` (ad hoc signed, not notarized). Pushing the
-   tag runs the same builds in the `release` workflow: the archives on
-   Linux, the DMGs (arm64 and x64) on macOS runners, then one `SHA256SUMS`
-   and build provenance over all of them (`RELEASING.md`).
+   writes the archives and `dist/release/SHA256SUMS`.
+   `ARCH=<arm64|x64> VERSION=vX.Y.Z make desktop-dist` builds the desktop
+   installers of the system it runs on into `dist/desktop/`: the DMG and
+   zip on a Mac (ad hoc signed unless `CSC_LINK`/`CSC_KEY_PASSWORD` or
+   `CSC_NAME` name a Developer ID, notarized with `APPLE_ID`,
+   `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID`), the setup on
+   Windows (x64; `scripts/desktop.sh dist` in Git Bash), the AppImage and
+   deb on Linux; Windows and Linux packages are unsigned. Pushing the tag
+   runs the same builds in the `release` workflow: the archives on Linux,
+   the installers on their own systems (macOS arm64 and x64, Windows x64,
+   Linux x64 and arm64), with the optional macOS signing secrets
+   (`MACOS_SIGN_CERTIFICATE`, `MACOS_SIGN_CERTIFICATE_PASSWORD`,
+   `MACOS_NOTARY_APPLE_ID`, `MACOS_NOTARY_TEAM_ID`,
+   `MACOS_NOTARY_PASSWORD`) given only to the macOS Package step, then one
+   `SHA256SUMS` and build provenance over all of them (`RELEASING.md`).
 5. Smoke test the host binary: `version`, start with `--local-only`, open
-   the UI; on a Mac, install the DMG and check that the app starts its core
-   and shows the terminals.
+   the UI; install the desktop app on each system available (DMG, setup,
+   deb or AppImage) and check that it starts its core and shows the
+   terminals (on Windows, of an SSH machine).
 
 Report the version, the changes to pinned digests, and the artifact list with
-checksums.
+checksums (archives, DMGs and zips, the Windows setup, AppImages and debs).
