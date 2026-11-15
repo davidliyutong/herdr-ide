@@ -1,6 +1,7 @@
 // Dragging a pane by its header onto another pane swaps the two (centre) or
 // places the dragged pane beside the target (edges); dropping it on a tab
-// moves it into that tab, on the new-tab button into a new tab. These are
+// moves it into that tab, on the new-tab button into a new tab, on another
+// workspace of its machine in the sidebar into a new tab there. These are
 // edits of the machine's layout document (term/layout.ts).
 
 import { trackDrag, type Box, type DragStart } from './drag';
@@ -11,7 +12,8 @@ import { t } from './i18n';
 export type DropTarget =
   | { kind: 'pane'; pane: string; zone: Zone; rect: DOMRect }
   | { kind: 'tab'; ws: string; index: number; rect: DOMRect }
-  | { kind: 'newTab'; ws: string; rect: DOMRect };
+  | { kind: 'newTab'; ws: string; rect: DOMRect }
+  | { kind: 'workspace'; ws: string; rect: DOMRect };
 
 export interface DragSource {
   m: string;
@@ -45,6 +47,10 @@ function findTarget(src: DragSource, x: number, y: number): DropTarget | undefin
   }
   const add = el?.closest<HTMLElement>('[data-new-tab]');
   if (add && add.dataset.m === src.m) return { kind: 'newTab', ws: add.dataset.newTab!, rect: add.getBoundingClientRect() };
+  // Another workspace of the machine, in the sidebar.
+  const row = el?.closest<HTMLElement>('.ws-item[data-ws-id]');
+  if (row && row.dataset.m === src.m && row.dataset.wsId !== src.ws)
+    return { kind: 'workspace', ws: row.dataset.wsId!, rect: row.getBoundingClientRect() };
 }
 
 /** The part of the target a drop would fill, for the highlight. */
@@ -73,6 +79,7 @@ export function dropped(l: L.Layout, src: DragSource, tg: DropTarget): L.Layout 
     const target = l.workspaces.find((w) => w.id === tg.ws)?.tabs[tg.index]?.focused;
     return target ? L.movePane(l, src.pane, target, 'horizontal') : l;
   }
+  // The new-tab button, or another workspace in the sidebar.
   return L.moveToNewTab(l, src.pane, tg.ws);
 }
 

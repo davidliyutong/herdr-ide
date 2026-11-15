@@ -156,7 +156,6 @@ func TestMachineRename(t *testing.T) {
 		{false, "PUT", "/api/m/gpu/label", `{"label":"a\u0007b"}`, 400, "invalid"},
 		{false, "PUT", "/api/m/gpu/label", `{}`, 400, "invalid"},
 		{false, "PUT", "/api/m/gpu/label", `{"label":"extra"}`, 409, "label_taken"},
-		{false, "PUT", "/api/m/local/label", `{"label":"x"}`, 400, "local"},
 		{false, "PUT", "/api/m/nope/label", `{"label":"x"}`, 404, "unknown"},
 		{true, "PUT", "/api/m/gpu/label", `{"label":"x"}`, 403, "read-only"},
 	})
@@ -170,7 +169,48 @@ func TestMachineRename(t *testing.T) {
 	if w := f.request(f.srv, "PUT", "/api/m/extra/label", `{"label":"Extra"}`); w.Code != http.StatusOK || f.mg.Get("extra").Label() != "Extra" || len(f.stored()) != 1 {
 		t.Fatalf("--ssh machine: %d %s %+v", w.Code, w.Body, f.stored())
 	}
+	if w := f.request(f.srv, "PUT", "/api/m/local/label", `{"label":"Workstation"}`); w.Code != http.StatusOK || f.mg.Get("local").Label() != "Workstation" {
+		t.Fatalf("local machine: %d %s", w.Code, w.Body)
+	}
 	f.audited(`"event":"machine.rename"`, `"from":"gpu"`, `"label":"-GPU box"`)
+}
+
+// Ordering names every machine once; the order is stored, and a core that
+// starts over the machines file lists them in it.
+func TestMachineOrder(t *testing.T) {
+	f := newMachinesFixture(t)
+	f.run([]httpCase{
+		{false, "PUT", "/api/machines/order", `{}`, 400, "invalid"},
+		{false, "PUT", "/api/machines/order", `{"order":["gpu","local"]}`, 400, "invalid"},
+		{false, "PUT", "/api/machines/order", `{"order":["gpu","gpu","local"]}`, 400, "invalid"},
+		{false, "PUT", "/api/machines/order", `{"order":["gpu","nope","local"]}`, 400, "invalid"},
+		{true, "PUT", "/api/machines/order", `{"order":["gpu","extra","local"]}`, 403, "read-only"},
+	})
+	ids := func(mg *machines.Manager) []string {
+		var out []string
+		for _, st := range mg.States() {
+			out = append(out, st.ID)
+		}
+		return out
+	}
+	want := []string{"gpu", "extra", "local"}
+	if w := f.request(f.srv, "PUT", "/api/machines/order", `{"order":["gpu","extra","local"]}`); w.Code != http.StatusOK || !reflect.DeepEqual(ids(f.mg), want) {
+		t.Fatalf("order: %d %s %v", w.Code, w.Body, ids(f.mg))
+	}
+	reg, err := machines.OpenRegistry(f.path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mg := machines.NewManager([]machines.Spec{
+		{ID: machines.LocalID, Label: "local", Kind: machines.KindLocal, Enabled: true},
+		{ID: "new", Label: "new", Kind: machines.KindSSH, Target: "new", Enabled: true},
+		{ID: "gpu", Label: "gpu", Kind: machines.KindSSH, Target: "u@gpu", Enabled: true},
+	}, nil, log.New(io.Discard, "", 0))
+	mg.UseRegistry(reg)
+	if got := ids(mg); !reflect.DeepEqual(got, []string{"gpu", "local", "new"}) {
+		t.Fatalf("after a restart: %v", got)
+	}
+	f.audited(`"event":"machine.order"`)
 }
 
 // Removing drops the machine and its record; the local machine stays.

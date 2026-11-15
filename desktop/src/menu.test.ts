@@ -109,7 +109,7 @@ test('items show the first single-stroke key of their command and run it', () =>
     ['Hide Others', 'Show All', 'Toggle Full Screen', 'Minimize', 'Zoom', 'Bring All to Front'],
   );
   // Commands without a default key are items without one.
-  for (const id of ['workspace.rename', 'tab.rename', 'workspace.close', 'app.addMachine']) {
+  for (const id of ['workspace.edit', 'tab.rename', 'workspace.close', 'app.addMachine']) {
     assert.equal(byCommand(id).accelerator, undefined, id);
     assert.ok(byCommand(id).label, id);
   }

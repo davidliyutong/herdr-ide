@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useStore } from './state/store';
 import { terms, useTerms } from './state/terms';
+import { rememberFollowed } from './state/followed';
 import { paneHandle } from './state/panes';
 import { conn } from './lib/conn';
 import { Sidebar } from './components/Sidebar';
@@ -55,13 +56,16 @@ function pasteToAgent(m: string, text: string, window?: string, folders?: string
   if (!paste()) setTimeout(paste, 300);
 }
 
-/** Follows the shown machine's terminals and keeps the store's view of its
+/** Follows the shown machine's terminals (and those followed before,
+ * state/followed.ts) and keeps the store's view of its
  * layout current: the selected workspace, and the terminal focused last in
  * it (Send to Agent's choice when the workspace has no agent). */
 function followTerms() {
   terms.start();
   const show = (m?: string) => m && terms.subscribe(m);
   show(useStore.getState().machineId);
+  // The machines followed before are followed again once connected.
+  const offFollowed = rememberFollowed(() => terms);
   const offStore = useStore.subscribe((s, prev) => {
     if (s.machineId !== prev.machineId) show(s.machineId);
     // Machines removed from the core are no longer followed.
@@ -80,6 +84,7 @@ function followTerms() {
   return () => {
     offStore();
     offTerms();
+    offFollowed();
   };
 }
 

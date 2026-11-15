@@ -1096,9 +1096,14 @@ body.dragging * {
 /* VS Code panes' windows (CodeLayer.tsx), placed over their panes' bodies
  * (.code-slot) by codeFrames.ts: above the panes' bodies, below the split
  * handles (4), a header's menu (5) and everything that floats. */
+/* The VS Code panes' iframes lie over the workspace's area of the grid and
+ * are clipped to it: placed relative to it, they move with it when the
+ * sidebar opens or changes width, and a frame not placed again yet never
+ * covers the sidebar or the status bar. */
 .code-layer {
-  position: fixed;
-  inset: 0;
+  grid-area: main;
+  position: relative;
+  overflow: hidden;
   z-index: 2;
   pointer-events: none;
 }
@@ -1531,9 +1536,17 @@ button.primary:hover {
 }
 
 /* ---------- settings ---------- */
+/* The settings dialog floats in the middle of the window and shrinks with
+ * it, keeping a gutter on every side, rather than hanging from the top. */
+.modal-backdrop.settings-backdrop {
+  align-items: center;
+  padding: 16px;
+}
 .modal.settings {
-  width: min(1040px, 96vw);
-  height: min(760px, 88vh);
+  width: min(1040px, 100%);
+  height: min(760px, 100%);
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   background: var(--bg);

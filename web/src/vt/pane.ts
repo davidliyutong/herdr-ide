@@ -11,8 +11,8 @@
 // handled here too; components/TerminalView.tsx shows what goes over the
 // canvas.
 
-import type { AttachOptions, StreamHandler } from '../term/connection';
-import type { Appearance } from '../appearance';
+import type { AttachOptions, Display, StreamHandler } from '../term/connection';
+import { displayColors, type Appearance } from '../appearance';
 import { loadVt, type Vt } from './module';
 import { Terminal, newFrame, type Frame, type Row } from './terminal';
 import { createRenderer, lookOf, hexColor, type Cells, type Look, type Overlay, type Renderer } from './renderer';
@@ -54,6 +54,8 @@ export interface TermLink {
   ack(stream: number, count: number): void;
   resize(stream: number, cols: number, rows: number): void;
   focus(stream: number, focused: boolean): void;
+  /** Absent on links to no terminal core (the ssh login's PTY). */
+  facts?(stream: number, display: Display): void;
   detach(stream: number): void;
 }
 
@@ -144,6 +146,8 @@ export class TermPane {
   private look: Look = { selection: 0x3b4a6b, match: 0x5c4813, matchCurrent: 0x9a6a00 };
   private appearance: Appearance;
   private stream?: number;
+  /** The display facts the core has for the stream (JSON), to send changes only. */
+  private sentDisplay = '';
   private attaching = false;
   /** Output bytes written but not yet acknowledged. */
   private unacked = 0;
@@ -244,6 +248,31 @@ export class TermPane {
     term.setBoldIsBright(a.boldIsBright);
     term.setCursorDefaults(a.cursorStyle, a.cursorBlink);
     term.setScrollback(this.o.scrollback());
+    // The core answers programs' color and size queries itself, from what
+    // the viewer told it last.
+    if (this.stream !== undefined && !this.o.readOnly()) {
+      const d = this.display();
+      const key = JSON.stringify(d);
+      if (key !== this.sentDisplay) {
+        this.sentDisplay = key;
+        this.o.connection.facts?.(this.stream, d);
+      }
+    }
+  }
+
+  /** The display an attach sends, recorded as the one the core has. */
+  private sentDisplayOf(): Display {
+    const d = this.display();
+    this.sentDisplay = JSON.stringify(d);
+    return d;
+  }
+
+  /** What the core answers this terminal's programs with: the theme's
+   * colors and the cell size in pixels. */
+  private display(): Display {
+    const d = displayColors(this.appearance.colors);
+    if (this.metrics) d.cell = [Math.max(1, Math.round(this.metrics.cw)), Math.max(1, Math.round(this.metrics.ch))];
+    return d;
   }
 
   private watchDpr() {
@@ -311,7 +340,15 @@ export class TermPane {
     const observe = this.o.readOnly();
     this.o.connection
       .attach(
-        { machine: this.o.m, terminal: this.o.address, cols: this.grid.cols, rows: this.grid.rows, history: this.o.scrollback(), observe },
+        {
+          machine: this.o.m,
+          terminal: this.o.address,
+          cols: this.grid.cols,
+          rows: this.grid.rows,
+          history: this.o.scrollback(),
+          observe,
+          display: this.sentDisplayOf(),
+        },
         {
           output: (data) => {
             if (this.term !== term) return;
@@ -342,6 +379,8 @@ export class TermPane {
           if (!observe && (this.grid.cols !== term.cols || this.grid.rows !== term.rows))
             this.o.connection.resize(s, this.grid.cols, this.grid.rows);
           if (this.focused) this.o.connection.focus(s, true);
+          // The theme or font may have changed while attaching.
+          if (!observe && JSON.stringify(this.display()) !== this.sentDisplay) this.configure(term);
         },
         () => {
           this.attaching = false;

@@ -181,8 +181,9 @@ the keyboard VS Code's own keys come first (`cmd+j` toggles its own bottom
 panel there), except the key of `pane.close`, which the page takes first
 to close the VS Code pane; in the desktop app on macOS a key VS Code
 leaves runs, through the menu, a command for `terminal`, `vscode` or
-`always`, on that pane. A rule naming `view.toggleCode`, the command of
-earlier versions, applies to `code.open`. `app.fullDiskAccess` (**Open
+`always`, on that pane. Rules naming `view.toggleCode` and
+`workspace.rename`, commands of earlier versions, apply to `code.open` and
+`workspace.edit`. `app.fullDiskAccess` (**Open
 Full Disk Access Settings…**) exists only in the desktop app on macOS, and
 the palette and the keyboard shortcuts page list it only there. Keys follow
 the keyboard layout's characters. The table is generated from the registry
@@ -202,7 +203,7 @@ by `scripts/registry`.
 | `workspace.next` | `terminal` | `cmd+ctrl+down` | – | – | – |
 | `workspace.previous` | `terminal` | `cmd+ctrl+up` | – | – | – |
 | `workspace.new` | `terminal` | `cmd+n` | – | `ctrl+shift+n` | – |
-| `workspace.rename` | `terminal` | – | – | – | – |
+| `workspace.edit` | `terminal` | – | – | – | – |
 | `workspace.close` | `terminal` | – | – | – | – |
 | `tab.new` | `terminal` | `cmd+t` | – | `ctrl+shift+t` | – |
 | `tab.rename` | `terminal` | – | – | – | – |
@@ -270,8 +271,8 @@ restores the terminal title); double-click a tab or workspace to rename it;
 drag a pane (a terminal, VS Code or a preview) by its header onto another
 pane to swap the two (centre) or to place it beside that pane (edges),
 onto a tab to move it there, or onto `+` to move it into a new tab; drag a
-tab along the tab bar, or a workspace along its machine's list, to reorder
-it. Escape cancels a drag.
+tab along the tab bar, a workspace along its machine's list, or a machine
+by its header among the machines, to reorder it. Escape cancels a drag.
 
 Right-click a pane header (or press its ⋯ button, shown when the header is
 narrow), a tab, a workspace or a machine for a menu of its commands
@@ -301,6 +302,7 @@ missing here.
 | `PUT /api/keybindings` | writes | Replaces the user's rules. |
 | `GET /api/machines` | – | Every machine's state, its agent's information and its terminal core's state. A machine that is never connected is in `error` with a `code`: `invalid_target` (a stored ssh target the core refuses) or `local_unsupported` (the local machine of a core on Windows, where no agent runs). |
 | `POST /api/machines` | writes | Adds and stores an SSH machine (`{"target", "label"}`). |
+| `PUT /api/machines/order` | writes | Puts the machines in an order and stores it (`{"order": [ids]}`, each machine once; `400 invalid` otherwise). |
 | `GET /api/ssh/hosts` | writes | The Host aliases of the core host's `~/.ssh/config` (and the files it includes) that are no machine's target yet, as `[{"alias", "hostname"?, "user"?}]`, for the Add Machine dialog; nothing else of the configuration ([02](features/02-multi-machine-transport.md)). Refused read-only, where no machine can be added. |
 | `DELETE /api/m/{id}` | writes | Removes a stored machine. |
 | `PUT /api/m/{id}/label` | writes | Renames a machine. |
@@ -387,8 +389,9 @@ on Linux, `%LocalAppData%\herdr-ide\code-server` on Windows) with `.sha256` side
 downloaded themselves), the settings in `settings[-<instance>].json`, the
 keybindings in `keybindings[-<instance>].json` and the machines in
 `machines[-<instance>].json` (`{"version": 1, "machines": [{id, label,
-kind, target, enabled}]}`: the SSH machines, and the local machine's
-enabled flag once it was changed; the SSH machines herdr saved
+kind, target, enabled}], "order": [ids]}`: the SSH machines, the local machine's
+enabled flag and name once they were changed, and the order the user put the machines
+in once they were reordered; the SSH machines herdr saved
 (`~/.local/state/herdr/client/endpoints.json`) are imported into it the
 first time a core of the instance starts without one), all in the
 user configuration directory (`~/Library/Application Support/herdr-ide/` on

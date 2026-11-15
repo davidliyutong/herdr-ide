@@ -170,6 +170,7 @@ machine; `201` with its state, `409 machine_exists`),
 `GET /api/ssh/hosts` (the Host aliases of the core host's ssh
 configuration that are no machine yet, with their `hostname` and `user`,
 for the Add Machine dialog; refused read-only),
+`PUT /api/machines/order` (`{"order": [ids]}`, each machine once),
 `PUT /api/m/{id}/label` (`{"label": "…"}`; `409 label_taken`),
 `PUT /api/m/{id}/enabled` (`{"enabled": bool}`) and `DELETE /api/m/{id}`
 change the core's machines file and the running machine; the WebSocket

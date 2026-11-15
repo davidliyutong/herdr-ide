@@ -144,11 +144,37 @@ export function folderName(cwd: string, home = ''): string {
   return dir ? dir.slice(dir.lastIndexOf('/') + 1) : '/';
 }
 
-/** A workspace's name as shown: the user's, else its folder's
+/** A workspace's name as shown: the user's, else the folder of dir (the
+ * directory of its only pane, when it has one pane), else its own folder's
  * (folderName). An emptied name gives it its folder's again. */
-export function workspaceTitle(ws: Pick<Workspace, 'name' | 'cwd'>, home?: string): string {
+export function workspaceTitle(ws: Pick<Workspace, 'name' | 'cwd'>, home?: string, dir?: string): string {
   const name = ws.name.trim();
-  return name && !GENERATED_NAMES.has(name) ? name : folderName(ws.cwd, home);
+  return name && !GENERATED_NAMES.has(name) ? name : folderName(dir || ws.cwd, home);
+}
+
+/** A workspace's pane when it has exactly one. */
+export function soleLeaf(ws: Workspace): Leaf | null {
+  const panes = ws.tabs.flatMap((tab) => panesOf(tab.root).map((key) => [tab, key] as const));
+  return panes.length === 1 ? leafOf(panes[0][0].root, panes[0][1]) : null;
+}
+
+/** The focused pane of a workspace's selected tab. */
+export function focusedLeaf(ws: Workspace): Leaf | null {
+  const tab = ws.tabs[ws.selected];
+  return tab ? leafOf(tab.root, tab.focused) : null;
+}
+
+/** The layout with the workspace of pane key given dir as its directory
+ * when key is its first and only pane and it has no directory yet: a
+ * workspace is named after the folder its first pane started in. A
+ * workspace whose directory the user emptied keeps none: its new terminals
+ * start in the focused one's. */
+export function adoptDirectory(layout: Layout, key: string, dir: string): Layout {
+  const at = locate(layout, key);
+  const ws = at && layout.workspaces[at.workspace];
+  if (!ws || ws.cwd || !dir) return layout;
+  const sole = soleLeaf(ws);
+  return sole && paneKey(sole) === key ? withWorkspace(layout, at.workspace, { ...ws, cwd: dir }) : layout;
 }
 
 /** A folder without trailing slashes, so one folder is one VS Code view. */
@@ -277,6 +303,12 @@ export function createWorkspace(layout: Layout, wsId: string, name: string, cwd 
 
 export function renameWorkspace(layout: Layout, wsId: string, name: string): Layout {
   return updateWorkspace(layout, wsId, (ws) => (ws.name === name ? ws : { ...ws, name }));
+}
+
+/** Sets a workspace's name and directory; an empty directory has its new
+ * terminals start in the focused one's. */
+export function editWorkspace(layout: Layout, wsId: string, name: string, cwd: string): Layout {
+  return updateWorkspace(layout, wsId, (ws) => (ws.name === name && ws.cwd === cwd ? ws : { ...ws, name, cwd }));
 }
 
 /** Removes a workspace with its tabs; its terminals keep running until the caller ends them. */

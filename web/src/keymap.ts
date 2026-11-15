@@ -93,6 +93,27 @@ export function keyContext(): KeyContext {
   return typeof document !== 'undefined' && document.querySelector('.modal-backdrop, .palette-backdrop') ? 'dialog' : 'terminal';
 }
 
+/** Commands a held key repeats, as in browsers and terminals: opening and
+ * closing tabs and panes, and stepping through tabs, workspaces, panes and
+ * matches. Toggles, dialogs and splits run once per press. */
+export const REPEATING_COMMANDS: ReadonlySet<string> = new Set([
+  'tab.new',
+  'tab.close',
+  'tab.next',
+  'tab.previous',
+  'pane.close',
+  'pane.focusLeft',
+  'pane.focusRight',
+  'pane.focusUp',
+  'pane.focusDown',
+  'pane.focusNext',
+  'pane.focusPrevious',
+  'workspace.next',
+  'workspace.previous',
+  'find.next',
+  'find.previous',
+]);
+
 /** Key handler of the app (panes and the window). Returns true when the key
  * was the app's; the caller cancels it. */
 export function handleKey(ev: KeyboardEvent, ctx: KeyContext = keyContext()): boolean {
@@ -115,7 +136,8 @@ export function handleKey(ev: KeyboardEvent, ctx: KeyContext = keyContext()): bo
       return true;
     case 'run':
       ev.preventDefault();
-      if (ev.repeat && !prev) return true;
+      // A held key repeats only some commands; a chord's last stroke runs.
+      if (ev.repeat && !prev && !REPEATING_COMMANDS.has(step.result.command)) return true;
       runCommand(step.result.command);
       return true;
   }
@@ -135,7 +157,7 @@ export function handleFrameKey(ev: KeyboardEvent, focus: () => void = () => {}):
   const b = stroke ? bindings().find((x) => PANE_COMMANDS.has(x.command) && x.key === stroke && applies(x.when, 'vscode')) : undefined;
   if (!b) return false;
   focus();
-  if (!ev.repeat) runCommand(b.command);
+  if (!ev.repeat || REPEATING_COMMANDS.has(b.command)) runCommand(b.command);
   return true;
 }
 
@@ -189,7 +211,7 @@ export function commandEnabled(id: string): boolean {
       return changes && !!s.machineId && s.machines[s.machineId]?.status === 'ready';
     case 'tab.new':
       return changes && !!layout;
-    case 'workspace.rename':
+    case 'workspace.edit':
     case 'workspace.close':
       return changes && !!cur?.ws;
     case 'workspace.next':
@@ -281,8 +303,8 @@ export function runCommand(id: string) {
     case 'workspace.new':
       actions.newWorkspace();
       break;
-    case 'workspace.rename':
-      if (s.machineId && s.workspaceId) actions.startRename('workspace', s.machineId, s.workspaceId);
+    case 'workspace.edit':
+      if (s.machineId && s.workspaceId) void actions.editWorkspace(s.machineId, s.workspaceId);
       break;
     case 'workspace.close':
       if (s.machineId && s.workspaceId) void actions.closeWorkspace(s.machineId, s.workspaceId);

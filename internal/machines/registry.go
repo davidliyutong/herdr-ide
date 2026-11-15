@@ -42,12 +42,15 @@ var (
 	// ErrMachineExists is returned when adding a machine (an id or an ssh
 	// target) the core has already.
 	ErrMachineExists = errors.New("machine exists")
-	// ErrLocalMachine is returned when removing or renaming the machine the
-	// core runs on.
-	ErrLocalMachine = errors.New("the local machine cannot be removed or renamed")
+	// ErrLocalMachine is returned when removing the machine the core runs
+	// on.
+	ErrLocalMachine = errors.New("the local machine cannot be removed")
 	// ErrLabelTaken is returned when another machine has the label
 	// (--machine selects machines by label).
 	ErrLabelTaken = errors.New("another machine has this label")
+	// ErrInvalidOrder is returned for an order of the machines that does
+	// not name each of them once.
+	ErrInvalidOrder = errors.New("the order does not name each machine once")
 )
 
 // registryVersion is the version of the machines file this core writes.
@@ -80,8 +83,12 @@ type Registry struct {
 	path string
 	mu   sync.Mutex
 	list []record
+	// order is the order the user put the machines in (ids, the local
+	// machine's and those given with --ssh included); machines it does not
+	// name follow, as they come (SortByOrder).
+	order []string
 	// version and extra are the file's version and its fields other than
-	// "version" and "machines".
+	// "version", "machines" and "order".
 	version int
 	extra   map[string]json.RawMessage
 }
@@ -121,8 +128,11 @@ func OpenRegistry(path string, imp func() ([]Spec, error)) (*Registry, error) {
 		for _, e := range entries {
 			r.list = append(r.list, r.parse(e))
 		}
+		if raw, ok := top["order"]; ok && string(raw) != "null" && json.Unmarshal(raw, &r.order) != nil {
+			return &Registry{}, fmt.Errorf("%s: order is not a list of ids", path)
+		}
 		for k, v := range top {
-			if k != "version" && k != "machines" {
+			if k != "version" && k != "machines" && k != "order" {
 				if r.extra == nil {
 					r.extra = map[string]json.RawMessage{}
 				}
@@ -188,7 +198,7 @@ func (r *Registry) parse(e json.RawMessage) record {
 func normalize(s Spec) (Spec, bool) {
 	switch {
 	case s.ID == LocalID:
-		return Spec{ID: LocalID, Kind: KindLocal, Enabled: s.Enabled}, true
+		return Spec{ID: LocalID, Label: s.Label, Kind: KindLocal, Enabled: s.Enabled}, true
 	case s.ID == "" || (s.Kind != "" && s.Kind != KindSSH):
 		return s, false
 	}
@@ -279,6 +289,43 @@ func (r *Registry) Put(s Spec) error {
 	return nil
 }
 
+// Order returns the order the user put the machines in.
+func (r *Registry) Order() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.order)
+}
+
+// SetOrder stores the order of the machines (their ids) and writes the file.
+func (r *Registry) SetOrder(ids []string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	prev := r.order
+	r.order = slices.Clone(ids)
+	if err := r.save(); err != nil {
+		r.order = prev
+		return err
+	}
+	return nil
+}
+
+// SortByOrder returns ids with those order names first, in its order, then
+// the others as they come.
+func SortByOrder(ids, order []string) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range order {
+		if slices.Contains(ids, id) && !slices.Contains(out, id) {
+			out = append(out, id)
+		}
+	}
+	for _, id := range ids {
+		if !slices.Contains(out, id) {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
 // Delete removes machine id's record, if there is one, and writes the file.
 func (r *Registry) Delete(id string) error {
 	r.mu.Lock()
@@ -319,8 +366,11 @@ func (r *Registry) save() error {
 		}
 		entries = append(entries, b)
 	}
-	b, err := object([]string{"version", "machines"},
-		map[string]any{"version": max(r.version, registryVersion), "machines": entries}, r.extra)
+	top := map[string]any{"version": max(r.version, registryVersion), "machines": entries}
+	if len(r.order) > 0 {
+		top["order"] = r.order
+	}
+	b, err := object([]string{"version", "machines", "order"}, top, r.extra)
 	if err != nil {
 		return err
 	}
@@ -433,6 +483,9 @@ func LoadSpecs(stored, extra []Spec) []Spec {
 	for _, s := range stored {
 		if s.ID == LocalID {
 			specs[0].Enabled = s.Enabled
+			if s.Label != "" {
+				specs[0].Label = s.Label
+			}
 			continue
 		}
 		if seen[s.ID] || s.Kind != KindSSH {

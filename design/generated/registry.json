@@ -51,7 +51,7 @@
       "when": "terminal"
     },
     {
-      "id": "workspace.rename",
+      "id": "workspace.edit",
       "section": "workspace",
       "when": "terminal"
     },
@@ -280,10 +280,10 @@
     "command.view.zoomOut",
     "command.view.zoomReset",
     "command.workspace.close",
+    "command.workspace.edit",
     "command.workspace.new",
     "command.workspace.next",
     "command.workspace.previous",
-    "command.workspace.rename",
     "command.workspace.switch",
     "settings.appearance.language",
     "settings.appearance.language.auto",

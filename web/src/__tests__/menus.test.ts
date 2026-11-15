@@ -14,6 +14,7 @@ import { closeMenu, isItem, openMenu, stepIndex, tidy, useMenu, type MenuEntry, 
 import { machineMenu, paneMenu, sidebarMenu, tabMenu, workspaceMenu } from '../menus';
 import { actions } from '../actions';
 import { useKeys } from '../keybindings';
+import { useDialog } from '../dialog';
 import { ContextMenu } from '../components/ContextMenu';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -188,6 +189,7 @@ describe('menus', () => {
       'Split Right',
       'Split Down',
       'Maximize Pane',
+      'Move to Workspace',
       'Open in VS Code',
       'Show Changes in VS Code',
       'Open Git Graph',
@@ -199,12 +201,36 @@ describe('menus', () => {
     find(paneMenu('m', 'p1'), 'Split Down').run!();
     await vi.waitFor(() => expect(core.calls.some((c) => c.method === 'terminal.run')).toBe(true));
     // The new terminal starts in the split one's folder and goes below it.
-    expect(core.calls.find((c) => c.method === 'terminal.run')?.params).toEqual({ keep: false, cwd: '/src' });
+    expect(core.calls.find((c) => c.method === 'terminal.run')?.params).toEqual({ keep: false, cwd: '/src', display: expect.any(Object) });
     await settle();
     expect(core.layout('m')!.workspaces[0].tabs[0]).toMatchObject({
       root: { split: 'vertical', children: [{ terminal: 'p1' }, { terminal: 't1' }] },
       focused: 't1',
     });
+  });
+
+  it('moves a pane to another workspace, or into a new one', async () => {
+    const sub = find(paneMenu('m', 'p1'), 'Move to Workspace').submenu!;
+    expect(labels(sub)).toEqual(['two', 'New Workspace…']);
+    find(sub, 'two').run!();
+    await settle();
+    let l = core.layout('m')!;
+    expect(l.selected).toBe(1);
+    expect(l.workspaces[0].tabs.map((t) => t.name)).toEqual(['b', 'd']);
+    expect(l.workspaces[1].tabs.map((t) => t.focused)).toEqual(['p4', 'p1']);
+    expect(l.workspaces[1].selected).toBe(1);
+    // A new workspace asks for its folder, the pane's to begin with.
+    const moving = actions.movePaneToNewWorkspace('m', 'p4');
+    const req = useDialog.getState().current!;
+    expect(req).toMatchObject({ kind: 'workspace', cwd: '/tmp' });
+    if (req.kind === 'workspace') req.resolve({ cwd: '/tmp', label: 'three' });
+    await moving;
+    await settle();
+    l = core.layout('m')!;
+    expect(l.workspaces.map((w) => w.name)).toEqual(['one', 'two', 'three']);
+    expect(l.workspaces[2]).toMatchObject({ cwd: '/tmp', tabs: [{ root: { terminal: 'p4' }, focused: 'p4' }] });
+    expect(l.workspaces[1].tabs.map((t) => t.focused)).toEqual(['p1']);
+    expect(l.selected).toBe(2);
   });
 
   it('moves tabs and shows key hints only for the current tab', async () => {
@@ -259,9 +285,17 @@ describe('menus', () => {
 
   it("creates a tab in its workspace's folder, else the focused terminal's", async () => {
     await actions.newTab('m', 'w2w2w2w2');
-    expect(core.calls.filter((c) => c.method === 'terminal.run').pop()?.params).toEqual({ keep: false, cwd: '/tmp' });
+    expect(core.calls.filter((c) => c.method === 'terminal.run').pop()?.params).toEqual({
+      keep: false,
+      cwd: '/tmp',
+      display: expect.any(Object),
+    });
     await actions.newTab('m', 'w1w1w1w1');
-    expect(core.calls.filter((c) => c.method === 'terminal.run').pop()?.params).toEqual({ keep: false, cwd: '/src' });
+    expect(core.calls.filter((c) => c.method === 'terminal.run').pop()?.params).toEqual({
+      keep: false,
+      cwd: '/src',
+      display: expect.any(Object),
+    });
     await settle();
     expect(core.layout('m')!.workspaces[0].tabs.length).toBe(4);
   });
@@ -338,6 +372,29 @@ describe('machineMenu', () => {
   const labels = (entries: MenuEntry[]) => entries.map((e) => (isItem(e) ? e.label : '-'));
   const ssh = (status: string) => ({ id: 'gpu', label: 'gpu', kind: 'ssh', status }) as unknown as MachineState;
 
+  it('moves a machine up or down among the machines, and puts it back when the core refuses', async () => {
+    const fetchMock = vi.fn((_url: string, _init?: RequestInit) => Promise.resolve(new Response('{}', { status: 200 })));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      useStore.getState().setReadOnly(false);
+      useStore.getState().setMachines([{ ...ssh('ready'), id: 'local', kind: 'local' } as MachineState, ssh('ready')]);
+      expect(find(machineMenu('local'), 'Move Up').disabled).toBe(true);
+      expect(find(machineMenu('gpu'), 'Move Down').disabled).toBe(true);
+      find(machineMenu('gpu'), 'Move Up').run!();
+      expect(useStore.getState().order).toEqual(['gpu', 'local']);
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      expect(fetchMock.mock.calls[0][0]).toBe('/api/machines/order');
+      expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'PUT', body: JSON.stringify({ order: ['gpu', 'local'] }) });
+
+      fetchMock.mockImplementation(() => Promise.resolve(new Response('{"error":"invalid"}', { status: 400 })));
+      find(machineMenu('gpu'), 'Move Down').run!();
+      expect(useStore.getState().order).toEqual(['local', 'gpu']);
+      await vi.waitFor(() => expect(useStore.getState().order).toEqual(['gpu', 'local']));
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('disables a connected machine after asking, and enables a disabled one', async () => {
     const { useDialog } = await import('../dialog');
     const fetchMock = vi.fn((_url: string, _init?: RequestInit) => Promise.resolve(new Response('{}', { status: 200 })));
@@ -366,6 +423,29 @@ describe('machineMenu', () => {
       await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
       expect(fetchMock.mock.calls[0][0]).toBe('/api/m/gpu/enabled');
       expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'PUT', body: JSON.stringify({ enabled: false }) });
+      // The dialog offers to stop the terminal core too, unchecked.
+      expect(req.check).toBe('Also stop its terminal service (ends every terminal there)');
+      expect(req.checked).toBe(false);
+
+      // Checked: the core stops first, then the machine is disabled.
+      fetchMock.mockClear();
+      useDialog.setState({ current: undefined });
+      find(machineMenu('gpu'), 'Disable Machine…').run!();
+      const again = useDialog.getState().current;
+      if (again?.kind !== 'confirm') throw new Error('no dialog');
+      again.resolve(true, true);
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+      expect(fetchMock.mock.calls.map((c) => c[0])).toEqual(['/api/m/gpu/hc/stop', '/api/m/gpu/enabled']);
+
+      // A machine that is not connected cannot have its core stopped.
+      fetchMock.mockClear();
+      useDialog.setState({ current: undefined });
+      useStore.getState().setMachines([ssh('error')]);
+      find(machineMenu('gpu'), 'Disable Machine…').run!();
+      const plain = useDialog.getState().current;
+      if (plain?.kind !== 'confirm') throw new Error('no dialog');
+      expect(plain.check).toBeUndefined();
+      plain.resolve(false);
 
       // Enabling does not ask.
       fetchMock.mockClear();
@@ -403,7 +483,7 @@ describe('machineMenu', () => {
       ]);
       // Nor is the local machine where no agent runs on it (Windows).
       useStore.getState().setMachines([{ ...ssh('error'), id: 'local', kind: 'local', code: 'local_unsupported' } as MachineState]);
-      expect(labels(tidy(machineMenu('local')))).toEqual(['New Workspace…', '-', 'Machine Settings…']);
+      expect(labels(tidy(machineMenu('local')))).toEqual(['New Workspace…', '-', 'Machine Settings…', 'Rename Machine']);
       // Machine Settings… opens the settings in the machine's scope.
       useStore.getState().setMachines([ssh('ready')]);
       find(machineMenu('gpu'), 'Machine Settings…').run!();
@@ -482,7 +562,7 @@ describe('machineMenu', () => {
       // The local machine keeps its name and stays.
       useStore.getState().setMachines([{ id: 'local', label: 'mac', kind: 'local', status: 'ready' } as unknown as MachineState]);
       expect(labels(machineMenu('local'))).not.toContain('Remove Machine…');
-      expect(labels(machineMenu('local'))).not.toContain('Rename Machine');
+      expect(labels(machineMenu('local'))).toContain('Rename Machine');
 
       for (const status of ['ready', 'disabled']) {
         useStore.getState().setMachines([saved(status)]);

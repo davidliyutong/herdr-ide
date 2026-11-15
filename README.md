@@ -21,8 +21,12 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   programs see the UI theme's colors. Workspaces, tabs and splits are a
   layout document kept on each machine, the same in every browser and the
   desktop app. Drag a pane by its header to swap or move it; double-click
-  a tab, workspace, pane title or machine to rename it in place; drag tabs
-  and workspaces to reorder them; drag the sidebar's edge or a split's
+  a tab, workspace, pane title or machine to rename it in place (a
+  workspace's menu edits its name and folder; without a folder, new
+  terminals start in the focused pane's); drag a pane onto another
+  workspace in the sidebar, or use its **Move to Workspace** menu, to move
+  it there; drag tabs,
+  workspaces and machines to reorder them; drag the sidebar's edge or a split's
   handle to resize them (a double click restores the default or equal
   sizes); every tab has a × and a middle
   click closes it; right-click a pane header, tab, workspace or machine

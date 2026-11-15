@@ -114,7 +114,15 @@ export function place(k: string) {
     el.style.display = 'none';
     return;
   }
-  Object.assign(el.style, { display: 'block', left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px` });
+  // Relative to the layer, which lies over the workspace (CodeLayer).
+  const o = el.parentElement?.getBoundingClientRect() ?? { left: 0, top: 0 };
+  Object.assign(el.style, {
+    display: 'block',
+    left: `${r.left - o.left}px`,
+    top: `${r.top - o.top}px`,
+    width: `${r.width}px`,
+    height: `${r.height}px`,
+  });
 }
 
 export function placeAll() {

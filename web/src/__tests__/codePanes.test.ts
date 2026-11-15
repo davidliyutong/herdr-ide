@@ -200,7 +200,11 @@ describe('a VS Code pane', () => {
     core.model.mutate('a', (l) => L.splitPane(l, 'g1', 'vertical', { code: view }));
     await actions.split('a', 'code:c1', 'right');
     await settle();
-    expect(core.calls.find((c) => c.method === 'terminal.run')?.params).toEqual({ keep: false, cwd: '/home/u/w1/docs' });
+    expect(core.calls.find((c) => c.method === 'terminal.run')?.params).toEqual({
+      keep: false,
+      cwd: '/home/u/w1/docs',
+      display: expect.any(Object),
+    });
     expect(L.leafOf(tabs()[0].root, 'code:c1')).not.toBeNull();
     expect(tabs()[0].root).toMatchObject({
       children: [

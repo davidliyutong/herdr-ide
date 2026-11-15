@@ -7,6 +7,7 @@ import { create } from 'zustand';
 import { getPrefs, usePrefs, type Prefs, type TermColors } from './prefs';
 import { conn } from './lib/conn';
 import type { TermFontWeight } from './terminal/fonts';
+import type { Display } from './term/connection';
 
 export type ThemeKind = 'dark' | 'light';
 
@@ -52,6 +53,31 @@ export function useThemeKind(): ThemeKind {
   const pref = usePrefs((s) => s.prefs.theme);
   const dark = useSystemDark((s) => s.dark);
   return resolveTheme(pref, dark);
+}
+
+/** A color setting as the terminal core takes it (`#rrggbb`). */
+function coreColor(css: string): string | undefined {
+  const m = /^#?([0-9a-f]{6})/i.exec(css.trim());
+  return m ? `#${m[1].toLowerCase()}` : undefined;
+}
+
+/** The colors the terminal core answers programs with: the theme's
+ * terminal colors (term/connection.ts Display). */
+export function displayColors(colors: TermColors): Display {
+  const out: Display = {};
+  const fg = coreColor(colors.foreground);
+  const bg = coreColor(colors.background);
+  const cursor = coreColor(colors.cursor);
+  if (fg) out.fg = fg;
+  if (bg) out.bg = bg;
+  if (cursor) out.cursor = cursor;
+  return out;
+}
+
+/** The display of the current theme, for terminals started before a pane
+ * shows them. */
+export function currentDisplay(): Display {
+  return displayColors(appearanceOf(getPrefs()).colors);
 }
 
 export function appearanceOf(p: Prefs): Appearance {

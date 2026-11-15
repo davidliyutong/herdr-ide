@@ -106,7 +106,7 @@ describe('Sidebar machines', () => {
   it('names workspaces without a name after their folder, keeps rows quiet and renames them in place', async () => {
     const core = new FakeCore();
     const tab = (t: string) => ({ root: { terminal: t }, focused: t });
-    core.machine('gpu', [FakeCore.term('t1'), FakeCore.term('t2'), FakeCore.term('t3'), FakeCore.term('t4')], {
+    core.machine('gpu', [FakeCore.term('t1'), FakeCore.term('t2'), FakeCore.term('t3'), FakeCore.term('t4', { cwd: '/home/u/notes' })], {
       version: 2,
       workspaces: [
         { id: 'aaaaaaaa', name: '', cwd: '/home/u/src/website', tabs: [tab('t1'), tab('t2')], selected: 0 },
@@ -130,12 +130,12 @@ describe('Sidebar machines', () => {
     expect(items()[0].textContent).toBe('1website');
     expect(items()[0].title).toBe('website · ~/src/website · 2 tabs · double-click to rename · drag to reorder');
     expect(items()[1].title).toContain('~ · 1 tab ·');
-    // Renamed in place: the field starts with the name shown, an emptied
-    // name gives the folder's back.
+    // Renamed in place: the field starts with the name shown and has no
+    // placeholder; an emptied name gives the folder's back.
     const rename = async (id: string, value: string) => {
       await act(async () => useStore.getState().setRenaming({ kind: 'workspace', m: 'gpu', id }));
       const input = host.querySelector<HTMLInputElement>('.ws-item input')!;
-      expect(input.placeholder).toBe(id === 'cccccccc' ? 'notes' : 'website');
+      expect(input.placeholder).toBe('');
       input.value = value;
       await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
       await act(settle);

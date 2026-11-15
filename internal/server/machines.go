@@ -110,6 +110,8 @@ func machineFailed(w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "label_taken"})
 	case errors.Is(err, machines.ErrLocalMachine):
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "local"})
+	case errors.Is(err, machines.ErrInvalidOrder):
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid"})
 	case errors.Is(err, machines.ErrInvalidTarget):
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": machines.CodeInvalidTarget})
 	default:
@@ -154,6 +156,29 @@ func (s *Server) handleMachineAdd(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, s.mg.Get(spec.ID).State())
 }
 
+// handleMachineOrder puts the machines in an order ({"order": [ids]}, each
+// machine once), stored in the machines file; every browser gets the new
+// list.
+func (s *Server) handleMachineOrder(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Order []string `json:"order"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&body); err != nil || body.Order == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid"})
+		return
+	}
+	ev := map[string]any{"order": body.Order}
+	if err := s.mg.SetOrder(body.Order); err != nil {
+		ev["error"] = err.Error()
+		s.audit.log(r, "machine.order", ev)
+		machineFailed(w, err)
+		return
+	}
+	s.audit.log(r, "machine.order", ev)
+	s.broadcastMachines()
+	writeJSON(w, http.StatusOK, s.mg.States())
+}
+
 // handleMachineRemove removes a machine: its record goes, its session ends
 // (its terminal core and programs keep running there) and it leaves every
 // browser. The local machine stays.
@@ -176,7 +201,7 @@ func (s *Server) handleMachineRemove(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"removed": id})
 }
 
-// handleMachineRename renames an SSH machine ({"label": "..."}, trimmed).
+// handleMachineRename renames a machine, the local one too ({"label": "..."}, trimmed).
 // The reply is the machine's state.
 func (s *Server) handleMachineRename(w http.ResponseWriter, r *http.Request) {
 	mc := s.machine(w, r)

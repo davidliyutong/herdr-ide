@@ -118,7 +118,7 @@ var Commands = func() []Command {
 		cmd("workspace.next", "workspace", on(macApp, "cmd+ctrl+down")),
 		cmd("workspace.previous", "workspace", on(macApp, "cmd+ctrl+up")),
 		cmd("workspace.new", "workspace", on(macApp, "cmd+n"), on(pcApp, "ctrl+shift+n")),
-		cmd("workspace.rename", "workspace"),
+		cmd("workspace.edit", "workspace"),
 		cmd("workspace.close", "workspace"),
 
 		cmd("tab.new", "tab", on(macApp, "cmd+t"), on(pcApp, "ctrl+shift+t")),
@@ -172,4 +172,6 @@ var Commands = func() []Command {
 var Renamed = map[string]string{
 	// The VS Code panel's toggle: VS Code is a pane now, opened as a tab.
 	"view.toggleCode": "code.open",
+	// Renaming a workspace became editing its name and directory.
+	"workspace.rename": "workspace.edit",
 }

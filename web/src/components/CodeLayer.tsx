@@ -104,13 +104,21 @@ export function CodeLayer() {
     return () => window.clearInterval(timer);
   }, [shown, stopped, readOnly, usable, views]);
 
+  // Frames are placed relative to the layer: placed again when the window
+  // or the layer (the workspace's area, as the sidebar changes) resizes.
+  const layer = useRef<HTMLDivElement>(null);
   useEffect(() => {
     window.addEventListener('resize', placeAll);
-    return () => window.removeEventListener('resize', placeAll);
+    const ro = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(placeAll);
+    if (layer.current) ro?.observe(layer.current);
+    return () => {
+      window.removeEventListener('resize', placeAll);
+      ro?.disconnect();
+    };
   }, []);
 
   return (
-    <div className="code-layer">
+    <div className="code-layer" ref={layer}>
       {Object.entries(frames).map(([k, fr]) => (
         <CodeFrame key={`${k}#${fr.load}`} k={k} frame={fr} />
       ))}

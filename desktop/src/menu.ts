@@ -90,7 +90,7 @@ export const menus: Menu[] = [
       { command: 'pane.splitDown' },
       '-',
       { command: 'workspace.new' },
-      { command: 'workspace.rename' },
+      { command: 'workspace.edit' },
       { command: 'workspace.close' },
       '-',
       { command: 'tab.rename' },

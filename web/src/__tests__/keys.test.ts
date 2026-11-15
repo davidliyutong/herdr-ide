@@ -9,7 +9,9 @@ import sequenceVectors from '../../../design/testdata/keys/sequences.json';
 import defaultVectors from '../../../design/testdata/keys/defaults.json';
 import registry from '../../../design/generated/registry.json';
 import { altOnly, KeyError, keyLabel, normalizeKeys, strokeOf } from '../keys';
-import { commandEnabled, feedStroke, handleKey, keyHint, withKey, type KeyContext } from '../keymap';
+import { commandEnabled, feedStroke, handleKey, keyHint, REPEATING_COMMANDS, withKey, type KeyContext } from '../keymap';
+import { actions } from '../actions';
+import { useStore } from '../state/store';
 import { keysOf, platform, resetRules, rulesFor, useKeys, type Binding, type Platform } from '../keybindings';
 import { conflictsOf } from '../components/KeyboardShortcuts';
 
@@ -188,6 +190,28 @@ describe('keybindings', () => {
     // A dialog's keys are its own.
     expect(handleKey(key({ key: 'k', code: 'KeyK', ctrlKey: true }), 'dialog')).toBe(false);
     expect(run).not.toHaveBeenCalled();
+  });
+
+  it('repeats tabs and panes while a key is held, toggles and dialogs once', () => {
+    const tab = vi.spyOn(actions, 'switchTab').mockImplementation(() => {});
+    const palette = vi.fn();
+    useStore.setState({ setPalette: palette } as never);
+    useKeys.setState({
+      effective: [
+        { key: 'ctrl+shift+n', command: 'tab.next', when: 'terminal' },
+        { key: 'ctrl+shift+o', command: 'app.commandPalette', when: 'terminal' },
+      ],
+    });
+    const key = (code: string, repeat: boolean) =>
+      new KeyboardEvent('keydown', { cancelable: true, key: code.slice(3).toLowerCase(), code, ctrlKey: true, shiftKey: true, repeat });
+    for (const repeat of [false, true, true]) {
+      expect(handleKey(key('KeyN', repeat), 'terminal')).toBe(true);
+      expect(handleKey(key('KeyO', repeat), 'terminal')).toBe(true);
+    }
+    expect(tab).toHaveBeenCalledTimes(3);
+    expect(palette).toHaveBeenCalledTimes(1);
+    expect(REPEATING_COMMANDS.has('tab.new') && REPEATING_COMMANDS.has('pane.close')).toBe(true);
+    tab.mockRestore();
   });
 
   it('lets the second press of a chord’s first stroke through to the terminal’s encoder', () => {

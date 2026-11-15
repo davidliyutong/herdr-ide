@@ -86,7 +86,11 @@ describe('PaneHeader', () => {
     await act(async () => buttons()[4].click());
     await act(settle);
     // The split starts in p1's folder and goes below p1.
-    expect(core.calls.find((c) => c.method === 'terminal.run')?.params).toEqual({ keep: false, cwd: '/home/u/src' });
+    expect(core.calls.find((c) => c.method === 'terminal.run')?.params).toEqual({
+      keep: false,
+      cwd: '/home/u/src',
+      display: expect.any(Object),
+    });
     expect(core.layout('m')!.workspaces[0].tabs[0].root).toMatchObject({
       children: [{ split: 'vertical', children: [{ terminal: 'p1' }, { terminal: 't1' }] }, { terminal: 'p2' }],
     });

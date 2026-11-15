@@ -90,7 +90,12 @@ Code leaves (and `pane.close`, below).
   document reloads it, so the iframes live in one layer over the panes and
   are placed over their pane's body (`.code-slot`), following its size and
   place; moving the pane, maximizing it, or switching tab, workspace or
-  machine only places the iframe elsewhere or hides it. The layer lies
+  machine only places the iframe elsewhere or hides it. The layer covers
+  the workspace's area of the page (not the sidebar or the status bar) and
+  clips to it; iframes are placed relative to it, so they move with the
+  workspace when the sidebar opens or changes width, and one not placed
+  again yet cannot draw over the sidebar. The window resizing, the layer
+  resizing and a slot resizing place them again. The layer lies
   above the panes' bodies and below the split handles, a header's menu,
   dialogs and menus.
 - An iframe is made when its pane comes on screen, so a layout with many

@@ -11,7 +11,7 @@ import { t, type MessageKey } from '../i18n';
 import { withKey } from '../keymap';
 import { APP_NAME } from '../brand';
 import { InlineEdit } from './InlineEdit';
-import { startWorkspaceDrag } from '../reorderDrag';
+import { startMachineDrag, startWorkspaceDrag } from '../reorderDrag';
 import { openMenu } from '../contextMenu';
 import { machineMenu, sidebarMenu, workspaceMenu } from '../menus';
 import { carriesFiles, dropFolders, folderDropTarget } from '../drop';
@@ -199,19 +199,23 @@ function MachineItem({ m }: { m: MachineState }) {
   const backend = mt?.backend;
   const followed = terms.isSubscribed(m.id);
   return (
-    <div className="machine">
+    <div className="machine" data-machine={m.id}>
       <div
         className="machine-head"
+        onPointerDown={(e) => {
+          if (e.button !== 0 || readOnly || renamingMachine || (e.target as HTMLElement).closest('button, input')) return;
+          startMachineDrag(e, { m: m.id, label: m.label });
+        }}
         // A click folds or unfolds; the second click of a double click
         // leaves it as the first left it, and the double click renames.
         onClick={(e) => !renamingMachine && e.detail < 2 && !(e.target as HTMLElement).closest('button') && setOpen(!open)}
         onDoubleClick={(e) => {
-          if (renamingMachine || readOnly || m.kind !== 'ssh' || (e.target as HTMLElement).closest('button')) return;
+          if (renamingMachine || readOnly || (e.target as HTMLElement).closest('button')) return;
           setOpen((o) => !o);
           actions.startRename('machine', m.id, m.id);
         }}
         onContextMenu={(e) => !renamingMachine && openMenu(e, machineMenu(m.id))}
-        title={[m.kind === 'ssh' && !readOnly ? t('sidebar.machineHint', { label: m.label }) : m.label, machineProblem(m) || m.platform]
+        title={[readOnly ? m.label : t('sidebar.machineHint', { label: m.label }), machineProblem(m) || m.platform]
           .filter(Boolean)
           .join('\n')}
       >
@@ -322,7 +326,6 @@ function MachineItem({ m }: { m: MachineState }) {
                 {editing ? (
                   <InlineEdit
                     value={name}
-                    placeholder={L.folderName(w.cwd, m.info?.home)}
                     onDone={(v) => {
                       setRenaming(undefined);
                       // Emptied, it is named after its folder again.

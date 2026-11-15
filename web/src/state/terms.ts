@@ -11,6 +11,7 @@ import { TermConnection } from '../term/connection';
 import { TerminalStore } from '../term/store';
 import { isLive, type BackendState, type TerminalRecord } from '../term/protocol';
 import * as L from '../term/layout';
+import { currentDisplay } from '../appearance';
 
 export interface MachineTerms {
   backend?: BackendState;
@@ -92,6 +93,11 @@ export class TermModel {
 
   isSubscribed(m: string): boolean {
     return this.subscribed.has(m);
+  }
+
+  /** The machines followed, in the order they were first followed. */
+  subscribedMachines(): string[] {
+    return [...this.subscribed];
   }
 
   /** A machine that is gone: no longer followed. */
@@ -254,12 +260,16 @@ export class TermModel {
     const base = ws?.cwd || undefined;
     const focused = this.directory(m, ws?.tabs[ws.selected]?.focused);
     const cwd = o.cwd ?? (o.split ? (focused ?? base) : (base ?? focused));
-    const params: Record<string, unknown> = { keep: false };
+    // The theme's colors answer the program's first color queries, made
+    // before a pane attaches.
+    const params: Record<string, unknown> = { keep: false, display: currentDisplay() };
     if (cwd) params.cwd = cwd;
     if (o.argv?.length) params.argv = o.argv;
     return this.call(m, 'terminal.run', params).then((rec) => {
       const address = typeof rec.address === 'string' ? rec.address : undefined;
-      if (address) this.mutate(m, (l) => place(l, address));
+      // The first pane of a workspace without a directory gives it its own.
+      const dir = (typeof rec.cwd === 'string' && rec.cwd) || cwd;
+      if (address) this.mutate(m, (l) => (dir ? L.adoptDirectory(place(l, address), address, dir) : place(l, address)));
       return address;
     });
   }

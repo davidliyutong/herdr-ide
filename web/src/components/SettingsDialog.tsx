@@ -171,7 +171,7 @@ function SettingsModal({ page: askedPage, machine: askedMachine }: { page?: stri
   ];
 
   return (
-    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && close()}>
+    <div className="modal-backdrop settings-backdrop" onMouseDown={(e) => e.target === e.currentTarget && close()}>
       <div className="modal settings" role="dialog" aria-label={t('settings.title')}>
         <div className="modal-head">
           <span className="modal-title">{t('settings.title')}</span>
@@ -825,7 +825,7 @@ function MachinePage({ m, readOnly }: { m: MachineState; readOnly: boolean }) {
           <span className="setting-title">{t('settings.machine.name')}</span>
         </div>
         <div className="setting-control row-gap">
-          {m.kind === 'ssh' && !readOnly ? (
+          {!readOnly ? (
             <input
               className="settings-input"
               value={name}

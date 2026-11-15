@@ -247,13 +247,14 @@ settings per browser; theming terminal applications.
   (`docks`, `dockWidth`, `dockHeight`) is removed once when the page
   loads.
 - The settings dialog (`components/SettingsDialog.tsx`, laid out as VS
-  Code's) renders the definitions:
+  Code's) floats in the middle of the window, shrinking with it down to a
+  16 px gutter on every side, and renders the definitions:
   - a scope bar: **User** (the global values) and one tab per machine that
     can have its own values. A machine's scope lists only the settings it
     can differ in (`remote-machine` leaves the core's host out), each
     showing "Same as User (value)" until it is set and a reset that removes
     the machine's own value; its **Overview** page has the machine's name
-    (renamed in place for SSH machines), address and platform, its
+    (renamed in place), address and platform, its
     connection with Enable, Disable, Sign In… or Retry, and
     **Troubleshooting**: restart, start or stop its terminal service. A
     machine's menu in the sidebar opens it there (**Machine Settings…**), and

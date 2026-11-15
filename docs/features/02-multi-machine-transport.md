@@ -220,11 +220,23 @@ Windows core host; the interactive ssh login from a core on Windows.
   (a password, a key's passphrase, a host key to confirm) turns
   *auth_required*, and the page that added it opens the authentication
   terminal for it where the core offers one (`ssh_login`).
+- **Ordering.** Dragging a machine's header in the sidebar among the
+  others, or **Move Up** / **Move Down** in its menu, reorders the
+  machines: the page shows the new order at once and sends it
+  (`PUT /api/machines/order`, `{"order": [ids]}`, each machine once, the
+  local machine's and those given with `--ssh` included; anything else is
+  refused with `invalid`). The core stores it as the machines file's
+  `order` and sends every page the new list; a core that starts lists the
+  machines in that order, those it does not name (added later, or given
+  with `--ssh` for one run) after them as they come. Refused read-only,
+  audited as `machine.order`.
 - **Renaming, removing, enabling and disabling.** The machine's menu renames
-  an SSH machine in its header (`PUT /api/m/{id}/label`, `{"label": "…"}`,
+  a machine in its header (`PUT /api/m/{id}/label`, `{"label": "…"}`,
   trimmed; a label another machine has, running or stored, is refused with
-  `label_taken`, since `--machine` selects by label; the local machine keeps
-  its host's name). **Remove machine…** asks first (`DELETE /api/m/{id}`):
+  `label_taken`, since `--machine` selects by label). The local machine is
+  named after its host (`<host> (local)`) until it is renamed; its record
+  then keeps the name, which later starts use instead, while enabling or
+  disabling it stores no name. **Remove machine…** asks first (`DELETE /api/m/{id}`):
   the record goes, the machine's session ends as disabling does (waiting up
   to 15 s), and browsers that showed it move to another machine and unload
   its VS Code panes' windows; nothing on the machine is removed, its terminal core
@@ -234,7 +246,11 @@ Windows core host; the interactive ssh login from a core on Windows.
   session (the agent exits and stops the code-server it started; programs
   keep running in the terminal core) and shows it as *disabled*; enabling
   connects it. Disabling a
-  connected machine asks first. The
+  connected machine asks first; while it is *ready*, the same dialog offers
+  a checkbox, unchecked, to stop its terminal core too, which ends every
+  terminal there: the page stops it (`POST /api/m/{id}/hc/stop`) before
+  disabling the machine, and a failed stop is reported while the machine
+  is disabled all the same. The
   sidebar folds disabled machines, so their Enable button shows only when
   the user opens one; disabling a machine folds it and enabling it unfolds
   it. Read-only browsers can do none of this (`403`); everything is

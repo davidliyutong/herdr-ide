@@ -15,7 +15,7 @@ import { mediaExt } from './terminal/links';
 import { bridge, hasFrame, type BridgeCommand } from './lib/bridge';
 import { reloadFrame, setStopped } from './codeFrames';
 import { hasMessage, t } from './i18n';
-import { confirmDialog, newWorkspaceDialog } from './dialog';
+import { confirmCheckDialog, confirmDialog, editWorkspaceDialog, newWorkspaceDialog } from './dialog';
 import type { MessageKey } from './i18n/en';
 
 export interface AttentionItem {
@@ -244,6 +244,31 @@ export const slotIndex = (from: number, slot: number) => (slot > from ? slot - 1
 
 const axisOf = (dir: 'right' | 'down'): L.Axis => (dir === 'right' ? 'horizontal' : 'vertical');
 
+/** Starts, restarts or stops a machine's terminal core
+ * (POST /api/m/{id}/hc/{action}) without asking; one action at a time per
+ * machine. Failures are reported. */
+async function runCore(m: string, action: 'start' | 'restart' | 'stop') {
+  const s = useStore.getState();
+  const machine = s.machines[m]?.label ?? m;
+  if (s.hcBusy[m]) return;
+  s.setHcBusy(m, true);
+  try {
+    const res = await fetch(`/api/m/${encodeURIComponent(m)}/hc/${action}`, { method: 'POST' });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      const code = `backend.${body.error}`;
+      throw new Error(t('core.failed', { machine, error: hasMessage(code) ? t(code) : body.error || String(res.status) }));
+    }
+    s.toast(t(action === 'stop' ? 'core.stopped' : action === 'restart' ? 'core.restarted' : 'core.started', { machine }));
+    // A started core is followed again.
+    if (action !== 'stop') terms.subscribe(m);
+  } catch (e) {
+    report(e);
+  } finally {
+    useStore.getState().setHcBusy(m, false);
+  }
+}
+
 export const actions = {
   /** Splits a pane: the new terminal starts in its directory (a VS Code
    * pane's folder, a preview's file's directory). */
@@ -260,6 +285,32 @@ export const actions = {
     } catch (e) {
       report(e);
     }
+  },
+
+  /** Moves a pane into a new tab of another workspace of its machine and
+   * shows it there. */
+  movePaneToWorkspace(m: string, pane: string, ws: string, create?: { name: string; cwd: string }) {
+    const s = useStore.getState();
+    if (s.zoomed?.m === m && s.zoomed.pane === pane) s.setZoomed(undefined);
+    const moved = terms.mutate(m, (l) =>
+      // A new workspace only with the pane in it, which may have closed meanwhile.
+      create && L.findLeaf(l, pane)
+        ? L.moveToNewTab(L.createWorkspace(l, ws, create.name, create.cwd), pane, ws)
+        : L.moveToNewTab(l, pane, ws),
+    );
+    if (moved) focusDom(m, pane);
+  },
+
+  /** Moves a pane into a new workspace: the dialog asks for its directory
+   * (the pane's to begin with) and name. */
+  async movePaneToNewWorkspace(m: string, pane: string) {
+    const layout = terms.layout(m);
+    const leaf = layout && L.findLeaf(layout, pane);
+    if (!leaf) return;
+    const def = paneDirectory(m, leaf) || useStore.getState().machines[m]?.info?.home || '~';
+    const input = await newWorkspaceDialog(m, def);
+    if (!input) return;
+    actions.movePaneToWorkspace(m, pane, L.newId(), { name: input.label, cwd: input.cwd });
   },
 
   /** Shows a pane alone in its tab, or all of the tab again. */
@@ -345,17 +396,25 @@ export const actions = {
   async setMachineEnabled(m: string, enabled: boolean) {
     const st = useStore.getState().machines[m];
     const machine = st?.label ?? m;
-    if (
-      !enabled &&
-      st?.status !== 'disabled' &&
-      !(await confirmDialog({
+    let stop = false;
+    if (!enabled && st?.status !== 'disabled') {
+      const ask = {
         title: t('confirm.disableMachineTitle', { machine }),
         message: t('confirm.disableMachine'),
         confirm: t('menu.disableMachine'),
         danger: true,
-      }))
-    )
-      return;
+      };
+      // While its agent is connected, the machine's terminal core can be
+      // stopped with it (unchecked: that ends every terminal there).
+      if (st?.status === 'ready' && !st.code) {
+        const res = await confirmCheckDialog({ ...ask, check: t('confirm.disableStopCore'), checked: false });
+        if (!res) return;
+        stop = res.checked;
+      } else if (!(await confirmDialog(ask))) return;
+    }
+    // Stopped before the session ends; a failed stop is reported and the
+    // machine is disabled all the same.
+    if (stop) await runCore(m, 'stop');
     try {
       const res = await fetch(`/api/m/${encodeURIComponent(m)}/enabled`, {
         method: 'PUT',
@@ -406,6 +465,30 @@ export const actions = {
     }
   },
 
+  /** Moves a machine to a slot of the machines (0 before the first, the
+   * machine count after the last): shown at once, stored by the core
+   * (PUT /api/machines/order), which sends every page the new list. */
+  async moveMachine(m: string, slot: number) {
+    const before = useStore.getState().order;
+    const from = before.indexOf(m);
+    if (from < 0) return;
+    const order = before.filter((x) => x !== m);
+    order.splice(Math.max(0, Math.min(slotIndex(from, slot), order.length)), 0, m);
+    if (order.every((x, i) => x === before[i])) return;
+    useStore.setState({ order });
+    try {
+      const res = await fetch('/api/machines/order', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order }),
+      });
+      if (!res.ok) throw new Error(t('machine.orderFailed', { detail: await machineError(res) }));
+    } catch (e) {
+      if (useStore.getState().order === order) useStore.setState({ order: before });
+      report(e);
+    }
+  },
+
   /** Starts, restarts or stops a machine's terminal core
    * (POST /api/m/{id}/hc/{action}); restarting and stopping ask first. One
    * action at a time per machine. */
@@ -423,22 +506,7 @@ export const actions = {
       }))
     )
       return;
-    s.setHcBusy(m, true);
-    try {
-      const res = await fetch(`/api/m/${encodeURIComponent(m)}/hc/${action}`, { method: 'POST' });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        const code = `backend.${body.error}`;
-        throw new Error(t('core.failed', { machine, error: hasMessage(code) ? t(code) : body.error || String(res.status) }));
-      }
-      s.toast(t(action === 'stop' ? 'core.stopped' : action === 'restart' ? 'core.restarted' : 'core.started', { machine }));
-      // A started core is followed again.
-      if (action !== 'stop') terms.subscribe(m);
-    } catch (e) {
-      report(e);
-    } finally {
-      useStore.getState().setHcBusy(m, false);
-    }
+    await runCore(m, action);
   },
 
   /** Creates a workspace and opens a terminal in it. Without a directory the
@@ -512,6 +580,16 @@ export const actions = {
   /** Names a workspace; an empty name shows its folder's again. */
   renameWorkspace(m: string, ws: string, name: string) {
     terms.mutate(m, (l) => L.renameWorkspace(l, ws, name.trim()));
+  },
+
+  /** Edits a workspace's name and directory in a dialog. An emptied name
+   * shows its folder's again; an emptied directory has its new terminals
+   * start in the focused pane's. */
+  async editWorkspace(m: string, ws: string) {
+    const w = terms.layout(m)?.workspaces.find((x) => x.id === ws);
+    if (!w) return;
+    const input = await editWorkspaceDialog(m, w.cwd, w.name);
+    if (input) terms.mutate(m, (l) => L.editWorkspace(l, ws, input.label, input.cwd));
   },
 
   /** Names a terminal's pane (its "name" label); empty shows its title again. */
@@ -700,10 +778,23 @@ export const actions = {
   },
 };
 
-/** A workspace's name as shown: the user's, else its folder's, the home
- * directory of its machine as "~". */
-export function workspaceTitle(m: string, ws: Pick<L.Workspace, 'name' | 'cwd'>): string {
-  return L.workspaceTitle(ws, useStore.getState().machines[m]?.info?.home);
+/** A workspace's name as shown: the user's, else the folder of its only
+ * pane (a terminal's current directory, a VS Code pane's folder) while it
+ * has one pane, else its own directory (the folder its first pane started
+ * in) or, without one, its focused pane's folder; the home directory of
+ * its machine as "~". */
+export function workspaceTitle(m: string, ws: L.Workspace): string {
+  // Without a directory of its own, a workspace with several panes goes by
+  // its focused one's, where its new terminals start.
+  const leaf = L.soleLeaf(ws) ?? (ws.cwd ? null : L.focusedLeaf(ws));
+  const dir = !leaf
+    ? undefined
+    : L.isCodeLeaf(leaf)
+      ? leaf.code.folder
+      : L.isTerminalLeaf(leaf)
+        ? terms.directory(m, leaf.terminal)
+        : undefined;
+  return L.workspaceTitle(ws, useStore.getState().machines[m]?.info?.home, dir);
 }
 
 /** A pane's title: a terminal's (terminalTitle), a VS Code pane's folder

@@ -1,5 +1,7 @@
 // Dragging a tab within the tab bar, or a workspace within its machine's list
-// in the sidebar, reorders it in the machine's layout document. A drop lands
+// in the sidebar, reorders it in the machine's layout document; dragging a
+// machine's header among the machines reorders the machines (the core stores
+// their order). A drop lands
 // in a slot of the current order: 0 before the first item, n after the
 // last; the slots on either side of the dragged item change nothing, so
 // they show no marker.
@@ -110,5 +112,18 @@ export function startWorkspaceDrag(ev: DragStart, src: { m: string; ws: string; 
     items: '.ws-item[data-ws-id]',
     idAttr: 'data-ws-id',
     move: async (index) => actions.moveWorkspace(src.m, src.ws, index),
+  });
+}
+
+/** Starts tracking a possible drag of a machine among the machines. */
+export function startMachineDrag(ev: DragStart, src: { m: string; label: string }) {
+  startReorder(ev, {
+    label: src.label,
+    id: src.m,
+    axis: 'y',
+    list: () => document.querySelector('.sidebar-scroll'),
+    items: '.machine[data-machine]',
+    idAttr: 'data-machine',
+    move: (index) => actions.moveMachine(src.m, index),
   });
 }

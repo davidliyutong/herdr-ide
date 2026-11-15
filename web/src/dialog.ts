@@ -21,7 +21,15 @@ export type DialogRequest =
       checked?: boolean;
       resolve(ok: boolean, checked?: boolean): void;
     }
-  | { kind: 'newWorkspace'; m: string; cwd: string; resolve(v: NewWorkspace | undefined): void }
+  | {
+      kind: 'workspace';
+      m: string;
+      cwd: string;
+      /** Set when an existing workspace is edited: its name. Its directory
+       * may then be left empty. */
+      edit?: { name: string };
+      resolve(v: NewWorkspace | undefined): void;
+    }
   | { kind: 'download'; m: string; dir: string; resolve(v: undefined): void };
 
 export const useDialog = create<{ current?: DialogRequest }>(() => ({}));
@@ -59,7 +67,13 @@ export function confirmCheckDialog(opts: {
 
 /** Asks for the working directory and name of a new workspace on machine m. */
 export function newWorkspaceDialog(m: string, cwd: string): Promise<NewWorkspace | undefined> {
-  return new Promise((resolve) => show({ kind: 'newWorkspace', m, cwd, resolve }));
+  return new Promise((resolve) => show({ kind: 'workspace', m, cwd, resolve }));
+}
+
+/** Asks for a workspace's new name and directory (empty: its new terminals
+ * start in the focused one's). */
+export function editWorkspaceDialog(m: string, cwd: string, name: string): Promise<NewWorkspace | undefined> {
+  return new Promise((resolve) => show({ kind: 'workspace', m, cwd, edit: { name }, resolve }));
 }
 
 /** Lets the user choose entries of directory dir (and the directories

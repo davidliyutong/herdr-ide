@@ -8,6 +8,18 @@ export interface StreamHandler {
   closed(reason: string, exitCode?: number): void;
 }
 
+/** What a viewer tells the terminal core about itself: the colors (as
+ * `#rrggbb`) and cell size (pixels) the core answers programs' queries
+ * with (OSC 10/11, `CSI ? 996 n`, size reports). The core answers those
+ * itself and keeps them from the viewer, so without them programs see its
+ * defaults (a dark background). */
+export interface Display {
+  fg?: string;
+  bg?: string;
+  cursor?: string;
+  cell?: [number, number];
+}
+
 export interface AttachOptions {
   machine: string;
   terminal: string;
@@ -16,6 +28,8 @@ export interface AttachOptions {
   /** Lines above the screen the first paint brings. */
   history?: number;
   observe?: boolean;
+  /** Sent unless observing. */
+  display?: Display;
 }
 
 /** The part of WebSocket the connection uses, so tests can supply their own. */
@@ -205,6 +219,7 @@ export class TermConnection {
       rows: o.rows,
       history: o.history ?? 0,
       observe: o.observe ?? false,
+      ...(o.display && !o.observe ? { display: o.display } : {}),
     });
     if (typeof msg.s !== 'number') throw new TermError('unavailable');
     return msg.s;
@@ -221,6 +236,11 @@ export class TermConnection {
 
   resize(stream: number, cols: number, rows: number): void {
     if (this.streams.has(stream)) this.send({ t: 'resize', s: stream, cols, rows });
+  }
+
+  /** Tells the core this viewer's display changed (a theme or font change). */
+  facts(stream: number, display: Display): void {
+    if (this.streams.has(stream)) this.send({ t: 'facts', s: stream, display });
   }
 
   focus(stream: number, focused: boolean): void {

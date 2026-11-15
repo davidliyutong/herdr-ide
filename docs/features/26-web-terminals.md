@@ -62,7 +62,11 @@ Callbacks: the terminal's answers to programs (device attributes, cursor
 position, colors, modes, size reports) go back as automatic input, bells,
 titles, clipboard writes (OSC 52), the color scheme query (`CSI ? 996 n`,
 from the theme) and synchronized output (mode 2026: the screen is drawn
-when the program lets go, after 1 s at the latest). A frame of the screen is
+when the program lets go, after 1 s at the latest). The terminal core answers the color, color scheme, device attribute
+and size queries itself and keeps them from the page, from the display
+facts the pane sends it (the theme's foreground, background and cursor,
+the cell size; [22](22-terminal-protocol.md)), so the emulator's answers
+are for queries the core passes on. A frame of the screen is
 read from the render state: only rows that changed, each row's cells in one
 call (codepoint, width, style id, hyperlink), a style read once per style
 id in the row and resolved through the palette, grapheme clusters, the

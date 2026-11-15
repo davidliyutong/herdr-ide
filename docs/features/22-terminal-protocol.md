@@ -103,7 +103,15 @@ has not had credit for yet, so an `ack` beyond it is cut to it.
 Input is a binary frame of kind 0, or kind 6 for the answers the
 client's terminal produces by itself. `resize`, `focus` and `facts` go to
 herdr-core as they are; the viewer that was active last sets the
-terminal's size. An observing attach (asked for, or any attach of a
+terminal's size and its display. herdr-core answers programs' color
+queries (OSC 10/11, `CSI ? 996 n`), device attributes and size reports
+itself and keeps those queries from the viewers, from the display facts
+of the viewer active last (colors and cell size), else from its defaults
+(a dark background). So the page sends its theme's colors and its cell
+size as `display` with every attach that is not observing, a `facts`
+message when they change (a theme or font change, which also tells
+programs that asked for mode 2031), and the colors as `display` with
+`terminal.run`, for the queries a program makes before a pane attaches. An observing attach (asked for, or any attach of a
 read-only core) gets the terminal's grid as kind 3 frames before the
 output drawn for it, and sends nothing: no display facts with the attach
 or later, no input, size or focus; its focus does not mark a finished

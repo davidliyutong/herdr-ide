@@ -7,6 +7,7 @@ import {
   ArrowDown,
   ArrowLeft,
   ArrowRight,
+  ArrowRightLeft,
   ArrowUp,
   ClipboardPaste,
   Columns2,
@@ -37,7 +38,7 @@ import {
   Wrench,
   X,
 } from 'lucide-react';
-import { actions, current } from './actions';
+import { actions, current, workspaceTitle } from './actions';
 import { CodeIcon } from './components/icons';
 import type { MenuEntry } from './contextMenu';
 import { downloadDialog } from './dialog';
@@ -60,7 +61,7 @@ const workspaceOf = (m: string, ws: string) => terms.layout(m)?.workspaces.find(
 
 /** A pane's menu: what it is (a terminal's name, VS Code's window, a
  * preview's file), splitting it (a new terminal in its directory), showing
- * it alone, a terminal's folder in VS Code, closing it. */
+ * it alone, moving it to another workspace, a terminal's folder in VS Code, closing it. */
 export function paneMenu(m: string, pane: string): MenuEntry[] {
   const s = useStore.getState();
   if (s.readOnly) return [];
@@ -87,6 +88,18 @@ export function paneMenu(m: string, pane: string): MenuEntry[] {
       run: () => actions.zoom(m, pane),
     },
   ];
+  // Into a new tab of another workspace of the machine, or of a new one.
+  const here = layout && L.locate(layout, pane);
+  const others = (layout?.workspaces ?? []).filter((_, i) => i !== here?.workspace);
+  arrange.push({
+    label: t('menu.moveToWorkspace'),
+    icon: <ArrowRightLeft />,
+    submenu: [
+      ...others.map((w) => ({ label: workspaceTitle(m, w), run: () => actions.movePaneToWorkspace(m, pane, w.id) })),
+      ...(others.length ? ['sep' as const] : []),
+      { label: t('command.workspace.new'), icon: <FolderPlus />, run: () => void actions.movePaneToNewWorkspace(m, pane) },
+    ],
+  });
   const close: MenuEntry = {
     label: t('command.pane.close'),
     hint: hint('pane.close'),
@@ -219,9 +232,9 @@ export function machineMenu(m: string): MenuEntry[] {
     { label: t('command.workspace.new'), icon: <FolderPlus />, disabled: !ready, run: () => void actions.newWorkspace(m) },
     'sep',
     { label: t('menu.machineSettings'), icon: <Settings />, run: () => s.openSettings({ machine: m }) },
+    { label: t('menu.renameMachine'), icon: <Pencil />, run: () => actions.startRename('machine', m, m) },
     ...(ssh
       ? [
-          { label: t('menu.renameMachine'), icon: <Pencil />, run: () => actions.startRename('machine', m, m) },
           {
             label: t('menu.copyTarget'),
             icon: <Copy />,
@@ -231,6 +244,24 @@ export function machineMenu(m: string): MenuEntry[] {
         ]
       : []),
     'sep',
+    // Moving: among two machines or more.
+    ...(s.order.length > 1
+      ? [
+          {
+            label: t('menu.moveUp'),
+            icon: <ArrowUp />,
+            disabled: s.order.indexOf(m) <= 0,
+            run: () => void actions.moveMachine(m, s.order.indexOf(m) - 1),
+          },
+          {
+            label: t('menu.moveDown'),
+            icon: <ArrowDown />,
+            disabled: s.order.indexOf(m) >= s.order.length - 1,
+            run: () => void actions.moveMachine(m, s.order.indexOf(m) + 2),
+          },
+          'sep' as const,
+        ]
+      : []),
     ...(usable && st.status === 'auth_required' && ssh && s.sshLogin
       ? [{ label: t('sidebar.authenticate'), icon: <KeyRound />, run: () => s.openAuth(m) }]
       : []),
@@ -297,7 +328,7 @@ export function tabMenu(m: string, ws: string, index: number): MenuEntry[] {
   ];
 }
 
-/** A workspace's menu: rename, new tab in it, move up or down, close. */
+/** A workspace's menu: edit its name and directory, new tab in it, move up or down, close. */
 export function workspaceMenu(m: string, ws: string): MenuEntry[] {
   const s = useStore.getState();
   const layout = terms.layout(m);
@@ -313,10 +344,10 @@ export function workspaceMenu(m: string, ws: string): MenuEntry[] {
     });
   return [
     {
-      label: t('command.workspace.rename'),
-      hint: hintIf(isCurrent, 'workspace.rename'),
+      label: t('command.workspace.edit'),
+      hint: hintIf(isCurrent, 'workspace.edit'),
       icon: <Pencil />,
-      run: () => actions.startRename('workspace', m, ws),
+      run: () => void actions.editWorkspace(m, ws),
     },
     'sep',
     { label: t('command.tab.new'), hint: hintIf(isCurrent, 'tab.new'), icon: <Plus />, run: () => void actions.newTab(m, ws) },

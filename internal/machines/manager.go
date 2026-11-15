@@ -36,9 +36,35 @@ type Manager struct {
 	reg *Registry
 }
 
-// UseRegistry stores later changes of the machines in r. Call before Run.
+// UseRegistry stores later changes of the machines in r and puts them in
+// the order stored there. Call before Run.
 func (mg *Manager) UseRegistry(r *Registry) {
 	mg.reg = r
+	mg.mmu.Lock()
+	mg.order = SortByOrder(mg.order, r.Order())
+	mg.mmu.Unlock()
+}
+
+// SetOrder puts the machines in the order of ids, which names each of them
+// once, and stores it.
+func (mg *Manager) SetOrder(ids []string) error {
+	mg.mmu.Lock()
+	defer mg.mmu.Unlock()
+	if len(ids) != len(mg.order) {
+		return ErrInvalidOrder
+	}
+	for i, id := range ids {
+		if mg.byID[id] == nil || slices.Contains(ids[:i], id) {
+			return ErrInvalidOrder
+		}
+	}
+	if mg.reg != nil {
+		if err := mg.reg.SetOrder(ids); err != nil {
+			return err
+		}
+	}
+	mg.order = slices.Clone(ids)
+	return nil
 }
 
 // store writes machine s's record when the registry keeps it: a stored SSH
@@ -71,6 +97,11 @@ func (mg *Manager) SetEnabled(id string, on bool) error {
 	}
 	s := spec(m)
 	s.Enabled = on
+	// The local machine's record holds a name only once the user gave one:
+	// its host's name is not frozen into it.
+	if m.Local() {
+		s.Label = mg.storedLabel(id)
+	}
 	if err := mg.store(s); err != nil {
 		return err
 	}
@@ -78,16 +109,13 @@ func (mg *Manager) SetEnabled(id string, on bool) error {
 	return nil
 }
 
-// SetLabel renames machine id. The local machine keeps its host's name; a
-// label another machine has (running or stored) is refused, since
-// --machine selects by label.
+// SetLabel renames machine id, the local machine too (its record then
+// keeps the name, which replaces its host's); a label another machine has
+// (running or stored) is refused, since --machine selects by label.
 func (mg *Manager) SetLabel(id, label string) error {
 	m := mg.Get(id)
 	if m == nil {
 		return ErrUnknownMachine
-	}
-	if m.Local() {
-		return ErrLocalMachine
 	}
 	if mg.taken(id, func(s Spec) bool { return s.Label == label }) {
 		return ErrLabelTaken
@@ -99,6 +127,15 @@ func (mg *Manager) SetLabel(id, label string) error {
 	}
 	m.setLabel(label)
 	return nil
+}
+
+// storedLabel is the label of machine id's record, "" without one.
+func (mg *Manager) storedLabel(id string) string {
+	if mg.reg == nil {
+		return ""
+	}
+	s, _ := mg.reg.Get(id)
+	return s.Label
 }
 
 // taken reports whether a machine other than id, running or stored, matches.

@@ -25,9 +25,9 @@ describe('dialogs', () => {
     const first = confirmDialog({ title: 'a', message: 'b', confirm: 'c' });
     const second = newWorkspaceDialog('m', '~');
     expect(await first).toBe(false);
-    expect(useDialog.getState().current?.kind).toBe('newWorkspace');
+    expect(useDialog.getState().current?.kind).toBe('workspace');
     const req = useDialog.getState().current!;
-    if (req.kind === 'newWorkspace') req.resolve({ cwd: '/x', label: '' });
+    if (req.kind === 'workspace') req.resolve({ cwd: '/x', label: '' });
     expect(await second).toEqual({ cwd: '/x', label: '' });
   });
 

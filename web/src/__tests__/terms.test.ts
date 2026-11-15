@@ -101,7 +101,7 @@ describe('TermModel', () => {
     await settle();
     await opened;
     expect(model.isSubscribed('m')).toBe(true);
-    expect(core.calls.find((c) => c.method === 'terminal.run')?.params).toEqual({ keep: false, cwd: '/srv' });
+    expect(core.calls.find((c) => c.method === 'terminal.run')?.params).toEqual({ keep: false, cwd: '/srv', display: expect.any(Object) });
     expect(model.layout('m')?.workspaces[0].tabs.map((x) => x.focused)).toEqual(['t1']);
     expect(terminalOnScreen('m', 't1')).toBe(true);
     expect(terminalOnScreen('m', 'other')).toBe(false);

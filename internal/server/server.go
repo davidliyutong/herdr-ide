@@ -153,6 +153,7 @@ func (s *Server) routes() []route {
 		{"PUT /api/keybindings", s.writable(s.handleSetKeybindings)},
 		{"GET /api/machines", s.handleMachines},
 		{"POST /api/machines", s.writable(s.handleMachineAdd)},
+		{"PUT /api/machines/order", s.writable(s.handleMachineOrder)},
 		{"GET /api/ssh/hosts", s.writable(s.handleSSHHosts)},
 		{"DELETE /api/m/{id}", s.writable(s.handleMachineRemove)},
 		{"PUT /api/m/{id}/label", s.writable(s.handleMachineRename)},

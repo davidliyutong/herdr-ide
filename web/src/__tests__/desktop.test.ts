@@ -166,7 +166,7 @@ describe('runMenuCommand', () => {
 
   it('asks for a new workspace', () => {
     runMenuCommand('workspace.new');
-    expect(useDialog.getState().current?.kind).toBe('newWorkspace');
+    expect(useDialog.getState().current?.kind).toBe('workspace');
   });
 
   it('takes cmd+w from VS Code before VS Code does: it closes the VS Code pane', async () => {

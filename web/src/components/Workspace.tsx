@@ -114,7 +114,6 @@ export function Workspace() {
                 {editing ? (
                   <InlineEdit
                     value={name}
-                    placeholder={String(i + 1)}
                     onDone={(v) => {
                       setRenaming(undefined);
                       // Unchanged keeps it as it was; emptied, it shows its number again.

@@ -597,8 +597,8 @@ func TestAddAndRemoveAtRuntime(t *testing.T) {
 
 // Renaming is stored for stored machines and kept in memory for --ssh ones;
 // a label another machine has (also one stored but not running) is refused,
-// and the local machine keeps its host's name. Enabling or disabling the
-// local machine stores a record of it.
+// and the local machine's name is stored once given. Enabling or disabling
+// the local machine stores a record of it, without its host's name.
 func TestSetLabelAndLocalRecord(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "machines.json")
 	reg, _ := OpenRegistry(path, nil)
@@ -622,7 +622,7 @@ func TestSetLabelAndLocalRecord(t *testing.T) {
 	for _, c := range []struct {
 		id, label string
 		want      error
-	}{{"extra", "GPU", ErrLabelTaken}, {"extra", "elsewhere", ErrLabelTaken}, {LocalID, "x", ErrLocalMachine}, {"nope", "x", ErrUnknownMachine}} {
+	}{{"extra", "GPU", ErrLabelTaken}, {"extra", "elsewhere", ErrLabelTaken}, {LocalID, "GPU", ErrLabelTaken}, {"nope", "x", ErrUnknownMachine}} {
 		if err := mg.SetLabel(c.id, c.label); err != c.want {
 			t.Fatalf("%s → %s: %v", c.id, c.label, err)
 		}
@@ -640,5 +640,17 @@ func TestSetLabelAndLocalRecord(t *testing.T) {
 	}
 	if mg.Get(LocalID).State().Status != StatusDisabled {
 		t.Fatal("the local machine is not disabled")
+	}
+	// Renamed, the local machine keeps its name in its record, which the
+	// next start uses instead of the host's.
+	if err := mg.SetLabel(LocalID, "Workstation"); err != nil || mg.Get(LocalID).Label() != "Workstation" {
+		t.Fatalf("local rename: %v", err)
+	}
+	r, _ = OpenRegistry(path, nil)
+	if s, _ := r.Get(LocalID); s != (Spec{ID: LocalID, Label: "Workstation", Kind: KindLocal}) {
+		t.Fatalf("stored local %+v", s)
+	}
+	if specs := LoadSpecs(r.Specs(), nil); specs[0].Label != "Workstation" || specs[0].Enabled {
+		t.Fatalf("loaded local %+v", specs[0])
 	}
 }

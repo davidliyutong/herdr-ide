@@ -46,7 +46,7 @@ Non-goals: arbitrary docking of panes; floating panes.
   terminals, which installs and starts their terminal cores
   ([02](02-multi-machine-transport.md)), then reads their layout documents.
   A machine whose document has no workspace gets one without a name or a
-  directory (shown as `~`). Terminals that no longer run are dropped from
+  directory (shown as `~` until its first pane gives it one). Terminals that no longer run are dropped from
   it.
 - The shown machine's selected workspace, its selected tab and the focused
   pane are the document's: selecting a workspace or tab, or focusing a
@@ -106,14 +106,23 @@ Non-goals: arbitrary docking of panes; floating panes.
   directory, VS Code and its folder, Preview and its file), and a dragged
   tab's ghost shows the tab's name or its focused pane's title. The window title stays the app's name, with the
   count of blocked agents. A workspace is called by its
-  name, else by its folder: the last component of its directory, `~` for
+  name, else it names itself after a folder: while it has one pane, that
+  pane's (a terminal's current directory, which follows `cd`, or a VS Code
+  pane's folder), else its own directory, the one it was created with or
+  edited to or, for a workspace created without one, the directory its
+  first terminal started in (`layout.adoptDirectory`), else, for one whose
+  directory was emptied, its focused pane's. The folder is shown as the last
+  component of its directory, `~` for
   the home directory or none, `/` for the root (`layout.workspaceTitle`;
   `Workspace` and `工作区`, which earlier versions named the workspaces they
   made, count as none), in the sidebar, the tab bar's breadcrumb (machine /
   workspace), the palette, menus and messages. The sidebar lists every
   workspace of a followed machine one below the other (the selected one
   with an accent bar); a machine not followed yet offers to show its
-  terminals. A workspace's row stays quiet: its number, its name and,
+  terminals. The browser remembers the machines it followed (the desktop
+  app's window too) and follows them again when the page opens, each once
+  it is connected, so a reopened app shows their workspaces again; a
+  machine removed is forgotten (`web/src/state/followed.ts`). A workspace's row stays quiet: its number, its name and,
   while one of its agents has a state, the most urgent one's dot; its
   directory and number of tabs are in its tooltip.
 - Creating things: each button does one thing, named by its tooltip with
@@ -142,9 +151,18 @@ Non-goals: arbitrary docking of panes; floating panes.
   click) shows a highlight of where the pane goes. The middle of another
   pane swaps the two; an edge places the pane beside it, on that side.
   Dropping on a tab places it beside that tab's focused pane, on `+` into a
-  new tab. Escape cancels. All of these are edits of the layout document.
+  new tab, on another workspace of its machine in the sidebar into a new
+  tab at the end of that workspace, which is then shown. Escape cancels. All of these are edits of the layout document.
   VS Code and preview panes move the same way; a VS Code pane keeps its
   window wherever it goes ([05](05-vscode-panes.md)).
+- A pane's **Move to Workspace** submenu lists the machine's other
+  workspaces and **New Workspace…**: the pane goes into a new tab at the
+  end of the one chosen, which is shown with the pane focused. A new
+  workspace is asked for as when creating one, with the pane's directory
+  to begin with, and holds just the moved pane (`actions.movePaneToWorkspace`,
+  `layout.moveToNewTab`). A workspace the last pane leaves stays, without
+  tabs, until it is closed. Panes move only between workspaces of one
+  machine: a terminal runs in its machine's terminal core.
 - Dragging a tab along the tab bar, or a workspace along its machine's list
   in the sidebar, shows an insertion bar and reorders it. A drop lands in a
   slot of the current order (0 before the first item, n after the last);
@@ -154,16 +172,17 @@ Non-goals: arbitrary docking of panes; floating panes.
   the next are the same slot, drawn on the row the pointer is on. A tab
   stays in its workspace and a workspace on its machine.
 - Everything with a name is renamed in place the same way: double-clicking
-  a tab, a workspace, a pane's title or an SSH machine's name (or the
-  item's **Rename** in its menu, or a rename binding) puts a field in its
+  a tab, a workspace, a pane's title or a machine's name (or the
+  item's **Rename** in its menu, or a rename binding; a workspace's menu
+  edits it in a dialog, below) puts a field in its
   place with the name selected; Enter or leaving the field saves, Escape
   cancels. A pane's name is the terminal's `name` label in the terminal
   core, which also names it in tabs, the sidebar and the palette (empty
   shows the terminal's title again); tab and workspace names are in the
   layout document (a tab's field starts with its name or its terminal's
   title and saves only a change: an emptied tab name shows its number
-  again, an emptied workspace name its folder's, which the field shows as
-  its placeholder); a machine's name is the core's ([02](02-multi-machine-transport.md)). A
+  again, an emptied workspace name its folder's; the fields show no
+  placeholder); a machine's name is the core's ([02](02-multi-machine-transport.md)). A
   single click on a pane's title only focuses the pane; the first click
   of a double click on a machine folds or unfolds it and the second puts
   it back.
@@ -206,19 +225,20 @@ Non-goals: arbitrary docking of panes; floating panes.
   it is arranged, then what ends something (with a red icon) last; items of
   commands have the commands' names:
   - a terminal's pane header (a header's ⋯ button opens the same menu):
-    Rename Pane, Split Right / Down, Maximize or Restore Pane, Open in
-    VS Code, Show Changes in VS Code, Open Git Graph, Close Pane;
+    Rename Pane, Split Right / Down, Maximize or Restore Pane, Move to
+    Workspace ▸ (below), Open in VS Code, Show Changes in VS Code, Open Git Graph, Close Pane;
   - a VS Code pane's header: Reload VS Code, Split Right / Down, Maximize
-    or Restore Pane, Stop VS Code on `<machine>`
+    or Restore Pane, Move to Workspace ▸, Stop VS Code on `<machine>`
     ([05](05-vscode-panes.md)), Close Pane;
   - a preview's header: Open in VS Code, Download (where downloads are
     offered, [06](06-quick-look-and-files.md)), Split Right / Down,
-    Maximize or Restore Pane, Close Pane;
+    Maximize or Restore Pane, Move to Workspace ▸, Close Pane;
   - tab: Rename Tab, New Tab, Move Left / Right, Close Tab;
-  - workspace: Rename Workspace, New Tab, Move Up / Down, Close Workspace…;
+  - workspace: Edit Workspace…, New Tab, Move Up / Down, Close Workspace…;
   - machine: New Workspace…, Machine Settings… (the settings in the
-    machine's scope, [13](13-settings-and-appearance.md)), Rename Machine
-    and Copy SSH Host (SSH machines), Sign In… or Retry while it needs one,
+    machine's scope, [13](13-settings-and-appearance.md)), Rename Machine,
+    Copy SSH Host (SSH machines), Move Up / Down
+    ([02](02-multi-machine-transport.md)), Sign In… or Retry while it needs one,
     Enable or Disable Machine…, **Troubleshooting** ▸ Restart, Start or Stop
     the terminal service (its terminal core,
     [02](02-multi-machine-transport.md)), Remove Machine… (SSH machines);
@@ -268,6 +288,13 @@ Non-goals: arbitrary docking of panes; floating panes.
   Enter cancels these unless
   the user moves to the confirm button. The browser's `prompt()` and
   `confirm()` are not used.
+- **Edit Workspace…** (the workspace's menu, `workspace.edit`; a rule
+  naming `workspace.rename`, the command of earlier versions, applies to
+  it) asks for its name and directory in the same dialog. The directory
+  may be left empty: the workspace then keeps none, and its new tabs start
+  in the focused pane's directory, as splits do (`layout.editWorkspace`;
+  a pane added later does not give it one back). Double-clicking the
+  workspace still renames it in place.
 
 **Keyboard** (`internal/keybindings`, `web/src/keymap.ts`; the system is
 described in [13](13-settings-and-appearance.md))
@@ -359,8 +386,11 @@ described in [13](13-settings-and-appearance.md))
   `cmd+!`).
 - In the desktop app the page matches every key it sees itself
   (`web/src/keymap.ts`), direct shortcuts and users' chords alike, with the
-  desktop platform's bindings, and cancels the keys it runs. Held keys do
-  not repeat a command. The application menu shows on each command item the
+  desktop platform's bindings, and cancels the keys it runs. A held key
+  repeats, as in browsers and terminals, the commands that open, close and
+  step through things (new and close tab, close pane, next and previous
+  tab, workspace, pane focus and match: `REPEATING_COMMANDS` in
+  `web/src/keymap.ts`); toggles, dialogs and splits run once per press. The application menu shows on each command item the
   first single-stroke key the keybindings give that command. On macOS keys
   with Cmd are the menu's accelerators, but Chromium on macOS gives a Cmd
   key to the page first, so the menu acts only on keys the page left: a
@@ -461,14 +491,16 @@ described in [13](13-settings-and-appearance.md))
 - `internal/keybindings/keybindings_test.go`: key syntax vectors
   (`TestParseVectors`), defaults per platform (`TestDefaults`), the user's
   rules and problems (`TestUserRules`), rules naming `view.toggleCode`
-  applying to `code.open` (`TestRenamedCommands`), conflicts
+  and `workspace.rename` applying to `code.open` and `workspace.edit`
+  (`TestRenamedCommands`), conflicts
   (`TestConflicts`), edits of the file (`TestReload`), the desktop app's
   old shortcut settings (`TestMigrateDesktopShortcuts`).
 - `web/src/__tests__/term.test.ts`: the layout vectors of
   `design/testdata/layout` (workspaces, tabs, splits, closing, swaps and
   moves, directional focus and pane drops, VS Code and preview panes in
   `views.json`, version 1 documents, unknown fields, malformed documents,
-  the names workspaces are shown with).
+  the names workspaces are shown with, editing a workspace's name and
+  directory).
 - `web/src/__tests__/tabLabels.test.ts`: tabs numbered unless named, a tab
   of VS Code or a preview alone shown by its mark and name, the
   terminal's title and pane count in the tooltip, renaming from the title
@@ -507,9 +539,12 @@ described in [13](13-settings-and-appearance.md))
   Windows and Linux menus with File and Help and no key registered),
   `desktop/src/follow.test.ts` (reading the keybindings and settings, their
   pushes, reconnecting).
+- `web/src/__tests__/followed.test.ts`: machines followed before followed
+  again once connected, a removed machine forgotten.
 - `web/src/__tests__/menus.test.ts`: insertion slots, also on wrapped rows,
   the area a drop counts in, drags measured on the screen, menu items and
-  their commands, moves from the current position, read-only, keyboard,
+  their commands, moves from the current position, a pane moved to
+  another workspace or a new one, read-only, keyboard,
   focus and closing of the menu, submenus, the machine's menu and its
   terminal service under Troubleshooting.
 - `web/src/__tests__/paneHeader.test.ts`: a header's buttons act on its own

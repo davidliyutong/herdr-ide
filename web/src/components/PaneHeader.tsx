@@ -104,7 +104,6 @@ export function PaneTitle({ m, terminal, title, name }: { m: string; terminal: s
       <InlineEdit
         className="pane-title-edit"
         value={name || title}
-        placeholder={t('pane.renamePlaceholder')}
         onDone={(v) => {
           setRenaming(undefined);
           if (v !== undefined && v !== name) void actions.renamePane(m, terminal, v);

@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { TermConnection, type Socket, type StreamHandler } from '../term/connection';
 import {
+  adoptDirectory,
   closePane,
   closeTab,
   closeWorkspace,
   codeViews,
   createWorkspace,
+  editWorkspace,
+  focusedLeaf,
   dropOnPane,
   emptyLayout,
   focusDirection,
@@ -30,6 +33,7 @@ import {
   selectTab,
   selectWorkspace,
   setPreviewPath,
+  soleLeaf,
   workspaceTitle,
   setRatio,
   splitFocused,
@@ -244,6 +248,40 @@ describe('layout', () => {
       ['code:c2', '/w/docs', 1],
     ]);
   });
+
+  it('names a workspace after its first pane, or its only one', () => {
+    // A workspace without a directory takes its first pane's, once.
+    let layout = openTerminal(createWorkspace(emptyLayout, 'w', ''), 't1');
+    layout = adoptDirectory(layout, 't1', '/home/u/app');
+    expect(layout.workspaces[0].cwd).toBe('/home/u/app');
+    layout = splitFocused(layout, 'vertical', 't2');
+    expect(adoptDirectory(layout, 't2', '/home/u/lib')).toBe(layout);
+    const ws = () => layout.workspaces[0];
+    expect(soleLeaf(ws())).toBeNull();
+    expect(workspaceTitle(ws(), '/home/u')).toBe('app');
+    // One pane left: its directory names the workspace.
+    layout = closePane(layout, 't1');
+    expect(soleLeaf(ws())).toEqual({ terminal: 't2' });
+    expect(workspaceTitle(ws(), '/home/u', '/home/u/lib')).toBe('lib');
+    expect(workspaceTitle(ws(), '/home/u', '/home/u')).toBe('~');
+    // The user's name wins.
+    expect(workspaceTitle({ ...ws(), name: 'mine' }, '/home/u', '/home/u/lib')).toBe('mine');
+  });
+
+  it('edits a workspace; one without a directory keeps none', () => {
+    let layout = openTerminal(createWorkspace(emptyLayout, 'w', '', '/home/u/app'), 't1');
+    layout = splitFocused(layout, 'vertical', 't2');
+    layout = editWorkspace(layout, 'w', 'mine', '/srv');
+    expect(layout.workspaces[0]).toMatchObject({ name: 'mine', cwd: '/srv' });
+    expect(editWorkspace(layout, 'w', 'mine', '/srv')).toBe(layout);
+    layout = editWorkspace(layout, 'w', '', '');
+    expect(layout.workspaces[0]).toMatchObject({ name: '', cwd: '' });
+    // A new pane does not give an emptied directory back: new terminals
+    // start in the focused pane's.
+    layout = splitFocused(layout, 'horizontal', 't3');
+    expect(adoptDirectory(layout, 't3', '/home/u/lib')).toBe(layout);
+    expect(focusedLeaf(layout.workspaces[0])).toEqual({ terminal: 't3' });
+  });
 });
 
 /** A socket the test drives: what the client sent, and messages from the core. */
@@ -269,6 +307,24 @@ class FakeSocket implements Socket {
 }
 
 describe('terminal connection', () => {
+  it('tells the core the display a viewer answers programs with, but not for an observer', async () => {
+    const socket = new FakeSocket();
+    const conn = new TermConnection(() => socket);
+    conn.start();
+    socket.onopen!();
+    const handler: StreamHandler = { output: () => {}, resized: () => {}, closed: () => {} };
+    const display = { fg: '#1f1f1f', bg: '#fafafa', cursor: '#333333', cell: [16, 34] as [number, number] };
+    const viewer = conn.attach({ machine: 'x', terminal: 't1', cols: 80, rows: 24, display }, handler);
+    expect(socket.sent.at(-1)).toMatchObject({ t: 'attach', terminal: 't1', display });
+    socket.text({ t: 'attached', rid: 1, s: 7 });
+    const s = await viewer;
+    conn.facts(s, { ...display, bg: '#000000' });
+    expect(socket.sent.at(-1)).toEqual({ t: 'facts', s: 7, display: { ...display, bg: '#000000' } });
+    void conn.attach({ machine: 'x', terminal: 't2', cols: 80, rows: 24, observe: true, display }, handler).catch(() => {});
+    expect(socket.sent.at(-1)).not.toHaveProperty('display');
+    conn.close();
+  });
+
   it('subscribes, calls, attaches and moves bytes', async () => {
     const sockets: FakeSocket[] = [];
     const conn = new TermConnection(() => {

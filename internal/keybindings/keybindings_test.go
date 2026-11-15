@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -254,12 +255,16 @@ func TestRenamedCommands(t *testing.T) {
 	if err := s.SetUser(rules(t,
 		`{"key": "cmd+j", "command": "-view.toggleCode"}`,
 		`{"key": "cmd+e", "command": "view.toggleCode", "when": "always"}`,
+		`{"key": "ctrl+k r", "command": "workspace.rename"}`,
 	)); err != nil {
 		t.Fatal(err)
 	}
 	st := s.State()
 	if got := effective(st, PlatformMac, "code.open"); !slices.Equal(got, []string{"cmd+e@always"}) {
 		t.Errorf("code.open = %v", got)
+	}
+	if got := effective(st, PlatformMac, "workspace.edit"); len(got) != 1 || !strings.HasPrefix(got[0], "ctrl+k r@") {
+		t.Errorf("workspace.edit = %v", got)
 	}
 	if len(st.Problems) != 0 {
 		t.Errorf("problems = %+v", st.Problems)
