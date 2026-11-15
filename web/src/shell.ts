@@ -23,6 +23,9 @@ export interface DesktopShell {
    * icon), also those opened while it started; returns a function that
    * stops it. */
   onOpenFolders(fn: (opened: OpenedFolders) => void): () => void;
+  /** Tells the shell which commands cannot run now (no terminal, a dialog
+   * open, read-only…): their menu items are disabled. */
+  setDisabledCommands(commands: string[]): void;
 }
 
 export const desktopShell: DesktopShell | undefined = (globalThis as { desktopShell?: DesktopShell }).desktopShell;

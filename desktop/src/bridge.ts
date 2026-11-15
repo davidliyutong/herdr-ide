@@ -8,4 +8,7 @@ export const channels = {
   openFolders: 'desktop:open-folders',
   /** page → shell: whether the page takes opened folders. */
   foldersWanted: 'desktop:folders-wanted',
+  /** page → shell: the commands that cannot run now, whose menu items are
+   * disabled. */
+  menuState: 'desktop:menu-state',
 } as const;

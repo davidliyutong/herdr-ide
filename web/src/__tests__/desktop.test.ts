@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 
 import { keyName } from '../keys';
-import { runMenuCommand } from '../desktop';
+import { disabledCommands, runMenuCommand } from '../desktop';
 import { useDialog } from '../dialog';
 import { useStore, currentDock } from '../state/store';
 import type { MachineState } from '../lib/machine';
@@ -135,7 +135,7 @@ describe('runMenuCommand', () => {
     runMenuCommand('app.settings');
     runMenuCommand('tab.close');
     await settle();
-    expect(useStore.getState().settingsOpen).toBe(false);
+    expect(useStore.getState().settings).toBeUndefined();
     expect(killed()).toEqual([]);
     // Showing or hiding the VS Code panel is for everywhere.
     useStore.getState().openDock({ kind: 'code', m: 'm', folder: '/srv/app' });
@@ -146,7 +146,7 @@ describe('runMenuCommand', () => {
   it('opens the settings', () => {
     useStore.getState().openSettings(false);
     runMenuCommand('app.settings');
-    expect(useStore.getState().settingsOpen).toBe(true);
+    expect(useStore.getState().settings).toEqual({});
     useStore.getState().openSettings(false);
   });
 
@@ -187,5 +187,24 @@ describe('runMenuCommand', () => {
     runMenuCommand('nope.command');
     expect(useDialog.getState().current).toBeUndefined();
     expect(core.calls.length).toBe(calls);
+  });
+
+  it('names the commands whose menu items cannot run now', async () => {
+    // Two panes in one tab, one tab, one workspace.
+    let off = disabledCommands();
+    for (const id of ['tab.next', 'tab.previous', 'workspace.next', 'tab.select1', 'app.agentAttention']) expect(off, id).toContain(id);
+    for (const id of ['tab.new', 'tab.close', 'pane.close', 'pane.zoom', 'pane.focusNext', 'find.open', 'app.settings'])
+      expect(off, id).not.toContain(id);
+    // While a dialog is open, only the commands for dialogs and everywhere run.
+    useStore.getState().openSettings({});
+    off = disabledCommands();
+    expect(off).toContain('tab.new');
+    expect(off).not.toContain('view.toggleCode');
+    useStore.getState().openSettings(false);
+    // Read-only: nothing that changes anything.
+    useStore.getState().setReadOnly(true);
+    off = disabledCommands();
+    for (const id of ['tab.new', 'pane.splitRight', 'tab.close', 'workspace.new', 'app.addMachine']) expect(off, id).toContain(id);
+    useStore.getState().setReadOnly(false);
   });
 });

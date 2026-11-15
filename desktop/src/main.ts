@@ -23,7 +23,7 @@ import { channels } from './bridge';
 import { CoreProcess, coreArgs, coreEnv, coreInstance, corePort, DesktopError, ENV_PREFIX } from './core';
 import { FolderQueue } from './folders';
 import { followCore, type ShellSettings } from './follow';
-import { menuTemplate, type Binding } from './menu';
+import { menuCommands, menuTemplate, parseDisabled, type Binding } from './menu';
 import { APP_ID, coreBinary, foldersOf, keyPlatform, quitsWithLastWindow, type Platform } from './platform';
 import { allowPermission, isExternal, isInternal, mainWindowPreferences, webPreferences } from './policy';
 
@@ -66,6 +66,8 @@ const keys = keyPlatform(platform);
 let bindings = registry.keybindings[keys] as Binding[];
 // appearance.language: "auto" follows the system's languages.
 let language = 'auto';
+// The commands whose menu items are disabled, as the page last said.
+let disabled = new Set<string>();
 // Folders opened with the app, until the page takes them.
 const folders = new FolderQueue();
 
@@ -146,8 +148,19 @@ function runCommand(command: string, focused: BaseWindow | undefined) {
 }
 
 function buildMenu() {
-  const template = menuTemplate(bindings, APP_NAME, t, (command) => (_item, focused) => runCommand(command, focused), platform);
+  const template = menuTemplate(bindings, APP_NAME, t, (command) => (_item, focused) => runCommand(command, focused), platform, disabled);
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+/** Disables the menu items of the commands the page says cannot run now. */
+function applyDisabled(next: Set<string>) {
+  disabled = next;
+  const menu = Menu.getApplicationMenu();
+  if (!menu) return;
+  for (const id of menuCommands()) {
+    const item = menu.getMenuItemById(id);
+    if (item) item.enabled = !disabled.has(id);
+  }
 }
 
 // The core's settings and keybindings: the theme becomes the title bar's and
@@ -172,6 +185,12 @@ function fromMainPage(event: IpcMainEvent): boolean {
     !!mainWindow && !!frame && event.sender === mainWindow.webContents && frame === event.sender.mainFrame && isInternal(frame.url, origin)
   );
 }
+
+ipcMain.on(channels.menuState, (event, value: unknown) => {
+  if (!fromMainPage(event)) return;
+  const next = parseDisabled(value);
+  if (next) applyDisabled(next);
+});
 
 ipcMain.on(channels.foldersWanted, (event, wanted: unknown) => {
   if (!fromMainPage(event)) return;

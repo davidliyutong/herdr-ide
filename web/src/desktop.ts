@@ -4,9 +4,12 @@
 // with the desktop app's bindings, and cancels those it runs. In a browser
 // there is no bridge and none of this is active.
 
-import { applies, keyContext, runCommand, type KeyContext } from './keymap';
+import { applies, commandEnabled, keyContext, runCommand, type KeyContext } from './keymap';
 import { useKeys } from './keybindings';
 import { desktopShell } from './shell';
+import { useStore } from './state/store';
+import { useTerms } from './state/terms';
+import { useDialog } from './dialog';
 
 export { desktopShell, type DesktopShell } from './shell';
 
@@ -28,7 +31,40 @@ export function runMenuCommand(command: string) {
   runCommand(command);
 }
 
-/** Runs the menu's commands; returns a function that stops it. */
+/** The commands the menu shows disabled: those that cannot run now, and
+ * while a dialog or the palette is open those for the main UI. */
+export function disabledCommands(): string[] {
+  const s = useStore.getState();
+  const dialog = !!(s.settings || s.palette || s.addMachine || s.auth || useDialog.getState().current);
+  return useKeys
+    .getState()
+    .commands.filter((c) => (dialog && !applies(c.when, 'dialog')) || !commandEnabled(c.id))
+    .map((c) => c.id);
+}
+
+/** Runs the menu's commands and keeps its items' enabled states current;
+ * returns a function that stops it. */
 export function initDesktop(): () => void {
-  return desktopShell?.onCommand(runMenuCommand) ?? (() => {});
+  const shell = desktopShell;
+  if (!shell) return () => {};
+  const off = shell.onCommand(runMenuCommand);
+  let last = '';
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const update = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      const list = disabledCommands();
+      const key = list.join(' ');
+      if (key === last) return;
+      last = key;
+      shell.setDisabledCommands(list);
+    }, 50);
+  };
+  const subs = [useStore.subscribe(update), useTerms.subscribe(update), useDialog.subscribe(update), useKeys.subscribe(update)];
+  update();
+  return () => {
+    off();
+    clearTimeout(timer);
+    for (const u of subs) u();
+  };
 }

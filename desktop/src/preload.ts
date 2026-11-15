@@ -1,7 +1,7 @@
 // Preload of the main window (sandboxed, context-isolated). It gives the page
 // a narrow bridge and nothing else: the commands of the menu items chosen,
-// where a file the user dropped is on disk, and which folders were opened
-// with the app.
+// where a file the user dropped is on disk, which folders were opened with
+// the app, and (from the page) which commands' menu items to disable.
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
 import type { DesktopShell, OpenedFolders } from '../../web/src/shell';
 import { channels } from './bridge';
@@ -49,6 +49,10 @@ const shell: DesktopShell = {
       off();
       ipcRenderer.send(channels.foldersWanted, false);
     };
+  },
+  setDisabledCommands(commands) {
+    // Strings only; the shell checks them against its menu's commands.
+    if (Array.isArray(commands)) ipcRenderer.send(channels.menuState, commands.filter(isString).slice(0, 200));
   },
 };
 

@@ -205,19 +205,23 @@ system's rules run in the tests on any of them:
 
 **The menu** (`desktop/src/menu.ts`, `menusFor`)
 
-- macOS: the application's menu (About, Settings…, Keyboard Shortcuts…,
-  Hide, Quit), then Shell, Edit, View and Window. Windows and Linux:
-  **File** (Settings…, Keyboard Shortcuts…, Quit, titled Exit on Windows),
-  Shell, Edit, View, Window and **Help** (About). The other menus are the
-  same everywhere: **Shell** (New Terminal, Split Right, Split Down, New,
-  Rename and Close Workspace…, Rename Tab…, Close Terminal, Close Tab),
+- macOS: the application's menu (About, Settings…, Keyboard Shortcuts,
+  Hide, Hide Others, Show All, Quit), then Shell, Edit, View and
+  **Window** (Minimize, Zoom, Bring All to Front and, as macOS's Window
+  menu, the list of windows). Windows and Linux: **File** (Settings…,
+  Keyboard Shortcuts, Quit, titled Exit on Windows), Shell, Edit, View,
+  **Window** (Minimize) and **Help** (About). The other menus are the same
+  everywhere: **Shell** (New Tab, Split Right, Split Down, New, Rename and
+  Close Workspace…, Rename Tab, Close Pane, Close Tab, Add Machine…),
   **Edit** (Undo, Redo, Cut, Copy, Paste, Select All, Find…, Find Next,
-  Find Previous), **View** (Command Palette…, Switch Workspace…, Toggle
-  Sidebar, Show or Hide VS Code, Zoom Pane, next and previous tab,
-  workspace and pane, Focus Pane Left, Right, Above, Below) and **Window**
-  (Minimize). Edit's Undo, Redo, Cut, Copy, Paste and Select All are
-  Electron's standard roles. Titles are the web UI's `desktop.menu.*`
-  strings, in English and Chinese.
+  Find Previous), **View** (Command Palette…, Go to Workspace…, Go to Agent
+  Needing Attention, Toggle Sidebar, Toggle VS Code Panel, Maximize Pane,
+  next and previous tab, workspace and pane, focusing the pane in each
+  direction, Toggle Full Screen). Items of commands have the commands'
+  names (`command.<id>`), as the palette, the keyboard shortcuts page and
+  the tooltips have them; menus and Electron's roles (Edit's Undo … Select
+  All, Hide, Zoom, Full Screen…) are titled with the web UI's
+  `desktop.menu.*` strings, in English and Chinese.
 - Each command item shows the first single-stroke key the keybindings give
   its command (the registry's defaults until the core answers), and the
   menu is rebuilt when the keybindings or the language change. The page
@@ -241,12 +245,15 @@ system's rules run in the tests on any of them:
 - An item chosen sends its command to the main window's page, which runs
   it where it applies (`web/src/desktop.ts`); with a program window or one
   of VS Code's own windows in front, closing a pane or a tab closes that
-  window instead. Items are not enabled and disabled by context
-  (Electron's menu has no validation when it opens): one chosen where its
-  command does not apply (a command for terminals while a dialog is open
-  or VS Code has the keyboard) does nothing. The shell's core never runs
-  read-only, since the shell does not pass `--read-only`, so no item needs
-  disabling for that.
+  window instead. The page tells the shell which commands cannot run now
+  (`desktopShell.setDisabledCommands`, sent again whenever that changes:
+  no terminal for pane commands, one tab for next and previous tab, one
+  pane for focus moves, a dialog or the palette open for the commands of
+  the main UI, read-only mode), and their items are disabled
+  (`MenuItem.enabled`, kept when the menu is rebuilt). The shell takes the
+  list only from the main window's page, as command ids, and uses those of
+  its menu's items (`parseDisabled`). One chosen anyway (by its key) where its command does
+  not apply does nothing.
 
 **The page's bridge, dropped and opened folders**
 
@@ -254,8 +261,8 @@ system's rules run in the tests on any of them:
   exposes one object, `desktopShell` (`web/src/shell.ts`): the commands of
   menu items chosen, where a dropped file is on disk, and the folders
   opened with the app. The page sends only whether it takes opened
-  folders; messages count only from the top frame of the main window
-  showing the core's origin. Program windows have no preload.
+  folders and which commands' items to disable; messages count only from
+  the top frame of the main window showing the core's origin. Program windows have no preload.
 - The bridge's `pathForFile` returns where a file the user dropped on the
   page is on disk (`webUtils.getPathForFile`; Electron removed
   `File.path`), and an empty string for a File made in JavaScript or
@@ -350,7 +357,7 @@ ICNS; development sets the Dock icon from the PNG.
   quit allows agent cleanup before the child is killed; force-killed
   agents retain their existing orphan-reaping and idle-timeout protection.
 - The local terminal core fails to start: the machine's status in the web
-  UI shows the error and offers **Start terminal core**; the desktop shell
+  UI shows the error and offers **Start Terminal Service**; the desktop shell
   does not start or alter terminal cores.
 - Windows: the local machine shows `local_unsupported` and is never
   connected. An SSH machine that needs a password, a key's passphrase the
@@ -388,8 +395,11 @@ a restart before the first click. Navigation and
 native popups are restricted to the exact owned core origin; external links
 accept only credential-free HTTP(S), with other schemes refused. Permissions
 require both the requesting frame and its top window to belong to the core;
-only notifications, clipboard reads, sanitized clipboard writes and the File
-System Access API are allowed. Clipboard reads let VS Code paste text copied
+only notifications, clipboard reads, sanitized clipboard writes, the File
+System Access API and local fonts are allowed. Local fonts let the
+settings' font picker list the monospace fonts installed on the computer
+(their names and read-only font data), which a browser grants after asking
+([13](13-settings-and-appearance.md)). Clipboard reads let VS Code paste text copied
 in other apps; the browser UI grants its frame the same permission, where the
 browser asks once, while the desktop app has no prompt. VS Code's
 **Download…** saves folders and files over 32 MB through the File System

@@ -5,21 +5,45 @@ import registry from '../../design/generated/registry.json';
 import { translate } from '../../web/src/i18n';
 import { en, type MessageKey } from '../../web/src/i18n/en';
 import { zhCN } from '../../web/src/i18n/zh-CN';
-import { accelerator, menus, menusFor, menuTemplate, type Binding } from './menu';
+import { accelerator, menuCommands, menus, menusFor, menuTemplate, parseDisabled, type Binding } from './menu';
 import type { Platform } from './platform';
 
 const mac = registry.keybindings.mac as Binding[];
 
-test('every item runs a registered command or a standard role, titled in both languages', () => {
+test('every item runs a registered command, named as the command, or a standard role, titled in both languages', () => {
   const commands = new Set(registry.commands.map((c) => c.id));
   for (const { title, items } of menus) {
     if (title !== 'app') assert.ok(en[`desktop.menu.${title}`] && zhCN[`desktop.menu.${title}`], title);
     for (const it of items) {
       if (it === '-') continue;
-      if ('command' in it) assert.ok(commands.has(it.command), it.command);
-      assert.ok(en[`desktop.menu.${it.title}` as MessageKey] && zhCN[`desktop.menu.${it.title}` as MessageKey], it.title);
+      if ('command' in it) {
+        assert.ok(commands.has(it.command), it.command);
+        const key = `command.${it.command}` as MessageKey;
+        assert.ok(en[key] && zhCN[key], key);
+      } else assert.ok(en[`desktop.menu.${it.title}` as MessageKey] && zhCN[`desktop.menu.${it.title}` as MessageKey], it.title);
     }
   }
+});
+
+test("the page's disabled commands are disabled items; anything else is refused", () => {
+  const template = menuTemplate(
+    mac,
+    'App',
+    (key, vars) => translate('en', key, vars),
+    () => () => {},
+    'darwin',
+    new Set(['tab.close']),
+  ) as Built[];
+  const items = template.flatMap((m) => m.submenu);
+  assert.equal(items.find((it) => it.id === 'tab.close')?.enabled, false);
+  assert.equal(items.find((it) => it.id === 'tab.new')?.enabled, true);
+  // Commands without an item (the tab numbers, VS Code's) are left out.
+  assert.deepEqual(parseDisabled(['tab.close', 'pane.zoom', 'tab.select1', 'code.open']), new Set(['tab.close', 'pane.zoom']));
+  for (const bad of [['tab.close', 'rm -rf'], 'tab.close', [1], null, Array(201).fill('tab.close')])
+    assert.equal(parseDisabled(bad), undefined);
+  // Every command of the menu can be named; the Window menu is macOS's.
+  assert.ok(menuCommands().includes('app.addMachine'));
+  assert.equal(template.find((m) => m.label === 'Window')?.role, 'windowMenu');
 });
 
 test('accelerators: one stroke, shifted punctuation as its character', () => {
@@ -62,7 +86,7 @@ test('items show the first single-stroke key of their command and run it', () =>
   );
   assert.equal(items.find((it) => it.role === 'quit')?.label, 'Quit App');
   const newTerminal = byCommand('tab.new');
-  assert.equal(newTerminal.label, 'New Terminal');
+  assert.equal(newTerminal.label, 'New Tab');
   assert.equal(newTerminal.accelerator, 'Super+T');
   assert.equal(newTerminal.registerAccelerator, true);
   assert.equal(byCommand('pane.close').accelerator, 'Super+W');
@@ -70,8 +94,17 @@ test('items show the first single-stroke key of their command and run it', () =>
   assert.equal(byCommand('view.toggleCode').accelerator, 'Super+J');
   assert.equal(byCommand('app.commandPalette').accelerator, 'Super+Shift+P');
   assert.equal(byCommand('app.keyboardShortcuts').accelerator, 'Super+/');
+  assert.equal(byCommand('tab.close').accelerator, 'Super+Shift+W');
+  assert.equal(byCommand('pane.focusLeft').accelerator, 'Super+Alt+Left');
+  assert.equal(byCommand('pane.zoom').accelerator, 'Super+Shift+Enter');
+  assert.deepEqual(
+    items
+      .filter((it) => it.role && ['minimize', 'zoom', 'front', 'togglefullscreen', 'hideOthers', 'unhide'].includes(it.role))
+      .map((it) => it.label),
+    ['Hide Others', 'Show All', 'Toggle Full Screen', 'Minimize', 'Zoom', 'Bring All to Front'],
+  );
   // Commands without a default key are items without one.
-  for (const id of ['pane.zoom', 'workspace.switch', 'workspace.rename', 'tab.rename', 'pane.focusLeft']) {
+  for (const id of ['workspace.rename', 'tab.rename', 'workspace.close', 'app.addMachine']) {
     assert.equal(byCommand(id).accelerator, undefined, id);
     assert.ok(byCommand(id).label, id);
   }
@@ -88,7 +121,7 @@ test('on Windows and Linux, File and Help menus; the keys are shown and every on
     );
     assert.deepEqual(
       template[0].submenu.map((it) => it.label ?? '-'),
-      ['Settings…', 'Keyboard Shortcuts…', '-', p === 'win32' ? 'Exit' : 'Quit App'],
+      ['Settings…', 'Keyboard Shortcuts', '-', p === 'win32' ? 'Exit' : 'Quit App'],
     );
     assert.equal(template.at(-1)!.submenu[0].role, 'about');
     assert.equal(
@@ -127,6 +160,7 @@ test("a rebinding moves the item's key; an unbinding removes it; chords stay wit
       { key: 'cmd+t', command: '-tab.new' },
       { key: 'cmd+shift+t', command: 'tab.new' },
       { key: 'cmd+w', command: '-pane.close' },
+      { key: 'cmd+shift+enter', command: '-pane.zoom' },
       { key: 'ctrl+k z', command: 'pane.zoom' },
       { key: 'ctrl+alt+z', command: 'pane.zoom' },
     ]),
@@ -134,7 +168,7 @@ test("a rebinding moves the item's key; an unbinding removes it; chords stay wit
   assert.equal(byCommand('tab.new').accelerator, 'Super+Shift+T');
   // Unbound: the item stays, without a key.
   assert.equal(byCommand('pane.close').accelerator, undefined);
-  assert.equal(byCommand('pane.close').label, 'Close Terminal');
+  assert.equal(byCommand('pane.close').label, 'Close Pane');
   // A chord is never an accelerator; a key without Cmd is shown, not taken.
   assert.equal(byCommand('pane.zoom').accelerator, 'Control+Alt+Z');
   assert.equal(byCommand('pane.zoom').registerAccelerator, false);
@@ -150,7 +184,9 @@ test('titles follow the language', () => {
   ) as Built[];
   assert.deepEqual(
     template.map((m) => m.label),
-    ['App', '终端', '编辑', '显示', '窗口'],
+    ['App', '终端', '编辑', '视图', '窗口'],
   );
   assert.equal(template[0].submenu.find((it) => it.role === 'about')?.label, '关于 App');
+  // Items of commands are named as the commands are everywhere else.
+  assert.equal(template[1].submenu.find((it) => it.id === 'tab.new')?.label, '新建标签页');
 });

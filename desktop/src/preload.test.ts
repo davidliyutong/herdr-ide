@@ -9,7 +9,7 @@ const shell = exposed.desktopShell as DesktopShell;
 
 test('the page gets only the desktopShell bridge, with these functions', () => {
   assert.deepEqual(Object.keys(exposed), ['desktopShell']);
-  assert.deepEqual(Object.keys(shell).sort(), ['onCommand', 'onOpenFolders', 'pathForFile']);
+  assert.deepEqual(Object.keys(shell).sort(), ['onCommand', 'onOpenFolders', 'pathForFile', 'setDisabledCommands']);
 });
 
 test('the menu sends the page commands, strings only, while it listens', () => {
@@ -49,4 +49,11 @@ test('folders opened with the app reach the page while it listens, which it tell
     { channel: channels.foldersWanted, value: true },
     { channel: channels.foldersWanted, value: false },
   ]);
+});
+
+test('the page tells the shell which commands to disable, as strings', () => {
+  sent.length = 0;
+  shell.setDisabledCommands(['tab.close', 7 as unknown as string, 'pane.zoom']);
+  shell.setDisabledCommands('tab.close' as unknown as string[]);
+  assert.deepEqual(sent, [{ channel: channels.menuState, value: ['tab.close', 'pane.zoom'] }]);
 });

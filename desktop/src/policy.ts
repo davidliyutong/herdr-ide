@@ -24,11 +24,14 @@ export function isExternal(url: string): boolean {
 // fileSystem is the File System Access API: VS Code's Download… saves
 // folders and files over 32 MB into a folder the user picks in the native
 // dialog, which is the consent (Electron keeps system folders out).
+// local-fonts lets the settings list the fonts installed on the computer
+// (names and font files, read-only) for the terminal font picker, as a
+// browser does after asking.
 export function allowPermission(permission: string, requestingURL: string, topURL: string, origin: string): boolean {
   return (
     isInternal(requestingURL, origin) &&
     isInternal(topURL, origin) &&
-    ['notifications', 'clipboard-read', 'clipboard-sanitized-write', 'fileSystem'].includes(permission)
+    ['notifications', 'clipboard-read', 'clipboard-sanitized-write', 'fileSystem', 'local-fonts'].includes(permission)
   );
 }
 

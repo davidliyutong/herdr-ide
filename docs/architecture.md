@@ -73,9 +73,11 @@ controls', the language the menu's. The application menu
 (`desktop/src/menu.ts`: on macOS the application's, Shell, Edit, View and
 Window; on Windows and Linux File, Shell, Edit, View, Window and Help)
 holds the keybindings' commands for terminals, splits, workspaces, tabs,
-find, the palette, the sidebar, VS Code, zoom and focus; each command item
-shows the first single-stroke key its command has, and is rebuilt when the
-keybindings or the language change.
+find, the palette, the sidebar, VS Code, zoom and focus, named as the
+commands are everywhere; each command item shows the first single-stroke
+key its command has and is disabled while the page says its command
+cannot run, and the menu is rebuilt when the keybindings or the language
+change.
 
 The renderer reuses the browser UI with no Node APIs, sandboxing and context
 isolation. The page matches every key it sees itself (`web/src/keymap.ts`),
@@ -85,9 +87,10 @@ left (a text field, VS Code or another window has the keyboard), so a key
 runs once; on Windows and Linux it registers no key and every key goes to
 the page ([04](features/04-layout-and-keyboard.md)). The main window's
 preload exposes only `desktopShell`: the commands of menu items chosen,
-where a file or folder dropped from the file manager is on disk (to create a
-workspace there or paste its path into a pane of the local machine), and
-the folders opened with the app (dropped on the Dock icon on macOS, named
+which commands' items to disable (from the page), where a file or folder
+dropped from the file manager is on disk (to create a workspace there or
+paste its path into a pane of the local machine), and the folders opened
+with the app (dropped on the Dock icon on macOS, named
 on the command line by a file manager's Open With on Linux), also when they
 launched it. Same-origin popups become equally restricted native windows;
 HTTP(S) links outside the core open in the default browser. Packaging and

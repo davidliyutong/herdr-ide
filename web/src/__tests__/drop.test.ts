@@ -37,6 +37,7 @@ const shell: DesktopShell = {
     };
   },
   onCommand: () => () => {},
+  setDisabledCommands: () => {},
   pathForFile: (f: File) => onDisk.get(f) ?? '',
 };
 
