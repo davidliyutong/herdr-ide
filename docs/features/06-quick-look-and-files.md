@@ -19,8 +19,9 @@ directory); follow uploads (progress, speed, time left), cancel them and see
 the recent ones; download a path from a pane, or files and folders chosen in
 the pane's directory, into the browser, folders as zip archives.
 
-Non-goals: a file manager (the download chooser picks entries, nothing
-more); editing files (that is VS Code's job).
+Non-goals: browsing and changing files, and editing them: the file
+explorer does that ([28](28-file-explorer.md)), and VS Code panes; the
+download chooser picks entries, nothing more.
 
 ## Design
 

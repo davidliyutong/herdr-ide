@@ -132,6 +132,7 @@ in the UI; a setting with a scope can have its own value per machine, under
 | `notifications.mutedAgents` | list of strings | `["droid"]` | – | – |
 | `codeServer.install` | `push`, `download`, `existing` | `"push"` | `--code-server-install` | per machine |
 | `codeServer.path` | string | `""` | `--code-server-path` | per machine |
+| `plugins.files.enabled` | `true`, `false` | `true` | – | – |
 | `gui.enabled` | `true`, `false` | `true` | `--gui` | per remote machine |
 | `gui.gpu` | `vglrun`, `all` | `"vglrun"` | `--gui-gpu` | per remote machine |
 | `gui.video` | `true`, `false` | `true` | `--gui-video` | per remote machine |
@@ -234,6 +235,7 @@ by `scripts/registry`.
 | `pane.undoClose` | `terminal` | `cmd+z` | – | – | – |
 | `view.toggleSidebar` | `terminal` | `cmd+b` | – | – | – |
 | `view.togglePanel` | `terminal` | `cmd+alt+b` | – | – | – |
+| `view.panel.files` | `terminal` | `cmd+shift+e` | – | – | – |
 | `view.zoomIn` | `always` | `cmd+shift+equal`, `cmd+equal` | – | `ctrl+shift+equal`, `ctrl+equal` | – |
 | `view.zoomOut` | `always` | `cmd+minus` | – | `ctrl+minus` | – |
 | `view.zoomReset` | `always` | `cmd+0` | – | `ctrl+0` | – |
@@ -320,6 +322,9 @@ missing here.
 | `GET /api/m/{id}/download` | – | One file as an attachment, or several paths (folders included) as a zip (`?path=`…, `&dl=<id>` to follow it on `/ws`). |
 | `POST /api/m/{id}/upload` | writes | Writes the request body to a file (`?name=`, `&dir=` absolute, else the upload directory). |
 | `GET /api/m/{id}/list` | – | A directory's entries (`?path=`). |
+| `GET /api/m/{id}/p/files/stat` | – | The file explorer's poll: size, modification time and kind of 1–200 paths (`?path=`…) ([28](features/28-file-explorer.md)). |
+| `POST /api/m/{id}/p/files/{action}` | writes | The file explorer's changes (`{"path"}`, `{"path", "to"}`, `{"paths", "dir"}` or `{"paths"}`): `mkdir`, `create`, `rename` and `move` (never replacing), `copy`, `trash`, `remove` (for good); audited as `files.<action>`. |
+| `POST /api/m/{id}/p/files/write` | writes | Saves the body (at most 8 MiB) into `?path=` when the file still has `&mtime=&size=` (`&new=1`: is not there, `&force=1`: any); `409 conflict` with its state otherwise. |
 | `GET /api/m/{id}/code/status` | – | Whether the machine's code-server is installed and runs. |
 | `POST /api/m/{id}/code/start` | writes | Installs and starts the machine's code-server. |
 | `POST /api/m/{id}/code/stop` | – | Releases the machine's code-server (allowed read-only: it only stops). |

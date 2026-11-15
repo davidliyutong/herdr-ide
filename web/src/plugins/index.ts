@@ -4,6 +4,7 @@ import { definePlugins, setPanelCommand } from './registry';
 import { togglePanel } from '../components/RightBar';
 import { transfersPlugin } from './transfers';
 import { guiPlugin } from './gui';
+import { filesPlugin } from './files';
 
 setPanelCommand((panel) => ({ run: () => togglePanel(panel.id) }));
-definePlugins([transfersPlugin, guiPlugin]);
+definePlugins([transfersPlugin, guiPlugin, filesPlugin]);

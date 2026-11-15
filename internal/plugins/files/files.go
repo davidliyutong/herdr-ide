@@ -1,0 +1,206 @@
+// Package files is the core's side of the file explorer plugin
+// (docs/features/28-file-explorer.md): routes below
+// /api/m/{id}/p/files/ that run the actions of its machine side
+// (internal/agent/plugin/files). Listing directories and reading files
+// use the core's own routes (/api/m/{id}/list, /file, /download); the
+// plugin adds the changes, the stat the explorer polls, and saving an
+// editor's text.
+package files
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"herdr-ide/internal/agentproto"
+	"herdr-ide/internal/plugin"
+)
+
+const (
+	// MaxWrite bounds an editor's save (the agent's limit).
+	MaxWrite = 8 << 20
+	// MaxStat bounds the paths of one stat (the agent's limit).
+	MaxStat = 200
+	// maxBody bounds the JSON of a change.
+	maxBody = 1 << 20
+	// timeout bounds an action; copies and removals of large trees take
+	// the longest.
+	timeout = 10 * time.Minute
+)
+
+// Plugin is the file explorer.
+type Plugin struct{}
+
+// New returns the plugin.
+func New() Plugin { return Plugin{} }
+
+func (Plugin) ID() string { return "files" }
+
+// Entry is the stat of a path (the agent's files.Entry).
+type Entry struct {
+	Path   string `json:"path"`
+	Exists bool   `json:"exists"`
+	IsDir  bool   `json:"is_dir,omitempty"`
+	Size   int64  `json:"size"`
+	MTime  int64  `json:"mtime"`
+}
+
+// params are an action's parameters (the agent's files.Params).
+type params struct {
+	Path   string   `json:"path,omitempty"`
+	Paths  []string `json:"paths,omitempty"`
+	To     string   `json:"to,omitempty"`
+	Dir    string   `json:"dir,omitempty"`
+	Expect *Entry   `json:"expect,omitempty"`
+	Force  bool     `json:"force,omitempty"`
+}
+
+func (Plugin) Routes() []plugin.Route {
+	change := func(action string) plugin.Route {
+		return plugin.Route{Method: http.MethodPost, Path: action, Machine: true, Mutating: true, Audit: action, Handler: run(action)}
+	}
+	return []plugin.Route{
+		{Method: http.MethodGet, Path: "stat", Machine: true, Handler: stat},
+		change("mkdir"),
+		change("create"),
+		change("rename"),
+		change("move"),
+		change("copy"),
+		change("trash"),
+		change("remove"),
+		{Method: http.MethodPost, Path: "write", Machine: true, Mutating: true, Audit: "write", Handler: write},
+	}
+}
+
+// stat answers the state of the paths (?path=…, at most MaxStat): the
+// explorer polls the directories it shows expanded.
+func stat(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
+	paths := r.URL.Query()["path"]
+	if len(paths) == 0 || len(paths) > MaxStat {
+		plugin.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad_request", "message": "between 1 and 200 paths"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	var out []Entry
+	if err := plugin.Request(ctx, c.Machine, "files", "stat", params{Paths: paths}, &out); err != nil {
+		plugin.WriteError(w, err)
+		return
+	}
+	plugin.WriteJSON(w, http.StatusOK, map[string]any{"entries": out})
+}
+
+// run answers a change: its JSON body is the action's parameters.
+func run(action string) func(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
+	return func(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
+		var p params
+		if err := plugin.ReadJSON(r, maxBody, &p); err != nil {
+			plugin.WriteError(w, err)
+			return
+		}
+		p.Expect, p.Force = nil, false
+		ctx, cancel := context.WithTimeout(r.Context(), timeout)
+		defer cancel()
+		var out json.RawMessage
+		if err := plugin.Request(ctx, c.Machine, "files", action, p, &out); err != nil {
+			plugin.WriteError(w, err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		if len(out) == 0 {
+			out = json.RawMessage("{}")
+		}
+		w.Write(out)
+	}
+}
+
+// writeParams reads a save's query: path, and the state the editor loaded
+// the file in (mtime and size), or new=1 for a file that must not exist,
+// or force=1.
+func writeParams(r *http.Request) (params, error) {
+	q := r.URL.Query()
+	p := params{Path: q.Get("path"), Force: q.Get("force") == "1"}
+	if p.Path == "" {
+		return p, errors.New("path required")
+	}
+	if p.Force || q.Get("new") == "1" {
+		return p, nil
+	}
+	mtime, err1 := strconv.ParseInt(q.Get("mtime"), 10, 64)
+	size, err2 := strconv.ParseInt(q.Get("size"), 10, 64)
+	if err1 != nil || err2 != nil {
+		return p, errors.New("mtime and size, new=1 or force=1 required")
+	}
+	p.Expect = &Entry{Path: p.Path, Exists: true, MTime: mtime, Size: size}
+	return p, nil
+}
+
+// write saves an editor's text (the body, at most MaxWrite bytes) into a
+// file. A file that changed since the editor loaded it is a 409 conflict
+// with its state now ("current"), which the editor offers to reload or
+// overwrite.
+func write(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
+	p, err := writeParams(r)
+	if err != nil {
+		plugin.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad_request", "message": err.Error()})
+		return
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxWrite))
+	if err != nil {
+		plugin.WriteJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "too_large", "message": err.Error()})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancel()
+	res, err := save(ctx, c, p, body)
+	if err != nil {
+		var pe *plugin.Error
+		if errors.As(err, &pe) && pe.Code == "conflict" {
+			var cur Entry
+			json.Unmarshal([]byte(strings.TrimPrefix(pe.Message, "conflict: ")), &cur)
+			plugin.WriteJSON(w, http.StatusConflict, map[string]any{"error": "conflict", "current": cur})
+			return
+		}
+		plugin.WriteError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Write(res)
+}
+
+// save runs the agent's write: its reply, the text as chunks, then the
+// line with the result.
+func save(ctx context.Context, c *plugin.Call, p params, body []byte) (json.RawMessage, error) {
+	conn, _, err := plugin.Open(ctx, c.Machine, "files", "write", p)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	cw := agentproto.ChunkWriter{W: conn}
+	if _, err := io.Copy(cw, bytes.NewReader(body)); err != nil {
+		return nil, &plugin.Error{Code: "transport", Message: err.Error()}
+	}
+	if err := cw.Finish(); err != nil {
+		return nil, &plugin.Error{Code: "transport", Message: err.Error()}
+	}
+	var rep agentproto.Reply
+	if err := agentproto.ReadLine(conn, &rep); err != nil {
+		return nil, &plugin.Error{Code: "transport", Message: err.Error()}
+	}
+	if !rep.OK {
+		code := rep.Code
+		if code == "" {
+			code = "failed"
+		}
+		return nil, &plugin.Error{Code: code, Message: rep.Error}
+	}
+	return rep.Plugin, nil
+}
