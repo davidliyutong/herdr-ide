@@ -97,7 +97,9 @@ func (r Runner) Run(ctx context.Context, command string, env map[string]string, 
 	}
 	buf := &capped{max: limit + maxValue}
 	cmd.Stdout, cmd.Stderr = buf, buf
-	// Programs left in the background must not keep the call open.
+	// Programs left in the background must not keep the call open (they
+	// hold the output's pipe), nor outlive it with the values in their
+	// environment: the group is killed whenever the command returns.
 	cmd.WaitDelay = 2 * time.Second
 	newGroup(cmd)
 	if err := cmd.Start(); err != nil {
@@ -111,6 +113,7 @@ func (r Runner) Run(ctx context.Context, command string, env map[string]string, 
 	var note string
 	select {
 	case err = <-done:
+		killGroup(cmd)
 	case <-timer.C:
 		killGroup(cmd)
 		err = <-done
@@ -129,18 +132,22 @@ func (r Runner) Run(ctx context.Context, command string, env map[string]string, 
 		output = output[:limit]
 		truncated = true
 	}
-	status := 0
-	var ee *exec.ExitError
-	switch {
-	case err == nil:
-	case errors.As(err, &ee):
-		status = ee.ExitCode()
-	default:
-		status = -1
+	// The exit status of the shell, also when Wait gave up on the output
+	// of programs it left in the background (exec.ErrWaitDelay).
+	status := -1
+	if cmd.ProcessState != nil {
+		status = cmd.ProcessState.ExitCode()
+	} else if err == nil {
+		status = 0
+	}
+	var bg string
+	if errors.Is(err, exec.ErrWaitDelay) && note == "" {
+		bg = "[programs left in the background were killed]\n"
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "exit status: %d\n", status)
 	b.WriteString(note)
+	b.WriteString(bg)
 	b.WriteString(output)
 	if truncated {
 		if !strings.HasSuffix(output, "\n") {

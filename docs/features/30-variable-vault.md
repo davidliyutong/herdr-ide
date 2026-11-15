@@ -23,6 +23,13 @@ deciding.
   of a terminal would get them, for the terminal's whole life.
 - Non-goal: protection against the user's own programs on an allowed
   machine: any process of the user there can ask as an agent does.
+- Non-goal: protection against the user's own programs on the core host.
+  There approval is advisory: a local process can call the core's loopback
+  API (no `Origin` header needed) to answer its own request or reveal a
+  value, content the core serves on its own origin (code-server's webviews,
+  VS Code extensions) passes the origin check, and on macOS the keychain
+  item, created with `/usr/bin/security`, can be read by any process of the
+  user. The panel says so for the local machine.
 - Non-goal: configuring the CLIs. The user adds the MCP server once per
   machine; the panel shows how.
 
@@ -47,15 +54,24 @@ own). The vault is then unlocked at every start by reading the key. Where
 no keychain answers (a headless Linux host), the vault turns to passphrase
 mode: the key is derived with Argon2id (time 3, 64 MiB, 4 threads; salt and
 parameters in the file), set the first time it is entered, and the vault is
-locked after every start until the passphrase is entered in the panel. A
+locked after every start until the passphrase is entered in the panel.
+Parameters read from the file must be within bounds (a 16-byte salt, time
+1–10, memory 8 MiB–1 GiB, 1–16 threads), or the vault does not open: an
+edited file can neither weaken the derivation nor exhaust the core's
+memory. A
 keychain vault whose key is gone or unreadable stays locked and says why
 (`key_missing`, `keychain_unavailable`); its names can still be listed and
 deleted.
 
 Names are environment variable names (`^[A-Za-z_][A-Za-z0-9_]*$`, at most
 128); values at most 64 KiB, descriptions at most 1 KiB, at most 1000
-variables. `machines` lists machine ids, `*` for all. `injectOnly`
-variables are only given to `run_with_env`.
+variables. `machines` lists machine ids, `*` for all; removing a machine
+from the core removes its id from every variable's list
+(`plugin.MachineForgetter`, audited as `vault.machine_forgotten`), so a
+machine added later under the same id asks again. `injectOnly` variables
+are only given to `run_with_env`, which does not stop a command from
+printing them encoded (base64, say): it keeps them out of the
+conversation by accident, not against a command written to reveal them.
 
 ### Core (`internal/plugins/vault`)
 
@@ -81,14 +97,28 @@ client, terminal and directory is shown to the user, not trusted.
   or `*` are given at once. For the others the core sends every page
   `plugin {plugin: vault, m, data: {type: request, request}}` and waits up
   to 60 s: **Allow once** gives the values this time, **Always allow** adds
-  the machine to each variable's list and gives them, **Deny**, no answer,
-  the requester going away or more than 32 waiting requests deny. The first
-  answer wins; the core then sends `{type: resolved, id, answer}`, which
-  closes the prompt on every page.
+  the machine to each variable's list and gives them, **Deny**, no answer
+  or the requester going away deny. A request identical to one waiting
+  (machine, tool, names) waits for that one's answer instead of prompting
+  again; beyond 4 waiting requests of the machine, or 32 in all, a request
+  fails with `busy`, so one machine cannot crowd out another's prompts.
+  The first answer wins; the answer, the timeout and the last requester's
+  leaving are decided under one lock, so a page's answer that the core
+  takes (`200`) is the answer the requesters get, and one that comes too
+  late gets `404`. The core then sends `{type: resolved, id, answer}`,
+  which closes the prompt on every page.
 
 Each request is recorded with names only: in the audit log
-(`vault.access`) and in a log of the last 500 kept in memory, shown in the
-panel. Changes send `{type: changed}`, on which pages load the vault again.
+(`vault.access`; results `allowed`, `approved` (once), `approved_always`,
+`listed` or the error's code) and in a log of the last 500 kept in memory,
+shown in the panel. List calls and `busy` refusals, which a program can
+repeat at will, are merged into the previous record when they repeat it
+(`count`), audited at most once a minute per machine (with the number
+skipped) and do not make the pages reload. Answers are audited as
+`vault.answered` (machine, tool, names, answer), saved variables as
+`vault.saved` (allowed machines, `inject_only`, whether the value changed),
+never with values. Other changes send `{type: changed}`, on which pages
+load the vault again.
 
 ### Machines
 
@@ -109,7 +139,7 @@ The server (`internal/vaultmcp`) speaks MCP over stdio (JSON-RPC 2.0, one
 message per line; revisions 2025-06-18, 2025-03-26 and 2024-11-05):
 `initialize`, `ping`, `tools/list`, `tools/call`; notifications get no
 answer. It identifies its client by its parent process's name
-(`/proc/<ppid>/comm` on Linux, `ps` on macOS) and its terminal by
+(`/proc/<ppid>/comm` on Linux, `/bin/ps` on macOS) and its terminal by
 `HC_TERMINAL_ID`, which terminals of the terminal core carry. Each tool
 call is one connection to `vault.sock`. Its tools:
 
@@ -121,6 +151,11 @@ call is one connection to `vault.sock`. Its tools:
   environment and stdin closed, and returns the exit status and up to
   64 KiB of combined output, in which each value as it appears is replaced
   with `***`; killed after `timeout` seconds (default 120, at most 600).
+  The process group is killed when the command returns too, so programs it
+  left in the background (`sleep 999 &`) do not outlive the call with the
+  values in their environment; Wait gives up after 2 s on output such a
+  program still holds. A program that leaves the group (`setsid`, a
+  daemon) escapes it.
   Masking misses values that are encoded, split or transformed: it keeps
   values out of the conversation by accident, not against a command
   written to reveal them.
@@ -135,7 +170,8 @@ the passphrase form, requests waiting, the variables with search, an editor
 (name, description, a write-only value field that sets a new value, inject
 only, the machines allowed without asking), reveal after a confirmation
 (disabled read-only), delete after a confirmation, the access log, and per
-machine the setup: `claude mcp add --scope user <slug>-vault -- <data
+machine the setup (for the local machine with the note that approval
+there is advisory, also on its approval prompts): `claude mcp add --scope user <slug>-vault -- <data
 dir>/bin/<slug>-mcp`, Codex's `[mcp_servers.<slug>-vault]` in
 `~/.codex/config.toml`, and the JSON other clients take, each with a copy
 button, built from the machine's home and data directory. The approval
@@ -162,6 +198,9 @@ prompts are drawn over every page by the plugin's status item, from its
   values cannot be decrypted.
 - Nobody answers: the request is denied after 60 s; the agent gets
   `denied` and can ask again.
+- Too many requests waiting: past 4 of the machine (or 32 in all) the
+  agent gets `busy`, says so to the model, and can ask again once the user
+  answered.
 - The agent or the core gone: the MCP server reports `unavailable` for the
   call and keeps running; the next call connects again.
 - The plugin off: the core refuses the stream with `plugin_disabled`,
@@ -178,20 +217,27 @@ server exposes.
 
 - `internal/vault/vault_test.go`: round trips with a key store in memory
   (never the system keychain), the name binding values, passphrase mode
-  (setup, wrong passphrase, lock), validation, file permissions, unknown
-  fields kept.
+  (setup, wrong passphrase, lock), validation, Argon2 parameters out of
+  bounds refused, file permissions, unknown fields kept, a removed
+  machine leaving the lists.
 - `internal/plugins/vault/vault_test.go`: lists without values, allowed
   machines, inject only, locked, approvals (once, always persisting, deny,
-  timeout, requester gone, first answer wins), routes, audit without values.
+  timeout, requester gone, first answer wins), an answer racing the
+  timeout, at most 4 waiting requests per machine and identical requests
+  sharing one, list calls coalesced, answers and saves audited, a removed
+  machine forgotten, routes, audit without values.
 - `internal/vaultmcp/mcp_test.go`: JSON-RPC over pipes (initialize and
   version negotiation, notifications, tools), masking, truncation,
   timeouts that kill the process group, errors reaching the model, the
-  socket's path from the link.
+  socket's path from the link; `run_unix_test.go`: programs left in the
+  background killed when the command returns.
 - `internal/agent/vault_test.go`: `vault.sock` (0600) relayed to the core as
   op `vault`, the link to the executable.
+- `internal/server/machines_test.go`: removing a machine tells the plugins
+  (`TestMachineRemove`).
 - `internal/server/plugins_test.go`: agents' streams of a plugin's op, refused
   while the plugin is off; `TestMutatingRoutesAreGuarded` covers the
   vault's routes.
 - `web/src/__tests__/vault.test.ts`: the panel without values, reveal after
   confirming, the editor's request, read-only, the approval prompt answered
-  and resolved elsewhere, the setup snippets.
+  and resolved elsewhere, the local machine's note, the setup snippets.

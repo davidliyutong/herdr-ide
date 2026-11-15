@@ -35,9 +35,15 @@ const (
 	DefaultTimeout = 60 * time.Second
 	// MaxLog is how many accesses the log keeps (in memory only).
 	MaxLog = 500
-	// MaxPending is how many requests may wait for an answer at once;
-	// more are denied.
-	MaxPending = 32
+	// MaxPending is how many requests may wait for an answer at once, and
+	// MaxPendingPerMachine how many of one machine; more are refused as
+	// busy, so one machine cannot crowd out the others' prompts.
+	MaxPending           = 32
+	MaxPendingPerMachine = 4
+	// noisyAuditEvery is how often the audit log records a machine's
+	// list calls and busy refusals (the ones in between are counted in
+	// the next record).
+	noisyAuditEvery = time.Minute
 	// MaxNames is how many variables one request may name.
 	MaxNames = 64
 )
@@ -63,6 +69,14 @@ type Plugin struct {
 	store   *vaultstore.Store
 	pending map[string]*Request
 	log     []Access
+	// noisy are the last audit records of list calls and busy refusals,
+	// by machine and result, with the calls not recorded since.
+	noisy map[string]*noisyAudit
+}
+
+type noisyAudit struct {
+	last       time.Time
+	suppressed int
 }
 
 // New returns the plugin with the OS keychain.
@@ -81,7 +95,27 @@ type Request struct {
 	Cwd      string    `json:"cwd,omitempty"`
 	Created  time.Time `json:"created"`
 	Expires  time.Time `json:"expires"`
-	answer   chan string
+
+	// Guarded by the plugin's mu: the requesters waiting for this request
+	// (identical requests share one prompt), its answer once resolved
+	// (done is then closed), and whether the pages were told.
+	waiters   int
+	answer    string
+	done      chan struct{}
+	announced bool
+}
+
+// same reports whether r asks for what m asks with tool for names.
+func (r *Request) same(m, tool string, names []string) bool {
+	if r.M != m || r.Tool != tool || len(r.Names) != len(names) {
+		return false
+	}
+	for _, n := range names {
+		if !slices.Contains(r.Names, n) {
+			return false
+		}
+	}
+	return true
 }
 
 // Access is a record of the access log: names only, never values.
@@ -92,9 +126,13 @@ type Access struct {
 	Names    []string  `json:"names,omitempty"`
 	Client   string    `json:"client,omitempty"`
 	Terminal string    `json:"terminal,omitempty"`
-	// Result: allowed (by the machines of the variables), approved,
-	// denied, timeout, or the error's code.
+	// Result: allowed (by the machines of the variables), approved
+	// (once), approved_always, listed, or the error's code (denied,
+	// busy…).
 	Result string `json:"result"`
+	// Count is how many identical list calls or busy refusals in a row
+	// this record stands for (1 when absent).
+	Count int `json:"count,omitempty"`
 }
 
 var errUnavailable = &plugin.Error{Code: "unavailable", Message: "the vault has no file (the core keeps no settings)"}
@@ -203,6 +241,10 @@ func (p *Plugin) handleSet(c *plugin.Call, w http.ResponseWriter, r *http.Reques
 	}
 	changed(c.Host)
 	i, _ := s.Get(r.PathValue("name"))
+	// What changed, never the value: who may read it without asking.
+	c.Host.Audit(r, "vault.saved", map[string]any{
+		"name": i.Name, "machines": i.Machines, "inject_only": i.InjectOnly, "value_changed": u.Value != nil,
+	})
 	plugin.WriteJSON(w, http.StatusOK, i)
 }
 
@@ -287,16 +329,30 @@ func (p *Plugin) handleRequests(c *plugin.Call, w http.ResponseWriter, r *http.R
 }
 
 // Answer answers a pending request; the first answer wins, later ones
-// find no request.
+// and answers after the request expired find no request. True means the
+// requesters get this answer.
 func (p *Plugin) Answer(id, answer string) bool {
+	return p.answerRequest(id, answer) != nil
+}
+
+func (p *Plugin) answerRequest(id, answer string) *Request {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	req, ok := p.pending[id]
-	if !ok {
+	if !ok || !p.resolve(req, answer) {
+		return nil
+	}
+	return req
+}
+
+// resolve gives req its answer unless it has one; called with p.mu held.
+func (p *Plugin) resolve(req *Request, answer string) bool {
+	if req.answer != "" {
 		return false
 	}
-	delete(p.pending, id)
-	req.answer <- answer
+	req.answer = answer
+	delete(p.pending, req.ID)
+	close(req.done)
 	return true
 }
 
@@ -314,10 +370,14 @@ func (p *Plugin) handleAnswer(c *plugin.Call, w http.ResponseWriter, r *http.Req
 		plugin.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad_request", "message": "answer is once, always or deny"})
 		return
 	}
-	if !p.Answer(r.PathValue("id"), body.Answer) {
+	req := p.answerRequest(r.PathValue("id"), body.Answer)
+	if req == nil {
 		plugin.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "not_found", "message": "no such request (answered or expired)"})
 		return
 	}
+	c.Host.Audit(r, "vault.answered", map[string]any{
+		"id": req.ID, "machine": req.M, "tool": req.Tool, "names": req.Names, "answer": body.Answer,
+	})
 	plugin.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -396,17 +456,61 @@ func clip(s string, n int) string {
 	return s
 }
 
+// noisy results are list calls and busy refusals: a program can repeat
+// them at will, so they are coalesced in the log, rate-limited in the
+// audit log and do not make the pages reload.
+func noisy(result string) bool { return result == "listed" || result == "busy" }
+
 func (p *Plugin) record(h plugin.Host, rec Access) {
+	quiet := noisy(rec.Result)
+	fields := map[string]any{
+		"machine": rec.M, "tool": rec.Tool, "names": rec.Names, "client": rec.Client, "terminal": rec.Terminal, "result": rec.Result,
+	}
+	audit := true
 	p.mu.Lock()
-	p.log = append(p.log, rec)
-	if len(p.log) > MaxLog {
-		p.log = slices.Delete(p.log, 0, len(p.log)-MaxLog)
+	if n := len(p.log); quiet && n > 0 && sameCall(p.log[n-1], rec) {
+		last := &p.log[n-1]
+		last.Time = rec.Time
+		last.Count = max(last.Count, 1) + 1
+	} else {
+		p.log = append(p.log, rec)
+		if len(p.log) > MaxLog {
+			p.log = slices.Delete(p.log, 0, len(p.log)-MaxLog)
+		}
+	}
+	if quiet {
+		key := rec.M + "\x00" + rec.Result
+		if p.noisy == nil {
+			p.noisy = map[string]*noisyAudit{}
+		}
+		na := p.noisy[key]
+		switch {
+		case na == nil:
+			p.noisy[key] = &noisyAudit{last: rec.Time}
+		case rec.Time.Sub(na.last) < noisyAuditEvery:
+			na.suppressed++
+			audit = false
+		default:
+			if na.suppressed > 0 {
+				fields["suppressed"] = na.suppressed
+			}
+			na.last, na.suppressed = rec.Time, 0
+		}
 	}
 	p.mu.Unlock()
-	h.Audit(nil, "vault.access", map[string]any{
-		"machine": rec.M, "tool": rec.Tool, "names": rec.Names, "client": rec.Client, "terminal": rec.Terminal, "result": rec.Result,
-	})
-	changed(h)
+	if audit {
+		h.Audit(nil, "vault.access", fields)
+	}
+	if !quiet {
+		changed(h)
+	}
+}
+
+// sameCall reports whether b repeats a's call (machine, tool, names,
+// client, terminal, result).
+func sameCall(a, b Access) bool {
+	return a.M == b.M && a.Tool == b.Tool && a.Client == b.Client && a.Terminal == b.Terminal &&
+		a.Result == b.Result && slices.Equal(a.Names, b.Names)
 }
 
 func (p *Plugin) handle(ctx context.Context, h plugin.Host, m string, req agentproto.VaultRequest, rec *Access) agentproto.VaultResponse {
@@ -463,7 +567,7 @@ func (p *Plugin) handle(ctx context.Context, h plugin.Host, m string, req agentp
 		case AnswerOnce:
 			rec.Result = "approved"
 		case AnswerAlways:
-			rec.Result = "approved"
+			rec.Result = "approved_always"
 			for _, n := range ask {
 				if err := s.Allow(n, m); err != nil {
 					h.Logger().Printf("vault: allowing %s on %s: %v", n, m, err)
@@ -471,6 +575,8 @@ func (p *Plugin) handle(ctx context.Context, h plugin.Host, m string, req agentp
 			}
 		case "timeout":
 			return failure("denied", "nobody approved the request within the time allowed")
+		case "busy":
+			return failure("busy", "too many requests of this machine wait for an answer; answer them or try again later")
 		default:
 			return failure("denied", "the user denied the request")
 		}
@@ -487,39 +593,100 @@ func (p *Plugin) handle(ctx context.Context, h plugin.Host, m string, req agentp
 }
 
 // ask shows the request on every page and waits for the first answer, the
-// timeout or the requester's going away.
+// timeout or the requester's going away. A request identical to one
+// waiting (machine, tool, names) waits for that one's answer; more than
+// MaxPendingPerMachine of a machine, or MaxPending in all, are "busy".
+// Whichever of the answer, the timeout and the last requester's leaving
+// comes first decides, under the lock, so a page's answer that was taken
+// is the answer the requesters get.
 func (p *Plugin) ask(ctx context.Context, h plugin.Host, m string, req agentproto.VaultRequest, names []string) string {
-	idb := make([]byte, 12)
-	rand.Read(idb)
-	now := time.Now().UTC()
-	r := &Request{
-		ID: hex.EncodeToString(idb), M: m, Tool: req.Tool, Names: names,
-		Client: clip(req.Client, 64), Terminal: clip(req.Terminal, 64), Cwd: clip(req.Cwd, 1024),
-		Created: now, Expires: now.Add(p.timeout()), answer: make(chan string, 1),
+	p.mu.Lock()
+	var r *Request
+	for _, x := range p.pending {
+		if x.same(m, req.Tool, names) {
+			r = x
+			break
+		}
+	}
+	fresh := r == nil
+	if fresh {
+		mine := 0
+		for _, x := range p.pending {
+			if x.M == m {
+				mine++
+			}
+		}
+		if mine >= MaxPendingPerMachine || len(p.pending) >= MaxPending {
+			p.mu.Unlock()
+			return "busy"
+		}
+		idb := make([]byte, 12)
+		rand.Read(idb)
+		now := time.Now().UTC()
+		r = &Request{
+			ID: hex.EncodeToString(idb), M: m, Tool: req.Tool, Names: names,
+			Client: clip(req.Client, 64), Terminal: clip(req.Terminal, 64), Cwd: clip(req.Cwd, 1024),
+			Created: now, Expires: now.Add(p.timeout()), done: make(chan struct{}),
+		}
+		if p.pending == nil {
+			p.pending = map[string]*Request{}
+		}
+		p.pending[r.ID] = r
+	}
+	r.waiters++
+	p.mu.Unlock()
+	if fresh {
+		h.Broadcast(ID, m, map[string]any{"type": "request", "request": r})
+	}
+	t := time.NewTimer(time.Until(r.Expires))
+	defer t.Stop()
+	gone := false
+	select {
+	case <-r.done:
+	case <-t.C:
+		p.mu.Lock()
+		p.resolve(r, "timeout")
+		p.mu.Unlock()
+	case <-ctx.Done():
+		gone = true
+		p.mu.Lock()
+		r.waiters--
+		if r.waiters == 0 {
+			p.resolve(r, AnswerDeny)
+		}
+		p.mu.Unlock()
 	}
 	p.mu.Lock()
-	if len(p.pending) >= MaxPending {
-		p.mu.Unlock()
+	answer := r.answer
+	announce := answer != "" && !r.announced
+	if announce {
+		r.announced = true
+	}
+	p.mu.Unlock()
+	if announce {
+		h.Broadcast(ID, m, map[string]any{"type": "resolved", "id": r.ID, "answer": answer})
+	}
+	if gone && answer == "" {
+		// Others still wait for the request; this requester left.
 		return AnswerDeny
 	}
-	if p.pending == nil {
-		p.pending = map[string]*Request{}
-	}
-	p.pending[r.ID] = r
-	p.mu.Unlock()
-	h.Broadcast(ID, m, map[string]any{"type": "request", "request": r})
-	t := time.NewTimer(p.timeout())
-	defer t.Stop()
-	answer := "timeout"
-	select {
-	case answer = <-r.answer:
-	case <-t.C:
-	case <-ctx.Done():
-		answer = AnswerDeny
-	}
-	p.mu.Lock()
-	delete(p.pending, r.ID)
-	p.mu.Unlock()
-	h.Broadcast(ID, m, map[string]any{"type": "resolved", "id": r.ID, "answer": answer})
 	return answer
+}
+
+// ForgetMachine removes a removed machine from the variables' allowed
+// machines (plugin.MachineForgetter): an id that comes back asks again.
+func (p *Plugin) ForgetMachine(h plugin.Host, id string) {
+	s, err := p.open(h)
+	if err != nil {
+		return
+	}
+	names, err := s.ForgetMachine(id)
+	if err != nil {
+		h.Logger().Printf("vault: forgetting machine %s: %v", id, err)
+		return
+	}
+	if len(names) > 0 {
+		h.Audit(nil, "vault.machine_forgotten", map[string]any{"machine": id, "names": names})
+		changed(h)
+	}
 }

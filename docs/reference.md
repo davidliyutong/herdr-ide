@@ -345,8 +345,8 @@ missing here.
 | `POST /api/p/vault/unlock` | writes | Unlocks: from the keychain, or with `{"passphrase"}` (sets it the first time in passphrase mode). |
 | `POST /api/p/vault/lock` | writes | Forgets the key until unlocked. |
 | `GET /api/p/vault/requests` | – | The MCP requests waiting for an answer. |
-| `POST /api/p/vault/requests/{id}` | writes | Answers one (`{"answer": "once"\|"always"\|"deny"}`); the first answer wins, later ones get `404`. |
-| `GET /api/p/vault/log` | – | The last 500 accesses since the core started (time, machine, client, terminal, tool, names, result), newest first; never values. |
+| `POST /api/p/vault/requests/{id}` | writes | Answers one (`{"answer": "once"\|"always"\|"deny"}`), audited as `vault.answered`; the first answer wins, later ones and those after the request expired get `404`, so `200` means the requester gets this answer. |
+| `GET /api/p/vault/log` | – | The last 500 accesses since the core started (time, machine, client, terminal, tool, names, result: `allowed`, `approved`, `approved_always`, `listed` or an error's code such as `denied` or `busy`; `count` for repeated list calls or busy refusals merged into one), newest first; never values. |
 | `/` | – | The web UI (`/licenses.md`: the notices of its bundle); any other path gets the app shell for the UI's own routes, except `/api/…` paths no route takes, which are 404. |
 
 ## Environment variables

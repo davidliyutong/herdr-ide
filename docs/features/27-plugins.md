@@ -39,7 +39,10 @@ works while the core runs (a scheduler) implements `Starter`. A plugin
 that serves streams agents open towards the core with ops of its own
 (`agentproto`, as the vault's `vault`) implements `Streamer`: the core hands
 it each such stream while it is on and refuses the stream with
-`plugin_disabled` while it is off.
+`plugin_disabled` while it is off. A plugin that keeps something about
+machines (the vault's allowed machines) implements `MachineForgetter`: the
+core calls it when the user removes a machine, whether the plugin is on or
+off.
 
 `plugin.Host` is the core as plugins see it: the machines, `Broadcast`
 (a `/ws` message `plugin {plugin, m, data}` to every page), the audit log,

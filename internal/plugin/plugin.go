@@ -87,6 +87,14 @@ type Streamer interface {
 	ServeAgent(h Host, mc *machines.Machine, conn net.Conn, hdr agentproto.Header)
 }
 
+// MachineForgetter is a plugin that keeps something about machines (the
+// vault's allowed machines): the core calls ForgetMachine when the user
+// removes a machine, whether the plugin is on or off, so an id that comes
+// back later does not inherit it.
+type MachineForgetter interface {
+	ForgetMachine(h Host, id string)
+}
+
 var validID = regexp.MustCompile(`^[a-z][a-z0-9]*$`)
 
 // ValidID reports whether id can name a plugin.

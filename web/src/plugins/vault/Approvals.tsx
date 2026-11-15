@@ -37,6 +37,7 @@ export function requestText(r: VaultRequest): string {
 
 export function RequestCard({ req }: { req: VaultRequest }) {
   const readOnly = useStore((s) => s.readOnly);
+  const local = useStore((s) => s.machines[req.m]?.kind === 'local');
   return (
     <div className="vault-request" role="alertdialog" aria-label={t('vault.request.title')} data-request={req.id}>
       <div className="vault-request-head">
@@ -47,6 +48,11 @@ export function RequestCard({ req }: { req: VaultRequest }) {
         <div className="vault-request-meta">
           {req.terminal && <span>{t('vault.request.terminal', { terminal: req.terminal })}</span>}
           {req.cwd && <span className="ellipsis">{req.cwd}</span>}
+        </div>
+      )}
+      {local && (
+        <div className="vault-request-meta" data-note="local">
+          {t('vault.localNote')}
         </div>
       )}
       {readOnly ? (

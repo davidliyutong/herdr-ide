@@ -13,6 +13,8 @@ import (
 // testKDF keeps Argon2id fast in tests.
 var testKDF = KDF{Time: 1, Memory: 64, Threads: 1}
 
+func init() { minKDFMemory = testKDF.Memory }
+
 func str(s string) *string { return &s }
 
 func openTest(t *testing.T, path string, keys KeyStore) *Store {
@@ -203,5 +205,62 @@ func TestUnknownFieldsAreKept(t *testing.T) {
 	b, _ := os.ReadFile(path)
 	if !strings.Contains(string(b), `"future"`) {
 		t.Errorf("lost unknown field: %s", b)
+	}
+}
+
+// Argon2 parameters out of bounds in the file fail Open with an error, not
+// a panic or a key derivation that exhausts the core's memory.
+func TestKDFParametersAreChecked(t *testing.T) {
+	salt := make([]byte, 16)
+	for _, k := range []KDF{
+		{Salt: salt, Time: 1, Memory: 64, Threads: 0},
+		{Salt: salt, Time: 0, Memory: 64, Threads: 1},
+		{Salt: salt, Time: 11, Memory: 64, Threads: 1},
+		{Salt: salt, Time: 1, Memory: 2 << 20, Threads: 1},
+		{Salt: salt, Time: 1, Memory: 64, Threads: 17},
+		{Salt: salt[:8], Time: 1, Memory: 64, Threads: 1},
+	} {
+		path := filepath.Join(t.TempDir(), "vault.json")
+		b, _ := json.Marshal(map[string]any{"version": 1, "mode": ModePassphrase, "kdf": k, "check": Sealed{}, "entries": []any{}})
+		os.WriteFile(path, b, 0o600)
+		if _, err := Open(path, nil, "vault.json"); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%+v: %v", k, err)
+		}
+	}
+	// The production bound on memory.
+	k := KDF{Salt: salt, Time: 1, Memory: 64, Threads: 1}
+	prev := minKDFMemory
+	minKDFMemory = 8 << 10
+	defer func() { minKDFMemory = prev }()
+	if err := validKDF(&k); err == nil {
+		t.Error("64 KiB accepted")
+	}
+	k.Memory = DefaultKDF.Memory
+	if err := validKDF(&k); err != nil {
+		t.Error(err)
+	}
+}
+
+// A removed machine leaves every variable's list.
+func TestForgetMachine(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vault.json")
+	s := openTest(t, path, &MemKeyStore{})
+	ms := []string{"m1", "m2"}
+	s.Set("A", Update{Value: str("a"), Machines: &ms})
+	all := []string{"*"}
+	s.Set("B", Update{Value: str("b"), Machines: &all})
+	names, err := s.ForgetMachine("m1")
+	if err != nil || strings.Join(names, ",") != "A" {
+		t.Fatalf("forget %v %v", names, err)
+	}
+	s2 := openTest(t, path, nil)
+	if i, _ := s2.Get("A"); strings.Join(i.Machines, ",") != "m2" {
+		t.Errorf("A %v", i.Machines)
+	}
+	if i, _ := s2.Get("B"); strings.Join(i.Machines, ",") != "*" {
+		t.Errorf("B %v", i.Machines)
+	}
+	if names, _ := s.ForgetMachine("m1"); names != nil {
+		t.Errorf("again %v", names)
 	}
 }

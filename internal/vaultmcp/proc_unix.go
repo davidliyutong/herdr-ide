@@ -12,8 +12,9 @@ import (
 	"syscall"
 )
 
-// newGroup starts the command in a process group of its own, which a
-// timeout ends as a whole.
+// newGroup starts the command in a process group of its own, which is
+// killed as a whole when the command returns, times out or is cancelled.
+// A program that leaves the group (setsid, a daemon) escapes it.
 func newGroup(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 }
@@ -37,7 +38,11 @@ func ParentName() string {
 		}
 		name = string(b)
 	default:
-		out, err := exec.Command("ps", "-o", "comm=", "-p", strconv.Itoa(ppid)).Output()
+		ps := "/bin/ps"
+		if _, err := os.Stat(ps); err != nil {
+			ps = "ps"
+		}
+		out, err := exec.Command(ps, "-o", "comm=", "-p", strconv.Itoa(ppid)).Output()
 		if err != nil {
 			return ""
 		}

@@ -294,3 +294,206 @@ func mustJSON(v any) string {
 	b, _ := json.Marshal(v)
 	return string(b)
 }
+
+// routeMux serves the plugin's routes with h as the host.
+func routeMux(p *Plugin, h *fakeHost) func(method, path, body string) (int, map[string]any) {
+	mux := http.NewServeMux()
+	for _, rt := range p.Routes() {
+		rt := rt
+		mux.HandleFunc(plugin.Pattern(ID, rt), func(w http.ResponseWriter, r *http.Request) {
+			rt.Handler(&plugin.Call{Host: h}, w, r)
+		})
+	}
+	return func(method, path, body string) (int, map[string]any) {
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest(method, path, strings.NewReader(body)))
+		var out map[string]any
+		json.Unmarshal(w.Body.Bytes(), &out)
+		return w.Code, out
+	}
+}
+
+// Answers and changes to who may read a variable are audited, without
+// values; always is told apart from once in the access log.
+func TestAnswersAndChangesAreAudited(t *testing.T) {
+	p, h, _ := newTest(t)
+	p.Timeout = 5 * time.Second
+	do := routeMux(p, h)
+	if c, _ := do("PUT", "/api/p/vault/vars/KEY", `{"value":"s3cret","machines":["m1"],"injectOnly":true}`); c != 200 {
+		t.Fatal(c)
+	}
+	audit := h.auditLog()
+	if !strings.Contains(audit, `vault.saved {"inject_only":true,"machines":["m1"],"name":"KEY","value_changed":true}`) || strings.Contains(audit, "s3cret") {
+		t.Errorf("set audit %s", audit)
+	}
+	ch := make(chan agentproto.VaultResponse, 1)
+	go func() {
+		ch <- p.Handle(context.Background(), h, "m2", agentproto.VaultRequest{Tool: "env", Names: []string{"KEY"}})
+	}()
+	req := (<-h.sent)["request"].(*Request)
+	if c, _ := do("POST", "/api/p/vault/requests/"+req.ID, `{"answer":"always"}`); c != 200 {
+		t.Fatal(c)
+	}
+	if r := <-ch; !r.OK {
+		t.Fatalf("always %+v", r)
+	}
+	audit = h.auditLog()
+	if !strings.Contains(audit, `vault.answered {"answer":"always","id":"`+req.ID+`","machine":"m2","names":["KEY"],"tool":"env"}`) {
+		t.Errorf("answer audit %s", audit)
+	}
+	if l := p.Log(); l[0].Result != "approved_always" {
+		t.Errorf("log %+v", l[0])
+	}
+	if strings.Contains(h.auditLog(), "s3cret") {
+		t.Error("a value in the audit log")
+	}
+}
+
+// An answer racing the timeout: the page is told its answer was taken
+// exactly when the requester gets it.
+func TestAnswerRacingTheTimeout(t *testing.T) {
+	p, h, s := newTest(t)
+	s.Set("KEY", vaultstore.Update{Value: str("v")})
+	h.sent = make(chan map[string]any, 1)
+	for i := 0; i < 200; i++ {
+		p.Timeout = time.Duration(i%5) * 100 * time.Microsecond
+		if p.Timeout == 0 {
+			p.Timeout = 50 * time.Microsecond
+		}
+		ch := make(chan agentproto.VaultResponse, 1)
+		go func() {
+			ch <- p.Handle(context.Background(), h, "m2", agentproto.VaultRequest{Tool: "get", Names: []string{"KEY"}})
+		}()
+		req := (<-h.sent)["request"].(*Request)
+		var wg sync.WaitGroup
+		took := make([]bool, 3)
+		for j := range took {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				took[j] = p.Answer(req.ID, AnswerOnce)
+			}()
+		}
+		wg.Wait()
+		r := <-ch
+		n := 0
+		for _, ok := range took {
+			if ok {
+				n++
+			}
+		}
+		if n > 1 || (n == 1) != r.OK {
+			t.Fatalf("round %d: answers taken %v, response %+v", i, took, r)
+		}
+	}
+}
+
+// A machine cannot crowd out the others' prompts: past four waiting
+// requests it is busy; identical requests share one prompt; list calls do
+// not make the pages reload and are coalesced.
+func TestPendingRequestsAreBounded(t *testing.T) {
+	p, h, s := newTest(t)
+	p.Timeout = 10 * time.Second
+	h.sent = make(chan map[string]any, 16)
+	for _, n := range []string{"A", "B", "C", "D", "E"} {
+		s.Set(n, vaultstore.Update{Value: str("v" + n)})
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	results := make(chan agentproto.VaultResponse, 8)
+	ask := func(m, name string) {
+		go func() {
+			results <- p.Handle(ctx, h, m, agentproto.VaultRequest{Tool: "get", Names: []string{name}})
+		}()
+	}
+	for _, n := range []string{"A", "B", "C", "D"} {
+		ask("ma", n)
+		<-h.sent
+	}
+	ask("ma", "E")
+	if r := <-results; r.Code != "busy" {
+		t.Fatalf("fifth request %+v", r)
+	}
+	// The same request again shares the prompt.
+	ask("ma", "A")
+	ask("mb", "A")
+	msg := <-h.sent
+	req := msg["request"].(*Request)
+	if req.M != "mb" {
+		t.Fatalf("other machine's request %+v", req)
+	}
+	if len(p.Pending()) != 5 {
+		t.Fatalf("pending %d", len(p.Pending()))
+	}
+	var a *Request
+	for _, r := range p.Pending() {
+		if r.M == "ma" && r.Names[0] == "A" {
+			a = r
+		}
+	}
+	for deadline := time.Now().Add(5 * time.Second); ; {
+		p.mu.Lock()
+		waiters := a.waiters
+		p.mu.Unlock()
+		if waiters == 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("waiters %d", waiters)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if !p.Answer(a.ID, AnswerOnce) {
+		t.Fatal("answer refused")
+	}
+	for i := 0; i < 2; i++ {
+		if r := <-results; !r.OK || r.Values["A"] != "vA" {
+			t.Errorf("shared answer %+v", r)
+		}
+	}
+	if !p.Answer(req.ID, AnswerDeny) {
+		t.Fatal("answer refused")
+	}
+	if r := <-results; r.Code != "denied" {
+		t.Errorf("mb %+v", r)
+	}
+	cancel()
+	for i := 0; i < 3; i++ {
+		<-results
+	}
+	if len(p.Pending()) != 0 {
+		t.Errorf("left %d", len(p.Pending()))
+	}
+
+	before := h.messageCount("changed")
+	audits := strings.Count(h.auditLog(), `"result":"listed"`)
+	for i := 0; i < 10; i++ {
+		p.Handle(context.Background(), h, "ma", agentproto.VaultRequest{Tool: "list"})
+	}
+	if h.messageCount("changed") != before {
+		t.Error("list calls made the pages reload")
+	}
+	if n := strings.Count(h.auditLog(), `"result":"listed"`) - audits; n != 1 {
+		t.Errorf("list audit lines %d", n)
+	}
+	if l := p.Log(); l[0].Result != "listed" || l[0].Count != 10 {
+		t.Errorf("log %+v", l[0])
+	}
+}
+
+// A removed machine leaves the variables' allowed machines.
+func TestForgetMachine(t *testing.T) {
+	p, h, s := newTest(t)
+	ms := []string{"m1", "m2"}
+	s.Set("KEY", vaultstore.Update{Value: str("v"), Machines: &ms})
+	p.ForgetMachine(h, "m1")
+	if i, _ := s.Get("KEY"); i.Allows("m1") || !i.Allows("m2") {
+		t.Errorf("machines %v", i.Machines)
+	}
+	if !strings.Contains(h.auditLog(), `vault.machine_forgotten {"machine":"m1","names":["KEY"]}`) {
+		t.Errorf("audit %s", h.auditLog())
+	}
+	if h.messageCount("changed") != 1 {
+		t.Errorf("changed %d", h.messageCount("changed"))
+	}
+}

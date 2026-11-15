@@ -117,6 +117,35 @@ type KDF struct {
 // recommended option).
 var DefaultKDF = KDF{Time: 3, Memory: 64 << 10, Threads: 4}
 
+// Bounds of the Argon2id parameters a vault's file may hold: a file
+// edited to weaker ones, or to ones that would exhaust the core's memory
+// or panic (no threads), is refused at Open.
+const (
+	saltLen    = 16
+	maxKDFTime = 10
+	maxKDFMem  = 1 << 20 // KiB: 1 GiB
+	maxThreads = 16
+)
+
+// minKDFMemory is the least memory (KiB) a file's parameters may ask for:
+// 8 MiB (tests lower it).
+var minKDFMemory uint32 = 8 << 10
+
+// validKDF reports why k cannot derive a key, nil when it can.
+func validKDF(k *KDF) error {
+	switch {
+	case len(k.Salt) != saltLen:
+		return fmt.Errorf("%w: kdf salt of %d bytes", ErrInvalid, len(k.Salt))
+	case k.Time < 1 || k.Time > maxKDFTime:
+		return fmt.Errorf("%w: kdf time %d", ErrInvalid, k.Time)
+	case k.Memory < minKDFMemory || k.Memory > maxKDFMem:
+		return fmt.Errorf("%w: kdf memory %d KiB", ErrInvalid, k.Memory)
+	case k.Threads < 1 || k.Threads > maxThreads:
+		return fmt.Errorf("%w: kdf threads %d", ErrInvalid, k.Threads)
+	}
+	return nil
+}
+
 // Entry is a stored variable.
 type Entry struct {
 	Name        string    `json:"name"`
@@ -229,6 +258,11 @@ func Open(path string, keys KeyStore, account string) (*Store, error) {
 	case ModeKeychain:
 		s.keyErr = s.unlockKeychain()
 	case ModePassphrase:
+		if s.f.KDF != nil {
+			if err := validKDF(s.f.KDF); err != nil {
+				return nil, fmt.Errorf("%s: %w", path, err)
+			}
+		}
 		s.setup = s.f.KDF == nil || s.f.Check == nil
 	case ModeNone:
 	default:
@@ -415,6 +449,37 @@ func (s *Store) Allow(name, m string) error {
 		return err
 	}
 	return nil
+}
+
+// ForgetMachine removes machine m from every variable's machines (a
+// removed machine: an id that comes back is not allowed again) and returns
+// the names it was removed from.
+func (s *Store) ForgetMachine(m string) ([]string, error) {
+	if m == "" || m == AllMachines {
+		return nil, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var names []string
+	prev := make([][]string, len(s.f.Entries))
+	for i := range s.f.Entries {
+		e := &s.f.Entries[i]
+		prev[i] = e.Machines
+		if slices.Contains(e.Machines, m) {
+			e.Machines = slices.DeleteFunc(slices.Clone(e.Machines), func(x string) bool { return x == m })
+			names = append(names, e.Name)
+		}
+	}
+	if len(names) == 0 {
+		return nil, nil
+	}
+	if err := s.save(); err != nil {
+		for i := range s.f.Entries {
+			s.f.Entries[i].Machines = prev[i]
+		}
+		return nil, err
+	}
+	return names, nil
 }
 
 // Delete removes a variable; it needs no key.

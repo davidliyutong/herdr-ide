@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"herdr-ide/internal/machines"
+	"herdr-ide/internal/plugin"
 	"herdr-ide/internal/transport"
 )
 
@@ -221,8 +222,13 @@ func TestMachineRemove(t *testing.T) {
 		{false, "DELETE", "/api/m/nope", "", 404, "unknown"},
 		{true, "DELETE", "/api/m/gpu", "", 403, "read-only"},
 	})
+	forgetter := &forgetPlugin{}
+	f.srv.opts.Plugins = append(f.srv.opts.Plugins, forgetter)
 	if w := f.request(f.srv, "DELETE", "/api/m/gpu", ""); w.Code != http.StatusOK || f.mg.Get("gpu") != nil || len(f.stored()) != 0 {
 		t.Fatalf("remove: %d %s", w.Code, w.Body)
+	}
+	if strings.Join(forgetter.ids, ",") != "gpu" {
+		t.Errorf("plugins told of %v", forgetter.ids)
 	}
 	if w := f.request(f.srv, "DELETE", "/api/m/extra", ""); w.Code != http.StatusOK || f.mg.Get("extra") != nil {
 		t.Fatalf("remove --ssh: %d %s", w.Code, w.Body)
@@ -454,3 +460,10 @@ func TestTargetHost(t *testing.T) {
 		}
 	}
 }
+
+// forgetPlugin records the machines the core tells it were removed.
+type forgetPlugin struct{ ids []string }
+
+func (*forgetPlugin) ID() string                               { return "forget" }
+func (*forgetPlugin) Routes() []plugin.Route                   { return nil }
+func (p *forgetPlugin) ForgetMachine(_ plugin.Host, id string) { p.ids = append(p.ids, id) }

@@ -43,6 +43,8 @@ export interface VaultAccess {
   client?: string;
   terminal?: string;
   result: string;
+  /** Identical list calls or busy refusals in a row (1 when absent). */
+  count?: number;
 }
 
 export type Answer = 'once' | 'always' | 'deny';

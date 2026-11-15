@@ -89,6 +89,7 @@ export function VaultPanel() {
                   names: (a.names ?? []).join(', ') || '–',
                 })}{' '}
                 <span className={`vault-result ${a.result}`}>{resultText(a.result)}</span>
+                {(a.count ?? 1) > 1 && <span className="vault-dim"> {t('vault.log.count', { count: a.count ?? 1 })}</span>}
               </li>
             ))}
           </ul>
@@ -413,6 +414,11 @@ function SetupGuide() {
       {block(t('vault.setup.codex'), s.codex, 'codex')}
       {block(t('vault.setup.json'), s.json, 'json')}
       <div className="vault-dim">{t('vault.setup.note')}</div>
+      {id && machines[id]?.kind === 'local' && (
+        <div className="vault-dim" data-note="local">
+          {t('vault.localNote')}
+        </div>
+      )}
     </details>
   );
 }

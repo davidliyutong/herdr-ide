@@ -152,6 +152,7 @@ describe('vault', () => {
     const card = document.querySelector<HTMLElement>('.vault-approvals [data-request="r1"]')!;
     expect(card.textContent).toContain('claude on gpu-box asks to run a command with A, B.');
     expect(card.textContent).toContain('t7');
+    expect(card.querySelector('[data-note="local"]')).toBeNull();
     await act(async () => card.querySelector<HTMLButtonElement>('[data-answer="always"]')!.click());
     await flush();
     expect(calls.find((c) => c.url === '/api/p/vault/requests/r1')?.body).toEqual({ answer: 'always' });
@@ -162,6 +163,17 @@ describe('vault', () => {
     expect(document.querySelector('[data-request="r2"]')).not.toBeNull();
     act(() => vaultMessage('m1', { type: 'resolved', id: 'r2', answer: 'deny' }));
     expect(document.querySelector('[data-request="r2"]')).toBeNull();
+  });
+
+  it('says approval is advisory for the local machine', async () => {
+    useStore.setState({ machines: { local: { label: 'This Mac', kind: 'local' } } as never });
+    await act(async () => root.render(createElement(VaultApprovals)));
+    await flush();
+    act(() =>
+      vaultMessage('local', { type: 'request', request: { id: 'r3', m: 'local', tool: 'get', names: ['X'], created: '', expires: '' } }),
+    );
+    expect(document.querySelector('[data-request="r3"] [data-note="local"]')?.textContent).toContain('approval is advisory');
+    act(() => vaultMessage('local', { type: 'resolved', id: 'r3', answer: 'deny' }));
   });
 
   it('gives each machine its setup', () => {
