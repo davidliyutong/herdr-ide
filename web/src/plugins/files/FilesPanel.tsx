@@ -66,6 +66,9 @@ const DRAG_TYPE = `application/x-${APP_SLUG}-files`;
  * pane's folder), the workspace's without a focused pane; undefined while
  * another pane (a preview, an editor) has the focus, which keeps the tree
  * where it is. */
+
+/** How long a click waits for a second one before Quick Look shows the file. */
+const DOUBLE_CLICK_MS = 250;
 export function followedDir(): string | undefined {
   const c = current();
   if (!c) return undefined;
@@ -86,6 +89,8 @@ export function FilesPanel() {
   const s = useTree();
   useDecorationVersion((d) => d.v);
   const treeRef = useRef<HTMLDivElement>(null);
+  const lookTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(lookTimer.current), []);
   const [drop, setDrop] = useState<string>();
   const [scroll, setScroll] = useState({ top: 0, height: 0 });
 
@@ -216,7 +221,13 @@ export function FilesPanel() {
     if (mod) return select(row.path, 'toggle');
     select(row.path);
     if (row.dir) setExpanded(row.path, !row.expanded);
-    else void quickLook(m, row.path, treeRef.current);
+    else {
+      // A second click soon after opens the editor instead (onDoubleClick):
+      // Quick Look waits for it, so a double click opens one pane.
+      window.clearTimeout(lookTimer.current);
+      const path = row.path;
+      lookTimer.current = window.setTimeout(() => void quickLook(m, path, treeRef.current), DOUBLE_CLICK_MS);
+    }
   };
 
   // ---- drags ----
@@ -313,7 +324,11 @@ export function FilesPanel() {
         title={deco?.tooltip ? `${row.path}\n${deco.tooltip}` : row.path}
         draggable={!readOnly && !renaming}
         onClick={(ev) => onRowClick(ev, row)}
-        onDoubleClick={() => !row.dir && void openPath(m, row.path, false)}
+        onDoubleClick={() => {
+          if (row.dir) return;
+          window.clearTimeout(lookTimer.current);
+          void openPath(m, row.path, false);
+        }}
         onContextMenu={(ev) => {
           if (!useTree.getState().selection.includes(row.path)) select(row.path);
           openMenu(ev, menuFor(m, targets(row.path), isDir, treeRef.current));
