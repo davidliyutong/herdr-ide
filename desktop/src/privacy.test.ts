@@ -44,39 +44,47 @@ test('System Settings opens at Full Disk Access, the only URL, on macOS only', (
   }
 });
 
-test("Finder shows the instance's terminal core executable, when it is installed", () => {
-  assert.equal(terminalCoreExecutable('/Users/u', 'desktop'), exe);
-  assert.equal(terminalCoreExecutable('/Users/u', 'fda'), `/Users/u/.${APP_SLUG}-fda/hc/herdr-core`);
-  assert.equal(terminalCoreExecutable('/Users/u', ''), `/Users/u/.${APP_SLUG}/hc/herdr-core`);
-  const { a, done } = actions();
-  a.revealTerminalCore();
-  assert.deepEqual(done, [`showItemInFolder ${exe}`]);
-  const missing = actions({}, false);
-  missing.a.revealTerminalCore();
-  assert.deepEqual(missing.done, []);
-});
+test(
+  "Finder shows the instance's terminal core executable, when it is installed",
+  { skip: process.platform === 'win32' && 'POSIX paths: macOS only' },
+  () => {
+    assert.equal(terminalCoreExecutable('/Users/u', 'desktop'), exe);
+    assert.equal(terminalCoreExecutable('/Users/u', 'fda'), `/Users/u/.${APP_SLUG}-fda/hc/herdr-core`);
+    assert.equal(terminalCoreExecutable('/Users/u', ''), `/Users/u/.${APP_SLUG}/hc/herdr-core`);
+    const { a, done } = actions();
+    a.revealTerminalCore();
+    assert.deepEqual(done, [`showItemInFolder ${exe}`]);
+    const missing = actions({}, false);
+    missing.a.revealTerminalCore();
+    assert.deepEqual(missing.done, []);
+  },
+);
 
-test('the packaged app reopens through Launch Services after it quit, development through Electron', () => {
-  assert.equal(bundleOf(`${app}/Contents/MacOS/${APP_SLUG}`), app);
-  for (const path of ['/usr/local/bin/electron', '/Applications/x/Contents/MacOS/x', '/a.app/Contents/Resources/x'])
-    assert.equal(bundleOf(path), '', path);
-  const [file, args] = reopenCommand(4242, app);
-  assert.equal(file, '/bin/sh');
-  assert.deepEqual(args.slice(2), ['sh', '4242', app]);
-  // It waits for the pid at most 300 × 0.2 s, and opens a new instance only
-  // once that pid is gone.
-  assert.match(args[1], /\$i -lt 300/);
-  assert.match(args[1], /\|\| exec \/usr\/bin\/open -n "\$2"$/);
+test(
+  'the packaged app reopens through Launch Services after it quit, development through Electron',
+  { skip: process.platform === 'win32' && 'POSIX paths: macOS only' },
+  () => {
+    assert.equal(bundleOf(`${app}/Contents/MacOS/${APP_SLUG}`), app);
+    for (const path of ['/usr/local/bin/electron', '/Applications/x/Contents/MacOS/x', '/a.app/Contents/Resources/x'])
+      assert.equal(bundleOf(path), '', path);
+    const [file, args] = reopenCommand(4242, app);
+    assert.equal(file, '/bin/sh');
+    assert.deepEqual(args.slice(2), ['sh', '4242', app]);
+    // It waits for the pid at most 300 × 0.2 s, and opens a new instance only
+    // once that pid is gone.
+    assert.match(args[1], /\$i -lt 300/);
+    assert.match(args[1], /\|\| exec \/usr\/bin\/open -n "\$2"$/);
 
-  const packaged = actions();
-  packaged.a.relaunch();
-  assert.deepEqual(packaged.done, [`spawn /bin/sh ${args.join(' ')}`, 'quit']);
-  for (const over of [{ dev: true }, { bundle: '' }]) {
-    const dev = actions(over);
-    dev.a.relaunch();
-    assert.deepEqual(dev.done, ['relaunch', 'quit']);
-  }
-});
+    const packaged = actions();
+    packaged.a.relaunch();
+    assert.deepEqual(packaged.done, [`spawn /bin/sh ${args.join(' ')}`, 'quit']);
+    for (const over of [{ dev: true }, { bundle: '' }]) {
+      const dev = actions(over);
+      dev.a.relaunch();
+      assert.deepEqual(dev.done, ['relaunch', 'quit']);
+    }
+  },
+);
 
 test('a smoke test sees what would open, and nothing opens or quits', () => {
   const lines: string[] = [];

@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { delimiter, join } from 'node:path';
+import { posix } from 'node:path';
 import { APP_SLUG } from '../../web/src/brand';
 import type { MessageKey } from '../../web/src/i18n/en';
 import type { Platform } from './platform';
@@ -51,8 +51,17 @@ export function coreEnv(env: NodeJS.ProcessEnv, home: string, platform: Platform
   // Finder and desktop launchers do not load shell rc files. Include common
   // installations without executing the user's login shell or interpolating
   // shell commands.
-  const paths = [env.PATH || '', join(home, '.local/bin'), '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin'];
-  return { ...env, PATH: paths.filter(Boolean).join(delimiter) };
+  const paths = [
+    env.PATH || '',
+    posix.join(home, '.local/bin'),
+    '/opt/homebrew/bin',
+    '/usr/local/bin',
+    '/usr/bin',
+    '/bin',
+    '/usr/sbin',
+    '/sbin',
+  ];
+  return { ...env, PATH: paths.filter(Boolean).join(posix.delimiter) };
 }
 
 export class CoreProcess {

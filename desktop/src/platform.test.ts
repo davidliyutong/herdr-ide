@@ -22,18 +22,22 @@ test("the core is the app's resource, or scripts/build.sh's in development", () 
   assert.equal(coreBinary('darwin', 'arm64', undefined, '/repo'), join('/repo', 'dist', `${APP_SLUG}-darwin-arm64`));
 });
 
-test('a command line names folders as paths or file: URLs; switches and leading arguments are not items', () => {
-  const dirs = new Set(['/home/u/app', '/home/u/my dir', '/work/x']);
-  const isDir = (p: string) => dirs.has(p);
-  assert.deepEqual(
-    foldersOf(['/opt/app/app', '/home/u/app', '--original-process-start-time=1', 'file:///home/u/my%20dir'], 1, '/', isDir),
-    {
-      folders: ['/home/u/app', '/home/u/my dir'],
-      skipped: 0,
-    },
-  );
-  // Relative to the launch's directory; files and missing paths are counted.
-  assert.deepEqual(foldersOf(['electron', '.', 'x', 'notes.txt', ''], 2, '/work', isDir), { folders: ['/work/x'], skipped: 1 });
-  assert.deepEqual(foldersOf(['/opt/app/app'], 1, '/', isDir), { folders: [], skipped: 0 });
-  assert.deepEqual(foldersOf(['/opt/app/app', 'file://host/x'], 1, '/', isDir), { folders: [], skipped: 1 });
-});
+test(
+  'a command line names folders as paths or file: URLs; switches and leading arguments are not items',
+  { skip: process.platform === 'win32' && 'POSIX paths: Linux only' },
+  () => {
+    const dirs = new Set(['/home/u/app', '/home/u/my dir', '/work/x']);
+    const isDir = (p: string) => dirs.has(p);
+    assert.deepEqual(
+      foldersOf(['/opt/app/app', '/home/u/app', '--original-process-start-time=1', 'file:///home/u/my%20dir'], 1, '/', isDir),
+      {
+        folders: ['/home/u/app', '/home/u/my dir'],
+        skipped: 0,
+      },
+    );
+    // Relative to the launch's directory; files and missing paths are counted.
+    assert.deepEqual(foldersOf(['electron', '.', 'x', 'notes.txt', ''], 2, '/work', isDir), { folders: ['/work/x'], skipped: 1 });
+    assert.deepEqual(foldersOf(['/opt/app/app'], 1, '/', isDir), { folders: [], skipped: 0 });
+    assert.deepEqual(foldersOf(['/opt/app/app', 'file://host/x'], 1, '/', isDir), { folders: [], skipped: 1 });
+  },
+);
