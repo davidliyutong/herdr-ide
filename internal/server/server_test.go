@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -397,6 +398,98 @@ func TestBridgeTheme(t *testing.T) {
 
 // Send to Agent reaches the browsers with the sending window's folders, so
 // the page can pick the workspace whose panel shows that window.
+// fakeWindow is a VS Code window on the far end of a bridge connection: it
+// says hello and answers every command, reporting each on cmds.
+func fakeWindow(t *testing.T, s *Server, mc *machines.Machine, id, folder string, cmds chan<- string) {
+	t.Helper()
+	a, b := net.Pipe()
+	t.Cleanup(func() { b.Close() })
+	go s.bridge.serve(mc, a)
+	r := bufio.NewReader(b)
+	if _, err := r.ReadString('\n'); err != nil { // the bridge's reply
+		t.Fatal(err)
+	}
+	fmt.Fprintf(b, `{"type":"hello","id":%q,"folders":[%q]}`+"\n", id, folder)
+	go func() {
+		for {
+			line, err := r.ReadString('\n')
+			if err != nil {
+				return
+			}
+			var msg map[string]any
+			if json.Unmarshal([]byte(line), &msg) != nil || msg["type"] != "command" {
+				continue
+			}
+			cmds <- id
+			fmt.Fprintf(b, `{"type":"ack","id":%q,"ok":true}`+"\n", msg["id"])
+		}
+	}()
+	// The hub knows the window once its hello was read.
+	deadline := time.Now().Add(2 * time.Second)
+	for s.bridge.byID(mc.ID(), id) == nil {
+		if time.Now().After(deadline) {
+			t.Fatalf("window %s never said hello", id)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func TestBridgeTargets(t *testing.T) {
+	s := newTestServer()
+	mc := machines.NewManager([]machines.Spec{{ID: "m", Label: "m", Kind: machines.KindSSH, Target: "m"}}, nil, log.New(io.Discard, "", 0)).Get("m")
+	cmds := make(chan string, 8)
+	fakeWindow(t, s, mc, "a", "/srv/app", cmds)
+	time.Sleep(5 * time.Millisecond)
+	fakeWindow(t, s, mc, "b", "/srv/app", cmds)
+	ctx := context.Background()
+	send := func(target bridgeTarget) string {
+		t.Helper()
+		got, err := s.bridge.command(ctx, "m", target, map[string]any{"cmd": "openDiff"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if received := <-cmds; received != got {
+			t.Fatalf("%s received the command, the reply names %s", received, got)
+		}
+		return got
+	}
+	// Two windows show the folder: a named one gets it, else the one used
+	// last (b said hello last).
+	if got := send(bridgeTarget{folder: "/srv/app", window: "a"}); got != "a" {
+		t.Fatalf("named window: got %s", got)
+	}
+	if got := send(bridgeTarget{folder: "/srv/app"}); got != "b" {
+		t.Fatalf("by folder: got %s", got)
+	}
+	// A window that is gone counts as unnamed.
+	if got := send(bridgeTarget{folder: "/srv/app", window: "gone"}); got != "b" {
+		t.Fatalf("gone window: got %s", got)
+	}
+	// A fresh pane's command waits for a window that says hello after it,
+	// although others show the folder.
+	done := make(chan string, 1)
+	go func() {
+		got, err := s.bridge.command(ctx, "m", bridgeTarget{folder: "/srv/app", fresh: true}, map[string]any{"cmd": "gitGraph"})
+		if err != nil {
+			t.Error(err)
+		}
+		done <- got
+	}()
+	select {
+	case got := <-cmds:
+		t.Fatalf("fresh command went to %s, an older window", got)
+	case <-time.After(300 * time.Millisecond):
+	}
+	fakeWindow(t, s, mc, "c", "/srv/other", cmds)
+	fakeWindow(t, s, mc, "d", "/srv/app/", cmds)
+	if got := <-cmds; got != "d" {
+		t.Fatalf("fresh command went to %s", got)
+	}
+	if got := <-done; got != "d" {
+		t.Fatalf("fresh command's reply names %s", got)
+	}
+}
+
 func TestBridgeSendToAgent(t *testing.T) {
 	s := newTestServer()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -418,10 +511,17 @@ func TestBridgeSendToAgent(t *testing.T) {
 	b.Write([]byte(`{"type":"sendToAgent","text":"@/srv/app/x.go:3","file":"/srv/app/x.go","line":3,"end_line":3}` + "\n"))
 	b.Write([]byte(`{"type":"hello","id":"w1","folders":[]}` + "\n"))
 	b.Write([]byte(`{"type":"sendToAgent","text":"@/b:2"}` + "\n"))
+	// A window that gets the keyboard is announced, with its id, so the page
+	// showing it learns which window its pane is; so is one that has it as
+	// it says hello.
+	b.Write([]byte(`{"type":"focus"}` + "\n"))
+	b.Write([]byte(`{"type":"hello","id":"w1","folders":["/srv/app"],"focused":true}` + "\n"))
 	for _, want := range []string{
 		`{"end_line":0,"file":"","line":0,"m":"m","t":"bridge.send","text":"@/a:1"}`,
-		`{"end_line":3,"file":"/srv/app/x.go","folders":["/srv/app"],"line":3,"m":"m","t":"bridge.send","text":"@/srv/app/x.go:3"}`,
-		`{"end_line":0,"file":"","folders":[],"line":0,"m":"m","t":"bridge.send","text":"@/b:2"}`,
+		`{"end_line":3,"file":"/srv/app/x.go","folders":["/srv/app"],"line":3,"m":"m","t":"bridge.send","text":"@/srv/app/x.go:3","window":"w1"}`,
+		`{"end_line":0,"file":"","folders":[],"line":0,"m":"m","t":"bridge.send","text":"@/b:2","window":"w1"}`,
+		`{"folders":[],"m":"m","t":"bridge.focus","window":"w1"}`,
+		`{"folders":["/srv/app"],"m":"m","t":"bridge.focus","window":"w1"}`,
 	} {
 		select {
 		case m := <-c.send:

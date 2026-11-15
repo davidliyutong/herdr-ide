@@ -17,11 +17,14 @@ import (
 	"herdr-ide/internal/machines"
 )
 
-// bridgeWindow is one VS Code window (extension host) of code-server.
+// bridgeWindow is one VS Code window (extension host) of code-server: a
+// VS Code pane of a page, or VS Code opened on its own.
 type bridgeWindow struct {
 	m       string
 	id      string
 	folders []string
+	// hello is when the window said hello; zero before.
+	hello   time.Time
 	active  time.Time
 	conn    net.Conn
 	wmu     sync.Mutex
@@ -63,6 +66,8 @@ type bridgeMsg struct {
 	Type    string   `json:"type"`
 	ID      string   `json:"id"`
 	Folders []string `json:"folders"`
+	// Focused: the window has the keyboard as it says hello.
+	Focused bool     `json:"focused"`
 	OK      bool     `json:"ok"`
 	Error   string   `json:"error"`
 	Text    string   `json:"text"`
@@ -106,6 +111,9 @@ func (h *bridgeHub) serve(mc *machines.Machine, conn net.Conn) {
 			w.id = msg.ID
 			w.folders = msg.Folders
 			w.active = time.Now()
+			if w.hello.IsZero() {
+				w.hello = w.active
+			}
 			h.windows[w] = true
 			theme := h.theme
 			h.mu.Unlock()
@@ -113,10 +121,14 @@ func (h *bridgeHub) serve(mc *machines.Machine, conn net.Conn) {
 			if theme != "" {
 				_ = w.send(map[string]string{"type": "theme", "kind": theme})
 			}
+			if msg.Focused {
+				h.focused(mc, w)
+			}
 		case "focus":
 			h.mu.Lock()
 			w.active = time.Now()
 			h.mu.Unlock()
+			h.focused(mc, w)
 		case "ack":
 			if ch, ok := w.pending.LoadAndDelete(msg.ID); ok {
 				if msg.OK {
@@ -136,15 +148,36 @@ func (h *bridgeHub) serve(mc *machines.Machine, conn net.Conn) {
 			if w.folders != nil {
 				ev["folders"] = w.folders
 			}
+			if w.id != "" {
+				ev["window"] = w.id
+			}
 			h.s.broadcast(ev)
 		case "download":
-			// Files chosen in VS Code's explorer: the browser showing that
+			// Files chosen in VS Code's explorer: the page showing that
 			// VS Code (the one with focus) downloads them (handleDownload).
 			if len(msg.Paths) > 0 && len(msg.Paths) <= maxDownloadPaths {
-				h.s.broadcast(map[string]any{"t": "bridge.download", "m": mc.ID(), "paths": msg.Paths})
+				ev := map[string]any{"t": "bridge.download", "m": mc.ID(), "paths": msg.Paths}
+				if w.id != "" {
+					ev["window"] = w.id
+				}
+				h.s.broadcast(ev)
 			}
 		}
 	}
+}
+
+// focused tells the pages that a window that said hello got the keyboard:
+// the page whose VS Code pane has it learns which window that pane shows,
+// and names it in the commands it sends there (command).
+func (h *bridgeHub) focused(mc *machines.Machine, w *bridgeWindow) {
+	if w.id == "" {
+		return
+	}
+	ev := map[string]any{"t": "bridge.focus", "m": mc.ID(), "window": w.id}
+	if w.folders != nil {
+		ev["folders"] = w.folders
+	}
+	h.s.broadcast(ev)
 }
 
 // setTheme makes every VS Code window, now and later, use a theme of kind.
@@ -203,21 +236,77 @@ func (h *bridgeHub) pick(m, folder string) (*bridgeWindow, int) {
 	return best, score
 }
 
-// command sends cmd to the VS Code window for folder. The iframe may still be
-// navigating to that folder, so an exact match is awaited briefly before a
-// window containing the folder (or, with no folder, any window) is used.
-func (h *bridgeHub) command(ctx context.Context, m, folder string, cmd map[string]any) error {
+// byID returns the window of machine m that said hello as id.
+func (h *bridgeHub) byID(m, id string) *bridgeWindow {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for w := range h.windows {
+		if w.m == m && w.id == id {
+			return w
+		}
+	}
+	return nil
+}
+
+// pickNew returns a window of machine m showing folder (any folder for "")
+// that said hello after since: one a page has just opened.
+func (h *bridgeHub) pickNew(m, folder string, since time.Time) *bridgeWindow {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var best *bridgeWindow
+	for w := range h.windows {
+		if w.m != m || w.hello.Before(since) {
+			continue
+		}
+		ok := folder == ""
+		for _, f := range w.folders {
+			ok = ok || strings.TrimRight(f, "/") == strings.TrimRight(folder, "/")
+		}
+		if ok && (best == nil || w.hello.Before(best.hello)) {
+			best = w
+		}
+	}
+	return best
+}
+
+// bridgeTarget is the window a command goes to: the one a page named
+// (window, a window id it learned from bridge.focus or an earlier reply),
+// else a window opened after the request (fresh: the page has just opened
+// a VS Code pane for folder), else the best window for folder (pick).
+type bridgeTarget struct {
+	folder, window string
+	fresh          bool
+}
+
+// command sends cmd to the VS Code window of t and returns that window's
+// id. A named window that is gone counts as unnamed. The iframe may still be
+// loading, so a fresh window or an exact match is awaited; without fresh, a
+// window containing the folder (or, with no folder, any window) is used
+// after a grace period.
+func (h *bridgeHub) command(ctx context.Context, m string, t bridgeTarget, cmd map[string]any) (string, error) {
 	start := time.Now()
 	deadline := time.NewTimer(60 * time.Second)
 	defer deadline.Stop()
 	var w *bridgeWindow
-	for {
+	if t.window != "" {
+		w = h.byID(m, t.window)
+	}
+	for w == nil {
 		h.mu.Lock()
 		changed := h.changed
 		h.mu.Unlock()
-		cand, sc := h.pick(m, folder)
-		grace := time.Since(start) > 4*time.Second
-		if cand != nil && (sc == 3 || folder == "" || grace && sc >= 2) {
+		var cand *bridgeWindow
+		ready := false
+		if t.fresh {
+			cand = h.pickNew(m, t.folder, start)
+			ready = cand != nil
+		} else {
+			var sc int
+			cand, sc = h.pick(m, t.folder)
+			grace := time.Since(start) > 4*time.Second
+			ready = cand != nil && (sc == 3 || t.folder == "" || grace && sc >= 2)
+		}
+		if ready {
 			w = cand
 			break
 		}
@@ -225,16 +314,13 @@ func (h *bridgeHub) command(ctx context.Context, m, folder string, cmd map[strin
 		case <-changed:
 		case <-time.After(time.Second):
 		case <-ctx.Done():
-			return ctx.Err()
+			return "", ctx.Err()
 		case <-deadline.C:
 			if cand != nil {
 				w = cand
 				break
 			}
-			return errors.New("no VS Code window is connected (code-server may still be starting)")
-		}
-		if w != nil {
-			break
+			return "", errors.New("no VS Code window is connected (code-server may still be starting)")
 		}
 	}
 	id := strconv.FormatUint(h.seq.Add(1), 10)
@@ -244,16 +330,19 @@ func (h *bridgeHub) command(ctx context.Context, m, folder string, cmd map[strin
 	w.pending.Store(id, ch)
 	if err := w.send(cmd); err != nil {
 		w.pending.Delete(id)
-		return err
+		return "", err
 	}
+	h.mu.Lock()
+	window := w.id
+	h.mu.Unlock()
 	select {
 	case err := <-ch:
-		return err
+		return window, err
 	case <-time.After(30 * time.Second):
 		w.pending.Delete(id)
-		return errors.New("VS Code did not answer")
+		return "", errors.New("VS Code did not answer")
 	case <-ctx.Done():
-		return ctx.Err()
+		return "", ctx.Err()
 	}
 }
 
@@ -268,23 +357,29 @@ func (s *Server) handleBridge(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	folder, _ := body["folder"].(string)
+	var t bridgeTarget
+	t.folder, _ = body["folder"].(string)
+	t.window, _ = body["window"].(string)
+	t.fresh, _ = body["fresh"].(bool)
 	delete(body, "folder")
-	s.audit.log(r, "bridge.command", map[string]any{"machine": mc.ID(), "cmd": body["cmd"], "folder": folder})
+	delete(body, "window")
+	delete(body, "fresh")
+	s.audit.log(r, "bridge.command", map[string]any{"machine": mc.ID(), "cmd": body["cmd"], "folder": t.folder})
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
 	defer cancel()
-	// Bring code-server up if the panel has not been opened yet.
+	// Bring code-server up if no VS Code pane has been shown yet.
 	if !s.cs.Ready(mc) {
 		if err := s.cs.Ensure(ctx, mc); err != nil {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
 			return
 		}
 	}
-	if err := s.bridge.command(ctx, mc.ID(), folder, body); err != nil {
+	window, err := s.bridge.command(ctx, mc.ID(), t, body)
+	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "window": window})
 }
 
 // handleAgentStream dispatches streams opened by agents.

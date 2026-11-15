@@ -115,15 +115,22 @@ settings between machines.
 
 - The extension runs in code-server's extension host on the machine and
   connects to `$HERDR_IDE_BRIDGE_SOCKET`, which the agent tunnels to the core.
-  It announces its window id and workspace folders.
-- The core routes UI commands to the window that shows the requested folder
-  (waiting up to 60 s for the iframe to load, accepting a containing folder
-  after a grace period): `openFile` (path, line, column), `openDiff`
+  It announces its window (a random id per extension host), its workspace
+  folders and whether it has the keyboard, and says when it gets the
+  keyboard. Each iframe is a window of its own; the core tells the pages
+  which window got the keyboard (`bridge.focus`), and the page whose iframe
+  has the keyboard, in the window that has it, learns which window that
+  iframe shows when the folders match.
+- The core routes UI commands (`openFile` (path, line, column), `openDiff`
   (multi-file "View Changes"), `gitGraph` (repository root), `openMedia`,
-  `reveal`. With one window per machine and folder, the folder of the
-  selected workspace's panel names its window, so commands reach the
-  VS Code the user sees; `openFile` keeps that folder when the file is
-  below it, else uses the focused pane's cwd or the file's directory.
+  `reveal`) to a window: the one the page names, else, for an iframe the
+  page has just created (`fresh`), the first window of that folder that
+  connects after the request, else the window showing the folder (waiting
+  up to 60 s for the iframe to load, accepting a containing folder after a
+  grace period, the window used last among several). Its reply names the
+  window, which the page keeps for that iframe. So a command reaches the
+  pane it was meant for, also when other panes or other browsers show the
+  same folder.
 - **Send to Agent** in the editor sends `@file:lines` plus the selection; the
   core adds the sending window's folders (`bridge.send`), and the browser
   pastes it, unsubmitted, into the focused pane when the selected
@@ -214,12 +221,14 @@ VS Code's "open in browser" links for forwarded ports therefore do not work.
   a listener that does not serve VS Code replaced
   (`TestCodeServerReplacesBrokenListener`).
 - `internal/server/server_test.go`: bridge window selection
-  (`TestBridgePick`), idle tracking (`TestCodeServerIdleTracking`), theme
-  broadcast (`TestBridgeTheme`), refused port proxy paths
-  (`TestCodeServerPortProxyRefused`), the sending window's folders in
-  `bridge.send` (`TestBridgeSendToAgent`);
+  (`TestBridgePick`; `TestBridgeTargets`: a named window, the window used
+  last, a fresh pane's window that connects after the request although
+  others show the folder), idle tracking (`TestCodeServerIdleTracking`),
+  theme broadcast (`TestBridgeTheme`), refused port proxy paths
+  (`TestCodeServerPortProxyRefused`), the sending window's folders and id
+  in `bridge.send` and `bridge.focus` (`TestBridgeSendToAgent`);
   `internal/server/download_test.go` (`TestBridgeDownload`:
-  `bridge.download` to browsers).
+  `bridge.download` to browsers, with the window's id).
 - `web/src/__tests__/workspaceDock.test.ts`: a panel per workspace, kept
   per browser and dropped with its workspace or machine, windows per
   machine and folder with their order, expiry and limit, disabled machines,

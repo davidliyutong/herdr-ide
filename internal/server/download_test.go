@@ -162,6 +162,18 @@ func TestBridgeDownload(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("no bridge.download")
 	}
+	// Once the window said hello, its id goes along: the page that shows it
+	// downloads.
+	b.Write([]byte(`{"type":"hello","id":"w1","folders":["/srv"]}` + "\n"))
+	b.Write([]byte(`{"type":"download","paths":["/srv/a"]}` + "\n"))
+	select {
+	case m := <-c.send:
+		if string(m) != `{"m":"m","paths":["/srv/a"],"t":"bridge.download","window":"w1"}` {
+			t.Fatalf("got %s", m)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no bridge.download")
+	}
 	b.Close()
 }
 
