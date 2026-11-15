@@ -1,0 +1,172 @@
+// VS Code panes: the layer of their iframes over the panes (CodeLayer, once
+// per page) and the body of each VS Code pane on screen (CodeSlot), which
+// the layer places its iframe over. See codeFrames.ts.
+
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { Power } from 'lucide-react';
+import { useStore } from '../state/store';
+import { useTerms } from '../state/terms';
+import { registerPane } from '../state/panes';
+import * as L from '../term/layout';
+import {
+  codeUrl,
+  focusFrame,
+  frameKey,
+  frameLoaded,
+  mountFrame,
+  nextFrames,
+  place,
+  placeAll,
+  setStopped,
+  showSlot,
+  useFrames,
+  type Frame,
+} from '../codeFrames';
+import { t } from '../i18n';
+
+type Machines = ReturnType<typeof useStore.getState>['machines'];
+let usableOf: { machines?: Machines; list: string } = { list: '' };
+
+/** The ids of the machines that can have VS Code (the core lists them and
+ * they are not disabled), one per line: worked out again only when the
+ * machines change, not on every change of the store. */
+function usableMachines(s: { machines: Machines }): string {
+  if (s.machines !== usableOf.machines) {
+    const list = Object.values(s.machines)
+      .filter((x) => x.status !== 'disabled')
+      .map((x) => x.id)
+      .sort()
+      .join('\n');
+    usableOf = { machines: s.machines, list };
+  }
+  return usableOf.list;
+}
+
+type Layouts = ReturnType<typeof useTerms.getState>['machines'];
+let viewsOf: { machines?: Layouts; list: string } = { list: '' };
+
+/** The VS Code views of every layout read, as machine|id, one per line, and
+ * the machines whose layout was read, as machine|: worked out again only
+ * when a layout changes. */
+function codeViewsOfLayouts(s: { machines: Layouts }): string {
+  const changed =
+    !viewsOf.machines ||
+    Object.keys(s.machines).length !== Object.keys(viewsOf.machines).length ||
+    Object.entries(s.machines).some(([m, mt]) => viewsOf.machines![m]?.layout !== mt.layout);
+  if (changed) {
+    const out: string[] = [];
+    for (const [m, mt] of Object.entries(s.machines)) {
+      if (!mt.layout) continue;
+      out.push(`${m}|`);
+      for (const ws of mt.layout.workspaces) for (const v of L.codeViews(ws)) out.push(frameKey(m, v.view.id));
+    }
+    viewsOf = { machines: s.machines, list: out.sort().join('\n') };
+  }
+  return viewsOf.list;
+}
+
+/** Why a machine's VS Code panes show no VS Code: read-only mode, the
+ * machine disabled, or code-server stopped from this page. */
+export type CodeOff = 'readOnly' | 'disabled' | 'stopped';
+
+export function useCodeOff(m: string): CodeOff | undefined {
+  const readOnly = useStore((s) => s.readOnly);
+  const disabled = useStore((s) => s.machines[m]?.status === 'disabled');
+  const stopped = useFrames((s) => !!s.stopped[m]);
+  return readOnly ? 'readOnly' : disabled ? 'disabled' : stopped ? 'stopped' : undefined;
+}
+
+/** The iframes of the VS Code panes, over the panes; once per page. */
+export function CodeLayer() {
+  const frames = useFrames((s) => s.frames);
+  const shown = useFrames((s) => s.shown);
+  const stopped = useFrames((s) => s.stopped);
+  const readOnly = useStore((s) => s.readOnly);
+  const usableList = useStore(usableMachines);
+  const viewsList = useTerms(codeViewsOfLayouts);
+  const usable = useMemo(() => new Set(usableList ? usableList.split('\n') : []), [usableList]);
+  const views = useMemo(() => new Set(viewsList ? viewsList.split('\n') : []), [viewsList]);
+
+  useEffect(() => {
+    // Disabled and removed machines have no code-server.
+    const off = (m: string) => readOnly || !usable.has(m) || !!stopped[m];
+    // A view is alive while its machine's layout holds it; unknown while
+    // that layout is not read (the machine is away).
+    const alive = (fr: Frame) => (views.has(`${fr.m}|`) ? views.has(frameKey(fr.m, fr.id)) : undefined);
+    const update = () => {
+      const s = useFrames.getState();
+      const next = nextFrames(s.frames, s.shown, alive, off, Date.now());
+      if (next !== s.frames) useFrames.setState({ frames: next });
+    };
+    update();
+    // Frames off screen expire.
+    const timer = window.setInterval(update, 60_000);
+    return () => window.clearInterval(timer);
+  }, [shown, stopped, readOnly, usable, views]);
+
+  useEffect(() => {
+    window.addEventListener('resize', placeAll);
+    return () => window.removeEventListener('resize', placeAll);
+  }, []);
+
+  return (
+    <div className="code-layer">
+      {Object.entries(frames).map(([k, fr]) => (
+        <CodeFrame key={`${k}#${fr.load}`} k={k} frame={fr} />
+      ))}
+    </div>
+  );
+}
+
+function CodeFrame({ k, frame }: { k: string; frame: Frame }) {
+  const ref = useRef<HTMLIFrameElement>(null);
+  useLayoutEffect(() => mountFrame(k, ref.current!), [k]);
+  return (
+    <iframe
+      ref={ref}
+      className="code-frame"
+      data-frame={k}
+      data-m={frame.m}
+      src={codeUrl(frame.m, frame.folder)}
+      title={`VS Code ${frame.folder}`}
+      allow="clipboard-read; clipboard-write"
+      onLoad={() => ref.current && frameLoaded(k, ref.current)}
+    />
+  );
+}
+
+/** The body of a VS Code pane on screen: the layer places the pane's
+ * window over it, or it says why there is none. */
+export function CodeSlot({ m, pane, view }: { m: string; pane: string; view: L.CodeView }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const off = useCodeOff(m);
+  const k = frameKey(m, view.id);
+  const folder = view.folder;
+  useLayoutEffect(() => (off ? undefined : showSlot({ m, id: view.id, folder }, ref.current!)), [m, view.id, folder, off]);
+  // The pane may have moved without changing its size.
+  useLayoutEffect(() => place(k));
+  useEffect(() => registerPane(m, pane, { focus: () => focusFrame(k) }), [m, pane, k]);
+  return (
+    <div className="code-slot" ref={ref} data-frame={k}>
+      {off && <CodeOffNote m={m} off={off} />}
+    </div>
+  );
+}
+
+function CodeOffNote({ m, off }: { m: string; off: CodeOff }) {
+  const label = useStore((s) => s.machines[m]?.label ?? m);
+  if (off === 'stopped')
+    return (
+      <div className="code-off">
+        <span>{t('code.stopped', { machine: label })}</span>
+        <button onClick={() => setStopped(m, false)}>
+          <Power /> {t('code.start')}
+        </button>
+      </div>
+    );
+  return (
+    <div className="code-off">
+      <span>{off === 'readOnly' ? t('code.readOnly') : t('code.machineDisabled', { machine: label })}</span>
+    </div>
+  );
+}

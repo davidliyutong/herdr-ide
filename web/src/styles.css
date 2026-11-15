@@ -179,21 +179,12 @@ select,
 /* ---------- app grid ---------- */
 .app {
   display: grid;
-  grid-template-columns: var(--sidebar-w, 20rem) minmax(0, 1fr) auto;
+  grid-template-columns: var(--sidebar-w, 20rem) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) 1.85rem;
-  grid-template-areas: 'sidebar main dock' 'status status status';
+  grid-template-areas: 'sidebar main' 'status status';
   height: 100%;
 }
 .app.no-sidebar {
-  grid-template-columns: 0 minmax(0, 1fr) auto;
-}
-/* VS Code and previews below the panes instead of beside them. */
-.app.dock-at-bottom {
-  grid-template-columns: var(--sidebar-w, 20rem) minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr) auto 1.85rem;
-  grid-template-areas: 'sidebar main' 'sidebar dock' 'status status';
-}
-.app.dock-at-bottom.no-sidebar {
   grid-template-columns: 0 minmax(0, 1fr);
 }
 
@@ -552,6 +543,12 @@ body.resizing .sidebar-resizer::after {
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
+/* A tab of VS Code or a preview alone: its mark before its name. */
+.tab-kind.lucide {
+  width: 1rem;
+  height: 1rem;
+  margin-right: -2px;
+}
 /* A tab of several panes: a small split mark (the count is in its tooltip). */
 .tab-split.lucide {
   width: 0.95rem;
@@ -805,9 +802,10 @@ body.resizing .sidebar-resizer::after {
   align-items: center;
   gap: 6px;
   flex: none;
-  height: 1.9rem;
+  /* Its buttons are the tab bar's size (an .icon), with a little room. */
+  height: 2.3rem;
   box-sizing: border-box;
-  padding: 0 4px 0 8px;
+  padding: 0 3px 0 8px;
   font-size: var(--fs-sm);
   line-height: 1;
   background: var(--bg-1);
@@ -828,16 +826,22 @@ body.resizing .sidebar-resizer::after {
   height: 100%;
   margin-left: auto;
 }
-.pane-header .pane-actions button {
-  width: 1.5rem;
-}
-.pane-header .pane-actions .sep {
-  height: 60%;
-}
 .pane-header.draggable {
   cursor: grab;
 }
 .pane-header.focused {
+  color: var(--fg);
+}
+/* What a pane other than a terminal is: VS Code's mark, a preview's eye. */
+.pane-kind.lucide {
+  width: 1.15rem;
+  height: 1.15rem;
+  margin-right: -2px;
+}
+.pane-header .code-icon {
+  color: var(--fg-dim);
+}
+.pane-header.focused .code-icon {
   color: var(--fg);
 }
 .pane-title.editable {
@@ -884,22 +888,22 @@ body.resizing .sidebar-resizer::after {
   gap: 1px;
   flex: none;
 }
+/* As large as the tab bar's and sidebar's icon buttons. */
 .pane-actions button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 1.85rem;
-  height: 100%;
-  min-height: 1rem;
+  height: 1.85rem;
   padding: 0;
   background: none;
   border: none;
-  border-radius: 4px;
+  border-radius: 5px;
   color: var(--fg-dim);
 }
 .pane-actions .lucide {
-  width: 1.08em;
-  height: 1.08em;
+  width: 1.15rem;
+  height: 1.15rem;
 }
 /* With several panes, only the focused one and the one pointed at show
    their buttons, so the keyboard's pane stands out; a program window that
@@ -916,41 +920,46 @@ body.resizing .sidebar-resizer::after {
 }
 .pane-actions .sep {
   width: 1px;
-  height: 1rem;
+  height: 1.1rem;
   background: var(--line-2);
   margin: 0 3px;
 }
-/* Narrow panes drop the folder, the agent, the VS Code buttons (still in
- * the pane's menu and key bindings), the split buttons, the title and zoom,
- * in this order; the close button stays. */
-@container (max-width: 420px) {
+/* The pane's menu, with every command of the pane: shown once the header
+ * has no room for all its buttons. */
+.pane-actions .more {
+  display: none;
+}
+/* Narrow panes drop the folder, then the agent and the VS Code buttons (the
+ * menu's button takes their place), the split buttons, zoom and the title,
+ * in this order; the menu's button and close stay. */
+@container (max-width: 30rem) {
   .pane-header .pane-cwd {
     display: none;
   }
 }
-@container (max-width: 320px) {
-  .pane-header .pane-agent {
-    display: none;
-  }
-}
-@container (max-width: 260px) {
+@container (max-width: 26rem) {
+  .pane-header .pane-agent,
   .pane-header .pane-actions .code {
     display: none;
   }
+  .pane-header .pane-actions .more {
+    display: inline-flex;
+  }
 }
-@container (max-width: 170px) {
+@container (max-width: 18rem) {
   .pane-header .pane-actions .split {
     display: none;
   }
 }
-@container (max-width: 130px) {
-  .pane-header .pane-title,
-  .pane-header .pane-title-edit {
+@container (max-width: 12rem) {
+  .pane-header .pane-actions .zoom {
     display: none;
   }
 }
-@container (max-width: 90px) {
-  .pane-header .pane-actions .zoom {
+@container (max-width: 9rem) {
+  .pane-header .pane-title,
+  .pane-header .pane-title-edit,
+  .pane-header .pane-kind {
     display: none;
   }
 }
@@ -1083,62 +1092,47 @@ body.dragging * {
   padding: 6px 10px;
 }
 
-/* ---------- dock ---------- */
-.dock {
-  grid-area: dock;
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  min-width: 0;
-  background: var(--bg-1);
-}
-.dock-right {
-  border-left: 1px solid var(--line);
-}
-.dock-bottom {
-  border-top: 1px solid var(--line);
-}
-.dock-resizer {
-  position: absolute;
+/* ---------- VS Code and preview panes ---------- */
+/* VS Code panes' windows (CodeLayer.tsx), placed over their panes' bodies
+ * (.code-slot) by codeFrames.ts: above the panes' bodies, below the split
+ * handles (4), a header's menu (5) and everything that floats. */
+.code-layer {
+  position: fixed;
+  inset: 0;
   z-index: 2;
+  pointer-events: none;
 }
-.dock-right > .dock-resizer {
-  left: -3px;
-  top: 0;
-  bottom: 0;
-  width: 6px;
-  cursor: col-resize;
+.code-frame {
+  position: absolute;
+  display: none;
+  border: 0;
+  background: var(--bg);
+  pointer-events: auto;
 }
-.dock-bottom > .dock-resizer {
-  top: -3px;
-  left: 0;
-  right: 0;
-  height: 6px;
-  cursor: row-resize;
-}
-.dock-resizer:hover {
-  background: var(--line-2);
-}
-.dock-head {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  height: 2.6rem;
-  padding: 0 8px 0 12px;
-  border-bottom: 1px solid var(--line);
-  flex: none;
-}
-.dock-title {
-  font-size: var(--fs-md);
-  min-width: 0;
-}
-.dock-body {
+.code-slot {
+  position: relative;
   flex: 1;
   min-height: 0;
-  position: relative;
+  background: var(--bg);
 }
-.code-frame,
+/* In place of VS Code when it has none: why, and how to get it back. */
+.code-off {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 16px;
+  text-align: center;
+  color: var(--fg-dim);
+}
+.code-off button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 .pdf-frame {
   position: absolute;
   inset: 0;
@@ -1148,10 +1142,12 @@ body.dragging * {
   background: var(--bg);
 }
 .preview {
-  position: absolute;
-  inset: 0;
+  position: relative;
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  background: var(--bg);
   outline: none;
 }
 .preview-toolbar {
@@ -1225,6 +1221,11 @@ body.dragging * {
   border-top: 1px solid var(--line);
   background: var(--bg-1);
   min-width: 0;
+}
+/* Only the focused pane's description gives way to a narrow window. */
+.statusbar > :not(.ellipsis):not(.spacer) {
+  flex: none;
+  white-space: nowrap;
 }
 .conn.on {
   color: var(--done);
@@ -2200,11 +2201,19 @@ button.danger-text:not(:disabled) {
 }
 
 /* ---------- narrow screens (phones) ---------- */
+.sidebar-backdrop {
+  display: none;
+}
 @media (max-width: 760px) {
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0 0 1.85rem 0;
+    z-index: 39;
+    background: var(--backdrop);
+  }
   .app,
-  .app.no-sidebar,
-  .app.dock-at-bottom,
-  .app.dock-at-bottom.no-sidebar {
+  .app.no-sidebar {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) 1.85rem;
     grid-template-areas: 'main' 'status';
@@ -2215,13 +2224,6 @@ button.danger-text:not(:disabled) {
     width: 82vw;
     z-index: 40;
     box-shadow: 8px 0 30px var(--shadow);
-  }
-  .dock {
-    position: fixed;
-    inset: 0 0 1.85rem 0;
-    width: auto !important;
-    height: auto !important;
-    z-index: 30;
   }
   .settings-row {
     flex-direction: column;

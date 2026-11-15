@@ -8,27 +8,34 @@ import { applies, commandEnabled, keyContext, runCommand, type KeyContext } from
 import { useKeys } from './keybindings';
 import { desktopShell } from './shell';
 import { useStore } from './state/store';
-import { useTerms } from './state/terms';
+import { terms, useTerms } from './state/terms';
+import { focusedFrame, useFrames } from './codeFrames';
+import * as L from './term/layout';
 import { useDialog } from './dialog';
 import { useSettings } from './settings';
 
 export { desktopShell, type DesktopShell } from './shell';
 
-/** Where the keyboard is: a dialog, VS Code's panel or the main UI. */
+/** Where the keyboard is: a dialog, a VS Code pane or the main UI. */
 function menuContext(): KeyContext {
   if (keyContext() === 'dialog') return 'dialog';
   return document.activeElement?.classList.contains('code-frame') ? 'vscode' : 'terminal';
 }
 
 /** Runs a command of the menu: while a dialog or the palette is open only
- * commands for dialogs or everywhere run, and while VS Code has the
- * keyboard only those for VS Code or everywhere (a key VS Code left goes no
- * further). Closing a tab asks first unless its panes only have shells
- * waiting at their prompt (actions.closeTab). */
+ * commands for dialogs or everywhere run; while a VS Code pane has the
+ * keyboard the main UI's commands act on that pane (keymap.ts applies), so
+ * cmd+w, which VS Code leaves, closes it. Closing a tab asks first unless
+ * its panes only have shells waiting at their prompt (actions.closeTab). */
 export function runMenuCommand(command: string) {
   const when = useKeys.getState().commands.find((c) => c.id === command)?.when ?? 'terminal';
   const ctx = menuContext();
   if (ctx !== 'terminal' && !applies(when, ctx)) return;
+  // The pane whose VS Code has the keyboard is the focused one, also when
+  // its focus event has not reached the layout yet.
+  const frame = focusedFrame();
+  const fr = frame ? useFrames.getState().frames[frame] : undefined;
+  if (fr) terms.mutate(fr.m, (l) => L.focusPane(l, L.codeKey(fr.id)));
   runCommand(command);
 }
 

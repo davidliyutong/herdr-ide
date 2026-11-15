@@ -47,18 +47,43 @@ more); editing files (that is VS Code's job).
   foreground program (the terminal core's record), else where it started;
   `~` against the machine's home.
 - Activation requires ⌘ or Ctrl, so plain clicks still reach mouse-aware
-  applications. Media opens in the preview panel; other files open in VS Code
-  at the line ([05](05-vscode-panel.md)), falling back to the preview.
+  applications. What a path opens in is a pane of the terminal's
+  workspace (`actions.openPath`):
+  - media (images, video, audio, PDF) opens in a preview pane: the
+    workspace's preview pane (the one of the terminal's tab first), which
+    then shows that path, else a new one split beside the terminal;
+  - other files open in VS Code at the line ([05](05-vscode-panes.md)): in
+    a VS Code pane of the workspace, the one of the terminal's tab whose
+    folder holds the file first, then one of another tab that holds it,
+    then any of the terminal's tab, then any; else in a new VS Code pane
+    split beside the terminal, for the terminal's directory when it holds
+    the file, else the workspace's when it does, else the file's
+    directory.
 
-**Preview** (`web/src/components/Dock.tsx`)
+  The text menu's **Open in VS Code** does the same, and its **Preview**
+  opens the path in a preview pane the same way, also when it is not
+  media.
 
+**Preview** (`web/src/components/PreviewPane.tsx`)
+
+- A preview is a pane of the layout document (`{"preview": {"id",
+  "path"}}`, [22](22-terminal-protocol.md)): it is split, dragged by its
+  header, maximized and closed like any pane, can be a tab's only pane,
+  and comes back after a reload or a restart ([04](04-layout-and-keyboard.md)).
+  A split from it starts a terminal in its file's directory. Closing it
+  ends nothing.
 - `GET /api/m/<machine>/file?path=` streams through the agent (`fs.stat`,
   `fs.read` with offset/length) and supports single HTTP ranges, ETags and
   `download=1`.
 - Images, video and audio use native elements; PDFs an iframe; text files
   read the first 2 MiB and refuse binary content; directories list entries
   that open on click. Sibling media in the same directory are navigable with
-  ← →.
+  ← →. Stepping to a sibling or entering a directory shows that path in the
+  same preview pane (the layout document's path changes, so every client
+  follows).
+- Its toolbar has **Download** and **Open in VS Code** (also for media:
+  VS Code shows images), which opens the file in a VS Code pane of the
+  workspace as a path from a terminal does, beside the preview.
 - A video codec the browser cannot decode shows a hint with download and
   VS Code options.
 
@@ -103,8 +128,9 @@ more); editing files (that is VS Code's job).
   (reading a FIFO would block), and so is anything it cannot read. Nothing
   is written on the machine. Files are compressed at the fastest deflate
   level: the archive is made while it downloads.
-- VS Code's explorer downloads through the same endpoint
-  ([05](05-vscode-panel.md)).
+- VS Code's explorer downloads through the same endpoint: the page whose
+  VS Code pane shows the asking window starts the download, else the page
+  with the focus ([05](05-vscode-panes.md)).
 
 **Pasted and dropped files** (`web/src/drop.ts`, `web/src/lib/files.ts`)
 
@@ -164,7 +190,8 @@ more); editing files (that is VS Code's job).
 - Finished uploads (done, failed or cancelled) move to the history, newest
   first: the machine, where the file is (or the directory it was going to),
   its size, time and average speed, or the error. A done upload can be
-  opened in the preview panel and its path copied. The browser keeps the
+  opened in a preview pane (the workspace's, else a new one beside the
+  focused pane) and its path copied. The browser keeps the
   last 50 in `localStorage` (names, machines and paths, not contents);
   opening the panel shows the ones other tabs finished. Entries can be
   removed one by one or all at once; this does not touch the files.
@@ -284,7 +311,10 @@ types, `TestContentTypeNeverActive`; upload names,
 and chunked writes, `TestFileOps`; writes that keep existing files,
 `TestWriteKeepsExistingFiles`),
 `web/src/__tests__/core.test.ts` (path resolution, media detection, wrapped
-links, selected links), `web/src/__tests__/vt.test.ts` (hyperlinks and the
+links, selected links), `web/src/__tests__/codePanes.test.ts` (a path
+from a terminal in a VS Code pane of the workspace or beside the terminal,
+media in a preview pane beside it that then shows the next file),
+`web/src/__tests__/vt.test.ts` (hyperlinks and the
 link underline), `web/src/__tests__/drop.test.ts`
 (dropped files' paths on the local machine, uploads and skipped folders for
 another, refused stray drops), `web/src/__tests__/transfers.test.ts`

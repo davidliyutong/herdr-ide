@@ -1,5 +1,5 @@
-// Context menus of pane headers, tabs, workspaces, machines and the
-// terminals' text. They call the same commands as the buttons and bindings;
+// Context menus of pane headers (also their "more" button), tabs,
+// workspaces, machines and the terminals' text. They call the same commands as the buttons and bindings;
 // read-only mode has no items that change anything (the terminals' text
 // keeps copying and opening links), so elsewhere the browser's menu shows.
 
@@ -33,12 +33,12 @@ import {
   ServerPlus,
   Settings,
   Square,
-  SquareCode,
   Trash2,
   Wrench,
   X,
 } from 'lucide-react';
 import { actions, current } from './actions';
+import { CodeIcon } from './components/icons';
 import type { MenuEntry } from './contextMenu';
 import { downloadDialog } from './dialog';
 import { canDownload, downloadPath } from './download';
@@ -58,52 +58,89 @@ const hintIf = (current: boolean, action: string) => (current ? hint(action) : u
 
 const workspaceOf = (m: string, ws: string) => terms.layout(m)?.workspaces.find((w) => w.id === ws);
 
-export function paneMenu(m: string, terminal: string): MenuEntry[] {
+/** A pane's menu: what it is (a terminal's name, VS Code's window, a
+ * preview's file), splitting it (a new terminal in its directory), showing
+ * it alone, a terminal's folder in VS Code, closing it. */
+export function paneMenu(m: string, pane: string): MenuEntry[] {
   const s = useStore.getState();
   if (s.readOnly) return [];
-  const cwd = terms.directory(m, terminal);
-  const zoomed = s.zoomed?.m === m && s.zoomed.terminal === terminal;
-  return [
-    { label: t('menu.renamePane'), icon: <Pencil />, run: () => actions.startRename('pane', m, terminal) },
-    'sep',
+  const layout = terms.layout(m);
+  const leaf = layout ? L.findLeaf(layout, pane) : null;
+  const zoomed = s.zoomed?.m === m && s.zoomed.pane === pane;
+  const arrange: MenuEntry[] = [
     {
       label: t('command.pane.splitRight'),
       hint: hint('pane.splitRight'),
       icon: <Columns2 />,
-      run: () => void actions.split(m, terminal, 'right'),
+      run: () => void actions.split(m, pane, 'right'),
     },
     {
       label: t('command.pane.splitDown'),
       hint: hint('pane.splitDown'),
       icon: <Rows2 />,
-      run: () => void actions.split(m, terminal, 'down'),
+      run: () => void actions.split(m, pane, 'down'),
     },
     {
       label: t(zoomed ? 'menu.restorePane' : 'command.pane.zoom'),
       hint: hint('pane.zoom'),
       icon: zoomed ? <Minimize2 /> : <Maximize2 />,
-      run: () => actions.zoom(m, terminal),
+      run: () => actions.zoom(m, pane),
     },
+  ];
+  const close: MenuEntry = {
+    label: t('command.pane.close'),
+    hint: hint('pane.close'),
+    icon: <X />,
+    danger: true,
+    run: () => void actions.closePane(m, pane),
+  };
+  if (leaf && L.isCodeLeaf(leaf)) {
+    const machine = s.machines[m]?.label ?? m;
+    return [
+      { label: t('code.reload'), icon: <RotateCw />, run: () => actions.reloadCode(m, leaf.code.id) },
+      'sep',
+      ...arrange,
+      'sep',
+      { label: t('code.stop', { machine }), icon: <Power />, run: () => void actions.stopCode(m) },
+      'sep',
+      close,
+    ];
+  }
+  if (leaf && L.isPreviewLeaf(leaf)) {
+    const path = leaf.preview.path;
+    return [
+      { label: t('preview.openInCode'), icon: <CodeIcon />, run: () => void actions.openInCode(m, path, 1, undefined, pane) },
+      ...(canDownload(m) ? [{ label: t('preview.download'), icon: <Download />, run: () => void downloadPath(m, path) }] : []),
+      'sep',
+      ...arrange,
+      'sep',
+      close,
+    ];
+  }
+  const cwd = terms.directory(m, pane);
+  return [
+    { label: t('menu.renamePane'), icon: <Pencil />, run: () => actions.startRename('pane', m, pane) },
     'sep',
-    { label: t('command.code.open'), hint: hint('code.open'), icon: <SquareCode />, run: () => actions.openCode(m, cwd) },
-    { label: t('command.code.diff'), hint: hint('code.diff'), icon: <FileDiff />, run: () => actions.openDiff(m, cwd) },
-    { label: t('command.code.gitGraph'), hint: hint('code.gitGraph'), icon: <GitGraph />, run: () => actions.openGitGraph(m, cwd) },
+    ...arrange,
     'sep',
+    { label: t('command.code.open'), hint: hint('code.open'), icon: <CodeIcon />, run: () => void actions.openCode(m, cwd) },
+    { label: t('command.code.diff'), hint: hint('code.diff'), icon: <FileDiff />, run: () => void actions.openDiff(m, cwd, pane) },
     {
-      label: t('command.pane.close'),
-      hint: hint('pane.close'),
-      icon: <X />,
-      danger: true,
-      run: () => void actions.closePane(m, terminal),
+      label: t('command.code.gitGraph'),
+      hint: hint('code.gitGraph'),
+      icon: <GitGraph />,
+      run: () => void actions.openGitGraph(m, cwd, pane),
     },
+    'sep',
+    close,
   ];
 }
 
 const copyText = (text: string) => void navigator.clipboard?.writeText(text).catch(() => {});
 
 /** The menu of a pane's text: copy the selection, paste, and open, copy or
- * download the URL or path under the pointer or selected. Paths open in the
- * preview panel or in VS Code; the item names the file, so a path detection
+ * download the URL or path under the pointer or selected. Paths open in a
+ * preview pane or in VS Code; the item names the file, so a path detection
  * cut short shows. Files of the pane's directory can be chosen to download
  * (not on the desktop app's own machine, where they already are). */
 export function surfaceMenu(o: {
@@ -126,9 +163,17 @@ export function surfaceMenu(o: {
   } else if (l?.kind === 'path') {
     const r = resolvePath(l.text, o.ctx);
     const name = r.path.split('/').pop() || r.path;
-    out.push('sep', { label: t('link.menuPreview', { name }), icon: <Eye />, run: () => actions.openPreview(o.ctx.m, r.path) });
+    out.push('sep', {
+      label: t('link.menuPreview', { name }),
+      icon: <Eye />,
+      run: () => void actions.openPreview(o.ctx.m, r.path, o.ctx.pane),
+    });
     if (!mediaExt.test(r.path))
-      out.push({ label: t('link.menuCode', { name }), icon: <SquareCode />, run: () => actions.openPath(o.ctx.m, r.path, r.line, r.col) });
+      out.push({
+        label: t('link.menuCode', { name }),
+        icon: <CodeIcon />,
+        run: () => void actions.openPath(o.ctx.m, r.path, r.line, r.col, o.ctx.pane),
+      });
     if (canDownload(o.ctx.m))
       out.push({ label: t('link.menuDownload', { name }), icon: <Download />, run: () => void downloadPath(o.ctx.m, r.path) });
     out.push({ label: t('link.menuCopyPath'), icon: <Copy />, run: () => copyText(r.path) });

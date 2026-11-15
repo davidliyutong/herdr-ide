@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 //
-// A pane's header: its terminal's title, agent and folder, and buttons that
-// act on its own terminal, whichever has the focus.
+// A pane's header: its terminal's title, agent and folder (VS Code's
+// folder), and buttons that act on its own pane, whichever has the focus.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
@@ -9,11 +9,12 @@ import { createRoot, type Root } from 'react-dom/client';
 
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 const command = vi.fn((..._args: unknown[]) => Promise.resolve());
-vi.mock('../lib/bridge', () => ({ bridge: { command: (...a: unknown[]) => command(...a) } }));
+vi.mock('../lib/bridge', () => ({ bridge: { command: (...a: unknown[]) => command(...a) }, hasFrame: () => false }));
 
 import { useStore } from '../state/store';
 import { terminalTitle, type MachineState } from '../lib/machine';
 import { PaneHeader } from '../components/PaneHeader';
+import * as L from '../term/layout';
 import { useMenu } from '../contextMenu';
 import { FakeCore, settle } from './fakeTerms';
 
@@ -24,8 +25,8 @@ describe('PaneHeader', () => {
   let root: Root;
   let core: FakeCore;
   const buttons = () => [...host.querySelectorAll('button')];
-  const render = () =>
-    act(async () => root.render(createElement(PaneHeader, { m: 'm', terminal: 'p1', ws: 'w1w1w1w1', focused: false, zoomed: false })));
+  const render = (pane = 'p1', leaf: L.Leaf = { terminal: 'p1' }) =>
+    act(async () => root.render(createElement(PaneHeader, { m: 'm', pane, leaf, ws: 'w1w1w1w1', focused: false, zoomed: false })));
 
   beforeEach(async () => {
     command.mockClear();
@@ -73,16 +74,15 @@ describe('PaneHeader', () => {
     expect(host.querySelector('.dot-working')).not.toBeNull();
     expect(host.querySelector('.pane-cwd')?.textContent).toBe('~/src');
     expect(buttons().map((b) => b.title.replace(/ \(.*\)$/, ''))).toEqual([
-      'Open Folder in VS Code',
+      'Open in VS Code',
       'Show Changes in VS Code',
       'Open Git Graph',
       'Split Right',
       'Split Down',
       'Maximize Pane',
+      'More Pane Actions',
       'Close Pane',
     ]);
-    await act(async () => buttons()[1].click());
-    expect(command).toHaveBeenLastCalledWith('m', '/home/u/src', { cmd: 'openDiff', repo: '/home/u/src' });
     await act(async () => buttons()[4].click());
     await act(settle);
     // The split starts in p1's folder and goes below p1.
@@ -91,8 +91,40 @@ describe('PaneHeader', () => {
       children: [{ split: 'vertical', children: [{ terminal: 'p1' }, { terminal: 't1' }] }, { terminal: 'p2' }],
     });
     await act(async () => buttons()[5].click());
-    expect(useStore.getState().zoomed).toEqual({ m: 'm', terminal: 'p1' });
+    expect(useStore.getState().zoomed).toEqual({ m: 'm', pane: 'p1' });
     useStore.getState().setZoomed(undefined);
+    // The changes open in VS Code beside p1, for p1's folder.
+    await act(async () => buttons()[1].click());
+    await act(settle);
+    expect(command).toHaveBeenLastCalledWith('m', expect.any(String), '/home/u/src', { cmd: 'openDiff', repo: '/home/u/src' }, true);
+    const [view] = L.codeViews(L.parseLayout(core.layout('m')).workspaces[0]);
+    expect(L.parseLayout(core.layout('m')).workspaces[0].tabs[0].root).toMatchObject({
+      children: [{ split: 'vertical', children: [{ split: 'horizontal', children: [{ terminal: 'p1' }, { code: view.view }] }, {}] }, {}],
+    });
+    // The menu's button has the pane's commands.
+    await act(async () => buttons()[6].click());
+    expect(useMenu.getState().menu?.entries.length).toBeGreaterThan(5);
+  });
+
+  it("names a VS Code pane by its folder and has VS Code's buttons", async () => {
+    core.model.mutate('m', (l) => L.splitPane(l, 'p2', 'vertical', { code: { id: 'c1', folder: '/home/u/src/app' } }));
+    await render('code:c1', { code: { id: 'c1', folder: '/home/u/src/app' } });
+    expect(host.querySelector('.pane-title')?.textContent).toBe('app');
+    expect(host.querySelector<HTMLElement>('.pane-title')?.title).toBe('VS Code on m: /home/u/src/app');
+    expect(host.querySelector('.pane-cwd')?.textContent).toBe('~/src/app');
+    expect(host.querySelector('.code-icon')).not.toBeNull();
+    expect(buttons().map((b) => b.title.replace(/ \(.*\)$/, ''))).toEqual([
+      'Reload VS Code',
+      'Split Right',
+      'Split Down',
+      'Maximize Pane',
+      'More Pane Actions',
+      'Close Pane',
+    ]);
+    await act(async () => buttons()[5].click());
+    await act(settle);
+    expect(L.findLeaf(L.parseLayout(core.layout('m')), 'code:c1')).toBeNull();
+    expect(core.calls.filter((c) => c.method === 'terminal.kill')).toEqual([]);
   });
 
   it('keeps keyboard focus in the terminal when a button is pressed', async () => {

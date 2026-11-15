@@ -9,13 +9,14 @@ import * as L from './term/layout';
 import { t } from './i18n';
 
 export type DropTarget =
-  | { kind: 'pane'; terminal: string; zone: Zone; rect: DOMRect }
+  | { kind: 'pane'; pane: string; zone: Zone; rect: DOMRect }
   | { kind: 'tab'; ws: string; index: number; rect: DOMRect }
   | { kind: 'newTab'; ws: string; rect: DOMRect };
 
 export interface DragSource {
   m: string;
-  terminal: string;
+  /** The pane's key (term/layout.ts paneKey). */
+  pane: string;
   ws: string;
   label: string;
 }
@@ -30,16 +31,16 @@ export function dropZone(r: Box, x: number, y: number): Zone {
 
 function findTarget(src: DragSource, x: number, y: number): DropTarget | undefined {
   const el = document.elementFromPoint(x, y) as HTMLElement | null;
-  const pane = el?.closest<HTMLElement>('.pane[data-terminal]');
-  if (pane && pane.dataset.m === src.m && pane.dataset.terminal !== src.terminal) {
+  const pane = el?.closest<HTMLElement>('.pane[data-pane]');
+  if (pane && pane.dataset.m === src.m && pane.dataset.pane !== src.pane) {
     const rect = pane.getBoundingClientRect();
-    return { kind: 'pane', terminal: pane.dataset.terminal!, zone: dropZone(rect, x, y), rect };
+    return { kind: 'pane', pane: pane.dataset.pane!, zone: dropZone(rect, x, y), rect };
   }
   const tab = el?.closest<HTMLElement>('.tab[data-tab]');
   if (tab && tab.dataset.m === src.m) {
     const index = Number(tab.dataset.tab);
     const tabs = terms.layout(src.m)?.workspaces.find((w) => w.id === tab.dataset.ws)?.tabs;
-    if (tabs?.[index] && !L.tabTerminals(tabs[index]).includes(src.terminal))
+    if (tabs?.[index] && !L.tabPanes(tabs[index]).includes(src.pane))
       return { kind: 'tab', ws: tab.dataset.ws!, index, rect: tab.getBoundingClientRect() };
   }
   const add = el?.closest<HTMLElement>('[data-new-tab]');
@@ -66,13 +67,13 @@ function markerRect(tg: DropTarget): Box {
 
 /** The layout after dropping the source on a target. */
 export function dropped(l: L.Layout, src: DragSource, tg: DropTarget): L.Layout {
-  if (tg.kind === 'pane') return L.dropOnPane(l, src.terminal, tg.terminal, tg.zone);
+  if (tg.kind === 'pane') return L.dropOnPane(l, src.pane, tg.pane, tg.zone);
   if (tg.kind === 'tab') {
-    // Beside the tab's focused terminal.
+    // Beside the tab's focused pane.
     const target = l.workspaces.find((w) => w.id === tg.ws)?.tabs[tg.index]?.focused;
-    return target ? L.movePane(l, src.terminal, target, 'horizontal') : l;
+    return target ? L.movePane(l, src.pane, target, 'horizontal') : l;
   }
-  return L.moveToNewTab(l, src.terminal, tg.ws);
+  return L.moveToNewTab(l, src.pane, tg.ws);
 }
 
 /** Starts tracking a possible drag from a pane header. */

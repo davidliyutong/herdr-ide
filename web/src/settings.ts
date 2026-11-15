@@ -185,7 +185,8 @@ export const legacyPrefs: Record<string, { key: string; parse(raw: string): Sett
   uiFontSize: { key: 'appearance.uiFontSize', parse: (r) => num(r, 11, 20, true) },
   termFontSize: { key: 'terminal.fontSize', parse: (r) => num(r, 6, 40, false) },
   termFontWeight: { key: 'terminal.fontWeight', parse: (r) => (['regular', 'medium'].includes(r) ? r : undefined) },
-  dockPosition: { key: 'layout.panelPosition', parse: (r) => (['right', 'bottom'].includes(r) ? r : undefined) },
+  // The VS Code panel's place, gone with the panel: dropped.
+  dockPosition: { key: '', parse: () => undefined },
   optionIsMeta: { key: 'terminal.optionIsMeta', parse: bool },
   programClipboard: { key: 'terminal.programClipboard', parse: (r) => (['auto', 'ask', 'off'].includes(r) ? r : undefined) },
   mathHover: { key: 'terminal.mathHover', parse: bool },

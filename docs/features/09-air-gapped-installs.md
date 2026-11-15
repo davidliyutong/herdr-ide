@@ -66,7 +66,7 @@ machine platform and pushes it through the agent
 
 ## Failure modes
 
-- **Offline and not seeded** → the VS Code panel shows which file is missing
+- **Offline and not seeded** → the VS Code pane shows which file is missing
   and where to put it.
 - **Digest mismatch** → refused with both digests in the error.
 - **Platform without a code-server build** → reported; terminals and previews

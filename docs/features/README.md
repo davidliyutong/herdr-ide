@@ -10,7 +10,7 @@ shortcuts, paths) lives in [reference.md](../reference.md).
 | --- | --- | --- |
 | 02 | [Multi-machine transport](02-multi-machine-transport.md) | One ssh session per machine running a static agent; yamux multiplexing; platform detection and upload. |
 | 04 | [Layout and keyboard](04-layout-and-keyboard.md) | Workspaces, tabs and split panes of the machine's layout document; direct shortcuts of the desktop app as the only default keys (no prefix: other keys reach the terminal), chords for users who bind them; command palette. |
-| 05 | [VS Code panel](05-vscode-panel.md) | code-server per machine behind the core's proxy; bridge extension; Git Graph and diffs. |
+| 05 | [VS Code panes](05-vscode-panes.md) | code-server per machine behind the core's proxy, VS Code as a pane of the split tree; bridge extension; Git Graph and diffs. |
 | 06 | [Quick Look and files](06-quick-look-and-files.md) | Path detection in terminals, media preview with range streaming, uploads for agents, downloads with folders as zips. |
 | 07 | [Agent-native workflow](07-agent-native-workflow.md) | Attention inbox, notifications, starting agents, sending code to agents. |
 | 08 | [Web access and security](08-web-access-and-security.md) | Browser/PWA delivery, reverse-proxy model and the guardrails around it. |

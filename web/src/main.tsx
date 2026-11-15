@@ -20,6 +20,8 @@ import { importLegacyPrefs, loadSettings } from './settings';
 import { setLocale } from './i18n';
 import { GuiWindowPage } from './gui/GuiWindowPage';
 import { refuseStrayFileDrops } from './drop';
+import { useFrames } from './codeFrames';
+import { actions } from './actions';
 
 // Debug handle for the browser console (also used by end-to-end tests).
 (window as unknown as Record<string, unknown>)[`__${APP_SLUG}`] = {
@@ -28,6 +30,8 @@ import { refuseStrayFileDrops } from './drop';
   vt: loadedVt,
   store: useStore,
   gui: useGui,
+  frames: useFrames,
+  actions,
 };
 
 initAppearance();

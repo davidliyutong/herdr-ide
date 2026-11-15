@@ -159,7 +159,7 @@ so every client of the machine shows the same arrangement. Version 2:
   - a terminal `{"terminal": address}`, named by its address;
   - VS Code `{"code": {"id", "folder"}}` for a folder of the machine
     (`""`: the one code-server opens), named `code:<id>`
-    ([05](05-vscode-panel.md));
+    ([05](05-vscode-panes.md));
   - a preview `{"preview": {"id", "path"}}` of a file or directory of the
     machine, named `preview:<id>` ([06](06-quick-look-and-files.md)).
 

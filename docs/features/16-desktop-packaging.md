@@ -152,8 +152,8 @@ system's rules run in the tests on any of them:
   shell has read it (else the system's); exit codes and similar details
   are appended as is.
 - Production uses loopback port 7781 and instance `desktop`. A stable
-  origin keeps what the page stores per browser (the sidebar, panel sizes,
-  transfer history) and the permissions granted to it; an explicit port
+  origin keeps what the page stores per browser (the sidebar, the selected
+  machine, transfer history) and the permissions granted to it; an explicit port
   override is available (`HERDR_IDE_DESKTOP_PORT`). Settings and
   keybindings are the core's, in the instance's files. Development uses
   port 7791 and instance `dev` (terminal core session `herdr-ide-dev`), or
@@ -237,7 +237,7 @@ system's rules run in the tests on any of them:
   Close Workspace…, Rename Tab, Close Pane, Close Tab, Add Machine…),
   **Edit** (Undo, Redo, Cut, Copy, Paste, Select All, Find…, Find Next,
   Find Previous), **View** (Command Palette…, Go to Workspace…, Go to Agent
-  Needing Attention, Toggle Sidebar, Toggle VS Code Panel, Maximize Pane,
+  Needing Attention, Toggle Sidebar, Open in VS Code, Maximize Pane,
   next and previous tab, workspace and pane, focusing the pane in each
   direction, Zoom In, Zoom Out, Reset Zoom, Toggle Full Screen). Items of commands have the commands'
   names (`command.<id>`), as the palette, the keyboard shortcuts page and
@@ -250,26 +250,31 @@ system's rules run in the tests on any of them:
   sees a key first, matches it itself and cancels the keys it runs
   ([04](04-layout-and-keyboard.md)).
 - On macOS the menu registers the keys with Cmd, so it acts on those the
-  page left (a text field, VS Code or another window has the keyboard);
-  Chromium's text fields edit with Cmd keys only through the Edit roles.
+  page left (a text field, a VS Code pane or another window has the
+  keyboard); Chromium's text fields edit with Cmd keys only through the
+  Edit roles. While a VS Code pane has the keyboard, the menu's commands
+  for the main UI act on that pane; VS Code keeps its own keys (⌘J
+  toggles its own bottom panel there), except ⌘W (**Close Pane**), which
+  the page takes before VS Code sees it, so it closes the VS Code pane
+  ([04](04-layout-and-keyboard.md)).
   Keys without Cmd are shown but not registered, since macOS would offer
   them to a menu before the page. Such a key therefore runs its command
   only where the page matches keys itself: in a terminal or elsewhere in
-  the page outside text fields and VS Code's panel. A command for
-  everywhere (Show or Hide VS Code) bound to a key without Cmd does not
+  the page outside text fields and VS Code panes. A command for
+  everywhere (the zoom commands) bound to a key without Cmd does not
   run from a text field or from VS Code.
 - On Windows and Linux the menu registers no key at all (its items and
   roles have `registerAccelerator: false`) and only shows them: every key
   goes to the page and its terminals, where Ctrl+C, Ctrl+M or Ctrl+Q are
   the programs' keys, and Chromium's text fields edit with Ctrl keys by
-  themselves. A key typed in a text field, in VS Code's panel or in
+  themselves. A key typed in a text field, in a VS Code pane or in
   another window thus runs no command of the menu; its item does.
 - An item chosen sends its command to the main window's page, which runs
   it where it applies (`web/src/desktop.ts`); with a program window or one
   of VS Code's own windows in front, closing a pane or a tab closes that
   window instead. The page tells the shell which commands cannot run now
   (`desktopShell.setDisabledCommands`, sent again whenever that changes:
-  no terminal for pane commands, one tab for next and previous tab, one
+  no pane for pane commands, one tab for next and previous tab, one
   pane for focus moves, a dialog or the palette open for the commands of
   the main UI, read-only mode), and their items are disabled
   (`MenuItem.enabled`, kept when the menu is rebuilt). The shell takes the
@@ -357,7 +362,7 @@ ICNS; development sets the Dock icon from the PNG.
 | Reimplement the UI for desktop | Duplicates terminal rendering, layout and VS Code integration. |
 | Tauri/WKWebView | The project's VS Code webviews require Chromium service-worker behavior. |
 | Attach to an existing server on a well-known port | Cannot prove ownership or safely reclaim it; might attach to another instance. |
-| Always choose a random port | Browser storage and permissions are per origin; what the page keeps per browser (sidebar, panel sizes, transfer history) would be lost at every launch. An explicit port `0` remains useful for isolated smoke tests. |
+| Always choose a random port | Browser storage and permissions are per origin; what the page keeps per browser (sidebar, selected machine, transfer history) would be lost at every launch. An explicit port `0` remains useful for isolated smoke tests. |
 | Parse the human log for readiness | Log wording is not a protocol; a dedicated JSON line is unambiguous. |
 | Kill the child only on normal quit | Leaves agents and code-server behind after a launcher crash; pipe EOF also handles that case. |
 | Stopping the core with SIGTERM | Windows has no signal a process can clean up after; closing stdin stops the core the same way on every system. |
@@ -429,7 +434,7 @@ browser asks once, while the desktop app has no prompt. VS Code's
 **Download…** saves folders and files over 32 MB through the File System
 Access API into a folder the user picks in the native dialog (smaller files
 are a plain download, which Electron saves through its save dialog); without
-the permission it failed silently ([05](05-vscode-panel.md)). The existing
+the permission it failed silently ([05](05-vscode-panes.md)). The existing
 HTTP guards, API allowlist, read-only behavior and CSP remain in force. On
 Windows the core keeps no ssh control sockets and offers no ssh login
 ([02](02-multi-machine-transport.md)). Release builds get no secret; only
@@ -460,7 +465,9 @@ menus: File to Help, Exit on Windows, no key registered), URL and
 permission policy (`policy`) and the preload's functions against a
 stand-in for Electron (`preload`), with no network or real terminal cores.
 `web/src/__tests__/desktop.test.ts` covers the page's side of menu
-commands (dialogs, VS Code with the keyboard), `zoom.test.ts` the zoom
+commands (dialogs, the main UI's commands acting on the VS Code pane that
+has the keyboard, ⌘W taken from VS Code to close its pane, **Open in
+VS Code** from the menu), `zoom.test.ts` the zoom
 commands (levels, the setting they change, when they are enabled, their
 keys taken from the terminal only while bound) and `drop.test.ts` dropped
 and opened folders, which a local machine with `local_unsupported` does not

@@ -293,7 +293,7 @@ function SettingsModal({ page: askedPage, machine: askedMachine }: { page?: stri
   );
 }
 
-/** Opens settings.json (or keybindings.json) in the VS Code panel of the
+/** Opens settings.json (or keybindings.json) in a VS Code pane of the
  * core's own machine, where the file is; without one (a core on Windows,
  * read-only mode) it copies the file's path. */
 function OpenFileButton({ file, which }: { file: string; which: 'settings' | 'keys' }) {
@@ -311,7 +311,7 @@ function OpenFileButton({ file, which }: { file: string; which: 'settings' | 'ke
       onClick={() => {
         if (canOpen) {
           useStore.getState().openSettings(false);
-          actions.openPath(local.id, file, 1);
+          void actions.openPath(local.id, file, 1);
         } else {
           void navigator.clipboard?.writeText(file).catch(() => {});
           useStore.getState().toast(t('transfers.copied', { path: file }));

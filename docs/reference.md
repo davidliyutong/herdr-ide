@@ -101,7 +101,6 @@ in the UI; a setting with a scope can have its own value per machine, under
 | `appearance.language` | `auto`, `en`, `zh-CN` | `"auto"` | – | – |
 | `appearance.uiFontSize` | integer, 11–20 | `13` | – | – |
 | `window.zoom` | integer, 50–300 | `100` | – | – |
-| `layout.panelPosition` | `right`, `bottom` | `"right"` | – | – |
 | `terminal.fontFamily` | string | `""` | – | – |
 | `terminal.fontSize` | number, 6–40 | `13` | – | – |
 | `terminal.fontWeight` | `regular`, `medium` | `"regular"` | – | – |
@@ -177,9 +176,13 @@ without a key (–) runs from the menus, the command palette, its button and
 the context menus, and any key or chord can be bound to it. The desktop
 app's menu shows the keys; there the page runs the keys it sees, and on
 macOS the menu the keys the page leaves (on Windows and Linux the menu
-takes no key, so Ctrl keys reach the terminals). While VS Code has the keyboard its own keys come
-first; a key it leaves runs a command only for
-`always` (show or hide VS Code) or `vscode`. Keys follow the keyboard
+takes no key, so Ctrl keys reach the terminals). While a VS Code pane has
+the keyboard VS Code's own keys come first (`cmd+j` toggles its own bottom
+panel there), except the key of `pane.close`, which the page takes first
+to close the VS Code pane; in the desktop app on macOS a key VS Code
+leaves runs, through the menu, a command for `terminal`, `vscode` or
+`always`, on that pane. A rule naming `view.toggleCode`, the command of
+earlier versions, applies to `code.open`. Keys follow the keyboard
 layout's characters. The table is generated from the registry by
 `scripts/registry`.
 
@@ -223,14 +226,13 @@ layout's characters. The table is generated from the registry by
 | `pane.focusNext` | `terminal` | `cmd+bracketright` | – | – | – |
 | `pane.focusPrevious` | `terminal` | `cmd+bracketleft` | – | – | – |
 | `view.toggleSidebar` | `terminal` | `cmd+b` | – | – | – |
-| `view.toggleCode` | `always` | `cmd+j` | – | `ctrl+shift+j` | – |
 | `view.zoomIn` | `always` | `cmd+shift+equal`, `cmd+equal` | – | `ctrl+shift+equal`, `ctrl+equal` | – |
 | `view.zoomOut` | `always` | `cmd+minus` | – | `ctrl+minus` | – |
 | `view.zoomReset` | `always` | `cmd+0` | – | `ctrl+0` | – |
 | `find.open` | `terminal` | `cmd+f` | `cmd+f` | `ctrl+shift+f` | `ctrl+shift+f` |
 | `find.next` | `terminal` | `cmd+g` | – | – | – |
 | `find.previous` | `terminal` | `cmd+shift+g` | – | – | – |
-| `code.open` | `terminal` | – | – | – | – |
+| `code.open` | `terminal` | `cmd+j` | – | `ctrl+shift+j` | – |
 | `code.diff` | `terminal` | – | – | – | – |
 | `code.gitGraph` | `terminal` | – | – | – | – |
 
@@ -247,7 +249,8 @@ program takes the mouse); holding a selection drag above or below a
 terminal scrolls its scrollback; `terminal.copyOnSelect` copies at release.
 The wheel scrolls the scrollback (on the alternate screen it is the arrow
 keys; programs that take the mouse get it). ⌘/Ctrl-click opens paths (media
-in the preview panel, code in VS Code) and URLs. `cmd+f` (macOS) or
+in a preview pane, code in a VS Code pane, of the terminal's workspace or
+split beside the terminal) and URLs. `cmd+f` (macOS) or
 `ctrl+shift+f` (other systems) finds text in the focused terminal and its
 scrollback (`find.open`; ASCII letters in either case): Enter goes to the
 older match, Shift+Enter to the newer one, Escape closes the bar. Pasting or
@@ -259,16 +262,18 @@ and folders chosen in its directory (folders as zips; not for the desktop
 app's own machine). The downloads panel in the status bar shows each
 download's progress, speed and result, cancels it or downloads it again.
 
-With the mouse: click a pane's title to rename it (empty restores the
-terminal title); double-click a tab or workspace to rename it; drag a pane by
-its header onto another pane to swap the two (centre) or to place it beside
-that pane (edges), onto a tab to move it there, or onto `+` to move it into a
-new tab; drag a tab along the tab bar, or a workspace along its machine's
-list, to reorder it. Escape cancels a drag.
+With the mouse: double-click a terminal pane's title to rename it (empty
+restores the terminal title); double-click a tab or workspace to rename it;
+drag a pane (a terminal, VS Code or a preview) by its header onto another
+pane to swap the two (centre) or to place it beside that pane (edges),
+onto a tab to move it there, or onto `+` to move it into a new tab; drag a
+tab along the tab bar, or a workspace along its machine's list, to reorder
+it. Escape cancels a drag.
 
-Right-click a pane header, a tab, a workspace or a machine for a menu of
-its commands (rename, split, zoom, VS Code, new tab, move, close; a
-machine's terminal core) with their bindings;
+Right-click a pane header (or press its ⋯ button, shown when the header is
+narrow), a tab, a workspace or a machine for a menu of its commands
+(rename, split, zoom, VS Code, new tab, move, close; a machine's terminal
+core) with their bindings;
 ↑↓ Home End select, Enter runs, Escape closes. In read-only mode the
 browser's menu shows instead.
 
@@ -402,11 +407,10 @@ directory and are not copied to SSH machines.
 
 In the browser, in `localStorage` under `herdr-ide.*` (state of that
 browser only; settings and keybindings are the core's, the workspaces,
-tabs and splits the terminal core's):
+tabs and splits, VS Code and preview panes included, the terminal core's):
 
-- whether the sidebar is open (`sidebarOpen`) and the VS Code panel's size
-  (`dockWidth`, `dockHeight`)
-- what each workspace's panel shows (`docks`)
+- whether the sidebar is open (`sidebarOpen`) and its width
+  (`sidebarWidth`)
 - the selected machine (`machine`)
 - the upload and download histories (`uploads`, `downloads`: the last 50
   finished transfers each, with file names, machines and paths, no
@@ -414,7 +418,9 @@ tabs and splits the terminal core's):
 
 Browser settings of earlier versions kept there (language, theme, font
 sizes, …) are moved to the core's settings once, when a page of a writable
-core loads, and then removed.
+core loads, and then removed. What earlier versions kept there for the
+VS Code panel (`docks`, `dockWidth`, `dockHeight`) is removed when a page
+loads, and its position (`dockPosition`) with the settings above.
 
 Desktop artifacts (`make desktop-app` writes the unpacked apps,
 `make desktop-dist` the installers of the system it runs on), in

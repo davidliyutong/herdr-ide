@@ -7,7 +7,8 @@ split trees of panes). Their prefix keymaps (`ctrl+b` in tmux) belong to
 the multiplexer running in a pane: this application is used with the
 mouse, so its default keys leave that key to the terminal. The
 terminal core keeps terminals, not layouts; every client of a machine arranges its
-terminals in the machine's layout document ([22](22-terminal-protocol.md)),
+terminals, VS Code views and previews in the machine's layout document
+([22](22-terminal-protocol.md)),
 so browsers and the desktop app show the same arrangement. In a browser,
 `Cmd+W`, `Cmd+T` and similar shortcuts belong to the browser and cannot be
 captured reliably; the desktop app owns its keys.
@@ -31,9 +32,11 @@ Non-goals: arbitrary docking of panes; floating panes.
   version 2 ([22](22-terminal-protocol.md) has the format and the
   operations): a list of workspaces and the selected one; a workspace has
   an id, a name, the directory its new terminals start in, its tabs and
-  the selected tab; a tab has a binary split tree whose leaves are
-  terminal addresses, its focused terminal and a name when the user gave
-  one. `layout.ts` implements the operations and runs the vectors of
+  the selected tab; a tab has a binary split tree whose leaves are panes
+  (terminals by their addresses, VS Code views of a folder
+  ([05](05-vscode-panes.md)) and previews of a file or directory
+  ([06](06-quick-look-and-files.md))), its focused pane and a name when
+  the user gave one. `layout.ts` implements the operations and runs the vectors of
   `design/testdata/layout`. Fields and node kinds a client does not know
   are kept, and a version 1 document (tabs without workspaces) reads as one
   workspace.
@@ -46,7 +49,7 @@ Non-goals: arbitrary docking of panes; floating panes.
   directory (shown as `~`). Terminals that no longer run are dropped from
   it.
 - The shown machine's selected workspace, its selected tab and the focused
-  terminal are the document's: selecting a workspace or tab, or focusing a
+  pane are the document's: selecting a workspace or tab, or focusing a
   pane, writes it, and every client follows. Edits are written one at a time
   with the version last read; a newer version from another client is read
   again, and wins over an edit written against an older one.
@@ -58,19 +61,20 @@ Non-goals: arbitrary docking of panes; floating panes.
 - The sidebar is as wide as its right edge is dragged (180 to 520 pixels,
   kept per browser); dragging the edge far left hides it, double-clicking
   the edge gives it its default width (260 pixels) back, and
-  `view.toggleSidebar` (the tab bar's first button) shows and hides it. The
-  VS Code panel is resized by its inner edge, moved below or beside the
-  panes by its header's button and closed by its ×
-  ([05](05-vscode-panel.md)); the uploads and downloads panels of the status
-  bar have a × too.
+  `view.toggleSidebar` (the tab bar's first button) shows and hides it. In
+  a window 760 pixels wide or less the open sidebar lies over the panes
+  with a dimmed backdrop; a press on the backdrop closes it. The uploads
+  and downloads panels of the status bar have a ×.
 - A new tab starts in its workspace's directory, else in the focused
-  terminal's; a split in the focused terminal's directory, else the
+  terminal's; a split in the directory of the pane split (a terminal's, a
+  VS Code pane's folder, a preview's file's directory), else the
   workspace's (`terminal.run` on the machine's terminal core). A terminal
   asked for while the machine's terminals are still starting opens once
   they are ready.
-- Closing a pane ends its terminal's program; its pane leaves the layout
-  when the core reports the terminal gone. Closing a tab or a workspace
-  removes it from the layout and ends its terminals. Every tab has a ×
+- Closing a terminal's pane ends its program; the pane leaves the layout
+  when the core reports the terminal gone. Closing a VS Code or preview
+  pane ends nothing: it leaves the layout at once. Closing a tab or a
+  workspace removes it from the layout and ends its terminals only. Every tab has a ×
   (shown on the active tab and on the tab under the pointer), the only one
   too, and a middle click closes a tab, as in browsers. Closing the last
   tab leaves its workspace in the sidebar, empty: the panes' area says it
@@ -88,15 +92,19 @@ Non-goals: arbitrary docking of panes; floating panes.
   tooltip has it in full). The active tab has its own background, an
   outline and an accent bar under it. A tab the user has not named shows
   its position (1, 2, 3…, a short number: several tabs of shells would
-  otherwise all read `user@host:~`), a named tab its name; both keep their
-  agents' status dot and their ×, a tab of several panes shows a small
-  split mark, and the tooltip has the focused terminal's pane name or title
-  (program, directory) and the number of panes. Outside the tab bar a tab
+  otherwise all read `user@host:~`), a named tab its name, and a tab
+  holding no terminal (VS Code alone, a preview alone) the pane's mark
+  (a code mark, an eye) and its name (the folder's, the file's); all
+  keep their agents' status dot and their ×, a tab of several panes shows a small
+  split mark, and the tooltip has the focused pane's name or title (a
+  terminal's program and directory, `VS Code · <folder>`,
+  `Preview · <file>`) and the number of panes. Outside the tab bar a tab
   is named with its workspace, never by a bare number: the Agents section,
   the palette's agents, notifications and toasts say where an agent is as
-  `website · 2` (or the tab's name); the pane headers and the status bar
-  keep the terminal's title, and a dragged tab's ghost shows the tab's name
-  or its terminal's title. The window title stays the app's name, with the
+  `website · 2` (or the tab's name); the pane headers keep the pane's
+  title, the status bar names the focused pane (a terminal's title and
+  directory, VS Code and its folder, Preview and its file), and a dragged
+  tab's ghost shows the tab's name or its focused pane's title. The window title stays the app's name, with the
   count of blocked agents. A workspace is called by its
   name, else by its folder: the last component of its directory, `~` for
   the home directory or none, `/` for the root (`layout.workspaceTitle`;
@@ -135,6 +143,8 @@ Non-goals: arbitrary docking of panes; floating panes.
   pane swaps the two; an edge places the pane beside it, on that side.
   Dropping on a tab places it beside that tab's focused pane, on `+` into a
   new tab. Escape cancels. All of these are edits of the layout document.
+  VS Code and preview panes move the same way; a VS Code pane keeps its
+  window wherever it goes ([05](05-vscode-panes.md)).
 - Dragging a tab along the tab bar, or a workspace along its machine's list
   in the sidebar, shows an insertion bar and reorders it. A drop lands in a
   slot of the current order (0 before the first item, n after the last);
@@ -161,11 +171,16 @@ Non-goals: arbitrary docking of panes; floating panes.
 
 **Pane headers** (`components/PaneHeader.tsx`, `PaneActions.tsx`)
 
-- Every pane has a header above its terminal: the agent's state, the
-  pane's name (else the terminal's title), the agent and the folder, then
-  its buttons: program windows ([14](14-gui-windows.md)), VS Code, changes
-  and Git Graph of the folder, split right / down, zoom or restore, and
-  close (24-pixel targets with tooltips naming the command and its key).
+- Every pane has a header above its body. A terminal's shows the agent's
+  state, the pane's name (else the terminal's title), the agent and the
+  folder; a VS Code pane's shows a code mark, the folder's name (its
+  tooltip `VS Code on <machine>: <folder>`) and its short path; a
+  preview's shows an eye, the file's name and its directory. Then its buttons: a terminal's
+  program windows ([14](14-gui-windows.md)), **Open in VS Code**, changes and Git Graph of the folder; a VS Code pane's
+  **Reload VS Code**; then split right / down, zoom or restore, **More
+  Pane Actions** (⋯, only while the header is narrow, below) and close
+  (1.85rem targets, the tab bar's icon size, with 1.15rem icons in a
+  2.3rem header; tooltips name the command and its key).
   They act on that pane, whichever pane has the focus, and a press on one
   leaves the keyboard in the terminal. Pressing the header focuses the
   pane; the focused pane's header is marked when the tab has several, and
@@ -173,11 +188,13 @@ Non-goals: arbitrary docking of panes; floating panes.
   (a program window asking for attention stays visible).
   Read-only pages see titles, folders and program windows without the other
   buttons.
-- Narrow headers keep one row: they drop the folder, the agent, the VS Code
-  buttons, the split buttons, the title and zoom, in this order (the dropped
-  commands stay in the pane's menu and key bindings); the close button
-  stays. Headers do not clip, so the program windows' menu can hang below
-  them.
+- Narrow headers keep one row. They drop, in this order: the folder; then
+  the agent and the VS Code buttons (Open in VS Code, changes, Git Graph,
+  Reload VS Code), and the ⋯ button appears, which opens the pane's menu
+  with all its commands; then the split buttons; then zoom; then the
+  title. The dropped commands stay in the pane's menu and key bindings;
+  the close button always stays. Headers do not clip, so the program
+  windows' menu can hang below them.
 
 **Context menus** (`web/src/contextMenu.ts`, `menus.tsx`,
 `components/ContextMenu.tsx`)
@@ -187,9 +204,15 @@ Non-goals: arbitrary docking of panes; floating panes.
   browser's. Every menu is in the same order: rename, what it creates, how
   it is arranged, then what ends something (with a red icon) last; items of
   commands have the commands' names:
-  - pane header: Rename Pane, Split Right / Down, Maximize or Restore Pane,
-    Open Folder in VS Code, Show Changes in VS Code, Open Git Graph, Close
-    Pane;
+  - a terminal's pane header (a header's ⋯ button opens the same menu):
+    Rename Pane, Split Right / Down, Maximize or Restore Pane, Open in
+    VS Code, Show Changes in VS Code, Open Git Graph, Close Pane;
+  - a VS Code pane's header: Reload VS Code, Split Right / Down, Maximize
+    or Restore Pane, Stop VS Code on `<machine>`
+    ([05](05-vscode-panes.md)), Close Pane;
+  - a preview's header: Open in VS Code, Download (where downloads are
+    offered, [06](06-quick-look-and-files.md)), Split Right / Down,
+    Maximize or Restore Pane, Close Pane;
   - tab: Rename Tab, New Tab, Move Left / Right, Close Tab;
   - workspace: Rename Workspace, New Tab, Move Up / Down, Close Workspace…;
   - machine: New Workspace…, Machine Settings… (the settings in the
@@ -248,7 +271,7 @@ Non-goals: arbitrary docking of panes; floating panes.
 **Keyboard** (`internal/keybindings`, `web/src/keymap.ts`; the system is
 described in [13](13-settings-and-appearance.md))
 
-- Commands (`tab.new`, `pane.splitRight`, `view.toggleCode`…) have default
+- Commands (`tab.new`, `pane.splitRight`, `code.open`…) have default
   keys per platform (`mac`: the desktop app on macOS; `mac-browser`; `pc`: the desktop app elsewhere; `pc-browser`) and
   a context (`when`: `terminal`, `vscode`, `dialog` or `always`); the
   user's rules in `keybindings[-<instance>].json` on the core host add and
@@ -265,8 +288,8 @@ described in [13](13-settings-and-appearance.md))
   palette (`cmd+shift+p` and `ctrl+shift+p` in the desktop app, `cmd+k`
   in browsers on macOS; browsers elsewhere leave no key for it, and the
   status bar's **Command Palette…** button opens it everywhere). Commands
-  without a key (renames, closing a workspace, VS Code's folder, diff and
-  Git Graph, and in browsers most of them) are in the menus, the context
+  without a key (renames, closing a workspace, VS Code's diff and Git
+  Graph, and in browsers most of them) are in the menus, the context
   menus, the pane headers and the palette, and keys or chords can be bound
   to any of them.
 - Keys are shown as the platform shows them: macOS's menu symbols
@@ -300,8 +323,8 @@ described in [13](13-settings-and-appearance.md))
   `cmd+[` the next / previous pane, `cmd+n` new workspace (asking for its
   folder), `cmd+p` go to a workspace, `cmd+ctrl+down` / `cmd+ctrl+up` next /
   previous workspace, `cmd+shift+a` the agent needing attention, `cmd+,`
-  settings, `cmd+b` sidebar, `cmd+j` the VS Code panel
-  ([05](05-vscode-panel.md)), `cmd+f` / `cmd+g` / `cmd+shift+g` find,
+  settings, `cmd+b` sidebar, `cmd+j` Open in VS Code
+  ([05](05-vscode-panes.md)), `cmd+f` / `cmd+g` / `cmd+shift+g` find,
   `cmd+shift+p` the command palette (as in VS Code and Ghostty), `cmd+/` the
   keyboard shortcuts, `cmd++` (or `cmd+=`), `cmd+-` and `cmd+0` the
   window's zoom ([16](16-desktop-packaging.md)), also in dialogs and,
@@ -309,7 +332,7 @@ described in [13](13-settings-and-appearance.md))
   keys as terminal emulators do, since `ctrl+w` deletes a word in shells:
   `ctrl+shift+t` new tab, `ctrl+shift+w` close tab, `ctrl+shift+enter`
   maximize the pane, `ctrl+shift+n` new workspace, `ctrl+shift+a` the agent
-  needing attention, `ctrl+shift+j` VS Code, `ctrl+shift+p` the palette,
+  needing attention, `ctrl+shift+j` Open in VS Code, `ctrl+shift+p` the palette,
   `ctrl+shift+/` the shortcuts, `ctrl+,` settings, `ctrl+tab` /
   `ctrl+shift+tab` next / previous tab and `alt+1`…`alt+9` the tabs (as
   GNOME Terminal and Konsole), and `ctrl++` (or `ctrl+=`), `ctrl+-` and
@@ -340,22 +363,27 @@ described in [13](13-settings-and-appearance.md))
   first single-stroke key the keybindings give that command. On macOS keys
   with Cmd are the menu's accelerators, but Chromium on macOS gives a Cmd
   key to the page first, so the menu acts only on keys the page left: a
-  text field has the keyboard (the page's window handler skips them),
-  VS Code does, a dialog is open, or another window has it. A key thus runs
+  text field has the keyboard (the page's window handler skips them), a
+  VS Code pane does, a dialog is open, or another window has it. A key thus runs
   its command once. Keys without Cmd are shown but not registered (macOS
   would offer them to a menu before the page), and the page runs them. On
   Windows and Linux the menu registers no key at all, so Ctrl+C, Ctrl+M,
   Ctrl+Q and every other key reach the page and its terminals: the page
   runs the `pc` bindings it matches, and a key typed in a text field, in
-  VS Code or in another window runs no menu command.
+  a VS Code pane or in another window runs no menu command.
 - A menu command the page receives (`runMenuCommand`) runs in the same
-  contexts as its key: while VS Code has the keyboard (its frame is the
-  page's focused element) only commands for `vscode` or `always`, while a
-  dialog or the palette is open only those for `dialog` or `always`.
-  VS Code takes its own keys before the menu, so
-  `cmd+w` closes its editor, `cmd+t` opens its symbol search, `cmd+,` its
-  settings, `cmd+n` a new file and `cmd+j` its bottom panel; a key it
-  leaves runs the menu's command where that applies.
+  contexts as its key: while a VS Code pane has the keyboard (its iframe
+  is the page's focused element) the commands for `terminal`, `vscode` or
+  `always`, with that pane as the focused one (pane commands act on it);
+  while a dialog or the palette is open only those for `dialog` or
+  `always`. VS Code takes its own keys before the menu: `cmd+j` toggles
+  its own bottom panel there, and `cmd+p`, `cmd+shift+p`, `cmd+t`,
+  `cmd+1`…`cmd+9`, `cmd+f`, `cmd+,` and `cmd+n` are VS Code's; a key it
+  leaves runs the menu's command where that applies. The one exception is
+  the key of `pane.close` (`cmd+w`): the page takes it from the iframe
+  before VS Code sees it (`handleFrameKey`), so it closes the VS Code pane
+  as it closes a terminal's pane; VS Code's editors close with their
+  tab's ×.
 - With a program window or one of VS Code's own windows in front, the
   menu's commands that close a pane or a tab (`pane.close`, `tab.close`)
   close that window; the others bring the main window forward and run
@@ -381,7 +409,7 @@ described in [13](13-settings-and-appearance.md))
   and Help (about) around the others: Shell (new terminal, splits,
   workspaces, rename tab, close terminal or tab), Edit (undo, redo, cut,
   copy, paste, select all, find), View (palette, switch workspace,
-  sidebar, VS Code, zoom, next and previous tab, workspace and pane, focus
+  sidebar, Open in VS Code, zoom, next and previous tab, workspace and pane, focus
   on a side) and Window ([16](16-desktop-packaging.md)). Items show the
   first single-stroke key of their command, none when it has none, and
   are rebuilt when the keybindings change.
@@ -400,11 +428,11 @@ described in [13](13-settings-and-appearance.md))
 | Tabs that shrink to fit, as in Chrome | Labels become unreadable with many tabs. |
 | A "more tabs" menu for the tabs that do not fit | Hides tabs again and costs a click. |
 | Bindings to move tabs and workspaces | Rarely needed; the context menu's move items work from the keyboard. |
-| A "⋯" button always shown on every header, tab and workspace row | Takes room on every tab and row; machine and workspace rows show theirs only while pointed at, tabs and panes rely on right-click and their own buttons. |
+| A "⋯" button always shown on every header, tab and workspace row | Takes room on every tab and row; machine and workspace rows show theirs only while pointed at, a pane header only once it is too narrow for its buttons, and tabs rely on right-click. |
 | A "+" on machine and workspace rows (a new tab in that workspace) | The same picture would mean three things in three places; one "+" makes tabs, a folder with a plus makes workspaces, a server with a plus adds machines. |
 | Renaming by a single click on a pane's title, as earlier versions did | A click meant to focus the pane started a rename; every name is now renamed by a double click. |
 | Renaming in dialogs | Takes the user away from the thing renamed; a field in its place is what file managers, VS Code and browsers' tab groups do. |
-| A sidebar of fixed width | Machine and workspace names were cut; a sidebar that cannot be resized looks broken next to a resizable VS Code panel. |
+| A sidebar of fixed width | Machine and workspace names were cut; a sidebar that cannot be resized looks broken next to resizable splits. |
 | A desktop shell as the only client, owning all shortcuts | Browser access lets the IDE work from other devices, with the mouse and the keys browsers leave to pages, and the desktop app adds direct shortcuts on top; Tauri's WKWebView on macOS lacks service workers, which VS Code webviews need. |
 | The prefix chords as defaults (`ctrl+b`, then a key), as earlier versions had | They took `ctrl+b` from tmux and other programs in the terminals, and every press of it waited for a second key; the application is used with the mouse, and chords stay available to users who bind them. |
 | Browser-specific bindings (`Cmd+…`) | Conflict with the browser; browsers do not deliver `Cmd+T`/`Cmd+W` to pages. The desktop app has them (above). |
@@ -431,17 +459,24 @@ described in [13](13-settings-and-appearance.md))
 
 - `internal/keybindings/keybindings_test.go`: key syntax vectors
   (`TestParseVectors`), defaults per platform (`TestDefaults`), the user's
-  rules and problems (`TestUserRules`), conflicts (`TestConflicts`), edits
-  of the file (`TestReload`), the desktop app's old shortcut settings
-  (`TestMigrateDesktopShortcuts`).
+  rules and problems (`TestUserRules`), rules naming `view.toggleCode`
+  applying to `code.open` (`TestRenamedCommands`), conflicts
+  (`TestConflicts`), edits of the file (`TestReload`), the desktop app's
+  old shortcut settings (`TestMigrateDesktopShortcuts`).
 - `web/src/__tests__/term.test.ts`: the layout vectors of
   `design/testdata/layout` (workspaces, tabs, splits, closing, swaps and
-  moves, directional focus and pane drops, version 1 documents, unknown
-  fields, malformed documents, the names workspaces are shown with).
-- `web/src/__tests__/tabLabels.test.ts`: tabs numbered unless named, the
+  moves, directional focus and pane drops, VS Code and preview panes in
+  `views.json`, version 1 documents, unknown fields, malformed documents,
+  the names workspaces are shown with).
+- `web/src/__tests__/tabLabels.test.ts`: tabs numbered unless named, a tab
+  of VS Code or a preview alone shown by its mark and name, the
   terminal's title and pane count in the tooltip, renaming from the title
   (unchanged keeps the number, emptied gives it back), and agents named by
   workspace and tab in the Agents section and the palette.
+- `web/src/__tests__/codePanes.test.ts`: splitting and closing a VS Code
+  pane (a terminal in its folder; nothing ended), the panes **Open in
+  VS Code**, changes, Git Graph and paths from a terminal open or reuse
+  ([05](05-vscode-panes.md), [06](06-quick-look-and-files.md)).
 - `web/src/__tests__/sidebarMachines.test.ts`: workspaces shown with their
   folder's name, rows without the tab count (in the tooltip), renaming in
   place and an emptied name giving the folder's back.
@@ -459,10 +494,11 @@ described in [13](13-settings-and-appearance.md))
   `web/src/__tests__/vt.test.ts`: the bytes `ctrl+b` sends.
 - `web/src/__tests__/desktop.test.ts`: key names on other layouts, the
   menu's commands: closing idle tabs and panes at once and asking for
-  running programs, none under dialogs, only those for VS Code or
-  everywhere while VS Code has the keyboard, showing and hiding VS Code;
-  the commands whose items are disabled (nothing to switch to, a dialog
-  open, read-only).
+  running programs, none under dialogs, the main UI's acting on the
+  VS Code pane that has the keyboard, `cmd+w` taken from VS Code to close
+  its pane, **Open in VS Code** (a tab for the focused terminal's folder,
+  selected again the next time); the commands whose items are disabled
+  (nothing to switch to, a dialog open, read-only).
 - `desktop/src/menu.test.ts` (the menu's structure, items named as their
   commands in both languages, accelerators, a rebinding, an unbinding,
   chords and unbound commands without accelerators, keys without Cmd shown
@@ -477,7 +513,8 @@ described in [13](13-settings-and-appearance.md))
   terminal service under Troubleshooting.
 - `web/src/__tests__/paneHeader.test.ts`: a header's buttons act on its own
   pane and keep the terminal's focus, rename by a double click, menu,
-  read-only.
+  read-only, a VS Code pane's header (named by its folder, its own
+  buttons).
 - `web/src/__tests__/settingsDialog.test.ts`: the palette's ranking.
 
 Splits, new tabs and workspaces, closing and dragging the split handle were

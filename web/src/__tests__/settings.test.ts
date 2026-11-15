@@ -119,7 +119,8 @@ describe('browser settings of earlier versions', () => {
       { name: 'theme', key: 'appearance.theme', value: 'light' },
       { name: 'uiFontSize', key: 'appearance.uiFontSize', value: 20 },
       { name: 'termFontSize', key: 'terminal.fontSize', value: 30.5 },
-      { name: 'dockPosition', key: 'layout.panelPosition', value: undefined },
+      // The VS Code panel's place, a setting no more: dropped.
+      { name: 'dockPosition', key: '', value: undefined },
       // Set on the core already: the core's value stays.
       { name: 'optionIsMeta', key: 'terminal.optionIsMeta', value: undefined },
     ]);

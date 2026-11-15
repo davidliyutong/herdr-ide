@@ -226,8 +226,8 @@ Windows core host; the interactive ssh login from a core on Windows.
   `label_taken`, since `--machine` selects by label; the local machine keeps
   its host's name). **Remove machine…** asks first (`DELETE /api/m/{id}`):
   the record goes, the machine's session ends as disabling does (waiting up
-  to 15 s), and browsers that showed it move to another machine and close
-  its VS Code panel; nothing on the machine is removed, its terminal core
+  to 15 s), and browsers that showed it move to another machine and unload
+  its VS Code panes' windows; nothing on the machine is removed, its terminal core
   and terminals keep running. The local machine cannot be
   removed. `PUT /api/m/{id}/enabled` (`{"enabled": bool}`) enables or
   disables a machine: stored and applied at once. Disabling ends the
@@ -445,8 +445,9 @@ Windows core host; the interactive ssh login from a core on Windows.
   folded, starting a terminal core that failed, the local machine that
   needs Linux or macOS (`local_unsupported`), **Sign in…** only where the
   core keeps an ssh login and the steps to take elsewhere.
-- `web/src/__tests__/addMachine.test.ts`: the form's checks, a removed
-  machine takes its VS Code panel along.
+- `web/src/__tests__/addMachine.test.ts`: the form's checks;
+  `web/src/__tests__/codePanes.test.ts`: the VS Code windows of a machine
+  that is disabled or gone are unloaded.
 - `make it` (`TestIntegrationHC`, `TestIntegrationTerm`) for the terminal
   core's install, start and streams with the real herdr-core.
 

@@ -76,7 +76,7 @@ export function Palette() {
       label: `${agentOf(record) ?? terminalTitle(record, terminal)} · ${terminalPlace(m, terminal) || terminalTitle(record, terminal)}`,
       hint: s.machines[m]?.label,
       icon: <StatusDot status={status} />,
-      run: () => actions.focusTerminal(m, terminal),
+      run: () => actions.focusPane(m, terminal),
     }));
     // Commands that open the palette, the tabs by number and commands that
     // cannot run now are left out.

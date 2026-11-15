@@ -5,6 +5,7 @@
 
 import { ArrowUpFromLine, Copy, Eye, X } from 'lucide-react';
 import { useStore } from '../state/store';
+import { actions } from '../actions';
 import { t } from '../i18n';
 import { formatSize } from '../lib/files';
 import { shortPath } from '../lib/machine';
@@ -77,7 +78,7 @@ function Row({ x }: { x: Transfer }) {
             disabled={!known}
             onClick={() => {
               useTransfers.getState().setPanel(false);
-              useStore.getState().openDock({ kind: 'preview', m: x.m, path: x.path! });
+              void actions.openPreview(x.m, x.path!);
             }}
           >
             <Eye />

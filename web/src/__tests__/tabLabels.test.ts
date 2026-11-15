@@ -19,6 +19,7 @@ import { Workspace } from '../components/Workspace';
 import { Palette } from '../components/Palette';
 import { Sidebar } from '../components/Sidebar';
 import { tabLabel, terminalPlace } from '../actions';
+import * as L from '../term/layout';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -89,6 +90,20 @@ describe('tab labels', () => {
     expect(tabs()[2].title).toContain('✳ Fix the tests · 2 panes');
     expect(tabs()[2].querySelector('.dot-blocked')).not.toBeNull();
     expect(host.querySelector('.crumb')?.textContent).toBe('nus-ws-1 / website');
+  });
+
+  it('shows a tab of VS Code or a preview alone by its mark and name, a tab with a terminal by its number', async () => {
+    core.model.mutate('m', (l) => L.splitPane(l, 't1', 'horizontal', { code: { id: 'c2', folder: '/home/u' } }));
+    core.model.mutate('m', (l) => L.openPane(l, { code: { id: 'c1', folder: '/home/u/src/website' } }));
+    core.model.mutate('m', (l) => L.openPane(l, { preview: { id: 'p1', path: '/home/u/src/website/plot.png' } }));
+    await act(async () => root.render(createElement(Workspace)));
+    expect(tabs().map((t) => t.querySelector('.tab-label')?.textContent)).toEqual(['1', 'server', '3', 'website', 'plot.png']);
+    expect(tabs()[3].querySelector('.code-icon')).not.toBeNull();
+    expect(tabs()[3].title).toContain('VS Code · ~/src/website');
+    expect(tabs()[4].title).toContain('Preview · ~/src/website/plot.png');
+    // A terminal with VS Code beside it: its number and the split mark.
+    expect(tabs()[0].querySelector('.code-icon')).toBeNull();
+    expect(tabs()[0].querySelector('.tab-split')).not.toBeNull();
   });
 
   it('renames in place starting from the title; unchanged keeps the number, emptied gives it back', async () => {

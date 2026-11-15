@@ -160,21 +160,21 @@
       ]
     },
     {
-      "description": "while VS Code has the keyboard only always bindings run",
+      "description": "in a VS Code pane the main UI's keys run, for the keys VS Code leaves (cmd+t, cmd+w, cmd+1…9); its own (cmd+j, cmd+shift+p) never reach the application",
       "platforms": [
         "mac"
       ],
       "context": "vscode",
       "strokes": [
-        "cmd+j",
-        "cmd+shift+p",
         "cmd+t",
+        "cmd+w",
+        "cmd+1",
         "ctrl+b"
       ],
       "results": [
-        "run:view.toggleCode",
-        "none",
-        "none",
+        "run:tab.new",
+        "run:pane.close",
+        "run:tab.select1",
         "none"
       ]
     },

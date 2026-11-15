@@ -188,7 +188,7 @@ describe('menus', () => {
       'Split Right',
       'Split Down',
       'Maximize Pane',
-      'Open Folder in VS Code',
+      'Open in VS Code',
       'Show Changes in VS Code',
       'Open Git Graph',
       'Close Pane',

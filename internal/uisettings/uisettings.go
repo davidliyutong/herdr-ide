@@ -77,8 +77,6 @@ func defs() []settings.Def {
 		// applies it; browsers zoom pages themselves.
 		{Key: Zoom, Type: settings.TypeNumber, Default: 100, Min: zoomMin, Max: zoomMax, Integer: true, Step: 10,
 			Section: "appearance", Order: 35},
-		{Key: "layout.panelPosition", Type: settings.TypeEnum, Default: "right", Enum: []string{"right", "bottom"},
-			Section: "appearance", Order: 40},
 
 		// Terminal.
 		{Key: FontFamily, Type: settings.TypeString, Default: "", Section: "terminal", Group: "text", Order: 10},
@@ -161,7 +159,8 @@ func scrollbackInRange(v any) (any, bool) {
 
 // Module is the user interfaces' sections and settings, with the values of
 // earlier versions changed in place: the silent agents were a string, the
-// scrollback went up to a million lines.
+// scrollback went up to a million lines; the VS Code panel's place
+// (layout.panelPosition) went with the panel, VS Code being a pane.
 var Module = settings.Module{
 	Sections: []settings.Section{
 		{ID: "appearance", Order: 10},
@@ -173,5 +172,6 @@ var Module = settings.Module{
 	Migrations: []settings.Migration{
 		{From: MutedAgents, To: MutedAgents, Convert: mutedList},
 		{From: Scrollback, To: Scrollback, Convert: scrollbackInRange},
+		{From: "layout.panelPosition"},
 	},
 }

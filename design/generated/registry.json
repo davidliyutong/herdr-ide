@@ -181,11 +181,6 @@
       "when": "terminal"
     },
     {
-      "id": "view.toggleCode",
-      "section": "view",
-      "when": "always"
-    },
-    {
       "id": "view.zoomIn",
       "section": "view",
       "when": "always"
@@ -274,7 +269,6 @@
     "command.tab.select7",
     "command.tab.select8",
     "command.tab.select9",
-    "command.view.toggleCode",
     "command.view.toggleSidebar",
     "command.view.zoomIn",
     "command.view.zoomOut",
@@ -308,9 +302,6 @@
     "settings.gui.gpu.all",
     "settings.gui.gpu.vglrun",
     "settings.gui.video",
-    "settings.layout.panelPosition",
-    "settings.layout.panelPosition.bottom",
-    "settings.layout.panelPosition.right",
     "settings.notifications.badge",
     "settings.notifications.mutedAgents",
     "settings.notifications.sound",
@@ -554,11 +545,6 @@
         "when": "terminal"
       },
       {
-        "key": "cmd+j",
-        "command": "view.toggleCode",
-        "when": "always"
-      },
-      {
         "key": "cmd+shift+equal",
         "command": "view.zoomIn",
         "when": "always"
@@ -591,6 +577,11 @@
       {
         "key": "cmd+shift+g",
         "command": "find.previous",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+j",
+        "command": "code.open",
         "when": "terminal"
       }
     ],
@@ -708,11 +699,6 @@
         "when": "terminal"
       },
       {
-        "key": "ctrl+shift+j",
-        "command": "view.toggleCode",
-        "when": "always"
-      },
-      {
         "key": "ctrl+shift+equal",
         "command": "view.zoomIn",
         "when": "always"
@@ -735,6 +721,11 @@
       {
         "key": "ctrl+shift+f",
         "command": "find.open",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+j",
+        "command": "code.open",
         "when": "terminal"
       }
     ],
@@ -760,7 +751,6 @@
     "gui.enabled": true,
     "gui.gpu": "vglrun",
     "gui.video": true,
-    "layout.panelPosition": "right",
     "notifications.badge": true,
     "notifications.mutedAgents": [
       "droid"

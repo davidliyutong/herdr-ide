@@ -76,7 +76,7 @@ panes, which stay the terminal settings'
   | Variable | Token |
   | --- | --- |
   | `--bg` | `color.background` |
-  | `--bg-1` (sidebar, toolbars, dock, status bar) | `color.sidebar` |
+  | `--bg-1` (sidebar, toolbars, status bar) | `color.sidebar` |
   | `--bg-2` (hovered rows, menus, dialogs) | `color.hover` |
   | `--bg-3` (buttons, selected rows) | `color.accent` |
   | `--line`, `--line-2` | `color.border`, `color.borderStrong` |

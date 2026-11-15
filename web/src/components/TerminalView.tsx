@@ -78,7 +78,7 @@ export function TerminalView({ m, terminal, focused, onActivate }: Props) {
         readOnly: () => useStore.getState().readOnly,
         appKey: (ev) => handleKey(ev),
         activate: () => activate.current(),
-        linkContext: () => ({ m, cwd: terms.directory(m, terminal), home: useStore.getState().machines[m]?.info?.home }),
+        linkContext: () => ({ m, pane: terminal, cwd: terms.directory(m, terminal), home: useStore.getState().machines[m]?.info?.home }),
         mathHover: () => getPrefs().mathHover,
         copyOnSelect: () => getPrefs().copyOnSelect,
         scrollback: () => getPrefs().scrollback,

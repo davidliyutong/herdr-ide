@@ -22,9 +22,9 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   layout document kept on each machine, the same in every browser and the
   desktop app. Drag a pane by its header to swap or move it; double-click
   a tab, workspace, pane title or machine to rename it in place; drag tabs
-  and workspaces to reorder them; drag the sidebar's edge, a split's
-  handle or the VS Code panel's edge to resize them (a double click
-  restores the default or equal sizes); every tab has a × and a middle
+  and workspaces to reorder them; drag the sidebar's edge or a split's
+  handle to resize them (a double click restores the default or equal
+  sizes); every tab has a × and a middle
   click closes it; right-click a pane header, tab, workspace or machine
   for its commands, or a pane's text to copy, paste or open a path. Everything is
   in reach of the mouse; the few default keys take nothing from the
@@ -47,18 +47,20 @@ workspaces and terminals of every machine in one browser tab, with VS Code
 - **Agent-native.** An inbox of agents that are blocked or done across all
   machines, browser notifications and sounds when an agent needs input or
   finishes, starting agents from the command palette,
-  sending code from VS Code to the focused agent, pasting images into agent
+  sending code from VS Code to an agent of its workspace, pasting images into agent
   prompts. Each machine's agent tells which coding agent runs in a terminal
   and whether it works, waits or finished a turn, with herdr's rules for
   Claude Code, Codex, Gemini, OpenCode and more.
 - **VS Code on demand.** code-server is installed per machine from the core
   host (no internet needed on machines), downloaded by the machines
   themselves, or taken from an existing install, with Git Graph and a bridge
-  extension: open a pane's folder, its diff or Git Graph from the buttons
-  in the pane's header or the command palette; jump from a `path:line` in the terminal
-  to the editor. Each workspace has its own panel, so several VS Code
-  windows stay open and switching workspace switches between them. The
-  panel sits beside or below the terminals. Idle instances are stopped.
+  extension. VS Code is a pane like a terminal: **Open in VS Code** (the
+  pane header's button, the pane's menu, the command palette, `cmd+j` in
+  the desktop app) opens a folder as a new tab, a pane's diff and Git Graph
+  open in VS Code beside it, and a `path:line` in the terminal opens in the
+  workspace's VS Code pane, else in one beside the terminal. VS Code panes
+  split, move between tabs, maximize and come back after a restart; moving
+  one or switching tabs does not reload it. Idle instances are stopped.
 - **Program windows.** Windows that programs on remote Linux machines open
   (matplotlib, the MuJoCo viewer, Qt tools) appear in browser windows, one
   per program window, with mouse and keyboard. Terminals get a virtual
@@ -69,7 +71,7 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   otherwise) to browsers that decode it, still ones as exact pictures.
 - **Quick Look.** ⌘/Ctrl-click or right-click a path in a terminal, also one
   wrapped over several lines, to preview images, GIFs, videos (with
-  seeking), audio, PDFs, text or directories.
+  seeking), audio, PDFs, text or directories in a preview pane.
 - **Formulas.** Rest the pointer on a LaTeX formula an agent wrote in a
   pane (`$…$`, `$$…$$`, `\(…\)`, `\[…\]`, also with the backslashes its
   markdown dropped) to see it typeset, and copy its source.
@@ -96,7 +98,7 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   fonts installed, with a preview), line height, cursor, scrollback, bell,
   color schemes (Dracula, Nord, Solarized, One, Gruvbox, Tomorrow…) with
   your own colors on top, notification sounds, system notifications and
-  the Dock/taskbar badge each on or off, silent agents, panel position, how each machine
+  the Dock/taskbar badge each on or off, silent agents, how each machine
   gets VS Code, program windows per machine and every keyboard shortcut,
   in one dialog laid out as VS Code's (the sidebar's gear, `cmd+,` or
   `ctrl+,` in the desktop app; a machine's own settings from its menu) with
@@ -202,14 +204,16 @@ On macOS `cmd+t` opens a tab, `cmd+1`…`cmd+9` select one (`cmd+9` the
 last), `cmd+shift+w` closes it, `cmd+w` closes the pane, `cmd+d` /
 `cmd+shift+d` split it, `cmd+alt+arrows` move between panes,
 `cmd+shift+enter` maximizes one, `cmd+n` creates a workspace, `cmd+,` opens
-the settings, `cmd+shift+p` the command palette, `cmd+j` shows or hides
-the VS Code panel and `cmd++`, `cmd+-` and `cmd+0` zoom the window,
+the settings, `cmd+shift+p` the command palette, `cmd+j` opens the focused
+pane's folder in VS Code and `cmd++`, `cmd+-` and `cmd+0` zoom the window,
 terminals included. On Windows and Linux `ctrl+shift+t` opens a tab,
 `ctrl+tab` and `alt+1`…`alt+9` switch tabs, `ctrl+shift+w` closes one,
 `ctrl+shift+n` creates a workspace, `ctrl+,` opens the settings,
-`ctrl+shift+p` the command palette, `ctrl+shift+j` the VS Code panel and
+`ctrl+shift+p` the command palette, `ctrl+shift+j` opens VS Code and
 `ctrl++`, `ctrl+-` and `ctrl+0` zoom;
-every other key, `ctrl+c` and `ctrl+q` included, reaches the terminal. While VS Code has focus, its own keys come first. The menu
+every other key, `ctrl+c` and `ctrl+q` included, reaches the terminal.
+While VS Code has focus, its own keys come first (`cmd+j` toggles its
+bottom panel), except `cmd+w` on macOS, which closes the VS Code pane. The menu
 bar shows the keys in effect, in the UI's language; the title bar follows
 the UI's theme.
 Change or remove the keys under **Settings → Keyboard Shortcuts**, where

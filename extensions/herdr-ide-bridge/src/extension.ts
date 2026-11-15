@@ -192,7 +192,7 @@ async function sendToAgent(uri?: vscode.Uri) {
   const ref = sel.isEmpty ? `@${file}:${start}` : `@${file}:${start}-${end}`;
   const body = sel.isEmpty ? '' : '\n```\n' + ed.document.getText(sel) + '\n```\n';
   send({ type: 'sendToAgent', text: ref + body, file, line: start, end_line: end });
-  vscode.window.setStatusBarMessage(vscode.l10n.t('Sent to the focused agent'), 2500);
+  vscode.window.setStatusBarMessage(vscode.l10n.t('Sent to an agent of this workspace'), 2500);
 }
 
 /** Downloads the files and folders chosen in the explorer (or the active

@@ -12,7 +12,8 @@ import { FakeXhr } from './fakeXhr';
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 vi.stubGlobal('XMLHttpRequest', FakeXhr);
 
-import { useStore, currentDock } from '../state/store';
+import { useStore } from '../state/store';
+import { actions } from '../actions';
 import { cancelAllUploads, cancelUpload, clearUploadHistory, forgetUpload, HISTORY_MAX, uploadFiles, useTransfers } from '../transfers';
 import { detail, duration, TransfersTray } from '../components/Transfers';
 
@@ -193,8 +194,10 @@ describe('the uploads panel', () => {
     expect(rows()[0]).toMatch(/^b\.bingpu box · ~\/proj\/b\.bin100 B in 1 s · 100 B\/s/);
     expect(rows()[1]).toMatch(/^a\.bingpu box · ~\/projCancelled/);
 
+    const preview = vi.spyOn(actions, 'openPreview').mockResolvedValue();
     await click('Preview');
-    expect(currentDock(useStore.getState())).toEqual({ kind: 'preview', m: 'ws2', path: '/home/u/proj/b.bin' });
+    expect(preview).toHaveBeenCalledWith('ws2', '/home/u/proj/b.bin');
+    preview.mockRestore();
     expect(useTransfers.getState().panel).toBe(false);
 
     await act(async () => button()!.click());

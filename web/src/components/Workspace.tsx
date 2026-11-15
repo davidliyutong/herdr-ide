@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
-import { Columns2, PanelLeft, Plus, X } from 'lucide-react';
+import { Columns2, Eye, PanelLeft, Plus, X } from 'lucide-react';
 import { useStore } from '../state/store';
 import { terms, useTerms } from '../state/terms';
 import * as L from '../term/layout';
-import { actions, paneRects, tabLabel, tabName, workspaceTitle } from '../actions';
+import { actions, paneRects, paneTitle, tabLabel, tabName, workspaceTitle } from '../actions';
 import { TerminalView } from './TerminalView';
 import { PaneHeader } from './PaneHeader';
+import { CodeSlot } from './CodeLayer';
+import { PreviewPane } from './PreviewPane';
+import { CodeIcon } from './icons';
 import { StatusDot } from './StatusDot';
-import { aggregate, agentStatus, codeText, terminalTitle } from '../lib/machine';
+import { aggregate, agentStatus, codeText, shortPath, terminalTitle } from '../lib/machine';
 import { t, type MessageKey } from '../i18n';
 import { withKey } from '../keymap';
 import { InlineEdit } from './InlineEdit';
@@ -66,12 +69,15 @@ export function Workspace() {
           {ws.tabs.map((tb, i) => {
             const st = tabStatus(tb);
             const id = `${ws.id}:${i}`;
-            // A tab the user has not named shows its number; the focused
-            // terminal's title (program, directory) is its tooltip.
+            // A tab the user has not named shows its number, or, holding no
+            // terminal, its VS Code's or preview's mark and name; the focused
+            // pane's title (program, directory) is its tooltip.
             const name = tabName(m, tb);
-            const title = terminalTitle(mt.terminals[tb.focused], tb.focused);
+            const focusedLeaf = L.leafOf(tb.root, tb.focused);
+            const title = paneAbout(m, focusedLeaf, tb.focused, mt.terminals[tb.focused]);
             const editing = renaming?.m === m && renaming.id === id;
-            const count = L.tabTerminals(tb).length;
+            const count = L.tabPanes(tb).length;
+            const view = !tb.name && !L.tabTerminals(tb).length && focusedLeaf && !L.isTerminalLeaf(focusedLeaf) ? focusedLeaf : undefined;
             const about = [
               tb.name && tb.name !== title ? `${tb.name} · ${title}` : title,
               count > 1 && t('workspace.paneCount', { n: count }),
@@ -117,6 +123,11 @@ export function Workspace() {
                   />
                 ) : tb.name ? (
                   <span className="tab-label ellipsis">{tb.name}</span>
+                ) : view ? (
+                  <>
+                    {L.isCodeLeaf(view) ? <CodeIcon className="tab-kind" /> : <Eye className="tab-kind" />}
+                    <span className="tab-label ellipsis">{paneTitle(m, view, tb.focused)}</span>
+                  </>
                 ) : (
                   <span className="tab-label tab-num">{tabLabel(tb, i)}</span>
                 )}
@@ -196,26 +207,33 @@ function splitBars(node: L.Node, area = { x: 0, y: 0, w: 1, h: 1 }, path: boolea
 
 const pct = (v: number) => `${v * 100}%`;
 
+/** What a pane is, for tooltips: a terminal's title, VS Code and its
+ * folder, a preview and its file. */
+function paneAbout(m: string, leaf: L.Leaf | null, key: string, record: Parameters<typeof terminalTitle>[0]): string {
+  const home = useStore.getState().machines[m]?.info?.home;
+  if (leaf && L.isCodeLeaf(leaf)) return `${t('code.title')} · ${shortPath(leaf.code.folder, home) || '~'}`;
+  if (leaf && L.isPreviewLeaf(leaf)) return `${t('preview.title')} · ${shortPath(leaf.preview.path, home)}`;
+  return terminalTitle(record, key);
+}
+
 /** A tab's panes, each placed by its share of the split tree; the panes
- * keep their terminals while the tree around them changes. */
+ * keep their terminals (and VS Code its window) while the tree around them
+ * changes. */
 function TabView({ m, ws, tab }: { m: string; ws: string; tab: L.Tab }) {
-  const zoomed = useStore((s) => (s.zoomed?.m === m ? s.zoomed.terminal : undefined));
+  const zoomed = useStore((s) => (s.zoomed?.m === m ? s.zoomed.pane : undefined));
   const readOnly = useStore((s) => s.readOnly);
-  const terminals = L.tabTerminals(tab);
-  const zoom = zoomed && terminals.includes(zoomed) ? zoomed : undefined;
-  // Panes of kinds other than terminals are not shown yet.
-  const rects = zoom
-    ? new Map([[zoom, { x: 0, y: 0, w: 1, h: 1 }]])
-    : new Map([...paneRects(tab.root)].filter(([key]) => terminals.includes(key)));
+  const panes = L.tabPanes(tab);
+  const zoom = zoomed && panes.includes(zoomed) ? zoomed : undefined;
+  const rects = zoom ? new Map([[zoom, { x: 0, y: 0, w: 1, h: 1 }]]) : paneRects(tab.root);
   const bars = zoom || readOnly ? [] : splitBars(tab.root);
   const body = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState<{ path: boolean[]; ratio: number }>();
-  const alone = terminals.length === 1;
+  const alone = panes.length === 1;
 
-  // A zoomed terminal that left the tab is no longer zoomed.
+  // A zoomed pane that left the tab is no longer zoomed.
   useEffect(() => {
-    if (zoomed && !terminals.includes(zoomed)) useStore.getState().setZoomed(undefined);
-  }, [zoomed, terminals.join()]);
+    if (zoomed && !panes.includes(zoomed)) useStore.getState().setZoomed(undefined);
+  }, [zoomed, panes.join()]);
 
   const dragBar = (e: React.PointerEvent, bar: SplitBar) => {
     e.preventDefault();
@@ -250,24 +268,35 @@ function TabView({ m, ws, tab }: { m: string; ws: string; tab: L.Tab }) {
 
   return (
     <div className={`tab-panes ${alone ? 'alone' : ''}`} ref={body}>
-      {[...rects].map(([terminal, r]) => (
-        <div
-          key={terminal}
-          className={`pane ${terminal === tab.focused && !alone ? 'focused' : ''}`}
-          style={{ left: pct(r.x), top: pct(r.y), width: pct(r.w), height: pct(r.h) }}
-          data-terminal={terminal}
-          data-m={m}
-          data-ws={ws}
-        >
-          <PaneHeader m={m} terminal={terminal} ws={ws} focused={terminal === tab.focused} zoomed={!!zoom} />
-          <TerminalView
-            m={m}
-            terminal={terminal}
-            focused={terminal === tab.focused}
-            onActivate={() => terminal !== tab.focused && terms.mutate(m, (l) => L.focusPane(l, terminal))}
-          />
-        </div>
-      ))}
+      {[...rects].map(([key, r]) => {
+        const leaf = L.leafOf(tab.root, key);
+        if (!leaf) return null;
+        const focused = key === tab.focused;
+        return (
+          <div
+            key={key}
+            className={`pane ${focused && !alone ? 'focused' : ''}`}
+            style={{ left: pct(r.x), top: pct(r.y), width: pct(r.w), height: pct(r.h) }}
+            data-pane={key}
+            data-m={m}
+            data-ws={ws}
+          >
+            <PaneHeader m={m} pane={key} leaf={leaf} ws={ws} focused={focused} zoomed={!!zoom} />
+            {L.isTerminalLeaf(leaf) ? (
+              <TerminalView
+                m={m}
+                terminal={key}
+                focused={focused}
+                onActivate={() => key !== tab.focused && terms.mutate(m, (l) => L.focusPane(l, key))}
+              />
+            ) : L.isCodeLeaf(leaf) ? (
+              <CodeSlot m={m} pane={key} view={leaf.code} />
+            ) : (
+              <PreviewPane m={m} pane={key} path={leaf.preview.path} />
+            )}
+          </div>
+        );
+      })}
       {bars.map((b) => {
         const ratio = dragging && dragging.path.join() === b.path.join() ? dragging.ratio : b.ratio;
         const style =

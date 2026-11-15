@@ -27,7 +27,7 @@ terminals (they belong to the user and run in the terminal core).
 | desktop core | Electron main process | parent stdin closes: the app quits (on Windows and Linux also by closing its main window) or crashes; no signal is sent on any system, and the shell kills that child only if it has not exited 20 s later |
 | terminal core (herdr-core, session `herdr-ide[-<instance>]`) | the user's account: herdr-core runs it detached from the agent (a systemd user service, a launchd job), started when a client first subscribes to the machine's terminals ([02](02-multi-machine-transport.md)) | the user stops it from the machine's menu (`hc` action `stop`, which ends its programs); not with the agent or the core, so programs survive disconnects. A restart hands the programs to its successor |
 | core's connection to the terminal core, agent detection | the core, while a client is subscribed to the machine's terminals | 10 s after the last subscriber left, or with the agent; no process of their own |
-| code-server | the agent recorded in `run/cs.pid` | idle for `--code-server-idle` (default 20 min, counted by the core's proxy: no WebSocket open), the owning agent exits, the user presses stop, or 1 h without connections (code-server's own `--idle-timeout-seconds`) |
+| code-server | the agent recorded in `run/cs.pid` | idle for `--code-server-idle` (default 20 min, counted by the core's proxy: no WebSocket open), the owning agent exits, the user stops it (**Stop VS Code on `<machine>`** in a VS Code pane's menu), or 1 h without connections (code-server's own `--idle-timeout-seconds`) |
 | VS Code extension host | code-server | 5 min after its window disconnects (`--reconnection-grace-time`) |
 | curl / wget (machine downloads) | the agent's `download` request | the download finishes, fails, or runs 20 min |
 | ssh ControlMaster (cores on Linux and macOS; Windows' OpenSSH has none) | OpenSSH | 10 min unused (`ControlPersist`), or its ServerAlive checks fail (1 min). When a session through it lost the agent while ssh kept running, or a connection probe through it timed out, the core tells it to take no new sessions (`ssh -O stop`); it then ends with the sessions still open through it, which may belong to other instances of the user |
@@ -40,9 +40,16 @@ terminals (they belong to the user and run in the terminal core).
   id and the owning agent's pid. An agent stops only the process it owns on
   exit, adopts a running process whose owner died, and a new agent stops any
   orphan whose owner is gone at startup.
-- **Hidden panels**: the UI unmounts a VS Code iframe hidden for 10 min,
-  or beyond the 3 hidden most recently, closing its WebSocket so the idle
-  timer can run (`web/src/components/Dock.tsx`).
+- **VS Code windows off screen**: each VS Code pane on screen is its own
+  iframe and VS Code window, created only when its pane is on screen. The
+  iframes live in a layer over the panes and are placed over their pane,
+  so moving a pane or switching tab, workspace or machine never reloads
+  VS Code. A window off screen stays loaded for 10 min, and at most 3 such
+  windows stay (the oldest go first); then it is unmounted, which closes
+  its WebSocket so the idle timer can run. A pane closed in the layout
+  (by any client) unmounts its window at once, and the windows of disabled
+  and removed machines go too (`web/src/codeFrames.ts`,
+  `web/src/components/CodeLayer.tsx`).
 
 **Files**
 
@@ -94,7 +101,7 @@ The full list of paths is in [reference](../reference.md#files-and-directories).
   ([deployment](../deployment.md#remote-resources)).
 - **A code-server nobody tracks answers on the socket** (pid file lost, data
   directory moved under it) → replaced when VS Code is next opened
-  ([05](05-vscode-panel.md)).
+  ([05](05-vscode-panes.md)).
 - **Two cores, same instance** → one code-server; either core's idle stop
   affects both, and the other restarts it on its next request.
 
@@ -107,6 +114,9 @@ The full list of paths is in [reference](../reference.md#files-and-directories).
 - `internal/server/server_test.go`: code-server idle detection with open
   connections and grace for untracked machines
   (`TestCodeServerIdleTracking`).
+- `web/src/__tests__/codePanes.test.ts`: a VS Code window per pane on
+  screen, kept off screen until it expires or more than 3 are, and gone
+  at once when its pane closed or its machine has no VS Code.
 - `internal/agent/hc_test.go` (`TestHCInstallStartAndPipe`: an install
   that fails leaves no partial file, a newer build replaces the old one);
   `internal/server/term_test.go` (`TestHCLifecycle`: a stopped terminal

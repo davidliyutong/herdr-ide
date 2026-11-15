@@ -18,7 +18,7 @@ var legacyShortcuts = []struct {
 	{"desktop-close-tab-key", "tab.close", "cmd+w", "ctrl+shift+w"},
 	{"desktop-settings-key", "app.settings", "cmd+comma", "ctrl+comma"},
 	{"desktop-new-workspace-key", "workspace.new", "cmd+n", "ctrl+shift+n"},
-	{"desktop-toggle-code-key", "view.toggleCode", "cmd+j", "ctrl+shift+j"},
+	{"desktop-toggle-code-key", "code.open", "cmd+j", "ctrl+shift+j"},
 }
 
 // LegacyShortcutSettings names the desktop app's shortcut settings of

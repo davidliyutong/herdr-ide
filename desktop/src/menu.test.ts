@@ -38,7 +38,7 @@ test("the page's disabled commands are disabled items; anything else is refused"
   assert.equal(items.find((it) => it.id === 'tab.close')?.enabled, false);
   assert.equal(items.find((it) => it.id === 'tab.new')?.enabled, true);
   // Commands without an item (the tab numbers, VS Code's) are left out.
-  assert.deepEqual(parseDisabled(['tab.close', 'pane.zoom', 'tab.select1', 'code.open']), new Set(['tab.close', 'pane.zoom']));
+  assert.deepEqual(parseDisabled(['tab.close', 'pane.zoom', 'tab.select1', 'code.diff']), new Set(['tab.close', 'pane.zoom']));
   for (const bad of [['tab.close', 'rm -rf'], 'tab.close', [1], null, Array(201).fill('tab.close')])
     assert.equal(parseDisabled(bad), undefined);
   // Every command of the menu can be named; the Window menu is macOS's.
@@ -91,7 +91,7 @@ test('items show the first single-stroke key of their command and run it', () =>
   assert.equal(newTerminal.registerAccelerator, true);
   assert.equal(byCommand('pane.close').accelerator, 'Super+W');
   assert.equal(byCommand('tab.next').accelerator, 'Super+}');
-  assert.equal(byCommand('view.toggleCode').accelerator, 'Super+J');
+  assert.equal(byCommand('code.open').accelerator, 'Super+J');
   assert.equal(byCommand('app.commandPalette').accelerator, 'Super+Shift+P');
   assert.equal(byCommand('app.keyboardShortcuts').accelerator, 'Super+/');
   assert.equal(byCommand('tab.close').accelerator, 'Super+Shift+W');

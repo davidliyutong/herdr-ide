@@ -2,15 +2,18 @@
 // Workspaces, tabs and panes are edits of the shown machine's layout
 // document plus terminal.run and terminal.kill on its terminal core
 // (state/terms.ts); closing ends the programs after asking when one runs.
+// VS Code and previews are panes too: they open as a tab or beside the pane
+// they came from (docs/features/05-vscode-panes.md).
 
 import * as L from './term/layout';
 import { isLive, type TerminalRecord } from './term/protocol';
 import { terms, useTerms } from './state/terms';
-import { currentDock, currentLastCode, useStore, type TermRef } from './state/store';
-import { paneHandle, withPane } from './state/panes';
+import { useStore } from './state/store';
+import { withView } from './state/panes';
 import { agentOf, agentStatus, statusRank, terminalTitle, type AgentStatus } from './lib/machine';
 import { mediaExt } from './terminal/links';
-import { bridge } from './lib/bridge';
+import { bridge, hasFrame, type BridgeCommand } from './lib/bridge';
+import { reloadFrame, setStopped } from './codeFrames';
 import { hasMessage, t } from './i18n';
 import { confirmDialog, newWorkspaceDialog } from './dialog';
 import type { MessageKey } from './i18n/en';
@@ -37,10 +40,10 @@ export function attentionList(): AttentionItem[] {
   return out.sort((a, b) => statusRank[b.status] - statusRank[a.status]);
 }
 
-/** Each terminal's share of its tab, from the split tree. */
+/** Each pane's share of its tab, from the split tree. */
 export const paneRects = L.paneRects;
 
-/** The shown machine's selected workspace and tab, and the focused terminal. */
+/** The shown machine's selected workspace and tab, and the focused pane. */
 export function current() {
   const m = useStore.getState().machineId;
   const layout = m ? useTerms.getState().machines[m]?.layout : undefined;
@@ -50,9 +53,66 @@ export function current() {
   return { m, layout, ws, tabIndex: ws?.selected ?? 0, tab, focused: tab?.focused || undefined };
 }
 
-/** Puts the keyboard in a terminal once it is on screen. */
-function focusDom(m: string, terminal: string) {
-  withPane(m, terminal, (h) => h.focus());
+/** Puts the keyboard in a pane once it is on screen. */
+function focusDom(m: string, pane: string) {
+  withView(m, pane, (h) => h.focus());
+}
+
+export function dirname(p: string) {
+  const i = p.lastIndexOf('/');
+  return i > 0 ? p.slice(0, i) : '/';
+}
+
+/** The directory a pane works in: a terminal's (its foreground program's),
+ * a VS Code pane's folder, a preview's file's directory. */
+export function paneDirectory(m: string, leaf: L.Leaf | null | undefined): string | undefined {
+  if (!leaf) return undefined;
+  if (L.isTerminalLeaf(leaf)) return terms.directory(m, leaf.terminal);
+  if (L.isCodeLeaf(leaf)) return leaf.code.folder || undefined;
+  return L.isPreviewLeaf(leaf) ? dirname(leaf.preview.path) : undefined;
+}
+
+/** Where a pane opened from another one goes: the workspace and tab of from
+ * (the shown machine's focused pane when there is none), with from when it
+ * is in the layout. */
+function originOf(m: string, layout: L.Layout, from?: string) {
+  if (from === undefined && useStore.getState().machineId === m) from = L.focusedPane(layout);
+  const at = from ? L.locate(layout, from) : null;
+  const ws = at ? layout.workspaces[at.workspace] : L.selectedWorkspace(layout);
+  return { ws, tab: at ? at.tab : (ws?.selected ?? 0), from: at ? from : undefined };
+}
+
+/** Opens a new pane beside from (to its right), else in a new tab of ws. */
+function openBeside(m: string, leaf: L.Leaf, ws: L.Workspace | undefined, from?: string) {
+  terms.mutate(m, (l) => {
+    const next = from ? L.splitPane(l, from, 'horizontal', leaf) : l;
+    return next !== l ? next : L.openPane(l, leaf, ws?.id);
+  });
+}
+
+/** Shows a VS Code pane (and its machine) and gives it the keyboard; runs
+ * cmd there. fresh: the pane was just opened. Asking for VS Code starts it
+ * again on a machine whose code-server was stopped from this page. */
+async function showCode(m: string, key: string, view: { id: string; folder: string }, fresh: boolean, cmd?: BridgeCommand) {
+  setStopped(m, false);
+  useStore.getState().selectMachine(m);
+  terms.mutate(m, (l) => L.focusPane(l, key));
+  focusDom(m, key);
+  if (cmd) await bridge.command(m, view.id, view.folder, cmd, fresh).catch(report);
+}
+
+/** A VS Code window in a split beside from: the VS Code pane of that tab for
+ * folder, else a new one; then cmd there (diff, Git Graph). */
+async function codeBeside(m: string, folder: string | undefined, from: string | undefined, cmd: BridgeCommand) {
+  await whenLoaded(m);
+  const layout = terms.layout(m)!;
+  const o = originOf(m, layout, from);
+  const f = L.normFolder(folder ?? o.ws?.cwd ?? '');
+  const found = o.ws ? L.codeViews(o.ws).find((v) => v.tab === o.tab && L.normFolder(v.view.folder) === f) : undefined;
+  if (found) return showCode(m, found.key, found.view, !hasFrame(m, found.view.id), cmd);
+  const view = { id: L.newId(), folder: f };
+  openBeside(m, { code: view }, o.ws, o.from);
+  await showCode(m, L.codeKey(view.id), view, true, cmd);
 }
 
 function report(e: unknown) {
@@ -185,12 +245,15 @@ export const slotIndex = (from: number, slot: number) => (slot > from ? slot - 1
 const axisOf = (dir: 'right' | 'down'): L.Axis => (dir === 'right' ? 'horizontal' : 'vertical');
 
 export const actions = {
-  /** Splits a terminal's pane: the new terminal starts in its directory. */
-  async split(m: string, terminal: string, dir: 'right' | 'down', argv?: string[]) {
-    terms.mutate(m, (l) => L.focusPane(l, terminal));
+  /** Splits a pane: the new terminal starts in its directory (a VS Code
+   * pane's folder, a preview's file's directory). */
+  async split(m: string, pane: string, dir: 'right' | 'down', argv?: string[]) {
+    terms.mutate(m, (l) => L.focusPane(l, pane));
+    const layout = terms.layout(m);
+    const cwd = layout ? paneDirectory(m, L.findLeaf(layout, pane)) : undefined;
     try {
-      const address = await terms.run(m, { split: true, argv }, (l, a) => {
-        const next = L.splitFocused(l, axisOf(dir), a);
+      const address = await terms.run(m, { split: true, argv, cwd }, (l, a) => {
+        const next = L.splitPane(l, pane, axisOf(dir), { terminal: a });
         return next === l ? L.openTerminal(l, a) : next;
       });
       if (address) focusDom(m, address);
@@ -199,20 +262,27 @@ export const actions = {
     }
   },
 
-  /** Shows a terminal alone in its tab, or all of the tab again. */
-  zoom(m: string, terminal: string) {
+  /** Shows a pane alone in its tab, or all of the tab again. */
+  zoom(m: string, pane: string) {
     const s = useStore.getState();
-    s.setZoomed(s.zoomed?.m === m && s.zoomed.terminal === terminal ? undefined : { m, terminal });
-    focusDom(m, terminal);
+    s.setZoomed(s.zoomed?.m === m && s.zoomed.pane === pane ? undefined : { m, pane });
+    focusDom(m, pane);
   },
 
-  /** Ends a terminal after asking when a program runs in it; its pane goes
-   * with the event that follows. */
-  async closePane(m: string, terminal: string) {
-    await once(`pane ${m} ${terminal}`, async () => {
-      if (!(await confirmEnd(m, [terminal], 'confirm.closePaneTitle', true))) return;
-      terms.mutate(m, (l) => L.closePane(l, terminal));
-      await terms.kill(m, terminal);
+  /** Closes a pane. A terminal ends after asking when a program runs in it,
+   * and its pane goes with the event that follows; VS Code and previews just
+   * go. */
+  async closePane(m: string, pane: string) {
+    const layout = terms.layout(m);
+    const leaf = layout ? L.findLeaf(layout, pane) : null;
+    if (leaf && !L.isTerminalLeaf(leaf)) {
+      terms.mutate(m, (l) => L.closePane(l, pane));
+      return;
+    }
+    await once(`pane ${m} ${pane}`, async () => {
+      if (!(await confirmEnd(m, [pane], 'confirm.closePaneTitle', true))) return;
+      terms.mutate(m, (l) => L.closePane(l, pane));
+      await terms.kill(m, pane);
     });
   },
 
@@ -235,11 +305,12 @@ export const actions = {
     const tab = terms.layout(m)?.workspaces.find((w) => w.id === ws)?.tabs[index];
     if (!tab) return;
     const addresses = L.tabTerminals(tab);
-    await once(`tab ${m} ${ws} ${addresses.join(',')}`, async () => {
+    const panes = L.tabPanes(tab).join();
+    await once(`tab ${m} ${ws} ${panes}`, async () => {
       if (!(await confirmEnd(m, addresses, 'confirm.closeTabTitle'))) return;
       terms.mutate(m, (l) => {
         const w = l.workspaces.find((x) => x.id === ws);
-        const i = w?.tabs.findIndex((x) => L.tabTerminals(x).join() === addresses.join()) ?? -1;
+        const i = w?.tabs.findIndex((x) => L.tabPanes(x).join() === panes) ?? -1;
         return i < 0 ? l : L.closeTab(l, ws, i);
       });
       await Promise.all(addresses.map((a) => terms.kill(m, a)));
@@ -464,27 +535,27 @@ export const actions = {
     terms.mutate(m, (l) => L.selectTab(l, ws, index));
   },
 
-  /** Selects a terminal's workspace and tab and gives it the focus. */
-  focusTerminal(m: string, terminal: string) {
+  /** Selects a pane's machine, workspace and tab and gives it the focus. */
+  focusPane(m: string, pane: string) {
     useStore.getState().selectMachine(m);
     terms.subscribe(m);
-    terms.mutate(m, (l) => L.focusPane(l, terminal));
-    focusDom(m, terminal);
+    terms.mutate(m, (l) => L.focusPane(l, pane));
+    focusDom(m, pane);
   },
 
   focusDirection(dir: L.Direction) {
     const c = current();
     const next = c && L.neighbor(c.layout, dir);
-    if (c && next) actions.focusTerminal(c.m, next);
+    if (c && next) actions.focusPane(c.m, next);
   },
 
   cyclePane(step: number) {
     const c = current();
     if (!c?.tab) return;
-    const ids = L.tabTerminals(c.tab);
+    const ids = L.tabPanes(c.tab);
     if (!ids.length) return;
     const i = c.focused ? ids.indexOf(c.focused) : -1;
-    actions.focusTerminal(c.m, ids[(i + step + ids.length) % ids.length]);
+    actions.focusPane(c.m, ids[(i + step + ids.length) % ids.length]);
   },
 
   /** Selects the next (1) or previous (-1) workspace of the shown machine. */
@@ -505,58 +576,106 @@ export const actions = {
     if (index < n) actions.selectTab(c.m, c.ws.id, index);
   },
 
-  /** The focused terminal, its machine and its directory. */
-  focusedContext(): { m: string; terminal?: string; cwd?: string } | undefined {
+  /** The focused pane (the terminal, when it is one), its machine and the
+   * directory it works in, else its workspace's. */
+  focusedContext(): { m: string; pane?: string; terminal?: string; cwd?: string } | undefined {
     const c = current();
     if (!c) return undefined;
-    return { m: c.m, terminal: c.focused, cwd: c.focused ? terms.directory(c.m, c.focused) : (c.ws?.cwd ?? undefined) || undefined };
+    const leaf = c.tab && c.focused ? L.leafOf(c.tab.root, c.focused) : null;
+    const terminal = leaf && L.isTerminalLeaf(leaf) ? leaf.terminal : undefined;
+    const cwd = (leaf ? paneDirectory(c.m, leaf) : undefined) ?? (c.ws?.cwd || undefined);
+    return { m: c.m, pane: leaf ? c.focused : undefined, terminal, cwd };
   },
 
-  openPath(m: string, path: string, line?: number, col?: number) {
-    if (mediaExt.test(path)) return useStore.getState().openDock({ kind: 'preview', m, path });
-    // Code (or unknown) files go to VS Code at the given position; fall back
-    // to the preview panel when code-server is unavailable.
-    bridge.openFile(m, path, line, col).catch(() => useStore.getState().openDock({ kind: 'preview', m, path }));
+  /** Opens a path found in a pane (from; the focused pane by default): media
+   * in a preview pane (openPreview), anything else in VS Code at the line:
+   * in a VS Code pane of the workspace, the one of from's tab whose folder
+   * holds the file first, then one of another tab that holds it, then any
+   * of from's tab, then any; else in a new one split beside from, for the
+   * terminal's directory or the workspace's when the file is below it, else
+   * for the file's directory. */
+  async openPath(m: string, path: string, line?: number, col?: number, from?: string) {
+    if (mediaExt.test(path)) return actions.openPreview(m, path, from);
+    return actions.openInCode(m, path, line, col, from);
   },
 
-  openPreview(m: string, path: string) {
-    useStore.getState().openDock({ kind: 'preview', m, path });
+  /** Opens a file in VS Code at the line, as openPath does for files that
+   * are not media; media too (a preview's Open in VS Code). */
+  async openInCode(m: string, path: string, line?: number, col?: number, from?: string) {
+    await whenLoaded(m);
+    const layout = terms.layout(m)!;
+    const o = originOf(m, layout, from);
+    const cmd: BridgeCommand = { cmd: 'openFile', path, line, col };
+    const views = o.ws ? L.codeViews(o.ws) : [];
+    const holds = (v: (typeof views)[number]) => L.folderHolds(v.view.folder, path);
+    const found = views.find((v) => v.tab === o.tab && holds(v)) ?? views.find(holds) ?? views.find((v) => v.tab === o.tab) ?? views[0];
+    if (found) return showCode(m, found.key, found.view, !hasFrame(m, found.view.id), cmd);
+    const near = [paneDirectory(m, o.from ? L.findLeaf(layout, o.from) : null), o.ws?.cwd].find((d) => d && L.folderHolds(d, path));
+    const view = { id: L.newId(), folder: L.normFolder(near ?? dirname(path)) };
+    openBeside(m, { code: view }, o.ws, o.from);
+    await showCode(m, L.codeKey(view.id), view, true, cmd);
   },
 
-  openCode(m: string, folder?: string) {
-    useStore.getState().openDock({ kind: 'code', m, folder });
+  /** Shows a file or directory in a preview pane of from's workspace (from:
+   * the focused pane by default), the one of from's tab first; else in a new
+   * one split beside from. */
+  async openPreview(m: string, path: string, from?: string) {
+    await whenLoaded(m);
+    const layout = terms.layout(m)!;
+    const o = originOf(m, layout, from);
+    const views = o.ws ? L.previewViews(o.ws) : [];
+    const found = views.find((v) => v.tab === o.tab) ?? views[0];
+    useStore.getState().selectMachine(m);
+    if (found) {
+      terms.mutate(m, (l) => L.focusPane(L.setPreviewPath(l, found.key, path), found.key));
+      focusDom(m, found.key);
+      return;
+    }
+    const id = L.newId();
+    openBeside(m, { preview: { id, path } }, o.ws, o.from);
+    focusDom(m, L.previewKey(id));
   },
 
-  openDiff(m: string, folder?: string) {
-    useStore.getState().openDock({ kind: 'code', m, folder });
-    bridge.command(m, folder, { cmd: 'openDiff', repo: folder }).catch(report);
+  /** Opens VS Code for a folder (the workspace's by default) as a new tab of
+   * the selected workspace, or selects the VS Code pane that workspace has
+   * for the folder. */
+  async openCode(m: string, folder?: string) {
+    await whenLoaded(m);
+    const layout = terms.layout(m)!;
+    const ws = L.selectedWorkspace(layout);
+    const home = useStore.getState().machines[m]?.info?.home ?? '';
+    const f = L.normFolder(folder ?? (ws?.cwd || home));
+    const found = ws && L.codeViews(ws).find((v) => L.normFolder(v.view.folder) === f);
+    if (found) return showCode(m, found.key, found.view, false);
+    const view = { id: L.newId(), folder: f };
+    terms.mutate(m, (l) => L.openPane(l, { code: view }, ws?.id));
+    await showCode(m, L.codeKey(view.id), view, true);
   },
 
-  openGitGraph(m: string, folder?: string) {
-    useStore.getState().openDock({ kind: 'code', m, folder });
-    bridge.command(m, folder, { cmd: 'gitGraph', repo: folder }).catch(report);
+  /** Shows a folder's changes (VS Code's multi-file diff) beside a pane. */
+  openDiff(m: string, folder?: string, from?: string) {
+    return codeBeside(m, folder, from, { cmd: 'openDiff', repo: folder });
+  },
+
+  /** Opens Git Graph of a folder's repository beside a pane. */
+  openGitGraph(m: string, folder?: string, from?: string) {
+    return codeBeside(m, folder, from, { cmd: 'gitGraph', repo: folder });
+  },
+
+  /** Loads a VS Code pane's window again. */
+  reloadCode(m: string, id: string) {
+    reloadFrame(m, id);
+  },
+
+  /** Stops a machine's code-server, which frees its memory there: this
+   * page's VS Code panes of the machine offer to start it again. */
+  async stopCode(m: string) {
+    setStopped(m, true);
+    await fetch(`/api/m/${encodeURIComponent(m)}/code/stop`, { method: 'POST' }).catch(() => {});
   },
 
   toggleSidebar() {
     useStore.getState().toggleSidebar();
-  },
-
-  /** Shows or hides the selected workspace's VS Code panel: an open panel
-   * (VS Code or preview) closes and the terminal gets the keys again;
-   * otherwise the VS Code panel the workspace showed last comes back while it
-   * is of the focused terminal's machine, else the focused terminal's folder
-   * opens in VS Code. */
-  toggleCode() {
-    const s = useStore.getState();
-    const c = actions.focusedContext();
-    if (currentDock(s)) {
-      s.openDock(undefined);
-      if (c?.terminal) paneHandle(c.m, c.terminal)?.focus();
-      return;
-    }
-    const last = currentLastCode(s);
-    if (last && (!c || last.m === c.m)) s.openDock(last);
-    else if (c) actions.openCode(c.m, c.cwd);
   },
 
   /** The selected tab: its machine, workspace, index and name. */
@@ -569,7 +688,7 @@ export const actions = {
   /** Jump to the agent that most needs attention (blocked first, then done). */
   openAttention() {
     const best = attentionList()[0];
-    if (best) actions.focusTerminal(best.m, best.terminal);
+    if (best) actions.focusPane(best.m, best.terminal);
   },
 
   /** Starts a coding agent in a pane split off the focused one. */
@@ -587,9 +706,17 @@ export function workspaceTitle(m: string, ws: Pick<L.Workspace, 'name' | 'cwd'>)
   return L.workspaceTitle(ws, useStore.getState().machines[m]?.info?.home);
 }
 
-/** A tab's name: its own, else its focused terminal's title. */
+/** A pane's title: a terminal's (terminalTitle), a VS Code pane's folder
+ * name, a preview's file name. */
+export function paneTitle(m: string, leaf: L.Leaf | null, key: string): string {
+  if (leaf && L.isCodeLeaf(leaf)) return L.folderName(leaf.code.folder, useStore.getState().machines[m]?.info?.home);
+  if (leaf && L.isPreviewLeaf(leaf)) return leaf.preview.path.split('/').pop() || leaf.preview.path;
+  return terminalTitle(terms.terminal(m, key), key);
+}
+
+/** A tab's name: its own, else its focused pane's title. */
 export function tabName(m: string, tab: L.Tab): string {
-  return tab.name || terminalTitle(terms.terminal(m, tab.focused), tab.focused);
+  return tab.name || paneTitle(m, L.leafOf(tab.root, tab.focused), tab.focused);
 }
 
 /** What a tab is called in its tab bar: its own name, else its position
@@ -622,5 +749,3 @@ function whenLoaded(m: string): Promise<void> {
     });
   });
 }
-
-export type { TermRef };

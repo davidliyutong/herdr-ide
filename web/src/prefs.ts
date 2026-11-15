@@ -1,8 +1,8 @@
 // What the UI reads from the settings (settings.ts), typed and named for its
 // users: `usePrefs((s) => s.prefs.theme)` in components, `getPrefs()`
 // elsewhere. The values are the core's (shared by every client of the core);
-// setPref saves one there. Pure per-device state (sidebar, panel sizes, the
-// selected machine, transfer history) stays in the browser (state/store.ts).
+// setPref saves one there. Pure per-device state (the sidebar, the selected
+// machine, transfer history) stays in the browser (state/store.ts).
 
 import { create } from 'zustand';
 import { setSetting, settingValue, useSettings, type SettingValue } from './settings';
@@ -23,7 +23,6 @@ export const prefKeys = {
   locale: 'appearance.language',
   theme: 'appearance.theme',
   uiFontSize: 'appearance.uiFontSize',
-  dockPosition: 'layout.panelPosition',
   termFontFamily: 'terminal.fontFamily',
   termFontSize: 'terminal.fontSize',
   termFontWeight: 'terminal.fontWeight',
@@ -49,7 +48,6 @@ export interface Prefs {
   locale: 'auto' | 'en' | 'zh-CN';
   theme: 'system' | 'dark' | 'light';
   uiFontSize: number;
-  dockPosition: 'right' | 'bottom';
   termFontFamily: string;
   termFontSize: number;
   termFontWeight: 'regular' | 'medium';

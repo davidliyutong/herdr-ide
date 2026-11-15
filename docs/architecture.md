@@ -45,11 +45,11 @@ machines only ([02](features/02-multi-machine-transport.md)).
 | `internal/jpegstrip` | JPEG encoding of a window capture in independent row groups, encoded in parallel (from Go's `image/jpeg`, BSD). |
 | `internal/server` | HTTP/WS front: guards, the event channel, terminal streams, files, proxy, bridge, audit. |
 | `internal/embedded` | Build artifacts compiled into the core (agents, herdr-core, the video encoder, bridge VSIX). |
-| `web` | Browser UI (Vite, React, zustand): the terminals of the machines' terminal cores (`src/term`: the client of `/api/v1/term` and the layout document; `src/state/terms.ts`: the machines' terminals and layouts; `src/vt`: Ghostty's terminal library as WebAssembly with its renderer and input encoders, also for the PTY dialogs, [26](features/26-web-terminals.md)); `web/embed.go` embeds `web/dist`. |
+| `web` | Browser UI (Vite, React, zustand): the terminals of the machines' terminal cores (`src/term`: the client of `/api/v1/term` and the layout document, whose panes are terminals, VS Code and previews; `src/state/terms.ts`: the machines' terminals and layouts; `src/vt`: Ghostty's terminal library as WebAssembly with its renderer and input encoders, also for the PTY dialogs, [26](features/26-web-terminals.md)); VS Code panes' iframes in a layer over the panes (`src/codeFrames.ts`, `src/components/CodeLayer.tsx`, [05](features/05-vscode-panes.md)); `web/embed.go` embeds `web/dist`. |
 | `desktop` | Electron shell for macOS, Windows and Linux (`src`: the owned core process, what differs per system (`platform.ts`), the client of its settings and keybindings, the application menu, the main window's preload and policy) and electron-builder config: macOS DMG and zip, Windows NSIS setup, Linux AppImage and deb, each wrapping the core built for its system. |
 | `extensions/herdr-ide-bridge` | VS Code extension installed into code-server. |
 | `scripts` | Build, packaging and check scripts (`build.sh`, which also builds a Windows core; `package.sh`, archives for Linux and macOS; `desktop.sh`, the desktop app of each system; `icons.sh`; `check.sh`, which vets for Linux, macOS and Windows too), the pinned downloads (`fetch-hc`, `fetch-ghostty-vt.sh` for the web UI's emulator, `build-ffmpeg.sh` for the video encoder) and the generators (`tokens`, `registry`). |
-| `design` | Design tokens (`tokens.json`): colors in light and dark, metrics, font sizes and terminal palettes; `scripts/tokens` generates `web/src/tokens.css` and the terminal colors' setting defaults (`internal/uisettings/tokens.go`) from them. `generated/registry.json` (`scripts/registry`): setting defaults, commands, default bindings per platform and the translation keys the web UI needs for them. `testdata/layout`: the layout document's test vectors (directional focus and pane drops included), run by the web UI's tests ([22](features/22-terminal-protocol.md)); `testdata/keys`: the key syntax's vectors, run by the web UI's tests (`parse.json` by Go's too); `testdata/math`: the formulas found in terminal text, run by the web UI's tests ([19](features/19-formulas-in-panes.md)); `testdata/machines`: the ssh target rule's vectors, run by Go and the web UI's tests. |
+| `design` | Design tokens (`tokens.json`): colors in light and dark, metrics, font sizes and terminal palettes; `scripts/tokens` generates `web/src/tokens.css` and the terminal colors' setting defaults (`internal/uisettings/tokens.go`) from them. `generated/registry.json` (`scripts/registry`): setting defaults, commands, default bindings per platform and the translation keys the web UI needs for them. `testdata/layout`: the layout document's test vectors (directional focus, pane drops and VS Code and preview panes included), run by the web UI's tests ([22](features/22-terminal-protocol.md)); `testdata/keys`: the key syntax's vectors, run by the web UI's tests (`parse.json` by Go's too); `testdata/math`: the formulas found in terminal text, run by the web UI's tests ([19](features/19-formulas-in-panes.md)); `testdata/machines`: the ssh target rule's vectors, run by Go and the web UI's tests. |
 
 ## Desktop launcher
 
@@ -75,7 +75,7 @@ windows'. The application menu
 (`desktop/src/menu.ts`: on macOS the application's, Shell, Edit, View and
 Window; on Windows and Linux File, Shell, Edit, View, Window and Help)
 holds the keybindings' commands for terminals, splits, workspaces, tabs,
-find, the palette, the sidebar, VS Code, maximizing a pane, the window's
+find, the palette, the sidebar, Open in VS Code, maximizing a pane, the window's
 zoom and focus, named as the
 commands are everywhere; each command item shows the first single-stroke
 key its command has and is disabled while the page says its command
@@ -87,8 +87,11 @@ isolation. The page matches every key it sees itself (`web/src/keymap.ts`),
 with the desktop platform's bindings (`mac`, or `pc` on Windows and Linux),
 and cancels the keys it runs. On macOS the menu acts only on keys the page
 left (a text field, VS Code or another window has the keyboard), so a key
-runs once; on Windows and Linux it registers no key and every key goes to
-the page ([04](features/04-layout-and-keyboard.md)). The main window's
+runs once; while a VS Code pane has the keyboard its commands act on that
+pane; on Windows and Linux it registers no key and every key goes to the
+page ([04](features/04-layout-and-keyboard.md)). A VS Code pane gives the
+page the key of `pane.close` before VS Code sees it
+([05](features/05-vscode-panes.md)). The main window's
 preload exposes only `desktopShell`: the commands of menu items chosen,
 which commands' items to disable (from the page), where a file or folder
 dropped from the file manager is on disk (to create a workspace there or

@@ -11,12 +11,13 @@ import (
 )
 
 // Values of earlier versions change once, in place: the silent agents
-// become a list, a scrollback above the maximum comes down to it; current
-// values and unknown keys stay as they are.
+// become a list, a scrollback above the maximum comes down to it, the
+// VS Code panel's place goes; current values and unknown keys stay as they
+// are.
 func TestMigrateValues(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.json")
-	os.WriteFile(path, []byte(`{"notifications.mutedAgents": "Droid, codex  gemini", "terminal.scrollback": 1000000, "future.key": 1}`), 0o600)
+	os.WriteFile(path, []byte(`{"notifications.mutedAgents": "Droid, codex  gemini", "terminal.scrollback": 1000000, "layout.panelPosition": "bottom", "future.key": 1}`), 0o600)
 	s := settings.New(path, Module)
 	if err := s.Load(); err != nil {
 		t.Fatal(err)
@@ -28,7 +29,7 @@ func TestMigrateValues(t *testing.T) {
 		t.Errorf("scrollback %v", got)
 	}
 	b, _ := os.ReadFile(path)
-	if !strings.Contains(string(b), `"future.key": 1`) || strings.Contains(string(b), `"Droid`) {
+	if !strings.Contains(string(b), `"future.key": 1`) || strings.Contains(string(b), `"Droid`) || strings.Contains(string(b), "panelPosition") {
 		t.Errorf("file after migration:\n%s", b)
 	}
 	if p := s.State().Problems; len(p) != 1 || p[0].Key != "future.key" {

@@ -12,10 +12,12 @@ type Listener = {
   /** sound: this page plays notification sounds (it was used most recently). */
   onAgent(machine: string, data: AgentStatusEvent, sound: boolean): void;
   onConnection(connected: boolean): void;
-  /** folders: those of the VS Code window that sent it. */
-  onBridgeSend(machine: string, text: string, folders?: string[]): void;
+  /** window and folders: the id and folders of the VS Code window that sent it. */
+  onBridgeSend(machine: string, text: string, window?: string, folders?: string[]): void;
   /** Files chosen in VS Code's explorer to download. */
-  onBridgeDownload(machine: string, paths: string[]): void;
+  onBridgeDownload(machine: string, paths: string[], window?: string): void;
+  /** A VS Code window got the keyboard. */
+  onBridgeFocus(machine: string, window: string, folders?: string[]): void;
   /** Progress or end of a download a page started (download.ts). */
   onDownload(ev: DownloadEvent): void;
   onGui(st: GuiState): void;
@@ -23,6 +25,9 @@ type Listener = {
   onSettings?(m: Record<string, unknown>): void;
   onKeybindings?(m: Record<string, unknown>): void;
 };
+
+const text = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
+const strings = (v: unknown) => (Array.isArray(v) ? v.filter((f): f is string => typeof f === 'string') : undefined);
 
 class Conn {
   private ws?: WebSocket;
@@ -79,14 +84,13 @@ class Conn {
         this.listener?.onAgent(m.m, m.data, m.sound === true);
         break;
       case 'bridge.send':
-        this.listener?.onBridgeSend(
-          m.m,
-          m.text,
-          Array.isArray(m.folders) ? m.folders.filter((f: unknown) => typeof f === 'string') : undefined,
-        );
+        this.listener?.onBridgeSend(m.m, m.text, text(m.window), strings(m.folders));
         break;
       case 'bridge.download':
-        this.listener?.onBridgeDownload(m.m, m.paths);
+        this.listener?.onBridgeDownload(m.m, m.paths, text(m.window));
+        break;
+      case 'bridge.focus':
+        if (text(m.window)) this.listener?.onBridgeFocus(m.m, m.window, strings(m.folders));
         break;
       case 'download':
         this.listener?.onDownload(m);

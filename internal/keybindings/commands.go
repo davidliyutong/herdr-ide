@@ -2,9 +2,10 @@ package keybindings
 
 import "fmt"
 
-// When tells where a binding applies: in the main window outside VS Code
-// and dialogs (terminal), while VS Code has the keyboard (vscode), while a
-// dialog of the application is open (dialog), or everywhere (always).
+// When tells where a binding applies: in the main window outside dialogs
+// (terminal; in a VS Code pane too, for the keys VS Code leaves), only while
+// a VS Code pane has the keyboard (vscode), while a dialog of the
+// application is open (dialog), or everywhere (always).
 type When string
 
 const (
@@ -82,8 +83,7 @@ func cmd(id, section string, defaults ...Default) Command {
 	return Command{ID: id, Section: section, When: WhenTerminal, Defaults: defaults}
 }
 
-// always is a command that also runs while a dialog or VS Code has the
-// keyboard.
+// always is a command that also runs while a dialog has the keyboard.
 func always(id, section string, defaults ...Default) Command {
 	return Command{ID: id, Section: section, When: WhenAlways, Defaults: defaults}
 }
@@ -143,9 +143,6 @@ var Commands = func() []Command {
 		cmd("pane.focusPrevious", "pane", on(macApp, "cmd+bracketleft")),
 
 		cmd("view.toggleSidebar", "view", on(macApp, "cmd+b")),
-		// Hiding the VS Code panel from inside VS Code is what the key is for.
-		Command{ID: "view.toggleCode", Section: "view", When: WhenAlways,
-			Defaults: []Default{on(macApp, "cmd+j"), on(pcApp, "ctrl+shift+j")}},
 		// The desktop app's zoom (the window.zoom setting), with the keys
 		// browsers zoom pages with, which they keep for themselves; also in
 		// dialogs and VS Code, as the window's zoom is. Ctrl+= is Zoom In
@@ -160,9 +157,17 @@ var Commands = func() []Command {
 		cmd("find.next", "find", on(macApp, "cmd+g")),
 		cmd("find.previous", "find", on(macApp, "cmd+shift+g")),
 
-		cmd("code.open", "code"),
+		// Inside VS Code its own cmd+j (its panel) runs instead.
+		cmd("code.open", "code", on(macApp, "cmd+j"), on(pcApp, "ctrl+shift+j")),
 		cmd("code.diff", "code"),
 		cmd("code.gitGraph", "code"),
 	)
 	return out
 }()
+
+// Renamed are the commands of earlier versions that another one took the
+// place of: the user's rules naming the old id apply to the new one.
+var Renamed = map[string]string{
+	// The VS Code panel's toggle: VS Code is a pane now, opened as a tab.
+	"view.toggleCode": "code.open",
+}

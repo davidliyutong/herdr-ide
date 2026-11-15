@@ -87,16 +87,25 @@ automatically, scheduling agents.
   in the focused terminal's directory, or in a new tab when no pane has the
   focus.
 - **Context to agents**: VS Code's *Send to Agent* pastes `@file:lines` and
-  the selection into a terminal without submitting (`web/src/lib/bridge.ts`):
-  the focused terminal when the selected workspace's panel shows the sending
-  window, else the agent of the workspace whose panel shows it that waits for
-  input (idle or done), never another workspace's; the paste goes through
-  the terminal's stream, bracketed when the program asked; pasted or
-  dropped images are uploaded and their paths typed
+  the selection into a terminal without submitting (`web/src/lib/bridge.ts`).
+  From a VS Code pane it goes to an agent of the pane's tab, else of the
+  pane's workspace (those waiting for input, idle or done, first), else to
+  the workspace's terminal focused last on this page; never to another
+  workspace's terminal: without one, a note names the workspace. The page
+  whose VS Code pane shows the sending window takes it: the core sends the
+  window's id, and a page learns which window each of its VS Code panes
+  shows when that window reports the keyboard while the pane's iframe has
+  it ([05](05-vscode-panes.md)). A window no page shows is handled by the
+  page with the keyboard: its focused terminal on that machine, else the
+  machine's agent waiting for input. The extension's status bar then says
+  *Sent to an agent of this workspace*. The paste goes through the
+  terminal's stream, bracketed when the program asked; pasted or dropped
+  images are uploaded and their paths typed
   ([06](06-quick-look-and-files.md)).
 - **Review**: from a pane, its header's buttons (and the palette's
   `code.diff` and `code.gitGraph`) open the multi-file diff and Git Graph
-  of its repository ([05](05-vscode-panel.md)).
+  of its repository in VS Code, split to the right of the pane (reusing
+  the tab's VS Code pane for the same folder) ([05](05-vscode-panes.md)).
 
 ## Alternatives considered
 
@@ -121,7 +130,7 @@ automatically, scheduling agents.
 agent messages and the seen marking by focus ([25](25-agent-detection.md)).
 `web/src/__tests__/terms.test.ts` covers the attention order,
 `sidebarMachines.test.ts` the inbox and the workspaces' dots,
-`workspaceDock.test.ts` where *Send to Agent* goes, and
+`codePanes.test.ts` where *Send to Agent* goes, and
 `web/src/__tests__/sound.test.ts` which sound a status change plays
 (suppression, muted agents, the chosen browser), `notify.test.ts` the
 three switches (a notification only while its setting is on, the

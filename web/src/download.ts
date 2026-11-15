@@ -15,6 +15,7 @@
 
 import { desktopShell } from './desktop';
 import { downloadUrl } from './lib/files';
+import { frameOfWindow } from './codeFrames';
 import { useStore } from './state/store';
 import { conn } from './lib/conn';
 import { hasMessage, t } from './i18n';
@@ -262,9 +263,11 @@ export async function downloadPath(m: string, path: string) {
 }
 
 /** VS Code's explorer asked for a download (bridge.download). Every page
- * hears it; the one embedding that VS Code has the focus. */
-export function bridgeDownload(m: string, paths: string[]) {
-  if (!Array.isArray(paths) || !document.hasFocus()) return;
+ * hears it; the page whose VS Code pane shows that window downloads, else
+ * the page with the focus (which has the VS Code that asked). */
+export function bridgeDownload(m: string, paths: string[], window?: string) {
+  if (!Array.isArray(paths)) return;
+  if (!(window && frameOfWindow(m, window)) && !document.hasFocus()) return;
   startDownload(
     m,
     paths.filter((p) => typeof p === 'string'),

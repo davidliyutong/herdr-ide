@@ -1,5 +1,5 @@
 {
-  "description": "How a stream of strokes runs bindings, chords included (users bind chords; no default is one). Each stroke gives none (the key is not the application's: the terminal gets it), pending (a chord goes on), run:<command>, literal (the chord's first stroke pressed again: this press goes on to the terminal, through the same key encoder as none) or swallow (a chord that matches nothing ends; the key is dropped). Bindings apply where their when allows: always applies in every context. Run by web/src/__tests__/keys.test.ts.",
+  "description": "How a stream of strokes runs bindings, chords included (users bind chords; no default is one). Each stroke gives none (the key is not the application's: the terminal gets it), pending (a chord goes on), run:<command>, literal (the chord's first stroke pressed again: this press goes on to the terminal, through the same key encoder as none) or swallow (a chord that matches nothing ends; the key is dropped). Bindings apply where their when allows: always applies in every context, terminal also in vscode (a VS Code pane is a pane of the main UI; the keys VS Code takes never reach the application). Run by web/src/__tests__/keys.test.ts.",
   "bindings": [
     {
       "key": "ctrl+b c",
@@ -23,7 +23,7 @@
     },
     {
       "key": "cmd+j",
-      "command": "view.toggleCode",
+      "command": "view.zoomIn",
       "when": "always"
     },
     {
@@ -159,19 +159,21 @@
       ]
     },
     {
-      "description": "in VS Code only its own and always bindings run",
+      "description": "in a VS Code pane the main UI's bindings run, its own and always ones too",
       "context": "vscode",
       "strokes": [
         "cmd+t",
         "cmd+j",
+        "f5",
         "ctrl+b",
-        "f5"
+        "c"
       ],
       "results": [
-        "none",
-        "run:view.toggleCode",
-        "none",
-        "run:code.open"
+        "run:tab.new",
+        "run:view.zoomIn",
+        "run:code.open",
+        "pending",
+        "run:tab.new"
       ]
     },
     {
@@ -185,7 +187,7 @@
       "results": [
         "none",
         "run:pane.splitRight",
-        "run:view.toggleCode"
+        "run:view.zoomIn"
       ]
     },
     {

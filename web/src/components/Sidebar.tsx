@@ -155,7 +155,7 @@ function Inbox() {
             key={`${m} ${terminal}`}
             className={`inbox-item st-${status}`}
             title={[where, shortPath(terms.directory(m, terminal), machines[m]?.info?.home)].filter(Boolean).join('\n')}
-            onClick={() => actions.focusTerminal(m, terminal)}
+            onClick={() => actions.focusPane(m, terminal)}
           >
             <StatusDot status={status} />
             <div className="inbox-text">

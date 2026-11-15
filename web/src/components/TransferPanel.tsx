@@ -137,7 +137,7 @@ export function TransferTray<T extends { id: string }>(p: TrayProps<T>) {
             <span className="spacer" />
             {p.canCancelAll(active) && <button onClick={p.cancelAll}>{t('transfers.cancelAll')}</button>}
             {history.length > 0 && <button onClick={p.clear}>{t('transfers.clear')}</button>}
-            <button className="icon" title={t('dock.close')} aria-label={t('dock.close')} onClick={close}>
+            <button className="icon" title={t('transfers.close')} aria-label={t('transfers.close')} onClick={close}>
               <X />
             </button>
           </div>

@@ -92,8 +92,9 @@ func TestDefaults(t *testing.T) {
 		{PlatformMac, "pane.focusNext", []string{"cmd+bracketright"}},
 		{PlatformPC, "pane.focusLeft", nil},
 		{PlatformMacBrowser, "pane.zoom", nil},
-		{PlatformMac, "view.toggleCode", []string{"cmd+j"}},
-		{PlatformPCBrowser, "view.toggleCode", nil},
+		{PlatformMac, "code.open", []string{"cmd+j"}},
+		{PlatformPC, "code.open", []string{"ctrl+shift+j"}},
+		{PlatformPCBrowser, "code.open", nil},
 		// Browsers zoom pages with these keys themselves.
 		{PlatformMac, "view.zoomIn", []string{"cmd+shift+equal", "cmd+equal"}},
 		{PlatformPC, "view.zoomOut", []string{"ctrl+minus"}},
@@ -246,6 +247,25 @@ func TestUserRules(t *testing.T) {
 	}
 }
 
+// A rule naming a command an earlier version had under another id applies
+// to the command that took its place.
+func TestRenamedCommands(t *testing.T) {
+	s := New(filepath.Join(t.TempDir(), "keybindings.json"), Commands)
+	if err := s.SetUser(rules(t,
+		`{"key": "cmd+j", "command": "-view.toggleCode"}`,
+		`{"key": "cmd+e", "command": "view.toggleCode", "when": "always"}`,
+	)); err != nil {
+		t.Fatal(err)
+	}
+	st := s.State()
+	if got := effective(st, PlatformMac, "code.open"); !slices.Equal(got, []string{"cmd+e@always"}) {
+		t.Errorf("code.open = %v", got)
+	}
+	if len(st.Problems) != 0 {
+		t.Errorf("problems = %+v", st.Problems)
+	}
+}
+
 func TestConflicts(t *testing.T) {
 	got := Conflicts([]Rule{
 		{Key: "ctrl+b", Command: "a", When: WhenTerminal},
@@ -256,9 +276,11 @@ func TestConflicts(t *testing.T) {
 		{Key: "cmd+k", Command: "f", When: WhenDialog},
 		{Key: "cmd+k", Command: "g", When: WhenTerminal},
 	})
+	// The main UI's bindings apply in VS Code panes too: b and c meet there.
 	want := []Conflict{
 		{Key: "cmd+j", Commands: []string{"d", "e"}},
-		{Key: "ctrl+b", Commands: []string{"a", "b"}, Prefix: true},
+		{Key: "ctrl+b", Commands: []string{"a", "b", "c"}, Prefix: true},
+		{Key: "ctrl+b c", Commands: []string{"b", "c"}},
 	}
 	b1, _ := json.Marshal(got)
 	b2, _ := json.Marshal(want)

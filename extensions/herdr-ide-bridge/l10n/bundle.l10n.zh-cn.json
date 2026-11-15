@@ -1,5 +1,5 @@
 {
   "The Git Graph extension is not installed": "未安装 Git Graph 扩展",
-  "Sent to the focused agent": "已发送给当前聚焦的 agent",
+  "Sent to an agent of this workspace": "已发送给本工作区的 agent",
   "Not connected to the web IDE: the download cannot start": "未连接到 Web IDE：无法开始下载"
 }

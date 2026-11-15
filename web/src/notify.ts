@@ -57,7 +57,7 @@ export function notifyAgent(m: string, ev: AgentStatusEvent, sound: boolean) {
     const n = new Notification(title, { body: ev.title ? `${label}\n${ev.title}` : label, tag: `${m}|${ev.terminal}` });
     n.onclick = () => {
       window.focus();
-      actions.focusTerminal(m, ev.terminal);
+      actions.focusPane(m, ev.terminal);
       n.close();
     };
   } else if (visible && ev.agent_status === 'blocked') {

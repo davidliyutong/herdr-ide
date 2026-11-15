@@ -103,9 +103,11 @@ settings per browser; theming terminal applications.
   → `true`/`false`), `gui-gpu` → `gui.gpu`, `gui-video` → `gui.video`;
   values of the current format win over migrated ones. Values of an older
   type change in place, once: `notifications.mutedAgents`, a
-  comma-separated string before, becomes a list of agent names, and a
+  comma-separated string before, becomes a list of agent names, a
   `terminal.scrollback` above 100,000 (earlier versions took a million,
-  which the terminals' memory cannot hold) comes down to 100,000
+  which the terminals' memory cannot hold) comes down to 100,000, and
+  `layout.panelPosition` (where earlier versions placed the VS Code panel,
+  which VS Code panes replaced) is dropped from the file
   (`uisettings.TestMigrateValues`). A value already of the current type is
   left as it is and the file is not rewritten. The desktop app's
   shortcut settings (`desktop-*-key`) become keybinding rules before the
@@ -149,17 +151,19 @@ settings per browser; theming terminal applications.
 **Keybindings** (`internal/keybindings`)
 
 - Commands are registered in Go (`internal/keybindings/commands.go`): an
-  id (`tab.new`, `pane.splitRight`, `view.toggleCode`,
+  id (`tab.new`, `pane.splitRight`, `code.open`,
   `find.open`…), a section of the keyboard page (`app`, `workspace`,
   `tab`, `pane`, `view`, `find`, `code`), where it applies and default
   keys per platform. Labels are `command.<id>` and
   `command.section.<id>`.
-- `when` contexts: `terminal` (the main window outside VS Code's panel and
-  dialogs; every command but one), `vscode` (VS Code's panel has the
+- `when` contexts: `terminal` (the main window outside dialogs: terminal
+  panes, and VS Code panes for the keys VS Code leaves; every command but
+  the zoom commands), `vscode` (only while a VS Code pane has the
   keyboard), `dialog` (a dialog, the palette or a text field of the
-  application has it) and `always` (`view.toggleCode`, so the key that
-  hides VS Code works from inside it). A binding runs only in its context;
-  `always` runs in every one.
+  application has it) and `always` (`view.zoomIn`, `view.zoomOut` and
+  `view.zoomReset`, so the window's zoom works in dialogs too). A binding
+  runs only in its context, `terminal` ones in VS Code panes too; `always`
+  runs in every one.
 - Platforms: `mac` and `pc` (the desktop app on macOS and on other
   systems) and `mac-browser`, `pc-browser` (a browser on either). A page
   picks its platform from the system and whether the desktop shell's
@@ -199,17 +203,21 @@ settings per browser; theming terminal applications.
   when it has one), rules apply in order, after the defaults. A rule
   without `when` takes its command's. Rules are not per platform: a rule
   applies to the bindings of every platform. Keys are stored as written
-  and normalized when read. Entries for
+  and normalized when read. A rule naming a command that earlier versions
+  had under another id applies to the command that took its place
+  (`view.toggleCode`, the VS Code panel's toggle, is `code.open`). Entries for
   commands this version does not have are kept and reported (`unknown`), as
   are entries that are not rules (`invalid`). Same watching, migration of
   the desktop app's `desktop-*-key` settings (a changed key replaces the
-  command's direct keys, `none` removes them; once, while the file does not
-  exist), atomic writes and refusal over a broken file as the settings.
+  command's direct keys, `none` removes them; `desktop-toggle-code-key`
+  becomes `code.open`'s; once, while the file does not exist), atomic
+  writes and refusal over a broken file as the settings.
 - `GET /api/keybindings` → `{sections, commands, defaults, user, effective,
   conflicts, problems, read_only, file}`, with `defaults`, `effective` and
   `conflicts` per platform: the core works out the bindings in effect, so
   clients only match keys. A conflict is a key bound to several commands
-  whose contexts overlap (the same `when`, or one of them `always`), or a
+  whose contexts overlap (the same `when`, `terminal` and `vscode`, which
+  both apply in a VS Code pane, or one of them `always`), or a
   stroke bound alone that also starts chords where both apply (the chords
   would never run). No platform's defaults conflict (a test checks it);
   conflicts made by user rules are kept, marked in every keyboard page,
@@ -228,13 +236,16 @@ settings per browser; theming terminal applications.
   `setPref` saves through the API and shows the value at once. Until the
   core answers, the defaults of `registry.json` apply.
 - Browser settings of earlier versions (11 `localStorage` keys: language,
-  theme, font sizes and weight, panel position, Option as Meta, program
-  clipboard, formulas, sounds, silent agents as a list) are moved once: each value
-  the core still has at its default is saved there, then the key is
-  removed. Read-only mode leaves them for a writable session. State of one
-  browser (whether the sidebar is open, the panel's sizes and what each
-  workspace's panel shows, the sidebar's width, the selected machine, the
-  transfer history) stays in `localStorage`.
+  theme, font sizes and weight, Option as Meta, program clipboard,
+  formulas, sounds, silent agents as a list, and the VS Code panel's
+  position) are moved once: each value the core still has at its default
+  is saved there, then the key is removed; the panel's position, gone with
+  the panel, is only removed. Read-only mode leaves them for a writable
+  session. State of one browser (whether the sidebar is open, the
+  sidebar's width, the selected machine, the transfer history) stays in
+  `localStorage`; what earlier versions kept there for the VS Code panel
+  (`docks`, `dockWidth`, `dockHeight`) is removed once when the page
+  loads.
 - The settings dialog (`components/SettingsDialog.tsx`, laid out as VS
   Code's) renders the definitions:
   - a scope bar: **User** (the global values) and one tab per machine that
@@ -300,9 +311,10 @@ settings per browser; theming terminal applications.
     macOS only;
   - read-only mode, a flag's lock and the file's problems as before; the
     header's file button opens `settings.json` (or `keybindings.json` on the
-    shortcuts page) in the VS Code panel of the core's own machine, where
-    the file is, and copies its path where there is none (a core on
-    Windows, read-only mode).
+    shortcuts page) in a VS Code pane on the core's own machine, where the
+    file is (as a path from a terminal opens,
+    [06](06-quick-look-and-files.md)), and copies its path where there is
+    none (a core on Windows, read-only mode).
   Changing one setting re-renders only what changed: the field or button
   used keeps the keyboard and the page its scroll position. Changing the
   language reloads the page that changed it.
@@ -325,8 +337,12 @@ settings per browser; theming terminal applications.
   the same way (`ctrl+k ctrl+k` types `ctrl+k`, whatever the stroke is); a
   chord matching nothing ends and its key is dropped. While a dialog or
   the palette is open only `dialog` and `always` bindings run. Keys typed
-  in VS Code's panel do not reach the page; in the desktop app its menu
-  runs the `vscode` and `always` commands there. Key hints (tooltips,
+  in a VS Code pane go to VS Code, except the key of `pane.close`
+  (`cmd+w` in the desktop app on macOS), which the page takes from the
+  pane's iframe first, so it closes the VS Code pane as it closes a
+  terminal's; in the desktop app on macOS the keys VS Code leaves reach the
+  application menu, which runs the `terminal`, `vscode` and `always`
+  commands on that pane ([04](04-layout-and-keyboard.md)). Key hints (tooltips,
   context menus, the palette, the status bar) show the command's direct
   shortcut in the desktop app, else its first key, and nothing when it has
   none. The status bar offers **Keyboard shortcuts** and **Command
@@ -356,7 +372,7 @@ settings per browser; theming terminal applications.
   restyle the UI (`styles.css` has no other colors; they are defined from
   the design tokens, [24](24-design-tokens.md)), the terminals' colors (the theme's
   `terminal.colors.*`, [26](26-web-terminals.md)) and `theme-color`. The kind is sent to the core,
-  which switches VS Code ([05](05-vscode-panel.md)); in the desktop app the
+  which switches VS Code ([05](05-vscode-panes.md)); in the desktop app the
   shell reads the setting from the core, and its title bar follows it
   ([16](16-desktop-packaging.md)).
 - Terminal palettes: the Default scheme's dark colors are GitHub Dark
@@ -400,8 +416,6 @@ settings per browser; theming terminal applications.
   scrollback (lines kept by the emulator and asked for when attaching),
   copy on select, bold as bright, Option as Meta and the program clipboard;
   the bell flashes the pane, beeps or does nothing.
-- Panel position (`right` or `bottom`) changes the grid: below the panes the
-  panel spans the workspace column and is resized by its top edge.
 - `notifications.sound`, `notifications.system` and `notifications.badge`
   turn the sounds, the system's notifications and the count of blocked
   agents on the app's icon and in the title on or off, each on its own;
@@ -476,8 +490,9 @@ file and in requests are bounded and refuse brackets and line breaks. See
 single strokes only, none a key of terminal programs, no conflicts, keys
 for the palette and the shortcuts; `TestUserChords`, chords of the user's
 file, the earlier `ctrl+b` ones included; `TestUserRules`, additions,
-removals and kept unknown entries; `TestConflicts` with prefix shadowing;
-`TestReload`;
+removals and kept unknown entries; `TestRenamedCommands`, rules naming
+`view.toggleCode` applied to `code.open`; `TestConflicts` with prefix
+shadowing and `terminal` meeting `vscode`; `TestReload`;
 `TestMigrateDesktopShortcuts`), `internal/server/settings_test.go`
 (`TestSettingsAPI`, `TestSettingsReadOnly`, `TestKeybindingsAPI`,
 `TestSettingsPush`: both APIs, error codes, read-only refusal, the
@@ -498,7 +513,9 @@ removed, colors from schemes and the user's, every scheme defined),
 fixed-pitch, proportional, symbol and undecoded fonts and one drawn by a
 fallback: names that print, each once, sorted),
 `internal/uisettings/uisettings_test.go` (`TestMigrateValues`: the silent
-agents and the scrollback changed once, current values not rewritten),
+agents and the scrollback changed once, `layout.panelPosition` dropped,
+current values not rewritten), `codePanes.test.ts` (the VS Code panel's
+browser keys removed),
 `internal/agent/detect` (`TestSettingsListEveryAgent`),
 `internal/codeserver` (`TestInstallMode`: a machine's own mode and path),
 `theme.test.ts` (`system` after `dark`), `termOptions.test.ts`,

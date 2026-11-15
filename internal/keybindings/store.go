@@ -150,7 +150,12 @@ func (s *Store) set(user []json.RawMessage) {
 			problems = append(problems, Problem{Index: i, Code: "invalid", Detail: err.Error()})
 			continue
 		}
-		if _, ok := s.byID[strings.TrimPrefix(r.Command, "-")]; !ok {
+		id := strings.TrimPrefix(r.Command, "-")
+		if to, ok := Renamed[id]; ok {
+			r.Command = strings.TrimSuffix(r.Command, id) + to
+			id = to
+		}
+		if _, ok := s.byID[id]; !ok {
 			problems = append(problems, Problem{Index: i, Code: "unknown", Detail: r.Command})
 			continue
 		}
@@ -310,8 +315,12 @@ func (s *Store) effective(platform string) []Rule {
 	return out
 }
 
-// overlaps tells whether two bindings can apply at the same time.
-func overlaps(a, b When) bool { return a == b || a == WhenAlways || b == WhenAlways }
+// overlaps tells whether two bindings can apply at the same time; the main
+// UI's (terminal) also apply in VS Code panes, for the keys VS Code leaves.
+func overlaps(a, b When) bool {
+	return a == b || a == WhenAlways || b == WhenAlways ||
+		a == WhenTerminal && b == WhenVSCode || a == WhenVSCode && b == WhenTerminal
+}
 
 // Conflicts finds keys that run several commands in the same place, and
 // strokes bound alone that start chords too.

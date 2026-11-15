@@ -115,7 +115,7 @@ describe('keybindings', () => {
     expect(keyHint('find.open')).toBe('Ctrl+Shift+F');
     // Unbound commands show no key.
     expect(keyHint('tab.new')).toBe('');
-    expect(keyHint('view.toggleCode')).toBe('');
+    expect(keyHint('code.open')).toBe('');
     expect(keyHint('app.commandPalette')).toBe('');
     expect(withKey('Find', 'find.open')).toBe('Find (Ctrl+Shift+F)');
     expect(withKey('New tab', 'tab.new')).toBe('New tab');
@@ -185,7 +185,8 @@ describe('keybindings', () => {
     expect(handleKey(key({ key: 'x', code: 'KeyX', ctrlKey: true }), 'terminal')).toBe(true);
     // Unknown commands do nothing; plain keys go on to the pane.
     expect(handleKey(key({ key: 'x', code: 'KeyX' }), 'terminal')).toBe(false);
-    expect(handleKey(key({ key: 'k', code: 'KeyK', ctrlKey: true }), 'vscode')).toBe(false);
+    // A dialog's keys are its own.
+    expect(handleKey(key({ key: 'k', code: 'KeyK', ctrlKey: true }), 'dialog')).toBe(false);
     expect(run).not.toHaveBeenCalled();
   });
 

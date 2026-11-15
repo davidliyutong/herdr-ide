@@ -1,13 +1,16 @@
 // Path and URL detection in pane output, also over rows a long path was
-// wrapped on. Cmd/Ctrl+click (or the pane's context menu) opens media in
-// Quick Look and code files in VS Code, resolving relative paths against the
-// pane's working directory.
+// wrapped on. Cmd/Ctrl+click (or the pane's context menu) opens media in a
+// preview pane and code files in a VS Code pane, beside the terminal or in
+// one its workspace has, resolving relative paths against the terminal's
+// working directory.
 
 import { actions } from '../actions';
 import { t } from '../i18n';
 
 export interface LinkContext {
   m: string;
+  /** The terminal's pane, which what it opens goes beside. */
+  pane?: string;
   cwd?: string;
   home?: string;
 }
@@ -157,7 +160,7 @@ export function safeUrl(url: string): boolean {
   }
 }
 
-/** Opens a URL in a new tab, or a path in Quick Look or VS Code. */
+/** Opens a URL in a new tab, or a path in a preview or VS Code pane. */
 export function openLink(l: { kind: FoundLink['kind']; text: string }, ctx: LinkContext) {
   if (l.kind === 'url') {
     // Targets come from pane output (OSC 8): web links only.
@@ -165,5 +168,5 @@ export function openLink(l: { kind: FoundLink['kind']; text: string }, ctx: Link
     return;
   }
   const r = resolvePath(l.text, ctx);
-  actions.openPath(ctx.m, r.path, r.line, r.col);
+  void actions.openPath(ctx.m, r.path, r.line, r.col, ctx.pane);
 }

@@ -152,7 +152,8 @@ returns. Focus changes are reported to programs that asked (mode 1004).
 - Links: with ⌘/Ctrl held, OSC 8 hyperlinks (`http`, `https`, `mailto`) and
   URLs or paths in the text are underlined, also a path wrapped over
   several rows (`terminal/links.ts`); a click opens URLs in a new tab and
-  paths in the preview panel or VS Code ([06](06-quick-look-and-files.md)).
+  paths in a preview or VS Code pane of the terminal's workspace
+  ([06](06-quick-look-and-files.md)).
   Formulas under the resting pointer are shown typeset
   ([19](19-formulas-in-panes.md)).
 - The text menu (right click) has **Copy**, **Paste** (where the browser
@@ -243,7 +244,8 @@ versions, ended programs, terminals asked for early, attention order),
 the font stack before and after the bundled font loads, the colors'
 contrast), `clipToast.test.ts`, `paneHeader.test.ts`, `menus.test.ts`,
 `desktop.test.ts` (closing asks when a program runs), `drop.test.ts`,
-`workspaceDock.test.ts`. In headless Chromium against a dev core: a shell
+`codePanes.test.ts` (paths from a terminal opened in panes beside it). In
+headless Chromium against a dev core: a shell
 with colors, 256 and true colors, box drawing, CJK and emoji; typing; vim
 (alternate screen, application cursor keys, mouse); resizing; splits, new
 tabs and workspaces; find; selection and copy; the wheel in the

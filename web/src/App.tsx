@@ -5,17 +5,16 @@ import { paneHandle } from './state/panes';
 import { conn } from './lib/conn';
 import { Sidebar } from './components/Sidebar';
 import { Workspace } from './components/Workspace';
-import { Dock } from './components/Dock';
+import { CodeLayer } from './components/CodeLayer';
 import { Palette } from './components/Palette';
 import { AuthDialog } from './components/AuthDialog';
 import { AddMachineDialog } from './components/AddMachineDialog';
 import { SettingsDialog } from './components/SettingsDialog';
 import { Dialogs } from './components/Dialogs';
 import { ContextMenu } from './components/ContextMenu';
-import { usePrefs } from './prefs';
 import { initDesktop } from './desktop';
 import { takeOpenedFolders } from './drop';
-import { commandLabel, handleKey, keyHint, onChordChange, pendingChord, runCommand } from './keymap';
+import { commandLabel, handleFrameKey, handleKey, keyHint, onChordChange, pendingChord, runCommand } from './keymap';
 import { applySettings, loadSettings } from './settings';
 import { applyKeybindings, loadKeybindings, useKeys } from './keybindings';
 import { t } from './i18n';
@@ -25,24 +24,27 @@ import * as L from './term/layout';
 import { useGui } from './gui/state';
 import { GuiTray } from './gui/GuiMenus';
 import { bridgeDownload, downloadEvent, resyncDownloads } from './download';
-import { sendTarget } from './lib/bridge';
+import { noteFocusedTerminal, sendTarget } from './lib/bridge';
+import { onFrameKey, windowFocused } from './codeFrames';
 import { TransfersTray } from './components/Transfers';
 import { DownloadsTray } from './components/Downloads';
 import { actions, workspaceTitle } from './actions';
 
 /** Text sent from VS Code ("Send to agent") is pasted, not submitted, into
- * the terminal sendTarget picks: the focused one, or an agent of the
- * workspace whose panel shows the sending window. */
-function pasteToAgent(m: string, text: string, folders?: string[]) {
+ * the terminal sendTarget picks: an agent of the sending VS Code pane's tab
+ * or workspace. The page whose pane that is takes it. */
+function pasteToAgent(m: string, text: string, window?: string, folders?: string[]) {
   const s = useStore.getState();
-  const { terminal, workspace } = sendTarget(s, m, folders);
+  const target = sendTarget(m, window, folders);
+  if (!target) return;
+  const { terminal, workspace } = target;
   if (!terminal) {
     const ws = workspace ? terms.layout(m)?.workspaces.find((w) => w.id === workspace) : undefined;
     s.toast(ws ? t('app.noAgentInWorkspace', { workspace: workspaceTitle(m, ws) }) : t('app.noAgentPane'));
     return;
   }
   // Shown first, so the terminal is attached and takes the paste.
-  actions.focusTerminal(m, terminal);
+  actions.focusPane(m, terminal);
   const paste = () => {
     const h = paneHandle(m, terminal);
     if (!h) return false;
@@ -54,8 +56,8 @@ function pasteToAgent(m: string, text: string, folders?: string[]) {
 }
 
 /** Follows the shown machine's terminals and keeps the store's view of its
- * layout current: the selected workspace (for its dock), and the docks of
- * workspaces that are gone. */
+ * layout current: the selected workspace, and the terminal focused last in
+ * it (Send to Agent's choice when the workspace has no agent). */
 function followTerms() {
   terms.start();
   const show = (m?: string) => m && terms.subscribe(m);
@@ -71,10 +73,7 @@ function followTerms() {
     const layout = m ? st.machines[m]?.layout : undefined;
     if (layout && layout !== (m ? prev.machines[m]?.layout : undefined)) {
       s.setWorkspace(L.selectedWorkspace(layout)?.id);
-      s.pruneDocks(
-        m!,
-        layout.workspaces.map((w) => w.id),
-      );
+      noteFocusedTerminal(m!, layout);
     }
     updateBadge();
   });
@@ -87,7 +86,6 @@ function followTerms() {
 export function App() {
   const sidebarOpen = useStore((s) => s.sidebarOpen);
   const sidebarWidth = useStore((s) => s.sidebarWidth);
-  const dockPosition = usePrefs((s) => s.prefs.dockPosition);
   const connected = useStore((s) => s.connected);
   const toasts = useStore((s) => s.toasts);
   const [chord, setChord] = useState(false);
@@ -110,8 +108,9 @@ export function App() {
           void loadKeybindings();
         }
       },
-      onBridgeSend: (m, text, folders) => pasteToAgent(m, text, folders),
-      onBridgeDownload: (m, paths) => bridgeDownload(m, paths),
+      onBridgeSend: (m, text, window, folders) => pasteToAgent(m, text, window, folders),
+      onBridgeDownload: (m, paths, window) => bridgeDownload(m, paths, window),
+      onBridgeFocus: (m, window, folders) => void windowFocused(m, window, folders),
       onDownload: (ev) => downloadEvent(ev),
       onGui: (st) => useGui.getState().setState(st),
       onSettings: (m) => applySettings(m),
@@ -133,6 +132,8 @@ export function App() {
       handleKey(ev);
     };
     window.addEventListener('keydown', onKey);
+    // A VS Code pane gives the app its pane keys (cmd+w) before VS Code.
+    onFrameKey(handleFrameKey);
     return () => {
       off();
       offTerms();
@@ -143,13 +144,12 @@ export function App() {
   }, []);
 
   return (
-    <div
-      className={`app ${sidebarOpen ? '' : 'no-sidebar'} dock-at-${dockPosition}`}
-      style={{ '--sidebar-w': `${sidebarWidth}px` } as React.CSSProperties}
-    >
+    <div className={`app ${sidebarOpen ? '' : 'no-sidebar'}`} style={{ '--sidebar-w': `${sidebarWidth}px` } as React.CSSProperties}>
       {sidebarOpen && <Sidebar />}
+      {/* On a narrow screen the sidebar lies over the panes: a press beside it closes it. */}
+      {sidebarOpen && <div className="sidebar-backdrop" onClick={() => actions.toggleSidebar()} />}
       <Workspace />
-      <Dock />
+      <CodeLayer />
       <StatusBar connected={connected} chord={chord} />
       <Palette />
       <SettingsDialog />
@@ -185,12 +185,22 @@ function StatusBar({ connected, chord }: { connected: boolean; chord: boolean })
   useKeys((s) => s.effective);
   const m = useStore((s) => s.machineId);
   const machine = useStore((s) => (s.machineId ? s.machines[s.machineId] : undefined));
-  const focused = useTerms((s) => {
-    const layout = m ? s.machines[m]?.layout : undefined;
-    return layout ? L.focusedTerminal(layout) : undefined;
+  // The focused pane: a terminal (its title and directory), VS Code (its
+  // folder) or a preview (its file).
+  const leaf = useTerms((s) => {
+    const tab = m && s.machines[m]?.layout ? L.selectedTab(s.machines[m].layout!) : undefined;
+    return tab ? L.leafOf(tab.root, tab.focused) : null;
   });
-  const cwd = useTerms(() => (m && focused ? terms.directory(m, focused) : undefined));
-  const title = useTerms((s) => (m && focused ? terminalTitle(s.machines[m]?.terminals[focused], focused) : undefined));
+  const terminal = leaf && L.isTerminalLeaf(leaf) ? leaf.terminal : undefined;
+  const cwd = useTerms(() => (m && terminal ? terms.directory(m, terminal) : undefined));
+  const title = useTerms((s) => (m && terminal ? terminalTitle(s.machines[m]?.terminals[terminal], terminal) : undefined));
+  const about = !leaf
+    ? undefined
+    : L.isCodeLeaf(leaf)
+      ? { title: t('code.title'), path: leaf.code.folder }
+      : L.isPreviewLeaf(leaf)
+        ? { title: t('preview.title'), path: leaf.preview.path }
+        : { title, path: cwd };
   const counts = useStore((s) => {
     let ready = 0;
     for (const id of s.order) if (s.machines[id]?.status === 'ready') ready++;
@@ -201,9 +211,9 @@ function StatusBar({ connected, chord }: { connected: boolean; chord: boolean })
       <span className={`conn ${connected ? 'on' : 'off'}`}>{connected ? t('app.connected') : t('app.reconnecting')}</span>
       {readOnly && <span className="prefix-badge ro">{t('app.readOnly')}</span>}
       <span className="muted">{t('app.machines', { n: counts })}</span>
-      {focused && machine && (
+      {about && machine && (
         <span className="muted ellipsis">
-          {machine.label} · {title} · {shortPath(cwd, machine.info?.home)}
+          {machine.label} · {about.title} · {shortPath(about.path, machine.info?.home) || '~'}
         </span>
       )}
       <span className="spacer" />
