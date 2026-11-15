@@ -360,6 +360,12 @@ class GLRenderer extends Base {
   /** Each row's instance bytes. */
   private chunks: Uint8Array[] = [];
   private data = new ArrayBuffer(0);
+  /** The instance buffer's size on the GPU. */
+  private instanceCap = 0;
+  /** The background texels, a row per terminal row. */
+  private bgPixels = new Uint8Array(0);
+  private readonly bgU: Record<'u_bg' | 'u_cell' | 'u_grid' | 'u_height' | 'u_default', WebGLUniformLocation | null>;
+  private readonly glyphU: Record<'u_tex' | 'u_size' | 'u_atlas', WebGLUniformLocation | null>;
   private lost = false;
 
   constructor(canvas: HTMLCanvasElement) {
@@ -370,22 +376,39 @@ class GLRenderer extends Base {
     canvas.addEventListener('webglcontextlost', this.onLost);
     const compile = (vs: string, fs: string) => {
       const p = gl.createProgram()!;
-      for (const [type, src] of [
-        [gl.VERTEX_SHADER, vs],
-        [gl.FRAGMENT_SHADER, fs],
-      ] as const) {
-        const s = gl.createShader(type)!;
-        gl.shaderSource(s, src);
-        gl.compileShader(s);
-        if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s) ?? 'shader');
-        gl.attachShader(p, s);
+      const shaders: WebGLShader[] = [];
+      try {
+        for (const [type, src] of [
+          [gl.VERTEX_SHADER, vs],
+          [gl.FRAGMENT_SHADER, fs],
+        ] as const) {
+          const s = gl.createShader(type)!;
+          shaders.push(s);
+          gl.shaderSource(s, src);
+          gl.compileShader(s);
+          if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s) ?? 'shader');
+          gl.attachShader(p, s);
+        }
+        gl.linkProgram(p);
+        if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p) ?? 'program');
+      } catch (err) {
+        gl.deleteProgram(p);
+        throw err;
+      } finally {
+        // A linked program needs its shaders no longer.
+        for (const s of shaders) {
+          gl.detachShader(p, s);
+          gl.deleteShader(s);
+        }
       }
-      gl.linkProgram(p);
-      if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p) ?? 'program');
       return p;
     };
     this.bgProg = compile(VERT_BG, FRAG_BG);
     this.glyphProg = compile(VERT_GLYPH, FRAG_GLYPH);
+    const uniforms = <K extends string>(p: WebGLProgram, names: K[]) =>
+      Object.fromEntries(names.map((n) => [n, gl.getUniformLocation(p, n)])) as Record<K, WebGLUniformLocation | null>;
+    this.bgU = uniforms(this.bgProg, ['u_bg', 'u_cell', 'u_grid', 'u_height', 'u_default']);
+    this.glyphU = uniforms(this.glyphProg, ['u_tex', 'u_size', 'u_atlas']);
     const texture = () => {
       const t = gl.createTexture()!;
       gl.bindTexture(gl.TEXTURE_2D, t);
@@ -482,17 +505,22 @@ class GLRenderer extends Base {
       this.bgRows = frame.rows;
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, frame.cols, frame.rows, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
     }
-    const line = new Uint8Array(frame.cols * 4);
+    const stride = frame.cols * 4;
+    if (this.bgPixels.length !== stride * frame.rows) this.bgPixels = new Uint8Array(stride * frame.rows);
+    const px = this.bgPixels;
     for (const y of ys) {
       const r = this.rows[y];
-      for (let x = 0; x < frame.cols; x++) {
+      for (let x = 0, o = y * stride; x < frame.cols; x++, o += 4) {
         const c = r.bg[x];
-        line[x * 4] = (c >> 16) & 0xff;
-        line[x * 4 + 1] = (c >> 8) & 0xff;
-        line[x * 4 + 2] = c & 0xff;
-        line[x * 4 + 3] = 255;
+        px[o] = (c >> 16) & 0xff;
+        px[o + 1] = (c >> 8) & 0xff;
+        px[o + 2] = c & 0xff;
+        px[o + 3] = 255;
       }
-      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, y, frame.cols, 1, gl.RGBA, gl.UNSIGNED_BYTE, line);
+    }
+    // Rows that changed side by side go up in one upload.
+    for (const [y0, n] of rowRuns(ys)) {
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, y0, frame.cols, n, gl.RGBA, gl.UNSIGNED_BYTE, px.subarray(y0 * stride, (y0 + n) * stride));
     }
     // Glyph instances of those rows; a glyph new to the atlas may start it
     // over, which needs every row's instances again.
@@ -522,12 +550,12 @@ class GLRenderer extends Base {
     gl.bindVertexArray(this.vaoBg);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.bgTex);
-    gl.uniform1i(gl.getUniformLocation(this.bgProg, 'u_bg'), 0);
-    gl.uniform2f(gl.getUniformLocation(this.bgProg, 'u_cell'), this.m.cw, this.m.ch);
-    gl.uniform2f(gl.getUniformLocation(this.bgProg, 'u_grid'), frame.cols, frame.rows);
-    gl.uniform1f(gl.getUniformLocation(this.bgProg, 'u_height'), this.height);
+    gl.uniform1i(this.bgU.u_bg, 0);
+    gl.uniform2f(this.bgU.u_cell, this.m.cw, this.m.ch);
+    gl.uniform2f(this.bgU.u_grid, frame.cols, frame.rows);
+    gl.uniform1f(this.bgU.u_height, this.height);
     const d = frame.colors.bg;
-    gl.uniform4f(gl.getUniformLocation(this.bgProg, 'u_default'), ((d >> 16) & 0xff) / 255, ((d >> 8) & 0xff) / 255, (d & 0xff) / 255, 1);
+    gl.uniform4f(this.bgU.u_default, ((d >> 16) & 0xff) / 255, ((d >> 8) & 0xff) / 255, (d & 0xff) / 255, 1);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     const count = total / STRIDE;
     if (count) {
@@ -536,12 +564,17 @@ class GLRenderer extends Base {
       gl.useProgram(this.glyphProg);
       gl.bindVertexArray(this.vaoGlyph);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.instances);
-      gl.bufferData(gl.ARRAY_BUFFER, bytes, gl.DYNAMIC_DRAW);
+      // The buffer is made again only when the instances outgrow it.
+      if (this.instanceCap < this.data.byteLength) {
+        this.instanceCap = this.data.byteLength;
+        gl.bufferData(gl.ARRAY_BUFFER, this.instanceCap, gl.DYNAMIC_DRAW);
+      }
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, bytes);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, this.atlasTex);
-      gl.uniform1i(gl.getUniformLocation(this.glyphProg, 'u_tex'), 0);
-      gl.uniform2f(gl.getUniformLocation(this.glyphProg, 'u_size'), this.width, this.height);
-      gl.uniform2f(gl.getUniformLocation(this.glyphProg, 'u_atlas'), this.atlas.size, this.atlas.size);
+      gl.uniform1i(this.glyphU.u_tex, 0);
+      gl.uniform2f(this.glyphU.u_size, this.width, this.height);
+      gl.uniform2f(this.glyphU.u_atlas, this.atlas.size, this.atlas.size);
       gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, count);
     }
     gl.bindVertexArray(null);
@@ -584,6 +617,26 @@ class GLRenderer extends Base {
     // keep only a few at a time.
     gl.getExtension('WEBGL_lose_context')?.loseContext();
   }
+}
+
+/** Rows as runs of neighbors, [first, count], in order. */
+export function rowRuns(ys: Iterable<number>): [number, number][] {
+  const sorted = [...ys].sort((a, b) => a - b);
+  const out: [number, number][] = [];
+  for (const y of sorted) {
+    const last = out[out.length - 1];
+    if (last && y === last[0] + last[1]) last[1]++;
+    else if (!last || y >= last[0] + last[1]) out.push([y, 1]);
+  }
+  return out;
+}
+
+/** A new canvas in the place of one: a canvas keeps the kind of context it
+ * was first asked for, so drawing with Canvas 2D after WebGL needs another. */
+export function replaceCanvas(old: HTMLCanvasElement): HTMLCanvasElement {
+  const fresh = old.cloneNode(false) as HTMLCanvasElement;
+  old.replaceWith(fresh);
+  return fresh;
 }
 
 export { textPad };

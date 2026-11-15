@@ -319,6 +319,9 @@ export class Atlas {
       typeof OffscreenCanvas !== 'undefined'
         ? new OffscreenCanvas(size, size)
         : Object.assign(document.createElement('canvas'), { width: size, height: size });
+    // Drawn on the CPU on purpose: its pixels are read back after each
+    // change (whether a glyph has color, the WebGL texture's upload), which
+    // a canvas on the GPU would answer with a readback each time.
     this.ctx = this.canvas.getContext('2d', { willReadFrequently: true }) as Ctx2D;
   }
 

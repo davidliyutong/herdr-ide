@@ -87,6 +87,11 @@ type Server struct {
 
 	term termHub
 
+	// ready records which machines were ready last, so a machine that
+	// connects (again) ends the wait of its terminal backend.
+	readyMu sync.Mutex
+	ready   map[string]bool
+
 	audit *auditor
 }
 
@@ -118,14 +123,13 @@ func New(mg *machines.Manager, opts Options) *Server {
 	s.displayEnv = s.gui.PaneEnv
 	s.initSettings()
 	// A machine that connects (again) ends the wait of its terminal backend.
-	var readyMu sync.Mutex
-	ready := map[string]bool{}
+	s.ready = map[string]bool{}
 	mg.Subscribe(func(st machines.State) {
 		now := st.Status == machines.StatusReady
-		readyMu.Lock()
-		prev := ready[st.ID]
-		ready[st.ID] = now
-		readyMu.Unlock()
+		s.readyMu.Lock()
+		prev := s.ready[st.ID]
+		s.ready[st.ID] = now
+		s.readyMu.Unlock()
 		if now && !prev {
 			s.term.wakeUp(st.ID)
 		}

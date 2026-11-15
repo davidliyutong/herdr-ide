@@ -107,6 +107,11 @@ export class TermModel {
     this.pending.delete(m);
     this.layouts.delete(m);
     this.loaded.delete(m);
+    this.versions.delete(m);
+    this.announced.delete(m);
+    this.saving.delete(m);
+    this.dirty.delete(m);
+    this.store.forget(m);
     this.publish();
   }
 

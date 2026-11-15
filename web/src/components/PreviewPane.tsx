@@ -58,7 +58,7 @@ export function PreviewPane({ m, pane, path }: { m: string; pane: string; path: 
           const r = await fetch(url, { headers: { Range: 'bytes=0-2097151' } });
           if (!r.ok) throw new Error(await r.text());
           const buf = new Uint8Array(await r.arrayBuffer());
-          if (buf.slice(0, 8000).includes(0)) throw new Error(t('preview.binary'));
+          if (buf.subarray(0, 8000).includes(0)) throw new Error(t('preview.binary'));
           if (!cancelled) setText(new TextDecoder().decode(buf));
         } catch (e) {
           if (!cancelled) setError(e instanceof Error ? e.message : String(e));

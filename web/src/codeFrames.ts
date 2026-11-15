@@ -176,6 +176,10 @@ export function mountFrame(k: string, el: HTMLIFrameElement): () => void {
   return () => {
     if (iframes.get(k) !== el) return;
     iframes.delete(k);
+    loaded.delete(k);
+    // A press can come before the frame it asked for (a reload's next
+    // iframe): when a frame was asked for outlives the one that went.
+    if (Date.now() - (asked.get(k) ?? -Infinity) >= ASK_MS) asked.delete(k);
     unbind(k);
   };
 }

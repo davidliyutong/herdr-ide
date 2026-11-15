@@ -273,7 +273,11 @@ function TabView({ m, ws, tab }: { m: string; ws: string; tab: L.Tab }) {
         const focused = key === tab.focused;
         return (
           <div
-            key={key}
+            // Machines name their terminals alike ("t1" on each): the
+            // machine is part of the key, so a pane of another machine gets
+            // its own canvas, not one whose WebGL context the pane before
+            // it gave up.
+            key={`${m}\n${key}`}
             className={`pane ${focused && !alone ? 'focused' : ''}`}
             style={{ left: pct(r.x), top: pct(r.y), width: pct(r.w), height: pct(r.h) }}
             data-pane={key}

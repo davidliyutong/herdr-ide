@@ -230,6 +230,49 @@ func TestMachineRemove(t *testing.T) {
 	f.audited(`"event":"machine.remove"`, `"target":"u@gpu"`)
 }
 
+// A removed machine leaves nothing behind: its terminal backend (whose
+// clients no longer count it), its code-server proxy and activity, and
+// whether it was ready, so one added again under the same id starts afresh.
+func TestMachineRemoveForgets(t *testing.T) {
+	f := newMachinesFixture(t)
+	s := f.srv
+	b := s.term.backend("gpu")
+	c := &termClient{s: s, subs: map[string]*termBackend{"gpu": b}}
+	b.mu.Lock()
+	b.subs[c] = true
+	b.stopped = true
+	b.mu.Unlock()
+	s.csProxy.proxy(f.mg.Get("gpu"))
+	s.csProxy.touch("gpu", 1)
+	s.readyMu.Lock()
+	s.ready["gpu"] = true
+	s.readyMu.Unlock()
+
+	if w := f.request(s, "DELETE", "/api/m/gpu", ""); w.Code != http.StatusOK {
+		t.Fatalf("remove: %d %s", w.Code, w.Body)
+	}
+	if s.term.existing("gpu") != nil || len(c.subs) != 0 || len(b.subs) != 0 || !b.gone {
+		t.Fatalf("terminal backend kept: %v %v %v", s.term.existing("gpu"), c.subs, b.gone)
+	}
+	s.csProxy.mu.Lock()
+	_, rp := s.csProxy.proxies["gpu"]
+	_, act := s.csProxy.active["gpu"]
+	_, last := s.csProxy.last["gpu"]
+	s.csProxy.mu.Unlock()
+	if rp || act || last {
+		t.Fatalf("code-server proxy kept: %v %v %v", rp, act, last)
+	}
+	s.readyMu.Lock()
+	ready := s.ready["gpu"]
+	s.readyMu.Unlock()
+	if ready {
+		t.Fatal("still ready")
+	}
+	if nb := s.term.backend("gpu"); nb == b || nb.stopped {
+		t.Fatal("the same id got the old backend")
+	}
+}
+
 // Enabling and disabling is a mutation: refused in read-only mode, checked,
 // audited and stored.
 func TestMachineEnabled(t *testing.T) {

@@ -54,6 +54,24 @@ const text = (s: string) => new TextDecoder().decode(new TextEncoder().encode(s)
 const str = (b: Uint8Array) => new TextDecoder().decode(b);
 
 describe('wasm module', () => {
+  it('frees all a terminal took, its input buffer too', () => {
+    const t = term();
+    const free = vt.free.bind(vt);
+    t.write(new Uint8Array(100_000).fill(0x41));
+    // What the terminal holds is freed by dispose: watch for its input buffer.
+    const inBuf = (t as unknown as { inBuf: number; inCap: number }).inBuf;
+    const inCap = (t as unknown as { inBuf: number; inCap: number }).inCap;
+    expect(inBuf).not.toBe(0);
+    const freed: [number, number][] = [];
+    vt.free = (p: number, n: number) => (freed.push([p, n]), free(p, n));
+    try {
+      t.dispose();
+    } finally {
+      vt.free = free;
+    }
+    expect(freed).toContainEqual([inBuf, inCap]);
+  });
+
   it('turns JavaScript functions into wasm functions a table takes', () => {
     const calls: number[] = [];
     const [f] = trampolines([{ params: ['i32', 'i32'], results: ['i32'], fn: (a: number, b: number) => (calls.push(a, b), a + b) }]);

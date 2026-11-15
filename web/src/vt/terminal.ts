@@ -342,6 +342,9 @@ export class Terminal {
     this.x('ghostty_render_state_free')(this.rs);
     this.x('ghostty_terminal_free')(this.t);
     vt.free(this.scratch, Terminal.SCRATCH);
+    if (this.inBuf) vt.free(this.inBuf, this.inCap);
+    this.inBuf = 0;
+    this.inCap = 0;
   }
 
   // ---- output and configuration ----

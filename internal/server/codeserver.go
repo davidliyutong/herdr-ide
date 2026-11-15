@@ -65,6 +65,24 @@ func (p *codeServerProxy) idleAmong(running []string, d time.Duration) []string 
 	return out
 }
 
+// forget drops what is kept for a removed machine: its proxy, whose
+// transport dials that machine (one added again under the same id gets a
+// new one), with its idle connections, and its activity.
+func (p *codeServerProxy) forget(id string) {
+	p.mu.Lock()
+	rp := p.proxies[id]
+	delete(p.proxies, id)
+	delete(p.active, id)
+	delete(p.last, id)
+	p.mu.Unlock()
+	if rp == nil {
+		return
+	}
+	if t, ok := rp.Transport.(*http.Transport); ok {
+		t.CloseIdleConnections()
+	}
+}
+
 func (p *codeServerProxy) proxy(mc *machines.Machine) *httputil.ReverseProxy {
 	p.mu.Lock()
 	defer p.mu.Unlock()

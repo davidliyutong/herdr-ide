@@ -15,7 +15,7 @@ import type { AttachOptions, Display, StreamHandler } from '../term/connection';
 import { displayColors, type Appearance } from '../appearance';
 import { loadVt, type Vt } from './module';
 import { Terminal, newFrame, type Frame, type Row } from './terminal';
-import { createRenderer, lookOf, hexColor, type Cells, type Look, type Overlay, type Renderer } from './renderer';
+import { createRenderer, replaceCanvas, lookOf, hexColor, type Cells, type Look, type Overlay, type Renderer } from './renderer';
 import { measureCell, type Metrics } from './atlas';
 import { keyInput, isMac, modsOf, mouseButton, textInput, wheelLines } from './input';
 import { forgetProgramClipboard, programClipboard, programClipboardCopied, programCopied, userInput } from './clipboard';
@@ -182,10 +182,12 @@ export class TermPane {
   private readonly measureCtx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
   /** Rendering with Canvas 2D was asked for (no WebGL2, or the context was lost). */
   private preferCanvas = false;
+  /** Ends the pane's event listeners. */
+  private readonly listeners = new AbortController();
 
   constructor(
     private readonly host: HTMLElement,
-    private readonly canvas: HTMLCanvasElement,
+    private canvas: HTMLCanvasElement,
     private readonly textarea: HTMLTextAreaElement,
     private readonly o: PaneOptions,
     appearance: Appearance,
@@ -419,10 +421,13 @@ export class TermPane {
     this.overlay = { ...this.overlay, focused: this.focused, blinkOn: this.blinkOn };
     r.render(this.frame, this.look, this.overlay);
     if ('contextLost' in r && (r as { contextLost: boolean }).contextLost) {
-      // The GPU took the context away: draw with Canvas 2D from now on.
+      // The GPU took the context away (a reset, or the browser's limit of
+      // contexts): draw with Canvas 2D from now on, on a canvas of its own,
+      // rather than take another context from a terminal that has one.
       r.dispose();
       this.preferCanvas = true;
       this.renderer = undefined;
+      this.canvas = replaceCanvas(this.canvas);
       this.setAppearance(this.appearance);
     }
     this.ack();
@@ -505,29 +510,32 @@ export class TermPane {
   }
 
   private install() {
+    // Every listener goes with the pane, not only the window's: the host
+    // and the textarea may outlive it.
+    const signal = this.listeners.signal;
     const ta = this.textarea;
-    ta.addEventListener('keydown', this.onKeyDown);
-    ta.addEventListener('keyup', this.onKeyUp);
-    ta.addEventListener('compositionstart', this.onComposition);
-    ta.addEventListener('compositionupdate', this.onComposition);
-    ta.addEventListener('compositionend', this.onCompositionEnd);
-    ta.addEventListener('input', this.onInput);
-    ta.addEventListener('paste', this.onPaste);
-    ta.addEventListener('copy', this.onCopy);
-    ta.addEventListener('focus', this.onFocusChange);
-    ta.addEventListener('blur', this.onFocusChange);
-    this.host.addEventListener('mousedown', this.onMouseDown);
-    this.host.addEventListener('wheel', this.onWheel, { passive: false });
-    this.host.addEventListener('contextmenu', this.onContextMenu);
-    this.host.addEventListener('dragover', this.onDragOver);
-    this.host.addEventListener('dragleave', this.onDragLeave);
-    this.host.addEventListener('drop', this.onDrop);
-    this.host.addEventListener('mouseleave', this.onMouseLeave);
-    this.host.addEventListener('mousemove', this.onHostMove);
-    window.addEventListener('mousemove', this.onMouseMove);
-    window.addEventListener('mouseup', this.onMouseUp);
-    window.addEventListener('keydown', this.onModifier);
-    window.addEventListener('keyup', this.onModifier);
+    ta.addEventListener('keydown', this.onKeyDown, { signal });
+    ta.addEventListener('keyup', this.onKeyUp, { signal });
+    ta.addEventListener('compositionstart', this.onComposition, { signal });
+    ta.addEventListener('compositionupdate', this.onComposition, { signal });
+    ta.addEventListener('compositionend', this.onCompositionEnd, { signal });
+    ta.addEventListener('input', this.onInput, { signal });
+    ta.addEventListener('paste', this.onPaste, { signal });
+    ta.addEventListener('copy', this.onCopy, { signal });
+    ta.addEventListener('focus', this.onFocusChange, { signal });
+    ta.addEventListener('blur', this.onFocusChange, { signal });
+    this.host.addEventListener('mousedown', this.onMouseDown, { signal });
+    this.host.addEventListener('wheel', this.onWheel, { passive: false, signal });
+    this.host.addEventListener('contextmenu', this.onContextMenu, { signal });
+    this.host.addEventListener('dragover', this.onDragOver, { signal });
+    this.host.addEventListener('dragleave', this.onDragLeave, { signal });
+    this.host.addEventListener('drop', this.onDrop, { signal });
+    this.host.addEventListener('mouseleave', this.onMouseLeave, { signal });
+    this.host.addEventListener('mousemove', this.onHostMove, { signal });
+    window.addEventListener('mousemove', this.onMouseMove, { signal });
+    window.addEventListener('mouseup', this.onMouseUp, { signal });
+    window.addEventListener('keydown', this.onModifier, { signal });
+    window.addEventListener('keyup', this.onModifier, { signal });
   }
 
   private onKeyDown = (ev: KeyboardEvent) => {
@@ -1099,10 +1107,7 @@ export class TermPane {
     window.clearTimeout(this.mathTimer);
     window.clearTimeout(this.autoTimer);
     this.preedit.remove();
-    window.removeEventListener('mousemove', this.onMouseMove);
-    window.removeEventListener('mouseup', this.onMouseUp);
-    window.removeEventListener('keydown', this.onModifier);
-    window.removeEventListener('keyup', this.onModifier);
+    this.listeners.abort();
     this.renderer?.dispose();
     this.term?.dispose();
     this.term = undefined;

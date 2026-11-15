@@ -23,6 +23,21 @@ const tab = (...terminals: string[]): L.Tab => ({
 });
 
 describe('TermModel', () => {
+  it('forgets a removed machine entirely, its terminals and backend too', async () => {
+    const core = new FakeCore();
+    core.machine('m', [FakeCore.term('t1')], { version: 2, workspaces: [], selected: 0 });
+    core.machine('gone', [FakeCore.term('t1')], { version: 2, workspaces: [], selected: 0 });
+    const model = core.install();
+    model.subscribe('m');
+    model.subscribe('gone');
+    await settle();
+    expect(Object.keys(useTerms.getState().machines).sort()).toEqual(['gone', 'm']);
+    model.forget('gone');
+    expect(Object.keys(useTerms.getState().machines)).toEqual(['m']);
+    expect(model.store.backends.has('gone')).toBe(false);
+    expect(model.store.terminals('gone')).toEqual([]);
+  });
+
   it('reads the layout after the terminals, with a workspace named in the language, without ended terminals', async () => {
     const core = new FakeCore();
     core.machine('m', [FakeCore.term('t1')], { version: 2, workspaces: [], selected: 0 });

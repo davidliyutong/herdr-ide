@@ -9,6 +9,12 @@ export class TerminalStore {
   readonly backends = new Map<string, BackendState>();
   private readonly records = new Map<string, Map<string, TerminalRecord>>();
 
+  /** Drops what is known of a machine that was removed. */
+  forget(machine: string) {
+    this.backends.delete(machine);
+    this.records.delete(machine);
+  }
+
   /** A machine's terminals, oldest first. */
   terminals(machine: string): TerminalRecord[] {
     const created = (t: TerminalRecord) => (typeof t.created_ms === 'number' ? t.created_ms : 0);

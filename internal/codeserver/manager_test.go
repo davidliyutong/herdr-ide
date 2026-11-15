@@ -53,3 +53,22 @@ func TestRecordDigest(t *testing.T) {
 		t.Errorf("pinned digest = %q", d)
 	}
 }
+
+// A removed machine's state is dropped, and a preparation still running
+// for it changes nothing (it does not bring the state back or fail).
+func TestForget(t *testing.T) {
+	mg := New(log.New(io.Discard, "", 0))
+	mg.state("gpu")
+	mg.setStatus("gpu", func(s *Status) { s.Ready = true })
+	if got := mg.Running(); len(got) != 1 {
+		t.Fatalf("running %v", got)
+	}
+	mg.Forget("gpu")
+	mg.setStatus("gpu", func(s *Status) { s.Ready = true })
+	mg.mu.Lock()
+	n := len(mg.states)
+	mg.mu.Unlock()
+	if n != 0 || len(mg.Running()) != 0 {
+		t.Fatalf("kept %d states", n)
+	}
+}

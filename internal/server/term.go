@@ -96,6 +96,9 @@ type termBackend struct {
 	agents map[string]agentproto.DetectEvent
 	// pub orders the publications of the state on the machine.
 	pub sync.Mutex
+	// gone: the machine was removed; the backend publishes nothing more
+	// (a machine added again under the same id has a backend of its own).
+	gone bool
 }
 
 func (h *termHub) backend(id string) *termBackend {
@@ -108,6 +111,42 @@ func (h *termHub) backend(id string) *termBackend {
 		h.backends[id] = b
 	}
 	return b
+}
+
+// forget drops the backend of a removed machine: its connection to the
+// terminal core closes and its clients no longer count it as subscribed, so
+// a machine added again under the same id starts afresh.
+func (h *termHub) forget(id string) {
+	h.mu.Lock()
+	b := h.backends[id]
+	delete(h.backends, id)
+	h.mu.Unlock()
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	b.gone = true
+	if b.idle != nil {
+		b.idle.Stop()
+		b.idle = nil
+	}
+	if b.stop != nil {
+		b.stop()
+		b.stop = nil
+	}
+	subs := make([]*termClient, 0, len(b.subs))
+	for c := range b.subs {
+		subs = append(subs, c)
+	}
+	clear(b.subs)
+	b.mu.Unlock()
+	for _, c := range subs {
+		c.mu.Lock()
+		if c.subs[id] == b {
+			delete(c.subs, id)
+		}
+		c.mu.Unlock()
+	}
 }
 
 // existing returns a machine's backend, nil when it has none.
@@ -140,6 +179,10 @@ func (b *termBackend) publish() {
 	b.pub.Lock()
 	defer b.pub.Unlock()
 	b.mu.Lock()
+	if b.gone {
+		b.mu.Unlock()
+		return
+	}
 	var st *machines.HCState
 	if b.stop != nil {
 		st = &machines.HCState{State: b.state, Code: b.code, Version: b.version}

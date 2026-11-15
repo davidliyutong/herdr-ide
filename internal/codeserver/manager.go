@@ -165,7 +165,18 @@ func (mg *Manager) state(id string) *machineState {
 func (mg *Manager) setStatus(id string, fn func(*Status)) {
 	mg.mu.Lock()
 	defer mg.mu.Unlock()
-	fn(&mg.states[id].status)
+	// A machine forgotten while it was being prepared keeps no state.
+	if s := mg.states[id]; s != nil {
+		fn(&s.status)
+	}
+}
+
+// Forget drops the state of a removed machine; one added again under the
+// same id is prepared afresh.
+func (mg *Manager) Forget(id string) {
+	mg.mu.Lock()
+	delete(mg.states, id)
+	mg.mu.Unlock()
 }
 
 // Status returns the preparation status for a machine.

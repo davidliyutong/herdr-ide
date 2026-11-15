@@ -62,10 +62,13 @@ export function TerminalView({ m, terminal, focused, onActivate }: Props) {
   const [bar, setBar] = useState<{ total: number; offset: number; len: number }>();
   const [renderer, setRenderer] = useState<string>();
   const findHere = useFind((s) => s.m === m && s.terminal === terminal);
+  /** Ends a drag along the scrollbar, if one is under way. */
+  const endScrollDrag = useRef<() => void>(undefined);
   const activate = useRef(onActivate);
   activate.current = onActivate;
 
   useEffect(() => {
+    let flashTimer: number | undefined;
     const pane = new TermPane(
       hostRef.current!,
       canvasRef.current!,
@@ -94,7 +97,8 @@ export function TerminalView({ m, terminal, focused, onActivate }: Props) {
           if (mode === 'sound') playSound('bell');
           if (mode !== 'visual') return;
           setFlash(true);
-          setTimeout(() => setFlash(false), 150);
+          window.clearTimeout(flashTimer);
+          flashTimer = window.setTimeout(() => setFlash(false), 150);
         },
         onScroll: setBar,
         onCell: (cw, ch) => setCell({ cw, ch }),
@@ -112,6 +116,8 @@ export function TerminalView({ m, terminal, focused, onActivate }: Props) {
     });
     return () => {
       off();
+      window.clearTimeout(flashTimer);
+      endScrollDrag.current?.();
       pane.dispose();
       paneRef.current = undefined;
     };
@@ -169,7 +175,9 @@ export function TerminalView({ m, terminal, focused, onActivate }: Props) {
             const onUp = () => {
               window.removeEventListener('mousemove', onMove);
               window.removeEventListener('mouseup', onUp);
+              endScrollDrag.current = undefined;
             };
+            endScrollDrag.current = onUp;
             window.addEventListener('mousemove', onMove);
             window.addEventListener('mouseup', onUp);
           }}
