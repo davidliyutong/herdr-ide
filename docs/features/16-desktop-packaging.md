@@ -27,7 +27,9 @@ window frames, folders opened with the app); automatic core ownership and
 cleanup through a mechanism that works on all three; safe renderer windows;
 a native menu with the UI's commands and the core's keybindings that never
 takes a key from a terminal; the title bar and menu following the core's
-theme and language; reproducible dependency resolution; release builds that
+theme and language; on macOS, a way to grant Full Disk Access to every
+program that needs it, with its state; reproducible dependency resolution;
+release builds that
 need no secret, with optional Developer ID signing and notarization on
 macOS; a development mode that cannot touch the daily instance's state or
 terminals.
@@ -325,6 +327,80 @@ system's rules run in the tests on any of them:
   takes no folder drops on the sidebar and makes no workspaces from opened
   folders.
 
+**Full Disk Access (macOS)** (`desktop/src/privacy.ts`,
+`web/src/fullDiskAccess.ts`, `web/src/components/settings/FullDiskAccess.tsx`,
+`internal/agent/privacy.go`). macOS has no request for Full Disk Access: a
+program gets it when the user turns it on in System Settings → Privacy &
+Security → Full Disk Access, where it is listed once added with **+** or
+dropped there. macOS checks the program it holds responsible for an
+access, which a child inherits from its parent:
+
+- The core is the app's child and code-server the core's, so the file
+  browser, uploads, downloads and VS Code (its editor and its terminals)
+  access files as the app.
+- The programs of terminals access them as herdr-core. herdr-core
+  (0.1.21, `platform/macos_launchd.rs`, `macos_responsibility.rs`) starts
+  the terminal core as a one-shot launchd job of the user's session, so
+  that it outlives the app, and the core and each terminal's holder
+  execute themselves again with the responsibility they inherited
+  disclaimed; programs never disclaim it, so a terminal's programs have
+  what `~/.herdr-ide[-<instance>]/hc/herdr-core` was granted, whoever
+  started the core. Checked on running instances with
+  `responsibility_get_pid_responsible_for_pid`: a terminal's shell gives
+  its holder (`herdr-core hold`), the terminal core and the holders give
+  themselves; for comparison, a shell of Ghostty gives Ghostty. Starting
+  the core as the app's child would not change this (the holders disclaim
+  in any case) and would tie the terminals to the app.
+
+Both programs therefore need the grant. The settings show it on the
+user's **Terminal** page, in a **Permissions** group, in the desktop app on
+macOS only (the preload's `privacy`, present on macOS; nothing in browsers,
+on Windows and Linux, or in a machine's scope), and a search finds it.
+The page reads `GET /api/m/local/privacy` when the row appears and whenever
+the window comes back to the front, as it does from System Settings. The
+agent opens and closes again a folder that only Full Disk Access opens and
+every Mac has, `~/Library/Application Support/com.apple.TCC` (else
+`~/Library/Safari`): in its own process for **File browser and VS Code**
+(the local machine's agent runs in the core), and, for **Terminals**,
+with `/bin/sh` that the terminal core runs through herdr-core's
+`machine.exec` (its child, so the core is responsible, as a holder is for
+its terminal). `EPERM` is **Not granted**; an open folder **Granted**;
+anything else, or no terminal core running, **Unknown**. Nothing is read
+and no terminal core is started. The row's buttons ask the shell, which
+takes nothing from the page: **Open System Settings…** opens
+`x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles`,
+**Show herdr-core in Finder** shows the instance's
+`~/.herdr-ide[-<instance>]/hc/herdr-core` (the shell works the path out
+from its instance; it is in a hidden folder, which the **+** dialog does
+not show), to be dragged into the list. macOS applies a grant to the
+processes it starts afterwards, so the row says what to restart while one
+lacks it, with the matching action, asked first:
+
+- **Restart Terminal Service…** (the machine menu's action; programs keep
+  running, the core's successor adopts their holders): the probe then runs
+  in a new core. New terminals have the access; terminals opened before
+  keep their holder, and its access, until they are closed.
+- **Quit and Reopen…**: the app quits, which stops its core and
+  code-server but not the terminals, and a helper it leaves (`/bin/sh`,
+  ending within 60 s) has Launch Services open the bundle again once the
+  app is gone, as the Dock would, so that the new app is its own
+  responsible process. Electron's `app.relaunch()` would start it as a
+  child of the old app; development runs, which must keep their instance,
+  use it. System Settings offers its own **Quit & Reopen** when the app's
+  switch is turned on while it runs.
+
+The palette's **Open Full Disk Access Settings…** (`app.fullDiskAccess`,
+macOS only) opens System Settings and the settings at the row. macOS
+records a grant with the program's designated requirement and later
+accepts the code that satisfies it ([TN3127](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements)).
+An app signed ad hoc has its code hash as that requirement (`codesign -d
+-r-` shows `cdhash H"…"`), so each build, an update included, needs the
+grant again: remove the old entry with **−** and add the app anew. Signed
+with a Developer ID, the requirement is the bundle identifier and the team,
+and the grant stays across updates. herdr-core is signed with Herdr's
+Developer ID (`dev.herdr.core`, team `2W9652Q7QR`), so its grant stays
+when the app installs another herdr-core at the same path.
+
 **Notifications and the badge.** The page's notifications are the web
 Notification API, granted by the shell's permission policy, and its count
 of blocked agents is the Badging API (`navigator.setAppBadge`,
@@ -373,6 +449,10 @@ ICNS; development sets the Dock icon from the PNG.
 | Quitting when the main window closes on macOS | Mac apps stay in the Dock until quit; the core keeps its machines, so the window reopens at once. |
 | Only an AppImage on Linux | On Ubuntu 24.04 and later AppArmor keeps Chromium's sandbox in an AppImage from creating user namespaces; the deb installs the profile that allows it. |
 | `--no-sandbox` | Turns off Chromium's renderer sandbox for everything the core serves, VS Code's extensions and webviews included. |
+| Granting Full Disk Access to the app alone, the terminal core started as its child | herdr-core's holders disclaim the responsibility they inherit in any case, so terminals would still be herdr-core's; a child of the app is in the app's coalition, which macOS may end with the app, while terminals outlive it. |
+| Checking Full Disk Access in the shell's own process | Tells the app's access only; terminals have herdr-core's, which only a process the terminal core starts shows. |
+| Reading the privacy database (`TCC.db`) | Reading it needs Full Disk Access itself, and its format is private. |
+| Electron's `app.relaunch()` for **Quit and Reopen…** | The new app would be the old one's child, whose responsible process has gone; macOS would not hold the new app responsible for its own accesses. |
 
 ## Failure modes
 
@@ -399,6 +479,12 @@ ICNS; development sets the Dock icon from the PNG.
   later an AppImage cannot start Chromium's sandbox and exits (the deb
   works). Without a notification daemon no notifications appear; a dock
   without the Unity launcher API shows no badge.
+- Full Disk Access (macOS): without a terminal core running, or without
+  the protected folders, the state is **Unknown** and nothing is offered
+  to restart. An app signed ad hoc and rebuilt or updated keeps its old
+  switch on in System Settings, but macOS no longer applies it: **Not
+  granted** until the entry is removed and the app added again. Terminals
+  opened before herdr-core got the grant stay without it until closed.
 - A downloaded app the system does not trust: Gatekeeper blocks an app
   signed ad hoc until the user allows it, SmartScreen warns before the
   unsigned setup runs ([deployment](../deployment.md#desktop-app)).
@@ -434,7 +520,14 @@ browser asks once, while the desktop app has no prompt. VS Code's
 **Download…** saves folders and files over 32 MB through the File System
 Access API into a folder the user picks in the native dialog (smaller files
 are a plain download, which Electron saves through its save dialog); without
-the permission it failed silently ([05](05-vscode-panes.md)). The existing
+the permission it failed silently ([05](05-vscode-panes.md)). The page's
+Full Disk Access requests (macOS) carry nothing: the shell opens one fixed
+System Settings URL, shows in Finder only the terminal core's executable
+of its instance, when it exists, and reopens only its own bundle; it
+accepts them only from the main window's top frame on the core origin.
+`GET /api/m/{id}/privacy` reports three states and a path; its probes
+open and close a folder without reading it, and the one in the terminal
+core is a fixed command herdr-core ends after 10 s. The existing
 HTTP guards, API allowlist, read-only behavior and CSP remain in force. On
 Windows the core keeps no ssh control sockets and offers no ssh login
 ([02](02-multi-machine-transport.md)). Release builds get no secret; only
@@ -462,8 +555,14 @@ Chromium's limits (`follow`), the menu (`menu`: every item a
 registered command or a standard role titled in both languages,
 accelerators, a rebinding, an unbinding, chords, and the Windows and Linux
 menus: File to Help, Exit on Windows, no key registered), URL and
-permission policy (`policy`) and the preload's functions against a
-stand-in for Electron (`preload`), with no network or real terminal cores.
+permission policy (`policy`), Full Disk Access (`privacy`: the one URL,
+the executable of each instance shown only when it exists, nothing on
+Windows and Linux, the bundle of a packaged executable, reopening through
+Launch Services after the app exited and through Electron in development,
+and `HERDR_IDE_DESKTOP_NO_OPEN`, which opens nothing) and the preload's
+functions against a stand-in for Electron (`preload`: the Full Disk Access
+requests only on macOS, carrying nothing the page passes), with no network
+or real terminal cores.
 `web/src/__tests__/desktop.test.ts` covers the page's side of menu
 commands (dialogs, the main UI's commands acting on the VS Code pane that
 has the keyboard, ⌘W taken from VS Code to close its pane, **Open in
@@ -471,7 +570,18 @@ VS Code** from the menu), `zoom.test.ts` the zoom
 commands (levels, the setting they change, when they are enabled, their
 keys taken from the terminal only while bound) and `drop.test.ts` dropped
 and opened folders, which a local machine with `local_unsupported` does not
-take. `make check test` includes desktop type, format and unit checks
+take, and `fullDiskAccess.test.ts` the Full Disk Access row: hidden in a
+browser, on Windows and Linux, in a machine's scope and on other pages;
+the states the core reports, read again when the window regains focus;
+the buttons' requests; **Restart Terminal Service…** while terminals lack
+it and **Quit and Reopen…** while the app does, each asked first; the
+search; the command. `internal/agent/privacy_test.go` covers the probes
+(`EPERM` against other errors, the first folder that exists, the shell
+script's exit codes with the system's `/bin/sh`, `machine.exec` against a
+scripted terminal core), `privacy_op_test.go` the op (unknown off macOS,
+no terminal core started), the server tests the endpoint (read-only
+allowed, unknown and offline machines), and `TestIntegrationHC` the probe
+through a real herdr-core. `make check test` includes desktop type, format and unit checks
 (without Electron's binary when `ELECTRON_SKIP_BINARY_DOWNLOAD=1`), and
 `scripts/check.sh` vets the core for Linux, macOS and Windows. CI's
 `desktop` job runs, on `ubuntu-24.04`, `macos-26` and `windows-2025`, the

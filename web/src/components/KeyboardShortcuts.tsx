@@ -10,7 +10,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Keyboard, Plus, RotateCcw, X } from 'lucide-react';
 import { hasMessage, t } from '../i18n';
-import { commandLabel } from '../keymap';
+import { commandLabel, commandShown } from '../keymap';
 import { altOnly, keyLabel, MAX_STROKES, strokeOf, tryNormalize, KeyError, normalizeKeys } from '../keys';
 import { keysOf, resetRules, rulesFor, saveUserRules, useKeys, type Conflict } from '../keybindings';
 import { openMenu, type MenuEntry } from '../contextMenu';
@@ -67,6 +67,7 @@ export function KeyboardShortcuts({ query, readOnly, embedded }: { query: string
   const commands = useMemo(
     () =>
       k.commands.filter((c) => {
+        if (!commandShown(c.id)) return false;
         const keys = keysOf(k.effective, c.id);
         if (byKeys) return !pressed || keys.some((key) => key === pressed || key.startsWith(pressed + ' '));
         return commandMatches(commandLabel(c.id), c.id, keys, query);

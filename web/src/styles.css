@@ -1747,6 +1747,27 @@ button.primary:hover {
 .row-gap {
   gap: 8px;
 }
+/* Full Disk Access (settings/FullDiskAccess.tsx): who has it, what to do,
+   then what to restart once it is on, with the actions. */
+.fda-access {
+  display: grid;
+  grid-template-columns: max-content max-content max-content;
+  gap: 4px 14px;
+  align-items: center;
+  margin: 6px 0 8px;
+  font-size: var(--fs-md);
+}
+.fda-access code {
+  color: var(--fg-dim);
+}
+.fda-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.fda-after {
+  margin-top: 12px;
+}
 .setting-check {
   display: flex;
   align-items: flex-start;

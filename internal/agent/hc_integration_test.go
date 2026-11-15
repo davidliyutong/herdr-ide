@@ -10,17 +10,19 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"herdr-ide/internal/agent"
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/hc"
 )
 
 // TestIntegrationHC installs a real herdr-core through the agent, starts the
-// agent's terminal core, runs a program in it through the API pipe and stops
-// the core again. The core's state goes to a temporary directory.
+// agent's terminal core, has it run the Full Disk Access probe, runs a
+// program in it through the API pipe and stops the core again. The core's state goes to a temporary directory.
 func TestIntegrationHC(t *testing.T) {
 	bin := os.Getenv("HC_TEST_BIN")
 	if bin == "" {
@@ -34,7 +36,7 @@ func TestIntegrationHC(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	s, _ := hcAgent(t, "it")
+	s, home := hcAgent(t, "it")
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
@@ -69,6 +71,17 @@ func TestIntegrationHC(t *testing.T) {
 	// Starting again finds the running core.
 	if r, err = s.Request(ctx, agentproto.Header{Op: agentproto.OpHC, Action: "start"}); err != nil || !r.HC.Running {
 		t.Fatalf("second start: %+v %v", r, err)
+	}
+	// Full Disk Access as the terminal core has it: the probe runs there
+	// (machine.exec). In this home the protected folder is a plain one,
+	// which every process opens.
+	defer agent.SetPrivacyOS("darwin")()
+	if err := os.MkdirAll(filepath.Join(home, "Library", "Safari"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if p, err := s.Request(ctx, agentproto.Header{Op: agentproto.OpPrivacy}); err != nil ||
+		p.Privacy.Terminals != agentproto.AccessGranted || p.Privacy.Files != agentproto.AccessGranted {
+		t.Fatalf("privacy: %+v %v", p.Privacy, err)
 	}
 
 	api, _, err := s.Open(ctx, agentproto.Header{Op: agentproto.OpHCAPI})

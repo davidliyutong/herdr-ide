@@ -26,6 +26,20 @@ export interface DesktopShell {
   /** Tells the shell which commands cannot run now (no terminal, a dialog
    * open, read-only…): their menu items are disabled. */
   setDisabledCommands(commands: string[]): void;
+  /** macOS only: Full Disk Access, which the user grants in System Settings. */
+  privacy?: DesktopPrivacy;
+}
+
+/** What the shell does for Full Disk Access; nothing is passed. */
+export interface DesktopPrivacy {
+  /** Opens System Settings at Privacy & Security › Full Disk Access. */
+  openFullDiskAccess(): void;
+  /** Shows the local terminal core's executable (herdr-core) in Finder, to
+   * drag it into that list: the programs of terminals have its access. */
+  revealTerminalCore(): void;
+  /** Quits the app and opens it again, as macOS applies a grant to the
+   * app's processes started afterwards. */
+  relaunch(): void;
 }
 
 export const desktopShell: DesktopShell | undefined = (globalThis as { desktopShell?: DesktopShell }).desktopShell;

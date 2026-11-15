@@ -42,6 +42,8 @@ type Agent struct {
 	hcMu     sync.Mutex
 	hcHashed hcHashed // the installed executable when it was last hashed
 
+	privacyMu sync.Mutex // one Full Disk Access check at a time
+
 	cs  *codeServer
 	gui *gui
 }
@@ -146,6 +148,8 @@ func (a *Agent) handle(ctx context.Context, st net.Conn) {
 		err = a.pipeUnix(st, a.hcSocket())
 	case agentproto.OpDetect:
 		err = a.handleDetect(ctx, st)
+	case agentproto.OpPrivacy:
+		err = a.handlePrivacy(ctx, st)
 	default:
 		err = agentproto.Fail(st, fmt.Errorf("unknown op %q", h.Op))
 		st.Close()

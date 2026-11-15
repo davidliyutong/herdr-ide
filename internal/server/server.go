@@ -159,6 +159,7 @@ func (s *Server) routes() []route {
 		{"PUT /api/m/{id}/enabled", s.writable(s.handleMachineEnabled)},
 		{"GET /api/m/{id}/hc", s.handleHCStatus},
 		{"POST /api/m/{id}/hc/{action}", s.writable(s.handleHCAction)},
+		{"GET /api/m/{id}/privacy", s.handlePrivacy},
 		{"GET /api/m/{id}/auth", s.writable(s.handleAuth)},
 		{"POST /api/m/{id}/bridge", s.writable(s.handleBridge)},
 		{"GET /api/m/{id}/file", s.handleFile},

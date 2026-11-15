@@ -35,6 +35,8 @@ export interface PaneRef {
 export interface SettingsView {
   page?: string;
   machine?: string;
+  /** A row of the page to bring into view. */
+  row?: string;
 }
 
 /** The sidebar's default width and the range it can be dragged in. */

@@ -6,9 +6,10 @@
 // setting (reset, copy its id or JSON), and settings.json opened in VS Code.
 // A machine's scope lists the settings it can have its own value of, each
 // following the user's value until set, and the machine's name, address and
-// troubleshooting. Labels are the i18n keys settings.<key>,
-// settings.<key>.desc, settings.<key>.<option> and settings.group.<id>; a
-// setting without them shows its key.
+// troubleshooting. In the desktop app on macOS the user's Terminal page ends
+// with Full Disk Access (settings/FullDiskAccess.tsx). Labels are the i18n
+// keys settings.<key>, settings.<key>.desc, settings.<key>.<option> and
+// settings.group.<id>; a setting without them shows its key.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Copy as CopyIcon, Ellipsis, FileJson, Lock, Minus, Plus, Search, X } from 'lucide-react';
@@ -35,6 +36,8 @@ import { FontPicker } from './settings/FontPicker';
 import { desktopShell } from '../shell';
 import { ZOOM_KEY } from '../zoom';
 import { colorKeys, ThemeColors, schemeLabel } from './settings/Colors';
+import { FullDiskAccess, fullDiskAccessMatches } from './settings/FullDiskAccess';
+import { fullDiskAccessAvailable, localMachine } from '../fullDiskAccess';
 
 export function settingLabel(key: string): string {
   const k = `settings.${key}`;
@@ -149,6 +152,9 @@ function SettingsModal({ page: askedPage, machine: askedMachine }: { page?: stri
   const current = pages.some((p) => p.id === page) ? page : pages[0]?.id;
   const searching = query.trim() !== '';
   const matching = defs.filter((d) => shownInRows(d) && matchesSearch(d, query));
+  // The Terminal page's Full Disk Access row (desktop app on macOS), found
+  // by a search of the user's settings too.
+  const fdaFound = searching && !machine && fullDiskAccessAvailable() && !!localMachine() && fullDiskAccessMatches(query);
   const fileProblems = st.problems.filter((p) => !p.key || !st.defs.some((d) => d.key === p.key));
   const modifiedIn = (section: string) =>
     defs.some(
@@ -267,7 +273,7 @@ function SettingsModal({ page: askedPage, machine: askedMachine }: { page?: stri
             ) : searching ? (
               <>
                 {sections
-                  .filter((s) => matching.some((d) => d.section === s.id))
+                  .filter((s) => matching.some((d) => d.section === s.id) || (s.id === 'terminal' && fdaFound))
                   .map((s) => (
                     <SectionView
                       key={s.id}
@@ -276,15 +282,22 @@ function SettingsModal({ page: askedPage, machine: askedMachine }: { page?: stri
                       heading
                       machine={machine}
                       readOnly={readOnly}
+                      fullDiskAccess={s.id === 'terminal' && fdaFound}
                     />
                   ))}
                 {!machine && <KeyboardShortcuts query={query} readOnly={readOnly} embedded />}
-                {matching.length === 0 && <p className="muted pad">{t('settings.noMatch')}</p>}
+                {matching.length === 0 && !fdaFound && <p className="muted pad">{t('settings.noMatch')}</p>}
               </>
             ) : current === MACHINE_PAGE && machine ? (
               <MachinePage m={machine} readOnly={readOnly} />
             ) : (
-              <SectionView id={current} defs={defs.filter((d) => d.section === current)} machine={machine} readOnly={readOnly} />
+              <SectionView
+                id={current}
+                defs={defs.filter((d) => d.section === current)}
+                machine={machine}
+                readOnly={readOnly}
+                fullDiskAccess={current === 'terminal' && !machine}
+              />
             )}
           </div>
         </div>
@@ -329,12 +342,15 @@ function SectionView({
   heading,
   machine,
   readOnly,
+  fullDiskAccess,
 }: {
   id: string;
   defs: SettingDef[];
   heading?: boolean;
   machine?: MachineState;
   readOnly: boolean;
+  /** With the Full Disk Access row, which shows itself only where it applies. */
+  fullDiskAccess?: boolean;
 }) {
   const values = useSettings((s) => s.values);
   const problems = useSettings((s) => s.problems);
@@ -366,6 +382,7 @@ function SectionView({
             />
           </div>
         ))}
+      {fullDiskAccess && <FullDiskAccess readOnly={readOnly} />}
       {id === 'gui' && machine && machine.kind !== 'local' && (
         <div className="setting">
           <div className="setting-head">

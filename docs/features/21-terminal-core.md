@@ -37,6 +37,14 @@ against a running core by the integration tests):
   starts the core detached from its caller (a systemd user service on
   Linux, a launchd job on macOS) and returns when it answers. Holder
   processes own the terminals, so a core restart keeps programs running.
+- On macOS (`platform/macos_launchd.rs`, `macos_responsibility.rs`) the
+  launchd job is a one-shot job of the user's session (none when
+  `SSH_CONNECTION` is set), and the core and each holder execute
+  themselves again disclaiming the responsibility they inherited; programs
+  keep their holder's. macOS's privacy checks (Full Disk Access, the
+  prompts for Desktop, Documents and Downloads) therefore treat a
+  terminal's programs as herdr-core's, not as those of the app that
+  started the core ([16](16-desktop-packaging.md)).
 - Programs inherit the core's environment plus `HC_TERMINAL_ID`,
   `HC_TERMINAL_SOCKET`, `TERM=xterm-256color` and `COLORTERM`. The agent
   starts the core (and code-server and the display) with its own

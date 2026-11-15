@@ -98,7 +98,11 @@ dropped from the file manager is on disk (to create a workspace there or
 paste its path into a pane of the local machine), and the folders opened
 with the app (dropped on the Dock icon on macOS, named
 on the command line by a file manager's Open With on Linux), also when they
-launched it. Same-origin popups become equally restricted native windows;
+launched it, and on macOS three requests for Full Disk Access without
+arguments (System Settings at that list, the local terminal core's
+executable in Finder, quitting and reopening the app), for which the shell
+opens one fixed URL, a path it works out itself and its own bundle.
+Same-origin popups become equally restricted native windows;
 HTTP(S) links outside the core open in the default browser. Packaging and
 lifecycle details are in [16](features/16-desktop-packaging.md).
 
@@ -121,6 +125,7 @@ after a successful reply it carries op-specific bytes.
 | `hc` | core → agent | actions `status`, `install` (after a first reply the gzip-compressed herdr-core executable, chunked, checked against `Digest`), `start`, `restart` (the core's successor adopts the programs; both with `Digest`, the executable this build carries, which the agent hashes the installed file against before running it) and `stop` (the terminal core of the agent's instance); each ends with a reply with `HC` (the installed executable's digest, whether a core answers, its version, session and socket); failures carry `Code`: `not_installed`, `bad_digest`, `start_failed`, `stop_failed` |
 | `hc-api` | core → agent | raw pipe to the terminal core's socket (herdr-core's API, `internal/hc`); starts nothing |
 | `detect` | core → agent | after the reply, `DetectEvent` lines `{terminal, agent, status}` (status `working`, `blocked`, `idle`, `done`, `unknown`; `{terminal}` when the agent left) from the agent, which follows the terminal core's terminals until the core closes the stream ([25](features/25-agent-detection.md)); starts and writes nothing |
+| `privacy` | core → agent | – (reply has `Privacy`: whether macOS's Full Disk Access lets the agent's process (`files`; on the local machine the core's) and the terminal core (`terminals`, a probe it runs with `machine.exec`) open a folder only it opens, each `granted`, `denied` or `unknown`, and the terminal core's executable); starts no terminal core, reads no file |
 | `bridge` | agent → core | JSON lines between the VS Code extension and the core |
 | `gui` | core → agent | actions `status`, `install` (fetch Xvfb in user space), `start`, `keep` (start the display keeper, which holds the display while the instance's terminal core runs), `shells` (which of the pids in `Args` were started with the display) (reply `GUI`); `video` and `video-install` (`Digest`: the video encoder's SHA-256; the second streams the gzip-compressed encoder, chunked) reply whether it is installed and the stream kinds it makes here (`GUI.Video`, `GUI.VideoEncoders`); `attach`: messages `[kind u8][len u32][payload]`, JSON events (`window`, `gone`, `layer`, `layer_gone`, `cursor`, `stats`, `video` (a window's stream starts, or ends without a codec)) and frames (`GUIFrameHeader` + JPEG/PNG, or a video frame of the whole window, `Enc` 3, 4 for key frames) from the agent, JSON commands (`watch`, `ack`, `refresh`, `codecs` (the stream kinds all viewers decode, also sent with `watch` and `refresh`), `keyframe`, input, `close`) from the core |
 
@@ -171,7 +176,9 @@ change the core's machines file and the running machine; the WebSocket
 `GET /api/m/{id}/auth` is the interactive ssh login of an *auth_required*
 machine (`501 ssh_login_unsupported` on a core without ssh control
 sockets, Windows). `GET /api/m/{id}/hc` and `POST /api/m/{id}/hc/{start|stop|restart}`
-report, start, stop and restart its terminal core. When machines come or
+report, start, stop and restart its terminal core; `GET /api/m/{id}/privacy`
+reports macOS's Full Disk Access for the machine's processes (op
+`privacy`, [16](features/16-desktop-packaging.md)). When machines come or
 go the core sends every browser a new `machines {list}`; a renamed machine
 arrives as its `machine {state}`. A program window is shown by
 the app at `GET /m/{id}/gui/{win}`, streamed over the WebSocket

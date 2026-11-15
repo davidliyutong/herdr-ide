@@ -26,6 +26,11 @@
       "when": "terminal"
     },
     {
+      "id": "app.fullDiskAccess",
+      "section": "app",
+      "when": "terminal"
+    },
+    {
       "id": "workspace.switch",
       "section": "workspace",
       "when": "terminal"
@@ -230,6 +235,7 @@
     "command.app.addMachine",
     "command.app.agentAttention",
     "command.app.commandPalette",
+    "command.app.fullDiskAccess",
     "command.app.keyboardShortcuts",
     "command.app.settings",
     "command.code.diff",

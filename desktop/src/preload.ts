@@ -1,7 +1,8 @@
 // Preload of the main window (sandboxed, context-isolated). It gives the page
 // a narrow bridge and nothing else: the commands of the menu items chosen,
 // where a file the user dropped is on disk, which folders were opened with
-// the app, and (from the page) which commands' menu items to disable.
+// the app, (from the page) which commands' menu items to disable, and on
+// macOS three requests without arguments for Full Disk Access.
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
 import type { DesktopShell, OpenedFolders } from '../../web/src/shell';
 import { channels } from './bridge';
@@ -56,4 +57,18 @@ const shell: DesktopShell = {
   },
 };
 
-contextBridge.exposeInMainWorld('desktopShell', shell);
+/** The bridge of a system (process.platform): Full Disk Access is macOS's. */
+export function desktopShellFor(platform: string): DesktopShell {
+  return {
+    ...shell,
+    ...(platform === 'darwin' && {
+      privacy: {
+        openFullDiskAccess: () => ipcRenderer.send(channels.openFullDiskAccess),
+        revealTerminalCore: () => ipcRenderer.send(channels.revealTerminalCore),
+        relaunch: () => ipcRenderer.send(channels.relaunch),
+      },
+    }),
+  };
+}
+
+contextBridge.exposeInMainWorld('desktopShell', desktopShellFor(process.platform));

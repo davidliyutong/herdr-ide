@@ -11,4 +11,11 @@ export const channels = {
   /** page → shell: the commands that cannot run now, whose menu items are
    * disabled. */
   menuState: 'desktop:menu-state',
+  /** page → shell (macOS): open System Settings at Full Disk Access. */
+  openFullDiskAccess: 'desktop:open-full-disk-access',
+  /** page → shell (macOS): show the local terminal core's executable in
+   * Finder. */
+  revealTerminalCore: 'desktop:reveal-terminal-core',
+  /** page → shell (macOS): quit and open the app again. */
+  relaunch: 'desktop:relaunch',
 } as const;

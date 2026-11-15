@@ -171,7 +171,13 @@ Download it from GitHub Releases:
   cannot check the app for malicious software, Control-click the app and
   choose **Open** (on macOS 15 and later: **Open Anyway** under System
   Settings → Privacy & Security). The app stays in the Dock when its
-  window closes, until you quit it.
+  window closes, until you quit it. For terminals and the file browser to
+  reach other apps' data (Mail, Messages, Safari) and open Desktop,
+  Documents, Downloads or external disks without asking, give them Full
+  Disk Access under **Settings → Terminal → Permissions**: it opens System
+  Settings, where you turn on herdr-ide and add herdr-core, which runs the
+  terminals, and tells you what to restart. An app signed ad hoc needs it
+  again after each rebuild or update.
 - **Windows:** run the setup; if SmartScreen says "Windows protected your
   PC", choose **More info** → **Run anyway**. The app needs Windows'
   OpenSSH Client (installed by default on Windows 10 1809 and later).

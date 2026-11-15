@@ -182,9 +182,11 @@ panel there), except the key of `pane.close`, which the page takes first
 to close the VS Code pane; in the desktop app on macOS a key VS Code
 leaves runs, through the menu, a command for `terminal`, `vscode` or
 `always`, on that pane. A rule naming `view.toggleCode`, the command of
-earlier versions, applies to `code.open`. Keys follow the keyboard
-layout's characters. The table is generated from the registry by
-`scripts/registry`.
+earlier versions, applies to `code.open`. `app.fullDiskAccess` (**Open
+Full Disk Access Settings…**) exists only in the desktop app on macOS, and
+the palette and the keyboard shortcuts page list it only there. Keys follow
+the keyboard layout's characters. The table is generated from the registry
+by `scripts/registry`.
 
 <!-- scripts/registry: commands -->
 
@@ -195,6 +197,7 @@ layout's characters. The table is generated from the registry by
 | `app.settings` | `terminal` | `cmd+comma` | – | `ctrl+comma` | – |
 | `app.agentAttention` | `terminal` | `cmd+shift+a` | – | `ctrl+shift+a` | – |
 | `app.addMachine` | `terminal` | – | – | – | – |
+| `app.fullDiskAccess` | `terminal` | – | – | – | – |
 | `workspace.switch` | `terminal` | `cmd+p` | – | – | – |
 | `workspace.next` | `terminal` | `cmd+ctrl+down` | – | – | – |
 | `workspace.previous` | `terminal` | `cmd+ctrl+up` | – | – | – |
@@ -304,6 +307,7 @@ missing here.
 | `PUT /api/m/{id}/enabled` | writes | Enables or disables a machine. |
 | `GET /api/m/{id}/hc` | – | The machine's terminal core: installed, running, version. |
 | `POST /api/m/{id}/hc/{action}` | writes | `start`, `stop` or `restart` the machine's terminal core. |
+| `GET /api/m/{id}/privacy` | – | macOS's Full Disk Access on the machine: `files` (the agent's process; on the local machine the core's, which the desktop app started) and `terminals` (the terminal core's, which its terminals' programs have), each `granted`, `denied` or `unknown` (not macOS, no terminal core running, no protected folder to try), and `hc`, the terminal core's executable. Starts no terminal core. |
 | `GET /api/m/{id}/auth` | writes | Interactive ssh login of a machine that needs one (WebSocket, `?cols=&rows=`); `400 invalid_target` for a refused target, `501 ssh_login_unsupported` on a core without ssh control sockets (Windows). |
 | `POST /api/m/{id}/bridge` | writes | A command for a VS Code window (open a file at a line, diff, Git Graph): the one `window` names, else with `fresh` one that connects after the request, else the best one for `folder`; the reply names the window that took it. |
 | `GET /api/m/{id}/file` | – | A file (`?path=`, `&download=1` as an attachment), with HTTP ranges. |
@@ -328,6 +332,7 @@ missing here.
 | `HERDR_IDE_BRIDGE_SOCKET` | set by the agent for code-server | Socket of the VS Code bridge extension. |
 | `HERDR_IDE_CORE` | `pnpm -C web dev` | Core URL the Vite dev server proxies to (default `http://127.0.0.1:7780`; `make dev-web` sets the development core's, `DEV_LISTEN`). |
 | `HERDR_IDE_DESKTOP_DEV` | Electron | Isolated development even in a packaged app: `1` runs instance `dev` (terminal core session `herdr-ide-dev`); another value names the instance (lowercase letters, digits and dashes, starting with a letter or digit, at most 32, not `desktop`; the app refuses to start otherwise), so a smoke test can run beside a development instance in use. Every development instance is local-only and has its own Electron profile and single-instance lock (`herdr-ide-desktop-<instance>`, `herdr-ide-desktop-dev` for `dev`). Unpackaged Electron always uses this mode. |
+| `HERDR_IDE_DESKTOP_NO_OPEN` | Electron, development instances only | Set (to anything): the Full Disk Access buttons write `no-open: …` with what they would open (System Settings' URL, the terminal core's executable in Finder, the app's relaunch) to stderr instead of opening it, for smoke tests. |
 | `HERDR_IDE_DESKTOP_PORT` | Electron | Loopback port (default `7781`, development `7791`); `0` chooses an ephemeral port, which gives a new browser storage origin. |
 | `--user-data-dir=<dir>` | Electron command line | Replaces the Electron profile and its single-instance lock, so a copy launched by its executable (on macOS not with `open`, which activates a running copy of the same bundle identifier) runs beside another one; for isolated smoke tests with `HERDR_IDE_DESKTOP_DEV`. |
 | `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` | core on Linux | The user configuration directory (settings, keybindings, machines; default `~/.config`) and the cache directory (code-server downloads; default `~/.cache`). |

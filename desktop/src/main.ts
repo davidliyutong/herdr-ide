@@ -11,7 +11,8 @@ import {
   type BaseWindow,
   type IpcMainEvent,
 } from 'electron';
-import { statSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import registry from '../../design/generated/registry.json';
 import tokens from '../../design/tokens.json';
@@ -26,6 +27,7 @@ import { followCore, type ShellSettings } from './follow';
 import { menuCommands, menuTemplate, parseDisabled, type Binding } from './menu';
 import { APP_ID, coreBinary, foldersOf, keyPlatform, quitsWithLastWindow, type Platform } from './platform';
 import { allowPermission, isExternal, isInternal, mainWindowPreferences, webPreferences } from './policy';
+import { bundleOf, privacyActions, terminalCoreExecutable } from './privacy';
 
 const platform = process.platform as Platform;
 app.setName(APP_NAME);
@@ -208,6 +210,35 @@ ipcMain.on(channels.foldersWanted, (event, wanted: unknown) => {
   if (!fromMainPage(event)) return;
   const contents = event.sender;
   folders.takenBy(wanted === true ? (opened) => contents.send(channels.openFolders, opened) : undefined);
+});
+
+// Full Disk Access (macOS): the page asks; what opens is the shell's own.
+const privacy = privacyActions(
+  {
+    platform,
+    executable: terminalCoreExecutable(app.getPath('home'), typeof instance === 'string' ? instance : ''),
+    bundle: app.isPackaged ? bundleOf(process.execPath) : '',
+    pid: process.pid,
+    dev,
+    log: dev && process.env[`${ENV_PREFIX}DESKTOP_NO_OPEN`] ? (line) => process.stderr.write(`no-open: ${line}\n`) : undefined,
+  },
+  {
+    openExternal: (url) => void shell.openExternal(url).catch(console.error),
+    showItemInFolder: (path) => shell.showItemInFolder(path),
+    exists: (path) => existsSync(path),
+    spawnDetached: (file, args) => spawn(file, args, { detached: true, stdio: 'ignore' }).unref(),
+    relaunch: () => app.relaunch(),
+    quit: () => app.quit(),
+  },
+);
+ipcMain.on(channels.openFullDiskAccess, (event) => {
+  if (fromMainPage(event)) privacy.openFullDiskAccess();
+});
+ipcMain.on(channels.revealTerminalCore, (event) => {
+  if (fromMainPage(event)) privacy.revealTerminalCore();
+});
+ipcMain.on(channels.relaunch, (event) => {
+  if (fromMainPage(event)) privacy.relaunch();
 });
 
 /** The page's background (color.background in design/tokens.json), shown before it paints. */

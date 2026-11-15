@@ -593,6 +593,12 @@ func TestHCLifecycle(t *testing.T) {
 	if code, st := do("GET", "/api/m/x/hc"); code != 200 || st["running"] != true || st["version"] != "9.9.9" || st["digest"] == "" {
 		t.Fatalf("status: %d %v", code, st)
 	}
+	// Full Disk Access: a terminal core that runs no program and a home
+	// without the protected folders tell nothing (a test does not reach
+	// macOS's real ones); the terminal core's executable is named.
+	if code, st := do("GET", "/api/m/x/privacy"); code != 200 || st["files"] != "unknown" || st["terminals"] != "unknown" || st["hc"] != bin {
+		t.Fatalf("privacy: %d %v", code, st)
+	}
 
 	// Stop: the core goes away and the backend does not start another.
 	core.ln.Close()

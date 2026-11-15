@@ -258,6 +258,10 @@ settings per browser; theming terminal applications.
     **Troubleshooting**: restart, start or stop its terminal service. A
     machine's menu in the sidebar opens it there (**Machine Settings…**), and
     a program window error opens its **Program Windows** page;
+  - in the desktop app on macOS, the user's **Terminal** page ends with
+    **Permissions → Full Disk Access**, which is no setting: whether
+    terminals and the app have it, System Settings, and what to restart
+    ([16](16-desktop-packaging.md)); the search finds it too;
   - a list of sections, the advanced ones last under **Advanced**, each
     with a dot when one of its settings is changed in the scope shown, and
     **Keyboard Shortcuts** (User only);

@@ -58,6 +58,10 @@ const (
 	// DetectEvent lines from the agent until either side closes the stream.
 	// It starts nothing and writes nothing.
 	OpDetect Op = "detect"
+	// OpPrivacy reports in Privacy what macOS's Full Disk Access lets the
+	// agent's own process and the terminal core's do. It starts no terminal
+	// core and reads no file.
+	OpPrivacy Op = "privacy"
 )
 
 // DetectEvent is one line of an OpDetect stream: the agent a terminal runs
@@ -119,6 +123,28 @@ type Reply struct {
 	Bridge  *BridgeInfo `json:"bridge,omitempty"`
 	GUI     *GUIStatus  `json:"gui,omitempty"`
 	HC      *HCStatus   `json:"hc,omitempty"`
+
+	Privacy *PrivacyStatus `json:"privacy,omitempty"`
+}
+
+// Full Disk Access as an OpPrivacy reply reports it.
+const (
+	AccessGranted = "granted"
+	AccessDenied  = "denied"
+	// AccessUnknown: not macOS, no terminal core running, no folder to
+	// try, or another error.
+	AccessUnknown = "unknown"
+)
+
+// PrivacyStatus is whether macOS's Full Disk Access lets a machine's
+// processes open a folder only it opens: Files for the agent's own process
+// (for the local machine the core's, which serves the file browser and
+// starts code-server), Terminals for the terminal core's (whose executable
+// is HC: the programs of its terminals have what it was granted).
+type PrivacyStatus struct {
+	Files     string `json:"files"`
+	Terminals string `json:"terminals"`
+	HC        string `json:"hc"`
 }
 
 // Info describes the agent host.

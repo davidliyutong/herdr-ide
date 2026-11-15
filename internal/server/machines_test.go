@@ -217,7 +217,7 @@ func TestMachineEnabled(t *testing.T) {
 
 // The terminal core's lifecycle endpoints: refused read-only, unknown
 // actions and machines are not found, a machine without its agent answers
-// machine_offline.
+// machine_offline. Full Disk Access is reported read-only too.
 func TestHCEndpointsGuard(t *testing.T) {
 	f := newMachinesFixture(t)
 	f.run([]httpCase{
@@ -226,6 +226,8 @@ func TestHCEndpointsGuard(t *testing.T) {
 		{false, "POST", "/api/m/nope/hc/stop", "", 404, ""},
 		{false, "POST", "/api/m/gpu/hc/stop", "", 409, "machine_offline"},
 		{true, "GET", "/api/m/gpu/hc", "", 409, "machine_offline"},
+		{true, "GET", "/api/m/gpu/privacy", "", 409, "machine_offline"},
+		{true, "GET", "/api/m/nope/privacy", "", 404, ""},
 	})
 	if strings.Contains(f.audit.String(), `"hc.`) {
 		t.Fatalf("audited a refused action: %s", f.audit.String())

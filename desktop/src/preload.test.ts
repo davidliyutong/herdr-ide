@@ -3,13 +3,31 @@ import assert from 'node:assert/strict';
 import type { DesktopShell, OpenedFolders } from '../../web/src/shell';
 import { channels } from './bridge';
 import { exposed, onDisk, receive, sent } from './fakeElectron';
-import './preload';
+import { desktopShellFor } from './preload';
 
 const shell = exposed.desktopShell as DesktopShell;
+const common = ['onCommand', 'onOpenFolders', 'pathForFile', 'setDisabledCommands'];
 
 test('the page gets only the desktopShell bridge, with these functions', () => {
   assert.deepEqual(Object.keys(exposed), ['desktopShell']);
-  assert.deepEqual(Object.keys(shell).sort(), ['onCommand', 'onOpenFolders', 'pathForFile', 'setDisabledCommands']);
+  assert.deepEqual(Object.keys(shell).sort(), process.platform === 'darwin' ? [...common, 'privacy'].sort() : common);
+  for (const platform of ['win32', 'linux']) assert.deepEqual(Object.keys(desktopShellFor(platform)).sort(), common);
+});
+
+test("Full Disk Access is macOS's: three requests on their own channels, carrying nothing from the page", () => {
+  const privacy = desktopShellFor('darwin').privacy!;
+  assert.deepEqual(Object.keys(privacy).sort(), ['openFullDiskAccess', 'relaunch', 'revealTerminalCore']);
+  sent.length = 0;
+  const anything = privacy as unknown as Record<string, (arg: unknown) => void>;
+  anything.openFullDiskAccess('https://example.com');
+  anything.revealTerminalCore('/etc/passwd');
+  anything.relaunch('--inspect');
+  assert.deepEqual(sent, [
+    { channel: channels.openFullDiskAccess, value: undefined },
+    { channel: channels.revealTerminalCore, value: undefined },
+    { channel: channels.relaunch, value: undefined },
+  ]);
+  sent.length = 0;
 });
 
 test('the menu sends the page commands, strings only, while it listens', () => {

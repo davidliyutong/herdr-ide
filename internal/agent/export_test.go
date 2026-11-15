@@ -10,3 +10,10 @@ func brandLegacy(names ...string) (restore func()) {
 	brand.LegacyDataDirNames = names
 	return func() { brand.LegacyDataDirNames = old }
 }
+
+// SetPrivacyOS makes op privacy check as on goos.
+func SetPrivacyOS(goos string) (restore func()) {
+	old := privacyOS
+	privacyOS = goos
+	return func() { privacyOS = old }
+}

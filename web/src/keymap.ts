@@ -16,6 +16,7 @@ import { platform, useKeys, type Binding, type When } from './keybindings';
 import { findStep, openFind, useFind } from './vt/find';
 import { paneHandle } from './state/panes';
 import { currentZoom, zoom, zoomAvailable, ZOOM_LEVELS } from './zoom';
+import { fullDiskAccessAvailable, openFullDiskAccess } from './fullDiskAccess';
 
 /** Where a key is pressed: the main UI, a VS Code pane, or a dialog. */
 export type KeyContext = 'terminal' | 'vscode' | 'dialog';
@@ -164,6 +165,13 @@ export function withKey(label: string, command: string): string {
   return key ? t('app.withKey', { label, key }) : label;
 }
 
+/** Whether a command exists on this page at all: Open Full Disk Access
+ * Settings… only in the desktop app on macOS. The keyboard shortcuts page
+ * lists the others. */
+export function commandShown(id: string): boolean {
+  return id !== 'app.fullDiskAccess' || fullDiskAccessAvailable();
+}
+
 /** Whether a command can run now: a pane, tab or workspace for it to act
  * on, something to switch to, a page that may change things. The desktop
  * app's menu shows the others disabled, the palette leaves them out. */
@@ -220,6 +228,8 @@ export function commandEnabled(id: string): boolean {
       return attentionList().length > 0;
     case 'app.addMachine':
       return changes;
+    case 'app.fullDiskAccess':
+      return fullDiskAccessAvailable();
     case 'view.zoomIn':
       return zoomAvailable(s.readOnly) && currentZoom() < ZOOM_LEVELS[ZOOM_LEVELS.length - 1];
     case 'view.zoomOut':
@@ -255,6 +265,9 @@ export function runCommand(id: string) {
       break;
     case 'app.addMachine':
       s.openAddMachine(true);
+      break;
+    case 'app.fullDiskAccess':
+      openFullDiskAccess();
       break;
     case 'workspace.switch':
       s.setPalette?.('workspaces');

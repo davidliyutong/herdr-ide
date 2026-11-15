@@ -111,6 +111,8 @@ var Commands = func() []Command {
 		cmd("app.settings", "app", on(macApp, "cmd+comma"), on(pcApp, "ctrl+comma")),
 		cmd("app.agentAttention", "app", on(macApp, "cmd+shift+a"), on(pcApp, "ctrl+shift+a")),
 		cmd("app.addMachine", "app"),
+		// The desktop app on macOS: System Settings at Full Disk Access.
+		cmd("app.fullDiskAccess", "app"),
 
 		cmd("workspace.switch", "workspace", on(macApp, "cmd+p")),
 		cmd("workspace.next", "workspace", on(macApp, "cmd+ctrl+down")),

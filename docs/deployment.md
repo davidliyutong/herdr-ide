@@ -132,6 +132,27 @@ and opens without this. To update, quit the app and replace it with the
 newer one; to uninstall, quit it and move it to the Trash (the files below
 stay).
 
+**Full Disk Access.** Without it macOS keeps programs out of other apps'
+data (Mail, Messages, Safari) and Time Machine backups, and asks before
+they open Desktop, Documents, Downloads or external disks. It is granted to
+two programs: the app, for the file browser, uploads, downloads and
+VS Code, and herdr-core, `~/.herdr-ide-desktop/hc/herdr-core`, for the
+programs of terminals (macOS holds herdr-core, not the app, responsible for
+them). **Settings → Terminal → Permissions → Full Disk Access** shows
+whether each has it and opens System Settings at the list (also **Open
+Full Disk Access Settings…** in the command palette): turn on herdr-ide
+and add herdr-core with **+** or by dragging it from the Finder window
+**Show herdr-core in Finder** opens. macOS applies it to processes started
+afterwards: quit and reopen the app (**Quit and Reopen…**; terminals keep
+running), restart the terminal service (**Restart Terminal Service…**;
+programs keep running) and open new terminals; terminals opened before
+stay without it until closed. macOS keeps a grant for the code that
+satisfies the program's designated requirement: for an app signed ad hoc
+that is this very build, so after rebuilding or updating it remove the
+app's entry with **−** and add it again; a Developer ID release keeps its
+grant across updates, and so does herdr-core, signed with Herdr's
+Developer ID.
+
 Finder launches include `~/.local/bin`, `/opt/homebrew/bin`,
 `/usr/local/bin` and system paths in the core's PATH. The launcher does not
 execute shell startup files, so variables exported there reach the core only
@@ -414,6 +435,7 @@ What herdr-ide starts on a machine and how it is reclaimed:
 | Electron profile | First desktop launch | Kept until manually removed, also by uninstalling ([where](#where-the-app-keeps-its-files)); Chromium manages its caches. Development has a separate profile. Core stderr is bounded to 16 KiB in memory; no desktop log files accumulate. |
 | `herdr-ide-agent` | one per core while connected | Exits when its ssh session ends; a dead link is detected by keepalives within about 45 s. |
 | A machine added from the UI | **Add machine…** (`POST /api/machines`) | Only a record in the core's `machines[-<instance>].json` and an agent while it is connected. **Remove machine…** deletes the record and ends the session (the agent exits and stops what it started); the machine's terminal core and terminals keep running there; the agent builds left in `~/.herdr-ide/agent/` follow their usual retention. |
+| Full Disk Access check (macOS) | `GET /api/m/{id}/privacy` (the desktop app's settings, on macOS, when the row appears and when the window regains focus); one at a time per agent | `/bin/sh` run by the machine's terminal core through herdr-core's `machine.exec`, only while that core runs (none is started), opening and closing one folder; herdr-core ends it and everything it started after 10 s at most, and sweeps the token it keeps for it in its state directory when it ended (or at its next start, after a crash). The agent writes nothing. |
 | Terminal core (herdr-core) | when a client of `/api/v1/term` first subscribes to the machine's terminals and no core answers (never in `--read-only`; audited as `term.start`), or **Start terminal core** / **Restart terminal core…** in the machine's menu (browser UI, desktop app) (`POST /api/m/{id}/hc/{start\|restart}`, audited as `hc.start`, `hc.restart`) | Started by herdr-core detached from the agent (a systemd user service on Linux, a launchd job on macOS) in the session `herdr-ide[-<instance>]`, with its socket in `~/.herdr-ide[-<instance>]/run/hc.sock`. It belongs to the user and outlives the agent and the core, so its programs keep running; it ends with **Stop terminal core…** in the machine's menu (`POST /api/m/{id}/hc/stop`, asked first, audited as `hc.stop`: every terminal there ends, and the core starts none again until it is started from the menu or a client subscribes to the machine anew), with the agent op `hc` action `stop`, with `HC_SESSION=herdr-ide[-<instance>] HC_SOCKET=<socket> herdr-core server stop`, and with the machine. A restart keeps the programs (the core's successor adopts them). Its state (terminal records, saved screens, logs) is herdr-core's, in `~/.local/state/herdr-core/herdr-ide[-<instance>]/`, and stays until the user removes it. |
 | herdr-core executable | pushed with the first subscription to a machine's terminals when the machine has another build than the core carries (never in `--read-only`; audited as `term.install`); a core already running is then restarted onto it (`term.restart`), and its programs keep running | One file, `~/.herdr-ide[-<instance>]/hc/herdr-core`, verified by SHA-256 and replaced whole by the next install; a running core keeps the executable it started from. A partial upload left by a killed agent is removed by the next install after 1 h. |
 | Connection to the terminal core | one per machine while a client of `/api/v1/term` is subscribed to it | Closed 10 s after the last subscriber left, and with the agent; attached streams end with their client. No process is started by it. |
