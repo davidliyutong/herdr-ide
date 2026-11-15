@@ -2,30 +2,27 @@
 
 ## Context
 
-The application is drawn twice: the web UI (`web/`, also inside the
-Electron desktop shell) with CSS, and the macOS application (`macos/`,
-[23](23-macos-application.md)) with AppKit. Both follow one design
-language: neutral greys, color only for state, dense rows, a 6 px radius,
-in a light and a dark theme. Kept in two places, the values drift: the web
-UI's chrome was blue-grey with a blue accent while the macOS application
-was neutral, and the macOS application's terminal palette was a copy of
-the web UI's.
+The web UI (`web/`, also inside the Electron desktop shell) is drawn with
+CSS in one design language: neutral greys, color only for state, dense
+rows, a 6 px radius, in a light and a dark theme. Its values are needed in
+more than one place: the chrome's CSS, the terminals' default colors, which
+are settings of the core, and the background the desktop shell gives its
+window before the page paints. Kept in each of them, the values drift.
 
-The two sides take values in different forms. AppKit wants `NSColor`s that
-follow the window's appearance and lengths in points; the web UI wants CSS
-custom properties that change with `<html data-theme>`
-([13](13-settings-and-appearance.md)).
+These places take values in different forms. The web UI wants CSS custom
+properties that change with `<html data-theme>`
+([13](13-settings-and-appearance.md)); the core's settings want Go values
+for their defaults.
 
 ## Goals / non-goals
 
 Goals: one file that defines the colors (light and dark), status colors,
-terminal palettes, metrics and font sizes; both applications read them in
-their own form without a build step of their own; a stale generated file
+terminal palettes, metrics and font sizes; the web UI and the core read
+them in their own form without a build step of their own; a stale generated file
 fails `make check`; the web UI's chrome uses the tokens through its
 existing CSS variables.
 
-Non-goals: components or layouts shared between the two applications;
-themes chosen by the user beyond light and dark; scaling the web UI by the
+Non-goals: themes chosen by the user beyond light and dark; scaling the web UI by the
 tokens' metrics and font sizes (the web UI's sizes are in `rem` so that its
 font size setting scales the chrome); the colors programs draw with in
 panes, which stay the terminal settings'
@@ -52,15 +49,8 @@ panes, which stay the terminal settings'
     (`rowHeight`, `tabHeight`, `sidebarWidth`, `radius`, `divider`).
   - `font.size.<name>`: font sizes in points (`base`, `small`, `terminal`).
 - **The generator** is `scripts/tokens` (Go, standard library only).
-  `make tokens` runs it; it writes three files, all checked in so that
-  no build needs Go to run first:
-  - `macos/Sources/App/Tokens.swift`: `enum Tokens` with the raw values
-    (`Tokens.colorBackground`, `Tokens.statusWorking`,
-    `Tokens.terminalDark`, `Tokens.metricRowHeight`,
-    `Tokens.fontSizeBase`). `Theme` (`macos/Sources/App/Theme.swift`)
-    turns them into AppKit's types: colors that follow the appearance,
-    fonts, `TerminalColors` for Ghostty's configuration. The views use
-    `Theme`, not `Tokens`.
+  `make tokens` runs it; it writes two files, both checked in so that no
+  build needs Go to run first:
   - `web/src/tokens.css`: custom properties on `:root` for the dark theme
     and on `:root[data-theme='light']` for the light one, the same
     selectors as `web/src/styles.css`, so the theme setting switches both
@@ -70,9 +60,8 @@ panes, which stay the terminal settings'
     `web/src/main.tsx` imports it before `styles.css`.
   - `internal/uisettings/tokens.go`: the terminal palettes as the
     defaults of the `terminal.colors.*` settings
-    ([13](13-settings-and-appearance.md)), from which the web UI's and the
-    macOS application's terminal colors come; a user's colors replace them
-    in every client.
+    ([13](13-settings-and-appearance.md)), from which the web UI's terminal
+    colors come; a user's colors replace them.
   Names are written in sorted order and the output depends on nothing but
   the tokens, so generating twice gives the same bytes. The generator
   refuses unknown fields, colors that are not lower-case `#rrggbb`, an
@@ -108,8 +97,7 @@ panes, which stay the terminal settings'
 - **Terminals.** The terminal colors are settings whose defaults are
   `terminal.light` and `terminal.dark` (`internal/uisettings/tokens.go`);
   the web UI reads them from the core (and from
-  `design/generated/registry.json` until the core answers), the macOS
-  application from the core with `Tokens` as its fallback.
+  `design/generated/registry.json` until the core answers).
   The page's background before the UI paints (`theme-color` in
   `web/index.html`, the web app manifest in `web/vite.config.ts`) is
   `color.background` written out; the desktop shell's window
@@ -120,8 +108,8 @@ panes, which stay the terminal settings'
 
 | Alternative | Why not |
 | --- | --- |
-| Style Dictionary or another token toolchain | A Node dependency and its configuration for two small outputs; the macOS build would need the web toolchain. |
-| Generating at build time instead of checking the files in | `swift build`, Xcode and Vite would each need Go and a step before them; checked-in files with a staleness check keep every build as it was. |
+| Style Dictionary or another token toolchain | A Node dependency and its configuration for two small outputs, one of them Go; the Go build would need the web toolchain. |
+| Generating at build time instead of checking the files in | Vite and `go build` would each need a step before them; checked-in files with a staleness check keep every build as it was. |
 | The web UI reading `tokens.json` at run time | Colors would arrive after the first paint, and CSS could not use them without scripting. |
 | Replacing the web UI's variables by the tokens in every rule | About two thousand lines of rules change for no visible difference from defining the variables once. |
 | A second theme switch for the tokens (class or media query) | Two mechanisms can disagree; `data-theme` already follows the setting and the system. |
@@ -140,21 +128,18 @@ panes, which stay the terminal settings'
   `tokens.go` or `registry.json`) → `make check` fails;
   `web/src/__tests__/tokens.test.ts` compares the registry's defaults with
   the tokens.
-- **A token removed while `Theme.swift` or `styles.css` still uses it** →
-  the Swift build fails on the missing member; in CSS the variable is
+- **A token removed while `styles.css` still uses it** → the variable is
   undefined and the property falls back to its inherited or initial
   value, which is visible in the chrome.
 
 ## Testing
 
 `scripts/tokens/main_test.go`: parsing (plain and alpha colors), the
-generated Swift and CSS and that repeated runs give the same bytes,
+generated CSS and Go and that repeated runs give the same bytes,
 rejected tokens (malformed colors, alpha, missing theme, unknown field,
 short palette, names), `-check` on missing, edited and outdated files
 without writing, and that the repository's generated files are current.
 `web/src/__tests__/tokens.test.ts`: the web UI's default terminal colors
 equal the tokens' and a theme's terminal background is the page's.
 `web/src/__tests__/termOptions.test.ts` keeps the terminal colors'
-contrast. The macOS application's builds (`make macos-build`,
-`make macos-test`, `make macos-app`) compile `Theme` against the
-generated `Tokens`.
+contrast.

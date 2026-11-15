@@ -6,7 +6,7 @@ vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {}, api: () => Promise.r
 import registry from '../../../design/generated/registry.json';
 import { resolveTheme } from '../appearance';
 import { dropZone } from '../paneDrag';
-import { matchesSearch, problemText, shownHere, valueLabel } from '../components/SettingsDialog';
+import { matchesSearch, problemText, valueLabel } from '../components/SettingsDialog';
 import { hasMessage } from '../i18n';
 import { applySettings, builtinDefaults, legacyImports, setSetting, useSettings, type SettingState } from '../settings';
 import { getPrefs, usePrefs } from '../prefs';
@@ -35,10 +35,10 @@ describe('dropZone', () => {
 
 describe('translations', () => {
   // design/generated/registry.json lists the keys of every setting, option,
-  // section and command the core registers for the web UI.
+  // section and command the core registers.
   it('has every label the core’s registry needs', () => {
-    expect(registry.i18n.web.length).toBeGreaterThan(80);
-    for (const k of registry.i18n.web) expect(hasMessage(k), k).toBe(true);
+    expect(registry.i18n.length).toBeGreaterThan(80);
+    for (const k of registry.i18n) expect(hasMessage(k), k).toBe(true);
   });
 });
 
@@ -128,10 +128,7 @@ describe('browser settings of earlier versions', () => {
 });
 
 describe('settings dialog', () => {
-  it('shows the web UI’s settings and finds them', () => {
-    expect(shownHere({ platforms: ['web'] })).toBe(true);
-    expect(shownHere({ platforms: ['macos'] })).toBe(false);
-    expect(shownHere({})).toBe(true);
+  it('finds settings', () => {
     expect(matchesSearch({ key: 'terminal.fontSize' }, 'font size')).toBe(true);
     expect(matchesSearch({ key: 'terminal.fontSize' }, 'FONTSIZE')).toBe(true);
     expect(matchesSearch({ key: 'terminal.cursorStyle', enum: ['block', 'bar', 'underline'] }, 'underline')).toBe(true);

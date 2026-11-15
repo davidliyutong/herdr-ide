@@ -4,7 +4,7 @@ DEV_LISTEN ?= 127.0.0.1:7790
 SLUG := $(shell sed -n 's/^[[:space:]]*Slug = "\(.*\)"$$/\1/p' internal/brand/brand.go)
 EXT  := extensions/$(SLUG)-bridge
 
-.PHONY: deps build test check tokens vt-wasm it dev-core dev-web macos-app macos-build macos-test desktop-app desktop-dmg desktop-install desktop-icons dev-desktop clean
+.PHONY: deps build test check tokens vt-wasm it dev-core dev-web desktop-app desktop-dmg desktop-install desktop-icons dev-desktop clean
 
 # Electron's ~100 MB binary only runs or packages the macOS app; elsewhere
 # its types suffice for typecheck and the launcher tests.
@@ -30,10 +30,10 @@ check:
 	pnpm -C desktop typecheck
 	pnpm -C desktop format:check
 
-# The design tokens of the web UI, the macOS application and the core's
-# terminal color defaults, from design/tokens.json; then what the clients
-# take from the registered settings and commands (design/generated) and the
-# tables of settings and commands in docs/reference.md.
+# The design tokens of the web UI and the core's terminal color defaults,
+# from design/tokens.json; then what the clients take from the registered
+# settings and commands (design/generated) and the tables of settings and
+# commands in docs/reference.md.
 tokens:
 	go run ./scripts/tokens
 	go run ./scripts/registry
@@ -54,15 +54,6 @@ dev-core:
 dev-web:
 	$(shell echo $(SLUG) | tr 'a-z-' 'A-Z_')_CORE=http://$(DEV_LISTEN) pnpm -C web dev
 
-macos-app:
-	scripts/macos-app.sh app
-
-macos-build:
-	scripts/macos-app.sh build
-
-macos-test:
-	scripts/macos-app.sh test
-
 desktop-app:
 	scripts/desktop.sh app
 
@@ -79,4 +70,4 @@ dev-desktop:
 	scripts/desktop.sh dev
 
 clean:
-	rm -rf dist desktop/dist macos/.build web/dist/assets internal/embedded/agents/*.gz internal/embedded/hc/*.gz internal/embedded/ext/*.vsix
+	rm -rf dist desktop/dist web/dist/assets internal/embedded/agents/*.gz internal/embedded/hc/*.gz internal/embedded/ext/*.vsix

@@ -26,7 +26,6 @@ export interface SettingDef {
   scope: 'app' | 'machine' | 'remote-machine';
   section: string;
   order: number;
-  platforms?: string[];
   flag?: string;
 }
 

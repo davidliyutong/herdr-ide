@@ -13,7 +13,7 @@
 #   8. the web UI's terminal emulator (web/src/vt/ghostty-vt.wasm) is the
 #      module whose digest scripts/fetch-ghostty-vt.sh recorded
 #   9. every shared test vector (design/testdata) is run by the web UI's
-#      and the macOS application's tests
+#      tests
 set -euo pipefail
 cd "$(dirname "$0")/.."
 fail=0
@@ -29,12 +29,12 @@ go vet -tags integration ./... || fail=1
 echo "==> brand literals"
 # String literals containing the slug outside the brand files, ignoring Go
 # import paths and comments.
-hits=$(grep -rnE --include='*.go' --include='*.ts' --include='*.tsx' --include='*.swift' --include='*.strings' "[\"'\`][^\"'\`]*\b${slug}\b" cmd internal web/src extensions/*/src desktop/src macos/Sources macos/Tests 2>/dev/null \
-  | grep -vE '(internal/brand/|web/src/brand\.ts|extensions/[^/]+/src/brand\.ts|macos/Sources/TermKit/Brand\.swift|_test\.go:|__tests__/)' \
+hits=$(grep -rnE --include='*.go' --include='*.ts' --include='*.tsx' "[\"'\`][^\"'\`]*\b${slug}\b" cmd internal web/src extensions/*/src desktop/src 2>/dev/null \
+  | grep -vE '(internal/brand/|web/src/brand\.ts|extensions/[^/]+/src/brand\.ts|_test\.go:|__tests__/)' \
   | grep -vE "\"${module}/" \
   | grep -vE '^[^:]+:[0-9]+:\s*(//|\*)' || true)
 if [[ -n "$hits" ]]; then
-  echo "hardcoded '${slug}' (use internal/brand, web/src/brand.ts, the extension's src/brand.ts or macos/Sources/TermKit/Brand.swift):"
+  echo "hardcoded '${slug}' (use internal/brand, web/src/brand.ts or the extension's src/brand.ts):"
   echo "$hits"
   fail=1
 fi
@@ -76,15 +76,13 @@ echo "==> terminal emulator module"
 scripts/fetch-ghostty-vt.sh --check || fail=1
 
 echo "==> shared test vectors"
-# Each client runs every vector: its tests name the file (<dir>/<name>.json),
-# the directory's files (<dir>/*.json) or the directory itself
-# ("…/testdata/<dir>"), so a new vector file cannot go unrun on one side.
+# The web UI's tests run every vector: they name the file
+# (<dir>/<name>.json), the directory's files (<dir>/*.json) or the directory
+# itself ("…/testdata/<dir>"), so a new vector file cannot go unrun.
 for f in design/testdata/*/*.json; do
   rel=${f#design/testdata/}
   dir=${rel%%/*}
-  for side in web/src/__tests__ macos/Tests; do
-    grep -rqF -e "$rel" -e "$dir/*.json" -e "testdata/$dir\"" "$side" || { echo "$f is run by no test in $side"; fail=1; }
-  done
+  grep -rqF -e "$rel" -e "$dir/*.json" -e "testdata/$dir\"" web/src/__tests__ || { echo "$f is run by no test in web/src/__tests__"; fail=1; }
 done
 
 exit $fail

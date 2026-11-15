@@ -10,10 +10,6 @@ Requirements: Go (see `go.mod`), Node.js 22.12+ and pnpm. The build
 downloads the pinned herdr-core, the terminal core the agents install on
 machines, into `dist/hc/` and embeds it.
 
-The macOS application (`macos/`) additionally needs Xcode 26 or later for
-`make macos-build` and `make macos-test`, and XcodeGen (`brew install
-xcodegen`) for `make macos-app`.
-
 ```bash
 make deps            # pnpm install for web/, the extension and desktop/
 make build           # web UI, extension, agents, core; release archives
@@ -57,16 +53,16 @@ workspaces can live in the ignored `.worktrees/` directory.
   it (the template asks for this).
 - `make check test` must pass; CI (`.github/workflows/ci.yml`) runs the
   same, plus `go test -race`, `make it` against the pinned herdr-core, the
-  cross-compiled release archives and, on macOS, the Go tests, the
-  Electron app, `make macos-test` and the ad-hoc signed `make macos-app`.
+  cross-compiled release archives and, on macOS, the Go tests and the
+  packaged Electron app (`make desktop-app`).
 - New Go dependencies: run `scripts/notices.sh` and commit
   `THIRD_PARTY_NOTICES.md` (checked by CI); make sure the license is
   compatible with MIT.
 - Add or update tests with behavior changes. Go tests live next to the code;
-  web tests in `web/src/__tests__`, desktop tests in `desktop/src/*.test.ts`,
-  the macOS application's in `macos/Tests`. Vectors both clients run live
-  in `design/testdata/` (`make check` fails when a vector file is run by no
-  web or no Swift test).
+  web tests in `web/src/__tests__`, desktop tests in `desktop/src/*.test.ts`.
+  Vectors the web tests run, and Go's tests where the rule is in Go too
+  (keys, ssh targets), live in `design/testdata/` (`make check` fails when
+  a vector file is run by no web test).
 - Update the docs in the same PR: flags, endpoints and files in
   [docs/reference.md](docs/reference.md) (CI checks every flag and route is
   listed; `make tokens` regenerates its tables of settings and commands),

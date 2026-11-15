@@ -2,8 +2,8 @@
 
 ## Context
 
-A client that emulates terminals itself (a native application drawing
-with the GPU, a browser renderer with its own terminal state) needs each
+A client that emulates terminals itself (the browser UI, which keeps each
+terminal's state in its own emulator and draws it with the GPU) needs each
 terminal's raw output, several viewers of one terminal, and input bytes it
 encodes itself, rather than a cell grid rendered for it. herdr-core provides that per machine
 ([21](21-terminal-core.md)), but its API is only reachable through the
@@ -176,12 +176,11 @@ so every client of the machine shows the same arrangement. Version 2:
   them.
 - `design/testdata/layout/*.json` holds the contract as vectors: an input
   document, operations, whether they change the layout, and the expected
-  document. Both clients run every vector.
+  document. The web UI's tests run every vector.
 
-**Clients.** Two implementations follow the protocol and the layout
-document: `macos/Sources/TermKit` (Swift), used by the macOS application
-([23](23-macos-application.md)), and `web/src/term` (TypeScript), used by
-the browser UI and the desktop app ([26](26-web-terminals.md)):
+**Client.** `web/src/term` (TypeScript) follows the protocol and the
+layout document for the browser UI and the desktop app
+([26](26-web-terminals.md)):
 `protocol.ts` (the messages, frames and records),
 `connection.ts` (the WebSocket, reconnecting and subscribing again, calls
 as promises, streams with their handlers registered before their first
@@ -189,8 +188,7 @@ frame), `store.ts` (terminal records from snapshots and events) and
 `layout.ts` (the layout document's workspaces, tabs and splits as immutable
 values and the operations on them); `web/src/state/terms.ts` follows the
 machines the user turned to, reads their layout documents before editing
-them and writes one change at a time with the version last read, as the
-macOS application does.
+them and writes one change at a time with the version last read.
 
 ## Alternatives considered
 
@@ -246,9 +244,7 @@ subscribing, calls, a stream's reply before its frames, input, credit,
 reconnecting), `terms.test.ts` the browser UI's model (the layout read
 after the terminals, one write at a time with another client's newer
 version taken, ended programs' panes closed, terminals asked for before
-the machine was ready), and `macos/Tests/TermKitTests/TermKitTests.swift`
-the Swift one (`ProtocolTests`, `TerminalStoreTests`, `LayoutTests` with
-the same layout vectors, `EventTests`). `TestIntegrationTerm` (`make it`, `HC_TEST_BIN`) runs the
+the machine was ready). `TestIntegrationTerm` (`make it`, `HC_TEST_BIN`) runs the
 whole path against a real herdr-core: install and start through the agent,
 a shell started, typed into and read by one client, found and watched by a
 second, and killed; `TestIntegrationDetect` an agent's states

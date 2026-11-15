@@ -127,9 +127,9 @@ function buildMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-// The core's settings and keybindings, as the macOS application applies
-// them: the theme becomes the title bar's and native controls' (also when it
-// differs from the system's appearance), the language the menu's.
+// The core's settings and keybindings: the theme becomes the title bar's and
+// native controls' (also when it differs from the system's appearance), the
+// language the menu's.
 function applySettings(s: ShellSettings) {
   nativeTheme.themeSource = s.theme;
   if (s.language === language) return;

@@ -1,9 +1,9 @@
 // Folders opened with the app: dropped on its Dock icon (the app declares
 // folders in its Info.plist, electron-builder.cjs) or `open -a`. macOS reports
 // them with open-file, also while the app launches, before the page can take
-// them; the page creates a workspace for each on the local machine, as the
-// macOS application does. They wait while no page takes them: the app is
-// starting, or the page is reloading.
+// them; the page creates a workspace for each on the local machine. They
+// wait while no page takes them: the app is starting, or the page is
+// reloading.
 
 import type { OpenedFolders } from '../../web/src/shell';
 

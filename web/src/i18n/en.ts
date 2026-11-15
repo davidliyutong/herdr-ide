@@ -12,7 +12,7 @@ export const en = {
   'desktop.coreBadReady': 'The server reported an unexpected address.',
   'desktop.coreLost': 'The server stopped unexpectedly.',
   'desktop.rendererGone': 'The window’s page stopped.',
-  // The desktop app's menu: the macOS application's titles (its menu.* strings).
+  // The desktop app's menu (desktop/src/menu.ts).
   'desktop.menu.about': 'About {app}',
   'desktop.menu.settings': 'Settings…',
   'desktop.menu.keyboardShortcuts': 'Keyboard Shortcuts…',

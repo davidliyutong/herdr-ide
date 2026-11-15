@@ -22,10 +22,10 @@ func validWhen(w When) bool {
 	return false
 }
 
-// Platforms the default bindings differ by: the desktop applications on
-// macOS and on other systems, and browsers on either. Browsers keep
-// Cmd+T, Cmd+W and similar keys for themselves, so most direct shortcuts
-// exist only in the applications.
+// Platforms the default bindings differ by: the desktop app on macOS and
+// on other systems, and browsers on either. Browsers keep Cmd+T, Cmd+W and
+// similar keys for themselves, so most direct shortcuts exist only in the
+// desktop app.
 const (
 	PlatformMac        = "mac"
 	PlatformPC         = "pc"
@@ -82,13 +82,12 @@ func cmd(id, section string, defaults ...Default) Command {
 	return Command{ID: id, Section: section, When: WhenTerminal, Defaults: defaults}
 }
 
-// Commands are every command, with the applications' direct shortcuts as
-// defaults: those of the macOS application's menu on macOS (Cmd), the
-// desktop app's on other systems (Ctrl+Shift, as terminal emulators use,
-// since Ctrl+W and Ctrl+T are keys of shells). No default is a chord, and
-// none is Ctrl or Alt with a letter alone or a function key, which programs
-// in terminals read: every key that is not a default reaches the terminal
-// on its first press. Browsers get only keys they leave to pages: find, the
+// Commands are every command, with the desktop app's direct shortcuts as
+// defaults: Cmd on macOS, Ctrl+Shift on other systems (as terminal
+// emulators use, since Ctrl+W and Ctrl+T are keys of shells). No default
+// is a chord, and none is Ctrl or Alt with a letter alone or a function
+// key, which programs in terminals read: every key that is not a default
+// reaches the terminal on its first press. Browsers get only keys they leave to pages: find, the
 // command palette on macOS (Cmd+K; Cmd+Shift+P opens a private window in
 // Firefox, as Ctrl+Shift+P does elsewhere, where no key is left for it and
 // the status bar opens it) and the list of shortcuts. A command without a

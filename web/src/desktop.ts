@@ -16,12 +16,11 @@ function menuContext(): KeyContext {
   return document.activeElement?.classList.contains('code-frame') ? 'vscode' : 'terminal';
 }
 
-/** Runs a command of the menu, as the macOS application's menu does: while
- * a dialog or the palette is open only commands for dialogs or everywhere
- * run, and while VS Code has the keyboard only those for VS Code or
- * everywhere (a key VS Code left goes no further). Closing a tab asks first
- * unless its panes only have shells waiting at their prompt
- * (actions.closeTab). */
+/** Runs a command of the menu: while a dialog or the palette is open only
+ * commands for dialogs or everywhere run, and while VS Code has the
+ * keyboard only those for VS Code or everywhere (a key VS Code left goes no
+ * further). Closing a tab asks first unless its panes only have shells
+ * waiting at their prompt (actions.closeTab). */
 export function runMenuCommand(command: string) {
   const when = useKeys.getState().commands.find((c) => c.id === command)?.when ?? 'terminal';
   const ctx = menuContext();

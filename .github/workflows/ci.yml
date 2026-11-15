@@ -56,9 +56,7 @@ jobs:
         env:
           HC_TEST_BIN: ${{ runner.temp }}/hc/herdr-core
 
-  # The core's tests on macOS, the Electron app, and the macOS application:
-  # its unit tests (with the renderer scripts/fetch-ghostty.sh pins) and the
-  # ad-hoc signed bundle.
+  # The core's tests on macOS and the Electron app.
   macos:
     runs-on: macos-26
     steps:
@@ -80,14 +78,6 @@ jobs:
             extensions/*/pnpm-lock.yaml
       # Checks that the app packages; the release workflow publishes DMGs.
       - run: make desktop-app
-      - run: brew install xcodegen
-      - run: make macos-test
-      # The core desktop-app built for this architecture goes into the bundle.
-      - run: make macos-app
-        env:
-          SKIP_CORE: 1
-      - name: Signature of the bundle
-        run: codesign --verify --deep --strict --verbose=2 dist/macos/*.app
 
   cross-compile:
     runs-on: ubuntu-24.04

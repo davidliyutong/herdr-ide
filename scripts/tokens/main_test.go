@@ -62,16 +62,6 @@ func TestGenerate(t *testing.T) {
 		}
 	}
 	for name, want := range map[string][]string{
-		swiftOut: {
-			"// " + header + "\n",
-			"enum Tokens {",
-			"static let colorBackground = Color(light: 0xffffff, dark: 0x0a0a0a, lightAlpha: 1, darkAlpha: 1)",
-			"static let colorBorderStrong = Color(light: 0xd4d4d4, dark: 0xffffff, lightAlpha: 1, darkAlpha: 0.14)",
-			"static let statusWorking = Color(",
-			`background: "#0a0a0a", foreground: "#f0f0f0", cursor: "#f0f0f0", selection: "#3b4a6b",`,
-			"static let metricRowHeight: CGFloat = 26\n",
-			"static let fontSizeBase: CGFloat = 12.5\n",
-		},
 		cssOut: {
 			"/* " + header + " */\n:root {\n",
 			"  --ds-color-background: #0a0a0a;\n",
@@ -127,7 +117,7 @@ func TestRejects(t *testing.T) {
 
 func TestCheck(t *testing.T) {
 	root := t.TempDir()
-	for _, name := range []string{source, swiftOut, cssOut, goOut} {
+	for _, name := range []string{source, cssOut, goOut} {
 		if err := os.MkdirAll(filepath.Dir(filepath.Join(root, name)), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -136,7 +126,7 @@ func TestCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Nothing generated yet: stale, and the check writes nothing.
-	if err := run(root, true); err == nil || !strings.Contains(err.Error(), swiftOut) || !strings.Contains(err.Error(), cssOut) {
+	if err := run(root, true); err == nil || !strings.Contains(err.Error(), cssOut) || !strings.Contains(err.Error(), goOut) {
 		t.Fatalf("check without generated files: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, cssOut)); !os.IsNotExist(err) {
@@ -157,7 +147,7 @@ func TestCheck(t *testing.T) {
 	if err := os.WriteFile(css, append(fresh, '\n'), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := run(root, true); err == nil || !strings.Contains(err.Error(), cssOut) || strings.Contains(err.Error(), swiftOut) {
+	if err := run(root, true); err == nil || !strings.Contains(err.Error(), cssOut) || strings.Contains(err.Error(), goOut) {
 		t.Fatalf("check with an edited file: %v", err)
 	}
 	if got, _ := os.ReadFile(css); !bytes.Equal(got, append(fresh, '\n')) {

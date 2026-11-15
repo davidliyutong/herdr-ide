@@ -1,5 +1,5 @@
 {
-  "description": "ssh targets (machines.ValidTarget): an OpenSSH destination ([user@]host, ssh://[user@]host[:port], a ~/.ssh/config alias, an IPv6 literal with its zone id) of at most 255 bytes of UTF-8, not starting with -, of ASCII letters, digits and # % + , - . / : = @ [ ] ^ _ ~ and Unicode letters, marks and numbers: no whitespace, control or format character and none of ! \" $ & ' ( ) * ; < > ? \\ ` { | }. The clients trim whitespace around what is typed first, as the core does. Run by internal/machines, web/src/__tests__/addMachine.test.ts and macos/Tests/TermKitTests.",
+  "description": "ssh targets (machines.ValidTarget): an OpenSSH destination ([user@]host, ssh://[user@]host[:port], a ~/.ssh/config alias, an IPv6 literal with its zone id) of at most 255 bytes of UTF-8, not starting with -, of ASCII letters, digits and # % + , - . / : = @ [ ] ^ _ ~ and Unicode letters, marks and numbers: no whitespace, control or format character and none of ! \" $ & ' ( ) * ; < > ? \\ ` { | }. The clients trim whitespace around what is typed first, as the core does. Run by internal/machines and web/src/__tests__/addMachine.test.ts.",
   "accept": [
     "gpu",
     "gpu-host",

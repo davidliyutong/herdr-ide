@@ -94,13 +94,8 @@ settings between machines.
   last, as it was, while it belongs to the focused pane's machine (its window
   is kept as above, so it is usually back at once), else the focused pane's
   folder opens. While VS Code has the keyboard it keeps its own `cmd+j`
-  (its bottom panel), as in the macOS application; the View menu's **Show
-  or Hide VS Code** works from there.
-- The macOS application shows the same proxied code-server in a panel of
-  its own (`macos/Sources/App/WebPanel.swift`, ⌘J), a `WKWebView`
-  addressed as `localhost`, which VS Code's web views need as a secure
-  context; it keeps the three most recently shown folders loaded
-  ([23](23-macos-application.md)).
+  (its bottom panel); the View menu's **Show or Hide VS Code** works from
+  there.
 
 **Theme** (`theme` WebSocket message, `bridgeHub.setTheme`)
 

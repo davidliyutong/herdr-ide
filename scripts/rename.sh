@@ -75,7 +75,6 @@ done
 if [[ "$name" != "$new" ]]; then
   perl -pi -e 's/^(\s*Name = )"[^"]*"/$1"$ENV{NEW_NAME}"/' internal/brand/brand.go
   perl -pi -e "s/^(export const APP_NAME = )'[^']*'/\$1'\$ENV{NEW_NAME}'/" web/src/brand.ts
-  perl -pi -e 's/^(\s*public static let appName = )"[^"]*"/$1"$ENV{NEW_NAME}"/' macos/Sources/TermKit/Brand.swift
 fi
 
 # Record the old names for migration.

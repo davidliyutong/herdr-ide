@@ -24,9 +24,6 @@ import {
 } from '../settings';
 import { KeyboardShortcuts } from './KeyboardShortcuts';
 
-/** The client's platform name in definitions' platforms. */
-const PLATFORM = 'web';
-
 export function settingLabel(key: string): string {
   const k = `settings.${key}`;
   return hasMessage(k) ? t(k) : key;
@@ -45,11 +42,6 @@ function optionLabel(key: string, option: string): string {
 function sectionLabel(id: string): string {
   const k = `settings.section.${id}`;
   return hasMessage(k) ? t(k) : id;
-}
-
-/** Whether a definition is shown here: its platforms include the web UI. */
-export function shownHere(d: Pick<SettingDef, 'platforms'>): boolean {
-  return !d.platforms?.length || d.platforms.includes(PLATFORM);
 }
 
 /** Whether a setting matches a search: its label, description, key or options. */
@@ -88,7 +80,7 @@ export function SettingsDialog() {
     return () => window.removeEventListener('keydown', onKey);
   }, [open]);
 
-  const defs = useMemo(() => st.defs.filter(shownHere), [st.defs]);
+  const defs = st.defs;
   const sections = useMemo(() => st.sections.filter((s) => defs.some((d) => d.section === s.id)), [st.sections, defs]);
   useEffect(() => {
     if (sections.length && page !== KEYS_PAGE && !sections.some((s) => s.id === page)) setPage(sections[0].id);

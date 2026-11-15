@@ -1,6 +1,5 @@
-// What the shell takes from its core, as the macOS application does: the
-// keybindings in effect on its platform (for the menu), the theme and the
-// language. It is a client of the event channel like the page: once /ws is
+// What the shell takes from its core: the keybindings in effect on its
+// platform (for the menu), the theme and the language. It is a client of the event channel like the page: once /ws is
 // open it reads GET /api/keybindings and GET /api/settings, then applies the
 // "keybindings" and "settings" messages the core sends after every change.
 // The core is the shell's own child; the channel is opened again if it drops.

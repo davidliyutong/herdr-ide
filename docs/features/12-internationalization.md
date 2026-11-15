@@ -27,28 +27,18 @@ reference documentation.
   palette switch language (the page that changed it reloads). Settings and
   commands defined by the core are labelled with keys built from their
   names (`settings.<key>`, `.desc`, `.<option>`, `command.<id>`);
-  `design/generated/registry.json` lists the keys each UI needs
-  (`scripts/registry`), `settings.test.ts` checks that the web UI has them,
-  and an untranslated one shows its key.
-- **macOS application** (`macos/Sources/App/Resources`): `Localizable.strings`
-  per locale (`en`, `zh-Hans`), read with `tr(key, args)`, in the language
-  of the core's `appearance.language` (`auto`: the system's).
-  `LocalizationTests` checks that every locale has the English keys with
-  the same `%@` placeholders, that every key is used and every used key
-  exists, and that the keys the core's registry asks of the application
-  exist. The core's codes are keys: `backend.<code>` (the terminal core's
-  state), `machine.<status>` and `machine.error.<code>`, `status.<state>`
-  (agents).
-- **Desktop shell**: the menu's titles (`desktop.menu.*`, the macOS
-  application's `menu.*` strings in both languages; `desktop/src/menu.test.ts`
-  compares them) and the error dialogs (`desktop.*`) come from the web's
+  `design/generated/registry.json` lists those keys (`scripts/registry`,
+  `"i18n"`), `settings.test.ts` checks that the web UI has them, and an
+  untranslated one shows its key.
+- **Desktop shell**: the menu's titles (`desktop.menu.*`) and the error
+  dialogs (`desktop.*`) come from the web's
   English/Chinese dictionaries, Electron's role items included. They follow
   the core's `appearance.language`, which the shell reads itself; `auto`
   follows the system's preferred languages, and so does a failure before the
   core answers.
 - **Server**: sends codes that the UI translates: code-server phases such as
   `download` with a detail, the terminal core's states (`machine_offline`,
-  `not_bundled`, `start_failed`, `stopped`…; `backend.<code>` in both UIs),
+  `not_bundled`, `start_failed`, `stopped`…; `backend.<code>` in the UI),
   machine states, agent statuses, program window phases (`gui.phase.*`).
   The code-server loading page, served inside the VS Code iframe, carries
   its own small English/Chinese table for the same codes and uses the
@@ -71,11 +61,9 @@ reference documentation.
    regenerate `design/generated/registry.json`.
 2. Add `web/src/i18n/<locale>.ts` typed as `Messages`, register it in
    `i18n/index.ts` (`dicts`, `locales`, detection).
-3. Add `macos/Sources/App/Resources/<locale>.lproj/Localizable.strings`
-   and map the setting's value to it in `macos/Sources/App/Theme.swift`.
-4. Add `package.nls.<locale>.json` and `l10n/bundle.l10n.<locale>.json` to
+3. Add `package.nls.<locale>.json` and `l10n/bundle.l10n.<locale>.json` to
    the extension.
-5. Add the language to the loading-page table in
+4. Add the language to the loading-page table in
    `internal/server/codeserver.go`.
 
 ## Alternatives considered
@@ -90,9 +78,7 @@ reference documentation.
 `web/src/__tests__/i18n.test.ts` (locale detection, placeholder
 substitution, placeholder parity); `tsc` enforces key completeness;
 `web/src/__tests__/settings.test.ts` (every key the core's registry needs
-for the web UI). `macos/Tests/TermKitTests` (`LocalizationTests`: locales
-agree, keys used and present, the registry's keys).
-`desktop/src/menu.test.ts` (the menu's titles are the macOS application's
-in English and Chinese, and follow the language). `scripts/check.sh`
+for the web UI). `desktop/src/menu.test.ts` (the menu's titles follow the
+language). `scripts/check.sh`
 (`scripts/registry -check`: the generated key lists are current; README
 sections). Both languages were checked in Chrome.

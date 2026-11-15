@@ -19,7 +19,7 @@ body:
     id: version
     attributes:
       label: Versions / 版本
-      description: "`herdr-ide version`, the client (browser and its version, desktop app or macOS application), OS/arch of core and machines"
+      description: "`herdr-ide version`, the client (browser and its version, or the desktop app), OS/arch of core and machines"
     validations:
       required: true
   - type: textarea

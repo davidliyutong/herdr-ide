@@ -399,7 +399,7 @@ export class Terminal {
   setScrollback(lines: number) {
     const n = Math.max(0, Math.floor(lines));
     this.setWith('SCROLLBACK_MAX_LINES', 4, (dv, p) => dv.setUint32(p, n, true));
-    // About 2 KiB a line, as the macOS application gives Ghostty.
+    // About 2 KiB a line.
     this.setWith('SCROLLBACK_MAX_BYTES', 4, (dv, p) => dv.setUint32(p, Math.min(0xffffffff, Math.max(1, n) * 2048), true));
   }
 

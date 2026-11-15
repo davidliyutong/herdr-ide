@@ -1,5 +1,5 @@
 {
-  "description": "Formulas found in terminal text (web/src/terminal/math.ts findMath, TermKit MathText.find), in the order they appear: [tex, display].",
+  "description": "Formulas found in terminal text (web/src/terminal/math.ts findMath), in the order they appear: [tex, display].",
   "cases": [
     {
       "description": "What Claude Code prints: inline and display $ formulas, its markdown having dropped the backslash of \\,.",

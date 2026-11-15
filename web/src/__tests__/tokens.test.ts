@@ -4,7 +4,7 @@ import { builtinDefaults } from '../settings';
 
 describe('design tokens', () => {
   // The terminal colors' settings default to the tokens' (scripts/tokens
-  // writes the core's defaults), which the macOS application shares.
+  // writes the core's defaults).
   for (const kind of ['dark', 'light'] as const) {
     it(`are the ${kind} terminal colors' defaults`, () => {
       const token = tokens.terminal[kind];

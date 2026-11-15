@@ -19,9 +19,8 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   scroll past the edge and copy whole), IME, OSC 52 copy (a selection in
   Claude Code goes straight to the clipboard), resizable splits, and
   programs see the UI theme's colors. Workspaces, tabs and splits are a
-  layout document kept on each machine, the same in every browser, the
-  desktop app and the macOS application. Drag a pane by its header to swap
-  or move it, click its title to rename it; drag tabs and workspaces to
+  layout document kept on each machine, the same in every browser and the
+  desktop app. Drag a pane by its header to swap or move it, click its title to rename it; drag tabs and workspaces to
   reorder them; right-click a pane header, tab or workspace for its
   commands, or a pane's text to copy, paste or open a path. Everything is
   in reach of the mouse; the few default keys take nothing from the
@@ -84,16 +83,16 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   machine. VS Code's explorer has the same download. The downloads panel in
   the status bar shows each download's progress, speed and result, and
   cancels or repeats it.
-- **Several browsers at once.** Every browser, the desktop app and the
-  macOS application show the same terminals and type into them; the one
-  used last sets a terminal's size.
+- **Several browsers at once.** Every browser and the desktop app show the
+  same terminals and type into them; the one used last sets a terminal's
+  size.
 - **Settings.** Language (English, Chinese), light/dark theme followed by
   VS Code, interface size, the terminals' font, line height, cursor,
   scrollback, bell and colors (both themes' 16 colors), panel position, the
   code-server installation method and every keyboard shortcut, in one
-  dialog (the sidebar's gear, `cmd+,` in the apps) with search. Settings and keys are kept on the core's
+  dialog (the sidebar's gear, `cmd+,` in the desktop app) with search. Settings and keys are kept on the core's
   host in two JSON files you can also edit by hand, and are the same in
-  every browser, the desktop app and the macOS application. Terminals use
+  every browser and the desktop app. Terminals use
   the included JetBrains Mono font unless you choose another.
 
 ## Screenshots
@@ -165,28 +164,15 @@ of the local machine are pasted as their own paths, without uploading.
 In the app, `cmd+t` opens a tab, `cmd+w` closes the pane, `cmd+d` /
 `cmd+shift+d` split it, `cmd+n` creates a workspace, `cmd+,` opens the
 settings, `cmd+shift+p` the command palette and `cmd+j` shows or hides the
-VS Code panel; while VS Code has focus, its own keys come first. The menus are the native application's,
-with the keys in effect, in the UI's language; the title bar follows the
-UI's theme.
+VS Code panel; while VS Code has focus, its own keys come first. The menu
+bar shows the keys in effect, in the UI's language; the title bar follows
+the UI's theme.
 Change or remove the keys under **Settings → Keyboard shortcuts**, where
 chords such as `ctrl+b c` can be bound too; browsers keep their own
 `cmd+t` / `cmd+w`.
 
-A native macOS application draws the terminals with Ghostty's renderer and
-offers what the browser UI does over the same core: workspaces, tabs and
-split panes (drag, zoom, rename), adding and managing machines with their
-ssh sign-in, a files window with uploads and downloads, pasting and dropping
-files into terminals, settings with machines' own values and every keyboard
-shortcut, the command palette, agents' notifications, sounds and Dock
-badge, VS Code beside the terminals and formulas shown under the pointer.
-Releases attach it for Apple Silicon (`…-mac-native-arm64.zip`); build it
-with `make macos-app` (`dist/macos/`, signed ad hoc unless `SIGN_IDENTITY`
-names a certificate). It shares the instance `desktop`, and so the
-settings, keys and machines, with the Electron app.
-
 The Electron app starts its own core at `http://127.0.0.1:7781` with
-instance `desktop` (the native application on a port of the system's
-choice); quitting or closing the main window stops that core. OpenSSH
+instance `desktop`; quitting or closing the main window stops that core. OpenSSH
 must already be installed. Released and local builds use ad-hoc signing,
 without Apple notarization or automatic updates. See
 [desktop deployment](docs/deployment.md#macos-desktop-app) for paths,
@@ -244,8 +230,7 @@ machines; release archives carry its license and notices in
 `licenses/herdr-core/`. The agents carry herdr's agent detection rules
 (Apache-2.0, [licenses/herdr-detect/](licenses/herdr-detect/)), and the
 core the video encoder for Linux machines (FFmpeg, LGPL-2.1, with libvpx,
-libva and libdrm; [licenses/encoder/](licenses/encoder/)). The macOS application
-also carries the licenses of Ghostty and libghostty-spm (MIT).
+libva and libdrm; [licenses/encoder/](licenses/encoder/)).
 code-server and Git Graph retain their own licenses and are downloaded at
 runtime. Git Graph restricts derivative distribution and does not clearly
 grant general redistribution of the original; it is excluded from public

@@ -1,5 +1,5 @@
 {
-  "description": "Strokes against each platform's default bindings (the keybindings of design/generated/registry.json, which internal/keybindings writes): each gives none (the key reaches the program in the terminal on its first press) or run:<command>. No default is a chord, so ctrl+b and every key that is not a default give none. Run by web/src/__tests__/keys.test.ts and macos/Tests/TermKitTests.",
+  "description": "Strokes against each platform's default bindings (the keybindings of design/generated/registry.json, which internal/keybindings writes): each gives none (the key reaches the program in the terminal on its first press) or run:<command>. No default is a chord, so ctrl+b and every key that is not a default give none. Run by web/src/__tests__/keys.test.ts.",
   "cases": [
     {
       "description": "ctrl+b (tmux's prefix) and the keys of shells and editors reach the terminal on their first press",
@@ -68,7 +68,7 @@
       ]
     },
     {
-      "description": "the macOS applications' direct shortcuts",
+      "description": "the desktop app's direct shortcuts on macOS",
       "platforms": [
         "mac"
       ],

@@ -6,10 +6,10 @@ Agents answer with markdown, and their math is LaTeX: `$…$` and `$$…$$`
 (Claude), `\(…\)` and `\[…\]` (GPT models). Claude Code and Codex render
 markdown in the terminal as text, so formulas stay source code, often hard
 to read once fractions, sums or matrices nest. Terminals are drawn on a
-canvas ([26](26-web-terminals.md)) or by Ghostty's renderer
-([23](23-macos-application.md)): there is no DOM text to typeset in
-place, and a formula's rendering does not fit the grid's rows. Those renderers also treat a backslash before punctuation as
-a markdown escape and drop it: Claude Code printed `e^{-x^2}\,dx` as
+canvas ([26](26-web-terminals.md)): there is no DOM text to typeset in
+place, and a formula's rendering does not fit the grid's rows. The agents'
+markdown renderers also treat a backslash before punctuation as a markdown
+escape and drop it: Claude Code printed `e^{-x^2}\,dx` as
 `e^{-x^2},dx`, and `\[ … \]` and `\( … \)` arrive as `[ … ]` and `( … )`.
 
 ## Goals / non-goals
@@ -62,17 +62,6 @@ dropped (`\{` printed as `{`, `\\` as `\`).
   clicking, scrolling and rows the terminal moves under it hide it at once,
   and so does a modifier showing links (⌘/Ctrl). When the text under a shown
   formula changes, the formula under the pointer is looked for again.
-- **In the macOS application** (`macos/Sources/TermKit/Math.swift`,
-  `App/Agents.swift` `MathHover`), with `terminal.mathHover` on, the
-  pointer resting 350 ms on a terminal's text reads the screen's rows from
-  Ghostty and finds the formula under it with the same rules
-  (`MathText`, on UTF-16 offsets as in the web UI; wide characters take
-  two columns). The vectors of `design/testdata/math` hold the cases both
-  implementations run. The formula is rendered by the web UI's own KaTeX
-  in a small web view of the core's `/math.html` (a second entry of the
-  Vite build, `web/src/mathPage.ts`, which renders with `mathRender.ts`
-  and reports its size as KaTeX's fonts arrive), shown in a popover under
-  the formula's rows. Moving off the formula hides it.
 - **KaTeX** (`web/src/terminal/mathRender.ts`) is a separate chunk with its
   stylesheet, imported the first time a formula is shown; the last 200
   results (HTML, or that KaTeX could not read the text) are kept. A failed
@@ -82,7 +71,7 @@ dropped (`\{` printed as `{`, `\\` as `\`).
   the embedded UI grows by about 290 KB of fonts instead of 1.1 MB.
 - **Setting.** `terminal.mathHover`, *Show formulas under the pointer*
   (Terminal, on by default), is a setting of the core
-  ([13](13-settings-and-appearance.md)): turned off, no client looks for
+  ([13](13-settings-and-appearance.md)): turned off, no page looks for
   formulas.
 
 ## Alternatives considered
@@ -118,18 +107,12 @@ existing Content-Security-Policy (inline styles were already allowed).
 
 ## Testing
 
-`design/testdata/math/find.json` holds the shared cases: what Claude Code
+`design/testdata/math/find.json` holds the cases: what Claude Code
 printed, `\(…\)` and `\[…\]` with and without backslashes, a display
 formula over several lines, matrices, shell variables, prices, calls,
 escaped dollars and empty lines. `web/src/__tests__/math.test.ts` runs
 them and covers display formulas over several rows, formulas wrapped by
 the terminal and by the program, pairing within a paragraph and wide
-characters;
-`macos/Tests/TermKitTests/TermKitTests.swift` (`FeatureTests`:
-`testMathVectors`, `testMathOnScreen`) runs the same vectors with
-`MathText` and a display formula and a wrapped one after wide characters
-on a screen of rows. `web/src/__tests__/vt.test.ts` (`drawRow`)
-covers the dotted underline. Showing a formula after the pointer rests and
-hiding it after leaving were checked in Chromium; debug builds of the
-macOS application rest the pointer on a cell with the `hover:<column>,<row>`
-action ([reference](../reference.md#environment-variables)).
+characters. `web/src/__tests__/vt.test.ts` (`drawRow`) covers the dotted
+underline. Showing a formula after the pointer rests and hiding it after
+leaving were checked in Chromium.

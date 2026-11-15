@@ -2,8 +2,8 @@
 // them: strokes separated by spaces ("ctrl+b c"), each modifiers and a key
 // joined by "+", canonically in the order cmd, ctrl, alt, shift with keys
 // named after the US layout's unshifted keys ("?" is "shift+slash").
-// macos/Sources/TermKit/Keys.swift does the same; design/testdata/keys holds
-// the vectors all three are tested with. Shared by the page and the desktop
+// internal/keybindings does the same; design/testdata/keys holds the vectors
+// both are tested with. Shared by the page and the desktop
 // app's shell, whose menu shows the keys (desktop/src/menu.ts).
 //
 // A pressed key is named after the character the keyboard layout gives it,

@@ -22,8 +22,7 @@ Bumping pinned artifacts (`internal/codeserver/`):
 Cutting a release:
 1. `make check test`, `make it` (with the pinned herdr-core:
    `go run ./scripts/fetch-hc -exe <file> <os>/<arch>`, then
-   `HC_TEST_BIN=<file> make it`) and, on a Mac, `make macos-test` pass on a
-   clean tree.
+   `HC_TEST_BIN=<file> make it`) pass on a clean tree.
 2. Write `CHANGELOG.md`. It is edited only here; feature and fix branches
    leave it alone. List what was merged since the last tag:
    `git log --first-parent --format='%h %s' $(git describe --tags --abbrev=0)..HEAD`
@@ -44,13 +43,13 @@ Cutting a release:
 4. Build: `TARGETS="linux/amd64 linux/arm64 darwin/amd64 darwin/arm64" scripts/build.sh`
    writes the archives and `dist/release/SHA256SUMS`. On a Mac,
    `ARCH=arm64 VERSION=vX.Y.Z make desktop-dmg` (and `ARCH=x64`) builds the
-   DMGs into `dist/desktop/`, and `VERSION=vX.Y.Z make macos-app` the macOS
-   application into `dist/macos/`. Pushing the tag runs the same builds in
-   the `release` workflow, which publishes archives, DMGs, the macOS
-   application's zip and one `SHA256SUMS` (signing secrets: `RELEASING.md`).
+   DMGs into `dist/desktop/` (ad hoc signed, not notarized). Pushing the
+   tag runs the same builds in the `release` workflow: the archives on
+   Linux, the DMGs (arm64 and x64) on macOS runners, then one `SHA256SUMS`
+   and build provenance over all of them (`RELEASING.md`).
 5. Smoke test the host binary: `version`, start with `--local-only`, open
-   the UI; on a Mac, install the DMG and the macOS application and check
-   that each starts its core and shows the terminals.
+   the UI; on a Mac, install the DMG and check that the app starts its core
+   and shows the terminals.
 
 Report the version, the changes to pinned digests, and the artifact list with
 checksums.

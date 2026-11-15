@@ -1,6 +1,6 @@
 :root {
   /* The UI's colors are the design tokens (tokens.css, generated from
-     design/tokens.json), which the macOS application shares. */
+     design/tokens.json). */
   --bg: var(--ds-color-background);
   --bg-1: var(--ds-color-sidebar);
   --bg-2: var(--ds-color-hover);

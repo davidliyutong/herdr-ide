@@ -13,8 +13,8 @@ import (
 	"herdr-ide/internal/machines"
 )
 
-// /ws is the event channel of the clients (the browser UI, the desktop app
-// and the macOS application): machines, program windows, agents, settings,
+// /ws is the event channel of the clients (the browser UI and the desktop
+// app's page and shell): machines, program windows, agents, settings,
 // keybindings, the VS Code bridge and downloads. Terminals have their own
 // WebSocket (/api/v1/term, term.go).
 

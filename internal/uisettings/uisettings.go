@@ -1,6 +1,6 @@
-// Package uisettings defines the settings of the user interfaces: the web UI
-// (also inside the desktop app) and the macOS application read them from the
-// core (/api/settings), so every client of a core looks and behaves the same
+// Package uisettings defines the settings of the user interface: the web UI
+// (also inside the desktop app) reads them from the core (/api/settings), so
+// every client of a core looks and behaves the same
 // and the values survive browsers, profiles and reinstalls. See
 // docs/features/13-settings-and-appearance.md.
 package uisettings

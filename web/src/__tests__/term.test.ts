@@ -115,7 +115,7 @@ describe('terminal store', () => {
   });
 });
 
-/** A vector of design/testdata/layout, shared with macos/Tests/TermKitTests. */
+/** A vector of design/testdata/layout. */
 interface LayoutVector {
   description: string;
   input: unknown;

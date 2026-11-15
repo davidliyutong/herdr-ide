@@ -15,7 +15,7 @@
   浏览器用编译成 WebAssembly 的 Ghostty 终端库自己模拟每个终端，并用 WebGL 绘制（不支持时用 Canvas 2D）。
   按键按 pane 里程序的模式编码（包括 kitty 键盘协议）。
   支持鼠标、滚动回看（拖到边缘会自动滚动，复制整段）、中文输入法、OSC 52 复制（在 Claude Code 里选中的文字直接进剪贴板）和拖动调整分屏，程序看到的终端颜色与界面主题一致。
-  workspace、tab 和分屏是保存在每台机器上的布局文档，所有浏览器、桌面应用和 macOS 应用看到的都一样。
+  workspace、tab 和分屏是保存在每台机器上的布局文档，所有浏览器和桌面应用看到的都一样。
   拖动 pane 标题栏可交换或移动 pane，点击标题即可重命名；
   拖动 tab 和 workspace 可调整顺序；
   右键 pane 标题栏、tab 或 workspace 可打开对应的命令菜单，右键 pane 里的文字可复制、粘贴或打开路径。
@@ -60,9 +60,9 @@
   文件夹打包成 zip，从机器上边打包边下载。
   VS Code 的资源管理器里也有同样的下载。
   状态栏的下载面板显示每个下载的进度、速度和结果，可以取消或重新下载。
-- **多浏览器同时使用**：所有浏览器、桌面应用和 macOS 应用看到同样的终端，都可以输入；终端的尺寸由最近使用它的一方决定。
-- **设置**：界面语言（中文、英文）、浅色/深色主题（VS Code 同步切换）、界面大小、终端的字体、行高、光标、回滚行数、响铃和配色（两种主题的 16 色），面板位置、code-server 安装方式以及所有快捷键，集中在一个可搜索的设置对话框里（侧栏的齿轮按钮，应用里按 `cmd+,`）。
-  设置和快捷键保存在 core 所在主机上的两个 JSON 文件里，也可以直接手改；浏览器、桌面应用和 macOS 应用看到的都一样。
+- **多浏览器同时使用**：所有浏览器和桌面应用看到同样的终端，都可以输入；终端的尺寸由最近使用它的一方决定。
+- **设置**：界面语言（中文、英文）、浅色/深色主题（VS Code 同步切换）、界面大小、终端的字体、行高、光标、回滚行数、响铃和配色（两种主题的 16 色），面板位置、code-server 安装方式以及所有快捷键，集中在一个可搜索的设置对话框里（侧栏的齿轮按钮，桌面应用里按 `cmd+,`）。
+  设置和快捷键保存在 core 所在主机上的两个 JSON 文件里，也可以直接手改；浏览器和桌面应用看到的都一样。
   终端默认使用内置的 JetBrains Mono 字体，也可以换成其他字体。
 
 ## 截图
@@ -123,17 +123,12 @@ macOS 版包含适用于 Finder 和 Dock 的多尺寸图标。
 
 在桌面应用中，`cmd+t` 新建 tab，`cmd+w` 关闭 pane，`cmd+d` / `cmd+shift+d` 分屏，`cmd+n` 新建 workspace，`cmd+,` 打开设置，`cmd+shift+p` 打开命令面板，`cmd+j` 显示或隐藏 VS Code 面板；
 焦点在 VS Code 里时，VS Code 自己的快捷键优先。
-菜单与原生应用相同，显示当前生效的快捷键，使用界面的语言；
+菜单栏显示当前生效的快捷键，使用界面的语言；
 标题栏跟随界面的主题。
 可在**设置 → 快捷键**中修改或移除快捷键，也可以绑定 `ctrl+b c` 这样的组合键；
 浏览器里 `cmd+t` / `cmd+w` 仍归浏览器自己使用。
 
-原生 macOS 应用用 Ghostty 的渲染器绘制终端，并通过同一个 core 提供浏览器界面的全部功能：workspace、tab 和分屏（拖动、最大化、重命名），添加和管理机器（含 ssh 登录），文件窗口与上传下载，把文件粘贴或拖入终端，可按机器覆盖的设置和全部快捷键，命令面板，agent 的通知、提示音和 Dock 角标，终端旁的 VS Code，以及鼠标悬停显示公式。
-GitHub Releases 提供 Apple Silicon 版本（`…-mac-native-arm64.zip`）；
-也可以用 `make macos-app` 构建（位于 `dist/macos/`；未通过 `SIGN_IDENTITY` 指定证书时使用 ad-hoc 签名）。
-它与 Electron 应用共用 `desktop` instance，因此设置、快捷键和机器列表也是同一份。
-
-Electron 应用会以 `desktop` instance 启动自己的 core，监听 `http://127.0.0.1:7781`（原生应用监听系统分配的端口）；
+Electron 应用会以 `desktop` instance 启动自己的 core，监听 `http://127.0.0.1:7781`；
 退出应用或关闭主窗口时回收该 core。
 仍需预先安装 OpenSSH。
 发布版和本地构建都使用 ad-hoc 签名，不含 Apple 公证或自动更新。
@@ -187,6 +182,5 @@ make check test    # 提交 PR 之前运行
 核心程序内嵌供各机器使用的 [herdr-core](https://github.com/herdrdev/herdr-core)（Apache-2.0），其许可证及依赖声明在发布包的 `licenses/herdr-core/` 中。
 agent 中带有 herdr 的 agent 识别规则（Apache-2.0，见 [licenses/herdr-detect/](licenses/herdr-detect/)）。
 核心程序还内嵌供 Linux 机器使用的视频编码器（FFmpeg，LGPL-2.1，以及 libvpx、libva 和 libdrm；见 [licenses/encoder/](licenses/encoder/)）。
-macOS 应用还附带 Ghostty 和 libghostty-spm 的许可证（MIT）。
 code-server 和 Git Graph 使用各自的许可证，在运行时下载。
 Git Graph 明确限制衍生作品分发，对原版的一般再分发授权不明确，因此不纳入公开发布包。

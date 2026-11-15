@@ -77,20 +77,6 @@ automatically, scheduling agents.
 - **Review**: from a pane, its header's buttons (and the palette's
   `code.diff` and `code.gitGraph`) open the multi-file diff and Git Graph
   of its repository ([05](05-vscode-panel.md)).
-- **The macOS application** ([23](23-macos-application.md)) does the
-  same with native means (`Activity` in `macos/Sources/TermKit`, the same
-  rules, unit-tested): the inbox at the top of the sidebar, the jump to the
-  agent that needs attention, the
-  agents in the palette and the kinds to start; system notifications
-  (`UNUserNotificationCenter`, one per terminal, replaced by the next;
-  clicking one shows the terminal) when the window is not in front, a
-  note in it for a blocked agent when it is; the system's sounds instead of
-  the chimes (Ping when input is needed, Glass when done), on the client
-  the core chose (the application reports its use as `active`); the number
-  of blocked terminals on the Dock icon. *Send to Agent* pastes into the
-  focused terminal of the sending window's machine, else into that
-  machine's agent waiting for input; the terminal is shown first and the
-  text pasted once it is attached.
 
 ## Alternatives considered
 
@@ -119,9 +105,7 @@ agent messages and the seen marking by focus ([25](25-agent-detection.md)).
 `web/src/__tests__/sound.test.ts` which sound a status change plays
 (suppression, muted agents, the chosen browser);
 `TestSoundClientMostRecentlyActive` (`internal/server`) the choice of the
-browser. The macOS application's `ActivityTests` (`macos/Tests/TermKitTests`)
-cover its attention order and reactions, the programs that make closing
-ask, where *Send to Agent* goes and the palette's entries. An agent's
+browser. An agent's
 working, blocked and done states in the sidebar, a tab,
 a pane header and a toast were checked in headless Chromium against a dev
 core with a script named like Claude Code.

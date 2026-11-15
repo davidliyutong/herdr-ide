@@ -3,7 +3,7 @@ import type { BackendState, TerminalRecord } from './protocol';
 /**
  * The terminals of the machines a client subscribed to, kept current from
  * the core's backend, snapshot and event messages. Events are applied as
- * herdr-core's API describes, like the core and the macOS application do.
+ * herdr-core's API describes, as the core does.
  */
 export class TerminalStore {
   readonly backends = new Map<string, BackendState>();

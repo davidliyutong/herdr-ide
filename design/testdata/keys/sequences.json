@@ -1,5 +1,5 @@
 {
-  "description": "How a stream of strokes runs bindings, chords included (users bind chords; no default is one). Each stroke gives none (the key is not the application's: the terminal gets it), pending (a chord goes on), run:<command>, literal (the chord's first stroke pressed again: this press goes on to the terminal, through the same key encoder as none) or swallow (a chord that matches nothing ends; the key is dropped). Bindings apply where their when allows: always applies in every context. Run by web/src/__tests__/keys.test.ts and macos/Tests/TermKitTests.",
+  "description": "How a stream of strokes runs bindings, chords included (users bind chords; no default is one). Each stroke gives none (the key is not the application's: the terminal gets it), pending (a chord goes on), run:<command>, literal (the chord's first stroke pressed again: this press goes on to the terminal, through the same key encoder as none) or swallow (a chord that matches nothing ends; the key is dropped). Bindings apply where their when allows: always applies in every context. Run by web/src/__tests__/keys.test.ts.",
   "bindings": [
     {
       "key": "ctrl+b c",

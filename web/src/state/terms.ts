@@ -1,8 +1,7 @@
 // The machines' terminals as the core's terminal protocol reports them
 // (/api/v1/term, docs/features/22-terminal-protocol.md) and their shared
 // arrangement, the layout document of each machine: workspaces, tabs and
-// split panes. The macOS application's model (macos/Sources/App/Model.swift)
-// does the same: a machine is subscribed once the user turns to it (which
+// split panes. A machine is subscribed once the user turns to it (which
 // installs and starts its terminal core), its layout is read before it is
 // edited, edits are written one at a time with the version last read, and
 // another client's newer version wins a conflict.

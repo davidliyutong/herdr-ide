@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import type { MenuItemConstructorOptions } from 'electron';
 import registry from '../../design/generated/registry.json';
 import { translate } from '../../web/src/i18n';
@@ -8,67 +7,16 @@ import { en, type MessageKey } from '../../web/src/i18n/en';
 import { zhCN } from '../../web/src/i18n/zh-CN';
 import { accelerator, menus, menuTemplate, type Binding } from './menu';
 
-// The tests run from desktop/ (pnpm -C desktop test).
-const repo = '..';
 const mac = registry.keybindings.mac as Binding[];
 
-/** The menu the macOS application builds (makeMenu in its main.swift): each
- * menu's title key and its items, "-" for separators. */
-function nativeMenus(): { title: string; items: string[] }[] {
-  const swift = readFileSync(`${repo}/macos/Sources/App/main.swift`, 'utf8');
-  const body = swift.slice(swift.indexOf('private func makeMenu()'));
-  const out: { title: string; items: string[] }[] = [];
-  const line =
-    /submenu\((?:Brand\.appName|tr\("menu\.(\w+)"\))\)|command\(menu, "menu\.(\w+)", "([\w.]+)"\)|add\(menu, "menu\.(\w+)"|menu\.addItem\(\.separator\(\)\)|^\s*return main$/gm;
-  for (const m of body.matchAll(line)) {
-    if (m[0].trim() === 'return main') break;
-    if (m[0].startsWith('submenu')) out.push({ title: m[1] ?? 'app', items: [] });
-    else if (m[2]) out.at(-1)!.items.push(`${m[2]} ${m[3]}`);
-    else if (m[4]) out.at(-1)!.items.push(m[4]);
-    else out.at(-1)!.items.push('-');
-  }
-  return out;
-}
-
-/** Items without separators at either end or in a row. */
-function tidy(items: string[]): string[] {
-  return items.filter((it, i, all) => it !== '-' || (i > 0 && i < all.length - 1 && all[i + 1] !== '-'));
-}
-
-// Files… and Add Machine… open the macOS application's own windows and
-// dialogs (the page has its sidebar's).
-const nativeOnly = new Set(['files', 'addMachine']);
-
-test("the menu is the macOS application's: same menus, commands, order", () => {
-  const native = nativeMenus();
-  assert.ok(native.length >= 5, 'main.swift parsed');
-  const shell = menus.map(({ title, items }) => ({
-    title,
-    items: tidy(items.map((it) => (it === '-' ? '-' : 'command' in it ? `${it.title} ${it.command}` : it.title))),
-  }));
-  const expected = native.map(({ title, items }) => ({ title, items: tidy(items.filter((it) => !nativeOnly.has(it))) }));
-  assert.deepEqual(shell, expected);
-});
-
-/** The macOS application's strings of a language, %@ written {app}. */
-function nativeStrings(lproj: string): Map<string, string> {
-  const text = readFileSync(`${repo}/macos/Sources/App/Resources/${lproj}.lproj/Localizable.strings`, 'utf8');
-  return new Map([...text.matchAll(/^"([^"]+)" = "(.*)";$/gm)].map((m) => [m[1], m[2].replaceAll('%@', '{app}')]));
-}
-
-test("titles are the macOS application's, in English and Chinese", () => {
-  const titles = menus
-    .flatMap(({ title, items }) => [title, ...items.map((it) => (it === '-' ? '' : it.title))])
-    .filter((t) => t && t !== 'app');
-  for (const [dict, lproj] of [
-    [en, 'en'],
-    [zhCN, 'zh-Hans'],
-  ] as const) {
-    const native = nativeStrings(lproj);
-    for (const title of titles) {
-      const own = dict[`desktop.menu.${title}` as MessageKey];
-      assert.ok(own, `desktop.menu.${title} (${lproj})`);
-      assert.equal(own, native.get(`menu.${title}`), `menu.${title} (${lproj})`);
+test('every item runs a registered command or a standard role, titled in both languages', () => {
+  const commands = new Set(registry.commands.map((c) => c.id));
+  for (const { title, items } of menus) {
+    if (title !== 'app') assert.ok(en[`desktop.menu.${title}`] && zhCN[`desktop.menu.${title}`], title);
+    for (const it of items) {
+      if (it === '-') continue;
+      if ('command' in it) assert.ok(commands.has(it.command), it.command);
+      assert.ok(en[`desktop.menu.${it.title}` as MessageKey] && zhCN[`desktop.menu.${it.title}` as MessageKey], it.title);
     }
   }
 });

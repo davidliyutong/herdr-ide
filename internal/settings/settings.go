@@ -1,5 +1,5 @@
-// Package settings is the one settings system of the core and of every
-// client (web UI, desktop app, macOS application), modeled on VS Code's: a
+// Package settings is the one settings system of the core and of its
+// clients (the web UI, also inside the desktop app), modeled on VS Code's: a
 // registry of typed definitions, a hand-editable JSON file on the core host,
 // layered values and generic settings UIs rendered from the definitions.
 //
@@ -68,12 +68,6 @@ const (
 	SourceFlag    Source = "flag"
 )
 
-// Platforms a setting can be limited to (Def.Platforms).
-const (
-	PlatformWeb   = "web"   // the browser UI, also inside the desktop app
-	PlatformMacOS = "macos" // the native macOS application
-)
-
 // Errors of Set and Reset; the API reports them as codes.
 var (
 	ErrUnknown = errors.New("unknown setting")
@@ -109,8 +103,6 @@ type Def struct {
 	// Section and Order place the setting in the UIs.
 	Section string
 	Order   int
-	// Platforms lists the clients that use the setting; empty for all.
-	Platforms []string
 	// Flag names a command-line flag that sets and locks the setting, with
 	// Usage as its help text.
 	Flag, Usage string
@@ -243,9 +235,8 @@ func (d Def) normalize(v any) (any, error) {
 }
 
 func normalizeString(t Type, enum []string, s string) (any, error) {
-	// No control character: C0 (line breaks, ESC, NUL…), DEL and C1. A
-	// string becomes a line of the macOS application's Ghostty
-	// configuration, among others.
+	// No control character: C0 (line breaks, ESC, NUL…), DEL and C1: a
+	// string is shown in the UIs and written into the settings file.
 	if strings.IndexFunc(s, unicode.IsControl) >= 0 || len(s) > maxString {
 		return nil, errors.New("contains control characters or is too long")
 	}
@@ -937,20 +928,19 @@ func (s *Store) OnChange(fn func([]Change)) {
 
 // DefJSON is a definition as the API lists it.
 type DefJSON struct {
-	Key       string   `json:"key"`
-	Type      Type     `json:"type"`
-	Default   any      `json:"default"`
-	Enum      []string `json:"enum,omitempty"`
-	Min       *float64 `json:"min,omitempty"`
-	Max       *float64 `json:"max,omitempty"`
-	Integer   bool     `json:"integer,omitempty"`
-	Item      Type     `json:"item,omitempty"`
-	Length    int      `json:"length,omitempty"`
-	Scope     Scope    `json:"scope"`
-	Section   string   `json:"section"`
-	Order     int      `json:"order"`
-	Platforms []string `json:"platforms,omitempty"`
-	Flag      string   `json:"flag,omitempty"`
+	Key     string   `json:"key"`
+	Type    Type     `json:"type"`
+	Default any      `json:"default"`
+	Enum    []string `json:"enum,omitempty"`
+	Min     *float64 `json:"min,omitempty"`
+	Max     *float64 `json:"max,omitempty"`
+	Integer bool     `json:"integer,omitempty"`
+	Item    Type     `json:"item,omitempty"`
+	Length  int      `json:"length,omitempty"`
+	Scope   Scope    `json:"scope"`
+	Section string   `json:"section"`
+	Order   int      `json:"order"`
+	Flag    string   `json:"flag,omitempty"`
 }
 
 // Definitions lists the definitions for the API, in UI order.
@@ -959,7 +949,7 @@ func (s *Store) Definitions() []DefJSON {
 	for _, d := range s.defs {
 		out = append(out, DefJSON{Key: d.Key, Type: d.Type, Default: d.Default, Enum: d.Enum, Min: d.Min, Max: d.Max,
 			Integer: d.Integer, Item: d.Item, Length: d.Length, Scope: d.Scope, Section: d.Section, Order: d.Order,
-			Platforms: d.Platforms, Flag: d.Flag})
+			Flag: d.Flag})
 	}
 	return out
 }

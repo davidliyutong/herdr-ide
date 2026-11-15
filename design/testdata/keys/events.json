@@ -1,12 +1,10 @@
 {
-  "description": "Key presses and the stroke each client names them by: a letter, digit or named character the layout gives the key without Shift, else the key at that place on a US layout. key and code are the browser's KeyboardEvent fields, chars and keyCode AppKit's charactersIgnoringModifiers and virtual key code. Run by web/src/__tests__/keys.test.ts and macos/Tests/TermKitTests.",
+  "description": "Key presses and the stroke each client names them by: a letter, digit or named character the layout gives the key without Shift, else the key at that place on a US layout. key and code are the browser's KeyboardEvent fields. Run by web/src/__tests__/keys.test.ts.",
   "cases": [
     {
       "description": "a letter with Cmd",
       "key": "t",
       "code": "KeyT",
-      "chars": "t",
-      "keyCode": 17,
       "mods": [
         "cmd"
       ],
@@ -16,8 +14,6 @@
       "description": "Shift does not change the name",
       "key": "T",
       "code": "KeyT",
-      "chars": "T",
-      "keyCode": 17,
       "mods": [
         "cmd",
         "shift"
@@ -28,8 +24,6 @@
       "description": "AZERTY: Z where QWERTY has W",
       "key": "z",
       "code": "KeyW",
-      "chars": "z",
-      "keyCode": 13,
       "mods": [
         "cmd"
       ],
@@ -39,8 +33,6 @@
       "description": "Dvorak: comma at QWERTY's W",
       "key": ",",
       "code": "KeyW",
-      "chars": ",",
-      "keyCode": 13,
       "mods": [
         "cmd"
       ],
@@ -50,8 +42,6 @@
       "description": "a non-Latin layout falls back to the physical key",
       "key": "ц",
       "code": "KeyW",
-      "chars": "ц",
-      "keyCode": 13,
       "mods": [
         "cmd"
       ],
@@ -61,8 +51,6 @@
       "description": "Option characters fall back to the physical key",
       "key": "†",
       "code": "KeyT",
-      "chars": "t",
-      "keyCode": 17,
       "mods": [
         "alt"
       ],
@@ -72,8 +60,6 @@
       "description": "a shifted character is Shift and its key",
       "key": "?",
       "code": "Slash",
-      "chars": "?",
-      "keyCode": 44,
       "mods": [
         "shift"
       ],
@@ -83,8 +69,6 @@
       "description": "a shifted digit",
       "key": "!",
       "code": "Digit1",
-      "chars": "!",
-      "keyCode": 18,
       "mods": [
         "shift"
       ],
@@ -94,8 +78,6 @@
       "description": "a digit with Ctrl",
       "key": "1",
       "code": "Digit1",
-      "chars": "1",
-      "keyCode": 18,
       "mods": [
         "ctrl"
       ],
@@ -105,8 +87,6 @@
       "description": "the prefix",
       "key": "b",
       "code": "KeyB",
-      "chars": "b",
-      "keyCode": 11,
       "mods": [
         "ctrl"
       ],
@@ -116,8 +96,6 @@
       "description": "Cmd+Shift+]",
       "key": "}",
       "code": "BracketRight",
-      "chars": "}",
-      "keyCode": 30,
       "mods": [
         "cmd",
         "shift"
@@ -128,8 +106,6 @@
       "description": "Cmd+,",
       "key": ",",
       "code": "Comma",
-      "chars": ",",
-      "keyCode": 43,
       "mods": [
         "cmd"
       ],
@@ -139,8 +115,6 @@
       "description": "minus",
       "key": "-",
       "code": "Minus",
-      "chars": "-",
-      "keyCode": 27,
       "mods": [],
       "stroke": "minus"
     },
@@ -148,8 +122,6 @@
       "description": "space",
       "key": " ",
       "code": "Space",
-      "chars": " ",
-      "keyCode": 49,
       "mods": [],
       "stroke": "space"
     },
@@ -157,8 +129,6 @@
       "description": "tab",
       "key": "Tab",
       "code": "Tab",
-      "chars": "\t",
-      "keyCode": 48,
       "mods": [],
       "stroke": "tab"
     },
@@ -166,8 +136,6 @@
       "description": "Shift+Tab",
       "key": "Tab",
       "code": "Tab",
-      "chars": "\u0019",
-      "keyCode": 48,
       "mods": [
         "shift"
       ],
@@ -177,8 +145,6 @@
       "description": "enter",
       "key": "Enter",
       "code": "Enter",
-      "chars": "\r",
-      "keyCode": 36,
       "mods": [],
       "stroke": "enter"
     },
@@ -186,8 +152,6 @@
       "description": "escape",
       "key": "Escape",
       "code": "Escape",
-      "chars": "\u001b",
-      "keyCode": 53,
       "mods": [],
       "stroke": "escape"
     },
@@ -195,8 +159,6 @@
       "description": "backspace",
       "key": "Backspace",
       "code": "Backspace",
-      "chars": "",
-      "keyCode": 51,
       "mods": [],
       "stroke": "backspace"
     },
@@ -204,8 +166,6 @@
       "description": "forward delete",
       "key": "Delete",
       "code": "Delete",
-      "chars": "",
-      "keyCode": 117,
       "mods": [],
       "stroke": "delete"
     },
@@ -213,8 +173,6 @@
       "description": "an arrow",
       "key": "ArrowLeft",
       "code": "ArrowLeft",
-      "chars": "",
-      "keyCode": 123,
       "mods": [],
       "stroke": "left"
     },
@@ -222,8 +180,6 @@
       "description": "an arrow with Alt",
       "key": "ArrowUp",
       "code": "ArrowUp",
-      "chars": "",
-      "keyCode": 126,
       "mods": [
         "alt"
       ],
@@ -233,8 +189,6 @@
       "description": "a function key",
       "key": "F5",
       "code": "F5",
-      "chars": "",
-      "keyCode": 96,
       "mods": [],
       "stroke": "f5"
     },
@@ -242,8 +196,6 @@
       "description": "page down",
       "key": "PageDown",
       "code": "PageDown",
-      "chars": "",
-      "keyCode": 121,
       "mods": [],
       "stroke": "pagedown"
     },
@@ -251,8 +203,6 @@
       "description": "backtick",
       "key": "`",
       "code": "Backquote",
-      "chars": "`",
-      "keyCode": 50,
       "mods": [
         "ctrl"
       ],
@@ -262,8 +212,6 @@
       "description": "a lone modifier is no stroke",
       "key": "Meta",
       "code": "MetaLeft",
-      "chars": "",
-      "keyCode": 55,
       "mods": [
         "cmd"
       ],
@@ -273,8 +221,6 @@
       "description": "Shift alone is no stroke",
       "key": "Shift",
       "code": "ShiftLeft",
-      "chars": "",
-      "keyCode": 56,
       "mods": [
         "shift"
       ],

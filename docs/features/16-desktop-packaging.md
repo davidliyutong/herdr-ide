@@ -5,18 +5,15 @@
 The browser UI and Go core already contain the application's features.
 macOS users also need an app they can launch from Finder and install by
 dragging it out of a disk image. The Electron shell is the browser UI as
-such an app, with its own core; the native macOS application
-([23](23-macos-application.md)) is a separate client of the same core
-protocols. VS Code webviews depend on Chromium features
-and a secure loopback origin, so a native shell must preserve the existing
-HTTP, WebSocket and service-worker behavior.
+such an app, with its own core. VS Code webviews depend on Chromium
+features and a secure loopback origin, so the shell must preserve the
+existing HTTP, WebSocket and service-worker behavior.
 
 ## Goals / non-goals
 
 Goals: reproducible dependency resolution, native macOS arm64/x64 `.app`
 and DMG builds, automatic core ownership and cleanup, safe renderer windows,
-a native menu with the macOS application's commands and the core's
-keybindings, the title bar and menu following the core's theme and
+a native menu with the UI's commands and the core's keybindings, the title bar and menu following the core's theme and
 language, and a development mode that cannot touch the daily instance's
 state or terminals.
 
@@ -30,8 +27,7 @@ implemented independently.
 - `scripts/desktop.sh` builds the existing embedded application and matches
   the Go core architecture to Electron (`x64` maps to Go `amd64`).
   `desktop/electron-builder.cjs` packages the core as an executable resource
-  outside ASAR, at `Contents/Resources/bin/<slug>` as `scripts/macos-app.sh`
-  does, with the notices laid out as in the release archives (`LICENSE`,
+  outside ASAR, at `Contents/Resources/bin/<slug>`, with the notices laid out as in the release archives (`LICENSE`,
   `THIRD_PARTY_NOTICES.md`, the web bundle's `licenses.md`,
   `licenses/herdr-core/`, `licenses/herdr-detect/`, `licenses/encoder/`); the
   shell lives inside ASAR. Its `beforePack` hook refuses to package binaries
@@ -86,8 +82,7 @@ implemented independently.
   starts, restarts and stops a machine's terminal core
   ([22](22-terminal-protocol.md)). All inherited environment and SSH configuration
   remain available to the core.
-- The shell follows its core as the macOS application does
-  (`desktop/src/follow.ts`): it holds its own event channel (`/ws`), reads
+- The shell follows its core (`desktop/src/follow.ts`): it holds its own event channel (`/ws`), reads
   `GET /api/settings` and `GET /api/keybindings` when it opens and applies
   the `settings` and `keybindings` messages after every change; if the
   channel drops it opens it again after 0.5 s, doubling to 8 s.
@@ -97,8 +92,8 @@ implemented independently.
   theme, also when it differs from the system's appearance; `system` keeps
   following macOS. `appearance.language` is the language of the menu and
   the error dialogs; `auto` follows the system's preferred languages.
-- The application menu (`desktop/src/menu.ts`) is the macOS application's
-  ([23](23-macos-application.md)): the application's menu (About, Settings…,
+- The application menu (`desktop/src/menu.ts`) has the application's menu
+  (About, Settings…,
   Keyboard Shortcuts…, Hide, Quit), **Shell** (New Terminal, Split Right,
   Split Down, New, Rename and Close Workspace…, Rename Tab…, Close
   Terminal, Close Tab), **Edit** (Undo, Redo, Cut, Copy, Paste, Select All,
@@ -106,12 +101,9 @@ implemented independently.
   Workspace…, Toggle Sidebar, Show or Hide VS Code, Zoom Pane, next and
   previous tab, workspace and pane, Focus Pane Left, Right, Above, Below)
   and **Window** (Minimize). Edit's Undo, Redo, Cut, Copy, Paste and
-  Select All are Electron's standard roles, as AppKit's actions are in the
-  macOS application: Chromium's text fields, like AppKit's, edit with Cmd
-  keys only through the menu. The
-  macOS application's Files… and Add Machine… open its own windows; the web
-  UI's sidebar adds machines. Titles are the web UI's `desktop.menu.*`
-  strings, the macOS application's `menu.*` ones in English and Chinese.
+  Select All are Electron's standard roles: Chromium's text fields edit
+  with Cmd keys only through the menu. Titles are the web UI's
+  `desktop.menu.*` strings, in English and Chinese.
   Each command item shows the first single-stroke key the keybindings give
   its command (the registry's defaults until the core answers) and the menu
   is rebuilt when the keybindings or the language change. The page sees a
@@ -122,13 +114,11 @@ implemented independently.
   only where the page matches keys itself: in a terminal or elsewhere in
   the page outside text fields and VS Code's panel. A command for
   everywhere (Show or Hide VS Code) bound to a key without Cmd does not run
-  from a text field or from VS Code, where the macOS application's key
-  matcher runs it. An item chosen sends its command to the main window's
+  from a text field or from VS Code. An item chosen sends its command to the main window's
   page, which runs it where it applies (`web/src/desktop.ts`); with a
   program window or one of VS Code's own windows in front, closing a pane
   or a tab closes that window instead. Items are not enabled and disabled
-  by context as the macOS application's are (Electron's menu has no
-  validation when it opens): one chosen where its command does not apply
+  by context (Electron's menu has no validation when it opens): one chosen where its command does not apply
   (a command for terminals while a dialog is open or VS Code has the
   keyboard) does nothing. The shell's core never runs
   read-only, since the shell does not pass `--read-only`, so no item needs
@@ -157,8 +147,7 @@ implemented independently.
   forgets when the page navigates or its renderer goes; it then sends them
   to the main page and brings the window forward. The page creates the
   workspaces as for folders dropped on the sidebar and notes how many other
-  items it skipped, as the macOS application does
-  ([04](04-layout-and-keyboard.md)). Unpackaged development runs use
+  items it skipped ([04](04-layout-and-keyboard.md)). Unpackaged development runs use
   Electron's own Info.plist and get no Dock drops; `open -a` still reports
   folders there.
 - The web brand constants and English/Chinese message dictionaries are
@@ -239,10 +228,8 @@ readiness, ephemeral ports, unexpected exits, late child errors and
 idempotent child shutdown, with fake Node children), opened folders waiting
 for the page (`folders`), the settings and keybindings read and followed
 over a stand-in event channel, which is opened again when it drops
-(`follow`), the menu (`menu`: its structure
-and titles against `macos/Sources/App/main.swift` and the macOS
-application's `Localizable.strings`, accelerators, a rebinding, an
-unbinding, chords), URL and permission policy (`policy`) and the preload's
+(`follow`), the menu (`menu`: its structure and titles, accelerators, a
+rebinding, an unbinding, chords), URL and permission policy (`policy`) and the preload's
 functions against a stand-in for Electron (`preload`), with no network or
 real terminal cores. `web/src/__tests__/desktop.test.ts` covers the page's
 side of menu commands (dialogs, VS Code with the keyboard) and

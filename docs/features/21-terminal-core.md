@@ -57,8 +57,8 @@ shares nothing with a herdr-core the user runs; its executable
 delivered through the agent, verified; a Go client of the API whose
 backpressure reaches the slowest hop.
 
-Non-goals: emulating terminals (each client does: the browser UI with
-[26](26-web-terminals.md), the macOS application with Ghostty); clients
+Non-goals: emulating terminals (the browser UI does,
+[26](26-web-terminals.md)); clients
 reach these terminals through [22](22-terminal-protocol.md); herdr-core's own machine links
 (`machine.add`): machines are reached through the agent
 ([02](02-multi-machine-transport.md)); Windows.
@@ -89,8 +89,8 @@ four release archives (Linux and macOS on amd64 and arm64).
 downloads an archive unless a verified copy is in `dist/hc/`, and takes the
 `herdr-core` member at the archive's root from the bytes whose digest it
 just checked: one regular file of at most 64 MiB, so the copy inside the
-macOS application bundle, a link or a second entry of that name is never
-used. It writes the executable gzip-compressed, without a name or time in
+macOS release's own application bundle (`Herdr Core.app`), a link or a
+second entry of that name is never used. It writes the executable gzip-compressed, without a name or time in
 the header, to `internal/embedded/hc/hc-<os>-<arch>.gz`, and the release's
 `LICENSE` and `THIRD-PARTY-NOTICES` to `dist/hc/licenses/`, which archives
 and the desktop app ship as `licenses/herdr-core/`. The executable is never

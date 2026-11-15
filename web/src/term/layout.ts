@@ -1,11 +1,10 @@
 // The arrangement of a machine's terminals that every client shares:
 // workspaces (a name and a directory), each with tabs, each a tree of split
 // panes whose leaves are terminals. It is the document "layout" in the
-// machine's terminal core (docs/features/22-terminal-protocol.md).
-// macos/Sources/TermKit/Layout.swift implements the same functions, and both
-// run the vectors in design/testdata/layout. The functions return new values
-// and never change their arguments; a layout is its own document value, and
-// fields this version does not know are kept at every level.
+// machine's terminal core (docs/features/22-terminal-protocol.md), tested
+// with the vectors in design/testdata/layout. The functions return new
+// values and never change their arguments; a layout is its own document
+// value, and fields this version does not know are kept at every level.
 
 export const LAYOUT_DOCUMENT = 'layout';
 /** The id of the workspace a version 1 document's tabs are read into. */

@@ -1,8 +1,7 @@
-// The application menu: the macOS application's menu (makeMenu in
-// macos/Sources/App/main.swift), with the same commands in the same places
-// under the same titles (the web UI's desktop.menu.* strings), built from the
-// keybindings in effect. An item of a command shows the first single-stroke
-// key the keybindings give it; chords have none, the page matches them.
+// The application menu, titled with the web UI's desktop.menu.* strings and
+// built from the keybindings in effect. An item of a command shows the first
+// single-stroke key the keybindings give it; chords have none, the page
+// matches them.
 //
 // The page sees a key before the menu and cancels the keys it runs
 // (web/src/keymap.ts), so a key runs once: the menu gets only keys the page
@@ -11,8 +10,8 @@
 // shows those and leaves them to the page.
 //
 // Edit's Undo, Redo, Cut, Copy, Paste and Select All are the standard
-// roles: text fields in Chromium, as in AppKit, edit with Cmd keys only
-// through the menu.
+// roles: text fields in Chromium on macOS edit with Cmd keys only through
+// the menu.
 
 import type { MenuItemConstructorOptions } from 'electron';
 import type { MessageKey } from '../../web/src/i18n/en';
@@ -24,8 +23,7 @@ export interface Binding {
   when: string;
 }
 
-/** A title: desktop.menu.<title> in the web UI's strings, menu.<title> in
- * the macOS application's. */
+/** A title: desktop.menu.<title> in the web UI's strings. */
 export type Title = { [K in MessageKey]: K extends `desktop.menu.${infer T}` ? T : never }[MessageKey];
 
 export type Role = 'about' | 'hide' | 'quit' | 'undo' | 'redo' | 'cut' | 'copy' | 'paste' | 'selectAll' | 'minimize';

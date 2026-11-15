@@ -11,8 +11,8 @@ import (
 // "+" ("cmd+shift+t"). The canonical form, which every client compares,
 // writes modifiers in the order cmd, ctrl, alt, shift and names keys in
 // lower case after the US layout's unshifted keys ("?" is "shift+slash").
-// web/src/keys.ts and macos/Sources/TermKit/Keys.swift implement the same
-// rules; design/testdata/keys holds the vectors all three are tested with.
+// web/src/keys.ts implements the same rules; design/testdata/keys holds the
+// vectors both are tested with.
 
 // Stroke is one key press with its modifiers.
 type Stroke struct {

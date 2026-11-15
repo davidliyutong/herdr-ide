@@ -1,5 +1,5 @@
 // Package keybindings is the one keybinding system of every client (web UI,
-// desktop app, macOS application), modeled on VS Code's: commands with
+// desktop app), modeled on VS Code's: commands with
 // default keys per platform, registered here, and a hand-editable file of
 // the user's rules ({key, command, when}; command "-<id>" removes a binding)
 // on the core host. The core serves the effective bindings of every platform

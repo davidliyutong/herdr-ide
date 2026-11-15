@@ -8,10 +8,9 @@ the multiplexer running in a pane: this application is used with the
 mouse, so its default keys leave that key to the terminal. The
 terminal core keeps terminals, not layouts; every client of a machine arranges its
 terminals in the machine's layout document ([22](22-terminal-protocol.md)),
-so the browser, the desktop app and the macOS application show the same
-arrangement. In a browser, `Cmd+W`, `Cmd+T` and similar shortcuts belong to
-the browser and cannot be captured reliably; the desktop app and the macOS
-application own their keys.
+so browsers and the desktop app show the same arrangement. In a browser,
+`Cmd+W`, `Cmd+T` and similar shortcuts belong to the browser and cannot be
+captured reliably; the desktop app owns its keys.
 
 ## Goals / non-goals
 
@@ -34,9 +33,8 @@ Non-goals: arbitrary docking of panes; floating panes.
   an id, a name, the directory its new terminals start in, its tabs and
   the selected tab; a tab has a binary split tree whose leaves are
   terminal addresses, its focused terminal and a name when the user gave
-  one. `layout.ts` (TypeScript) and `macos/Sources/TermKit/Layout.swift`
-  implement the same operations and run the same vectors
-  (`design/testdata/layout`). Fields and node kinds a client does not know
+  one. `layout.ts` implements the operations and runs the vectors of
+  `design/testdata/layout`. Fields and node kinds a client does not know
   are kept, and a version 1 document (tabs without workspaces) reads as one
   workspace.
 - The page follows the machines the user turned to (the machine shown at
@@ -169,7 +167,7 @@ Non-goals: arbitrary docking of panes; floating panes.
   without the dialog (named after the folder; the last one is selected); the sidebar shows where they go while they are over it, and
   dropped files that are not folders are skipped with a note. Folders
   dropped on the app's Dock icon or opened with it do the same, also
-  skipping other items with that note, as in the macOS application; when the drop launched the app,
+  skipping other items with that note; when the drop launched the app,
   they wait up to 30 s for the local machine to connect, else a note says
   they were not opened. Browsers do
   not tell the page where a dropped folder is, so they do not offer this, nor
@@ -184,8 +182,7 @@ Non-goals: arbitrary docking of panes; floating panes.
 described in [13](13-settings-and-appearance.md))
 
 - Commands (`tab.new`, `pane.splitRight`, `view.toggleCode`…) have default
-  keys per platform (`mac`: the macOS application and the desktop app on
-  macOS; `mac-browser`; `pc`: the desktop app elsewhere; `pc-browser`) and
+  keys per platform (`mac`: the desktop app on macOS; `mac-browser`; `pc`: the desktop app elsewhere; `pc-browser`) and
   a context (`when`: `terminal`, `vscode`, `dialog` or `always`); the
   user's rules in `keybindings[-<instance>].json` on the core host add and
   remove keys, and the settings' **Keyboard shortcuts** page edits them.
@@ -198,7 +195,7 @@ described in [13](13-settings-and-appearance.md))
   reach the program in the terminal on their first press. The defaults
   are the direct shortcuts below and, on every platform, the list of
   shortcuts (`cmd+/` on macOS, `ctrl+shift+/` elsewhere) and the command
-  palette (`cmd+shift+p` and `ctrl+shift+p` in the applications, `cmd+k`
+  palette (`cmd+shift+p` and `ctrl+shift+p` in the desktop app, `cmd+k`
   in browsers on macOS; browsers elsewhere leave no key for it, and the
   status bar's **Command palette** button opens it everywhere). Commands
   without a key (tab numbers, focus moves, renames, zoom, workspace
@@ -217,12 +214,10 @@ described in [13](13-settings-and-appearance.md))
 - The PWA manifest allows installing the app in its own window, where fewer
   shortcuts are taken by browser chrome.
 
-**Direct shortcuts** (`desktop/src/menu.ts`, `web/src/desktop.ts`,
-`macos/Sources/App/main.swift`)
+**Direct shortcuts** (`desktop/src/menu.ts`, `web/src/desktop.ts`)
 
-- The desktop applications own their keys, so their platforms have direct
-  shortcuts. On macOS (both applications) they are the
-  macOS application's menu keys: `cmd+t` new tab, `cmd+d` / `cmd+shift+d`
+- The desktop app owns its keys, so its platforms have direct shortcuts.
+  On macOS they are the menu's keys: `cmd+t` new tab, `cmd+d` / `cmd+shift+d`
   split right / down, `cmd+w` close the focused pane (its terminal, not
   the tab), `cmd+n` new workspace (asking for
   its folder), `cmd+,` settings, `cmd+b` sidebar, `cmd+j` show or hide the
@@ -240,8 +235,8 @@ described in [13](13-settings-and-appearance.md))
   opens a private window on `cmd+shift+p` and `ctrl+shift+p` and gives
   pages neither).
 - A key is named after the character the keyboard layout gives it, as macOS
-  names its shortcuts (`web/src/keys.ts`, shared by the shell and the page;
-  `Keys.stroke` in the macOS application): on AZERTY, `cmd+z` stays undo
+  names its shortcuts (`web/src/keys.ts`, shared by the shell and the
+  page): on AZERTY, `cmd+z` stays undo
   although its physical key is QWERTY's W. Keys without an ASCII character
   (non-Latin layouts, Option characters, dead keys) and keys that type
   nothing fall back to the physical key, so `cmd+w` on a Russian layout is
@@ -258,11 +253,11 @@ described in [13](13-settings-and-appearance.md))
   dialog is open, or another window has it. A key thus runs its command
   once. Keys without Cmd are shown but not registered (macOS would offer
   them to a menu before the page), and the page runs them.
-- A menu command the page receives (`runMenuCommand`) runs as in the macOS
-  application's menu: while VS Code has the keyboard (its frame is the
+- A menu command the page receives (`runMenuCommand`) runs in the same
+  contexts as its key: while VS Code has the keyboard (its frame is the
   page's focused element) only commands for `vscode` or `always`, while a
   dialog or the palette is open only those for `dialog` or `always`.
-  VS Code takes its own keys before the menu in both applications, so
+  VS Code takes its own keys before the menu, so
   `cmd+w` closes its editor, `cmd+t` opens its symbol search, `cmd+,` its
   settings, `cmd+n` a new file and `cmd+j` its bottom panel; a key it
   leaves runs the menu's command where that applies.
@@ -284,20 +279,15 @@ described in [13](13-settings-and-appearance.md))
   once. Otherwise a confirmation names the programs that end (an agent by
   its name, also while it waits for input; Cancel has focus). Jobs sent to
   the background with `&` are not seen; they end with the tab.
-- Both applications have the same menu, with the same commands in the same
-  places under the same titles (the macOS application's `makeMenu`; the
-  desktop app's titles are the web UI's `desktop.menu.*` strings): Shell
-  (new terminal, splits, workspaces, rename tab, close terminal or tab),
-  Edit (copy, paste, find; the desktop app adds undo, redo and cut, which
-  Chromium's text fields need), View (palette, switch workspace, sidebar,
-  VS Code, zoom, next and previous tab, workspace and pane, focus on a
-  side) and Window ([16](16-desktop-packaging.md),
-  [23](23-macos-application.md)). Items show the first single-stroke key
-  of their command, none when it has none, and are rebuilt when the
-  keybindings change.
-- In the macOS application Ghostty unbinds the menu's keys, so the menu gets
-  them before a terminal; a key matcher in front of the window runs chords
-  and keys without a menu item, and passes every other key on.
+- The desktop app's menu (`desktop/src/menu.ts`; its titles are the web
+  UI's `desktop.menu.*` strings) has the application's menu (about,
+  settings, keyboard shortcuts, hide, quit), Shell (new terminal, splits,
+  workspaces, rename tab, close terminal or tab), Edit (undo, redo, cut,
+  copy, paste, select all, find), View (palette, switch workspace,
+  sidebar, VS Code, zoom, next and previous tab, workspace and pane, focus
+  on a side) and Window ([16](16-desktop-packaging.md)). Items show the
+  first single-stroke key of their command, none when it has none, and
+  are rebuilt when the keybindings change.
 - Key hints (tooltips, context menus, the palette, the status bar) show
   the direct shortcut in the desktop app, else the first key, and nothing
   for a command without one.
@@ -306,7 +296,7 @@ described in [13](13-settings-and-appearance.md))
 
 | Option | Why not |
 | --- | --- |
-| Each client keeping its own arrangement | The browser, the desktop app and the macOS application would show the same terminals differently; the document is one arrangement for every client of the machine. |
+| Each client keeping its own arrangement | Browsers and the desktop app would show the same terminals differently; the document is one arrangement for every client of the machine. |
 | The selection kept per browser | Two windows on one machine would disagree about what is shown and focused. Zoom stays per browser, since it is a way of looking. |
 | A toolbar above a lone pane instead of pane headers | With the page's own layout every pane has room for a header of its own. |
 | A tab bar that scrolls sideways (with auto-scroll while dragging) | Tabs out of view are hidden with no sign that they exist. |
@@ -314,12 +304,12 @@ described in [13](13-settings-and-appearance.md))
 | A "more tabs" menu for the tabs that do not fit | Hides tabs again and costs a click. |
 | Bindings to move tabs and workspaces | Rarely needed; the context menu's move items work from the keyboard. |
 | A "⋯" button on every header, tab and workspace row | Takes room on every tab and row; right-click covers desktop browsers. |
-| A desktop shell as the only client, owning all shortcuts | Browser access lets the IDE work from other devices, with the mouse and the keys browsers leave to pages, and the applications add direct shortcuts on top; Tauri's WKWebView on macOS lacks service workers, which VS Code webviews need. |
+| A desktop shell as the only client, owning all shortcuts | Browser access lets the IDE work from other devices, with the mouse and the keys browsers leave to pages, and the desktop app adds direct shortcuts on top; Tauri's WKWebView on macOS lacks service workers, which VS Code webviews need. |
 | The prefix chords as defaults (`ctrl+b`, then a key), as earlier versions had | They took `ctrl+b` from tmux and other programs in the terminals, and every press of it waited for a second key; the application is used with the mouse, and chords stay available to users who bind them. |
 | Browser-specific bindings (`Cmd+…`) | Conflict with the browser; browsers do not deliver `Cmd+T`/`Cmd+W` to pages. The desktop app has them (above). |
-| The desktop shell taking direct shortcuts before the page (`before-input-event`), as it did | Two key matchers (the shell's and the page's) with their own rules for VS Code, dialogs and recording keys; with the page matching every key and the menu getting the rest, the desktop app behaves as the macOS application, where VS Code also keeps its own keys. |
+| The desktop shell taking direct shortcuts before the page (`before-input-event`), as it did | Two key matchers (the shell's and the page's) with their own rules for VS Code, dialogs and recording keys; with the page matching every key and the menu getting the rest, a key runs once and VS Code keeps its own keys. |
 | Desktop shortcuts per browser profile (localStorage) | The shell needs them before and outside the page; the core's keybindings keep one set for all windows. |
-| `cmd+w` closing the tab on macOS, as the desktop app did | The macOS application's menu closes the focused terminal with it, like Ghostty and iTerm close a split; one set of macOS defaults for both applications. **Close Tab** in the Shell menu and the tab's × close a tab. |
+| `cmd+w` closing the tab on macOS, as the desktop app did | Terminal emulators with splits (Ghostty, iTerm) close the focused split with it, so `cmd+w` closes the focused terminal. **Close Tab** in the Shell menu and the tab's × close a tab. |
 | Keyboard Lock API | Fullscreen-only and Chromium-only. |
 
 ## Failure modes
@@ -346,8 +336,7 @@ described in [13](13-settings-and-appearance.md))
 - `web/src/__tests__/term.test.ts`: the layout vectors of
   `design/testdata/layout` (workspaces, tabs, splits, closing, swaps and
   moves, directional focus and pane drops, version 1 documents, unknown
-  fields, malformed documents), also run by the macOS application's
-  `LayoutTests`.
+  fields, malformed documents).
 - `web/src/__tests__/terms.test.ts`: reading the document after the
   terminals, with a workspace named in the language and without ended
   terminals; one write at a time and another client's newer version; ended
@@ -364,12 +353,11 @@ described in [13](13-settings-and-appearance.md))
   menu's commands: closing idle tabs and panes at once and asking for
   running programs, none under dialogs, only those for VS Code or
   everywhere while VS Code has the keyboard, showing and hiding VS Code.
-- `desktop/src/menu.test.ts` (the menu's structure and titles against the
-  macOS application's, accelerators, a rebinding, an unbinding, chords
-  and unbound commands without accelerators, keys without Cmd shown only),
+- `desktop/src/menu.test.ts` (the menu's structure and titles,
+  accelerators, a rebinding, an unbinding, chords and unbound commands
+  without accelerators, keys without Cmd shown only),
   `desktop/src/follow.test.ts` (reading the keybindings and settings, their
-  pushes, reconnecting), `macos/Tests/TermKitTests` (`KeysTests`: chords,
-  every platform's defaults, menu equivalents, closing commands).
+  pushes, reconnecting).
 - `web/src/__tests__/menus.test.ts`: insertion slots, also on wrapped rows,
   the area a drop counts in, drags measured on the screen, menu items and
   their commands, moves from the current position, read-only, keyboard,

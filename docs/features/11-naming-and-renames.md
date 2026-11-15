@@ -6,7 +6,7 @@ The project started as "webherdr" and was renamed to "herdr-ide" with the
 mechanism described here. The name appears in binaries, the Go module
 path, directories on every machine, the terminal core's session,
 environment variables, browser storage, the VS Code extension identity, the
-applications' bundle IDs, protocol prefixes and documentation. A rename
+desktop app's bundle ID, protocol prefixes and documentation. A rename
 should be quick, mechanical and safe for existing installs.
 
 ## Goals / non-goals
@@ -24,21 +24,18 @@ identifiers (its executable, `HC_*` variables and state directory).
   `EnvPrefix`, binary and extension names, `DataDirName`, `DataDir(instance)`,
   `AgentDir`, `BridgeExtID`), `web/src/brand.ts` (`APP_NAME`, `APP_SLUG`,
   namespaced `storage`), `extensions/herdr-ide-bridge/src/brand.ts`
-  (`SLUG`, `DATA_DIR`, `ENV_PREFIX`), `macos/Sources/TermKit/Brand.swift`
-  (`Brand.appName`, `Brand.appSlug`, `Brand.envPrefix`). Display name and
+  (`SLUG`, `DATA_DIR`, `ENV_PREFIX`). Display name and
   slug are separate, so the visible name can change without touching
   identifiers.
 - **Consistency**: `internal/brand/brand_test.go` checks that the
-  TypeScript and Swift copies and the extension's `package.json` agree with
-  Go; `scripts/check.sh` fails on string literals containing the slug in Go,
-  TypeScript, Swift and `.strings` files outside these files (imports,
-  comments and tests excepted). Build scripts, the Makefile and the Vite
+  TypeScript copies and the extension's `package.json` agree with Go;
+  `scripts/check.sh` fails on string literals containing the slug in Go and
+  TypeScript files outside these files (imports, comments and tests
+  excepted). Build scripts, the Makefile and the Vite
   config derive names from these files; the PWA manifest and page title are
   generated from `brand.ts`. The desktop launcher imports the web brand
   constants; electron-builder reads the same file for its app name, bundle
-  ID and bundled core path. `scripts/macos-app.sh` reads the Go constants
-  for the macOS application's name, bundle ID (`dev.<slug>.mac`) and
-  bundled core.
+  ID and bundled core path.
 - **Derived at runtime**: the agent's state directory
   (`~/.<slug>[-<instance>]`), the terminal core's session name
   (`<slug>[-<instance>]`, [21](21-terminal-core.md)), the proxy-secret
@@ -48,7 +45,7 @@ identifiers (its executable, `HC_*` variables and state directory).
   [--dry-run]` replaces the slug, the env prefix and the module path (through
   a placeholder, so an explicit `--module` is never rewritten), moves
   `cmd/<slug>`, `cmd/<slug>-agent` and `extensions/<slug>-bridge`, sets the
-  display name in the Go, web and Swift brand files, removes generated
+  display name in the Go and web brand files, removes generated
   artifacts, and runs the build and brand test.
 - **Migration**: the script appends the old names to the `Legacy*` lists
   (`internal/brand/brand.go`) and `LEGACY_SLUGS` (`web/src/brand.ts`). At
@@ -84,8 +81,8 @@ identifiers (its executable, `HC_*` variables and state directory).
 
 ## Testing
 
-`internal/brand/brand_test.go` (`TestBrandMirrorsAgree`: Go, the web UI,
-the extension and the macOS application); `internal/agent/lifecycle_test.go`
+`internal/brand/brand_test.go` (`TestBrandMirrorsAgree`: Go, the web UI
+and the extension); `internal/agent/lifecycle_test.go`
 (`TestHousekeepingAndMigration`: legacy directory migration),
 `internal/agent/codeserver_test.go` (`TestMigrationStopsLegacyCodeServer`);
 `scripts/check.sh` brand step. The rename

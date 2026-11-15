@@ -4,17 +4,16 @@
 
 The terminal core ([21](21-terminal-core.md)) hands each viewer a terminal's
 raw output and takes the bytes the viewer's own terminal encodes
-([22](22-terminal-protocol.md)): every client emulates the terminals it
-shows. The macOS application does this with Ghostty
-([23](23-macos-application.md)). The browser UI (also what the desktop app
-shows) needs an emulator too, one that parses, keeps scrollback, encodes
-keys and mouse events and answers programs the same way, so that a program
-behaves alike in both clients.
+([22](22-terminal-protocol.md)): the browser UI (also what the desktop app
+shows) emulates the terminals it shows. It needs an emulator that parses
+output, keeps scrollback, encodes keys and mouse events and answers
+programs as a desktop terminal does, so that programs behave in a pane as
+they do there.
 
 ## Goals / non-goals
 
-Goals: the emulator the macOS application uses, from the same Ghostty
-commit; every `terminal.*` setting honoured; a terminal that keeps up with
+Goals: Ghostty's terminal emulation, from a pinned commit; every
+`terminal.*` setting honoured; a terminal that keeps up with
 programs flooding output, with the page's memory bounded; keys, mouse,
 pastes and focus encoded for the modes the program asked for (legacy,
 application cursor and keypad, kitty keyboard protocol, modifyOtherKeys,
@@ -29,8 +28,7 @@ WebAssembly); finding by regular expression or whole words; ligatures.
 
 **Module** (`scripts/fetch-ghostty-vt.sh`, `web/src/vt/`). Ghostty's
 terminal library, libghostty-vt, built as WebAssembly from commit
-`cf5519b22f91` (the macOS application's, `scripts/fetch-ghostty.sh`):
-`zig build -Demit-lib-vt -Dtarget=wasm32-freestanding -Doptimize=ReleaseSmall`
+`cf5519b22f91`: `zig build -Demit-lib-vt -Dtarget=wasm32-freestanding -Doptimize=ReleaseSmall`
 with the features the page uses (render state, input encoders, selections,
 colors, the formatter, search and grid references). The module
 (`ghostty-vt.wasm`, 797 KB, 250 KB compressed, no imports) and Ghostty's
@@ -57,8 +55,7 @@ terminal, which they find by the terminal's handle.
 **Emulator** (`vt/terminal.ts`). One per attached terminal. The settings
 become its options: the theme's colors (the 16 of `terminal.colors.*`, the
 other 240 the standard cube and grays), `terminal.scrollback` as lines
-(and 2 KiB a line as the byte bound, as the macOS application gives
-Ghostty), `terminal.cursorStyle` and `terminal.cursorBlink` as the cursor a
+(and 2 KiB a line as the byte bound), `terminal.cursorStyle` and `terminal.cursorBlink` as the cursor a
 program's reset returns to, `terminal.boldIsBright`; grapheme clusters take
 the width Unicode gives them (mode 2027 on, as in Ghostty's application).
 Callbacks: the terminal's answers to programs (device attributes, cursor
@@ -186,7 +183,7 @@ returns. Focus changes are reported to programs that asked (mode 1004).
 
 | Option | Why not |
 | --- | --- |
-| xterm.js | A second emulator beside the macOS application's, with its own parsing, key encodings and quirks; programs would behave differently in the two clients. |
+| xterm.js | Its own parsing, key encodings and quirks; Ghostty's library brings a desktop terminal's emulation, key, mouse and paste encoders, selections, search and formatter to the page. |
 | A cell grid rendered on the machine (the previous design) | Needs a renderer on every machine; one browser owned the session at a time; scrollback, selections and find were a round trip each. |
 | Reading the screen from the terminal core (`terminal.read`) instead of emulating | A request per change, no scrollback in the page, and the page could not answer programs or encode keys for their modes. |
 | A small zig or C module of our own linking the library with JavaScript imports | Needs zig in every build; the trampoline module gives the library's callbacks without changing the library. |

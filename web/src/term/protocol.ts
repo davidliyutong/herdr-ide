@@ -1,6 +1,5 @@
 // The core's terminal protocol (/api/v1/term): JSON text messages with a "t"
-// field and binary frames [stream u32 LE][kind u8][payload]. The macOS
-// application speaks the same protocol (macos/Sources/TermKit).
+// field and binary frames [stream u32 LE][kind u8][payload].
 
 /** Output to the client, input from it. */
 export const FRAME_DATA = 0;

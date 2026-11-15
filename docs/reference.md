@@ -83,8 +83,8 @@ selects the code-server builds; `--code-server-version`, `--code-server-url`,
 
 ## Settings
 
-Every setting of the core and of the user interfaces is defined in the core
-(`internal/registry`) and shown by the settings dialog of every client
+Every setting of the core and of the user interface is defined in the core
+(`internal/registry`) and shown by the UI's settings dialog
 ([13](features/13-settings-and-appearance.md)). Values live in
 `settings[-<instance>].json` on the core host and can be edited there by
 hand; the core reads the file again within two seconds. A setting with a
@@ -157,20 +157,19 @@ starting with a stroke is bound, that stroke waits for the next one instead
 of reaching the terminal; typing it twice (`ctrl+k ctrl+k`) lets the second
 press through to the terminal as any key no binding takes.
 
-The default keys differ by platform: `mac` is the macOS application and
-the desktop app on macOS, `mac-browser` browsers on macOS, `pc` the desktop
-app on other systems and `pc-browser` browsers there. No default is a
-chord, and none is `ctrl` or `alt` with a letter alone: `ctrl+b` and every
+The default keys differ by platform: `mac` is the desktop app on macOS,
+`mac-browser` browsers on macOS, `pc` the desktop app on other systems and
+`pc-browser` browsers there. No default is a chord, and none is `ctrl` or `alt` with a letter alone: `ctrl+b` and every
 other key that is not in the table reach the program in the terminal on
-their first press. The applications have direct shortcuts, which browsers
+their first press. The desktop app has direct shortcuts, which browsers
 keep for themselves (`cmd+t`, `cmd+w`…); browsers get find, the list of
 shortcuts and, on macOS, the command palette (`cmd+k`; in browsers on
 other systems the status bar's **Command palette** opens it). A command
 without a key (–) runs from the menus, the command palette, its button and
-the context menus, and any key or chord can be bound to it. Both
-applications' menus show the keys; in the desktop app the page runs the
-keys it sees and the menu the keys the page leaves. While VS Code has the
-keyboard its own keys come first; a key it leaves runs a command only for
+the context menus, and any key or chord can be bound to it. The desktop
+app's menu shows the keys; there the page runs the keys it sees and the menu
+the keys the page leaves. While VS Code has the keyboard its own keys come
+first; a key it leaves runs a command only for
 `always` (show or hide VS Code) or `vscode`. Keys follow the keyboard
 layout's characters. The table is generated from the registry by
 `scripts/registry`.
@@ -308,9 +307,7 @@ missing here.
 | Variable | Where | Description |
 | --- | --- | --- |
 | `HERDR_IDE_BRIDGE_SOCKET` | set by the agent for code-server | Socket of the VS Code bridge extension. |
-| `HERDR_IDE_CORE` | `pnpm -C web dev`, the macOS application | Core URL the Vite dev server proxies to (default `http://127.0.0.1:7780`); the macOS application uses that core instead of starting the one in its bundle when it is on loopback (`http(s)://127.0.0.1` or `localhost`), and ignores it otherwise. |
-| `HERDR_IDE_DEV` | the macOS application | `1` starts the bundled core as instance `dev`, local-only, like `make dev-desktop`. |
-| `HERDR_IDE_SNAPSHOT`, `HERDR_IDE_ACTIONS` | debug builds of the macOS application | Development aids: a path the window is written to as a PNG every two seconds, and actions run two seconds apart (`new`, `split-right`, `split-down`, `close`, `next-tab`, `workspace:<name>[:<cwd>]` (a new workspace with a terminal, without the dialog), `rename-workspace:<name>`, `close-workspace` (without asking), `close-workspace:<names>`, `next-workspace`, `type:<text>`, `find:<text>`, `find-next`, `open:<path>`, `code`, `page`, `settings`, `settings:<section>`, `keys` (the keyboard shortcuts page), `set:<key>=<json>` (a setting changed through the core), `strokes:<stroke> <stroke>…` (strokes given to the key matcher), `key:cmd+<key>`, `command:<id>` (a command of the keybindings), `folder:<path>` (a folder dropped on the Dock icon), `palette:<text>`, `drag:<from>:<to>:<zone>` (a pane dragged by its header, or `tab`), `add-machine`, `machine:<add\|signin\|remove\|menu>:<target>`, `transfers`, `files:<dir>`, `select:<names>`, `download-to:<file>`, `upload-file:<file>`, `paste-file:<file>`, `paste-image:<png>`, `record:<command>:<strokes>` (the key recorder), `hover:<column>,<row>` (the pointer resting on a cell), separated by `;`); the window's other windows are written beside it as `<path>.window.png`, `.window2.png`…. |
+| `HERDR_IDE_CORE` | `pnpm -C web dev` | Core URL the Vite dev server proxies to (default `http://127.0.0.1:7780`; `make dev-web` sets the development core's, `DEV_LISTEN`). |
 | `HERDR_IDE_DESKTOP_DEV` | Electron | `1` forces isolated development even in a packaged app: instance `dev` (terminal core session `herdr-ide-dev`), local-only, separate Electron profile. Unpackaged Electron always uses this mode. |
 | `HERDR_IDE_DESKTOP_PORT` | Electron | Loopback port (default `7781`, development `7791`); `0` chooses an ephemeral port, which gives a new browser storage origin. |
 | `--user-data-dir=<dir>` | Electron command line | Replaces the Electron profile and its single-instance lock, so a copy launched by its executable (not with `open`, which activates a running copy of the same bundle identifier) runs beside an installed one; for isolated smoke tests with `HERDR_IDE_DESKTOP_DEV=1`. |
@@ -324,13 +321,11 @@ Variables of the build scripts and tests:
 | `AGENT_PLATFORMS` | `scripts/build.sh` | Agent and herdr-core platforms to embed (default all four). |
 | `SKIP_WEB`, `SKIP_EXT` | `scripts/build.sh` | `1` reuses `web/dist` or the built bridge extension. |
 | `REQUIRE_ENCODER` | `scripts/build.sh` | `1` (release builds) fails when a Linux video encoder (`scripts/build-ffmpeg.sh`) is missing. |
-| `VERSION` | `scripts/build.sh`, desktop and macOS builds | The version the core and agents report (default `git describe`). Desktop builds take a semver for the app metadata and DMG name; a leading `v` (release tags such as `v0.2.0`) is kept for the core and dropped for the app metadata. The macOS application uses it as its bundle version. |
+| `VERSION` | `scripts/build.sh`, desktop builds | The version the core and agents report (default `git describe`). Desktop builds take a semver for the app metadata and DMG name; a leading `v` (release tags such as `v0.2.0`) is kept for the core and dropped for the app metadata. |
 | `FFMPEG_PLATFORMS` | `scripts/build-ffmpeg.sh` | Linux platforms to build the video encoder for (default both). |
 | `GHOSTTY_SRC` | `make vt-wasm` | A Ghostty checkout to build libghostty-vt from instead of the pinned clone. |
 | `ARCH` | `make desktop-app`, `make desktop-dmg` | `arm64` or `x64`; defaults to the host Node architecture. The Go core architecture is matched automatically. |
 | `INSTALL_DIR` | `make desktop-install` | Where the Electron app is installed (default `/Applications`). |
-| `SIGN_IDENTITY`, `NOTARY_PROFILE` | `make macos-app`, `scripts/macos-app.sh sign` | A code-signing certificate's name (default `-`, an ad hoc signature) and a `notarytool` keychain profile; with both the application is notarized and stapled. `scripts/macos-app.sh sign` signs (and notarizes) a bundle built before again. `SKIP_CORE=1` reuses the core in `dist/`; `OUT_DIR` is where the `.app` goes (default `dist/macos`). |
-| `DEVELOPER_DIR` | `make macos-*` | The Xcode to use; the script picks `/Applications/Xcode.app` when the active developer directory is the command line tools. |
 | `DEV_LISTEN` | `make dev-core`, `make dev-web` | The development core's address (default `127.0.0.1:7790`). |
 | `HC_TEST_BIN` | `make it` | herdr-core executable for the integration tests; otherwise `hc` is found on `PATH`, and without one they are skipped. `go run ./scripts/fetch-hc -exe <file> <os>/<arch>` writes the pinned one. |
 | `GUI_TEST_INSTALL` | `go test ./internal/agent` on Linux | `1` lets the program-window tests fetch Xvfb when it is not installed. |
@@ -395,21 +390,10 @@ Browser settings of earlier versions kept there (language, theme, font
 sizes, …) are moved to the core's settings once, when a page of a writable
 core loads, and then removed.
 
-The macOS application keeps, in its preferences (`dev.herdr-ide.mac`), the
-window's frames and the transfers' history (the last 50 finished uploads
-and downloads: file names, machines and paths, no contents), until the user
-clears the history in the transfers panel or removes the preferences; its
-Quick Look copies are in a private temporary directory emptied when the
-next preview is complete and at quit.
-
 Desktop artifacts: `dist/desktop/mac-arm64/herdr-ide.app` (arm64),
 `dist/desktop/mac/herdr-ide.app` (x64), and
-`dist/desktop/herdr-ide-<version>-mac-<arch>.dmg`; the macOS application is
-built to `dist/macos/herdr-ide.app` (`make macos-app`; releases publish it
-zipped as `herdr-ide-<version>-mac-native-arm64.zip`) and its Xcode build
-products are in `macos/.build/`, the renderer it is built with in
-`macos/.deps/`. Generated shell code lives
-in `desktop/dist/`; `make clean` removes these build outputs.
+`dist/desktop/herdr-ide-<version>-mac-<arch>.dmg`. Generated shell code
+lives in `desktop/dist/`; `make clean` removes these build outputs.
 Icon sources and distributable PNG/ICNS are kept in `desktop/assets/`, with
 the small SVG in `web/public/icon.svg`; `make desktop-icons` regenerates the
 PNG and ICNS on macOS with librsvg and iconutil.

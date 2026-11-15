@@ -51,8 +51,8 @@ the sidebar (an ssh target and a label); the first start of an instance
 imports the SSH machines herdr saved
 (`~/.local/state/herdr/client/endpoints.json`), if any.
 
-Several browser tabs, windows and the desktop and macOS applications can
-show the same machines at once: they share each machine's arrangement of
+Several browser tabs, windows and the desktop app can show the same
+machines at once: they share each machine's arrangement of
 workspaces, tabs and panes ([04](features/04-layout-and-keyboard.md)), and
 a terminal takes the size of the client that used it last.
 
@@ -123,23 +123,6 @@ attaches to an existing listener. Opening the app twice focuses the original
 window. Closing the main window or quitting stops its core and agents;
 closing a program window leaves the main app running. HTTP(S) external links
 open in the default browser; custom URL schemes are refused.
-
-The macOS application ([23](features/23-macos-application.md)) is a
-second, native client of the same kind: releases attach it as
-`herdr-ide-<version>-mac-native-arm64.zip` (Apple Silicon), signed ad hoc
-unless the release had a Developer ID certificate and notarization
-credentials ([RELEASING.md](../RELEASING.md)); allow an ad-hoc signed copy
-once like the DMG's. `make macos-app` builds it into `dist/macos/` (Xcode 26
-and `brew install xcodegen`; `SIGN_IDENTITY` and `NOTARY_PROFILE` sign and
-notarize it). It starts the core in its bundle with instance `desktop` on a
-loopback port the system chooses, so it shares settings, keybindings and
-machines with the Electron app; quitting it stops that core and its agents,
-not the machines' terminal cores. Use one of the two applications at a
-time: two cores of one instance share each machine's run directory
-(`~/.herdr-ide-desktop/run/`: code-server's and the bridge's sockets, the
-display). `HERDR_IDE_DEV=1` starts the bundled core
-as instance `dev`, local-only, and `HERDR_IDE_CORE=<url>` makes it use a
-running core instead (development).
 
 For development run:
 
@@ -281,7 +264,7 @@ What herdr-ide starts on a machine and how it is reclaimed:
 | Electron profile | First desktop launch | Kept until manually removed; Chromium manages its caches. Development has a separate profile. Core stderr is bounded to 16 KiB in memory; no desktop log files accumulate. |
 | `herdr-ide-agent` | one per core while connected | Exits when its ssh session ends; a dead link is detected by keepalives within about 45 s. |
 | A machine added from the UI | **Add machine…** (`POST /api/machines`) | Only a record in the core's `machines[-<instance>].json` and an agent while it is connected. **Remove machine…** deletes the record and ends the session (the agent exits and stops what it started); the machine's terminal core and terminals keep running there; the agent builds left in `~/.herdr-ide/agent/` follow their usual retention. |
-| Terminal core (herdr-core) | when a client of `/api/v1/term` first subscribes to the machine's terminals and no core answers (never in `--read-only`; audited as `term.start`), or **Start terminal core** / **Restart terminal core…** in the machine's menu (browser UI, desktop app, macOS application) (`POST /api/m/{id}/hc/{start\|restart}`, audited as `hc.start`, `hc.restart`) | Started by herdr-core detached from the agent (a systemd user service on Linux, a launchd job on macOS) in the session `herdr-ide[-<instance>]`, with its socket in `~/.herdr-ide[-<instance>]/run/hc.sock`. It belongs to the user and outlives the agent and the core, so its programs keep running; it ends with **Stop terminal core…** in the machine's menu (`POST /api/m/{id}/hc/stop`, asked first, audited as `hc.stop`: every terminal there ends, and the core starts none again until it is started from the menu or a client subscribes to the machine anew), with the agent op `hc` action `stop`, with `HC_SESSION=herdr-ide[-<instance>] HC_SOCKET=<socket> herdr-core server stop`, and with the machine. A restart keeps the programs (the core's successor adopts them). Its state (terminal records, saved screens, logs) is herdr-core's, in `~/.local/state/herdr-core/herdr-ide[-<instance>]/`, and stays until the user removes it. |
+| Terminal core (herdr-core) | when a client of `/api/v1/term` first subscribes to the machine's terminals and no core answers (never in `--read-only`; audited as `term.start`), or **Start terminal core** / **Restart terminal core…** in the machine's menu (browser UI, desktop app) (`POST /api/m/{id}/hc/{start\|restart}`, audited as `hc.start`, `hc.restart`) | Started by herdr-core detached from the agent (a systemd user service on Linux, a launchd job on macOS) in the session `herdr-ide[-<instance>]`, with its socket in `~/.herdr-ide[-<instance>]/run/hc.sock`. It belongs to the user and outlives the agent and the core, so its programs keep running; it ends with **Stop terminal core…** in the machine's menu (`POST /api/m/{id}/hc/stop`, asked first, audited as `hc.stop`: every terminal there ends, and the core starts none again until it is started from the menu or a client subscribes to the machine anew), with the agent op `hc` action `stop`, with `HC_SESSION=herdr-ide[-<instance>] HC_SOCKET=<socket> herdr-core server stop`, and with the machine. A restart keeps the programs (the core's successor adopts them). Its state (terminal records, saved screens, logs) is herdr-core's, in `~/.local/state/herdr-core/herdr-ide[-<instance>]/`, and stays until the user removes it. |
 | herdr-core executable | pushed with the first subscription to a machine's terminals when the machine has another build than the core carries (never in `--read-only`; audited as `term.install`); a core already running is then restarted onto it (`term.restart`), and its programs keep running | One file, `~/.herdr-ide[-<instance>]/hc/herdr-core`, verified by SHA-256 and replaced whole by the next install; a running core keeps the executable it started from. A partial upload left by a killed agent is removed by the next install after 1 h. |
 | Connection to the terminal core | one per machine while a client of `/api/v1/term` is subscribed to it | Closed 10 s after the last subscriber left, and with the agent; attached streams end with their client. No process is started by it. |
 | Agent detection (op `detect`) | while the core's connection to a machine's terminal core lasts | In the agent: one more connection to the terminal core, an event subscription, and for each terminal running a coding agent an observing attach and screen reads (`terminal.read`, at most every 300 ms after output); everything ends when the core closes the stream (10 s after the last subscriber left, or the connection to the terminal core ended) or with the agent. No process is started and nothing is written to disk. |
@@ -385,20 +368,19 @@ files.
   become rules of a new `keybindings[-<instance>].json` once, while that
   file does not exist, and are dropped from the settings; otherwise the
   file is created by the first change of a key. Keys set in herdr's own
-  configuration no longer apply, and ⌘W in the macOS application and the
-  desktop app now closes the focused pane (`pane.close`), not the tab.
+  configuration no longer apply, and ⌘W in the desktop app now closes the
+  focused pane (`pane.close`), not the tab.
 - **The prefix chords are gone.** The defaults no longer have the
   `ctrl+b` chords of herdr's keymap (`ctrl+b c` new tab, `ctrl+b v` split,
   `ctrl+b space` palette…): `ctrl+b` and every key that is not a default
   now reach the program in the terminal on their first press, and the
   commands are in the menus, the context menus, the pane headers and the
   command palette (the status bar's button; `cmd+shift+p` in the
-  applications). The defaults left are in the
+  desktop app). The defaults left are in the
   [reference](reference.md#keyboard-shortcuts). Chords can be bound again,
   one rule per key, under **Settings → Keyboard shortcuts** or in
   `keybindings[-<instance>].json` in the core host's user configuration
-  directory (`keybindings-desktop.json` for the desktop app and the macOS
-  application), for example:
+  directory (`keybindings-desktop.json` for the desktop app), for example:
 
   ```json
   [

@@ -87,10 +87,8 @@ input methods.
 - Terminals created otherwise (before the display existed, or with
   herdr-core's own commands) keep their environment: a shell gets its
   variables when it starts. "Enable in open panes" (settings dialog, per
-  machine: every terminal of the machine's terminal core), the palette's
-  commands for the focused pane's terminal and for a whole machine and, in
-  the macOS application,
-  **Enable Program Windows Here** in a terminal's menu
+  machine: every terminal of the machine's terminal core) and the palette's
+  commands for the focused pane's terminal and for a whole machine
   (`POST /api/m/{id}/gui/enable`, `{"terminals": [...]}`, empty or absent
   for all) catch them up without restarting anything: for each terminal
   the core asks the terminal core for its record now (`terminal.get`: the program's `pid` and the `foreground`
@@ -178,9 +176,9 @@ input methods.
   ancestor's that names one): its terminal from `HC_TERMINAL_ID` when
   `HC_TERMINAL_SOCKET` is the instance's terminal core (`run/hc.sock`;
   terminals of the user's own herdr-core are not named). The window record
-  carries `terminal`; the macOS application lists a window under its
-  terminal and, like the web UI, opens a new one by itself when that
-  terminal is on screen in the window in front ([23](23-macos-application.md)).
+  carries `terminal`, by which the web UI lists a window in its terminal's
+  pane header and opens a new one by itself while that terminal is on
+  screen (below).
 - Input arrives in window coordinates and is replayed with XTEST: pointer
   motion, buttons, wheel steps (buttons 4–7) and keys as X keycodes. The
   browser sends the physical key (`KeyboardEvent.code` → evdev code + 8), so

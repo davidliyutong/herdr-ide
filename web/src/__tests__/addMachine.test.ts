@@ -10,7 +10,7 @@ import { validTarget, type MachineState } from '../lib/machine';
 const form = (target: string, label = '') => ({ target, label });
 
 describe('ssh targets', () => {
-  // The vectors internal/machines and the macOS application run too.
+  // The vectors internal/machines runs too.
   it('takes the destinations OpenSSH takes, and nothing that reads as an option or holds a shell character', () => {
     expect(targetVectors.accept.length).toBeGreaterThan(20);
     for (const ok of targetVectors.accept) expect(validTarget(ok), ok).toBe(true);

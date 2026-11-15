@@ -121,8 +121,7 @@ Non-goals: managing ssh keys; Windows machines.
   machines a run leaves out, and they still count when a target or label
   is checked for being taken.
 - **Adding.** **Add machine…** (right-click the sidebar's free space or any
-  machine; the macOS application's machine menu has the same items,
-  [23](23-macos-application.md)) asks for an SSH target and an optional
+  machine) asks for an SSH target and an optional
   label (the target names it otherwise): `POST /api/machines {target,
   label}`, answered `201` with the machine's state. The target is what
   OpenSSH takes as a destination: `[user@]host`, `ssh://[user@]host[:port]`,
@@ -211,7 +210,7 @@ Non-goals: managing ssh keys; Windows machines.
   machine's terminal core (the installed executable's digest, whether one
   answers, its version, session and socket), and
   `POST /api/m/{id}/hc/{start|stop|restart}` runs the agent's `hc` op from
-  the machine's menu (the browser UI's sidebar, the macOS application);
+  the machine's menu in the sidebar;
   restart and stop ask first: start installs this build's
   executable when the machine has another and starts a core; restart has
   the core's successor adopt the programs; stop ends every terminal there
@@ -358,8 +357,6 @@ Non-goals: managing ssh keys; Windows machines.
   folded, starting a terminal core that failed.
 - `web/src/__tests__/addMachine.test.ts`: the form's checks, a removed
   machine takes its VS Code panel along.
-- `macos/Tests/TermKitTests` (`EventTests`): the machine state's `hc`, the
-  target check.
 - `make it` (`TestIntegrationHC`, `TestIntegrationTerm`) for the terminal
   core's install, start and streams with the real herdr-core.
 

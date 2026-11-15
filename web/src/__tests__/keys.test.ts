@@ -13,8 +13,8 @@ import { feedStroke, handleKey, keyHint, withKey, type KeyContext } from '../key
 import { keysOf, platform, resetRules, rulesFor, useKeys, type Binding, type Platform } from '../keybindings';
 import { conflictsOf } from '../components/KeyboardShortcuts';
 
-// The vectors of design/testdata/keys, which internal/keybindings and the
-// macOS application run too.
+// The vectors of design/testdata/keys; internal/keybindings runs parse.json
+// too.
 describe('key sequences', () => {
   it('normalizes as the core does', () => {
     expect(parseVectors.cases.length).toBeGreaterThan(30);

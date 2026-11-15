@@ -11,11 +11,11 @@ A Go server (`cmd/herdr-ide`) that serves a React terminal UI and reaches
 several machines through a per-machine Go agent (`cmd/herdr-ide-agent`) over
 ssh. Every machine's terminals live in a terminal core of the agent's own
 (herdr-core, `hc`, in a session apart from the user's); the browser emulates
-them with Ghostty's libghostty-vt as WebAssembly, and a macOS application
-(`macos/`) draws them with Ghostty's renderer, both through the core's
-terminal protocol (`/api/v1/term`). code-server provides VS Code panels. One
-binary embeds the UI, the agents and herdr-core for 4 platforms, and a VS
-Code extension.
+them with Ghostty's libghostty-vt as WebAssembly through the core's terminal
+protocol (`/api/v1/term`), and an Electron desktop app (`desktop/`) wraps the
+same UI and a core of its own on macOS. code-server provides VS Code panels.
+One binary embeds the UI, the agents and herdr-core for 4 platforms, and a
+VS Code extension.
 
 ## Commands
 
@@ -23,14 +23,13 @@ Code extension.
 | --- | --- |
 | Install JS deps | `make deps` |
 | Unit tests (Go + web + desktop) | `make test` |
-| All checks (gofmt, vet, tsc, prettier, brand/doc/README consistency, generated tokens, the terminal emulator's digest, shared test vectors run by the web and Swift tests) | `make check` |
-| Regenerate the design tokens' Swift, CSS and Go after editing `design/tokens.json`, and `design/generated/registry.json` with the settings and commands tables of `docs/reference.md` after changing settings or commands | `make tokens` |
+| All checks (gofmt, vet, tsc, prettier, brand/doc/README consistency, generated tokens, the terminal emulator's digest, shared test vectors run by the web tests) | `make check` |
+| Regenerate the design tokens' CSS and Go after editing `design/tokens.json`, and `design/generated/registry.json` with the settings and commands tables of `docs/reference.md` after changing settings or commands | `make tokens` |
 | Rebuild the web UI's terminal emulator (Ghostty's libghostty-vt as WebAssembly; zig 0.17) | `make vt-wasm` |
 | Integration test with a real terminal core (`HC_TEST_BIN=<herdr-core>`; the pinned one: `go run ./scripts/fetch-hc -exe <file> <os>/<arch>`) | `make it` |
 | Full build into `dist/` | `make build` (or `scripts/build.sh`) |
 | macOS `.app` / DMG | `make desktop-app` / `make desktop-dmg` |
 | Build the `.app` and install it into `/Applications` | `make desktop-install` |
-| macOS application: unit tests / debug build / `.app` | `make macos-test` / `make macos-build` / `make macos-app` |
 | Isolated desktop development | `make dev-desktop` |
 | Run for development | `make dev-core` and `make dev-web` |
 
@@ -41,18 +40,15 @@ Run `make check test` before finishing a change.
 1. **Never touch the user's real instance or terminals.** Experiments,
    tests and dev servers use `--instance dev` (state in `~/.herdr-ide-dev`,
    terminal core session `herdr-ide-dev`) or the integration tests'
-   session `herdr-ide-it`; the desktop apps' instance (`desktop`) and the
+   session `herdr-ide-it`; the desktop app's instance (`desktop`) and the
    default one are the user's. Stop a terminal core only through its own
    instance (`POST /api/m/{id}/hc/stop` of the dev core), never the user's,
    and do not attach to the user's terminals.
 2. **No hardcoded product name.** Use `brand.*` (Go), `APP_NAME`/`APP_SLUG`/
-   `storage` from `web/src/brand.ts`, `src/brand.ts` in the extension,
-   `Brand` (`macos/Sources/TermKit/Brand.swift`) in the macOS application.
+   `storage` from `web/src/brand.ts`, `src/brand.ts` in the extension.
    `scripts/check.sh` fails otherwise. Renames: `scripts/rename.sh`.
 3. **All UI text through i18n.** Add the key to `web/src/i18n/en.ts` and the
-   translation to `zh-CN.ts` (the build fails if one is missing); in the
-   macOS application to both `Localizable.strings` (`make macos-test` fails
-   if one is missing or unused). The server
+   translation to `zh-CN.ts` (the build fails if one is missing). The server
    returns codes, not prose. Comments, logs and identifiers are English.
 4. **Docs move with code.** New or changed flags and endpoints →
    `docs/reference.md` (CI checks; its settings and commands tables are
@@ -78,9 +74,9 @@ Run `make check test` before finishing a change.
    speak its protocol generation (`internal/hc`), honor stream credit, and
    take a `missed` notification as the subscription's new complete state.
 8. **Tests.** Go tests beside the code (agent tests set `HOME` to a temp
-   dir); web tests in `web/src/__tests__`; the macOS application's in
-   `macos/Tests` (`make macos-test`, needs Xcode). Don't add tests that need network
-   access or real machines to `make test`.
+   dir); web tests in `web/src/__tests__`; the desktop shell's beside its
+   sources in `desktop/src`. Don't add tests that need network access or
+   real machines to `make test`.
 9. **`CHANGELOG.md` changes only in a release.** Feature and fix branches
    do not touch it. When a release is cut, a `release-manager` subagent
    writes the version's entries from the pull requests merged since the

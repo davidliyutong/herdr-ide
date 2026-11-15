@@ -11,7 +11,7 @@ const texts = (s: string) =>
     .sort((a, b) => a.start - b.start)
     .map((m) => [m.tex, m.display]);
 
-/** The vectors of design/testdata/math, which macos/Tests/TermKitTests runs too. */
+/** The vectors of design/testdata/math. */
 interface MathVectors {
   cases: Array<{ description: string; text: string; expected: Array<[string, boolean]> }>;
 }

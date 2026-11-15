@@ -7,9 +7,8 @@
 //   - "commands" and "keybindings": the commands and the default bindings
 //     of each platform, which the web UI and the desktop app's shell use
 //     until they have read the core's;
-//   - "i18n": the translation keys each user interface needs for the
-//     settings and commands it shows. The web UI's and the macOS
-//     application's tests fail when one of them lacks a key listed for it.
+//   - "i18n": the translation keys the web UI needs for the settings and
+//     commands it shows; its tests fail when it lacks one.
 //
 // It also writes the tables of every setting and of every command with its
 // default keys into docs/reference.md, between the markers there.
@@ -39,32 +38,20 @@ import (
 
 const out = "design/generated/registry.json"
 
-// clients are the user interfaces and the platform name settings use for each.
-var clients = map[string]string{"web": settings.PlatformWeb, "macos": settings.PlatformMacOS}
-
-// keys returns the translation keys of a client: every section, setting
-// label and enum option it shows, and every command with its section.
-func keys(platform string) []string {
+// keys returns the translation keys of the UI: every section, setting label
+// and enum option, and every command with its section.
+func keys() []string {
 	store := settings.New("", registry.Settings()...)
-	return keysOf(store.Defs(), store.Sections(), platform)
-}
-
-// keysOf returns the translation keys of a client from the settings'
-// definitions and sections.
-func keysOf(defs []settings.Def, sections []settings.Section, platform string) []string {
 	set := map[string]bool{}
 	used := map[string]bool{}
-	for _, d := range defs {
-		if len(d.Platforms) > 0 && !slices.Contains(d.Platforms, platform) {
-			continue
-		}
+	for _, d := range store.Defs() {
 		used[d.Section] = true
 		set["settings."+d.Key] = true
 		for _, o := range d.Enum {
 			set["settings."+d.Key+"."+o] = true
 		}
 	}
-	for _, s := range sections {
+	for _, s := range store.Sections() {
 		if used[s.ID] {
 			set["settings.section."+s.ID] = true
 		}
@@ -84,10 +71,6 @@ func keysOf(defs []settings.Def, sections []settings.Section, platform string) [
 }
 
 func generate() []byte {
-	i18n := map[string][]string{}
-	for client, platform := range clients {
-		i18n[client] = keys(platform)
-	}
 	defaults := map[string]any{}
 	for _, d := range settings.New("", registry.Settings()...).Defs() {
 		defaults[d.Key] = d.Default
@@ -97,7 +80,7 @@ func generate() []byte {
 		"settings":    defaults,
 		"commands":    kb.CommandList(),
 		"keybindings": kb.AllDefaults(),
-		"i18n":        i18n,
+		"i18n":        keys(),
 	}
 	b, _ := json.MarshalIndent(doc, "", "  ")
 	return append(b, '\n')
@@ -184,22 +167,15 @@ func defaultOf(d settings.Def) string {
 	return "`" + string(j) + "`"
 }
 
-// scope tells which machines and clients a setting applies to.
+// scope tells which machines a setting can differ for.
 func scope(d settings.Def) string {
-	var parts []string
 	switch d.Scope {
 	case settings.ScopeMachine:
-		parts = append(parts, "per machine")
+		return "per machine"
 	case settings.ScopeRemoteMachine:
-		parts = append(parts, "per remote machine")
+		return "per remote machine"
 	}
-	for _, p := range d.Platforms {
-		parts = append(parts, map[string]string{settings.PlatformWeb: "web UI only", settings.PlatformMacOS: "macOS application only"}[p])
-	}
-	if len(parts) == 0 {
-		return "–"
-	}
-	return strings.Join(parts, ", ")
+	return "–"
 }
 
 // commandsTable lists every command with its default keys per platform.
