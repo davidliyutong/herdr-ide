@@ -97,6 +97,11 @@ workspaces and terminals of every machine in one browser tab, with VS Code
 - **Several browsers at once.** Every browser and the desktop app show the
   same terminals and type into them; the one used last sets a terminal's
   size.
+- **Plugins and the right sidebar.** Features that come as plugins add
+  panels to a sidebar on the right (⌘⌥B in the desktop app on macOS),
+  panes of their own, commands and status bar items; each can be turned
+  off in Settings › Plugins. Uploads and downloads and program windows are
+  plugins too.
 - **Settings.** Language (English, Chinese), light/dark theme followed by
   VS Code, interface size, the desktop app's zoom, the terminals' font (picked from the monospace
   fonts installed, with a preview), line height, cursor, scrollback, bell,

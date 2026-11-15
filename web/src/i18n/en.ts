@@ -706,6 +706,19 @@ export const en = {
   'keys.removeAll': 'Remove Keybinding',
   'keys.copyId': 'Copy Command ID',
   'keys.hint': 'Double-click a command to change its keys; right-click it for more.',
+  'plugins.rail': 'Panels',
+  'plugins.hidePanel': 'Hide Panel',
+  'plugins.paneOff': 'The plugin “{plugin}” is off. Turn it on in Settings › Plugins to show this pane.',
+  'plugins.paneUnknown': 'This pane belongs to the plugin “{plugin}”, which this version does not have.',
+  'plugins.page.about':
+    'Plugins add panels to the right sidebar, kinds of panes, commands and status bar items. They are part of the app; turning one off hides it everywhere.',
+  'plugins.page.always': 'Always on',
+  'plugins.gui.title': 'Program Windows',
+  'plugins.gui.description': 'Windows of graphical programs on remote Linux machines, in browser windows.',
+  'plugins.transfers.title': 'Uploads and Downloads',
+  'plugins.transfers.description': 'Files dropped onto panes and files downloaded from machines, with their progress in the status bar.',
+  'settings.section.plugins': 'Plugins',
+  'command.view.togglePanel': 'Toggle Right Sidebar',
 } as const;
 
 export type MessageKey = keyof typeof en;

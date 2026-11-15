@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Columns2, Eye, PanelLeft, Plus, X } from 'lucide-react';
+import { Columns2, PanelLeft, Plus, X } from 'lucide-react';
 import { useStore } from '../state/store';
 import { terms, useTerms } from '../state/terms';
 import * as L from '../term/layout';
@@ -8,7 +8,8 @@ import { TerminalView } from './TerminalView';
 import { PaneHeader } from './PaneHeader';
 import { CodeSlot } from './CodeLayer';
 import { PreviewPane } from './PreviewPane';
-import { CodeIcon } from './icons';
+import { LeafIcon, PluginPane } from './PluginPane';
+import { describeView } from '../plugins/registry';
 import { StatusDot } from './StatusDot';
 import { aggregate, agentStatus, codeText, shortPath, terminalTitle } from '../lib/machine';
 import { t, type MessageKey } from '../i18n';
@@ -124,7 +125,7 @@ export function Workspace() {
                   <span className="tab-label ellipsis">{tb.name}</span>
                 ) : view ? (
                   <>
-                    {L.isCodeLeaf(view) ? <CodeIcon className="tab-kind" /> : <Eye className="tab-kind" />}
+                    <LeafIcon m={m} leaf={view} className="tab-kind" />
                     <span className="tab-label ellipsis">{paneTitle(m, view, tb.focused)}</span>
                   </>
                 ) : (
@@ -212,6 +213,10 @@ function paneAbout(m: string, leaf: L.Leaf | null, key: string, record: Paramete
   const home = useStore.getState().machines[m]?.info?.home;
   if (leaf && L.isCodeLeaf(leaf)) return `${t('code.title')} · ${shortPath(leaf.code.folder, home) || '~'}`;
   if (leaf && L.isPreviewLeaf(leaf)) return `${t('preview.title')} · ${shortPath(leaf.preview.path, home)}`;
+  if (leaf && L.isPluginLeaf(leaf)) {
+    const d = describeView(m, leaf.view);
+    return d.path ? `${d.title} · ${shortPath(d.path, home)}` : d.title;
+  }
   return terminalTitle(record, key);
 }
 
@@ -294,6 +299,8 @@ function TabView({ m, ws, tab }: { m: string; ws: string; tab: L.Tab }) {
               />
             ) : L.isCodeLeaf(leaf) ? (
               <CodeSlot m={m} pane={key} view={leaf.code} />
+            ) : L.isPluginLeaf(leaf) ? (
+              <PluginPane m={m} pane={key} view={leaf.view} focused={focused} />
             ) : (
               <PreviewPane m={m} pane={key} path={leaf.preview.path} />
             )}

@@ -153,6 +153,9 @@ var Commands = func() []Command {
 		cmd("pane.undoClose", "pane", on(macApp, "cmd+z")),
 
 		cmd("view.toggleSidebar", "view", on(macApp, "cmd+b")),
+		// The right sidebar: the plugins' panels (web/src/plugins), with
+		// VS Code's key for its secondary sidebar.
+		cmd("view.togglePanel", "view", on(macApp, "cmd+alt+b")),
 		// The desktop app's zoom (the window.zoom setting), with the keys
 		// browsers zoom pages with, which they keep for themselves; also in
 		// dialogs and VS Code, as the window's zoom is. Ctrl+= is Zoom In

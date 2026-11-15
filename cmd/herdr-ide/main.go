@@ -164,6 +164,7 @@ func serve(args []string, logger *log.Logger) {
 		csf         codeServerFlags
 		prefs       = settings.New("", registry.Settings()...)
 		keys        = keybindings.New("", registry.Commands())
+		plugins     = registry.Plugins()
 	)
 	fl.Var(&origins, "allowed-origin", "browser origin of the reverse proxy, e.g. https://ide.example.com (repeatable)")
 	fl.Var(&only, "machine", "connect only these machines, by id, label or ssh target (repeatable)")
@@ -303,6 +304,7 @@ func serve(args []string, logger *log.Logger) {
 		Settings:       prefs,
 		Keybindings:    keys,
 		HC:             embedded.HC,
+		Plugins:        plugins,
 	})
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

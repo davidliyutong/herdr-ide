@@ -19,6 +19,7 @@ import { findStep, openFind, useFind } from './vt/find';
 import { paneHandle } from './state/panes';
 import { currentZoom, zoom, zoomAvailable, ZOOM_LEVELS } from './zoom';
 import { fullDiskAccessAvailable, openFullDiskAccess } from './fullDiskAccess';
+import { activePanels, pluginCommand } from './plugins/registry';
 
 /** Where a key is pressed: the main UI, a VS Code pane, or a dialog. */
 export type KeyContext = 'terminal' | 'vscode' | 'dialog';
@@ -222,7 +223,11 @@ export function commandEnabled(id: string): boolean {
   const panes = cur?.tab ? L.tabPanes(cur.tab).length : 0;
   const changes = !s.readOnly;
   if (/^tab\.select[1-9]$/.test(id)) return tabs > 1;
+  const plugin = pluginCommand(id);
+  if (plugin) return plugin.enabled?.() ?? true;
   switch (id) {
+    case 'view.togglePanel':
+      return activePanels().length > 0;
     case 'workspace.new':
       return changes && !!s.machineId && s.machines[s.machineId]?.status === 'ready';
     case 'tab.new':
@@ -296,7 +301,18 @@ export function runCommand(id: string) {
     actions.switchTab(select[1] === '9' ? { last: true } : { index: Number(select[1]) - 1 });
     return;
   }
+  const plugin = pluginCommand(id);
+  if (plugin) {
+    plugin.run();
+    return;
+  }
   switch (id) {
+    case 'view.togglePanel': {
+      const panels = activePanels();
+      if (s.panel && panels.some((p) => p.id === s.panel)) s.setPanel(undefined);
+      else s.setPanel((panels.find((p) => p.id === s.lastPanel) ?? panels[0])?.id);
+      break;
+    }
     case 'app.commandPalette':
       s.setPalette?.('commands');
       break;

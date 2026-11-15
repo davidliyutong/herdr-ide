@@ -137,6 +137,7 @@ describe('settings dialog', () => {
     expect(qa('.settings-nav button').map((b) => b.textContent)).toEqual([
       'Terminal',
       'Notifications',
+      'Plugins',
       'Keyboard Shortcuts',
       'VS Code',
       'Program Windows',

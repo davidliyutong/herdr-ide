@@ -33,6 +33,7 @@ import {
   selectTab,
   selectWorkspace,
   setPreviewPath,
+  setViewFields,
   soleLeaf,
   workspaceTitle,
   setRatio,
@@ -177,6 +178,8 @@ function applyOp(layout: Layout, op: Record<string, unknown>): Layout {
       return splitPane(layout, s('target'), op.axis as Axis, op.leaf as Leaf, op.before === true);
     case 'setPreviewPath':
       return setPreviewPath(layout, s('pane'), s('path'));
+    case 'setViewFields':
+      return setViewFields(layout, s('pane'), op.fields as Record<string, unknown>);
     case 'prune':
       return pruneLayout(layout, new Set(op.live as string[]));
     case 'setRatio':

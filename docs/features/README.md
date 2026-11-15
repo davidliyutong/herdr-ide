@@ -27,6 +27,7 @@ shortcuts, paths) lives in [reference.md](../reference.md).
 | 24 | [Design tokens](24-design-tokens.md) | One file of colors, metrics, font sizes and terminal palettes, generated into the web UI's CSS variables and the terminal colors' setting defaults. |
 | 25 | [Agent detection in terminals](25-agent-detection.md) | herdr's method for the terminal core's terminals: the foreground process names the agent, herdr's rules over the screen give its state, done when a turn ends; in the agent, next to the terminals. |
 | 26 | [Web terminals](26-web-terminals.md) | Ghostty's terminal library as WebAssembly emulates the browser's terminals; WebGL2 (or Canvas 2D) draws them; keys, mouse and pastes encoded for each program's modes; selections, links, clipboard and find in the page. |
+| 27 | [Plugins](27-plugins.md) | Features built in with one shape on each side: routes below `/api/p/<id>` and `/api/m/{id}/p/<id>`, the agent's `plugin` op, panels of the right sidebar, panes of their own, commands and status bar items; a switch per plugin. |
 
 ## Writing a feature document
 

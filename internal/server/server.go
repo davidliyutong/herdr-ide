@@ -23,6 +23,7 @@ import (
 	"herdr-ide/internal/gui"
 	"herdr-ide/internal/keybindings"
 	"herdr-ide/internal/machines"
+	"herdr-ide/internal/plugin"
 	"herdr-ide/internal/settings"
 )
 
@@ -60,6 +61,8 @@ type Options struct {
 	Settings *settings.Store
 	// Keybindings are the UIs' keybindings; nil disables them.
 	Keybindings *keybindings.Store
+	// Plugins are the core's plugins (internal/plugin).
+	Plugins []plugin.Plugin
 }
 
 // Server is the HTTP front of the core.
@@ -186,6 +189,7 @@ func (s *Server) routes() []route {
 		{"POST /api/m/{id}/gui/enable", s.writable(s.handleGUIEnable)},
 		{"GET /api/gui", s.handleGUIStates},
 	}
+	rs = append(rs, s.pluginRoutes()...)
 	if s.opts.Static != nil {
 		rs = append(rs,
 			route{"/", spaHandler(s.opts.Static).ServeHTTP})
@@ -322,6 +326,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 // Run performs background maintenance until ctx ends: code-server instances
 // without VS Code connections are stopped after CodeServerIdle.
 func (s *Server) Run(ctx context.Context) {
+	s.startPlugins(ctx)
 	if s.opts.CodeServerIdle <= 0 {
 		<-ctx.Done()
 		return

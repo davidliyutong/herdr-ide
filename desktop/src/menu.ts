@@ -125,6 +125,7 @@ export const menus: Menu[] = [
       { command: 'app.agentAttention' },
       '-',
       { command: 'view.toggleSidebar' },
+      { command: 'view.togglePanel' },
       { command: 'code.open' },
       { command: 'pane.zoom' },
       '-',

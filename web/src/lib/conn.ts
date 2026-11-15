@@ -24,6 +24,8 @@ type Listener = {
   /** The settings or keybindings changed: their new state. */
   onSettings?(m: Record<string, unknown>): void;
   onKeybindings?(m: Record<string, unknown>): void;
+  /** A message of a plugin's core side, for machine m ("" for the core's). */
+  onPlugin?(plugin: string, m: string, data: unknown): void;
 };
 
 const text = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
@@ -103,6 +105,9 @@ class Conn {
         break;
       case 'keybindings':
         this.listener?.onKeybindings?.(m);
+        break;
+      case 'plugin':
+        if (text(m.plugin)) this.listener?.onPlugin?.(m.plugin, typeof m.m === 'string' ? m.m : '', m.data);
         break;
     }
   }

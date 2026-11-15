@@ -179,13 +179,117 @@ select,
 /* ---------- app grid ---------- */
 .app {
   display: grid;
-  grid-template-columns: var(--sidebar-w, 20rem) minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-w, 20rem) minmax(0, 1fr) var(--panel-w, 0) var(--rail-w, 0);
   grid-template-rows: minmax(0, 1fr) 1.85rem;
-  grid-template-areas: 'sidebar main' 'status status';
+  grid-template-areas: 'sidebar main panel rail' 'status status status status';
   height: 100%;
 }
 .app.no-sidebar {
-  grid-template-columns: 0 minmax(0, 1fr);
+  grid-template-columns: 0 minmax(0, 1fr) var(--panel-w, 0) var(--rail-w, 0);
+}
+
+/* ---------- right sidebar (plugins' panels) ---------- */
+.panel-rail {
+  grid-area: rail;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding-top: 6px;
+  background: var(--bg-1);
+  border-left: 1px solid var(--line);
+  min-height: 0;
+}
+.rail-button {
+  width: 2rem;
+  height: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: var(--fg-dim);
+  background: transparent;
+}
+.rail-button:hover {
+  color: var(--fg);
+  background: var(--bg-2);
+}
+.rail-button.active {
+  color: var(--fg);
+  background: var(--accent-soft);
+}
+.rail-button svg {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+.panel {
+  grid-area: panel;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  background: var(--bg-1);
+  border-left: 1px solid var(--line);
+}
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 6px 4px 12px;
+}
+.panel-title {
+  flex: 1;
+  font-weight: 600;
+  font-size: 0.78rem;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+}
+.panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.panel-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  width: 8px;
+  z-index: 6;
+  cursor: col-resize;
+}
+.panel-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+  transition: background 0.12s 0.1s;
+}
+.panel-resizer:hover::after,
+body.resizing .panel-resizer::after {
+  background: var(--accent);
+}
+.panel-backdrop {
+  display: none;
+}
+.plugin-pane {
+  position: relative;
+  flex: 1;
+  display: flex;
+  background: var(--bg);
+  flex-direction: column;
+  min-height: 0;
+  outline: none;
+}
+.plugin-pane-off {
+  margin: auto;
+  padding: 16px;
+  text-align: center;
 }
 
 /* ---------- sidebar ---------- */
@@ -2248,9 +2352,26 @@ button.danger-text:not(:disabled) {
   }
   .app,
   .app.no-sidebar {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) var(--rail-w, 0);
     grid-template-rows: minmax(0, 1fr) 1.85rem;
-    grid-template-areas: 'main' 'status';
+    grid-template-areas: 'main rail' 'status status';
+  }
+  .panel {
+    position: fixed;
+    inset: 0 var(--rail-w, 0) 1.85rem auto;
+    width: min(var(--panel-px, 320px), 82vw);
+    z-index: 40;
+    box-shadow: -8px 0 30px var(--shadow);
+  }
+  .panel-resizer {
+    display: none;
+  }
+  .panel-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0 var(--rail-w, 0) 1.85rem 0;
+    z-index: 39;
+    background: var(--backdrop);
   }
   .sidebar {
     position: fixed;
@@ -2664,4 +2785,21 @@ button.gui-note:hover {
 .gui-state.installing,
 .gui-state.starting {
   color: var(--working);
+}
+
+/* ---------- settings: plugins ---------- */
+.plugin-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.plugin-row .plugin-icon {
+  width: 1.2rem;
+  height: 1.2rem;
+  flex: none;
+  color: var(--fg-dim);
+}
+.plugin-row .plugin-text {
+  flex: 1;
+  min-width: 0;
 }

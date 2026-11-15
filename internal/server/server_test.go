@@ -15,6 +15,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -68,7 +69,7 @@ func TestContentTypeNeverActive(t *testing.T) {
 
 func newTestServer(origins ...string) *Server {
 	mg := machines.NewManager(nil, nil, log.New(os.Stderr, "", 0))
-	return New(mg, Options{AllowedOrigins: origins, Logger: log.New(os.Stderr, "", 0)})
+	return New(mg, Options{AllowedOrigins: origins, Logger: log.New(os.Stderr, "", 0), Plugins: testPlugins()})
 }
 
 func TestGuard(t *testing.T) {
@@ -220,6 +221,7 @@ func TestMutatingRoutesAreGuarded(t *testing.T) {
 	ro := newTestServer("https://ide.example.com")
 	ro.opts.ReadOnly = true
 	hro := ro.Handler()
+	wildcard := regexp.MustCompile(`\{[a-z]+\}`)
 	wild := strings.NewReplacer("{id}", "x", "{action}", "start", "{win}", "1")
 	checked := 0
 	for _, rt := range s.routes() {
@@ -234,7 +236,7 @@ func TestMutatingRoutesAreGuarded(t *testing.T) {
 		if method == "" {
 			method = "POST"
 		}
-		path = wild.Replace(path)
+		path = wildcard.ReplaceAllString(wild.Replace(path), "x")
 		do := func(h http.Handler, origin string) *httptest.ResponseRecorder {
 			r := httptest.NewRequest(method, path, strings.NewReader("{}"))
 			r.Host = "127.0.0.1:7780"

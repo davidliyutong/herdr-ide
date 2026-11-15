@@ -62,6 +62,11 @@ const (
 	// agent's own process and the terminal core's do. It starts no terminal
 	// core and reads no file.
 	OpPrivacy Op = "privacy"
+	// OpPlugin runs Action of the agent's side of Plugin with Params (JSON)
+	// and replies with its result in Reply.Plugin; an action that streams
+	// writes JSON lines after the reply until either side closes the stream
+	// (internal/agent/plugin).
+	OpPlugin Op = "plugin"
 )
 
 // DetectEvent is one line of an OpDetect stream: the agent a terminal runs
@@ -106,6 +111,11 @@ type Header struct {
 	// one a start or restart may run.
 	URL    string `json:"url,omitempty"`
 	Digest string `json:"digest,omitempty"`
+
+	// Plugin (OpPlugin) names the plugin whose Action runs, with Params,
+	// the action's own JSON.
+	Plugin string          `json:"plugin,omitempty"`
+	Params json.RawMessage `json:"params,omitempty"`
 }
 
 // Reply is the first line written back by the acceptor.
@@ -125,6 +135,8 @@ type Reply struct {
 	HC      *HCStatus   `json:"hc,omitempty"`
 
 	Privacy *PrivacyStatus `json:"privacy,omitempty"`
+	// Plugin is an OpPlugin action's result, the plugin's own JSON.
+	Plugin json.RawMessage `json:"plugin,omitempty"`
 }
 
 // Full Disk Access as an OpPrivacy reply reports it.

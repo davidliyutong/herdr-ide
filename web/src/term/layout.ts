@@ -24,8 +24,12 @@ export type CodeLeaf = Extra & { code: CodeView };
 /** A file or directory of the machine, shown by the preview. */
 export type PreviewView = Extra & { id: string; path: string };
 export type PreviewLeaf = Extra & { preview: PreviewView };
-/** A pane: a terminal, a VS Code view or a preview. */
-export type Leaf = TerminalLeaf | CodeLeaf | PreviewLeaf;
+/** A pane a plugin draws (web/src/plugins): its kind of pane, and fields
+ * of the plugin's own. */
+export type PluginView = Extra & { id: string; plugin: string; kind: string };
+export type PluginLeaf = Extra & { view: PluginView };
+/** A pane: a terminal, a VS Code view, a preview or a plugin's pane. */
+export type Leaf = TerminalLeaf | CodeLeaf | PreviewLeaf | PluginLeaf;
 /** ratio is the first child's share, 0.1 to 0.9. */
 export type Split = Extra & { split: Axis; ratio: number; children: [Node, Node] };
 /** A leaf, a split, or a node of a kind this version does not know, kept as it is. */
@@ -64,18 +68,27 @@ const id = (v: unknown) => isObject(v) && typeof v.id === 'string' && v.id !== '
  * here name it by. Terminals go by their address. */
 export const codeKey = (id: string) => `code:${id}`;
 export const previewKey = (id: string) => `preview:${id}`;
+export const viewKey = (id: string) => `view:${id}`;
 
 export const isTerminalLeaf = (node: Node): node is TerminalLeaf => typeof node.terminal === 'string' && node.terminal !== '';
 export const isCodeLeaf = (node: Node): node is CodeLeaf => !isTerminalLeaf(node) && id(node.code);
 export const isPreviewLeaf = (node: Node): node is PreviewLeaf =>
   !isTerminalLeaf(node) && !isCodeLeaf(node) && id(node.preview) && text((node.preview as Extra).path) !== '';
+export const isPluginLeaf = (node: Node): node is PluginLeaf =>
+  !isTerminalLeaf(node) &&
+  !isCodeLeaf(node) &&
+  !isPreviewLeaf(node) &&
+  id(node.view) &&
+  text((node.view as Extra).plugin) !== '' &&
+  text((node.view as Extra).kind) !== '';
 
-/** A pane's key: a terminal's address, code:<id> or preview:<id>; undefined
- * for splits and nodes of unknown kinds. */
+/** A pane's key: a terminal's address, code:<id>, preview:<id> or
+ * view:<id>; undefined for splits and nodes of unknown kinds. */
 export function paneKey(node: Node): string | undefined {
   if (isTerminalLeaf(node)) return node.terminal;
   if (isCodeLeaf(node)) return codeKey(node.code.id);
   if (isPreviewLeaf(node)) return previewKey(node.preview.id);
+  if (isPluginLeaf(node)) return viewKey(node.view.id);
   return undefined;
 }
 
@@ -203,6 +216,7 @@ function parseNode(raw: Extra): Node {
     return { ...raw, code: { ...code, id: code.id as string, folder: text(code.folder) } };
   }
   if (isPreviewLeaf(raw)) return { ...raw, preview: { ...raw.preview } };
+  if (isPluginLeaf(raw)) return { ...raw, view: { ...raw.view } };
   const { split, ratio, children, ...extra } = raw;
   if ((split === 'horizontal' || split === 'vertical') && Array.isArray(children) && children.length === 2 && children.every(isObject)) {
     const r = typeof ratio === 'number' && Number.isFinite(ratio) ? clampRatio(ratio) : 0.5;
@@ -553,6 +567,33 @@ export function setPreviewPath(layout: Layout, key: string, path: string): Layou
   const at = locate(layout, key)!;
   const ws = layout.workspaces[at.workspace];
   return withWorkspace(layout, at.workspace, { ...ws, tabs: ws.tabs.map((t, i) => (i === at.tab ? { ...t, root: swap(t.root) } : t)) });
+}
+
+/** Changes the fields of a plugin's pane (its id, plugin and kind stay). */
+export function setViewFields(layout: Layout, key: string, fields: Extra): Layout {
+  const leaf = findLeaf(layout, key);
+  if (!leaf || !isPluginLeaf(leaf)) return layout;
+  const view = { ...leaf.view, ...fields, id: leaf.view.id, plugin: leaf.view.plugin, kind: leaf.view.kind };
+  if (jsonEqual(view, leaf.view)) return layout;
+  const next: PluginLeaf = { ...leaf, view };
+  const swap = (node: Node): Node => {
+    if (isLeaf(node)) return paneKey(node) === key ? next : node;
+    return isSplit(node) ? { ...node, children: [swap(node.children[0]), swap(node.children[1])] } : node;
+  };
+  const at = locate(layout, key)!;
+  const ws = layout.workspaces[at.workspace];
+  return withWorkspace(layout, at.workspace, { ...ws, tabs: ws.tabs.map((t, i) => (i === at.tab ? { ...t, root: swap(t.root) } : t)) });
+}
+
+/** A workspace's panes of a plugin's kind, in the order of its tabs and their trees. */
+export function pluginViews(ws: Workspace, plugin: string, kind?: string): { key: string; view: PluginView; tab: number }[] {
+  return ws.tabs.flatMap((t, tab) =>
+    leavesOf(t.root).flatMap((l) =>
+      isPluginLeaf(l) && l.view.plugin === plugin && (!kind || l.view.kind === kind)
+        ? [{ key: viewKey(l.view.id), view: l.view, tab }]
+        : [],
+    ),
+  );
 }
 
 /** A workspace's VS Code views, in the order of its tabs and their trees. */

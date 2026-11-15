@@ -233,6 +233,7 @@ by `scripts/registry`.
 | `pane.forward` | `terminal` | `cmd+bracketright` | – | – | – |
 | `pane.undoClose` | `terminal` | `cmd+z` | – | – | – |
 | `view.toggleSidebar` | `terminal` | `cmd+b` | – | – | – |
+| `view.togglePanel` | `terminal` | `cmd+alt+b` | – | – | – |
 | `view.zoomIn` | `always` | `cmd+shift+equal`, `cmd+equal` | – | `ctrl+shift+equal`, `ctrl+equal` | – |
 | `view.zoomOut` | `always` | `cmd+minus` | – | `ctrl+minus` | – |
 | `view.zoomReset` | `always` | `cmd+0` | – | `ctrl+0` | – |

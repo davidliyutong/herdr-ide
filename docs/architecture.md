@@ -12,6 +12,7 @@ desktop app (Electron shell)                            ├─ machines: registr
                                                                                                     ├─ files (stat/list/range read/upload/zip)
                                                                                                     ├─ code-server (unix socket only)
                                                                                                     ├─ Xvfb + window manager (programs' windows)
+                                                                                                    ├─ plugins' machine sides (op plugin)
                                                                                                     └─ bridge.sock ◀── VS Code bridge extension
 ```
 
@@ -41,11 +42,13 @@ machines only ([02](features/02-multi-machine-transport.md)).
 | `internal/uisettings` | The user interfaces' settings (appearance, layout, terminal, colors, notifications); `tokens.go` is generated from the design tokens. |
 | `internal/registry` | What the core registers: the setting modules and the commands (used by the core and `scripts/registry`). |
 | `internal/userfile` | Atomic writes and change detection of the hand-editable files; the configuration directory made private on Linux and macOS (`private_unix.go`; on Windows its access control list keeps it the user's). |
+| `internal/plugin` | The core's side of plugins: their routes below `/api/p/<id>` and `/api/m/{id}/p/<id>` (guarded and audited as the core's own), `/ws` messages, switches (`plugins.<id>.enabled`) and the calls to their machine sides ([27](features/27-plugins.md)). |
+| `internal/agent/plugin` | The machine side of plugins: handlers of the agent's `plugin` op, registered per plugin. |
 | `internal/gui` | Virtual displays on machines, their windows, frames and input between agents and browser windows. |
 | `internal/jpegstrip` | JPEG encoding of a window capture in independent row groups, encoded in parallel (from Go's `image/jpeg`, BSD). |
 | `internal/server` | HTTP/WS front: guards, the event channel, terminal streams, files, proxy, bridge, audit. |
 | `internal/embedded` | Build artifacts compiled into the core (agents, herdr-core, the video encoder, bridge VSIX). |
-| `web` | Browser UI (Vite, React, zustand): the terminals of the machines' terminal cores (`src/term`: the client of `/api/v1/term` and the layout document, whose panes are terminals, VS Code and previews; `src/state/terms.ts`: the machines' terminals and layouts; `src/vt`: Ghostty's terminal library as WebAssembly with its renderer and input encoders, also for the PTY dialogs, [26](features/26-web-terminals.md)); VS Code panes' iframes in a layer over the panes (`src/codeFrames.ts`, `src/components/CodeLayer.tsx`, [05](features/05-vscode-panes.md)); `web/embed.go` embeds `web/dist`. |
+| `web` | Browser UI (Vite, React, zustand): the plugins' web sides (`src/plugins`, the right sidebar `src/components/RightBar.tsx`, [27](features/27-plugins.md)); the terminals of the machines' terminal cores (`src/term`: the client of `/api/v1/term` and the layout document, whose panes are terminals, VS Code and previews; `src/state/terms.ts`: the machines' terminals and layouts; `src/vt`: Ghostty's terminal library as WebAssembly with its renderer and input encoders, also for the PTY dialogs, [26](features/26-web-terminals.md)); VS Code panes' iframes in a layer over the panes (`src/codeFrames.ts`, `src/components/CodeLayer.tsx`, [05](features/05-vscode-panes.md)); `web/embed.go` embeds `web/dist`. |
 | `desktop` | Electron shell for macOS, Windows and Linux (`src`: the owned core process, what differs per system (`platform.ts`), the client of its settings and keybindings, the application menu, the main window's preload and policy) and electron-builder config: macOS DMG and zip, Windows NSIS setup, Linux AppImage and deb, each wrapping the core built for its system. |
 | `extensions/herdr-ide-bridge` | VS Code extension installed into code-server. |
 | `scripts` | Build, packaging and check scripts (`build.sh`, which also builds a Windows core; `package.sh`, archives for Linux and macOS; `desktop.sh`, the desktop app of each system; `icons.sh`; `check.sh`, which vets for Linux, macOS and Windows too), the pinned downloads (`fetch-hc`, `fetch-ghostty-vt.sh` for the web UI's emulator, `build-ffmpeg.sh` for the video encoder) and the generators (`tokens`, `registry`). |
@@ -126,6 +129,7 @@ after a successful reply it carries op-specific bytes.
 | `hc-api` | core → agent | raw pipe to the terminal core's socket (herdr-core's API, `internal/hc`); starts nothing |
 | `detect` | core → agent | after the reply, `DetectEvent` lines `{terminal, agent, status}` (status `working`, `blocked`, `idle`, `done`, `unknown`; `{terminal}` when the agent left) from the agent, which follows the terminal core's terminals until the core closes the stream ([25](features/25-agent-detection.md)); starts and writes nothing |
 | `privacy` | core → agent | – (reply has `Privacy`: whether macOS's Full Disk Access lets the agent's process (`files`; on the local machine the core's) and the terminal core (`terminals`, a probe it runs with `machine.exec`) open a folder only it opens, each `granted`, `denied` or `unknown`, and the terminal core's executable); starts no terminal core, reads no file |
+| `plugin` | core → agent | `Action` of `Plugin` with `Params` (the plugin's JSON); the reply's `Plugin` is its result, or JSON lines follow until either side closes the stream; failures carry `Code` (`unknown_plugin`, `bad_params`, the plugin's own) ([27](features/27-plugins.md)) |
 | `bridge` | agent → core | JSON lines between the VS Code extension and the core |
 | `gui` | core → agent | actions `status`, `install` (fetch Xvfb in user space), `start`, `keep` (start the display keeper, which holds the display while the instance's terminal core runs), `shells` (which of the pids in `Args` were started with the display) (reply `GUI`); `video` and `video-install` (`Digest`: the video encoder's SHA-256; the second streams the gzip-compressed encoder, chunked) reply whether it is installed and the stream kinds it makes here (`GUI.Video`, `GUI.VideoEncoders`); `attach`: messages `[kind u8][len u32][payload]`, JSON events (`window`, `gone`, `layer`, `layer_gone`, `cursor`, `stats`, `video` (a window's stream starts, or ends without a codec)) and frames (`GUIFrameHeader` + JPEG/PNG, or a video frame of the whole window, `Enc` 3, 4 for key frames) from the agent, JSON commands (`watch`, `ack`, `refresh`, `codecs` (the stream kinds all viewers decode, also sent with `watch` and `refresh`), `keyframe`, input, `close`) from the core |
 
@@ -146,6 +150,7 @@ own protocol (`/api/v1/term`, below). A client plays no notification sounds
 | `retry {m}` (ends the wait before a disconnected machine's next connection attempt; refused for read-only clients), `ping {rid}` | `pong {rid}`, `machines {list}`, `machine {state}`, `agent {m, data}` (status change), `bridge.send {m, text, file, line, end_line, folders, window}` (text for an agent, with the file and lines it came from; `folders` and `window` are the sending VS Code window's, absent while unknown: the page whose VS Code pane shows that window picks a terminal of the pane's workspace), `bridge.download {m, paths, window}` (files chosen in VS Code's explorer; the page showing that window, else the page with the focus, downloads them), `bridge.focus {m, window, folders}` (a VS Code window got the keyboard: the page whose pane has it learns the pane's window and names it in its commands, `POST /api/m/{id}/bridge`) |
 | `download.watch {ids}` (downloads the page started with `dl=<id>`: before starting one and after reconnecting), `download.cancel {id}` | `download {id, state, sent, total, name, error}` to the page following the id: progress and how it ended (`unknown` for an id the core has not seen or no longer knows), for the downloads panel |
 | `theme {kind: dark\|light}` (VS Code follows it) | `gui {state: {m, phase, gpu, windows}}` (program windows per machine) |
+| – | `plugin {plugin, m, data}`: a plugin's message for machine `m` (`""` for the core's), handed to the plugin's web side while it is on ([27](features/27-plugins.md)) |
 | – | `settings {values, problems}` and `keybindings {user, effective, conflicts, problems}` after every change, through the API or the files ([13](features/13-settings-and-appearance.md)) |
 | `active {idle}` (ms since the user last used the page) | `agent {…, sound}`: `sound` is true only for the most recently used page, which plays the notification sound; a terminal core's terminal sends `data {terminal, agent, display_agent, agent_status, title}` ([25](features/25-agent-detection.md)) |
 
@@ -189,7 +194,10 @@ and closed through `POST /m/{id}/gui/{win}/close`;
 `POST /api/m/{id}/gui/enable` (`{"terminals": [...]}`, empty or absent
 for all of them) gives open terminals of the machine's terminal core the
 display, see [14](features/14-gui-windows.md). `PUT /api/settings` takes an
-optional `machine` for settings that can differ per machine.
+optional `machine` for settings that can differ per machine. Plugins' routes
+are below `/api/p/<plugin>/` and `/api/m/{id}/p/<plugin>/` (each plugin's
+document lists them); they answer `404 plugin_disabled` while the plugin is
+off ([27](features/27-plugins.md)).
 
 ## Terminal clients ↔ core protocol (`/api/v1/term`)
 

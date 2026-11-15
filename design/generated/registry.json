@@ -201,6 +201,11 @@
       "when": "terminal"
     },
     {
+      "id": "view.togglePanel",
+      "section": "view",
+      "when": "terminal"
+    },
+    {
       "id": "view.zoomIn",
       "section": "view",
       "when": "always"
@@ -293,6 +298,7 @@
     "command.tab.select7",
     "command.tab.select8",
     "command.tab.select9",
+    "command.view.togglePanel",
     "command.view.toggleSidebar",
     "command.view.zoomIn",
     "command.view.zoomOut",
@@ -571,6 +577,11 @@
       {
         "key": "cmd+b",
         "command": "view.toggleSidebar",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+alt+b",
+        "command": "view.togglePanel",
         "when": "terminal"
       },
       {

@@ -119,6 +119,7 @@ export function paneMenu(m: string, pane: string): MenuEntry[] {
       close,
     ];
   }
+  if (leaf && L.isPluginLeaf(leaf)) return [...arrange, 'sep', close];
   if (leaf && L.isPreviewLeaf(leaf)) {
     const path = leaf.preview.path;
     return [

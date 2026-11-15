@@ -6,6 +6,7 @@
 // they came from (docs/features/05-vscode-panes.md).
 
 import * as L from './term/layout';
+import { describeView } from './plugins/registry';
 import { isLive, type TerminalRecord } from './term/protocol';
 import { terms, useTerms } from './state/terms';
 import { useStore } from './state/store';
@@ -74,6 +75,7 @@ export function paneDirectory(m: string, leaf: L.Leaf | null | undefined): strin
   if (!leaf) return undefined;
   if (L.isTerminalLeaf(leaf)) return terms.directory(m, leaf.terminal);
   if (L.isCodeLeaf(leaf)) return leaf.code.folder || undefined;
+  if (L.isPluginLeaf(leaf)) return describeView(m, leaf.view).directory;
   return L.isPreviewLeaf(leaf) ? dirname(leaf.preview.path) : undefined;
 }
 
@@ -721,6 +723,31 @@ export const actions = {
     focusDom(m, L.previewKey(id));
   },
 
+  /** Shows a plugin's pane in from's workspace (from: the focused pane by
+   * default): one of its kind that reuse accepts gets fields, the one of
+   * from's tab first; else a new one opens beside from. Returns its key. */
+  async openView(
+    m: string,
+    view: { plugin: string; kind: string } & Record<string, unknown>,
+    opts: { from?: string; reuse?: (v: L.PluginView) => boolean } = {},
+  ) {
+    await whenLoaded(m);
+    const layout = terms.layout(m)!;
+    const o = originOf(m, layout, opts.from);
+    useStore.getState().selectMachine(m);
+    const views = o.ws ? L.pluginViews(o.ws, view.plugin, view.kind).filter((v) => opts.reuse?.(v.view)) : [];
+    const found = views.find((v) => v.tab === o.tab) ?? views[0];
+    if (found) {
+      terms.mutate(m, (l) => L.focusPane(L.setViewFields(l, found.key, view), found.key));
+      focusDom(m, found.key);
+      return found.key;
+    }
+    const id = L.newId();
+    openBeside(m, { view: { ...view, id } }, o.ws, o.from);
+    focusDom(m, L.viewKey(id));
+    return L.viewKey(id);
+  },
+
   /** Opens VS Code for a folder (the workspace's by default) as a new tab of
    * the selected workspace, or selects the VS Code pane that workspace has
    * for the folder. */
@@ -809,6 +836,7 @@ export function workspaceTitle(m: string, ws: L.Workspace): string {
 export function paneTitle(m: string, leaf: L.Leaf | null, key: string): string {
   if (leaf && L.isCodeLeaf(leaf)) return L.folderName(leaf.code.folder, useStore.getState().machines[m]?.info?.home);
   if (leaf && L.isPreviewLeaf(leaf)) return leaf.preview.path.split('/').pop() || leaf.preview.path;
+  if (leaf && L.isPluginLeaf(leaf)) return describeView(m, leaf.view).title;
   return terminalTitle(terms.terminal(m, key), key);
 }
 

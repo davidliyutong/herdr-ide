@@ -23,12 +23,12 @@ import { notifyAgent, updateBadge } from './notify';
 import { shortPath, terminalTitle } from './lib/machine';
 import * as L from './term/layout';
 import { useGui } from './gui/state';
-import { GuiTray } from './gui/GuiMenus';
 import { bridgeDownload, downloadEvent, resyncDownloads } from './download';
 import { noteFocusedTerminal, sendTarget } from './lib/bridge';
 import { onFrameKey, windowFocused } from './codeFrames';
-import { TransfersTray } from './components/Transfers';
-import { DownloadsTray } from './components/Downloads';
+import { describeView, pluginMessage, useActivePlugins, usePanels } from './plugins/registry';
+import { RightBar } from './components/RightBar';
+import './plugins';
 import { actions, current, workspaceTitle } from './actions';
 import { noteFocus } from './paneHistory';
 
@@ -103,6 +103,10 @@ export function App() {
   const sidebarWidth = useStore((s) => s.sidebarWidth);
   const connected = useStore((s) => s.connected);
   const toasts = useStore((s) => s.toasts);
+  const panels = usePanels();
+  const panel = useStore((s) => s.panel);
+  const panelWidth = useStore((s) => s.panelWidth);
+  const panelShown = panels.some((p) => p.id === panel);
   const [chord, setChord] = useState(false);
 
   useEffect(() => {
@@ -130,6 +134,7 @@ export function App() {
       onGui: (st) => useGui.getState().setState(st),
       onSettings: (m) => applySettings(m),
       onKeybindings: (m) => applyKeybindings(m),
+      onPlugin: (plugin, m, data) => pluginMessage(plugin, m, data),
     });
     const offTerms = followTerms();
     void loadKeybindings();
@@ -159,12 +164,23 @@ export function App() {
   }, []);
 
   return (
-    <div className={`app ${sidebarOpen ? '' : 'no-sidebar'}`} style={{ '--sidebar-w': `${sidebarWidth}px` } as React.CSSProperties}>
+    <div
+      className={`app ${sidebarOpen ? '' : 'no-sidebar'}`}
+      style={
+        {
+          '--sidebar-w': `${sidebarWidth}px`,
+          '--panel-w': panelShown ? `${panelWidth}px` : '0px',
+          '--panel-px': `${panelWidth}px`,
+          '--rail-w': panels.length ? '2.6rem' : '0px',
+        } as React.CSSProperties
+      }
+    >
       {sidebarOpen && <Sidebar />}
       {/* On a narrow screen the sidebar lies over the panes: a press beside it closes it. */}
       {sidebarOpen && <div className="sidebar-backdrop" onClick={() => actions.toggleSidebar()} />}
       <Workspace />
       <CodeLayer />
+      <RightBar />
       <StatusBar connected={connected} chord={chord} />
       <Palette />
       <SettingsDialog />
@@ -215,7 +231,9 @@ function StatusBar({ connected, chord }: { connected: boolean; chord: boolean })
       ? { title: t('code.title'), path: leaf.code.folder }
       : L.isPreviewLeaf(leaf)
         ? { title: t('preview.title'), path: leaf.preview.path }
-        : { title, path: cwd };
+        : L.isPluginLeaf(leaf)
+          ? (({ title, path }) => ({ title, path }))(describeView(m!, leaf.view))
+          : { title, path: cwd };
   const counts = useStore((s) => {
     let ready = 0;
     for (const id of s.order) if (s.machines[id]?.status === 'ready') ready++;
@@ -232,9 +250,7 @@ function StatusBar({ connected, chord }: { connected: boolean; chord: boolean })
         </span>
       )}
       <span className="spacer" />
-      <TransfersTray />
-      <DownloadsTray />
-      <GuiTray />
+      <PluginStatusItems />
       {chord && <span className="prefix-badge">{pendingChord()}</span>}
       <StatusCommand command="app.keyboardShortcuts" />
       <StatusCommand command="app.commandPalette" />
@@ -251,4 +267,10 @@ function StatusCommand({ command }: { command: string }) {
       {key && <kbd>{key}</kbd>}
     </button>
   );
+}
+
+/** The status bar's items of the plugins that are on. */
+function PluginStatusItems() {
+  const plugins = useActivePlugins();
+  return <>{plugins.flatMap((p) => (p.statusItems ?? []).map((Item, i) => <Item key={`${p.id}:${i}`} />))}</>;
 }

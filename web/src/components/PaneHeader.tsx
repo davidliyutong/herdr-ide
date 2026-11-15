@@ -12,6 +12,8 @@ import { openMenu } from '../contextMenu';
 import { paneMenu } from '../menus';
 import { PaneActions } from './PaneActions';
 import { t } from '../i18n';
+import { LeafIcon } from './PluginPane';
+import { describeView } from '../plugins/registry';
 
 interface Props {
   m: string;
@@ -59,6 +61,8 @@ export function PaneHeader({ m, pane, leaf, ws, focused, zoomed }: Props) {
             <bdi>{shortPath(leaf.code.folder, home)}</bdi>
           </span>
         </>
+      ) : L.isPluginLeaf(leaf) ? (
+        <PluginHeading m={m} view={leaf.view} home={home} />
       ) : (
         <>
           <Eye className="pane-kind" />
@@ -118,5 +122,23 @@ export function PaneTitle({ m, terminal, title, name }: { m: string; terminal: s
     >
       {name || title}
     </span>
+  );
+}
+
+/** A plugin's pane: its icon, title and path. */
+function PluginHeading({ m, view, home }: { m: string; view: L.PluginView; home?: string }) {
+  const d = describeView(m, view);
+  return (
+    <>
+      <LeafIcon m={m} leaf={{ view }} className="pane-kind" />
+      <span className="pane-title" title={d.path ? `${d.title} · ${d.path}` : d.title}>
+        {d.title}
+      </span>
+      {d.path && (
+        <span className="pane-cwd" title={d.path}>
+          <bdi>{shortPath(d.path, home)}</bdi>
+        </span>
+      )}
+    </>
   );
 }

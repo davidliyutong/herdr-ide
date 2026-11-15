@@ -8,8 +8,7 @@ import { usePrefs } from '../prefs';
 import { agentOf, terminalTitle } from '../lib/machine';
 import { useTerms } from '../state/terms';
 import { StatusDot } from './StatusDot';
-import { useGui } from '../gui/state';
-import { enableGui } from '../gui/enable';
+import { pluginPaletteItems } from '../plugins/registry';
 
 interface Item {
   id: string;
@@ -103,19 +102,7 @@ export function Palette() {
         run: () => usePrefs.getState().setPref('theme', th),
       });
     }
-    const f = actions.focusedContext();
-    const focused = f?.terminal;
-    if (f && focused && useGui.getState().machines[f.m]?.phase === 'ready') {
-      cmds.push({ id: 'gui:pane', label: t('action.enableGuiPane'), run: () => void enableGui(f.m, [focused]) });
-    }
-    for (const st of Object.values(useGui.getState().machines)) {
-      if (st.phase !== 'ready') continue;
-      cmds.push({
-        id: `gui:${st.m}`,
-        label: t('action.enableGuiMachine', { m: s.machines[st.m]?.label ?? st.m }),
-        run: () => void enableGui(st.m),
-      });
-    }
+    cmds.push(...pluginPaletteItems());
     if (mode === 'workspaces') return [...ws, ...agents];
     return [...cmds, ...ws, ...agents];
   }, [mode]);

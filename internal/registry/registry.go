@@ -8,6 +8,7 @@ import (
 	"herdr-ide/internal/codeserver"
 	"herdr-ide/internal/gui"
 	"herdr-ide/internal/keybindings"
+	"herdr-ide/internal/plugin"
 	"herdr-ide/internal/settings"
 	"herdr-ide/internal/uisettings"
 )
@@ -16,8 +17,17 @@ import (
 // the desktop app's shortcut settings of earlier versions, which became
 // keybinding rules before the settings are loaded.
 func Settings() []settings.Module {
-	return []settings.Module{uisettings.Module, codeserver.Settings, gui.Settings, legacyShortcuts()}
+	return []settings.Module{uisettings.Module, codeserver.Settings, gui.Settings, plugin.Settings(Plugins(), pluginsOff), legacyShortcuts()}
 }
+
+// Plugins are the core's plugins (internal/plugin), in the order the UIs
+// list them.
+func Plugins() []plugin.Plugin {
+	return []plugin.Plugin{}
+}
+
+// pluginsOff are the plugins that are off until the user turns them on.
+var pluginsOff = plugin.Defaults{}
 
 // legacyShortcuts drops the desktop app's old shortcut settings
 // (desktop-*-key) from the settings file.

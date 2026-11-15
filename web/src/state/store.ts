@@ -41,6 +41,8 @@ export interface SettingsView {
 
 /** The sidebar's default width and the range it can be dragged in. */
 export const SIDEBAR_WIDTH = { def: 260, min: 180, max: 520 };
+/** The right sidebar's (plugins' panels). */
+export const PANEL_WIDTH = { def: 320, min: 220, max: 720 };
 
 export interface UIState {
   connected: boolean;
@@ -62,6 +64,11 @@ export interface UIState {
   settings?: SettingsView;
   /** The sidebar's width in pixels. */
   sidebarWidth: number;
+  /** The panel the right sidebar shows (web/src/plugins), none while it is hidden. */
+  panel?: string;
+  /** The last panel shown, which showing the right sidebar again brings back. */
+  lastPanel?: string;
+  panelWidth: number;
   renaming?: Renaming;
   toasts: Toast[];
   auth?: string;
@@ -87,6 +94,9 @@ export interface UIState {
   /** Opens the settings dialog (on a page, in a scope), or closes it (false). */
   openSettings(view: SettingsView | false): void;
   setSidebarWidth(w: number): void;
+  /** Shows a panel in the right sidebar, or hides it (undefined). */
+  setPanel(id: string | undefined): void;
+  setPanelWidth(w: number): void;
   setRenaming(r: Renaming | undefined): void;
   /** Shows a toast for ttl ms (default: 5 s, 15 s with an action, or the
    * action's own) and returns its id. */
@@ -131,6 +141,9 @@ export const useStore = create<UIState>((set, get) => ({
   machines: {},
   sidebarOpen: loadPref('sidebarOpen', true),
   sidebarWidth: loadPref('sidebarWidth', SIDEBAR_WIDTH.def),
+  panel: loadPref<string | null>('panel', null) ?? undefined,
+  lastPanel: loadPref<string | null>('lastPanel', null) ?? undefined,
+  panelWidth: loadPref('panelWidth', PANEL_WIDTH.def),
   toasts: [],
 
   setConnected: (connected) => set({ connected }),
@@ -164,6 +177,16 @@ export const useStore = create<UIState>((set, get) => ({
     const width = Math.round(Math.min(SIDEBAR_WIDTH.max, Math.max(SIDEBAR_WIDTH.min, w)));
     savePref('sidebarWidth', width);
     set({ sidebarWidth: width });
+  },
+  setPanel: (panel) => {
+    savePref('panel', panel ?? null);
+    if (panel) savePref('lastPanel', panel);
+    set(panel ? { panel, lastPanel: panel } : { panel: undefined });
+  },
+  setPanelWidth: (w) => {
+    const width = Math.round(Math.min(PANEL_WIDTH.max, Math.max(PANEL_WIDTH.min, w)));
+    savePref('panelWidth', width);
+    set({ panelWidth: width });
   },
   setRenaming: (renaming) => set({ renaming }),
   openAuth: (auth) => set({ auth }),

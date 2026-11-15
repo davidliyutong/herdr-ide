@@ -38,6 +38,7 @@ import { ZOOM_KEY } from '../zoom';
 import { colorKeys, ThemeColors, schemeLabel } from './settings/Colors';
 import { FullDiskAccess, fullDiskAccessMatches } from './settings/FullDiskAccess';
 import { fullDiskAccessAvailable, localMachine } from '../fullDiskAccess';
+import { PluginsPage } from './settings/PluginsPage';
 
 export function settingLabel(key: string): string {
   const k = `settings.${key}`;
@@ -104,6 +105,8 @@ export function machineScoped(d: SettingDef, m: Pick<MachineState, 'kind'>): boo
 
 const KEYS_PAGE = 'keys';
 const MACHINE_PAGE = 'machine';
+/** The plugins and their switches (the section of plugins.<id>.enabled). */
+const PLUGINS_PAGE = 'plugins';
 
 export function SettingsDialog() {
   const view = useStore((s) => s.settings);
@@ -145,7 +148,8 @@ function SettingsModal({ page: askedPage, machine: askedMachine }: { page?: stri
   const sections = st.sections.filter((s) => defs.some((d) => d.section === s.id && shownInRows(d)));
   const pages = [
     ...(machine ? [{ id: MACHINE_PAGE, advanced: false }] : []),
-    ...sections.filter((s) => !s.advanced),
+    ...sections.filter((s) => !s.advanced && s.id !== PLUGINS_PAGE),
+    ...(machine ? [] : [{ id: PLUGINS_PAGE, advanced: false }]),
     ...(machine ? [] : [{ id: KEYS_PAGE, advanced: false }]),
     ...sections.filter((s) => s.advanced),
   ];
@@ -290,6 +294,8 @@ function SettingsModal({ page: askedPage, machine: askedMachine }: { page?: stri
               </>
             ) : current === MACHINE_PAGE && machine ? (
               <MachinePage m={machine} readOnly={readOnly} />
+            ) : current === PLUGINS_PAGE && !machine ? (
+              <PluginsPage readOnly={readOnly} />
             ) : (
               <SectionView
                 id={current}
