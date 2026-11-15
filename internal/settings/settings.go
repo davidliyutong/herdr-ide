@@ -25,6 +25,7 @@ import (
 	"flag"
 	"fmt"
 	"math"
+	"reflect"
 	"regexp"
 	"slices"
 	"sort"
@@ -77,10 +78,12 @@ var (
 	ErrFile    = errors.New("the settings file has errors")
 )
 
-// Section groups settings in the UIs; sections are shown by Order.
+// Section groups settings in the UIs; sections are shown by Order, the
+// advanced ones after the others under a heading of their own.
 type Section struct {
-	ID    string `json:"id"`
-	Order int    `json:"order"`
+	ID       string `json:"id"`
+	Order    int    `json:"order"`
+	Advanced bool   `json:"advanced,omitempty"`
 }
 
 // Def defines a setting.
@@ -92,16 +95,21 @@ type Def struct {
 	// Enum lists the values of a TypeEnum setting.
 	Enum []string
 	// Min and Max bound a TypeNumber setting (nil: unbounded); Integer
-	// refuses fractions.
+	// refuses fractions; Step is what the UIs' stepper adds (0: 1).
 	Min, Max *float64
 	Integer  bool
+	Step     float64
 	// Item is the type of a list's items (TypeString or TypeColor); Length
-	// the number of items a list must have (0: any up to 256).
-	Item   Type
-	Length int
-	Scope  Scope
-	// Section and Order place the setting in the UIs.
+	// the number of items a list must have (0: any up to 256). Options are
+	// the values the UIs offer for a list of strings; others can be added.
+	Item    Type
+	Length  int
+	Options []string
+	Scope   Scope
+	// Section and Order place the setting in the UIs; Group names a heading
+	// within the section (settings of a group are next to each other).
 	Section string
+	Group   string
 	Order   int
 	// Flag names a command-line flag that sets and locks the setting, with
 	// Usage as its help text.
@@ -114,11 +122,18 @@ type Def struct {
 func Range(min, max float64) (*float64, *float64) { return &min, &max }
 
 // Migration moves a value of an older file format: From is the old key,
-// To the new one ("" drops it), Convert turns the old string value into a
-// new value (false keeps the entry under its old key).
+// To the new one ("" drops it; From itself when a value of an older type
+// changes in place), Convert turns the old value (decoded JSON) into a new
+// one (false: the value is not of the older format and stays as it is).
 type Migration struct {
 	From, To string
-	Convert  func(string) (any, bool)
+	Convert  func(any) (any, bool)
+}
+
+// Renamed is the Convert of a string setting that only changed its key.
+func Renamed(v any) (any, bool) {
+	s, ok := v.(string)
+	return s, ok
 }
 
 // Module is what a package registers: its sections, settings and the
@@ -553,20 +568,26 @@ func (s *Store) migrate(raw map[string]json.RawMessage) (map[string]json.RawMess
 	// dropped) and value; handled is false for entries of the current format.
 	convert := func(k string, v json.RawMessage) (key string, val json.RawMessage, handled bool) {
 		i := slices.IndexFunc(s.migrations, func(m Migration) bool { return m.From == k })
-		var old string
-		if i < 0 || json.Unmarshal(v, &old) != nil {
+		if i < 0 {
 			return k, v, false
 		}
-		changed = true
 		m := s.migrations[i]
 		if m.To == "" {
+			changed = true
 			return "", nil, true
+		}
+		var old any
+		if json.Unmarshal(v, &old) != nil {
+			return k, v, false
 		}
 		nv, ok := m.Convert(old)
 		b, err := json.Marshal(nv)
-		if !ok || err != nil {
-			return k, v, true
+		// A value Convert does not take, or one a migration in place leaves
+		// as it was, is of the current format.
+		if !ok || err != nil || m.To == k && reflect.DeepEqual(old, decode(b)) {
+			return k, v, false
 		}
+		changed = true
 		return m.To, b, true
 	}
 	// place adds the entries to dst: those of the current format win over
@@ -744,6 +765,13 @@ func equal(a, b any) bool {
 		return ok && slices.Equal(x, y)
 	}
 	return a == b
+}
+
+// decode is a JSON value as json.Unmarshal gives it (nil if it is not JSON).
+func decode(b []byte) any {
+	var v any
+	json.Unmarshal(b, &v)
+	return v
 }
 
 type flagValue struct {
@@ -935,10 +963,13 @@ type DefJSON struct {
 	Min     *float64 `json:"min,omitempty"`
 	Max     *float64 `json:"max,omitempty"`
 	Integer bool     `json:"integer,omitempty"`
+	Step    float64  `json:"step,omitempty"`
 	Item    Type     `json:"item,omitempty"`
 	Length  int      `json:"length,omitempty"`
+	Options []string `json:"options,omitempty"`
 	Scope   Scope    `json:"scope"`
 	Section string   `json:"section"`
+	Group   string   `json:"group,omitempty"`
 	Order   int      `json:"order"`
 	Flag    string   `json:"flag,omitempty"`
 }
@@ -948,8 +979,8 @@ func (s *Store) Definitions() []DefJSON {
 	out := make([]DefJSON, 0, len(s.defs))
 	for _, d := range s.defs {
 		out = append(out, DefJSON{Key: d.Key, Type: d.Type, Default: d.Default, Enum: d.Enum, Min: d.Min, Max: d.Max,
-			Integer: d.Integer, Item: d.Item, Length: d.Length, Scope: d.Scope, Section: d.Section, Order: d.Order,
-			Flag: d.Flag})
+			Integer: d.Integer, Step: d.Step, Item: d.Item, Length: d.Length, Options: d.Options, Scope: d.Scope,
+			Section: d.Section, Group: d.Group, Order: d.Order, Flag: d.Flag})
 	}
 	return out
 }

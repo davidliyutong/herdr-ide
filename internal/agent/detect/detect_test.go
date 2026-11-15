@@ -1,9 +1,12 @@
 package detect
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"herdr-ide/internal/uisettings"
 )
 
 // screen joins lines as herdr-core's terminal.read returns a screen.
@@ -315,5 +318,21 @@ func TestTrackerSelfReported(t *testing.T) {
 	none := NewTracker(nil, t0)
 	if s, ch := none.Observe(t0.Add(time.Hour), working); ch || s != Unknown {
 		t.Fatalf("no manifest: %s", s)
+	}
+}
+
+// The settings offer every agent the manifests know as a silent agent.
+func TestSettingsListEveryAgent(t *testing.T) {
+	ms, err := Manifests()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for id := range ms {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	if !slices.Equal(ids, uisettings.Agents) {
+		t.Errorf("uisettings.Agents = %v, manifests %v", uisettings.Agents, ids)
 	}
 }

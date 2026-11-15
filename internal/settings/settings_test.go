@@ -33,9 +33,9 @@ func testModule() Module {
 			{Key: "b.palette", Type: TypeList, Item: TypeColor, Length: 2, Default: []string{"#000000", "#ffffff"}, Section: "b", Order: 3},
 		},
 		Migrations: []Migration{
-			{From: "old-mode", To: "a.mode", Convert: func(s string) (any, bool) { return s, true }},
-			{From: "gui", To: "b.on", Convert: func(s string) (any, bool) {
-				switch s {
+			{From: "old-mode", To: "a.mode", Convert: Renamed},
+			{From: "gui", To: "b.on", Convert: func(v any) (any, bool) {
+				switch v {
 				case "on":
 					return true, true
 				case "off":

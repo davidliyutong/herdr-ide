@@ -6,6 +6,8 @@
 package uisettings
 
 import (
+	"strings"
+
 	"herdr-ide/internal/settings"
 )
 
@@ -24,8 +26,29 @@ const (
 	UIFontSize   = "appearance.uiFontSize"
 	FontFamily   = "terminal.fontFamily"
 	FontSize     = "terminal.fontSize"
+	Scrollback   = "terminal.scrollback"
+	MutedAgents  = "notifications.mutedAgents"
+	SchemePrefix = "terminal.colorScheme."
 	ColorsPrefix = "terminal.colors."
 )
+
+// MaxScrollback is the most lines a terminal keeps above its screen.
+const MaxScrollback = 100_000
+
+// Agents are the coding agents the terminals recognize (the manifests'
+// ids, internal/agent/detect), offered by the list of silent agents.
+var Agents = []string{
+	"agy", "amp", "claude", "cline", "codex", "copilot", "cursor", "devin", "droid", "gemini", "grok",
+	"hermes", "kilo", "kimi", "kiro", "letta", "maki", "muse", "opencode", "pi", "qodercli", "qwen",
+}
+
+// Schemes are the terminal color schemes the UIs offer; "default" is the
+// design tokens' colors of the theme in use (web/src/terminal/schemes.ts
+// has the colors of the others).
+var Schemes = []string{
+	"default", "dracula", "gruvbox-dark", "gruvbox-light", "nord", "one-dark", "one-light",
+	"solarized-dark", "solarized-light", "tomorrow", "tomorrow-night",
+}
 
 func rng(min, max float64) (*float64, *float64) { return settings.Range(min, max) }
 
@@ -33,48 +56,54 @@ func defs() []settings.Def {
 	uiMin, uiMax := rng(11, 20)
 	fontMin, fontMax := rng(6, 40)
 	lineMin, lineMax := rng(0.8, 2)
-	scrollMin, scrollMax := rng(0, 1_000_000)
+	scrollMin, scrollMax := rng(0, MaxScrollback)
 	out := []settings.Def{
 		// Appearance.
-		{Key: Language, Type: settings.TypeEnum, Default: "auto", Enum: []string{"auto", "en", "zh-CN"},
+		{Key: Theme, Type: settings.TypeEnum, Default: "system", Enum: []string{"system", "light", "dark"},
 			Section: "appearance", Order: 10},
-		{Key: Theme, Type: settings.TypeEnum, Default: "system", Enum: []string{"system", "dark", "light"},
+		{Key: Language, Type: settings.TypeEnum, Default: "auto", Enum: []string{"auto", "en", "zh-CN"},
 			Section: "appearance", Order: 20},
 		{Key: UIFontSize, Type: settings.TypeNumber, Default: 13, Min: uiMin, Max: uiMax, Integer: true,
 			Section: "appearance", Order: 30},
-
-		// Layout.
 		{Key: "layout.panelPosition", Type: settings.TypeEnum, Default: "right", Enum: []string{"right", "bottom"},
-			Section: "layout", Order: 10},
+			Section: "appearance", Order: 40},
 
 		// Terminal.
-		{Key: FontFamily, Type: settings.TypeString, Default: "", Section: "terminal", Order: 10},
-		{Key: FontSize, Type: settings.TypeNumber, Default: 13, Min: fontMin, Max: fontMax, Section: "terminal", Order: 20},
+		{Key: FontFamily, Type: settings.TypeString, Default: "", Section: "terminal", Group: "text", Order: 10},
+		{Key: FontSize, Type: settings.TypeNumber, Default: 13, Min: fontMin, Max: fontMax, Step: 1,
+			Section: "terminal", Group: "text", Order: 20},
 		{Key: "terminal.fontWeight", Type: settings.TypeEnum, Default: "regular", Enum: []string{"regular", "medium"},
-			Section: "terminal", Order: 30},
-		{Key: "terminal.lineHeight", Type: settings.TypeNumber, Default: 1.05, Min: lineMin, Max: lineMax,
-			Section: "terminal", Order: 40},
+			Section: "terminal", Group: "text", Order: 30},
+		{Key: "terminal.lineHeight", Type: settings.TypeNumber, Default: 1.05, Min: lineMin, Max: lineMax, Step: 0.05,
+			Section: "terminal", Group: "text", Order: 40},
 		{Key: "terminal.cursorStyle", Type: settings.TypeEnum, Default: "block", Enum: []string{"block", "bar", "underline"},
-			Section: "terminal", Order: 50},
-		{Key: "terminal.cursorBlink", Type: settings.TypeBool, Default: true, Section: "terminal", Order: 60},
-		{Key: "terminal.scrollback", Type: settings.TypeNumber, Default: 10000, Min: scrollMin, Max: scrollMax, Integer: true,
-			Section: "terminal", Order: 70},
-		{Key: "terminal.copyOnSelect", Type: settings.TypeBool, Default: false, Section: "terminal", Order: 80},
+			Section: "terminal", Group: "cursor", Order: 50},
+		{Key: "terminal.cursorBlink", Type: settings.TypeBool, Default: true, Section: "terminal", Group: "cursor", Order: 60},
+		{Key: Scrollback, Type: settings.TypeNumber, Default: 10000, Min: scrollMin, Max: scrollMax, Integer: true,
+			Step: 1000, Section: "terminal", Group: "behavior", Order: 70},
 		{Key: "terminal.bell", Type: settings.TypeEnum, Default: "visual", Enum: []string{"none", "sound", "visual"},
-			Section: "terminal", Order: 90},
-		{Key: "terminal.boldIsBright", Type: settings.TypeBool, Default: false, Section: "terminal", Order: 100},
-		{Key: "terminal.optionIsMeta", Type: settings.TypeBool, Default: false, Section: "terminal", Order: 110},
+			Section: "terminal", Group: "behavior", Order: 80},
+		{Key: "terminal.optionIsMeta", Type: settings.TypeBool, Default: false, Section: "terminal", Group: "behavior", Order: 90},
+		// LaTeX formulas in panes shown rendered under the pointer.
+		{Key: "terminal.mathHover", Type: settings.TypeBool, Default: true, Section: "terminal", Group: "behavior", Order: 100},
+		{Key: "terminal.copyOnSelect", Type: settings.TypeBool, Default: false, Section: "terminal", Group: "clipboard", Order: 110},
 		// What a program's clipboard write (OSC 52) does.
 		{Key: "terminal.programClipboard", Type: settings.TypeEnum, Default: "auto", Enum: []string{"auto", "ask", "off"},
-			Section: "terminal", Order: 120},
-		// LaTeX formulas in panes shown rendered under the pointer.
-		{Key: "terminal.mathHover", Type: settings.TypeBool, Default: true, Section: "terminal", Order: 130},
+			Section: "terminal", Group: "clipboard", Order: 120},
 
-		// Notifications: on by default, with droid muted.
+		// Terminal colors: a scheme per theme, then the user's own colors,
+		// which replace the scheme's.
+		{Key: SchemePrefix + "dark", Type: settings.TypeEnum, Default: "default", Enum: Schemes, Section: "colors", Order: 10},
+		{Key: SchemePrefix + "light", Type: settings.TypeEnum, Default: "default", Enum: Schemes, Section: "colors", Order: 20},
+		{Key: "terminal.boldIsBright", Type: settings.TypeBool, Default: false, Section: "colors", Order: 30},
+
+		// Notifications: on by default, with droid silent.
 		{Key: "notifications.sound", Type: settings.TypeBool, Default: true, Section: "notifications", Order: 10},
-		{Key: "notifications.mutedAgents", Type: settings.TypeString, Default: "droid", Section: "notifications", Order: 20},
+		{Key: MutedAgents, Type: settings.TypeList, Item: settings.TypeString, Options: Agents, Default: []string{"droid"},
+			Section: "notifications", Order: 20},
 	}
-	// Terminal colors per theme, defaulting to the design tokens.
+	// The colors of each theme that replace its scheme's, defaulting to the
+	// design tokens (the default scheme).
 	for i, theme := range []string{"dark", "light"} {
 		c := tokenColors[theme]
 		p := ColorsPrefix + theme + "."
@@ -91,14 +120,43 @@ func defs() []settings.Def {
 	return out
 }
 
-// Module is the user interfaces' sections and settings.
+// mutedList turns the comma-separated silent agents of earlier versions
+// into a list.
+func mutedList(v any) (any, bool) {
+	s, ok := v.(string)
+	if !ok {
+		return nil, false
+	}
+	out := []string{}
+	for _, f := range strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == ' ' || r == '\t' }) {
+		out = append(out, strings.ToLower(f))
+	}
+	return out, true
+}
+
+// scrollbackInRange brings a scrollback above MaxScrollback, which earlier
+// versions accepted, down to it.
+func scrollbackInRange(v any) (any, bool) {
+	n, ok := v.(float64)
+	if !ok {
+		return nil, false
+	}
+	return min(n, MaxScrollback), true
+}
+
+// Module is the user interfaces' sections and settings, with the values of
+// earlier versions changed in place: the silent agents were a string, the
+// scrollback went up to a million lines.
 var Module = settings.Module{
 	Sections: []settings.Section{
 		{ID: "appearance", Order: 10},
-		{ID: "layout", Order: 20},
 		{ID: "terminal", Order: 30},
 		{ID: "colors", Order: 40},
 		{ID: "notifications", Order: 50},
 	},
 	Defs: defs(),
+	Migrations: []settings.Migration{
+		{From: MutedAgents, To: MutedAgents, Convert: mutedList},
+		{From: Scrollback, To: Scrollback, Convert: scrollbackInRange},
+	},
 }

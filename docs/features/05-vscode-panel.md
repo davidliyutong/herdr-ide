@@ -20,9 +20,10 @@ settings between machines.
 
 **Provisioning** (`internal/codeserver`, agent `codeserver.go`)
 
-- The `codeServer.install` setting (settings dialog or
-  `--code-server-install`; one value for every machine) picks how a machine
-  gets code-server:
+- The `codeServer.install` setting (settings dialog, also per machine in
+  its scope, or `--code-server-install` for every machine) picks how a
+  machine gets code-server; `codeServer.path` names an installed one, also
+  per machine:
   - `push` (default): the release for the machine's platform is resolved on
     the core host ([09](09-air-gapped-installs.md)), uploaded through the
     agent and unpacked into `~/.herdr-ide/code-server/<version>` (shared by

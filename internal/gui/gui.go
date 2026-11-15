@@ -36,8 +36,8 @@ const (
 )
 
 // onOff reads the on/off values of earlier versions.
-func onOff(s string) (any, bool) {
-	switch s {
+func onOff(v any) (any, bool) {
+	switch v {
 	case "on":
 		return true, true
 	case "off":
@@ -49,7 +49,7 @@ func onOff(s string) (any, bool) {
 // Settings are the GUI settings that can be changed at runtime, also per
 // remote machine, with the flags and file keys of earlier versions.
 var Settings = settings.Module{
-	Sections: []settings.Section{{ID: "gui", Order: 70}},
+	Sections: []settings.Section{{ID: "gui", Order: 70, Advanced: true}},
 	Defs: []settings.Def{
 		{
 			Key: SettingGUI, Type: settings.TypeBool, Default: true, Scope: settings.ScopeRemoteMachine, Section: "gui", Order: 10,
@@ -70,7 +70,7 @@ var Settings = settings.Module{
 	},
 	Migrations: []settings.Migration{
 		{From: "gui", To: SettingGUI, Convert: onOff},
-		{From: "gui-gpu", To: SettingGPU, Convert: func(s string) (any, bool) { return s, true }},
+		{From: "gui-gpu", To: SettingGPU, Convert: settings.Renamed},
 		{From: "gui-video", To: SettingVideo, Convert: onOff},
 	},
 }

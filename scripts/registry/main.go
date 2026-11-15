@@ -38,8 +38,8 @@ import (
 
 const out = "design/generated/registry.json"
 
-// keys returns the translation keys of the UI: every section, setting label
-// and enum option, and every command with its section.
+// keys returns the translation keys of the UI: every section, group,
+// setting label and enum option, and every command with its section.
 func keys() []string {
 	store := settings.New("", registry.Settings()...)
 	set := map[string]bool{}
@@ -47,6 +47,9 @@ func keys() []string {
 	for _, d := range store.Defs() {
 		used[d.Section] = true
 		set["settings."+d.Key] = true
+		if d.Group != "" {
+			set["settings.group."+d.Group] = true
+		}
 		for _, o := range d.Enum {
 			set["settings."+d.Key+"."+o] = true
 		}

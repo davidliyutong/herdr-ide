@@ -11,17 +11,26 @@ import (
 
 func TestInstallMode(t *testing.T) {
 	mg := New(log.New(io.Discard, "", 0))
-	if mode, bin := mg.install(); mode != InstallPush || bin != "" {
+	if mode, bin := mg.install("m1"); mode != InstallPush || bin != "" {
 		t.Errorf("no settings: %s %q", mode, bin)
 	}
 	mg.Settings = settings.New("", Settings)
 	mg.Settings.Set(SettingInstall, "", InstallExisting)
-	if mode, bin := mg.install(); mode != InstallExisting || bin != "auto" {
+	if mode, bin := mg.install("m1"); mode != InstallExisting || bin != "auto" {
 		t.Errorf("existing: %s %q", mode, bin)
 	}
 	mg.Settings.Set(SettingPath, "", "~/bin/code-server")
-	if _, bin := mg.install(); bin != "~/bin/code-server" {
+	if _, bin := mg.install("m1"); bin != "~/bin/code-server" {
 		t.Errorf("existing with path: %q", bin)
+	}
+	// A machine's own values win over the global ones.
+	mg.Settings.Set(SettingInstall, "m2", InstallDownload)
+	mg.Settings.Set(SettingPath, "m1", "/opt/cs/bin/code-server")
+	if mode, bin := mg.install("m2"); mode != InstallDownload || bin != "" {
+		t.Errorf("m2: %s %q", mode, bin)
+	}
+	if mode, bin := mg.install("m1"); mode != InstallExisting || bin != "/opt/cs/bin/code-server" {
+		t.Errorf("m1: %s %q", mode, bin)
 	}
 	if err := mg.Settings.Set(SettingPath, "", "bin/code-server"); err == nil {
 		t.Error("relative path accepted")

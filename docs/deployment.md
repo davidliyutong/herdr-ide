@@ -434,8 +434,9 @@ What herdr-ide starts on a machine and how it is reclaimed:
 The licenses stay in the extracted release directory until the user removes
 it.
 
-How machines get code-server is a setting (the settings dialog or
-`--code-server-install`): the core uploads the release (default; works for
+How machines get code-server is a setting (the settings dialog, for every
+machine or in one machine's own settings, or `--code-server-install` for
+all of them): the core uploads the release (default; works for
 machines without internet), each machine downloads it itself (faster when the
 machines have a better connection than the path through the core; needs curl
 or wget and access to the `--code-server-url` host), or a code-server already
