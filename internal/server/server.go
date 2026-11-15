@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
 	"strings"
 	"sync"
@@ -77,6 +78,9 @@ type Server struct {
 	// displayEnv is the environment of a machine's virtual display that new
 	// terminals get (gui.Manager.PaneEnv; tests replace it).
 	displayEnv func(*machines.Machine) map[string]string
+	// home is the core host user's home directory, whose ~/.ssh/config the
+	// Add Machine dialog lists (os.UserHomeDir; tests replace it).
+	home func() (string, error)
 
 	clientsMu sync.Mutex
 	clients   map[*wsClient]bool
@@ -89,7 +93,7 @@ type Server struct {
 // New creates a server for the machine manager.
 func New(mg *machines.Manager, opts Options) *Server {
 	s := &Server{opts: opts, mg: mg, logger: opts.Logger, origins: map[string]bool{}, hosts: map[string]bool{},
-		cs: opts.CodeServer, clients: map[*wsClient]bool{}}
+		cs: opts.CodeServer, clients: map[*wsClient]bool{}, home: os.UserHomeDir}
 	s.term = termHub{s: s, backends: map[string]*termBackend{}}
 	if s.cs == nil {
 		s.cs = codeserver.New(opts.Logger)
@@ -149,6 +153,7 @@ func (s *Server) routes() []route {
 		{"PUT /api/keybindings", s.writable(s.handleSetKeybindings)},
 		{"GET /api/machines", s.handleMachines},
 		{"POST /api/machines", s.writable(s.handleMachineAdd)},
+		{"GET /api/ssh/hosts", s.writable(s.handleSSHHosts)},
 		{"DELETE /api/m/{id}", s.writable(s.handleMachineRemove)},
 		{"PUT /api/m/{id}/label", s.writable(s.handleMachineRename)},
 		{"PUT /api/m/{id}/enabled", s.writable(s.handleMachineEnabled)},

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -291,5 +292,80 @@ func TestSSHLoginNeedsAControlDir(t *testing.T) {
 	with := New(mg, Options{Logger: log.New(io.Discard, "", 0), ControlDir: t.TempDir()})
 	if w := get(with, "/api/config"); !strings.Contains(w.Body.String(), `"ssh_login":true`) {
 		t.Errorf("config: %s", w.Body)
+	}
+}
+
+// The Add Machine dialog's list of the core host's ssh aliases: aliases
+// that are no machine's target yet, with their HostName and User only;
+// none from another site or in read-only mode, and an empty list without a
+// configuration.
+func TestSSHHosts(t *testing.T) {
+	f := newMachinesFixture(t)
+	home := t.TempDir()
+	os.MkdirAll(filepath.Join(home, ".ssh"), 0o700)
+	os.WriteFile(filepath.Join(home, ".ssh", "config"), []byte(`Host gpu extra lab bad|alias *.corp
+  HostName 10.0.0.5
+  User yutong
+  IdentityFile ~/.ssh/id_secret
+Host EXTRA2 other
+`), 0o600)
+	home2 := ""
+	f.srv.home = func() (string, error) { return home2, nil }
+	get := func(s *Server, origin string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("GET", "/api/ssh/hosts", nil)
+		r.Host = "127.0.0.1:7780"
+		if origin != "" {
+			r.Header.Set("Origin", origin)
+		}
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		return w
+	}
+	// No configuration.
+	home2 = t.TempDir()
+	if w := get(f.srv, ""); w.Code != 200 || strings.TrimSpace(w.Body.String()) != "[]" {
+		t.Fatalf("without a config: %d %s", w.Code, w.Body)
+	}
+	home2 = home
+	w := get(f.srv, "http://127.0.0.1:7780")
+	var got []map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &got); w.Code != 200 || err != nil {
+		t.Fatalf("%d %s %v", w.Code, w.Body, err)
+	}
+	// gpu is u@gpu's host and extra a target: both are machines already.
+	want := []map[string]string{
+		{"alias": "lab", "hostname": "10.0.0.5", "user": "yutong"},
+		{"alias": "EXTRA2"},
+		{"alias": "other"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("hosts = %v, want %v", got, want)
+	}
+	if strings.Contains(w.Body.String(), "id_secret") {
+		t.Errorf("a key path left the core: %s", w.Body)
+	}
+	if w := get(f.srv, "https://evil.example"); w.Code != http.StatusForbidden {
+		t.Errorf("from another site: %d", w.Code)
+	}
+	ro := f.server(true)
+	ro.home = func() (string, error) { return home, nil }
+	if w := get(ro, ""); w.Code != http.StatusForbidden || strings.Contains(w.Body.String(), "lab") {
+		t.Errorf("read-only: %d %s", w.Code, w.Body)
+	}
+	// A core whose user has no home directory lists none.
+	f.srv.home = func() (string, error) { return "", errors.New("no home") }
+	if w := get(f.srv, ""); w.Code != 200 || strings.TrimSpace(w.Body.String()) != "[]" {
+		t.Errorf("without a home: %d %s", w.Code, w.Body)
+	}
+}
+
+func TestTargetHost(t *testing.T) {
+	for in, want := range map[string]string{
+		"gpu": "gpu", "me@gpu": "gpu", "ssh://me@gpu:2222": "gpu", "gpu:22": "gpu",
+		"me@[fe80::1%en0]:22": "fe80::1%en0", "fe80::1": "fe80::1", "u%40x@h": "h",
+	} {
+		if got := targetHost(in); got != want {
+			t.Errorf("targetHost(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

@@ -208,6 +208,9 @@ func TestMutatingRoutesAreGuarded(t *testing.T) {
 	}
 	mutatingGET := map[string]bool{
 		"GET /api/m/{id}/auth": true, // starts an interactive ssh login
+		// Changes nothing, but only adding a machine needs the core host's
+		// ssh aliases: guarded as the changes are.
+		"GET /api/ssh/hosts": true,
 	}
 	s := newTestServer("https://ide.example.com")
 	s.opts.Static = fstest.MapFS{"index.html": {Data: []byte("<html></html>")}}

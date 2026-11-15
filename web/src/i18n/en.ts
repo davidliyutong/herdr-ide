@@ -381,6 +381,7 @@ export const en = {
   'addMachine.title': 'Add machine',
   'addMachine.target': 'SSH target',
   'addMachine.targetPlaceholder': 'host alias from ~/.ssh/config, or user@host',
+  'addMachine.fromConfig': 'Hosts in ~/.ssh/config',
   'addMachine.label': 'Name',
   'addMachine.labelPlaceholder': 'optional; defaults to the host',
   'addMachine.badTarget':

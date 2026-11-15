@@ -162,7 +162,28 @@ Windows core host; the interactive ssh login from a core on Windows.
 - **Adding.** **Add machine…** (right-click the sidebar's free space or any
   machine) asks for an SSH target and an optional
   label (the target names it otherwise): `POST /api/machines {target,
-  label}`, answered `201` with the machine's state. The target is what
+  label}`, answered `201` with the machine's state. Below the target field
+  the dialog lists the Host aliases of the core host's ssh configuration
+  that are no machine yet (`GET /api/ssh/hosts`, `internal/sshconfig`),
+  each with the user and host it connects to; typing narrows the list
+  (aliases starting with the text first, then those whose alias, host name
+  or user holds it), the arrow keys and Enter, Tab or a click pick one,
+  and any other target can still be typed. The core reads
+  `~/.ssh/config` and the files its `Include` lines name (globs; relative
+  paths in `~/.ssh`, `~/` the home directory) as ssh does for this:
+  keywords without regard to case, `Keyword value` or `Keyword=value`,
+  quoted arguments, `Host a b c` naming several aliases, the first
+  `HostName` and `User` an alias gets winning (`%h` in a `HostName` is the
+  alias). It keeps concrete aliases only: patterns with `*` or `?`,
+  negations (`!`) and `Match` blocks are left out, and so is every other
+  option (keys, proxies, commands), which never leaves the core. An alias
+  is no longer offered once a machine's target is it or names its host
+  (`u@alias`, `ssh://u@alias:22`), nor when the target rule below refuses
+  it. Reading is bounded: regular files only (a FIFO or device an
+  `Include` names is skipped), at most 256 KiB each (larger ones are
+  skipped), 64 files, includes 8 deep and 1000 aliases; a missing or
+  unreadable file gives an empty list. The list is refused in read-only
+  mode, where no machine can be added. The target is what
   OpenSSH takes as a destination: `[user@]host`, `ssh://[user@]host[:port]`,
   a `~/.ssh/config` alias, an IPv6 literal with its zone id
   (`[fe80::1%en0]`), user names such as `user+tag` or `a=b,c~#`, Unicode
@@ -388,7 +409,20 @@ Windows core host; the interactive ssh login from a core on Windows.
   `ssh_login` false and the authentication terminal refused with
   `ssh_login_unsupported` (`TestSSHLoginNeedsAControlDir`); the terminal core's endpoints refused read-only, for
   unknown actions and for machines without an agent
-  (`TestHCEndpointsGuard`).
+  (`TestHCEndpointsGuard`); the Add Machine dialog's ssh aliases: those
+  of machines left out, key paths never sent, refused from another site
+  and read-only, an empty list without a configuration or a home directory
+  (`TestSSHHosts`).
+- `internal/sshconfig/*_test.go`: includes (globs, relative, `~/` and
+  absolute paths, quoted), patterns and negations left out, keywords in any
+  case and with `=`, `Host a b c`, the first `HostName` and `User` winning,
+  `%h`, `Match` blocks ignored, a missing file, a file including itself,
+  one too large, a directory, a FIFO and `/dev/zero` skipped, includes
+  nested deeper than allowed (`TestReadAliases`, `TestReadMissingAndBounded`,
+  `TestReadSkipsSpecialFiles`, `TestParseLine`).
+- `web/src/__tests__/addMachineHosts.test.ts`: the hosts offered for what
+  is typed, picked with the arrow keys and Enter, Tab or the pointer, and
+  another target taken as typed.
 - `internal/server/term_test.go`: `TestHCLifecycle` (status, a stopped core
   kept stopped while a client is subscribed, started and restarted again,
   the machine's `hc` state, audit entries); `TestTermWithoutCore` (a build

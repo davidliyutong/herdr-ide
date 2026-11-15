@@ -38,8 +38,8 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   running), **Start Terminal Service** and **Stop Terminal Service…**.
 - **Multi-machine.** Keeps its own list of SSH machines (the machines saved
   in herdr are imported the first time); right-click the sidebar to add one
-  (an ssh target and a label; a password or host key is asked for in a
-  terminal), or a machine to rename, remove, disable or enable it or open
+  (a host of your `~/.ssh/config`, picked from a list, or any ssh target,
+  and a label; a password or host key is asked for in a terminal), or a machine to rename, remove, disable or enable it or open
   its **Machine Settings…**. One ssh
   connection per machine runs a small static agent
   (linux/macOS × amd64/arm64, uploaded automatically) that multiplexes

@@ -1405,6 +1405,19 @@ body.dragging * {
 .dir-suggestion.sel {
   background: var(--bg-3);
 }
+/* The Add Machine dialog's hosts of ~/.ssh/config: alias, then where it
+   connects, dimmed at the right. */
+.ssh-hosts-caption {
+  padding: 4px 8px 2px;
+}
+.ssh-hosts .dir-suggestion {
+  min-width: 0;
+}
+.ssh-host-detail {
+  margin-left: auto;
+  padding-left: 12px;
+  font-family: ui-monospace, monospace;
+}
 .download-body {
   display: flex;
   flex-direction: column;

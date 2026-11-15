@@ -374,6 +374,7 @@ export const zhCN: Messages = {
   'addMachine.title': '添加机器',
   'addMachine.target': 'SSH 目标',
   'addMachine.targetPlaceholder': '~/.ssh/config 中的主机别名，或 user@host',
+  'addMachine.fromConfig': '~/.ssh/config 中的主机',
   'addMachine.label': '名称',
   'addMachine.labelPlaceholder': '可选，默认为主机名',
   'addMachine.badTarget':

@@ -30,6 +30,7 @@ machines only ([02](features/02-multi-machine-transport.md)).
 | `internal/agent` | Agent: the terminal core, agent detection, files, code-server supervision, virtual displays, bridge listener, housekeeping. Every file is `//go:build unix` (unix sockets with peer checks, process groups, Xvfb), so code the core runs on Windows does not import it. |
 | `internal/agent/detect` | Which coding agent a terminal's foreground process is and its state from the screen, by herdr's method and manifests (embedded, Apache-2.0), with the state machine for debouncing and done ([25](features/25-agent-detection.md)). |
 | `internal/transport` | yamux sessions: in-process for the local machine (`local.go`, unix), ssh stdio for others; agent upload; the ssh control directory (`sys_unix.go`: private, under `/tmp`; `sys_windows.go`: none, since Win32-OpenSSH has no ControlMaster, and ssh started without a console window). |
+| `internal/sshconfig` | The Host aliases of the core host's OpenSSH configuration (`~/.ssh/config` and its includes) with their HostName and User, read with bounds for the Add Machine dialog ([02](features/02-multi-machine-transport.md)). |
 | `internal/machines` | The core's machines (`Registry`: SSH machines in `machines[-<instance>].json`, the SSH machines herdr saved imported once when that file does not exist; entries and fields it does not use are written back as they were), added, removed, renamed, enabled and disabled at runtime; the connection state machine; the ssh target rule (`ValidTarget`; a stored machine whose target fails is listed with `invalid_target` and never dialed); the local machine of a core on Windows, listed with `local_unsupported` and never dialed (`LocalSupported`). |
 | `internal/hc` | Client of herdr-core's API (protocol generation 1): JSON-RPC calls, attached terminals as raw byte streams with credit, event subscriptions. |
 | `internal/hcdist` | herdr-core release embedded for machines: version, upstream archive names and SHA-256 digests ([21](features/21-terminal-core.md)). |
@@ -158,6 +159,9 @@ rules replaced), see [13](features/13-settings-and-appearance.md).
 Machines ([02](features/02-multi-machine-transport.md)):
 `POST /api/machines` (`{"target", "label"}`: adds and stores an SSH
 machine; `201` with its state, `409 machine_exists`),
+`GET /api/ssh/hosts` (the Host aliases of the core host's ssh
+configuration that are no machine yet, with their `hostname` and `user`,
+for the Add Machine dialog; refused read-only),
 `PUT /api/m/{id}/label` (`{"label": "…"}`; `409 label_taken`),
 `PUT /api/m/{id}/enabled` (`{"enabled": bool}`) and `DELETE /api/m/{id}`
 change the core's machines file and the running machine; the WebSocket

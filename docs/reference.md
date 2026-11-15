@@ -293,6 +293,7 @@ missing here.
 | `PUT /api/keybindings` | writes | Replaces the user's rules. |
 | `GET /api/machines` | – | Every machine's state, its agent's information and its terminal core's state. A machine that is never connected is in `error` with a `code`: `invalid_target` (a stored ssh target the core refuses) or `local_unsupported` (the local machine of a core on Windows, where no agent runs). |
 | `POST /api/machines` | writes | Adds and stores an SSH machine (`{"target", "label"}`). |
+| `GET /api/ssh/hosts` | writes | The Host aliases of the core host's `~/.ssh/config` (and the files it includes) that are no machine's target yet, as `[{"alias", "hostname"?, "user"?}]`, for the Add Machine dialog; nothing else of the configuration ([02](features/02-multi-machine-transport.md)). Refused read-only, where no machine can be added. |
 | `DELETE /api/m/{id}` | writes | Removes a stored machine. |
 | `PUT /api/m/{id}/label` | writes | Renames a machine. |
 | `PUT /api/m/{id}/enabled` | writes | Enables or disables a machine. |

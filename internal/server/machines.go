@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"herdr-ide/internal/machines"
+	"herdr-ide/internal/sshconfig"
 )
 
 // maxLabelLen bounds a label: no odd bytes in the audit log. Targets are
@@ -43,6 +44,51 @@ func (s *Server) broadcastMachines() {
 
 func (s *Server) handleMachines(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.mg.States())
+}
+
+// handleSSHHosts lists the Host aliases of the core host's ssh configuration
+// (~/.ssh/config and its includes) that are no machine's target yet, for
+// the Add Machine dialog: each alias with its HostName and User, nothing
+// else (internal/sshconfig). An alias the target rule refuses is left out,
+// since it could not be added. Only pages that may add machines get it.
+func (s *Server) handleSSHHosts(w http.ResponseWriter, r *http.Request) {
+	out := []sshconfig.Host{}
+	home, err := s.home()
+	if err != nil || home == "" {
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+	added := map[string]bool{}
+	for _, st := range s.mg.States() {
+		if st.Kind == machines.KindSSH {
+			added[strings.ToLower(st.Target)] = true
+			added[strings.ToLower(targetHost(st.Target))] = true
+		}
+	}
+	for _, h := range sshconfig.Read(home) {
+		if machines.ValidTarget(h.Alias) && !added[strings.ToLower(h.Alias)] {
+			out = append(out, h)
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// targetHost is the host of an ssh target: without ssh://, the user and the
+// port ("gpu" for "ssh://me@gpu:22" and "me@gpu").
+func targetHost(t string) string {
+	t = strings.TrimPrefix(t, "ssh://")
+	if i := strings.LastIndexByte(t, '@'); i >= 0 {
+		t = t[i+1:]
+	}
+	if strings.HasPrefix(t, "[") {
+		if i := strings.IndexByte(t, ']'); i > 0 {
+			return t[1:i]
+		}
+	}
+	if i := strings.IndexByte(t, ':'); i >= 0 && strings.Count(t, ":") == 1 {
+		t = t[:i]
+	}
+	return t
 }
 
 // newMachineID is a random id: machine ids appear in URLs and in per-machine
