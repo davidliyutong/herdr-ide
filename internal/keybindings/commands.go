@@ -83,51 +83,56 @@ func cmd(id, section string, defaults ...Default) Command {
 }
 
 // Commands are every command, with the desktop app's direct shortcuts as
-// defaults: Cmd on macOS, Ctrl+Shift on other systems (as terminal
-// emulators use, since Ctrl+W and Ctrl+T are keys of shells). No default
-// is a chord, and none is Ctrl or Alt with a letter alone or a function
-// key, which programs in terminals read: every key that is not a default
-// reaches the terminal on its first press. Browsers get only keys they leave to pages: find, the
-// command palette on macOS (Cmd+K; Cmd+Shift+P opens a private window in
-// Firefox, as Ctrl+Shift+P does elsewhere, where no key is left for it and
-// the status bar opens it) and the list of shortcuts. A command without a
-// key runs from the menus, the command palette or its button, and the user
-// can bind any key or chord to it.
+// defaults: on macOS the Cmd keys of Terminal.app, iTerm, Chrome and VS Code
+// (Cmd+T, Cmd+1…9, Cmd+Option+arrows, Cmd+Shift+Enter…); on other systems
+// Ctrl+Shift keys (as terminal emulators use, since Ctrl+W and Ctrl+T are
+// keys of shells), Ctrl+Tab and Alt with a digit (as GNOME Terminal and
+// Konsole switch tabs). No default is a chord, and none is Ctrl or Alt with
+// a letter alone or a function key, which programs in terminals read: every
+// key that is not a default reaches the terminal on its first press.
+// Browsers get only keys they leave to pages: find, the command palette on
+// macOS (Cmd+K; Cmd+Shift+P opens a private window in Firefox, as
+// Ctrl+Shift+P does elsewhere, where no key is left for it and the status
+// bar opens it) and the keyboard shortcuts. A command without a key runs
+// from the menus, the command palette or its button, and the user can bind
+// any key or chord to it.
 var Commands = func() []Command {
 	out := []Command{
 		cmd("app.commandPalette", "app", on(macApp, "cmd+shift+p"), on(pcApp, "ctrl+shift+p"), on(macBrowser, "cmd+k")),
 		cmd("app.keyboardShortcuts", "app", on(macAll, "cmd+slash"), on(pcAll, "ctrl+shift+slash")),
 		cmd("app.settings", "app", on(macApp, "cmd+comma"), on(pcApp, "ctrl+comma")),
-		cmd("app.agentAttention", "app"),
+		cmd("app.agentAttention", "app", on(macApp, "cmd+shift+a"), on(pcApp, "ctrl+shift+a")),
+		cmd("app.addMachine", "app"),
 
-		cmd("workspace.switch", "workspace"),
-		cmd("workspace.next", "workspace"),
-		cmd("workspace.previous", "workspace"),
+		cmd("workspace.switch", "workspace", on(macApp, "cmd+p")),
+		cmd("workspace.next", "workspace", on(macApp, "cmd+ctrl+down")),
+		cmd("workspace.previous", "workspace", on(macApp, "cmd+ctrl+up")),
 		cmd("workspace.new", "workspace", on(macApp, "cmd+n"), on(pcApp, "ctrl+shift+n")),
 		cmd("workspace.rename", "workspace"),
 		cmd("workspace.close", "workspace"),
 
 		cmd("tab.new", "tab", on(macApp, "cmd+t"), on(pcApp, "ctrl+shift+t")),
 		cmd("tab.rename", "tab"),
-		cmd("tab.next", "tab", on(macApp, "cmd+shift+bracketright")),
-		cmd("tab.previous", "tab", on(macApp, "cmd+shift+bracketleft")),
+		cmd("tab.next", "tab", on(macApp, "cmd+shift+bracketright"), on(macApp, "ctrl+tab"), on(pcApp, "ctrl+tab")),
+		cmd("tab.previous", "tab", on(macApp, "cmd+shift+bracketleft"), on(macApp, "ctrl+shift+tab"), on(pcApp, "ctrl+shift+tab")),
 	}
+	// Cmd+1…8 select a tab and Cmd+9 the last one, as in browsers.
 	for i := 1; i <= 9; i++ {
-		out = append(out, cmd(fmt.Sprintf("tab.select%d", i), "tab"))
+		out = append(out, cmd(fmt.Sprintf("tab.select%d", i), "tab", on(macApp, fmt.Sprintf("cmd+%d", i)), on(pcApp, fmt.Sprintf("alt+%d", i))))
 	}
 	out = append(out,
-		cmd("tab.close", "tab", on(pcApp, "ctrl+shift+w")),
+		cmd("tab.close", "tab", on(macApp, "cmd+shift+w"), on(pcApp, "ctrl+shift+w")),
 
 		cmd("pane.splitRight", "pane", on(macApp, "cmd+d")),
 		cmd("pane.splitDown", "pane", on(macApp, "cmd+shift+d")),
 		cmd("pane.close", "pane", on(macApp, "cmd+w")),
-		cmd("pane.zoom", "pane"),
-		cmd("pane.focusLeft", "pane"),
-		cmd("pane.focusDown", "pane"),
-		cmd("pane.focusUp", "pane"),
-		cmd("pane.focusRight", "pane"),
-		cmd("pane.focusNext", "pane"),
-		cmd("pane.focusPrevious", "pane"),
+		cmd("pane.zoom", "pane", on(macApp, "cmd+shift+enter"), on(pcApp, "ctrl+shift+enter")),
+		cmd("pane.focusLeft", "pane", on(macApp, "cmd+alt+left")),
+		cmd("pane.focusDown", "pane", on(macApp, "cmd+alt+down")),
+		cmd("pane.focusUp", "pane", on(macApp, "cmd+alt+up")),
+		cmd("pane.focusRight", "pane", on(macApp, "cmd+alt+right")),
+		cmd("pane.focusNext", "pane", on(macApp, "cmd+bracketright")),
+		cmd("pane.focusPrevious", "pane", on(macApp, "cmd+bracketleft")),
 
 		cmd("view.toggleSidebar", "view", on(macApp, "cmd+b")),
 		// Hiding the VS Code panel from inside VS Code is what the key is for.

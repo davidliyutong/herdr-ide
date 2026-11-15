@@ -30,9 +30,19 @@ reference documentation.
   `design/generated/registry.json` lists those keys (`scripts/registry`,
   `"i18n"`), `settings.test.ts` checks that the web UI has them, and an
   untranslated one shows its key.
-- **Desktop shell**: the menu's titles (`desktop.menu.*`) and the error
-  dialogs (`desktop.*`) come from the web's
-  English/Chinese dictionaries, Electron's role items included. They follow
+- **Vocabulary**: one name per thing and per command in every place (the
+  desktop app's menu, the command palette, the keyboard shortcuts page,
+  context menus and tooltips all use `command.<id>`), Title Case in English
+  menus and command names as in VS Code and macOS. Chinese uses the words
+  Chinese VS Code and Chrome use: 工作区 (workspace), 标签页 (tab), 窗格
+  (pane), 智能体 (agent, the coding agents; the sidebar's **Agents**
+  section is 智能体), 分屏, 侧栏, 程序窗口, 服务器 (the core). herdr-core
+  is the **terminal service** (终端服务), named only in the machine's
+  **Troubleshooting** submenu, its machine settings page and errors; the
+  everyday UI says terminals.
+- **Desktop shell**: the menu's titles (`desktop.menu.*`), its items of
+  commands (`command.<id>`) and the error dialogs (`desktop.*`) come from
+  the web's English/Chinese dictionaries, Electron's role items included. They follow
   the core's `appearance.language`, which the shell reads itself; `auto`
   follows the system's preferred languages, and so does a failure before the
   core answers.

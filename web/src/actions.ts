@@ -494,12 +494,13 @@ export const actions = {
     actions.selectWorkspace(c.m, c.layout.workspaces[(c.layout.selected + step + n) % n].id);
   },
 
-  switchTab(step: number | { index: number }) {
+  /** Selects the next (1) or previous (-1) tab, the tab at an index, or the last one. */
+  switchTab(step: number | { index: number } | { last: true }) {
     const c = current();
     if (!c?.ws) return;
     const n = c.ws.tabs.length;
     if (!n) return;
-    const index = typeof step === 'number' ? (c.ws.selected + step + n) % n : step.index;
+    const index = typeof step === 'number' ? (c.ws.selected + step + n) % n : 'last' in step ? n - 1 : step.index;
     if (index < n) actions.selectTab(c.m, c.ws.id, index);
   },
 

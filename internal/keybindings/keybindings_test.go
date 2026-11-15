@@ -80,7 +80,18 @@ func TestDefaults(t *testing.T) {
 		{PlatformPC, "app.keyboardShortcuts", []string{"ctrl+shift+slash"}},
 		{PlatformPCBrowser, "app.keyboardShortcuts", []string{"ctrl+shift+slash"}},
 		{PlatformPCBrowser, "tab.select9", nil},
-		{PlatformMac, "pane.zoom", nil},
+		{PlatformMacBrowser, "tab.select1", nil},
+		{PlatformMac, "tab.select1", []string{"cmd+1"}},
+		{PlatformMac, "tab.select9", []string{"cmd+9"}},
+		{PlatformPC, "tab.select2", []string{"alt+2"}},
+		{PlatformMac, "tab.close", []string{"cmd+shift+w"}},
+		{PlatformMac, "tab.next", []string{"cmd+shift+bracketright", "ctrl+tab"}},
+		{PlatformPC, "tab.previous", []string{"ctrl+shift+tab"}},
+		{PlatformMac, "pane.zoom", []string{"cmd+shift+enter"}},
+		{PlatformMac, "pane.focusLeft", []string{"cmd+alt+left"}},
+		{PlatformMac, "pane.focusNext", []string{"cmd+bracketright"}},
+		{PlatformPC, "pane.focusLeft", nil},
+		{PlatformMacBrowser, "pane.zoom", nil},
 		{PlatformMac, "view.toggleCode", []string{"cmd+j"}},
 		{PlatformPCBrowser, "view.toggleCode", nil},
 	} {
@@ -306,8 +317,8 @@ func TestMigrateDesktopShortcuts(t *testing.T) {
 		t.Errorf("app.settings = %v", got)
 	}
 	// cmd+w was the desktop app's default for closing the tab: nothing to
-	// carry over (on macOS it closes the pane now).
-	if got := effective(st, PlatformMac, "tab.close"); len(got) != 0 {
+	// carry over (on macOS it closes the pane now, cmd+shift+w the tab).
+	if got := effective(st, PlatformMac, "tab.close"); !slices.Equal(got, []string{"cmd+shift+w@terminal"}) {
 		t.Errorf("tab.close = %v", got)
 	}
 	// Once only.

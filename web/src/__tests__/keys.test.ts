@@ -82,13 +82,21 @@ describe('key sequences', () => {
   });
 
   it('shows keys as they are typed', () => {
-    expect(keyLabel('ctrl+b shift+slash')).toBe('ctrl+b ?');
-    expect(keyLabel('ctrl+b comma')).toBe('ctrl+b ,');
-    expect(keyLabel('ctrl+b minus')).toBe('ctrl+b -');
-    expect(keyLabel('cmd+shift+bracketright')).toBe('cmd+}');
-    expect(keyLabel('ctrl+b shift+g')).toBe('ctrl+b shift+g');
-    expect(keyLabel('ctrl+shift+equal')).toBe('ctrl++');
-    expect(keyLabel('ctrl+b space')).toBe('ctrl+b space');
+    expect(keyLabel('ctrl+b shift+slash', false)).toBe('Ctrl+B ?');
+    expect(keyLabel('ctrl+b comma', false)).toBe('Ctrl+B ,');
+    expect(keyLabel('ctrl+b minus', false)).toBe('Ctrl+B -');
+    expect(keyLabel('ctrl+b shift+g', false)).toBe('Ctrl+B Shift+G');
+    expect(keyLabel('ctrl+shift+equal', false)).toBe('Ctrl++');
+    expect(keyLabel('ctrl+b space', false)).toBe('Ctrl+B Space');
+    expect(keyLabel('ctrl+shift+tab', false)).toBe('Ctrl+Shift+Tab');
+    expect(keyLabel('alt+1', false)).toBe('Alt+1');
+    // macOS shows its menus' symbols, modifiers in their order.
+    expect(keyLabel('cmd+shift+bracketright', true)).toBe('⌘}');
+    expect(keyLabel('cmd+shift+p', true)).toBe('⇧⌘P');
+    expect(keyLabel('cmd+alt+left', true)).toBe('⌥⌘←');
+    expect(keyLabel('cmd+ctrl+down', true)).toBe('⌃⌘↓');
+    expect(keyLabel('cmd+shift+enter', true)).toBe('⇧⌘↩');
+    expect(keyLabel('ctrl+k ctrl+s', true)).toBe('⌃K ⌃S');
     expect(altOnly('alt+t')).toBe(true);
     expect(altOnly('cmd+alt+t')).toBe(false);
   });
@@ -103,13 +111,13 @@ describe('keybindings', () => {
     expect(platform(false, true)).toBe('pc');
     expect(platform(false, false)).toBe('pc-browser');
     // jsdom: a browser on another system.
-    expect(keyHint('app.keyboardShortcuts')).toBe('ctrl+?');
-    expect(keyHint('find.open')).toBe('ctrl+shift+f');
+    expect(keyHint('app.keyboardShortcuts')).toBe('Ctrl+?');
+    expect(keyHint('find.open')).toBe('Ctrl+Shift+F');
     // Unbound commands show no key.
     expect(keyHint('tab.new')).toBe('');
     expect(keyHint('view.toggleCode')).toBe('');
     expect(keyHint('app.commandPalette')).toBe('');
-    expect(withKey('Find', 'find.open')).toBe('Find (ctrl+shift+f)');
+    expect(withKey('Find', 'find.open')).toBe('Find (Ctrl+Shift+F)');
     expect(withKey('New tab', 'tab.new')).toBe('New tab');
   });
 

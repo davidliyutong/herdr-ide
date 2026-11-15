@@ -224,18 +224,60 @@ export function shiftedChar(name: string): string | undefined {
   return named[name]?.shifted ?? (/^\d$/.test(name) ? shiftedDigits[Number(name)] : undefined);
 }
 
-/** How a key sequence is shown: "ctrl+b ?", "cmd+}", "ctrl+shift+t". A
- * shifted punctuation key shows the character it types. */
-export function keyLabel(seq: string): string {
+/** Whether the page runs on macOS (or iOS), whose keys are shown as symbols. */
+export const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+
+/** Keys shown as symbols on macOS, as its menus show them. */
+const macKeys: Record<string, string> = {
+  enter: '↩',
+  escape: '⎋',
+  tab: '⇥',
+  backspace: '⌫',
+  delete: '⌦',
+  left: '←',
+  right: '→',
+  up: '↑',
+  down: '↓',
+  pageup: '⇞',
+  pagedown: '⇟',
+  home: '↖',
+  end: '↘',
+  space: 'Space',
+};
+const pcKeys: Record<string, string> = { escape: 'Esc', pageup: 'PageUp', pagedown: 'PageDown', backspace: 'Backspace', space: 'Space' };
+const macMods: [string, string][] = [
+  ['ctrl', '⌃'],
+  ['alt', '⌥'],
+  ['shift', '⇧'],
+  ['cmd', '⌘'],
+];
+const pcMods: [string, string][] = [
+  ['cmd', 'Cmd'],
+  ['ctrl', 'Ctrl'],
+  ['alt', 'Alt'],
+  ['shift', 'Shift'],
+];
+
+/** How a key sequence is shown to the user: as macOS menus show keys
+ * ("⇧⌘P", "⌥⌘←") on macOS, else as Windows and Linux do ("Ctrl+Shift+P").
+ * A shifted punctuation key shows the character it types ("⌘}", "Ctrl+?");
+ * the strokes of a chord are separated by a space. */
+export function keyLabel(seq: string, mac = isMac): string {
   return seq
     .split(' ')
     .filter(Boolean)
     .map((stroke) => {
       const parts = stroke.split('+');
-      const key = parts.pop()!;
-      const shifted = parts.includes('shift') && shiftedChar(key);
-      if (shifted) return [...parts.filter((p) => p !== 'shift'), shifted].join('+');
-      return [...parts, named[key]?.char?.trim() || key].join('+');
+      const name = parts.pop()!;
+      const shifted = parts.includes('shift') ? shiftedChar(name) : undefined;
+      const mods = shifted ? parts.filter((p) => p !== 'shift') : parts;
+      const key =
+        shifted ??
+        (mac ? macKeys[name] : pcKeys[name]) ??
+        (named[name]?.char?.trim() || (name.length === 1 ? name.toUpperCase() : name[0].toUpperCase() + name.slice(1)));
+      const order = mac ? macMods : pcMods;
+      const shown = order.filter(([m]) => mods.includes(m)).map(([, label]) => label);
+      return mac ? shown.join('') + key : [...shown, key].join('+');
     })
     .join(' ');
 }

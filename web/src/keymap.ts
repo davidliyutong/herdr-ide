@@ -7,8 +7,9 @@
 // desktop app the page sees a key before the application menu, which gets
 // only the keys the page leaves (desktop.ts).
 
-import { actions } from './actions';
-import { useStore } from './state/store';
+import { actions, attentionList, current } from './actions';
+import { currentDock, useStore } from './state/store';
+import * as L from './term/layout';
 import { hasMessage, t } from './i18n';
 import { keyLabel, strokeOf } from './keys';
 import { platform, useKeys, type Binding, type When } from './keybindings';
@@ -115,7 +116,7 @@ export function handleKey(ev: KeyboardEvent, ctx: KeyContext = keyContext()): bo
   }
 }
 
-/** The label of a command, e.g. "New tab". */
+/** The label of a command, e.g. "New Tab". */
 export function commandLabel(id: string): string {
   const k = `command.${id}`;
   return hasMessage(k) ? t(k) : id;
@@ -141,13 +142,77 @@ export function withKey(label: string, command: string): string {
   return key ? t('app.withKey', { label, key }) : label;
 }
 
+/** Whether a command can run now: a terminal, tab or workspace for it to
+ * act on, something to switch to, a page that may change things. The
+ * desktop app's menu shows the others disabled, the palette leaves them
+ * out. */
+export function commandEnabled(id: string): boolean {
+  const s = useStore.getState();
+  const c = actions.focusedContext();
+  const cur = current();
+  const layout = cur?.layout;
+  const tabs = cur?.ws?.tabs.length ?? 0;
+  const panes = cur?.tab ? L.tabTerminals(cur.tab).length : 0;
+  const changes = !s.readOnly;
+  if (/^tab\.select[1-9]$/.test(id)) return tabs > 1;
+  switch (id) {
+    case 'workspace.new':
+      return changes && !!s.machineId && s.machines[s.machineId]?.status === 'ready';
+    case 'tab.new':
+      return changes && !!layout;
+    case 'workspace.rename':
+    case 'workspace.close':
+      return changes && !!cur?.ws;
+    case 'workspace.next':
+    case 'workspace.previous':
+      return (layout?.workspaces.length ?? 0) > 1;
+    case 'workspace.switch':
+      return Object.values(s.machines).length > 0;
+    case 'tab.rename':
+    case 'tab.close':
+      return changes && !!cur?.tab;
+    case 'tab.next':
+    case 'tab.previous':
+      return tabs > 1;
+    case 'pane.splitRight':
+    case 'pane.splitDown':
+    case 'pane.close':
+      return changes && !!c?.terminal;
+    case 'pane.zoom':
+      return !!c?.terminal && panes > 1;
+    case 'pane.focusLeft':
+    case 'pane.focusRight':
+    case 'pane.focusUp':
+    case 'pane.focusDown':
+    case 'pane.focusNext':
+    case 'pane.focusPrevious':
+      return panes > 1;
+    case 'find.open':
+    case 'find.next':
+    case 'find.previous':
+      return !!c?.terminal;
+    case 'code.open':
+    case 'code.diff':
+    case 'code.gitGraph':
+      return changes && !!c;
+    case 'view.toggleCode':
+      return !!c || !!currentDock(s);
+    case 'app.agentAttention':
+      return attentionList().length > 0;
+    case 'app.addMachine':
+      return changes;
+  }
+  return true;
+}
+
 /** Runs a command; unknown ones do nothing. */
 export function runCommand(id: string) {
   const ctx = actions.focusedContext();
   const s = useStore.getState();
   const select = /^tab\.select([1-9])$/.exec(id);
   if (select) {
-    actions.switchTab({ index: Number(select[1]) - 1 });
+    // The ninth is the last tab, as in browsers.
+    actions.switchTab(select[1] === '9' ? { last: true } : { index: Number(select[1]) - 1 });
     return;
   }
   switch (id) {
@@ -155,13 +220,16 @@ export function runCommand(id: string) {
       s.setPalette?.('commands');
       break;
     case 'app.keyboardShortcuts':
-      s.setPalette?.('help');
+      s.openSettings({ page: 'keys' });
       break;
     case 'app.settings':
-      s.openSettings(true);
+      s.openSettings({});
       break;
     case 'app.agentAttention':
       actions.openAttention();
+      break;
+    case 'app.addMachine':
+      s.openAddMachine(true);
       break;
     case 'workspace.switch':
       s.setPalette?.('workspaces');

@@ -97,8 +97,8 @@ in the UI; a setting with a scope can have its own value per machine, under
 
 | Setting | Values | Default | Flag | Scope |
 | --- | --- | --- | --- | --- |
+| `appearance.theme` | `system`, `light`, `dark` | `"system"` | – | – |
 | `appearance.language` | `auto`, `en`, `zh-CN` | `"auto"` | – | – |
-| `appearance.theme` | `system`, `dark`, `light` | `"system"` | – | – |
 | `appearance.uiFontSize` | integer, 11–20 | `13` | – | – |
 | `layout.panelPosition` | `right`, `bottom` | `"right"` | – | – |
 | `terminal.fontFamily` | string | `""` | – | – |
@@ -107,13 +107,15 @@ in the UI; a setting with a scope can have its own value per machine, under
 | `terminal.lineHeight` | number, 0.8–2 | `1.05` | – | – |
 | `terminal.cursorStyle` | `block`, `bar`, `underline` | `"block"` | – | – |
 | `terminal.cursorBlink` | `true`, `false` | `true` | – | – |
-| `terminal.scrollback` | integer, 0–1000000 | `10000` | – | – |
-| `terminal.copyOnSelect` | `true`, `false` | `false` | – | – |
+| `terminal.scrollback` | integer, 0–100000 | `10000` | – | – |
 | `terminal.bell` | `none`, `sound`, `visual` | `"visual"` | – | – |
-| `terminal.boldIsBright` | `true`, `false` | `false` | – | – |
 | `terminal.optionIsMeta` | `true`, `false` | `false` | – | – |
-| `terminal.programClipboard` | `auto`, `ask`, `off` | `"auto"` | – | – |
 | `terminal.mathHover` | `true`, `false` | `true` | – | – |
+| `terminal.copyOnSelect` | `true`, `false` | `false` | – | – |
+| `terminal.programClipboard` | `auto`, `ask`, `off` | `"auto"` | – | – |
+| `terminal.colorScheme.dark` | `default`, `dracula`, `gruvbox-dark`, `gruvbox-light`, `nord`, `one-dark`, `one-light`, `solarized-dark`, `solarized-light`, `tomorrow`, `tomorrow-night` | `"default"` | – | – |
+| `terminal.colorScheme.light` | `default`, `dracula`, `gruvbox-dark`, `gruvbox-light`, `nord`, `one-dark`, `one-light`, `solarized-dark`, `solarized-light`, `tomorrow`, `tomorrow-night` | `"default"` | – | – |
+| `terminal.boldIsBright` | `true`, `false` | `false` | – | – |
 | `terminal.colors.dark.foreground` | color `#rrggbb` | `"#f0f0f0"` | – | – |
 | `terminal.colors.dark.background` | color `#rrggbb` | `"#0a0a0a"` | – | – |
 | `terminal.colors.dark.cursor` | color `#rrggbb` | `"#f0f0f0"` | – | – |
@@ -125,9 +127,9 @@ in the UI; a setting with a scope can have its own value per machine, under
 | `terminal.colors.light.selection` | color `#rrggbb` | `"#b6d4fe"` | – | – |
 | `terminal.colors.light.palette` | 16 colors | 16 colors of `design/tokens.json` | – | – |
 | `notifications.sound` | `true`, `false` | `true` | – | – |
-| `notifications.mutedAgents` | string | `"droid"` | – | – |
-| `codeServer.install` | `push`, `download`, `existing` | `"push"` | `--code-server-install` | – |
-| `codeServer.path` | string | `""` | `--code-server-path` | – |
+| `notifications.mutedAgents` | list of strings | `["droid"]` | – | – |
+| `codeServer.install` | `push`, `download`, `existing` | `"push"` | `--code-server-install` | per machine |
+| `codeServer.path` | string | `""` | `--code-server-path` | per machine |
 | `gui.enabled` | `true`, `false` | `true` | `--gui` | per remote machine |
 | `gui.gpu` | `vglrun`, `all` | `"vglrun"` | `--gui-gpu` | per remote machine |
 | `gui.video` | `true`, `false` | `true` | `--gui-video` | per remote machine |
@@ -146,7 +148,7 @@ in the UI; a setting with a scope can have its own value per machine, under
 ## Keyboard shortcuts
 
 Keys come from the keybindings (`internal/keybindings`): defaults per
-platform, changed in **Settings → Keyboard shortcuts** or in
+platform, changed in **Settings → Keyboard Shortcuts** or in
 `keybindings[-<instance>].json` on the core host, an array of
 `{"key", "command", "when"}` rules (`"command": "-<id>"` removes a key;
 `when` is `terminal`, `vscode`, `dialog` or `always`). A key is modifiers
@@ -162,9 +164,12 @@ The default keys differ by platform: `mac` is the desktop app on macOS,
 `pc-browser` browsers there. No default is a chord, and none is `ctrl` or `alt` with a letter alone: `ctrl+b` and every
 other key that is not in the table reach the program in the terminal on
 their first press. The desktop app has direct shortcuts, which browsers
-keep for themselves (`cmd+t`, `cmd+w`…); browsers get find, the list of
+keep for themselves (`cmd+t`, `cmd+w`…); browsers get find, the keyboard
 shortcuts and, on macOS, the command palette (`cmd+k`; in browsers on
-other systems the status bar's **Command palette** opens it). A command
+other systems the status bar's **Command Palette…** opens it). On Windows
+and Linux the desktop app's tab keys are `ctrl+tab`, `ctrl+shift+tab` and
+`alt+1`…`alt+9`, as in GNOME Terminal and Konsole; `tab.select9` is the
+last tab. A command
 without a key (–) runs from the menus, the command palette, its button and
 the context menus, and any key or chord can be bound to it. The desktop
 app's menu shows the keys; there the page runs the keys it sees, and on
@@ -182,37 +187,38 @@ layout's characters. The table is generated from the registry by
 | `app.commandPalette` | `terminal` | `cmd+shift+p` | `cmd+k` | `ctrl+shift+p` | – |
 | `app.keyboardShortcuts` | `terminal` | `cmd+slash` | `cmd+slash` | `ctrl+shift+slash` | `ctrl+shift+slash` |
 | `app.settings` | `terminal` | `cmd+comma` | – | `ctrl+comma` | – |
-| `app.agentAttention` | `terminal` | – | – | – | – |
-| `workspace.switch` | `terminal` | – | – | – | – |
-| `workspace.next` | `terminal` | – | – | – | – |
-| `workspace.previous` | `terminal` | – | – | – | – |
+| `app.agentAttention` | `terminal` | `cmd+shift+a` | – | `ctrl+shift+a` | – |
+| `app.addMachine` | `terminal` | – | – | – | – |
+| `workspace.switch` | `terminal` | `cmd+p` | – | – | – |
+| `workspace.next` | `terminal` | `cmd+ctrl+down` | – | – | – |
+| `workspace.previous` | `terminal` | `cmd+ctrl+up` | – | – | – |
 | `workspace.new` | `terminal` | `cmd+n` | – | `ctrl+shift+n` | – |
 | `workspace.rename` | `terminal` | – | – | – | – |
 | `workspace.close` | `terminal` | – | – | – | – |
 | `tab.new` | `terminal` | `cmd+t` | – | `ctrl+shift+t` | – |
 | `tab.rename` | `terminal` | – | – | – | – |
-| `tab.next` | `terminal` | `cmd+shift+bracketright` | – | – | – |
-| `tab.previous` | `terminal` | `cmd+shift+bracketleft` | – | – | – |
-| `tab.select1` | `terminal` | – | – | – | – |
-| `tab.select2` | `terminal` | – | – | – | – |
-| `tab.select3` | `terminal` | – | – | – | – |
-| `tab.select4` | `terminal` | – | – | – | – |
-| `tab.select5` | `terminal` | – | – | – | – |
-| `tab.select6` | `terminal` | – | – | – | – |
-| `tab.select7` | `terminal` | – | – | – | – |
-| `tab.select8` | `terminal` | – | – | – | – |
-| `tab.select9` | `terminal` | – | – | – | – |
-| `tab.close` | `terminal` | – | – | `ctrl+shift+w` | – |
+| `tab.next` | `terminal` | `cmd+shift+bracketright`, `ctrl+tab` | – | `ctrl+tab` | – |
+| `tab.previous` | `terminal` | `cmd+shift+bracketleft`, `ctrl+shift+tab` | – | `ctrl+shift+tab` | – |
+| `tab.select1` | `terminal` | `cmd+1` | – | `alt+1` | – |
+| `tab.select2` | `terminal` | `cmd+2` | – | `alt+2` | – |
+| `tab.select3` | `terminal` | `cmd+3` | – | `alt+3` | – |
+| `tab.select4` | `terminal` | `cmd+4` | – | `alt+4` | – |
+| `tab.select5` | `terminal` | `cmd+5` | – | `alt+5` | – |
+| `tab.select6` | `terminal` | `cmd+6` | – | `alt+6` | – |
+| `tab.select7` | `terminal` | `cmd+7` | – | `alt+7` | – |
+| `tab.select8` | `terminal` | `cmd+8` | – | `alt+8` | – |
+| `tab.select9` | `terminal` | `cmd+9` | – | `alt+9` | – |
+| `tab.close` | `terminal` | `cmd+shift+w` | – | `ctrl+shift+w` | – |
 | `pane.splitRight` | `terminal` | `cmd+d` | – | – | – |
 | `pane.splitDown` | `terminal` | `cmd+shift+d` | – | – | – |
 | `pane.close` | `terminal` | `cmd+w` | – | – | – |
-| `pane.zoom` | `terminal` | – | – | – | – |
-| `pane.focusLeft` | `terminal` | – | – | – | – |
-| `pane.focusDown` | `terminal` | – | – | – | – |
-| `pane.focusUp` | `terminal` | – | – | – | – |
-| `pane.focusRight` | `terminal` | – | – | – | – |
-| `pane.focusNext` | `terminal` | – | – | – | – |
-| `pane.focusPrevious` | `terminal` | – | – | – | – |
+| `pane.zoom` | `terminal` | `cmd+shift+enter` | – | `ctrl+shift+enter` | – |
+| `pane.focusLeft` | `terminal` | `cmd+alt+left` | – | – | – |
+| `pane.focusDown` | `terminal` | `cmd+alt+down` | – | – | – |
+| `pane.focusUp` | `terminal` | `cmd+alt+up` | – | – | – |
+| `pane.focusRight` | `terminal` | `cmd+alt+right` | – | – | – |
+| `pane.focusNext` | `terminal` | `cmd+bracketright` | – | – | – |
+| `pane.focusPrevious` | `terminal` | `cmd+bracketleft` | – | – | – |
 | `view.toggleSidebar` | `terminal` | `cmd+b` | – | – | – |
 | `view.toggleCode` | `always` | `cmd+j` | – | `ctrl+shift+j` | – |
 | `find.open` | `terminal` | `cmd+f` | `cmd+f` | `ctrl+shift+f` | `ctrl+shift+f` |

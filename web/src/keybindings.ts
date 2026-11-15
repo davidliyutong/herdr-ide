@@ -41,7 +41,8 @@ export type UserRule = { key?: string; command?: string; when?: string } & Recor
 
 export type Platform = 'mac' | 'pc' | 'mac-browser' | 'pc-browser';
 
-export const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+export { isMac } from './keys';
+import { isMac } from './keys';
 
 /** The platform whose bindings apply: the desktop app or a browser, on macOS
  * or another system. Browsers keep Cmd+T and the like for themselves. */
