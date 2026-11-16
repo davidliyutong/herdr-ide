@@ -16,3 +16,6 @@ CLAUDE.local.md
 internal/embedded/encoder/*.gz
 internal/embedded/hc/*.gz
 web/.deps/
+
+TODO.md
+.codegraph
