@@ -11,6 +11,7 @@ import { colors } from '../../prefs';
 import { resetSetting, setSetting, useSettings, type SettingDef } from '../../settings';
 import { ansiNames, schemeColors } from '../../terminal/schemes';
 import { confirmDialog } from '../../dialog';
+import { Picker } from '../Picker';
 
 type Theme = 'dark' | 'light';
 const overrides = ['foreground', 'background', 'cursor', 'selection', 'palette'] as const;
@@ -68,18 +69,18 @@ export function ThemeColors({
       </div>
       <div className="setting-desc">{t(`settings.${scheme.key}.desc` as MessageKey)}</div>
       <div className="setting-control scheme-control">
-        <select
+        <Picker
+          items={(scheme.enum ?? []).map((id) => {
+            const s = schemeColors(id, theme);
+            return { value: id, label: schemeLabel(id), icon: <SchemeMini bg={s.background} palette={s.palette} /> };
+          })}
           value={current}
           disabled={readOnly || locked}
+          keepOrder
+          label={t(`settings.${scheme.key}` as MessageKey)}
           aria-label={t(`settings.${scheme.key}` as MessageKey)}
-          onChange={(e) => void choose(e.target.value)}
-        >
-          {(scheme.enum ?? []).map((id) => (
-            <option key={id} value={id}>
-              {schemeLabel(id)}
-            </option>
-          ))}
-        </select>
+          onChange={(id) => void choose(id)}
+        />
         <SchemePreview fg={c.foreground} bg={c.background} palette={c.palette} />
       </div>
       <button type="button" className="link disclosure" aria-expanded={open} onClick={() => setOpen(!open)}>
@@ -136,6 +137,17 @@ export function SchemePreview({ fg, bg, palette }: { fg: string; bg: string; pal
       <span className="scheme-text">Aa</span>
       {palette.map((c, i) => (
         <span key={i} className="scheme-chip" style={{ background: c }} />
+      ))}
+    </span>
+  );
+}
+
+/** A scheme in its list: its background with four of its colors. */
+function SchemeMini({ bg, palette }: { bg: string; palette: string[] }) {
+  return (
+    <span className="scheme-mini" style={{ background: bg }} aria-hidden>
+      {[1, 2, 4, 5].map((i) => (
+        <span key={i} style={{ background: palette[i] }} />
       ))}
     </span>
   );

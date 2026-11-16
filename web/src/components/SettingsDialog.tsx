@@ -41,6 +41,7 @@ import { ThemePicker } from './settings/ThemePicker';
 import { FullDiskAccess, fullDiskAccessMatches } from './settings/FullDiskAccess';
 import { fullDiskAccessAvailable, localMachine } from '../fullDiskAccess';
 import { PluginHeader, PluginsPage } from './settings/PluginsPage';
+import { Picker, type PickerItem } from './Picker';
 import { acceptRisk, pluginSwitch, sectionPlugin, usePluginList } from '../plugins/registry';
 import type { PluginDef } from '../plugins/api';
 
@@ -106,6 +107,21 @@ function shownInRows(d: SettingDef): boolean {
 export function machineScoped(d: SettingDef, m: Pick<MachineState, 'kind'>): boolean {
   return d.scope === 'machine' || (d.scope === 'remote-machine' && m.kind !== 'local');
 }
+
+/** A machine as the scope's list shows it: its state, name and address. */
+function machineItem(m: MachineState): PickerItem {
+  return {
+    value: m.id,
+    label: m.label,
+    description: m.kind === 'local' ? (m.info?.hostname ?? t('settings.scope.thisComputer')) : (m.target ?? m.platform),
+    icon: <span className={`mstatus ms-${m.status}`} aria-hidden />,
+    keywords: [m.platform, m.target].filter(Boolean).join(' '),
+  };
+}
+
+/** Lists longer than this are searchable pickers rather than segmented
+ * controls or native selects. */
+const SEGMENTS = 4;
 
 /** A page of the dialog's navigation: a section, or one of its own. */
 interface Page {
@@ -213,10 +229,14 @@ function SettingsModal({ page: askedPage, machine: askedMachine }: { page?: stri
     setQuery('');
     setPage(id);
   };
-  const scopes = [
-    { id: '', label: t('settings.scope.user') },
-    ...machines.filter((m) => st.defs.some((d) => machineScoped(d, m))).map((m) => ({ id: m.id, label: m.label })),
-  ];
+  // The machines that can have their own values, chosen in a searchable
+  // list beside User (as VS Code's folder settings): any number fits.
+  const scopeMachines = machines.filter((m) => st.defs.some((d) => machineScoped(d, m)));
+  const chooseScope = (id: string) => {
+    setScope(id);
+    const m = machines.find((x) => x.id === id);
+    if (m && page !== MACHINE_PAGE && !st.defs.some((d) => d.section === page && machineScoped(d, m))) setPage(MACHINE_PAGE);
+  };
 
   return (
     <div className="modal-backdrop settings-backdrop" onMouseDown={(e) => e.target === e.currentTarget && close()}>
@@ -251,34 +271,23 @@ function SettingsModal({ page: askedPage, machine: askedMachine }: { page?: stri
             <X />
           </button>
         </div>
-        <div className="settings-scopes" role="tablist" aria-label={t('settings.scope')}>
-          {scopes.map((s) => (
-            <button
-              key={s.id}
-              role="tab"
-              aria-selected={scope === s.id}
-              className={scope === s.id ? 'on' : ''}
-              title={s.id ? t('settings.scope.machineHint', { machine: s.label }) : t('settings.scope.userHint')}
-              onClick={() => {
-                setScope(s.id);
-                if (
-                  s.id &&
-                  page !== MACHINE_PAGE &&
-                  !st.defs.some(
-                    (d) =>
-                      d.section === page &&
-                      machineScoped(
-                        d,
-                        machines.find((m) => m.id === s.id)!,
-                      ),
-                  )
-                )
-                  setPage(MACHINE_PAGE);
-              }}
-            >
-              {s.label}
-            </button>
-          ))}
+        <div className="settings-scopes" role="group" aria-label={t('settings.scope')}>
+          <button aria-pressed={!scope} className={!scope ? 'on' : ''} title={t('settings.scope.userHint')} onClick={() => chooseScope('')}>
+            {t('settings.scope.user')}
+          </button>
+          {scopeMachines.length > 0 && (
+            <Picker
+              className={`settings-scope-machine ${scope ? 'on' : ''}`}
+              items={scopeMachines.map(machineItem)}
+              value={machine?.id}
+              noneLabel={t('settings.scope.machine')}
+              placeholder={t('settings.scope.findMachine')}
+              label={t('settings.scope.machines')}
+              aria-label={machine ? t('settings.scope.machineHint', { machine: machine.label }) : t('settings.scope.machines')}
+              keepOrder
+              onChange={chooseScope}
+            />
+          )}
         </div>
         <div className="settings-main">
           <nav className="settings-nav" aria-label={t('settings.sections')}>
@@ -606,14 +615,16 @@ function Control({
     case 'enum':
       if (d.key === 'appearance.colorTheme')
         return <ThemePicker value={String(value)} disabled={disabled} onChange={(id) => onChange(id)} />;
-      return (d.enum ?? []).length > 4 ? (
-        <select value={String(value)} disabled={disabled} aria-label={settingLabel(d.key)} onChange={(e) => onChange(e.target.value)}>
-          {(d.enum ?? []).map((o) => (
-            <option key={o} value={o}>
-              {optionLabel(d.key, o)}
-            </option>
-          ))}
-        </select>
+      return (d.enum ?? []).length > SEGMENTS ? (
+        <Picker
+          items={(d.enum ?? []).map((o) => ({ value: o, label: optionLabel(d.key, o) }))}
+          value={String(value)}
+          disabled={disabled}
+          keepOrder
+          label={settingLabel(d.key)}
+          aria-label={settingLabel(d.key)}
+          onChange={(v) => onChange(v)}
+        />
       ) : (
         <div className="segmented" role="radiogroup" aria-label={settingLabel(d.key)}>
           {(d.enum ?? []).map((o) => (
@@ -654,6 +665,9 @@ function Control({
   }
 }
 
+/** The item of a machine's list that follows the user's value. */
+const INHERIT = '\0inherit';
+
 /** A machine's own value: "Same as User (value)" or a value of its own. */
 function MachineControl({
   d,
@@ -671,6 +685,23 @@ function MachineControl({
   if (d.type === 'bool' || d.type === 'enum') {
     const options = d.type === 'bool' ? ['true', 'false'] : (d.enum ?? []);
     const parse = (raw: string): SettingValue => (d.type === 'bool' ? raw === 'true' : raw);
+    // A long list is searchable; On and Off or a few options stay a native
+    // select, the user's value first.
+    if (options.length > SEGMENTS)
+      return (
+        <Picker
+          items={[
+            { value: INHERIT, label: t('settings.inherit', { value: valueLabel(d, inherited) }) },
+            ...options.map((o) => ({ value: o, label: valueLabel(d, parse(o)) })),
+          ]}
+          value={own === undefined ? INHERIT : String(own)}
+          disabled={disabled}
+          keepOrder
+          label={settingLabel(d.key)}
+          aria-label={settingLabel(d.key)}
+          onChange={(v) => onChange(v === INHERIT ? undefined : parse(v))}
+        />
+      );
     return (
       <select
         value={own === undefined ? '' : String(own)}
@@ -819,38 +850,44 @@ function NumberInput({ d, value, disabled, onChange }: { d: SettingDef; value: n
   );
 }
 
-/** A list of strings: the offered values as checkboxes, other values as
- * removable chips, and a field that adds one. */
+/** A list of strings: with offered values, a searchable list of them with
+ * check boxes that also adds any other value typed; without, a field that
+ * adds one. Every value is a removable chip. */
 function ListEditor({ d, value, disabled, onChange }: { d: SettingDef; value: string[]; disabled: boolean; onChange(v: string[]): void }) {
   const [draft, setDraft] = useState('');
   const options = d.options ?? [];
-  const others = value.filter((v) => !options.includes(v));
-  const toggle = (o: string, on: boolean) => onChange(on ? [...value, o] : value.filter((v) => v !== o));
-  const add = () => {
-    const v = draft.trim();
-    setDraft('');
+  const add = (raw: string) => {
+    const v = raw.trim();
     if (v && !value.includes(v)) onChange([...value, v]);
   };
+  const others = value.filter((v) => !options.includes(v));
   return (
     <div className="list-editor">
       {options.length > 0 && (
-        <div className="list-options">
-          {options.map((o) => (
-            <label key={o} className={`list-option ${value.includes(o) ? 'on' : ''}`}>
-              <input type="checkbox" checked={value.includes(o)} disabled={disabled} onChange={(e) => toggle(o, e.target.checked)} />
-              {o}
-            </label>
-          ))}
-        </div>
+        <Picker
+          multiple
+          items={[...options, ...others].map((o) => ({ value: o, label: o }))}
+          value={value}
+          disabled={disabled}
+          keepOrder
+          noneLabel={t('settings.list.none')}
+          placeholder={t('settings.list.search')}
+          label={settingLabel(d.key)}
+          aria-label={settingLabel(d.key)}
+          create={(q) => (value.includes(q.trim()) ? undefined : t('settings.list.addValue', { value: q.trim() }))}
+          onCreate={add}
+          onChange={onChange}
+        />
       )}
       <div className="list-items">
-        {others.map((v) => (
-          <span key={v} className="list-chip">
-            {v}
+        {value.map((v) => (
+          <span key={v} className="list-chip" title={v}>
+            <span className="ellipsis">{v}</span>
             {!disabled && (
               <button
                 className="icon"
                 title={t('settings.list.remove', { item: v })}
+                aria-label={t('settings.list.remove', { item: v })}
                 onClick={() => onChange(value.filter((x) => x !== v))}
               >
                 <X />
@@ -858,7 +895,7 @@ function ListEditor({ d, value, disabled, onChange }: { d: SettingDef; value: st
             )}
           </span>
         ))}
-        {!disabled && (
+        {!disabled && !options.length && (
           <span className="list-add">
             <input
               className="settings-input"
@@ -868,14 +905,23 @@ function ListEditor({ d, value, disabled, onChange }: { d: SettingDef; value: st
               spellCheck={false}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') add();
+                if (e.key === 'Enter') {
+                  add(draft);
+                  setDraft('');
+                }
                 if (e.key === 'Escape' && draft) {
                   stopEscape(e);
                   setDraft('');
                 }
               }}
             />
-            <button disabled={!draft.trim()} onClick={add}>
+            <button
+              disabled={!draft.trim()}
+              onClick={() => {
+                add(draft);
+                setDraft('');
+              }}
+            >
               {t('settings.list.add')}
             </button>
           </span>

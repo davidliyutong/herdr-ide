@@ -250,8 +250,11 @@ settings per browser; theming terminal applications.
 - The settings dialog (`components/SettingsDialog.tsx`, laid out as VS
   Code's) floats in the middle of the window, shrinking with it down to a
   16 px gutter on every side, and renders the definitions:
-  - a scope bar: **User** (the global values) and one tab per machine that
-    can have its own values. A machine's scope lists only the settings it
+  - a scope bar: **User** (the global values) and, beside it as VS Code
+    has its folder settings, **Machine ▾**, a searchable list of the
+    machines that can have their own values (each with its state and
+    address; the button names the machine chosen), so any number of
+    machines fits on one row, a phone's too. A machine's scope lists only the settings it
     can differ in (`remote-machine` leaves the core's host out), each
     showing "Same as User (value)" until it is set and a reset that removes
     the machine's own value; its **Overview** page has the machine's name
@@ -280,12 +283,18 @@ settings per browser; theming terminal applications.
     otherwise. Settings of the user scope set for some machines say so,
     with links to those machines' scopes;
   - controls by type: a checkbox with the description for a bool; a
-    segmented control for up to four options, else a menu; a stepper (−,
-    the value, +) with the definition's step, unit and range written out
-    ("0–100,000 lines"; typed values are brought into the range) for a
-    number; a list of the offered values as checkboxes plus removable
-    chips and a field for others (`notifications.mutedAgents`: every agent
-    the terminals recognize); a text field otherwise. The terminal font is a
+    segmented control for up to four options, else a searchable list
+    (`components/Picker.tsx`, [27](27-plugins.md)); in a machine's scope
+    a native select of "Same as User (value)", On and Off or up to four
+    options, a searchable list starting with "Same as User" for more; a
+    stepper (−, the value, +) with the definition's step, unit and range
+    written out ("0–100,000 lines"; typed values are brought into the
+    range) for a number; for a list with offered values, a searchable list
+    of them with check boxes that adds any other value typed (**Add
+    "…"**; `notifications.mutedAgents`: every agent the terminals
+    recognize, `usage.thresholds`), and for one without, a field that
+    adds a value; every value of a list is a removable chip; a text field
+    otherwise. The terminal font is a
     picker (`settings/FontPicker.tsx`): the bundled JetBrains Mono first,
     then the monospace fonts installed on the computer, each drawn in
     itself, searchable, and any other typed name; a preview line in the
@@ -310,8 +319,9 @@ settings per browser; theming terminal applications.
     theme a scheme (`terminal.colorScheme.dark`, `.light`: Default, which is
     the app's own colors, Dracula, Gruvbox Dark and Light, Nord, One Dark
     and Light, Solarized Dark and Light, Tomorrow and Tomorrow Night;
-    `web/src/terminal/schemes.ts`) with a preview of its background, text
-    and 16 colors, and **Customize colors**: named swatches for text,
+    `web/src/terminal/schemes.ts`), chosen in a searchable list that shows
+    each scheme's background and four of its colors, with a preview of its
+    background, text and 16 colors, and **Customize colors**: named swatches for text,
     background, cursor, selection and the 16 ANSI colors (Black … Bright
     white), each set one replacing the scheme's (`terminal.colors.<theme>.*`;
     a color left at its default follows the scheme) and with a reset of its
@@ -527,9 +537,12 @@ unbound; user rules), `vt.test.ts` (the bytes the terminal sends for
 `ctrl+b`),
 `settings.test.ts` (labels for every registry key, store, optimistic
 changes and error codes, migration of the browser settings, search),
-`settingsDialog.test.ts` (sections and scopes, the stepper keeping the
-focus and the range, the list editor, a machine's own value set and
-removed, colors from schemes and the user's, every scheme defined),
+`settingsDialog.test.ts` (sections and scopes, the machines' scope list,
+the stepper keeping the focus and the range, the list editor's offered
+values, an added one and chips, a machine's own value set and removed,
+small lists as native selects, a color scheme searched and chosen, a
+machine's value among many options, colors from schemes and the user's,
+every scheme defined),
 `pluginSettings.test.ts` (plugins' pages in the list and their switch),
 `localFonts.test.ts` (the font picker's list with Chromium's metrics of
 fixed-pitch, proportional, symbol and undecoded fonts and one drawn by a

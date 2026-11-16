@@ -2156,6 +2156,15 @@ button.primary:hover,
 .settings-scopes button:hover {
   color: var(--fg);
 }
+/* The machine scope: a searchable list styled as a tab. */
+.settings-scopes .settings-scope-machine {
+  min-width: 0;
+  max-width: 16rem;
+  gap: 6px;
+}
+.settings-scopes .settings-scope-machine .ellipsis.muted {
+  color: inherit;
+}
 .settings-scopes button.on {
   color: var(--fg);
   border-bottom-color: var(--accent);
@@ -2337,8 +2346,7 @@ button.primary:hover,
   max-width: 46rem;
   cursor: pointer;
 }
-.setting-check input,
-.list-option input {
+.setting-check input {
   margin: 0.18rem 0 0;
   width: 1rem;
   height: 1rem;
@@ -2453,31 +2461,17 @@ button.disclosure:hover {
 .stepper-range {
   margin-left: 6px;
 }
-/* A list of strings: offered values as checkboxes, others as chips. */
+/* A list of strings: a searchable list of the offered values (or a field
+   adding one), the values as chips. */
 .list-editor {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 8px;
-}
-.list-options {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
-  gap: 4px 12px;
   max-width: 46rem;
 }
-.list-option {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 1.6rem;
-  color: var(--fg-dim);
-  cursor: pointer;
-}
-.list-option.on {
-  color: var(--fg);
-}
-.list-option input {
-  margin: 0;
+.list-editor > .picker-button {
+  min-width: 14rem;
 }
 .list-items {
   display: flex;
@@ -2489,7 +2483,9 @@ button.disclosure:hover {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  padding: 0 0 0 8px;
+  max-width: 100%;
+  min-height: var(--ctl-sm);
+  padding: 0 8px;
   border: 1px solid var(--line-2);
   border-radius: 999px;
   background: var(--bg);
@@ -2497,6 +2493,7 @@ button.disclosure:hover {
 .list-chip .icon {
   min-width: var(--ctl-sm);
   height: var(--ctl-sm);
+  margin-right: -8px;
 }
 .list-add {
   display: inline-flex;
@@ -2651,8 +2648,23 @@ button.danger-text:not(:disabled) {
   font-size: var(--fs-md);
 }
 /* Terminal colors: a scheme with a preview, then named swatches. */
-.scheme-control select {
+.scheme-control .picker-button {
   min-width: 14rem;
+}
+/* A scheme in its list: its background and four of its colors. */
+.scheme-mini {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 3px;
+  height: 1rem;
+  border: 1px solid var(--line-2);
+  border-radius: 3px;
+}
+.scheme-mini > span {
+  width: 4px;
+  height: 0.6rem;
+  border-radius: 1px;
 }
 .scheme-preview {
   display: inline-flex;
