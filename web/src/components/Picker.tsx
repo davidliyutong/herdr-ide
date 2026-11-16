@@ -233,7 +233,6 @@ function PickerList<V extends string>(p: ListProps<V>) {
 
   useEffect(() => {
     returnTo.current = p.owner?.current ?? document.activeElement;
-    input.current?.focus({ preventScroll: true });
   }, []);
 
   // Placed within the window; again when it changes or scrolls.
@@ -254,6 +253,14 @@ function PickerList<V extends string>(p: ListProps<V>) {
     const next = placeList(rectOf(p.anchor), c + wantedList, { width: window.innerWidth, height: window.innerHeight });
     setPlace((cur) => (cur && JSON.stringify(cur) === JSON.stringify(next) ? cur : next));
   }, [p.anchor, wantedList, tick, chrome]);
+  // The search field takes the keyboard once the list is placed: until
+  // then the list is hidden, and browsers do not focus a hidden field.
+  const focused = useRef(false);
+  useLayoutEffect(() => {
+    if (!place || focused.current) return;
+    focused.current = true;
+    input.current?.focus({ preventScroll: true });
+  }, [place]);
   const listHeight = Math.max(base, Math.min(wantedList, (place?.maxHeight ?? Infinity) - chrome));
 
   // The keyboard's row in view.

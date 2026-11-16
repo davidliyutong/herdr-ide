@@ -361,17 +361,25 @@ function Variables({ session }: { session: boolean }) {
             onChange={(e) => setQuery(e.target.value)}
           />
         </label>
-        <button className="sm" data-action="import" disabled={readOnly} title={t('vault.import.title')} onClick={() => openVaultImport()}>
-          <FileUp /> {t('vault.import.open')}
+        <button
+          className="icon sm"
+          data-action="import"
+          disabled={readOnly}
+          title={t('vault.import.title')}
+          aria-label={t('vault.import.open')}
+          onClick={() => openVaultImport()}
+        >
+          <FileUp />
         </button>
         <button
-          className="sm"
+          className="icon sm"
           data-action="export"
           disabled={readOnly || variables.length === 0}
           title={t('vault.export.title')}
+          aria-label={t('vault.export.open')}
           onClick={() => openVaultExport(selected)}
         >
-          <Download /> {t('vault.export.open')}
+          <Download />
         </button>
         <button
           className="primary sm"

@@ -2459,11 +2459,13 @@ button.disclosure:hover {
 }
 .segmented {
   display: inline-flex;
+  flex-shrink: 0;
   border: 1px solid var(--line-2);
   border-radius: 6px;
   overflow: hidden;
 }
 .segmented button {
+  white-space: nowrap;
   border: none;
   border-radius: 0;
   background: transparent;

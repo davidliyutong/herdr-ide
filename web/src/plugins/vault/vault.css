@@ -145,7 +145,7 @@
 }
 .vault-search {
   flex: 1;
-  min-width: 0;
+  min-width: 6em;
   display: flex;
   align-items: center;
   gap: 6px;
