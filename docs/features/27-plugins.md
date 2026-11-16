@@ -254,11 +254,11 @@ on macOS) shows the panel shown last or hides it.
 | --- | --- | --- |
 | `transfers` | always on | The uploads and downloads trays of the status bar ([06](06-quick-look-and-files.md)). |
 | `gui` | `gui.enabled` (per machine; the Plugins page sets the User value) | The program windows' tray and palette items ([14](14-gui-windows.md)). |
-| `vscode` | `plugins.vscode.enabled` (the desktop app), `plugins.vscode.browser` (browsers, after accepting the risk); both off by default | VS Code (code-server) in panes: the commands `code.open`, `code.diff`, `code.gitGraph`, the panes' buttons and menu items, the windows' layer ([05](05-vscode-panes.md)). Its routes are the core's own (`/api/m/{id}/code/*`, `/m/{id}/code/`, `/api/m/{id}/bridge`), which answer `plugin_disabled` to a client whose switch is off (`withPlugin`), stopping code-server excepted. Turning a switch off also closes that client's proxied connections, VS Code windows open in other browsers included, and, once both are off, ends a code-server preparation under way. |
-| `files` | `plugins.files.enabled` | The file explorer's panel and its editor pane, with Monaco loaded on first use ([28](28-file-explorer.md)). |
+| `vscode` | `plugins.vscode.enabled` (the desktop app), `plugins.vscode.browser` (browsers, after accepting the risk); both off by default | VS Code (code-server) in panes: the commands `code.open`, `code.diff`, `code.gitGraph`, the panes' buttons and menu items, the windows' layer ([05](05-vscode-panes.md)). Its routes are the core's own (`/api/m/{id}/code/*`, `/m/{id}/code/`, `/api/m/{id}/bridge`), which answer `plugin_disabled` to a client whose switch is off (`withPlugin`), stopping code-server excepted. Turning a switch off also closes that client's proxied connections, VS Code windows open in other browsers included, and, once both are off, ends a code-server preparation under way. Its settings page is code-server's section (`codeServer`, marked `Plugin: "vscode"`). |
+| `files` | `plugins.files.enabled` | The file explorer's panel and its editor pane, with Monaco loaded on first use, and its settings page (section `files`) ([28](28-file-explorer.md)). |
 | `vault` | `plugins.vault.enabled` | The variable vault: its panel, approval prompts and file dialogs, its settings page (section `vault`, ending with Import and Export), the op `vault` and the `mcp` command ([30](30-variable-vault.md)). |
 | `usage` | `plugins.usage.enabled` | The AI usage panel, its status bar item, its settings page (section `usage`) and its scheduler in the core ([29](29-ai-usage.md)). |
-| `git` | `plugins.git.enabled` | Source Control's panel, the graph and diff panes, the file explorer's decorations of changed files ([31](31-git.md)). |
+| `git` | `plugins.git.enabled` | Source Control's panel, the graph and diff panes, the file explorer's decorations of changed files, and its settings page (section `git`) ([31](31-git.md)). |
 
 ## Alternatives considered
 

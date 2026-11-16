@@ -51,7 +51,7 @@ const (
 // machine: one is offline, another has its own), with the flags and file
 // keys of earlier versions.
 var Settings = settings.Module{
-	Sections: []settings.Section{{ID: "codeServer", Order: 60, Advanced: true}},
+	Sections: []settings.Section{{ID: "codeServer", Order: 60, Advanced: true, Plugin: "vscode"}},
 	Defs: []settings.Def{
 		{
 			Key: SettingInstall, Type: settings.TypeEnum, Default: InstallPush, Scope: settings.ScopeMachine,
