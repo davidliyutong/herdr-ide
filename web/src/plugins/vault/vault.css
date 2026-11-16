@@ -138,7 +138,8 @@
   align-items: center;
   gap: 6px;
 }
-.vault-toolbar select {
+.vault-toolbar select,
+.vault-toolbar .picker-button {
   flex: 1;
   min-width: 0;
 }
@@ -180,9 +181,27 @@
 }
 .vault-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 6px 8px;
-  padding: 10px 8px 10px 12px;
+  padding: 10px 8px 10px 10px;
+}
+.vault-row.selected {
+  background: var(--accent-soft);
+}
+.vault-row-check {
+  margin: 3px 0 0;
+}
+/* Choosing variables: all of those shown, and what to do with the chosen. */
+.vault-select-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--ctl);
+  padding: 0 8px 0 10px;
+  font-size: var(--fs-md);
+}
+.vault-select-bar .muted {
+  font-size: var(--fs-sm);
 }
 .vault-row + .vault-row {
   border-top: 1px solid var(--line);
@@ -253,7 +272,7 @@
   background: color-mix(in srgb, var(--warning) 14%, transparent);
 }
 .vault-value {
-  grid-column: 1 / -1;
+  grid-column: 2 / -1;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -270,7 +289,7 @@
   user-select: text;
 }
 .vault-row .callout {
-  grid-column: 1 / -1;
+  grid-column: 2 / -1;
 }
 
 /* ---- the editor's dialog ---- */
@@ -347,31 +366,9 @@
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
-.vault-machine-list {
-  display: flex;
-  flex-direction: column;
-  max-height: 12rem;
+/* The machines that may read without asking: a searchable choice. */
+.vault-machines-picker {
   margin-top: 6px;
-  overflow: auto;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-}
-.vault-machine {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: var(--h-row);
-  padding: 2px 10px;
-  cursor: pointer;
-}
-.vault-machine + .vault-machine {
-  border-top: 1px solid var(--line);
-}
-.vault-machine:hover {
-  background: var(--bg-2);
-}
-.vault-machine input {
-  accent-color: var(--accent);
 }
 .vault-switch-row {
   flex-direction: row;
@@ -596,4 +593,74 @@
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+/* ---- export and import ---- */
+.modal.dialog.vault-transfer {
+  width: min(520px, 94vw);
+}
+.modal.dialog.vault-transfer.wide {
+  width: min(680px, 94vw);
+}
+.vault-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-height: 120px;
+  overflow: auto;
+}
+.vault-chips code {
+  padding: 0 5px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-3);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+}
+.vault-import-bulk {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-md);
+}
+.vault-import-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: min(50vh, 420px);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+}
+.vault-import-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+}
+.vault-import-row + .vault-import-row {
+  border-top: 1px solid var(--line);
+}
+.vault-import-row.skip .vault-name {
+  color: var(--fg-mute);
+  text-decoration: line-through;
+}
+.vault-import-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.vault-import-head .tag.warn {
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 40%, transparent);
+}
+.vault-import-head .tag.danger {
+  color: var(--error);
+  border-color: color-mix(in srgb, var(--error) 40%, transparent);
+}
+.vault-import-access {
+  font-size: var(--fs-sm);
+}
+.vault-import-unknown {
+  color: var(--warning);
 }

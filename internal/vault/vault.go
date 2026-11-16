@@ -75,6 +75,18 @@ var (
 // Code is the error's code for clients: vault_locked, not_found, …
 func Code(err error) string {
 	switch {
+	// An export file's errors first: they may wrap the vault's (a
+	// derivation out of bounds is ErrInvalid too).
+	case errors.Is(err, ErrFileFormat):
+		return "bad_file"
+	case errors.Is(err, ErrFileVersion):
+		return "file_version"
+	case errors.Is(err, ErrFilePassphrase):
+		return "file_passphrase"
+	case errors.Is(err, ErrWeakExport):
+		return "weak_export_passphrase"
+	case errors.Is(err, ErrTooLarge):
+		return "too_large"
 	case errors.Is(err, ErrLocked):
 		return "vault_locked"
 	case errors.Is(err, ErrNotFound):
@@ -302,9 +314,6 @@ func Open(path string) (*Store, error) {
 	}
 	return s, nil
 }
-
-// Path is the vault's file.
-func (s *Store) Path() string { return s.path }
 
 // Status tells the mode and whether the vault is locked.
 func (s *Store) Status() Status {
@@ -644,23 +653,6 @@ func (s *Store) Delete(name string) error {
 		_ = s.applyForgotten()
 	}
 	return nil
-}
-
-// Rename gives a variable another name, keeping its value, description,
-// machines and flags (Set with To). Its value is sealed again under the new
-// name (part of its additional data), so the vault must be unlocked; a
-// name taken by another variable is refused.
-func (s *Store) Rename(from, to string) error {
-	if !ValidName(to) {
-		return ErrInvalidName
-	}
-	if from == to {
-		if _, ok := s.Get(from); !ok {
-			return ErrNotFound
-		}
-		return nil
-	}
-	return s.Set(from, Update{To: &to})
 }
 
 // Lock forgets the key until Unlock.

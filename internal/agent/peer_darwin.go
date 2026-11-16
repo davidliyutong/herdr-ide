@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"net"
 	"syscall"
 
@@ -47,4 +48,19 @@ func peerCred(c *net.UnixConn) (pid, uid int, err error) {
 		return 0, 0, serr
 	}
 	return pid, int(cred.Uid), nil
+}
+
+// parentOf returns pid's parent and pid's name (its p_comm, at most 16
+// bytes) from the kernel (sysctl kern.proc.pid); ok is false when the
+// process is gone.
+func parentOf(pid int) (ppid int, name string, ok bool) {
+	kp, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
+	if err != nil || kp.Proc.P_pid != int32(pid) {
+		return 0, "", false
+	}
+	comm := kp.Proc.P_comm[:]
+	if i := bytes.IndexByte(comm, 0); i >= 0 {
+		comm = comm[:i]
+	}
+	return int(kp.Eproc.Ppid), string(comm), true
 }

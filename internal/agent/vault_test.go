@@ -17,6 +17,7 @@ import (
 	"herdr-ide/internal/agent"
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/transport"
+	"herdr-ide/internal/vaultmcp"
 )
 
 // An MCP server's connection to vault.sock reaches the core as a stream
@@ -48,6 +49,7 @@ func TestVaultSocketRelaysToTheCore(t *testing.T) {
 		t.Fatalf("vault.sock %v", st)
 	}
 	// The core's side: answer the stream the agent opens.
+	header := make(chan agentproto.Header, 1)
 	go func() {
 		c, err := s.Accept()
 		if err != nil {
@@ -59,6 +61,7 @@ func TestVaultSocketRelaysToTheCore(t *testing.T) {
 			agentproto.WriteLine(c, agentproto.Reply{Error: "unexpected"})
 			return
 		}
+		header <- h
 		agentproto.WriteLine(c, agentproto.Reply{OK: true})
 		var req agentproto.VaultRequest
 		agentproto.ReadLine(c, &req)
@@ -79,8 +82,14 @@ func TestVaultSocketRelaysToTheCore(t *testing.T) {
 	if json.Unmarshal(line, &resp) != nil || !resp.OK || resp.Values["K"] != "v" {
 		t.Fatalf("response %s", line)
 	}
+	// The core learns who connected, as the agent saw it: this process
+	// (by peer credentials) and its parents.
+	h := <-header
+	if len(h.Process) < 2 || h.Process[0].Pid != os.Getpid() || h.Process[1].Pid != os.Getppid() || h.Process[0].Name == "" {
+		t.Errorf("process chain %+v", h.Process)
+	}
 
-	link := filepath.Join(home, ".herdr-ide", "bin", agent.MCPLinkName)
+	link := filepath.Join(home, ".herdr-ide", "bin", vaultmcp.LinkName)
 	exe, _ := os.Executable()
 	exe, _ = filepath.EvalSymlinks(exe)
 	for i := 0; i < 100; i++ {
@@ -219,7 +228,7 @@ func TestLinkMCPReplacesTheLink(t *testing.T) {
 	if err := agent.LinkMCP(dir, "/new/agent"); err != nil {
 		t.Fatal(err)
 	}
-	if target, _ := os.Readlink(filepath.Join(dir, agent.MCPLinkName)); target != "/new/agent" {
+	if target, _ := os.Readlink(filepath.Join(dir, vaultmcp.LinkName)); target != "/new/agent" {
 		t.Errorf("link -> %s", target)
 	}
 	if st, _ := os.Stat(dir); st.Mode().Perm() != 0o700 {

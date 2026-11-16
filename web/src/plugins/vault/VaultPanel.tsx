@@ -9,8 +9,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Copy,
+  Download,
   Eye,
   EyeOff,
+  FileUp,
   History,
   KeyRound,
   Lock,
@@ -35,14 +37,22 @@ import {
   loadVault,
   lockVault,
   openSession,
+  processText,
   setPassphrase,
   useVault,
   vaultApi,
+  VaultError,
   type VaultAccess,
   type VaultVariable,
 } from './api';
+import { Picker, type PickerItem } from '../../components/Picker';
+import type { MachineState } from '../../lib/machine';
 import { RequestCard } from './Approvals';
 import { setupSnippets } from './setup';
+import { StrengthBar, noManager } from './fields';
+import { openVaultExport, openVaultImport } from './dialogs';
+
+export { passStrength } from './fields';
 import './vault.css';
 
 function copy(text: string) {
@@ -120,10 +130,6 @@ export function VaultPanel() {
 
 // ---- the gate ----
 
-/** Password managers are kept away from the passphrase: one saved there is
- * readable by programs on the computer in several browsers. */
-const noManager = { autoComplete: 'off', 'data-1p-ignore': '', 'data-lpignore': 'true', 'data-bwignore': '', 'data-form-type': 'other' };
-
 /** When the passphrase was set, so that one the user did not choose shows. */
 function Since() {
   const at = useVault((s) => s.status?.passphraseSet);
@@ -136,6 +142,7 @@ function Since() {
 function Gate() {
   const status = useVault((s) => s.status)!;
   const session = useVault((s) => s.session);
+  const idle = useVault((s) => s.idle);
   const readOnly = useStore((s) => s.readOnly);
   const [changing, setChanging] = useState(false);
   if (readOnly) {
@@ -154,7 +161,7 @@ function Gate() {
         <LockOpen />
         <span className="vault-session-text">
           <b>{t('vault.session.open')}</b>
-          <span className="muted">{t('vault.session.idle')}</span>
+          <span className="muted">{t('vault.session.idle', { n: Math.round((idle ?? 1800) / 60) })}</span>
           <Since />
         </span>
         <span className="spacer" />
@@ -177,7 +184,6 @@ function PassphraseCard({ kind, onDone }: { kind: 'create' | 'change'; onDone?()
   const [repeat, setRepeat] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
-  const strength = passStrength(pass);
   const submit = async () => {
     setErr('');
     if (pass !== repeat) return setErr(t('vault.error.mismatch'));
@@ -225,12 +231,7 @@ function PassphraseCard({ kind, onDone }: { kind: 'create' | 'change'; onDone?()
         value={pass}
         onChange={(e) => setPass(e.target.value)}
       />
-      <div className={`vault-strength s${strength}`} aria-hidden>
-        <i />
-        <i />
-        <i />
-        <i />
-      </div>
+      <StrengthBar value={pass} />
       <input
         className="input"
         type="password"
@@ -254,13 +255,6 @@ function PassphraseCard({ kind, onDone }: { kind: 'create' | 'change'; onDone?()
       </div>
     </form>
   );
-}
-
-/** A rough strength, 0 to 4: length and kinds of characters. */
-export function passStrength(p: string): number {
-  if (p.length < 8) return 0;
-  const kinds = [/[a-z]/, /[A-Z]/, /\d/, /[^A-Za-z0-9]/].filter((r) => r.test(p)).length;
-  return Math.min(4, (p.length >= 12 ? 2 : 1) + (kinds >= 3 ? 2 : kinds >= 2 ? 1 : 0));
 }
 
 /** Unlocking this page's session with the passphrase. */
@@ -318,12 +312,42 @@ function UnlockCard() {
 
 function Variables({ session }: { session: boolean }) {
   const variables = useVault((s) => s.variables);
+  const readOnly = useStore((s) => s.readOnly);
   const [query, setQuery] = useState('');
   const [editing, setEditing] = useState<VaultVariable | 'new' | undefined>();
+  const [picked, setPicked] = useState<string[]>([]);
+  const [anchor, setAnchor] = useState<string>();
+  const [bulkAccess, setBulkAccess] = useState(false);
+  const [bulkErr, setBulkErr] = useState('');
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
     return q ? variables.filter((v) => v.name.toLowerCase().includes(q) || v.description.toLowerCase().includes(q)) : variables;
   }, [variables, query]);
+  // The selection holds variables that are still there.
+  const selected = picked.filter((n) => variables.some((v) => v.name === n));
+  const shownNames = shown.map((v) => v.name);
+  const allShown = shownNames.length > 0 && shownNames.every((n) => selected.includes(n));
+  const someShown = shownNames.some((n) => selected.includes(n));
+  /** A row's checkbox: shift extends from the last one clicked. */
+  const toggle = (name: string, on: boolean, range: boolean) => {
+    const from = anchor ? shownNames.indexOf(anchor) : -1;
+    const to = shownNames.indexOf(name);
+    const names = range && from >= 0 && to >= 0 ? shownNames.slice(Math.min(from, to), Math.max(from, to) + 1) : [name];
+    setPicked((p) => (on ? [...p.filter((n) => !names.includes(n)), ...names] : p.filter((n) => !names.includes(n))));
+    setAnchor(name);
+  };
+  const removeSelected = async () => {
+    const ok = await confirmDialog({
+      title: t('vault.bulk.deleteTitle', { n: selected.length }),
+      message: t('vault.bulk.deleteMessage', { names: selected.join(', ') }),
+      confirm: t('vault.delete'),
+      danger: true,
+    });
+    if (!ok) return;
+    setBulkErr(await eachVariable(selected, (n) => vaultApi.remove(n)));
+    setPicked([]);
+    await loadVault();
+  };
   return (
     <>
       <div className="vault-toolbar">
@@ -337,6 +361,18 @@ function Variables({ session }: { session: boolean }) {
             onChange={(e) => setQuery(e.target.value)}
           />
         </label>
+        <button className="sm" data-action="import" disabled={readOnly} title={t('vault.import.title')} onClick={() => openVaultImport()}>
+          <FileUp /> {t('vault.import.open')}
+        </button>
+        <button
+          className="sm"
+          data-action="export"
+          disabled={readOnly || variables.length === 0}
+          title={t('vault.export.title')}
+          onClick={() => openVaultExport(selected)}
+        >
+          <Download /> {t('vault.export.open')}
+        </button>
         <button
           className="primary sm"
           disabled={!session}
@@ -354,15 +390,100 @@ function Variables({ session }: { session: boolean }) {
       ) : shown.length === 0 ? (
         <div className="empty-note">{t('vault.noMatch')}</div>
       ) : (
-        <ul className="vault-list">
-          {shown.map((v) => (
-            <Row key={v.name} v={v} session={session} onEdit={() => setEditing(v)} />
-          ))}
-        </ul>
+        <>
+          <div className="vault-select-bar" data-selected={selected.length}>
+            <input
+              type="checkbox"
+              aria-label={t('vault.bulk.selectAll')}
+              title={t('vault.bulk.selectAll')}
+              checked={allShown}
+              ref={(el) => {
+                if (el) el.indeterminate = someShown && !allShown;
+              }}
+              onChange={(e) =>
+                setPicked((p) =>
+                  e.target.checked
+                    ? [...p.filter((n) => !shownNames.includes(n)), ...shownNames]
+                    : p.filter((n) => !shownNames.includes(n)),
+                )
+              }
+            />
+            {selected.length === 0 ? (
+              <span className="muted">{t('vault.bulk.hint')}</span>
+            ) : (
+              <>
+                <b>{t('vault.bulk.selected', { n: selected.length })}</b>
+                <span className="spacer" />
+                <button className="sm ghost" data-bulk="export" disabled={readOnly} onClick={() => openVaultExport(selected)}>
+                  <Download /> {t('vault.export.open')}
+                </button>
+                <button
+                  className="sm ghost"
+                  data-bulk="access"
+                  disabled={!session}
+                  title={session ? undefined : t('vault.needSession')}
+                  onClick={() => setBulkAccess(true)}
+                >
+                  <Monitor /> {t('vault.bulk.access')}
+                </button>
+                <button
+                  className="sm ghost danger-text"
+                  data-bulk="delete"
+                  disabled={!session}
+                  title={session ? undefined : t('vault.needSession')}
+                  onClick={() => void removeSelected()}
+                >
+                  <Trash2 /> {t('vault.delete')}
+                </button>
+                <button className="icon sm" title={t('vault.bulk.clear')} aria-label={t('vault.bulk.clear')} onClick={() => setPicked([])}>
+                  <X />
+                </button>
+              </>
+            )}
+          </div>
+          {bulkErr && <div className="callout error">{bulkErr}</div>}
+          <ul className="vault-list">
+            {shown.map((v) => (
+              <Row
+                key={v.name}
+                v={v}
+                session={session}
+                selected={selected.includes(v.name)}
+                onSelect={(on, range) => toggle(v.name, on, range)}
+                onEdit={() => setEditing(v)}
+              />
+            ))}
+          </ul>
+        </>
       )}
       {editing && <Editor variable={editing === 'new' ? undefined : editing} onDone={() => setEditing(undefined)} />}
+      {bulkAccess && (
+        <BulkAccess
+          names={selected}
+          onDone={(err) => {
+            setBulkAccess(false);
+            setBulkErr(err ?? '');
+          }}
+        />
+      )}
     </>
   );
+}
+
+/** Runs change for each variable in turn (one call each: a failure leaves
+ * the others changed) and says which failed, and why. */
+async function eachVariable(names: string[], change: (name: string) => Promise<unknown>): Promise<string> {
+  const failed: string[] = [];
+  for (const n of names) {
+    try {
+      await change(n);
+    } catch (e) {
+      failed.push(`${n}: ${errorText(e)}`);
+      // Without the session, the others fail alike.
+      if (e instanceof VaultError && e.code === 'vault_session') break;
+    }
+  }
+  return failed.length ? t('vault.bulk.failed', { failed: failed.join('; ') }) : '';
 }
 
 /** Who may read a variable without asking, as a chip. */
@@ -388,7 +509,19 @@ function Access({ v }: { v: VaultVariable }) {
   );
 }
 
-function Row({ v, session, onEdit }: { v: VaultVariable; session: boolean; onEdit(): void }) {
+function Row({
+  v,
+  session,
+  selected,
+  onSelect,
+  onEdit,
+}: {
+  v: VaultVariable;
+  session: boolean;
+  selected: boolean;
+  onSelect(on: boolean, range: boolean): void;
+  onEdit(): void;
+}) {
   const [value, setValue] = useState<string>();
   const [err, setErr] = useState('');
   // A revealed value hides itself after a while.
@@ -413,7 +546,15 @@ function Row({ v, session, onEdit }: { v: VaultVariable; session: boolean; onEdi
     }
   };
   return (
-    <li className="vault-row" data-name={v.name}>
+    <li className={`vault-row${selected ? ' selected' : ''}`} data-name={v.name}>
+      <input
+        type="checkbox"
+        className="vault-row-check"
+        aria-label={t('vault.bulk.select', { name: v.name })}
+        checked={selected}
+        onClick={(e) => onSelect(e.currentTarget.checked, e.shiftKey)}
+        onChange={() => {}}
+      />
       <div className="vault-row-main">
         <div className="vault-row-head">
           <code className="vault-name ellipsis">{v.name}</code>
@@ -459,11 +600,127 @@ function Row({ v, session, onEdit }: { v: VaultVariable; session: boolean; onEdi
 
 type AccessMode = 'ask' | 'some' | 'all';
 
+/** Who may read without asking: ask every time, chosen machines (with
+ * their state), all machines. */
+function AccessChooser({
+  mode,
+  picked,
+  onMode,
+  onPicked,
+}: {
+  mode: AccessMode;
+  picked: string[];
+  onMode(m: AccessMode): void;
+  onPicked(f: (p: string[]) => string[]): void;
+}) {
+  const machines = useStore((s) => s.machines);
+  const order = useStore((s) => s.order);
+  return (
+    <fieldset className="vault-field">
+      <legend>{t('vault.machines')}</legend>
+      <div className="vault-modes" role="radiogroup">
+        {(['ask', 'some', 'all'] as const).map((m) => (
+          <label key={m} className={`vault-mode ${mode === m ? 'on' : ''}`}>
+            <input type="radio" name="access" checked={mode === m} onChange={() => onMode(m)} />
+            <b>{t(`vault.access.${m}`)}</b>
+            <small>{t(`vault.access.${m}Hint`)}</small>
+          </label>
+        ))}
+      </div>
+      {mode === 'some' && (
+        <Picker
+          multiple
+          className="vault-machines-picker"
+          aria-label={t('vault.machines')}
+          label={t('vault.machines')}
+          noneLabel={t('vault.access.pickMachines')}
+          items={machineItems(order, machines, picked)}
+          value={picked}
+          onChange={(v) => onPicked(() => v)}
+        />
+      )}
+    </fieldset>
+  );
+}
+
+/** The machines to choose from: the core's, with their state, and any
+ * chosen one it no longer has (by its id). */
+function machineItems(order: string[], machines: Record<string, MachineState | undefined>, picked: readonly string[] = []): PickerItem[] {
+  const items: PickerItem[] = order.map((m) => ({
+    value: m,
+    label: machines[m]?.label ?? m,
+    icon: <span className={`mstatus ms-${machines[m]?.status ?? 'idle'}`} />,
+    description: machines[m]?.kind === 'local' ? t('vault.thisComputer') : undefined,
+    keywords: m,
+  }));
+  for (const m of picked) if (!order.includes(m)) items.push({ value: m, label: m });
+  return items;
+}
+
+const machinesFor = (mode: AccessMode, picked: string[]): string[] => (mode === 'all' ? ['*'] : mode === 'some' ? picked : []);
+
+/** Changes who may read the variables named without asking, one call
+ * each (their values are sealed again with their machines). */
+function BulkAccess({ names, onDone }: { names: string[]; onDone(err?: string): void }) {
+  const [mode, setMode] = useState<AccessMode>('ask');
+  const [picked, setPicked] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    setBusy(true);
+    const machines = machinesFor(mode, picked);
+    const err = await eachVariable(names, (n) => vaultApi.set(n, { machines }));
+    setBusy(false);
+    await loadVault();
+    onDone(err);
+  };
+  return createPortal(
+    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onDone()}>
+      <form
+        className="modal dialog vault-editor"
+        role="dialog"
+        aria-label={t('vault.bulk.accessTitle', { n: names.length })}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.key === 'Escape') onDone();
+        }}
+        onSubmit={(e) => {
+          e.preventDefault();
+          void save();
+        }}
+      >
+        <div className="modal-head">
+          <span className="modal-title">{t('vault.bulk.accessTitle', { n: names.length })}</span>
+          <span className="spacer" />
+          <button type="button" className="icon" title={t('dialog.cancel')} aria-label={t('dialog.cancel')} onClick={() => onDone()}>
+            <X />
+          </button>
+        </div>
+        <div className="dialog-body vault-fields">
+          <div className="vault-chips">
+            {names.map((n) => (
+              <code key={n}>{n}</code>
+            ))}
+          </div>
+          <AccessChooser mode={mode} picked={picked} onMode={setMode} onPicked={setPicked} />
+        </div>
+        <div className="dialog-actions">
+          <span className="spacer" />
+          <button type="button" onClick={() => onDone()}>
+            {t('dialog.cancel')}
+          </button>
+          <button className="primary" type="submit" disabled={busy || (mode === 'some' && !picked.length)}>
+            {t('vault.save')}
+          </button>
+        </div>
+      </form>
+    </div>,
+    document.body,
+  );
+}
+
 /** Adds or changes a variable, in a dialog: the value field only sets a new
  * value; who may read it without asking; inject-only. */
 function Editor({ variable, onDone }: { variable?: VaultVariable; onDone(): void }) {
-  const machines = useStore((s) => s.machines);
-  const order = useStore((s) => s.order);
   const [name, setName] = useState(variable?.name ?? '');
   const [description, setDescription] = useState(variable?.description ?? '');
   const [value, setValue] = useState('');
@@ -476,7 +733,7 @@ function Editor({ variable, onDone }: { variable?: VaultVariable; onDone(): void
   const [busy, setBusy] = useState(false);
   const target = name.trim();
   const nameOk = /^[A-Za-z_][A-Za-z0-9_]*$/.test(target) && target.length <= 128;
-  const machinesOf = (): string[] => (mode === 'all' ? ['*'] : mode === 'some' ? picked : []);
+  const machinesOf = (): string[] => machinesFor(mode, picked);
   const save = async () => {
     setErr('');
     setBusy(true);
@@ -578,34 +835,7 @@ function Editor({ variable, onDone }: { variable?: VaultVariable; onDone(): void
               </button>
             </span>
           </label>
-          <fieldset className="vault-field">
-            <legend>{t('vault.machines')}</legend>
-            <div className="vault-modes" role="radiogroup">
-              {(['ask', 'some', 'all'] as const).map((m) => (
-                <label key={m} className={`vault-mode ${mode === m ? 'on' : ''}`}>
-                  <input type="radio" name="access" checked={mode === m} onChange={() => setMode(m)} />
-                  <b>{t(`vault.access.${m}`)}</b>
-                  <small>{t(`vault.access.${m}Hint`)}</small>
-                </label>
-              ))}
-            </div>
-            {mode === 'some' && (
-              <div className="vault-machine-list">
-                {order.map((m) => (
-                  <label key={m} className="vault-machine">
-                    <input
-                      type="checkbox"
-                      checked={picked.includes(m)}
-                      onChange={(e) => setPicked((p) => (e.target.checked ? [...p.filter((x) => x !== m), m] : p.filter((x) => x !== m)))}
-                    />
-                    <span className={`mstatus ms-${machines[m]?.status ?? 'idle'}`} />
-                    <span className="ellipsis">{machines[m]?.label ?? m}</span>
-                    {machines[m]?.kind === 'local' && <span className="tag">{t('vault.thisComputer')}</span>}
-                  </label>
-                ))}
-              </div>
-            )}
-          </fieldset>
+          <AccessChooser mode={mode} picked={picked} onMode={setMode} onPicked={setPicked} />
           <div className="vault-field vault-switch-row">
             <span className="vault-switch-text">
               <b>{t('vault.injectOnly.title')}</b>
@@ -648,16 +878,15 @@ function Editor({ variable, onDone }: { variable?: VaultVariable; onDone(): void
 
 // ---- the access log ----
 
+/** Outcomes: values let out (by the list, or by a page: a reveal, an
+ * export), approved by the user, refused, listed. */
 const OUTCOME: Record<string, 'ok' | 'asked' | 'refused' | 'info'> = {
   allowed: 'ok',
+  revealed: 'ok',
+  exported: 'ok',
   approved: 'asked',
   approved_always: 'asked',
   listed: 'info',
-  denied: 'refused',
-  busy: 'refused',
-  vault_locked: 'refused',
-  not_found: 'refused',
-  inject_only: 'refused',
 };
 
 function resultText(result: string): string {
@@ -665,31 +894,54 @@ function resultText(result: string): string {
   return hasMessage(key) ? t(key) : result;
 }
 
-/** The accesses since the core started, by day, filtered by machine and
- * outcome. */
+/** The machine filter's value of a page's records (machine ''). */
+const PAGE = '\0page';
+
+/** Who asked: the machine, the client and terminal it reported and the
+ * directory; a page's address. */
+function whoText(a: VaultAccess, label: (m: string) => string): string {
+  if (!a.m) return [t('vault.log.page'), a.remote].filter(Boolean).join(' · ');
+  return [
+    label(a.m),
+    a.client || t('vault.request.unknownClient'),
+    a.terminal && t('vault.request.terminal', { terminal: a.terminal }),
+    a.cwd,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+/** The accesses kept in the vault's access log, by day, filtered by
+ * machine (or pages) and outcome. */
 function AccessLog() {
   const log = useVault((s) => s.log);
   const machines = useStore((s) => s.machines);
   const [machine, setMachine] = useState('');
   const [outcome, setOutcome] = useState('');
-  const shown = log.filter((a) => (!machine || a.m === machine) && (!outcome || (OUTCOME[a.result] ?? 'refused') === outcome));
+  const shown = log.filter(
+    (a) => (!machine || (machine === PAGE ? !a.m : a.m === machine)) && (!outcome || (OUTCOME[a.result] ?? 'refused') === outcome),
+  );
   const days = new Map<string, VaultAccess[]>();
   for (const a of shown.slice(0, 300)) {
     const d = new Date(a.time).toLocaleDateString();
     days.set(d, [...(days.get(d) ?? []), a]);
   }
-  const ids = [...new Set(log.map((a) => a.m))];
+  const ids = [...new Set(log.map((a) => a.m || PAGE))];
+  const label = (m: string) => machines[m]?.label ?? m;
   return (
     <>
       <div className="vault-toolbar">
-        <select value={machine} aria-label={t('vault.log.machine')} onChange={(e) => setMachine(e.target.value)}>
-          <option value="">{t('vault.log.allMachines')}</option>
-          {ids.map((m) => (
-            <option key={m} value={m}>
-              {machines[m]?.label ?? m}
-            </option>
-          ))}
-        </select>
+        <Picker
+          aria-label={t('vault.log.machine')}
+          label={t('vault.log.machine')}
+          keepOrder
+          items={[
+            { value: '', label: t('vault.log.allMachines') },
+            ...ids.map((m) => ({ value: m, label: m === PAGE ? t('vault.log.page') : label(m) })),
+          ]}
+          value={machine}
+          onChange={setMachine}
+        />
         <select value={outcome} aria-label={t('vault.log.outcome')} onChange={(e) => setOutcome(e.target.value)}>
           <option value="">{t('vault.log.allOutcomes')}</option>
           {(['ok', 'asked', 'refused', 'info'] as const).map((o) => (
@@ -711,7 +963,7 @@ function AccessLog() {
               <h4 className="section-head">{day}</h4>
               <ul>
                 {list.map((a, i) => (
-                  <li key={i} className={`vault-entry ${OUTCOME[a.result] ?? 'refused'}`}>
+                  <li key={a.id ?? i} className={`vault-entry ${OUTCOME[a.result] ?? 'refused'}`} data-result={a.result}>
                     <span className="vault-entry-time mono">{new Date(a.time).toLocaleTimeString()}</span>
                     <span className="vault-entry-body">
                       <span className="vault-entry-line">
@@ -726,15 +978,14 @@ function AccessLog() {
                           ))}
                         </span>
                       )}
-                      <span className="vault-entry-who muted ellipsis">
-                        {[
-                          machines[a.m]?.label ?? a.m,
-                          a.client || t('vault.request.unknownClient'),
-                          a.terminal && t('vault.request.terminal', { terminal: a.terminal }),
-                        ]
-                          .filter(Boolean)
-                          .join(' · ')}
+                      <span className="vault-entry-who muted ellipsis" title={a.userAgent}>
+                        {whoText(a, label)}
                       </span>
+                      {(a.process ?? []).length > 0 && (
+                        <span className="vault-entry-who vault-entry-process muted ellipsis" title={t('vault.log.process')}>
+                          {processText(a.process)}
+                        </span>
+                      )}
                     </span>
                   </li>
                 ))}
@@ -774,13 +1025,14 @@ function SetupGuide() {
     <div className="vault-setup">
       <p className="vault-hint">{t('vault.setup.about')}</p>
       {order.length > 1 && (
-        <select aria-label={t('vault.setup.machine')} value={id} onChange={(e) => setM(e.target.value)}>
-          {order.map((x) => (
-            <option key={x} value={x}>
-              {machines[x]?.label ?? x}
-            </option>
-          ))}
-        </select>
+        <Picker
+          aria-label={t('vault.setup.machine')}
+          label={t('vault.setup.machine')}
+          keepOrder
+          items={machineItems(order, machines)}
+          value={id}
+          onChange={setM}
+        />
       )}
       {block(t('vault.setup.claude'), s.claude, 'claude')}
       {block(t('vault.setup.codex'), s.codex, 'codex')}

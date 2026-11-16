@@ -6,10 +6,20 @@
 // denying needs nothing.
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { KeyRound, Terminal } from 'lucide-react';
+import { Cpu, KeyRound, Terminal } from 'lucide-react';
 import { useStore } from '../../state/store';
 import { t } from '../../i18n';
-import { answerRequest, errorText, loadRequests, openSession, reloadVault, useVault, type Answer, type VaultRequest } from './api';
+import {
+  answerRequest,
+  errorText,
+  loadRequests,
+  openSession,
+  processText,
+  reloadVault,
+  useVault,
+  type Answer,
+  type VaultRequest,
+} from './api';
 import './vault.css';
 
 /** The prompts (a status bar item of the plugin, drawn over the page). It
@@ -92,6 +102,12 @@ export function RequestCard({ req }: { req: VaultRequest }) {
           <Terminal />
           {req.terminal && <span>{t('vault.request.terminal', { terminal: req.terminal })}</span>}
           {req.cwd && <span className="ellipsis">{req.cwd}</span>}
+        </div>
+      )}
+      {(req.process ?? []).length > 0 && (
+        <div className="vault-request-meta" data-meta="process" title={t('vault.log.process')}>
+          <Cpu />
+          <span className="ellipsis">{processText(req.process)}</span>
         </div>
       )}
       {local && (

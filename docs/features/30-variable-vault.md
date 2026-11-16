@@ -19,6 +19,8 @@ deciding.
   them.
 - Per-variable allowed machines; other machines ask the user, who allows
   once, always or denies.
+- Variables moved between vaults in files encrypted under a passphrase of
+  their own, which the core builds and reads.
 - One gate for every caller, the core host's own programs included: a
   value leaves the vault only for a machine the variable lists or with the
   user's approval, and approving, revealing and changing need the vault's
@@ -28,6 +30,8 @@ deciding.
   every machine (through the core's terminals, or ssh with the user's
   keys), so only variables that ask every time are kept from them; the
   panel says so and recommends asking every time for important secrets.
+  The user accepts this as long as every read is logged: no value leaves
+  the vault without its record in the access log, written to disk first.
 - Non-goal: putting variables into terminals' environments. Every program
   of a terminal would get them, for the terminal's whole life.
 - Non-goal: protection against the user's own programs on an allowed
@@ -119,10 +123,9 @@ back needs no restart. Its routes, below `/api/p/vault`
 ([reference](../reference.md#http-and-websocket-endpoints)): the list
 (state and variables without values), `PUT`/`DELETE vars/{name}` (`PUT`
 with `{"to"}` renames the variable in the same write as its other changes,
-so a refusal changes nothing), `POST vars/{name}/reveal`,
-`POST vars/{name}/rename` (`{"to"}`: the value is sealed again under the
-new name, its additional data; machines, description and flag stay; a
-taken name is `409 exists`), `session` (open, end), `passphrase` (set,
+so a refusal changes nothing: the value is sealed again under the new
+name, its additional data; a taken name is `409 exists`),
+`POST vars/{name}/reveal`, `session` (open, end), `passphrase` (set,
 change), `lock`, the pending `requests` and their answers, and the access
 `log`. Every route that changes something is a writing route (refused
 read-only) audited with the name or request id.
@@ -138,8 +141,9 @@ vault; setting or changing the passphrase opens one too): 32 random bytes
 the core keeps in memory and the page only in its own memory, never in
 storage that programs could read from disk. Only what passes the gate
 counts as a session's use: loading the list says whether the session is
-open without keeping it so. A session ends unused for 30 minutes, 12
-hours after it began, when the vault is locked (every one) or its
+open without keeping it so. A session ends unused for 30 minutes
+(`vault.sessionIdle`), 12 hours after it began (`vault.sessionMax`),
+when the vault is locked (every one: by Lock or the auto-lock) or its
 passphrase changed (every other one); a session that a passphrase check
 would open after such an end (the check crossed it) is not opened; at most
 32 are open, the oldest going. Installing or dropping the key is one step
@@ -159,10 +163,17 @@ reaches the vault only through its agent's socket and the same rules as
 every machine: the core host's agent is the local machine's.
 
 The MCP servers' requests arrive as streams the agent opens with op
-`vault` (`plugin.Streamer`): one `VaultRequest {tool, names, client,
-terminal, cwd}` line, one `VaultResponse` line. The core takes the machine
-from the session the stream came on; what the request says about its
-client, terminal and directory is shown to the user, not trusted.
+`vault` (`plugin.Streamer`): a header whose `process` is the process
+connected to `vault.sock` (by its peer credentials) and up to 7 of its
+parents, `{pid, name}` each as the agent read them from the kernel
+(`/proc/<pid>/stat` on Linux, `kern.proc.pid` on macOS), then one
+`VaultRequest {tool, names, client, terminal, cwd}` line and one
+`VaultResponse` line. The core takes the machine from the session the
+stream came on and the process chain from the header, never from the
+request; what the request says about its client, terminal and directory
+is shown to the user, not trusted. A process can name itself as it likes
+(its name, not its pid), so the chain says who asked as far as the
+machine's kernel knows, not what the program is.
 
 - `list`: every variable's name, description, `inject_only` and whether
   this machine needs approval. Works while locked.
@@ -172,7 +183,8 @@ client, terminal and directory is shown to the user, not trusted.
   locked vault with `vault_locked`. Names whose `machines` hold the machine
   or `*` are given at once. For the others the core sends every page
   `plugin {plugin: vault, m, data: {type: request, request}}` and waits up
-  to 60 s: **Allow once** gives the values this time, **Always allow** adds
+  to 60 s (`vault.approvalTimeout`): **Allow once** gives the values this
+  time, **Always allow** adds
   the machine to each variable's list and gives them, **Deny**, no answer
   or the requester going away deny. A request identical to one waiting
   (machine, tool, names) waits for that one's answer instead of prompting
@@ -184,21 +196,126 @@ client, terminal and directory is shown to the user, not trusted.
   late gets `404`. The core then sends `{type: resolved, id, answer}`,
   which closes the prompt on every page.
 
-Each request is recorded with names only: in the audit log
-(`vault.access`; results `allowed`, `approved` (once), `approved_always`,
-`listed` or the error's code) and in a log of the last 500 kept in memory,
-shown in the panel. List calls and refusals (`busy`, `not_found`,
-`vault_locked`, `inject_only`, `bad_request`, every result but `allowed`,
-`approved`, `approved_always` and `denied`), which a program can repeat at
-will, are merged into the previous record when they repeat it (`count`),
-audited at most once a minute per machine and result (with the number
-skipped; the last of a burst is written when the minute is over, so every
-call is accounted for) and do not make the pages reload. The other records
-make the pages reload at most once a second, the last one included.
+**Every read is logged.** A variable that lists machines can be read by
+any program on them, and the core host's programs reach every machine
+(through the core's terminals or ssh): the user accepts that, as long as
+every value that leaves the vault is recorded. Each request of an MCP
+server and each value a page takes (a reveal, an export) is a record of
+the **access log**, with its time, machine (`""` for a page), tool,
+names, result, the process chain the agent saw, the client, terminal and
+directory the request named, and a page's address and browser; never a
+value. Results: `allowed` (by the variables' machines), `approved`
+(once), `approved_always`, `revealed`, `exported` (these let values
+out), `listed`, `denied` (by the user), `expired` (no answer in time),
+`cancelled` (the requester went away), `log_failed` or the error's code.
+The log is kept in `vault[-<instance>]-access.jsonl` beside the vault's
+file (0600, a JSON record a line) and read back at the core's start, so
+the panel shows what happened before a restart. A record that lets values
+out is appended and flushed to disk before they leave; when it cannot be
+written the values do not leave (`log_failed`, to the MCP server and as a
+reveal's `500`). The log keeps the last 1000 records that let values out
+and, apart, the last 500 others, so lists and refusals, which a program
+can repeat at will, never push a release out; the file is written again
+with what is kept once it holds twice as many lines. Every record is
+audited too (`vault.access`, a page's as `vault.revealed` and
+`vault.exported`) when the core writes an audit log (`--audit-log`).
+
+List calls and refusals (`busy`, `not_found`, `vault_locked`,
+`inject_only`, `bad_request`, `cancelled`: every result but those that
+let values out, `denied`, `expired` and `log_failed`) are merged into the
+previous record when they repeat it (`count`, written again at most every
+5 s), audited at most once a minute per machine and result (with the
+number skipped; the last of a burst is written when the minute is over,
+so every call is accounted for) and do not make the pages reload. A
+release is never merged: each one is a record of its own, in the access
+log and the audit log. The other records make the pages reload at most
+once a second, the last one included.
 Answers are audited as `vault.answered` (machine, tool, names, answer),
 saved variables as `vault.saved` (allowed machines, `inject_only`, whether
 the value changed, `from` when renamed), never with values. Other changes
 send `{type: changed}`, on which pages load the vault again.
+
+### Export and import
+
+Variables move between vaults (another computer, a new core, a backup) in
+an **export file** encrypted under a passphrase of its own
+(`internal/vault/export.go`). The core opens the vault's values and seals
+them into the file, and opens a file and saves its values: no value
+reaches a browser, which holds only the file (ciphertext).
+
+The file is a JSON envelope: `format` (`<slug>-vault-export`, after the
+product), `version` (1), `kdf` (`argon2id` with its salt, time, memory
+and threads: new files take the vault's parameters, time 3, 64 MiB, 4
+threads, and a new 16-byte salt), `cipher` (`aes-256-gcm`), `nonce` and
+`ciphertext`. Everything in the clear but the nonce is the ciphertext's
+additional data, so a file whose version or derivation was changed does
+not open. The content holds when it was exported, each variable's name,
+value, description, machines (`*` or ids), inject-only flag and times, and
+the machines its lists name with their ids, labels and whether each was
+the core's own computer. The file's passphrase has at least 12
+characters: unlike the vault's file, an export is attacked offline
+without the vault's waits, and it is only as strong as its passphrase.
+Files are at most 16 MiB and hold at most 1000 variables.
+
+**Export** (`POST export`, a writing route behind the gate): the
+variables chosen, or all; it needs the page's session and the vault's
+passphrase again (a bulk release; checked one at a time and slowed down
+as a session's), and the vault unlocked. It is recorded in the access
+log (`exported`, with the names) and audited (`vault.exported`) before
+the file is sent, and not sent when that record cannot be written. One
+file is derived at a time (`429 busy`).
+
+**Import** sends the file's text and its passphrase twice: once for a
+preview (`POST import/preview`), once with the choices (`POST import`);
+the core keeps nothing of a file between the two, so no decrypted value
+waits in its memory for an answer, and the second call checks the vault
+as it then is. The preview names each variable with its description,
+flag, whether the vault has one of that name, why it cannot be imported
+(`invalid_name`: only under another name; `invalid`: a value, description
+or machine list the vault refuses) and its machines as they map here:
+`*` stays; a machine is kept by its id (machines added in the UI get
+random ids, so the same id is the same machine record, as when importing
+into the core that exported); the local machine, whose id is the same on
+every core, only when its label (the host's name) matches too; labels
+alone map nothing, as two machines may share one. Machines that do not
+map leave the list, so they ask every time; the preview names them. The
+choices say per variable `import` (its name must be free), `overwrite`,
+`rename` (`as`, validated as any name) or `skip`; the import is one write
+of the store (`Store.Import`): a taken name, an invalid variable or more
+than 1000 variables refuse it all and change nothing. Imported values are
+sealed under the vault's key with their name, machines and flag; a new
+variable keeps the file's creation time. Imports are audited as
+`vault.imported` with the names, those overwritten and those renamed,
+never values; they release nothing, so the access log has none of them.
+
+### Settings
+
+The section **Variable Vault** of the settings (`internal/plugins/vault`'s
+module, all whole numbers, for the whole core) is the plugin's page in
+Settings, listed under the plugins (`Section.plugin`). The page ends with
+**Files** (`SettingsExtra.tsx`, the plugin's `settings.extra`): Import… and
+Export…, which open the panel's dialogs (`openVaultImport`,
+`openVaultExport`); they are disabled in read-only mode and for a vault
+without a passphrase yet, and a locked vault is said to be unlocked by the
+passphrase the dialogs ask for.
+
+- `vault.approvalTimeout`: seconds a request waits for an answer (60;
+  10–600);
+- `vault.autoLock`: minutes after which the vault locks when unused (0,
+  never; up to 1440). A use is an unlock, a page's action through the gate
+  (a change, a reveal, an approval, an export or import) or a value
+  released to a machine; lists and refusals are not. The lock is the
+  route's (every session ends, after a passphrase check that runs), audited
+  as `vault.locked` with `reason: idle`. While the vault is unlocked a
+  timer looks at least every minute, so a change of the setting counts
+  within one;
+- `vault.sessionIdle` and `vault.sessionMax`: a page's session ends unused
+  for those minutes (30; 1–240) or those hours after it began (12; 1–24);
+- `vault.runTimeout`, `vault.runMaxTimeout` and `vault.runOutput`:
+  `run_with_env`'s default and longest timeouts in seconds (120 and 600;
+  5–3600; a default above the longest takes the longest) and the KiB of
+  output it returns (64; 4–1024). The core sends them with an `env`'s
+  values; the MCP server applies them to that command.
 
 ### Machines
 
@@ -239,8 +356,10 @@ of the terminal core carry. Each tool call is one connection to
 - `run_with_env {command, names, cwd?, timeout?}`: runs `sh -c command` in
   its own process group with the variables added to the server's
   environment and stdin closed, and returns the exit status and up to
-  64 KiB of combined output, in which each value as it appears is replaced
-  with `***`; killed after `timeout` seconds (default 120, at most 600).
+  64 KiB of combined output (`vault.runOutput`), in which each value as it
+  appears is replaced with `***`; killed after `timeout` seconds (by
+  default 120, `vault.runTimeout`; at most 600, `vault.runMaxTimeout`):
+  the core sends these settings with the values (`VaultResponse.run`).
   Output is captured 64 KiB (the longest value) beyond what is returned,
   so a value cut by the limit is still masked; when even the capture is
   cut, its last bytes that could be the beginning of a value (fewer than
@@ -273,27 +392,38 @@ The panel **Variable Vault** of the right sidebar (command
   (twice, with a strength bar and the warning that it cannot be
   recovered); otherwise, without a session, a card to unlock this page with
   the passphrase, and with one a bar that says the page is unlocked until
-  30 idle minutes, with Change Passphrase and Lock; both say when the
+  it is idle for the minutes of `vault.sessionIdle` (which the list
+  carries, `idle`), with Change Passphrase and Lock; both say when the
   passphrase was set. A page that the gate refuses (its session ended)
   shows the unlock card again. The passphrase fields keep password
   managers away (`autocomplete="off"` and the attributes 1Password,
   LastPass and Bitwarden honor): a passphrase saved by a browser is
   readable by programs on the computer in several browsers.
 - Requests waiting for an answer.
-- Three tabs. **Variables**: search, New Variable, and a row per variable
-  with its name, the inject-only tag, its description and who may read it
+- Three tabs. **Variables**: search, Import…, Export…, New Variable, a bar
+  to choose all variables shown (and, with some chosen, Export…, Who May
+  Read… and Delete for them together, the last two only with a session:
+  one call per variable, the ones that failed named), and a row per
+  variable with a checkbox (Shift chooses a range), its name, the
+  inject-only tag, its description and who may read it
   without asking (every time asks, the machines chosen, all machines, in
   the colors of safe to open); reveal after a confirmation, hidden again
   after 30 s, and edit, both only with a session. The editor is a dialog:
   name, description, a write-only value field (shown while typing on
   request) that sets a new value, who may read without asking (ask every
-  time, chosen machines with their state, all machines), inject only as a
+  time, chosen machines, all machines: the machines a searchable choice,
+  `components/Picker.tsx`, with their state, the same in Who May Read…),
+  inject only as a
   switch, and Delete after a confirmation. Saving is one call, a new name
   included (`to`), so a save that fails changed nothing and can be tried
-  again as it is. **Access log**: the accesses
-  since the core started by day, filtered by machine and outcome, each
-  with its time, outcome (allowed by the list, approved, refused, listed),
-  tool, names, machine, client and terminal. **Connect**: per machine,
+  again as it is. **Access log**: the records
+  the log keeps, by day, filtered by machine (or pages; a searchable choice)
+  and outcome, each
+  with its time, outcome (values let out: allowed by the list, shown or
+  exported by a page; approved; refused; listed), tool, names, machine,
+  client, terminal and directory, the process chain the agent saw (the
+  asking process first), and for a page its address. **Connect**: per
+  machine (a searchable choice),
   `claude mcp add --scope user <slug>-vault -- <data dir>/bin/<slug>-mcp`,
   Codex's `[mcp_servers.<slug>-vault]` in `~/.codex/config.toml` and the
   JSON other clients take, each with a copy button, built from the
@@ -319,6 +449,20 @@ to the core (`/ws`) comes back, the status item loads the requests, and the
 vault if it was loaded, again: the core may have restarted (its requests
 and sessions gone, the vault locked) or changed meanwhile.
 
+The export and import dialogs are drawn over every page by the plugin's
+status item, so `openVaultExport(names?)` and `openVaultImport()` (exported
+by `web/src/plugins/vault`) open them from anywhere, a settings page
+included. **Export**: the variables chosen or all, the vault's passphrase
+(a page without a session opens one with it first), the file's passphrase
+twice with a strength bar and the warning that the file is only as strong
+as it; the file is saved by the browser as
+`<slug>-vault-<date>.json`. **Import**: the file and its passphrase (and
+the vault's, on a page without a session), then the preview: per variable
+its tags (exists, inject only, invalid), the machines it maps to and those
+that will ask, and what to do with it (import, skip, overwrite, import
+under a new name, checked against the vault's names and the other
+choices), with one choice for every name that exists; Import sends them.
+
 ## Alternatives considered
 
 | Alternative | Why not |
@@ -333,6 +477,9 @@ and sessions gone, the vault locked) or changed meanwhile.
 | Upgrading files sealed with less additional data | Their machine lists were not authenticated: an upgrade would seal a widened list in; none was released, so such files are refused. |
 | Biometrics (Touch ID) per approval | Not available to pages in every browser, nor in the same way on every system; the passphrase works everywhere and a session spares asking for it at every approval. |
 | Machines and flag in the clear, unauthenticated | A program on the core host could widen a variable's machines in the file and read it without asking; sealing them with the value makes such an edit unreadable. |
+| An import session on the core between the preview and the import | The decrypted values would wait in the core's memory for the user's answer, with an expiry and a bound of their own; sending the file and its passphrase again costs one more derivation and leaves nothing behind. |
+| Mapping machines by label on import | Labels are names the user gives and two machines may share one: a match could let another machine read without asking. Ids are random for machines added in the UI; the local machine's id is the same everywhere, so its label must match too. |
+| Exporting values to the browser (a JSON file the page builds) | Values would pass through the page, its memory and its extensions; the core builds the file, and the page gets ciphertext. |
 | Values in the browser for editing | A value shown in a page is in its memory, its extensions' reach and its screen; the editor only sets new values. |
 
 ## Failure modes
@@ -356,8 +503,11 @@ and sessions gone, the vault locked) or changed meanwhile.
   locked and its session gone.
 - Wrong passphrases in a row: `429 wait` for a while that doubles; a check
   while another runs: `429 busy`.
-- Nobody answers: the request is denied after 60 s; the agent gets
-  `denied` and can ask again.
+- Nobody answers: the request is denied after 60 s
+  (`vault.approvalTimeout`); the agent gets `denied` and can ask again.
+- The vault unused for the minutes of `vault.autoLock`: it locks, every
+  page's session ends and machines get `vault_locked` until a page unlocks
+  it again.
 - Too many requests waiting: past 4 of the machine (or 32 in all) the
   agent gets `busy`, says so to the model, and can ask again once the user
   answered.
@@ -376,6 +526,20 @@ and sessions gone, the vault locked) or changed meanwhile.
 - Many refusals in a row (a program repeating a call): one record in the
   log with their count, one audit record a minute per machine and result,
   the last of a burst written when the minute is over.
+- The access log cannot be written (a full disk, its file not writable):
+  no value leaves; the MCP server gets `log_failed`, a reveal `500
+  log_failed`; list calls and refusals are answered as before.
+- An export file with a wrong passphrase, or changed: `file_passphrase`
+  (the two cannot be told apart); not an export file, or derivation
+  parameters out of bounds: `bad_file`; another version: `file_version`;
+  over 16 MiB: `too_large`. Nothing is imported.
+- An import that meets a taken name (one created since the preview), an
+  invalid variable or the bound of 1000 variables: refused as a whole,
+  the vault unchanged; the dialog says which variable.
+- One change of several chosen fails (Who May Read…, Delete): the others
+  are done; the panel names the ones that failed and why.
+- The core restarted: the access log is read back from its file; a
+  repeated refusal's count may lack the calls of its last 5 s.
 
 ## Security
 
@@ -400,6 +564,16 @@ server exposes.
   could not be written at the unlock applied by the next allow or
   deletion (`TestForgottenAppliedAtTheNextChange`); renaming with other
   changes in one write, a refusal changing nothing (`TestSetRenames`).
+- `internal/vault/export_test.go`: a file's round trip, with only its
+  format, version, derivation and cipher in the clear and a salt and nonce
+  of its own; a short file passphrase, a wrong one, a changed ciphertext
+  or derivation, a nonce of another size, derivation parameters out of
+  bounds, another version, format or cipher, not JSON and too large, each
+  with its code; more than 1000 variables; the store's export (unlocked,
+  names that are not there named) and import in one write, refused as a
+  whole for a taken name, a name twice, an invalid one, a value too long
+  or a machine with a control character, the creation time kept, more
+  than 1000 variables refused.
 - `internal/userfile/userfile_test.go`: the content flushed before the
   rename and the directory after, a content that cannot be flushed
   replacing nothing (`TestWriteIsDurable`).
@@ -420,9 +594,39 @@ server exposes.
   without a session refused and denials allowed; answers, saves and
   reveals audited without values or passphrases; a removed machine
   forgotten.
+- `internal/plugins/vault/accesslog_test.go`: the access log read back
+  after a restart with releases, counts and who asked, 0600 and without
+  values (`TestAccessLogSurvivesARestart`); releases never merged and
+  never pushed out by refusals (`TestReleasesAreNeverCoalesced`); a
+  release whose record cannot be written refused (`TestUnloggedReleaseIsRefused`);
+  the file written again past its bound and read back the same; a merged
+  count written once the while is over; the process chain taken from the
+  header, never the request (`TestWhoAskedComesFromTheAgent`); cancelled
+  and expired requests.
+- `internal/plugins/vault/transfer_test.go`: an export needs the session
+  and the vault's passphrase, a file passphrase of 12 characters, a
+  choice, names that exist and an unlocked vault; its file opens with its
+  passphrase, names the machines with their labels, is recorded as
+  `exported` and audited without values or passphrases
+  (`TestExport`); an import's preview without values, with the names that
+  exist and the machines unknown here (the local machine of another label
+  among them), a conflict refusing it all, bad choices refused, then
+  import, overwrite, skip and rename in one write, machines mapped by id,
+  audited without values (`TestImport`); the local machine kept when its
+  label matches, a wrong passphrase, a changed file, another version, not
+  a file and too large refused by both routes (`TestImportFailures`).
+  `internal/server`'s `TestMutatingRoutesAreGuarded` refuses export and
+  import read-only and from other origins.
+- `internal/plugins/vault/settings_test.go`: the settings' defaults are
+  the values before them and out-of-bounds values are refused
+  (`TestSettingsDefs`); the approval's wait, a session's idle and longest
+  life, the auto-lock (uses keep the vault unlocked, then it locks, ends
+  every session and is audited; 0 never locks it: `TestAutoLock`) and
+  `run_with_env`'s limits sent with an env's values, not a get's.
 - `internal/vaultmcp/mcp_test.go`: JSON-RPC over pipes (initialize and
   version negotiation, notifications, tools), masking, truncation, masking
-  where the capture is cut (`TestMaskAtTheCut`), timeouts that kill the
+  where the capture is cut (`TestMaskAtTheCut`), the core's limits on
+  output and timeouts (`TestRunLimitsFromTheCore`), timeouts that kill the
   process group, errors reaching the model, a cancelled call's request
   leaving the core without a response, the socket's path from the link;
   `run_unix_test.go`: programs left in the background killed when the
@@ -431,7 +635,8 @@ server exposes.
   (the test binary started again as the server), and when the client
   cancels the call.
 - `internal/agent/vault_test.go`: `vault.sock` (0600) relayed to the core as
-  op `vault`, the link to the executable; `vault.sock` and `bridge.sock`
+  op `vault` with the connecting process and its parent in the header, the
+  link to the executable; `vault.sock` and `bridge.sock`
   served by the newest of two agents of one instance, kept when the older
   exits, served by the other again when the newest exits first, removed
   with the last (`TestSocketsFollowTheNewestAgent`).
@@ -449,5 +654,18 @@ server exposes.
   again when the connection to the core comes back; read-only; the
   approval prompt asking for the passphrase, denying without one and
   resolved elsewhere, kept with the reason when an answer fails and closed
-  when the core no longer has it; `busy` told from `wait`; the local
-  machine's note; the setup snippets.
+  when the core no longer has it; `busy` told from `wait`; the access log
+  with a page's reveal, a count, the directory and the process chain, and
+  the chain in the prompt; the local machine's note; the setup snippets.
+- `web/src/__tests__/vault-transfer.test.ts`: exporting the chosen
+  variables (a file passphrase under 12 characters and a mismatch
+  refused, a session opened first with the vault's passphrase, the file
+  saved under its name), all of them and a wrong passphrase said; an
+  import's preview (a wrong file passphrase said), its defaults, the
+  choice for every existing name, a new name checked before anything is
+  sent and the choices in one call; choosing all, a range with Shift,
+  exporting the chosen, giving them all machines and deleting them, one
+  failure named; the settings page's Import and Export (open the dialogs,
+  disabled read-only and without a passphrase, the locked vault said).
+- `web/src/__tests__/vault.test.ts` also chooses the editor's machines
+  and the log's machine filter with the searchable choice.

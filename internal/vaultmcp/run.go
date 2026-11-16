@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"herdr-ide/internal/agentproto"
 )
 
 // Defaults of run_with_env.
@@ -26,13 +28,30 @@ const (
 
 // Runner runs run_with_env's commands.
 type Runner struct {
-	// Shell runs the command with -c (default sh).
-	Shell string
 	// MaxOutput is how much output is returned (default MaxOutput).
 	MaxOutput int
 	// DefaultTimeout and MaxTimeout bound a command's time (defaults
 	// DefaultTimeout and MaxTimeout).
 	DefaultTimeout, MaxTimeout time.Duration
+}
+
+// with returns r bounded as the core says (the vault's settings): its
+// default and longest timeout, its output; what the core leaves out (an
+// older core, or none) keeps r's.
+func (r Runner) with(run *agentproto.VaultRun) Runner {
+	if run == nil {
+		return r
+	}
+	if run.Timeout > 0 {
+		r.DefaultTimeout = time.Duration(run.Timeout) * time.Second
+	}
+	if run.MaxTimeout > 0 {
+		r.MaxTimeout = time.Duration(run.MaxTimeout) * time.Second
+	}
+	if run.MaxOutput > 0 {
+		r.MaxOutput = run.MaxOutput
+	}
+	return r
 }
 
 // capped keeps the first max bytes written and counts the rest.
@@ -123,10 +142,7 @@ func maskOutput(s string, values map[string]string, cut bool) string {
 // environment, and returns the exit status and the masked output; failed
 // when the command failed, timed out or could not start.
 func (r Runner) Run(ctx context.Context, command string, env map[string]string, dir string, timeout time.Duration) (out string, failed bool) {
-	shell, limit, def, maxT := r.Shell, r.MaxOutput, r.DefaultTimeout, r.MaxTimeout
-	if shell == "" {
-		shell = "sh"
-	}
+	limit, def, maxT := r.MaxOutput, r.DefaultTimeout, r.MaxTimeout
 	if limit <= 0 {
 		limit = MaxOutput
 	}
@@ -140,7 +156,7 @@ func (r Runner) Run(ctx context.Context, command string, env map[string]string, 
 		timeout = def
 	}
 	timeout = min(timeout, maxT)
-	cmd := exec.Command(shell, "-c", command)
+	cmd := exec.Command("sh", "-c", command)
 	cmd.Dir = dir
 	cmd.Env = os.Environ()
 	for k, v := range env {

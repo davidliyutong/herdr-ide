@@ -39,11 +39,9 @@ const ID = "vault"
 
 // Bounds of what the plugin keeps in memory.
 const (
-	// DefaultTimeout is how long a request waits for the user's answer;
-	// none counts as deny.
+	// DefaultTimeout is how long a request waits for the user's answer by
+	// default (vault.approvalTimeout); none counts as deny.
 	DefaultTimeout = 60 * time.Second
-	// MaxLog is how many accesses the log keeps (in memory only).
-	MaxLog = 500
 	// MaxPending is how many requests may wait for an answer at once, and
 	// MaxPendingPerMachine how many of one machine; more are refused as
 	// busy, so one machine cannot crowd out the others' prompts.
@@ -58,10 +56,14 @@ const (
 	changedEvery = time.Second
 	// MaxNames is how many variables one request may name.
 	MaxNames = 64
-	// SessionIdle and SessionMax bound a vault session: unused for
-	// SessionIdle, or SessionMax after it began, it ends.
+	// SessionIdle and SessionMax bound a vault session by default
+	// (vault.sessionIdle, vault.sessionMax): unused for SessionIdle, or
+	// SessionMax after it began, it ends.
 	SessionIdle = 30 * time.Minute
 	SessionMax  = 12 * time.Hour
+	// lockCheckEvery is how often the auto-lock looks at the setting while
+	// the vault is unlocked, so a change of it counts within a minute.
+	lockCheckEvery = time.Minute
 	// MaxSessions is how many sessions may be open at once (the oldest
 	// goes).
 	MaxSessions = 32
@@ -78,6 +80,11 @@ const (
 	AnswerOnce   = "once"
 	AnswerAlways = "always"
 	AnswerDeny   = "deny"
+	// What else ends a wait (ask): nobody answered in time, the requester
+	// went away, too many requests wait.
+	answerTimeout = "timeout"
+	answerGone    = "gone"
+	answerBusy    = "busy"
 )
 
 // Plugin is the vault plugin.
@@ -85,8 +92,11 @@ type Plugin struct {
 	// Path is the vault's file; "" puts it beside the settings file
 	// (vault.json, vault-<instance>.json).
 	Path string
-	// Timeout of an approval; 0 is DefaultTimeout.
+	// Timeout of an approval; 0 takes the setting (DefaultTimeout).
 	Timeout time.Duration
+
+	// fileWork is held while an export file's key is derived (transfer.go).
+	fileWork sync.Mutex
 
 	// keyMu makes installing or dropping the key one step with the sessions
 	// that go with it: an unlock and the session it opens, a lock and the
@@ -98,7 +108,8 @@ type Plugin struct {
 	mu      sync.Mutex
 	store   *vaultstore.Store
 	pending map[string]*Request
-	log     []Access
+	// alog is the access log (accesslog.go), opened at its first use.
+	alog *accessLog
 	// noisy are the last audit records of list calls and refusals, by
 	// machine and result, with the calls not recorded since.
 	noisy map[string]*noisyAudit
@@ -123,6 +134,12 @@ type Plugin struct {
 	// and after a new passphrase is set, before its session (tests: a lock
 	// asked for there).
 	keyStep func()
+	// lastUse is the vault's last use (touch), lockTimer the auto-lock's
+	// timer while the vault is unlocked; lockAfter and lockCheck replace
+	// the setting and lockCheckEvery (tests).
+	lastUse              time.Time
+	lockTimer            *time.Timer
+	lockAfter, lockCheck time.Duration
 }
 
 type session struct {
@@ -148,15 +165,18 @@ func (p *Plugin) ID() string { return ID }
 
 // Request is an MCP server's request that waits for the user's answer.
 type Request struct {
-	ID       string    `json:"id"`
-	M        string    `json:"m"`
-	Tool     string    `json:"tool"`
-	Names    []string  `json:"names"`
-	Client   string    `json:"client,omitempty"`
-	Terminal string    `json:"terminal,omitempty"`
-	Cwd      string    `json:"cwd,omitempty"`
-	Created  time.Time `json:"created"`
-	Expires  time.Time `json:"expires"`
+	ID       string   `json:"id"`
+	M        string   `json:"m"`
+	Tool     string   `json:"tool"`
+	Names    []string `json:"names"`
+	Client   string   `json:"client,omitempty"`
+	Terminal string   `json:"terminal,omitempty"`
+	Cwd      string   `json:"cwd,omitempty"`
+	// Process is the process that asked and its parents, as the machine's
+	// agent saw them.
+	Process []agentproto.VaultProcess `json:"process,omitempty"`
+	Created time.Time                 `json:"created"`
+	Expires time.Time                 `json:"expires"`
 
 	// Guarded by the plugin's mu: the requesters waiting for this request
 	// (identical requests share one prompt), its answer once resolved
@@ -180,23 +200,6 @@ func (r *Request) same(m, tool string, names []string) bool {
 	return true
 }
 
-// Access is a record of the access log: names only, never values.
-type Access struct {
-	Time     time.Time `json:"time"`
-	M        string    `json:"m"`
-	Tool     string    `json:"tool"`
-	Names    []string  `json:"names,omitempty"`
-	Client   string    `json:"client,omitempty"`
-	Terminal string    `json:"terminal,omitempty"`
-	// Result: allowed (by the machines of the variables), approved
-	// (once), approved_always, listed, or the error's code (denied,
-	// busy…).
-	Result string `json:"result"`
-	// Count is how many identical list calls or refusals in a row this
-	// record stands for (1 when absent).
-	Count int `json:"count,omitempty"`
-}
-
 // openError is why the vault is not there: unavailable (the core keeps no
 // settings file to keep it beside), or the store's code for a file that
 // does not open (version: of another version; invalid: damaged or edited;
@@ -208,19 +211,37 @@ func (e *openError) Error() string { return e.code + ": " + e.msg }
 
 var errUnavailable = &openError{code: "unavailable", msg: "the vault has no file (the core keeps no settings)"}
 
+// vaultPath is the vault's file: Path, or beside the settings file; ""
+// when the core keeps none.
+func (p *Plugin) vaultPath(h plugin.Host) string {
+	if p.Path != "" {
+		return p.Path
+	}
+	if st := h.Settings(); st != nil && st.Path() != "" {
+		sp := st.Path()
+		return filepath.Join(filepath.Dir(sp), strings.Replace(filepath.Base(sp), "settings", "vault", 1))
+	}
+	return ""
+}
+
+// accessLog returns the access log, beside the vault's file (in memory
+// only without one).
+func (p *Plugin) accessLog(h plugin.Host) *accessLog {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.alog == nil {
+		p.alog = newAccessLog(accessLogPath(p.vaultPath(h)), h.Logger())
+	}
+	return p.alog
+}
+
 // open returns the store, opened at the first use.
 func (p *Plugin) open(h plugin.Host) (*vaultstore.Store, error) {
+	path := p.vaultPath(h)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.store != nil {
 		return p.store, nil
-	}
-	path := p.Path
-	if path == "" {
-		if st := h.Settings(); st != nil && st.Path() != "" {
-			sp := st.Path()
-			path = filepath.Join(filepath.Dir(sp), strings.Replace(filepath.Base(sp), "settings", "vault", 1))
-		}
 	}
 	if path == "" {
 		return nil, errUnavailable
@@ -234,13 +255,6 @@ func (p *Plugin) open(h plugin.Host) (*vaultstore.Store, error) {
 	return s, nil
 }
 
-func (p *Plugin) timeout() time.Duration {
-	if p.Timeout > 0 {
-		return p.Timeout
-	}
-	return DefaultTimeout
-}
-
 // Routes are the UI's.
 func (p *Plugin) Routes() []plugin.Route {
 	return []plugin.Route{
@@ -248,7 +262,9 @@ func (p *Plugin) Routes() []plugin.Route {
 		{Method: "PUT", Path: "vars/{name}", Mutating: true, Audit: "set", Handler: p.gated(p.handleSet)},
 		{Method: "DELETE", Path: "vars/{name}", Mutating: true, Audit: "delete", Handler: p.gated(p.handleDelete)},
 		{Method: "POST", Path: "vars/{name}/reveal", Mutating: true, Audit: "reveal", Handler: p.gated(p.handleReveal)},
-		{Method: "POST", Path: "vars/{name}/rename", Mutating: true, Audit: "rename", Handler: p.gated(p.handleRename)},
+		{Method: "POST", Path: "export", Mutating: true, Audit: "export", Handler: p.gated(p.handleExport)},
+		{Method: "POST", Path: "import/preview", Mutating: true, Audit: "import_preview", Handler: p.gated(p.handleImportPreview)},
+		{Method: "POST", Path: "import", Mutating: true, Audit: "import", Handler: p.gated(p.handleImport)},
 		{Method: "POST", Path: "session", Mutating: true, Audit: "session", Handler: p.handleSession},
 		{Method: "DELETE", Path: "session", Mutating: true, Audit: "session_end", Handler: p.handleEndSession},
 		{Method: "POST", Path: "passphrase", Mutating: true, Audit: "passphrase", Handler: p.handlePassphrase},
@@ -283,6 +299,8 @@ func fail(w http.ResponseWriter, err error) {
 		status = http.StatusConflict
 	case "wrong_passphrase":
 		status = http.StatusForbidden
+	case "too_large":
+		status = http.StatusRequestEntityTooLarge
 	case "failed":
 		status = http.StatusInternalServerError
 	}
@@ -300,7 +318,10 @@ func (p *Plugin) handleList(c *plugin.Call, w http.ResponseWriter, r *http.Reque
 	}
 	// Whether the page's session is open, without counting as its use: only
 	// what passes the gate keeps a session from ending idle.
-	plugin.WriteJSON(w, http.StatusOK, map[string]any{"status": s.Status(), "variables": s.List(), "session": p.sessionOf(r, false)})
+	idle, _ := p.sessionLimits(c.Host)
+	plugin.WriteJSON(w, http.StatusOK, map[string]any{
+		"status": s.Status(), "variables": s.List(), "session": p.sessionOf(c.Host, r, false), "idle": idle.Seconds(),
+	})
 }
 
 func (p *Plugin) clock() time.Time {
@@ -312,21 +333,26 @@ func (p *Plugin) clock() time.Time {
 
 // sessionOf reports whether the request carries a session that is open;
 // use marks it used.
-func (p *Plugin) sessionOf(r *http.Request, use bool) bool {
+func (p *Plugin) sessionOf(h plugin.Host, r *http.Request, use bool) bool {
 	tok := r.Header.Get(SessionHeader)
 	if tok == "" {
 		return false
 	}
+	idle, most := p.sessionLimits(h)
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	ss, ok := p.sessions[tok]
 	now := p.clock()
-	if !ok || now.Sub(ss.used) > SessionIdle || now.Sub(ss.started) > SessionMax {
+	if !ok || now.Sub(ss.used) > idle || now.Sub(ss.started) > most {
 		delete(p.sessions, tok)
+		p.mu.Unlock()
 		return false
 	}
 	if use {
 		ss.used = now
+	}
+	p.mu.Unlock()
+	if use {
+		p.touch(h)
 	}
 	return true
 }
@@ -335,7 +361,7 @@ func (p *Plugin) sessionOf(r *http.Request, use bool) bool {
 // the gate before the UI's changes and reveals.
 func (p *Plugin) gated(h func(*plugin.Call, http.ResponseWriter, *http.Request)) func(*plugin.Call, http.ResponseWriter, *http.Request) {
 	return func(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
-		if !p.sessionOf(r, true) {
+		if !p.sessionOf(c.Host, r, true) {
 			refuseSession(c, w, r)
 			return
 		}
@@ -358,11 +384,12 @@ func (p *Plugin) currentEpoch() uint64 {
 
 // newSession opens a session and returns its token, unless the sessions
 // ended since epoch (then ""); the oldest goes when there are MaxSessions.
-func (p *Plugin) newSession(epoch uint64) string {
+func (p *Plugin) newSession(h plugin.Host, epoch uint64) string {
 	b := make([]byte, 32)
 	rand.Read(b)
 	tok := hex.EncodeToString(b)
 	now := p.clock()
+	idle, most := p.sessionLimits(h)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.epoch != epoch {
@@ -372,7 +399,7 @@ func (p *Plugin) newSession(epoch uint64) string {
 		p.sessions = map[string]*session{}
 	}
 	for k, ss := range p.sessions {
-		if now.Sub(ss.used) > SessionIdle || now.Sub(ss.started) > SessionMax {
+		if now.Sub(ss.used) > idle || now.Sub(ss.started) > most {
 			delete(p.sessions, k)
 		}
 	}
@@ -504,31 +531,6 @@ func (p *Plugin) handleDelete(c *plugin.Call, w http.ResponseWriter, r *http.Req
 	plugin.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-// handleRename gives a variable another name ({"to": name}); its
-// machines, flags and value stay. Audited with both names.
-func (p *Plugin) handleRename(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
-	s, err := p.open(c.Host)
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	var body struct {
-		To string `json:"to"`
-	}
-	if err := plugin.ReadJSON(r, 4096, &body); err != nil {
-		fail(w, err)
-		return
-	}
-	from := r.PathValue("name")
-	if err := s.Rename(from, body.To); err != nil {
-		fail(w, err)
-		return
-	}
-	c.Host.Audit(r, "vault.renamed", map[string]any{"name": from, "to": body.To})
-	changed(c.Host)
-	plugin.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
-}
-
 // handleReveal is the only way a value reaches a browser: a writing route,
 // refused read-only and audited with the variable's name.
 func (p *Plugin) handleReveal(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
@@ -537,12 +539,17 @@ func (p *Plugin) handleReveal(c *plugin.Call, w http.ResponseWriter, r *http.Req
 		fail(w, err)
 		return
 	}
-	v, err := s.Value(r.PathValue("name"))
+	name := r.PathValue("name")
+	v, err := s.Value(name)
 	if err != nil {
 		fail(w, err)
 		return
 	}
-	c.Host.Audit(r, "vault.revealed", map[string]any{"name": r.PathValue("name")})
+	// The value leaves only once its record is written.
+	if err := p.record(c.Host, r, "vault.revealed", pageAccess(r, "reveal", []string{name}, ResultRevealed)); err != nil {
+		failLog(w)
+		return
+	}
 	plugin.WriteJSON(w, http.StatusOK, map[string]string{"value": v})
 }
 
@@ -580,7 +587,7 @@ func (p *Plugin) handleSession(c *plugin.Call, w http.ResponseWriter, r *http.Re
 	p.tried(err == nil, errors.Is(err, vaultstore.ErrPassphrase))
 	tok := ""
 	if err == nil {
-		if tok = p.newSession(epoch); tok == "" {
+		if tok = p.newSession(c.Host, epoch); tok == "" {
 			// The sessions ended while the check ran, which keyMu leaves
 			// to a lock or a new passphrase after it.
 			err = vaultstore.ErrLocked
@@ -592,8 +599,10 @@ func (p *Plugin) handleSession(c *plugin.Call, w http.ResponseWriter, r *http.Re
 		fail(w, err)
 		return
 	}
+	p.touch(c.Host)
 	changed(c.Host)
-	plugin.WriteJSON(w, http.StatusOK, map[string]any{"session": tok, "idle": SessionIdle.Seconds(), "status": s.Status()})
+	idle, _ := p.sessionLimits(c.Host)
+	plugin.WriteJSON(w, http.StatusOK, map[string]any{"session": tok, "idle": idle.Seconds(), "status": s.Status()})
 }
 
 func (p *Plugin) handleEndSession(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
@@ -641,7 +650,7 @@ func (p *Plugin) handlePassphrase(c *plugin.Call, w http.ResponseWriter, r *http
 		if p.keyStep != nil {
 			p.keyStep()
 		}
-		tok = p.newSession(p.endSessions())
+		tok = p.newSession(c.Host, p.endSessions())
 	}
 	p.keyMu.Unlock()
 	c.Host.Audit(r, "vault.passphrase_set", map[string]any{"ok": err == nil, "change": change})
@@ -649,8 +658,10 @@ func (p *Plugin) handlePassphrase(c *plugin.Call, w http.ResponseWriter, r *http
 		fail(w, err)
 		return
 	}
+	p.touch(c.Host)
 	changed(c.Host)
-	plugin.WriteJSON(w, http.StatusOK, map[string]any{"session": tok, "idle": SessionIdle.Seconds(), "status": s.Status()})
+	idle, _ := p.sessionLimits(c.Host)
+	plugin.WriteJSON(w, http.StatusOK, map[string]any{"session": tok, "idle": idle.Seconds(), "status": s.Status()})
 }
 
 func (p *Plugin) handleLock(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
@@ -684,13 +695,9 @@ func (p *Plugin) handleRequests(c *plugin.Call, w http.ResponseWriter, r *http.R
 	plugin.WriteJSON(w, http.StatusOK, map[string]any{"requests": p.Pending()})
 }
 
-// Answer answers a pending request; the first answer wins, later ones
-// and answers after the request expired find no request. True means the
-// requesters get this answer.
-func (p *Plugin) Answer(id, answer string) bool {
-	return p.answerRequest(id, answer) != nil
-}
-
+// answerRequest answers a pending request and returns it; the first answer
+// wins, later ones and answers after the request expired find none (nil),
+// so a request returned is one whose requesters get this answer.
 func (p *Plugin) answerRequest(id, answer string) *Request {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -724,7 +731,7 @@ func (p *Plugin) handleAnswer(c *plugin.Call, w http.ResponseWriter, r *http.Req
 	case AnswerOnce, AnswerAlways:
 		// Letting a value out is the user's, behind the gate; denying
 		// needs no proof.
-		if !p.sessionOf(r, true) {
+		if !p.sessionOf(c.Host, r, true) {
 			refuseSession(c, w, r)
 			return
 		}
@@ -744,24 +751,42 @@ func (p *Plugin) handleAnswer(c *plugin.Call, w http.ResponseWriter, r *http.Req
 	plugin.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-// Log returns the access log, newest first.
+// Log returns the access log, newest first (none before the first use).
 func (p *Plugin) Log() []Access {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	out := append([]Access{}, p.log...)
-	slices.Reverse(out)
-	return out
+	l := p.alog
+	p.mu.Unlock()
+	if l == nil {
+		return []Access{}
+	}
+	return l.list()
 }
 
 func (p *Plugin) handleLog(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
-	plugin.WriteJSON(w, http.StatusOK, map[string]any{"log": p.Log()})
+	plugin.WriteJSON(w, http.StatusOK, map[string]any{"log": p.accessLog(c.Host).list()})
+}
+
+// failLog answers a release whose record could not be written: the value
+// does not leave.
+func failLog(w http.ResponseWriter) {
+	plugin.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": ResultLogFailed, "message": "the access could not be recorded, so the value was not released"})
+}
+
+// pageAccess is the record of values a page takes (a reveal, an export):
+// its connection's address and browser.
+func pageAccess(r *http.Request, tool string, names []string, result string) Access {
+	remote := r.RemoteAddr
+	if f := r.Header.Get("X-Forwarded-For"); f != "" {
+		remote = clip(f, 256) + " via " + remote
+	}
+	return Access{Time: time.Now().UTC(), Tool: tool, Names: names, Remote: remote, UserAgent: clip(r.UserAgent(), 256), Result: result}
 }
 
 // AgentOps: the MCP servers' requests.
 func (p *Plugin) AgentOps() []agentproto.Op { return []agentproto.Op{agentproto.OpVault} }
 
 // ServeAgent answers one MCP server request relayed by mc's agent.
-func (p *Plugin) ServeAgent(h plugin.Host, mc *machines.Machine, conn net.Conn, _ agentproto.Header) {
+func (p *Plugin) ServeAgent(h plugin.Host, mc *machines.Machine, conn net.Conn, hdr agentproto.Header) {
 	defer conn.Close()
 	if err := agentproto.WriteLine(conn, agentproto.Reply{OK: true}); err != nil {
 		return
@@ -771,6 +796,8 @@ func (p *Plugin) ServeAgent(h plugin.Host, mc *machines.Machine, conn net.Conn, 
 	if err := agentproto.ReadLine(conn, &req); err != nil {
 		return
 	}
+	// Who asked, as the agent saw it (never what the request says).
+	req.Process = hdr.Process
 	_ = conn.SetReadDeadline(time.Time{})
 	// The MCP server going away (its stream closed) ends a wait for an
 	// answer: nothing writes to the stream before the response.
@@ -801,15 +828,35 @@ func (p *Plugin) Handle(ctx context.Context, h plugin.Host, m string, req agentp
 		}
 		names = append(names, clip(n, vaultstore.MaxName))
 	}
-	rec := Access{Time: time.Now().UTC(), M: m, Tool: clip(req.Tool, 16), Names: names, Client: clip(req.Client, 64), Terminal: clip(req.Terminal, 64)}
-	resp := p.handle(ctx, h, m, req, &rec)
-	if resp.OK && rec.Result == "" {
-		rec.Result = "allowed"
-	} else if !resp.OK {
-		rec.Result = resp.Code
+	rec := Access{
+		Time: time.Now().UTC(), M: m, Tool: clip(req.Tool, 16), Names: names,
+		Client: clip(req.Client, 64), Terminal: clip(req.Terminal, 64), Cwd: clip(req.Cwd, 1024), Process: clipProcess(req.Process),
 	}
-	p.record(h, rec)
+	resp, result := p.handle(ctx, h, m, req, &rec)
+	rec.Result = result
+	// Values leave only once their record is written.
+	if err := p.record(h, nil, "vault.access", rec); err != nil {
+		return failure(ResultLogFailed, "the access could not be recorded, so the values were not released")
+	}
+	if released(result) {
+		p.touch(h)
+		if req.Tool == agentproto.VaultEnv {
+			resp.Run = runLimits(h)
+		}
+	}
 	return resp
+}
+
+// clipProcess bounds a process chain an agent reported.
+func clipProcess(ps []agentproto.VaultProcess) []agentproto.VaultProcess {
+	if len(ps) == 0 {
+		return nil
+	}
+	out := make([]agentproto.VaultProcess, 0, min(len(ps), agentproto.MaxVaultProcesses))
+	for _, x := range ps[:min(len(ps), agentproto.MaxVaultProcesses)] {
+		out = append(out, agentproto.VaultProcess{Pid: x.Pid, Name: clip(x.Name, 64)})
+	}
+	return out
 }
 
 func clip(s string, n int) string {
@@ -819,20 +866,6 @@ func clip(s string, n int) string {
 	return s
 }
 
-// noisy results are list calls and refusals (busy, not_found,
-// vault_locked, inject_only, bad_request…): a program can repeat them at
-// will, so they are coalesced in the log, rate-limited in the audit log
-// and do not make the pages reload. What lets a value out (allowed,
-// approved, approved_always) or is the user's answer (denied) is recorded
-// every time.
-func noisy(result string) bool {
-	switch result {
-	case "allowed", "approved", "approved_always", "denied":
-		return false
-	}
-	return true
-}
-
 func (p *Plugin) noisyAuditEvery() time.Duration {
 	if p.noisyEvery > 0 {
 		return p.noisyEvery
@@ -840,33 +873,43 @@ func (p *Plugin) noisyAuditEvery() time.Duration {
 	return noisyAuditEvery
 }
 
-func (p *Plugin) record(h plugin.Host, rec Access) {
+// record writes rec to the access log and to the audit log as event (r:
+// a page's request). A record that lets values out is written to the
+// access log's file and flushed first; when that fails it is recorded as
+// log_failed, and the error says the values must not leave. List calls
+// and refusals are coalesced and rate-limited (noisy); nothing else is.
+func (p *Plugin) record(h plugin.Host, r *http.Request, event string, rec Access) error {
 	quiet := noisy(rec.Result)
-	fields := map[string]any{
-		"machine": rec.M, "tool": rec.Tool, "names": rec.Names, "client": rec.Client, "terminal": rec.Terminal, "result": rec.Result,
-	}
+	kept, err := p.accessLog(h).add(rec, quiet, released(rec.Result))
+	fields := accessFields(kept)
 	audit := true
-	p.mu.Lock()
-	if n := len(p.log); quiet && n > 0 && sameCall(p.log[n-1], rec) {
-		last := &p.log[n-1]
-		last.Time = rec.Time
-		last.Count = max(last.Count, 1) + 1
-	} else {
-		p.log = append(p.log, rec)
-		if len(p.log) > MaxLog {
-			p.log = slices.Delete(p.log, 0, len(p.log)-MaxLog)
-		}
-	}
 	if quiet {
-		audit = p.auditNoisy(h, rec.M+"\x00"+rec.Result, rec.Time, fields)
+		p.mu.Lock()
+		audit = p.auditNoisy(h, kept.M+"\x00"+kept.Result, kept.Time, fields)
+		p.mu.Unlock()
 	}
-	p.mu.Unlock()
 	if audit {
-		h.Audit(nil, "vault.access", fields)
+		h.Audit(r, event, fields)
 	}
 	if !quiet {
 		p.changedThrottled(h)
 	}
+	return err
+}
+
+// accessFields are an access's fields in the audit log: names, never
+// values.
+func accessFields(a Access) map[string]any {
+	f := map[string]any{"tool": a.Tool, "names": a.Names, "result": a.Result}
+	for k, v := range map[string]string{"machine": a.M, "client": a.Client, "terminal": a.Terminal, "cwd": a.Cwd, "user_agent": a.UserAgent} {
+		if v != "" {
+			f[k] = v
+		}
+	}
+	if len(a.Process) > 0 {
+		f["process"] = a.Process
+	}
+	return f
 }
 
 // auditNoisy decides whether a noisy record of key (machine and result) is
@@ -958,37 +1001,32 @@ func (p *Plugin) changedThrottled(h plugin.Host) {
 	changed(h)
 }
 
-// sameCall reports whether b repeats a's call (machine, tool, names,
-// client, terminal, result).
-func sameCall(a, b Access) bool {
-	return a.M == b.M && a.Tool == b.Tool && a.Client == b.Client && a.Terminal == b.Terminal &&
-		a.Result == b.Result && slices.Equal(a.Names, b.Names)
-}
-
-func (p *Plugin) handle(ctx context.Context, h plugin.Host, m string, req agentproto.VaultRequest, rec *Access) agentproto.VaultResponse {
+// handle answers req and says what the access log records: the result
+// (refused: the response's code) and, in rec, the names deduplicated.
+func (p *Plugin) handle(ctx context.Context, h plugin.Host, m string, req agentproto.VaultRequest, rec *Access) (agentproto.VaultResponse, string) {
+	refuse := func(code, msg string) (agentproto.VaultResponse, string) { return failure(code, msg), code }
 	s, err := p.open(h)
 	if err != nil {
-		return failure("unavailable", err.Error())
+		return refuse("unavailable", err.Error())
 	}
 	if req.Tool == agentproto.VaultList {
-		rec.Result = "listed"
 		vars := []agentproto.VaultVariable{}
 		for _, i := range s.List() {
 			vars = append(vars, agentproto.VaultVariable{Name: i.Name, Description: i.Description, InjectOnly: i.InjectOnly, Approval: !i.Allows(m)})
 		}
-		return agentproto.VaultResponse{OK: true, Variables: vars}
+		return agentproto.VaultResponse{OK: true, Variables: vars}, ResultListed
 	}
 	switch req.Tool {
 	case agentproto.VaultGet:
 		if len(req.Names) != 1 {
-			return failure("bad_request", "get takes one name")
+			return refuse("bad_request", "get takes one name")
 		}
 	case agentproto.VaultEnv:
 		if len(req.Names) == 0 || len(req.Names) > MaxNames {
-			return failure("bad_request", "env takes 1 to 64 names")
+			return refuse("bad_request", "env takes 1 to 64 names")
 		}
 	default:
-		return failure("bad_request", "unknown tool")
+		return refuse("bad_request", "unknown tool")
 	}
 	names := []string{}
 	for _, n := range req.Names {
@@ -1001,47 +1039,50 @@ func (p *Plugin) handle(ctx context.Context, h plugin.Host, m string, req agentp
 	for _, n := range names {
 		i, ok := s.Get(n)
 		if !ok {
-			return failure("not_found", "no variable "+n)
+			return refuse("not_found", "no variable "+n)
 		}
 		if req.Tool == agentproto.VaultGet && i.InjectOnly {
-			return failure("inject_only", n+" can only be injected into a command (run_with_env)")
+			return refuse("inject_only", n+" can only be injected into a command (run_with_env)")
 		}
 		if !i.Allows(m) {
 			ask = append(ask, n)
 		}
 	}
 	if s.Status().Locked {
-		return failure("vault_locked", "the vault is locked; unlock it in the UI")
+		return refuse("vault_locked", "the vault is locked; unlock it in the UI")
 	}
+	result := ResultAllowed
 	if len(ask) > 0 {
 		answer := p.ask(ctx, h, m, req, ask)
 		switch answer {
 		case AnswerOnce:
-			rec.Result = "approved"
+			result = ResultApproved
 		case AnswerAlways:
-			rec.Result = "approved_always"
+			result = ResultApprovedAlways
 			for _, n := range ask {
 				if err := s.Allow(n, m); err != nil {
 					h.Logger().Printf("vault: allowing %s on %s: %v", n, m, err)
 				}
 			}
-		case "timeout":
-			return failure("denied", "nobody approved the request within the time allowed")
-		case "busy":
-			return failure("busy", "too many requests of this machine wait for an answer; answer them or try again later")
+		case answerTimeout:
+			return failure("denied", "nobody approved the request within the time allowed"), ResultExpired
+		case answerGone:
+			return failure("denied", "the request was cancelled"), ResultCancelled
+		case answerBusy:
+			return refuse("busy", "too many requests of this machine wait for an answer; answer them or try again later")
 		default:
-			return failure("denied", "the user denied the request")
+			return refuse(ResultDenied, "the user denied the request")
 		}
 	}
 	values := map[string]string{}
 	for _, n := range names {
 		v, err := s.Value(n)
 		if err != nil {
-			return failure(vaultstore.Code(err), err.Error())
+			return refuse(vaultstore.Code(err), err.Error())
 		}
 		values[n] = v
 	}
-	return agentproto.VaultResponse{OK: true, Values: values}
+	return agentproto.VaultResponse{OK: true, Values: values}, result
 }
 
 // ask shows the request on every page and waits for the first answer, the
@@ -1070,7 +1111,7 @@ func (p *Plugin) ask(ctx context.Context, h plugin.Host, m string, req agentprot
 		}
 		if mine >= MaxPendingPerMachine || len(p.pending) >= MaxPending {
 			p.mu.Unlock()
-			return "busy"
+			return answerBusy
 		}
 		idb := make([]byte, 12)
 		rand.Read(idb)
@@ -1078,7 +1119,7 @@ func (p *Plugin) ask(ctx context.Context, h plugin.Host, m string, req agentprot
 		r = &Request{
 			ID: hex.EncodeToString(idb), M: m, Tool: req.Tool, Names: names,
 			Client: clip(req.Client, 64), Terminal: clip(req.Terminal, 64), Cwd: clip(req.Cwd, 1024),
-			Created: now, Expires: now.Add(p.timeout()), done: make(chan struct{}),
+			Process: clipProcess(req.Process), Created: now, Expires: now.Add(p.timeout(h)), done: make(chan struct{}),
 		}
 		if p.pending == nil {
 			p.pending = map[string]*Request{}
@@ -1097,7 +1138,7 @@ func (p *Plugin) ask(ctx context.Context, h plugin.Host, m string, req agentprot
 	case <-r.done:
 	case <-t.C:
 		p.mu.Lock()
-		p.resolve(r, "timeout")
+		p.resolve(r, answerTimeout)
 		p.mu.Unlock()
 	case <-ctx.Done():
 		gone = true
@@ -1118,9 +1159,10 @@ func (p *Plugin) ask(ctx context.Context, h plugin.Host, m string, req agentprot
 	if announce {
 		h.Broadcast(ID, m, map[string]any{"type": "resolved", "id": r.ID, "answer": answer})
 	}
-	if gone && answer == "" {
-		// Others still wait for the request; this requester left.
-		return AnswerDeny
+	if gone && (answer == "" || answer == AnswerDeny) {
+		// This requester left: others may still wait for the request, or it
+		// was the last and so denied it.
+		return answerGone
 	}
 	return answer
 }

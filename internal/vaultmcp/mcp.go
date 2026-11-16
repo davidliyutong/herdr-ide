@@ -262,15 +262,15 @@ func tools() []map[string]any {
 		},
 		{
 			"name": "run_with_env",
-			"description": "Run a shell command (sh -c) with the named variables in its environment, and return its exit status and output (stdout and stderr, at most 64 KiB). " +
-				"Occurrences of the values in the output are replaced with ***. Default timeout 120 s, at most 600 s.",
+			"description": "Run a shell command (sh -c) with the named variables in its environment, and return its exit status and output (stdout and stderr, at most 64 KiB unless the vault's settings say otherwise). " +
+				"Occurrences of the values in the output are replaced with ***. The default and longest timeouts are the vault's settings (120 s and 600 s unless changed).",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"command": map[string]any{"type": "string", "description": "The command, run by sh -c."},
 					"names":   map[string]any{"type": "array", "items": str, "description": "The variables to set."},
 					"cwd":     map[string]any{"type": "string", "description": "Working directory (default: the server's)."},
-					"timeout": map[string]any{"type": "integer", "description": "Seconds (default 120, at most 600)."},
+					"timeout": map[string]any{"type": "integer", "description": "Seconds (by default the vault's setting, 120 unless changed; at most its longest, 600 unless changed)."},
 				},
 				"required": []string{"command", "names"},
 			},
@@ -331,7 +331,7 @@ func (s *Server) call(ctx context.Context, params json.RawMessage) (any, *rpcErr
 		if err != nil {
 			return text(err.Error(), true), nil
 		}
-		out, failed := s.Runner.Run(ctx, a.Command, resp.Values, a.Cwd, time.Duration(a.Timeout*float64(time.Second)))
+		out, failed := s.Runner.with(resp.Run).Run(ctx, a.Command, resp.Values, a.Cwd, time.Duration(a.Timeout*float64(time.Second)))
 		return text(out, failed), nil
 	}
 	return nil, &rpcError{Code: -32602, Message: "unknown tool: " + p.Name}

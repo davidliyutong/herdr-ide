@@ -127,6 +127,10 @@ type Header struct {
 	// the header line, that many bytes of JSON (at most MaxBody); the
 	// core sends params larger than MaxInline so.
 	ParamsLength int64 `json:"params_length,omitempty"`
+
+	// Process (OpVault) is the process connected to vault.sock (peer
+	// credentials) and its parents, as the agent saw them.
+	Process []VaultProcess `json:"process,omitempty"`
 }
 
 // Reply is the first line written back by the acceptor.

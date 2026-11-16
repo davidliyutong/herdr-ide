@@ -10,17 +10,12 @@ import (
 	"time"
 
 	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/brand"
+	"herdr-ide/internal/vaultmcp"
 )
 
 // maxVaultConns bounds the MCP server connections relayed at once; more
 // wait in the listen queue.
 const maxVaultConns = 16
-
-// MCPLinkName is the stable path's name below <data dir>/bin: a link to
-// the executable that serves the mcp command (this agent's, or the core's
-// for the local machine), so an MCP configuration outlives upgrades.
-const MCPLinkName = brand.Slug + "-mcp"
 
 // serveVault accepts connections of the variable vault's MCP servers on
 // <run>/vault.sock (0600, in the 0700 run directory, and only from this
@@ -30,7 +25,8 @@ const MCPLinkName = brand.Slug + "-mcp"
 func (a *Agent) serveVault(ctx context.Context) {
 	slots := make(chan struct{}, maxVaultConns)
 	a.serveSocket(ctx, "vault", filepath.Join(a.runDir, "vault.sock"), func(c net.Conn) {
-		if _, uid, err := peerCred(c.(*net.UnixConn)); err != nil || uid != os.Getuid() {
+		pid, uid, err := peerCred(c.(*net.UnixConn))
+		if err != nil || uid != os.Getuid() {
 			a.logger.Printf("vault: refused a connection from uid %d (%v)", uid, err)
 			c.Close()
 			return
@@ -43,15 +39,37 @@ func (a *Agent) serveVault(ctx context.Context) {
 		}
 		go func() {
 			defer func() { <-slots }()
-			a.relayVault(c)
+			a.relayVault(c, processChain(pid))
 		}()
 	})
 }
 
+// processChain is the process pid (connected to vault.sock) and its
+// parents, up to agentproto.MaxVaultProcesses, as the kernel names them:
+// the core records who asked with every access (the request's own claims
+// about its client are not trusted). It stops at init and at a process
+// that is gone.
+func processChain(pid int) []agentproto.VaultProcess {
+	var chain []agentproto.VaultProcess
+	for pid > 1 && len(chain) < agentproto.MaxVaultProcesses {
+		ppid, name, ok := parentOf(pid)
+		if !ok {
+			break
+		}
+		chain = append(chain, agentproto.VaultProcess{Pid: pid, Name: name})
+		if ppid == pid {
+			break
+		}
+		pid = ppid
+	}
+	return chain
+}
+
 // relayVault pipes one MCP server connection to the core, once it sent its
-// request (within 30 s, as the core waits for it).
-func (a *Agent) relayVault(c net.Conn) {
-	a.relayFirst(c, agentproto.OpVault, 30*time.Second, func(rep agentproto.Reply) {
+// request (within 30 s, as the core waits for it), with the process chain
+// behind it in the stream's header.
+func (a *Agent) relayVault(c net.Conn, chain []agentproto.VaultProcess) {
+	a.relayFirst(c, agentproto.Header{Op: agentproto.OpVault, Process: chain}, 30*time.Second, func(rep agentproto.Reply) {
 		// The core refused (the plugin is off): the MCP server reads why.
 		code := rep.Code
 		if code == "" {
@@ -76,13 +94,14 @@ func (a *Agent) linkMCP() {
 	}
 }
 
-// LinkMCP makes dir/<slug>-mcp a link to exe, replacing another link
-// atomically.
+// LinkMCP makes dir/<slug>-mcp (vaultmcp.LinkName: the stable path an MCP
+// configuration names, so it outlives upgrades) a link to exe, replacing
+// another link atomically.
 func LinkMCP(dir, exe string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	link := filepath.Join(dir, MCPLinkName)
+	link := filepath.Join(dir, vaultmcp.LinkName)
 	if cur, err := os.Readlink(link); err == nil && cur == exe {
 		return nil
 	}

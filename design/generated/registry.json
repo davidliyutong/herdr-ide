@@ -367,6 +367,8 @@
     "settings.group.text",
     "settings.group.usageAdaptive",
     "settings.group.usageProviders",
+    "settings.group.vaultRun",
+    "settings.group.vaultSessions",
     "settings.gui.enabled",
     "settings.gui.gpu",
     "settings.gui.gpu.all",
@@ -390,6 +392,7 @@
     "settings.section.plugins",
     "settings.section.terminal",
     "settings.section.usage",
+    "settings.section.vault",
     "settings.terminal.bell",
     "settings.terminal.bell.none",
     "settings.terminal.bell.sound",
@@ -474,6 +477,13 @@
     "settings.usage.refreshWorking",
     "settings.usage.statusBar",
     "settings.usage.thresholds",
+    "settings.vault.approvalTimeout",
+    "settings.vault.autoLock",
+    "settings.vault.runMaxTimeout",
+    "settings.vault.runOutput",
+    "settings.vault.runTimeout",
+    "settings.vault.sessionIdle",
+    "settings.vault.sessionMax",
     "settings.window.zoom"
   ],
   "keybindings": {
@@ -973,6 +983,13 @@
       "80",
       "95"
     ],
+    "vault.approvalTimeout": 60,
+    "vault.autoLock": 0,
+    "vault.runMaxTimeout": 600,
+    "vault.runOutput": 64,
+    "vault.runTimeout": 120,
+    "vault.sessionIdle": 30,
+    "vault.sessionMax": 12,
     "window.zoom": 100
   }
 }

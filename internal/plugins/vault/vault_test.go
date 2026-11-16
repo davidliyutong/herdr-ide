@@ -23,13 +23,15 @@ import (
 
 // fakeHost records what the plugin broadcasts and audits.
 type fakeHost struct {
+	mg       *machines.Manager
+	st       *settings.Store
 	mu       sync.Mutex
 	messages []map[string]any
 	audits   []string
 	sent     chan map[string]any
 }
 
-func (h *fakeHost) Machines() *machines.Manager { return nil }
+func (h *fakeHost) Machines() *machines.Manager { return h.mg }
 func (h *fakeHost) Broadcast(id, m string, data any) {
 	d := data.(map[string]any)
 	h.mu.Lock()
@@ -46,7 +48,7 @@ func (h *fakeHost) Audit(r *http.Request, event string, fields map[string]any) {
 	h.mu.Unlock()
 }
 func (h *fakeHost) ReadOnly() bool            { return false }
-func (h *fakeHost) Settings() *settings.Store { return nil }
+func (h *fakeHost) Settings() *settings.Store { return h.st }
 func (h *fakeHost) Logger() *log.Logger       { return log.New(log.Writer(), "", 0) }
 func (h *fakeHost) auditLog() string {
 	h.mu.Lock()
@@ -155,10 +157,10 @@ func TestApprovals(t *testing.T) {
 		if len(p.Pending()) != 1 {
 			t.Error("not pending")
 		}
-		if !p.Answer(req.ID, a) {
+		if p.answerRequest(req.ID, a) == nil {
 			t.Fatal("answer refused")
 		}
-		if p.Answer(req.ID, AnswerDeny) {
+		if p.answerRequest(req.ID, AnswerDeny) != nil {
 			t.Error("a second answer was taken")
 		}
 	}
@@ -373,7 +375,7 @@ func TestPassphraseAndSessions(t *testing.T) {
 	// A session is not opened by a check that crossed a lock.
 	epoch := p.currentEpoch()
 	c.do("POST", "/api/p/vault/lock", "")
-	if tok := p.newSession(epoch); tok != "" {
+	if tok := p.newSession(h, epoch); tok != "" {
 		t.Error("a session opened across a lock")
 	}
 	// Refusals of the gate and reveals are audited.
@@ -510,7 +512,7 @@ func TestAnswerRacingTheTimeout(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				took[j] = p.Answer(req.ID, AnswerOnce)
+				took[j] = p.answerRequest(req.ID, AnswerOnce) != nil
 			}()
 		}
 		wg.Wait()
@@ -582,7 +584,7 @@ func TestPendingRequestsAreBounded(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
-	if !p.Answer(a.ID, AnswerOnce) {
+	if p.answerRequest(a.ID, AnswerOnce) == nil {
 		t.Fatal("answer refused")
 	}
 	for i := 0; i < 2; i++ {
@@ -590,7 +592,7 @@ func TestPendingRequestsAreBounded(t *testing.T) {
 			t.Errorf("shared answer %+v", r)
 		}
 	}
-	if !p.Answer(req.ID, AnswerDeny) {
+	if p.answerRequest(req.ID, AnswerDeny) == nil {
 		t.Fatal("answer refused")
 	}
 	if r := <-results; r.Code != "denied" {

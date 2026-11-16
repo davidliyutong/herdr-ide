@@ -25,6 +25,20 @@ type VaultRequest struct {
 	Client   string `json:"client,omitempty"`
 	Terminal string `json:"terminal,omitempty"`
 	Cwd      string `json:"cwd,omitempty"`
+	// Process is never read from the request: the core takes it from the
+	// stream's header, where the agent put what it saw (Header.Process).
+	Process []VaultProcess `json:"-"`
+}
+
+// MaxVaultProcesses is how many processes of the chain behind a request
+// the agent reports: the one connected to vault.sock and its parents.
+const MaxVaultProcesses = 8
+
+// VaultProcess is a process of the chain behind a vault request: its pid
+// and its name (the kernel's short name, which a program can set itself).
+type VaultProcess struct {
+	Pid  int    `json:"pid"`
+	Name string `json:"name,omitempty"`
 }
 
 // VaultVariable is a variable as list shows it.
@@ -37,12 +51,24 @@ type VaultVariable struct {
 }
 
 // VaultResponse answers a VaultRequest. Code is one of vault_locked,
-// not_found, inject_only, denied, plugin_disabled, unavailable,
-// bad_request.
+// not_found, inject_only, denied, busy, corrupt, log_failed (the access
+// could not be recorded, so no value was released), plugin_disabled,
+// unavailable, bad_request.
 type VaultResponse struct {
 	OK        bool              `json:"ok"`
 	Code      string            `json:"code,omitempty"`
 	Error     string            `json:"error,omitempty"`
 	Variables []VaultVariable   `json:"variables,omitempty"`
 	Values    map[string]string `json:"values,omitempty"`
+	// Run bounds the command an env's values are for (run_with_env), as
+	// the vault's settings say.
+	Run *VaultRun `json:"run,omitempty"`
+}
+
+// VaultRun bounds run_with_env's command: its default and longest
+// timeout in seconds, and how much output it returns, in bytes.
+type VaultRun struct {
+	Timeout    int `json:"timeout"`
+	MaxTimeout int `json:"max_timeout"`
+	MaxOutput  int `json:"max_output"`
 }
