@@ -3,6 +3,7 @@ package usage
 import (
 	"context"
 	"errors"
+	"math"
 	"os"
 	"path"
 	"sort"
@@ -107,9 +108,93 @@ func kimiDetail(d map[string]any) (pct float64, resets int64, ok bool) {
 	return clampPct(used / limit * 100), timeOf(first(d, "resetTime", "reset_time", "resetAt")), true
 }
 
-// parseKimiUsage reads usage (the weekly quota) and limits[] (windows of
-// window.duration timeUnits).
+// parseKimiUsage reads the answer of /coding/v1/usages in either shape it
+// has had: usages {limit_5h, limit_7d, limit_month_total, limit_month_code}
+// (Kimi Code 2.2.0's), or usage (the weekly quota) and limits[]. With both,
+// the one with more windows counts (the newer when they tie); the booster
+// wallet comes with the newer.
 func parseKimiUsage(a *Account, m map[string]any) {
+	var older, newer Account
+	parseKimiLimits(&older, m)
+	parseKimiUsages(&newer, m)
+	a.Windows = newer.Windows
+	if len(older.Windows) > len(newer.Windows) {
+		a.Windows = older.Windows
+	}
+	a.Credits = kimiWallet(obj(m["boosterWallet"]))
+}
+
+// parseKimiUsages reads usages: each {used_ratio (0–1, a number or a
+// string), reset_time}; the month's total counts Kimi and Kimi Code, and
+// limit_month_code is Kimi Code's part of it, labelled Code.
+func parseKimiUsages(a *Account, m map[string]any) {
+	u := obj(m["usages"])
+	add := func(key, kind, label string, sec int64) {
+		x := obj(u[key])
+		r, ok := num(x["used_ratio"])
+		if !ok {
+			return
+		}
+		a.Windows = append(a.Windows, Window{Kind: kind, Label: label, UsedPct: clampPct(r * 100), ResetsAt: timeOf(x["reset_time"]), WindowSec: sec})
+	}
+	add("limit_5h", KindSession, "", 5*3600)
+	add("limit_7d", KindWeekly, "", 7*86400)
+	// A month taken as 30 days (for the pace; its length then does not
+	// change from one month to the next).
+	add("limit_month_total", KindMonthly, "", 30*86400)
+	add("limit_month_code", KindMonthly, "Code", 30*86400)
+}
+
+// kimiWallet reads boosterWallet, extra usage bought beyond the plan, as
+// Kimi Code reads it: a balance of type BOOSTER with amount and amountLeft
+// in millionths of a cent, monthlyUsed and monthlyChargeLimit
+// {priceInCents, currency}, monthlyChargeLimitEnabled. Nil without one.
+func kimiWallet(w map[string]any) *Credits {
+	b := obj(w["balance"])
+	if str(b["type"]) != "BOOSTER" {
+		return nil
+	}
+	if amount, ok := num(b["amount"]); !ok || amount <= 0 {
+		return nil
+	}
+	// fixed is an amount in millionths of a cent, in currency units: at
+	// least a cent when there is any.
+	fixed := func(v float64) float64 {
+		c := v / 1e6
+		if c > 0 && c < 1 {
+			c = 1
+		}
+		return math.Round(c) / 100
+	}
+	money := func(x map[string]any) (float64, string, bool) {
+		c, ok := num(x["priceInCents"])
+		return math.Trunc(c) / 100, str(x["currency"]), ok
+	}
+	left := 0.0
+	if v, ok := num(b["amountLeft"]); ok {
+		left = fixed(v)
+	}
+	limit, limitCur, hasLimit := money(obj(w["monthlyChargeLimit"]))
+	used, usedCur, hasUsed := money(obj(w["monthlyUsed"]))
+	cur := "USD"
+	if limitCur != "" {
+		cur = limitCur
+	} else if usedCur != "" {
+		cur = usedCur
+	}
+	c := &Credits{Balance: floatPtr(left), Enabled: boolPtr(true), Unit: strings.ToLower(cur)}
+	if hasUsed {
+		c.Used = floatPtr(used)
+	}
+	if w["monthlyChargeLimitEnabled"] == true && hasLimit && limit > 0 {
+		c.Limit = floatPtr(limit)
+	}
+	return c
+}
+
+// parseKimiLimits reads usage (the weekly quota) and limits[] (windows of
+// window.duration timeUnits).
+func parseKimiLimits(a *Account, m map[string]any) {
 	if pct, resets, ok := kimiDetail(obj(m["usage"])); ok {
 		a.Windows = append(a.Windows, Window{Kind: KindWeekly, UsedPct: pct, ResetsAt: resets, WindowSec: 7 * 86400})
 	}

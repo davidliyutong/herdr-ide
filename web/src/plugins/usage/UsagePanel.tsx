@@ -485,7 +485,13 @@ function Money({ account: a }: { account: UsageAccount }) {
   const c = a.credits;
   const parts: string[] = [];
   if (c) {
-    const unit = (v: number) => (c.unit === 'usd' ? money(v) : v.toFixed(2).replace(/\.00$/, ''));
+    // Dollars, another currency by its code (Kimi's wallet), or credits.
+    const unit = (v: number) =>
+      c.unit === 'usd'
+        ? money(v)
+        : /^[a-z]{3}$/.test(c.unit ?? '')
+          ? `${v.toFixed(2)} ${c.unit!.toUpperCase()}`
+          : v.toFixed(2).replace(/\.00$/, '');
     if (c.unlimited) parts.push(t('usage.credits.unlimited'));
     else if (c.balance !== undefined) parts.push(t('usage.credits.balance', { v: unit(c.balance) }));
     if (c.used !== undefined && c.limit !== undefined) parts.push(t('usage.credits.usedOf', { used: unit(c.used), limit: unit(c.limit) }));

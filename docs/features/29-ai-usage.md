@@ -62,7 +62,7 @@ script run over ssh).
 | Codex | `$CODEX_HOME` or `~/.codex/auth.json`, and each of `usage.codexHomes` | `GET chatgpt.com/backend-api/wham/usage` with `ChatGPT-Account-Id`: `rate_limit.primary_window`/`secondary_window`, `additional_rate_limits`, `credits`, `plan_type`. Without an answer (network) or with an expired token: the newest session log's `rate_limits` (read backwards from its end, and not again while the log is unchanged), as `stale` with `code: from_log` | `tokens.account_id`; email and plan from the id token's claims |
 | Grok | `$GROK_HOME` or `~/.grok/auth.json`, x.ai's issuer first | `GET cli-chat-proxy.grok.com/v1/billing?format=credits` (`X-XAI-Token-Auth: xai-grok-cli`): `creditUsagePercent` (else on-demand used over cap) for the period, `productUsage`; `/v1/settings` for the plan | `user_id` |
 | Antigravity | none: the running language server | `/bin/ps` (else `ps` on the `PATH`) for the agent's user's own Antigravity `language_server` and its `--csrf_token`; its loopback ports (`/proc` on Linux, `/usr/sbin/lsof` on macOS); `POST https://127.0.0.1:<port>/exa.language_server_pb.LanguageServerService/GetUserStatus` (then HTTP, then an empty body; no connection is kept); without one, `agy -p /usage --output-format json` (20 s, in a process group of its own that is killed when it exits or times out), at most every 10 minutes (the polls in between get its last answer) and not again for 30 minutes after it failed: it takes seconds and a few hundred MB | a hash of the email; agy 1.5 names none, so the email comes from the end of agy's log, `~/.gemini/antigravity-cli/cli.log` (`authenticated successfully as …`), and the account merges with the language server's across machines |
-| Kimi Code | `$KIMI_CODE_HOME` or `~/.kimi-code/credentials/kimi-code*.json`; an ended token of `kimi-code.json` is renewed first (below) | `GET api.kimi.com/coding/v1/usages`: `usage` (weekly), `limits[]` (`window.duration` × `timeUnit`); numbers may be strings | the token's `user_id` (or `sub`) claim |
+| Kimi Code | `$KIMI_CODE_HOME` or `~/.kimi-code/credentials/kimi-code*.json`; an ended token of `kimi-code.json` is renewed first (below) | `GET api.kimi.com/coding/v1/usages`, in either shape, the one with more windows (Kimi Code 2.2.0's when they tie): `usages` as Kimi Code 2.2.0 reads it (`limit_5h`, `limit_7d`, `limit_month_total`, and `limit_month_code`, Kimi Code's part of the month, labelled Code; each `used_ratio` 0–1 and `reset_time`; a month taken as 30 days) with `boosterWallet` (extra usage: its balance, used this month and monthly limit, in its currency), or `usage` (weekly) and `limits[]` (`window.duration` × `timeUnit`); numbers may be strings | the token's `user_id` (or `sub`) claim |
 | DeepSeek | the key file the panel writes (the user's choice, first), `DEEPSEEK_API_KEY`, or Claude Code's `settings.json` when its `ANTHROPIC_BASE_URL` is DeepSeek's (`https` on `api.deepseek.com` or another host below `deepseek.com`; a gateway that only has deepseek in its name does not count) | `GET api.deepseek.com/user/balance`: `balance_infos`, `is_available` (no windows) | a hash of the key |
 
 Tokens are read from the files at each poll, sent only to their provider's
@@ -369,7 +369,7 @@ status pages. Resources and retention:
 
 - `internal/usage/usage_test.go`: each provider against an `httptest`
   server or fixture files: headers, windows, credits, expired tokens (not
-  sent), 401, 429 with `Retry-After`, Kimi's string numbers, Codex's log
+  sent), 401, 429 with `Retry-After`, Kimi's string numbers, both of its answers' shapes and its booster wallet, Codex's log
   fallback, the keychain, Antigravity's `ps` (other users' servers left
   out), `lsof`, `/proc` and `agy` paths, the loopback client, the key
   file's modes, no token in a reply, redirects not followed, a lookalike
@@ -422,7 +422,8 @@ status pages. Resources and retention:
 - `web/src/__tests__/usage.test.ts`: ordering, the core's alerts shown
   once per browser (again in a snapshot, from another page, after a
   reload; none older than an hour), the cost sums, windows grouped by their models, the panel
-  (tiles, the overview's rows and spend, a service's cards, its spend,
+  (tiles, the overview's rows and spend, a service's cards, a wallet's
+  currency, its spend,
   used or left) and the status bar item (hidden with `usage.statusBar`
   off) against a stubbed core, the panel with ready machines in the store
   (no render loop), no `watch` from a hidden page, the spend read again

@@ -254,6 +254,14 @@ describe('usage panel and status item', () => {
     // Refresh asks the core.
     await act(async () => host.querySelector<HTMLButtonElement>('.usage-refresh')!.click());
     expect(calls).toContain('POST /api/p/usage/refresh');
+    // A wallet in another currency says which.
+    await act(async () =>
+      useUsage.setState({
+        snapshot: snapshot([account('kimi:k', [10], { credits: { balance: 12.5, used: 3, limit: 50, enabled: true, unit: 'cny' } })]),
+      }),
+    );
+    await act(async () => setView({ tab: 'kimi' }));
+    expect(host.querySelector('.usage-money')!.textContent).toBe('Credits: 12.50 CNY · Extra usage: 3.00 CNY of 50.00 CNY');
   });
 
   it('does not keep the core asking from a hidden page', async () => {

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -369,6 +370,90 @@ func TestKimiStringNumbers(t *testing.T) {
 	write(t, filepath.Join(e.Home, ".kimi-code/credentials/kimi-code.json"), `{"access_token":"x","expires_at":1}`)
 	if a = one(t, Limits(context.Background(), e, Options{Providers: []string{Kimi}})); a.Status != StatusStale {
 		t.Errorf("expired %+v", a)
+	}
+}
+
+// Kimi Code 2.2.0's shape: usages with used_ratio (a number or a string)
+// and reset_time, the month's code part labelled, and the booster wallet.
+func TestKimiUsagesShape(t *testing.T) {
+	api := newFakeAPI(t)
+	api.json("/coding/v1/usages", `{"usages":{
+	    "limit_5h":{"used_ratio":0.42,"reset_time":"2026-11-16T15:00:00Z"},
+	    "limit_7d":{"used_ratio":"0.1","reset_time":"2026-11-20T00:00:00Z"},
+	    "limit_month_total":{"used_ratio":0.6,"reset_time":"2026-12-01T00:00:00Z"},
+	    "limit_month_code":{"used_ratio":0.25,"reset_time":"2026-12-01T00:00:00Z"},
+	    "limit_unknown":{"used_ratio":0.9}},
+	  "boosterWallet":{"balance":{"type":"BOOSTER","amount":"5000000000","amountLeft":1234000000},
+	    "monthlyChargeLimitEnabled":true,"monthlyChargeLimit":{"priceInCents":5000,"currency":"CNY"},"monthlyUsed":{"priceInCents":"300","currency":"CNY"}}}`)
+	e := testEnv(t, api)
+	write(t, filepath.Join(e.Home, ".kimi-code/credentials/kimi-code.json"),
+		`{"access_token":"`+jwt(map[string]any{"user_id": "k-1"})+`","expires_at":`+itoa(testNow.Add(time.Hour).Unix())+`}`)
+	a := one(t, Limits(context.Background(), e, Options{Providers: []string{Kimi}}))
+	want := []Window{
+		{Kind: KindSession, UsedPct: 42, ResetsAt: time.Date(2026, 11, 16, 15, 0, 0, 0, time.UTC).Unix(), WindowSec: 18000},
+		{Kind: KindWeekly, UsedPct: 10, ResetsAt: time.Date(2026, 11, 20, 0, 0, 0, 0, time.UTC).Unix(), WindowSec: 604800},
+		{Kind: KindMonthly, UsedPct: 60, ResetsAt: time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC).Unix(), WindowSec: 30 * 86400},
+		{Kind: KindMonthly, Label: "Code", UsedPct: 25, ResetsAt: time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC).Unix(), WindowSec: 30 * 86400},
+	}
+	if a.Status != StatusOK || !reflect.DeepEqual(a.Windows, want) {
+		t.Fatalf("windows %+v", a.Windows)
+	}
+	c := a.Credits
+	if c == nil || *c.Balance != 12.34 || *c.Used != 3 || *c.Limit != 50 || c.Unit != "cny" || !*c.Enabled {
+		t.Errorf("wallet %+v", c)
+	}
+}
+
+func TestKimiShapesAndWallets(t *testing.T) {
+	older := `"usage":{"limit":"100","used":"30","resetTime":"2026-11-20T00:00:00Z"},
+	  "limits":[{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","remaining":"40"}}]`
+	newer2 := `"usages":{"limit_5h":{"used_ratio":0.5},"limit_7d":{"used_ratio":0.3}}`
+	newer4 := `"usages":{"limit_5h":{"used_ratio":0.5},"limit_7d":{"used_ratio":0.3},"limit_month_total":{"used_ratio":0.2},"limit_month_code":{"used_ratio":0.1}}`
+	newer1 := `"usages":{"limit_7d":{"used_ratio":0.3}}`
+	for _, c := range []struct {
+		name, body string
+		kinds      []string
+	}{
+		{"older only", "{" + older + "}", []string{"session", "weekly"}},
+		{"both, the newer richer", "{" + older + "," + newer4 + "}", []string{"session", "weekly", "monthly", "monthly"}},
+		{"both, the older richer", "{" + older + "," + newer1 + "}", []string{"session", "weekly"}},
+		{"both, as rich: the newer", "{" + older + "," + newer2 + "}", []string{"session", "weekly"}},
+		{"neither", `{"usages":{},"limits":[]}`, nil},
+	} {
+		var a Account
+		var m map[string]any
+		if err := json.Unmarshal([]byte(c.body), &m); err != nil {
+			t.Fatal(c.name, err)
+		}
+		parseKimiUsage(&a, m)
+		var kinds []string
+		for _, w := range a.Windows {
+			kinds = append(kinds, w.Kind)
+		}
+		if !reflect.DeepEqual(kinds, c.kinds) {
+			t.Errorf("%s: %v", c.name, kinds)
+		}
+		if c.name == "both, as rich: the newer" && a.Windows[1].UsedPct != 30 {
+			t.Errorf("%s: %+v", c.name, a.Windows)
+		}
+	}
+	for _, c := range []struct {
+		name, wallet string
+		want         *Credits
+	}{
+		{"none", `null`, nil},
+		{"not a booster", `{"balance":{"type":"GIFT","amount":100}}`, nil},
+		{"empty", `{"balance":{"type":"BOOSTER","amount":0}}`, nil},
+		{"no limit, a cent at least, dollars", `{"balance":{"type":"BOOSTER","amount":1000000,"amountLeft":400000},"monthlyChargeLimitEnabled":false,"monthlyChargeLimit":{"priceInCents":900}}`,
+			&Credits{Balance: floatPtr(0.01), Enabled: boolPtr(true), Unit: "usd"}},
+	} {
+		var m map[string]any
+		json.Unmarshal([]byte(`{"boosterWallet":`+c.wallet+`}`), &m)
+		var a Account
+		parseKimiUsage(&a, m)
+		if !reflect.DeepEqual(a.Credits, c.want) {
+			t.Errorf("%s: %+v", c.name, a.Credits)
+		}
 	}
 }
 
