@@ -2090,6 +2090,10 @@ button.download-name:hover {
   min-height: var(--h-toolbar);
   padding: 0 14px;
 }
+/* A fourth answer (Skip) stands apart, at the start of the row. */
+.dialog-actions .dialog-extra {
+  margin-right: auto;
+}
 button.primary,
 .btn.primary {
   background: var(--accent);

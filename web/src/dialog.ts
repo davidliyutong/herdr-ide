@@ -24,7 +24,9 @@ export type DialogRequest =
       alt?: string;
       /** What the Cancel button says (Skip), Cancel by default. */
       cancel?: string;
-      resolve(ok: boolean, checked?: boolean, alt?: boolean): void;
+      /** A fourth answer, at the start of the row (Skip beside Cancel). */
+      extra?: string;
+      resolve(ok: boolean, checked?: boolean, alt?: boolean, extra?: boolean): void;
     }
   | {
       kind: 'workspace';
@@ -83,21 +85,24 @@ export function confirmCheckDialog(opts: {
 }
 
 /** A question with three answers, cancel (Escape too), alt and confirm,
- * and a box to tick: resolves with the answer and the box's state. */
+ * a fourth one (extra) when given, and a box to tick: resolves with the
+ * answer and the box's state. */
 export function choiceDialog(opts: {
   title: string;
   message: string;
   confirm: string;
   alt: string;
   cancel?: string;
+  extra?: string;
   check?: string;
   checked?: boolean;
-}): Promise<{ answer: 'confirm' | 'alt' | 'cancel'; checked: boolean }> {
+}): Promise<{ answer: 'confirm' | 'alt' | 'extra' | 'cancel'; checked: boolean }> {
   return new Promise((resolve) =>
     show({
       kind: 'confirm',
       ...opts,
-      resolve: (ok, checked, alt) => resolve({ answer: ok ? 'confirm' : alt ? 'alt' : 'cancel', checked: !!checked }),
+      resolve: (ok, checked, alt, extra) =>
+        resolve({ answer: ok ? 'confirm' : alt ? 'alt' : extra ? 'extra' : 'cancel', checked: !!checked }),
     }),
   );
 }

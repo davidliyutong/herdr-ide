@@ -2,7 +2,8 @@
 // files and folders dropped from the computer or chosen with Upload Files…
 // and Upload Folder…, into a folder of the machine, with the folders'
 // structure. Names already taken there are asked about (replace, keep
-// both, skip; the answer for all of them with a box); each file or folder
+// both, skip when other names go too, the answer for all of them with a
+// box; cancel stops the whole upload); each file or folder
 // dropped is one upload of the uploads panel (transfers.ts), with its
 // progress and Cancel. In the desktop app, files of its own machine are
 // copied where they are instead.
@@ -140,8 +141,14 @@ export function innerFolders(parts: readonly Picked[]): string[] {
 }
 
 /** Asks what to do with each name taken; with the box ticked, the answer
- * holds for the rest. */
-export async function askConflicts(names: readonly string[], folder: (n: string) => boolean, dir: string): Promise<Map<string, Conflict>> {
+ * holds for the rest. Cancel (Escape) stops the whole upload: undefined.
+ * Skip is offered when the upload holds other names (others). */
+export async function askConflicts(
+  names: readonly string[],
+  folder: (n: string) => boolean,
+  dir: string,
+  others = names.length > 1,
+): Promise<Map<string, Conflict> | undefined> {
   const out = new Map<string, Conflict>();
   let all: Conflict | undefined;
   for (let k = 0; k < names.length; k++) {
@@ -156,9 +163,10 @@ export async function askConflicts(names: readonly string[], folder: (n: string)
       message: t(folder(n) ? 'files.upload.folderExists' : 'files.upload.fileExists', { name: n, dir }),
       confirm: t('files.upload.replace'),
       alt: t('files.upload.keepBoth'),
-      cancel: t('files.upload.skip'),
+      extra: others ? t('files.upload.skip') : undefined,
       check: left ? t('files.upload.applyAll', { n: left }) : undefined,
     });
+    if (r.answer === 'cancel') return undefined;
     const c: Conflict = r.answer === 'confirm' ? 'replace' : r.answer === 'alt' ? 'keep' : 'skip';
     out.set(n, c);
     if (r.checked) all = c;
@@ -169,7 +177,8 @@ export async function askConflicts(names: readonly string[], folder: (n: string)
 /** Uploads picked files and folders into dir of machine m. A name taken
  * by an entry of the same kind is asked about: replaced (a file written
  * over as a save writes it; a folder merged, its files replacing those
- * of the same names), kept beside (a new name, name-1…) or skipped; one
+ * of the same names), kept beside (a new name, name-1…) or skipped, or
+ * the whole upload cancelled; one
  * taken by the other kind is kept beside. A folder's folders are made
  * first, then its files go one after the other as one upload. */
 export async function uploadInto(m: string, dir: string, picked: readonly Picked[]) {
@@ -202,7 +211,9 @@ export async function uploadInto(m: string, dir: string, picked: readonly Picked
     names.filter((n) => there.has(n) && there.get(n) === folder(n)),
     folder,
     shortPath(dir, home),
+    names.length > 1,
   );
+  if (!decision) return; // cancelled: nothing goes
 
   const items: PlacedUpload[] = [];
   for (const n of names) {

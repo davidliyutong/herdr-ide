@@ -140,8 +140,9 @@ Plugins; `internal/plugins/files/settings.go`):
   cannot be read are left out with a note), a chosen one from its files'
   relative paths (the browser does not tell its empty folders); at most
   10 000 entries at once. Names already in the folder are asked about
-  once each (**Replace**, **Keep Both**, **Skip**, Escape skipping, a box
-  applying the answer to the rest): a replaced file is written as a save
+  once each (**Replace**, **Keep Both**, **Skip** when other names go too,
+  a box applying the answer to the rest; **Cancel** or Escape stops the
+  whole upload, nothing goes, as Finder's Stop): a replaced file is written as a save
   writes it (in place), a replaced
   folder is merged (its files replace those of the same names, the others
   stay), Keep Both gives the upload a free name (`name-1.ext`, a folder
@@ -499,7 +500,8 @@ the trash stay in the user's trash
   everything in them (in batches, unreadable items counted), the deepest
   folders made, files and folders uploaded with their structure (a
   folder as one upload, its folders made first), names taken asked about
-  (replace, keep both, skip, once for all; a folder replaced merged, the
+  (replace, keep both, skip, once for all, cancel stopping everything, no
+  Skip for a single name; a folder replaced merged, the
   other kind kept beside), a folder's upload adding up its files, failing
   once they went and stopping when cancelled, the menus' upload and
   transfer entries (none that write in read-only mode), the `DownloadURL`

@@ -117,7 +117,7 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   new files and folders, rename, cut, copy and paste, drag to move, drop
   files and folders from your computer (or choose them with Upload Files…
   and Upload Folder…) to upload them with their structure, asking whether
-  to replace, keep both or skip names already there, drag rows out to
+  to replace, keep both or skip names already there (or cancel), drag rows out to
   download them, Move to Trash, copy paths,
   download, open in a terminal or VS Code. A click shows a file in a
   preview editor that the next click replaces, a double click keeps it

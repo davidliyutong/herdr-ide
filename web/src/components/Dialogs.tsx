@@ -56,9 +56,9 @@ function ConfirmDialog({ req }: { req: Extract<DialogRequest, { kind: 'confirm' 
   const [checked, setChecked] = useState(!!req.checked);
   // A request that replaces another one shown starts from its own state.
   useEffect(() => setChecked(!!req.checked), [req]);
-  const done = (ok: boolean, alt = false) => {
+  const done = (ok: boolean, alt = false, extra = false) => {
     closeDialog(req);
-    req.resolve(ok, req.check !== undefined ? checked : undefined, alt);
+    req.resolve(ok, req.check !== undefined ? checked : undefined, alt, extra);
   };
   return (
     <Frame title={req.title} onCancel={() => done(false)}>
@@ -72,6 +72,11 @@ function ConfirmDialog({ req }: { req: Extract<DialogRequest, { kind: 'confirm' 
         )}
       </div>
       <div className="dialog-actions">
+        {req.extra && (
+          <button data-answer="extra" className="dialog-extra" onClick={() => done(false, false, true)}>
+            {req.extra}
+          </button>
+        )}
         {/* Enter cancels a destructive action unless the user moves to it. */}
         <button autoFocus={req.danger} onClick={() => done(false)}>
           {req.cancel ?? t('dialog.cancel')}

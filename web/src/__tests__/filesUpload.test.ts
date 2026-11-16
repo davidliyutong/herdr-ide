@@ -62,13 +62,13 @@ const uploads = () =>
     return [q.get('path'), q.get('replace') === '1'];
   });
 
-/** Answers the dialog shown: replace, keep or skip, with the box. */
-async function answer(how: 'replace' | 'keep' | 'skip', all = false) {
+/** Answers the dialog shown: replace, keep, skip or cancel, with the box. */
+async function answer(how: 'replace' | 'keep' | 'skip' | 'cancel', all = false) {
   for (let i = 0; i < 50 && !useDialog.getState().current; i++) await new Promise((r) => setTimeout(r));
   const req = useDialog.getState().current as Extract<DialogRequest, { kind: 'confirm' }>;
   expect(req?.kind).toBe('confirm');
   useDialog.setState({ current: undefined });
-  req.resolve(how === 'replace', all, how === 'keep');
+  req.resolve(how === 'replace', all, how === 'keep', how === 'skip');
   return req;
 }
 
@@ -168,12 +168,13 @@ describe('uploading into a folder', () => {
     ]);
   });
 
-  it('asks about names taken: replace, keep both, skip, once for all', async () => {
+  it('asks about names taken: replace, keep both, skip, once for all; cancel stops it all', async () => {
     there = { '/r/a.txt': false, '/r/b.txt': false, '/r/c.txt': false, '/r/d.txt': false, '/r/dir': false };
     const done = uploadInto('m', '/r', [pick('a.txt'), pick('b.txt'), pick('c.txt'), pick('d.txt'), pick('dir/x'), pick('new.txt')]);
     const first = await answer('replace');
     expect(first.title).toBe(t('files.upload.conflictTitle'));
-    expect(first.cancel).toBe(t('files.upload.skip'));
+    expect(first.cancel).toBeUndefined(); // Cancel
+    expect(first.extra).toBe(t('files.upload.skip'));
     expect(first.check).toBe(t('files.upload.applyAll', { n: 3 }));
     await answer('keep');
     await answer('skip', true);
@@ -186,6 +187,25 @@ describe('uploading into a folder', () => {
       ['/r/new.txt', false],
     ]);
     expect(useDialog.getState().current).toBeUndefined();
+
+    // Cancelled at the second name: nothing goes, not even the names free.
+    FakeXhr.reset();
+    const again = uploadInto('m', '/r', [pick('a.txt'), pick('b.txt'), pick('new.txt')]);
+    await answer('replace');
+    await answer('cancel');
+    await again;
+    expect(uploads()).toEqual([]);
+    expect(useDialog.getState().current).toBeUndefined();
+  });
+
+  it('offers no Skip when the name taken is all that goes', async () => {
+    there = { '/r/a.txt': false };
+    const done = uploadInto('m', '/r', [pick('a.txt')]);
+    const req = await answer('cancel');
+    expect(req.extra).toBeUndefined();
+    expect(req.check).toBeUndefined();
+    await done;
+    expect(uploads()).toEqual([]);
   });
 
   it('merges a folder replaced: its files replace those of the same names', async () => {
