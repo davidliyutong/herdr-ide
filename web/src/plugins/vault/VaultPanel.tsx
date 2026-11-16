@@ -140,6 +140,7 @@ function Since() {
 function Gate() {
   const status = useVault((s) => s.status)!;
   const session = useVault((s) => s.session);
+  const idle = useVault((s) => s.idle);
   const readOnly = useStore((s) => s.readOnly);
   const [changing, setChanging] = useState(false);
   if (readOnly) {
@@ -158,7 +159,7 @@ function Gate() {
         <LockOpen />
         <span className="vault-session-text">
           <b>{t('vault.session.open')}</b>
-          <span className="muted">{t('vault.session.idle')}</span>
+          <span className="muted">{t('vault.session.idle', { n: Math.round((idle ?? 1800) / 60) })}</span>
           <Since />
         </span>
         <span className="spacer" />

@@ -838,7 +838,7 @@ export const en = {
   'vault.tab.log': 'Access log',
   'vault.tab.connect': 'Connect',
   'vault.session.open': 'Unlocked on this page',
-  'vault.session.idle': 'Ends after 30 idle minutes',
+  'vault.session.idle': 'Ends after {n} idle minutes',
   'vault.changePassphrase': 'Change Passphrase',
   'vault.gate.create.title': 'Protect the vault with a passphrase',
   'vault.gate.create.text':
@@ -1152,6 +1152,33 @@ export const en = {
   'settings.usage.claudeKeychain': 'Claude credentials from the macOS keychain',
   'settings.usage.claudeKeychain.desc':
     'Where Claude Code keeps its sign-in in the keychain, read it there (read only). macOS may ask to allow it on the local machine.',
+  'settings.section.vault': 'Variable Vault',
+  'settings.vault.approvalTimeout': 'Time to answer a request',
+  'settings.vault.approvalTimeout.desc': 'Seconds a machine’s request waits for Allow or Deny on a page; without an answer it is denied.',
+  'settings.vault.approvalTimeout.unit': 's',
+  'settings.vault.autoLock': 'Lock when unused',
+  'settings.vault.autoLock.desc':
+    'Minutes after which the vault locks when nothing used it: no unlock, no change, reveal or approval on a page and no value read by a machine. Locking ends every page’s session, and machines get nothing until it is unlocked again. 0: never.',
+  'settings.vault.autoLock.unit': 'min',
+  'settings.group.vaultSessions': 'A page’s unlock',
+  'settings.vault.sessionIdle': 'Ends when idle',
+  'settings.vault.sessionIdle.desc':
+    'Minutes a page stays unlocked without a change, reveal or approval; then it asks for the passphrase again.',
+  'settings.vault.sessionIdle.unit': 'min',
+  'settings.vault.sessionMax': 'Ends at the latest',
+  'settings.vault.sessionMax.desc': 'Hours after which a page’s unlock ends even while it is used.',
+  'settings.vault.sessionMax.unit': 'h',
+  'settings.group.vaultRun': 'Commands run with variables (run_with_env)',
+  'settings.vault.runTimeout': 'Default timeout',
+  'settings.vault.runTimeout.desc': 'Seconds a command may run when the agent names no timeout; it is killed after them.',
+  'settings.vault.runTimeout.unit': 's',
+  'settings.vault.runMaxTimeout': 'Longest timeout',
+  'settings.vault.runMaxTimeout.desc': 'Seconds a command may run at most, whatever timeout the agent names.',
+  'settings.vault.runMaxTimeout.unit': 's',
+  'settings.vault.runOutput': 'Output returned',
+  'settings.vault.runOutput.desc':
+    'KiB of a command’s output (with the values masked) that reach the agent’s conversation; the rest is cut.',
+  'settings.vault.runOutput.unit': 'KiB',
   'command.view.panel.usage': 'Show AI Usage',
   // git plugin
   'settings.plugins.git.enabled': 'Git',

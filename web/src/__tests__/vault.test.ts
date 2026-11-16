@@ -89,6 +89,7 @@ describe('vault', () => {
         return json({
           status,
           session: sent,
+          idle: 600,
           variables: [
             { name: 'GITHUB_TOKEN', description: 'for gh', machines: ['*'], injectOnly: false, created: '', updated: '' },
             { name: 'DB_PASS', description: '', machines: [], injectOnly: true, created: '', updated: '' },
@@ -148,7 +149,8 @@ describe('vault', () => {
     expect(host.querySelector('.vault-gate .callout.error')?.textContent).toBe(t('vault.error.wrong_passphrase'));
     await unlock();
     expect(useVault.getState().session).toBe(true);
-    expect(host.querySelector('.vault-session')).not.toBeNull();
+    // How long the session lasts unused is the core's setting.
+    expect(host.querySelector('.vault-session')?.textContent).toContain(t('vault.session.idle', { n: 10 }));
 
     const reveal = host.querySelector<HTMLButtonElement>('[data-name="GITHUB_TOKEN"] [data-action="reveal"]')!;
     await act(async () => reveal.click());

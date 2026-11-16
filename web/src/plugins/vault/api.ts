@@ -4,8 +4,8 @@
 // reveals and approvals pass the vault's gate: a session the page opens
 // with the passphrase, whose token it keeps in memory only (never in
 // storage, which programs on the computer could read) and sends as
-// X-Vault-Session; the core ends it after 30 idle minutes, and a page
-// that is refused asks for the passphrase again.
+// X-Vault-Session; the core ends it once unused for a while (a setting),
+// and a page that is refused asks for the passphrase again.
 import { create } from 'zustand';
 import { hasMessage, t } from '../../i18n';
 
@@ -145,7 +145,7 @@ function opened(o: Opened) {
 const enc = encodeURIComponent;
 
 export const vaultApi = {
-  list: () => call<{ status: VaultStatus; variables: VaultVariable[]; session?: boolean }>('GET', ''),
+  list: () => call<{ status: VaultStatus; variables: VaultVariable[]; session?: boolean; idle?: number }>('GET', ''),
   /** Creates or changes a variable; `to` renames it in the same write. */
   set: (name: string, body: { to?: string; description?: string; machines?: string[]; injectOnly?: boolean; value?: string }) =>
     call<VaultVariable>('PUT', `/vars/${enc(name)}`, body),
@@ -212,6 +212,8 @@ interface VaultState {
   /** The error code of the last load ('unavailable': the core keeps no
    * file; 'version', 'invalid': its file does not open). */
   error?: string;
+  /** Seconds a session lasts unused (the core's setting). */
+  idle?: number;
 }
 
 export const useVault = create<VaultState>(() => ({ variables: [], log: [], requests: {}, session: false }));
@@ -250,7 +252,14 @@ export async function loadVault() {
     const sent = token;
     const [list, log] = await Promise.all([vaultApi.list(), vaultApi.log()]);
     if (token === sent && !list.session) token = '';
-    useVault.setState({ status: list.status, variables: list.variables ?? [], log: log.log ?? [], session: !!token, error: undefined });
+    useVault.setState({
+      status: list.status,
+      variables: list.variables ?? [],
+      log: log.log ?? [],
+      session: !!token,
+      idle: list.idle,
+      error: undefined,
+    });
   } catch (e) {
     useVault.setState({ error: e instanceof VaultError ? e.code : 'failed' });
   }

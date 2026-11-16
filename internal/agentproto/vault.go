@@ -60,4 +60,15 @@ type VaultResponse struct {
 	Error     string            `json:"error,omitempty"`
 	Variables []VaultVariable   `json:"variables,omitempty"`
 	Values    map[string]string `json:"values,omitempty"`
+	// Run bounds the command an env's values are for (run_with_env), as
+	// the vault's settings say.
+	Run *VaultRun `json:"run,omitempty"`
+}
+
+// VaultRun bounds run_with_env's command: its default and longest
+// timeout in seconds, and how much output it returns, in bytes.
+type VaultRun struct {
+	Timeout    int `json:"timeout"`
+	MaxTimeout int `json:"max_timeout"`
+	MaxOutput  int `json:"max_output"`
 }

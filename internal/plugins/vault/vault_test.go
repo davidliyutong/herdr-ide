@@ -24,6 +24,7 @@ import (
 // fakeHost records what the plugin broadcasts and audits.
 type fakeHost struct {
 	mg       *machines.Manager
+	st       *settings.Store
 	mu       sync.Mutex
 	messages []map[string]any
 	audits   []string
@@ -47,7 +48,7 @@ func (h *fakeHost) Audit(r *http.Request, event string, fields map[string]any) {
 	h.mu.Unlock()
 }
 func (h *fakeHost) ReadOnly() bool            { return false }
-func (h *fakeHost) Settings() *settings.Store { return nil }
+func (h *fakeHost) Settings() *settings.Store { return h.st }
 func (h *fakeHost) Logger() *log.Logger       { return log.New(log.Writer(), "", 0) }
 func (h *fakeHost) auditLog() string {
 	h.mu.Lock()
@@ -374,7 +375,7 @@ func TestPassphraseAndSessions(t *testing.T) {
 	// A session is not opened by a check that crossed a lock.
 	epoch := p.currentEpoch()
 	c.do("POST", "/api/p/vault/lock", "")
-	if tok := p.newSession(epoch); tok != "" {
+	if tok := p.newSession(h, epoch); tok != "" {
 		t.Error("a session opened across a lock")
 	}
 	// Refusals of the gate and reveals are audited.

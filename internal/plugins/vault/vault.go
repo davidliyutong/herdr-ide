@@ -39,8 +39,8 @@ const ID = "vault"
 
 // Bounds of what the plugin keeps in memory.
 const (
-	// DefaultTimeout is how long a request waits for the user's answer;
-	// none counts as deny.
+	// DefaultTimeout is how long a request waits for the user's answer by
+	// default (vault.approvalTimeout); none counts as deny.
 	DefaultTimeout = 60 * time.Second
 	// MaxPending is how many requests may wait for an answer at once, and
 	// MaxPendingPerMachine how many of one machine; more are refused as
@@ -56,10 +56,14 @@ const (
 	changedEvery = time.Second
 	// MaxNames is how many variables one request may name.
 	MaxNames = 64
-	// SessionIdle and SessionMax bound a vault session: unused for
-	// SessionIdle, or SessionMax after it began, it ends.
+	// SessionIdle and SessionMax bound a vault session by default
+	// (vault.sessionIdle, vault.sessionMax): unused for SessionIdle, or
+	// SessionMax after it began, it ends.
 	SessionIdle = 30 * time.Minute
 	SessionMax  = 12 * time.Hour
+	// lockCheckEvery is how often the auto-lock looks at the setting while
+	// the vault is unlocked, so a change of it counts within a minute.
+	lockCheckEvery = time.Minute
 	// MaxSessions is how many sessions may be open at once (the oldest
 	// goes).
 	MaxSessions = 32
@@ -88,7 +92,7 @@ type Plugin struct {
 	// Path is the vault's file; "" puts it beside the settings file
 	// (vault.json, vault-<instance>.json).
 	Path string
-	// Timeout of an approval; 0 is DefaultTimeout.
+	// Timeout of an approval; 0 takes the setting (DefaultTimeout).
 	Timeout time.Duration
 
 	// fileWork is held while an export file's key is derived (transfer.go).
@@ -130,6 +134,12 @@ type Plugin struct {
 	// and after a new passphrase is set, before its session (tests: a lock
 	// asked for there).
 	keyStep func()
+	// lastUse is the vault's last use (touch), lockTimer the auto-lock's
+	// timer while the vault is unlocked; lockAfter and lockCheck replace
+	// the setting and lockCheckEvery (tests).
+	lastUse              time.Time
+	lockTimer            *time.Timer
+	lockAfter, lockCheck time.Duration
 }
 
 type session struct {
@@ -245,13 +255,6 @@ func (p *Plugin) open(h plugin.Host) (*vaultstore.Store, error) {
 	return s, nil
 }
 
-func (p *Plugin) timeout() time.Duration {
-	if p.Timeout > 0 {
-		return p.Timeout
-	}
-	return DefaultTimeout
-}
-
 // Routes are the UI's.
 func (p *Plugin) Routes() []plugin.Route {
 	return []plugin.Route{
@@ -315,7 +318,10 @@ func (p *Plugin) handleList(c *plugin.Call, w http.ResponseWriter, r *http.Reque
 	}
 	// Whether the page's session is open, without counting as its use: only
 	// what passes the gate keeps a session from ending idle.
-	plugin.WriteJSON(w, http.StatusOK, map[string]any{"status": s.Status(), "variables": s.List(), "session": p.sessionOf(r, false)})
+	idle, _ := p.sessionLimits(c.Host)
+	plugin.WriteJSON(w, http.StatusOK, map[string]any{
+		"status": s.Status(), "variables": s.List(), "session": p.sessionOf(c.Host, r, false), "idle": idle.Seconds(),
+	})
 }
 
 func (p *Plugin) clock() time.Time {
@@ -327,21 +333,26 @@ func (p *Plugin) clock() time.Time {
 
 // sessionOf reports whether the request carries a session that is open;
 // use marks it used.
-func (p *Plugin) sessionOf(r *http.Request, use bool) bool {
+func (p *Plugin) sessionOf(h plugin.Host, r *http.Request, use bool) bool {
 	tok := r.Header.Get(SessionHeader)
 	if tok == "" {
 		return false
 	}
+	idle, most := p.sessionLimits(h)
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	ss, ok := p.sessions[tok]
 	now := p.clock()
-	if !ok || now.Sub(ss.used) > SessionIdle || now.Sub(ss.started) > SessionMax {
+	if !ok || now.Sub(ss.used) > idle || now.Sub(ss.started) > most {
 		delete(p.sessions, tok)
+		p.mu.Unlock()
 		return false
 	}
 	if use {
 		ss.used = now
+	}
+	p.mu.Unlock()
+	if use {
+		p.touch(h)
 	}
 	return true
 }
@@ -350,7 +361,7 @@ func (p *Plugin) sessionOf(r *http.Request, use bool) bool {
 // the gate before the UI's changes and reveals.
 func (p *Plugin) gated(h func(*plugin.Call, http.ResponseWriter, *http.Request)) func(*plugin.Call, http.ResponseWriter, *http.Request) {
 	return func(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
-		if !p.sessionOf(r, true) {
+		if !p.sessionOf(c.Host, r, true) {
 			refuseSession(c, w, r)
 			return
 		}
@@ -373,11 +384,12 @@ func (p *Plugin) currentEpoch() uint64 {
 
 // newSession opens a session and returns its token, unless the sessions
 // ended since epoch (then ""); the oldest goes when there are MaxSessions.
-func (p *Plugin) newSession(epoch uint64) string {
+func (p *Plugin) newSession(h plugin.Host, epoch uint64) string {
 	b := make([]byte, 32)
 	rand.Read(b)
 	tok := hex.EncodeToString(b)
 	now := p.clock()
+	idle, most := p.sessionLimits(h)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.epoch != epoch {
@@ -387,7 +399,7 @@ func (p *Plugin) newSession(epoch uint64) string {
 		p.sessions = map[string]*session{}
 	}
 	for k, ss := range p.sessions {
-		if now.Sub(ss.used) > SessionIdle || now.Sub(ss.started) > SessionMax {
+		if now.Sub(ss.used) > idle || now.Sub(ss.started) > most {
 			delete(p.sessions, k)
 		}
 	}
@@ -575,7 +587,7 @@ func (p *Plugin) handleSession(c *plugin.Call, w http.ResponseWriter, r *http.Re
 	p.tried(err == nil, errors.Is(err, vaultstore.ErrPassphrase))
 	tok := ""
 	if err == nil {
-		if tok = p.newSession(epoch); tok == "" {
+		if tok = p.newSession(c.Host, epoch); tok == "" {
 			// The sessions ended while the check ran, which keyMu leaves
 			// to a lock or a new passphrase after it.
 			err = vaultstore.ErrLocked
@@ -587,8 +599,10 @@ func (p *Plugin) handleSession(c *plugin.Call, w http.ResponseWriter, r *http.Re
 		fail(w, err)
 		return
 	}
+	p.touch(c.Host)
 	changed(c.Host)
-	plugin.WriteJSON(w, http.StatusOK, map[string]any{"session": tok, "idle": SessionIdle.Seconds(), "status": s.Status()})
+	idle, _ := p.sessionLimits(c.Host)
+	plugin.WriteJSON(w, http.StatusOK, map[string]any{"session": tok, "idle": idle.Seconds(), "status": s.Status()})
 }
 
 func (p *Plugin) handleEndSession(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
@@ -636,7 +650,7 @@ func (p *Plugin) handlePassphrase(c *plugin.Call, w http.ResponseWriter, r *http
 		if p.keyStep != nil {
 			p.keyStep()
 		}
-		tok = p.newSession(p.endSessions())
+		tok = p.newSession(c.Host, p.endSessions())
 	}
 	p.keyMu.Unlock()
 	c.Host.Audit(r, "vault.passphrase_set", map[string]any{"ok": err == nil, "change": change})
@@ -644,8 +658,10 @@ func (p *Plugin) handlePassphrase(c *plugin.Call, w http.ResponseWriter, r *http
 		fail(w, err)
 		return
 	}
+	p.touch(c.Host)
 	changed(c.Host)
-	plugin.WriteJSON(w, http.StatusOK, map[string]any{"session": tok, "idle": SessionIdle.Seconds(), "status": s.Status()})
+	idle, _ := p.sessionLimits(c.Host)
+	plugin.WriteJSON(w, http.StatusOK, map[string]any{"session": tok, "idle": idle.Seconds(), "status": s.Status()})
 }
 
 func (p *Plugin) handleLock(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
@@ -715,7 +731,7 @@ func (p *Plugin) handleAnswer(c *plugin.Call, w http.ResponseWriter, r *http.Req
 	case AnswerOnce, AnswerAlways:
 		// Letting a value out is the user's, behind the gate; denying
 		// needs no proof.
-		if !p.sessionOf(r, true) {
+		if !p.sessionOf(c.Host, r, true) {
 			refuseSession(c, w, r)
 			return
 		}
@@ -821,6 +837,12 @@ func (p *Plugin) Handle(ctx context.Context, h plugin.Host, m string, req agentp
 	// Values leave only once their record is written.
 	if err := p.record(h, nil, "vault.access", rec); err != nil {
 		return failure(ResultLogFailed, "the access could not be recorded, so the values were not released")
+	}
+	if released(result) {
+		p.touch(h)
+		if req.Tool == agentproto.VaultEnv {
+			resp.Run = runLimits(h)
+		}
 	}
 	return resp
 }
@@ -1097,7 +1119,7 @@ func (p *Plugin) ask(ctx context.Context, h plugin.Host, m string, req agentprot
 		r = &Request{
 			ID: hex.EncodeToString(idb), M: m, Tool: req.Tool, Names: names,
 			Client: clip(req.Client, 64), Terminal: clip(req.Terminal, 64), Cwd: clip(req.Cwd, 1024),
-			Process: clipProcess(req.Process), Created: now, Expires: now.Add(p.timeout()), done: make(chan struct{}),
+			Process: clipProcess(req.Process), Created: now, Expires: now.Add(p.timeout(h)), done: make(chan struct{}),
 		}
 		if p.pending == nil {
 			p.pending = map[string]*Request{}

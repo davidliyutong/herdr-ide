@@ -141,8 +141,9 @@ vault; setting or changing the passphrase opens one too): 32 random bytes
 the core keeps in memory and the page only in its own memory, never in
 storage that programs could read from disk. Only what passes the gate
 counts as a session's use: loading the list says whether the session is
-open without keeping it so. A session ends unused for 30 minutes, 12
-hours after it began, when the vault is locked (every one) or its
+open without keeping it so. A session ends unused for 30 minutes
+(`vault.sessionIdle`), 12 hours after it began (`vault.sessionMax`),
+when the vault is locked (every one: by Lock or the auto-lock) or its
 passphrase changed (every other one); a session that a passphrase check
 would open after such an end (the check crossed it) is not opened; at most
 32 are open, the oldest going. Installing or dropping the key is one step
@@ -182,7 +183,8 @@ machine's kernel knows, not what the program is.
   locked vault with `vault_locked`. Names whose `machines` hold the machine
   or `*` are given at once. For the others the core sends every page
   `plugin {plugin: vault, m, data: {type: request, request}}` and waits up
-  to 60 s: **Allow once** gives the values this time, **Always allow** adds
+  to 60 s (`vault.approvalTimeout`): **Allow once** gives the values this
+  time, **Always allow** adds
   the machine to each variable's list and gives them, **Deny**, no answer
   or the requester going away deny. A request identical to one waiting
   (machine, tool, names) waits for that one's answer instead of prompting
@@ -286,6 +288,29 @@ variable keeps the file's creation time. Imports are audited as
 `vault.imported` with the names, those overwritten and those renamed,
 never values; they release nothing, so the access log has none of them.
 
+### Settings
+
+The section **Variable Vault** of the settings (`internal/plugins/vault`'s
+module, all whole numbers, for the whole core):
+
+- `vault.approvalTimeout`: seconds a request waits for an answer (60;
+  10–600);
+- `vault.autoLock`: minutes after which the vault locks when unused (0,
+  never; up to 1440). A use is an unlock, a page's action through the gate
+  (a change, a reveal, an approval, an export or import) or a value
+  released to a machine; lists and refusals are not. The lock is the
+  route's (every session ends, after a passphrase check that runs), audited
+  as `vault.locked` with `reason: idle`. While the vault is unlocked a
+  timer looks at least every minute, so a change of the setting counts
+  within one;
+- `vault.sessionIdle` and `vault.sessionMax`: a page's session ends unused
+  for those minutes (30; 1–240) or those hours after it began (12; 1–24);
+- `vault.runTimeout`, `vault.runMaxTimeout` and `vault.runOutput`:
+  `run_with_env`'s default and longest timeouts in seconds (120 and 600;
+  5–3600; a default above the longest takes the longest) and the KiB of
+  output it returns (64; 4–1024). The core sends them with an `env`'s
+  values; the MCP server applies them to that command.
+
 ### Machines
 
 Every agent listens on `<run>/vault.sock` (0600; connections only from its
@@ -325,8 +350,10 @@ of the terminal core carry. Each tool call is one connection to
 - `run_with_env {command, names, cwd?, timeout?}`: runs `sh -c command` in
   its own process group with the variables added to the server's
   environment and stdin closed, and returns the exit status and up to
-  64 KiB of combined output, in which each value as it appears is replaced
-  with `***`; killed after `timeout` seconds (default 120, at most 600).
+  64 KiB of combined output (`vault.runOutput`), in which each value as it
+  appears is replaced with `***`; killed after `timeout` seconds (by
+  default 120, `vault.runTimeout`; at most 600, `vault.runMaxTimeout`):
+  the core sends these settings with the values (`VaultResponse.run`).
   Output is captured 64 KiB (the longest value) beyond what is returned,
   so a value cut by the limit is still masked; when even the capture is
   cut, its last bytes that could be the beginning of a value (fewer than
@@ -359,7 +386,8 @@ The panel **Variable Vault** of the right sidebar (command
   (twice, with a strength bar and the warning that it cannot be
   recovered); otherwise, without a session, a card to unlock this page with
   the passphrase, and with one a bar that says the page is unlocked until
-  30 idle minutes, with Change Passphrase and Lock; both say when the
+  it is idle for the minutes of `vault.sessionIdle` (which the list
+  carries, `idle`), with Change Passphrase and Lock; both say when the
   passphrase was set. A page that the gate refuses (its session ended)
   shows the unlock card again. The passphrase fields keep password
   managers away (`autocomplete="off"` and the attributes 1Password,
@@ -465,8 +493,11 @@ choices), with one choice for every name that exists; Import sends them.
   locked and its session gone.
 - Wrong passphrases in a row: `429 wait` for a while that doubles; a check
   while another runs: `429 busy`.
-- Nobody answers: the request is denied after 60 s; the agent gets
-  `denied` and can ask again.
+- Nobody answers: the request is denied after 60 s
+  (`vault.approvalTimeout`); the agent gets `denied` and can ask again.
+- The vault unused for the minutes of `vault.autoLock`: it locks, every
+  page's session ends and machines get `vault_locked` until a page unlocks
+  it again.
 - Too many requests waiting: past 4 of the machine (or 32 in all) the
   agent gets `busy`, says so to the model, and can ask again once the user
   answered.
@@ -576,9 +607,16 @@ server exposes.
   a file and too large refused by both routes (`TestImportFailures`).
   `internal/server`'s `TestMutatingRoutesAreGuarded` refuses export and
   import read-only and from other origins.
+- `internal/plugins/vault/settings_test.go`: the settings' defaults are
+  the values before them and out-of-bounds values are refused
+  (`TestSettingsDefs`); the approval's wait, a session's idle and longest
+  life, the auto-lock (uses keep the vault unlocked, then it locks, ends
+  every session and is audited; 0 never locks it: `TestAutoLock`) and
+  `run_with_env`'s limits sent with an env's values, not a get's.
 - `internal/vaultmcp/mcp_test.go`: JSON-RPC over pipes (initialize and
   version negotiation, notifications, tools), masking, truncation, masking
-  where the capture is cut (`TestMaskAtTheCut`), timeouts that kill the
+  where the capture is cut (`TestMaskAtTheCut`), the core's limits on
+  output and timeouts (`TestRunLimitsFromTheCore`), timeouts that kill the
   process group, errors reaching the model, a cancelled call's request
   leaving the core without a response, the socket's path from the link;
   `run_unix_test.go`: programs left in the background killed when the

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"herdr-ide/internal/agentproto"
 )
 
 // Defaults of run_with_env.
@@ -31,6 +33,25 @@ type Runner struct {
 	// DefaultTimeout and MaxTimeout bound a command's time (defaults
 	// DefaultTimeout and MaxTimeout).
 	DefaultTimeout, MaxTimeout time.Duration
+}
+
+// with returns r bounded as the core says (the vault's settings): its
+// default and longest timeout, its output; what the core leaves out (an
+// older core, or none) keeps r's.
+func (r Runner) with(run *agentproto.VaultRun) Runner {
+	if run == nil {
+		return r
+	}
+	if run.Timeout > 0 {
+		r.DefaultTimeout = time.Duration(run.Timeout) * time.Second
+	}
+	if run.MaxTimeout > 0 {
+		r.MaxTimeout = time.Duration(run.MaxTimeout) * time.Second
+	}
+	if run.MaxOutput > 0 {
+		r.MaxOutput = run.MaxOutput
+	}
+	return r
 }
 
 // capped keeps the first max bytes written and counts the rest.

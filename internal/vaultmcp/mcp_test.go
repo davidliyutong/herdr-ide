@@ -225,6 +225,40 @@ func TestRunLimits(t *testing.T) {
 	}
 }
 
+// The core's limits (the vault's settings) bound run_with_env's command:
+// its output, its default and longest timeout; without them the server's
+// own hold.
+func TestRunLimitsFromTheCore(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("sh")
+	}
+	run := &agentproto.VaultRun{Timeout: 1, MaxTimeout: 2, MaxOutput: 50}
+	core := fakeCore(t, func(req agentproto.VaultRequest) agentproto.VaultResponse {
+		return agentproto.VaultResponse{OK: true, Values: map[string]string{"K": "v"}, Run: run}
+	}, nil)
+	c, _ := startServer(t, &Server{Dial: core})
+	call := func(command string, timeout float64) (string, bool) {
+		args := map[string]any{"command": command, "names": []string{"K"}}
+		if timeout > 0 {
+			args["timeout"] = timeout
+		}
+		return toolText(t, c.call("tools/call", map[string]any{"name": "run_with_env", "arguments": args}))
+	}
+	if txt, _ := call("yes abcdefghij | head -c 5000", 0); !strings.Contains(txt, "[output truncated: 50 of 5000 bytes]") {
+		t.Errorf("output %q", txt)
+	}
+	if txt, failed := call("sleep 30", 0); !failed || !strings.Contains(txt, "timed out after 1s") {
+		t.Errorf("default timeout %q", txt)
+	}
+	if txt, failed := call("sleep 30", 600); !failed || !strings.Contains(txt, "timed out after 2s") {
+		t.Errorf("longest timeout %q", txt)
+	}
+	r := Runner{}.with(nil)
+	if r != (Runner{}) {
+		t.Errorf("without the core's limits %+v", r)
+	}
+}
+
 // Output cut by the capture: masking shrinks the text, so the beginning of
 // a value at the cut, which no occurrence matches, would come within the
 // returned part; it is dropped, and an occurrence that began before it is
