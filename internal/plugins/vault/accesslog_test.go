@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -199,6 +200,60 @@ func TestAccessLogIsCompacted(t *testing.T) {
 	l2.maxReleases, l2.maxOthers = 5, 5
 	if got := l2.list(); mustJSON(got) != mustJSON(want) {
 		t.Errorf("read back\n%s\nwant\n%s", mustJSON(got), mustJSON(want))
+	}
+}
+
+// A write that fails partway is cut back, so the next release is read
+// back after a restart; a half line a crash left is ended before the next
+// record is appended.
+func TestAccessLogAfterAFailedWrite(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vault-access.jsonl")
+	release := func(l *accessLog, name string) (Access, error) {
+		return l.add(Access{Time: time.Now(), M: "m1", Tool: "get", Names: []string{name}, Result: ResultAllowed}, false, true)
+	}
+	names := func(l *accessLog) string {
+		var out []string
+		for _, a := range l.list() {
+			out = append(out, a.Names[0]+":"+a.Result)
+		}
+		return strings.Join(out, ",")
+	}
+	l := newAccessLog(path, nil)
+	if _, err := release(l, "A"); err != nil {
+		t.Fatal(err)
+	}
+	orig := writeLog
+	defer func() { writeLog = orig }()
+	writeLog = func(f *os.File, b []byte) (int, error) {
+		n, _ := f.Write(b[:len(b)/2])
+		return n, errors.New("no space left")
+	}
+	if a, err := release(l, "B"); err == nil || a.Result != ResultLogFailed {
+		t.Fatalf("a failed write: %+v %v", a, err)
+	}
+	writeLog = orig
+	if _, err := release(l, "C"); err != nil {
+		t.Fatal(err)
+	}
+	l.close()
+	if got := names(newAccessLog(path, nil)); got != "C:allowed,A:allowed" {
+		t.Errorf("read back %s", got)
+	}
+
+	// A crash in the middle of a line.
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.WriteString(`{"id":77,"time":"2026-01-0`)
+	f.Close()
+	l = newAccessLog(path, nil)
+	if _, err := release(l, "D"); err != nil {
+		t.Fatal(err)
+	}
+	l.close()
+	if got := names(newAccessLog(path, nil)); got != "D:allowed,C:allowed,A:allowed" {
+		t.Errorf("read back after a half line %s", got)
 	}
 }
 

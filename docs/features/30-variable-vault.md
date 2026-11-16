@@ -213,7 +213,10 @@ file (0600, a JSON record a line) and read back at the core's start, so
 the panel shows what happened before a restart. A record that lets values
 out is appended and flushed to disk before they leave; when it cannot be
 written the values do not leave (`log_failed`, to the MCP server and as a
-reveal's `500`). The log keeps the last 1000 records that let values out
+reveal's `500`). A write that fails partway is cut back to the last whole
+record, and a line a crash left half written is ended before the next
+record is appended, so no later record is glued to it and lost when the
+file is read back. The log keeps the last 1000 records that let values out
 and, apart, the last 500 others, so lists and refusals, which a program
 can repeat at will, never push a release out; the file is written again
 with what is kept once it holds twice as many lines. Every record is
@@ -608,6 +611,8 @@ server exposes.
   values (`TestAccessLogSurvivesARestart`); releases never merged and
   never pushed out by refusals (`TestReleasesAreNeverCoalesced`); a
   release whose record cannot be written refused (`TestUnloggedReleaseIsRefused`);
+  a release after a write that failed partway, and after a half line a
+  crash left, read back (`TestAccessLogAfterAFailedWrite`);
   the file written again past its bound and read back the same; a merged
   count written once the while is over; the process chain taken from the
   header, never the request (`TestWhoAskedComesFromTheAgent`); cancelled
