@@ -19,6 +19,7 @@ export function Dialogs() {
   }, [req]);
   if (!req) return null;
   if (req.kind === 'confirm') return <ConfirmDialog req={req} />;
+  if (req.kind === 'risk') return <RiskDialog req={req} />;
   if (req.kind === 'download') return <DownloadDialog req={req} />;
   return <WorkspaceDialog req={req} />;
 }
@@ -78,6 +79,44 @@ function ConfirmDialog({ req }: { req: Extract<DialogRequest, { kind: 'confirm' 
           </button>
         )}
         <button className={req.danger ? 'primary danger' : 'primary'} autoFocus={!req.danger} onClick={() => done(true)}>
+          {req.confirm}
+        </button>
+      </div>
+    </Frame>
+  );
+}
+
+/** A risk to accept (riskDialog): what is at risk, and the confirm button
+ * only once the box is ticked; Cancel has the focus. */
+function RiskDialog({ req }: { req: Extract<DialogRequest, { kind: 'risk' }> }) {
+  const [accepted, setAccepted] = useState(false);
+  useEffect(() => setAccepted(false), [req]);
+  const done = (ok: boolean) => {
+    closeDialog(req);
+    req.resolve(ok);
+  };
+  return (
+    <Frame title={req.title} onCancel={() => done(false)}>
+      <div className="dialog-body risk-dialog">
+        <p>{req.intro}</p>
+        <ul>
+          {req.points.map((p) => (
+            <li key={p}>{p}</li>
+          ))}
+        </ul>
+        {req.outro.map((p) => (
+          <p key={p}>{p}</p>
+        ))}
+        <label className="row dialog-check">
+          <input type="checkbox" checked={accepted} onChange={(e) => setAccepted(e.target.checked)} />
+          <span>{req.check}</span>
+        </label>
+      </div>
+      <div className="dialog-actions">
+        <button autoFocus onClick={() => done(false)}>
+          {t('dialog.cancel')}
+        </button>
+        <button className="primary danger" data-answer="accept" disabled={!accepted} onClick={() => accepted && done(true)}>
           {req.confirm}
         </button>
       </div>

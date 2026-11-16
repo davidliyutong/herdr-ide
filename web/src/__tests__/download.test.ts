@@ -13,9 +13,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { MenuEntry, MenuItem } from '../contextMenu';
 import { definePlugins } from '../plugins/registry';
 import { vscodePlugin } from '../plugins/vscode';
+import { vscodeOn } from './fakeSettings';
 
-// VS Code is a plugin: these tests have it on.
+// VS Code is a plugin, off by default: these tests have it on.
 definePlugins([vscodePlugin]);
+vscodeOn();
 
 /** Messages the page sent the core. */
 const sent = vi.hoisted(() => [] as unknown[]);

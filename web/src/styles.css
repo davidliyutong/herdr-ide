@@ -1856,6 +1856,16 @@ body.dragging * {
 .dialog-check input {
   margin-top: 4px;
 }
+.risk-dialog p,
+.risk-dialog ul {
+  margin: 0 0 8px;
+}
+.risk-dialog ul {
+  padding-left: 20px;
+}
+.risk-dialog .dialog-check {
+  font-weight: 600;
+}
 .dialog-body.form {
   display: flex;
   flex-direction: column;
@@ -3264,4 +3274,378 @@ button.gui-note:hover {
 .plugin-row .plugin-text {
   flex: 1;
   min-width: 0;
+}
+/* A plugin's settings button on the Plugins page; its page starts with
+   the plugin and its switch, and says when it is off. */
+.plugin-row .plugin-settings {
+  flex: none;
+}
+.plugin-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.plugin-header.off .plugin-icon {
+  opacity: 0.6;
+}
+/* Plugins' pages in the navigation: under the Plugins page, indented. */
+.settings-nav button.sub {
+  padding-left: 22px;
+}
+.settings-nav button.off .ellipsis {
+  opacity: 0.6;
+}
+
+/* ---------- characters a query matched (components/Highlight.tsx) ---------- */
+mark.match {
+  background: none;
+  color: inherit;
+  font-weight: 650;
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+}
+
+/* ---------- file-type icons (fileIcons.tsx): colored by --ds-file-icon-* ---------- */
+.file-icon {
+  width: var(--ic);
+  height: var(--ic);
+  flex: none;
+  color: var(--fg-dim);
+}
+
+/* ---------- trees and lists (components/tree) ---------- */
+/* A tree: its rows are absolutely placed (windowed) inside a box of the
+   full height. */
+.tree {
+  position: relative;
+  outline: none;
+}
+.tree-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: var(--h-row);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px 0 6px;
+  font-size: var(--fs-base);
+  cursor: default;
+  user-select: none;
+  white-space: nowrap;
+}
+.tree-row:hover {
+  background: var(--bg-2);
+}
+.tree-row.selected {
+  background: var(--bg-3);
+}
+.tree:focus-within .tree-row.selected {
+  background: var(--accent-soft);
+}
+.tree:focus-visible .tree-row.cursor {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: -1px;
+}
+.tree-row.drop {
+  background: var(--accent-soft);
+}
+.tree-row.dimmed {
+  opacity: 0.55;
+}
+/* One per level above the row (12 px with the row's gap): a line below
+   the parent's twisty. */
+.tree-guide,
+.tree-indent {
+  position: relative;
+  flex: none;
+  align-self: stretch;
+  width: 8px;
+}
+.tree-guide::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--ic-sm) / 2);
+  border-left: 1px solid var(--line);
+}
+.tree:hover .tree-guide::before,
+.tree:focus-within .tree-guide::before {
+  border-left-color: var(--line-2);
+}
+.tree-twisty {
+  display: inline-flex;
+  width: var(--ic-sm);
+  flex: none;
+  color: var(--fg-dim);
+}
+.tree-twisty svg {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
+.tree-text {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+.tree-label {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.tree-description {
+  flex: 0 10 auto;
+  min-width: 0;
+  color: var(--fg-dim);
+  font-size: var(--fs-md);
+}
+.tree-actions {
+  display: none;
+  flex: none;
+  align-items: center;
+}
+.tree-row:hover .tree-actions,
+.tree-row:focus-within .tree-actions,
+.tree:focus-within .tree-row.cursor .tree-actions {
+  display: inline-flex;
+}
+.tree-badge {
+  flex: none;
+  min-width: 1em;
+  text-align: center;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+/* A collapsible section (components/tree/Section.tsx): the head is the
+   design's .section-head; the toggle fills it. */
+.section-head .section-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  line-height: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.section-head .section-toggle:hover {
+  background: none;
+}
+/* A count: neutral, as VS Code's (only what asks for attention takes the accent). */
+.section-count {
+  flex: none;
+  min-width: 1.5em;
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--bg-3);
+  color: var(--fg-dim);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* ---------- searchable dropdowns (components/Picker.tsx) ---------- */
+.picker-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 10rem;
+  max-width: 100%;
+  padding: 0 6px 0 8px;
+  background: var(--bg);
+  text-align: left;
+}
+.picker-button .ellipsis {
+  flex: 1;
+  min-width: 0;
+}
+.picker-button .picker-chevron {
+  color: var(--fg-dim);
+}
+.picker-button[aria-expanded='true'] {
+  border-color: var(--accent);
+}
+.picker {
+  position: fixed;
+  z-index: 95;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px var(--shadow);
+  font-size: var(--fs-base);
+  overflow: hidden;
+}
+.picker-search {
+  flex: none;
+  margin: 6px;
+  height: var(--ctl);
+  padding: 0 8px;
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  outline: none;
+}
+.picker-search:focus {
+  border-color: var(--accent);
+}
+.picker-search::placeholder {
+  color: var(--fg-mute);
+}
+.picker-list {
+  position: relative;
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 4px 4px;
+  overscroll-behavior: contain;
+}
+.picker-rows {
+  position: relative;
+}
+.picker-row,
+.picker-group {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  white-space: nowrap;
+  user-select: none;
+}
+.picker-row {
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.picker-row.active {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.picker-row.active .picker-description,
+.picker-row.active .picker-detail,
+.picker-row.active .picker-icon,
+.picker-row.active .picker-current {
+  color: inherit;
+}
+.picker-row.disabled {
+  color: var(--fg-mute);
+  cursor: default;
+}
+.picker-group {
+  padding-top: 4px;
+  color: var(--fg-mute);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.picker-icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--fg-dim);
+}
+.picker-icon > svg,
+svg.picker-icon {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
+.picker-text {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  flex: 1;
+  min-width: 0;
+}
+.picker-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.picker-label {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.picker-description {
+  flex: 0 10 auto;
+  min-width: 0;
+  color: var(--fg-dim);
+  font-size: var(--fs-md);
+}
+.picker-detail {
+  color: var(--fg-dim);
+  font-size: var(--fs-md);
+}
+.picker-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+  border: 1px solid var(--line-2);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--on-accent);
+}
+.picker-check.on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.picker-row.active .picker-check {
+  border-color: currentColor;
+}
+.picker-check svg {
+  width: 0.75rem;
+  height: 0.75rem;
+  stroke-width: 3;
+}
+.picker-current {
+  flex: none;
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+  color: var(--accent);
+}
+.picker-empty {
+  padding: 6px 10px 10px;
+  font-size: var(--fs-md);
+}
+.picker-footer {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  min-height: var(--h-toolbar);
+  padding: 4px 6px;
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-md);
+}
+@media (max-width: 760px) {
+  .settings-nav button.sub {
+    padding-left: 10px;
+  }
 }

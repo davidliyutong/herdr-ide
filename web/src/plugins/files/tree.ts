@@ -10,6 +10,7 @@
 import { create } from 'zustand';
 import { listDir, type RemoteStat } from '../../lib/files';
 import { loadPref, savePref } from '../../state/store';
+import { selectAll, selectOnly, selectRange, selectToggle, type NavRow } from '../../components/tree/selection';
 import { filesApi, type Entry } from './api';
 
 /** A directory's listing; error is why the last listing failed (the
@@ -179,25 +180,22 @@ export function treeRows(s: Pick<TreeState, 'root' | 'dirs' | 'expanded' | 'hidd
   return out;
 }
 
-/** The path delta rows from cursor (the first or last row without one). */
-export function stepRow(rows: readonly Row[], cursor: string | undefined, delta: number): string | undefined {
-  const real = rows.filter((r) => !r.creating);
-  if (!real.length) return undefined;
-  const i = cursor ? real.findIndex((r) => r.path === cursor) : -1;
-  if (i < 0) return (delta > 0 ? real[0] : real[real.length - 1]).path;
-  return real[Math.max(0, Math.min(real.length - 1, i + delta))].path;
+/** The paths of the rows the keyboard and selection go over (not a name
+ * being typed). */
+export function rowIds(rows: readonly Row[]): string[] {
+  return rows.filter((r) => !r.creating).map((r) => r.path);
 }
 
-/** The rows from a to b, in order. */
-export function rangeOf(rows: readonly Row[], a: string, b: string): string[] {
-  const i = rows.findIndex((r) => r.path === a);
-  const j = rows.findIndex((r) => r.path === b);
-  if (i < 0 || j < 0) return [b];
-  const [lo, hi] = i < j ? [i, j] : [j, i];
-  return rows
-    .slice(lo, hi + 1)
-    .filter((r) => !r.creating)
-    .map((r) => r.path);
+/** The rows as the keyboard sees them (components/tree/selection.ts): ←
+ * goes to the folder, → into a folder, type-ahead by name. */
+export function navRows(rows: readonly Row[]): NavRow[] {
+  return rows.map((r) => ({
+    id: r.path,
+    parent: parentOf(r.path),
+    expanded: r.dir && !r.creating ? r.expanded : undefined,
+    label: r.name,
+    skip: !!r.creating,
+  }));
 }
 
 /** Paths without those below another of them (a folder and its files
@@ -325,14 +323,12 @@ export function setFilter(filter: string) {
 
 /** Selects path alone (or adds it, or a range from the anchor). */
 export function select(path: string, how: 'only' | 'toggle' | 'range' = 'only', rows: readonly Row[] = []) {
-  set((s) => {
-    if (how === 'toggle') {
-      const has = s.selection.includes(path);
-      return { selection: has ? s.selection.filter((p) => p !== path) : [...s.selection, path], cursor: path, anchor: path };
-    }
-    if (how === 'range' && s.anchor) return { selection: rangeOf(rows, s.anchor, path), cursor: path };
-    return { selection: [path], cursor: path, anchor: path };
-  });
+  set((s) => (how === 'toggle' ? selectToggle(s, path) : how === 'range' ? selectRange(s, rowIds(rows), path) : selectOnly(path)));
+}
+
+/** Selects every row shown (⌘/Ctrl+A). */
+export function selectAllRows(rows: readonly Row[]) {
+  set((s) => selectAll(s, rowIds(rows)));
 }
 
 export function setEdit(edit: Edit | undefined) {

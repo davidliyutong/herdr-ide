@@ -4,6 +4,10 @@
 // offers VS Code, its panes say so and the core refuses its routes
 // (internal/plugins/vscode), so code-server is neither fetched nor started.
 // The layout keeps VS Code panes ({code: …}) whether it is on or off.
+// Its windows run on the UI's origin, so it has a switch for the desktop
+// app (plugins.vscode.enabled) and one for browsers
+// (plugins.vscode.browser), both off by default; turning the browsers' on
+// asks the user to accept that risk (browserRisk).
 import { actions } from '../../actions';
 import { useStore } from '../../state/store';
 import type { PluginDef } from '../api';
@@ -20,6 +24,14 @@ export const vscodePlugin: PluginDef = {
   title: 'plugins.vscode.title',
   description: 'plugins.vscode.description',
   icon: CodeIcon,
+  browserRisk: {
+    title: 'code.risk.title',
+    intro: 'code.risk.intro',
+    points: ['code.risk.terminals', 'code.risk.files', 'code.risk.app'],
+    outro: ['code.risk.source', 'code.risk.scope'],
+    check: 'code.risk.check',
+    confirm: 'code.risk.enable',
+  },
   commands: {
     'code.open': {
       enabled: can,

@@ -75,7 +75,7 @@ setting in the UI.
 | `--agent-dir` | – | Directory with uncompressed `herdr-ide-agent-<os>-<arch>` builds, used instead of the embedded ones. |
 | `--ext-dir` | – | Directory containing `herdr-ide-bridge.vsix`, used instead of the embedded one. |
 | `--web-dir` | – | Serve the UI from this directory instead of the embedded build. |
-| `--parent-stdio` | `false` | Launcher lifecycle: write one `{"event":"ready","url":"http://host:port"}` line to stdout after binding; cancel and clean up when stdin closes. Logs remain on stderr; SIGPIPE is ignored, so a launcher that disappeared does not kill the core before its cleanup. Used by Electron; does not change HTTP guards. |
+| `--parent-stdio` | `false` | Launcher lifecycle: read the launcher's hello, one JSON line on stdin, before serving (`{"desktop_token":"…"}`: the desktop app's token of this launch, 32 to 256 letters, digits, `-` or `_`, which its windows' requests carry in the cookie `herdr-ide-desktop`; `{}` for none; a missing or malformed hello stops the core); write one `{"event":"ready","url":"http://host:port"}` line to stdout after binding; cancel and clean up when stdin closes. Logs remain on stderr; SIGPIPE is ignored, so a launcher that disappeared does not kill the core before its cleanup. Used by Electron; does not change HTTP guards. |
 
 ## `fetch-assets` flags
 
@@ -136,7 +136,8 @@ in the UI; a setting with a scope can have its own value per machine, under
 | `notifications.mutedAgents` | list of strings | `["droid"]` | – | – |
 | `codeServer.install` | `push`, `download`, `existing` | `"push"` | `--code-server-install` | per machine |
 | `codeServer.path` | string | `""` | `--code-server-path` | per machine |
-| `plugins.vscode.enabled` | `true`, `false` | `true` | – | – |
+| `plugins.vscode.enabled` | `true`, `false` | `false` | – | – |
+| `plugins.vscode.browser` | `true`, `false` | `false` | – | – |
 | `plugins.files.enabled` | `true`, `false` | `true` | – | – |
 | `plugins.git.enabled` | `true`, `false` | `true` | – | – |
 | `plugins.usage.enabled` | `true`, `false` | `true` | – | – |
@@ -172,6 +173,15 @@ in the UI; a setting with a scope can have its own value per machine, under
   "[machine:gpu-box]": { "gui.video": false }
 }
 ```
+
+VS Code has two switches, both off by default
+([05](features/05-vscode-panes.md)): `plugins.vscode.enabled` turns it on
+in the desktop app's windows (settings files of earlier versions, where it
+turned VS Code on everywhere, keep their value for the desktop app), and
+`plugins.vscode.browser` in browsers. VS Code runs on the UI's own origin,
+where its extensions and webviews can do whatever the page can; the UI sets
+`plugins.vscode.browser` only after the user accepted that risk in a
+dialog, and setting it in the file by hand is the same acceptance.
 
 ## Keyboard shortcuts
 
@@ -329,8 +339,8 @@ missing here.
 | --- | --- | --- |
 | `GET /ws` | – | The event channel (WebSocket): machines, agents, settings, keybindings, program windows, downloads. |
 | `GET /api/v1/term` | – | The terminal protocol (WebSocket): the machines' terminals, their events and byte streams ([22](features/22-terminal-protocol.md)). |
-| `GET /api/config` | – | Name, slug, version, whether the core is read-only (`read_only`) and whether it offers the interactive ssh login (`ssh_login`; false on Windows, whose ssh keeps no control sockets). |
-| `GET /api/settings` | – | Definitions, values (per machine too) and problems of the settings. |
+| `GET /api/config` | – | Name, slug, version, whether the core is read-only (`read_only`), whether it offers the interactive ssh login (`ssh_login`; false on Windows, whose ssh keeps no control sockets) and which kind of client asks (`client`: `desktop` for a request with the desktop app's token of this launch in its cookie, else `browser`). |
+| `GET /api/settings` | – | Definitions, values (per machine too) and problems of the settings, and which kind of client asks (`client`, as in `/api/config`): the switch of VS Code that applies to the page (`plugins.vscode.enabled` in the desktop app, `plugins.vscode.browser` in a browser). |
 | `PUT /api/settings` | writes | Sets one value (`{"key", "value", "machine"?}`). |
 | `DELETE /api/settings` | writes | Removes one value, which falls back to the global value or the default. |
 | `GET /api/keybindings` | – | Commands, default keys per platform, the user's rules, the bindings in effect and their conflicts. |
@@ -346,7 +356,7 @@ missing here.
 | `POST /api/m/{id}/hc/{action}` | writes | `start`, `stop` or `restart` the machine's terminal core. |
 | `GET /api/m/{id}/privacy` | – | macOS's Full Disk Access on the machine: `files` (the agent's process; on the local machine the core's, which the desktop app started) and `terminals` (the terminal core's, which its terminals' programs have), each `granted`, `denied` or `unknown` (not macOS, no terminal core running, no protected folder to try), and `hc`, the terminal core's executable. Starts no terminal core. |
 | `GET /api/m/{id}/auth` | writes | Interactive ssh login of a machine that needs one (WebSocket, `?cols=&rows=`); `400 invalid_target` for a refused target, `501 ssh_login_unsupported` on a core without ssh control sockets (Windows). |
-| `POST /api/m/{id}/bridge` | writes | (VS Code plugin; `404 plugin_disabled` while it is off) A command for a VS Code window (open a file at a line, diff, Git Graph): the one `window` names, else with `fresh` one that connects after the request, else the best one for `folder`; the reply names the window that took it. |
+| `POST /api/m/{id}/bridge` | writes | (VS Code plugin; `404 plugin_disabled` while it is off for the requesting client) A command for a VS Code window (open a file at a line, diff, Git Graph): the one `window` names, else with `fresh` one that connects after the request, else the best one for `folder`; the reply names the window that took it. |
 | `GET /api/m/{id}/file` | – | A file (`?path=`, `&download=1` as an attachment), with HTTP ranges; `404` only for a path that is not there, `403` for one the machine may not read, `502` when the machine did not answer or its stat failed otherwise. |
 | `GET /api/m/{id}/download` | – | One file as an attachment, or several paths (folders included) as a zip (`?path=`…, `&dl=<id>` to follow it on `/ws`). |
 | `POST /api/m/{id}/upload` | writes | Writes the request body to a file (`?name=`, `&dir=` absolute, else the upload directory). |
@@ -356,7 +366,7 @@ missing here.
 | `POST /api/m/{id}/p/files/write` | writes | Saves the body (at most 8 MiB) into `?path=` when the file still has `&mtime=&size=` (`&new=1`: is not there, `&force=1`: any); `409 conflict` with its state otherwise; audited as `files.write` with the path, `force` and the outcome. |
 | `GET /api/m/{id}/p/git/{read}` | – | The Git plugin's reads ([31](features/31-git.md)) with their parameters in the query: `repo` (`?path=` a directory), `status`, `log` (`&skip=&limit=&branch=…&remotes=1`), `show` (`&rev=&parent=` or `&rev2=`), `blob` (`&path=&source=worktree\|index\|head\|<rev>&parent=`), `branches`, `tags`, `stashes`, `diffStat`, `watch` (tokens `token`, `refs`, `config`), each with `?repo=` the top level. |
 | `POST /api/m/{id}/p/git/{change}` | writes | The Git plugin's changes with a JSON body (at most 5 MiB; `repo` and the action's fields): `stage`, `unstage`, `applyPatch`, `discard`, `commit`, `checkout`, `branchCreate`, `branchDelete`, `branchRename`, `merge`, `rebase`, `abort`, `continue`, `cherryPick`, `revert`, `reset`, `tagCreate`, `tagDelete`, `stashPush`, `stashApply`, `stashPop`, `stashDrop` (`index` and `hash`, the entry's commit), `fetch`, `pull`, `push`; at most 20 000 `paths`; audited as `git.<action>`; failures `git_missing`, `not_a_repo`, `bad_ref`, `auth_required`, `conflicts`, `diverged`, `stale`, `timeout`, `git_failed`. |
-| `GET /api/m/{id}/code/status` | – | Whether the machine's code-server is installed and runs. While the VS Code plugin is off, it, `code/start`, the proxy and the bridge answer `404 plugin_disabled`. |
+| `GET /api/m/{id}/code/status` | – | Whether the machine's code-server is installed and runs. While the VS Code plugin is off for the requesting client (`plugins.vscode.enabled` for the desktop app, `plugins.vscode.browser` for browsers), it, `code/start`, the proxy and the bridge answer `404 plugin_disabled`. |
 | `POST /api/m/{id}/code/start` | writes | Installs and starts the machine's code-server. |
 | `POST /api/m/{id}/code/stop` | – | Releases the machine's code-server (allowed read-only: it only stops). |
 | `/m/{id}/code/` | writes | The machine's code-server behind the core's proxy (`/m/{id}/code` redirects here). |

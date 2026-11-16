@@ -27,7 +27,8 @@ settings per browser; theming terminal applications.
 **Registry** (`internal/settings`, `internal/registry`)
 
 - A package defines the settings it uses as a `settings.Module`: sections
-  (`{id, order}`), definitions and migrations of its old keys
+  (`{id, order}`; `advanced`; `plugin`, the plugin a plugin's section
+  belongs to, [27](27-plugins.md)), definitions and migrations of its old keys
   (`internal/uisettings` for the user interfaces, `codeserver.Settings`,
   `gui.Settings`); `internal/registry` lists the modules the core
   registers.
@@ -264,8 +265,11 @@ settings per browser; theming terminal applications.
     terminals and the app have it, System Settings, and what to restart
     ([16](16-desktop-packaging.md)); the search finds it too;
   - a list of sections, the advanced ones last under **Advanced**, each
-    with a dot when one of its settings is changed in the scope shown, and
-    **Keyboard Shortcuts** (User only);
+    with a dot when one of its settings is changed in the scope shown,
+    **Plugins** (User only) with the plugins' own pages indented below it
+    (in a machine's scope under a heading; a plugin's page starts with its
+    switch, says when it is off and is dimmed in the list then,
+    [27](27-plugins.md)), and **Keyboard Shortcuts** (User only);
   - a search across labels, descriptions, keys, sections and options of the
     scope shown (and the keyboard shortcuts in User);
   - per setting: its name, its description, then its control; a bar on its
@@ -526,6 +530,7 @@ changes and error codes, migration of the browser settings, search),
 `settingsDialog.test.ts` (sections and scopes, the stepper keeping the
 focus and the range, the list editor, a machine's own value set and
 removed, colors from schemes and the user's, every scheme defined),
+`pluginSettings.test.ts` (plugins' pages in the list and their switch),
 `localFonts.test.ts` (the font picker's list with Chromium's metrics of
 fixed-pitch, proportional, symbol and undecoded fonts and one drawn by a
 fallback: names that print, each once, sorted),

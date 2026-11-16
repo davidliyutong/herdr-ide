@@ -544,6 +544,33 @@ describe('FilesPanel', () => {
     expect(changes()).toEqual([['copy', { paths: ['/home/u/src/main.go'], dir: '/home/u/src' }]]);
   });
 
+  it('draws file-type icons, indent guides and the filter’s match', async () => {
+    await act(async () => row('/home/u/src/lib').click());
+    await flush();
+    expect(row('/home/u/src/lib').querySelector('svg.file-icon')?.getAttribute('data-icon')).toBe('folder.lib');
+    expect(row('/home/u/src/main.go').querySelector('svg.file-icon')?.getAttribute('data-icon')).toBe('go');
+    expect(row('/home/u/src/lib/a.go').querySelectorAll('.tree-guide')).toHaveLength(1);
+    await act(async () => setFilter('ai'));
+    expect(row('/home/u/src/main.go').querySelector('mark')?.textContent).toBe('ai');
+  });
+
+  it('pages, selects all and goes to a row by typing its name', async () => {
+    await act(async () => row('/home/u/src/lib').click());
+    await flush();
+    await key('PageDown');
+    expect(useTree.getState().cursor).toBe('/home/u/src/main.go');
+    await key('a', { metaKey: true, ctrlKey: false });
+    await key('a', { ctrlKey: true, metaKey: false });
+    expect(useTree.getState().selection).toEqual([
+      '/home/u/src/lib',
+      '/home/u/src/lib/a.go',
+      '/home/u/src/lib/b.go',
+      '/home/u/src/main.go',
+    ]);
+    await key('b');
+    expect(useTree.getState()).toMatchObject({ cursor: '/home/u/src/lib/b.go', selection: ['/home/u/src/lib/b.go'] });
+  });
+
   it('keeps a cut on the clipboard until it is moved', async () => {
     const main = '/home/u/src/main.go';
     await key('End');

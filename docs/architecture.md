@@ -57,7 +57,7 @@ machines only ([02](features/02-multi-machine-transport.md)).
 | `internal/jpegstrip` | JPEG encoding of a window capture in independent row groups, encoded in parallel (from Go's `image/jpeg`, BSD). |
 | `internal/server` | HTTP/WS front: guards, the event channel, terminal streams, files, proxy, bridge, audit. |
 | `internal/embedded` | Build artifacts compiled into the core (agents, herdr-core, the video encoder, bridge VSIX). |
-| `web` | Browser UI (Vite, React, zustand): the plugins' web sides (`src/plugins`, the right sidebar `src/components/RightBar.tsx`, [27](features/27-plugins.md); Monaco loaded on first use for plugins' editors, `src/plugins/monaco.ts`, [28](features/28-file-explorer.md)); the terminals of the machines' terminal cores (`src/term`: the client of `/api/v1/term` and the layout document, whose panes are terminals, VS Code and previews; `src/state/terms.ts`: the machines' terminals and layouts; `src/vt`: Ghostty's terminal library as WebAssembly with its renderer and input encoders, also for the PTY dialogs, [26](features/26-web-terminals.md)); VS Code panes' iframes in a layer over the panes (`src/codeFrames.ts`, `src/components/CodeLayer.tsx`, [05](features/05-vscode-panes.md)); `web/embed.go` embeds `web/dist`. |
+| `web` | Browser UI (Vite, React, zustand): the plugins' web sides (`src/plugins`, the right sidebar `src/components/RightBar.tsx`, [27](features/27-plugins.md); the components panels share: searchable dropdowns `src/components/Picker.tsx`, tree rows, selection and sections `src/components/tree`, file-type icons `src/fileIcons.tsx`; Monaco loaded on first use for plugins' editors, `src/plugins/monaco.ts`, [28](features/28-file-explorer.md)); the terminals of the machines' terminal cores (`src/term`: the client of `/api/v1/term` and the layout document, whose panes are terminals, VS Code and previews; `src/state/terms.ts`: the machines' terminals and layouts; `src/vt`: Ghostty's terminal library as WebAssembly with its renderer and input encoders, also for the PTY dialogs, [26](features/26-web-terminals.md)); VS Code panes' iframes in a layer over the panes (`src/codeFrames.ts`, `src/components/CodeLayer.tsx`, [05](features/05-vscode-panes.md)); `web/embed.go` embeds `web/dist`. |
 | `desktop` | Electron shell for macOS, Windows and Linux (`src`: the owned core process, what differs per system (`platform.ts`), the client of its settings and keybindings, the application menu, the main window's preload and policy) and electron-builder config: macOS DMG and zip, Windows NSIS setup, Linux AppImage and deb, each wrapping the core built for its system. |
 | `extensions/herdr-ide-bridge` | VS Code extension installed into code-server. |
 | `scripts` | Build, packaging and check scripts (`build.sh`, which also builds a Windows core; `package.sh`, archives for Linux and macOS; `desktop.sh`, the desktop app of each system; `icons.sh`; `check.sh`, which vets for Linux, macOS and Windows too), the pinned downloads (`fetch-hc`, `fetch-ghostty-vt.sh` for the web UI's emulator, `build-ffmpeg.sh` for the video encoder) and the generators (`tokens`, `registry`). |
@@ -69,7 +69,13 @@ The optional Electron shell (`desktop/src/main.ts`) runs on macOS, Windows
 and Linux (`desktop/src/platform.ts` holds what differs). It spawns the
 bundled core from its resources (`bin/herdr-ide`, `bin/herdr-ide.exe` on
 Windows) with `--parent-stdio`, loopback port 7781 and instance `desktop`.
-The core writes one `{ "event": "ready", "url": "…" }` line to stdout after
+The shell's first line on the core's stdin is its hello,
+`{ "desktop_token": "…" }`, which the core reads before it serves: the
+token of this launch, which the shell also sets as an HttpOnly cookie for
+the core's origin in its session, so the core tells the app's windows
+from browsers (VS Code has a switch for each,
+[08](features/08-web-access-and-security.md)). The core writes one
+`{ "event": "ready", "url": "…" }` line to stdout after
 binding its listener; stderr carries logs. The shell loads only that owned
 core's URL. Closing the parent stdin pipe cancels the core's context, and
 it is how the shell stops the core on every system (no signal is sent;
@@ -255,10 +261,13 @@ extensions (VSIXs, also from the core) → start (a running code-server is
 reused only if it serves the workbench; otherwise it is replaced). The agent records the process in `run/cs.pid` with its own pid as
 owner; it stops its own process on exit, reaps processes whose owner died,
 and stops on request. The core stops code-server after `--code-server-idle`
-without WebSocket connections through its proxy. Turning the VS Code plugin
-off ends a preparation under way (its context; an upload's stream is closed
-and the machine's download stops with its stream) and closes the proxied
-requests and WebSockets, so code-server idles out. See
+without WebSocket connections through its proxy. The VS Code plugin has a
+switch for the desktop app's windows and one for browsers
+([05](features/05-vscode-panes.md)): turning one off closes the proxied
+requests and WebSockets of that kind of client, and turning off the last
+one on also ends a preparation under way (its context; an upload's stream
+is closed and the machine's download stops with its stream), so
+code-server idles out. See
 [deployment](deployment.md#remote-resources).
 
 ## Names, renames and migration

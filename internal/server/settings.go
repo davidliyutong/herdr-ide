@@ -36,12 +36,13 @@ func keybindingsMessage(kb *keybindings.Store) map[string]any {
 }
 
 // handleSettings lists the sections, definitions and values, so the UIs
-// render their forms without knowing the settings in advance.
+// render their forms without knowing the settings in advance, and which
+// kind of client asks (clientOf).
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	st := s.opts.Settings
 	if st == nil {
 		writeJSON(w, http.StatusOK, map[string]any{"sections": []any{}, "definitions": []any{}, "values": map[string]any{},
-			"problems": []any{}, "read_only": s.opts.ReadOnly})
+			"problems": []any{}, "read_only": s.opts.ReadOnly, "client": s.clientOf(r)})
 		return
 	}
 	state := st.State()
@@ -52,6 +53,9 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		"problems":    state.Problems,
 		"read_only":   s.opts.ReadOnly,
 		"file":        st.Path(),
+		// Which switch of a plugin with one per kind of client
+		// (plugin.BrowserRisk) applies to this page: the core's verdict.
+		"client": s.clientOf(r),
 	})
 }
 

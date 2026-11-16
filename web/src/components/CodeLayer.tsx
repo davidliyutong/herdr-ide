@@ -23,8 +23,8 @@ import {
   type Frame,
 } from '../codeFrames';
 import { t } from '../i18n';
-import { setSetting } from '../settings';
-import { usePluginOn } from '../plugins/registry';
+import { useSettings } from '../settings';
+import { setPluginSwitch, usePluginOn } from '../plugins/registry';
 
 type Machines = ReturnType<typeof useStore.getState>['machines'];
 let usableOf: { machines?: Machines; list: string } = { list: '' };
@@ -170,13 +170,15 @@ export function CodeSlot({ m, pane, view }: { m: string; pane: string; view: L.C
 function CodeOffNote({ m, off }: { m: string; off: CodeOff }) {
   const label = useStore((s) => s.machines[m]?.label ?? m);
   const readOnly = useStore((s) => s.readOnly);
+  // This kind of client's switch; a browser's asks to accept the risk.
+  const browser = useSettings((s) => s.client) === 'browser';
   if (off === 'plugin')
     return (
       <div className="code-off">
-        <span>{t('code.pluginOff')}</span>
+        <span>{t(browser ? 'code.pluginOffBrowser' : 'code.pluginOff')}</span>
         {!readOnly && (
-          <button onClick={() => void setSetting('plugins.vscode.enabled', true)}>
-            <Power /> {t('code.pluginTurnOn')}
+          <button onClick={() => void setPluginSwitch('vscode', true)}>
+            <Power /> {t(browser ? 'code.pluginTurnOnBrowser' : 'code.pluginTurnOn')}
           </button>
         )}
       </div>

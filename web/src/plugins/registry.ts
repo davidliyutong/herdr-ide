@@ -1,6 +1,8 @@
 // The plugins the app has and which of them are on (api.ts).
 import { create } from 'zustand';
-import { builtinDefaults, useSettings } from '../settings';
+import { riskDialog } from '../dialog';
+import { t } from '../i18n';
+import { builtinDefaults, setSetting, useSettings, type Client, type Section } from '../settings';
 import type { CommandDef, PaletteItem, PanelDef, PaneViewDef, PluginDef } from './api';
 
 let plugins: PluginDef[] = [];
@@ -22,16 +24,23 @@ export const usePluginList = create<{ list: PluginDef[] }>(() => ({ list: [] }))
 /** Every plugin, on or off. */
 export const allPlugins = (): readonly PluginDef[] => plugins;
 
-/** The setting that turns p on, undefined when it is always on. */
-export function enableSetting(p: PluginDef): string | undefined {
+/** The browsers' switch of a plugin whose content runs on the UI's origin
+ * (browserRisk). */
+export const browserSetting = (p: PluginDef): string => `plugins.${p.id}.browser`;
+
+/** The setting that turns p on for this kind of client (the core's
+ * verdict on this page, settings.ts Client): the browsers' own for a
+ * plugin with browserRisk in a browser; undefined when it is always on. */
+export function enableSetting(p: PluginDef, client: Client = useSettings.getState().client): string | undefined {
   if (p.enableSetting === null) return undefined;
+  if (p.browserRisk && client === 'browser') return browserSetting(p);
   return p.enableSetting ?? `plugins.${p.id}.enabled`;
 }
 
 /** The value of p's switch for every machine without one of its own (the
  * app's value), on when the core has none; true for plugins always on. */
-export function pluginSwitch(p: PluginDef, values = useSettings.getState().values): boolean {
-  const key = enableSetting(p);
+export function pluginSwitch(p: PluginDef, values = useSettings.getState().values, client = useSettings.getState().client): boolean {
+  const key = enableSetting(p, client);
   if (!key) return true;
   const v = values[key]?.value ?? builtinDefaults[key];
   return v !== false;
@@ -39,14 +48,55 @@ export function pluginSwitch(p: PluginDef, values = useSettings.getState().value
 
 /** Whether p is on: its switch, or, for a setting machines can have of
  * their own (program windows), that of any machine. */
-export function pluginOn(p: PluginDef, values = useSettings.getState().values): boolean {
-  if (pluginSwitch(p, values)) return true;
-  const own = values[enableSetting(p)!]?.machines ?? {};
+export function pluginOn(p: PluginDef, values = useSettings.getState().values, client = useSettings.getState().client): boolean {
+  if (pluginSwitch(p, values, client)) return true;
+  const own = values[enableSetting(p, client)!]?.machines ?? {};
   return Object.values(own).some((v) => v !== false);
+}
+
+/** Asks before a setting turns on that is the browsers' switch of a plugin
+ * whose content runs on the UI's origin (browserRisk): what that content
+ * can reach, and Enable only once the user ticked that they understand.
+ * True when accepted, and for every other setting. */
+export function acceptRisk(key: string): Promise<boolean> {
+  const r = plugins.find((p) => p.browserRisk && browserSetting(p) === key)?.browserRisk;
+  if (!r) return Promise.resolve(true);
+  return riskDialog({
+    title: t(r.title),
+    intro: t(r.intro),
+    points: r.points.map((k) => t(k)),
+    outro: r.outro.map((k) => t(k)),
+    check: t(r.check),
+    confirm: t(r.confirm),
+  });
+}
+
+/** Turns the plugin of this id on or off for this kind of client; in a
+ * browser, turning on one whose content runs on the UI's origin asks
+ * first (acceptRisk), and declining changes nothing. Resolves to an error
+ * message, or undefined. */
+export async function setPluginSwitch(id: string, on: boolean): Promise<string | undefined> {
+  const p = plugins.find((x) => x.id === id);
+  const key = p && enableSetting(p);
+  if (!key) return undefined;
+  if (on && !(await acceptRisk(key))) return undefined;
+  return setSetting(key, on);
 }
 
 /** The plugins that are on. */
 export const activePlugins = (): PluginDef[] => plugins.filter((p) => pluginOn(p));
+
+/** The settings section of p: the one it names, else the one the core
+ * says is its (Section.plugin). */
+export function pluginSection(p: PluginDef, sections: readonly Section[] = useSettings.getState().sections): string | undefined {
+  return p.settings?.section ?? sections.find((s) => s.plugin === p.id)?.id;
+}
+
+/** The id of the plugin a settings section belongs to: the core's word
+ * for it (Section.plugin), else the plugin naming it. */
+export function sectionPlugin(section: string, sections: readonly Section[] = useSettings.getState().sections): string | undefined {
+  return sections.find((s) => s.id === section)?.plugin ?? plugins.find((p) => p.settings?.section === section)?.id;
+}
 
 /** Whether the plugin of this id is there and on. */
 export const isPluginOn = (id: string): boolean => activePlugins().some((p) => p.id === id);
@@ -54,8 +104,9 @@ export const isPluginOn = (id: string): boolean => activePlugins().some((p) => p
 /** The plugins that are on, re-rendered when settings change. */
 export function useActivePlugins(): PluginDef[] {
   const values = useSettings((s) => s.values);
+  const client = useSettings((s) => s.client);
   usePluginList((s) => s.list);
-  return plugins.filter((p) => pluginOn(p, values));
+  return plugins.filter((p) => pluginOn(p, values, client));
 }
 
 /** Whether the plugin of this id is on, for components. */
