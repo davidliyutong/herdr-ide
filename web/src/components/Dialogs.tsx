@@ -6,6 +6,9 @@ import { formatSize, listDir, type RemoteStat } from '../lib/files';
 import { shortPath } from '../lib/machine';
 import { useStore } from '../state/store';
 import { t } from '../i18n';
+import { match } from '../lib/match';
+import { rangeOf } from './tree/selection';
+import { Highlight } from './Highlight';
 
 /** Renders the pending dialog request (see dialog.ts). */
 export function Dialogs() {
@@ -256,12 +259,17 @@ function DownloadDialog({ req }: { req: Extract<DialogRequest, { kind: 'download
   const [list, setList] = useState<{ path: string; entries: RemoteStat[] }>();
   const [error, setError] = useState('');
   const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [query, setQuery] = useState('');
+  // The entry checked or unchecked last, where a Shift-click's range starts.
+  const anchor = useRef<string>(undefined);
 
   useEffect(() => {
     let cancelled = false;
     setList(undefined);
     setError('');
     setChecked(new Set());
+    setQuery('');
+    anchor.current = undefined;
     listDir(req.m, dir)
       .then((d) => !cancelled && setList({ path: d.dir.path ?? dir, entries: d.entries }))
       .catch((e: Error) => !cancelled && setError(t('download.listFailed', { dir, error: e.message })));
@@ -278,13 +286,36 @@ function DownloadDialog({ req }: { req: Extract<DialogRequest, { kind: 'download
   const full = (name: string) => (path === '/' ? '' : path.replace(/\/$/, '')) + '/' + name;
   const parent = path.replace(/\/[^/]*\/?$/, '') || '/';
   const entries = list?.entries ?? [];
-  const toggle = (name: string) =>
+  // The entries the filter shows, with the characters it matched.
+  const shown = entries.flatMap((e) => {
+    const m = match(query, e.name);
+    return m ? [{ e, ranges: m.ranges }] : [];
+  });
+  /** Checks or unchecks an entry; with Shift, every entry shown from the
+   * one checked or unchecked last, alike. */
+  const toggle = (name: string, shift = false) =>
     setChecked((c) => {
       const next = new Set(c);
-      if (!next.delete(name)) next.add(name);
+      const on = !c.has(name);
+      const names = shown.map((x) => x.e.name);
+      const from = shift && anchor.current && names.includes(anchor.current) ? anchor.current : name;
+      for (const n of rangeOf(names, from, name)) {
+        if (on) next.add(n);
+        else next.delete(n);
+      }
+      anchor.current = name;
       return next;
     });
-  const all = entries.length > 0 && checked.size === entries.length;
+  const all = shown.length > 0 && shown.every((x) => checked.has(x.e.name));
+  const setShown = (on: boolean) =>
+    setChecked((c) => {
+      const next = new Set(c);
+      for (const x of shown) {
+        if (on) next.add(x.e.name);
+        else next.delete(x.e.name);
+      }
+      return next;
+    });
   const download = () => {
     if (checked.size === 0) return;
     startDownload(
@@ -312,30 +343,54 @@ function DownloadDialog({ req }: { req: Extract<DialogRequest, { kind: 'download
             <bdi>{shortPath(path, home)}</bdi>
           </span>
         </div>
+        {entries.length > 0 && (
+          <input
+            className="input download-filter"
+            value={query}
+            placeholder={t('download.filter')}
+            aria-label={t('download.filter')}
+            spellCheck={false}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              // Escape clears the filter before it closes the dialog.
+              if (e.key === 'Escape' && query) {
+                e.stopPropagation();
+                setQuery('');
+              }
+            }}
+          />
+        )}
         <div className="download-list" role="listbox" aria-multiselectable="true" aria-label={path}>
-          {entries.length > 0 && (
+          {shown.length > 0 && (
             <label className="download-row download-all">
-              <input type="checkbox" checked={all} onChange={() => setChecked(all ? new Set() : new Set(entries.map((e) => e.name)))} />
-              <span>{t('download.selectAll')}</span>
+              <input type="checkbox" checked={all} onChange={() => setShown(!all)} />
+              <span>{t(query ? 'download.selectShown' : 'download.selectAll')}</span>
             </label>
           )}
-          {entries.map((e) => (
+          {shown.map(({ e, ranges }) => (
             <div
               key={e.name}
               role="option"
               aria-selected={checked.has(e.name)}
               className={`download-row ${checked.has(e.name) ? 'sel' : ''}`}
+              title={e.name}
               onDoubleClick={() => e.is_dir && setDir(full(e.name))}
             >
-              <input type="checkbox" checked={checked.has(e.name)} aria-label={e.name} onChange={() => toggle(e.name)} />
+              <input
+                type="checkbox"
+                checked={checked.has(e.name)}
+                aria-label={e.name}
+                // React reports a checkbox's change from its click, which knows Shift.
+                onChange={(ev) => toggle(e.name, (ev.nativeEvent as MouseEvent).shiftKey)}
+              />
               {e.is_dir ? <Folder /> : <File />}
               {e.is_dir ? (
-                <button className="link download-name" onClick={() => setDir(full(e.name))}>
-                  {e.name}
+                <button className="link download-name ellipsis" onClick={() => setDir(full(e.name))}>
+                  <Highlight text={e.name} ranges={ranges} />
                 </button>
               ) : (
-                <span className="download-name ellipsis" onClick={() => toggle(e.name)}>
-                  {e.name}
+                <span className="download-name ellipsis" onClick={(ev) => toggle(e.name, ev.shiftKey)}>
+                  <Highlight text={e.name} ranges={ranges} />
                 </span>
               )}
               <span className="muted small">{e.is_dir ? '' : formatSize(e.size)}</span>
@@ -343,6 +398,7 @@ function DownloadDialog({ req }: { req: Extract<DialogRequest, { kind: 'download
           ))}
           {!list && !error && <div className="muted small">{t('download.loading')}</div>}
           {list && entries.length === 0 && <div className="muted small">{t('download.empty')}</div>}
+          {entries.length > 0 && shown.length === 0 && <div className="muted small">{t('download.noMatch')}</div>}
           {error && <div className="error small">{error}</div>}
         </div>
         <div className="muted small">{t('download.hint')}</div>

@@ -102,9 +102,14 @@ download chooser picks entries, nothing more.
   or selected (checked with a `HEAD` request first, so text that names no
   file becomes a note instead of a failed download) and **Download files…**:
   a chooser listing the pane's working directory, where entries are
-  checked (or all at once), directories entered by clicking their names and
-  left with the up button, and **Download** takes the checked entries of the
-  directory shown in one download. Neither is offered for the desktop app's
+  checked (or all at once; Shift-clicking a box or name checks or unchecks
+  every entry from the one clicked last, alike), a field filters the
+  entries by name (the matched characters marked; **Select all shown**
+  then takes those shown, checked entries stay checked while hidden, and
+  Escape clears the filter before it closes the chooser), directories are
+  entered by clicking their names and left with the up button, and
+  **Download** takes the checked entries of the directory shown in one
+  download. Neither is offered for the desktop app's
   own machine, whose files are already on the computer; a browser offers
   them for every machine.
 - The page starts a download with a same-origin link, so the browser (or the
@@ -338,7 +343,7 @@ download cancelled before its request refused, `416` for a range past the
 end, a file removed between stat and read not found, the browser leaving
 during the stat reported as cancelled),
 `web/src/__tests__/download.test.ts` (the pane menu's items, the check
-before a path's download, the chooser, no downloads for the desktop app's
+before a path's download, the chooser (Shift ranges, the filter), no downloads for the desktop app's
 own machine; the panel: progress and speed, an archive without a size,
 failures and their notes, cancelling, a download the browser holds back,
 asking again after a reconnect and ending what the core no longer knows,

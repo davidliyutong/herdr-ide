@@ -90,3 +90,45 @@ describe('display error', () => {
     expect(host.querySelector('.gui-note')).toBeNull();
   });
 });
+
+describe('program windows', () => {
+  it('lists the windows of several machines in a searchable list and opens the one chosen', async () => {
+    useStore
+      .getState()
+      .setMachines([
+        { id: 'ws2', label: 'ws2', kind: 'ssh', status: 'ready' } as unknown as MachineState,
+        { id: 'gpu', label: 'gpu', kind: 'ssh', status: 'ready' } as unknown as MachineState,
+      ]);
+    useGui.setState({
+      machines: {
+        ws2: { m: 'ws2', phase: 'ready', windows: [{ id: 1, title: 'xterm', w: 640, h: 480 }] },
+        gpu: {
+          m: 'gpu',
+          phase: 'ready',
+          windows: [
+            { id: 2, title: 'paraview', w: 800, h: 600 },
+            { id: 3, title: '', w: 300, h: 200 },
+          ],
+        },
+      },
+    });
+    const opened = vi.fn(() => ({ focus() {} }) as unknown as Window);
+    vi.stubGlobal('open', opened);
+    const host = renderTray();
+    const button = host.querySelector<HTMLButtonElement>('button[aria-haspopup="listbox"]')!;
+    button.focus();
+    await act(async () => button.click());
+    const rows = () => [...document.body.querySelectorAll<HTMLElement>('.picker-row, .picker-group')].map((r) => r.textContent);
+    expect(rows()).toEqual(['ws2', 'xterm640×480', 'gpu', 'paraview800×600', 'Untitled window300×200']);
+    const search = document.body.querySelector<HTMLInputElement>('.picker-search')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, 'para');
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(rows()).toEqual(['gpu', 'paraview800×600']);
+    await act(async () => search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
+    expect(opened).toHaveBeenCalledWith(expect.stringContaining('/m/gpu/gui/2'), expect.any(String), expect.any(String));
+    expect(document.activeElement).toBe(button);
+    vi.unstubAllGlobals();
+  });
+});

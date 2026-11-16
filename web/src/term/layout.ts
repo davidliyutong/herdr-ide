@@ -370,6 +370,60 @@ export function moveTab(layout: Layout, workspace: string, from: number, to: num
   });
 }
 
+/** A list with the items at picked (indexes, in any order; unknown ones
+ * left out) moved, in the list's order, as one block to a slot of the
+ * list as it is (0 before the first item, n after the last). */
+export function movedBlock<T>(list: readonly T[], picked: readonly number[], slot: number): T[] {
+  const set = new Set(picked.filter((i) => i >= 0 && i < list.length));
+  const block = list.filter((_, i) => set.has(i));
+  const rest = list.filter((_, i) => !set.has(i));
+  const at = clampIndex(slot, list.length + 1) - [...set].filter((i) => i < slot).length;
+  return [...rest.slice(0, at), ...block, ...rest.slice(at)];
+}
+
+/** Moves several tabs of a workspace, in their order, as one block to a
+ * slot of its tabs; the selected tab stays selected. */
+export function moveTabs(layout: Layout, workspace: string, tabs: readonly number[], slot: number): Layout {
+  return updateWorkspace(layout, workspace, (ws) => {
+    const next = movedBlock(ws.tabs, tabs, slot);
+    if (next.every((t, i) => t === ws.tabs[i])) return ws;
+    return { ...ws, tabs: next, selected: Math.max(0, next.indexOf(ws.tabs[ws.selected])) };
+  });
+}
+
+/** Moves several workspaces, in their order, as one block to a slot of
+ * the workspaces; the selected one stays selected. */
+export function moveWorkspaces(layout: Layout, ids: readonly string[], slot: number): Layout {
+  const picked = ids.map((x) => workspaceIndex(layout, x));
+  const next = movedBlock(layout.workspaces, picked, slot);
+  if (next.every((w, i) => w === layout.workspaces[i])) return layout;
+  return { ...layout, workspaces: next, selected: Math.max(0, next.indexOf(layout.workspaces[layout.selected])) };
+}
+
+/** Moves tabs of a workspace, in their order, to the end of another one,
+ * which is selected with the last of them; the tab selected in the first
+ * stays selected when it stays, else its neighbor is. A workspace the
+ * tabs leave empty stays. Nothing for the same or an unknown workspace. */
+export function moveTabsToWorkspace(layout: Layout, workspace: string, tabs: readonly number[], target: string): Layout {
+  const from = workspaceIndex(layout, workspace);
+  const to = workspaceIndex(layout, target);
+  const src = layout.workspaces[from];
+  if (from < 0 || to < 0 || from === to) return layout;
+  const set = new Set(tabs.filter((i) => i >= 0 && i < src.tabs.length));
+  if (!set.size) return layout;
+  const moving = src.tabs.filter((_, i) => set.has(i));
+  const rest = src.tabs.filter((_, i) => !set.has(i));
+  const kept = rest.indexOf(src.tabs[src.selected]);
+  const before = [...set].filter((i) => i < src.selected).length;
+  const selected = kept >= 0 ? kept : clampIndex(src.selected - before, rest.length);
+  const dst = layout.workspaces[to];
+  const added = [...dst.tabs, ...moving];
+  const workspaces = layout.workspaces.map((w, i) =>
+    i === from ? { ...w, tabs: rest, selected } : i === to ? { ...w, tabs: added, selected: added.length - 1 } : w,
+  );
+  return { ...layout, workspaces, selected: to };
+}
+
 /** Selects a tab and its workspace. */
 export function selectTab(layout: Layout, workspace: string, tab: number): Layout {
   const index = workspaceIndex(layout, workspace);

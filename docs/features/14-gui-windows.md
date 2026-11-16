@@ -288,7 +288,11 @@ input methods.
   windows are marked on the program windows button of their terminal's pane
   header ([04](04-layout-and-keyboard.md)), until opened; the button lists
   the terminal's windows (by the window's `terminal`), and the status bar
-  lists every window, including those without a terminal. A dialog of a window (`WM_TRANSIENT_FOR`) is opened
+  lists every window, including those without a terminal. A button of one
+  window opens it; with more, the list is searchable (`components/Picker.tsx`:
+  the windows' titles and sizes, under their machines' names when they are
+  on several; typing narrows it, the keyboard chooses, Escape gives the
+  keyboard back to the button). A dialog of a window (`WM_TRANSIENT_FOR`) is opened
   by the browser window of its parent, which may still do so after the click
   that caused it; if blocked, that window shows a button for it.
 - Pictures are decoded as they arrive, several at once
@@ -454,7 +458,9 @@ per connection, the retry backoff, and detaching without an error when the
 machine disconnects or is removed;
 `web/src/__tests__/guiError.test.ts` covers the status bar's error (shown
 on click, dismissed until the display failed anew, hidden for machines
-that are not connected);
+that are not connected) and the windows' searchable list (grouped by
+machine, narrowed by typing, the chosen window opened, the keyboard back
+on the button);
 `internal/server/server_test.go` covers the Origin check of the close
 request;
 `internal/agent/gui_test.go` also covers recognizing shells started with the

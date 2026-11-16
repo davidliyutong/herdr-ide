@@ -373,6 +373,121 @@ describe('ContextMenu', () => {
     expect(menus()).toHaveLength(0);
     await act(async () => root.unmount());
   });
+
+  it('filters its items as one types: Backspace widens, Escape clears, then closes', async () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const root = createRoot(host);
+    await act(async () => root.render(createElement(ContextMenu)));
+    const ran: string[] = [];
+    const item = (label: string, more: Partial<MenuItem> = {}): MenuItem => ({ label, run: () => ran.push(label), ...more });
+    const ev = { clientX: 10, clientY: 10, preventDefault: vi.fn(), stopPropagation: vi.fn() };
+    await act(async () =>
+      openMenu(ev, [
+        item('Rename Tab'),
+        'sep',
+        item('New Tab'),
+        item('Close Tab', { disabled: true }),
+        item('website', { keywords: 'gpu' }),
+      ]),
+    );
+    const menu = () => host.querySelector<HTMLElement>('[role=menu]');
+    const field = () => host.querySelector<HTMLInputElement>('.context-filter input');
+    const shown = () => [...host.querySelectorAll('.context-item')].map((e) => e.textContent);
+    const key = (k: string, target: HTMLElement = (document.activeElement as HTMLElement) ?? menu()!) =>
+      act(async () => void target.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })));
+    // A short menu shows no field until a key is typed.
+    expect(field()).toBeNull();
+    await key('t');
+    expect(field()?.value).toBe('t');
+    expect(document.activeElement).toBe(field());
+    // Matched characters are marked; separators go; disabled items stay.
+    expect(shown()).toEqual(['Rename Tab', 'New Tab', 'Close Tab', 'website']);
+    const type = (v: string) =>
+      act(async () => {
+        const f = field()!;
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(f, v);
+        f.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    await type('tab');
+    expect(shown()).toEqual(['Rename Tab', 'New Tab', 'Close Tab']);
+    expect(host.querySelector('.context-item.sel')?.textContent).toBe('Rename Tab');
+    expect(host.querySelector('.context-item.sel mark.match')?.textContent).toBe('Tab');
+    await type('na');
+    expect(shown()).toEqual(['Rename Tab']);
+    // Letters that start words.
+    await type('nt');
+    expect(shown()).toEqual(['New Tab']);
+    // Keywords match too, without marks.
+    await type('gpu');
+    expect(shown()).toEqual(['website']);
+    await type('zz');
+    expect(shown()).toEqual([]);
+    expect(host.querySelector('.context-empty')?.textContent).toBe('No matching items');
+    // Escape clears the filter, then closes the menu.
+    await key('Escape', field()!);
+    expect(field()?.value).toBe('');
+    expect(shown()).toHaveLength(4);
+    await key('Escape', field()!);
+    expect(menu()).toBeNull();
+
+    // Typing on the menu itself filters, and Backspace there widens.
+    await act(async () => openMenu(ev, [item('alpha'), item('beta')]));
+    menu()!.focus();
+    await key('b', menu()!);
+    expect(shown()).toEqual(['beta']);
+    await key('Enter', field()!);
+    expect(ran).toEqual(['beta']);
+    await act(async () => root.unmount());
+  });
+
+  it('keeps long menus usable: a field from the start, pages, scrolling inside', async () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const root = createRoot(host);
+    await act(async () => root.render(createElement(ContextMenu)));
+    const ran: string[] = [];
+    const many: MenuItem[] = Array.from({ length: 300 }, (_, i) => ({ label: `workspace ${i}`, run: () => ran.push(String(i)) }));
+    const ev = { clientX: 10, clientY: 10, preventDefault: vi.fn(), stopPropagation: vi.fn() };
+    const scrolled = vi.fn();
+    Element.prototype.scrollIntoView = scrolled;
+    await act(async () => openMenu(ev, [{ label: 'Move to Workspace', submenu: many }]));
+    const menus = () => [...host.querySelectorAll<HTMLElement>('[role=menu]')];
+    const key = (k: string) =>
+      act(
+        async () => void document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })),
+      );
+    await key('ArrowDown');
+    await key('ArrowRight');
+    expect(menus()).toHaveLength(2);
+    // The submenu of many items has its field, which has the keyboard.
+    const field = menus()[1].querySelector<HTMLInputElement>('.context-filter input')!;
+    expect(document.activeElement).toBe(field);
+    expect(menus()[1].querySelectorAll('.context-item')).toHaveLength(300);
+    await key('End');
+    expect(menus()[1].querySelector('.context-item.sel')?.textContent).toBe('workspace 299');
+    expect(scrolled).toHaveBeenCalled();
+    await key('PageUp');
+    expect(menus()[1].querySelector('.context-item.sel')?.textContent).toBe('workspace 291');
+    // Scrolling the menu's own list keeps it open.
+    await act(async () => void menus()[1].querySelector('.context-list')!.dispatchEvent(new Event('scroll')));
+    expect(menus()).toHaveLength(2);
+    // Typing narrows it; ← (in an empty field) goes back to the parent.
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, '42');
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    // In the menu's order.
+    expect([...menus()[1].querySelectorAll('.context-item')].map((e) => e.textContent)).toEqual([
+      'workspace 42',
+      'workspace 142',
+      'workspace 242',
+    ]);
+    await key('Enter');
+    expect(ran).toEqual(['42']);
+    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    await act(async () => root.unmount());
+  });
 });
 
 describe('machineMenu', () => {

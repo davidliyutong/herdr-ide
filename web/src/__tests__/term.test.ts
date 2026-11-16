@@ -19,6 +19,9 @@ import {
   layoutTerminals,
   locate,
   moveTab,
+  moveTabs,
+  moveTabsToWorkspace,
+  moveWorkspaces,
   movePane,
   moveToNewTab,
   moveWorkspace,
@@ -165,6 +168,12 @@ function applyOp(layout: Layout, op: Record<string, unknown>): Layout {
       return closeTab(layout, s('workspace'), n('tab'));
     case 'moveTab':
       return moveTab(layout, s('workspace'), n('from'), n('to'));
+    case 'moveTabs':
+      return moveTabs(layout, s('workspace'), op.tabs as number[], n('slot'));
+    case 'moveTabsToWorkspace':
+      return moveTabsToWorkspace(layout, s('workspace'), op.tabs as number[], s('target'));
+    case 'moveWorkspaces':
+      return moveWorkspaces(layout, op.workspaces as string[], n('slot'));
     case 'selectTab':
       return selectTab(layout, s('workspace'), n('tab'));
     case 'splitFocused':

@@ -219,7 +219,11 @@ Non-goals: arbitrary docking of panes; floating panes.
 - Dragging a tab along the tab bar, or a workspace along its machine's list
   in the sidebar, shows an insertion bar and reorders it. A drop lands in a
   slot of the current order (0 before the first item, n after the last);
-  the two slots beside the dragged item change nothing and show no bar. On
+  the two slots beside the dragged item change nothing and show no bar. A
+  tab, workspace or machine dragged while it is one of several selected
+  (below) moves them all, in their order, as one block (its ghost says how
+  many; slots that would leave the order as it is show no bar); tabs moved
+  so are not merged into a pane. On
   a tab bar with several rows the row under the pointer (or the nearest) is
   picked first, then the slot within it; the end of one row and the start of
   the next are the same slot, drawn on the row the pointer is on. A tab
@@ -240,6 +244,60 @@ Non-goals: arbitrary docking of panes; floating panes.
   of a double click on a machine folds or unfolds it and the second puts
   it back.
 - Read-only mode and zoomed panes have no drag, rename or mutating buttons.
+
+**Selecting several** (`web/src/state/multiSelect.ts`)
+
+- Tabs of a workspace, workspaces of a machine and machines can be
+  selected together, as files in a file manager and tabs in Chrome: ⌘-click
+  (Ctrl-click elsewhere) adds or removes one, Shift-click selects the rows
+  from the last one clicked, and a plain click clears the selection and
+  does what it always does (shows the tab or workspace, folds the
+  machine). The tab and the workspace shown start a selection, as
+  Chrome's active tab does; a ⌘/Ctrl-click on a tab does not show it.
+  Selected rows have the accent's tint. A selection holds rows of one
+  list; rows that go away (closed, removed, also by another client) leave
+  it.
+- A right click, the row's `⋯` button or the menu key on one of several
+  selected rows opens the selection's menu; on a row outside it, the
+  row's own menu, and the selection is cleared:
+  - tabs: **Move to Workspace ▸** (the machine's other workspaces and
+    **New Workspace…**: the tabs go, in their order, to the end of the one
+    chosen, which is shown with the last of them; `layout.moveTabsToWorkspace`),
+    **Close N Tabs**, at once, with one **Undo** for all of them, each back
+    at its place (`closedPanes.ts` groups the records of one closing);
+  - workspaces: **Close N Workspaces…**, asking once and naming them (the
+    first five, then how many more), after the question about unsaved
+    changes of any of them;
+  - machines: **Retry**, **Enable**, **Disable…** (asking once, naming
+    them, with the box to stop the terminal services of those connected)
+    and **Remove…** (the SSH machines, asking once and naming them), each
+    counting the machines it acts on and offered only when some are in that
+    state.
+- A tab's own menu also has **Move to Workspace ▸**. Panes, the palette's
+  lists and the settings' lists select one thing at a time: a tab holds a
+  few panes, which its menu and drags already move, and the palette runs
+  one command.
+
+**Keyboard in the sidebar and the tab bar** (`web/src/rowKeys.ts`)
+
+- The sidebar's machines and workspaces are a tree and the tab bar a tab
+  list, each one stop of the Tab key: the row focused last, else the
+  workspace or tab shown. In the sidebar ↑ ↓ PgUp PgDn Home End move
+  between rows, ← folds a machine or goes to it, → unfolds it, letters go
+  to the next row whose name starts with them; in the tab bar ← → Home End
+  move. Shift with a move extends the selection, Ctrl+Space adds or
+  removes the row, ⌘/Ctrl+A selects every workspace of the machine, every
+  machine or every tab, Escape clears the selection. Enter or Space does
+  what a click does, F2 renames in place, Delete (⌘⌫ on macOS) closes the
+  tab or workspace, or the selection (workspaces asking first; tabs with
+  Undo), or removes SSH machines (asking), and the menu key or Shift+F10
+  opens the row's menu at the row. The focused row is outlined. Only the
+  keyboard puts the focus on a row: a press of the mouse leaves it where it
+  was, so the terminal of a workspace or tab clicked takes it. The agents
+  of the sidebar's Agents section are buttons (Enter or Space shows the
+  agent's pane).
+- The sidebar's list keeps where it was scrolled while the page reloads
+  (per browser tab).
 
 **Pane headers** (`components/PaneHeader.tsx`, `PaneActions.tsx`)
 
@@ -286,7 +344,7 @@ Non-goals: arbitrary docking of panes; floating panes.
   - a preview's header: Open in VS Code, Download (where downloads are
     offered, [06](06-quick-look-and-files.md)), Split Right / Down,
     Maximize or Restore Pane, Move to Workspace ▸, Close Pane;
-  - tab: Rename Tab, New Tab, Move Left / Right, Close Tab;
+  - tab: Rename Tab, New Tab, Move Left / Right, Move to Workspace ▸, Close Tab;
   - workspace: Edit Workspace…, New Tab, Move Up / Down, Close Workspace…;
   - machine: New Workspace…, Machine Settings… (the settings in the
     machine's scope, [13](13-settings-and-appearance.md)), Rename Machine,
@@ -304,13 +362,25 @@ Non-goals: arbitrary docking of panes; floating panes.
   past either end is disabled. A move item uses the position the tab or
   workspace has when it runs, which another client may have changed since
   the menu opened.
-- The menu takes the keyboard: ↑↓ (skipping disabled items), Home/End,
-  Enter or Space runs, Escape or Tab closes; key bindings do not run
-  while it is open. Running an item or closing from the keyboard gives focus
-  back to what had it, before the item runs, so items that move focus
-  (rename, split) keep it. A click elsewhere, scrolling, leaving the window
-  or resizing closes it. The menu keeps its own width next to the window's
-  right edge.
+- The menu takes the keyboard: ↑↓ (skipping disabled items), PgUp/PgDn,
+  Home/End, Enter or Space runs, Escape or Tab closes; key bindings do not
+  run while it is open. Running an item or closing from the keyboard gives
+  focus back to what had it, before the item runs, so items that move focus
+  (rename, split) keep it. A click elsewhere, scrolling the page, leaving
+  the window or resizing closes it. The menu keeps its own width next to
+  the window's right edge.
+- Menus of any length stay usable. Typing filters the menu or submenu
+  that has the keyboard: a field at its top shows what is typed (a menu of
+  10 items or more, such as **Move to Workspace ▸** on a machine with many
+  workspaces, shows it from the start), the items whose names match stay in
+  the menu's order with the matched characters marked (the command
+  palette's matcher; an item may also match by words it does not show, a
+  workspace by its directory), separators go and disabled items stay; the
+  first match has the keyboard. Backspace widens the filter, Escape clears
+  it and then closes the menu, and a space is typed while filtering. A menu
+  taller than the window scrolls within it, the item the keyboard moves to
+  is scrolled into view, and scrolling the menu itself keeps it open. A
+  name cut with an ellipsis shows in full as the item's tooltip.
 - Read-only mode offers no items, so the browser's menu shows. A pane's
   text has its own menu (copy, paste, find, open or copy a path or URL,
   download it or files of the pane's directory;
@@ -384,8 +454,13 @@ described in [13](13-settings-and-appearance.md))
   followed, the agent kinds to start, the UI languages and themes, and
   enabling program windows ([14](14-gui-windows.md)). Items whose words
   start with what is typed come first, then those holding it, then those
-  whose word starts spell it (`fpl` for Focus Pane Left); a click or Enter
-  runs an item. `workspace.switch` opens it with workspaces and agents
+  whose word starts spell it (`fpl` for Focus Pane Left), with the matched
+  characters marked; a click or Enter runs an item. ↑ ↓ PgUp PgDn move, the
+  item the keyboard is on is kept in view, at most 200 items are drawn and
+  a line says how many more there are to narrow by typing, and a name cut
+  by an ellipsis shows in full as its tooltip. Escape closes it and gives
+  the keyboard back where it was, as the settings dialog and the Add
+  Machine dialog do. `workspace.switch` opens it with workspaces and agents
   only; `app.keyboardShortcuts` opens the settings' **Keyboard Shortcuts**
   page.
 - The PWA manifest allows installing the app in its own window, where fewer
@@ -606,14 +681,29 @@ described in [13](13-settings-and-appearance.md))
   Windows and Linux menus with File and Help and no key registered),
   `desktop/src/follow.test.ts` (reading the keybindings and settings, their
   pushes, reconnecting).
+- `web/src/__tests__/multiSelect.test.tsx`: tabs, workspaces and machines
+  selected with Ctrl and Shift (the tab and workspace shown starting a
+  selection), their menus, tabs moved to another workspace, closed with
+  one Undo that brings them back in their places, workspaces closed and
+  machines removed and disabled after one confirmation naming them,
+  retrying several, the keyboard of the tab bar and the sidebar (tab
+  stops, arrows, Shift, Ctrl+A, Ctrl+Space, Escape, Enter, F2, Delete,
+  Shift+F10, folding with ← →, type-ahead), the slots of a dragged block
+  and blocks of workspaces and tabs moved; `design/testdata/layout/tabs-block.json`:
+  the layout's block moves.
+- `web/src/__tests__/palette.test.tsx`: the palette with 250 workspaces
+  (200 drawn and how many more, pages, the item in view), the keyboard
+  given back when it or the settings dialog closes.
 - `web/src/__tests__/followed.test.ts`: machines followed before followed
   again once connected, a removed machine forgotten.
 - `web/src/__tests__/menus.test.ts`: insertion slots, also on wrapped rows,
   the area a drop counts in, drags measured on the screen, menu items and
   their commands, moves from the current position, a pane moved to
   another workspace or a new one, read-only, keyboard,
-  focus and closing of the menu, submenus, the machine's menu and its
-  terminal service under Troubleshooting.
+  focus and closing of the menu, submenus, a menu filtered by typing
+  (Backspace, Escape, keywords, no match), a submenu of 300 items (its
+  field from the start, pages, the item in view, scrolling inside it), the
+  machine's menu and its terminal service under Troubleshooting.
 - `web/src/__tests__/paneHeader.test.ts`: a header's buttons act on its own
   pane and keep the terminal's focus, rename by a double click, menu,
   read-only, a VS Code pane's header (named by its folder, its own

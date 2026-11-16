@@ -18,11 +18,18 @@ const stack = (family: string) => termFontFamily(400, family);
 
 export function FontPicker({ value, disabled, onChange }: { value: string; disabled: boolean; onChange(v: string): void }) {
   const [open, setOpen] = useState(false);
+  const button = useRef<HTMLButtonElement>(null);
+  // Closed, the list gives the keyboard back to its button.
+  const close = () => {
+    setOpen(false);
+    button.current?.focus({ preventScroll: true });
+  };
   const size = usePrefs((s) => s.prefs.termFontSize);
   const label = value || t('settings.font.bundled', { font: BUNDLED });
   return (
     <div className="font-picker">
       <button
+        ref={button}
         type="button"
         className="font-picker-button"
         disabled={disabled}
@@ -39,10 +46,11 @@ export function FontPicker({ value, disabled, onChange }: { value: string; disab
         <FontList
           value={value}
           onPick={(v) => {
-            setOpen(false);
+            close();
             if (v !== value) onChange(v);
           }}
           onClose={() => setOpen(false)}
+          onEscape={close}
         />
       )}
       <div className="font-preview" style={{ fontFamily: stack(value), fontSize: `${size}px` }} aria-hidden>
@@ -52,7 +60,7 @@ export function FontPicker({ value, disabled, onChange }: { value: string; disab
   );
 }
 
-function FontList({ value, onPick, onClose }: { value: string; onPick(v: string): void; onClose(): void }) {
+function FontList({ value, onPick, onClose, onEscape }: { value: string; onPick(v: string): void; onClose(): void; onEscape(): void }) {
   const [list, setList] = useState<FontList>();
   const [q, setQ] = useState('');
   const [sel, setSel] = useState(0);
@@ -109,7 +117,7 @@ function FontList({ value, onPick, onClose }: { value: string; onPick(v: string)
           else if (e.key === 'Enter' && rows[sel]) onPick(rows[sel].value);
           else if (e.key === 'Escape') {
             e.nativeEvent.stopImmediatePropagation();
-            onClose();
+            onEscape();
           } else return;
           e.preventDefault();
           e.stopPropagation();

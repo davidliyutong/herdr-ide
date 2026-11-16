@@ -19,3 +19,18 @@ export function useDismiss(open: boolean, ref: RefObject<HTMLElement | null>, cl
     };
   }, [open, ref, close, owner]);
 }
+
+/** Gives the keyboard back to what had it (a terminal, a button) once a
+ * popup or dialog that took it closes (open turns false or it unmounts),
+ * unless the user has put it somewhere else meanwhile. */
+export function useReturnFocus(open: boolean) {
+  useEffect(() => {
+    if (!open) return;
+    const before = document.activeElement;
+    return () => {
+      const now = document.activeElement;
+      const lost = !now || now === document.body || !now.isConnected;
+      if (lost && before instanceof HTMLElement && before.isConnected) before.focus({ preventScroll: true });
+    };
+  }, [open]);
+}

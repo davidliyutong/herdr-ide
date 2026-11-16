@@ -1,5 +1,6 @@
 // Context menus of pane headers (also their "more" button), tabs,
-// workspaces, machines and the terminals' text. They call the same commands as the buttons and bindings;
+// workspaces, machines and the terminals' text, and of several tabs,
+// workspaces or machines selected together (state/multiSelect.ts). They call the same commands as the buttons and bindings;
 // read-only mode has no items that change anything (the terminals' text
 // keeps copying and opening links), so elsewhere the browser's menu shows.
 
@@ -44,13 +45,14 @@ import { isPluginOn } from './plugins/registry';
 import type { MenuEntry } from './contextMenu';
 import { downloadDialog } from './dialog';
 import { canDownload, downloadPath } from './download';
-import { t } from './i18n';
+import { t, type MessageKey } from './i18n';
 import { keyHint } from './keymap';
 import { mediaExt, openLink, resolvePath, safeUrl, type LinkContext } from './terminal/links';
 import { useStore } from './state/store';
 import { conn } from './lib/conn';
 import { terms } from './state/terms';
 import * as L from './term/layout';
+import { tabId } from './state/multiSelect';
 
 /** A command's key, as menu items show it; none when it is unbound. */
 const hint = (action: string) => keyHint(action) || undefined;
@@ -96,7 +98,7 @@ export function paneMenu(m: string, pane: string): MenuEntry[] {
     label: t('menu.moveToWorkspace'),
     icon: <ArrowRightLeft />,
     submenu: [
-      ...others.map((w) => ({ label: workspaceTitle(m, w), run: () => actions.movePaneToWorkspace(m, pane, w.id) })),
+      ...others.map((w) => ({ label: workspaceTitle(m, w), keywords: w.cwd, run: () => actions.movePaneToWorkspace(m, pane, w.id) })),
       ...(others.length ? ['sep' as const] : []),
       { label: t('command.workspace.new'), icon: <FolderPlus />, run: () => void actions.movePaneToNewWorkspace(m, pane) },
     ],
@@ -301,7 +303,90 @@ export function machineMenu(m: string): MenuEntry[] {
   ];
 }
 
-/** A tab's menu: rename, new tab, move left or right, close. */
+/** Moving tabs (by their first panes) to another workspace of their
+ * machine, or into a new one. */
+function moveTabsSubmenu(m: string, ws: string, keys: string[]): MenuEntry[] {
+  const others = (terms.layout(m)?.workspaces ?? []).filter((w) => w.id !== ws);
+  return [
+    ...others.map((w) => ({ label: workspaceTitle(m, w), keywords: w.cwd, run: () => actions.moveTabsToWorkspace(m, keys, w.id) })),
+    ...(others.length ? ['sep' as const] : []),
+    { label: t('command.workspace.new'), icon: <FolderPlus />, run: () => void actions.moveTabsToNewWorkspace(m, keys) },
+  ];
+}
+
+/** The menu of several tabs of a workspace selected together: move them
+ * to another workspace, close them (one undo). */
+export function tabsMenu(m: string, ws: string, keys: string[]): MenuEntry[] {
+  if (useStore.getState().readOnly || !workspaceOf(m, ws)) return [];
+  return [
+    { label: t('menu.moveToWorkspace'), icon: <ArrowRightLeft />, submenu: moveTabsSubmenu(m, ws, keys) },
+    'sep',
+    { label: t('menu.closeTabs', { n: keys.length }), icon: <X />, danger: true, run: () => void actions.closeTabs(m, keys) },
+  ];
+}
+
+/** The menu of several workspaces of a machine selected together: close them (asking once). */
+export function workspacesMenu(m: string, ids: string[]): MenuEntry[] {
+  if (useStore.getState().readOnly || !terms.layout(m)) return [];
+  return [
+    {
+      label: t('menu.closeWorkspaces', { n: ids.length }),
+      icon: <X />,
+      danger: true,
+      run: () => void actions.closeWorkspaces(m, ids),
+    },
+  ];
+}
+
+/** The menu of several machines selected together: their connections
+ * (enable, retry, disable; each item counting the machines it acts on)
+ * and removing the SSH ones, asking once. */
+export function machinesMenu(ids: string[]): MenuEntry[] {
+  const s = useStore.getState();
+  if (s.readOnly) return [];
+  const list = ids.map((id) => s.machines[id]).filter((st) => st && !st.code);
+  const off = list.filter((st) => st.status === 'disabled').map((st) => st.id);
+  const on = list.filter((st) => st.status !== 'disabled').map((st) => st.id);
+  const failed = list.filter((st) => st.status === 'error' || st.status === 'auth_required').map((st) => st.id);
+  const ssh = ids.filter((id) => s.machines[id]?.kind === 'ssh');
+  const count = (n: number, one: MessageKey, many: MessageKey) => (n === 1 ? t(one) : t(many, { n }));
+  return [
+    ...(failed.length
+      ? [{ label: count(failed.length, 'sidebar.retry', 'menu.retryMachines'), icon: <RotateCw />, run: () => failed.forEach(conn.retry) }]
+      : []),
+    ...(off.length
+      ? [
+          {
+            label: count(off.length, 'menu.enableMachine', 'menu.enableMachines'),
+            icon: <Power />,
+            run: () => void actions.setMachinesEnabled(off, true),
+          },
+        ]
+      : []),
+    ...(on.length
+      ? [
+          {
+            label: count(on.length, 'menu.disableMachine', 'menu.disableMachines'),
+            icon: <PowerOff />,
+            run: () => void actions.setMachinesEnabled(on, false),
+          },
+        ]
+      : []),
+    'sep',
+    ...(ssh.length
+      ? [
+          {
+            label: count(ssh.length, 'menu.removeMachine', 'menu.removeMachines'),
+            icon: <Trash2 />,
+            danger: true,
+            run: () => void actions.removeMachines(ssh),
+          },
+        ]
+      : []),
+  ];
+}
+
+/** A tab's menu: rename, new tab, move left or right or to another workspace, close. */
 export function tabMenu(m: string, ws: string, index: number): MenuEntry[] {
   const s = useStore.getState();
   const w = workspaceOf(m, ws);
@@ -327,6 +412,7 @@ export function tabMenu(m: string, ws: string, index: number): MenuEntry[] {
     'sep',
     { label: t('menu.moveLeft'), icon: <ArrowLeft />, disabled: index <= 0, run: move(-1) },
     { label: t('menu.moveRight'), icon: <ArrowRight />, disabled: index >= n - 1, run: move(1) },
+    { label: t('menu.moveToWorkspace'), icon: <ArrowRightLeft />, submenu: moveTabsSubmenu(m, ws, [tabId(w.tabs[index])]) },
     'sep',
     {
       label: t('command.tab.close'),

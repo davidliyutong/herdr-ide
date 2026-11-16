@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../state/store';
 import { actions, attentionList, terminalPlace, workspaceTitle } from '../actions';
 import { commandEnabled, commandLabel, keyHint, runCommand } from '../keymap';
@@ -9,7 +9,15 @@ import { agentOf, terminalTitle } from '../lib/machine';
 import { useTerms } from '../state/terms';
 import { StatusDot } from './StatusDot';
 import { pluginPaletteItems } from '../plugins/registry';
-import { matchScore } from '../lib/match';
+import { match, matchScore } from '../lib/match';
+import { Highlight } from './Highlight';
+import { titleIfCut } from './ContextMenu';
+import { useReturnFocus } from './useDismiss';
+
+/** Items drawn at most; typing narrows the rest. */
+const SHOWN = 200;
+/** Items a page key moves. */
+const PAGE = 8;
 
 // The matcher is shared with the pickers (lib/match.ts).
 export { matchScore };
@@ -28,6 +36,15 @@ export function Palette() {
   const [q, setQ] = useState('');
   const [sel, setSel] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  // The keyboard's item is scrolled into view; the pointer's is not.
+  const reveal = useRef(false);
+  useReturnFocus(!!mode);
+  useLayoutEffect(() => {
+    if (!reveal.current) return;
+    reveal.current = false;
+    listRef.current?.querySelector('.palette-item.sel')?.scrollIntoView?.({ block: 'nearest' });
+  }, [sel]);
 
   useEffect(() => {
     setQ('');
@@ -99,6 +116,11 @@ export function Palette() {
   if (!mode) return null;
 
   const close = () => setPalette(undefined);
+  const shown = filtered.slice(0, SHOWN);
+  const move = (to: number) => {
+    reveal.current = true;
+    setSel(Math.max(0, Math.min(to, shown.length - 1)));
+  };
   const run = (i?: Item) => {
     close();
     i?.run();
@@ -117,21 +139,36 @@ export function Palette() {
           }}
           onKeyDown={(e) => {
             if (e.key === 'Escape') close();
-            else if (e.key === 'ArrowDown') setSel((v) => Math.min(v + 1, filtered.length - 1));
-            else if (e.key === 'ArrowUp') setSel((v) => Math.max(v - 1, 0));
+            else if (e.key === 'ArrowDown') move(sel + 1);
+            else if (e.key === 'ArrowUp') move(sel - 1);
+            else if (e.key === 'PageDown') move(sel + PAGE);
+            else if (e.key === 'PageUp') move(sel - PAGE);
             else if (e.key === 'Enter') run(filtered[sel]);
             else return;
             e.preventDefault();
           }}
         />
-        <div className="palette-list">
-          {filtered.slice(0, 200).map((i, idx) => (
-            <div key={i.id} className={`palette-item ${idx === sel ? 'sel' : ''}`} onMouseEnter={() => setSel(idx)} onClick={() => run(i)}>
+        <div className="palette-list" ref={listRef} role="listbox" aria-label={t('palette.placeholder')}>
+          {shown.map((i, idx) => (
+            <div
+              key={i.id}
+              role="option"
+              aria-selected={idx === sel}
+              className={`palette-item ${idx === sel ? 'sel' : ''}`}
+              onMouseEnter={(e) => {
+                titleIfCut(e);
+                setSel(idx);
+              }}
+              onClick={() => run(i)}
+            >
               {i.icon}
-              <span className="ellipsis">{i.label}</span>
+              <span className="ellipsis">
+                <Highlight text={i.label} ranges={q ? match(q, i.label)?.ranges : undefined} />
+              </span>
               {i.hint && <span className="muted small hint">{i.hint}</span>}
             </div>
           ))}
+          {filtered.length > SHOWN && <div className="muted small pad">{t('palette.more', { n: filtered.length - SHOWN })}</div>}
           {filtered.length === 0 && <div className="muted pad">{t('palette.noMatch')}</div>}
         </div>
       </div>
