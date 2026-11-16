@@ -6,10 +6,12 @@
 // (or, when it was this one, its neighbor) comes back, so the tab can be
 // dropped beside it. Resting on another tab of the bar for a moment shows
 // that one instead. A drag that does not merge the tab ends with it shown.
+// A tab dragged while it is one of several selected moves them all, in
+// their order, as one block along the bar (no merging).
 
 import { actions } from './actions';
 import { trackDrag, type Box, type DragStart } from './drag';
-import { insertSlot, near, type Slot } from './reorderDrag';
+import { blockSlot, insertSlot, near, type Slot } from './reorderDrag';
 import { terms } from './state/terms';
 import * as L from './term/layout';
 import { t } from './i18n';
@@ -25,6 +27,8 @@ export interface TabSource {
   label: string;
   /** The tab shown before the press. */
   shown: number;
+  /** The tabs selected with it, by their first panes (state/multiSelect.ts). */
+  block?: string[];
 }
 
 /** The tab to show while a tab is dragged: the one shown before the press,
@@ -75,6 +79,7 @@ function paneTarget(src: TabSource, x: number, y: number): TabTarget | undefined
 
 /** Starts tracking a possible drag of a tab. */
 export function startTabDrag(ev: DragStart, src: TabSource) {
+  if (src.block && src.block.length > 1) return startBlockDrag(ev, src, src.block);
   const ws = () => terms.layout(src.m)?.workspaces.find((w) => w.id === src.ws);
   // The dragged tab, known by its focused pane: its index changes when it moves.
   const key = ws()?.tabs[src.index]?.focused;
@@ -117,6 +122,25 @@ export function startTabDrag(ev: DragStart, src: TabSource) {
       if (spring) window.clearTimeout(spring.timer);
       if (key && !(dropped && last?.kind === 'pane')) terms.mutate(src.m, (l) => L.focusPane(l, key));
     },
+    failed: (error) => t('pane.moveFailed', { error }),
+  });
+}
+
+/** Tracks a drag of several tabs selected together along the bar. */
+function startBlockDrag(ev: DragStart, src: TabSource, block: string[]) {
+  const layout = terms.layout(src.m);
+  const indexes = block.flatMap((k) => {
+    const at = layout && L.locate(layout, k);
+    return at ? [String(at.tab)] : [];
+  });
+  trackDrag<Slot>(ev, {
+    label: t('drag.tabs', { n: block.length }),
+    find: (x, y) => {
+      const l = near(tabsList(src), '.tab[data-tab]', 'data-tab', x, y, 'x');
+      return l && blockSlot(l.boxes, l.ids, indexes, x, y, 'x');
+    },
+    marker: (slot) => ({ box: slot.box, zone: 'slot' }),
+    drop: async (slot) => actions.moveTabs(src.m, block, slot.index),
     failed: (error) => t('pane.moveFailed', { error }),
   });
 }

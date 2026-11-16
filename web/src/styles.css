@@ -786,6 +786,16 @@ body.resizing .sidebar-resizer::after {
 .ws-item.add {
   color: var(--fg-mute);
 }
+/* Workspaces and machines selected together (state/multiSelect.ts). */
+.ws-item.multi,
+.machine-head.multi {
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+.ws-item:focus-visible .row-action,
+.machine-head:focus-visible .row-action {
+  visibility: visible;
+}
 .ws-item.add .lucide {
   margin-left: -1px;
 }
@@ -943,8 +953,19 @@ body.resizing .sidebar-resizer::after {
   background: var(--line);
 }
 .tab:hover .tab-close,
-.tab.active .tab-close {
+.tab.active .tab-close,
+.tab:focus-visible .tab-close {
   visibility: visible;
+}
+/* Tabs selected together (state/multiSelect.ts): the accent's tint. */
+.tab.multi:not(.active) {
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+.tab.multi.active {
+  box-shadow:
+    inset 0 0 0 1px var(--accent),
+    inset 0 -2px 0 var(--accent);
 }
 /* A tab the user has not named shows its position, as a short number. */
 .tab-num {

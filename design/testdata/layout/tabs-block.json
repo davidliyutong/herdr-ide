@@ -1,0 +1,155 @@
+{
+  "description": "Moving several tabs or workspaces at once (a selection of them): tabs of a workspace, in their order, as one block to a slot of its tabs; workspaces as one block to a slot of the workspaces; the selected tab and workspace stay selected. Tabs moved to another workspace go to its end in their order, that workspace is selected with the last of them, and the first workspace selects the tab after the selected one when that one moved. Moving tabs to their own workspace changes nothing.",
+  "input": {
+    "version": 2,
+    "workspaces": [
+      {
+        "id": "w1",
+        "name": "one",
+        "cwd": "",
+        "tabs": [
+          {
+            "root": {
+              "terminal": "a"
+            },
+            "focused": "a"
+          },
+          {
+            "root": {
+              "terminal": "b"
+            },
+            "focused": "b"
+          },
+          {
+            "root": {
+              "terminal": "c"
+            },
+            "focused": "c"
+          },
+          {
+            "root": {
+              "terminal": "d"
+            },
+            "focused": "d"
+          },
+          {
+            "root": {
+              "terminal": "e"
+            },
+            "focused": "e"
+          }
+        ],
+        "selected": 1
+      },
+      {
+        "id": "w2",
+        "name": "two",
+        "cwd": "",
+        "tabs": [
+          {
+            "root": {
+              "terminal": "z"
+            },
+            "focused": "z"
+          }
+        ],
+        "selected": 0
+      }
+    ],
+    "selected": 0
+  },
+  "ops": [
+    {
+      "op": "moveTabs",
+      "workspace": "w1",
+      "tabs": [
+        0,
+        2
+      ],
+      "slot": 5
+    },
+    {
+      "op": "moveWorkspaces",
+      "workspaces": [
+        "w2"
+      ],
+      "slot": 0
+    },
+    {
+      "op": "moveTabsToWorkspace",
+      "workspace": "w1",
+      "tabs": [
+        0,
+        4
+      ],
+      "target": "w2"
+    },
+    {
+      "op": "moveTabsToWorkspace",
+      "workspace": "w2",
+      "tabs": [
+        0
+      ],
+      "target": "w2"
+    }
+  ],
+  "changed": true,
+  "expected": {
+    "version": 2,
+    "workspaces": [
+      {
+        "id": "w2",
+        "name": "two",
+        "cwd": "",
+        "tabs": [
+          {
+            "root": {
+              "terminal": "z"
+            },
+            "focused": "z"
+          },
+          {
+            "root": {
+              "terminal": "b"
+            },
+            "focused": "b"
+          },
+          {
+            "root": {
+              "terminal": "c"
+            },
+            "focused": "c"
+          }
+        ],
+        "selected": 2
+      },
+      {
+        "id": "w1",
+        "name": "one",
+        "cwd": "",
+        "tabs": [
+          {
+            "root": {
+              "terminal": "d"
+            },
+            "focused": "d"
+          },
+          {
+            "root": {
+              "terminal": "e"
+            },
+            "focused": "e"
+          },
+          {
+            "root": {
+              "terminal": "a"
+            },
+            "focused": "a"
+          }
+        ],
+        "selected": 0
+      }
+    ],
+    "selected": 0
+  }
+}

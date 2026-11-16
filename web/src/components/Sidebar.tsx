@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, Ellipsis, FolderPlus, ServerPlus, Settings } from 'lucide-react';
 import { SIDEBAR_WIDTH, useStore } from '../state/store';
 import { terms, useTerms } from '../state/terms';
@@ -9,12 +9,128 @@ import * as L from '../term/layout';
 import { StatusDot, statusLabel } from './StatusDot';
 import { t, type MessageKey } from '../i18n';
 import { withKey } from '../keymap';
-import { APP_NAME } from '../brand';
+import { APP_NAME, storage } from '../brand';
 import { InlineEdit } from './InlineEdit';
 import { startMachineDrag, startWorkspaceDrag } from '../reorderDrag';
 import { openMenu } from '../contextMenu';
-import { machineMenu, sidebarMenu, workspaceMenu } from '../menus';
+import { machineMenu, machinesMenu, sidebarMenu, workspaceMenu, workspacesMenu } from '../menus';
 import { carriesFiles, dropFolders, folderDropTarget } from '../drop';
+import {
+  clearMulti,
+  clickRow,
+  extendTo,
+  inMulti,
+  selectAllRows,
+  selectedIds,
+  targetIds,
+  useMulti,
+  type MultiScope,
+} from '../state/multiSelect';
+import { navigationKey, TypeAhead, type NavRow } from './tree';
+import { ensureTabStop, isDeleteKey, isMenuKey, isToggleKey, openRowMenu, rove, ROW } from '../rowKeys';
+
+const MACHINES: MultiScope = { kind: 'machine' };
+const workspacesOf = (m: string): MultiScope => ({ kind: 'workspace', m });
+/** The workspace a machine's layout selects, which starts a selection of its workspaces. */
+const shownWorkspace = (m: string) => {
+  const l = terms.layout(m);
+  return l?.workspaces[l.selected]?.id;
+};
+
+/** The menu of a workspace, or of the workspaces selected with it. */
+function workspaceMenuFor(m: string, ws: string) {
+  if (inMulti(workspacesOf(m), ws)) return workspacesMenu(m, selectedIds(workspacesOf(m)));
+  clearMulti();
+  return workspaceMenu(m, ws);
+}
+
+/** The menu of a machine, or of the machines selected with it. */
+function machineMenuFor(m: string) {
+  if (inMulti(MACHINES, m)) return machinesMenu(selectedIds(MACHINES));
+  clearMulti();
+  return machineMenu(m);
+}
+
+const typeahead = new TypeAhead();
+
+/** The sidebar's keys on its rows (machines, workspaces and the rows that
+ * add): arrows, pages, Home and End move (Shift extends a selection of
+ * workspaces of one machine, or of machines), ← → fold and unfold a
+ * machine and go to it, letters go to a row by its name, Enter or Space
+ * does what a click does, Ctrl+Space toggles a row in the selection,
+ * ⌘/Ctrl+A selects every row of its kind, F2 renames, Delete closes
+ * workspaces or removes SSH machines (asking), the menu key or Shift+F10
+ * opens the row's menu, Escape clears the selection. */
+function onRowsKey(e: React.KeyboardEvent<HTMLElement>) {
+  const list = e.currentTarget;
+  const row = (e.target as HTMLElement).closest<HTMLElement>(ROW);
+  if (!row || (e.target as HTMLElement).closest('input, textarea')) return;
+  const els = [...list.querySelectorAll<HTMLElement>(ROW)];
+  const rows: NavRow[] = els.map((el) => ({
+    id: el.dataset.nav!,
+    parent: el.dataset.navParent,
+    expanded: el.dataset.expanded === undefined ? undefined : el.dataset.expanded === 'true',
+    label: el.dataset.navLabel,
+  }));
+  const id = row.dataset.nav!;
+  const elOf = (x: string) => els.find((el) => el.dataset.nav === x);
+  const ws = row.dataset.wsId;
+  const m = row.dataset.m ?? row.closest<HTMLElement>('[data-machine]')?.dataset.machine;
+  const kind = ws ? 'workspace' : row.dataset.machineHead !== undefined ? 'machine' : undefined;
+  const scope = ws && m ? workspacesOf(m) : MACHINES;
+  const readOnly = useStore.getState().readOnly;
+  const done = () => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+  const action = navigationKey(e, rows, id, {
+    multi: true,
+    typeahead,
+    page: Math.max(1, Math.floor(list.clientHeight / row.offsetHeight) - 1),
+  });
+  if (action) {
+    done();
+    if (action.kind === 'move') {
+      const to = elOf(action.to);
+      if (!to) return;
+      to.focus();
+      to.scrollIntoView?.({ block: 'nearest' });
+      // A selection holds rows of one list: workspaces of one machine, or machines.
+      const toWs = to.dataset.wsId;
+      const sameList = kind && (kind === 'workspace' ? toWs && to.dataset.m === m : to.dataset.machineHead !== undefined);
+      if (action.extend && sameList)
+        extendTo(
+          scope,
+          kind === 'workspace' ? ws! : m!,
+          kind === 'workspace' ? toWs! : to.closest<HTMLElement>('[data-machine]')!.dataset.machine!,
+        );
+    } else if (action.kind === 'expand' || action.kind === 'collapse') elOf(action.id)?.click();
+    else if (action.kind === 'selectAll' && kind) selectAllRows(scope, kind === 'workspace' && m ? shownWorkspace(m) : undefined);
+    return;
+  }
+  const key = kind === 'workspace' ? ws! : m!;
+  if (e.key === 'Escape') {
+    if (!useMulti.getState().sel) return;
+    done();
+    clearMulti();
+  } else if (e.key === 'Enter' || (e.key === ' ' && !e.metaKey && !e.ctrlKey)) {
+    done();
+    row.click();
+  } else if (kind && isToggleKey(e)) {
+    done();
+    clickRow({ shiftKey: false, metaKey: true, ctrlKey: true }, scope, key, kind === 'workspace' && m ? shownWorkspace(m) : undefined);
+  } else if (kind && e.key === 'F2' && !readOnly && m) {
+    done();
+    actions.startRename(kind, m, key);
+  } else if (kind && isDeleteKey(e) && !readOnly && m) {
+    done();
+    if (kind === 'workspace') void actions.closeWorkspaces(m, targetIds(scope, key));
+    else void actions.removeMachines(targetIds(scope, key));
+  } else if (isMenuKey(e)) {
+    done();
+    openRowMenu(row);
+  }
+}
 
 export function Sidebar() {
   const order = useStore((s) => s.order);
@@ -23,6 +139,19 @@ export function Sidebar() {
   // The local machine while folders from Finder are dragged over the sidebar
   // (desktop app only): dropping them creates workspaces there.
   const [dropOn, setDropOn] = useState<string>();
+  const scroll = useRef<HTMLDivElement>(null);
+  // One row is the list's tab stop: the one focused last, else the
+  // workspace shown.
+  useEffect(() => ensureTabStop(scroll.current, '.ws-item.selected[data-nav]'));
+  // Where the list was scrolled stays across reloads of the page, once its
+  // machines are back.
+  const restored = useRef(false);
+  useEffect(() => {
+    const el = scroll.current;
+    if (restored.current || !el || !order.length) return;
+    restored.current = true;
+    el.scrollTop = keptScroll();
+  }, [order.length]);
   return (
     <aside
       className="sidebar"
@@ -78,7 +207,17 @@ export function Sidebar() {
       {/* Right-clicking free space (or a part of a machine without its own
           menu) offers to add a machine. */}
       <div
+        ref={scroll}
         className="sidebar-scroll"
+        role="tree"
+        aria-label={t('sidebar.machines')}
+        aria-multiselectable
+        onKeyDown={onRowsKey}
+        onFocus={(e) => {
+          const row = (e.target as HTMLElement).closest<HTMLElement>(ROW);
+          if (row && scroll.current) rove(scroll.current, row);
+        }}
+        onScroll={(e) => keepScroll(e.currentTarget.scrollTop)}
         onContextMenu={(e) => !(e.target as HTMLElement).closest('input, textarea') && openMenu(e, sidebarMenu())}
       >
         {order.map((id) => machines[id] && <MachineItem key={id} m={machines[id]} />)}
@@ -87,6 +226,29 @@ export function Sidebar() {
       <SidebarResizer />
     </aside>
   );
+}
+
+const SCROLL_KEY = `${storage}.sidebarScroll`;
+
+/** Where the sidebar's list was scrolled in this tab of the browser. */
+function keptScroll(): number {
+  try {
+    return Number(sessionStorage.getItem(SCROLL_KEY)) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+let scrollTimer: ReturnType<typeof setTimeout> | undefined;
+function keepScroll(top: number) {
+  clearTimeout(scrollTimer);
+  scrollTimer = setTimeout(() => {
+    try {
+      sessionStorage.setItem(SCROLL_KEY, String(Math.round(top)));
+    } catch {
+      // Storage refused (private mode): the position is not kept.
+    }
+  }, 150);
 }
 
 /** The sidebar's right edge: dragging it sets the width (kept per
@@ -154,6 +316,13 @@ function Inbox() {
           <div
             key={`${m} ${terminal}`}
             className={`inbox-item st-${status}`}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter' && e.key !== ' ') return;
+              e.preventDefault();
+              actions.focusPane(m, terminal);
+            }}
             title={[where, shortPath(terms.directory(m, terminal), machines[m]?.info?.home)].filter(Boolean).join('\n')}
             onClick={() => actions.focusPane(m, terminal)}
           >
@@ -198,23 +367,41 @@ function MachineItem({ m }: { m: MachineState }) {
   const layout = mt?.layout;
   const backend = mt?.backend;
   const followed = terms.isSubscribed(m.id);
+  const sel = useMulti((s) => s.sel);
+  const machinePicked = selectedIds(MACHINES, sel).includes(m.id);
+  const picked = new Set(selectedIds(workspacesOf(m.id), sel));
   return (
     <div className="machine" data-machine={m.id}>
       <div
-        className="machine-head"
+        className={`machine-head ${machinePicked ? 'multi' : ''}`}
+        data-nav={`m:${m.id}`}
+        data-nav-label={m.label}
+        data-machine-head
+        data-expanded={open}
+        role="treeitem"
+        aria-level={1}
+        aria-expanded={open}
+        aria-selected={machinePicked}
+        tabIndex={-1}
         onPointerDown={(e) => {
           if (e.button !== 0 || readOnly || renamingMachine || (e.target as HTMLElement).closest('button, input')) return;
-          startMachineDrag(e, { m: m.id, label: m.label });
+          if (e.shiftKey || e.metaKey || e.ctrlKey) return;
+          startMachineDrag(e, { m: m.id, label: m.label, block: inMulti(MACHINES, m.id) ? selectedIds(MACHINES) : undefined });
         }}
         // A click folds or unfolds; the second click of a double click
         // leaves it as the first left it, and the double click renames.
-        onClick={(e) => !renamingMachine && e.detail < 2 && !(e.target as HTMLElement).closest('button') && setOpen(!open)}
+        // With ⌘/Ctrl or Shift it selects instead.
+        onClick={(e) => {
+          if (renamingMachine || (e.target as HTMLElement).closest('button')) return;
+          if (clickRow(e, MACHINES, m.id)) return;
+          if (e.detail < 2) setOpen(!open);
+        }}
         onDoubleClick={(e) => {
-          if (renamingMachine || readOnly || (e.target as HTMLElement).closest('button')) return;
+          if (renamingMachine || readOnly || (e.target as HTMLElement).closest('button') || e.shiftKey || e.metaKey || e.ctrlKey) return;
           setOpen((o) => !o);
           actions.startRename('machine', m.id, m.id);
         }}
-        onContextMenu={(e) => !renamingMachine && openMenu(e, machineMenu(m.id))}
+        onContextMenu={(e) => !renamingMachine && openMenu(e, machineMenuFor(m.id))}
         title={[readOnly ? m.label : t('sidebar.machineHint', { label: m.label }), machineProblem(m) || m.platform]
           .filter(Boolean)
           .join('\n')}
@@ -237,11 +424,12 @@ function MachineItem({ m }: { m: MachineState }) {
             className="icon row-action"
             title={t('sidebar.machineActions')}
             aria-label={t('sidebar.machineActions')}
+            tabIndex={-1}
             onClick={(e) => {
               const r = e.currentTarget.getBoundingClientRect();
               openMenu(
                 { clientX: r.left, clientY: r.bottom, preventDefault() {}, stopPropagation: () => e.stopPropagation() },
-                machineMenu(m.id),
+                machineMenuFor(m.id),
               );
             }}
           >
@@ -285,7 +473,15 @@ function MachineItem({ m }: { m: MachineState }) {
             </div>
           )}
           {m.status === 'ready' && !followed && (
-            <div className="ws-item add" onClick={() => actions.showMachine(m.id)}>
+            <div
+              className="ws-item add"
+              role="treeitem"
+              aria-level={2}
+              tabIndex={-1}
+              data-nav={`show:${m.id}`}
+              data-nav-parent={`m:${m.id}`}
+              onClick={() => actions.showMachine(m.id)}
+            >
               {t('sidebar.showTerminals')}
             </div>
           )}
@@ -308,19 +504,38 @@ function MachineItem({ m }: { m: MachineState }) {
             return (
               <div
                 key={w.id}
-                className={`ws-item ${selected ? 'selected' : ''}`}
-                onClick={() => actions.selectWorkspace(m.id, w.id)}
+                className={`ws-item ${selected ? 'selected' : ''} ${picked.has(w.id) ? 'multi' : ''}`}
+                role="treeitem"
+                aria-level={2}
+                aria-selected={picked.has(w.id) || selected}
+                aria-current={selected || undefined}
+                tabIndex={-1}
+                // A click shows it; with ⌘/Ctrl or Shift it selects instead.
+                onClick={(e) => {
+                  if (editing || clickRow(e, workspacesOf(m.id), w.id, shownWorkspace(m.id))) return;
+                  actions.selectWorkspace(m.id, w.id);
+                }}
                 onDoubleClick={(e) =>
-                  !readOnly && !(e.target as HTMLElement).closest('button') && actions.startRename('workspace', m.id, w.id)
+                  !readOnly &&
+                  !e.shiftKey &&
+                  !e.metaKey &&
+                  !e.ctrlKey &&
+                  !(e.target as HTMLElement).closest('button') &&
+                  actions.startRename('workspace', m.id, w.id)
                 }
                 onPointerDown={(e) => {
                   if (e.button !== 0 || readOnly || editing || (e.target as HTMLElement).closest('button, input')) return;
-                  startWorkspaceDrag(e, { m: m.id, ws: w.id, label: name });
+                  if (e.shiftKey || e.metaKey || e.ctrlKey) return;
+                  const scope = workspacesOf(m.id);
+                  startWorkspaceDrag(e, { m: m.id, ws: w.id, label: name, block: inMulti(scope, w.id) ? selectedIds(scope) : undefined });
                 }}
-                onContextMenu={(e) => !editing && openMenu(e, workspaceMenu(m.id, w.id))}
+                onContextMenu={(e) => !editing && openMenu(e, workspaceMenuFor(m.id, w.id))}
                 title={readOnly ? about : t('sidebar.workspaceHint', { label: about })}
                 data-ws-id={w.id}
                 data-m={m.id}
+                data-nav={`w:${m.id}:${w.id}`}
+                data-nav-parent={`m:${m.id}`}
+                data-nav-label={name}
               >
                 <span className="ws-num">{i + 1}</span>
                 {editing ? (
@@ -345,12 +560,13 @@ function MachineItem({ m }: { m: MachineState }) {
                     className="icon row-action"
                     title={t('sidebar.workspaceActions')}
                     aria-label={t('sidebar.workspaceActions')}
+                    tabIndex={-1}
                     onClick={(e) => {
                       e.stopPropagation();
                       const r = e.currentTarget.getBoundingClientRect();
                       openMenu(
                         { clientX: r.left, clientY: r.bottom, preventDefault() {}, stopPropagation() {} },
-                        workspaceMenu(m.id, w.id),
+                        workspaceMenuFor(m.id, w.id),
                       );
                     }}
                   >
@@ -363,6 +579,11 @@ function MachineItem({ m }: { m: MachineState }) {
           {layout && !readOnly && (
             <div
               className="ws-item add"
+              role="treeitem"
+              aria-level={2}
+              tabIndex={-1}
+              data-nav={`new:${m.id}`}
+              data-nav-parent={`m:${m.id}`}
               title={t('sidebar.newWorkspaceOn', { machine: m.label })}
               onClick={() => void actions.newWorkspace(m.id)}
             >

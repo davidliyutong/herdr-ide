@@ -17,7 +17,91 @@ import { withKey } from '../keymap';
 import { InlineEdit } from './InlineEdit';
 import { startTabDrag } from '../tabDrag';
 import { openMenu } from '../contextMenu';
-import { tabMenu } from '../menus';
+import { tabMenu, tabsMenu } from '../menus';
+import {
+  clearMulti,
+  clickRow,
+  extendTo,
+  inMulti,
+  selectAllRows,
+  selectedIds,
+  tabId,
+  targetIds,
+  useMulti,
+  type MultiScope,
+} from '../state/multiSelect';
+import { ensureTabStop, isDeleteKey, isMenuKey, isToggleKey, openRowMenu, rove, ROW } from '../rowKeys';
+
+const tabsOf = (m: string, ws: string): MultiScope => ({ kind: 'tab', m, ws });
+
+/** The tab a workspace shows, which starts a selection of its tabs. */
+const shownTab = (m: string, ws: string) => {
+  const w = terms.layout(m)?.workspaces.find((x) => x.id === ws);
+  const tab = w?.tabs[w.selected];
+  return tab ? tabId(tab) : undefined;
+};
+
+/** The menu of a tab, or of the tabs selected with it. */
+function tabMenuFor(m: string, ws: string, index: number, id: string) {
+  const scope = tabsOf(m, ws);
+  if (inMulti(scope, id)) return tabsMenu(m, ws, selectedIds(scope));
+  clearMulti();
+  return tabMenu(m, ws, index);
+}
+
+/** The tab bar's keys on a tab: ← → Home End move between tabs (Shift
+ * extends the selection), Enter or Space shows it, Ctrl+Space toggles
+ * it in the selection, ⌘/Ctrl+A selects every tab, F2 renames, Delete
+ * closes (with Undo), the menu key or Shift+F10 opens its menu, Escape
+ * clears the selection. */
+function onTabsKey(e: React.KeyboardEvent<HTMLElement>, m: string, ws: string) {
+  const row = (e.target as HTMLElement).closest<HTMLElement>(`.tab${ROW}`);
+  if (!row || (e.target as HTMLElement).closest('input')) return;
+  const els = [...e.currentTarget.querySelectorAll<HTMLElement>(`.tab${ROW}`)];
+  const i = els.indexOf(row);
+  const id = row.dataset.nav!;
+  const scope = tabsOf(m, ws);
+  const readOnly = useStore.getState().readOnly;
+  const plain = !e.metaKey && !e.ctrlKey && !e.altKey;
+  const mod = e.metaKey || e.ctrlKey;
+  const done = () => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+  const go = (to: number) => {
+    const el = els[Math.max(0, Math.min(els.length - 1, to))];
+    if (!el) return;
+    done();
+    el.focus();
+    if (e.shiftKey) extendTo(scope, id, el.dataset.nav!);
+  };
+  if (plain && e.key === 'ArrowLeft') go(i - 1);
+  else if (plain && e.key === 'ArrowRight') go(i + 1);
+  else if (plain && e.key === 'Home') go(0);
+  else if (plain && e.key === 'End') go(els.length - 1);
+  else if (plain && (e.key === 'Enter' || e.key === ' ')) {
+    done();
+    actions.selectTab(m, ws, i);
+  } else if (isToggleKey(e)) {
+    done();
+    clickRow({ shiftKey: false, metaKey: true, ctrlKey: true }, scope, id, shownTab(m, ws));
+  } else if (mod && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'a') {
+    done();
+    selectAllRows(scope, shownTab(m, ws));
+  } else if (e.key === 'F2' && plain && !readOnly) {
+    done();
+    actions.startRename('tab', m, `${ws}:${i}`);
+  } else if (isDeleteKey(e) && !readOnly) {
+    done();
+    void actions.closeTabs(m, targetIds(scope, id));
+  } else if (isMenuKey(e)) {
+    done();
+    openRowMenu(row);
+  } else if (e.key === 'Escape' && useMulti.getState().sel) {
+    done();
+    clearMulti();
+  }
+}
 
 /** The shown machine's selected workspace: its tab bar and the selected tab's panes. */
 export function Workspace() {
@@ -29,6 +113,10 @@ export function Workspace() {
   const readOnly = useStore((s) => s.readOnly);
   const layout = mt?.layout;
   const ws = layout ? L.selectedWorkspace(layout) : undefined;
+  const sel = useMulti((s) => s.sel);
+  const tabsRef = useRef<HTMLDivElement>(null);
+  // One tab is the bar's tab stop: the one focused last, else the one shown.
+  useEffect(() => ensureTabStop(tabsRef.current, '.tab.active'));
 
   if (!m || !machine || !layout || !ws) {
     const backend = mt?.backend;
@@ -50,6 +138,7 @@ export function Workspace() {
     );
   }
   const tab = ws.tabs[ws.selected];
+  const picked = new Set(selectedIds(tabsOf(m, ws.id), sel));
   const tabStatus = (tb: L.Tab) => aggregate(L.tabTerminals(tb).map((a) => agentStatus(mt.terminals[a])));
 
   return (
@@ -66,7 +155,20 @@ export function Workspace() {
         <span className="crumb">
           <span className="muted">{machine.label}</span> / {workspaceTitle(m, ws)}
         </span>
-        <div className="tabs" data-m={m} data-ws={ws.id}>
+        <div
+          ref={tabsRef}
+          className="tabs"
+          role="tablist"
+          aria-label={t('workspace.tabs')}
+          aria-multiselectable
+          data-m={m}
+          data-ws={ws.id}
+          onKeyDown={(e) => onTabsKey(e, m, ws.id)}
+          onFocus={(e) => {
+            const row = (e.target as HTMLElement).closest<HTMLElement>(`.tab${ROW}`);
+            if (row && tabsRef.current) rove(tabsRef.current, row);
+          }}
+        >
           {ws.tabs.map((tb, i) => {
             const st = tabStatus(tb);
             const id = `${ws.id}:${i}`;
@@ -77,6 +179,7 @@ export function Workspace() {
             const focusedLeaf = L.leafOf(tb.root, tb.focused);
             const title = paneAbout(m, focusedLeaf, tb.focused, mt.terminals[tb.focused]);
             const editing = renaming?.m === m && renaming.id === id;
+            const key = tabId(tb);
             const count = L.tabPanes(tb).length;
             const view = !tb.name && !L.tabTerminals(tb).length && focusedLeaf && !L.isTerminalLeaf(focusedLeaf) ? focusedLeaf : undefined;
             const about = [
@@ -88,15 +191,35 @@ export function Workspace() {
             return (
               <div
                 key={`${i}:${tb.focused}`}
-                className={`tab ${i === ws.selected ? 'active' : ''}`}
-                onDoubleClick={() => !readOnly && actions.startRename('tab', m, id)}
+                className={`tab ${i === ws.selected ? 'active' : ''} ${picked.has(key) ? 'multi' : ''}`}
+                role="tab"
+                aria-selected={i === ws.selected || picked.has(key)}
+                tabIndex={-1}
+                data-nav={key}
+                onDoubleClick={(e) => !readOnly && !e.shiftKey && !e.metaKey && !e.ctrlKey && actions.startRename('tab', m, id)}
                 onPointerDown={(e) => {
                   if (e.button !== 0 || editing || (e.target as HTMLElement).closest('button, input')) return;
+                  const scope = tabsOf(m, ws.id);
+                  // With ⌘/Ctrl or Shift the press selects tabs, as in
+                  // browsers, and shows none of them.
+                  if (clickRow(e, scope, key, shownTab(m, ws.id))) return;
+                  // One of several selected: a drag moves them all, a click
+                  // (below) shows it alone.
+                  const block = inMulti(scope, key) ? selectedIds(scope) : undefined;
+                  if (block) {
+                    if (!readOnly) startTabDrag(e, { m, ws: ws.id, index: i, label: name, shown: ws.selected, block });
+                    return;
+                  }
                   // A tab is shown on press, as in browsers: a press that turns
                   // into a drag (or whose release lands elsewhere) still switches.
                   const shown = ws.selected;
                   actions.selectTab(m, ws.id, i);
                   if (!readOnly) startTabDrag(e, { m, ws: ws.id, index: i, label: name, shown });
+                }}
+                onClick={(e) => {
+                  if (e.shiftKey || e.metaKey || e.ctrlKey || !useMulti.getState().sel) return;
+                  clearMulti();
+                  actions.selectTab(m, ws.id, i);
                 }}
                 // A middle click closes the tab, as in browsers.
                 onAuxClick={(e) => {
@@ -105,7 +228,7 @@ export function Workspace() {
                   void actions.closeTab(m, ws.id, i);
                 }}
                 onMouseDown={(e) => e.button === 1 && e.preventDefault()}
-                onContextMenu={(e) => !editing && openMenu(e, tabMenu(m, ws.id, i))}
+                onContextMenu={(e) => !editing && openMenu(e, tabMenuFor(m, ws.id, i, key))}
                 title={readOnly ? about : t('workspace.tabHint', { label: about })}
                 aria-label={tb.name ? name : t('workspace.tabNumber', { n: i + 1, title })}
                 data-tab={i}
@@ -139,6 +262,7 @@ export function Workspace() {
                 {count > 1 && <Columns2 className="tab-split" aria-label={t('workspace.paneCount', { n: count })} />}
                 {!readOnly && (
                   <button
+                    tabIndex={-1}
                     className="tab-close"
                     title={withKey(t('command.tab.close'), 'tab.close')}
                     aria-label={t('command.tab.close')}
