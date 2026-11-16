@@ -945,7 +945,10 @@ export const actions = {
 
   /** Shows a plugin's pane in from's workspace (from: the focused pane by
    * default): one of its kind that reuse accepts gets fields, the one of
-   * from's tab first; else a new one opens beside from. Returns its key. */
+   * from's tab first, then (for a pane opened as a tab) any of the
+   * workspace's; else a new one opens, in a tab of its own (tab: editors,
+   * diffs, graphs, as terminals and VS Code open) or split beside from.
+   * Returns its key. */
   async openView(
     m: string,
     view: { plugin: string; kind: string } & Record<string, unknown>,
@@ -956,14 +959,15 @@ export const actions = {
     const o = originOf(m, layout, opts.from);
     useStore.getState().selectMachine(m);
     const views = o.ws ? L.pluginViews(o.ws, view.plugin, view.kind).filter((v) => opts.reuse?.(v.view)) : [];
-    const found = views.find((v) => v.tab === o.tab) ?? views[0];
+    // A pane beside from is reused in from's tab only: one in another tab
+    // would take the view away from from.
+    const found = views.find((v) => v.tab === o.tab) ?? (opts.tab ? views[0] : undefined);
     if (found) {
       terms.mutate(m, (l) => L.focusPane(L.setViewFields(l, found.key, view), found.key));
       focusDom(m, found.key);
       return found.key;
     }
     const id = L.newId();
-    // Wide content (a graph) takes a tab of its own.
     if (opts.tab) terms.mutate(m, (l) => L.openPane(l, { view: { ...view, id } }, o.ws?.id));
     else openBeside(m, { view: { ...view, id } }, o.ws, o.from);
     focusDom(m, L.viewKey(id));

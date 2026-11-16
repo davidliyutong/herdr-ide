@@ -38,20 +38,25 @@ export const baseName = (p: string) => p.slice(p.lastIndexOf('/') + 1) || p;
 export const join = (root: string, rel: string) => `${root.replace(/\/+$/, '')}/${rel}`;
 export const short = (h: string) => h.slice(0, 7);
 
-/** Opens a file's diff, reusing the pane that shows the same one; a
- * change of the working tree or the index (Source Control's rows) takes
- * over any such pane without unsaved edits, as VS Code's preview editor
- * does, so going through the changes opens one pane. With own (several
- * files opened at once) only the file's own pane is reused. */
-export function openDiff(m: string, d: DiffView, from?: string, o: { own?: boolean } = {}) {
+/** Opens a file's diff in a tab of the workspace, as editors open,
+ * reusing the pane that shows the same one; a change of the working tree
+ * or the index (Source Control's rows) takes over any such pane without
+ * unsaved edits, as VS Code's preview editor does, so going through the
+ * changes opens one pane. With own (several files opened at once) only
+ * the file's own pane is reused. With beside (the graph's files), it opens
+ * split beside from, and a diff of from's tab without unsaved edits shows
+ * the next file. */
+export function openDiff(m: string, d: DiffView, from?: string, o: { own?: boolean; beside?: boolean } = {}) {
   const same = (v: Record<string, unknown>) =>
     v.repo === d.repo && v.path === d.path && v.mode === d.mode && (v.rev ?? '') === (d.rev ?? '') && (v.rev2 ?? '') === (d.rev2 ?? '');
   const local = (mode: unknown) => mode === 'worktree' || mode === 'staged';
+  // Beside the graph, any diff of its tab without unsaved edits shows the
+  // next file, as a preview does.
   const reuse = (v: Record<string, unknown>) =>
-    same(v) || (!o.own && local(d.mode) && local(v.mode) && !dirtyDiffs.has(`view:${String(v.id)}`));
+    same(v) || (!o.own && (o.beside || (local(d.mode) && local(v.mode))) && !dirtyDiffs.has(`view:${String(v.id)}`));
   // Fields of the other file it showed are dropped.
   const view = { rev: undefined, rev2: undefined, orig: undefined, parent: undefined, untracked: undefined, ...d };
-  return actions.openView(m, { plugin: 'git', kind: 'diff', ...view }, { from, reuse });
+  return actions.openView(m, { plugin: 'git', kind: 'diff', ...view }, { from, reuse, tab: !o.beside });
 }
 
 /** Opens the graph of a repository in a tab of its own (one pane per repository). */
@@ -66,7 +71,7 @@ export function openFile(m: string, repo: string, path: string) {
 
 /** The diff of a file of the status: of the index (staged) or of the
  * working tree. */
-export function openStatusDiff(m: string, repo: string, f: StatusFile, staged: boolean, o: { own?: boolean } = {}) {
+export function openStatusDiff(m: string, repo: string, f: StatusFile, staged: boolean, o: { own?: boolean; beside?: boolean } = {}) {
   return openDiff(
     m,
     {

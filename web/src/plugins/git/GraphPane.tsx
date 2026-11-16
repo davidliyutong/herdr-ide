@@ -668,7 +668,7 @@ function Detail({
                 path={f.path}
                 letter={letter}
                 title={f.orig ? `${f.orig} → ${f.path}` : f.path}
-                onClick={() => void openStatusDiff(m, repo, f, staged && f.y === '.')}
+                onClick={() => void openStatusDiff(m, repo, f, staged && f.y === '.', { beside: true })}
               />
             );
           })}
@@ -735,6 +735,8 @@ function Detail({
                   compare
                     ? { repo, path: f.path, orig: f.orig, mode: 'compare', rev: compare, rev2: rev }
                     : { repo, path: f.path, orig: f.orig, mode: 'commit', rev, parent: c && c.parents.length > 1 ? parent : undefined },
+                  undefined,
+                  { beside: true },
                 )
               }
             >

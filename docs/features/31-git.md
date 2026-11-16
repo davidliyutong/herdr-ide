@@ -334,10 +334,13 @@ Graph's editor; `actions.openView` with `tab`):
   drop.
 
 **Diff pane** (`DiffPane.tsx`, `{view: {plugin: 'git', kind: 'diff', repo,
-path, mode, rev?, rev2?, orig?, parent?}}`; the same file and mode reuse
-their pane, and a change of the working tree or the index opened from
-Source Control takes over any such pane without unsaved edits, as VS
-Code's preview editor does, so going through the changes keeps one pane):
+path, mode, rev?, rev2?, orig?, parent?}}`; a diff opens in a tab of the
+workspace, as editors, terminals and VS Code do, and the graph's files
+split beside the graph; the same file and mode reuse their pane, a change
+of the working tree or the index opened from Source Control takes over
+any such pane without unsaved edits, as VS Code's preview editor does, so
+going through the changes keeps one tab, and beside the graph any diff of
+its tab without unsaved edits shows the next file):
 
 | Mode | Left | Right |
 | --- | --- | --- |

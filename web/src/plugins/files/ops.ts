@@ -86,19 +86,23 @@ function editors(m: string): L.PluginView[] {
   return ws ? L.pluginViews(ws, 'files', 'editor').map((v) => v.view) : [];
 }
 
-/** Opens a file in the editor, as VS Code does: a preview (a single click)
- * shows it in the workspace's preview editor, which the next preview
- * replaces unless it has unsaved changes; otherwise (a double click, Enter)
- * it stays open. An editor that shows the file already is focused, and
- * kept (no longer a preview) unless this is a preview too. Media files
- * show in the same editor, as Quick Look shows them. */
-export function openEditor(m: string, path: string, o: { preview?: boolean } = {}) {
-  const preview = !!o.preview;
+/** Opens a file in the editor, as VS Code does, in a tab of the workspace
+ * as terminals open: a preview (a single click) shows it in the
+ * workspace's preview editor, which the next preview replaces unless it
+ * has unsaved changes; otherwise (a double click, Enter) it stays open. An
+ * editor that shows the file already is shown, and kept (no longer a
+ * preview) unless this is a preview too. With side, the editor opens
+ * split beside the focused pane instead (Open to the Side), unless that
+ * pane's tab shows the file already. Media files show in the same editor,
+ * as Quick Look shows them. */
+export function openEditor(m: string, path: string, o: { preview?: boolean; side?: boolean } = {}) {
+  const preview = !!o.preview && !o.side;
   const view = { plugin: 'files', kind: 'editor', path };
+  const tab = !o.side;
   if (editors(m).some((v) => v.path === path))
-    return actions.openView(m, preview ? view : { ...view, preview: false }, { reuse: (v) => v.path === path });
+    return actions.openView(m, preview ? view : { ...view, preview: false }, { reuse: (v) => v.path === path, tab });
   const replaceable = (v: L.PluginView) => preview && v.preview === true && !unsavedPanes(m, [L.viewKey(v.id)]).length;
-  return actions.openView(m, { ...view, preview }, { reuse: replaceable });
+  return actions.openView(m, { ...view, preview }, { reuse: replaceable, tab });
 }
 
 /** Opens files in editors to keep, one after the other (a selection's). */
@@ -106,11 +110,11 @@ export async function openFiles(m: string, paths: readonly string[]) {
   for (const p of paths) await openEditor(m, p);
 }
 
-/** Open to the Side: the file in an editor to keep, in a split beside the
- * focused pane, as VS Code's; an editor that shows it already is focused
- * instead, as a workspace has one per file. */
+/** Open to the Side: the file in an editor to keep, split beside the
+ * focused pane, as VS Code's; an editor of that tab that shows it already
+ * is focused instead. */
 export function openToSide(m: string, path: string) {
-  return openEditor(m, path);
+  return openEditor(m, path, { side: true });
 }
 
 /** Keeps a preview editor open: the next preview opens beside it. */

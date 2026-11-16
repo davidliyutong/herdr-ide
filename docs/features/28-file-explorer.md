@@ -97,13 +97,17 @@ Plugins; `internal/plugins/files/settings.go`):
   on no row. A cut stays on the clipboard until its paths are moved: the
   ones that failed to move stay on it. The page's own shortcuts work as anywhere
   outside a terminal.
-- A click selects (⌘/Ctrl adds, Shift extends), expands a folder or shows
-  a file in the workspace's **preview editor** (`openEditor` with
-  `preview`) and keeps the keyboard in the tree; the next click shows its
-  file in the same pane, as VS Code's preview editors do, so browsing
-  files does not fill the workspace with panes. A double click or Enter
-  keeps the file open: an editor showing it already is kept (no longer a
-  preview), else it opens in an editor of its own. The preview's title is
+- Editors open in tabs of the workspace, as terminals, VS Code and the
+  Git graph do, never split into the tab shown, so opening files does not
+  squeeze its panes; they move, split and merge as any pane does
+  ([04](04-layout-and-keyboard.md)). A click selects (⌘/Ctrl adds, Shift
+  extends), expands a folder or shows a file in the workspace's **preview
+  editor** (`openEditor` with `preview`), whose tab it shows, and keeps
+  the keyboard in the tree; the next click shows its file in the same
+  pane, as VS Code's preview editors do, so browsing files does not fill
+  the workspace with tabs. A double click or Enter keeps the file open:
+  an editor showing it already is shown and kept (no longer a preview),
+  else it opens in a tab of its own. The preview's title is
   in italics in its header and tab; the pin button of its bar, a double
   click or its first edit keeps it. A preview with unsaved changes is
   never replaced. One pane kind shows every file: text in Monaco, media
@@ -111,9 +115,9 @@ Plugins; `internal/plugins/files/settings.go`):
 - Changes are typed in the tree: a new file or folder gets a row with a
   name field in its folder, F2 turns a row's name into one. Names with `/`,
   empty names, `.` and `..` are refused before anything is sent.
-- The context menu: Open (the files of the selection, several at once),
-  Open to the Side (a kept editor beside the focused pane, as Open places
-  editors), Open Preview, Open in VS Code, Open in Terminal (a terminal
+- The context menu: Open (the files of the selection, several at once,
+  each in a tab), Open to the Side (a kept editor split beside the focused
+  pane, unless that tab shows the file already), Open Preview, Open in VS Code, Open in Terminal (a terminal
   split beside the focused pane, in the folder; these three for one row),
   Open Changes (a file version control marks as changed, with a letter:
   the quick diff provider's diff, the Git plugin's), New File, New
@@ -493,6 +497,10 @@ the trash stay in the user's trash
   nested trees that follow no link, copies and removals that stop once
   cancelled.
 - `internal/plugins/files/audit_test.go`: the paths of the audit records.
+- `web/src/__tests__/editorPlacement.test.ts`: editors in tabs of their
+  own, the preview's tab reused, a file open already shown, Open to the
+  Side split beside the focused pane; Source Control's diffs in a reused
+  tab, the graph's beside the graph, showing the next file there.
 - `web/src/__tests__/files.test.ts`: rows (order, hidden files, the filter,
   a new entry's row, file icons, indent guides, the filter's match marked),
   breadcrumb and paths, the root following the focused terminal, the
