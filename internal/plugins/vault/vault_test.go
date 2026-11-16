@@ -64,7 +64,7 @@ func (h *fakeHost) messageCount(t string) (n int) {
 
 func newTest(t *testing.T) (*Plugin, *fakeHost, *vaultstore.Store) {
 	t.Helper()
-	p := &Plugin{Keys: &vaultstore.MemKeyStore{}, Path: filepath.Join(t.TempDir(), "vault.json"), Timeout: 200 * time.Millisecond}
+	p := &Plugin{Path: filepath.Join(t.TempDir(), "vault.json"), Timeout: 200 * time.Millisecond}
 	h := &fakeHost{sent: make(chan map[string]any, 8)}
 	s, err := p.open(h)
 	if err != nil {
@@ -185,7 +185,7 @@ func TestApprovals(t *testing.T) {
 		t.Errorf("always %+v", r)
 	}
 	// Persisted: reopened, the machine reads without asking.
-	s2, _ := vaultstore.Open(p.Path, p.Keys, "vault.json")
+	s2, _ := vaultstore.Open(p.Path)
 	if i, _ := s2.Get("KEY"); !i.Allows("m2") {
 		t.Error("always did not persist")
 	}
@@ -265,7 +265,7 @@ func TestRoutes(t *testing.T) {
 		t.Errorf("after the end %d", code)
 	}
 	// Without a file the vault is unavailable.
-	p2 := &Plugin{Keys: &vaultstore.MemKeyStore{}}
+	p2 := &Plugin{}
 	w := httptest.NewRecorder()
 	p2.handleList(&plugin.Call{Host: h}, w, httptest.NewRequest("GET", "/api/p/vault", nil))
 	if w.Code != 503 {
@@ -276,7 +276,7 @@ func TestRoutes(t *testing.T) {
 // A new vault asks for a passphrase, which opens the first session;
 // sessions end unused or old; wrong passphrases in a row slow down.
 func TestPassphraseAndSessions(t *testing.T) {
-	p := &Plugin{Keys: &vaultstore.MemKeyStore{}, Path: filepath.Join(t.TempDir(), "vault-dev.json")}
+	p := &Plugin{Path: filepath.Join(t.TempDir(), "vault-dev.json")}
 	h := &fakeHost{}
 	s, _ := p.open(h)
 	s.KDF = testKDF
@@ -306,11 +306,22 @@ func TestPassphraseAndSessions(t *testing.T) {
 	if code, _ := c.do("PUT", "/api/p/vault/vars/A", `{"value":"y"}`); code != 401 {
 		t.Errorf("idle session %d", code)
 	}
+	// Loading the list does not count as its use: only what passes the gate.
+	c.session2(t, "long enough")
+	for i := 0; i < 3; i++ {
+		now = now.Add(SessionIdle / 2)
+		if _, out := c.do("GET", "/api/p/vault", ""); i < 1 && out["session"] != true {
+			t.Errorf("list %d: %v", i, out["session"])
+		}
+	}
+	if code, _ := c.do("POST", "/api/p/vault/vars/A/reveal", ""); code != 401 {
+		t.Errorf("session kept by lists %d", code)
+	}
 	// Used, it lasts at most SessionMax.
 	c.session2(t, "long enough")
 	for i := 0; i < int(SessionMax/SessionIdle)+1; i++ {
 		now = now.Add(SessionIdle - time.Second)
-		c.do("GET", "/api/p/vault", "")
+		c.do("POST", "/api/p/vault/vars/A/reveal", "")
 	}
 	if code, _ := c.do("PUT", "/api/p/vault/vars/A", `{"value":"y"}`); code != 401 {
 		t.Errorf("old session %d", code)
@@ -344,6 +355,27 @@ func TestPassphraseAndSessions(t *testing.T) {
 	c.session2(t, "longer still")
 	if _, out := c.do("POST", "/api/p/vault/vars/A/reveal", ""); out["value"] != "x" {
 		t.Errorf("value after the change %v", out)
+	}
+	// One check at a time: a guess while another runs waits.
+	p.mu.Lock()
+	p.guessing = true
+	p.mu.Unlock()
+	if code, out := c.do("POST", "/api/p/vault/session", `{"passphrase":"longer still"}`); code != 429 || out["error"] != "wait" {
+		t.Errorf("parallel guess %d %v", code, out)
+	}
+	p.tried(false, false)
+	// A session is not opened by a check that crossed a lock.
+	epoch := p.currentEpoch()
+	c.do("POST", "/api/p/vault/lock", "")
+	if tok := p.newSession(epoch); tok != "" {
+		t.Error("a session opened across a lock")
+	}
+	// Refusals of the gate and reveals are audited.
+	audit = h.auditLog()
+	for _, ev := range []string{"denied.vault_session", "vault.revealed"} {
+		if !strings.Contains(audit, ev) {
+			t.Errorf("no %s in %s", ev, audit)
+		}
 	}
 }
 

@@ -9,13 +9,13 @@
 import { create } from 'zustand';
 
 export interface VaultStatus {
-  /** '' (no passphrase yet), 'keychain' (an earlier version's, to convert) or 'passphrase'. */
+  /** '' (no passphrase yet) or 'passphrase'. */
   mode: string;
   locked: boolean;
-  /** No passphrase yet: setPassphrase sets it (converting a keychain vault). */
+  /** No passphrase yet: setPassphrase sets it. */
   setup?: boolean;
-  /** Why the keychain's key could not be read: key_missing, keychain_unavailable. */
-  error?: string;
+  /** When the passphrase was set or last changed (RFC 3339). */
+  passphraseSet?: string;
 }
 
 export interface VaultVariable {

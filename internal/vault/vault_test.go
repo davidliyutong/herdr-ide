@@ -1,7 +1,6 @@
 package vault
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"os"
@@ -9,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // testKDF keeps Argon2id fast in tests.
@@ -18,9 +18,11 @@ func init() { minKDFMemory = testKDF.Memory }
 
 func str(s string) *string { return &s }
 
-func openTest(t *testing.T, path string, keys KeyStore) *Store {
+func boolp(b bool) *bool { return &b }
+
+func openTest(t *testing.T, path string) *Store {
 	t.Helper()
-	s, err := Open(path, keys, "vault.json")
+	s, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,19 +35,41 @@ const pass = "correct horse"
 // newVault is a vault at path with the test passphrase, unlocked.
 func newVault(t *testing.T, path string) *Store {
 	t.Helper()
-	s := openTest(t, path, &MemKeyStore{})
+	s := openTest(t, path)
 	if err := s.SetPassphrase(pass); err != nil {
 		t.Fatal(err)
 	}
 	return s
 }
 
-// A new vault asks for a passphrase before its first value, keeps nothing
-// in the keychain, and opens again only with the passphrase.
+// reopen opens the vault at path again and unlocks it.
+func reopen(t *testing.T, path string) *Store {
+	t.Helper()
+	s := openTest(t, path)
+	if err := s.Unlock(pass); err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+// edit changes the vault's file as a program could.
+func edit(t *testing.T, path string, f func(raw map[string]any)) {
+	t.Helper()
+	var raw map[string]any
+	b, _ := os.ReadFile(path)
+	if err := json.Unmarshal(b, &raw); err != nil {
+		t.Fatal(err)
+	}
+	f(raw)
+	b, _ = json.Marshal(raw)
+	os.WriteFile(path, b, 0o600)
+}
+
+// A new vault asks for a passphrase before its first value, and opens
+// again only with it; when the passphrase was set is kept.
 func TestPassphraseFirst(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "vault.json")
-	keys := &MemKeyStore{}
-	s := openTest(t, path, keys)
+	s := openTest(t, path)
 	if st := s.Status(); st.Mode != ModeNone || st.Locked || !st.Setup {
 		t.Fatalf("empty vault %+v", st)
 	}
@@ -58,6 +82,8 @@ func TestPassphraseFirst(t *testing.T) {
 	if err := s.SetPassphrase("short"); !errors.Is(err, ErrWeak) {
 		t.Errorf("weak: %v", err)
 	}
+	now := time.Date(2026, 11, 16, 10, 0, 0, 0, time.UTC)
+	s.now = func() time.Time { return now }
 	if err := s.SetPassphrase(pass); err != nil {
 		t.Fatal(err)
 	}
@@ -66,9 +92,6 @@ func TestPassphraseFirst(t *testing.T) {
 	}
 	if err := s.Set("TOKEN", Update{Value: str("s3cr3t-value"), Description: str("the key")}); err != nil {
 		t.Fatal(err)
-	}
-	if len(keys.Keys) != 0 {
-		t.Fatalf("keychain %v", keys.Keys)
 	}
 	b, _ := os.ReadFile(path)
 	if strings.Contains(string(b), "s3cr3t") {
@@ -85,8 +108,8 @@ func TestPassphraseFirst(t *testing.T) {
 	if err := s.Verify("wrong horse"); !errors.Is(err, ErrPassphrase) {
 		t.Errorf("verify wrong: %v", err)
 	}
-	s2 := openTest(t, path, keys)
-	if st := s2.Status(); st.Mode != ModePassphrase || !st.Locked || st.Setup {
+	s2 := openTest(t, path)
+	if st := s2.Status(); st.Mode != ModePassphrase || !st.Locked || st.Setup || !st.PassphraseSet.Equal(now) {
 		t.Fatalf("reopened %+v", st)
 	}
 	if _, err := s2.Value("TOKEN"); !errors.Is(err, ErrLocked) {
@@ -94,6 +117,9 @@ func TestPassphraseFirst(t *testing.T) {
 	}
 	if err := s2.Unlock("wrong horse"); !errors.Is(err, ErrPassphrase) {
 		t.Errorf("wrong passphrase: %v", err)
+	}
+	if st := s2.Status(); !st.Locked {
+		t.Error("unlocked by a wrong passphrase")
 	}
 	if err := s2.Unlock(pass); err != nil {
 		t.Fatal(err)
@@ -114,33 +140,17 @@ func TestPassphraseFirst(t *testing.T) {
 	}
 }
 
-// A value is sealed with its name, machines and flag: a value moved to
-// another variable, or machines or the flag changed in the file to let a
-// machine read it, no longer opens.
+// A value is sealed with the file's version, its name, machines and flag:
+// a value moved to another variable, or machines or the flag changed in
+// the file to let a machine read it, no longer opens.
 func TestMetadataBindsValues(t *testing.T) {
-	edit := func(t *testing.T, path string, f func(entries []any)) {
-		t.Helper()
-		var raw map[string]any
-		b, _ := os.ReadFile(path)
-		json.Unmarshal(b, &raw)
-		f(raw["entries"].([]any))
-		b, _ = json.Marshal(raw)
-		os.WriteFile(path, b, 0o600)
-	}
-	reopen := func(t *testing.T, path string) *Store {
-		t.Helper()
-		s := openTest(t, path, nil)
-		if err := s.Unlock(pass); err != nil {
-			t.Fatal(err)
-		}
-		return s
-	}
 	for name, f := range map[string]func(entries []any){
 		"swapped values": func(e []any) {
 			a, b := e[0].(map[string]any), e[1].(map[string]any)
 			a["value"], b["value"] = b["value"], a["value"]
 		},
 		"machines widened": func(e []any) { e[0].(map[string]any)["machines"] = []any{"*"} },
+		"machine added":    func(e []any) { e[0].(map[string]any)["machines"] = []any{"box", "evil"} },
 		"flag dropped":     func(e []any) { e[0].(map[string]any)["injectOnly"] = false },
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -148,7 +158,7 @@ func TestMetadataBindsValues(t *testing.T) {
 			s := newVault(t, path)
 			s.Set("A", Update{Value: str("alpha"), Machines: &[]string{"box"}, InjectOnly: boolp(true)})
 			s.Set("B", Update{Value: str("bravo")})
-			edit(t, path, f)
+			edit(t, path, func(raw map[string]any) { f(raw["entries"].([]any)) })
 			if _, err := reopen(t, path).Value("A"); !errors.Is(err, ErrCorrupt) {
 				t.Errorf("edited value opened: %v", err)
 			}
@@ -169,63 +179,55 @@ func TestMetadataBindsValues(t *testing.T) {
 	}
 }
 
-// A vault of an earlier version, its key in the keychain and its values
-// sealed with their names only, opens with the key, is sealed again with
-// the machines, asks for a passphrase, and then leaves the keychain.
-func TestKeychainVaultConverts(t *testing.T) {
+// The additional data has one text per content: machine lists that a
+// separator would make alike are told apart, and machine ids with control
+// characters are refused.
+func TestADIsInjective(t *testing.T) {
+	a := adOf(&Entry{Name: "A", Machines: []string{"!\x01*"}})
+	b := adOf(&Entry{Name: "A", Machines: []string{"!", "*"}})
+	if a == b {
+		t.Fatal("two machine lists give the same additional data")
+	}
+	if adOf(&Entry{Name: "A", InjectOnly: true}) == adOf(&Entry{Name: "A"}) {
+		t.Fatal("the flag is not in the additional data")
+	}
+	s := newVault(t, filepath.Join(t.TempDir(), "vault.json"))
+	if err := s.Set("A", Update{Value: str("x"), Machines: &[]string{"a\x01b"}}); !errors.Is(err, ErrInvalid) {
+		t.Errorf("control character: %v", err)
+	}
+	s.Set("A", Update{Value: str("x")})
+	if err := s.Allow("A", "a\nb"); !errors.Is(err, ErrInvalid) {
+		t.Errorf("allow with a newline: %v", err)
+	}
+}
+
+// A file of another version (development versions sealed values with less
+// additional data), a mode this version does not know or variables
+// without a passphrase do not open; an empty one of another version does.
+func TestOtherVersionsRefused(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "vault.json")
-	key := make([]byte, 32)
-	for i := range key {
-		key[i] = byte(i)
+	newVault(t, path).Set("A", Update{Value: str("alpha")})
+	for name, f := range map[string]func(raw map[string]any){
+		"older version":  func(raw map[string]any) { raw["version"] = 2 },
+		"keychain mode":  func(raw map[string]any) { raw["mode"] = "keychain" },
+		"no passphrase":  func(raw map[string]any) { delete(raw, "mode") },
+		"no parameters":  func(raw map[string]any) { delete(raw, "kdf") },
+		"no check value": func(raw map[string]any) { delete(raw, "check") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := filepath.Join(t.TempDir(), "vault.json")
+			b, _ := os.ReadFile(path)
+			os.WriteFile(p, b, 0o600)
+			edit(t, p, f)
+			if _, err := Open(p); err == nil {
+				t.Error("opened")
+			}
+		})
 	}
-	keys := &MemKeyStore{Keys: map[string]string{"vault.json": base64.StdEncoding.EncodeToString(key)}}
-	check, _ := seal(key, []byte(checkText), checkAD)
-	v, _ := seal(key, []byte("old-secret"), "OLD")
-	f := map[string]any{"version": 1, "mode": ModeKeychain, "check": check, "entries": []any{
-		map[string]any{"name": "OLD", "machines": []string{"box"}, "value": v},
-	}}
-	b, _ := json.Marshal(f)
-	os.WriteFile(path, b, 0o600)
-	s := openTest(t, path, keys)
-	if st := s.Status(); st.Mode != ModeKeychain || st.Locked || !st.Setup {
-		t.Fatalf("keychain vault %+v", st)
-	}
-	if got, err := s.Value("OLD"); err != nil || got != "old-secret" {
-		t.Fatalf("keychain value %q %v", got, err)
-	}
-	b, _ = os.ReadFile(path)
-	if !strings.Contains(string(b), `"version": 2`) {
-		t.Errorf("not sealed again: %s", b)
-	}
-	if err := s.SetPassphrase(pass); err != nil {
-		t.Fatal(err)
-	}
-	if len(keys.Keys) != 0 {
-		t.Errorf("keychain kept %v", keys.Keys)
-	}
-	s2 := openTest(t, path, keys)
-	if st := s2.Status(); st.Mode != ModePassphrase || !st.Locked {
-		t.Fatalf("converted %+v", st)
-	}
-	if err := s2.Unlock(pass); err != nil {
-		t.Fatal(err)
-	}
-	if got, err := s2.Value("OLD"); err != nil || got != "old-secret" {
-		t.Fatalf("converted value %q %v", got, err)
-	}
-	// Without its key a keychain vault cannot take a passphrase.
-	b, _ = json.Marshal(f)
-	os.WriteFile(path, b, 0o600)
-	s3 := openTest(t, path, &MemKeyStore{})
-	if st := s3.Status(); !st.Locked || st.Error != "key_missing" {
-		t.Errorf("without the key %+v", st)
-	}
-	if err := s3.SetPassphrase(pass); !errors.Is(err, ErrKeyMissing) {
-		t.Errorf("convert without the key: %v", err)
-	}
-	s4 := openTest(t, path, &MemKeyStore{Fail: true})
-	if st := s4.Status(); !st.Locked || st.Error != "keychain_unavailable" {
-		t.Errorf("without a keychain %+v", st)
+	empty := filepath.Join(t.TempDir(), "vault.json")
+	os.WriteFile(empty, []byte(`{"version":1,"entries":[]}`), 0o600)
+	if s, err := Open(empty); err != nil || !s.Status().Setup {
+		t.Errorf("empty file of an earlier version: %v", err)
 	}
 }
 
@@ -243,7 +245,7 @@ func TestChangePassphrase(t *testing.T) {
 	if err := s.ChangePassphrase(pass, "battery staple"); err != nil {
 		t.Fatal(err)
 	}
-	s2 := openTest(t, path, nil)
+	s2 := openTest(t, path)
 	if err := s2.Unlock(pass); !errors.Is(err, ErrPassphrase) {
 		t.Errorf("old passphrase: %v", err)
 	}
@@ -306,8 +308,8 @@ func TestValidation(t *testing.T) {
 // Fields a later version adds are kept.
 func TestUnknownFieldsAreKept(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "vault.json")
-	os.WriteFile(path, []byte(`{"version":1,"future":{"x":1},"entries":[]}`), 0o600)
-	s := openTest(t, path, &MemKeyStore{})
+	os.WriteFile(path, []byte(`{"version":3,"future":{"x":1},"entries":[]}`), 0o600)
+	s := openTest(t, path)
 	if err := s.SetPassphrase(pass); err != nil {
 		t.Fatal(err)
 	}
@@ -333,9 +335,9 @@ func TestKDFParametersAreChecked(t *testing.T) {
 		{Salt: salt[:8], Time: 1, Memory: 64, Threads: 1},
 	} {
 		path := filepath.Join(t.TempDir(), "vault.json")
-		b, _ := json.Marshal(map[string]any{"version": 1, "mode": ModePassphrase, "kdf": k, "check": Sealed{}, "entries": []any{}})
+		b, _ := json.Marshal(map[string]any{"version": FileVersion, "mode": ModePassphrase, "kdf": k, "check": Sealed{}, "entries": []any{}})
 		os.WriteFile(path, b, 0o600)
-		if _, err := Open(path, nil, "vault.json"); !errors.Is(err, ErrInvalid) {
+		if _, err := Open(path); !errors.Is(err, ErrInvalid) {
 			t.Errorf("%+v: %v", k, err)
 		}
 	}
@@ -355,7 +357,8 @@ func TestKDFParametersAreChecked(t *testing.T) {
 
 // A removed machine leaves every variable's list: at once when the vault is
 // unlocked (the values sealed again), else at the next unlock, and until
-// then it may read nothing without asking.
+// then it may read nothing without asking. A value that does not open
+// keeps the machine forgotten.
 func TestForgetMachine(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "vault.json")
 	s := newVault(t, path)
@@ -367,7 +370,7 @@ func TestForgetMachine(t *testing.T) {
 	if err != nil || strings.Join(names, ",") != "A" {
 		t.Fatalf("forget %v %v", names, err)
 	}
-	s2 := openTest(t, path, nil)
+	s2 := openTest(t, path)
 	if i, _ := s2.Get("A"); strings.Join(i.Machines, ",") != "m2,m3" {
 		t.Errorf("A %v", i.Machines)
 	}
@@ -384,7 +387,7 @@ func TestForgetMachine(t *testing.T) {
 	if i, _ := s2.Get("A"); strings.Join(i.Machines, ",") != "m3" || i.Allows("m2") {
 		t.Errorf("A while locked %v", i.Machines)
 	}
-	s3 := openTest(t, path, nil)
+	s3 := openTest(t, path)
 	if i, _ := s3.Get("A"); i.Allows("m2") {
 		t.Errorf("reopened, m2 may read %v", i.Machines)
 	}
@@ -398,6 +401,32 @@ func TestForgetMachine(t *testing.T) {
 	if strings.Contains(string(b), "forgotten") {
 		t.Errorf("forgotten kept after the unlock: %s", b)
 	}
+	// A value that does not open: the machine stays forgotten, the unlock
+	// works and the other values open.
+	s3.Set("C", Update{Value: str("c"), Machines: &[]string{"m4"}})
+	s3.Set("D", Update{Value: str("d"), Machines: &[]string{"m4"}})
+	s3.Lock()
+	s3.ForgetMachine("m4")
+	edit(t, path, func(raw map[string]any) {
+		for _, e := range raw["entries"].([]any) {
+			if e.(map[string]any)["name"] == "C" {
+				e.(map[string]any)["value"] = map[string]any{"nonce": "AAAAAAAAAAAAAAAA", "ciphertext": "AAAA"}
+			}
+		}
+	})
+	s4 := reopen(t, path)
+	if st := s4.Status(); st.Locked {
+		t.Fatal("locked")
+	}
+	if i, _ := s4.Get("C"); i.Allows("m4") {
+		t.Errorf("C after a failed seal %v", i.Machines)
+	}
+	if i, _ := s4.Get("D"); i.Allows("m4") || len(i.Machines) != 0 {
+		t.Errorf("D %v", i.Machines)
+	}
+	if v, err := s4.Value("D"); err != nil || v != "d" {
+		t.Errorf("D value %q %v", v, err)
+	}
 }
 
 // A renamed variable keeps its value (sealed again under its new name, read
@@ -405,7 +434,6 @@ func TestForgetMachine(t *testing.T) {
 // invalid names and a locked vault are refused.
 func TestRename(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "vault.json")
-	keys := &MemKeyStore{}
 	s := newVault(t, path)
 	if err := s.Set("OLD", Update{Value: str("v1"), Description: str("d"), Machines: &[]string{"box"}, InjectOnly: boolp(true)}); err != nil {
 		t.Fatal(err)
@@ -428,10 +456,7 @@ func TestRename(t *testing.T) {
 	if _, ok := s.Get("OLD"); ok {
 		t.Fatal("the old name stays")
 	}
-	s2 := openTest(t, path, keys)
-	if err := s2.Unlock(pass); err != nil {
-		t.Fatal(err)
-	}
+	s2 := reopen(t, path)
 	if v, err := s2.Value("NEW"); err != nil || v != "v1" {
 		t.Fatalf("value after rename %q %v", v, err)
 	}
@@ -444,5 +469,3 @@ func TestRename(t *testing.T) {
 		t.Fatalf("locked: %v", err)
 	}
 }
-
-func boolp(b bool) *bool { return &b }

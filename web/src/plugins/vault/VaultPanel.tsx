@@ -1,7 +1,6 @@
 // The variable vault's panel in the right sidebar. At the top, the gate:
-// creating the vault's passphrase (or converting a vault of an earlier
-// version, whose key was in the keychain), unlocking this page's session
-// with it, or the session's bar with the lock. Then requests waiting for
+// creating the vault's passphrase, unlocking this page's session with it,
+// or the session's bar with the lock. Then requests waiting for
 // an answer and three tabs: the variables (never their values, except one
 // revealed on request; an editor in a dialog), the access log (filtered by
 // machine and outcome, by day) and how to connect a coding agent's CLI on
@@ -104,8 +103,19 @@ export function VaultPanel() {
 
 // ---- the gate ----
 
-/** The vault's gate: a passphrase to create, to convert to, or to unlock
- * this page's session with; with a session, its bar. */
+/** Password managers are kept away from the passphrase: one saved there is
+ * readable by programs on the computer in several browsers. */
+const noManager = { autoComplete: 'off', 'data-1p-ignore': '', 'data-lpignore': 'true', 'data-bwignore': '', 'data-form-type': 'other' };
+
+/** When the passphrase was set, so that one the user did not choose shows. */
+function Since() {
+  const at = useVault((s) => s.status?.passphraseSet);
+  if (!at) return null;
+  return <span className="muted">{t('vault.passphraseSince', { date: new Date(at).toLocaleString() })}</span>;
+}
+
+/** The vault's gate: a passphrase to create or to unlock this page's
+ * session with; with a session, its bar. */
 function Gate() {
   const status = useVault((s) => s.status)!;
   const session = useVault((s) => s.session);
@@ -119,7 +129,7 @@ function Gate() {
       </div>
     );
   }
-  if (status.setup) return <PassphraseCard kind={status.mode === 'keychain' ? 'convert' : 'create'} />;
+  if (status.setup) return <PassphraseCard kind="create" />;
   if (!session) return <UnlockCard />;
   return (
     <>
@@ -128,6 +138,7 @@ function Gate() {
         <span className="vault-session-text">
           <b>{t('vault.session.open')}</b>
           <span className="muted">{t('vault.session.idle')}</span>
+          <Since />
         </span>
         <span className="spacer" />
         <button className="sm ghost" onClick={() => setChanging(!changing)}>
@@ -142,9 +153,8 @@ function Gate() {
   );
 }
 
-/** Creating the passphrase, converting a keychain vault to one, or changing it. */
-function PassphraseCard({ kind, onDone }: { kind: 'create' | 'convert' | 'change'; onDone?(): void }) {
-  const status = useVault((s) => s.status)!;
+/** Creating the passphrase, or changing it. */
+function PassphraseCard({ kind, onDone }: { kind: 'create' | 'change'; onDone?(): void }) {
   const [old, setOld] = useState('');
   const [pass, setPass] = useState('');
   const [repeat, setRepeat] = useState('');
@@ -177,12 +187,11 @@ function PassphraseCard({ kind, onDone }: { kind: 'create' | 'convert' | 'change
         <b>{t(`vault.gate.${kind}.title`)}</b>
       </div>
       <p className="vault-gate-text">{t(`vault.gate.${kind}.text`)}</p>
-      {kind === 'convert' && status.error && <div className="callout error">{errorText(new VaultError(status.error))}</div>}
       {kind === 'change' && (
         <input
           className="input"
           type="password"
-          autoComplete="current-password"
+          {...noManager}
           placeholder={t('vault.passphraseCurrent')}
           aria-label={t('vault.passphraseCurrent')}
           value={old}
@@ -192,7 +201,7 @@ function PassphraseCard({ kind, onDone }: { kind: 'create' | 'convert' | 'change
       <input
         className="input"
         type="password"
-        autoComplete="new-password"
+        {...noManager}
         autoFocus={kind !== 'change'}
         placeholder={t('vault.passphraseNew')}
         aria-label={t('vault.passphraseNew')}
@@ -208,7 +217,7 @@ function PassphraseCard({ kind, onDone }: { kind: 'create' | 'convert' | 'change
       <input
         className="input"
         type="password"
-        autoComplete="new-password"
+        {...noManager}
         placeholder={t('vault.passphraseRepeat')}
         aria-label={t('vault.passphraseRepeat')}
         value={repeat}
@@ -266,12 +275,14 @@ function UnlockCard() {
         <Lock />
         <b>{t('vault.gate.unlock.title')}</b>
       </div>
-      <p className="vault-gate-text">{t('vault.gate.unlock.text')}</p>
+      <p className="vault-gate-text">
+        {t('vault.gate.unlock.text')} <Since />
+      </p>
       <div className="vault-unlock-row">
         <input
           className="input"
           type="password"
-          autoComplete="current-password"
+          {...noManager}
           placeholder={t('vault.passphrase')}
           aria-label={t('vault.passphrase')}
           value={pass}

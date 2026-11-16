@@ -79,8 +79,6 @@ const (
 
 // Plugin is the vault plugin.
 type Plugin struct {
-	// Keys keeps the master key: the OS keychain (New), a map in tests.
-	Keys vaultstore.KeyStore
 	// Path is the vault's file; "" puts it beside the settings file
 	// (vault.json, vault-<instance>.json).
 	Path string
@@ -94,11 +92,15 @@ type Plugin struct {
 	// noisy are the last audit records of list calls and busy refusals,
 	// by machine and result, with the calls not recorded since.
 	noisy map[string]*noisyAudit
-	// sessions are the pages' vault sessions by token; fails and waitUntil
-	// slow down guessing the passphrase.
+	// sessions are the pages' vault sessions by token; epoch is bumped
+	// when they all end (a lock, a new passphrase), so a session opened by
+	// a check that crossed it is not taken. fails, waitUntil and guessing
+	// slow down guessing the passphrase: one check at a time.
 	sessions  map[string]*session
+	epoch     uint64
 	fails     int
 	waitUntil time.Time
+	guessing  bool
 	now       func() time.Time
 }
 
@@ -111,8 +113,8 @@ type noisyAudit struct {
 	suppressed int
 }
 
-// New returns the plugin with the OS keychain.
-func New() *Plugin { return &Plugin{Keys: vaultstore.OSKeyStore{}} }
+// New returns the plugin.
+func New() *Plugin { return &Plugin{} }
 
 func (p *Plugin) ID() string { return ID }
 
@@ -186,7 +188,7 @@ func (p *Plugin) open(h plugin.Host) (*vaultstore.Store, error) {
 	if path == "" {
 		return nil, errUnavailable
 	}
-	s, err := vaultstore.Open(path, p.Keys, filepath.Base(path))
+	s, err := vaultstore.Open(path)
 	if err != nil {
 		h.Logger().Printf("vault: %v", err)
 		return nil, &plugin.Error{Code: "unavailable", Message: err.Error()}
@@ -238,7 +240,7 @@ func fail(w http.ResponseWriter, err error) {
 		status = http.StatusNotFound
 	case "exists":
 		status = http.StatusConflict
-	case "vault_locked", "key_missing", "keychain_unavailable", "no_passphrase", "has_passphrase":
+	case "vault_locked", "no_passphrase", "has_passphrase":
 		status = http.StatusConflict
 	case "wrong_passphrase":
 		status = http.StatusForbidden
@@ -257,7 +259,9 @@ func (p *Plugin) handleList(c *plugin.Call, w http.ResponseWriter, r *http.Reque
 		fail(w, err)
 		return
 	}
-	plugin.WriteJSON(w, http.StatusOK, map[string]any{"status": s.Status(), "variables": s.List(), "session": p.sessionOf(r)})
+	// Whether the page's session is open, without counting as its use: only
+	// what passes the gate keeps a session from ending idle.
+	plugin.WriteJSON(w, http.StatusOK, map[string]any{"status": s.Status(), "variables": s.List(), "session": p.sessionOf(r, false)})
 }
 
 func (p *Plugin) clock() time.Time {
@@ -267,9 +271,9 @@ func (p *Plugin) clock() time.Time {
 	return time.Now()
 }
 
-// sessionOf reports whether the request carries a session that is open,
-// and marks it used.
-func (p *Plugin) sessionOf(r *http.Request) bool {
+// sessionOf reports whether the request carries a session that is open;
+// use marks it used.
+func (p *Plugin) sessionOf(r *http.Request, use bool) bool {
 	tok := r.Header.Get(SessionHeader)
 	if tok == "" {
 		return false
@@ -282,7 +286,9 @@ func (p *Plugin) sessionOf(r *http.Request) bool {
 		delete(p.sessions, tok)
 		return false
 	}
-	ss.used = now
+	if use {
+		ss.used = now
+	}
 	return true
 }
 
@@ -290,23 +296,39 @@ func (p *Plugin) sessionOf(r *http.Request) bool {
 // the gate before the UI's changes and reveals.
 func (p *Plugin) gated(h func(*plugin.Call, http.ResponseWriter, *http.Request)) func(*plugin.Call, http.ResponseWriter, *http.Request) {
 	return func(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
-		if !p.sessionOf(r) {
-			plugin.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "vault_session", "message": "the vault's passphrase is needed (a vault session)"})
+		if !p.sessionOf(r, true) {
+			refuseSession(c, w, r)
 			return
 		}
 		h(c, w, r)
 	}
 }
 
-// newSession opens a session and returns its token; the oldest goes when
-// there are MaxSessions.
-func (p *Plugin) newSession() string {
+// refuseSession answers 401 vault_session and audits the refusal.
+func refuseSession(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
+	c.Host.Audit(r, "denied.vault_session", map[string]any{"route": r.Method + " " + r.URL.Path})
+	plugin.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "vault_session", "message": "the vault's passphrase is needed (a vault session)"})
+}
+
+// currentEpoch is the sessions' epoch, taken before a passphrase check.
+func (p *Plugin) currentEpoch() uint64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.epoch
+}
+
+// newSession opens a session and returns its token, unless the sessions
+// ended since epoch (then ""); the oldest goes when there are MaxSessions.
+func (p *Plugin) newSession(epoch uint64) string {
 	b := make([]byte, 32)
 	rand.Read(b)
 	tok := hex.EncodeToString(b)
 	now := p.clock()
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.epoch != epoch {
+		return ""
+	}
 	if p.sessions == nil {
 		p.sessions = map[string]*session{}
 	}
@@ -328,26 +350,41 @@ func (p *Plugin) newSession() string {
 	return tok
 }
 
-// endSessions ends every session (the vault was locked).
-func (p *Plugin) endSessions() {
+// endSessions ends every session (the vault was locked, the passphrase
+// changed) and returns the new epoch.
+func (p *Plugin) endSessions() uint64 {
 	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.sessions = nil
-	p.mu.Unlock()
+	p.epoch++
+	return p.epoch
 }
 
-// backoff is how long a passphrase must wait after wrong ones; zero when
-// it may be tried now.
-func (p *Plugin) backoff() time.Duration {
+// beginGuess reserves the one passphrase check that may run: false (with
+// the wait, possibly zero while another check runs) when it may not now.
+func (p *Plugin) beginGuess() (bool, time.Duration) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return max(0, p.waitUntil.Sub(p.clock()))
+	if d := p.waitUntil.Sub(p.clock()); d > 0 {
+		return false, d
+	}
+	if p.guessing {
+		return false, 0
+	}
+	p.guessing = true
+	return true, 0
 }
 
-// tried records a passphrase's outcome: wrong ones in a row past failFree
-// make the next wait twice as long, up to maxBackoff.
-func (p *Plugin) tried(ok bool) {
+// tried ends a check begun with beginGuess with its outcome (wrong: a
+// wrong passphrase; other failures count as neither): wrong ones in a row
+// past failFree make the next wait twice as long, up to maxBackoff.
+func (p *Plugin) tried(ok, wrong bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.guessing = false
+	if !ok && !wrong {
+		return
+	}
 	if ok {
 		p.fails, p.waitUntil = 0, time.Time{}
 		return
@@ -359,14 +396,15 @@ func (p *Plugin) tried(ok bool) {
 	}
 }
 
-// slowDown answers 429 while wrong passphrases must wait; true when it did.
+// slowDown reserves a passphrase check, or answers 429 while wrong
+// passphrases must wait or another check runs; true when it answered.
 func (p *Plugin) slowDown(w http.ResponseWriter) bool {
-	d := p.backoff()
-	if d <= 0 {
+	ok, d := p.beginGuess()
+	if ok {
 		return false
 	}
 	w.Header().Set("Retry-After", strconv.Itoa(int(d.Seconds())+1))
-	plugin.WriteJSON(w, http.StatusTooManyRequests, map[string]string{"error": "wait", "message": "too many wrong passphrases; try again later"})
+	plugin.WriteJSON(w, http.StatusTooManyRequests, map[string]string{"error": "wait", "message": "too many wrong passphrases, or a check running; try again later"})
 	return true
 }
 
@@ -407,6 +445,7 @@ func (p *Plugin) handleDelete(c *plugin.Call, w http.ResponseWriter, r *http.Req
 		fail(w, err)
 		return
 	}
+	c.Host.Audit(r, "vault.deleted", map[string]any{"name": r.PathValue("name")})
 	changed(c.Host)
 	plugin.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
@@ -449,6 +488,7 @@ func (p *Plugin) handleReveal(c *plugin.Call, w http.ResponseWriter, r *http.Req
 		fail(w, err)
 		return
 	}
+	c.Host.Audit(r, "vault.revealed", map[string]any{"name": r.PathValue("name")})
 	plugin.WriteJSON(w, http.StatusOK, map[string]string{"value": v})
 }
 
@@ -468,21 +508,27 @@ func (p *Plugin) handleSession(c *plugin.Call, w http.ResponseWriter, r *http.Re
 		plugin.WriteError(w, err)
 		return
 	}
-	if p.slowDown(w) {
-		return
-	}
-	if st := s.Status(); st.Mode != vaultstore.ModePassphrase || st.Setup {
+	if st := s.Status(); st.Mode != vaultstore.ModePassphrase {
 		fail(w, vaultstore.ErrNoPassphrase)
 		return
 	}
+	if p.slowDown(w) {
+		return
+	}
+	epoch := p.currentEpoch()
 	err = s.Unlock(body.Passphrase)
-	p.tried(err == nil)
+	p.tried(err == nil, errors.Is(err, vaultstore.ErrPassphrase))
 	c.Host.Audit(r, "vault.unlocked", map[string]any{"ok": err == nil})
 	if err != nil {
 		fail(w, err)
 		return
 	}
-	tok := p.newSession()
+	tok := p.newSession(epoch)
+	if tok == "" {
+		// Locked, or a new passphrase, while the check ran.
+		fail(w, vaultstore.ErrLocked)
+		return
+	}
 	changed(c.Host)
 	plugin.WriteJSON(w, http.StatusOK, map[string]any{"session": tok, "idle": SessionIdle.Seconds(), "status": s.Status()})
 }
@@ -496,9 +542,10 @@ func (p *Plugin) handleEndSession(c *plugin.Call, w http.ResponseWriter, r *http
 	plugin.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-// handlePassphrase sets the vault's first passphrase ({passphrase}; also
-// converting a keychain vault of an earlier version), or changes it
-// ({old, passphrase}); either opens a session.
+// handlePassphrase sets a new vault's passphrase ({passphrase}), or
+// changes it ({old, passphrase}); either opens a session. The first
+// passphrase needs no session: the vault has no values yet, and when it
+// was set shows in the panel.
 func (p *Plugin) handlePassphrase(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
 	s, err := p.open(c.Host)
 	if err != nil {
@@ -517,23 +564,19 @@ func (p *Plugin) handlePassphrase(c *plugin.Call, w http.ResponseWriter, r *http
 	if change && p.slowDown(w) {
 		return
 	}
-	mode := s.Status().Mode
 	if change {
 		err = s.ChangePassphrase(*body.Old, body.Passphrase)
-		if err == nil || errors.Is(err, vaultstore.ErrPassphrase) {
-			p.tried(err == nil)
-		}
+		p.tried(err == nil, errors.Is(err, vaultstore.ErrPassphrase))
 	} else {
 		err = s.SetPassphrase(body.Passphrase)
 	}
-	c.Host.Audit(r, "vault.passphrase_set", map[string]any{"ok": err == nil, "change": change, "from": mode})
+	c.Host.Audit(r, "vault.passphrase_set", map[string]any{"ok": err == nil, "change": change})
 	if err != nil {
 		fail(w, err)
 		return
 	}
 	// Sessions of the old passphrase end with it.
-	p.endSessions()
-	tok := p.newSession()
+	tok := p.newSession(p.endSessions())
 	changed(c.Host)
 	plugin.WriteJSON(w, http.StatusOK, map[string]any{"session": tok, "idle": SessionIdle.Seconds(), "status": s.Status()})
 }
@@ -606,8 +649,8 @@ func (p *Plugin) handleAnswer(c *plugin.Call, w http.ResponseWriter, r *http.Req
 	case AnswerOnce, AnswerAlways:
 		// Letting a value out is the user's, behind the gate; denying
 		// needs no proof.
-		if !p.sessionOf(r) {
-			plugin.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "vault_session", "message": "the vault's passphrase is needed (a vault session)"})
+		if !p.sessionOf(r, true) {
+			refuseSession(c, w, r)
 			return
 		}
 	case AnswerDeny:

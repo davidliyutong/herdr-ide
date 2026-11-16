@@ -5,28 +5,25 @@
 // core's memory while unlocked. Names, descriptions and the machines
 // allowed to read a variable are stored in the clear; values never are,
 // and each value's encryption covers its name, its machines and its
-// inject-only flag, so a file edited to let a machine read a variable no
-// longer opens it. Vaults of earlier versions kept a random key in the
-// operating system's keychain instead; they open with it and are converted
-// to a passphrase (ConvertToPassphrase). The core's plugin
-// (internal/plugins/vault) serves it to the UI and to the MCP servers on
-// machines (docs/features/30-variable-vault.md).
+// inject-only flag (adOf), so a file edited to let a machine read a
+// variable no longer opens it. The core's plugin (internal/plugins/vault)
+// serves it to the UI and to the MCP servers on machines
+// (docs/features/30-variable-vault.md).
 package vault
 
 import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
 	"slices"
 	"sort"
-	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"golang.org/x/crypto/argon2"
 
@@ -47,19 +44,16 @@ const (
 
 // Modes of the master key.
 const (
-	// ModeNone: no key yet (no passphrase was ever set).
+	// ModeNone: no passphrase yet (a new vault).
 	ModeNone = ""
-	// ModeKeychain: a random key in the operating system's keychain, as
-	// vaults of earlier versions kept it; converted to a passphrase.
-	ModeKeychain = "keychain"
 	// ModePassphrase: a key derived from the user's passphrase (Argon2id).
 	ModePassphrase = "passphrase"
 )
 
-// fileVersion is the version of new files: 2 seals each value with its
-// machines and inject-only flag besides its name (adOf); version 1 files
-// are sealed again when unlocked.
-const fileVersion = 2
+// FileVersion is the version of the files this store reads and writes: a
+// file of another version, holding a passphrase or variables, does not
+// open (development versions sealed values differently).
+const FileVersion = 3
 
 // Errors, each with the code the UI and the MCP servers get (Code).
 var (
@@ -70,13 +64,12 @@ var (
 	ErrValueRequired = errors.New("a new variable needs a value")
 	ErrPassphrase    = errors.New("wrong passphrase")
 	ErrWeak          = errors.New("the passphrase must have at least 8 characters")
-	ErrKeyMissing    = errors.New("the vault's key is not in the keychain")
-	ErrKeychain      = errors.New("the keychain is unavailable")
 	ErrCorrupt       = errors.New("a value cannot be decrypted")
 	ErrFull          = errors.New("too many variables")
 	ErrExists        = errors.New("a variable of that name exists")
 	ErrNoPassphrase  = errors.New("the vault has no passphrase yet")
 	ErrHasPassphrase = errors.New("the vault has a passphrase; change it with the current one")
+	ErrVersion       = errors.New("the vault's file is of another version")
 )
 
 // Code is the error's code for clients: vault_locked, not_found, …
@@ -96,10 +89,6 @@ func Code(err error) string {
 		return "wrong_passphrase"
 	case errors.Is(err, ErrWeak):
 		return "weak_passphrase"
-	case errors.Is(err, ErrKeyMissing):
-		return "key_missing"
-	case errors.Is(err, ErrKeychain):
-		return "keychain_unavailable"
 	case errors.Is(err, ErrCorrupt):
 		return "corrupt"
 	case errors.Is(err, ErrFull):
@@ -110,6 +99,8 @@ func Code(err error) string {
 		return "no_passphrase"
 	case errors.Is(err, ErrHasPassphrase):
 		return "has_passphrase"
+	case errors.Is(err, ErrVersion):
+		return "version"
 	}
 	return "failed"
 }
@@ -183,10 +174,13 @@ type file struct {
 	Version int    `json:"version"`
 	Mode    string `json:"mode,omitempty"`
 	KDF     *KDF   `json:"kdf,omitempty"`
-	// Check is a known text sealed with the key: a wrong key or
-	// passphrase fails to open it.
-	Check   *Sealed `json:"check,omitempty"`
-	Entries []Entry `json:"entries"`
+	// Check is a known text sealed with the key: a wrong passphrase fails
+	// to open it.
+	Check *Sealed `json:"check,omitempty"`
+	// PassphraseSet is when the passphrase was set or last changed: the
+	// panel shows it, so a passphrase the user did not choose shows.
+	PassphraseSet time.Time `json:"passphraseSet,omitzero"`
+	Entries       []Entry   `json:"entries"`
 	// Forgotten are machines removed while the vault was locked: no
 	// variable lets them read without asking, and they are taken out of
 	// the variables' machines (whose values are sealed again) at the next
@@ -198,19 +192,9 @@ type file struct {
 
 const checkText = "vault-check"
 
-// checkAD is the check's additional data; no variable can have this name.
+// checkAD is the check's additional data; no variable's is the same
+// (adOf's are JSON objects).
 const checkAD = "#check"
-
-// KeyStore is where vaults of earlier versions kept the master key: the
-// operating system's keychain (OSKeyStore) or, in tests, a map. It is read
-// to open such a vault and emptied once it has a passphrase.
-type KeyStore interface {
-	// Get returns the secret, ErrKeyMissing when there is none, or another
-	// error when the keychain cannot be used.
-	Get(account string) (string, error)
-	Set(account, secret string) error
-	Delete(account string) error
-}
 
 // Info is a variable as clients see it: everything but the value.
 type Info struct {
@@ -227,34 +211,31 @@ func (i Info) Allows(m string) bool {
 	return slices.Contains(i.Machines, AllMachines) || slices.Contains(i.Machines, m)
 }
 
-// adOf is the additional data a value is sealed with: its name, and in
-// files of version 2 its machines and inject-only flag, so a value whose
-// machines or flag were changed in the file (to let a machine read it
-// without asking) no longer opens.
-func adOf(e *Entry, version int) string {
-	if version < 2 {
-		return e.Name
-	}
+// adOf is the additional data a value is sealed with: the file's version,
+// the variable's name, machines (sorted) and inject-only flag as JSON (an
+// encoding with one text per content), so a value moved to another entry,
+// or an entry whose machines were widened or flag dropped in the file,
+// does not open.
+func adOf(e *Entry) string {
 	ms := slices.Clone(e.Machines)
 	slices.Sort(ms)
-	flag := ""
-	if e.InjectOnly {
-		flag = "inject-only"
-	}
-	return e.Name + "\x00" + strings.Join(ms, "\x01") + "\x00" + flag
+	b, _ := json.Marshal(struct {
+		V          int      `json:"v"`
+		Name       string   `json:"name"`
+		Machines   []string `json:"machines"`
+		InjectOnly bool     `json:"injectOnly"`
+	}{FileVersion, e.Name, ms, e.InjectOnly})
+	return string(b)
 }
 
 // Status is the vault's state.
 type Status struct {
 	Mode   string `json:"mode"`
 	Locked bool   `json:"locked"`
-	// Setup: no passphrase yet (a new vault, one of passphrase mode whose
-	// passphrase was never set, or a keychain vault to convert):
-	// SetPassphrase sets it.
+	// Setup: no passphrase yet; SetPassphrase sets it.
 	Setup bool `json:"setup,omitempty"`
-	// Error is why a keychain key could not be read (key_missing,
-	// keychain_unavailable).
-	Error string `json:"error,omitempty"`
+	// PassphraseSet is when the passphrase was set or last changed.
+	PassphraseSet time.Time `json:"passphraseSet,omitzero"`
 }
 
 // Update changes a variable; nil fields stay as they are.
@@ -267,59 +248,55 @@ type Update struct {
 
 // Store is the vault.
 type Store struct {
-	path    string
-	keys    KeyStore
-	account string
+	path string
 	// KDF are the parameters of a new passphrase (tests lower them).
 	KDF KDF
 
-	mu     sync.Mutex
-	f      file
-	key    []byte // nil while locked
-	keyErr error  // why the keychain's key could not be read
-	setup  bool   // passphrase mode without a passphrase
-	now    func() time.Time
+	mu  sync.Mutex
+	f   file
+	key []byte // nil while locked
+	now func() time.Time
 }
 
-// Open reads the vault at path (none yet: an empty vault). keys holds the
-// master key under account. A keychain vault is unlocked at once when the
-// key can be read; a passphrase vault stays locked until Unlock.
-func Open(path string, keys KeyStore, account string) (*Store, error) {
-	s := &Store{path: path, keys: keys, account: account, KDF: DefaultKDF, now: time.Now}
+// Open reads the vault at path (none yet: an empty vault, without a
+// passphrase). A vault with a passphrase stays locked until Unlock.
+func Open(path string) (*Store, error) {
+	s := &Store{path: path, KDF: DefaultKDF, now: time.Now}
 	b, sig, err := userfile.Read(path)
 	if err != nil {
 		return nil, err
 	}
 	if !sig.Exists {
-		s.f = file{Version: fileVersion}
+		s.f = file{Version: FileVersion}
 		return s, nil
 	}
 	if err := json.Unmarshal(b, &s.f); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	_ = json.Unmarshal(b, &s.f.rest)
-	for _, k := range []string{"version", "mode", "kdf", "check", "entries", "forgotten"} {
+	for _, k := range []string{"version", "mode", "kdf", "check", "passphraseSet", "entries", "forgotten"} {
 		delete(s.f.rest, k)
 	}
-	if s.f.Version < 1 {
-		s.f.Version = 1
-	}
 	switch s.f.Mode {
-	case ModeKeychain:
-		s.keyErr = s.unlockKeychain()
-		if s.keyErr == nil {
-			s.keyErr = s.upgrade()
-		}
 	case ModePassphrase:
-		if s.f.KDF != nil {
-			if err := validKDF(s.f.KDF); err != nil {
-				return nil, fmt.Errorf("%s: %w", path, err)
-			}
+		if s.f.KDF == nil || s.f.Check == nil {
+			return nil, fmt.Errorf("%s: %w: a passphrase vault without its key's parameters", path, ErrInvalid)
 		}
-		s.setup = s.f.KDF == nil || s.f.Check == nil
+		if err := validKDF(s.f.KDF); err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
 	case ModeNone:
+		if len(s.f.Entries) > 0 {
+			return nil, fmt.Errorf("%s: %w: variables without a passphrase", path, ErrInvalid)
+		}
 	default:
-		return nil, fmt.Errorf("%s: unknown mode %q", path, s.f.Mode)
+		return nil, fmt.Errorf("%s: %w: mode %q", path, ErrVersion, s.f.Mode)
+	}
+	if s.f.Version != FileVersion {
+		if s.f.Mode != ModeNone {
+			return nil, fmt.Errorf("%s: %w %d, not %d", path, ErrVersion, s.f.Version, FileVersion)
+		}
+		s.f.Version = FileVersion
 	}
 	return s, nil
 }
@@ -331,11 +308,12 @@ func (s *Store) Path() string { return s.path }
 func (s *Store) Status() Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	st := Status{Mode: s.f.Mode, Locked: s.f.Mode != ModeNone && s.key == nil, Setup: s.f.Mode != ModePassphrase || s.setup}
-	if s.f.Mode == ModeKeychain && s.key == nil && s.keyErr != nil {
-		st.Error = Code(s.keyErr)
+	return Status{
+		Mode:          s.f.Mode,
+		Locked:        s.f.Mode != ModeNone && s.key == nil,
+		Setup:         s.f.Mode == ModeNone,
+		PassphraseSet: s.f.PassphraseSet,
 	}
-	return st
 }
 
 // info is what clients see of e: its machines without those forgotten.
@@ -389,7 +367,7 @@ func (s *Store) Value(name string) (string, error) {
 	if s.key == nil {
 		return "", ErrLocked
 	}
-	b, err := open(s.key, e.Value, adOf(e, s.f.Version))
+	b, err := open(s.key, e.Value, adOf(e))
 	if err != nil {
 		return "", err
 	}
@@ -400,7 +378,7 @@ func (s *Store) Value(name string) (string, error) {
 // flag changed), from plain, the value's text; called with s.mu held and
 // the key there.
 func (s *Store) reseal(e *Entry, plain []byte) error {
-	v, err := seal(s.key, plain, adOf(e, s.f.Version))
+	v, err := seal(s.key, plain, adOf(e))
 	if err != nil {
 		return err
 	}
@@ -408,20 +386,35 @@ func (s *Store) reseal(e *Entry, plain []byte) error {
 	return nil
 }
 
-func validMachines(ms []string) bool {
-	if len(ms) > MaxMachines {
+// validMachineID reports whether m can be a machine in a variable's list:
+// not empty, not too long, no control characters.
+func validMachineID(m string) bool {
+	if m == "" || len(m) > MaxMachineID {
 		return false
 	}
-	for _, m := range ms {
-		if m == "" || len(m) > MaxMachineID {
+	for _, r := range m {
+		if unicode.IsControl(r) {
 			return false
 		}
 	}
 	return true
 }
 
-// Set creates or changes a variable: a new one needs a value; a value
-// needs the vault unlocked (and creates the key of a vault without one).
+func validMachines(ms []string) bool {
+	if len(ms) > MaxMachines {
+		return false
+	}
+	for _, m := range ms {
+		if !validMachineID(m) {
+			return false
+		}
+	}
+	return true
+}
+
+// Set creates or changes a variable: a new one needs a value. Every
+// change needs the vault unlocked: the value is sealed with the machines
+// and the flag.
 func (s *Store) Set(name string, u Update) error {
 	if !ValidName(name) {
 		return ErrInvalidName
@@ -444,16 +437,14 @@ func (s *Store) Set(name string, u Update) error {
 	if e == nil && len(s.f.Entries) >= MaxEntries {
 		return ErrFull
 	}
-	// The value is sealed with the machines and the flag: changing any of
-	// them needs the key.
 	if s.key == nil {
-		return s.ensureKey()
+		return s.noKey()
 	}
 	var plain []byte
 	if u.Value != nil {
 		plain = []byte(*u.Value)
 	} else {
-		b, err := open(s.key, e.Value, adOf(e, s.f.Version))
+		b, err := open(s.key, e.Value, adOf(e))
 		if err != nil {
 			return err
 		}
@@ -499,7 +490,7 @@ func dedupe(ms []string) []string {
 
 // Allow adds machine m to the machines allowed to read name.
 func (s *Store) Allow(name, m string) error {
-	if m == "" || len(m) > MaxMachineID {
+	if !validMachineID(m) {
 		return ErrInvalid
 	}
 	s.mu.Lock()
@@ -517,7 +508,7 @@ func (s *Store) Allow(name, m string) error {
 	if s.key == nil {
 		return ErrLocked
 	}
-	plain, err := open(s.key, e.Value, adOf(e, s.f.Version))
+	plain, err := open(s.key, e.Value, adOf(e))
 	if err != nil {
 		return err
 	}
@@ -554,7 +545,7 @@ func (s *Store) ForgetMachine(m string) ([]string, error) {
 		return nil, nil
 	}
 	// Taking it out of the machines seals the values again, which needs
-	// the key: while locked, the machine is forgotten until the unlock.
+	// the key: until then, the machine is forgotten.
 	if !slices.Contains(s.f.Forgotten, m) {
 		prev := s.f.Forgotten
 		s.f.Forgotten = append(slices.Clone(s.f.Forgotten), m)
@@ -564,46 +555,46 @@ func (s *Store) ForgetMachine(m string) ([]string, error) {
 		}
 	}
 	if s.key != nil {
-		if err := s.applyForgotten(); err != nil {
-			return nil, err
-		}
+		s.applyForgotten()
 	}
 	return names, nil
 }
 
 // applyForgotten takes the forgotten machines out of the variables'
-// machines, sealing their values again; called with s.mu held and the key
-// there.
-func (s *Store) applyForgotten() error {
+// machines, sealing their values again; a value that does not open keeps
+// its machines and the list stays (it is still enforced by info). Called
+// with s.mu held and the key there.
+func (s *Store) applyForgotten() {
 	if len(s.f.Forgotten) == 0 {
-		return nil
+		return
 	}
 	prev := slices.Clone(s.f.Entries)
+	all := true
 	for i := range s.f.Entries {
 		e := &s.f.Entries[i]
 		if !slices.ContainsFunc(e.Machines, func(x string) bool { return slices.Contains(s.f.Forgotten, x) }) {
 			continue
 		}
-		plain, err := open(s.key, e.Value, adOf(e, s.f.Version))
+		plain, err := open(s.key, e.Value, adOf(e))
 		if err != nil {
-			s.f.Entries = prev
-			return err
+			all = false
+			continue
 		}
+		before := *e
 		e.Machines = slices.DeleteFunc(slices.Clone(e.Machines), func(x string) bool { return slices.Contains(s.f.Forgotten, x) })
-		err = s.reseal(e, plain)
-		clear(plain)
-		if err != nil {
-			s.f.Entries = prev
-			return err
+		if s.reseal(e, plain) != nil {
+			*e = before
+			all = false
 		}
+		clear(plain)
 	}
 	forgotten := s.f.Forgotten
-	s.f.Forgotten = nil
+	if all {
+		s.f.Forgotten = nil
+	}
 	if err := s.save(); err != nil {
 		s.f.Entries, s.f.Forgotten = prev, forgotten
-		return err
 	}
-	return nil
 }
 
 // Delete removes a variable; it needs no key.
@@ -624,9 +615,9 @@ func (s *Store) Delete(name string) error {
 }
 
 // Rename gives a variable another name, keeping its value, description,
-// machines and flags. Its value is sealed again under the new name (the
-// name is the ciphertext's additional data), so the vault must be unlocked;
-// a name taken by another variable is refused.
+// machines and flags. Its value is sealed again under the new name (part
+// of its additional data), so the vault must be unlocked; a name taken by
+// another variable is refused.
 func (s *Store) Rename(from, to string) error {
 	if !ValidName(to) {
 		return ErrInvalidName
@@ -646,13 +637,13 @@ func (s *Store) Rename(from, to string) error {
 	if s.key == nil {
 		return ErrLocked
 	}
-	plain, err := open(s.key, e.Value, adOf(e, s.f.Version))
+	plain, err := open(s.key, e.Value, adOf(e))
 	if err != nil {
 		return err
 	}
 	defer clear(plain)
 	prev := *e
-	e.Name, e.Updated = to, time.Now().UTC()
+	e.Name, e.Updated = to, s.now().UTC()
 	err = s.reseal(e, plain)
 	if err == nil {
 		err = s.save()
@@ -670,25 +661,14 @@ func (s *Store) Lock() {
 	defer s.mu.Unlock()
 	clear(s.key)
 	s.key = nil
-	s.keyErr = nil
 }
 
-// Unlock takes the key derived from the passphrase (a keychain vault's
-// from the keychain; the passphrase is ignored) and seals the values of an
-// earlier version's file again, with their machines.
+// Unlock takes the key derived from the passphrase; an unlocked vault only
+// checks it. Forgotten machines are then taken out of the lists.
 func (s *Store) Unlock(passphrase string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	switch s.f.Mode {
-	case ModeNone:
-		return ErrNoPassphrase
-	case ModeKeychain:
-		if s.keyErr = s.unlockKeychain(); s.keyErr == nil {
-			s.keyErr = s.upgrade()
-		}
-		return s.keyErr
-	}
-	if s.setup {
+	if s.f.Mode != ModePassphrase {
 		return ErrNoPassphrase
 	}
 	if s.key != nil {
@@ -696,18 +676,19 @@ func (s *Store) Unlock(passphrase string) error {
 	}
 	key := derive(passphrase, *s.f.KDF)
 	if b, err := open(key, s.f.Check, checkAD); err != nil || string(b) != checkText {
+		clear(key)
 		return ErrPassphrase
 	}
 	s.key = key
-	return s.upgrade()
+	s.applyForgotten()
+	return nil
 }
 
-// Verify checks a passphrase without changing anything (an unlocked
-// vault's, to prove the user is there).
+// Verify checks a passphrase without changing anything.
 func (s *Store) Verify(passphrase string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.f.Mode != ModePassphrase || s.setup {
+	if s.f.Mode != ModePassphrase {
 		return ErrNoPassphrase
 	}
 	return s.verify(passphrase)
@@ -722,40 +703,19 @@ func (s *Store) verify(passphrase string) error {
 	return nil
 }
 
-// SetPassphrase gives the vault a passphrase: a new vault's first, or a
-// keychain vault's, whose values are sealed again under the passphrase's
-// key and whose keychain item is then removed (an unlocked one; a keychain
-// whose key cannot be read leaves values that cannot be opened). A vault
-// with a passphrase changes it with ChangePassphrase. The vault is
-// unlocked afterwards.
+// SetPassphrase gives a new vault its passphrase (at least 8 characters)
+// and unlocks it; a vault with a passphrase changes it with
+// ChangePassphrase.
 func (s *Store) SetPassphrase(passphrase string) error {
 	if len([]rune(passphrase)) < 8 {
 		return ErrWeak
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	switch {
-	case s.f.Mode == ModePassphrase && !s.setup:
+	if s.f.Mode != ModeNone {
 		return ErrHasPassphrase
-	case s.f.Mode == ModeKeychain && s.key == nil:
-		if s.keyErr != nil {
-			return s.keyErr
-		}
-		return ErrLocked
-	case s.f.Mode == ModePassphrase && s.setup && len(s.f.Entries) > 0:
-		// Values sealed under a key never written down cannot be kept.
-		return ErrLocked
 	}
-	keychain := s.f.Mode == ModeKeychain
-	if err := s.rekey(passphrase); err != nil {
-		return err
-	}
-	s.setup = false
-	if keychain && s.keys != nil {
-		// The old key opens nothing any more; remove it all the same.
-		_ = s.keys.Delete(s.account)
-	}
-	return nil
+	return s.rekey(passphrase)
 }
 
 // ChangePassphrase replaces the passphrase after checking the current one;
@@ -766,22 +726,21 @@ func (s *Store) ChangePassphrase(old, passphrase string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.f.Mode != ModePassphrase || s.setup {
+	if s.f.Mode != ModePassphrase {
 		return ErrNoPassphrase
 	}
 	if err := s.verify(old); err != nil {
 		return err
 	}
 	if s.key == nil {
-		key := derive(old, *s.f.KDF)
-		s.key = key
+		s.key = derive(old, *s.f.KDF)
 	}
 	return s.rekey(passphrase)
 }
 
 // rekey derives a new key from passphrase with a new salt and seals every
-// value and the check under it (version 2), from the key there; called
-// with s.mu held.
+// value and the check under it, from the key there (none for a new
+// vault); called with s.mu held.
 func (s *Store) rekey(passphrase string) error {
 	kdf := s.KDF
 	kdf.Salt = make([]byte, saltLen)
@@ -789,103 +748,48 @@ func (s *Store) rekey(passphrase string) error {
 		return err
 	}
 	key := derive(passphrase, kdf)
-	prev := s.f
-	prev.Entries = slices.Clone(s.f.Entries)
 	entries := slices.Clone(s.f.Entries)
 	for i := range entries {
 		e := &entries[i]
-		plain, err := open(s.key, e.Value, adOf(e, s.f.Version))
+		plain, err := open(s.key, e.Value, adOf(e))
 		if err != nil {
+			clear(key)
 			return err
 		}
-		v, err := seal(key, plain, adOf(e, fileVersion))
+		v, err := seal(key, plain, adOf(e))
 		clear(plain)
 		if err != nil {
+			clear(key)
 			return err
 		}
 		e.Value = v
 	}
 	check, err := seal(key, []byte(checkText), checkAD)
 	if err != nil {
+		clear(key)
 		return err
 	}
-	s.f.Entries, s.f.Version, s.f.Mode, s.f.KDF, s.f.Check = entries, fileVersion, ModePassphrase, &kdf, check
+	prev := s.f
+	s.f.Entries, s.f.Version, s.f.Mode, s.f.KDF, s.f.Check, s.f.PassphraseSet = entries, FileVersion, ModePassphrase, &kdf, check, s.now().UTC()
 	if err := s.save(); err != nil {
 		s.f = prev
+		clear(key)
 		return err
 	}
 	clear(s.key)
 	s.key = key
-	return s.applyForgotten()
-}
-
-// upgrade seals the values of a version 1 file again with their machines
-// (version 2) and takes the forgotten machines out; called with s.mu held
-// and the key there.
-func (s *Store) upgrade() error {
-	if s.f.Version < fileVersion {
-		prev := slices.Clone(s.f.Entries)
-		for i := range s.f.Entries {
-			e := &s.f.Entries[i]
-			plain, err := open(s.key, e.Value, adOf(e, s.f.Version))
-			if err != nil {
-				s.f.Entries = prev
-				return err
-			}
-			v, err := seal(s.key, plain, adOf(e, fileVersion))
-			clear(plain)
-			if err != nil {
-				s.f.Entries = prev
-				return err
-			}
-			e.Value = v
-		}
-		version := s.f.Version
-		s.f.Version = fileVersion
-		if err := s.save(); err != nil {
-			s.f.Entries, s.f.Version = prev, version
-			return err
-		}
-	}
-	return s.applyForgotten()
+	s.applyForgotten()
+	return nil
 }
 
 func derive(passphrase string, k KDF) []byte {
 	return argon2.IDKey([]byte(passphrase), k.Salt, k.Time, k.Memory, k.Threads, 32)
 }
 
-// unlockKeychain reads the key from the keychain and checks it.
-func (s *Store) unlockKeychain() error {
-	if s.keys == nil {
-		return ErrKeychain
-	}
-	secret, err := s.keys.Get(s.account)
-	if err != nil {
-		if errors.Is(err, ErrKeyMissing) {
-			return ErrKeyMissing
-		}
-		return fmt.Errorf("%w: %v", ErrKeychain, err)
-	}
-	key, err := base64.StdEncoding.DecodeString(secret)
-	if err != nil || len(key) != 32 {
-		return ErrKeyMissing
-	}
-	if s.f.Check != nil {
-		if b, err := open(key, s.f.Check, checkAD); err != nil || string(b) != checkText {
-			return ErrKeyMissing
-		}
-	}
-	s.key = key
-	return nil
-}
-
-// ensureKey says why there is no key to seal a value: a vault without a
-// passphrase needs one first (SetPassphrase), any other is locked.
-func (s *Store) ensureKey() error {
-	if s.key != nil {
-		return nil
-	}
-	if s.f.Mode == ModeNone || s.setup {
+// noKey says why there is no key to seal a value: a new vault needs its
+// passphrase first, any other is locked.
+func (s *Store) noKey() error {
+	if s.f.Mode == ModeNone {
 		return ErrNoPassphrase
 	}
 	return ErrLocked
@@ -906,14 +810,17 @@ func (s *Store) save() error {
 	if s.f.Check != nil {
 		out["check"] = s.f.Check
 	}
-	if len(s.f.Forgotten) > 0 {
-		out["forgotten"] = s.f.Forgotten
+	if !s.f.PassphraseSet.IsZero() {
+		out["passphraseSet"] = s.f.PassphraseSet
 	}
 	entries := s.f.Entries
 	if entries == nil {
 		entries = []Entry{}
 	}
 	out["entries"] = entries
+	if len(s.f.Forgotten) > 0 {
+		out["forgotten"] = s.f.Forgotten
+	}
 	b, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {
 		return err
@@ -930,9 +837,10 @@ func gcm(key []byte) (cipher.AEAD, error) {
 	return cipher.NewGCM(block)
 }
 
-// seal encrypts plain with the name as additional data, so a value moved
-// to another variable in the file no longer opens.
-func seal(key, plain []byte, name string) (*Sealed, error) {
+// seal encrypts plain with ad as additional data (adOf), so a value moved
+// to another variable in the file, or whose variable's machines or flag
+// changed in it, no longer opens.
+func seal(key, plain []byte, ad string) (*Sealed, error) {
 	g, err := gcm(key)
 	if err != nil {
 		return nil, err
@@ -941,10 +849,10 @@ func seal(key, plain []byte, name string) (*Sealed, error) {
 	if _, err := rand.Read(nonce); err != nil {
 		return nil, err
 	}
-	return &Sealed{Nonce: nonce, Ciphertext: g.Seal(nil, nonce, plain, []byte(name))}, nil
+	return &Sealed{Nonce: nonce, Ciphertext: g.Seal(nil, nonce, plain, []byte(ad))}, nil
 }
 
-func open(key []byte, v *Sealed, name string) ([]byte, error) {
+func open(key []byte, v *Sealed, ad string) ([]byte, error) {
 	if v == nil {
 		return nil, ErrCorrupt
 	}
@@ -955,7 +863,7 @@ func open(key []byte, v *Sealed, name string) ([]byte, error) {
 	if len(v.Nonce) != g.NonceSize() {
 		return nil, ErrCorrupt
 	}
-	b, err := g.Open(nil, v.Nonce, v.Ciphertext, []byte(name))
+	b, err := g.Open(nil, v.Nonce, v.Ciphertext, []byte(ad))
 	if err != nil {
 		return nil, ErrCorrupt
 	}

@@ -107,7 +107,11 @@ export function RequestCard({ req }: { req: VaultRequest }) {
             <input
               className="input"
               type="password"
-              autoComplete="current-password"
+              autoComplete="off"
+              data-1p-ignore=""
+              data-lpignore="true"
+              data-bwignore=""
+              data-form-type="other"
               placeholder={t('vault.request.passphrase')}
               aria-label={t('vault.request.passphrase')}
               value={pass}
