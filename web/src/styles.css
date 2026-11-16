@@ -2159,6 +2159,10 @@ button.primary:hover,
   min-width: var(--ctl-sm);
   height: var(--ctl-sm);
 }
+/* The pages as a searchable list, at a phone's width only. */
+.settings-nav-pick {
+  display: none;
+}
 /* The scope tabs: the user's settings, then each machine's. */
 .settings-scopes {
   display: flex;
@@ -2942,11 +2946,18 @@ button.danger-text:not(:disabled) {
   .settings-main {
     flex-direction: column;
   }
+  /* The pages are a searchable list above the page. */
   .settings-nav {
-    width: auto;
-    flex-direction: row;
-    border-right: none;
+    display: none;
+  }
+  .settings-nav-pick {
+    display: block;
+    flex: none;
+    padding: 6px 12px;
     border-bottom: 1px solid var(--line);
+  }
+  .settings-nav-pick .picker-button {
+    width: 100%;
   }
   .settings-search input {
     width: 8rem;
@@ -3708,9 +3719,4 @@ svg.picker-icon {
   padding: 4px 6px;
   border-top: 1px solid var(--line);
   font-size: var(--fs-md);
-}
-@media (max-width: 760px) {
-  .settings-nav button.sub {
-    padding-left: 10px;
-  }
 }

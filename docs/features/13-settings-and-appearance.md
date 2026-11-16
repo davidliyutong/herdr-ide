@@ -272,7 +272,11 @@ settings per browser; theming terminal applications.
     **Plugins** (User only) with the plugins' own pages indented below it
     (in a machine's scope under a heading; a plugin's page starts with its
     switch, says when it is off and is dimmed in the list then,
-    [27](27-plugins.md)), and **Keyboard Shortcuts** (User only);
+    [27](27-plugins.md)), and **Keyboard Shortcuts** (User only); in a
+    window 760 pixels wide or less, where a column of pages has no room,
+    the pages are a searchable list above the page (the plugins' pages and
+    the advanced ones under their headings, a page with changed settings
+    saying so);
   - a search across labels, descriptions, keys, sections and options of the
     scope shown (and the keyboard shortcuts in User);
   - per setting: its name, its description, then its control; a bar on its
@@ -541,7 +545,8 @@ unbound; user rules), `vt.test.ts` (the bytes the terminal sends for
 `ctrl+b`),
 `settings.test.ts` (labels for every registry key, store, optimistic
 changes and error codes, migration of the browser settings, search),
-`settingsDialog.test.ts` (sections and scopes, the machines' scope list,
+`settingsDialog.test.ts` (sections and scopes, the pages as a searchable
+list, the machines' scope list,
 the stepper keeping the focus and the range, the list editor's offered
 values, an added one and chips, a machine's own value set and removed,
 small lists as native selects, a color scheme searched and chosen, a

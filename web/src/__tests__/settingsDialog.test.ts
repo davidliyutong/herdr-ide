@@ -140,6 +140,25 @@ const pickRow = (text: string) =>
   );
 
 describe('settings dialog', () => {
+  it('offers its pages in a searchable list, which a phone shows instead of the navigation', async () => {
+    await act(async () => useStore.getState().openSettings({ page: 'terminal' }));
+    const button = q<HTMLButtonElement>('.settings-nav-pick .picker-button')!;
+    expect(button.textContent).toBe('Terminal');
+    await act(async () => button.click());
+    expect([...document.body.querySelectorAll<HTMLElement>('.picker-row, .picker-group')].map((r) => r.textContent)).toEqual([
+      'Terminal',
+      'Notifications',
+      'Plugins',
+      'Keyboard Shortcuts',
+      'Advanced',
+      'VS Code',
+      'Program Windows',
+    ]);
+    await pickRow('Keyboard Shortcuts');
+    expect(q('.settings-nav button.on')?.textContent).toBe('Keyboard Shortcuts');
+    expect(q('.settings-nav-pick .picker-button')?.textContent).toBe('Keyboard Shortcuts');
+  });
+
   it('lists sections, the advanced ones last, and one scope per machine', async () => {
     await act(async () => useStore.getState().openSettings({ page: 'terminal' }));
     expect(qa('.settings-nav button').map((b) => b.textContent)).toEqual([
