@@ -17,10 +17,10 @@ import type { PaneViewProps } from '../api';
 import { keepEdit, keptEdit, takeEdit, useUnsaved, type KeptEdit } from '../../unsaved';
 import { createDiffEditor, type DiffEditor, type Monaco, type TextModel } from '../monaco';
 import { ConflictError, filesApi, errorText as filesError } from '../files/api';
-import { gitApi, errorText, type Blob } from './api';
+import { gitApi, errorText, type Blob, type StatusFile } from './api';
 import { baseName, join, openFile, short, type DiffMode, type DiffView } from './ops';
 import { rangePatch, type Direction, type LineRange, type Side } from './patch';
-import { changed, runGit, useRepo } from './state';
+import { refresh, runGit, useRepo } from './state';
 import './git.css';
 
 export function diffOf(view: Record<string, unknown>): DiffView {
@@ -81,6 +81,15 @@ export async function loadSides(m: string, d: DiffView): Promise<{ left: Blob; r
   }
 }
 
+/** What a diff of the working tree or the index follows: the repository's
+ * version (its index and HEAD) and, for the working tree's side, the
+ * file's entry in the status (letters, modification time, size). */
+export function followed(version: number, d: DiffView, files: StatusFile[]): string {
+  if (d.mode !== 'worktree') return String(version);
+  const f = files?.find((x) => x.path === d.path);
+  return `${version}\u0000${f ? `${f.x}${f.y}\u0000${f.mtime ?? ''}\u0000${f.size ?? ''}` : '-'}`;
+}
+
 /** The lines of selections (a selection ending at a line's start does
  * not take that line). */
 export function selectedLines(sels: { startLineNumber: number; endLineNumber: number; endColumn: number }[]): LineRange[] {
@@ -130,19 +139,30 @@ export function DiffPane({ m, pane, view, focused }: PaneViewProps) {
   }, [dirty, m, pane]);
   const editable = d.mode === 'worktree' && !readOnly;
   const key = `${d.repo}\u0000${d.path}\u0000${d.mode}\u0000${d.rev ?? ''}\u0000${d.rev2 ?? ''}\u0000${d.parent ?? ''}\u0000${d.orig ?? ''}`;
+  // The latest call of show and the file shown: an earlier call's answer
+  // (another file's after a switch, an older version's) is dropped.
+  const shows = useRef(0);
+  const keyNow = useRef(key);
+  keyNow.current = key;
 
   const show = useCallback(
     async (keepDirty = false) => {
+      const call = ++shows.current;
+      const stale = () => call !== shows.current || keyNow.current !== key;
       let s: { left: Blob; right: Blob };
       try {
         s = await loadSides(m, d);
       } catch (e) {
-        setStatus({ kind: 'error', message: errorText(e) });
+        if (!stale()) setStatus({ kind: 'error', message: errorText(e) });
         return;
       }
+      if (stale()) return;
       if (s.left.binary || s.right.binary) return setStatus({ kind: 'binary' });
       if (s.left.tooLarge || s.right.tooLarge) return setStatus({ kind: 'tooLarge' });
-      sides.current = s;
+      // Unsaved text keeps the right side it was edited from (its size
+      // and modification time): saving it then refuses to overwrite what
+      // changed on disk meanwhile.
+      sides.current = keepDirty ? { left: s.left, right: sides.current.right } : s;
       const c = ed.current;
       const model = c?.editor.getModel();
       if (model) {
@@ -172,7 +192,8 @@ export function DiffPane({ m, pane, view, focused }: PaneViewProps) {
       if (res.entry) sides.current.right = { ...r, exists: true, text, size: res.entry.size, mtime: res.entry.mtime };
       savedAt.current = at;
       setDirty(model.getAlternativeVersionId() !== at);
-      void changed(m, d.repo);
+      // Only the working tree changed: the status is read again.
+      void refresh(m, d.repo, { fresh: true });
       return true;
     } catch (e) {
       if (e instanceof ConflictError) {
@@ -255,7 +276,8 @@ export function DiffPane({ m, pane, view, focused }: PaneViewProps) {
               modified.getValue(),
               right.exists ? { mtime: right.mtime ?? 0, size: right.size } : 'new',
             );
-            void changed(m, d.repo);
+            // Only the working tree changed: the status is read again.
+            void refresh(m, d.repo, { fresh: true });
             return true;
           } catch (e) {
             useStore.getState().toast(t('git.diff.saveFailed', { error: filesError(e) }), undefined, undefined, 'error');
@@ -281,18 +303,47 @@ export function DiffPane({ m, pane, view, focused }: PaneViewProps) {
     if (focused) ed.current?.editor.getModifiedEditor().focus();
   }, [focused]);
 
-  // The repository changed (a commit, a change elsewhere): both sides are
-  // read again; unsaved text stays.
-  const version = st?.version ?? 0;
-  const first = useRef(true);
+  // What the sides come from changed: the index or HEAD (the repository's
+  // version) and, for the working tree's side, the file (its entry in the
+  // status: letters, modification time and size, so an edit of a file
+  // already listed counts). Both sides are read again; unsaved text stays.
+  // A commit's or a compare's sides never change.
+  const follows =
+    d.mode === 'worktree' || d.mode === 'staged' ? (st?.status ? followed(st.version, d, st.status.files) : undefined) : 'fixed';
+  const seen = useRef<{ key: string; follows?: string }>(undefined);
   useEffect(() => {
-    if (first.current) {
-      first.current = false;
-      return;
-    }
+    const prev = seen.current;
+    seen.current = { key, follows };
+    // A new file is shown by the editor's own effect.
+    if (!prev || prev.key !== key || prev.follows === undefined || follows === undefined || prev.follows === follows) return;
     if (status.kind === 'ready') void show(dirty);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [version]);
+  }, [key, follows]);
+
+  /** Whether the working tree's file is still the one the right side was
+   * read from: staging or discarding ranges of an older version would act
+   * on lines that are not there. If not, the sides are read again (unsaved
+   * text stays, and is not acted on). */
+  const current = async (): Promise<boolean> => {
+    if (d.mode !== 'worktree') return true;
+    const r = sides.current.right;
+    let now: Blob;
+    try {
+      now = await gitApi.blob(m, d.repo, d.path, 'worktree');
+    } catch {
+      // The change itself says what is wrong.
+      return true;
+    }
+    if (now.exists === r.exists && now.size === r.size && now.mtime === r.mtime && now.text === r.text) return true;
+    const name = baseName(d.path);
+    if (dirty) {
+      useStore.getState().toast(t('git.diff.changedUnsaved', { name }), { label: t('git.diff.reload'), run: () => void show() });
+    } else {
+      await show(false);
+      useStore.getState().toast(t('git.diff.changedReloaded', { name }));
+    }
+    return false;
+  };
 
   /** The patch of the selected ranges: staging goes forward from the
    * index; unstaging (from the index) and discarding (from the working
@@ -320,12 +371,15 @@ export function DiffPane({ m, pane, view, focused }: PaneViewProps) {
       });
       if (!ok) return;
     }
+    if (!(await current())) return;
     if (await runGit(m, d.repo, 'applyPatch', { patch, cached: what !== 'discard' })) await show(what !== 'discard' && dirty);
   };
 
   const wholeFile = async (what: 'stage' | 'unstage') => {
-    if (what === 'stage' && dirty) await save();
-    if (await runGit(m, d.repo, what, { paths: [d.path] })) await show(dirty);
+    if (what === 'stage' && dirty && !(await save())) return;
+    // A rename is unstaged with its old path, or its deletion stays staged.
+    const paths = what === 'unstage' && d.orig ? [d.path, d.orig] : [d.path];
+    if (await runGit(m, d.repo, what, { paths })) await show(dirty);
   };
 
   const go = (dir: 'next' | 'previous') => ed.current?.editor.goToDiff(dir);

@@ -112,3 +112,30 @@ export function layoutGraph(commits: GraphCommit[], colors = 8): Graph {
   }
   return { rows, width: maxWidth };
 }
+
+/** The paging of a list of commits read page by page: where the next page
+ * starts on the machine (pages it gave, not the commits kept), whether
+ * the first page arrived, one is being read, or one failed (no more are
+ * asked until the list is read again). A list read again gets a new one;
+ * an answer for an older one is dropped. */
+export interface Paging {
+  next: number;
+  ready: boolean;
+  loading: boolean;
+  failed: boolean;
+}
+
+export const newPaging = (): Paging => ({ next: 0, ready: false, loading: false, failed: false });
+
+/** A page appended to the commits loaded, without those already there (a
+ * page overlaps the last when new commits arrived meanwhile). */
+export function appendCommits<T extends GraphCommit>(have: readonly T[], page: readonly T[]): T[] {
+  const seen = new Set(have.map((c) => c.hash));
+  const out = [...have];
+  for (const c of page) {
+    if (seen.has(c.hash)) continue;
+    seen.add(c.hash);
+    out.push(c);
+  }
+  return out;
+}

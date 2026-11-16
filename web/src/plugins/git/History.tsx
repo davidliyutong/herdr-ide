@@ -14,7 +14,7 @@ import { openMenu } from '../../contextMenu';
 import { t } from '../../i18n';
 import { useSize } from '../../lib/sizes';
 import { gitApi, errorText, type Change, type Commit, type Ref } from './api';
-import { layoutGraph } from './graph';
+import { appendCommits, layoutGraph, newPaging, type Paging } from './graph';
 import { GraphCell, laneColor } from './GraphCell';
 import { badgesOf, type Badge } from './GraphPane';
 import { letterColor } from './GitPanel';
@@ -22,6 +22,8 @@ import { copy, openDiff, openGraph, short } from './ops';
 
 /** The commits of a page. */
 export const PAGE = 200;
+/** The most commits the first page reads again (the machine's largest page). */
+const MAX_RELOAD = 1000;
 /** A lane's width in pixels. */
 const LANE = 12;
 const HEIGHT_KEY = 'git.historyHeight';
@@ -58,6 +60,8 @@ type Line =
   | { kind: 'file'; i: number; f: Change; hash: string; multi: boolean }
   | { kind: 'note'; i: number; text: string };
 
+/** version is the repository's refs version (state.ts): the list is read
+ * again when it moves. */
 export function History({ m, root, version, branch, head }: { m: string; root: string; version: number; branch?: string; head?: string }) {
   const rowH = useSize('row');
   const [open, setOpen] = useState(() => stored(OPEN_KEY, true));
@@ -71,42 +75,52 @@ export function History({ m, root, version, branch, head }: { m: string; root: s
   const [scroll, setScroll] = useState({ top: 0, height: 0 });
   const list = useRef<HTMLDivElement>(null);
   const section = useRef<HTMLElement>(null);
-  const loading = useRef(false);
+  // The list's paging, replaced when the first page is read again: an
+  // answer for an earlier one is dropped.
+  const page = useRef<Paging>(newPaging());
 
-  // The first page, again whenever the repository changed.
+  // The first page (as many commits as were loaded, up to MAX_RELOAD),
+  // again whenever the refs changed.
   useEffect(() => {
     if (!open) return;
-    let gone = false;
+    const pg = newPaging();
+    const limit = Math.min(MAX_RELOAD, Math.max(PAGE, page.current.next));
+    page.current = pg;
     gitApi
-      .log(m, root, { limit: PAGE })
+      .log(m, root, { limit })
       .then((l) => {
-        if (gone) return;
+        if (page.current !== pg) return;
+        pg.next = l.commits.length;
+        pg.ready = true;
         setCommits(l.commits);
         setRefs(l.refs ?? []);
         setMore(l.more);
         setError(undefined);
       })
-      .catch((e) => !gone && setError(errorText(e)));
-    return () => {
-      gone = true;
-    };
+      .catch((e) => page.current === pg && setError(errorText(e)));
   }, [m, root, version, open]);
 
   const loadMore = async () => {
-    if (loading.current || !more) return;
-    loading.current = true;
+    const pg = page.current;
+    if (!more || !pg.ready || pg.loading || pg.failed) return;
+    pg.loading = true;
     try {
-      const l = await gitApi.log(m, root, { skip: commits.length, limit: PAGE });
-      setCommits((c) => [...c, ...l.commits.filter((x) => !c.some((y) => y.hash === x.hash))]);
-      setMore(l.more);
+      const l = await gitApi.log(m, root, { skip: pg.next, limit: PAGE });
+      if (page.current !== pg) return;
+      pg.next += l.commits.length;
+      setCommits((c) => appendCommits(c, l.commits));
+      setMore(l.more && l.commits.length > 0);
     } catch (e) {
+      if (page.current !== pg) return;
+      // Not asked again until the list is read again.
+      pg.failed = true;
       setError(errorText(e));
     } finally {
-      loading.current = false;
+      pg.loading = false;
     }
   };
 
-  // A commit's files, under it.
+  // A commit's files, under it (a commit never changes).
   useEffect(() => {
     if (!expanded) return setFiles(undefined);
     let gone = false;
@@ -118,7 +132,7 @@ export function History({ m, root, version, branch, head }: { m: string; root: s
     return () => {
       gone = true;
     };
-  }, [m, root, expanded, version]);
+  }, [m, root, expanded]);
 
   const graph = useMemo(() => layoutGraph(commits), [commits]);
   const badges = useMemo(() => badgesOf(refs, branch, head, true), [refs, branch, head]);

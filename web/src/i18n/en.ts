@@ -1246,6 +1246,8 @@ export const en = {
   'git.diff.saveFirst': 'Save the file first.',
   'git.diff.conflict': '{name} changed on disk since it was loaded; it was not saved.',
   'git.diff.saveFailed': 'Could not save: {error}',
+  'git.diff.changedReloaded': '{name} changed on disk; its diff was read again. Select the ranges again.',
+  'git.diff.changedUnsaved': '{name} changed on disk since it was loaded; reload it before acting on ranges.',
   'git.diff.binary': '{name} is a binary file.',
   'git.diff.tooLarge': '{name} is too large to compare (over 8 MiB).',
   'git.error.git_missing': 'Git is not installed on the machine.',
@@ -1253,6 +1255,9 @@ export const en = {
   'git.error.auth_required':
     'The remote asks for credentials. Run this command in a terminal to sign in, or set up a credential helper or SSH key.',
   'git.error.conflicts': 'There are conflicts to resolve.',
+  'git.error.diverged':
+    'The branch and its upstream have diverged, and Git’s configuration does not say how to pull them together (pull.rebase or pull.ff): use Pull (Rebase), or set one in a terminal.',
+  'git.error.stale': 'The stashes changed meanwhile; they were read again.',
   'git.error.git_failed': 'Git failed:',
   'git.error.timeout': 'Git took too long and was stopped.',
   'git.error.too_large': 'Git’s output is too large.',

@@ -32,7 +32,7 @@ func (h *auditHost) Logger() *log.Logger       { return log.New(log.Writer(), ""
 func TestChangeAudit(t *testing.T) {
 	h := &auditHost{}
 	body := `{"repo":"/home/u/r","name":"topic","remote":"origin","force":true,"forceWithLease":true,"amend":true,"all":false,` +
-		`"mode":"hard","rev":"abc123","paths":["a","b"],"untracked":["c"],"message":"SECRET-MESSAGE","patch":"SECRET-PATCH"}`
+		`"mode":"hard","rev":"abc123","hash":"def456","paths":["a","b"],"untracked":["c"],"message":"SECRET-MESSAGE","patch":"SECRET-PATCH"}`
 	r := httptest.NewRequest("POST", "/api/m/x/p/git/commit", strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -45,7 +45,7 @@ func TestChangeAudit(t *testing.T) {
 	}
 	ev := h.events[0]
 	for _, want := range []string{"git.commit.done ", `"repo":"/home/u/r"`, `"name":"topic"`, `"remote":"origin"`, `"force":true`,
-		`"forceWithLease":true`, `"amend":true`, `"mode":"hard"`, `"rev":"abc123"`, `"paths":3`, `"ok":false`, `"code":"offline"`} {
+		`"forceWithLease":true`, `"amend":true`, `"mode":"hard"`, `"rev":"abc123"`, `"hash":"def456"`, `"paths":3`, `"ok":false`, `"code":"offline"`} {
 		if !strings.Contains(ev, want) {
 			t.Errorf("%s missing: %s", want, ev)
 		}

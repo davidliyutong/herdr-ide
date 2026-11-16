@@ -25,6 +25,8 @@ import { settle } from './fakeTerms';
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const ROOT = '/home/u/repo';
+const STASH = 'a'.repeat(40);
+const commit = (hash: string, ...parents: string[]) => ({ hash, parents, author: 'A', email: 'a@x', date: 1, subject: `commit ${hash}` });
 const files: StatusFile[] = [
   { path: 'src/a.ts', x: 'M', y: 'M', kind: 'changed' },
   { path: 'src/new.ts', x: 'A', y: '.', kind: 'changed' },
@@ -74,6 +76,9 @@ describe('GitPanel', () => {
   let root: Root;
   const posts: Array<{ action: string; body: Record<string, unknown> }> = [];
   let status: StatusFile[];
+  let parents: string[] | undefined;
+  /** Answers log requests instead of the two pages below, when set. */
+  let logImpl: ((q: URLSearchParams) => Promise<Response>) | undefined;
   const logs: URLSearchParams[] = [];
   const flush = async () => {
     for (let i = 0; i < 4; i++) await act(async () => settle());
@@ -86,6 +91,8 @@ describe('GitPanel', () => {
     posts.length = 0;
     logs.length = 0;
     status = files.slice(0, 4);
+    parents = undefined;
+    logImpl = undefined;
     forgetRepos();
     useGit.setState({ repos: {} });
     vi.stubGlobal('fetch', async (input: string, init?: RequestInit) => {
@@ -108,11 +115,13 @@ describe('GitPanel', () => {
               behind: 0,
               upstream: 'origin/main',
               remotes: ['origin'],
+              parents,
             }),
           );
         case 'status':
           return new Response(JSON.stringify({ branch: 'main', head: 'h1', upstream: 'origin/main', ahead: 1, behind: 0, files: status }));
         case 'log': {
+          if (logImpl) return logImpl(url.searchParams);
           logs.push(url.searchParams);
           // Two pages: h1 (more), then h0.
           const second = url.searchParams.get('skip') === '1';
@@ -131,7 +140,7 @@ describe('GitPanel', () => {
             JSON.stringify({ base: 'h0', target: 'h1', files: [{ path: 'src/a.ts', status: 'M', added: 3, deleted: 1 }] }),
           );
         case 'stashes':
-          return new Response('[]');
+          return new Response(JSON.stringify([{ index: 0, hash: STASH, base: 'h1', date: 1, message: 'WIP on main' }]));
         case 'watch':
           return new Response(JSON.stringify({ token: 't' }));
       }
@@ -173,10 +182,41 @@ describe('GitPanel', () => {
     await act(async () => button(t('git.unstage'), srow)!.click());
     await flush();
     expect(posts[1]).toEqual({ action: 'unstage', body: { paths: ['src/new.ts'], repo: ROOT } });
+    // The groups' actions name no paths when they act on everything: no
+    // limit of paths or of a command line's length.
     await act(async () => button(t('git.stageAll'), changes)!.click());
     await flush();
-    expect(posts[2].action).toBe('stage');
-    expect((posts[2].body.paths as string[]).sort()).toEqual(['notes/todo.md', 'old.txt', 'src/a.ts']);
+    expect(posts[2]).toEqual({ action: 'stage', body: { all: true, repo: ROOT } });
+    await act(async () => button(t('git.unstageAll'), section(t('git.group.staged')))!.click());
+    await flush();
+    expect(posts[3]).toEqual({ action: 'unstage', body: { all: true, repo: ROOT } });
+  });
+
+  it('stages all changes but the conflicts by their paths', async () => {
+    status = [...files.slice(0, 1), files[4]];
+    await act(async () => button(t('git.refresh'))!.click());
+    await flush();
+    await act(async () => button(t('git.stageAll'), section(t('git.group.changes')))!.click());
+    await flush();
+    expect(posts[0]).toEqual({ action: 'stage', body: { paths: ['src/a.ts'], repo: ROOT } });
+  });
+
+  it('unstages a rename with its old path', async () => {
+    status = [files[5]];
+    await act(async () => button(t('git.refresh'))!.click());
+    await flush();
+    const row = section(t('git.group.staged')).querySelector('.git-row')!;
+    await act(async () => button(t('git.unstage'), row)!.click());
+    await flush();
+    expect(posts[0]).toEqual({ action: 'unstage', body: { paths: ['renamed.txt', 'before.txt'], repo: ROOT } });
+  });
+
+  it('acts on a stash by its index and commit', async () => {
+    const stashes = section(t('git.group.stashes'));
+    await act(async () => stashes.querySelector<HTMLElement>('.git-group-head')!.click());
+    await act(async () => button(t('git.stash.pop'), stashes)!.click());
+    await flush();
+    expect(posts[0]).toEqual({ action: 'stashPop', body: { index: 0, hash: STASH, repo: ROOT } });
   });
 
   it('discards after asking, removing untracked files', async () => {
@@ -244,6 +284,61 @@ describe('GitPanel', () => {
     await act(async () => history.querySelector<HTMLElement>('.git-history-row')!.click());
     await flush();
     expect(history.querySelector('.git-history-file')?.textContent).toContain('a.ts');
+  });
+
+  // A page asked before the list was read again (new commits) belongs to
+  // the old list: it is dropped, not appended after a gap; pages go on
+  // from where the machine's pages ended, and stop at the end.
+  it("drops a page of the history's earlier list", async () => {
+    let server = [commit('h1', 'h0'), commit('h0')];
+    let release: (() => void) | undefined;
+    logImpl = async (q) => {
+      logs.push(q);
+      const skip = Number(q.get('skip') ?? 0);
+      const page = server.slice(skip, skip + 1);
+      const body = JSON.stringify({ commits: page, more: skip + 1 < server.length, refs: [] });
+      if (skip === 1 && !release) await new Promise<void>((r) => (release = r));
+      return new Response(body);
+    };
+    useGit.setState({ repos: {} });
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    await act(async () => root.render(createElement(GitPanel)));
+    await flush();
+    // The second page of [h1, h0] is on its way; a commit arrives and the
+    // list is read again.
+    expect(release).toBeDefined();
+    server = [commit('h2', 'h1'), ...server];
+    const k = Object.keys(useGit.getState().repos).find((x) => x.endsWith(ROOT))!;
+    await act(async () => useGit.setState((s) => ({ repos: { ...s.repos, [k]: { ...s.repos[k], refs: s.repos[k].refs + 1 } } })));
+    await flush();
+    await act(async () => release!());
+    await flush();
+    await flush();
+    const history = section(t('git.group.recent'));
+    expect([...history.querySelectorAll('.git-history-row')].map((r) => r.textContent?.match(/commit (h\d)/)?.[1])).toEqual([
+      'h2',
+      'h1',
+      'h0',
+    ]);
+    expect(logs.length).toBeLessThan(8);
+  });
+
+  it('keeps the amend box per repository', async () => {
+    parents = ['/home/u'];
+    await act(async () => button(t('git.refresh'))!.click());
+    await flush();
+    const amend = () => host.querySelector<HTMLInputElement>('.git-amend input')!;
+    await act(async () => amend().click());
+    expect(amend().checked).toBe(true);
+    const pick = host.querySelector<HTMLSelectElement>('.git-repo-pick')!;
+    await act(async () => {
+      pick.value = '/home/u';
+      pick.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+    expect(host.querySelector('.git-title')!.textContent).toBe('u');
+    expect(amend().checked).toBe(false);
   });
 
   it('says how long ago a commit was', () => {

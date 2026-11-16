@@ -36,7 +36,7 @@ import { t } from '../../i18n';
 import { followedDir } from '../files/FilesPanel';
 import { gitApi, type Stash, type StatusFile } from './api';
 import { MARK_COLOR, markOf } from './decorations';
-import { baseName, createBranch, discard, openFile, openGraph, openStatusDiff, short, stashDrop, stashPush } from './ops';
+import { baseName, createBranch, discard, openFile, openGraph, openStatusDiff, short, stashDrop, stashParams, stashPush } from './ops';
 import { History } from './History';
 import { changed, forgetRepos, runGit, useRepo, useReposOf, type RepoState } from './state';
 import './git.css';
@@ -158,7 +158,8 @@ export function GitPanel() {
           ))}
         </select>
       )}
-      <RepoView m={m} root={root} st={st} />
+      {/* Its own state (the amend box, the history, the stashes) per repository. */}
+      <RepoView key={`${m}\u0000${root}`} m={m} root={root} st={st} />
     </div>
   );
 }
@@ -169,11 +170,12 @@ function RepoView({ m, root, st }: { m: string; root: string; st?: RepoState }) 
   const [closed, setClosed] = useState<Record<string, boolean>>({});
   const [message, setMessage] = useState(drafts.get(root) ?? '');
   const [amend, setAmend] = useState(false);
-  useEffect(() => setMessage(drafts.get(root) ?? ''), [root]);
   const status = st?.status;
   const info = st?.info;
   const groups = useMemo(() => groupFiles(status?.files ?? []), [status]);
-  const branch = status?.branch ?? info?.branch;
+  // The status has the branch (none when detached); the info only until
+  // the first status.
+  const branch = status ? status.branch : info?.branch;
   const busy = st?.busy;
 
   const setDraft = (v: string) => {
@@ -263,7 +265,7 @@ function RepoView({ m, root, st }: { m: string; root: string; st?: RepoState }) 
           className="icon"
           title={t('git.refresh')}
           aria-label={t('git.refresh')}
-          onClick={() => (forgetRepos(), void changed(m, root))}
+          onClick={() => (forgetRepos(), void changed(m, root, { all: true }))}
         >
           <RefreshCw />
         </button>
@@ -380,6 +382,7 @@ function RepoView({ m, root, st }: { m: string; root: string; st?: RepoState }) 
           root={root}
           group="changes"
           files={groups.changes}
+          whole={!groups.merge.length}
           tree={tree}
           closed={!!closed.changes}
           onToggle={() => toggle('changes')}
@@ -387,12 +390,12 @@ function RepoView({ m, root, st }: { m: string; root: string; st?: RepoState }) 
         <Stashes
           m={m}
           root={root}
-          version={st?.version ?? 0}
+          version={st?.refs ?? 0}
           closed={closed.stashes !== false}
           onToggle={() => setClosed((c) => ({ ...c, stashes: c.stashes === false }))}
         />
       </div>
-      <History m={m} root={root} version={st?.version ?? 0} branch={branch} head={status?.head} />
+      <History key={`${m}\u0000${root}`} m={m} root={root} version={st?.refs ?? 0} branch={branch} head={status?.head} />
     </>
   );
 }
@@ -419,11 +422,26 @@ function StateBanner({ m, root, state }: { m: string; root: string; state: strin
 
 const GROUP_TITLE = { merge: 'git.group.merge', staged: 'git.group.staged', changes: 'git.group.changes' } as const;
 
+/** The paths a file's unstaging names: a rename's old path too (else its
+ * deletion stays staged). */
+export const unstagePaths = (f: StatusFile) => (f.orig ? [f.path, f.orig] : [f.path]);
+
+/** What a group's Stage All and Unstage All send: the whole index or
+ * working tree when the group is all of it (no paths to list, however
+ * many), else the group's paths. */
+export function groupAction(group: Group, files: GroupedFile[], whole: boolean): Record<string, unknown> {
+  if (group === 'staged' || whole) return { all: true };
+  return { paths: files.map((g) => g.file.path) };
+}
+
 function FileGroup(props: {
   m: string;
   root: string;
   group: Group;
   files: GroupedFile[];
+  /** The group holds every change of its side (Changes without conflicts
+   * beside it): Stage All stages everything. */
+  whole?: boolean;
   tree: boolean;
   closed: boolean;
   onToggle(): void;
@@ -431,9 +449,8 @@ function FileGroup(props: {
   const { m, root, group, files, tree, closed, onToggle } = props;
   const readOnly = useStore((s) => s.readOnly);
   const staged = group === 'staged';
-  const paths = files.map((g) => g.file.path);
-  const stageAll = () => void runGit(m, root, 'stage', { paths });
-  const unstageAll = () => void runGit(m, root, 'unstage', { paths });
+  const stageAll = () => void runGit(m, root, 'stage', groupAction(group, files, !!props.whole));
+  const unstageAll = () => void runGit(m, root, 'unstage', groupAction(group, files, true));
   const rows = tree ? treeRows(files) : files.map((f) => ({ f, depth: 0 }));
   return (
     <section className="git-group" aria-label={t(GROUP_TITLE[group])}>
@@ -515,7 +532,7 @@ function FileRow({
       { label: t('git.openFile'), disabled: deleted, run: () => void openFile(m, root, f.path) },
       'sep',
       staged
-        ? { label: t('git.unstage'), disabled: readOnly, run: () => void runGit(m, root, 'unstage', { paths: [f.path] }) }
+        ? { label: t('git.unstage'), disabled: readOnly, run: () => void runGit(m, root, 'unstage', { paths: unstagePaths(f) }) }
         : { label: t('git.stage'), disabled: readOnly, run: () => void runGit(m, root, 'stage', { paths: [f.path] }) },
       ...(group === 'changes'
         ? [{ label: t('git.discard'), danger: true, disabled: readOnly, run: () => void discard(m, root, [f]) }]
@@ -554,7 +571,7 @@ function FileRow({
               className="icon"
               title={t('git.unstage')}
               aria-label={t('git.unstage')}
-              onClick={() => void runGit(m, root, 'unstage', { paths: [f.path] })}
+              onClick={() => void runGit(m, root, 'unstage', { paths: unstagePaths(f) })}
             >
               <Minus />
             </button>
@@ -580,6 +597,8 @@ function FileRow({
   );
 }
 
+/** The stashes, read again when the refs moved (version); none shown when
+ * they could not be read (an entry shown must be one the machine has). */
 function Stashes({ m, root, version, closed, onToggle }: { m: string; root: string; version: number; closed: boolean; onToggle(): void }) {
   const readOnly = useStore((s) => s.readOnly);
   const [stashes, setStashes] = useState<Stash[]>([]);
@@ -588,14 +607,14 @@ function Stashes({ m, root, version, closed, onToggle }: { m: string; root: stri
     gitApi
       .stashes(m, root)
       .then((s) => !gone && setStashes(s))
-      .catch(() => undefined);
+      .catch(() => !gone && setStashes([]));
     return () => {
       gone = true;
     };
   }, [m, root, version]);
   if (!stashes.length) return null;
   return (
-    <section className="git-group">
+    <section className="git-group" aria-label={t('git.group.stashes')}>
       <div className="git-group-head" onClick={onToggle}>
         {closed ? <ChevronRight /> : <ChevronDown />}
         <span className="ellipsis">{t('git.group.stashes')}</span>
@@ -612,9 +631,9 @@ function Stashes({ m, root, version, closed, onToggle }: { m: string; root: stri
             onContextMenu={(e) => {
               e.preventDefault();
               openMenu(e, [
-                { label: t('git.stash.apply'), disabled: readOnly, run: () => void runGit(m, root, 'stashApply', { index: s.index }) },
-                { label: t('git.stash.pop'), disabled: readOnly, run: () => void runGit(m, root, 'stashPop', { index: s.index }) },
-                { label: t('git.stash.drop'), danger: true, disabled: readOnly, run: () => void stashDrop(m, root, s.index) },
+                { label: t('git.stash.apply'), disabled: readOnly, run: () => void runGit(m, root, 'stashApply', stashParams(s)) },
+                { label: t('git.stash.pop'), disabled: readOnly, run: () => void runGit(m, root, 'stashPop', stashParams(s)) },
+                { label: t('git.stash.drop'), danger: true, disabled: readOnly, run: () => void stashDrop(m, root, s) },
               ]);
             }}
           >
@@ -627,7 +646,7 @@ function Stashes({ m, root, version, closed, onToggle }: { m: string; root: stri
                   className="icon"
                   title={t('git.stash.apply')}
                   aria-label={t('git.stash.apply')}
-                  onClick={() => void runGit(m, root, 'stashApply', { index: s.index })}
+                  onClick={() => void runGit(m, root, 'stashApply', stashParams(s))}
                 >
                   <Check />
                 </button>
@@ -635,7 +654,7 @@ function Stashes({ m, root, version, closed, onToggle }: { m: string; root: stri
                   className="icon"
                   title={t('git.stash.pop')}
                   aria-label={t('git.stash.pop')}
-                  onClick={() => void runGit(m, root, 'stashPop', { index: s.index })}
+                  onClick={() => void runGit(m, root, 'stashPop', stashParams(s))}
                 >
                   <ArrowUp />
                 </button>

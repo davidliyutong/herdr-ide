@@ -80,16 +80,51 @@ func repoInfo(ctx context.Context, env *plugin.Env, dir string) (*Repo, error) {
 	return info, nil
 }
 
-// toplevel is the top level of the repository dir is in, "" when none.
+// toplevel is the top level of the repository dir is in, "" when none, as
+// dir spells it: git answers the physical path, the explorer and editors
+// show the path through a link to a directory (logical).
 func toplevel(ctx context.Context, env *plugin.Env, dir string) (string, error) {
-	res, err := execGit(ctx, env, dir, true, run{args: []string{"rev-parse", "--show-toplevel"}, ok: []int{128}})
+	res, err := execGit(ctx, env, dir, true, run{args: []string{"rev-parse", "--show-toplevel", "--show-prefix"}, ok: []int{128}})
 	if err != nil {
 		return "", err
 	}
 	if res.code != 0 {
 		return "", nil
 	}
-	return strings.TrimSpace(string(res.out)), nil
+	lines := strings.Split(string(res.out), "\n")
+	prefix := ""
+	if len(lines) > 1 {
+		prefix = lines[1]
+	}
+	return logical(dir, lines[0], prefix), nil
+}
+
+// logical is the top level top as dir spells it: dir without prefix (its
+// path below the top level, as git gave it) when that is the same
+// directory as top; else top.
+func logical(dir, top, prefix string) string {
+	cand := filepath.Clean(dir)
+	if prefix = strings.TrimSuffix(prefix, "/"); prefix != "" {
+		below := string(filepath.Separator) + filepath.FromSlash(prefix)
+		if !strings.HasSuffix(cand, below) {
+			return top
+		}
+		if cand = strings.TrimSuffix(cand, below); cand == "" {
+			cand = string(filepath.Separator)
+		}
+	}
+	if cand == top {
+		return top
+	}
+	a, err := filepath.EvalSymlinks(cand)
+	if err != nil {
+		return top
+	}
+	b, err := filepath.EvalSymlinks(top)
+	if err != nil || a != b {
+		return top
+	}
+	return cand
 }
 
 func (r *repo) info(ctx context.Context) (*Repo, error) {
@@ -171,6 +206,11 @@ type File struct {
 	// Kind: changed, renamed, unmerged, untracked or ignored.
 	Kind      string `json:"kind"`
 	Submodule bool   `json:"submodule,omitempty"`
+	// MTime (unix milliseconds) and Size of the working tree's file when
+	// it differs from the index (or is untracked or conflicted): they
+	// move when the file is edited again while its letters stay.
+	MTime int64 `json:"mtime,omitempty"`
+	Size  int64 `json:"size,omitempty"`
 }
 
 // Status is the state of the index and the working tree.
@@ -194,7 +234,27 @@ func (r *repo) status(ctx context.Context) (*Status, error) {
 	if gd, _ := gitDirs(r.root); gd != "" {
 		st.State = progress(gd)
 	}
+	r.stamp(st.Files)
 	return st, nil
+}
+
+// stamp gives the files whose working tree side differs from the index
+// the modification time and size of that side (no contents are read).
+func (r *repo) stamp(files []File) {
+	for i := range files {
+		f := &files[i]
+		if f.Kind == "ignored" || f.Y == "." || f.Y == "D" {
+			continue
+		}
+		fi, err := os.Lstat(filepath.Join(r.root, filepath.FromSlash(strings.TrimSuffix(f.Path, "/"))))
+		if err != nil {
+			continue
+		}
+		f.MTime, f.Size = fi.ModTime().UnixMilli(), fi.Size()
+		if fi.IsDir() {
+			f.Size = 0
+		}
+	}
 }
 
 // parseStatus reads git status --porcelain=v2 -z --branch.
@@ -338,13 +398,15 @@ func (r *repo) log(ctx context.Context, p Params) (*Log, error) {
 		}
 	}
 	args = append(args, "--")
+	// On a branch without commits yet (HEAD names none) the other
+	// branches still have theirs; with no refs at all the log is empty.
 	out := &Log{Commits: []Commit{}, Head: head}
-	if head != "" || len(p.Branches) > 0 {
-		res, err := r.git(ctx, run{args: args})
-		if err != nil {
-			return nil, err
-		}
-		out.Commits = parseLog(res.out)
+	res, err := r.git(ctx, run{args: args})
+	if err != nil {
+		return nil, err
+	}
+	if cs := parseLog(res.out); cs != nil {
+		out.Commits = cs
 	}
 	if len(out.Commits) > limit {
 		out.Commits, out.More = out.Commits[:limit], true
@@ -615,6 +677,10 @@ func (r *repo) blob(ctx context.Context, p Params) (*Blob, error) {
 	if err != nil {
 		return nil, err
 	}
+	if strings.HasSuffix(rel, "/") {
+		// A directory (an untracked repository inside this one).
+		return &Blob{}, nil
+	}
 	var obj string
 	switch p.Source {
 	case "worktree":
@@ -839,11 +905,15 @@ func (r *repo) diffStat(ctx context.Context) (*DiffStat, error) {
 
 // ---- watch ----
 
-// Watch is a token that changes when the repository's index, HEAD, refs
-// or an operation in progress change; the panel polls it and reads the
-// status again when it changed.
+// Watch is a token that changes when the repository's index, HEAD, refs,
+// configuration or an operation in progress change; the panel polls it
+// and reads the status again when it changed. Refs changes only with
+// HEAD, the refs (also in reftable) and the stashes: what the history
+// shows. Config changes with the configuration (remotes).
 type Watch struct {
-	Token string `json:"token"`
+	Token  string `json:"token"`
+	Refs   string `json:"refs"`
+	Config string `json:"config"`
 }
 
 // gitDirs finds a repository's git directory and common directory
@@ -892,8 +962,7 @@ func (r *repo) watch() (*Watch, error) {
 	if gitDir == "" {
 		return nil, plugin.Errorf("not_a_repo", "%s has no git directory", r.root)
 	}
-	h := sha256.New()
-	add := func(p string) {
+	add := func(h io.Writer, p string) {
 		fi, err := os.Stat(p)
 		if err != nil {
 			fmt.Fprintf(h, "%s -\n", p)
@@ -901,11 +970,22 @@ func (r *repo) watch() (*Watch, error) {
 		}
 		fmt.Fprintf(h, "%s %d %d\n", p, fi.ModTime().UnixNano(), fi.Size())
 	}
-	for _, name := range []string{"index", "HEAD", "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply", "logs/HEAD"} {
-		add(filepath.Join(gitDir, name))
+	refs := sha256.New()
+	for _, name := range []string{"HEAD", "logs/HEAD"} {
+		add(refs, filepath.Join(gitDir, name))
 	}
-	for _, name := range []string{"packed-refs", "FETCH_HEAD", "logs/refs/stash"} {
-		add(filepath.Join(common, name))
+	for _, name := range []string{"packed-refs", "logs/refs/stash"} {
+		add(refs, filepath.Join(common, name))
+	}
+	// Refs in reftable: every update writes a table and names it in
+	// tables.list.
+	for _, d := range []string{gitDir, common} {
+		if b, err := readSmall(filepath.Join(d, "reftable", "tables.list"), 64<<10); err == nil {
+			fmt.Fprintf(refs, "%s %x\n", d, sha256.Sum256(b))
+		}
+		if d == common {
+			break
+		}
 	}
 	n := 0
 	filepath.WalkDir(filepath.Join(common, "refs"), func(p string, d fs.DirEntry, err error) error {
@@ -915,8 +995,37 @@ func (r *repo) watch() (*Watch, error) {
 		if n++; n > maxWatched {
 			return fs.SkipAll
 		}
-		add(p)
+		add(refs, p)
 		return nil
 	})
-	return &Watch{Token: hex.EncodeToString(h.Sum(nil)[:12])}, nil
+	refsSum := refs.Sum(nil)
+	config := sha256.New()
+	add(config, filepath.Join(common, "config"))
+	add(config, filepath.Join(gitDir, "config.worktree"))
+	configSum := config.Sum(nil)
+	all := sha256.New()
+	all.Write(refsSum)
+	all.Write(configSum)
+	for _, name := range []string{"index", "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply"} {
+		add(all, filepath.Join(gitDir, name))
+	}
+	add(all, filepath.Join(common, "FETCH_HEAD"))
+	return &Watch{
+		Token:  hex.EncodeToString(all.Sum(nil)[:12]),
+		Refs:   hex.EncodeToString(refsSum[:12]),
+		Config: hex.EncodeToString(configSum[:12]),
+	}, nil
+}
+
+// readSmall reads a regular file, at most limit bytes of it.
+func readSmall(p string, limit int64) ([]byte, error) {
+	f, err := os.OpenFile(p, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	if fi, err := f.Stat(); err != nil || !fi.Mode().IsRegular() {
+		return nil, fs.ErrInvalid
+	}
+	return io.ReadAll(io.LimitReader(f, limit))
 }

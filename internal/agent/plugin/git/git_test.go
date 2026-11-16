@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -23,13 +24,30 @@ import (
 	"herdr-ide/internal/agentproto"
 )
 
-// Paths from a request are literal: pathspec magic matches nothing.
+// Paths from a request are literal: pathspec magic matches nothing, a
+// name with wildcards names that file. Hooks do not inherit that: a
+// pre-commit hook's own glob pathspecs match.
 func TestLiteralPaths(t *testing.T) {
 	env := testEnv(t)
 	dir := newRepo(t, env)
 	write(t, filepath.Join(dir, "b.txt"), "b\n")
 	fails(t, env, "stage", Params{Repo: dir, Paths: []string{":(glob)*.txt"}}, "git_failed")
 	sh(t, dir, "diff", "--cached", "--exit-code")
+	write(t, filepath.Join(dir, "*.txt"), "star\n")
+	ok(t, env, "stage", Params{Repo: dir, Paths: []string{"*.txt"}}, nil)
+	if got := sh(t, dir, "diff", "--cached", "--name-only"); got != "*.txt" {
+		t.Errorf("staged %q", got)
+	}
+	ok(t, env, "commit", Params{Repo: dir, Message: "star"}, nil)
+
+	marker := filepath.Join(env.Home, "hook.out")
+	write(t, filepath.Join(dir, ".git", "hooks", "pre-commit"), "#!/bin/sh\ngit diff --cached --name-only -- '*.txt' > '"+marker+"'\n")
+	os.Chmod(filepath.Join(dir, ".git", "hooks", "pre-commit"), 0o755)
+	ok(t, env, "stage", Params{Repo: dir, Paths: []string{"b.txt"}}, nil)
+	ok(t, env, "commit", Params{Repo: dir, Message: "b"}, nil)
+	if b, err := os.ReadFile(marker); err != nil || strings.TrimSpace(string(b)) != "b.txt" {
+		t.Errorf("the hook's glob matched %q (%v)", b, err)
+	}
 }
 
 // testEnv is an agent's environment with HOME (so the global git
@@ -152,15 +170,56 @@ func TestPlainName(t *testing.T) {
 }
 
 func TestCleanPath(t *testing.T) {
-	for _, s := range []string{"a.txt", "dir/b c.txt", "-weird", ":(glob)*"} {
-		if _, err := cleanPath(s); err != nil {
-			t.Errorf("%q refused: %v", s, err)
+	for s, want := range map[string]string{"a.txt": "a.txt", "dir/b c.txt": "dir/b c.txt", "-weird": "-weird", ":(glob)*": ":(glob)*",
+		// A directory as the status lists an untracked repository.
+		"nested/": "nested/", "a/b/": "a/b/"} {
+		if got, err := cleanPath(s); err != nil || got != want {
+			t.Errorf("%q: %q %v", s, got, err)
 		}
 	}
-	for _, s := range []string{"", "/etc/passwd", "../x", "a/../b", "./a", "a//b", "a/", "a\x00b", ".", ".."} {
+	for _, s := range []string{"", "/", "/etc/passwd", "../x", "a/../b", "./a", "a//b", "a//", "../", "a\x00b", ".", "..", "./"} {
 		if _, err := cleanPath(s); err == nil {
 			t.Errorf("%q accepted", s)
 		}
+	}
+}
+
+// Many paths are split over runs that stay below the system's limit of a
+// command line; each path is a literal pathspec after "--".
+func TestPathRuns(t *testing.T) {
+	var ps []string
+	for i := 0; i < 5000; i++ {
+		ps = append(ps, strings.Repeat("d", 40)+"/"+strconv.Itoa(i))
+	}
+	runs := pathRuns([]string{"add", "--all"}, ps)
+	if len(runs) < 2 {
+		t.Fatalf("%d runs", len(runs))
+	}
+	n := 0
+	for _, rn := range runs {
+		if rn.args[0] != "add" || rn.args[1] != "--all" || rn.args[2] != "--" {
+			t.Fatalf("args %q", rn.args[:3])
+		}
+		size := 0
+		for _, a := range rn.args[3:] {
+			if !strings.HasPrefix(a, ":(literal)") {
+				t.Fatalf("not literal: %q", a)
+			}
+			if a != literal(ps[n]) {
+				t.Fatalf("path %d: %q", n, a)
+			}
+			size += len(a) + 1
+			n++
+		}
+		if size > maxArgBytes {
+			t.Errorf("a run of %d bytes", size)
+		}
+	}
+	if n != len(ps) {
+		t.Errorf("%d of %d paths", n, len(ps))
+	}
+	if runs := pathRuns([]string{"x"}, nil); len(runs) != 0 {
+		t.Errorf("no paths: %v", runs)
 	}
 }
 
@@ -191,6 +250,9 @@ func TestArgvRefusesOptions(t *testing.T) {
 		{"push", Params{Remote: "origin"}},
 		{"fetch", Params{Remote: "--upload-pack=x"}},
 		{"stashApply", Params{Index: -1}},
+		{"stashApply", Params{Index: 0}},
+		{"stashDrop", Params{Index: 0, Hash: "--all"}},
+		{"stashPop", Params{Index: 0, Hash: "stash@{0}"}},
 		{"tagCreate", Params{Name: "-d"}},
 		{"tagDelete", Params{Name: "missing"}},
 		{"branchDelete", Params{Name: "--force"}},
@@ -203,19 +265,35 @@ func TestArgvRefusesOptions(t *testing.T) {
 		{"applyPatch", Params{}},
 	}
 	for _, c := range bad {
-		if rn, err := r.argv(ctx, c.action, c.p); err == nil {
-			t.Errorf("%s %+v: accepted as %q", c.action, c.p, rn.args)
+		if rns, err := r.runs(ctx, c.action, c.p); err == nil {
+			t.Errorf("%s %+v: accepted as %v", c.action, c.p, rns)
 		}
 	}
-	// What is accepted puts paths after "--" and names where git takes
-	// no option.
-	rn, err := r.argv(ctx, "stage", Params{Paths: []string{"-n", "a.txt"}})
-	if err != nil || strings.Join(rn.args, " ") != "add --all -- -n a.txt" {
-		t.Errorf("stage: %q %v", rn.args, err)
+	// What is accepted puts paths after "--" as literal pathspecs and
+	// names where git takes no option.
+	rns, err := r.runs(ctx, "stage", Params{Paths: []string{"-n", "a.txt", ":(glob)*"}})
+	if err != nil || len(rns) != 1 || strings.Join(rns[0].args, " ") != "add --all -- :(literal)-n :(literal)a.txt :(literal):(glob)*" {
+		t.Errorf("stage: %v %v", rns, err)
 	}
-	rn, err = r.argv(ctx, "commit", Params{Message: "--amend\n\nbody"})
-	if err != nil || strings.Join(rn.args, " ") != "commit --cleanup=strip --file=-" || string(rn.stdin) != "--amend\n\nbody" {
+	rns, err = r.runs(ctx, "discard", Params{Paths: []string{"a.txt"}, Untracked: []string{"-f"}})
+	if err != nil || len(rns) != 2 || strings.Join(rns[0].args, " ") != "clean -f -q -- :(literal)-f" ||
+		strings.Join(rns[1].args, " ") != "restore --worktree -- :(literal)a.txt" {
+		t.Errorf("discard: %v %v", rns, err)
+	}
+	rn, err := r.argv(ctx, "commit", Params{Message: "--amend\n\nbody"})
+	if err != nil || strings.Join(rn.args, " ") != "commit --cleanup=whitespace --file=-" || string(rn.stdin) != "--amend\n\nbody" {
 		t.Errorf("commit: %q %q %v", rn.args, rn.stdin, err)
+	}
+	// As many paths as a status lists.
+	many := make([]string, maxStatus)
+	for i := range many {
+		many[i] = "f" + strconv.Itoa(i)
+	}
+	if _, err := r.runs(ctx, "stage", Params{Paths: many}); err != nil {
+		t.Errorf("%d paths: %v", len(many), err)
+	}
+	if _, err := r.runs(ctx, "stage", Params{Paths: append(many, "one more")}); err == nil {
+		t.Error("over the limit of paths accepted")
 	}
 }
 
@@ -701,11 +779,236 @@ func TestNested(t *testing.T) {
 	}
 	write(t, filepath.Join(inner, "x"), "x\n")
 	ok(t, env, "stage", Params{Repo: inner, All: true}, nil)
+	// Changed again after it was staged: unstaging still drops it from
+	// the index and keeps the working tree's file.
+	write(t, filepath.Join(inner, "x"), "x again\n")
 	ok(t, env, "unstage", Params{Repo: inner, Paths: []string{"x"}}, nil)
 	var st Status
 	ok(t, env, "status", Params{Repo: inner}, &st)
 	if len(st.Files) != 1 || st.Files[0].Kind != "untracked" {
 		t.Errorf("status %+v", st)
+	}
+	if b, _ := os.ReadFile(filepath.Join(inner, "x")); string(b) != "x again\n" {
+		t.Errorf("working tree %q", b)
+	}
+	// From the outer repository the inner one is an untracked directory,
+	// listed with a trailing "/"; it can be staged and unstaged, and a
+	// discard does not delete a repository.
+	sh(t, inner, "add", "x")
+	sh(t, inner, "-c", "user.name=I", "-c", "user.email=i@example.com", "commit", "-q", "-m", "inner")
+	ok(t, env, "status", Params{Repo: dir}, &st)
+	if len(st.Files) != 1 || st.Files[0].Path != "inner/" || st.Files[0].Kind != "untracked" {
+		t.Fatalf("outer status %+v", st)
+	}
+	var b Blob
+	ok(t, env, "blob", Params{Repo: dir, Path: "inner/", Source: "worktree"}, &b)
+	if b.Exists {
+		t.Errorf("blob of a directory %+v", b)
+	}
+	ok(t, env, "stage", Params{Repo: dir, Paths: []string{"inner/"}}, nil)
+	ok(t, env, "status", Params{Repo: dir}, &st)
+	if len(st.Files) != 1 || st.Files[0].X != "A" || !st.Files[0].Submodule {
+		t.Fatalf("staged %+v", st)
+	}
+	ok(t, env, "unstage", Params{Repo: dir, Paths: []string{st.Files[0].Path}}, nil)
+	ok(t, env, "discard", Params{Repo: dir, Untracked: []string{"inner/"}}, nil)
+	if _, err := os.Stat(filepath.Join(inner, ".git")); err != nil {
+		t.Errorf("inner repository removed: %v", err)
+	}
+}
+
+// On a branch without commits (an orphan), the log still has the other
+// branches' commits.
+func TestLogUnbornBranch(t *testing.T) {
+	env := testEnv(t)
+	dir := newRepo(t, env)
+	sh(t, dir, "checkout", "-q", "--orphan", "fresh")
+	var lg Log
+	ok(t, env, "log", Params{Repo: dir}, &lg)
+	if len(lg.Commits) != 1 || lg.Head != "" || lg.Branch != "fresh" || len(lg.Refs) != 1 {
+		t.Errorf("log %+v", lg)
+	}
+}
+
+// A directory reached through a link to a directory: the top level is
+// spelled through the link, as the explorer and editors show it.
+func TestLogicalRoot(t *testing.T) {
+	env := testEnv(t)
+	dir := newRepo(t, env)
+	os.MkdirAll(filepath.Join(dir, "sub", "deeper"), 0o755)
+	link := filepath.Join(env.Home, "link")
+	if err := os.Symlink(dir, link); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{link, filepath.Join(link, "sub"), filepath.Join(link, "sub", "deeper")} {
+		var info Repo
+		ok(t, env, "repo", Params{Path: p}, &info)
+		if info.Root != link {
+			t.Errorf("%s: root %q, want %q", p, info.Root, link)
+		}
+	}
+	var st Status
+	ok(t, env, "status", Params{Repo: link}, &st)
+	// A link inside the repository: git's prefix is not the path's end,
+	// the physical top level is answered.
+	os.Symlink("sub", filepath.Join(dir, "alias"))
+	var info Repo
+	ok(t, env, "repo", Params{Path: filepath.Join(link, "alias")}, &info)
+	if info.Root != dir {
+		t.Errorf("through alias: %q, want %q", info.Root, dir)
+	}
+	for _, c := range []struct{ dir, top, prefix, want string }{
+		{"/a/b/c", "/x/b", "c/", "/x/b"},
+		{"/a/b/c", "/a/b", "c/", "/a/b"},
+		{"/a/b/c", "/x", "b/c/", "/x"},
+	} {
+		if got := logical(c.dir, c.top, c.prefix); got != c.want {
+			t.Errorf("logical(%q, %q, %q) = %q", c.dir, c.top, c.prefix, got)
+		}
+	}
+}
+
+// The watch: the whole token moves with the index, the refs token only
+// with HEAD, refs and stashes, the config token with the configuration.
+func TestWatch(t *testing.T) {
+	env := testEnv(t)
+	dir := newRepo(t, env)
+	watch := func(d string) Watch {
+		var w Watch
+		ok(t, env, "watch", Params{Repo: d}, &w)
+		time.Sleep(20 * time.Millisecond)
+		return w
+	}
+	w0 := watch(dir)
+	write(t, filepath.Join(dir, "b.txt"), "b\n")
+	if w := watch(dir); w != w0 {
+		t.Errorf("an edit of the working tree moved %v", w)
+	}
+	sh(t, dir, "add", "b.txt")
+	w1 := watch(dir)
+	if w1.Token == w0.Token || w1.Refs != w0.Refs || w1.Config != w0.Config {
+		t.Errorf("staging: %v → %v", w0, w1)
+	}
+	for _, step := range [][]string{{"commit", "-q", "-m", "b"}, {"branch", "x"}, {"stash", "push", "-q", "--include-untracked", "-m", "s"}} {
+		if step[0] == "stash" {
+			write(t, filepath.Join(dir, "u.txt"), "u\n")
+		}
+		sh(t, dir, step...)
+		w2 := watch(dir)
+		if w2.Refs == w1.Refs || w2.Token == w1.Token || w2.Config != w1.Config {
+			t.Errorf("%s: %v → %v", step[0], w1, w2)
+		}
+		w1 = w2
+	}
+	sh(t, dir, "remote", "add", "o", "/nowhere")
+	if w2 := watch(dir); w2.Config == w1.Config || w2.Token == w1.Token || w2.Refs != w1.Refs {
+		t.Errorf("remote add: %v → %v", w1, w2)
+	}
+
+	// Refs in reftable (git 2.45 and later).
+	rt := filepath.Join(env.Home, "rt")
+	cmd := exec.Command("git", "init", "-q", "-b", "main", "--ref-format=reftable", rt)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Skipf("no reftable: %s", out)
+	}
+	rt, _ = filepath.EvalSymlinks(rt)
+	sh(t, rt, "config", "user.name", "Tester")
+	sh(t, rt, "config", "user.email", "tester@example.com")
+	write(t, filepath.Join(rt, "a"), "a\n")
+	sh(t, rt, "add", "a")
+	sh(t, rt, "commit", "-q", "-m", "a")
+	w0 = watch(rt)
+	sh(t, rt, "branch", "other")
+	if w := watch(rt); w.Refs == w0.Refs {
+		t.Error("a branch in reftable did not move the refs token")
+	}
+}
+
+// The status gives a changed file of the working tree its modification
+// time and size: they move when it is edited again.
+func TestStatusStamps(t *testing.T) {
+	env := testEnv(t)
+	dir := newRepo(t, env)
+	write(t, filepath.Join(dir, "a.txt"), "changed\n")
+	write(t, filepath.Join(dir, "u.txt"), "u\n")
+	write(t, filepath.Join(dir, "s.txt"), "s\n")
+	sh(t, dir, "add", "s.txt")
+	files := func() map[string]File {
+		var st Status
+		ok(t, env, "status", Params{Repo: dir}, &st)
+		m := map[string]File{}
+		for _, f := range st.Files {
+			m[f.Path] = f
+		}
+		return m
+	}
+	f1 := files()
+	if f := f1["a.txt"]; f.MTime == 0 || f.Size != 8 {
+		t.Errorf("a.txt %+v", f)
+	}
+	if f := f1["u.txt"]; f.MTime == 0 || f.Size != 2 {
+		t.Errorf("u.txt %+v", f)
+	}
+	if f := f1["s.txt"]; f.MTime != 0 {
+		t.Errorf("staged only %+v", f)
+	}
+	write(t, filepath.Join(dir, "a.txt"), "changed again\n")
+	if f := files()["a.txt"]; f.Y != f1["a.txt"].Y || f.Size == f1["a.txt"].Size {
+		t.Errorf("edited again %+v", f)
+	}
+}
+
+// Stage and discard many paths: they are split over runs of git.
+func TestManyPaths(t *testing.T) {
+	env := testEnv(t)
+	dir := newRepo(t, env)
+	sub := strings.Repeat("long-directory-name-", 3)
+	var ps []string
+	for i := 0; i < 2500; i++ {
+		p := sub + "/f" + strconv.Itoa(i)
+		write(t, filepath.Join(dir, p), "x\n")
+		ps = append(ps, p)
+	}
+	if runs := pathRuns(nil, ps); len(runs) < 2 {
+		t.Fatalf("%d runs", len(runs))
+	}
+	ok(t, env, "stage", Params{Repo: dir, Paths: ps}, nil)
+	if n := len(strings.Fields(sh(t, dir, "diff", "--cached", "--name-only"))); n != len(ps) {
+		t.Errorf("%d staged", n)
+	}
+	ok(t, env, "unstage", Params{Repo: dir, All: true}, nil)
+	ok(t, env, "discard", Params{Repo: dir, Untracked: ps}, nil)
+	if l := sh(t, dir, "status", "--porcelain"); l != "" {
+		t.Errorf("left %q", l)
+	}
+}
+
+// A run that cannot start fails as what kept it: no git, no directory, or
+// an argument list over the system's limit (not "git is missing").
+func TestStartError(t *testing.T) {
+	env := testEnv(t)
+	dir := newRepo(t, env)
+	code := func(err error) string {
+		var pe *plugin.Error
+		if errors.As(err, &pe) {
+			return pe.Code
+		}
+		return fmt.Sprint(err)
+	}
+	_, err := execGit(context.Background(), env, dir, true, run{args: []string{"log", strings.Repeat("x", 4<<20)}})
+	if c := code(err); c != "failed" {
+		t.Errorf("long arguments: %s (%v)", c, err)
+	}
+	_, err = execGit(context.Background(), env, filepath.Join(dir, "gone"), true, run{args: []string{"status"}})
+	if c := code(err); c != "not_found" {
+		t.Errorf("no directory: %s (%v)", c, err)
+	}
+	old := lookGit
+	lookGit = func() (string, error) { return filepath.Join(dir, "no-git"), nil }
+	defer func() { lookGit = old }()
+	_, err = execGit(context.Background(), env, dir, true, run{args: []string{"status"}})
+	if c := code(err); c != "git_missing" {
+		t.Errorf("no git: %s (%v)", c, err)
 	}
 }
 
@@ -735,6 +1038,20 @@ func TestWrites(t *testing.T) {
 		t.Fatalf("unstaged %+v", s)
 	}
 	ok(t, env, "unstage", Params{Repo: dir, All: true}, nil)
+
+	// A staged rename is unstaged with both its paths: nothing stays
+	// staged.
+	sh(t, dir, "mv", "a.txt", "moved.txt")
+	if f := status()["moved.txt"]; f.Kind != "renamed" || f.Orig != "a.txt" {
+		t.Fatalf("rename %+v", f)
+	}
+	ok(t, env, "unstage", Params{Repo: dir, Paths: []string{"moved.txt", "a.txt"}}, nil)
+	for p, f := range status() {
+		if f.X != "." && f.X != "?" {
+			t.Errorf("%s still staged: %+v", p, f)
+		}
+	}
+	os.Rename(filepath.Join(dir, "moved.txt"), filepath.Join(dir, "a.txt"))
 
 	// A patch into the index, and the same patch taken back.
 	patch := "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1,3 +1,3 @@\n one\n-two\n+TWO\n three\n"
@@ -771,10 +1088,20 @@ func TestWrites(t *testing.T) {
 	// Commit with the message on stdin, amend, signoff.
 	write(t, filepath.Join(dir, "a.txt"), "one\ntwo\nthree\nfour\n")
 	ok(t, env, "stage", Params{Repo: dir, Paths: []string{"a.txt"}}, nil)
-	ok(t, env, "commit", Params{Repo: dir, Message: "--amend title\n\n# not a comment? stripped\nbody `x` $(y)\n"}, nil)
-	if msg := sh(t, dir, "log", "-1", "--format=%B"); msg != "--amend title\n\nbody `x` $(y)" {
+	ok(t, env, "commit", Params{Repo: dir, Message: "--amend title  \n\n\n# kept as typed\nbody `x` $(y)\n\n"}, nil)
+	if msg := sh(t, dir, "log", "-1", "--format=%B"); msg != "--amend title\n\n# kept as typed\nbody `x` $(y)" {
 		t.Errorf("message %q", msg)
 	}
+	// A message that starts with "#" is a message.
+	write(t, filepath.Join(dir, "a.txt"), "one\ntwo\nthree\nfour\nfive\n")
+	ok(t, env, "stage", Params{Repo: dir, Paths: []string{"a.txt"}}, nil)
+	ok(t, env, "commit", Params{Repo: dir, Message: "#123 reported this"}, nil)
+	if msg := sh(t, dir, "log", "-1", "--format=%B"); msg != "#123 reported this" {
+		t.Errorf("message %q", msg)
+	}
+	sh(t, dir, "reset", "-q", "--soft", "HEAD~1")
+	write(t, filepath.Join(dir, "a.txt"), "one\ntwo\nthree\nfour\n")
+	sh(t, dir, "add", "a.txt")
 	ok(t, env, "commit", Params{Repo: dir, Message: "four", Amend: true, Signoff: true}, nil)
 	if msg := sh(t, dir, "log", "-1", "--format=%B"); !strings.HasPrefix(msg, "four\n\nSigned-off-by: Tester") {
 		t.Errorf("amended %q", msg)
@@ -838,19 +1165,30 @@ func TestWrites(t *testing.T) {
 	if l := sh(t, dir, "stash", "list"); !strings.Contains(l, "--keep-index") {
 		t.Errorf("stash list %q", l)
 	}
-	ok(t, env, "stashApply", Params{Repo: dir, Index: 0}, nil)
+	stash := func(n int) string { return sh(t, dir, "rev-parse", "stash@{"+strconv.Itoa(n)+"}") }
+	ok(t, env, "stashApply", Params{Repo: dir, Index: 0, Hash: stash(0)}, nil)
 	if len(status()) != 2 {
 		t.Errorf("applied %+v", status())
 	}
 	sh(t, dir, "checkout", "--", "a.txt")
 	os.Remove(filepath.Join(dir, "un.txt"))
-	ok(t, env, "stashPop", Params{Repo: dir}, nil)
+	ok(t, env, "stashPop", Params{Repo: dir, Hash: stash(0)}, nil)
 	sh(t, dir, "stash", "push", "-q", "-u")
-	ok(t, env, "stashDrop", Params{Repo: dir, Index: 0}, nil)
+	// The list changed since the UI read it (another stash pushed): the
+	// entry at the index is not the one shown, nothing is dropped.
+	shown := stash(0)
+	write(t, filepath.Join(dir, "a.txt"), "another\n")
+	sh(t, dir, "stash", "push", "-q")
+	fails(t, env, "stashDrop", Params{Repo: dir, Index: 0, Hash: shown}, "stale")
+	if n := len(strings.Fields(sh(t, dir, "stash", "list", "--format=%H"))); n != 2 {
+		t.Fatalf("%d stashes", n)
+	}
+	ok(t, env, "stashDrop", Params{Repo: dir, Index: 1, Hash: shown}, nil)
+	ok(t, env, "stashDrop", Params{Repo: dir, Index: 0, Hash: stash(0)}, nil)
 	if l := sh(t, dir, "stash", "list"); l != "" {
 		t.Errorf("stash list %q", l)
 	}
-	fails(t, env, "stashDrop", Params{Repo: dir, Index: 3}, "git_failed")
+	fails(t, env, "stashDrop", Params{Repo: dir, Index: 3, Hash: shown}, "stale")
 
 	// Rebase.
 	sh(t, dir, "checkout", "-q", "-b", "re")
@@ -906,6 +1244,36 @@ func TestRemote(t *testing.T) {
 	ok(t, env, "fetch", Params{Repo: dir, All: true}, nil)
 	ok(t, env, "push", Params{Repo: dir}, nil)
 	fails(t, env, "push", Params{Repo: dir, Remote: "upstream"}, "not_found")
+
+	// Branches that diverged: a pull follows the user's configuration
+	// (pull.rebase), and without one git's refusal is diverged.
+	diverge := func(n string) {
+		write(t, filepath.Join(other, "o"+n), n)
+		sh(t, other, "add", "o"+n)
+		sh(t, other, "commit", "-q", "-m", "other "+n)
+		sh(t, other, "pull", "-q", "--rebase")
+		sh(t, other, "push", "-q")
+		write(t, filepath.Join(dir, "d"+n), n)
+		sh(t, dir, "add", "d"+n)
+		sh(t, dir, "commit", "-q", "-m", "mine "+n)
+	}
+	diverge("1")
+	if gitAtLeast(t, 2, 34) {
+		fails(t, env, "pull", Params{Repo: dir}, "diverged")
+	}
+	sh(t, dir, "config", "pull.rebase", "true")
+	ok(t, env, "pull", Params{Repo: dir}, nil)
+	if p := sh(t, dir, "log", "-1", "--format=%P"); len(strings.Fields(p)) != 1 || sh(t, dir, "rev-parse", "HEAD~1") != sh(t, dir, "rev-parse", "origin/main") {
+		t.Errorf("not rebased: parents %q", p)
+	}
+}
+
+// gitAtLeast reports whether the git of the tests is at least major.minor.
+func gitAtLeast(t *testing.T, major, minor int) bool {
+	t.Helper()
+	var a, b int
+	fmt.Sscanf(strings.TrimPrefix(sh(t, t.TempDir(), "--version"), "git version "), "%d.%d", &a, &b)
+	return a > major || a == major && b >= minor
 }
 
 // A remote that asks for a password fails with auth_required instead of
@@ -930,11 +1298,13 @@ func TestEnviron(t *testing.T) {
 	env := &plugin.Env{Environ: func() []string {
 		return []string{"PATH=/bin", "GIT_DIR=/x", "GIT_ASKPASS=/a", "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=core.pager", "LANG=de_DE",
 			"GIT_CONFIG_GLOBAL=/tmp/evil", "GIT_ATTR_SOURCE=HEAD~1", "GIT_TRACE=/tmp/trace", "GIT_EXEC_PATH=/x", "GIT_PAGER=less",
-			"SSH_ASKPASS=/a", "GIT_SSH_COMMAND=ssh -i k", "GIT_SSH=/usr/bin/ssh", "GIT_SSH_VARIANT=ssh", "GIT_AUTHOR_NAME=A", "GIT_COMMITTER_EMAIL=c@x"}
+			"SSH_ASKPASS=/a", "GIT_SSH_COMMAND=ssh -i k", "GIT_SSH=/usr/bin/ssh", "GIT_SSH_VARIANT=ssh", "GIT_AUTHOR_NAME=A", "GIT_COMMITTER_EMAIL=c@x",
+			"GIT_LITERAL_PATHSPECS=1", "GIT_GLOB_PATHSPECS=1"}
 	}}
 	got := strings.Join(environ(env, true), "\n")
+	// Hooks get the environment too: none sets how their pathspecs read.
 	for _, bad := range []string{"GIT_DIR", "GIT_ASKPASS", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "LANG=", "GIT_CONFIG_GLOBAL",
-		"GIT_ATTR_SOURCE", "GIT_TRACE", "GIT_EXEC_PATH", "GIT_PAGER=less", "SSH_ASKPASS="} {
+		"GIT_ATTR_SOURCE", "GIT_TRACE", "GIT_EXEC_PATH", "GIT_PAGER=less", "SSH_ASKPASS=", "PATHSPECS"} {
 		if strings.Contains(got, bad) {
 			t.Errorf("%s passed: %s", bad, got)
 		}

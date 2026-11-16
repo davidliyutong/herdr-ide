@@ -4,7 +4,7 @@
 // parents off the page running out of the last row.
 
 import { describe, expect, it } from 'vitest';
-import { layoutGraph, type GraphCommit } from '../plugins/git/graph';
+import { appendCommits, layoutGraph, type GraphCommit } from '../plugins/git/graph';
 import { badgesOf, graphRows, matches, UNCOMMITTED } from '../plugins/git/GraphPane';
 import type { Commit, StatusFile } from '../plugins/git/api';
 
@@ -164,5 +164,15 @@ describe('graph rows', () => {
     expect(matches(r, 'zzz')).toBe(false);
     expect(matches(r, '123')).toBe(true);
     expect(matches(r, '')).toBe(true);
+  });
+});
+
+describe('appendCommits', () => {
+  it('appends a page without the commits already loaded', () => {
+    const have = [c('d', 'c'), c('c', 'b')];
+    // New commits arrived: the next page starts one earlier.
+    const got = appendCommits(have, [c('c', 'b'), c('b', 'a'), c('b', 'a'), c('a')]);
+    expect(got.map((x) => x.hash)).toEqual(['d', 'c', 'b', 'a']);
+    expect(have.map((x) => x.hash)).toEqual(['d', 'c']);
   });
 });

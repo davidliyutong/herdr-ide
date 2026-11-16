@@ -8,9 +8,9 @@
 //
 // Every action runs the git executable with an argument vector built here:
 // no shell, no option or flag from the request. Paths are relative to the
-// repository's top level, come after "--" and are literal pathspecs
-// (GIT_LITERAL_PATHSPECS); revisions and ref names never start with "-"
-// and are checked before use. git never asks for credentials or an editor
+// repository's top level, come after "--" and are literal pathspecs (each
+// with the ":(literal)" magic, so hooks do not inherit a literal setting);
+// revisions and ref names never start with "-" and are checked before use. git never asks for credentials or an editor
 // (no terminal, GIT_TERMINAL_PROMPT=0, no askpass programs, GIT_EDITOR
 // true); a fetch, pull or push that would need a password fails with
 // auth_required. Each run has a timeout (reads 15 s, network and
@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"os"
 	"os/exec"
@@ -54,10 +55,13 @@ const (
 	// MaxPage the largest.
 	PageSize = 300
 	MaxPage  = 1000
-	// maxPaths bounds the paths of one change.
-	maxPaths = 5000
-	// maxStatus bounds the entries of a status.
+	// maxStatus bounds the entries of a status; maxPaths the paths of one
+	// change (as many as a status lists).
 	maxStatus = 20000
+	maxPaths  = maxStatus
+	// maxArgBytes bounds the paths of one run of git: a change with more
+	// runs git several times (the system limits a command line's length).
+	maxArgBytes = 96 << 10
 )
 
 func init() { plugin.Register("git", handle) }
@@ -108,9 +112,11 @@ type Params struct {
 	// merge, rebase, cherryPick or revert.
 	Op   string `json:"op,omitempty"`
 	Mode string `json:"mode,omitempty"`
-	// Stashes
-	Index            int  `json:"index,omitempty"`
-	IncludeUntracked bool `json:"includeUntracked,omitempty"`
+	// Stashes: the entry's index and its commit, which stash@{Index} must
+	// still name.
+	Index            int    `json:"index,omitempty"`
+	Hash             string `json:"hash,omitempty"`
+	IncludeUntracked bool   `json:"includeUntracked,omitempty"`
 	// fetch, pull, push
 	Remote         string `json:"remote,omitempty"`
 	Branch         string `json:"branch,omitempty"`
@@ -289,9 +295,6 @@ type run struct {
 	limit int
 	// ok are exit codes that are not failures (diff's 1).
 	ok []int
-	// magic leaves pathspec magic on: git stash's own pathspecs need it;
-	// runs with paths from a request keep them literal.
-	magic bool
 }
 
 // result is what a run printed.
@@ -364,9 +367,6 @@ func execGit(ctx context.Context, env *plugin.Env, dir string, read bool, rn run
 	args = append(append(args, "--no-pager"), rn.args...)
 	cmd := exec.Command(bin, args...)
 	cmd.Env = environ(env, read)
-	if !rn.magic {
-		cmd.Env = append(cmd.Env, "GIT_LITERAL_PATHSPECS=1")
-	}
 	cmd.Dir = dir
 	// A session of its own: no controlling terminal (nothing can prompt)
 	// and a process group to kill.
@@ -383,7 +383,7 @@ func execGit(ctx context.Context, env *plugin.Env, dir string, read bool, rn run
 	errb.drop = true
 	cmd.Stdout, cmd.Stderr = out, errb
 	if err := cmd.Start(); err != nil {
-		return result{}, plugin.Errorf("git_missing", "%v", err)
+		return result{}, startError(bin, dir, err)
 	}
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
@@ -423,6 +423,21 @@ func execGit(ctx context.Context, env *plugin.Env, dir string, read bool, rn run
 	return res, nil
 }
 
+// startError is the failure of a run that did not start: git_missing when
+// the executable is gone, not_found when the directory is, failed
+// otherwise (an argument list over the system's limit, no memory).
+func startError(bin, dir string, err error) error {
+	if errors.Is(err, fs.ErrNotExist) {
+		if _, serr := os.Stat(bin); serr != nil {
+			return plugin.Errorf("git_missing", "%v", err)
+		}
+		if _, serr := os.Stat(dir); serr != nil {
+			return plugin.Errorf("not_found", "%s: %v", dir, serr)
+		}
+	}
+	return plugin.Errorf("failed", "git did not start: %v", err)
+}
+
 // capped is a buffer that stops at limit and says so on over.
 type capped struct {
 	buf   bytes.Buffer
@@ -450,10 +465,14 @@ func (c *capped) Write(p []byte) (int, error) {
 	return c.buf.Write(p)
 }
 
+// diverged is git's refusal to pull into a branch that diverged from its
+// upstream when no pull.rebase or pull.ff says how.
+var diverged = regexp.MustCompile(`(?i)reconcile divergent branches`)
+
 var authFailure = regexp.MustCompile(`(?i)terminal prompts disabled|could not read (username|password)|authentication failed|permission denied \(publickey|host key verification failed|askpass|invalid username or password|access denied|HTTP Basic: Access denied`)
 
 // classify gives a failed run of git its code: not_a_repo, auth_required,
-// conflicts, or git_failed with what git said.
+// conflicts, diverged, or git_failed with what git said.
 func classify(sub string, res result) error {
 	msg := strings.TrimSpace(string(res.err))
 	if msg == "" {
@@ -469,6 +488,8 @@ func classify(sub string, res result) error {
 		return &plugin.Error{Code: "auth_required", Err: errors.New(msg)}
 	case bytes.Contains(res.out, []byte("CONFLICT")) || strings.Contains(msg, "CONFLICT") || strings.Contains(msg, "could not apply"):
 		return &plugin.Error{Code: "conflicts", Err: errors.New(strings.TrimSpace(string(res.out) + "\n" + msg))}
+	case diverged.MatchString(msg):
+		return &plugin.Error{Code: "diverged", Err: errors.New(msg)}
 	}
 	return &plugin.Error{Code: "git_failed", Err: fmt.Errorf("git %s: %s", sub, msg)}
 }
@@ -476,6 +497,9 @@ func classify(sub string, res result) error {
 // ---- validation ----
 
 var hexRev = regexp.MustCompile(`^[0-9a-fA-F]{4,64}$`)
+
+// fullHash is an object's whole name (SHA-1 or SHA-256).
+var fullHash = regexp.MustCompile(`^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$`)
 
 // badRefChars are characters no ref name or revision the UI sends has.
 const badRefChars = " \t\n\r\x00\x7f~^:?*[\\"
@@ -557,17 +581,52 @@ func (r *repo) remote(ctx context.Context, name string) error {
 }
 
 // cleanPath checks a path relative to the top level: not empty, not
-// absolute, no "." or ".." elements, no NUL.
+// absolute, no "." or ".." elements, no NUL. A trailing "/" (a directory,
+// as the status lists an untracked repository inside this one) is kept.
 func cleanPath(p string) (string, error) {
-	if p == "" || strings.ContainsRune(p, 0) || strings.HasPrefix(p, "/") {
+	rel, dir := strings.CutSuffix(p, "/")
+	if rel == "" || strings.ContainsRune(rel, 0) || strings.HasPrefix(rel, "/") {
 		return "", plugin.Errorf("bad_params", "bad path %q", p)
 	}
-	for _, el := range strings.Split(p, "/") {
+	for _, el := range strings.Split(rel, "/") {
 		if el == "" || el == "." || el == ".." {
 			return "", plugin.Errorf("bad_params", "bad path %q", p)
 		}
 	}
-	return path.Clean(p), nil
+	rel = path.Clean(rel)
+	if dir {
+		rel += "/"
+	}
+	return rel, nil
+}
+
+// literal is a path as a pathspec that matches it only: no wildcards, no
+// other magic.
+func literal(p string) string { return ":(literal)" + p }
+
+// pathRuns are runs of git with args, "--" and paths as literal
+// pathspecs, as many paths per run as fit maxArgBytes.
+func pathRuns(args []string, paths []string) []run {
+	var runs []run
+	var cur []string
+	size := 0
+	flush := func() {
+		a := append(append(append([]string{}, args...), "--"), cur...)
+		runs = append(runs, run{args: a})
+		cur, size = nil, 0
+	}
+	for _, p := range paths {
+		lp := literal(p)
+		if len(cur) > 0 && size+len(lp)+1 > maxArgBytes {
+			flush()
+		}
+		cur = append(cur, lp)
+		size += len(lp) + 1
+	}
+	if len(cur) > 0 {
+		flush()
+	}
+	return runs
 }
 
 func cleanPaths(ps []string) ([]string, error) {

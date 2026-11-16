@@ -130,7 +130,7 @@ func change(action string) func(c *plugin.Call, w http.ResponseWriter, r *http.R
 // acted on); auditFlags its switches. Patches and messages are never
 // recorded; paths only by their number.
 var (
-	auditNames = []string{"repo", "rev", "rev2", "ref", "onto", "name", "to", "at", "remote", "branch", "tag", "mode", "op"}
+	auditNames = []string{"repo", "rev", "rev2", "ref", "onto", "name", "to", "at", "remote", "branch", "tag", "mode", "op", "hash"}
 	auditFlags = []string{"force", "forceWithLease", "amend", "all"}
 )
 

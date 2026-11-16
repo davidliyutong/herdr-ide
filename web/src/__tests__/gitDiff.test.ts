@@ -99,27 +99,32 @@ vi.mock('../plugins/monaco', () => ({
 import { useStore } from '../state/store';
 import type { MachineState } from '../lib/machine';
 import { t } from '../i18n';
-import { DiffPane, diffTitle } from '../plugins/git/DiffPane';
-import { useGit } from '../plugins/git/state';
+import { DiffPane, diffTitle, followed } from '../plugins/git/DiffPane';
+import { refresh, repoKey, useGit } from '../plugins/git/state';
+import type { StatusFile } from '../plugins/git/api';
 import { settle } from './fakeTerms';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const ROOT = '/r';
-/** The versions of f.txt by source. */
-const blobs: Record<string, { text: string; mtime?: number }> = {
+/** The versions of f.txt by source ("source:path" for another file). */
+const original: Record<string, { text: string; mtime?: number }> = {
   index: { text: 'a\nb\nc\n' },
   worktree: { text: 'a\nB\nc\nD\n', mtime: 5000 },
   head: { text: 'a\nb\n' },
   abc1234: { text: 'new\n' },
   'abc1234^1': { text: 'old\n' },
 };
+let blobs: Record<string, { text: string; mtime?: number }> = { ...original };
 
 describe('DiffPane', () => {
   let host: HTMLDivElement;
   let root: Root;
   const posts: Array<{ path: string; body: unknown; q?: URLSearchParams }> = [];
   const gets: string[] = [];
+  /** Blob reads of a path wait for its promise. */
+  let holds: Record<string, Promise<void>> = {};
+  let statusFiles: StatusFile[] = [];
   const flush = async () => {
     for (let i = 0; i < 4; i++) await act(async () => settle());
   };
@@ -142,6 +147,9 @@ describe('DiffPane', () => {
   beforeEach(() => {
     posts.length = 0;
     gets.length = 0;
+    blobs = { ...original };
+    holds = {};
+    statusFiles = [];
     editor.model = undefined;
     editor.lineChanges = [];
     editor.modifiedSide = side();
@@ -161,12 +169,14 @@ describe('DiffPane', () => {
         const q = url.searchParams;
         const k = q.get('source')! + (q.get('parent') ? `^${q.get('parent')}` : '');
         gets.push(`${k}:${q.get('path')}`);
-        const b = blobs[k];
-        return new Response(
-          JSON.stringify(b ? { exists: true, text: b.text, size: b.text.length, mtime: b.mtime } : { exists: false, text: '', size: 0 }),
+        const b = q.get('path') === 'f.txt' ? blobs[k] : blobs[`${k}:${q.get('path')}`];
+        const body = JSON.stringify(
+          b ? { exists: true, text: b.text, size: b.text.length, mtime: b.mtime } : { exists: false, text: '', size: 0 },
         );
+        await holds[q.get('path')!];
+        return new Response(body);
       }
-      if (action === 'status') return new Response(JSON.stringify({ ahead: 0, behind: 0, files: [] }));
+      if (action === 'status') return new Response(JSON.stringify({ ahead: 0, behind: 0, files: statusFiles }));
       if (action === 'repo') return new Response(JSON.stringify({ root: ROOT, ahead: 0, behind: 0, remotes: [] }));
       return new Response(JSON.stringify({ token: 't' }));
     });
@@ -233,6 +243,82 @@ describe('DiffPane', () => {
     expect(editor.model!.original.getValue()).toBe('old\n');
     expect(editor.model!.modified.getValue()).toBe('new\n');
     expect(button(t('git.diff.stageRanges'))).toBeUndefined();
+  });
+
+  // Unsaved text keeps the right side it was edited from: after the
+  // repository changed (the left side read again), a save still names
+  // the version loaded, so the machine refuses it if the file changed.
+  it('saves unsaved text against the version it was edited from', async () => {
+    await render({ mode: 'worktree' });
+    editor.model!.modified.setValue('mine\n');
+    blobs.worktree = { text: 'theirs\n', mtime: 7000 };
+    blobs.index = { text: 'staged\n' };
+    const k = repoKey('m', ROOT);
+    await act(async () => useGit.setState((s) => ({ repos: { ...s.repos, [k]: { ...s.repos[k], version: s.repos[k].version + 1 } } })));
+    await flush();
+    expect(editor.model!.original.getValue()).toBe('staged\n');
+    expect(editor.model!.modified.getValue()).toBe('mine\n');
+    await act(async () => editor.modifiedSide.commands[0]());
+    await flush();
+    const w = posts.find((p) => p.path.endsWith('/p/files/write'))!;
+    expect(w.q!.get('mtime')).toBe('5000');
+    expect(w.q!.get('size')).toBe(String('a\nB\nc\nD\n'.length));
+  });
+
+  // Switching files fast: the earlier file's answer comes last and is
+  // dropped.
+  it('shows the file it shows now after a fast switch', async () => {
+    blobs['worktree:g.txt'] = { text: 'g\n', mtime: 1 };
+    blobs['index:g.txt'] = { text: 'g0\n' };
+    let release!: () => void;
+    holds['f.txt'] = new Promise<void>((r) => (release = r));
+    await render({ mode: 'worktree' });
+    await render({ mode: 'worktree', path: 'g.txt' });
+    expect(editor.model!.modified.getValue()).toBe('g\n');
+    await act(async () => release());
+    await flush();
+    expect(editor.model!.modified.getValue()).toBe('g\n');
+    expect(editor.model!.original.getValue()).toBe('g0\n');
+  });
+
+  // An edit of a file already changed moves its entry in the status (its
+  // time and size): the diff reads it again.
+  it('reads the working tree again when its file was edited again', async () => {
+    statusFiles = [{ path: 'f.txt', x: '.', y: 'M', kind: 'changed', mtime: 5000, size: 8 }];
+    await render({ mode: 'worktree' });
+    blobs.worktree = { text: 'edited again\n', mtime: 9000 };
+    statusFiles = [{ path: 'f.txt', x: '.', y: 'M', kind: 'changed', mtime: 9000, size: 13 }];
+    await act(async () => refresh('m', ROOT, { fresh: true }));
+    await flush();
+    expect(editor.model!.modified.getValue()).toBe('edited again\n');
+    expect(followed(1, { repo: ROOT, path: 'f.txt', mode: 'staged' }, statusFiles)).toBe('1');
+    expect(followed(1, { repo: ROOT, path: 'x', mode: 'worktree' }, statusFiles)).toBe('1\u0000-');
+  });
+
+  // Staging ranges of a file that changed on disk since it was read would
+  // stage lines that are not there: the diff is read again instead.
+  it('reads the file again instead of staging ranges of an older version', async () => {
+    await render({ mode: 'worktree' });
+    editor.lineChanges = [{ originalStartLineNumber: 2, originalEndLineNumber: 2, modifiedStartLineNumber: 2, modifiedEndLineNumber: 2 }];
+    await act(async () => editor.diffListener!());
+    editor.modifiedSide.selections = [{ startLineNumber: 2, endLineNumber: 2, endColumn: 2 }];
+    blobs.worktree = { text: 'a\nX\nc\nD\n', mtime: 8000 };
+    await act(async () => button(t('git.diff.stageRanges'))!.click());
+    await flush();
+    expect(posts.find((p) => p.path.endsWith('/applyPatch'))).toBeUndefined();
+    expect(editor.model!.modified.getValue()).toBe('a\nX\nc\nD\n');
+    // Read again, the ranges stage.
+    await act(async () => button(t('git.diff.stageRanges'))!.click());
+    await flush();
+    expect(posts.find((p) => p.path.endsWith('/applyPatch'))).toBeDefined();
+  });
+
+  it('unstages a rename with its old path', async () => {
+    await render({ mode: 'staged', orig: 'old.txt' });
+    await act(async () => button(t('git.diff.unstageFile'))!.click());
+    await flush();
+    const p = posts.find((x) => x.path.endsWith('/unstage'))!;
+    expect(p.body).toEqual({ paths: ['f.txt', 'old.txt'], repo: ROOT });
   });
 
   it('saves the working tree with the version it loaded', async () => {

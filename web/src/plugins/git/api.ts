@@ -29,6 +29,11 @@ export interface StatusFile {
   y: string;
   kind: 'changed' | 'renamed' | 'unmerged' | 'untracked' | 'ignored';
   submodule?: boolean;
+  /** The working tree's file when it differs from the index: its
+   * modification time (unix milliseconds) and size, which move when it is
+   * edited again. */
+  mtime?: number;
+  size?: number;
 }
 
 export interface Status {
@@ -128,6 +133,15 @@ export interface Tag {
   subject?: string;
 }
 
+/** Tokens of a repository's files: token moves with the index, HEAD, the
+ * refs, the configuration and an operation in progress; refs only with
+ * HEAD, the refs and the stashes; config with the configuration. */
+export interface Watch {
+  token: string;
+  refs?: string;
+  config?: string;
+}
+
 /** A failure with the code the core or the machine gave. */
 export class GitError extends Error {
   constructor(
@@ -137,6 +151,13 @@ export class GitError extends Error {
     super(message);
     this.name = 'GitError';
   }
+}
+
+/** Whether a failure of repo says the directory is in no repository (or
+ * is gone). Others (offline, busy, timeout…) say nothing about it: a later
+ * request may succeed, so they are not remembered as answers. */
+export function noRepo(e: unknown): boolean {
+  return e instanceof GitError && (e.code === 'not_a_repo' || e.code === 'not_found');
 }
 
 /** A failure as the user reads it: the code's text, with what git said. */
@@ -201,7 +222,7 @@ export const gitApi = {
   branches: (m: string, repo: string) => get<Branch[]>(m, 'branches', { repo }),
   tags: (m: string, repo: string) => get<Tag[]>(m, 'tags', { repo }),
   stashes: (m: string, repo: string) => get<Stash[]>(m, 'stashes', { repo }),
-  watch: (m: string, repo: string) => get<{ token: string }>(m, 'watch', { repo }),
+  watch: (m: string, repo: string) => get<Watch>(m, 'watch', { repo }),
   /** A change (internal/agent/plugin/git's Params). */
   run: (m: string, repo: string, action: string, params: Record<string, unknown> = {}) => post(m, action, { ...params, repo }),
 };

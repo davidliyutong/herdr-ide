@@ -7,7 +7,7 @@ import { confirmDialog } from '../../dialog';
 import { useStore } from '../../state/store';
 import { t, type MessageKey } from '../../i18n';
 import { openEditor } from '../files/ops';
-import type { StatusFile } from './api';
+import type { Stash, StatusFile } from './api';
 import { badRefName, promptDialog } from './prompt';
 import { runGit } from './state';
 import { dirtyDiffs } from './DiffPane';
@@ -165,14 +165,18 @@ export async function stashPush(m: string, repo: string) {
   if (v) await runGit(m, repo, 'stashPush', { message: String(v.message ?? ''), includeUntracked: !!v.includeUntracked });
 }
 
-export async function stashDrop(m: string, repo: string, index: number) {
+/** The stash's actions name the entry with its commit: one pushed or
+ * dropped meanwhile renumbers them, and the machine refuses (stale). */
+export const stashParams = (s: Stash) => ({ index: s.index, hash: s.hash });
+
+export async function stashDrop(m: string, repo: string, s: Stash) {
   const ok = await confirmDialog({
     title: t('git.stash.drop'),
-    message: t('git.stash.dropMessage', { n: index }),
+    message: t('git.stash.dropMessage', { n: s.index }),
     confirm: t('git.stash.drop'),
     danger: true,
   });
-  if (ok) await runGit(m, repo, 'stashDrop', { index });
+  if (ok) await runGit(m, repo, 'stashDrop', stashParams(s));
 }
 
 /** Copies text, with a toast. */

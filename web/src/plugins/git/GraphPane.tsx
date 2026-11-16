@@ -15,7 +15,7 @@ import { openMenu, type MenuEntry } from '../../contextMenu';
 import { t } from '../../i18n';
 import type { PaneViewProps } from '../api';
 import { gitApi, errorText, type Commit, type Ref, type Shown, type Stash, type StatusFile } from './api';
-import { layoutGraph, type GraphCommit } from './graph';
+import { appendCommits, layoutGraph, newPaging, type GraphCommit, type Paging } from './graph';
 import { GraphCell, LANE_COLORS, laneColor } from './GraphCell';
 import {
   checkoutRemote,
@@ -30,6 +30,7 @@ import {
   reset,
   short,
   stashDrop,
+  stashParams,
 } from './ops';
 import { letterColor } from './GitPanel';
 import { changed, runGit, useRepo } from './state';
@@ -144,39 +145,53 @@ export function GraphPane({ m, view }: PaneViewProps) {
   const [scroll, setScroll] = useState({ top: 0, height: 600 });
   const [loadingMore, setLoadingMore] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
-  const version = st?.version ?? 0;
+  // The log follows the refs (HEAD, branches, tags, stashes), not the
+  // working tree: the uncommitted row comes from the status.
+  const version = st?.refs ?? 0;
 
-  // The first page (as many commits as are loaded, at most 1000) when the
-  // repository, the filter or the remotes' switch change.
-  const loaded = useRef(PAGE);
+  // The first page when the repository, the filter or the remotes' switch
+  // change, and when the refs did (then as many commits as were loaded, at
+  // most 1000). Each read replaces the paging: answers for an earlier one
+  // (another filter's, an older list's) are dropped.
+  const page = useRef<Paging>(newPaging());
+  const scope = useRef('');
   useEffect(() => {
-    let gone = false;
-    const limit = Math.min(1000, Math.max(PAGE, loaded.current));
+    const sc = `${m}\u0000${repo}\u0000${filter}\u0000${remotes}`;
+    const limit = scope.current === sc ? Math.min(1000, Math.max(PAGE, page.current.next)) : PAGE;
+    scope.current = sc;
+    const pg = newPaging();
+    page.current = pg;
+    setLoadingMore(false);
     gitApi
       .log(m, repo, { limit, branches: filter ? [filter] : undefined, remotes })
       .then((l) => {
-        if (gone) return;
-        loaded.current = l.commits.length;
+        if (page.current !== pg) return;
+        pg.next = l.commits.length;
+        pg.ready = true;
         setData({ commits: l.commits, more: l.more, refs: l.refs ?? [], stashes: l.stashes ?? [], head: l.head, branch: l.branch });
         setError(undefined);
       })
-      .catch((e) => !gone && setError(errorText(e)));
-    return () => {
-      gone = true;
-    };
+      .catch((e) => page.current === pg && setError(errorText(e)));
   }, [m, repo, filter, remotes, version]);
 
   const loadMore = async () => {
-    if (!data?.more || loadingMore) return;
+    const pg = page.current;
+    if (!data?.more || !pg.ready || pg.loading || pg.failed) return;
+    pg.loading = true;
     setLoadingMore(true);
     try {
-      const l = await gitApi.log(m, repo, { skip: data.commits.length, limit: PAGE, branches: filter ? [filter] : undefined, remotes });
-      setData((d) => d && { ...d, commits: [...d.commits, ...l.commits], more: l.more });
-      loaded.current += l.commits.length;
+      const l = await gitApi.log(m, repo, { skip: pg.next, limit: PAGE, branches: filter ? [filter] : undefined, remotes });
+      if (page.current !== pg) return;
+      pg.next += l.commits.length;
+      setData((d) => d && { ...d, commits: appendCommits(d.commits, l.commits), more: l.more && l.commits.length > 0 });
     } catch (e) {
+      if (page.current !== pg) return;
+      // Not asked again until the list is read again.
+      pg.failed = true;
       setError(errorText(e));
     } finally {
-      setLoadingMore(false);
+      pg.loading = false;
+      if (page.current === pg) setLoadingMore(false);
     }
   };
 
@@ -348,9 +363,9 @@ export function GraphPane({ m, view }: PaneViewProps) {
   const stashMenu = (e: React.MouseEvent, s: Stash) => {
     e.preventDefault();
     openMenu(e, [
-      { label: t('git.stash.apply'), disabled: readOnly, run: () => run('stashApply', { index: s.index }) },
-      { label: t('git.stash.pop'), disabled: readOnly, run: () => run('stashPop', { index: s.index }) },
-      { label: t('git.stash.drop'), danger: true, disabled: readOnly, run: () => void stashDrop(m, repo, s.index) },
+      { label: t('git.stash.apply'), disabled: readOnly, run: () => run('stashApply', stashParams(s)) },
+      { label: t('git.stash.pop'), disabled: readOnly, run: () => run('stashPop', stashParams(s)) },
+      { label: t('git.stash.drop'), danger: true, disabled: readOnly, run: () => void stashDrop(m, repo, s) },
       { label: t('git.graph.copyHash'), run: () => copy(s.hash) },
     ]);
   };
@@ -420,7 +435,12 @@ export function GraphPane({ m, view }: PaneViewProps) {
             </>
           )}
         </span>
-        <button className="icon" title={t('git.refresh')} aria-label={t('git.refresh')} onClick={() => void changed(m, repo)}>
+        <button
+          className="icon"
+          title={t('git.refresh')}
+          aria-label={t('git.refresh')}
+          onClick={() => void changed(m, repo, { all: true })}
+        >
           <RefreshCw />
         </button>
       </div>
