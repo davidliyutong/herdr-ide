@@ -218,8 +218,8 @@ the answer through.
   a row, Shift-click selects a range, and the keys of a tree move
   (`navigationKey`: arrows, PgUp, PgDn, Home, End, Shift to extend, ← →
   on folders, ⌘/Ctrl+A, type-ahead); Enter opens the diffs of the
-  selection (several each in a pane of its own), Space the cursor's in
-  the preview. Every action acts on the selected rows of the row's group
+  selected files (several each in a pane of its own; on a folder alone it
+  opens or closes it), Space the cursor's in the preview. Every action acts on the selected rows of the row's group
   when the row is selected (a folder on the files inside): the row's
   buttons open the files (the explorer's editor), discard (after asking;
   untracked files are deleted) and stage or unstage (a rename with its
