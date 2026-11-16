@@ -1,6 +1,6 @@
 // The variable vault's panel in the right sidebar. At the top, the gate:
 // creating the vault's passphrase, unlocking this page's session with it,
-// or the session's bar with the lock. Then requests waiting for
+// or the session's bar with the auto-lock's countdown and the lock. Then requests waiting for
 // an answer and three tabs: the variables (never their values, except one
 // revealed on request; an editor in a dialog), the access log (filtered by
 // machine and outcome, by day) and how to connect a coding agent's CLI on
@@ -51,6 +51,7 @@ import { RequestCard } from './Approvals';
 import { setupSnippets } from './setup';
 import { StrengthBar, noManager } from './fields';
 import { openVaultExport, openVaultImport } from './dialogs';
+import { AutoLockButton } from './AutoLock';
 
 export { passStrength } from './fields';
 import './vault.css';
@@ -168,6 +169,7 @@ function Gate() {
         <button className="sm ghost" onClick={() => setChanging(!changing)}>
           {t('vault.changePassphrase')}
         </button>
+        <AutoLockButton />
         <button className="sm" onClick={() => void lockVault()}>
           <Lock /> {t('vault.lock')}
         </button>

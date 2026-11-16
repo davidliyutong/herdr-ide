@@ -1057,7 +1057,7 @@
       "95"
     ],
     "vault.approvalTimeout": 60,
-    "vault.autoLock": 0,
+    "vault.autoLock": 60,
     "vault.runMaxTimeout": 600,
     "vault.runOutput": 64,
     "vault.runTimeout": 120,

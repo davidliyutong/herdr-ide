@@ -154,7 +154,9 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   gate stands before every approval, reveal and change: the passphrase,
   so no program, not even one on the core's computer, approves a request
   or reads a variable that asks every time without you; every value that
-  leaves the vault is first written to its access log. Variables move
+  leaves the vault is first written to its access log. It locks after an
+  hour without use; the panel counts down and sets another time for the
+  current unlock (presets or one you type). Variables move
   between vaults in files encrypted under a passphrase of their own
   (export and import, with a preview and a choice per variable)
   ([30](docs/features/30-variable-vault.md)).

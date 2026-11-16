@@ -20,6 +20,7 @@ import { VaultPanel, passStrength } from '../plugins/vault/VaultPanel';
 import { VaultApprovals } from '../plugins/vault/Approvals';
 import { endSession, loadVault, openSession, useVault, vaultApi, vaultMessage } from '../plugins/vault/api';
 import { mcpCommand, setupSnippets } from '../plugins/vault/setup';
+import { clockText, minutesText, parseMinutes } from '../plugins/vault/lockTimes';
 import { pluginMessage } from '../plugins/registry';
 import '../plugins';
 
@@ -62,6 +63,8 @@ describe('vault', () => {
   let pending: unknown[];
   /** The access log GET log answers. */
   let accessLog: unknown[];
+  /** The auto-lock the list says (the stand-in sets it as the route does). */
+  let autoLock: { after: number; custom: boolean; setting: number; lockAt?: string };
 
   beforeEach(async () => {
     calls = [];
@@ -70,6 +73,7 @@ describe('vault', () => {
     listError = answerError = sessionError = undefined;
     failPut = sessionGone = false;
     pending = [];
+    autoLock = { after: 3600, custom: false, setting: 3600, lockAt: new Date(Date.now() + 59 * 60_000 + 30_000).toISOString() };
     accessLog = [{ time: '2026-01-01T00:00:00Z', m: 'm1', tool: 'get', names: ['GITHUB_TOKEN'], result: 'approved' }];
     await endSession().catch(() => undefined);
     useVault.setState({ status: undefined, variables: [], log: [], requests: {}, error: undefined, session: false });
@@ -90,6 +94,7 @@ describe('vault', () => {
           status,
           session: sent,
           idle: 600,
+          autoLock,
           variables: [
             { name: 'GITHUB_TOKEN', description: 'for gh', machines: ['*'], injectOnly: false, created: '', updated: '' },
             { name: 'DB_PASS', description: '', machines: [], injectOnly: true, created: '', updated: '' },
@@ -112,6 +117,17 @@ describe('vault', () => {
       // The gate.
       if (!open) return json({ error: 'vault_session' }, 401);
       if (url.endsWith('/reveal')) return json({ value: 'ghp_secret' });
+      if (url === '/api/p/vault/autolock') {
+        const { minutes } = JSON.parse(String(init!.body)) as { minutes: number | null };
+        const after = minutes === null ? 3600 : minutes * 60;
+        autoLock = {
+          after,
+          custom: minutes !== null,
+          setting: 3600,
+          lockAt: after ? new Date(Date.now() + after * 1000).toISOString() : undefined,
+        };
+        return json(autoLock);
+      }
       if (url.startsWith('/api/p/vault/vars/') && method === 'PUT') return failPut ? json({ error: 'failed' }, 500) : json({});
       if (answer) return json({ ok: true });
       return json({ error: 'not_found' }, 404);
@@ -323,6 +339,71 @@ describe('vault', () => {
     await unlock();
     expect(host.querySelector('.vault-gate .callout.error')?.textContent).toBe(t('vault.error.wait'));
     expect(t('vault.error.busy')).not.toBe(t('vault.error.wait'));
+  });
+
+  it('counts down to the auto-lock and sets another time for this unlock', async () => {
+    await act(async () => root.render(createElement(VaultPanel)));
+    await flush();
+    await unlock();
+    const btn = () => host.querySelector<HTMLButtonElement>('.vault-autolock')!;
+    expect(btn().textContent).toMatch(/^59:(29|30)$/);
+    expect(btn().title).toBe(t('vault.autoLock.title', { time: t('vault.autoLock.hours', { n: 1 }) }));
+    const key = (k: string) =>
+      act(async () => {
+        (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+      });
+    const choose = async (q: string) => {
+      await act(async () => btn().click());
+      await flush();
+      const search = document.body.querySelector<HTMLInputElement>('.picker .picker-search')!;
+      await act(async () => type(search, q));
+      await key('Enter');
+      await flush();
+    };
+    // A time typed: an hour and a half.
+    await choose('1h30m');
+    expect(calls.filter((c) => c.url === '/api/p/vault/autolock').at(-1)).toMatchObject({
+      method: 'POST',
+      token: TOKEN,
+      body: { minutes: 90 },
+    });
+    expect(btn().textContent).toMatch(/^1:(29:59|30:00)$/);
+    expect(btn().classList.contains('custom')).toBe(true);
+    // Never, from the list.
+    await choose(t('vault.autoLock.never'));
+    expect(calls.at(-1)!.body).toEqual({ minutes: 0 });
+    expect(btn().textContent).toBe(t('vault.autoLock.off'));
+    // Back to the setting's time.
+    await choose(t('vault.autoLock.default', { time: t('vault.autoLock.hours', { n: 1 }) }));
+    expect(calls.at(-1)!.body).toEqual({ minutes: null });
+    expect(btn().classList.contains('custom')).toBe(false);
+  });
+
+  it('reads times typed for the auto-lock', () => {
+    expect(['90', '90m', '90 min', '2h', '1.5h', '1h30m', '1h30', '2小时', '45分钟'].map(parseMinutes)).toEqual([
+      90, 90, 90, 120, 90, 90, 90, 120, 45,
+    ]);
+    expect(['', '0', 'h', '25h', '2d', 'abc', '-5'].map(parseMinutes)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    expect([clockText(5), clockText(65), clockText(3599.2), clockText(3723), clockText(-3)]).toEqual([
+      '0:05',
+      '1:05',
+      '1:00:00',
+      '1:02:03',
+      '0:00',
+    ]);
+    expect([minutesText(45), minutesText(120), minutesText(90)]).toEqual([
+      t('vault.autoLock.minutes', { n: 45 }),
+      t('vault.autoLock.hours', { n: 2 }),
+      t('vault.autoLock.hoursMinutes', { h: 1, m: 30 }),
+    ]);
   });
 
   it('creates the passphrase of a new vault', async () => {

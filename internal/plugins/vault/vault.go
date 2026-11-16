@@ -140,6 +140,10 @@ type Plugin struct {
 	lastUse              time.Time
 	lockTimer            *time.Timer
 	lockAfter, lockCheck time.Duration
+	// lockFor replaces vault.autoLock until the vault locks, once a page
+	// set the countdown (lockForSet; 0: never).
+	lockFor    time.Duration
+	lockForSet bool
 }
 
 type session struct {
@@ -269,6 +273,7 @@ func (p *Plugin) Routes() []plugin.Route {
 		{Method: "DELETE", Path: "session", Mutating: true, Audit: "session_end", Handler: p.handleEndSession},
 		{Method: "POST", Path: "passphrase", Mutating: true, Audit: "passphrase", Handler: p.handlePassphrase},
 		{Method: "POST", Path: "lock", Mutating: true, Audit: "lock", Handler: p.handleLock},
+		{Method: "POST", Path: "autolock", Mutating: true, Audit: "autolock", Handler: p.gated(p.handleAutoLock)},
 		{Method: "GET", Path: "requests", Handler: p.handleRequests},
 		{Method: "POST", Path: "requests/{id}", Mutating: true, Audit: "answer", Handler: p.handleAnswer},
 		{Method: "GET", Path: "log", Handler: p.handleLog},
@@ -319,8 +324,10 @@ func (p *Plugin) handleList(c *plugin.Call, w http.ResponseWriter, r *http.Reque
 	// Whether the page's session is open, without counting as its use: only
 	// what passes the gate keeps a session from ending idle.
 	idle, _ := p.sessionLimits(c.Host)
+	st := s.Status()
 	plugin.WriteJSON(w, http.StatusOK, map[string]any{
-		"status": s.Status(), "variables": s.List(), "session": p.sessionOf(c.Host, r, false), "idle": idle.Seconds(),
+		"status": st, "variables": s.List(), "session": p.sessionOf(c.Host, r, false), "idle": idle.Seconds(),
+		"autoLock": p.autoLockState(c.Host, st.Locked || st.Setup),
 	})
 }
 
@@ -674,6 +681,7 @@ func (p *Plugin) handleLock(c *plugin.Call, w http.ResponseWriter, r *http.Reque
 	p.keyMu.Lock()
 	s.Lock()
 	p.endSessions()
+	p.clearLockFor()
 	p.keyMu.Unlock()
 	changed(c.Host)
 	plugin.WriteJSON(w, http.StatusOK, s.Status())

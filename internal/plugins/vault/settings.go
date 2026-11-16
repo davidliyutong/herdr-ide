@@ -30,7 +30,7 @@ const (
 
 // Defaults of what the settings change.
 const (
-	DefaultAutoLock      = 0
+	DefaultAutoLock      = 60
 	DefaultRunTimeout    = 120 * time.Second
 	DefaultRunMaxTimeout = 600 * time.Second
 	DefaultRunOutput     = 64 << 10
@@ -86,8 +86,19 @@ func (p *Plugin) sessionLimits(h plugin.Host) (idle, most time.Duration) {
 }
 
 // autoLockAfter is how long the vault stays unlocked without use; 0 never
-// locks it.
+// locks it. The time a page set for this unlock (setLockFor) comes first.
 func (p *Plugin) autoLockAfter(h plugin.Host) time.Duration {
+	p.mu.Lock()
+	set, d := p.lockForSet, p.lockFor
+	p.mu.Unlock()
+	if set {
+		return d
+	}
+	return p.autoLockSetting(h)
+}
+
+// autoLockSetting is the auto-lock's time vault.autoLock sets.
+func (p *Plugin) autoLockSetting(h plugin.Host) time.Duration {
 	if p.lockAfter > 0 {
 		return p.lockAfter
 	}

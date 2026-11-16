@@ -312,14 +312,16 @@ passphrase the dialogs ask for.
 
 - `vault.approvalTimeout`: seconds a request waits for an answer (60;
   10–600);
-- `vault.autoLock`: minutes after which the vault locks when unused (0,
-  never; up to 1440). A use is an unlock, a page's action through the gate
-  (a change, a reveal, an approval, an export or import) or a value
-  released to a machine; lists and refusals are not. The lock is the
-  route's (every session ends, after a passphrase check that runs), audited
-  as `vault.locked` with `reason: idle`. While the vault is unlocked a
-  timer looks at least every minute, so a change of the setting counts
-  within one;
+- `vault.autoLock`: minutes after which the vault locks when unused (60;
+  0, never; up to 1440). A use is an unlock, a page's action through the
+  gate (a change, a reveal, an approval, an export or import, setting the
+  countdown) or a value released to a machine; lists and refusals are not.
+  The lock is the route's (every session ends, after a passphrase check
+  that runs), audited as `vault.locked` with `reason: idle`. While the
+  vault is unlocked a timer looks at least every minute, so a change of
+  the setting counts within one. The panel shows the countdown and may set
+  another time for the current unlock (`POST autolock`, below), which
+  holds until the vault locks: the next unlock follows the setting again;
 - `vault.sessionIdle` and `vault.sessionMax`: a page's session ends unused
   for those minutes (30; 1–240) or those hours after it began (12; 1–24);
 - `vault.runTimeout`, `vault.runMaxTimeout` and `vault.runOutput`:
@@ -404,8 +406,17 @@ The panel **Variable Vault** of the right sidebar (command
   recovered); otherwise, without a session, a card to unlock this page with
   the passphrase, and with one a bar that says the page is unlocked until
   it is idle for the minutes of `vault.sessionIdle` (which the list
-  carries, `idle`), with Change Passphrase and Lock; both say when the
-  passphrase was set. A page that the gate refuses (its session ended)
+  carries, `idle`), with Change Passphrase, the auto-lock's countdown and
+  Lock; both say when the passphrase was set. The countdown (`AutoLock.tsx`)
+  shows the time left before the vault locks unless something uses it
+  (`autoLock.lockAt` of the list, ticking every second; at zero, or when a
+  use elsewhere moved it, the list is loaded again), or **No auto-lock**.
+  A click opens a picker: **As in Settings** (the setting's time), 15 and
+  30 minutes, 1, 2, 4 and 8 hours, **Never**, or a time typed (`90`,
+  `90m`, `2h`, `1.5h`, `1h30m`, `2小时`; 1 minute to a day). The choice
+  holds for this unlock on every page (the core keeps it, and tells the
+  pages), is shown in the accent while it does, and counts as a use, so
+  the countdown starts again from it. A page that the gate refuses (its session ended)
   shows the unlock card again. The passphrase fields keep password
   managers away (`autocomplete="off"` and the attributes 1Password,
   LastPass and Bitwarden honor): a passphrase saved by a browser is
@@ -517,9 +528,10 @@ choices), with one choice for every name that exists; Import sends them.
   while another runs: `429 busy`.
 - Nobody answers: the request is denied after 60 s
   (`vault.approvalTimeout`); the agent gets `denied` and can ask again.
-- The vault unused for the minutes of `vault.autoLock`: it locks, every
-  page's session ends and machines get `vault_locked` until a page unlocks
-  it again.
+- The vault unused for the minutes of `vault.autoLock` (or the time the
+  panel set for this unlock): it locks, every page's session ends, the
+  time set is forgotten and machines get `vault_locked` until a page
+  unlocks it again.
 - Too many requests waiting: past 4 of the machine (or 32 in all) the
   agent gets `busy`, says so to the model, and can ask again once the user
   answered.
@@ -637,7 +649,9 @@ server exposes.
   the values before them and out-of-bounds values are refused
   (`TestSettingsDefs`); the approval's wait, a session's idle and longest
   life, the auto-lock (uses keep the vault unlocked, then it locks, ends
-  every session and is audited; 0 never locks it: `TestAutoLock`) and
+  every session and is audited; 0 never locks it: `TestAutoLock`; a time
+  a page sets behind the gate, its bounds, `lockAt` in the list, the lock
+  at that time and the setting again after it: `TestAutoLockSetByPage`) and
   `run_with_env`'s limits sent with an env's values, not a get's.
 - `internal/vaultmcp/mcp_test.go`: JSON-RPC over pipes (initialize and
   version negotiation, notifications, tools), masking, truncation, masking

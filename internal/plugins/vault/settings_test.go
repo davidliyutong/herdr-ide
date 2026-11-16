@@ -27,7 +27,7 @@ func withSettings(t *testing.T, h *fakeHost, values map[string]float64) {
 func TestSettingsDefs(t *testing.T) {
 	st := settings.New("", Settings)
 	want := map[string]float64{
-		SettingApprovalTimeout: 60, SettingAutoLock: 0, SettingSessionIdle: 30, SettingSessionMax: 12,
+		SettingApprovalTimeout: 60, SettingAutoLock: 60, SettingSessionIdle: 30, SettingSessionMax: 12,
 		SettingRunTimeout: 120, SettingRunMaxTimeout: 600, SettingRunOutput: 64,
 	}
 	for k, v := range want {
@@ -51,7 +51,7 @@ func TestSettingsDefs(t *testing.T) {
 	// Without settings (or out of their bounds) the defaults hold.
 	h := &fakeHost{}
 	p := &Plugin{}
-	if p.timeout(h) != DefaultTimeout || p.autoLockAfter(h) != 0 {
+	if p.timeout(h) != DefaultTimeout || p.autoLockAfter(h) != time.Hour {
 		t.Error("defaults without settings")
 	}
 	if idle, most := p.sessionLimits(h); idle != SessionIdle || most != SessionMax {
@@ -68,12 +68,17 @@ func TestApprovalTimeoutSetting(t *testing.T) {
 	p.Timeout = 0
 	withSettings(t, h, map[string]float64{SettingApprovalTimeout: 10})
 	s.Set("KEY", vaultstore.Update{Value: str("v")})
-	go p.Handle(context.Background(), h, "m1", agentproto.VaultRequest{Tool: "get", Names: []string{"KEY"}})
+	done := make(chan struct{})
+	go func() {
+		p.Handle(context.Background(), h, "m1", agentproto.VaultRequest{Tool: "get", Names: []string{"KEY"}})
+		close(done)
+	}()
 	req := (<-h.sent)["request"].(*Request)
 	if d := req.Expires.Sub(req.Created); d != 10*time.Second {
 		t.Errorf("waits %v", d)
 	}
 	p.answerRequest(req.ID, AnswerDeny)
+	<-done // it writes the access log, in the test's directory
 }
 
 // vault.sessionIdle and vault.sessionMax end a page's session, and the
@@ -159,5 +164,62 @@ func TestRunLimitsGoWithEnv(t *testing.T) {
 	}
 	if r := p.Handle(ctx, h, "m1", agentproto.VaultRequest{Tool: "get", Names: []string{"KEY"}}); !r.OK || r.Run != nil {
 		t.Errorf("get %+v", r)
+	}
+}
+
+// A page sets the auto-lock's time for this unlock (presets, a time of its
+// own, never), behind the gate; the list says when the vault locks; the
+// vault locks at that time; the next unlock follows the setting again.
+func TestAutoLockSetByPage(t *testing.T) {
+	p, h, s := newTest(t)
+	p.lockCheck = 20 * time.Millisecond
+	c := newClient(p, h)
+	_, out := c.do("GET", "/api/p/vault", "")
+	if al := out["autoLock"].(map[string]any); al["after"] != 3600.0 || al["custom"] != false || al["lockAt"] != nil {
+		t.Fatalf("locked: %v", al)
+	}
+	if code, _ := c.do("POST", "/api/p/vault/autolock", `{"minutes":5}`); code != 401 {
+		t.Fatalf("without a session: %d", code)
+	}
+	c.session(t)
+	_, out = c.do("GET", "/api/p/vault", "")
+	at, _ := time.Parse(time.RFC3339, out["autoLock"].(map[string]any)["lockAt"].(string))
+	if d := time.Until(at); d < 59*time.Minute || d > time.Hour+time.Second {
+		t.Fatalf("locks in %v", d)
+	}
+	for _, bad := range []string{`{"minutes":-1}`, `{"minutes":1441}`, `{"minutes":1.5}`, `{`} {
+		if code, _ := c.do("POST", "/api/p/vault/autolock", bad); code != 400 {
+			t.Errorf("%s: %d", bad, code)
+		}
+	}
+	code, al := c.do("POST", "/api/p/vault/autolock", `{"minutes":0}`)
+	if code != 200 || al["after"] != 0.0 || al["custom"] != true || al["lockAt"] != nil {
+		t.Fatalf("never: %d %v", code, al)
+	}
+	if code, al = c.do("POST", "/api/p/vault/autolock", `{"minutes":null}`); al["after"] != 3600.0 || al["custom"] != false || al["setting"] != 3600.0 {
+		t.Fatalf("back to the setting: %d %v", code, al)
+	}
+	if h.messageCount("changed") == 0 {
+		t.Error("pages not told")
+	}
+	// A time of its own: the vault locks then, and forgets it.
+	if code, al = c.do("POST", "/api/p/vault/autolock", `{"minutes":1}`); al["after"] != 60.0 || al["custom"] != true {
+		t.Fatalf("a minute: %d %v", code, al)
+	}
+	p.mu.Lock()
+	p.lockFor = 100 * time.Millisecond // a minute is long for a test
+	p.mu.Unlock()
+	deadline := time.Now().Add(5 * time.Second)
+	for !s.Status().Locked {
+		if time.Now().After(deadline) {
+			t.Fatal("not locked")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if p.autoLockAfter(h) != time.Hour {
+		t.Errorf("after the lock: %v", p.autoLockAfter(h))
+	}
+	if !strings.Contains(h.auditLog(), `"reason":"idle"`) {
+		t.Errorf("audit %s", h.auditLog())
 	}
 }

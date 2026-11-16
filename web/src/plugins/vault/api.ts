@@ -145,7 +145,7 @@ function opened(o: Opened) {
 const enc = encodeURIComponent;
 
 export const vaultApi = {
-  list: () => call<{ status: VaultStatus; variables: VaultVariable[]; session?: boolean; idle?: number }>('GET', ''),
+  list: () => call<{ status: VaultStatus; variables: VaultVariable[]; session?: boolean; idle?: number; autoLock?: AutoLock }>('GET', ''),
   /** Creates or changes a variable; `to` renames it in the same write. */
   set: (name: string, body: { to?: string; description?: string; machines?: string[]; injectOnly?: boolean; value?: string }) =>
     call<VaultVariable>('PUT', `/vars/${enc(name)}`, body),
@@ -156,6 +156,9 @@ export const vaultApi = {
   passphrase: (passphrase: string, old?: string) =>
     call<Opened>('POST', '/passphrase', old === undefined ? { passphrase } : { old, passphrase }),
   lock: () => call<VaultStatus>('POST', '/lock'),
+  /** Sets the auto-lock's time for this unlock (0: never), null for the
+   * setting's. */
+  autoLock: (minutes: number | null) => call<AutoLock>('POST', '/autolock', { minutes }),
   requests: () => call<{ requests: VaultRequest[] }>('GET', '/requests'),
   answer: (id: string, answer: Answer) => call('POST', `/requests/${enc(id)}`, { answer }),
   log: () => call<{ log: VaultAccess[] }>('GET', '/log'),
@@ -201,6 +204,18 @@ export interface ImportChoice {
   as?: string;
 }
 
+/** The auto-lock as the core keeps it. */
+export interface AutoLock {
+  /** Seconds without use after which the vault locks; 0: never. */
+  after: number;
+  /** A page set it for this unlock (else the setting's). */
+  custom: boolean;
+  /** The setting's time, in seconds. */
+  setting: number;
+  /** When the vault locks if unused (ISO), while it is unlocked. */
+  lockAt?: string;
+}
+
 interface VaultState {
   status?: VaultStatus;
   /** This page has an open session: it may change, reveal and approve. */
@@ -214,6 +229,7 @@ interface VaultState {
   error?: string;
   /** Seconds a session lasts unused (the core's setting). */
   idle?: number;
+  autoLock?: AutoLock;
 }
 
 export const useVault = create<VaultState>(() => ({ variables: [], log: [], requests: {}, session: false }));
@@ -244,6 +260,13 @@ export async function lockVault() {
   await loadVault();
 }
 
+/** Sets the auto-lock's time for this unlock (minutes, 0: never; null:
+ * the setting's), which starts the countdown again. */
+export async function setAutoLock(minutes: number | null) {
+  const autoLock = await vaultApi.autoLock(minutes);
+  useVault.setState({ autoLock });
+}
+
 /** Loads the variables and the log again. */
 export async function loadVault() {
   try {
@@ -258,6 +281,7 @@ export async function loadVault() {
       log: log.log ?? [],
       session: !!token,
       idle: list.idle,
+      autoLock: list.autoLock,
       error: undefined,
     });
   } catch (e) {
