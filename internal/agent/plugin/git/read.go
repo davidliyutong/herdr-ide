@@ -40,6 +40,9 @@ type Repo struct {
 	// revert.
 	State   string   `json:"state,omitempty"`
 	Remotes []string `json:"remotes"`
+	// RemoteURLs are the remotes' fetch URLs without what could be a
+	// credential (a URL's user and password).
+	RemoteURLs map[string]string `json:"remoteUrls,omitempty"`
 	// Parents are the top levels of the repositories this one is nested
 	// in, innermost first.
 	Parents []string `json:"parents,omitempty"`
@@ -167,7 +170,50 @@ func (r *repo) info(ctx context.Context) (*Repo, error) {
 			}
 		}
 	}
+	if len(info.Remotes) > 0 {
+		if res, err := r.git(ctx, run{args: []string{"remote", "-v"}}); err == nil {
+			info.RemoteURLs = remoteURLs(string(res.out))
+		}
+	}
 	return info, nil
+}
+
+// remoteURLs reads `git remote -v`: each remote's fetch URL, redacted.
+func remoteURLs(out string) map[string]string {
+	urls := map[string]string{}
+	for _, l := range strings.Split(out, "\n") {
+		name, rest, ok := strings.Cut(l, "\t")
+		u, kind, ok2 := strings.Cut(rest, " (")
+		if !ok || !ok2 || kind != "fetch)" {
+			continue
+		}
+		urls[name] = redactURL(u)
+	}
+	return urls
+}
+
+// redactURL drops a URL's user information (https://user:token@host/…:
+// tokens are often put there), and of the scp-like form (user@host:path)
+// a user with a password.
+func redactURL(s string) string {
+	if i := strings.Index(s, "://"); i > 0 {
+		rest := s[i+3:]
+		authority := rest
+		if j := strings.IndexByte(rest, '/'); j >= 0 {
+			authority = rest[:j]
+		}
+		if at := strings.LastIndexByte(authority, '@'); at >= 0 {
+			return s[:i+3] + rest[at+1:]
+		}
+		return s
+	}
+	if at := strings.Index(s, "@"); at > 0 {
+		user := s[:at]
+		if !strings.ContainsAny(user, "/") && strings.Contains(user, ":") {
+			return s[at+1:]
+		}
+	}
+	return s
 }
 
 // progress is the operation in progress in a git directory.
@@ -805,27 +851,57 @@ type Branch struct {
 	Subject string `json:"subject"`
 }
 
+// MaxTracked bounds the branches with an upstream whose ahead and behind
+// branches reads: each takes a walk of history, and repositories with
+// thousands of branches would wait for them all.
+const MaxTracked = 300
+
 func (r *repo) branches(ctx context.Context) ([]Branch, error) {
 	res, err := r.git(ctx, run{args: []string{"for-each-ref",
-		"--format=%(refname)%00%(objectname)%00%(upstream:short)%00%(upstream:track,nobracket)%00%(HEAD)%00%(committerdate:raw)%00%(symref)%00%(contents:subject)",
+		"--format=%(refname)%00%(objectname)%00%(upstream:short)%00%(HEAD)%00%(committerdate:raw)%00%(symref)%00%(contents:subject)",
 		"refs/heads", "refs/remotes"}})
 	if err != nil {
 		return nil, err
 	}
 	out := []Branch{}
+	tracked := 0
 	for _, l := range strings.Split(string(res.out), "\n") {
 		f := strings.Split(l, "\x00")
-		if len(f) < 8 || f[6] != "" {
+		if len(f) < 7 || f[5] != "" {
 			continue
 		}
-		b := Branch{Full: f[0], Hash: f[1], Upstream: f[2], Current: f[4] == "*", Subject: f[7]}
-		b.Date, _ = strconv.ParseInt(strings.Fields(f[5] + " 0")[0], 10, 64)
+		b := Branch{Full: f[0], Hash: f[1], Upstream: f[2], Current: f[3] == "*", Subject: f[6]}
+		b.Date, _ = strconv.ParseInt(strings.Fields(f[4] + " 0")[0], 10, 64)
 		if strings.HasPrefix(f[0], "refs/remotes/") {
 			b.Remote, b.Name = true, strings.TrimPrefix(f[0], "refs/remotes/")
 		} else {
 			b.Name = strings.TrimPrefix(f[0], "refs/heads/")
+			if b.Upstream != "" {
+				tracked++
+			}
 		}
-		for _, part := range strings.Split(f[3], ",") {
+		out = append(out, b)
+	}
+	if tracked == 0 || tracked > MaxTracked {
+		return out, nil
+	}
+	// Ahead, behind and gone upstreams of the local branches.
+	res, err = r.git(ctx, run{args: []string{"for-each-ref", "--format=%(refname)%00%(upstream:track,nobracket)", "refs/heads"}})
+	if err != nil {
+		return nil, err
+	}
+	track := map[string]string{}
+	for _, l := range strings.Split(string(res.out), "\n") {
+		if name, t, ok := strings.Cut(l, "\x00"); ok {
+			track[name] = t
+		}
+	}
+	for i := range out {
+		b := &out[i]
+		if b.Remote || b.Upstream == "" {
+			continue
+		}
+		for _, part := range strings.Split(track[b.Full], ",") {
 			part = strings.TrimSpace(part)
 			switch {
 			case part == "gone":
@@ -836,7 +912,6 @@ func (r *repo) branches(ctx context.Context) ([]Branch, error) {
 				b.Behind, _ = strconv.Atoi(strings.TrimPrefix(part, "behind "))
 			}
 		}
-		out = append(out, b)
 	}
 	return out, nil
 }

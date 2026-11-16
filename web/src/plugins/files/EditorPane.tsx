@@ -25,6 +25,7 @@ import { lineChanges, quickDiff, type LineChange } from './quickDiff';
 import { useDecorationVersion } from './decorations';
 import { startPolling } from './poller';
 import { isMediaPath, MediaView } from '../../components/PreviewPane';
+import { isMixed, restoreEols, useMixedLineEndings } from '../../eol';
 import './files.css';
 
 /** The largest file the editor opens (the core's limit for a save). */
@@ -255,11 +256,21 @@ interface KeptText extends KeptEdit {
   model: TextModel;
   version: Version | undefined;
   savedAt: number;
+  /** The text as loaded or saved (its line endings, eol.ts). */
+  raw: string;
 }
 
 function TextEditor({ m, pane, view, focused }: PaneViewProps) {
   const path = String(view.path ?? '');
   const readOnly = useStore((s) => s.readOnly);
+  // A file that mixes line endings (eol.ts): Monaco shows one kind; a
+  // save keeps each line's own (keep), writes Monaco's (unify), or the
+  // file is not edited (readOnly).
+  const eolMode = useMixedLineEndings();
+  const [mixed, setMixed] = useState(false);
+  /** The text as loaded or saved, whose line endings a save keeps. */
+  const raw = useRef('');
+  const locked = readOnly || (mixed && eolMode === 'readOnly');
   const host = useRef<HTMLDivElement>(null);
   const ed = useRef<{ editor: CodeEditor; monaco: Monaco }>(undefined);
   /** The version on disk the text was loaded or saved as; undefined for a
@@ -287,6 +298,8 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
   const showText = useCallback((text: string, v: Version | undefined) => {
     version.current = v;
     bom.current = !!v?.bom;
+    raw.current = text;
+    setMixed(isMixed(text));
     dismissed.current = undefined;
     const c = ed.current;
     const model = c?.editor.getModel() ?? undefined;
@@ -325,13 +338,16 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
   const save = useCallback(
     async (force = false) => {
       const e = ed.current?.editor;
-      if (!e || readOnly) return false;
-      const text = (bom.current ? BOM : '') + e.getValue();
+      if (!e || locked) return false;
+      const body = eolMode === 'keep' ? restoreEols(raw.current, e.getValue()) : e.getValue();
+      const text = (bom.current ? BOM : '') + body;
       const at = e.getModel()?.getAlternativeVersionId() ?? 0;
       setSaving(true);
       try {
         const r = await filesApi.write(m, path, text, force ? 'force' : (version.current ?? 'new'));
         if (r.entry) version.current = { size: r.entry.size, mtime: r.entry.mtime, bom: bom.current };
+        raw.current = body;
+        setMixed(isMixed(body));
         dismissed.current = undefined;
         savedAt.current = at;
         setDirty((e.getModel()?.getAlternativeVersionId() ?? 0) !== at);
@@ -345,7 +361,7 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
         setSaving(false);
       }
     },
-    [m, path, readOnly],
+    [m, path, locked, eolMode],
   );
   const saveRef = useRef(save);
   saveRef.current = save;
@@ -380,6 +396,9 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
       if (kept) {
         version.current = kept.version;
         savedAt.current = kept.savedAt;
+        bom.current = !!kept.version?.bom;
+        raw.current = kept.raw;
+        setMixed(isMixed(kept.raw));
       }
       const model = kept?.model ?? monaco.editor.getModel(uri) ?? monaco.editor.createModel('', undefined, uri);
       editor.setModel(model);
@@ -403,15 +422,19 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
       if (!model) return;
       if (model.getAlternativeVersionId() === savedAt.current) return model.dispose();
       const base = version.current;
+      const loaded = raw.current;
+      const keep = eolMode === 'keep';
       keepEdit<KeptText>(m, pane, {
         name: path.slice(path.lastIndexOf('/') + 1) || path,
         path,
         model,
         version: base,
         savedAt: savedAt.current,
+        raw: loaded,
         save: async () => {
           try {
-            await filesApi.write(m, path, model.getValue(), base ?? 'new');
+            const body = keep ? restoreEols(loaded, model.getValue()) : model.getValue();
+            await filesApi.write(m, path, (base?.bom ? BOM : '') + body, base ?? 'new');
             return true;
           } catch (err) {
             useStore.getState().toast(t('files.saveFailed', { error: errorText(err) }), undefined, undefined, 'error');
@@ -425,8 +448,8 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
   }, [m, path, showText]);
 
   useEffect(() => {
-    ed.current?.editor.updateOptions({ readOnly });
-  }, [readOnly]);
+    ed.current?.editor.updateOptions({ readOnly: locked });
+  }, [locked]);
 
   useEffect(() => {
     if (focused) ed.current?.editor.focus();
@@ -489,7 +512,7 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
             ●
           </span>
         )}
-        {readOnly && <span className="tag">{t('files.readOnly')}</span>}
+        {locked && <span className="tag">{t('files.readOnly')}</span>}
         <span className="spacer" />
         {changes}
         <button className="icon" title={t('files.revert')} aria-label={t('files.revert')} onClick={() => void reload()}>
@@ -500,7 +523,7 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
             className="icon"
             title={t('files.save')}
             aria-label={t('files.save')}
-            disabled={saving || status.kind !== 'ready' || !dirty}
+            disabled={saving || status.kind !== 'ready' || !dirty || locked}
             onClick={() => void save()}
           >
             <Save />
@@ -514,7 +537,7 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
           <button className="btn" onClick={() => void reload()}>
             {t('files.conflict.reload')}
           </button>
-          {!readOnly && (
+          {!locked && (
             <button className="primary danger" onClick={() => void save(true)}>
               {t('files.conflict.overwrite')}
             </button>
@@ -528,6 +551,11 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
           >
             {t('files.conflict.keep')}
           </button>
+        </div>
+      )}
+      {mixed && (status.kind === 'ready' || status.kind === 'conflict') && (
+        <div className="callout eol-note" role="note">
+          {t(eolMode === 'readOnly' ? 'eol.readOnly' : eolMode === 'unify' ? 'eol.unify' : 'eol.keep', { name })}
         </div>
       )}
       {status.kind === 'binary' && note('files.binary')}

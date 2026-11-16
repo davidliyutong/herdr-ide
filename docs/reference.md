@@ -142,6 +142,12 @@ in the UI; a setting with a scope can have its own value per machine, under
 | `plugins.git.enabled` | `true`, `false` | `true` | – | – |
 | `plugins.usage.enabled` | `true`, `false` | `true` | – | – |
 | `plugins.vault.enabled` | `true`, `false` | `true` | – | – |
+| `git.mixedLineEndings` | `keep`, `unify`, `readOnly` | `"keep"` | – | – |
+| `git.changesView` | `list`, `tree` | `"list"` | – | – |
+| `git.untrackedChanges` | `mixed`, `separate` | `"mixed"` | – | – |
+| `git.autoFetch` | integer, 0–240 | `0` | – | – |
+| `git.confirmSync` | `true`, `false` | `false` | – | – |
+| `git.graphPageSize` | integer, 50–1000 | `300` | – | – |
 | `usage.refresh` | `manual`, `1`, `2`, `5`, `15`, `30`, `60`, `adaptive` | `"adaptive"` | – | – |
 | `usage.refreshOpen` | integer, 1–60 | `5` | – | – |
 | `usage.refreshWorking` | integer, 1–120 | `10` | – | – |

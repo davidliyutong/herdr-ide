@@ -15,6 +15,7 @@ import { confirmDialog } from '../../dialog';
 import { t } from '../../i18n';
 import type { PaneViewProps } from '../api';
 import { keepEdit, keptEdit, takeEdit, useUnsaved, type KeptEdit } from '../../unsaved';
+import { eolName, hasLoneCR, isMixed, restoreEols, unifiedEol, useMixedLineEndings, type MixedLineEndings } from '../../eol';
 import { createDiffEditor, type DiffEditor, type Monaco, type TextModel } from '../monaco';
 import { ConflictError, filesApi, errorText as filesError } from '../files/api';
 import { gitApi, errorText, type Blob, type StatusFile } from './api';
@@ -101,6 +102,24 @@ export function selectedLines(sels: { startLineNumber: number; endLineNumber: nu
 
 type Status = { kind: 'loading' } | { kind: 'ready' } | { kind: 'binary' | 'tooLarge' } | { kind: 'error'; message: string };
 
+/** What a diff of files that mix line endings (eol.ts) can do, by the
+ * setting git.mixedLineEndings: keep saves each line's own ending and
+ * makes range patches of the files' bytes (not with a lone CR, which git
+ * does not take for a line's end); unify saves and patches Monaco's text
+ * (every ending alike: patches may not apply); readOnly edits nothing and
+ * acts on whole files only. */
+export function mixedRules(mode: MixedLineEndings, left: string, right: string) {
+  const mixed = isMixed(left) || isMixed(right);
+  const loneCR = hasLoneCR(left) || hasLoneCR(right);
+  return {
+    mixed,
+    editable: !mixed || mode !== 'readOnly',
+    ranges: !mixed || mode === 'unify' || (mode === 'keep' && !loneCR),
+    /** Patches and saves from the files' bytes. */
+    bytes: mixed && mode === 'keep',
+  };
+}
+
 /** The keys of diff panes with unsaved edits. */
 export const dirtyDiffs = new Set<string>();
 
@@ -117,6 +136,7 @@ interface KeptDiff extends KeptEdit {
 export function DiffPane({ m, pane, view, focused }: PaneViewProps) {
   const d = diffOf(view);
   const readOnly = useStore((s) => s.readOnly);
+  const eolMode = useMixedLineEndings();
   const st = useRepo(m, d.repo);
   const host = useRef<HTMLDivElement>(null);
   const ed = useRef<{ editor: DiffEditor; monaco: Monaco }>(undefined);
@@ -128,6 +148,13 @@ export function DiffPane({ m, pane, view, focused }: PaneViewProps) {
   const [fold, setFold] = useState(true);
   const [dirty, setDirty] = useState(false);
   const [changes, setChanges] = useState(0);
+  // The sides' texts as read (the files' bytes): whether they mix line
+  // endings (eol.ts).
+  const [texts, setTexts] = useState({ left: '', right: '' });
+  const rules = mixedRules(eolMode, texts.left, texts.right);
+  /** The text a save writes: each line's own ending kept (keep), else as
+   * the editor has it. */
+  const toSave = (text: string, right: Blob) => (eolMode === 'keep' ? restoreEols(right.text, text) : text);
   // Panes with unsaved edits keep their file when another one opens (ops.ts
   // openDiff), also while their edit is kept (unsaved.ts).
   useEffect(() => {
@@ -137,7 +164,7 @@ export function DiffPane({ m, pane, view, focused }: PaneViewProps) {
       if (!keptEdit(m, pane)) dirtyDiffs.delete(pane);
     };
   }, [dirty, m, pane]);
-  const editable = d.mode === 'worktree' && !readOnly;
+  const editable = d.mode === 'worktree' && !readOnly && rules.editable;
   const key = `${d.repo}\u0000${d.path}\u0000${d.mode}\u0000${d.rev ?? ''}\u0000${d.rev2 ?? ''}\u0000${d.parent ?? ''}\u0000${d.orig ?? ''}`;
   // The latest call of show and the file shown: an earlier call's answer
   // (another file's after a switch, an older version's) is dropped.
@@ -163,6 +190,7 @@ export function DiffPane({ m, pane, view, focused }: PaneViewProps) {
       // and modification time): saving it then refuses to overwrite what
       // changed on disk meanwhile.
       sides.current = keepDirty ? { left: s.left, right: sides.current.right } : s;
+      setTexts({ left: sides.current.left.text, right: sides.current.right.text });
       const c = ed.current;
       const model = c?.editor.getModel();
       if (model) {
@@ -184,12 +212,13 @@ export function DiffPane({ m, pane, view, focused }: PaneViewProps) {
     const c = ed.current;
     if (!c || !editable) return false;
     const model = c.editor.getModel()!.modified;
-    const text = model.getValue();
     const at = model.getAlternativeVersionId();
     const r = sides.current.right;
+    const text = toSave(model.getValue(), r);
     try {
       const res = await filesApi.write(m, join(d.repo, d.path), text, r.exists ? { mtime: r.mtime ?? 0, size: r.size } : 'new');
       if (res.entry) sides.current.right = { ...r, exists: true, text, size: res.entry.size, mtime: res.entry.mtime };
+      setTexts({ left: sides.current.left.text, right: text });
       savedAt.current = at;
       setDirty(model.getAlternativeVersionId() !== at);
       // Only the working tree changed: the status is read again.
@@ -204,7 +233,7 @@ export function DiffPane({ m, pane, view, focused }: PaneViewProps) {
       return false;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [m, key, editable, show]);
+  }, [m, key, editable, show, eolMode]);
   const saveRef = useRef(save);
   saveRef.current = save;
   // Closing the pane with changes not saved asks first (unsaved.ts).
@@ -242,6 +271,7 @@ export function DiffPane({ m, pane, view, focused }: PaneViewProps) {
         // version it was edited from.
         await show(true);
         sides.current = { ...sides.current, right: kept.right };
+        setTexts({ left: sides.current.left.text, right: kept.right.text });
       } else await show();
       if (focused) editor.getModifiedEditor().focus();
     })();
@@ -260,6 +290,7 @@ export function DiffPane({ m, pane, view, focused }: PaneViewProps) {
       };
       if (modified.getAlternativeVersionId() === savedAt.current) return free();
       const right = sides.current.right;
+      const keep = eolMode === 'keep';
       dirtyDiffs.add(pane);
       keepEdit<KeptDiff>(m, pane, {
         name: baseName(d.path),
@@ -273,7 +304,7 @@ export function DiffPane({ m, pane, view, focused }: PaneViewProps) {
             await filesApi.write(
               m,
               join(d.repo, d.path),
-              modified.getValue(),
+              keep ? restoreEols(right.text, modified.getValue()) : modified.getValue(),
               right.exists ? { mtime: right.mtime ?? 0, size: right.size } : 'new',
             );
             // Only the working tree changed: the status is read again.
@@ -355,10 +386,21 @@ export function DiffPane({ m, pane, view, focused }: PaneViewProps) {
     const e = side === 'modified' ? c.editor.getModifiedEditor() : c.editor.getOriginalEditor();
     const model = c.editor.getModel()!;
     const sel = selectedLines(e.getSelections() ?? []);
-    return rangePatch(d.path, model.original.getValue(), model.modified.getValue(), c.editor.getLineChanges() ?? [], sel, side, direction);
+    // A file that mixes line endings (keep): the lines of its bytes, which
+    // Monaco's line numbers count alike (no lone CR); unsaved text as a
+    // save would write it.
+    const s = sides.current;
+    const original = rules.bytes ? s.left.text : model.original.getValue();
+    const modified = rules.bytes
+      ? dirty
+        ? restoreEols(s.right.text, model.modified.getValue())
+        : s.right.text
+      : model.modified.getValue();
+    return rangePatch(d.path, original, modified, c.editor.getLineChanges() ?? [], sel, side, direction);
   };
 
   const applyRanges = async (what: 'stage' | 'unstage' | 'discard') => {
+    if (!rules.ranges) return useStore.getState().toast(t('git.diff.eol.noRanges'));
     if (what === 'discard' && dirty) return useStore.getState().toast(t('git.diff.saveFirst'));
     const patch = patchFor(what === 'stage' ? 'forward' : 'backward');
     if (!patch) return useStore.getState().toast(t('git.diff.noRanges'));
@@ -384,7 +426,7 @@ export function DiffPane({ m, pane, view, focused }: PaneViewProps) {
 
   const go = (dir: 'next' | 'previous') => ed.current?.editor.goToDiff(dir);
   const name = baseName(d.path);
-  const canRanges = !readOnly && status.kind === 'ready' && changes > 0;
+  const canRanges = !readOnly && status.kind === 'ready' && changes > 0 && rules.ranges;
 
   return (
     <div className="git-diff" data-autofocus tabIndex={-1}>
@@ -467,6 +509,11 @@ export function DiffPane({ m, pane, view, focused }: PaneViewProps) {
           )}
         </div>
       )}
+      {status.kind === 'ready' && rules.mixed && (
+        <div className="callout eol-note" role="note">
+          {eolNote(eolMode, name, texts.left, texts.right, d.mode === 'worktree')}
+        </div>
+      )}
       {status.kind === 'binary' && <div className="git-note muted">{t('git.diff.binary', { name })}</div>}
       {status.kind === 'tooLarge' && <div className="git-note muted">{t('git.diff.tooLarge', { name })}</div>}
       {status.kind === 'error' && <div className="git-note error">{status.message}</div>}
@@ -474,4 +521,16 @@ export function DiffPane({ m, pane, view, focused }: PaneViewProps) {
       <div ref={host} className="git-diff-host" hidden={status.kind !== 'ready'} />
     </div>
   );
+}
+
+/** What the diff says about a file that mixes line endings. */
+function eolNote(mode: MixedLineEndings, name: string, left: string, right: string, worktree: boolean): string {
+  if (mode === 'readOnly') return t('git.diff.eol.readOnly', { name });
+  if (mode === 'unify')
+    return t(worktree ? 'git.diff.eol.unify' : 'git.diff.eol.unifyPatch', {
+      name,
+      eol: eolName(unifiedEol(isMixed(right) ? right : left)),
+    });
+  if (!mixedRules(mode, left, right).ranges) return t('git.diff.eol.loneCR', { name });
+  return t('git.diff.eol.keep', { name });
 }

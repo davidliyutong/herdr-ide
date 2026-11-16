@@ -5,6 +5,9 @@
 import { actions } from '../../actions';
 import { confirmDialog } from '../../dialog';
 import { useStore } from '../../state/store';
+import { terms } from '../../state/terms';
+import * as L from '../../term/layout';
+import { confirmUnsaved, dropEdit, dropGoneEdits } from '../../unsaved';
 import { t, type MessageKey } from '../../i18n';
 import { openEditor } from '../files/ops';
 import type { Stash, StatusFile } from './api';
@@ -38,12 +41,14 @@ export const short = (h: string) => h.slice(0, 7);
 /** Opens a file's diff, reusing the pane that shows the same one; a
  * change of the working tree or the index (Source Control's rows) takes
  * over any such pane without unsaved edits, as VS Code's preview editor
- * does, so going through the changes opens one pane. */
-export function openDiff(m: string, d: DiffView, from?: string) {
+ * does, so going through the changes opens one pane. With own (several
+ * files opened at once) only the file's own pane is reused. */
+export function openDiff(m: string, d: DiffView, from?: string, o: { own?: boolean } = {}) {
   const same = (v: Record<string, unknown>) =>
     v.repo === d.repo && v.path === d.path && v.mode === d.mode && (v.rev ?? '') === (d.rev ?? '') && (v.rev2 ?? '') === (d.rev2 ?? '');
   const local = (mode: unknown) => mode === 'worktree' || mode === 'staged';
-  const reuse = (v: Record<string, unknown>) => same(v) || (local(d.mode) && local(v.mode) && !dirtyDiffs.has(`view:${String(v.id)}`));
+  const reuse = (v: Record<string, unknown>) =>
+    same(v) || (!o.own && local(d.mode) && local(v.mode) && !dirtyDiffs.has(`view:${String(v.id)}`));
   // Fields of the other file it showed are dropped.
   const view = { rev: undefined, rev2: undefined, orig: undefined, parent: undefined, untracked: undefined, ...d };
   return actions.openView(m, { plugin: 'git', kind: 'diff', ...view }, { from, reuse });
@@ -61,19 +66,57 @@ export function openFile(m: string, repo: string, path: string) {
 
 /** The diff of a file of the status: of the index (staged) or of the
  * working tree. */
-export function openStatusDiff(m: string, repo: string, f: StatusFile, staged: boolean) {
-  return openDiff(m, {
-    repo,
-    path: f.path,
-    mode: staged ? 'staged' : 'worktree',
-    orig: staged && f.orig ? f.orig : undefined,
-    untracked: f.kind === 'untracked' || undefined,
-  });
+export function openStatusDiff(m: string, repo: string, f: StatusFile, staged: boolean, o: { own?: boolean } = {}) {
+  return openDiff(
+    m,
+    {
+      repo,
+      path: f.path,
+      mode: staged ? 'staged' : 'worktree',
+      orig: staged && f.orig ? f.orig : undefined,
+      untracked: f.kind === 'untracked' || undefined,
+    },
+    undefined,
+    o,
+  );
 }
 
-/** Discards the changes of files of the working tree, after asking. */
-export async function discard(m: string, repo: string, files: StatusFile[]) {
-  if (!files.length) return;
+/** The panes of a layout that show files of repo (paths from its top
+ * level; one ending in / a directory and what is inside): the Git
+ * plugin's diffs of the working tree and the file explorer's editors, in
+ * every workspace. */
+export function panesOfFiles(layout: L.Layout, repo: string, paths: readonly string[]): string[] {
+  const covers = (list: readonly string[], p: string) => list.some((x) => (x.endsWith('/') ? p.startsWith(x) : p === x));
+  const abs = paths.map((p) => join(repo, p));
+  const out: string[] = [];
+  for (const ws of layout.workspaces) {
+    for (const v of L.pluginViews(ws, 'git', 'diff')) {
+      const { repo: r, mode, path } = v.view;
+      if (r === repo && mode === 'worktree' && typeof path === 'string' && covers(paths, path)) out.push(v.key);
+    }
+    for (const v of L.pluginViews(ws, 'files', 'editor')) {
+      if (typeof v.view.path === 'string' && covers(abs, v.view.path)) out.push(v.key);
+    }
+  }
+  return out;
+}
+
+/** Closes panes without asking (what they had unsaved was asked about),
+ * with the edits kept for them. */
+function closePanes(m: string, panes: readonly string[]) {
+  if (!panes.length) return;
+  terms.mutate(m, (l) => panes.reduce((acc, p) => L.closePane(acc, p), l));
+  for (const p of panes) dropEdit(m, p);
+  // A pane unmounting keeps its unsaved text; the layout has it no longer.
+  setTimeout(() => dropGoneEdits(), 0);
+}
+
+/** Discards the changes of files of the working tree, after asking; the
+ * panes that show them (diffs of the working tree, editors) close once
+ * discarded, those with unsaved text asked about first as closing would.
+ * Resolves with whether it discarded them. */
+export async function discard(m: string, repo: string, files: StatusFile[]): Promise<boolean> {
+  if (!files.length) return false;
   const untracked = files.filter((f) => f.kind === 'untracked').map((f) => f.path);
   const tracked = files.filter((f) => f.kind !== 'untracked').map((f) => f.path);
   const what = files.length === 1 ? baseName(files[0].path) : t('git.files', { n: files.length });
@@ -83,7 +126,13 @@ export async function discard(m: string, repo: string, files: StatusFile[]) {
     confirm: t(untracked.length && !tracked.length ? 'git.discard.delete' : 'git.discard'),
     danger: true,
   });
-  if (ok) await runGit(m, repo, 'discard', { paths: tracked, untracked });
+  if (!ok) return false;
+  const layout = terms.layout(m);
+  const panes = layout ? panesOfFiles(layout, repo, [...tracked, ...untracked]) : [];
+  if (!(await confirmUnsaved(m, panes))) return false;
+  const done = await runGit(m, repo, 'discard', { paths: tracked, untracked });
+  if (done) closePanes(m, panes);
+  return done;
 }
 
 /** A new branch at a commit (HEAD by default), checked out if asked. */
@@ -123,9 +172,10 @@ export async function deleteBranch(m: string, repo: string, name: string, remote
   if (force) await runGit(m, repo, 'branchDelete', { name, force: true });
 }
 
-/** Checks a remote branch out as a local one that tracks it. */
-export async function checkoutRemote(m: string, repo: string, remoteBranch: string) {
-  const local = remoteBranch.slice(remoteBranch.indexOf('/') + 1);
+/** Checks a remote branch out as a local one that tracks it (named as
+ * on the remote: without the remote's name, remote when it has a /). */
+export async function checkoutRemote(m: string, repo: string, remoteBranch: string, remote?: string) {
+  const local = remote ? remoteBranch.slice(remote.length + 1) : remoteBranch.slice(remoteBranch.indexOf('/') + 1);
   return runGit(m, repo, 'branchCreate', { name: local, at: remoteBranch, checkout: true });
 }
 

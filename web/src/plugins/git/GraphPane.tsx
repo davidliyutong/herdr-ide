@@ -7,14 +7,17 @@
 // opens its diff), a Cmd/Ctrl-click on a second commit compares the two,
 // and context menus on commits, badges and stashes act on them.
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ChevronDown, ChevronUp, GitBranch, RefreshCw, Search, Tag as TagIcon, X } from 'lucide-react';
-import { useStore } from '../../state/store';
+import { loadPref, savePref, useStore } from '../../state/store';
+import { useSettings } from '../../settings';
+import { Picker, type PickerItem } from '../../components/Picker';
 import { useSize } from '../../lib/sizes';
 import { openMenu, type MenuEntry } from '../../contextMenu';
-import { t } from '../../i18n';
+import { t, type MessageKey } from '../../i18n';
+import { FileIcon } from '../../fileIcons';
 import type { PaneViewProps } from '../api';
-import { gitApi, errorText, type Commit, type Ref, type Shown, type Stash, type StatusFile } from './api';
+import { gitApi, errorText, GitError, type Commit, type Ref, type Shown, type Stash, type StatusFile } from './api';
 import { appendCommits, layoutGraph, newPaging, type GraphCommit, type Paging } from './graph';
 import { GraphCell, LANE_COLORS, laneColor } from './GraphCell';
 import {
@@ -32,14 +35,61 @@ import {
   stashDrop,
   stashParams,
 } from './ops';
-import { letterColor } from './GitPanel';
+import { folderOf, leafName, letterColor, letterMark } from './GitPanel';
 import { changed, runGit, useRepo } from './state';
+import { pushTag, pushTo, remoteOf } from './pickers';
 import './git.css';
 
 export const LANE_W = 14;
 export const DETAIL_H = 300;
-/** The commits of a page. */
+/** The commits of a page (the setting git.graphPageSize's default). */
 export const PAGE = 300;
+/** The setting: the commits of a page. */
+export const GRAPH_PAGE_SIZE = 'git.graphPageSize';
+
+/** The page size the setting gives, within the machine's bounds. */
+export function pageSize(v: unknown): number {
+  const n = typeof v === 'number' && Number.isFinite(v) ? Math.round(v) : PAGE;
+  return Math.min(1000, Math.max(50, n));
+}
+
+/** The most refs the filter holds (the machine's log takes 100). */
+export const MAX_FILTER = 100;
+
+/** Where a repository's branch filter is kept, per browser. */
+export const filterKey = (m: string, repo: string) => `git.graphFilter:${m}:${repo}`;
+
+/** A ref's full name from a badge: what the branch filter holds (full
+ * names, which no branch and tag of one name confuse). */
+export function badgeRef(b: Badge): string | undefined {
+  switch (b.kind) {
+    case 'branch':
+      return `refs/heads/${b.name}`;
+    case 'remote':
+      return `refs/remotes/${b.name}`;
+    case 'tag':
+      return `refs/tags/${b.name}`;
+  }
+  return undefined;
+}
+
+/** The branch filter's rows: local branches, each remote's branches under
+ * its name, tags; values are the refs' full names. */
+export function filterItems(refs: readonly Ref[], remotes: readonly string[]): PickerItem[] {
+  const local: PickerItem[] = [];
+  const remote: PickerItem[] = [];
+  const tags: PickerItem[] = [];
+  for (const r of refs) {
+    if (r.name.startsWith('refs/heads/'))
+      local.push({ value: r.name, label: r.name.slice(11), icon: <GitBranch />, group: t('git.pick.branches') });
+    else if (r.name.startsWith('refs/remotes/')) {
+      const name = r.name.slice(13);
+      remote.push({ value: r.name, label: name, icon: <GitBranch />, group: t('git.pick.remote', { remote: remoteOf(name, remotes) }) });
+    } else if (r.name.startsWith('refs/tags/'))
+      tags.push({ value: r.name, label: r.name.slice(10), icon: <TagIcon />, group: t('git.pick.tags') });
+  }
+  return [...local, ...remote, ...tags];
+}
 /** The ref of the working tree's row and its hash in the graph. */
 export const UNCOMMITTED = '*';
 
@@ -137,7 +187,19 @@ export function GraphPane({ m, view }: PaneViewProps) {
   const readOnly = useStore((s) => s.readOnly);
   const [data, setData] = useState<Loaded>();
   const [error, setError] = useState<string>();
-  const [filter, setFilter] = useState('');
+  // The refs shown (none: every branch), kept per repository.
+  const [filter, setFilterNow] = useState<string[]>(() => loadPref<string[]>(filterKey(m, repo), []));
+  const setFilter = (f: string[]) => {
+    // The machine takes the history of at most MAX_FILTER refs at once.
+    if (f.length > MAX_FILTER) {
+      useStore.getState().toast(t('git.graph.filterMax', { n: MAX_FILTER }));
+      f = f.slice(0, MAX_FILTER);
+    }
+    setFilterNow(f);
+    savePref(filterKey(m, repo), f);
+  };
+  const filterKeyNow = filter.join('\n');
+  const pageLimit = pageSize(useSettings((s) => s.values[GRAPH_PAGE_SIZE]?.value));
   const [remotes, setRemotes] = useState(true);
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<string>();
@@ -156,14 +218,14 @@ export function GraphPane({ m, view }: PaneViewProps) {
   const page = useRef<Paging>(newPaging());
   const scope = useRef('');
   useEffect(() => {
-    const sc = `${m}\u0000${repo}\u0000${filter}\u0000${remotes}`;
-    const limit = scope.current === sc ? Math.min(1000, Math.max(PAGE, page.current.next)) : PAGE;
+    const sc = `${m}\u0000${repo}\u0000${filterKeyNow}\u0000${remotes}`;
+    const limit = scope.current === sc ? Math.min(1000, Math.max(pageLimit, page.current.next)) : pageLimit;
     scope.current = sc;
     const pg = newPaging();
     page.current = pg;
     setLoadingMore(false);
     gitApi
-      .log(m, repo, { limit, branches: filter ? [filter] : undefined, remotes })
+      .log(m, repo, { limit, branches: filter.length ? filter : undefined, remotes })
       .then((l) => {
         if (page.current !== pg) return;
         pg.next = l.commits.length;
@@ -171,8 +233,28 @@ export function GraphPane({ m, view }: PaneViewProps) {
         setData({ commits: l.commits, more: l.more, refs: l.refs ?? [], stashes: l.stashes ?? [], head: l.head, branch: l.branch });
         setError(undefined);
       })
-      .catch((e) => page.current === pg && setError(errorText(e)));
-  }, [m, repo, filter, remotes, version]);
+      .catch((e) => {
+        if (page.current !== pg) return;
+        // A ref of the filter is gone (deleted elsewhere): every branch.
+        if (filter.length && e instanceof GitError && e.code === 'bad_ref') {
+          setFilter([]);
+          useStore.getState().toast(t('git.graph.filterGone'));
+          return;
+        }
+        setError(errorText(e));
+      });
+    // The filter is in filterKeyNow.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [m, repo, filterKeyNow, remotes, version, pageLimit]);
+
+  // Refs of the filter deleted since: dropped from it.
+  useEffect(() => {
+    if (!data || !filter.length) return;
+    const known = new Set(data.refs.map((r) => r.name));
+    const kept = filter.filter((f) => known.has(f));
+    if (kept.length !== filter.length) setFilter(kept);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
 
   const loadMore = async () => {
     const pg = page.current;
@@ -180,7 +262,7 @@ export function GraphPane({ m, view }: PaneViewProps) {
     pg.loading = true;
     setLoadingMore(true);
     try {
-      const l = await gitApi.log(m, repo, { skip: pg.next, limit: PAGE, branches: filter ? [filter] : undefined, remotes });
+      const l = await gitApi.log(m, repo, { skip: pg.next, limit: pageLimit, branches: filter.length ? filter : undefined, remotes });
       if (page.current !== pg) return;
       pg.next += l.commits.length;
       setData((d) => d && { ...d, commits: appendCommits(d.commits, l.commits), more: l.more && l.commits.length > 0 });
@@ -196,8 +278,9 @@ export function GraphPane({ m, view }: PaneViewProps) {
   };
 
   const rows = useMemo(
-    () => (data ? graphRows(data.commits, filter ? [] : data.stashes, data.head, filter ? [] : (st?.status?.files ?? [])) : []),
-    [data, filter, st?.status],
+    () =>
+      data ? graphRows(data.commits, filter.length ? [] : data.stashes, data.head, filter.length ? [] : (st?.status?.files ?? [])) : [],
+    [data, filterKeyNow, st?.status],
   );
   const graph = useMemo(() => layoutGraph(rows as GraphCommit[], LANE_COLORS), [rows]);
   const badges = useMemo(() => badgesOf(data?.refs ?? [], data?.branch, data?.head, remotes), [data, remotes]);
@@ -238,20 +321,15 @@ export function GraphPane({ m, view }: PaneViewProps) {
   const visible: number[] = [];
   for (let i = first; i < rows.length && top(i) < scroll.top + scroll.height + 10 * ROW_H; i++) visible.push(i);
 
-  const branchNames = useMemo(() => {
-    const local: string[] = [];
-    const remote: string[] = [];
-    for (const r of data?.refs ?? []) {
-      if (r.name.startsWith('refs/heads/')) local.push(r.name.slice(11));
-      else if (r.name.startsWith('refs/remotes/')) remote.push(r.name.slice(13));
-    }
-    return { local, remote };
-  }, [data]);
+  const remoteList = st?.info?.remotes;
+  const refItems = useMemo(() => filterItems(data?.refs ?? [], remoteList ?? []), [data, remoteList]);
 
   const run = (action: string, params: Record<string, unknown> = {}) => void runGit(m, repo, action, params);
   const current = data?.branch;
-  const remoteOf = (name: string) => name.slice(0, name.indexOf('/'));
-  const pushRemote = () => (st?.info?.remotes.includes('origin') ? 'origin' : st?.info?.remotes[0]);
+  const remoteNames = st?.info?.remotes ?? [];
+  /** Push to the only remote, or To… one chosen (several). */
+  const pushLabel = (key: 'git.graph.pushBranch' | 'git.graph.pushTag') =>
+    remoteNames.length === 1 ? t(key, { remote: remoteNames[0] }) : t('git.pushTo');
 
   const commitMenu = (e: React.MouseEvent, c: Commit) => {
     e.preventDefault();
@@ -297,8 +375,19 @@ export function GraphPane({ m, view }: PaneViewProps) {
     e.preventDefault();
     e.stopPropagation();
     let items: MenuEntry[] = [];
+    const at = { x: e.clientX, y: e.clientY };
+    const ref = badgeRef(b);
+    const inFilter = !!ref && filter.includes(ref);
+    const filterEntries: MenuEntry[] = ref
+      ? [
+          'sep',
+          { label: t('git.graph.showOnly'), disabled: filter.length === 1 && inFilter, run: () => setFilter([ref]) },
+          inFilter
+            ? { label: t('git.graph.removeFromFilter'), run: () => setFilter(filter.filter((f) => f !== ref)) }
+            : { label: t('git.graph.addToFilter'), disabled: !filter.length, run: () => setFilter([...filter, ref]) },
+        ]
+      : [];
     if (b.kind === 'branch') {
-      const remote = pushRemote();
       items = [
         {
           label: t('git.graph.checkoutBranch', { branch: b.name }),
@@ -320,16 +409,20 @@ export function GraphPane({ m, view }: PaneViewProps) {
         { label: t('git.branch.delete'), danger: true, disabled: readOnly || b.current, run: () => void deleteBranch(m, repo, b.name) },
         'sep',
         {
-          label: t('git.graph.pushBranch', { remote: remote ?? '' }),
-          disabled: readOnly || !remote,
-          run: () => run('push', { remote, branch: b.name, setUpstream: true }),
+          label: pushLabel('git.graph.pushBranch'),
+          disabled: readOnly || !remoteNames.length,
+          run: () => void pushTo(m, repo, at, st?.info, b.name),
         },
         { label: t('git.graph.copyName'), run: () => copy(b.name) },
       ];
     } else if (b.kind === 'remote') {
-      const remote = remoteOf(b.name);
+      const remote = remoteOf(b.name, remoteNames);
       items = [
-        { label: t('git.graph.checkoutRemote', { branch: b.name }), disabled: readOnly, run: () => void checkoutRemote(m, repo, b.name) },
+        {
+          label: t('git.graph.checkoutRemote', { branch: b.name }),
+          disabled: readOnly,
+          run: () => void checkoutRemote(m, repo, b.name, remote),
+        },
         {
           label: t('git.graph.mergeInto', { branch: b.name, current: current ?? 'HEAD' }),
           disabled: readOnly,
@@ -346,18 +439,17 @@ export function GraphPane({ m, view }: PaneViewProps) {
         { label: t('git.graph.copyName'), run: () => copy(b.name) },
       ];
     } else if (b.kind === 'tag') {
-      const remote = pushRemote();
       items = [
         { label: t('git.tag.delete'), danger: true, disabled: readOnly, run: () => void deleteTag(m, repo, b.name) },
         {
-          label: t('git.graph.pushTag', { remote: remote ?? '' }),
-          disabled: readOnly || !remote,
-          run: () => run('push', { remote, tag: b.name }),
+          label: pushLabel('git.graph.pushTag'),
+          disabled: readOnly || !remoteNames.length,
+          run: () => void pushTag(m, repo, at, st?.info, b.name),
         },
         { label: t('git.graph.copyName'), run: () => copy(b.name) },
       ];
     } else return;
-    openMenu(e, items);
+    openMenu(e, [...items, ...filterEntries]);
   };
 
   const stashMenu = (e: React.MouseEvent, s: Stash) => {
@@ -383,20 +475,17 @@ export function GraphPane({ m, view }: PaneViewProps) {
     <div className="git-graph">
       <div className="git-graph-bar">
         <GitBranch className="muted" />
-        <select value={filter} onChange={(e) => setFilter(e.target.value)} aria-label={t('git.graph.branches')}>
-          <option value="">{t('git.graph.allBranches')}</option>
-          {branchNames.local.map((b) => (
-            <option key={'l' + b} value={b}>
-              {b}
-            </option>
-          ))}
-          {remotes &&
-            branchNames.remote.map((b) => (
-              <option key={'r' + b} value={b}>
-                {b}
-              </option>
-            ))}
-        </select>
+        <Picker
+          multiple
+          className="git-graph-filter"
+          aria-label={t('git.graph.branches')}
+          label={t('git.graph.branches')}
+          placeholder={t('git.graph.filterPlaceholder')}
+          noneLabel={t('git.graph.allBranches')}
+          items={refItems}
+          value={filter}
+          onChange={setFilter}
+        />
         <label className="small git-check">
           <input type="checkbox" checked={remotes} onChange={(e) => setRemotes(e.target.checked)} /> {t('git.graph.showRemotes')}
         </label>
@@ -574,12 +663,13 @@ function Detail({
             const staged = f.x !== '.' && f.x !== '?' && f.kind !== 'unmerged';
             const letter = f.kind === 'untracked' ? 'U' : f.kind === 'unmerged' ? '!' : f.y !== '.' ? f.y : f.x;
             return (
-              <div key={f.path} className="git-row" onClick={() => void openStatusDiff(m, repo, f, staged && f.y === '.')}>
-                <span className="git-letter" style={{ color: letterColor(letter) }}>
-                  {letter}
-                </span>
-                <span className="ellipsis">{f.path}</span>
-              </div>
+              <FileLine
+                key={f.path}
+                path={f.path}
+                letter={letter}
+                title={f.orig ? `${f.orig} → ${f.path}` : f.path}
+                onClick={() => void openStatusDiff(m, repo, f, staged && f.y === '.')}
+              />
             );
           })}
         </div>
@@ -634,9 +724,10 @@ function Detail({
         <div className="git-detail-files">
           {!shown && !error && <div className="muted small">{t('git.loading')}</div>}
           {shown?.files.map((f) => (
-            <div
+            <FileLine
               key={f.path}
-              className="git-row"
+              path={f.path}
+              letter={f.status}
               title={f.orig ? `${f.orig} → ${f.path}` : f.path}
               onClick={() =>
                 void openDiff(
@@ -647,11 +738,6 @@ function Detail({
                 )
               }
             >
-              <span className="git-letter" style={{ color: letterColor(f.status) }}>
-                {f.status}
-              </span>
-              <span className="ellipsis">{f.orig ? `${f.orig} → ${f.path}` : f.path}</span>
-              <span className="spacer" />
               {f.binary ? (
                 <span className="muted small">{t('git.graph.binary')}</span>
               ) : (
@@ -659,10 +745,44 @@ function Detail({
                   <span className="add">+{f.added}</span> <span className="del">−{f.deleted}</span>
                 </span>
               )}
-            </div>
+            </FileLine>
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+/** A file of a commit or of the working tree's changes: its icon, name
+ * (in its letter's color) and folder, what the caller adds (lines added
+ * and deleted) and its letter. */
+export function FileLine({
+  path,
+  letter,
+  title,
+  onClick,
+  children,
+}: {
+  path: string;
+  letter: string;
+  title?: string;
+  onClick?(): void;
+  children?: ReactNode;
+}) {
+  const color = letterColor(letter);
+  const folder = folderOf(path);
+  return (
+    <div className={`git-file${letter === 'D' ? ' deleted' : ''}`} title={title ?? path} onClick={onClick}>
+      <FileIcon name={leafName(path)} kind={path.endsWith('/') ? 'dir' : 'file'} />
+      <span className="git-name ellipsis" style={{ color }}>
+        {leafName(path)}
+      </span>
+      {folder && <span className="git-path ellipsis muted">{folder}</span>}
+      <span className="spacer" />
+      {children}
+      <span className="git-letter" style={{ color }} aria-label={t(`git.mark.${letterMark(letter)}` as MessageKey)}>
+        {letter}
+      </span>
     </div>
   );
 }

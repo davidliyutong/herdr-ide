@@ -11,11 +11,12 @@ import { createRoot, type Root } from 'react-dom/client';
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {}, send: () => {}, connected: true } }));
 vi.mock('../plugins/monaco', () => ({ createEditor: vi.fn(), createDiffEditor: vi.fn(), loadMonaco: vi.fn() }));
 
-import { useStore } from '../state/store';
+import { loadPref, savePref, useStore } from '../state/store';
+import { useSettings } from '../settings';
 import type { MachineState } from '../lib/machine';
 import { useMenu, isItem } from '../contextMenu';
 import { t } from '../i18n';
-import { GraphPane } from '../plugins/git/GraphPane';
+import { filterKey, GraphPane } from '../plugins/git/GraphPane';
 import { useGit } from '../plugins/git/state';
 import { settle } from './fakeTerms';
 
@@ -35,6 +36,7 @@ describe('GraphPane', () => {
   let host: HTMLDivElement;
   let root: Root;
   const shows: URLSearchParams[] = [];
+  const logs: URLSearchParams[] = [];
   const posts: Array<{ action: string; body: unknown }> = [];
   /** Answers log requests instead of the page below, when set. */
   let logImpl: ((q: URLSearchParams) => Promise<Response>) | undefined;
@@ -42,10 +44,23 @@ describe('GraphPane', () => {
     for (let i = 0; i < 4; i++) await act(async () => settle());
   };
   const rows = () => [...host.querySelectorAll<HTMLElement>('.git-graph-row')];
+  const pickerRow = (text: string) => [...document.querySelectorAll<HTMLElement>('.picker-row')].find((r) => r.textContent === text)!;
+  const mount = async () => {
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    await act(async () =>
+      root.render(
+        createElement(GraphPane, { m: 'm', pane: 'view:g', view: { id: 'g', plugin: 'git', kind: 'graph', repo: ROOT }, focused: true }),
+      ),
+    );
+    await flush();
+  };
 
   beforeEach(async () => {
     shows.length = 0;
+    logs.length = 0;
     posts.length = 0;
+    savePref(filterKey('m', ROOT), []);
     logImpl = undefined;
     useGit.setState({ repos: {} });
     vi.stubGlobal('fetch', async (input: string, init?: RequestInit) => {
@@ -57,6 +72,7 @@ describe('GraphPane', () => {
       }
       switch (action) {
         case 'log':
+          logs.push(url.searchParams);
           if (logImpl) return logImpl(url.searchParams);
           return new Response(
             JSON.stringify({
@@ -152,7 +168,7 @@ describe('GraphPane', () => {
     ];
     logImpl = async (q) => {
       const skip = Number(q.get('skip') ?? 0);
-      if (q.get('branch') === 'feature')
+      if (q.get('branch') === 'refs/heads/feature')
         return new Response(
           JSON.stringify({ commits: [commit('f1', 20, 'feature work', 'b1')], more: false, refs, head: 'm1', branch: 'main' }),
         );
@@ -179,11 +195,8 @@ describe('GraphPane', () => {
     );
     await flush();
     expect(release).toBeDefined();
-    const select = host.querySelector<HTMLSelectElement>('.git-graph-bar select')!;
-    await act(async () => {
-      select.value = 'feature';
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    await act(async () => host.querySelector<HTMLButtonElement>('.git-graph-filter')!.click());
+    await act(async () => pickerRow('feature').click());
     await flush();
     await act(async () => release!());
     await flush();
@@ -197,5 +210,54 @@ describe('GraphPane', () => {
     await act(async () => items.find((i) => i.label === t('git.graph.cherryPick'))!.run!());
     await flush();
     expect(posts[0]).toEqual({ action: 'cherryPick', body: { rev: 'f1', repo: ROOT } });
+  });
+
+  // The filter: several branches and tags (their full names) from a
+  // searchable list, none for every branch, kept per repository.
+  it('shows the history of the branches chosen, remembered', async () => {
+    await act(async () => host.querySelector<HTMLButtonElement>('.git-graph-filter')!.click());
+    expect([...document.querySelectorAll('.picker-group')].map((g) => g.textContent)).toEqual([t('git.pick.branches'), t('git.pick.tags')]);
+    await act(async () => pickerRow('feature').click());
+    await act(async () => pickerRow('v1').click());
+    await flush();
+    expect(logs[logs.length - 1].getAll('branch')).toEqual(['refs/heads/feature', 'refs/tags/v1']);
+    expect(loadPref(filterKey('m', ROOT), [])).toEqual(['refs/heads/feature', 'refs/tags/v1']);
+    // The working tree and the stashes are not shown with a filter.
+    expect(rows()[0].querySelector('.git-graph-desc')!.textContent).toBe('mainMerge feature');
+    await mount();
+    expect(logs[logs.length - 1].getAll('branch')).toEqual(['refs/heads/feature', 'refs/tags/v1']);
+    expect(host.querySelector('.git-graph-filter')!.textContent).toBe(t('picker.selected', { count: 2 }));
+  });
+
+  it('filters from a branch’s badge', async () => {
+    const badgeMenu = async (name: string) => {
+      const badge = [...host.querySelectorAll<HTMLElement>('.git-badge')].find((b) => b.textContent === name)!;
+      await act(async () => badge.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 1, clientY: 1 })));
+      return (useMenu.getState().menu?.entries ?? []).filter(isItem);
+    };
+    let items = await badgeMenu('feature');
+    // With every branch shown, adding one is not offered (it would show it only).
+    expect(items.find((i) => i.label === t('git.graph.addToFilter'))?.disabled).toBe(true);
+    await act(async () => items.find((i) => i.label === t('git.graph.showOnly'))!.run!());
+    await flush();
+    expect(logs[logs.length - 1].getAll('branch')).toEqual(['refs/heads/feature']);
+    items = await badgeMenu('main');
+    await act(async () => items.find((i) => i.label === t('git.graph.addToFilter'))!.run!());
+    await flush();
+    expect(logs[logs.length - 1].getAll('branch')).toEqual(['refs/heads/feature', 'refs/heads/main']);
+    items = await badgeMenu('feature');
+    await act(async () => items.find((i) => i.label === t('git.graph.removeFromFilter'))!.run!());
+    await flush();
+    expect(logs[logs.length - 1].getAll('branch')).toEqual(['refs/heads/main']);
+  });
+
+  it('reads pages of the size the settings give', async () => {
+    useSettings.setState((st) => ({ values: { ...st.values, 'git.graphPageSize': { value: 100, source: 'global' } } }));
+    try {
+      await mount();
+      expect(logs[logs.length - 1].get('limit')).toBe('100');
+    } finally {
+      useSettings.setState((st) => ({ values: { ...st.values, 'git.graphPageSize': { value: 300, source: 'global' } } }));
+    }
   });
 });

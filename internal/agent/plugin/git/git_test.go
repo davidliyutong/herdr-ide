@@ -169,6 +169,29 @@ func TestPlainName(t *testing.T) {
 	}
 }
 
+// Remotes' URLs reach the UI without what could be a credential.
+func TestRedactURL(t *testing.T) {
+	for in, want := range map[string]string{
+		"https://github.com/o/r.git":             "https://github.com/o/r.git",
+		"https://user:ghp_secret@github.com/o/r": "https://github.com/o/r",
+		"https://ghp_secret@github.com/o/r":      "https://github.com/o/r",
+		"https://a@b:tok@host:8443/p@q":          "https://host:8443/p@q",
+		"ssh://git@host:22/o/r.git":              "ssh://host:22/o/r.git",
+		"git@github.com:o/r.git":                 "git@github.com:o/r.git",
+		"user:pass@host:o/r.git":                 "host:o/r.git",
+		"/srv/repos/a@b:c":                       "/srv/repos/a@b:c",
+		"https://user:sp%zz@host/invalid-escape": "https://host/invalid-escape",
+	} {
+		if got := redactURL(in); got != want {
+			t.Errorf("%q: %q, want %q", in, got, want)
+		}
+	}
+	got := remoteURLs("origin\thttps://t@h/r (fetch)\norigin\thttps://t@h/r (push)\nup\t/srv/r.git (fetch)\n")
+	if len(got) != 2 || got["origin"] != "https://h/r" || got["up"] != "/srv/r.git" {
+		t.Errorf("remoteURLs %v", got)
+	}
+}
+
 func TestCleanPath(t *testing.T) {
 	for s, want := range map[string]string{"a.txt": "a.txt", "dir/b c.txt": "dir/b c.txt", "-weird": "-weird", ":(glob)*": ":(glob)*",
 		// A directory as the status lists an untracked repository.
@@ -249,6 +272,9 @@ func TestArgvRefusesOptions(t *testing.T) {
 		{"push", Params{Remote: "--exec=touch /tmp/x"}},
 		{"push", Params{Remote: "origin"}},
 		{"fetch", Params{Remote: "--upload-pack=x"}},
+		{"pull", Params{Remote: "--upload-pack=x"}},
+		{"pull", Params{Branch: "main"}},
+		{"pull", Params{Remote: "origin", Branch: "main"}},
 		{"stashApply", Params{Index: -1}},
 		{"stashApply", Params{Index: 0}},
 		{"stashDrop", Params{Index: 0, Hash: "--all"}},
@@ -279,6 +305,10 @@ func TestArgvRefusesOptions(t *testing.T) {
 	if err != nil || len(rns) != 2 || strings.Join(rns[0].args, " ") != "clean -f -q -- :(literal)-f" ||
 		strings.Join(rns[1].args, " ") != "restore --worktree -- :(literal)a.txt" {
 		t.Errorf("discard: %v %v", rns, err)
+	}
+	rns, err = r.runs(ctx, "stage", Params{All: true, Tracked: true})
+	if err != nil || len(rns) != 1 || strings.Join(rns[0].args, " ") != "add --update" {
+		t.Errorf("stage tracked: %v %v", rns, err)
 	}
 	rn, err := r.argv(ctx, "commit", Params{Message: "--amend\n\nbody"})
 	if err != nil || strings.Join(rn.args, " ") != "commit --cleanup=whitespace --file=-" || string(rn.stdin) != "--amend\n\nbody" {
@@ -1233,6 +1263,18 @@ func TestRemote(t *testing.T) {
 	if info.Behind != 1 {
 		t.Errorf("behind %d", info.Behind)
 	}
+	// The branches have their upstream and how far behind it they are.
+	var branches []Branch
+	ok(t, env, "branches", Params{Repo: dir}, &branches)
+	found := false
+	for _, b := range branches {
+		if b.Name == "main" && !b.Remote {
+			found = b.Upstream == "origin/main" && b.Behind == 1 && b.Ahead == 0
+		}
+	}
+	if !found {
+		t.Errorf("branches %+v", branches)
+	}
 	ok(t, env, "pull", Params{Repo: dir, Rebase: true}, nil)
 	if _, err := os.Stat(filepath.Join(dir, "o.txt")); err != nil {
 		t.Error("pull")
@@ -1244,6 +1286,38 @@ func TestRemote(t *testing.T) {
 	ok(t, env, "fetch", Params{Repo: dir, All: true}, nil)
 	ok(t, env, "push", Params{Repo: dir}, nil)
 	fails(t, env, "push", Params{Repo: dir, Remote: "upstream"}, "not_found")
+
+	// A second remote: its URL (without a user or token), a fetch from
+	// it, a push that makes it the upstream, a pull of one of its
+	// branches named by its full ref.
+	second := filepath.Join(env.Home, "second.git")
+	sh(t, env.Home, "init", "-q", "--bare", "-b", "main", second)
+	sh(t, dir, "remote", "add", "second", second)
+	sh(t, dir, "remote", "add", "token", "https://user:secret@example.com/r.git")
+	ok(t, env, "repo", Params{Path: dir}, &info)
+	if len(info.Remotes) != 3 || info.RemoteURLs["second"] != second || info.RemoteURLs["token"] != "https://example.com/r.git" {
+		t.Errorf("remotes %v %v", info.Remotes, info.RemoteURLs)
+	}
+	sh(t, dir, "remote", "remove", "token")
+	sh(t, dir, "checkout", "-q", "-b", "topic")
+	ok(t, env, "push", Params{Repo: dir, Remote: "second", Branch: "topic", SetUpstream: true}, nil)
+	ok(t, env, "repo", Params{Path: dir}, &info)
+	if info.Upstream != "second/topic" {
+		t.Errorf("upstream %q", info.Upstream)
+	}
+	write(t, filepath.Join(other, "s.txt"), "s\n")
+	sh(t, other, "add", "s.txt")
+	sh(t, other, "commit", "-q", "-m", "s")
+	sh(t, other, "push", "-q", second, "HEAD:refs/heads/topic")
+	ok(t, env, "fetch", Params{Repo: dir, Remote: "second"}, nil)
+	ok(t, env, "pull", Params{Repo: dir, Remote: "second", Branch: "topic", Rebase: true}, nil)
+	if _, err := os.Stat(filepath.Join(dir, "s.txt")); err != nil {
+		t.Error("pull from second/topic")
+	}
+	for _, b := range []string{"-x", "a:b", "a..b", "x y"} {
+		fails(t, env, "pull", Params{Repo: dir, Remote: "second", Branch: b}, "bad_ref")
+	}
+	sh(t, dir, "checkout", "-q", "main")
 
 	// Branches that diverged: a pull follows the user's configuration
 	// (pull.rebase), and without one git's refusal is diverged.

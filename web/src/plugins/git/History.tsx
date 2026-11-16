@@ -13,11 +13,13 @@ import { ChevronDown, ChevronRight, GitGraph, Tag as TagIcon } from 'lucide-reac
 import { openMenu } from '../../contextMenu';
 import { t } from '../../i18n';
 import { useSize } from '../../lib/sizes';
+import { useSectionOpen } from '../../components/tree';
 import { gitApi, errorText, type Change, type Commit, type Ref } from './api';
 import { appendCommits, layoutGraph, newPaging, type Paging } from './graph';
 import { GraphCell, laneColor } from './GraphCell';
 import { badgesOf, type Badge } from './GraphPane';
-import { letterColor } from './GitPanel';
+import { folderOf, leafName, letterColor } from './GitPanel';
+import { FileIcon } from '../../fileIcons';
 import { copy, openDiff, openGraph, short } from './ops';
 
 /** The commits of a page. */
@@ -27,6 +29,8 @@ const MAX_RELOAD = 1000;
 /** A lane's width in pixels. */
 const LANE = 12;
 const HEIGHT_KEY = 'git.historyHeight';
+/** Where earlier versions kept whether the history is open: the default
+ * of its section's state (section.git.history). */
 const OPEN_KEY = 'git.historyOpen';
 
 function stored<T>(key: string, fallback: T): T {
@@ -64,7 +68,8 @@ type Line =
  * again when it moves. */
 export function History({ m, root, version, branch, head }: { m: string; root: string; version: number; branch?: string; head?: string }) {
   const rowH = useSize('row');
-  const [open, setOpen] = useState(() => stored(OPEN_KEY, true));
+  // Kept as the panel's sections are (components/tree useSectionOpen).
+  const [open, setOpen] = useSectionOpen('git.history', stored(OPEN_KEY, true));
   const [height, setHeight] = useState(() => stored<number | undefined>(HEIGHT_KEY, undefined));
   const [commits, setCommits] = useState<Commit[]>([]);
   const [refs, setRefs] = useState<Ref[]>([]);
@@ -163,7 +168,6 @@ export function History({ m, root, version, branch, head }: { m: string; root: s
 
   const toggle = () => {
     setOpen(!open);
-    store(OPEN_KEY, !open);
   };
 
   // The header's top edge sets the height; far down, it collapses.
@@ -242,17 +246,20 @@ export function History({ m, root, version, branch, head }: { m: string; root: s
         }
       >
         <GraphCell row={graph.rows[l.i]} width={lanes} height={rowH} lane={LANE} through />
-        <span className="git-letter" style={{ color: letterColor(f.status) }}>
-          {f.status}
+        <FileIcon name={leafName(f.path)} kind="file" />
+        <span className={`ellipsis${f.status === 'D' ? ' git-deleted' : ''}`} style={{ color: letterColor(f.status) }}>
+          {leafName(f.path)}
         </span>
-        <span className="ellipsis">{f.path.slice(f.path.lastIndexOf('/') + 1)}</span>
-        <span className="git-path ellipsis muted">{f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : ''}</span>
+        <span className="git-path ellipsis muted">{folderOf(f.path)}</span>
         <span className="spacer" />
         {!f.binary && (
           <span className="git-stat">
             <span className="add">+{f.added}</span> <span className="del">−{f.deleted}</span>
           </span>
         )}
+        <span className="git-letter" style={{ color: letterColor(f.status) }}>
+          {f.status}
+        </span>
       </div>
     );
   };

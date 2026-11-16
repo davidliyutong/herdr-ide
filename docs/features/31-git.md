@@ -16,13 +16,16 @@ pane of its own.
 
 Goals: VS Code's Source Control and the Git Graph extension in one, for the
 repository of the focused pane's directory on any machine: the branch with
-ahead/behind and fetch, pull, push; staging and unstaging files and
-selected ranges; discarding; commits (amend, Cmd/Ctrl+Enter); the graph
-of every branch with ref badges, search, a branch filter, a commit's
-details and files, comparing two commits, and the actions of its context
-menus (checkout, branches, tags, merge, rebase, cherry-pick, revert,
-reset, stashes); diffs in Monaco with the working tree's side editable; the
-file explorer's colors for changed files.
+ahead/behind, a searchable branch picker, and fetch, pull, push with one
+remote or several; staging and unstaging files and selected ranges;
+discarding; commits (amend, Cmd/Ctrl+Enter); changes listed as the file
+explorer lists files (icons, a tree of folders, selection and keys); the
+graph of every branch or of those chosen with ref badges, search, a
+commit's details and files, comparing two commits, and the actions of its
+context menus (checkout, branches, tags, merge, rebase, cherry-pick,
+revert, reset, stashes); diffs in Monaco with the working tree's side
+editable, files that mix line endings kept as they are; the file
+explorer's colors for changed files; a settings page.
 
 Non-goals: an interactive rebase, conflict resolution with three panes
 (conflicted files open in the diff pane and the editor), credentials typed
@@ -108,18 +111,18 @@ vector the agent builds: no shell, no option from the request.
 
 | Read | What it answers |
 | --- | --- |
-| `repo` | `?path=` a directory: top level, git directories, branch (or detached) and HEAD, upstream with ahead/behind, an operation in progress (`merge`, `rebase`, `cherryPick`, `revert`), remotes, enclosing repositories. |
+| `repo` | `?path=` a directory: top level, git directories, branch (or detached) and HEAD, upstream with ahead/behind, an operation in progress (`merge`, `rebase`, `cherryPick`, `revert`), remotes with their fetch URLs (`remote -v`) without a URL's user and password (a token is often put there) or an scp-like address's user with a password, enclosing repositories. |
 | `status` | `status --porcelain=v2 -z --branch --untracked-files=all`: files with the index's and the working tree's letters, renames with their old path, conflicts, untracked files; branch, upstream, ahead/behind. A file whose working tree side differs from the index (and an untracked or conflicted one) has that file's modification time and size (`lstat`, nothing read), which move when it is edited again while its letters stay. |
 | `log` | `log --date-order` of the branches, tags and HEAD (with `remotes=1` the remote branches; `branch=` names some instead; on a branch without commits yet, the other branches' commits), pages of 300 (at most 1000, `skip=`): hash, parents, author, e-mail, date, subject; with the first page the refs (`for-each-ref`, tags peeled), the stashes, HEAD and its branch. |
 | `show` | `rev=` a commit's message and committer and its files (status, lines added and deleted, binary) against its parent `parent=` (1 by default; the empty tree for a root commit), or with `rev2=` the files between two commits. |
 | `blob` | `path=` at `source=`: `worktree` (with its size and modification time; a link is answered as its target, a path through a directory link that leads out of the repository does not exist, FIFOs and devices are not read), `index` (stage 0), `head`, or a revision (with `parent=`: its parent's); `exists`, `binary` (a NUL in the first 8000 bytes or not UTF-8), `tooLarge` over 8 MiB. |
-| `branches`, `tags`, `stashes` | Local and remote branches with upstream and ahead/behind; tags with their commit and whether annotated; stashes with their base. |
+| `branches`, `tags`, `stashes` | Local and remote branches with their last commit's subject and date and their upstream, and ahead/behind (or a gone upstream) while at most 300 local branches have one (a second `for-each-ref`: each count walks history); tags with their commit and whether annotated; stashes with their base. |
 | `diffStat` | Lines added and deleted per file in the working tree and in the index. |
 | `watch` | Tokens of modification times and sizes in the git directory and the common one, found without running git (a `.git` file names a worktree's or submodule's directory, its `commondir` the common one): `refs` of `HEAD`, `logs/HEAD`, `packed-refs`, the stash's log, `refs/` (at most 4000 entries) and, for refs in reftable, the contents of `reftable/tables.list`; `config` of `config` and `config.worktree`; `token` of those and the index, the operation's files and `FETCH_HEAD`. |
 
 | Change | git |
 | --- | --- |
-| `stage` | `add --all -- <paths>` (`all`: `add --all`) |
+| `stage` | `add --all -- <paths>` (`all`: `add --all`; with `tracked` `add --update`, which leaves untracked files out) |
 | `unstage` | `restore --staged -- <paths>`; before the first commit `rm --cached -r -f` (the working tree keeps the files); `all`: `reset -q HEAD --` |
 | `applyPatch` | `apply [--cached] [--reverse] -` with the patch on standard input |
 | `discard` | `restore --worktree -- <paths>`; untracked files `clean -f -- <paths>`, which removes nothing tracked (nor a repository inside this one, which needs a second `-f`) |
@@ -132,7 +135,7 @@ vector the agent builds: no shell, no option from the request.
 | `reset` | `reset -q --soft`/`--mixed`/`--hard <commit> --` |
 | `tagCreate`, `tagDelete` | `tag <name> <at>` or `tag --annotate --file=- <name> <at>`; `tag -d`, or `push <remote> --delete refs/tags/<name>` |
 | `stashPush`, `stashApply`, `stashPop`, `stashDrop` | `stash push [--include-untracked] [--message=…]`; `stash apply`/`pop`/`drop stash@{N}` with `index` N and `hash` the entry's commit, after `rev-parse --verify stash@{N}` gave that commit (a stash pushed or dropped meanwhile renumbers them: `stale`) |
-| `fetch`, `pull`, `push` | `fetch [--prune] <remote>` or `--all`; `pull` as the user's `pull.rebase` and `pull.ff` say, or `pull --rebase`; `push [--force-with-lease] [--set-upstream] <remote> refs/heads/<b>:refs/heads/<b>` or `refs/tags/<t>`, or `push` to the upstream |
+| `fetch`, `pull`, `push` | `fetch [--prune] <remote>` or `--all`; `pull [--rebase] [<remote> refs/heads/<b>]` (as the user's `pull.rebase` and `pull.ff` say without `--rebase`; from the upstream without a remote, a branch's name through `check-ref-format`); `push [--force-with-lease] [--set-upstream] <remote> refs/heads/<b>:refs/heads/<b>` or `refs/tags/<t>`, or `push` to the upstream |
 
 **Core side.** Reads are `GET /api/m/{id}/p/git/<action>` with their
 parameters in the query; changes `POST /api/m/{id}/p/git/<action>` with a
@@ -148,7 +151,7 @@ the answer through.
 
 - The repository of the focused pane's directory (a terminal's, a VS Code
   pane's folder, the workspace's), kept while another pane (a diff, the
-  graph) has the focus; a picker when the directory is in nested
+  graph) has the focus; a searchable list (`Picker`) when the directory is in nested
   repositories. A directory in no repository is remembered until
   **Refresh**; a failure that says nothing about it (offline, busy,
   timeout) is shown and the directory asked again 10 s later. What the
@@ -156,30 +159,93 @@ the answer through.
   is its own: another repository starts afresh.
 - The branch (or the detached commit) with a sync button (`behind↓ ahead↑`:
   pull, then push) or **Publish Branch** without an upstream, Pull and
-  Push; More: Fetch (all remotes, pruned), Pull (Rebase), Force Push (with
-  lease), Create Branch, Stash Changes, tree or list.
+  Push; More: Fetch (all remotes, pruned), **Fetch From…**, Pull, Pull
+  (Rebase), **Pull From…**, Push, **Push To…**, Force Push (with lease),
+  Create Branch, Stash Changes, tree or list. A repository may have
+  several remotes, and nothing picks one silently: Pull and Push go to
+  the branch's upstream; without one, Push (and Publish Branch) pushes to
+  a remote that becomes the upstream and Pull pulls a remote's branch,
+  the remote asked (`pick`, each with its URL) when there are several.
+  Fetch From… asks for a remote (`fetch --prune <remote>`); Pull From…
+  for a remote and one of its branches (those fetched, by their names
+  there, or a name typed: `pull <remote> refs/heads/<name>`); Push To…
+  for a remote, which becomes the upstream. With `git.confirmSync` on,
+  Pull, Push and the sync button ask first, naming where they go.
+- **Remotes**, a section closed by default: each remote with its fetch
+  URL (without a user or password, which the machine drops); a button
+  fetches from it, the context menu fetches, pulls from it, pushes the
+  branch to it, or copies its URL or name.
+- With `git.autoFetch` above 0, every remote is fetched (`fetch --all
+  --prune`) that many minutes apart while the panel shows the repository,
+  the page is visible, the UI is not read-only and no change runs; quietly
+  (a failure says nothing until the user fetches), then the repository is
+  read again.
+- The branch is a button that opens the branch picker (`pickers.tsx`, the
+  shared searchable list, `pick`): Create Branch…, Create Branch From… and
+  Check Out Detached… first, then the local branches (the current one
+  checked, each with its upstream and ahead/behind or that the upstream
+  is gone, and its last commit's subject and age), each remote's branches
+  under its name, and the tags; typing filters (thousands of refs stay
+  fast: only the rows in view are drawn) and offers **Create branch
+  “…”** for a valid name typed. A local branch is checked out; a remote
+  branch checks out the local branch of its name, else a new one that
+  tracks it; a tag is checked out detached. Create Branch From… and Check
+  Out Detached… ask for a branch, remote branch or tag the same way, or a
+  commit's hash typed. In read-only mode the branch is not a button.
 - A banner while a merge, rebase, cherry-pick or revert is in progress, with
   Abort and Continue.
 - The commit box: Cmd/Ctrl+Enter or **Commit**; **Amend last commit**.
   With nothing staged it offers to stage everything and commit. The text
   typed is kept per repository while the panel is hidden.
 - **Merge Changes**, **Staged Changes**, **Changes** (untracked files
-  among them, `U`) with counts, as a list (the folder beside the name) or a
-  tree (folders with a single folder joined). Rows show the status letter
-  in its color; a click opens the diff, the row's buttons open the file
-  (the explorer's editor), discard (after asking; untracked files are
-  deleted) and stage or unstage (a rename with its old path, so its
-  deletion does not stay staged); group headers stage, unstage or discard
-  all: **Unstage All** and, without conflicts, **Stage All** name no paths
-  (`reset`, `add --all`); with conflicts Stage All names the Changes'
-  paths, so conflicts are not marked resolved. The context menu has the
-  same.
-- **Stashes** (apply, pop, drop), each named by its index and commit;
-  none are shown when they could not be read.
+  among them, `U`, or with `git.untrackedChanges` at `separate` in
+  **Untracked Changes**) are collapsible sections (`components/tree`
+  `Section`, kept open or closed per browser as `section.git.merge`,
+  `git.staged`, `git.changes`, `git.untracked`) with their counts and
+  their actions in the header. Their rows are drawn as the file
+  explorer's (`TreeRow`, only those in view of the list): the file's icon
+  (`fileIcons.tsx`), its name and, as a list, its folder; as a tree,
+  folders before files, those with a single folder inside joined (`a/b`),
+  each collapsible, and **Collapse All** in the toolbar. The list or tree
+  is the setting `git.changesView`, which the toolbar's button sets (in
+  read-only mode, for this view only). The status letter is the row's
+  decoration in the explorer's Git marks' colors (`--ds-git-*`: conflict,
+  deleted, modified, renamed, added, untracked); a deleted file's name is
+  struck through.
+- Rows behave as the explorer's: a click selects a row and opens its
+  diff with the keyboard left in the list (VS Code's preview; a double
+  click leaves it in the diff), ⌘-click (Ctrl elsewhere) adds or removes
+  a row, Shift-click selects a range, and the keys of a tree move
+  (`navigationKey`: arrows, PgUp, PgDn, Home, End, Shift to extend, ← →
+  on folders, ⌘/Ctrl+A, type-ahead); Enter opens the diffs of the
+  selected files (several each in a pane of its own; on a folder alone it
+  opens or closes it), Space the cursor's in the preview. Every action acts on the selected rows of the row's group
+  when the row is selected (a folder on the files inside): the row's
+  buttons open the files (the explorer's editor), discard (after asking;
+  untracked files are deleted) and stage or unstage (a rename with its
+  old path, so its deletion does not stay staged). Discarding (a row,
+  the selection, Discard All, untracked files deleted) closes the panes
+  that show those files once it is done, in every workspace: diffs of the
+  working tree and the explorer's editors (`ops.ts` `panesOfFiles`; an
+  untracked folder's files too); panes among them with unsaved text,
+  also text kept while the pane is away, are asked about first as closing
+  would (`confirmUnsaved`): Cancel discards nothing. The context menu has
+  Open Changes and the Git actions, then the explorer's file entries
+  (`fileMenu.ts`): Open, Open to the Side, Open Preview, Open in VS Code
+  (while its plugin is on), Open in Terminal, Copy Path, Copy Relative
+  Path, Download and Show in Explorer (those of a single file for one
+  target; nothing that opens a deleted file). Group headers stage,
+  unstage or discard all: **Unstage All** and, without conflicts,
+  **Stage All** name no paths (`reset`, `add --all`, or `add --update`
+  while untracked files are shown apart, whose own Stage All names
+  them); with conflicts Stage All names the Changes' paths, so conflicts
+  are not marked resolved.
+- **Stashes** (apply, pop, drop), a section closed by default, each named
+  by its index and commit; none are shown when they could not be read.
 - **History** (`History.tsx`), docked at the bottom of the panel as VS
   Code's Source Control Graph: its heading stays at the bottom while it is
   collapsed; expanded, the list grows upward from it, as high as its top
-  edge is dragged (both kept per browser). It holds every commit of the
+  edge is dragged (both kept per browser, open or closed as the sections are: `section.git.history`). It holds every commit of the
   branches, newest first, with the graph's lanes (as wide as the rows in
   view need), the branches and tags at each commit in their lane's color
   (the current branch filled) and how long ago it was; pages of 200 load as
@@ -188,9 +254,9 @@ the answer through.
   already there; when the list is read again (as many commits as were
   loaded, at most 1000), a page asked for the earlier list is dropped, and
   a page that failed stops the paging until then. A click shows the
-  commit's files under it, the lanes running through (a file opens its
-  diff against the first parent); the context menu copies the hash or
-  opens the graph pane.
+  commit's files under it with their icons, the lanes running through (a
+  file opens its diff against the first parent); the context menu copies
+  the hash or opens the graph pane.
 - While shown and the page visible, the panel asks `watch` every 2 s and
   reads `status` (which has the branch, upstream and ahead/behind) when
   the token moved, at least every 10 s (changes of the working tree do
@@ -223,14 +289,29 @@ Graph's editor; `actions.openView` with `tab`):
   never below their base. Badges: the current branch (bold), branches,
   remote branches (when shown), tags, HEAD when detached. Columns: the
   description, date, author, short hash. Only the rows in view are drawn;
-  the next page loads near the end, as the history's (a page of another
-  filter's or an earlier list is dropped, none appended twice).
+  the next page (`git.graphPageSize` commits, 300 by default) loads near
+  the end, as the history's (a page of another filter's or an earlier
+  list is dropped, none appended twice).
 - A search box dims what does not match (subject, author, e-mail, hash
-  prefix), Enter and the arrows go to the next and previous match. A branch
-  filter shows one branch's history; **Remote branches** turns them off.
+  prefix), Enter and the arrows go to the next and previous match.
+- The branch filter is the shared searchable list with several choices
+  (`Picker` `multiple`): local branches, each remote's branches under its
+  name, and tags; none chosen shows every branch. It holds the refs' full
+  names (`refs/heads/main`, `refs/tags/v1`, which a branch and a tag of
+  one name do not confuse), sent as the log's `branch=` (at most 100, as
+  the machine's log takes; more are cut with a toast); it is kept per
+  browser for each machine's repository (`git.graphFilter:<machine>:<repo>`),
+  and a ref of it deleted since is dropped (when the first page fails
+  with `bad_ref`, the filter is cleared and a toast says so). While it
+  holds refs, the working tree's row and the stashes are not shown. A
+  badge's context menu (a branch, remote branch or tag) has **Show Only
+  This Branch**, and **Add to Filter** (while the filter holds others) or
+  **Remove from Filter**. **Remote branches** turns them off in the
+  history of every branch.
 - A click opens the commit's details under it: hash, parents (a merge's
   parent chooses what its files are compared with), author, committer,
-  message, and its files with lines added and deleted; a file opens the
+  message, and its files (their icons, names in their letter's color,
+  folders) with lines added and deleted; a file opens the
   diff against the parent. Cmd/Ctrl-click on another commit compares the
   two (files between them; a file opens its diff); the working tree's row
   lists the changed files.
@@ -240,9 +321,10 @@ Graph's editor; `actions.openView` with `tab`):
   hard, after asking), Compare with HEAD, copy hash or subject. A branch:
   check out (double click too), merge into the current one, rebase the
   current one onto it, rename, delete (asked again to force one not
-  merged), push to `origin` (or the first remote) with upstream. A remote
-  branch: check out as a local branch that tracks it, merge, fetch its
-  remote, delete it on the remote. A tag: delete, push. A stash: apply, pop,
+  merged), push to the remote (the only one, else **Push To…** asks
+  which) with upstream. A remote branch: check out as a local branch that
+  tracks it, merge, fetch its remote, delete it on the remote. A tag:
+  delete, push (to a remote asked as a branch's). A stash: apply, pop,
   drop.
 
 **Diff pane** (`DiffPane.tsx`, `{view: {plugin: 'git', kind: 'diff', repo,
@@ -289,6 +371,42 @@ Code's preview editor does, so going through the changes keeps one pane):
   workspace or machine shown, another pane zoomed): closing asks about it,
   Save saves it against the file as it was when the edits began, and the
   pane takes it back when drawn again ([27](27-plugins.md)).
+- Files whose lines end in more than one way (LF and CRLF, or a lone CR):
+  Monaco gives a model one kind of ending, so the text comes back with
+  every line's alike and patches made of it name lines the file does not
+  have. The setting `git.mixedLineEndings` (Settings › Git) says what the
+  diff (and the file explorer's editor, [28](28-file-explorer.md)) does
+  with such a file, and a note above the diff says it:
+  - `keep` (the default): a save writes each line with its own ending
+    (`web/src/eol.ts`): the text as read and the edited text are compared
+    line by line (Myers' diff, at most 1000 edits, past that the rest as
+    one change), equal lines keep their ending, a changed line the ending
+    of the line it replaced, a new line the ending of the line before it
+    (else after it, else the file's most common one), and a last line
+    without one stays without. Range patches are made of the sides' bytes
+    (unsaved text as a save would write it), whose lines Monaco's line
+    numbers count alike, so context lines match the index and staged
+    lines keep their endings. A lone CR ends a line for Monaco but not for
+    git: ranges of such a file are not offered, whole files are.
+  - `unify`: as Monaco has it: a save writes every line with the model's
+    ending, patches are made of the model's text and may not apply.
+  - `readOnly`: the working tree's side is read-only, ranges are not
+    offered; Stage File and Unstage File work.
+
+**Settings** (the plugin's page, Settings › Plugins › Git: the section
+`git`, `internal/plugins/git/settings.go`):
+
+- `git.mixedLineEndings`: files that mix line endings in diffs and the
+  explorer's editor (`keep`, `unify`, `readOnly`; see the diff pane).
+- `git.changesView`: the changes as a `list` or a `tree`.
+- `git.untrackedChanges`: untracked files among the changes (`mixed`) or
+  in a group of their own (`separate`).
+- `git.autoFetch`: minutes between automatic fetches while the panel
+  shows a repository (0, the default: never).
+- `git.confirmSync`: ask before Pull, Push and the sync button (off by
+  default).
+- `git.graphPageSize`: the commits a page of the graph reads (50–1000,
+  300 by default).
 
 **Colors**: lanes take the design tokens' chart hues (`--ds-chart-*`, in
 an order that keeps neighbors apart), status letters and names VS Code's
@@ -416,7 +534,9 @@ terminal; what the plugin adds is a way to reach it from the browser:
   lines starting with `#` kept, branches, tags, stashes named by their
   commit and `stale` after the list changed, cherry-pick, revert, merge,
   reset, rebase); thousands of paths over several runs (`TestPathRuns`,
-  `TestManyPaths`); push, fetch and pull with a bare repository, a pull of
+  `TestManyPaths`); push, fetch and pull with a bare repository and a
+  second remote (its URL without the token, `TestRedactURL`; pushed with
+  its upstream set, a branch of it pulled by name), a pull of
   diverged branches (`diverged`, then rebased by `pull.rebase`); a remote
   that asks for a password (`auth_required`); timeouts and output limits
   with a fake git, a background child holding git's output (also one in a
@@ -430,27 +550,52 @@ terminal; what the plugin adds is a way to reach it from the browser:
   actions, reads as reads.
 - `internal/plugins/git/git_test.go`: routes (reads GET, changes mutating
   and audited), the read's query, a change's audit record
-  (`TestChangeAudit`); `TestMutatingRoutesAreGuarded`
+  (`TestChangeAudit`), the settings' defaults and bounds (`TestSettings`);
+  `TestMutatingRoutesAreGuarded`
   (`internal/server`) checks them.
 - `design/testdata/git/range-patches.json`: range patches (additions,
   deletions, parts of changes, ranges over several hunks, unstaging,
-  discarding, the last line without a newline), run by
+  discarding, the last line without a newline, files that mix LF and
+  CRLF), run by
   `web/src/__tests__/gitPatch.test.ts` and applied with git by the Go test.
 - `web/src/__tests__/gitGraph.test.ts`: lanes (linear, branch and merge,
   octopus, parallel branches, reused lanes, parents off the page, joins),
   rows with the working tree and stashes, badges, search, pages appended
   without commits already there.
 - `web/src/__tests__/gitPanel.test.ts`, `gitGraphPane.test.ts`,
-  `gitDiff.test.ts` (Monaco replaced): groups and tree, decorations, the
-  panel's actions (Stage All and Unstage All without paths, with
-  conflicts by paths, a rename unstaged with its old path, stashes by
-  their commit) and commit box, the Amend box per repository, read-only
+  `gitDiff.test.ts` (Monaco replaced): groups (untracked files apart,
+  staged with `add --update` and by their paths) and the tree (joined and
+  collapsed folders, a folder's files, Collapse All, the view set),
+  decorations, the panel's actions (Stage All and Unstage All without
+  paths, with conflicts by paths, a rename unstaged with its old path,
+  stashes by their commit), several rows selected by clicks and keys
+  with every action on them, the context menu's file entries, the branch
+  picker (groups, a branch, a remote branch tracked, a tag detached, a
+  branch created from what is typed), the repository picker, several
+  remotes (publishing asks which, Fetch From…, Pull From… a remote's
+  branch, the Remotes section with URLs), the question before a pull,
+  the automatic fetch (time faked), and commit
+  box, the Amend box per repository, read-only
   mode, a history page of an earlier list dropped; the graph's rows,
-  details, compare and menus, a page of another filter dropped; the diff's
+  details, compare and menus, a page of another filter dropped, several
+  branches and tags filtered and the filter kept, a badge's Show Only,
+  Add to Filter and Remove from Filter, the page size of the setting; the diff's
   sides per mode, range patches sent, saves (also of unsaved text after
   the repository changed, against the version it was edited from), a fast
   switch of files, a file edited again read again, ranges not applied to
-  a file changed on disk.
+  a file changed on disk; a file that mixes line endings staged by ranges
+  of its bytes and saved with each line's own ending, unified, or
+  read-only as `git.mixedLineEndings` says.
+- `web/src/__tests__/eol.test.ts`: lines as Monaco reads them, mixed
+  files, the line diff (a shortest edit script, checked against the
+  longest common subsequence of random lines; its limit of edits), the
+  endings a save keeps (unchanged text as it was, changed and new lines,
+  deleted lines, a last line without an ending, lone CRs).
+- `web/src/__tests__/gitDiscard.test.ts` (a scripted core's layout): the
+  panes of discarded files found and closed once discarded, the others
+  kept; unsaved text asked about first (Cancel discards nothing, Don't
+  Save discards and closes); nothing closed when the discard is not
+  confirmed.
 - `web/src/__tests__/gitState.test.ts` (time faked): which reads the
   watch's tokens start (the status, the info, the diffs' and the log's
   versions), backing off after timeouts, a change's read starting after
