@@ -2829,8 +2829,8 @@ button.danger-text:not(:disabled) {
   letter-spacing: 0.05em;
 }
 .keys-section {
-  margin: 14px 0 2px;
-  padding: 0 10px;
+  /* Padding, not margins: the table's rows are placed by their heights. */
+  padding: 14px 10px 2px;
   font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--fg-mute);

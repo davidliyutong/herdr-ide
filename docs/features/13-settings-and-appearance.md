@@ -355,7 +355,11 @@ settings per browser; theming terminal applications.
   recorder cancels every key, so in the desktop app its menu, ⌘Q included,
   does not act on one). The search matches names, ids and keys; its
   keyboard button searches by the keys pressed instead. Conflicts are
-  marked. Changes become user rules (`rulesFor`) saved with `PUT`.
+  marked. Changes become user rules (`rulesFor`) saved with `PUT`. Only the
+  rows in view of the page (and a few around them) are drawn, the others
+  standing in as space of their height (measured once drawn, else
+  estimated), so plugins' commands can make the table as long as they
+  like; while a row records keys every row is drawn.
 - `keymap.ts` matches every keydown of the app (terminals route theirs
   through it) against the bindings in effect on the page's platform, chords
   included: a key no binding takes is left to the terminal, whose key
@@ -553,6 +557,8 @@ small lists as native selects, a color scheme searched and chosen, a
 machine's value among many options, colors from schemes and the user's,
 every scheme defined),
 `pluginSettings.test.ts` (plugins' pages in the list and their switch),
+`keysTable.test.tsx` (the keyboard table drawing the rows in view of a
+300-command table, the rest as space, all while recording),
 `localFonts.test.ts` (the font picker's list with Chromium's metrics of
 fixed-pitch, proportional, symbol and undecoded fonts and one drawn by a
 fallback: names that print, each once, sorted),
