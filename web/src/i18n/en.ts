@@ -460,6 +460,7 @@ export const en = {
   'settings.title': 'Settings',
   'settings.close': 'Close (Esc)',
   'settings.section.appearance': 'Appearance',
+  'settings.section.layout': 'Panes and Tabs',
   'settings.section.terminal': 'Terminal',
   'settings.section.notifications': 'Notifications',
   'settings.section.codeServer': 'VS Code',
@@ -696,6 +697,9 @@ export const en = {
   'settings.terminal.cursorBlink': 'Blinking cursor',
   'settings.terminal.scrollback': 'Scrollback',
   'settings.terminal.scrollback.desc': 'Lines kept above the screen, to scroll back to.',
+  'settings.layout.undoClose': 'Undo close for',
+  'settings.layout.undoClose.desc':
+    'How long, in seconds, closed panes, tabs and workspaces can be brought back with Undo Close; their terminals end when it is over.',
   'settings.terminal.copyOnSelect': 'Copy on select',
   'settings.terminal.copyOnSelect.desc': 'Selected text goes to the clipboard at once.',
   'settings.terminal.bell': 'Bell',

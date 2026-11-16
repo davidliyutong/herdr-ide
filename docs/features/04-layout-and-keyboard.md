@@ -194,8 +194,9 @@ Non-goals: arbitrary docking of panes; floating panes.
   workspace and tab; panes closed since are passed over. The history keeps
   the last 100 steps, in the page only.
 - **Close Pane**, **Close Tab** and **Close Workspace** close at once,
-  without asking, also when a program runs: they can be undone for 5 s
-  (`closedPanes.ts`).
+  without asking, also when a program runs: they can be undone for the time of the setting
+  `layout.undoClose` (5 s by default, 3 to 120; `closedPanes.ts`), which
+  applies to what is closed from then on: a close keeps the deadline it got.
   Only a pane with changes not saved (an editor, a diff's working tree)
   asks first, as does closing its workspace: **Save**, **Don't Save** or
   **Cancel**; a save that fails keeps it (`web/src/unsaved.ts`, which
@@ -214,7 +215,7 @@ Non-goals: arbitrary docking of panes; floating panes.
   tabs, showing the tab it showed (`layout.restoreWorkspace`, then each
   tab as a closed tab). A terminal whose program
   ended meanwhile, or a VS Code or preview opened again elsewhere, stays
-  closed. The closed terminals end when the 5 s are over: each gets the
+  closed. The closed terminals end when that time is over: each gets the
   label `closing` with that time (`TermModel.closeLater`), and every page
   showing the machine ends a terminal so labeled without a pane once the
   time is over, so it ends also when the page that closed it is gone
@@ -516,7 +517,7 @@ described in [13](13-settings-and-appearance.md))
   workspace), `cmd+shift+enter` maximize or restore
   the pane, `cmd+alt+arrows` focus the pane in that direction, `cmd+[` /
   `cmd+]` go back / forward through the panes focused, `cmd+z` undo the
-  last close within 5 s, `cmd+n` new workspace (asking for its
+  last close within the undo time (`layout.undoClose`, 5 s by default), `cmd+n` new workspace (asking for its
   optional folder), `cmd+p` go to a workspace, `cmd+ctrl+down` / `cmd+ctrl+up` next /
   previous workspace, `cmd+shift+a` the agent needing attention, `cmd+,`
   settings, `cmd+b` sidebar, `cmd+j` Open in VS Code
@@ -641,7 +642,7 @@ described in [13](13-settings-and-appearance.md))
 | `cmd+w` closing the tab on macOS, as the desktop app did | Terminal emulators with splits (Ghostty, iTerm) close the focused split with it, so `cmd+w` closes the focused terminal. **Close Tab** in the Shell menu and the tab's × close a tab. |
 | Keyboard Lock API | Fullscreen-only and Chromium-only. |
 | `cmd+]` / `cmd+[` for the next / previous pane | Safari, Finder and Xcode go forward and back with them; next and previous pane keep their commands without a key, and `cmd+alt+arrows` move between panes. |
-| Asking before closing a pane or tab with a program running | A dialog stops the closing; with 5 s to undo, `cmd+w` closes at once, twice in a row too, and a close by mistake is taken back with its program untouched. |
+| Asking before closing a pane or tab with a program running | A dialog stops the closing; with `layout.undoClose` (5 s by default) to undo, `cmd+w` closes at once, twice in a row too, and a close by mistake is taken back with its program untouched. |
 | The page taking `pane.close`'s key (`cmd+w`) from VS Code, as earlier versions did | It closed the whole VS Code pane where VS Code's users close an editor; VS Code now has every key first, and its key closes the pane only in a window without editors, where VS Code would close its window. |
 | Every new tab in the focused terminal's directory | A workspace created for a folder keeps its tabs there; only a workspace without one, or in the home directory where every shell starts anyway, follows the focused terminal. |
 | Reopening a closed terminal later as a new shell in its directory | Its program and screen would be gone: Undo Close brings back the same terminal, and only while it still runs. |

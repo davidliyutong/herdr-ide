@@ -104,6 +104,7 @@ in the UI; a setting with a scope can have its own value per machine, under
 | `appearance.language` | `auto`, `en`, `zh-CN` | `"auto"` | – | – |
 | `appearance.uiFontSize` | integer, 11–20 | `13` | – | – |
 | `window.zoom` | integer, 50–300 | `100` | – | – |
+| `layout.undoClose` | integer, 3–120 | `5` | – | – |
 | `terminal.fontFamily` | string | `""` | – | – |
 | `terminal.fontSize` | number, 6–40 | `13` | – | – |
 | `terminal.fontWeight` | `regular`, `medium` | `"regular"` | – | – |

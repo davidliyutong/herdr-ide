@@ -427,6 +427,7 @@
     "settings.gui.gpu.all",
     "settings.gui.gpu.vglrun",
     "settings.gui.video",
+    "settings.layout.undoClose",
     "settings.notifications.badge",
     "settings.notifications.mutedAgents",
     "settings.notifications.sound",
@@ -443,6 +444,7 @@
     "settings.section.files",
     "settings.section.git",
     "settings.section.gui",
+    "settings.section.layout",
     "settings.section.notifications",
     "settings.section.plugins",
     "settings.section.terminal",
@@ -964,6 +966,7 @@
     "gui.enabled": true,
     "gui.gpu": "vglrun",
     "gui.video": true,
+    "layout.undoClose": 5,
     "notifications.badge": true,
     "notifications.mutedAgents": [
       "droid"

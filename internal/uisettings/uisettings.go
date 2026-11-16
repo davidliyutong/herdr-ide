@@ -29,6 +29,7 @@ const (
 	FontFamily   = "terminal.fontFamily"
 	FontSize     = "terminal.fontSize"
 	Scrollback   = "terminal.scrollback"
+	UndoClose    = "layout.undoClose"
 	MutedAgents  = "notifications.mutedAgents"
 	SchemePrefix = "terminal.colorScheme."
 	ColorsPrefix = "terminal.colors."
@@ -41,6 +42,13 @@ const MaxScrollback = 100_000
 const (
 	MinZoom = 50
 	MaxZoom = 300
+)
+
+// MinUndoClose and MaxUndoClose bound the time, in seconds, a closed pane,
+// tab or workspace can be brought back.
+const (
+	MinUndoClose = 3
+	MaxUndoClose = 120
 )
 
 // Agents are the coding agents the terminals recognize (the manifests'
@@ -67,6 +75,7 @@ func defs() []settings.Def {
 	lineMin, lineMax := rng(0.8, 2)
 	cursorMin, cursorMax := rng(0.5, 4)
 	scrollMin, scrollMax := rng(0, MaxScrollback)
+	undoMin, undoMax := rng(MinUndoClose, MaxUndoClose)
 	out := []settings.Def{
 		// Appearance.
 		{Key: Theme, Type: settings.TypeEnum, Default: "system", Enum: []string{"system", "light", "dark"},
@@ -83,6 +92,11 @@ func defs() []settings.Def {
 		// applies it; browsers zoom pages themselves.
 		{Key: Zoom, Type: settings.TypeNumber, Default: 100, Min: zoomMin, Max: zoomMax, Integer: true, Step: 10,
 			Section: "appearance", Order: 35},
+
+		// Panes, tabs and workspaces: how long a close can be undone, in
+		// seconds (the web UI's Undo Close).
+		{Key: UndoClose, Type: settings.TypeNumber, Default: 5, Min: undoMin, Max: undoMax, Integer: true, Step: 1,
+			Section: "layout", Order: 10},
 
 		// Terminal.
 		{Key: FontFamily, Type: settings.TypeString, Default: "", Section: "terminal", Group: "text", Order: 10},
@@ -175,6 +189,7 @@ func scrollbackInRange(v any) (any, bool) {
 var Module = settings.Module{
 	Sections: []settings.Section{
 		{ID: "appearance", Order: 10},
+		{ID: "layout", Order: 20},
 		{ID: "terminal", Order: 30},
 		{ID: "colors", Order: 40},
 		{ID: "notifications", Order: 50},

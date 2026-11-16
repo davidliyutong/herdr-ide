@@ -77,3 +77,16 @@ func TestColorThemes(t *testing.T) {
 	}
 	t.Fatal("no color theme setting")
 }
+
+func TestUndoCloseBounds(t *testing.T) {
+	for _, d := range Module.Defs {
+		if d.Key != UndoClose {
+			continue
+		}
+		if d.Default != 5 || d.Min == nil || *d.Min != MinUndoClose || d.Max == nil || *d.Max != MaxUndoClose || !d.Integer {
+			t.Errorf("layout.undoClose: %+v", d)
+		}
+		return
+	}
+	t.Error("layout.undoClose is not defined")
+}

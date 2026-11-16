@@ -15,7 +15,7 @@ import { agentOf, agentStatus, statusRank, terminalTitle, type AgentStatus } fro
 import { mediaExt } from './terminal/links';
 import { bridge, hasFrame, type BridgeCommand } from './lib/bridge';
 import { reloadFrame, setStopped } from './codeFrames';
-import { closingGroup, rememberClosed, rememberWorkspace, takeClosed, UNDO_MS, type ClosedRecord } from './closedPanes';
+import { closingGroup, rememberClosed, rememberWorkspace, takeClosed, undoMs, type ClosedRecord } from './closedPanes';
 import { nameList } from './state/multiSelect';
 import { confirmUnsaved } from './unsaved';
 import { go, paneOpen, type Spot } from './paneHistory';
@@ -234,7 +234,7 @@ function closeWithUndo(m: string, layout: L.Layout, tabs: string[][], message: s
 function undoable(m: string, closed: ClosedRecord[], message: string, always = false) {
   for (const c of closed) for (const a of c.terminals) terms.closeLater(m, a, c.deadline);
   if (closed.length || always)
-    useStore.getState().toast(message, { label: t('closed.undo'), run: () => actions.undoClose(), ttl: UNDO_MS });
+    useStore.getState().toast(message, { label: t('closed.undo'), run: () => actions.undoClose(), ttl: undoMs() });
 }
 
 /** Names as a confirmation lists them: quoted, the first few, then how many more. */
@@ -351,7 +351,7 @@ export const actions = {
     focusDom(m, pane);
   },
 
-  /** Closes a pane at once, without asking: its terminal ends UNDO_MS
+  /** Closes a pane at once, without asking: its terminal ends the undo time
    * later, and Undo Close brings it back until then (closedPanes.ts). */
   async closePane(m: string, pane: string) {
     if (!(await confirmUnsaved(m, [pane]))) return;
@@ -424,7 +424,7 @@ export const actions = {
     }
   },
 
-  /** Closes a tab at once, without asking: its terminals end UNDO_MS
+  /** Closes a tab at once, without asking: its terminals end the undo time
    * later, and Undo Close brings it back until then. */
   async closeTab(m: string, ws: string, index: number) {
     const layout = terms.layout(m);
@@ -730,7 +730,7 @@ export const actions = {
   },
 
   /** Closes a workspace at once, without asking: its terminals end
-   * UNDO_MS later, and Undo Close brings it back until then. */
+   * the undo time later, and Undo Close brings it back until then. */
   async closeWorkspace(m: string, ws: string) {
     return actions.closeWorkspaces(m, [ws]);
   },
@@ -761,7 +761,7 @@ export const actions = {
   },
 
   /** Closes workspaces of a machine at once, without asking (but for
-   * unsaved changes): their terminals end UNDO_MS later, and one Undo
+   * unsaved changes): their terminals end the undo time later, and one Undo
    * Close brings them all back, at their places, until then. */
   async closeWorkspaces(m: string, ids: string[]) {
     const layout = terms.layout(m);

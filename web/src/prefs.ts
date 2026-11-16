@@ -38,6 +38,7 @@ export const prefKeys = {
   optionIsMeta: 'terminal.optionIsMeta',
   programClipboard: 'terminal.programClipboard',
   mathHover: 'terminal.mathHover',
+  undoClose: 'layout.undoClose',
   notifySound: 'notifications.sound',
   notifySystem: 'notifications.system',
   notifyBadge: 'notifications.badge',
@@ -66,6 +67,8 @@ export interface Prefs {
   optionIsMeta: boolean;
   programClipboard: 'auto' | 'ask' | 'off';
   mathHover: boolean;
+  /** layout.undoClose: seconds a close can be undone. */
+  undoClose: number;
   notifySound: boolean;
   notifySystem: boolean;
   notifyBadge: boolean;

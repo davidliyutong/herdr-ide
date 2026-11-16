@@ -1,15 +1,24 @@
 // Closing with a way back: a pane, tab or workspace closed with Close
 // Pane, Close Tab or Close Workspace leaves at once, without asking, and
-// its terminals end UNDO_MS later (TermModel.closeLater). Until then Undo
-// Close (pane.undoClose, cmd+z in the desktop app on macOS) puts the
+// its terminals end when the undo time (layout.undoClose) is over
+// (TermModel.closeLater). Until then Undo Close (pane.undoClose, cmd+z in
+// the desktop app on macOS) puts the
 // newest of them back as it was, with its terminals' programs still
 // running; tabs or workspaces closed together (a selection of them) come
 // back together. Records live in the page; the terminals' end does not
 // depend on it.
+import { settingValue } from './settings';
 import * as L from './term/layout';
 
-/** How long a closed pane can be brought back. */
-export let UNDO_MS = 5000;
+let fixedMs: number | undefined;
+
+/** How long a pane closed now can be brought back: the setting layout.undoClose
+ * (seconds) when it is closed; records keep the deadline they were given. */
+export function undoMs(): number {
+  if (fixedMs !== undefined) return fixedMs;
+  const s = Number(settingValue('layout.undoClose'));
+  return (Number.isFinite(s) && s > 0 ? s : 5) * 1000;
+}
 
 export interface ClosedRecord extends L.Closed {
   m: string;
@@ -57,7 +66,7 @@ export function rememberClosed(
   const closed = L.tabPanes(tab).filter((k) => keys.includes(k));
   if (!closed.length) return undefined;
   const terminals = L.tabTerminals(tab).filter((k) => keys.includes(k));
-  const record = { m, ws: ws.id, index: at.tab, tab, closed, terminals, deadline: now + UNDO_MS, group };
+  const record = { m, ws: ws.id, index: at.tab, tab, closed, terminals, deadline: now + undoMs(), group };
   records = [...records.filter((r) => r.deadline > now), record];
   return record;
 }
@@ -76,7 +85,7 @@ export function rememberWorkspace(
   if (index < 0) return undefined;
   const workspace = layout.workspaces[index];
   const known = layout.workspaces.map((w) => w.id);
-  spaces = [...spaces.filter((r) => r.deadline > now), { m, workspace, index, known, deadline: now + UNDO_MS, group }];
+  spaces = [...spaces.filter((r) => r.deadline > now), { m, workspace, index, known, deadline: now + undoMs(), group }];
   return workspace.tabs.flatMap((tab) => rememberClosed(m, layout, L.tabPanes(tab), now, group) ?? []);
 }
 
@@ -97,9 +106,10 @@ export function hasClosed(now = Date.now()): boolean {
   return records.some((r) => r.deadline > now) || spaces.some((r) => r.deadline > now);
 }
 
-/** Forgets every record (tests), and sets the time to undo. */
-export function resetClosed(undoMs = 5000) {
+/** Forgets every record (tests), and fixes the time to undo (none: the
+ * setting's). */
+export function resetClosed(ms?: number) {
   records = [];
   spaces = [];
-  UNDO_MS = undoMs;
+  fixedMs = ms;
 }
