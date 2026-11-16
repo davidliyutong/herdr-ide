@@ -87,6 +87,7 @@ export const zhCN: Messages = {
   'app.reload': '刷新',
 
   'gui.windows': '程序窗口',
+  'gui.findWindow': '查找窗口',
   'gui.untitled': '无标题窗口',
   'gui.open': '打开',
   'gui.openTitle': '打开窗口：{title}',

@@ -2999,7 +2999,6 @@ button.danger-text:not(:disabled) {
   background: var(--bg-3);
 }
 .gui-tray .lucide,
-.gui-menu-item .lucide,
 .gui-note .lucide {
   width: var(--ic-sm);
   height: var(--ic-sm);
@@ -3074,22 +3073,6 @@ button.gui-note:hover {
 .statusbar .gui-menu {
   top: auto;
   bottom: calc(100% + 6px);
-}
-.gui-menu-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.gui-menu-item:hover {
-  background: var(--bg-3);
-}
-.gui-menu-item .ellipsis {
-  flex: 1;
-  min-width: 0;
 }
 
 /* The uploads panel (components/Transfers.tsx), above the status bar. */

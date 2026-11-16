@@ -90,6 +90,7 @@ export const en = {
   'app.reload': 'Reload',
 
   'gui.windows': 'Program windows',
+  'gui.findWindow': 'Find a window',
   'gui.untitled': 'Untitled window',
   'gui.open': 'Open',
   'gui.openTitle': 'Open window: {title}',
