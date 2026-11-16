@@ -11,7 +11,7 @@
 // keys settings.<key>, settings.<key>.desc, settings.<key>.<option> and
 // settings.group.<id>; a setting without them shows its key.
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AlertTriangle, Copy as CopyIcon, Ellipsis, FileJson, Lock, Minus, Plus, Search, X } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../state/store';
@@ -26,6 +26,7 @@ import {
   resetSetting,
   setSetting,
   useSettings,
+  type Section,
   type SettingDef,
   type SettingProblem,
   type SettingState,
@@ -39,8 +40,9 @@ import { colorKeys, ThemeColors, schemeLabel } from './settings/Colors';
 import { ThemePicker } from './settings/ThemePicker';
 import { FullDiskAccess, fullDiskAccessMatches } from './settings/FullDiskAccess';
 import { fullDiskAccessAvailable, localMachine } from '../fullDiskAccess';
-import { PluginsPage } from './settings/PluginsPage';
-import { acceptRisk } from '../plugins/registry';
+import { PluginHeader, PluginsPage } from './settings/PluginsPage';
+import { acceptRisk, pluginSwitch, sectionPlugin, usePluginList } from '../plugins/registry';
+import type { PluginDef } from '../plugins/api';
 
 export function settingLabel(key: string): string {
   const k = `settings.${key}`;
@@ -105,6 +107,36 @@ export function machineScoped(d: SettingDef, m: Pick<MachineState, 'kind'>): boo
   return d.scope === 'machine' || (d.scope === 'remote-machine' && m.kind !== 'local');
 }
 
+/** A page of the dialog's navigation: a section, or one of its own. */
+interface Page {
+  id: string;
+  advanced?: boolean;
+  /** The plugin whose settings it has: listed under the plugins. */
+  plugin?: string;
+}
+
+/** The pages of plugins' settings, in the plugins' order: their sections
+ * with settings shown, and (with extra, in the user's scope) the pages a
+ * plugin names for its extra alone. */
+function pluginPages(shown: readonly Section[], all: readonly Section[], plugins: readonly PluginDef[], user: boolean): Page[] {
+  const out: Page[] = [];
+  for (const s of shown) {
+    const plugin = sectionPlugin(s.id, all);
+    if (plugin) out.push({ id: s.id, plugin });
+  }
+  if (user) {
+    for (const p of plugins) {
+      const id = p.settings?.section;
+      if (id && p.settings?.extra && !out.some((x) => x.id === id)) out.push({ id, plugin: p.id });
+    }
+  }
+  const rank = (p: Page) => {
+    const i = plugins.findIndex((x) => x.id === p.plugin);
+    return i < 0 ? plugins.length : i;
+  };
+  return out.sort((a, b) => rank(a) - rank(b));
+}
+
 const KEYS_PAGE = 'keys';
 const MACHINE_PAGE = 'machine';
 /** The plugins and their switches (the section of plugins.<id>.enabled). */
@@ -124,6 +156,7 @@ function SettingsModal({ page: askedPage, machine: askedMachine }: { page?: stri
   const [page, setPage] = useState(askedPage ?? (askedMachine ? MACHINE_PAGE : 'appearance'));
   const [query, setQuery] = useState('');
   const keysFile = useKeys((k) => k.file);
+  const plugins = usePluginList((s) => s.list);
   const search = useRef<HTMLInputElement>(null);
 
   // Opened again while open (a machine's menu, a key): show what was asked.
@@ -148,14 +181,23 @@ function SettingsModal({ page: askedPage, machine: askedMachine }: { page?: stri
     [st.defs, machine],
   );
   const sections = st.sections.filter((s) => defs.some((d) => d.section === s.id && shownInRows(d)));
-  const pages = [
-    ...(machine ? [{ id: MACHINE_PAGE, advanced: false }] : []),
-    ...sections.filter((s) => !s.advanced && s.id !== PLUGINS_PAGE),
-    ...(machine ? [] : [{ id: PLUGINS_PAGE, advanced: false }]),
-    ...(machine ? [] : [{ id: KEYS_PAGE, advanced: false }]),
-    ...sections.filter((s) => s.advanced),
+  const pages: Page[] = [
+    ...(machine ? [{ id: MACHINE_PAGE }] : []),
+    ...sections.filter((s) => !s.advanced && s.id !== PLUGINS_PAGE && !sectionPlugin(s.id, st.sections)),
+    ...(machine ? [] : [{ id: PLUGINS_PAGE }]),
+    ...pluginPages(sections, st.sections, plugins, !machine),
+    ...(machine ? [] : [{ id: KEYS_PAGE }]),
+    ...sections.filter((s) => s.advanced && !sectionPlugin(s.id, st.sections)),
   ];
   const current = pages.some((p) => p.id === page) ? page : pages[0]?.id;
+  const currentPlugin = plugins.find((p) => p.id === pages.find((x) => x.id === current)?.plugin);
+  const CurrentExtra = currentPlugin?.settings?.section === current ? currentPlugin.settings.extra : undefined;
+  /** A page's name: its section's, else its plugin's (a page for extra alone). */
+  const pageLabel = (id: string) => {
+    if (hasMessage(`settings.section.${id}`)) return sectionLabel(id);
+    const p = plugins.find((x) => x.id === sectionPlugin(id, st.sections));
+    return p ? t(p.title) : id;
+  };
   const searching = query.trim() !== '';
   const matching = defs.filter((d) => shownInRows(d) && matchesSearch(d, query));
   // The Terminal page's Full Disk Access row (desktop app on macOS), found
@@ -240,23 +282,36 @@ function SettingsModal({ page: askedPage, machine: askedMachine }: { page?: stri
         </div>
         <div className="settings-main">
           <nav className="settings-nav" aria-label={t('settings.sections')}>
-            {pages.map((s, i) => (
-              <div key={s.id}>
-                {s.advanced && !pages[i - 1]?.advanced && <div className="settings-nav-heading">{t('settings.section.advanced')}</div>}
-                <button className={!searching && current === s.id ? 'on' : ''} onClick={() => go(s.id)}>
-                  <span className="ellipsis">
-                    {s.id === KEYS_PAGE
-                      ? t('settings.section.keyboard')
-                      : s.id === MACHINE_PAGE
-                        ? t('settings.machine.overview')
-                        : sectionLabel(s.id)}
-                  </span>
-                  {s.id !== KEYS_PAGE && s.id !== MACHINE_PAGE && modifiedIn(s.id) && (
-                    <span className="nav-dot" title={t('settings.modifiedHere')} />
+            {pages.map((s, i) => {
+              const def = s.plugin === undefined ? undefined : plugins.find((x) => x.id === s.plugin);
+              const off = !!def && !pluginSwitch(def, st.values, st.client);
+              return (
+                <div key={s.id}>
+                  {s.advanced && !pages[i - 1]?.advanced && <div className="settings-nav-heading">{t('settings.section.advanced')}</div>}
+                  {s.plugin !== undefined && machine && pages[i - 1]?.plugin === undefined && (
+                    <div className="settings-nav-heading">{t('settings.section.plugins')}</div>
                   )}
-                </button>
-              </div>
-            ))}
+                  <button
+                    className={[!searching && current === s.id && 'on', s.plugin !== undefined && !machine && 'sub', off && 'off']
+                      .filter(Boolean)
+                      .join(' ')}
+                    title={off ? t('plugins.page.off', { plugin: pageLabel(s.id) }) : undefined}
+                    onClick={() => go(s.id)}
+                  >
+                    <span className="ellipsis">
+                      {s.id === KEYS_PAGE
+                        ? t('settings.section.keyboard')
+                        : s.id === MACHINE_PAGE
+                          ? t('settings.machine.overview')
+                          : pageLabel(s.id)}
+                    </span>
+                    {s.id !== KEYS_PAGE && s.id !== MACHINE_PAGE && modifiedIn(s.id) && (
+                      <span className="nav-dot" title={t('settings.modifiedHere')} />
+                    )}
+                  </button>
+                </div>
+              );
+            })}
           </nav>
           <div className="settings-body">
             {readOnly && <p className="settings-note">{t('settings.serverReadOnly')}</p>}
@@ -297,14 +352,17 @@ function SettingsModal({ page: askedPage, machine: askedMachine }: { page?: stri
             ) : current === MACHINE_PAGE && machine ? (
               <MachinePage m={machine} readOnly={readOnly} />
             ) : current === PLUGINS_PAGE && !machine ? (
-              <PluginsPage readOnly={readOnly} />
+              <PluginsPage readOnly={readOnly} onOpen={go} />
             ) : (
               <SectionView
                 id={current}
+                title={pageLabel(current)}
                 defs={defs.filter((d) => d.section === current)}
                 machine={machine}
                 readOnly={readOnly}
                 fullDiskAccess={current === 'terminal' && !machine}
+                header={currentPlugin && <PluginHeader p={currentPlugin} readOnly={readOnly} withSwitch={!machine} />}
+                footer={CurrentExtra && !machine && <CurrentExtra readOnly={readOnly} />}
               />
             )}
           </div>
@@ -346,13 +404,21 @@ function OpenFileButton({ file, which }: { file: string; which: 'settings' | 'ke
 
 function SectionView({
   id,
+  title,
   defs,
   heading,
   machine,
   readOnly,
   fullDiskAccess,
+  header,
+  footer,
 }: {
   id: string;
+  /** The page's title, when not the section's (a plugin's page). */
+  title?: string;
+  /** Before the settings (a plugin and its switch) and after them (a plugin's extra). */
+  header?: ReactNode;
+  footer?: ReactNode;
   defs: SettingDef[];
   heading?: boolean;
   machine?: MachineState;
@@ -368,8 +434,9 @@ function SectionView({
   return (
     <section className="settings-section">
       {heading && <h3>{sectionLabel(id)}</h3>}
-      {!heading && <h2 className="settings-page-title">{sectionLabel(id)}</h2>}
+      {!heading && <h2 className="settings-page-title">{title ?? sectionLabel(id)}</h2>}
       {machine && !heading && <p className="settings-note">{t('settings.scope.machineNote', { machine: machine.label })}</p>}
+      {header}
       {error && <p className="error small">{error}</p>}
       {/* The colors page: a scheme and own colors per theme. */}
       {!machine &&
@@ -391,6 +458,7 @@ function SectionView({
           </div>
         ))}
       {fullDiskAccess && <FullDiskAccess readOnly={readOnly} />}
+      {footer}
       {id === 'gui' && machine && machine.kind !== 'local' && (
         <div className="setting">
           <div className="setting-head">

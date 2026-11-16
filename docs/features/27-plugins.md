@@ -78,7 +78,13 @@ the requesting client's switch (`plugin.EnabledFor`) to the plugin's
 routes and to the core's own routes of a plugin (`withPlugin`);
 `plugin.Enabled`, for what serves every client (agents' streams,
 schedulers), is on while either is. `internal/registry` lists the core's
-plugins (`Plugins`).
+plugins (`Plugins`). A plugin's own settings are a settings module with a
+section of its own whose `Plugin` field names the plugin
+(`settings.Section{ID: "usage", Plugin: "usage"}`, served as `plugin` by
+`/api/settings`): the UIs list that section under the plugins and say
+when its plugin is off ([13](13-settings-and-appearance.md));
+`TestPluginSectionsNameCorePlugins` checks that every such section names
+a plugin of the core.
 
 ### Agent
 
@@ -120,7 +126,12 @@ A plugin (`PluginDef`, `web/src/plugins/api.ts`) contributes:
 - **commands**: handlers of commands declared in
   `internal/keybindings/commands.go`, checked before the app's own;
 - **status bar items**, **palette items** and a handler of its `/ws`
-  messages.
+  messages;
+- **a settings page** (`settings: {section, extra?}`): the section of its
+  settings, which the Plugins page opens, and a component drawn at the
+  end of that page (`extra`, given `readOnly`: actions that are no
+  setting, such as an import and an export). A plugin that names a
+  section without settings gets a page for its `extra` alone.
 
 `web/src/plugins/index.ts` lists the plugins in order. `registry.ts` filters
 them by their setting: a plugin that is off loses its panels, commands,
@@ -139,6 +150,58 @@ settings' rows), asks first (`setPluginSwitch`, `acceptRisk`): a dialog
 with the plugin's texts, what its content can reach, and **Enable** only
 once the box that the user understands the risk is ticked; turning it off,
 and the desktop app's switch, ask nothing.
+
+**Settings pages.** Settings › Plugins lists every plugin with its
+switch; a plugin with a settings page has a settings button on its row
+that opens the page. In the dialog's navigation the plugins' pages follow
+the Plugins page, indented and in the plugins' order (in a machine's
+scope, which has no Plugins page, under a heading of their own); the
+plugin a section belongs to is the core's word for it (`Section.plugin`),
+else the plugin naming it (`registry.ts` `pluginSection`,
+`sectionPlugin`). A page starts with the plugin, its description and its
+switch (`settings/PluginsPage.tsx` `PluginHeader`; in a machine's scope
+without the switch, which is the User setting); while the plugin is off
+the page says so, its entry in the navigation is dimmed, and its settings
+stay editable, kept for when it is on. The page ends with the plugin's
+`extra`. The settings search finds a plugin's settings as any others. The
+AI usage plugin's page is its section `usage`.
+
+**Building blocks.** Plugins' panels and panes draw with the app's shared
+components rather than their own, so they look and behave alike
+([24](24-design-tokens.md) has their styles):
+
+- `components/Picker.tsx`: searchable dropdowns. `<Picker items value
+  onChange multiple? create? onCreate? noneLabel? />` is a button showing
+  the current value(s) that opens the list (where a `<select>` would be);
+  `pick(anchor, {items, value?, create?, placeholder?, emptyText?,
+  keepOrder?, label?})` opens it at an element or a point and resolves
+  with the value chosen (`{create: query}` for the create row, undefined
+  when dismissed), `pickMany(anchor, {items, value?})` with the values
+  checked. Items (`PickerItem`) have a `value`, `label`, `description`,
+  `detail`, `icon`, `group` (a header), `disabled` and `keywords`. The
+  search uses the command palette's matcher (`lib/match.ts`) and marks the
+  characters it matched; only the rows in view are drawn
+  (`lib/windowed.ts`), so thousands of items stay fast. Keys: typing
+  filters, ↑ ↓ PgUp PgDn Home End move, Enter chooses (with several:
+  accepts), Space toggles with several once an arrow moved or while the
+  query is empty (else it types a space), Escape closes and gives the
+  focus back; a press outside closes. The list is placed below its anchor,
+  above when there is more room there, within the window (as wide as it
+  less 8 px gutters on a phone).
+- `fileIcons.tsx`: `<FileIcon name kind open? link? />` and the lookup
+  `fileIcon(name, kind, open?)` (`{id, icon, color}`): file-type icons as
+  VS Code's icon themes give them, in the tokens' file icon hues.
+- `components/tree`: `<TreeRow>` (indent guides, twisty, icon, label with
+  the filter's match marked, description, a decoration's letter and color,
+  actions shown while the row is pointed at or has the keyboard; the
+  caller's attributes for clicks, drags and the windowed position);
+  selection over the shown rows' ids (`selectOnly`, `selectToggle`,
+  `selectRange`, `selectAll`, `clickSelection`) and the keys of a tree
+  (`navigationKey`: ↑ ↓ PgUp PgDn Home End with Shift extending, ← → to
+  collapse, expand, go to the parent and into a folder, ⌘/Ctrl+A,
+  type-ahead with `TypeAhead`); `<Section id title count? actions?>`, a
+  collapsible group whose state is kept per browser (`section.<id>`).
+  The file explorer is built with them.
 
 What a plugin draws is inside an error boundary (`PluginBoundary`): a pane's
 body, the panel shown and each status bar item. One that throws while
@@ -178,7 +241,7 @@ on macOS) shows the panel shown last or hides it.
 | `vscode` | `plugins.vscode.enabled` (the desktop app), `plugins.vscode.browser` (browsers, after accepting the risk); both off by default | VS Code (code-server) in panes: the commands `code.open`, `code.diff`, `code.gitGraph`, the panes' buttons and menu items, the windows' layer ([05](05-vscode-panes.md)). Its routes are the core's own (`/api/m/{id}/code/*`, `/m/{id}/code/`, `/api/m/{id}/bridge`), which answer `plugin_disabled` to a client whose switch is off (`withPlugin`), stopping code-server excepted. Turning a switch off also closes that client's proxied connections, VS Code windows open in other browsers included, and, once both are off, ends a code-server preparation under way. |
 | `files` | `plugins.files.enabled` | The file explorer's panel and its editor pane, with Monaco loaded on first use ([28](28-file-explorer.md)). |
 | `vault` | `plugins.vault.enabled` | The variable vault: its panel, approval prompts, the op `vault` and the `mcp` command ([30](30-variable-vault.md)). |
-| `usage` | `plugins.usage.enabled` | The AI usage panel, its status bar item and its scheduler in the core ([29](29-ai-usage.md)). |
+| `usage` | `plugins.usage.enabled` | The AI usage panel, its status bar item, its settings page (section `usage`) and its scheduler in the core ([29](29-ai-usage.md)). |
 | `git` | `plugins.git.enabled` | Source Control's panel, the graph and diff panes, the file explorer's decorations of changed files ([31](31-git.md)). |
 
 ## Alternatives considered
@@ -228,6 +291,14 @@ on macOS) shows the panel shown last or hides it.
   unknown.
 - `web/src/__tests__/vscodeRisk.test.ts`: the switch of the page's kind
   of client, the risk dialog before the browsers' switch turns on.
+- `internal/registry/registry_test.go`: plugins' sections name plugins of
+  the core (`TestPluginSectionsNameCorePlugins`).
+- `web/src/__tests__/pluginSettings.test.ts`: plugins' pages under the
+  Plugins page (and under a heading in a machine's scope), opened from a
+  plugin's row, the page's switch and its note while the plugin is off,
+  a page of an `extra` alone, the search finding a plugin's settings.
+- `web/src/__tests__/picker.test.ts`, `tree.test.ts`, `fileIcons.test.ts`:
+  the building blocks.
 - `web/src/__tests__/pluginFramework.test.ts`: error boundaries of panes,
   panels and status items, the Plugins page's per-machine switch, editors'
   font following the settings.

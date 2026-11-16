@@ -70,6 +70,22 @@ export interface BrowserRisk {
   confirm: MessageKey;
 }
 
+/** What a plugin's page in Settings ends with: actions that are no
+ * setting (an import and an export). */
+export interface PluginSettingsProps {
+  readOnly: boolean;
+}
+
+/** A plugin's page in Settings. */
+export interface PluginSettingsDef {
+  /** The section of its settings (internal/settings), whose page the
+   * Plugins page's settings button opens. The core's section names its
+   * plugin as well; a section without settings is a page for extra alone. */
+  section: string;
+  /** Drawn at the end of the page. */
+  extra?: ComponentType<PluginSettingsProps>;
+}
+
 export interface PluginDef {
   /** As the core's plugin (internal/plugin): lower-case letters and digits. */
   id: string;
@@ -86,6 +102,8 @@ export interface PluginDef {
    * on asks the user to accept this risk first (registry.ts
    * setPluginSwitch). The dialog's texts. */
   browserRisk?: BrowserRisk;
+  /** Its settings page. */
+  settings?: PluginSettingsDef;
   panels?: PanelDef[];
   /** By kind. */
   paneViews?: Record<string, PaneViewDef>;

@@ -14,6 +14,7 @@ export const usagePlugin: PluginDef = {
   title: 'usage.title',
   description: 'usage.description',
   icon: Gauge,
+  settings: { section: 'usage' },
   panels: [{ id: 'usage', title: 'usage.title', icon: Gauge, component: UsagePanel, command: 'view.panel.usage' }],
   statusItems: [UsageStatusItem],
   onMessage(_m, data) {

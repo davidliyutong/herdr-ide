@@ -2,7 +2,7 @@
 import { create } from 'zustand';
 import { riskDialog } from '../dialog';
 import { t } from '../i18n';
-import { builtinDefaults, setSetting, useSettings, type Client } from '../settings';
+import { builtinDefaults, setSetting, useSettings, type Client, type Section } from '../settings';
 import type { CommandDef, PaletteItem, PanelDef, PaneViewDef, PluginDef } from './api';
 
 let plugins: PluginDef[] = [];
@@ -85,6 +85,18 @@ export async function setPluginSwitch(id: string, on: boolean): Promise<string |
 
 /** The plugins that are on. */
 export const activePlugins = (): PluginDef[] => plugins.filter((p) => pluginOn(p));
+
+/** The settings section of p: the one it names, else the one the core
+ * says is its (Section.plugin). */
+export function pluginSection(p: PluginDef, sections: readonly Section[] = useSettings.getState().sections): string | undefined {
+  return p.settings?.section ?? sections.find((s) => s.plugin === p.id)?.id;
+}
+
+/** The id of the plugin a settings section belongs to: the core's word
+ * for it (Section.plugin), else the plugin naming it. */
+export function sectionPlugin(section: string, sections: readonly Section[] = useSettings.getState().sections): string | undefined {
+  return sections.find((s) => s.id === section)?.plugin ?? plugins.find((p) => p.settings?.section === section)?.id;
+}
 
 /** Whether the plugin of this id is there and on. */
 export const isPluginOn = (id: string): boolean => activePlugins().some((p) => p.id === id);

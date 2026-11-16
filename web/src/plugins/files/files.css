@@ -63,80 +63,16 @@
   border-color: var(--accent);
 }
 .files-tree {
-  position: relative;
   flex: 1;
   min-height: 0;
   overflow: auto;
-  outline: none;
 }
 .files-tree.drop {
   background: var(--accent-soft);
 }
+/* The rows are the shared tree rows (components/tree, styles.css). */
 .files-rows {
   position: relative;
-}
-.files-row {
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: var(--h-row);
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding-right: 8px;
-  font-size: var(--fs-base);
-  cursor: default;
-  user-select: none;
-  white-space: nowrap;
-}
-.files-row:hover {
-  background: var(--bg-2);
-}
-.files-row.selected {
-  background: var(--bg-3);
-}
-.files-tree:focus-within .files-row.selected {
-  background: var(--accent-soft);
-}
-.files-tree:focus-visible .files-row.cursor {
-  outline: 1px solid var(--focus-ring);
-  outline-offset: -1px;
-}
-.files-row.drop {
-  background: var(--accent-soft);
-}
-.files-row.cut {
-  opacity: 0.55;
-}
-.files-twisty {
-  display: inline-flex;
-  width: var(--ic-sm);
-  flex: none;
-  color: var(--fg-dim);
-}
-.files-twisty svg {
-  width: var(--ic-sm);
-  height: var(--ic-sm);
-}
-.files-icon {
-  width: var(--ic);
-  height: var(--ic);
-  flex: none;
-  color: var(--fg-dim);
-}
-.files-name {
-  flex: 1;
-}
-.files-link {
-  width: var(--fs-md);
-  height: var(--fs-md);
-  flex: none;
-  color: var(--fg-mute);
-}
-.files-badge {
-  flex: none;
-  font-size: var(--fs-sm);
-  font-weight: 600;
 }
 .files-edit {
   flex: 1;

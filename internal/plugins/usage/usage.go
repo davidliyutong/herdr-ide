@@ -54,7 +54,7 @@ var DefaultCadence = Cadence{Open: 5 * time.Minute, Working: 10 * time.Minute, I
 
 // Settings is the plugin's settings module (internal/registry).
 var Settings = func() settings.Module {
-	m := settings.Module{Sections: []settings.Section{{ID: "usage", Order: 66}}}
+	m := settings.Module{Sections: []settings.Section{{ID: "usage", Order: 66, Plugin: ID}}}
 	m.Defs = append(m.Defs,
 		settings.Def{Key: SettingRefresh, Type: settings.TypeEnum, Default: RefreshAdaptive, Enum: refreshModes,
 			Scope: settings.ScopeApp, Section: "usage", Order: 10},

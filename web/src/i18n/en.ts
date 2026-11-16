@@ -359,6 +359,17 @@ export const en = {
   'palette.placeholderWorkspaces': 'Switch to a workspace or agent…',
   'palette.noMatch': 'No matches',
 
+  // Searchable dropdowns (components/Picker.tsx).
+  'picker.search': 'Search',
+  'picker.noMatch': 'No matches',
+  'picker.none': 'None',
+  'picker.all': 'All',
+  'picker.selected': '{count} selected',
+  'picker.selectShown': 'Select Shown',
+  'picker.clear': 'Clear',
+  'picker.done': 'Done',
+  // File-type icons (fileIcons.tsx).
+  'fileIcon.link': 'Symbolic link',
   'sidebar.agents': 'Agents',
   'sidebar.newWorkspaceOn': 'New workspace on {machine}',
   'sidebar.resize': 'Drag to resize · double-click for the default width',
@@ -728,6 +739,8 @@ export const en = {
   'plugins.page.always': 'Always on',
   'plugins.page.perMachine':
     'The switch is the User setting, for every machine without one of its own (Settings of a machine sets that); the plugin shows while any machine has it on.',
+  'plugins.page.settings': '{plugin} Settings',
+  'plugins.page.off': '{plugin} is off. Its settings are kept and apply once it is on.',
   'plugins.crashed': 'Something went wrong in the plugin “{plugin}”: {error}',
   'plugins.crashedShort': '“{plugin}” failed: {error}',
   'plugins.retry': 'Try Again',

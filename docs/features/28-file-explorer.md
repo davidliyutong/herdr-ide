@@ -58,15 +58,25 @@ machine's `internal/agent/plugin/files`.
   beside them (the root's is shown). Folders come first, names sort as
   people sort them (`a2` before `a10`).
 - The filter keeps entries whose names contain its text (case ignored) in
-  the directories listed and kept, and opens the folders that lead to
-  them.
-- Rows are drawn only where they are in view (fixed height), so a
-  directory of thousands of entries scrolls without drawing them all.
-- Keys on the tree: ↑ ↓ (with Shift to extend the selection), Home, End,
-  → (expand, then the first child), ← (collapse, then the parent), Enter
+  the directories listed and kept, opens the folders that lead to them,
+  and marks the text in each name.
+- Rows are the shared tree rows ([27](27-plugins.md), `components/tree`):
+  indent guides, a twisty, the file type's icon (`fileIcons.tsx`: special
+  names such as `package.json`, `Dockerfile` or `README.md`, compound
+  extensions such as `.d.ts` or `.tar.gz`, extensions, special folders
+  such as `.git`, `src` or `node_modules`, in the design tokens' file icon
+  hues, [24](24-design-tokens.md); a symbolic link has the link icon of
+  its kind in its type's color), the name and a decoration. They are drawn
+  only where they are in view (fixed height), so a directory of thousands
+  of entries scrolls without drawing them all.
+- Keys on the tree: ↑ ↓ PgUp PgDn Home End (with Shift to extend the
+  selection), → (expand, then the first child), ← (collapse, then the
+  parent), ⌘A (Ctrl+A elsewhere) selects every row shown, letters go to
+  the next row whose name starts with them (type-ahead), Enter
   (open, kept), Space (preview, the keyboard stays in the tree), F2 (rename), Delete or ⌘⌫ (trash), Shift
   with them (delete for good, after asking), ⌘/Ctrl C, X, V, Escape (the
-  clipboard, then the filter). The keys act on the selected rows the tree
+  clipboard, then the filter). Arrows with ⌘, Ctrl or Alt are left to
+  the page's shortcuts. The keys act on the selected rows the tree
   shows; V pastes into the cursor's folder, or the root when the cursor is
   on no row. A cut stays on the clipboard until its paths are moved: the
   ones that failed to move stay on it. The page's own shortcuts work as anywhere
@@ -329,8 +339,9 @@ the trash stay in the user's trash
   cancelled.
 - `internal/plugins/files/audit_test.go`: the paths of the audit records.
 - `web/src/__tests__/files.test.ts`: rows (order, hidden files, the filter,
-  a new entry's row), breadcrumb and paths, the root following the focused
-  terminal, the keyboard, the context menu's changes and the routes they
+  a new entry's row, file icons, indent guides, the filter's match marked),
+  breadcrumb and paths, the root following the focused terminal, the
+  keyboard (pages, select all, type-ahead too), the context menu's changes and the routes they
   call, Delete and Shift+Delete, polling (the shown folders only, as a
   POST, one at a time and less often after failures, a failed listing
   kept and tried again), Refresh, what a new root keeps and clears, paste

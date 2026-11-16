@@ -351,6 +351,17 @@ export const zhCN: Messages = {
   'palette.placeholderWorkspaces': '切换到工作区或智能体…',
   'palette.noMatch': '没有匹配项',
 
+  // 可搜索下拉列表（components/Picker.tsx）。
+  'picker.search': '搜索',
+  'picker.noMatch': '没有匹配项',
+  'picker.none': '无',
+  'picker.all': '全部',
+  'picker.selected': '已选 {count} 项',
+  'picker.selectShown': '全选显示的项',
+  'picker.clear': '清除',
+  'picker.done': '完成',
+  // 文件类型图标（fileIcons.tsx）。
+  'fileIcon.link': '符号链接',
   'sidebar.agents': '智能体',
   'sidebar.newWorkspaceOn': '在 {machine} 上新建工作区',
   'sidebar.resize': '拖动可调整宽度 · 双击恢复默认宽度',
@@ -711,6 +722,8 @@ export const zhCN: Messages = {
   'plugins.page.always': '始终开启',
   'plugins.page.perMachine':
     '此开关是“用户”设置，适用于没有单独设置的所有机器（在某台机器的设置范围中可单独设置）；只要有任一机器开启，插件就会显示。',
+  'plugins.page.settings': '{plugin}设置',
+  'plugins.page.off': '{plugin}已关闭。其设置会保留，开启后生效。',
   'plugins.crashed': '插件“{plugin}”出错：{error}',
   'plugins.crashedShort': '“{plugin}”出错：{error}',
   'plugins.retry': '重试',

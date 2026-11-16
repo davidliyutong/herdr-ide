@@ -54,6 +54,9 @@ export interface Section {
   order: number;
   /** Listed after the others, under "Advanced". */
   advanced?: boolean;
+  /** The plugin it belongs to (plugins/api.ts): listed under the
+   * plugins, saying when the plugin is off. */
+  plugin?: string;
 }
 
 /** The kind of client this page is, as the core tells from its requests

@@ -19,7 +19,7 @@ for their defaults.
 ## Goals / non-goals
 
 Goals: one file that defines the colors (light and dark), the color
-themes, status, Git and chart colors, terminal palettes, the chrome's
+themes, status, Git, chart and file icon colors, terminal palettes, the chrome's
 sizes and the type scale; the web UI and the core read them in their own
 form without a build step of their own; a stale generated file fails
 `make check`; the web UI's chrome uses the tokens through its CSS
@@ -53,6 +53,11 @@ colors programs draw with in panes, which stay the terminal settings'
     `orange`, `red`, `purple`) for data: the Git graph's lanes, the AI
     usage charts. The dark ones are of the same family as the icon's blue
     and teal.
+  - `fileIcon.<hue>`: the hues of file-type icons (`web/src/fileIcons.tsx`):
+    `blue`, `sky`, `teal`, `green`, `yellow`, `orange`, `red`, `pink`,
+    `purple`, `brown`, `grey`. Icons are graphics: each keeps 3:1 against
+    the background, the sidebars, a hovered and a selected row in both
+    themes (`fileIcons.test.ts`).
   - `themes`: the color themes, each `{id, accent, onAccent}` with a light
     and a dark value; the first is the default. `accent` keeps 3:1
     against the background and `onAccent` 4.5:1 on the accent
@@ -81,7 +86,7 @@ colors programs draw with in panes, which stay the terminal settings'
     and on `:root[data-theme='light']` for the light one, the same
     selectors as `web/src/styles.css`, so the theme setting switches both
     (`--ds-color-background`, `--ds-status-working`, `--ds-git-added`,
-    `--ds-chart-blue`, `--ds-terminal-ansi-0` to `-15`,
+    `--ds-chart-blue`, `--ds-file-icon-sky`, `--ds-terminal-ansi-0` to `-15`,
     `--ds-metric-radius`, `--ds-size-toolbar`, `--ds-font-size-base`).
     The first theme's `--ds-accent` and `--ds-on-accent` are on those two
     blocks; each other theme has `:root[data-accent='<id>']` for its dark
@@ -128,7 +133,8 @@ colors programs draw with in panes, which stay the terminal settings'
   | `--ctl`, `--ctl-sm`, `--ic`, `--ic-sm` | `size.control`, `controlSmall`, `icon`, `iconSmall` |
   | `--fs-xs` … `--fs-display` | `font.size.*` |
 
-  Git and chart colors are used as `--ds-git-*` and `--ds-chart-*`.
+  Git, chart and file icon colors are used as `--ds-git-*`,
+  `--ds-chart-*` and `--ds-file-icon-*`.
   Code that lays rows out by number (virtual lists) takes the same sizes
   in pixels at the UI font size in use from `web/src/lib/sizes.ts`.
 - **The design language** (`styles.css`): the accent marks focus (the
@@ -158,6 +164,22 @@ colors programs draw with in panes, which stay the terminal settings'
   - **Feedback**: `.badge` (accent pill), `.tag` (outlined label),
     `.callout` (`.warning`, `.error`), `.empty-note` (a panel with nothing
     to show), `.switch` (on/off in forms), toasts as above.
+  - **Dropdowns** (`components/Picker.tsx`, `.picker`, `.picker-button`): a
+    floating panel of the menus' fill with a search field and list rows a
+    row high (taller for touch), the keyboard's row in the accent as in the
+    palette, group headers like section headings, check boxes filled with
+    the accent, a footer for several; characters a query matched are
+    underlined in the accent (`mark.match`, `components/Highlight.tsx`).
+  - **Trees and lists** (`components/tree`, `.tree`, `.tree-row`): list
+    rows with indent guides (`--line`, `--line-2` while the tree is
+    pointed at or focused), a twisty, a file icon (`.file-icon`, `--ic`,
+    neutral or in its `--ds-file-icon-*` hue), the label, a muted
+    description, actions shown on hover and focus, a decoration letter in
+    its color; selected rows take `--bg-3`, `--accent-soft` while the tree
+    has the keyboard, whose row has the focus ring. Collapsible sections
+    (`.section-head` with `.section-toggle`) show their count neutral
+    (`.section-count`), as VS Code does: only what asks for attention
+    takes the accent.
 
   The tab bar and the active tab use `color.tabBar` and `color.tabActive`
   directly; the active tab also has an outline (`--line-2`) and an accent
@@ -210,7 +232,7 @@ colors programs draw with in panes, which stay the terminal settings'
 ## Testing
 
 `scripts/tokens/main_test.go`: parsing (plain and alpha colors), the
-generated CSS (themes, sizes in rem, lengths written once) and Go and that
+generated CSS (themes, file icon hues, sizes in rem, lengths written once) and Go and that
 repeated runs give the same bytes, rejected tokens (malformed colors,
 alpha, missing theme, unknown field, short palette, names, themes, sizes),
 `-check` on missing, edited and outdated files without writing, and that
@@ -222,4 +244,4 @@ default color theme; `data-accent` for known and unknown themes; every
 theme's accent contrast in both kinds; sizes in pixels scale with the UI
 font size.
 `web/src/__tests__/termOptions.test.ts` keeps the terminal colors'
-contrast.
+contrast, `fileIcons.test.ts` the file icon hues'.

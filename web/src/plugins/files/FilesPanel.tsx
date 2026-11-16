@@ -7,21 +7,7 @@
 // double click (or Enter) opens it in the editor pane.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ChevronDown,
-  ChevronRight,
-  ChevronsDownUp,
-  Eye,
-  EyeOff,
-  File as FileIcon,
-  FilePlus,
-  Folder,
-  FolderOpen,
-  FolderPlus,
-  Link2,
-  LocateFixed,
-  RefreshCw,
-} from 'lucide-react';
+import { ChevronsDownUp, Eye, EyeOff, FilePlus, FolderPlus, LocateFixed, RefreshCw } from 'lucide-react';
 import { current, paneDirectory } from '../../actions';
 import { useStore } from '../../state/store';
 import { useTerms } from '../../state/terms';
@@ -33,14 +19,21 @@ import { APP_SLUG } from '../../brand';
 import { t } from '../../i18n';
 import { isMac } from '../../keys';
 import { useSize } from '../../lib/sizes';
+import { revealTop, useScrollView, visibleRange } from '../../lib/windowed';
+import { TreeRow } from '../../components/tree/TreeRow';
+import { TypeAhead, clickSelection, navigationKey, stepId } from '../../components/tree/selection';
+import { FileIcon } from '../../fileIcons';
 import { decorationsOf, useDecorationVersion, useShownDirs } from './decorations';
 import {
   collapseAll,
   crumbs,
+  navRows,
   parentOf,
   poll,
   refresh,
+  rowIds,
   select,
+  selectAllRows,
   setEdit,
   setExpanded,
   setFilter,
@@ -48,10 +41,8 @@ import {
   setHidden,
   showRoot,
   shownDirs,
-  stepRow,
   treeRows,
   useTree,
-  within,
   setClipboard,
   type Row,
 } from './tree';
@@ -90,7 +81,8 @@ export function FilesPanel() {
   useDecorationVersion((d) => d.v);
   const treeRef = useRef<HTMLDivElement>(null);
   const [drop, setDrop] = useState<string>();
-  const [scroll, setScroll] = useState({ top: 0, height: 0 });
+  const view = useScrollView();
+  const typeahead = useMemo(() => new TypeAhead(), []);
 
   // The directories shown, for decoration providers.
   const shownKey = s.m === m && s.root ? shownDirs(s).sort().join('\n') : '';
@@ -112,14 +104,6 @@ export function FilesPanel() {
   // are checked for changes, one poll at a time.
   useEffect(() => startPolling(POLL_MS, poll), []);
 
-  useEffect(() => {
-    const el = treeRef.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(() => setScroll((v) => ({ ...v, height: el.clientHeight })));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
   // Rows are --h-row high, which scales with the UI font size.
   const ROW_HEIGHT = useSize('row');
   const rows = useMemo(() => treeRows(s), [s.root, s.dirs, s.expanded, s.hidden, s.filter, s.edit]);
@@ -131,10 +115,7 @@ export function FilesPanel() {
     const el = treeRef.current;
     if (!el || !s.cursor || !el.clientHeight) return;
     const i = rows.findIndex((r) => r.path === s.cursor);
-    if (i < 0) return;
-    const top = i * ROW_HEIGHT;
-    if (top < el.scrollTop) el.scrollTop = top;
-    else if (top + ROW_HEIGHT > el.scrollTop + el.clientHeight) el.scrollTop = top + ROW_HEIGHT - el.clientHeight;
+    if (i >= 0) el.scrollTop = revealTop(el.scrollTop, el.clientHeight, i * ROW_HEIGHT, (i + 1) * ROW_HEIGHT);
   }, [s.cursor, rows, ROW_HEIGHT]);
 
   if (!m || !s.root) return <div className="files-empty muted small">{t('files.noMachine')}</div>;
@@ -157,33 +138,18 @@ export function FilesPanel() {
       ev.preventDefault();
       ev.stopPropagation();
     };
-    const moveTo = (p: string | undefined) => p && select(p, ev.shiftKey ? 'range' : 'only', rows);
+    // Arrows, pages, Home, End, ← → on folders, ⌘/Ctrl+A, type-ahead.
+    const height = view.height || treeRef.current?.clientHeight;
+    const page = height ? Math.floor(height / ROW_HEIGHT) - 1 : undefined;
+    const nav = navigationKey(ev, navRows(rows), cur, { page, multi: true, typeahead });
+    if (nav) {
+      handled();
+      if (nav.kind === 'move') select(nav.to, nav.extend ? 'range' : 'only', rows);
+      else if (nav.kind === 'expand' || nav.kind === 'collapse') setExpanded(nav.id, nav.kind === 'expand');
+      else if (nav.kind === 'selectAll') selectAllRows(rows);
+      return;
+    }
     switch (true) {
-      case ev.key === 'ArrowDown':
-        handled();
-        return moveTo(stepRow(rows, cur, 1));
-      case ev.key === 'ArrowUp':
-        handled();
-        return moveTo(stepRow(rows, cur, -1));
-      case ev.key === 'Home':
-        handled();
-        return moveTo(stepRow(rows, undefined, 1));
-      case ev.key === 'End':
-        handled();
-        return moveTo(stepRow(rows, undefined, -1));
-      case ev.key === 'ArrowRight':
-        handled();
-        if (!row?.dir) return;
-        if (!row.expanded) return setExpanded(row.path, true);
-        return moveTo(stepRow(rows, cur, 1));
-      case ev.key === 'ArrowLeft': {
-        handled();
-        if (!row) return;
-        if (row.dir && row.expanded) return setExpanded(row.path, false);
-        const up = parentOf(row.path);
-        if (up !== root && within(up, root)) select(up);
-        return;
-      }
       case ev.key === 'Enter':
         handled();
         if (row) void openPath(m, row.path, row.dir);
@@ -218,10 +184,9 @@ export function FilesPanel() {
   };
 
   const onRowClick = (ev: React.MouseEvent, row: Row) => {
-    const mod = isMac ? ev.metaKey : ev.ctrlKey;
     treeRef.current?.focus();
-    if (ev.shiftKey) return select(row.path, 'range', rows);
-    if (mod) return select(row.path, 'toggle');
+    const how = clickSelection(ev);
+    if (how !== 'only') return select(row.path, how, rows);
     select(row.path);
     if (row.dir) setExpanded(row.path, !row.expanded);
     // A click shows the file in the preview editor; a double click keeps it
@@ -267,10 +232,9 @@ export function FilesPanel() {
     void dropFiles(m, dir, ev.dataTransfer.items);
   };
 
-  // ---- rows, windowed: only those in view are drawn ----
-  const height = scroll.height || rows.length * ROW_HEIGHT;
-  const first = Math.max(0, Math.floor(scroll.top / ROW_HEIGHT) - 10);
-  const last = Math.min(rows.length, Math.ceil((scroll.top + height) / ROW_HEIGHT) + 10);
+  // ---- rows, windowed: only those in view are drawn (all of them
+  // until the tree is measured) ----
+  const [first, last] = visibleRange(rows.length, ROW_HEIGHT, view.top, view.height || rows.length * ROW_HEIGHT);
   const decorations = new Map<string, ReturnType<typeof decorationsOf>>();
   const decorationOf = (row: Row) => {
     const dir = parentOf(row.path);
@@ -278,47 +242,58 @@ export function FilesPanel() {
     return decorations.get(dir)![row.name];
   };
   const selected = new Set(s.selection);
+  // The filter's text in each name, marked.
+  const needle = s.filter.trim().toLowerCase();
+  const matched = (name: string): Array<[number, number]> | undefined => {
+    const at = needle ? name.toLowerCase().indexOf(needle) : -1;
+    return at < 0 ? undefined : [[at, at + needle.length]];
+  };
   const cut = new Set(s.clipboard?.cut && s.clipboard.m === m ? s.clipboard.paths : []);
 
   const drawRow = (row: Row, index: number) => {
-    const style = { top: index * ROW_HEIGHT, height: ROW_HEIGHT, paddingLeft: 6 + row.depth * 12 };
+    const style = { top: index * ROW_HEIGHT, height: ROW_HEIGHT };
     if (row.creating) {
       return (
-        <div key={`new:${row.path}`} className="files-row editing" style={style} role="none">
-          <span className="files-twisty" />
-          {row.creating === 'folder' ? <Folder className="files-icon" /> : <FileIcon className="files-icon" />}
-          <InlineEdit
-            value=""
-            className="files-edit"
-            onDone={(name) => {
-              setEdit(undefined);
-              treeRef.current?.focus();
-              if (name) void create(m, row.path, name, row.creating!);
-            }}
-          />
-        </div>
+        <TreeRow
+          key={`new:${row.path}`}
+          className="files-row editing"
+          style={style}
+          role="none"
+          depth={row.depth}
+          expanded={undefined}
+          icon={<FileIcon name="" kind={row.creating === 'folder' ? 'dir' : 'file'} />}
+          label=""
+          editor={
+            <InlineEdit
+              value=""
+              className="files-edit"
+              onDone={(name) => {
+                setEdit(undefined);
+                treeRef.current?.focus();
+                if (name) void create(m, row.path, name, row.creating!);
+              }}
+            />
+          }
+        />
       );
     }
     const deco = decorationOf(row);
     const renaming = s.edit?.kind === 'rename' && s.edit.path === row.path;
-    const Icon = row.dir ? (row.expanded ? FolderOpen : Folder) : FileIcon;
     return (
-      <div
+      <TreeRow
         key={row.path}
-        className={[
-          'files-row',
-          selected.has(row.path) && 'selected',
-          s.cursor === row.path && 'cursor',
-          drop === row.path && row.dir && 'drop',
-          cut.has(row.path) && 'cut',
-        ]
-          .filter(Boolean)
-          .join(' ')}
+        className="files-row"
         style={style}
-        role="treeitem"
-        aria-level={row.depth + 1}
-        aria-expanded={row.dir ? row.expanded : undefined}
-        aria-selected={selected.has(row.path)}
+        depth={row.depth}
+        expanded={row.dir ? row.expanded : undefined}
+        icon={<FileIcon name={row.name} kind={row.dir ? 'dir' : 'file'} open={row.dir && row.expanded} link={row.link} />}
+        label={row.name}
+        highlight={matched(row.name)}
+        decoration={deco}
+        selected={selected.has(row.path)}
+        cursor={s.cursor === row.path}
+        dropTarget={drop === row.path && row.dir}
+        dimmed={cut.has(row.path)}
         data-path={row.path}
         title={deco?.tooltip ? `${row.path}\n${deco.tooltip}` : row.path}
         draggable={!readOnly && !renaming}
@@ -333,31 +308,20 @@ export function FilesPanel() {
         onDragStart={(ev) => onDragStart(ev, row)}
         onDragOver={(ev) => onDragOver(ev, row)}
         onDrop={(ev) => onDrop(ev, row)}
-      >
-        <span className="files-twisty">{row.dir && (row.expanded ? <ChevronDown /> : <ChevronRight />)}</span>
-        <Icon className="files-icon" />
-        {renaming ? (
-          <InlineEdit
-            value={row.name}
-            className="files-edit"
-            onDone={(name) => {
-              setEdit(undefined);
-              treeRef.current?.focus();
-              if (name) void rename(m, row.path, name);
-            }}
-          />
-        ) : (
-          <span className="files-name ellipsis" style={deco?.color ? { color: deco.color } : undefined}>
-            {row.name}
-          </span>
-        )}
-        {row.link && <Link2 className="files-link" aria-label={t('files.link')} />}
-        {deco?.badge && (
-          <span className="files-badge" style={deco.color ? { color: deco.color } : undefined}>
-            {deco.badge}
-          </span>
-        )}
-      </div>
+        editor={
+          renaming ? (
+            <InlineEdit
+              value={row.name}
+              className="files-edit"
+              onDone={(name) => {
+                setEdit(undefined);
+                treeRef.current?.focus();
+                if (name) void rename(m, row.path, name);
+              }}
+            />
+          ) : undefined
+        }
+      />
     );
   };
 
@@ -444,21 +408,24 @@ export function FilesPanel() {
             treeRef.current?.focus();
             const st = useTree.getState();
             if (!st.cursor || !rows.some((r) => r.path === st.cursor)) {
-              const p = stepRow(rows, undefined, 1);
+              const p = stepId(rowIds(rows), undefined, 1);
               if (p) select(p);
             }
           }
         }}
       />
       <div
-        ref={treeRef}
-        className={`files-tree ${drop === root ? 'drop' : ''}`}
+        ref={(el) => {
+          treeRef.current = el;
+          view.ref(el);
+        }}
+        className={`tree files-tree ${drop === root ? 'drop' : ''}`}
         role="tree"
         tabIndex={0}
         aria-label={t('files.title')}
         aria-multiselectable
         onKeyDown={onKey}
-        onScroll={(e) => setScroll({ top: e.currentTarget.scrollTop, height: e.currentTarget.clientHeight })}
+        onScroll={view.onScroll}
         onContextMenu={(ev) => {
           if (ev.defaultPrevented) return;
           openMenu(ev, menuFor(m, [], isDir, treeRef.current));
