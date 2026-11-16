@@ -141,7 +141,11 @@ Non-goals: arbitrary docking of panes; floating panes.
 
 - All drags share `drag.ts`: a drag starts after the pointer moved 6
   pixels on the screen (so a click stays a click), a ghost follows the
-  pointer, a marker shows where the drop lands, and Escape cancels. The
+  pointer, a marker shows where the drop lands, and Escape cancels. Held
+  within 32 pixels of the sidebar list's top or bottom edge (or just beyond
+  it), the pointer scrolls the list, faster nearer the edge, and the marker
+  follows what comes into view, so a workspace or machine out of view can
+  be reached with a workspace, a machine or a pane dragged. The
   distance is measured in screen coordinates: in macOS full screen the menu
   bar slides down when the pointer nears the top edge and moves the page
   under a pointer that stands still, which page coordinates would count as
@@ -294,8 +298,8 @@ Non-goals: arbitrary docking of panes; floating panes.
   opens the row's menu at the row. The focused row is outlined. Only the
   keyboard puts the focus on a row: a press of the mouse leaves it where it
   was, so the terminal of a workspace or tab clicked takes it. The agents
-  of the sidebar's Agents section are buttons (Enter or Space shows the
-  agent's pane).
+  of the sidebar's Agents section are one Tab stop too: ↑ ↓ Home End move
+  between them, Enter or Space shows the agent's pane.
 - The sidebar's list keeps where it was scrolled while the page reloads
   (per browser tab).
 
@@ -672,7 +676,8 @@ described in [13](13-settings-and-appearance.md))
   ([05](05-vscode-panes.md), [06](06-quick-look-and-files.md)).
 - `web/src/__tests__/sidebarMachines.test.ts`: workspaces shown with their
   folder's name, rows without the tab count (in the tooltip), renaming in
-  place and an emptied name giving the folder's back.
+  place and an emptied name giving the folder's back, the Agents section's
+  arrows and Tab stop.
 - `web/src/__tests__/terms.test.ts`: reading the document after the
   terminals, with a workspace without a name and without ended
   terminals; one write at a time and another client's newer version; ended
@@ -715,7 +720,8 @@ described in [13](13-settings-and-appearance.md))
 - `web/src/__tests__/followed.test.ts`: machines followed before followed
   again once connected, a removed machine forgotten.
 - `web/src/__tests__/menus.test.ts`: insertion slots, also on wrapped rows,
-  the area a drop counts in, drags measured on the screen, menu items and
+  the area a drop counts in, drags measured on the screen, the sidebar
+  scrolled while a drag is held at its edges, menu items and
   their commands, moves from the current position, a pane moved to
   another workspace or a new one, read-only, keyboard,
   focus and closing of the menu, submenus, a menu filtered by typing

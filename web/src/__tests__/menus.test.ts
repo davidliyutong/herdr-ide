@@ -7,7 +7,7 @@ vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 
 import { useStore } from '../state/store';
 import { insertSlot, near } from '../reorderDrag';
-import { dragBegins, trackDrag } from '../drag';
+import { dragBegins, edgeScroll, trackDrag } from '../drag';
 import type { MachineState } from '../lib/machine';
 import { FakeCore, settle } from './fakeTerms';
 import { closeMenu, isItem, openMenu, stepIndex, tidy, useMenu, type MenuEntry, type MenuItem } from '../contextMenu';
@@ -101,6 +101,43 @@ describe('drag start', () => {
     expect(document.querySelector('.drag-ghost')).not.toBeNull();
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     expect(document.querySelector('.drag-ghost')).toBeNull();
+  });
+
+  it('scrolls the sidebar while the pointer is held near its top or bottom edge', () => {
+    const rect = { left: 0, right: 200, top: 100, bottom: 500 };
+    expect(edgeScroll(rect, 50, 300)).toBe(0);
+    expect(edgeScroll(rect, 300, 490)).toBe(0);
+    expect(edgeScroll(rect, 50, 499)).toBeGreaterThan(0);
+    expect(edgeScroll(rect, 50, 101)).toBeLessThan(0);
+    // Nearer the edge (or beyond it) is faster.
+    expect(edgeScroll(rect, 50, 520)).toBeGreaterThan(edgeScroll(rect, 50, 480));
+
+    vi.useFakeTimers();
+    const list = document.createElement('div');
+    list.className = 'sidebar-scroll';
+    list.getBoundingClientRect = () => ({ ...rect, x: 0, y: 100, width: 200, height: 400, toJSON() {} });
+    let top = 0;
+    Object.defineProperty(list, 'scrollTop', { get: () => top, set: (v: number) => (top = v) });
+    document.body.append(list);
+    const find = vi.fn(() => 1);
+    trackDrag(
+      { clientX: 50, clientY: 300, screenX: 50, screenY: 300, pointerId: 1 },
+      { label: 'ws', find, marker: () => ({ box: { left: 0, top: 0, width: 1, height: 1 }, zone: 'slot' }), drop: () => Promise.resolve() },
+    );
+    const move = (y: number) =>
+      window.dispatchEvent(Object.assign(new Event('pointermove'), { pointerId: 1, clientX: 50, clientY: y, screenX: 50, screenY: y }));
+    move(495);
+    vi.advanceTimersByTime(160);
+    expect(top).toBeGreaterThan(50);
+    // The marker follows what scrolls into view.
+    expect(find.mock.calls.length).toBeGreaterThan(5);
+    const held = top;
+    move(300);
+    vi.advanceTimersByTime(160);
+    expect(top).toBe(held);
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    list.remove();
+    vi.useRealTimers();
   });
 });
 
