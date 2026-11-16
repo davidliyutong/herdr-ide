@@ -1,0 +1,524 @@
+/* The AI usage plugin (web/src/plugins/usage): the panel, laid out as
+   CodexBar, and the status bar's item. */
+:root {
+  /* Each service's color (logos.tsx): its own where it has one, else a hue
+     that keeps the services apart. */
+  --usage-claude: #d97757;
+  --usage-codex: #4aa8b8;
+  --usage-grok: #3fb08a;
+  --usage-antigravity: #5cb85f;
+  --usage-kimi: #f0663c;
+  --usage-deepseek: #6b84ff;
+}
+:root[data-theme='light'] {
+  --usage-claude: #c15f3c;
+  --usage-codex: #1f7f8f;
+  --usage-grok: #1d8a63;
+  --usage-antigravity: #2f8a35;
+  --usage-kimi: #c9461d;
+  --usage-deepseek: #3f5ae0;
+}
+
+.usage-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 2px 10px 16px;
+  --brand: var(--accent);
+}
+.ai-logo {
+  display: inline-flex;
+  flex: none;
+  width: var(--ic);
+  height: var(--ic);
+  color: var(--fg-dim);
+}
+.ai-logo svg,
+.ai-logo .lucide {
+  width: 100%;
+  height: 100%;
+}
+.ai-logo.lg {
+  width: 1.85rem;
+  height: 1.85rem;
+}
+
+/* ---- the services' tiles ---- */
+.usage-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(4.4rem, 1fr));
+  gap: 4px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+.usage-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  min-height: 0;
+  padding: 7px 4px 6px;
+  line-height: 1.2;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--fg-dim);
+  font-size: var(--fs-sm);
+}
+.usage-tile:hover {
+  background: var(--bg-2);
+  color: var(--fg);
+}
+.usage-tile.on {
+  background: var(--bg-3);
+  border-color: var(--line-2);
+  color: var(--fg);
+}
+.usage-tile .ai-logo {
+  width: 1.4rem;
+  height: 1.4rem;
+}
+.usage-tile:first-child .ai-logo {
+  color: var(--accent);
+}
+.usage-tile-name {
+  max-width: 100%;
+}
+/* What is left of the service's tightest window, in its color. */
+.usage-tile-meter {
+  display: block;
+  width: 78%;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--bg-3);
+  overflow: hidden;
+}
+.usage-tile:first-child .usage-tile-meter {
+  visibility: hidden;
+}
+.usage-tile-meter > i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--brand);
+}
+
+/* ---- when, used/left, refresh ---- */
+.usage-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--fg-mute);
+  font-size: var(--fs-sm);
+}
+.usage-refresh .spin {
+  animation: usage-spin 1s linear infinite;
+}
+@keyframes usage-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---- cards ---- */
+.usage-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+}
+.usage-provider {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.usage-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.usage-card-head .ai-logo {
+  color: var(--brand);
+}
+.usage-card-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.usage-card-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--fs-sm);
+}
+.usage-provider-name {
+  font-size: var(--fs-lg);
+}
+.usage-email {
+  min-width: 0;
+  color: var(--fg-dim);
+}
+.usage-plan {
+  flex: none;
+}
+.usage-heading {
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+}
+.usage-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.usage-incident {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-sm);
+  color: var(--warning);
+  text-decoration: none;
+}
+.usage-incident.major,
+.usage-incident.critical {
+  color: var(--error);
+}
+.usage-incident .lucide {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
+
+/* ---- windows ---- */
+.usage-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.usage-group + .usage-group {
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+}
+.usage-group-label {
+  margin-bottom: -4px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--fg-dim);
+}
+.usage-window {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.usage-window-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.usage-window-name {
+  min-width: 0;
+}
+.usage-pct {
+  font-weight: 600;
+}
+.usage-reset {
+  flex: none;
+  color: var(--fg-mute);
+  font-size: var(--fs-sm);
+}
+.usage-window.level-warn .usage-pct {
+  color: var(--warning);
+}
+.usage-window.level-out .usage-pct {
+  color: var(--error);
+}
+.usage-window-note {
+  color: var(--fg-dim);
+  font-size: var(--fs-sm);
+}
+.usage-window-note.warn {
+  color: var(--warning);
+}
+/* A window's bar: its service's color, quarter marks, the even pace. */
+.usage-bar {
+  position: relative;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--bg-3);
+  overflow: hidden;
+}
+.usage-bar.small {
+  height: 4px;
+  border-radius: 2px;
+}
+.usage-bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--brand);
+}
+.level-warn .usage-bar-fill {
+  background: var(--warning);
+}
+.level-out .usage-bar-fill {
+  background: var(--error);
+}
+.usage-bar-ticks {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to right,
+    transparent calc(25% - 1px),
+    var(--bg) calc(25% - 1px) 25%,
+    transparent 25% calc(50% - 1px),
+    var(--bg) calc(50% - 1px) 50%,
+    transparent 50% calc(75% - 1px),
+    var(--bg) calc(75% - 1px) 75%,
+    transparent 75%
+  );
+}
+.usage-pace {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--error);
+}
+.usage-money,
+.usage-machines {
+  font-size: var(--fs-sm);
+}
+.usage-machines {
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+/* ---- the overview's accounts ---- */
+.usage-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.usage-rows {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+  overflow: hidden;
+}
+.usage-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 0;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+  line-height: 1.35;
+}
+.usage-row + .usage-row {
+  border-top: 1px solid var(--line);
+}
+.usage-row:hover {
+  background: var(--bg-2);
+}
+.usage-row > .ai-logo {
+  width: 1.4rem;
+  height: 1.4rem;
+}
+.usage-row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.usage-row-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.usage-row-window {
+  font-size: var(--fs-sm);
+}
+.usage-row-meter {
+  flex: none;
+  width: 4.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: flex-end;
+}
+.usage-row-meter .usage-bar {
+  width: 100%;
+}
+.usage-row-pct {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.usage-row.level-warn .usage-row-pct {
+  color: var(--warning);
+}
+.usage-row.level-out .usage-row-pct {
+  color: var(--error);
+}
+.usage-status.stale {
+  color: var(--warning);
+}
+.usage-status.error,
+.usage-status.unauth {
+  color: var(--error);
+}
+
+/* ---- spend ---- */
+.usage-big {
+  font-size: var(--fs-display);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+.usage-sub {
+  font-size: var(--fs-sm);
+}
+.usage-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+  font-size: var(--fs-sm);
+}
+.usage-stat-value {
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.usage-daily-box {
+  position: relative;
+}
+.usage-daily-max {
+  position: absolute;
+  right: 0;
+  top: -2px;
+  font-size: var(--fs-xs);
+}
+.usage-daily {
+  display: block;
+  width: 100%;
+  height: 72px;
+  margin-top: 12px;
+}
+.usage-daily-axis {
+  stroke: var(--line-2);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.usage-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: var(--fs-sm);
+  color: var(--fg-dim);
+}
+.usage-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.usage-legend-item i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.usage-rank {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.usage-rank li {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 0 6px;
+  font-size: var(--fs-md);
+}
+.usage-rank li > .ellipsis {
+  flex: 1;
+  min-width: 0;
+}
+.usage-rank li > .muted {
+  font-size: var(--fs-sm);
+}
+.usage-rank-cost {
+  font-variant-numeric: tabular-nums;
+}
+.usage-rank-bar {
+  position: absolute;
+  left: 0;
+  bottom: 1px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent-soft);
+}
+.usage-footnote {
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+.usage-loading {
+  font-size: var(--fs-sm);
+}
+.usage-deepseek-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.usage-deepseek-form input {
+  flex: 1;
+  min-width: 8rem;
+}
+
+/* ---- the status bar's item ---- */
+.usage-status-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: var(--ctl-sm);
+  min-height: 0;
+  padding: 0 6px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+.usage-status-item:hover {
+  color: var(--fg);
+  background: var(--bg-3);
+}
+.usage-status-item .lucide {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
+.usage-status-item.warn {
+  color: var(--warning);
+}
+.usage-status-item.out {
+  color: var(--error);
+}

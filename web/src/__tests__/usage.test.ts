@@ -13,7 +13,7 @@ vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 import { useStore } from '../state/store';
 import { useSettings } from '../settings';
 import type { MachineState } from '../lib/machine';
-import { UsagePanel } from '../plugins/usage/UsagePanel';
+import { groupWindows, UsagePanel } from '../plugins/usage/UsagePanel';
 import { UsageStatusItem } from '../plugins/usage/StatusItem';
 import { applySnapshot, setView, useUsage } from '../plugins/usage/state';
 import {
@@ -166,7 +166,7 @@ describe('usage panel and status item', () => {
     });
     useSettings.setState({ values: {}, readOnly: false });
     useUsage.setState({ snapshot: undefined, cost: undefined });
-    setView({ tab: 'limits', remaining: false, compact: false, costDays: 30 });
+    setView({ tab: 'overview', remaining: false, costDays: 30 });
     useStore.getState().setPanel(undefined);
     host = document.createElement('div');
     document.body.append(host);
@@ -197,7 +197,7 @@ describe('usage panel and status item', () => {
     expect(item.classList.contains('warn')).toBe(false);
   });
 
-  it('draws the accounts tightest first, with their windows and machines', async () => {
+  it('shows a tile per service and the accounts, tightest first; a service its cards', async () => {
     useUsage.setState({
       snapshot: snapshot([
         account('codex:a', [20], { plan: 'Plus', email: 'c@example.com' }),
@@ -206,20 +206,44 @@ describe('usage panel and status item', () => {
     });
     await act(async () => root.render(createElement(UsagePanel)));
     expect(calls).toContain('GET /api/p/usage?watch=1');
-    const cards = [...host.querySelectorAll<HTMLElement>('.usage-card')];
-    expect(cards.map((c) => c.dataset.account)).toEqual(['claude:b', 'codex:a']);
-    expect(cards[0].querySelectorAll('.usage-window')).toHaveLength(2);
-    expect(cards[0].querySelector('.usage-window')!.classList.contains('warn')).toBe(true);
-    expect(cards[0].querySelector('.usage-hint')!.textContent).toContain('Run Claude once');
-    expect(cards[0].querySelector('.usage-machines')!.textContent).toContain('local, box');
-    expect(cards[1].querySelector('.usage-plan')!.textContent).toBe('Plus');
-    // Compact: one window per account.
-    const compact = [...host.querySelectorAll<HTMLButtonElement>('.usage-toggle')].find((b) => b.textContent === 'Detailed')!;
-    await act(async () => compact.click());
-    expect(host.querySelector('.usage-card')!.querySelectorAll('.usage-window')).toHaveLength(1);
+    // The overview, Claude and Codex (in the services' order), and Claude
+    // from its spend.
+    const tiles = [...host.querySelectorAll<HTMLButtonElement>('.usage-tile')];
+    expect(tiles.map((b) => b.dataset.provider ?? 'overview')).toEqual(['overview', 'claude', 'codex']);
+    expect(tiles[1].querySelector<HTMLElement>('.usage-tile-meter i')!.style.width).toBe('10%');
+    const rows = [...host.querySelectorAll<HTMLElement>('.usage-row')];
+    expect(rows.map((c) => c.dataset.account)).toEqual(['claude:b', 'codex:a']);
+    expect(rows[0].classList.contains('level-warn')).toBe(true);
+    expect(rows[1].textContent).toContain('Plus');
+    // A row shows its service.
+    await act(async () => rows[0].click());
+    const card = host.querySelector<HTMLElement>('.usage-card[data-account="claude:b"]')!;
+    expect(card.querySelectorAll('.usage-window')).toHaveLength(2);
+    expect(card.querySelector('.usage-window-name')!.textContent).toContain('5 hours');
+    expect(card.querySelector('.usage-window')!.classList.contains('level-warn')).toBe(true);
+    expect(card.querySelector('.usage-hint')!.textContent).toContain('Run Claude once');
+    expect(card.querySelector('.usage-machines')!.textContent).toContain('local, box');
+    // Remaining instead of used.
+    const left = [...host.querySelectorAll<HTMLButtonElement>('.usage-meta [role=radio]')].find((b) => b.textContent === 'Remaining')!;
+    await act(async () => left.click());
+    expect(card.querySelector('.usage-pct')!.textContent).toBe('10% left');
     // Refresh asks the core.
     await act(async () => host.querySelector<HTMLButtonElement>('.usage-refresh')!.click());
     expect(calls).toContain('POST /api/p/usage/refresh');
+  });
+
+  it('groups windows by the models they count, the session first', () => {
+    const g = groupWindows([
+      { kind: 'weekly', label: 'Gemini', usedPct: 10 },
+      { kind: 'session', label: 'Gemini', usedPct: 5 },
+      { kind: 'weekly', usedPct: 1 },
+      { kind: 'weekly', label: 'Claude and GPT', usedPct: 50 },
+    ]);
+    expect(g.map((x) => [x.label, x.windows.map((w) => w.kind)])).toEqual([
+      [undefined, ['weekly']],
+      ['Gemini', ['session', 'weekly']],
+      ['Claude and GPT', ['weekly']],
+    ]);
   });
 
   it('renders with ready machines in the store (no render loop)', async () => {
@@ -231,7 +255,8 @@ describe('usage panel and status item', () => {
           { id: 'local', label: 'This Mac', kind: 'local', status: 'ready' } as unknown as MachineState,
           { id: 'box', label: 'box', kind: 'ssh', status: 'ready' } as unknown as MachineState,
         ]);
-      useUsage.setState({ snapshot: snapshot([account('claude:b', [30], { machines: ['local', 'box'] })]) });
+      useUsage.setState({ snapshot: snapshot([account('claude:b', [30], { machines: ['local', 'box'] }), account('deepseek:k', [])]) });
+      setView({ tab: 'deepseek' });
       await act(async () => root.render(createElement(UsagePanel)));
       await act(async () => {});
       expect(host.querySelector('.usage-card')).not.toBeNull();
@@ -244,16 +269,17 @@ describe('usage panel and status item', () => {
     }
   });
 
-  it('shows the cost tab: totals, daily bars, ranking and machines that failed', async () => {
+  it("shows the spend: total, daily bars in the services' colors, ranking and machines that failed", async () => {
     await act(async () => root.render(createElement(UsagePanel)));
-    const costTab = [...host.querySelectorAll<HTMLButtonElement>('[role=tab]')].find((b) => b.textContent === 'Cost')!;
-    await act(async () => costTab.click());
     await act(async () => {});
     expect(calls.some((c) => c.startsWith('GET /api/p/usage/cost?days=90&tz='))).toBe(true);
-    const totals = [...host.querySelectorAll('.usage-total-value')].map((e) => e.textContent);
-    expect(totals).toEqual(['$12.50', '$12.50', '$12.50', '$12.50']);
-    expect(host.querySelectorAll('.usage-daily rect')).toHaveLength(30);
+    expect(host.querySelector('.usage-big')!.textContent).toBe('~$12.50');
+    expect(host.querySelectorAll('.usage-daily g')).toHaveLength(30);
+    expect(host.querySelector('.usage-daily rect')!.getAttribute('fill')).toBe('var(--usage-claude)');
     expect(host.querySelector('.usage-rank li')!.textContent).toContain('claude-opus-4-6');
-    expect(host.querySelector('.usage-cost .error')!.textContent).toContain('offline');
+    expect(host.querySelector('.usage-spend .callout.error')!.textContent).toContain('offline');
+    // A service's own spend.
+    await act(async () => host.querySelector<HTMLButtonElement>('.usage-tile[data-provider="claude"]')!.click());
+    expect([...host.querySelectorAll('.usage-stat-value')].map((e) => e.textContent)).toEqual(['$12.50', '$12.50', '2', '2']);
   });
 });

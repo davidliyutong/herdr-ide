@@ -5,6 +5,7 @@ import { Gauge } from 'lucide-react';
 import type { PluginDef } from '../api';
 import { UsagePanel } from './UsagePanel';
 import { UsageStatusItem } from './StatusItem';
+import './usage.css';
 import { applySnapshot } from './state';
 import type { UsageSnapshot } from './model';
 

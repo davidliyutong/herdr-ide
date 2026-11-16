@@ -138,19 +138,39 @@ not read; SSH machines are.
 ### Web UI
 
 `web/src/plugins/usage`: the panel **AI Usage** (command
-`view.panel.usage`, no default key) has two tabs.
+`view.panel.usage`, no default key) is laid out as CodexBar.
 
-- **Limits**: a card per account, the tightest window first: provider,
-  plan, email, each window's bar (used or remaining, a toggle) with the
-  even-pace marker, its reset countdown, a warning when its pace runs out
-  before the reset and a burndown line; credits and balances; the status
-  page's incident; the machines it was seen on, and what to do about a
-  status other than ok. A compact view shows each account's tightest window
-  only. The DeepSeek section writes a key file on a machine.
-- **Cost**: today, 7, 30 and 90 days; bars per day of the range chosen
-  (plain SVG); a ranking by model, project or machine; the weekly and
-  monthly equivalents; models without prices and machines whose logs could
-  not be read.
+- **Tiles** at the top: the overview and each service with an account or
+  spend (in the order Claude, Codex, Grok, Antigravity, Kimi, DeepSeek):
+  its mark and name and, in its color, a bar of what is left of its
+  tightest window. The marks are Lobe Icons' (`web/src/assets/ai-logos`,
+  MIT, drawn in one color, `logos.tsx`); each service's color is its own
+  where it has one (Claude's clay, DeepSeek's blue), else a hue that keeps
+  the services apart (`--usage-<provider>`, `usage.css`, darker in the
+  light theme). Under the tiles: when the numbers were read and the next
+  read, the switch between used and left, and Refresh (which also reads
+  the cost again). The tile shown and the switch are kept per browser.
+- **Overview**: the spend of the last 7, 30 or 90 days at API prices (a
+  large total, tokens, the weekly and monthly equivalents), bars per day
+  stacked in the services' colors (plain SVG) with a legend of each
+  service's total, a ranking by model, project or machine, models without
+  prices and machines whose logs could not be read; then a row per
+  account, the tightest window first: its mark, plan, tightest window, its
+  reset and a small bar; a click shows its service.
+- **A service**: a card per account: its mark, email, plan, when it was
+  read; its status page's incident and what to do about a status other
+  than ok; its windows grouped by the group of models they count (a
+  labelled session or weekly window, as Antigravity's groups; the
+  unlabelled first; in a group the session before the week), each with its
+  name (a session of whole hours says how long: 5 hours), the share used or
+  left, the reset countdown and a bar in the service's color (the warning
+  and error colors from the first threshold and when out) with quarter
+  marks and the even pace's mark once the window is under way, then how far
+  ahead of an even pace it is and when it runs out at this pace before the
+  reset; credits and balances; the machines it was seen on. Then the
+  service's own spend (today, 30 days, tokens today and in 30 days, its
+  daily bars, its most used model) and, for DeepSeek, the form that
+  writes a key file on a machine.
 
 The status bar shows the tightest window's percentage, in the warning color
 from the first of `usage.thresholds` (default 80 and 95); a click shows the
@@ -166,6 +186,8 @@ browser's storage, so a reload or another tab does not repeat it.
 | Alternative | Why not |
 | --- | --- |
 | Fetching from the core with credentials copied there | Tokens would leave their machines; the agents already run where the CLIs do. |
+| A window's name as "group · kind" in one line | In a narrow panel two windows of a group (Antigravity's weekly and 5-hour) were cut to the same text with different numbers; a heading per group and the kind on each row keep them apart. |
+| A burndown line per window | Drawn over the whole period, the few hours read so far were a stray dash; the even pace's mark and how far ahead of it the window is say the same at a glance. |
 | Refreshing expired OAuth tokens | Writing the CLIs' credential files races the CLIs and can sign them out; running the CLI once renews them. |
 | Browser cookies for providers without a CLI token | Reads another program's secrets; declined. |
 | Every machine asked for every account | The same account would be asked once per machine at every poll, against the providers' rate limits. |
@@ -216,8 +238,10 @@ status pages. Resources and retention:
   last good numbers, `Retry-After` (also without an id), the manual
   refresh's minimum gap on a fake clock, history and pace, status pages,
   the cost report, shared scans and its cache, settings.
-- `web/src/__tests__/usage.test.ts`: ordering, alerts, the cost sums, the
-  panel and the status bar item against a stubbed core, the panel with
-  ready machines in the store (no render loop).
+- `web/src/__tests__/usage.test.ts`: ordering, alerts, the cost sums,
+  windows grouped by their models, the panel (tiles, the overview's rows
+  and spend, a service's cards, its spend, used or left) and the status
+  bar item against a stubbed core, the panel with ready machines in the
+  store (no render loop).
 - `internal/server`: `TestMutatingRoutesAreGuarded` covers the plugin's
   routes.

@@ -140,8 +140,9 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   reset countdown and whether its pace runs it out first, credits and
   balances, incidents of the providers' status pages — one card per
   account even when several machines share it, with notifications at the
-  thresholds you choose. A Cost tab adds up what the CLIs' local logs
-  would cost at API prices, by day, model, project and machine. Credentials
+  thresholds you choose. Laid out as CodexBar: a tile per service with its
+  logo and color, an overview of what the CLIs' local logs would cost at
+  API prices (by day, model, project and machine) and a page per service. Credentials
   are read where they are, read only, and never leave the machine.
 - **Settings.** Language (English, Chinese), light/dark theme followed by
   VS Code, color themes (the accent: blue, VS Code blue, teal, violet,

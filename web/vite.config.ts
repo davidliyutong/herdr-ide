@@ -38,10 +38,11 @@ function brand(): Plugin {
   };
 }
 
-// The bundled terminal font, terminal emulator and VSCodium logo are not npm
-// packages, so Vite's license list leaves them out
-// (src/terminal/fonts/README.md, scripts/fetch-ghostty-vt.sh,
-// src/assets/vscodium/README.md). Monaco bundles code of other projects,
+// The bundled terminal font, terminal emulator, VSCodium logo and the AI
+// services' marks are not npm packages the UI imports, so Vite's license
+// list leaves them out (src/terminal/fonts/README.md,
+// scripts/fetch-ghostty-vt.sh, src/assets/vscodium/README.md,
+// src/assets/ai-logos/README.md). Monaco bundles code of other projects,
 // whose notices it ships beside its license.
 function bundledLicenses(): Plugin {
   return {
@@ -56,6 +57,7 @@ function bundledLicenses(): Plugin {
           `${String(out.source).trimEnd()}\n\n## JetBrains Mono - 2.304 (OFL-1.1)\n\n${read('./src/terminal/fonts/OFL.txt')}\n` +
           `\n## libghostty-vt (Ghostty cf5519b22f91, MIT)\n\n${read('./src/vt/LICENSE')}\n` +
           `\n## VSCodium logo (VSCodium ca7f7b44b5e5, MIT)\n\n${read('./src/assets/vscodium/LICENSE')}\n` +
+          `\n## AI service marks (Lobe Icons, @lobehub/icons-static-svg 1.102.0, MIT)\n\n${read('./src/assets/ai-logos/LICENSE')}\n` +
           `\n## Third-party notices of monaco-editor\n\n${read('./node_modules/monaco-editor/ThirdPartyNotices.txt')}\n`;
       },
     },

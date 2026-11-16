@@ -8,7 +8,8 @@ import { settingValue } from '../../settings';
 import { storage } from '../../brand';
 import { alerts, alertText, parseThresholds, type CostReport, type UsageSnapshot } from './model';
 
-export type UsageTab = 'limits' | 'cost';
+/** The panel shows the overview or one service (its id). */
+export type UsageTab = string;
 
 interface UsageState {
   snapshot?: UsageSnapshot;
@@ -17,7 +18,6 @@ interface UsageState {
   costError?: string;
   /** Show what is left instead of what is used. */
   remaining: boolean;
-  compact: boolean;
   tab: UsageTab;
   costDays: 7 | 30 | 90;
 }
@@ -26,7 +26,6 @@ const VIEW = 'usage.view';
 
 interface View {
   remaining?: boolean;
-  compact?: boolean;
   tab?: UsageTab;
   costDays?: 7 | 30 | 90;
 }
@@ -36,8 +35,7 @@ const view = loadPref<View>(VIEW, {});
 export const useUsage = create<UsageState>(() => ({
   costLoading: false,
   remaining: !!view.remaining,
-  compact: !!view.compact,
-  tab: view.tab === 'cost' ? 'cost' : 'limits',
+  tab: typeof view.tab === 'string' && view.tab !== 'limits' && view.tab !== 'cost' ? view.tab : 'overview',
   costDays: view.costDays === 7 || view.costDays === 90 ? view.costDays : 30,
 }));
 
@@ -45,7 +43,7 @@ export const useUsage = create<UsageState>(() => ({
 export function setView(v: View) {
   useUsage.setState(v);
   const s = useUsage.getState();
-  savePref(VIEW, { remaining: s.remaining, compact: s.compact, tab: s.tab, costDays: s.costDays });
+  savePref(VIEW, { remaining: s.remaining, tab: s.tab, costDays: s.costDays });
 }
 
 const FIRED = 'usage.alerts';
