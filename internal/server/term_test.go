@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -37,6 +38,10 @@ type fakeTermCore struct {
 	frames []string // "kind:payload" of stream frames
 	attach []string // params of terminal.attach
 	calls  []string // params of terminal.run
+	labels []string // params of terminal.label
+	// snap, when set, is the terminals of events.subscribe (JSON), sent
+	// without the status event that otherwise follows.
+	snap string
 }
 
 func (f *fakeTermCore) seen(want string) bool {
@@ -127,8 +132,20 @@ func (f *fakeTermCore) serve(c net.Conn) {
 		switch req.Method {
 		case "events.subscribe":
 			next++
+			f.mu.Lock()
+			snap := f.snap
+			f.mu.Unlock()
+			if snap != "" {
+				write(reply(`"result":{"channel":` + string('0'+byte(next)) + `,"seq":1,"terminals":` + snap + `}`))
+				break
+			}
 			write(reply(`"result":{"channel":` + string('0'+byte(next)) + `,"seq":1,"terminals":[{"address":"t1","state":"live","cols":80,"rows":24,"future_field":7}]}`))
 			write(frameOf(next, 0, []byte(`{"jsonrpc":"2.0","method":"event","params":{"seq":2,"type":"status","terminal":"t1","data":{"status":{"state":"working"},"records":{},"reported":true}}}`+"\n")))
+		case "terminal.label":
+			f.mu.Lock()
+			f.labels = append(f.labels, string(req.Params))
+			f.mu.Unlock()
+			write(reply(`"result":{}`))
 		case "terminal.attach":
 			f.mu.Lock()
 			f.attach = append(f.attach, string(req.Params))
@@ -730,6 +747,77 @@ func TestTermShells(t *testing.T) {
 // event) and /ws (agent messages, with the terminal's address). A turn
 // that ended is seen, and reported idle, when a client has the terminal
 // focused, then or later.
+// A done the program reports itself (OSC 7501) outlives the core: a client
+// that sees it labels the terminal with its turn, and a core that starts
+// again (the app restarted) reads that turn's done as seen; a later turn's
+// done is news.
+func TestTermSeenTurnOutlivesTheCore(t *testing.T) {
+	rec := func(turn int, labels string) string {
+		return `[{"address":"t1","state":"live","cols":80,"rows":24,"labels":` + labels +
+			`,"reported":true,"status":{"state":"done"},"turn":` + strconv.Itoa(turn) + `}]`
+	}
+	status := func(c *termConn) string {
+		t.Helper()
+		for {
+			if m := c.until("event"); m["type"] == "agent" {
+				return m["data"].(map[string]any)["agent_status"].(string)
+			}
+		}
+	}
+	start := func(snap string) (*termBackend, *termConn, *fakeTermCore) {
+		t.Helper()
+		s, core, _ := termServer(t, Options{}, true)
+		core.mu.Lock()
+		core.snap = snap
+		core.mu.Unlock()
+		c := dialTerm(t, s)
+		c.ready()
+		return s.term.existing("x"), c, core
+	}
+
+	// The turn seen before: idle, and no new label.
+	b, c, core := start(rec(3, `{"seen":"3","closing":""}`))
+	b.applyAgent(agentproto.DetectEvent{Terminal: "t1", Agent: "codex", Status: "done"})
+	if st := status(c); st != "idle" {
+		t.Fatalf("seen turn: %s", st)
+	}
+	// A later turn: news, until a client looks.
+	b, c, core = start(rec(4, `{"seen":"3"}`))
+	b.applyAgent(agentproto.DetectEvent{Terminal: "t1", Agent: "codex", Status: "done"})
+	if st := status(c); st != "done" {
+		t.Fatalf("new turn: %s", st)
+	}
+	core.mu.Lock()
+	if len(core.labels) != 0 {
+		t.Fatalf("labelled before it was seen: %q", core.labels)
+	}
+	core.mu.Unlock()
+	c.send(map[string]any{"t": "attach", "rid": 1, "m": "x", "terminal": "t1", "cols": 80, "rows": 24})
+	sid := c.until("attached")["s"]
+	c.send(map[string]any{"t": "focus", "s": sid, "focused": true})
+	if st := status(c); st != "idle" {
+		t.Fatalf("focused: %s", st)
+	}
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+		core.mu.Lock()
+		got := strings.Join(core.labels, " ")
+		core.mu.Unlock()
+		if got == `{"labels":{"seen":"4"},"terminal":"t1"}` {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("labels %q", got)
+		}
+	}
+	// A done the program does not report itself (read from the screen) is
+	// never taken for seen.
+	b, c, _ = start(`[{"address":"t1","state":"live","cols":80,"rows":24,"labels":{"seen":"0"}}]`)
+	b.applyAgent(agentproto.DetectEvent{Terminal: "t1", Agent: "claude", Status: "done"})
+	if st := status(c); st != "done" {
+		t.Fatalf("screen's done: %s", st)
+	}
+}
+
 func TestTermAgents(t *testing.T) {
 	s, _, _ := termServer(t, Options{}, true)
 	var mu sync.Mutex

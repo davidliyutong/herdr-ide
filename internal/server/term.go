@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"slices"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -489,6 +490,7 @@ func (b *termBackend) event(n hc.RawNotification) {
 		case "turn":
 			if t != nil {
 				t["turn"] = data["turn"]
+				b.keepSeenLocked(n.Terminal)
 			}
 		default: // lost, keep, finished, status, title, size, foreground
 			if t == nil {
@@ -511,6 +513,9 @@ func (b *termBackend) event(n hc.RawNotification) {
 			case "lost":
 				delete(t, "pid")
 				delete(t, "foreground")
+			case "status":
+				// A done seen before its report reached the core.
+				b.keepSeenLocked(n.Terminal)
 			}
 		}
 	}
@@ -584,7 +589,10 @@ func (b *termBackend) applyAgent(ev agentproto.DetectEvent) {
 		}
 		delete(b.agents, ev.Terminal)
 	} else {
-		if ev.Status == "done" && b.focusedLocked(ev.Terminal) {
+		// Seen: the terminal has a client's focus, or (the first word of a
+		// new detection, after the core or the agent started again) the
+		// program still reports the turn a client saw before.
+		if ev.Status == "done" && (b.focusedLocked(ev.Terminal) || !had && b.seenBeforeLocked(ev.Terminal)) {
 			ev.Status = "idle"
 		}
 		if had && prev == ev {
@@ -592,10 +600,62 @@ func (b *termBackend) applyAgent(ev agentproto.DetectEvent) {
 			return
 		}
 		b.agents[ev.Terminal] = ev
+		b.keepSeenLocked(ev.Terminal)
 	}
 	b.mergeAgent(ev.Terminal)
 	b.mu.Unlock()
 	b.notifyAgent(ev)
+}
+
+// seenLabel is the terminal core's label that keeps which turn of a
+// terminal's program a client saw end: the record's turn, when the program
+// reports its own status (OSC 7501) and still says done. That report
+// outlives the core: after the core or the agent starts again, a new
+// detection reads it as a turn that just ended, and the label tells that
+// it was seen. A turn that ends later has a higher number.
+const seenLabel = "seen"
+
+// reportedDoneLocked is the turn whose end terminal addr's program reports
+// (its own status is done), "" when it reports no done; b.mu is held.
+func (b *termBackend) reportedDoneLocked(addr string) string {
+	t := b.terms[addr]
+	if r, _ := t["reported"].(bool); !r {
+		return ""
+	}
+	if st, _ := t["status"].(map[string]any); st == nil || st["state"] != "done" {
+		return ""
+	}
+	turn, _ := t["turn"].(float64) // absent: 0
+	return strconv.FormatUint(uint64(turn), 10)
+}
+
+// seenBeforeLocked reports whether the done terminal addr's program reports
+// is the turn a client saw (seenLabel); b.mu is held.
+func (b *termBackend) seenBeforeLocked(addr string) bool {
+	turn := b.reportedDoneLocked(addr)
+	labels, _ := b.terms[addr]["labels"].(map[string]any)
+	return turn != "" && labels[seenLabel] == turn
+}
+
+// keepSeenLocked labels terminal addr with the turn its program reports as
+// done while the core holds that turn seen (its agent idle), so the core
+// still knows after it starts again; b.mu is held. The label call runs
+// apart: the core's own event of the new label follows.
+func (b *termBackend) keepSeenLocked(addr string) {
+	ev, ok := b.agents[addr]
+	turn := b.reportedDoneLocked(addr)
+	conn := b.conn
+	if !ok || ev.Status != "idle" || turn == "" || conn == nil || b.seenBeforeLocked(addr) {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		params := map[string]any{"terminal": addr, "labels": map[string]string{seenLabel: turn}}
+		if err := conn.Call(ctx, "terminal.label", params, nil); err != nil {
+			b.s.logger.Printf("term %s: label %s seen: %v", b.id, addr, err)
+		}
+	}()
 }
 
 // seen marks a terminal's ended turn seen (a client focused it): done
@@ -610,6 +670,7 @@ func (b *termBackend) seen(addr string) {
 	ev.Status = "idle"
 	b.agents[addr] = ev
 	b.mergeAgent(addr)
+	b.keepSeenLocked(addr)
 	b.mu.Unlock()
 	b.notifyAgent(ev)
 }
