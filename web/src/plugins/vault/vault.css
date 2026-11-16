@@ -93,6 +93,7 @@
 }
 .vault-session {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   padding: 8px 8px 8px 10px;
@@ -104,7 +105,7 @@
   color: var(--done);
 }
 .vault-session-text {
-  flex: 1;
+  flex: 1 1 140px;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -114,8 +115,14 @@
   flex: none;
   white-space: nowrap;
 }
-.vault-session .spacer {
-  display: none;
+/* The buttons stay together, and go below the text when the panel is
+ * narrow. */
+.vault-session-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-left: auto;
 }
 /* The auto-lock's countdown: digits that do not shift as they change; a
  * time set for this unlock in the accent. */

@@ -165,14 +165,15 @@ function Gate() {
           <span className="muted">{t('vault.session.idle', { n: Math.round((idle ?? 1800) / 60) })}</span>
           <Since />
         </span>
-        <span className="spacer" />
-        <button className="sm ghost" onClick={() => setChanging(!changing)}>
-          {t('vault.changePassphrase')}
-        </button>
-        <AutoLockButton />
-        <button className="sm" onClick={() => void lockVault()}>
-          <Lock /> {t('vault.lock')}
-        </button>
+        <span className="vault-session-actions">
+          <button className="sm ghost" onClick={() => setChanging(!changing)}>
+            {t('vault.changePassphrase')}
+          </button>
+          <AutoLockButton />
+          <button className="sm" onClick={() => void lockVault()}>
+            <Lock /> {t('vault.lock')}
+          </button>
+        </span>
       </div>
       {changing && <PassphraseCard kind="change" onDone={() => setChanging(false)} />}
     </>
