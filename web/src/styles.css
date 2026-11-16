@@ -2011,6 +2011,10 @@ body.dragging * {
   direction: rtl;
   text-align: left;
 }
+/* Narrows a long folder's entries by name. */
+.download-filter {
+  width: 100%;
+}
 .download-list {
   border: 1px solid var(--line-2);
   border-radius: 5px;

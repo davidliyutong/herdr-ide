@@ -202,6 +202,45 @@ describe('download chooser', () => {
     expect(clicked.map(query)).toEqual([['/home/u/proj']]);
   });
 
+  it('checks a range with Shift and filters the entries by name', async () => {
+    const { host, closed } = await render('/home/u/proj');
+    check(host, 'src');
+    act(() =>
+      host
+        .querySelector<HTMLInputElement>('input[aria-label="b.png"]')!
+        .dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true })),
+    );
+    expect(host.querySelector('.dialog-actions')?.textContent).toContain('3 selected');
+    // Shift-unchecking a range unchecks it alike.
+    act(() =>
+      host
+        .querySelector<HTMLInputElement>('input[aria-label="a.txt"]')!
+        .dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true })),
+    );
+    expect(host.querySelector('.dialog-actions')?.textContent).toContain('1 selected');
+    const filter = host.querySelector<HTMLInputElement>('.download-filter')!;
+    const type = (v: string) =>
+      act(() => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(filter, v);
+        filter.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    type('png');
+    expect(rows(host)).toEqual(['b.png10 B']);
+    expect(host.querySelector('.download-row:not(.download-all) mark')?.textContent).toBe('png');
+    // Select all takes the entries shown; those checked before stay.
+    expect(host.querySelector('.download-all')?.textContent).toBe('Select all shown');
+    act(() => host.querySelector<HTMLInputElement>('.download-all input')!.click());
+    expect(host.querySelector('.dialog-actions')?.textContent).toContain('2 selected');
+    type('zzz');
+    expect(host.querySelector('.download-list')?.textContent).toBe('No entry matches the filter.');
+    // Escape clears the filter, then closes.
+    act(() => void filter.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(rows(host)).toHaveLength(3);
+    expect(closed()).toBe(false);
+    act(() => button(host, 'Download').click());
+    expect(clicked.map(query)).toEqual([['/home/u/proj/src', '/home/u/proj/b.png']]);
+  });
+
   it('shows why a directory cannot be listed and closes on Escape', async () => {
     const { host, closed } = await render('/nope');
     expect(host.querySelector('.download-list .error')?.textContent).toBe('Could not list /nope: no such directory');
