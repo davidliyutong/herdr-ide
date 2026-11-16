@@ -192,7 +192,19 @@ describe('vault', () => {
     expect(value.type).toBe('password');
     // Chosen machines: the GPU box; inject only.
     await act(async () => form.querySelectorAll<HTMLInputElement>('input[type="radio"]')[1].click());
-    await act(async () => form.querySelectorAll<HTMLInputElement>('.vault-machine input[type="checkbox"]')[1].click());
+    // The machines are a searchable choice; it lists each with its state.
+    await act(async () => form.querySelector<HTMLButtonElement>('.vault-machines-picker')!.click());
+    const rows = [...document.querySelectorAll<HTMLElement>('.picker-row')];
+    expect(rows.map((r) => r.querySelector('.picker-label')?.textContent)).toEqual(['Local', 'GPU box']);
+    expect(rows[0].textContent).toContain(t('vault.thisComputer'));
+    await act(async () => rows[1].click());
+    await act(async () =>
+      document
+        .querySelector<HTMLInputElement>('.picker-search')!
+        .dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })),
+    );
+    expect(document.querySelector('.picker')).toBeNull();
+    expect(form.querySelector('.vault-machines-picker')?.textContent).toBe('GPU box');
     await act(async () => form.querySelector<HTMLButtonElement>('[role="switch"]')!.click());
     await act(async () => form.querySelector<HTMLButtonElement>('button[type="submit"]')!.click());
     await flush();
@@ -431,8 +443,14 @@ describe('vault', () => {
     expect(entries[2].textContent).toContain('/srv/app');
     expect(entries[2].querySelector('.vault-entry-process')?.textContent).toBe('herdr-ide-mcp (4242) ← claude (4200)');
     // Pages are a choice of the machine filter.
-    const filter = host.querySelector<HTMLSelectElement>(`select[aria-label="${t('vault.log.machine')}"]`)!;
-    expect([...filter.options].map((o) => o.textContent)).toEqual([t('vault.log.allMachines'), t('vault.log.page'), 'gpu-box']);
+    const filter = host.querySelector<HTMLButtonElement>(`.picker-button[aria-label="${t('vault.log.machine')}"]`)!;
+    expect(filter.textContent).toBe(t('vault.log.allMachines'));
+    await act(async () => filter.click());
+    const options = [...document.querySelectorAll<HTMLElement>('.picker-row')];
+    expect(options.map((o) => o.textContent)).toEqual([t('vault.log.allMachines'), t('vault.log.page'), 'gpu-box']);
+    // Pages alone.
+    await act(async () => options[1].click());
+    expect([...host.querySelectorAll<HTMLElement>('.vault-entry')].map((e) => e.dataset.result)).toEqual(['revealed']);
     // The prompt shows the chain too.
     const request = { id: 'r8', m: 'm1', tool: 'get', names: ['A'], client: 'claude', process: chain, created: '1', expires: '2' };
     act(() => vaultMessage('m1', { type: 'request', request }));

@@ -20,8 +20,9 @@ import { t } from '../i18n';
 import { APP_SLUG } from '../brand';
 import { VaultPanel } from '../plugins/vault/VaultPanel';
 import { VaultDialogs } from '../plugins/vault/Transfer';
-import { endSession, openSession, useVault } from '../plugins/vault/api';
-import { openVaultExport, openVaultImport } from '../plugins/vault';
+import { endSession, loadVault, openSession, useVault } from '../plugins/vault/api';
+import { openVaultExport, openVaultImport, vaultPlugin } from '../plugins/vault';
+import { VaultSettingsExtra } from '../plugins/vault/SettingsExtra';
 import { useVaultDialog } from '../plugins/vault/dialogs';
 import '../plugins';
 
@@ -58,10 +59,12 @@ describe('vault files and choices', () => {
   let root: Root;
   let calls: Call[];
   let saved: { name: string; text: string }[];
+  let vaultStatus: { mode: string; locked: boolean; setup?: boolean };
 
   beforeEach(async () => {
     calls = [];
     saved = [];
+    vaultStatus = { mode: 'passphrase', locked: false };
     await endSession().catch(() => undefined);
     useVault.setState({ status: undefined, variables: [], log: [], requests: {}, error: undefined, session: false });
     useVaultDialog.setState({ dialog: undefined });
@@ -79,7 +82,7 @@ describe('vault files and choices', () => {
       const json = (v: unknown, code = 200) => new Response(JSON.stringify(v), { status: code });
       if (url === '/api/p/vault' && method === 'GET')
         return json({
-          status: { mode: 'passphrase', locked: false },
+          status: vaultStatus,
           session: token === TOKEN,
           variables: ['A', 'B', 'C', 'D'].map((name) => ({
             name,
@@ -296,5 +299,36 @@ describe('vault files and choices', () => {
       '/api/p/vault/vars/C',
     ]);
     expect(host.querySelector('.callout.error')?.textContent).toContain(`C: ${t('vault.error.failed')}`);
+  });
+
+  it("ends the vault's settings page with Import and Export, saying when the vault is locked", async () => {
+    expect(vaultPlugin.settings).toEqual({ section: 'vault', extra: VaultSettingsExtra });
+    vaultStatus = { mode: 'passphrase', locked: true };
+    await act(async () =>
+      root.render(createElement('div', null, createElement(VaultSettingsExtra, { readOnly: false }), createElement(VaultDialogs))),
+    );
+    await flush();
+    const button = (a: string) => host.querySelector<HTMLButtonElement>(`[data-vault-files] [data-action="${a}"]`)!;
+    expect(host.querySelector('[data-vault-files] [data-note]')?.textContent).toBe(t('vault.settings.locked'));
+    // Locked, the dialogs ask for the passphrase, which unlocks it.
+    expect(button('import').disabled).toBe(false);
+    await act(async () => button('export').click());
+    expect(useVaultDialog.getState().dialog).toEqual({ kind: 'export', names: undefined });
+    expect(document.querySelector('.vault-transfer')?.getAttribute('aria-label')).toBe(t('vault.export.title'));
+    act(() => useVaultDialog.setState({ dialog: undefined }));
+    await act(async () => button('import').click());
+    expect(useVaultDialog.getState().dialog).toEqual({ kind: 'import' });
+    act(() => useVaultDialog.setState({ dialog: undefined }));
+    // Read-only: both disabled, and said.
+    await act(async () => root.render(createElement(VaultSettingsExtra, { readOnly: true })));
+    await flush();
+    expect(button('import').disabled && button('export').disabled).toBe(true);
+    expect(host.querySelector('[data-vault-files] [data-note]')?.textContent).toBe(t('vault.readOnly'));
+    // A vault without a passphrase yet: nothing to do here.
+    vaultStatus = { mode: '', locked: false, setup: true };
+    await act(async () => root.render(createElement(VaultSettingsExtra, { readOnly: false })));
+    await act(async () => loadVault());
+    expect(button('import').disabled).toBe(true);
+    expect(host.querySelector('[data-vault-files] [data-note]')?.textContent).toBe(t('vault.settings.setup'));
   });
 });

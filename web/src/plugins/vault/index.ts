@@ -8,6 +8,7 @@ import type { PluginDef } from '../api';
 import { VaultPanel } from './VaultPanel';
 import { VaultApprovals } from './Approvals';
 import { VaultDialogs } from './Transfer';
+import { VaultSettingsExtra } from './SettingsExtra';
 import { vaultMessage } from './api';
 
 export { openVaultExport, openVaultImport } from './dialogs';
@@ -19,5 +20,6 @@ export const vaultPlugin: PluginDef = {
   icon: KeyRound,
   panels: [{ id: 'vault', title: 'plugins.vault.title', icon: KeyRound, component: VaultPanel, command: 'view.panel.vault' }],
   statusItems: [VaultApprovals, VaultDialogs],
+  settings: { section: 'vault', extra: VaultSettingsExtra },
   onMessage: vaultMessage,
 };

@@ -45,6 +45,8 @@ import {
   type VaultAccess,
   type VaultVariable,
 } from './api';
+import { Picker, type PickerItem } from '../../components/Picker';
+import type { MachineState } from '../../lib/machine';
 import { RequestCard } from './Approvals';
 import { setupSnippets } from './setup';
 import { StrengthBar, noManager } from './fields';
@@ -626,23 +628,33 @@ function AccessChooser({
         ))}
       </div>
       {mode === 'some' && (
-        <div className="vault-machine-list">
-          {order.map((m) => (
-            <label key={m} className="vault-machine">
-              <input
-                type="checkbox"
-                checked={picked.includes(m)}
-                onChange={(e) => onPicked((p) => (e.target.checked ? [...p.filter((x) => x !== m), m] : p.filter((x) => x !== m)))}
-              />
-              <span className={`mstatus ms-${machines[m]?.status ?? 'idle'}`} />
-              <span className="ellipsis">{machines[m]?.label ?? m}</span>
-              {machines[m]?.kind === 'local' && <span className="tag">{t('vault.thisComputer')}</span>}
-            </label>
-          ))}
-        </div>
+        <Picker
+          multiple
+          className="vault-machines-picker"
+          aria-label={t('vault.machines')}
+          label={t('vault.machines')}
+          noneLabel={t('vault.access.pickMachines')}
+          items={machineItems(order, machines, picked)}
+          value={picked}
+          onChange={(v) => onPicked(() => v)}
+        />
       )}
     </fieldset>
   );
+}
+
+/** The machines to choose from: the core's, with their state, and any
+ * chosen one it no longer has (by its id). */
+function machineItems(order: string[], machines: Record<string, MachineState | undefined>, picked: readonly string[] = []): PickerItem[] {
+  const items: PickerItem[] = order.map((m) => ({
+    value: m,
+    label: machines[m]?.label ?? m,
+    icon: <span className={`mstatus ms-${machines[m]?.status ?? 'idle'}`} />,
+    description: machines[m]?.kind === 'local' ? t('vault.thisComputer') : undefined,
+    keywords: m,
+  }));
+  for (const m of picked) if (!order.includes(m)) items.push({ value: m, label: m });
+  return items;
 }
 
 const machinesFor = (mode: AccessMode, picked: string[]): string[] => (mode === 'all' ? ['*'] : mode === 'some' ? picked : []);
@@ -919,14 +931,17 @@ function AccessLog() {
   return (
     <>
       <div className="vault-toolbar">
-        <select value={machine} aria-label={t('vault.log.machine')} onChange={(e) => setMachine(e.target.value)}>
-          <option value="">{t('vault.log.allMachines')}</option>
-          {ids.map((m) => (
-            <option key={m} value={m}>
-              {m === PAGE ? t('vault.log.page') : label(m)}
-            </option>
-          ))}
-        </select>
+        <Picker
+          aria-label={t('vault.log.machine')}
+          label={t('vault.log.machine')}
+          keepOrder
+          items={[
+            { value: '', label: t('vault.log.allMachines') },
+            ...ids.map((m) => ({ value: m, label: m === PAGE ? t('vault.log.page') : label(m) })),
+          ]}
+          value={machine}
+          onChange={setMachine}
+        />
         <select value={outcome} aria-label={t('vault.log.outcome')} onChange={(e) => setOutcome(e.target.value)}>
           <option value="">{t('vault.log.allOutcomes')}</option>
           {(['ok', 'asked', 'refused', 'info'] as const).map((o) => (
@@ -1010,13 +1025,14 @@ function SetupGuide() {
     <div className="vault-setup">
       <p className="vault-hint">{t('vault.setup.about')}</p>
       {order.length > 1 && (
-        <select aria-label={t('vault.setup.machine')} value={id} onChange={(e) => setM(e.target.value)}>
-          {order.map((x) => (
-            <option key={x} value={x}>
-              {machines[x]?.label ?? x}
-            </option>
-          ))}
-        </select>
+        <Picker
+          aria-label={t('vault.setup.machine')}
+          label={t('vault.setup.machine')}
+          keepOrder
+          items={machineItems(order, machines)}
+          value={id}
+          onChange={setM}
+        />
       )}
       {block(t('vault.setup.claude'), s.claude, 'claude')}
       {block(t('vault.setup.codex'), s.codex, 'codex')}

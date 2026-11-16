@@ -291,7 +291,13 @@ never values; they release nothing, so the access log has none of them.
 ### Settings
 
 The section **Variable Vault** of the settings (`internal/plugins/vault`'s
-module, all whole numbers, for the whole core):
+module, all whole numbers, for the whole core) is the plugin's page in
+Settings, listed under the plugins (`Section.plugin`). The page ends with
+**Files** (`SettingsExtra.tsx`, the plugin's `settings.extra`): Import… and
+Export…, which open the panel's dialogs (`openVaultImport`,
+`openVaultExport`); they are disabled in read-only mode and for a vault
+without a passphrase yet, and a locked vault is said to be unlocked by the
+passphrase the dialogs ask for.
 
 - `vault.approvalTimeout`: seconds a request waits for an answer (60;
   10–600);
@@ -405,15 +411,19 @@ The panel **Variable Vault** of the right sidebar (command
   after 30 s, and edit, both only with a session. The editor is a dialog:
   name, description, a write-only value field (shown while typing on
   request) that sets a new value, who may read without asking (ask every
-  time, chosen machines with their state, all machines), inject only as a
+  time, chosen machines, all machines: the machines a searchable choice,
+  `components/Picker.tsx`, with their state, the same in Who May Read…),
+  inject only as a
   switch, and Delete after a confirmation. Saving is one call, a new name
   included (`to`), so a save that fails changed nothing and can be tried
   again as it is. **Access log**: the records
-  the log keeps, by day, filtered by machine (or pages) and outcome, each
+  the log keeps, by day, filtered by machine (or pages; a searchable choice)
+  and outcome, each
   with its time, outcome (values let out: allowed by the list, shown or
   exported by a page; approved; refused; listed), tool, names, machine,
   client, terminal and directory, the process chain the agent saw (the
-  asking process first), and for a page its address. **Connect**: per machine,
+  asking process first), and for a page its address. **Connect**: per
+  machine (a searchable choice),
   `claude mcp add --scope user <slug>-vault -- <data dir>/bin/<slug>-mcp`,
   Codex's `[mcp_servers.<slug>-vault]` in `~/.codex/config.toml` and the
   JSON other clients take, each with a copy button, built from the
@@ -655,4 +665,7 @@ server exposes.
   choice for every existing name, a new name checked before anything is
   sent and the choices in one call; choosing all, a range with Shift,
   exporting the chosen, giving them all machines and deleting them, one
-  failure named.
+  failure named; the settings page's Import and Export (open the dialogs,
+  disabled read-only and without a passphrase, the locked vault said).
+- `web/src/__tests__/vault.test.ts` also chooses the editor's machines
+  and the log's machine filter with the searchable choice.

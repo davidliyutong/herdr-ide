@@ -39,6 +39,10 @@ func TestSettingsDefs(t *testing.T) {
 	if len(Settings.Defs) != len(want) {
 		t.Errorf("%d settings", len(Settings.Defs))
 	}
+	// The section is the plugin's page in Settings.
+	if secs := st.Sections(); len(secs) != 1 || secs[0].ID != ID || secs[0].Plugin != ID {
+		t.Errorf("sections %+v", secs)
+	}
 	for k, v := range map[string]float64{SettingApprovalTimeout: 5, SettingAutoLock: -1, SettingSessionMax: 25, SettingRunOutput: 2048, SettingSessionIdle: 1.5} {
 		if err := st.Set(k, "", v); err == nil {
 			t.Errorf("%s = %v taken", k, v)

@@ -104,7 +104,16 @@ describe("plugins' settings pages", () => {
 
   it('lists the sections of plugins under the Plugins page, in the plugins’ order', () => {
     const labels = nav().map((b) => b.textContent);
-    expect(labels).toEqual(['Terminal', 'Plugins', t('files.title'), t('usage.title'), t('plugins.transfers.title'), 'Keyboard Shortcuts']);
+    // The vault's page has its extra alone here (its section has no settings in this stand-in).
+    expect(labels).toEqual([
+      'Terminal',
+      'Plugins',
+      t('files.title'),
+      t('usage.title'),
+      t('plugins.vault.title'),
+      t('plugins.transfers.title'),
+      'Keyboard Shortcuts',
+    ]);
     expect(navButton(t('usage.title')).classList.contains('sub')).toBe(true);
     expect(navButton('Plugins').classList.contains('sub')).toBe(false);
   });
