@@ -11,6 +11,8 @@
 
 import type * as MonacoNs from 'monaco-editor';
 import { usePrefs } from '../prefs';
+import { locale } from '../i18n';
+import { allowedLocales } from './monacoLocales';
 import { appearanceOf, resolveTheme, useSystemDark } from '../appearance';
 
 export type Monaco = typeof MonacoNs;
@@ -189,13 +191,29 @@ const common: MonacoNs.editor.IEditorOptions = {
   renderWhitespace: 'selection',
 };
 
+/** Unicode highlighting for an editor made now: characters of the user's
+ * languages are not marked as confusable with ASCII, invisible ones stay
+ * marked. The languages are read when an editor is created, so editors made
+ * after the UI language changes get the new list. */
+function unicodeOptions(): MonacoNs.editor.IEditorOptions {
+  const languages = typeof navigator === 'undefined' ? [] : navigator.languages?.length ? navigator.languages : [navigator.language];
+  return {
+    unicodeHighlight: {
+      ambiguousCharacters: true,
+      allowedLocales: allowedLocales(languages, locale),
+      nonBasicASCII: false,
+      invisibleCharacters: true,
+    },
+  };
+}
+
 /** An editor in el. */
 export async function createEditor(
   el: HTMLElement,
   opts: MonacoNs.editor.IStandaloneEditorConstructionOptions = {},
 ): Promise<{ monaco: Monaco; editor: CodeEditor }> {
   const monaco = await loadMonaco();
-  const editor = monaco.editor.create(el, { ...common, ...fontOptions(), theme: themeName(), ...opts });
+  const editor = monaco.editor.create(el, { ...common, ...unicodeOptions(), ...fontOptions(), theme: themeName(), ...opts });
   followFont(editor);
   return { monaco, editor };
 }
@@ -208,6 +226,7 @@ export async function createDiffEditor(
   const monaco = await loadMonaco();
   const editor = monaco.editor.createDiffEditor(el, {
     ...common,
+    ...unicodeOptions(),
     ...fontOptions(),
     theme: themeName(),
     hideUnchangedRegions: { enabled: true },

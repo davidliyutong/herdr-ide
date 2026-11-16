@@ -24,6 +24,9 @@ replaces and a double click keeps, as VS Code's preview editors (media
 too, as Quick Look shows them); the editor never overwrites a change made
 on the machine since it loaded the file; files changed in version control
 are colored in the tree and the editor's gutter marks the changed lines.
+The editor does not mark characters of the user's languages (the browser's
+languages and the app's language), such as Chinese punctuation, as
+confusable with ASCII; invisible characters stay marked.
 
 Non-goals: an IDE (language services beyond what Monaco has for JSON, CSS
 and HTML, search across files: VS Code panes do that; version control:
