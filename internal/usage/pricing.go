@@ -58,10 +58,11 @@ func (p PriceTable) ModelPricing(provider, model string) (string, *ModelPrice) {
 	return best, bp
 }
 
-// Tier picks the tier of a prompt of n tokens.
+// Tier picks the tier of a prompt of n tokens: the first whose InputMax
+// is at least n ("100K tokens or fewer").
 func (m *ModelPrice) Tier(n int64) (int, Tier) {
 	for i, t := range m.Tiers {
-		if t.InputMax == nil || n < *t.InputMax {
+		if t.InputMax == nil || n <= *t.InputMax {
 			return i, t
 		}
 	}

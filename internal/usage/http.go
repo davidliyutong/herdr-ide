@@ -15,6 +15,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -24,14 +25,20 @@ const Timeout = 15 * time.Second
 // maxBody bounds a provider's answer.
 const maxBody = 4 << 20
 
-// NewClient is the client for the providers: the proxy of HTTPS_PROXY (and
+// NewClient is a client for the providers: the proxy of HTTPS_PROXY (and
 // NO_PROXY), a 15 s timeout, no cookies, and no redirects (a provider's
 // 3xx is an error, http_3xx, so credentials go to the fixed hosts only).
+// Its idle connections close after 90 s.
 func NewClient() *http.Client {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.Proxy = http.ProxyFromEnvironment
 	return &http.Client{Timeout: Timeout, Transport: tr, CheckRedirect: noRedirect}
 }
+
+// sharedClient is the one client of the process's Envs (NewEnv): polls
+// reuse its connections instead of opening new ones to the same hosts and
+// leaving them idle in a client no one uses again.
+var sharedClient = sync.OnceValue(NewClient)
 
 // noRedirect stops at the first answer: a redirect is returned as it is.
 func noRedirect(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
@@ -242,7 +249,8 @@ func lookPath(environ func() []string) func(string) (string, error) {
 
 // localClient reaches the local language server on 127.0.0.1:port only:
 // whatever the URL names, it dials that address, uses no proxy, and accepts
-// the server's self-signed certificate.
+// the server's self-signed certificate. A client is made per port and
+// poll, so it keeps no connection open: each is closed with its answer.
 func localClient(port int) *http.Client {
 	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
 	tr := &http.Transport{
@@ -253,6 +261,7 @@ func localClient(port int) *http.Client {
 		},
 		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true}, // the language server's own certificate, on loopback only
 		TLSHandshakeTimeout: 5 * time.Second,
+		DisableKeepAlives:   true,
 	}
 	return &http.Client{Timeout: 5 * time.Second, Transport: tr, CheckRedirect: noRedirect}
 }

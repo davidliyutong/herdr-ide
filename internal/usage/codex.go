@@ -1,9 +1,10 @@
 package usage
 
 import (
-	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"io/fs"
 	"os"
 	"path"
@@ -214,23 +215,29 @@ func codexWindows(rl map[string]any, label string) []Window {
 }
 
 // codexFromLog is the newest rate_limits a session log of home recorded
-// (a token_count event), as a stale account; nil when there is none.
+// (a token_count event), as a stale account; nil when there is none. The
+// newest log is read backwards from its end until a line has them, and
+// what it said is kept (Env.Memo) while it does not change: a rollout is
+// tens of MB.
 func codexFromLog(e *Env, home string) *Account {
 	var newest string
-	var newestTime int64
+	var newestInfo fs.FileInfo
 	for _, dir := range []string{path.Join(home, "sessions"), path.Join(home, "archived_sessions")} {
 		fs.WalkDir(os.DirFS(dir), ".", func(p string, d fs.DirEntry, err error) error {
 			if err != nil || d.IsDir() || !strings.HasPrefix(path.Base(p), "rollout-") || !strings.HasSuffix(p, ".jsonl") {
 				return nil
 			}
-			if info, err := d.Info(); err == nil && info.ModTime().Unix() > newestTime {
-				newestTime, newest = info.ModTime().Unix(), path.Join(dir, p)
+			if info, err := d.Info(); err == nil && (newestInfo == nil || info.ModTime().After(newestInfo.ModTime())) {
+				newestInfo, newest = info, path.Join(dir, p)
 			}
 			return nil
 		})
 	}
 	if newest == "" {
 		return nil
+	}
+	if a, ok := e.Memo.codexLogOf(home, newest, newestInfo.Size(), newestInfo.ModTime()); ok {
+		return a
 	}
 	f, err := os.Open(newest)
 	if err != nil {
@@ -239,34 +246,80 @@ func codexFromLog(e *Env, home string) *Account {
 	defer f.Close()
 	var last map[string]any
 	var lastTS int64
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 64<<10), maxLine)
-	for sc.Scan() {
-		line := sc.Bytes()
-		if !strings.Contains(string(line), `"rate_limits"`) {
-			continue
+	eachLineBackward(f, newestInfo.Size(), func(line []byte) bool {
+		if !bytes.Contains(line, []byte(`"rate_limits"`)) {
+			return false
 		}
 		var d map[string]any
 		if json.Unmarshal(line, &d) != nil {
-			continue
+			return false
 		}
-		pl := obj(d["payload"])
-		if rl := obj(pl["rate_limits"]); rl != nil {
-			last, lastTS = rl, timeOf(d["timestamp"])
+		rl := obj(obj(d["payload"])["rate_limits"])
+		if rl == nil {
+			return false
+		}
+		last, lastTS = rl, timeOf(d["timestamp"])
+		return true
+	})
+	var a *Account
+	if last != nil {
+		a = &Account{Provider: Codex, Status: StatusStale, Code: "from_log", Source: "log", AsOf: lastTS}
+		a.Windows = codexWindows(last, "")
+		for i := range a.Windows {
+			if a.Windows[i].ResetsAt < 0 {
+				a.Windows[i].ResetsAt = lastTS - a.Windows[i].ResetsAt
+			}
+		}
+		if p := str(last["plan_type"]); p != "" {
+			a.Plan = codexPlan(p)
 		}
 	}
-	if last == nil {
-		return nil
-	}
-	a := &Account{Provider: Codex, Status: StatusStale, Code: "from_log", Source: "log", AsOf: lastTS}
-	a.Windows = codexWindows(last, "")
-	for i := range a.Windows {
-		if a.Windows[i].ResetsAt < 0 {
-			a.Windows[i].ResetsAt = lastTS - a.Windows[i].ResetsAt
-		}
-	}
-	if p := str(last["plan_type"]); p != "" {
-		a.Plan = codexPlan(p)
-	}
+	e.Memo.keepCodexLog(home, newest, newestInfo.Size(), newestInfo.ModTime(), a)
 	return a
+}
+
+// eachLineBackward calls fn with the lines of r (size bytes), the last
+// first, until fn returns true; lines longer than maxLine are skipped.
+func eachLineBackward(r io.ReaderAt, size int64, fn func(line []byte) bool) {
+	const chunk = 256 << 10
+	pos := size
+	// carry is the end of a line whose start is before pos.
+	var carry []byte
+	long := false
+	for pos > 0 {
+		// Reads grow with a long line, so it is copied a few times only.
+		n := min(max(int64(chunk), int64(len(carry))), pos)
+		pos -= n
+		b := make([]byte, n, n+int64(len(carry)))
+		if _, err := r.ReadAt(b, pos); err != nil && err != io.EOF {
+			return
+		}
+		if long {
+			// Still inside a line too long to read: drop up to its start.
+			i := bytes.LastIndexByte(b, '\n')
+			if i < 0 {
+				continue
+			}
+			b, long = b[:i+1], false
+		} else {
+			b = append(b, carry...)
+		}
+		for {
+			i := bytes.LastIndexByte(b, '\n')
+			if i < 0 {
+				break
+			}
+			if line := bytes.TrimSpace(b[i+1:]); len(line) > 0 && len(line) <= maxLine && fn(line) {
+				return
+			}
+			b = b[:i]
+		}
+		carry = b
+		if len(carry) > maxLine {
+			carry, long = nil, true
+		}
+	}
+	if line := bytes.TrimSpace(carry); !long && len(line) > 0 && len(line) <= maxLine {
+		fn(line)
+	}
 }

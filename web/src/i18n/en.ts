@@ -986,6 +986,7 @@ export const en = {
   'usage.pctUsed': '{pct}% used',
   'usage.pctLeft': '{pct}% left',
   'usage.resetsIn': 'resets in {in}',
+  'usage.pastReset': 'Started over since it was read; the next refresh reads the new period.',
   'usage.paceMarker': 'Even pace: the share of the window’s time gone',
   'usage.runsOut': 'At this pace it runs out in {in}, before it resets',
   'usage.credits.unlimited': 'Unlimited credits',
@@ -995,6 +996,7 @@ export const en = {
   'usage.balance': 'Balance: {v} {currency}',
   'usage.unavailable': 'the balance cannot pay for requests',
   'usage.deepseek.title': 'DeepSeek API key',
+  'usage.deepseek.add': 'Add a DeepSeek API key…',
   'usage.deepseek.about':
     'Saved in a file only that machine’s user can read; it is never shown again. A key in DEEPSEEK_API_KEY or in Claude Code’s settings for DeepSeek is used first.',
   'usage.deepseek.machine': 'Machine',

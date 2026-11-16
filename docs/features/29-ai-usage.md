@@ -47,7 +47,8 @@ script run over ssh).
   credentials), `error` (with `code`) or `missing`. An account the core
   names in `skip` (`provider:id`), or one without an id named in
   `skipLocal` (`provider`, or `provider:home` for a Codex home), is answered
-  `skipped` without a request.
+  `skipped` without a request. The agent asks the providers through one
+  HTTP client, so polls reuse its connections.
 - `cost {since, tzOffset, codexHomes, providers}`: the logs' tokens and
   cost by day (the user's), provider, model and project. The scan stops
   between files when the request ends, keeping what it read.
@@ -56,11 +57,11 @@ script run over ssh).
 | Provider | Credentials | Asks | Account id |
 | --- | --- | --- | --- |
 | Claude | `~/.claude/.credentials.json` (`$CLAUDE_CONFIG_DIR`) `claudeAiOauth`; on macOS the keychain item `Claude Code-credentials` when the file has none (`usage.claudeKeychain`) | `GET api.anthropic.com/api/oauth/usage` (`anthropic-beta: oauth-2025-04-20`): `five_hour`, `seven_day`, `seven_day_opus`, `seven_day_sonnet` (`utilization`, `resets_at`), `extra_usage` (amounts in cents) | `~/.claude.json`'s `oauthAccount.accountUuid`, else `/api/oauth/profile` |
-| Codex | `$CODEX_HOME` or `~/.codex/auth.json`, and each of `usage.codexHomes` | `GET chatgpt.com/backend-api/wham/usage` with `ChatGPT-Account-Id`: `rate_limit.primary_window`/`secondary_window`, `additional_rate_limits`, `credits`, `plan_type`. Without an answer (network) or with an expired token: the newest session log's `rate_limits`, as `stale` with `code: from_log` | `tokens.account_id`; email and plan from the id token's claims |
+| Codex | `$CODEX_HOME` or `~/.codex/auth.json`, and each of `usage.codexHomes` | `GET chatgpt.com/backend-api/wham/usage` with `ChatGPT-Account-Id`: `rate_limit.primary_window`/`secondary_window`, `additional_rate_limits`, `credits`, `plan_type`. Without an answer (network) or with an expired token: the newest session log's `rate_limits` (read backwards from its end, and not again while the log is unchanged), as `stale` with `code: from_log` | `tokens.account_id`; email and plan from the id token's claims |
 | Grok | `$GROK_HOME` or `~/.grok/auth.json`, x.ai's issuer first | `GET cli-chat-proxy.grok.com/v1/billing?format=credits` (`X-XAI-Token-Auth: xai-grok-cli`): `creditUsagePercent` (else on-demand used over cap) for the period, `productUsage`; `/v1/settings` for the plan | `user_id` |
-| Antigravity | none: the running language server | `/bin/ps` (else `ps` on the `PATH`) for the agent's user's own Antigravity `language_server` and its `--csrf_token`; its loopback ports (`/proc` on Linux, `/usr/sbin/lsof` on macOS); `POST https://127.0.0.1:<port>/exa.language_server_pb.LanguageServerService/GetUserStatus` (then HTTP, then an empty body); without one, `agy -p /usage --output-format json` (20 s, in a process group of its own that is killed when it exits or times out) | a hash of the email |
+| Antigravity | none: the running language server | `/bin/ps` (else `ps` on the `PATH`) for the agent's user's own Antigravity `language_server` and its `--csrf_token`; its loopback ports (`/proc` on Linux, `/usr/sbin/lsof` on macOS); `POST https://127.0.0.1:<port>/exa.language_server_pb.LanguageServerService/GetUserStatus` (then HTTP, then an empty body; no connection is kept); without one, `agy -p /usage --output-format json` (20 s, in a process group of its own that is killed when it exits or times out), at most every 10 minutes (the polls in between get its last answer) and not again for 30 minutes after it failed: it takes seconds and a few hundred MB | a hash of the email (agy 1.5 names none: its account stays apart per machine) |
 | Kimi Code | `$KIMI_CODE_HOME` or `~/.kimi-code/credentials/kimi-code*.json` | `GET api.kimi.com/coding/v1/usages`: `usage` (weekly), `limits[]` (`window.duration` × `timeUnit`); numbers may be strings | the token's `user_id` (or `sub`) claim |
-| DeepSeek | `DEEPSEEK_API_KEY`, Claude Code's `settings.json` when its `ANTHROPIC_BASE_URL` is DeepSeek's (`https` on `api.deepseek.com` or another host below `deepseek.com`; a gateway that only has deepseek in its name does not count), or the key file the panel writes | `GET api.deepseek.com/user/balance`: `balance_infos`, `is_available` (no windows) | a hash of the key |
+| DeepSeek | the key file the panel writes (the user's choice, first), `DEEPSEEK_API_KEY`, or Claude Code's `settings.json` when its `ANTHROPIC_BASE_URL` is DeepSeek's (`https` on `api.deepseek.com` or another host below `deepseek.com`; a gateway that only has deepseek in its name does not count) | `GET api.deepseek.com/user/balance`: `balance_infos`, `is_available` (no windows) | a hash of the key |
 
 Tokens are read from the files at each poll, sent only to their provider's
 host and never returned; expiry is checked first, so an expired token is not
@@ -84,9 +85,19 @@ the input price unless given; 1 hour: twice it). A week is 168 hours and a
 month 750 for the equivalents (cost × 168 or 750 / the range's hours).
 
 The scanner keeps `usage/cost-cache.json` below the agent's data directory
-(0600): per log its size, time and records. An unchanged log is not read
-again; a Claude log that grew is read on from its last complete line. Logs
-and records older than 90 days leave the cache. A long scan saves the cache
+(0600): per log its size, time, the offset after its last complete line,
+its records, one per key (Claude logs a streamed response once per content
+block), and for a Codex rollout the parser's state there (the last turn's
+model, the project, the last legacy total). An unchanged log is not read
+again; one that grew is read on from that offset when the byte before it
+is still a newline (else from the start), and its last line counts once it
+ends; gzipped logs are read whole. Claude's lines are decoded only when
+they have both `"usage"` and `"assistant"` as JSON's own strings, so a
+tool's long output is not. Logs and records older than 90 days leave the
+cache. A scan that changed the cache writes it when the file is older than
+5 minutes or the scan read at least 8 MiB of logs; otherwise the next scan
+reads on from the file's offsets, which costs less than writing every
+record again whenever a log in use grew a line. A long scan saves the cache
 every 20 s, and one that is cancelled saves what it read, so the next one
 goes on from there.
 
@@ -94,28 +105,37 @@ goes on from there.
 
 `internal/plugins/usage` is a `plugin.Starter`. Every 10 s it checks
 whether a poll is due by `usage.refresh`: `manual`, every 1, 2, 5, 15 or 30
-minutes, or `adaptive` (default): every 2 minutes while a panel is open (its
-`GET /api/p/usage?watch=1` every minute counts for 3), every 5 while a coding
+minutes, or `adaptive` (default): every 2 minutes while a panel is open in a
+page that is shown (its `GET /api/p/usage?watch=1` every minute counts for
+3; a hidden page sends none), every 5 while a coding
 agent works in any terminal (the agent detection's events,
 [25](25-agent-detection.md)), else every 30. `POST /api/p/usage/refresh`
 (and a new DeepSeek key) polls at once if the last poll is at least 30 s
 old, else when it is: it answers 202 with `at`, when that poll runs, and
 requests before then share it, so a client cannot make the machines ask
-the providers more often than twice a minute.
+the providers more often than twice a minute. No poll runs, or counts as
+the last one, while no machine is connected.
 
 A poll asks the connected machines one after the other, the local one
 first, with the accounts already fetched (and those waiting out a
 `Retry-After`) in `skip`: an account signed in on several machines is asked
-once and lists every machine it was seen on. An account without an id
-waiting out a `Retry-After` is in its own machine's `skipLocal`. Accounts are keyed
+once and lists every machine it was seen on, keeping those whose poll
+failed. An account without an id waiting out a `Retry-After` is in its own
+machine's `skipLocal`. A machine that connects after a poll (the SSH ones
+after the local one at start, or a reconnect) is asked at the next tick,
+alone, with the accounts read within the cadence in `skip`, without moving
+the cadence (not in `manual` mode). Accounts are keyed
 `provider:id`; one without an id stays apart per machine. An answer without
 numbers keeps the last good ones with the new status and code (the card
 says how old they are). Accounts no machine reported for 7 days are
-forgotten.
+forgotten; those of a provider turned off leave the snapshot at once.
 
 The history (`usage-history[-<instance>].json` beside the settings, 0600)
 keeps a point per window and poll when the use changed or 15 minutes
-passed, for 30 days, and the last accounts, shown again after a restart.
+passed, only for numbers read in that poll (not those kept from an
+earlier one), for 30 days, and the last accounts, shown again after a
+restart. A window is told apart by its kind and label, and by its length
+where two share them (Kimi's limits have no labels).
 A window's pace compares its use with the share of its time gone, and
 projects when it runs out at the rate of its history in this period (else
 since the period began).
@@ -149,14 +169,18 @@ not read; SSH machines are.
   the services apart (`--usage-<provider>`, `usage.css`, darker in the
   light theme). Under the tiles: when the numbers were read and the next
   read, the switch between used and left, and Refresh (which also reads
-  the cost again). The tile shown and the switch are kept per browser.
+  the cost again; so does showing the panel when the cost is older than 15
+  minutes). The tile shown and the switch are kept per browser. A snapshot
+  older than the one shown is ignored.
 - **Overview**: the spend of the last 7, 30 or 90 days at API prices (a
   large total, tokens, the weekly and monthly equivalents), bars per day
   stacked in the services' colors (plain SVG) with a legend of each
   service's total, a ranking by model, project or machine, models without
   prices and machines whose logs could not be read; then a row per
   account, the tightest window first: its mark, plan, tightest window, its
-  reset and a small bar; a click shows its service.
+  reset and a small bar; a click shows its service. While DeepSeek is
+  turned on and no machine has its key, a link opens its page, which has
+  the key form.
 - **A service**: a card per account: its mark, email, plan, when it was
   read; its status page's incident and what to do about a status other
   than ok; its windows grouped by the group of models they count (a
@@ -167,15 +191,18 @@ not read; SSH machines are.
   and error colors from the first threshold and when out) with quarter
   marks and the even pace's mark once the window is under way, then how far
   ahead of an even pace it is and when it runs out at this pace before the
-  reset; credits and balances; the machines it was seen on. Then the
+  reset; credits and balances; the machines it was seen on. A window whose
+  reset has passed since it was read says so, dimmed, and is left out of
+  the tightest window and the alerts until the next poll. Then the
   service's own spend (today, 30 days, tokens today and in 30 days, its
   daily bars, its most used model) and, for DeepSeek, the form that
   writes a key file on a machine.
 
 The status bar shows the tightest window's percentage, in the warning color
 from the first of `usage.thresholds` (default 80 and 95); a click shows the
-panel. A snapshot that takes a window over a threshold notifies once (again
-after it fell below), as does a window that started over after reaching
+panel. A snapshot that takes a window over a threshold notifies once per
+period (again after it fell below, or in a new period no page saw
+start), as does a window that started over after reaching
 the first threshold and one whose pace runs it out before its reset (once
 per period): a toast, or a system notification while the page is in the
 background with `notifications.system` on. What was notified is kept in the
@@ -190,6 +217,8 @@ browser's storage, so a reload or another tab does not repeat it.
 | A burndown line per window | Drawn over the whole period, the few hours read so far were a stray dash; the even pace's mark and how far ahead of it the window is say the same at a glance. |
 | Refreshing expired OAuth tokens | Writing the CLIs' credential files races the CLIs and can sign them out; running the CLI once renews them. |
 | Browser cookies for providers without a CLI token | Reads another program's secrets; declined. |
+| Running `agy` at every poll | Each run takes seconds and a few hundred MB, every 2 minutes on every machine with `agy` while a panel is open; its numbers change slowly, so one run per 10 minutes serves the polls between. |
+| Writing the cost cache after every scan that changed it | A log in use grows at every scan, and the cache (tens of thousands of records) was written whole each time; reading on from the file's older offsets costs a few minutes of lines. |
 | Every machine asked for every account | The same account would be asked once per machine at every poll, against the providers' rate limits. |
 | A chart library for the bars and burndown | A few SVG paths and rectangles; no dependency. |
 
@@ -204,6 +233,8 @@ browser's storage, so a reload or another tab does not repeat it.
   CLI; nothing is sent.
 - 429: the account is skipped until its `Retry-After` (at most a day), also
   one without an id, on its machine.
+- `agy` fails or times out (20 s): `agy_failed` (or `bad_response`), the
+  last numbers stay, and it is not run again for 30 minutes.
 - A redirect: not followed; `http_3xx`, so credentials reach only the
   fixed hosts.
 - A machine offline: its poll fails with `offline`; its accounts keep their
@@ -227,21 +258,37 @@ status pages. Resources and retention:
   out), `lsof`, `/proc` and `agy` paths, the loopback client, the key
   file's modes, no token in a reply, redirects not followed, a lookalike
   DeepSeek gateway, `skipLocal`.
+- `internal/usage/resources_test.go`: the language server's client
+  leaves no connection open, the agent's polls share one client, `agy` at
+  most every 10 minutes and backed off after a failure, Antigravity's
+  `skip` and `skipLocal`, the Codex log read backwards across long lines
+  and once while unchanged.
 - `internal/usage/proc_unix_test.go`: a fake `agy` leaving `sleep 300`
   behind; its process group is killed after it exits and when it times
   out.
 - `internal/usage/cost_test.go`: the logs' dedupe rules, tiers and cache
-  writes, the user's days, the incremental cache and its retention, a
-  cancelled scan keeping its progress.
+  writes, the user's days, the incremental cache and its retention, one
+  record per response in the cache (an older cache's duplicates dropped),
+  Codex and Grok logs read on from their offsets (a rewritten one from
+  the start, an unfinished line once it ends), the cache written seldom,
+  a cancelled scan keeping its progress.
 - `internal/agent/plugin/usage/usage_test.go`: the actions and their codes.
 - `internal/plugins/usage/usage_test.go`: cadence, dedupe across machines,
   last good numbers, `Retry-After` (also without an id), the manual
   refresh's minimum gap on a fake clock, history and pace, status pages,
-  the cost report, shared scans and its cache, settings.
-- `web/src/__tests__/usage.test.ts`: ordering, alerts, the cost sums,
-  windows grouped by their models, the panel (tiles, the overview's rows
-  and spend, a service's cards, its spend, used or left) and the status
-  bar item against a stubbed core, the panel with ready machines in the
-  store (no render loop).
+  the cost report, shared scans and its cache, settings, a machine that
+  connects later asked alone, no poll without machines, machines kept
+  when their poll fails, no history from kept numbers, a provider turned
+  off hidden, windows' ids.
+- `internal/usage/cost_test.go` (`TestPricingTiers`): tier limits
+  inclusive, the current Claude models' prices.
+- `web/src/__tests__/usage.test.ts`: ordering, alerts (again in a new
+  period, not for a reset time that moves a little, none for a window past
+  its reset), the cost sums, windows grouped by their models, the panel
+  (tiles, the overview's rows and spend, a service's cards, its spend,
+  used or left) and the status bar item against a stubbed core, the panel
+  with ready machines in the store (no render loop), no `watch` from a
+  hidden page, DeepSeek's key form without an account, an older snapshot
+  ignored.
 - `internal/server`: `TestMutatingRoutesAreGuarded` covers the plugin's
   routes.

@@ -244,6 +244,14 @@
 .usage-window.level-out .usage-pct {
   color: var(--error);
 }
+/* Past its reset: the numbers are of the period before. */
+.usage-window.level-past .usage-pct,
+.usage-window.level-past .usage-window-name {
+  color: var(--fg-mute);
+}
+.level-past .usage-bar-fill {
+  opacity: 0.4;
+}
 .usage-window-note {
   color: var(--fg-dim);
   font-size: var(--fs-sm);
@@ -521,4 +529,10 @@
 }
 .usage-status-item.out {
   color: var(--error);
+}
+
+/* The overview's way to DeepSeek's key form while no key is found. */
+.usage-add-key {
+  align-self: flex-start;
+  font-size: var(--fs-sm);
 }

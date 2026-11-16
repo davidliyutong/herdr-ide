@@ -967,6 +967,7 @@ export const zhCN: Messages = {
   'usage.pctUsed': '已用 {pct}%',
   'usage.pctLeft': '剩余 {pct}%',
   'usage.resetsIn': '{in}后重置',
+  'usage.pastReset': '读取后已重置；下次刷新会读取新周期的用量。',
   'usage.paceMarker': '均匀配速：窗口时间已过去的比例',
   'usage.runsOut': '按当前速度 {in}后用尽，早于重置',
   'usage.credits.unlimited': '额度不限',
@@ -976,6 +977,7 @@ export const zhCN: Messages = {
   'usage.balance': '余额：{v} {currency}',
   'usage.unavailable': '余额不足以支付请求',
   'usage.deepseek.title': 'DeepSeek API 密钥',
+  'usage.deepseek.add': '添加 DeepSeek API 密钥…',
   'usage.deepseek.about':
     '保存在只有那台机器的用户能读的文件里，之后不再显示。DEEPSEEK_API_KEY 或 Claude Code 指向 DeepSeek 的设置中的密钥优先。',
   'usage.deepseek.machine': '机器',

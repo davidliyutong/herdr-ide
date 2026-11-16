@@ -280,7 +280,7 @@ func TestHistoryPointsAreThinned(t *testing.T) {
 		pts = append(pts, [2]float64{float64(now.Unix() - int64(200-i)*60), float64(i) / 2})
 	}
 	h.Windows["k"] = map[string][][2]float64{"weekly|": pts}
-	got := h.points("k", usage.Window{Kind: "weekly"}, now)
+	got := h.points("k", "weekly|", usage.Window{Kind: "weekly"}, now)
 	if len(got) != maxPoints || got[len(got)-1] != pts[len(pts)-1] || got[0] != pts[0] {
 		t.Errorf("thinned to %d: first %v last %v", len(got), got[0], got[len(got)-1])
 	}
@@ -561,4 +561,117 @@ func TestCostSharedScansAndCache(t *testing.T) {
 		t.Errorf("cancelled request %+v", rep.Machines)
 	}
 	close(block)
+}
+
+// A machine that connects after the first poll is asked at the next tick,
+// alone, without the accounts already read; the cadence stays.
+func TestJoinedMachineAskedAtOnce(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	ready := []string{"local"}
+	var asked []string
+	var boxSkip []string
+	shared := usage.Account{Provider: "claude", ID: "acc-1", Status: "ok", AsOf: now.Unix(), Windows: []usage.Window{win("weekly", 40, 0, 0)}}
+	p, _ := testPlugin(t, &now, nil, func(m string, o usage.Options) ([]usage.Account, error) {
+		asked = append(asked, m)
+		if m == "box" {
+			boxSkip = o.Skip
+			return []usage.Account{{Provider: "claude", ID: "acc-1", Status: "skipped"},
+				{Provider: "kimi", Status: "ok", AsOf: now.Unix(), Windows: []usage.Window{win("weekly", 5, 0, 0)}}}, nil
+		}
+		return []usage.Account{shared}, nil
+	})
+	p.ready = func() []string { return ready }
+	p.onMachine(machines.State{ID: "local", Status: machines.StatusReady})
+	p.pollDue(context.Background())
+	first := p.lastPoll
+	now = now.Add(20 * time.Second)
+	ready = []string{"local", "box"}
+	p.onMachine(machines.State{ID: "box", Status: machines.StatusReady})
+	p.onMachine(machines.State{ID: "box", Status: machines.StatusReady}) // again: no second poll
+	p.pollDue(context.Background())
+	p.pollDue(context.Background())
+	if !slices.Equal(asked, []string{"local", "box"}) || !slices.Contains(boxSkip, "claude:acc-1") {
+		t.Fatalf("asked %v, box skipped %v", asked, boxSkip)
+	}
+	s := p.Snapshot()
+	if a := find(s, "claude:acc-1"); a == nil || !slices.Equal(a.Machines, []string{"box", "local"}) {
+		t.Errorf("machines of the shared account %+v", a)
+	}
+	if find(s, "kimi:@box") == nil || !p.lastPoll.Equal(first) || s.Machines["local"].Status != "ok" {
+		t.Errorf("joined poll: %+v, last poll %v", s, p.lastPoll)
+	}
+}
+
+// No poll runs, and none counts as the last, while no machine is connected.
+func TestNoPollWithoutMachines(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	p, _ := testPlugin(t, &now, nil, func(string, usage.Options) ([]usage.Account, error) { return nil, nil })
+	p.Refresh()
+	if p.due() {
+		t.Fatal("due without machines")
+	}
+	p.Poll(context.Background())
+	if !p.lastPoll.IsZero() || p.polling {
+		t.Errorf("an empty poll counted")
+	}
+}
+
+// A machine whose poll failed stays among an account's machines; the
+// history gets points only for numbers read again.
+func TestFailedMachineAndStaleHistory(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	failBox := false
+	acc := usage.Account{Provider: "claude", ID: "acc-1", Status: "ok", Windows: []usage.Window{win("weekly", 40, 0, 0)}}
+	p, _ := testPlugin(t, &now, []string{"local", "box"}, func(m string, o usage.Options) ([]usage.Account, error) {
+		if m == "box" && failBox {
+			return nil, plugin.ErrOffline
+		}
+		a := acc
+		a.AsOf = now.Unix()
+		if slices.Contains(o.Skip, "claude:acc-1") {
+			a = usage.Account{Provider: "claude", ID: "acc-1", Status: "skipped"}
+		}
+		return []usage.Account{a}, nil
+	})
+	p.Poll(context.Background())
+	failBox = true
+	now = now.Add(time.Hour)
+	p.Poll(context.Background())
+	if a := find(p.Snapshot(), "claude:acc-1"); a == nil || !slices.Equal(a.Machines, []string{"local", "box"}) {
+		t.Fatalf("machines %+v", a)
+	}
+	// Every machine offline: the numbers stay, the history gets no point.
+	p.fetch = func(context.Context, string, string, any, any) error { return plugin.ErrOffline }
+	for range 4 {
+		now = now.Add(time.Hour)
+		p.Poll(context.Background())
+	}
+	if pts := p.history.Windows["claude:acc-1"]["weekly|"]; len(pts) != 2 {
+		t.Errorf("history %v", pts)
+	}
+}
+
+// A provider turned off leaves the snapshot at once.
+func TestProviderOffHidden(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	p, h := testPlugin(t, &now, []string{"local"}, func(string, usage.Options) ([]usage.Account, error) {
+		return []usage.Account{{Provider: "claude", ID: "acc-1", Status: "ok", AsOf: now.Unix(), Windows: []usage.Window{win("weekly", 40, 0, 0)}}}, nil
+	})
+	p.Poll(context.Background())
+	h.st.Set(providerSetting("claude"), "", false)
+	if len(p.Snapshot().Accounts) != 0 {
+		t.Error("an account of a provider turned off is shown")
+	}
+	h.st.Set(providerSetting("claude"), "", true)
+	if len(p.Snapshot().Accounts) != 1 {
+		t.Error("turned on again: not shown")
+	}
+}
+
+// Windows that share kind and label get ids of their own.
+func TestWindowIDs(t *testing.T) {
+	ids := windowIDs([]usage.Window{win("session", 1, 0, 18000), win("session", 2, 0, 3600), win("weekly", 3, 0, 0), win("weekly", 4, 0, 0), {Kind: "model", Label: "M"}})
+	if !slices.Equal(ids, []string{"session||18000", "session||3600", "weekly||0", "weekly||0#1", "model|M"}) {
+		t.Errorf("ids %q", ids)
+	}
 }

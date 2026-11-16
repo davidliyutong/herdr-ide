@@ -1,5 +1,5 @@
 {
-  "comment": "API prices in USD per million tokens, by provider and model (longest prefix of the model name). tiers are matched in order by the request's prompt length (inputMax null: the last tier). cacheWrite is the 5-minute cache write (default: input), cacheWrite1h the 1-hour one (default: 2 x input).",
+  "comment": "API prices in USD per million tokens, by provider and model (longest prefix of the model name). tiers are matched in order by the request's prompt length: inputMax is the longest prompt of a tier, null for the last. cacheWrite is the 5-minute cache write (default: input), cacheWrite1h the 1-hour one (default: 2 x input).",
   "weekHours": 168,
   "monthHours": 750,
   "providers": {
@@ -13,6 +13,10 @@
       }
     },
     "claude": {
+      "claude-fable-5-2": {
+        "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "tiers": [{ "inputMax": null, "input": 8.0, "output": 40.0, "cached": 0.2, "cacheWrite": 10.0, "cacheWrite1h": 16.0 }]
+      },
       "claude-fable-5-1": {
         "source": "https://platform.claude.com/docs/en/about-claude/pricing",
         "tiers": [{ "inputMax": null, "input": 10.0, "output": 50.0, "cached": 0.25, "cacheWrite": 12.5, "cacheWrite1h": 20.0 }]
@@ -51,7 +55,7 @@
       },
       "claude-sonnet-5-5": {
         "source": "https://platform.claude.com/docs/en/about-claude/pricing",
-        "tiers": [{ "inputMax": null, "input": 2.0, "output": 10.0, "cached": 0.2, "cacheWrite": 2.5, "cacheWrite1h": 4.0 }]
+        "tiers": [{ "inputMax": null, "input": 2.0, "output": 10.0, "cached": 0.1, "cacheWrite": 2.5, "cacheWrite1h": 4.0 }]
       },
       "claude-sonnet-5": {
         "source": "https://platform.claude.com/docs/en/about-claude/pricing",
@@ -60,6 +64,13 @@
       "claude-sonnet-4": {
         "source": "https://platform.claude.com/docs/en/about-claude/pricing",
         "tiers": [{ "inputMax": null, "input": 3.0, "output": 15.0, "cached": 0.3, "cacheWrite": 3.75, "cacheWrite1h": 6.0 }]
+      },
+      "claude-haiku-5-5": {
+        "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "tiers": [
+          { "inputMax": 100000, "input": 0.1, "output": 0.5, "cached": 0.01, "cacheWrite": 0.125, "cacheWrite1h": 0.2 },
+          { "inputMax": null, "input": 0.5, "output": 2.5, "cached": 0.05, "cacheWrite": 0.625, "cacheWrite1h": 1.0 }
+        ]
       },
       "claude-haiku-4-5": {
         "source": "https://platform.claude.com/docs/en/about-claude/pricing",

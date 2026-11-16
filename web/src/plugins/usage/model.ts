@@ -12,6 +12,9 @@ export interface UsagePace {
 }
 
 export interface UsageWindow {
+  /** Tells an account's windows apart: kind|label, with the length where
+   * two share them. */
+  id?: string;
   kind: WindowKind;
   label?: string;
   usedPct: number;
@@ -100,10 +103,17 @@ export interface CostReport {
 
 export const PROVIDERS = ['claude', 'codex', 'grok', 'antigravity', 'kimi', 'deepseek'] as const;
 
-/** The window an account is closest to running out of. */
-export function tightestWindow(a: UsageAccount): UsageWindow | undefined {
+/** A window whose reset has passed since it was read: its use is of the
+ * period before, until the next poll reads the new one. */
+export function pastReset(w: UsageWindow, now = Date.now() / 1000): boolean {
+  return !!w.resetsAt && w.resetsAt <= now;
+}
+
+/** The window an account is closest to running out of, of those still in
+ * the period they were read in. */
+export function tightestWindow(a: UsageAccount, now = Date.now() / 1000): UsageWindow | undefined {
   let best: UsageWindow | undefined;
-  for (const w of a.windows ?? []) if (!best || w.usedPct > best.usedPct) best = w;
+  for (const w of a.windows ?? []) if (!pastReset(w, now) && (!best || w.usedPct > best.usedPct)) best = w;
   return best;
 }
 
@@ -163,15 +173,26 @@ export interface Alert {
   threshold?: number;
 }
 
-const windowId = (a: UsageAccount, w: UsageWindow) => `${a.key}|${w.kind}|${w.label ?? ''}`;
+export const windowId = (a: UsageAccount, w: UsageWindow) => `${a.key}|${w.id ?? `${w.kind}|${w.label ?? ''}`}`;
+
+/** Two resets this close are the same period's (a provider that says how
+ * long until it gives a slightly different time at each poll). */
+const SAME_PERIOD = 10 * 60;
 
 /**
- * The alerts of a new snapshot: a window that reached a threshold (once
- * until it falls below it again), a window that started over after it had
- * reached the lowest threshold, and a window whose pace runs it out before
- * its reset (once per period). fired keeps what was said, by alert id.
+ * The alerts of a new snapshot: a window that reached a threshold (once per
+ * period until it falls below it again), a window that started over after
+ * it had reached the lowest threshold, and a window whose pace runs it out
+ * before its reset (once per period). fired keeps what was said, by alert
+ * id, with the period's reset. A window past its reset says nothing.
  */
-export function alerts(prev: UsageSnapshot | undefined, next: UsageSnapshot, thresholds: number[], fired: Record<string, number>): Alert[] {
+export function alerts(
+  prev: UsageSnapshot | undefined,
+  next: UsageSnapshot,
+  thresholds: number[],
+  fired: Record<string, number>,
+  now = Date.now() / 1000,
+): Alert[] {
   const out: Alert[] = [];
   const before = new Map<string, UsageWindow>();
   for (const a of prev?.accounts ?? []) for (const w of a.windows ?? []) before.set(windowId(a, w), w);
@@ -179,12 +200,15 @@ export function alerts(prev: UsageSnapshot | undefined, next: UsageSnapshot, thr
   for (const a of next.accounts) {
     if (a.status !== 'ok') continue;
     for (const w of a.windows ?? []) {
+      if (pastReset(w, now)) continue;
       const id = windowId(a, w);
       const period = w.resetsAt ?? 0;
       for (const th of thresholds) {
         const key = `${id}|${th}`;
         if (w.usedPct >= th) {
-          if (fired[key] === undefined) {
+          // Not said yet, or said in an earlier period (no page saw the
+          // window drop below the threshold in between).
+          if (fired[key] === undefined || Math.abs(period - fired[key]) > SAME_PERIOD) {
             fired[key] = period;
             out.push({ id: key, kind: 'threshold', account: a, window: w, threshold: th });
           }

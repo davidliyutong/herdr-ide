@@ -2,6 +2,7 @@ package usage
 
 import (
 	"encoding/json"
+	"strconv"
 	"time"
 
 	"herdr-ide/internal/usage"
@@ -32,14 +33,41 @@ func newHistory() *history {
 	return &history{Version: historyVersion, Windows: map[string]map[string][][2]float64{}}
 }
 
-func windowID(w usage.Window) string { return w.Kind + "|" + w.Label }
+// windowIDs are the ids of an account's windows: kind|label, and after
+// another | the window's length when two windows share kind and label
+// (Kimi's limits have no labels), and their place when that is shared too.
+func windowIDs(ws []usage.Window) []string {
+	ids := make([]string, len(ws))
+	count := map[string]int{}
+	for i, w := range ws {
+		ids[i] = w.Kind + "|" + w.Label
+		count[ids[i]]++
+	}
+	for i, w := range ws {
+		if count[ids[i]] > 1 {
+			ids[i] += "|" + strconv.FormatInt(w.WindowSec, 10)
+		}
+	}
+	seen := map[string]int{}
+	for i := range ids {
+		if n := seen[ids[i]]; n > 0 {
+			seen[ids[i]]++
+			ids[i] += "#" + strconv.Itoa(n)
+		} else {
+			seen[ids[i]] = 1
+		}
+	}
+	return ids
+}
 
-// record adds a point for each window of the accounts with current
-// numbers, and drops points older than historyKeep.
-func (h *history) record(accs map[string]*account, now time.Time) {
+// record adds a point for each window of the accounts read in this poll
+// (fresh, by key) with current numbers, and drops points older than
+// historyKeep. Numbers kept from an earlier poll add none: they were not
+// read again.
+func (h *history) record(accs map[string]*account, fresh map[string]bool, now time.Time) {
 	t := float64(now.Unix())
 	for k, a := range accs {
-		if a.view.Status != usage.StatusOK {
+		if !fresh[k] || a.view.Status != usage.StatusOK {
 			continue
 		}
 		ws := h.Windows[k]
@@ -47,8 +75,9 @@ func (h *history) record(accs map[string]*account, now time.Time) {
 			ws = map[string][][2]float64{}
 			h.Windows[k] = ws
 		}
-		for _, w := range a.view.Account.Windows {
-			id := windowID(w)
+		ids := windowIDs(a.view.Account.Windows)
+		for i, w := range a.view.Account.Windows {
+			id := ids[i]
 			pts := ws[id]
 			if n := len(pts); n > 0 && pts[n-1][1] == w.UsedPct && t-pts[n-1][0] < pointEvery.Seconds() {
 				continue
@@ -80,10 +109,10 @@ func (h *history) prune(now time.Time) {
 	}
 }
 
-// points are a window's points of its current period (the last 7 days
-// when its length is unknown), at most maxPoints, the newest kept.
-func (h *history) points(key string, w usage.Window, now time.Time) [][2]float64 {
-	pts := h.Windows[key][windowID(w)]
+// points are the points of window w (id) of its current period (the last
+// 7 days when its length is unknown), at most maxPoints, the newest kept.
+func (h *history) points(key, id string, w usage.Window, now time.Time) [][2]float64 {
+	pts := h.Windows[key][id]
 	from := float64(now.Add(-7 * 24 * time.Hour).Unix())
 	if w.ResetsAt > 0 && w.WindowSec > 0 {
 		from = float64(w.ResetsAt - w.WindowSec)

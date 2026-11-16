@@ -70,16 +70,36 @@ type fileEntry struct {
 	Kind  string `json:"kind"`
 	Size  int64  `json:"size"`
 	MTime int64  `json:"mtime"`
-	// Off is where the last complete line ended (Claude's logs are read
-	// on from there when they grow).
-	Off     int64             `json:"off,omitempty"`
+	// Off is where the last complete line ended: a log that grew is read
+	// on from there (not a gzipped one).
+	Off int64 `json:"off,omitempty"`
+	// Records are the log's, one per key (dedupe).
 	Records []Record          `json:"records,omitempty"`
 	Models  map[string]string `json:"models,omitempty"`
+	// Codex is the rollout parser's state at Off.
+	Codex *codexState `json:"codex,omitempty"`
+}
+
+// codexState is what parseCodexLog carries from line to line, kept to read
+// a rollout on from where it ended.
+type codexState struct {
+	// Model and Turn are the last turn's.
+	Model   string `json:"model,omitempty"`
+	Turn    string `json:"turn,omitempty"`
+	Project string `json:"project,omitempty"`
+	// New: a token_usage_record was seen (legacy token_count events are
+	// replays from then on).
+	New bool `json:"new,omitempty"`
+	// Total is the last token_count's total input (nil: none yet).
+	Total *int64 `json:"total,omitempty"`
 }
 
 type costCache struct {
 	Version int                   `json:"version"`
 	Files   map[string]*fileEntry `json:"files"`
+	// dirty: loading changed it (duplicates of an earlier version
+	// dropped).
+	dirty bool
 }
 
 // CostOptions select what Cost reports.
@@ -187,8 +207,17 @@ func providerOf(kind string) string {
 	return Grok
 }
 
-// costSaveEvery is how often a long scan saves what it read so far.
-const costSaveEvery = 20 * time.Second
+const (
+	// costSaveEvery is how often a long scan saves what it read so far.
+	costSaveEvery = 20 * time.Second
+	// costPersistEvery and costPersistBytes: a scan that changed the cache
+	// writes it when the file is older than costPersistEvery or the scan
+	// read at least costPersistBytes of logs; otherwise the next scan
+	// reads on from the file's older offsets, which costs less than
+	// writing every record again whenever a log in use grew a line.
+	costPersistEvery = 5 * time.Minute
+	costPersistBytes = 8 << 20
+)
 
 // Cost reads the CLIs' logs (only what changed since the cache was
 // written) and returns the days' tokens and cost at API prices. ctx is
@@ -209,8 +238,9 @@ func Cost(ctx context.Context, e *Env, o CostOptions) (*CostReport, error) {
 	cache := loadCostCache(cachePath)
 	seen := map[string]bool{}
 	logs := costLogs(e, o)
-	changed := false
+	changed := cache.dirty
 	lastSave := time.Now()
+	var read int64
 	for _, lf := range logs {
 		if err := ctx.Err(); err != nil {
 			if changed && cachePath != "" {
@@ -232,18 +262,15 @@ func Cost(ctx context.Context, e *Env, o CostOptions) (*CostReport, error) {
 		if old != nil && old.Kind == lf.kind && old.Size == size && old.MTime == mtime {
 			continue
 		}
-		changed = true
 		ent := &fileEntry{Kind: lf.kind, Size: size, MTime: mtime}
-		from := int64(0)
-		if old != nil && old.Kind == logClaude && lf.kind == logClaude && old.Off > 0 && old.Off <= size && mtime >= old.MTime {
-			// Claude's logs only grow: read on from the last line read.
-			from = old.Off
-			ent.Records = old.Records
-		}
-		if err := parseLog(lf, from, ent); err != nil {
+		n, err := parseLog(lf, old, ent)
+		if err != nil {
 			continue
 		}
+		ent.Records = dedupe(ent.Records)
 		cache.Files[lf.path] = ent
+		read += n
+		changed = true
 	}
 	// Logs that are gone or too old leave the cache; those of providers
 	// not selected stay as they are.
@@ -265,10 +292,18 @@ func Cost(ctx context.Context, e *Env, o CostOptions) (*CostReport, error) {
 			changed = true
 		}
 	}
-	if changed && cachePath != "" {
+	if changed && cachePath != "" && persistDue(cachePath, read) {
 		saveCostCache(cachePath, cache)
 	}
 	return aggregateCost(cache, seen, o), nil
+}
+
+// persistDue tells whether a scan that changed the cache and read n bytes
+// of logs writes it: none written yet, it is older than costPersistEvery,
+// or the scan read at least costPersistBytes.
+func persistDue(p string, n int64) bool {
+	st, err := os.Stat(p)
+	return err != nil || time.Since(st.ModTime()) >= costPersistEvery || n >= costPersistBytes
 }
 
 func loadCostCache(p string) *costCache {
@@ -284,7 +319,38 @@ func loadCostCache(p string) *costCache {
 	if json.Unmarshal(b, &v) != nil || v.Version != costCacheVer || v.Files == nil {
 		return c
 	}
+	for _, ent := range v.Files {
+		if n := len(ent.Records); n > 0 {
+			ent.Records = dedupe(ent.Records)
+			v.dirty = v.dirty || len(ent.Records) != n
+		}
+	}
 	return &v
+}
+
+// dedupe keeps one record per key, the one with the most output (the
+// first of equals), where the key first was: Claude logs a streamed
+// response once per content block, each line with the usage so far.
+// Records without a key all stay.
+func dedupe(rs []Record) []Record {
+	at := make(map[string]int, len(rs))
+	out := rs[:0]
+	for _, r := range rs {
+		if r.K == "" {
+			out = append(out, r)
+			continue
+		}
+		if i, ok := at[r.K]; ok {
+			if r.O > out[i].O {
+				out[i] = r
+			}
+			continue
+		}
+		at[r.K] = len(out)
+		out = append(out, r)
+	}
+	clear(rs[len(out):])
+	return out
 }
 
 // saveCostCache writes the cache atomically, 0600 in a 0700 directory.
@@ -316,42 +382,56 @@ func saveCostCache(p string, c *costCache) error {
 	return os.Rename(tmp.Name(), p)
 }
 
-// parseLog reads a log from offset from into ent.
-func parseLog(lf logFile, from int64, ent *fileEntry) error {
+// parseLog reads a log into ent (whose Size and MTime are the file's): on
+// from where old ended when the log only grew (old's records, models and
+// parser state carried over), else from the start. A log that is not
+// gzipped may be growing: its last line counts once it ends. It returns
+// how many bytes it read.
+func parseLog(lf logFile, old, ent *fileEntry) (int64, error) {
 	f, err := os.Open(lf.path)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer f.Close()
+	gzipped := strings.HasSuffix(lf.path, ".gz")
 	var r io.Reader = f
-	if strings.HasSuffix(lf.path, ".gz") {
+	from := int64(0)
+	if !gzipped && old != nil && old.Kind == lf.kind && old.Off > 0 && old.Off <= ent.Size && ent.MTime >= old.MTime &&
+		(lf.kind != logCodex || old.Codex != nil) && endsLine(f, old.Off) {
+		from = old.Off
+		ent.Records = old.Records
+		ent.Models = old.Models
+		if old.Codex != nil {
+			st := *old.Codex
+			ent.Codex = &st
+		}
+		if _, err := f.Seek(from, io.SeekStart); err != nil {
+			return 0, err
+		}
+	}
+	if gzipped {
 		gz, err := gzip.NewReader(f)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		defer gz.Close()
 		r = gz
-	} else if from > 0 {
-		if _, err := f.Seek(from, io.SeekStart); err != nil {
-			return err
-		}
 	}
+	var end int64
 	switch lf.kind {
 	case logClaude:
-		end, err := eachLine(r, func(line []byte) { parseClaudeLine(lf.path, line, ent) })
-		ent.Off = from + end
-		return err
+		end, err = eachLine(r, gzipped, func(line []byte) { parseClaudeLine(lf.path, line, ent) })
 	case logCodex:
-		return parseCodexLog(lf.path, r, ent)
+		end, err = parseCodexLog(lf.path, r, ent)
 	case logGrok:
-		_, err := eachLine(r, func(line []byte) { parseGrokUpdate(lf.path, line, ent) })
-		return err
+		end, err = eachLine(r, gzipped, func(line []byte) { parseGrokUpdate(lf.path, line, ent) })
 	case logGrokLegacy:
-		_, err := eachLine(r, func(line []byte) { parseGrokUnified(line, ent) })
-		return err
+		end, err = eachLine(r, gzipped, func(line []byte) { parseGrokUnified(line, ent) })
 	case logGrokEvents:
-		ent.Models = map[string]string{}
-		_, err := eachLine(r, func(line []byte) {
+		if ent.Models == nil {
+			ent.Models = map[string]string{}
+		}
+		end, err = eachLine(r, gzipped, func(line []byte) {
 			if !bytes.Contains(line, []byte(`"turn_started"`)) || !bytes.Contains(line, []byte(`"model_id"`)) {
 				return
 			}
@@ -365,14 +445,25 @@ func parseLog(lf logFile, from int64, ent *fileEntry) error {
 				}
 			}
 		})
-		return err
 	}
-	return nil
+	if !gzipped {
+		ent.Off = from + end
+	}
+	return ent.Size - from, err
+}
+
+// endsLine tells whether the byte before off is a newline: a log read on
+// from off was not rewritten up to there.
+func endsLine(f *os.File, off int64) bool {
+	var b [1]byte
+	_, err := f.ReadAt(b[:], off-1)
+	return err == nil && b[0] == '\n'
 }
 
 // eachLine calls fn with every non-empty line of r shorter than maxLine
-// and returns the offset after the last newline.
-func eachLine(r io.Reader, fn func([]byte)) (int64, error) {
+// that ends with a newline, and with final also with a last one that does
+// not; it returns the offset after the last newline.
+func eachLine(r io.Reader, final bool, fn func([]byte)) (int64, error) {
 	br := bufio.NewReaderSize(r, 64<<10)
 	var buf []byte
 	var off, end int64
@@ -391,7 +482,7 @@ func eachLine(r io.Reader, fn func([]byte)) (int64, error) {
 			continue
 		}
 		complete := len(chunk) > 0 && chunk[len(chunk)-1] == '\n'
-		if !long && (complete || err == io.EOF) {
+		if !long && (complete || final && err == io.EOF) {
 			if line := bytes.TrimSpace(buf); len(line) > 0 {
 				fn(line)
 			}
@@ -445,7 +536,9 @@ func projectName(cwd string) string {
 // response, keyed by (requestId, message.id) as duplicates of forked and
 // streamed sessions are; "<synthetic>" messages are errors.
 func parseClaudeLine(file string, line []byte, ent *fileEntry) {
-	if !bytes.Contains(line, []byte(`"usage"`)) {
+	// Quoted, the words are JSON's own, not text in a string (whose quotes
+	// are escaped): a user's line (a tool's output) is not decoded.
+	if !bytes.Contains(line, []byte(`"usage"`)) || !bytes.Contains(line, []byte(`"assistant"`)) {
 		return
 	}
 	var d struct {
@@ -522,12 +615,22 @@ func (u codexUsage) record(model, proj string, t int64) (Record, bool) {
 // response, keyed by response_id, the model by turn_id), else the legacy
 // token_count events (last_token_usage; an event whose total did not move
 // is a replay), which after the first token_usage_record are replays too.
-func parseCodexLog(file string, r io.Reader, ent *fileEntry) error {
+// It goes on from ent.Codex's state and leaves the state at its end there.
+func parseCodexLog(file string, r io.Reader, ent *fileEntry) (int64, error) {
 	turnModel := map[string]string{}
-	lastModel, proj := "", ""
+	lastModel, lastTurn, proj := "", "", ""
 	seenNew := false
 	var prevTotal int64 = -1
-	_, err := eachLine(r, func(line []byte) {
+	if st := ent.Codex; st != nil {
+		lastModel, lastTurn, proj, seenNew = st.Model, st.Turn, st.Project, st.New
+		if st.Turn != "" {
+			turnModel[st.Turn] = st.Model
+		}
+		if st.Total != nil {
+			prevTotal = *st.Total
+		}
+	}
+	end, err := eachLine(r, false, func(line []byte) {
 		switch {
 		case bytes.Contains(line, []byte(`"session_meta"`)):
 			var d struct {
@@ -547,7 +650,7 @@ func parseCodexLog(file string, r io.Reader, ent *fileEntry) error {
 				} `json:"payload"`
 			}
 			if json.Unmarshal(line, &d) == nil && d.Payload.Model != "" {
-				lastModel = d.Payload.Model
+				lastModel, lastTurn = d.Payload.Model, d.Payload.TurnID
 				if d.Payload.TurnID != "" {
 					turnModel[d.Payload.TurnID] = d.Payload.Model
 				}
@@ -617,7 +720,12 @@ func parseCodexLog(file string, r io.Reader, ent *fileEntry) error {
 			ent.Records = append(ent.Records, rec)
 		}
 	})
-	return err
+	st := &codexState{Model: lastModel, Turn: lastTurn, Project: proj, New: seenNew}
+	if prevTotal >= 0 {
+		st.Total = &prevTotal
+	}
+	ent.Codex = st
+	return end, err
 }
 
 type grokUsage struct {

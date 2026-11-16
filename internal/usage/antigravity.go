@@ -15,6 +15,16 @@ import (
 // AgyTimeout bounds the agy CLI, the fallback when no language server runs.
 const AgyTimeout = 20 * time.Second
 
+const (
+	// AgyEvery is the least time between two runs of agy that answered
+	// with numbers: it takes seconds and a few hundred MB, so the polls in
+	// between get its last answer.
+	AgyEvery = 10 * time.Minute
+	// AgyBackoff is how long agy is not run again after it failed or
+	// timed out.
+	AgyBackoff = 30 * time.Minute
+)
+
 // lsProcess is a running Antigravity language server.
 type lsProcess struct {
 	PID  int
@@ -24,9 +34,15 @@ type lsProcess struct {
 // antigravityAccounts reads Antigravity's model quotas from its local
 // language server (GetUserStatus on 127.0.0.1, with the CSRF token of its
 // command line), else from `agy -p /usage --output-format json`.
+// An account the core names in Options.Skip (by the email's hash, known
+// once the language server answered) or this machine's account without an
+// id in SkipLocal is answered skipped.
 func antigravityAccounts(ctx context.Context, e *Env, o *Options) []Account {
 	if e.Command == nil {
 		return []Account{{Provider: Antigravity, Status: StatusMissing}}
+	}
+	if o.skips(Antigravity, "", "") {
+		return []Account{skipped(Account{Provider: Antigravity})}
 	}
 	procs := findLanguageServers(ctx, e)
 	for _, p := range procs {
@@ -34,6 +50,9 @@ func antigravityAccounts(ctx context.Context, e *Env, o *Options) []Account {
 			if m := getUserStatus(ctx, e, port, p.CSRF); m != nil {
 				a := Account{Provider: Antigravity, Source: "ls"}
 				if parseAntigravity(&a, m) {
+					if o.skips(Antigravity, a.ID, "") {
+						return []Account{skipped(a)}
+					}
 					a.Status, a.AsOf = StatusOK, e.now().Unix()
 					return []Account{a}
 				}
@@ -41,6 +60,9 @@ func antigravityAccounts(ctx context.Context, e *Env, o *Options) []Account {
 		}
 	}
 	if a, ok := agyUsage(ctx, e); ok {
+		if a.ID != "" && o.skips(Antigravity, a.ID, "") {
+			return []Account{skipped(a)}
+		}
 		return []Account{a}
 	}
 	if len(procs) > 0 {
@@ -182,6 +204,7 @@ func getUserStatus(ctx context.Context, e *Env, port int, csrf string) map[strin
 		return nil
 	}
 	c := e.LocalClient(port)
+	defer c.CloseIdleConnections()
 	headers := map[string]string{"X-Codeium-Csrf-Token": csrf, "Connect-Protocol-Version": "1", "Content-Type": "application/json"}
 	bodies := [][]byte{
 		[]byte(`{"metadata":{"ideName":"antigravity","extensionName":"antigravity","locale":"en"}}`),
@@ -236,7 +259,9 @@ func parseAntigravity(a *Account, m map[string]any) bool {
 
 // agyUsage runs `agy -p /usage --output-format json` (no update, 20 s) and
 // reads what it prints: the language server's shape, or a list of models
-// with their remaining fraction or used percent.
+// with their remaining fraction or used percent. Within AgyEvery of a run
+// that answered, or AgyBackoff of one that failed, it gives that run's
+// answer again (Env.Memo) instead of running agy.
 func agyUsage(ctx context.Context, e *Env) (Account, bool) {
 	if e.LookPath == nil {
 		return Account{}, false
@@ -245,18 +270,26 @@ func agyUsage(ctx context.Context, e *Env) (Account, bool) {
 	if err != nil {
 		return Account{}, false
 	}
-	ctx, cancel := context.WithTimeout(ctx, AgyTimeout)
+	if a, ok := e.Memo.lastAgy(bin, e.now()); ok {
+		return a, true
+	}
+	actx, cancel := context.WithTimeout(ctx, AgyTimeout)
 	defer cancel()
 	env := append(e.Environ(), "AGY_CLI_DISABLE_AUTO_UPDATE=true", "NO_COLOR=1")
-	out, err := e.Command(ctx, env, bin, "-p", "/usage", "--output-format", "json")
+	out, err := e.Command(actx, env, bin, "-p", "/usage", "--output-format", "json")
 	a := Account{Provider: Antigravity, Source: "cli"}
 	if ok := parseAgy(&a, out); !ok {
+		a = Account{Provider: Antigravity, Status: StatusError, Code: "bad_response", Source: "cli"}
 		if err != nil || len(out) == 0 {
-			return Account{Provider: Antigravity, Status: StatusError, Code: "agy_failed", Source: "cli"}, true
+			a.Code = "agy_failed"
 		}
-		return Account{Provider: Antigravity, Status: StatusError, Code: "bad_response", Source: "cli"}, true
+	} else {
+		a.Status, a.AsOf = StatusOK, e.now().Unix()
 	}
-	a.Status, a.AsOf = StatusOK, e.now().Unix()
+	// A run the caller cut short says nothing about agy.
+	if ctx.Err() == nil {
+		e.Memo.keepAgy(bin, a, e.now())
+	}
 	return a, true
 }
 

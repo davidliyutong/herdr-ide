@@ -39,17 +39,19 @@ func grokAccounts(ctx context.Context, e *Env, o *Options) []Account {
 		}
 		return keys[i] < keys[j]
 	})
-	var entry struct {
+	type grokEntry struct {
 		Key       string `json:"key"`
 		ExpiresAt any    `json:"expires_at"`
 		Email     string `json:"email"`
 		UserID    string `json:"user_id"`
 	}
+	var entry grokEntry
 	found := false
 	for _, k := range keys {
-		entry.Key = ""
-		if json.Unmarshal(entries[k], &entry) == nil && entry.Key != "" {
-			found = true
+		// Each entry on its own: one without a key lends nothing to the next.
+		var e grokEntry
+		if json.Unmarshal(entries[k], &e) == nil && e.Key != "" {
+			entry, found = e, true
 			break
 		}
 	}

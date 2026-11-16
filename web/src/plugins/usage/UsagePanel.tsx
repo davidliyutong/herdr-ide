@@ -13,7 +13,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../../state/store';
 import { useSettings } from '../../settings';
 import { t } from '../../i18n';
-import { fetchCost, fetchSnapshot, refreshNow, setDeepseekKey, setView, useUsage, type UsageTab } from './state';
+import { costStale, fetchCost, fetchSnapshot, refreshNow, setDeepseekKey, setView, useUsage, type UsageTab } from './state';
 import {
   costOf,
   daily,
@@ -22,6 +22,7 @@ import {
   lastDays,
   money,
   parseThresholds,
+  pastReset,
   PROVIDERS,
   providerName,
   rank,
@@ -61,17 +62,30 @@ export function UsagePanel() {
   const tab = useUsage((s) => s.tab);
   const snapshot = useUsage((s) => s.snapshot);
   const cost = useUsage((s) => s.cost);
-  // While the panel is open the core asks every 2 minutes (adaptive); the
-  // cost is read once, then on demand.
+  const deepseekOn = useSettings((s) => s.values['usage.providers.deepseek']?.value !== false);
+  // While the panel is open and the page shown the core asks every 2
+  // minutes (adaptive); a hidden page says nothing, so a forgotten tab
+  // does not keep it asking. The cost is read when shown and older than
+  // 15 minutes, else on demand.
   useEffect(() => {
-    void fetchSnapshot(true);
-    if (!useUsage.getState().cost && !useUsage.getState().costLoading) void fetchCost();
-    const id = setInterval(() => void fetchSnapshot(true), 60_000);
-    return () => clearInterval(id);
+    const visible = () => typeof document === 'undefined' || document.visibilityState === 'visible';
+    const look = () => {
+      if (!visible()) return;
+      void fetchSnapshot(true);
+      if (costStale()) void fetchCost();
+    };
+    look();
+    const id = setInterval(() => visible() && void fetchSnapshot(true), 60_000);
+    document.addEventListener('visibilitychange', look);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', look);
+    };
   }, []);
   const accounts = useMemo(() => sortAccounts(snapshot?.accounts ?? []), [snapshot]);
   const providers = useMemo(() => shownProviders(accounts, cost), [accounts, cost]);
-  const shown: UsageTab = tab === 'overview' || providers.includes(tab) ? tab : 'overview';
+  // DeepSeek's page has the form for its key, so it opens without one.
+  const shown: UsageTab = tab === 'overview' || providers.includes(tab) || (tab === 'deepseek' && deepseekOn) ? tab : 'overview';
   return (
     <div className="usage-panel">
       <Tiles providers={providers} accounts={accounts} shown={shown} />
@@ -186,10 +200,18 @@ function Meta() {
 
 function Overview({ accounts }: { accounts: UsageAccount[] }) {
   const snapshot = useUsage((s) => s.snapshot);
+  const readOnly = useSettings((s) => s.readOnly);
+  const deepseekOn = useSettings((s) => s.values['usage.providers.deepseek']?.value !== false);
+  const noDeepseek = deepseekOn && !readOnly && !accounts.some((a) => a.provider === 'deepseek');
   return (
     <>
       <Spend />
       {snapshot && accounts.length === 0 && <div className="empty-note">{t('usage.empty')}</div>}
+      {noDeepseek && (
+        <button className="link usage-add-key" onClick={() => setView({ tab: 'deepseek' })}>
+          {t('usage.deepseek.add')}
+        </button>
+      )}
       {accounts.length > 0 && (
         <section className="usage-section">
           <h4 className="usage-heading">{t('usage.accounts')}</h4>
@@ -312,7 +334,7 @@ function AccountCard({ account: a }: { account: UsageAccount }) {
         <div key={g.label ?? ''} className="usage-group">
           {g.label && <div className="usage-group-label">{g.label}</div>}
           {g.windows.map((w) => (
-            <WindowRow key={`${w.kind}|${w.label ?? ''}`} w={w} grouped={!!g.label} now={now} />
+            <WindowRow key={w.id ?? `${w.kind}|${w.label ?? ''}`} w={w} grouped={!!g.label} now={now} />
           ))}
         </div>
       ))}
@@ -372,19 +394,26 @@ function WindowRow({ w, grouped, now }: { w: UsageWindow; grouped: boolean; now:
   useSettings((s) => s.values['usage.thresholds']);
   const shown = remaining ? 100 - w.usedPct : w.usedPct;
   const ahead = w.pace ? Math.round(w.usedPct - w.pace.expectedPct) : 0;
-  const notes = [
-    ahead >= 5 && w.usedPct < 100 ? t('usage.ahead', { pct: ahead }) : '',
-    w.pace?.beforeReset && w.pace.exhaustsAt && w.usedPct < 100 ? t('usage.runsOutShort', { in: duration(w.pace.exhaustsAt - now) }) : '',
-  ].filter(Boolean);
+  // Past its reset the numbers are of the period before: said so, not
+  // counted as a warning.
+  const past = pastReset(w, now);
+  const notes = past
+    ? [t('usage.pastReset')]
+    : [
+        ahead >= 5 && w.usedPct < 100 ? t('usage.ahead', { pct: ahead }) : '',
+        w.pace?.beforeReset && w.pace.exhaustsAt && w.usedPct < 100
+          ? t('usage.runsOutShort', { in: duration(w.pace.exhaustsAt - now) })
+          : '',
+      ].filter(Boolean);
   return (
-    <div className={`usage-window level-${level(w)}`} data-window={w.kind}>
+    <div className={`usage-window level-${past ? 'past' : level(w)}`} data-window={w.kind}>
       <div className="usage-window-head">
         <span className="usage-window-name ellipsis">
           {windowLabel(w, grouped)}{' '}
           <b className="usage-pct">{t(remaining ? 'usage.pctLeft' : 'usage.pctUsed', { pct: Math.round(shown) })}</b>
         </span>
         <span className="spacer" />
-        {w.resetsAt ? <span className="usage-reset">{t('usage.resetsIn', { in: duration(w.resetsAt - now) })}</span> : null}
+        {w.resetsAt && !past ? <span className="usage-reset">{t('usage.resetsIn', { in: duration(w.resetsAt - now) })}</span> : null}
       </div>
       <Bar w={w} remaining={remaining} />
       {notes.length > 0 && <div className={`usage-window-note ${w.pace?.beforeReset ? 'warn' : ''}`}>{notes.join(' · ')}</div>}

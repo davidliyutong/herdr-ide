@@ -159,8 +159,9 @@ func TestCostCache(t *testing.T) {
 	if rows["claude|claude-haiku-4-5|alpha"].Requests != 1 || rows["claude|claude-opus-4-6|alpha"].Requests != 1 {
 		t.Errorf("grown log: %+v", rep.Rows)
 	}
-	// A log gone leaves the cache.
+	// A log gone leaves the cache (written once it is old enough).
 	os.Remove(f)
+	agedCache(t, cache)
 	Cost(context.Background(), e, CostOptions{Since: since, Providers: []string{Claude}})
 	if _, ok := loadCostCache(cache).Files[f]; ok {
 		t.Errorf("removed log still cached")
@@ -199,11 +200,26 @@ func TestPricingTiers(t *testing.T) {
 		t.Errorf("unknown model priced")
 	}
 	_, mp = Pricing.ModelPricing("codex", "gpt-5.5")
-	if i, _ := mp.Tier(271999); i != 0 {
+	if i, _ := mp.Tier(272000); i != 0 {
 		t.Errorf("short tier %d", i)
 	}
-	if i, _ := mp.Tier(272000); i != 1 {
+	if i, _ := mp.Tier(272001); i != 1 {
 		t.Errorf("long tier %d", i)
+	}
+	// The current Claude models: Fable 5.2 not priced as Fable 5, Sonnet
+	// 5.5's cache reads, Haiku 5.5's two rate cards split at 100K tokens.
+	if key, mp := Pricing.ModelPricing("claude", "claude-fable-5-2"); key != "claude-fable-5-2" || !near(mp.Tiers[0].Cost(1e6, 1e6, 1e6, 1e6, 1e6), 8+0.2+10+16+40) {
+		t.Errorf("fable 5.2: %q", key)
+	}
+	if _, mp := Pricing.ModelPricing("claude", "claude-sonnet-5-5"); !near(mp.Tiers[0].Cost(0, 1e6, 0, 0, 0), 0.1) {
+		t.Errorf("sonnet 5.5 cache reads")
+	}
+	_, mp = Pricing.ModelPricing("claude", "claude-haiku-5-5")
+	if _, tier := mp.Tier(100000); !near(tier.Cost(1e6, 1e6, 0, 0, 1e6), 0.1+0.01+0.5) {
+		t.Errorf("haiku 5.5 short prompt")
+	}
+	if _, tier := mp.Tier(100001); !near(tier.Cost(1e6, 1e6, 0, 0, 1e6), 0.5+0.05+2.5) {
+		t.Errorf("haiku 5.5 long prompt")
 	}
 	// Cache writes default to the input price (5 m) and twice it (1 h).
 	_, mp = Pricing.ModelPricing("grok", "grok-4.6")
@@ -245,5 +261,145 @@ func TestCostCancelKeepsProgress(t *testing.T) {
 	rep, err = Cost(context.Background(), e, CostOptions{Since: since})
 	if err != nil || rep.Files != 6 {
 		t.Errorf("full scan after a cancel: %v %+v", err, rep)
+	}
+}
+
+// agedCache makes the cache file older than costPersistEvery.
+func agedCache(t *testing.T, p string) {
+	t.Helper()
+	old := time.Now().Add(-costPersistEvery - time.Minute)
+	if err := os.Chtimes(p, old, old); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func appendTo(t *testing.T, f, text string) {
+	t.Helper()
+	fh, err := os.OpenFile(f, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fh.WriteString(text)
+	fh.Close()
+	later := time.Now().Add(time.Minute)
+	os.Chtimes(f, later, later)
+}
+
+// The cache keeps one record per response: a streamed response's lines
+// are one record, the one with the final usage; an older cache's
+// duplicates are dropped when it is read.
+func TestCostCacheOneRecordPerResponse(t *testing.T) {
+	e := testEnv(t, nil)
+	costFixtures(t, e)
+	since := testNow.Add(-30 * 24 * time.Hour).Unix()
+	Cost(context.Background(), e, CostOptions{Since: since, Providers: []string{Claude}})
+	cache := filepath.Join(e.Base, CostCacheFile)
+	f := filepath.Join(e.Home, ".claude/projects/-home-u-alpha/s1.jsonl")
+	c := loadCostCache(cache)
+	if rs := c.Files[f].Records; len(rs) != 1 || rs[0].O != 500 {
+		t.Fatalf("records %+v", rs)
+	}
+	if c.dirty {
+		t.Error("a clean cache read as changed")
+	}
+	// An older cache with each line's record.
+	r := c.Files[f].Records[0]
+	low := r
+	low.O = 100
+	c.Files[f].Records = []Record{low, r, low}
+	saveCostCache(cache, c)
+	c = loadCostCache(cache)
+	if rs := c.Files[f].Records; len(rs) != 1 || rs[0].O != 500 || !c.dirty {
+		t.Errorf("older cache %+v dirty %v", rs, c.dirty)
+	}
+}
+
+// Logs that grow are read on from where they ended: Codex's rollouts with
+// the turn's model, Grok's updates without counting a turn twice; a log
+// rewritten up to there is read again; a line counts once it ends.
+func TestCostReadsOn(t *testing.T) {
+	e := testEnv(t, nil)
+	costFixtures(t, e)
+	since := testNow.Add(-30 * 24 * time.Hour).Unix()
+	if _, err := Cost(context.Background(), e, CostOptions{Since: since}); err != nil {
+		t.Fatal(err)
+	}
+	cache := filepath.Join(e.Base, CostCacheFile)
+	rollout := filepath.Join(e.Home, ".codex/sessions/2026/11/15/rollout-new.jsonl")
+	updates := filepath.Join(e.Home, ".grok/sessions/%2Fwork%2Fdelta/abc/updates.jsonl")
+	// Mark what was read: a record read again would lose the mark.
+	c := loadCostCache(cache)
+	c.Files[rollout].Records[0].O = 7777
+	c.Files[updates].Records[0].O = 8888
+	saveCostCache(cache, c)
+	appendTo(t, rollout, `{"timestamp":"2026-11-15T10:01:00Z","type":"token_usage_record","payload":{"turn_id":"t1","response_id":"r2","usage":{"input_tokens":1000,"cached_input_tokens":0,"output_tokens":10}}}`+"\n")
+	appendTo(t, updates, grokUpdates)
+	rep, _ := Cost(context.Background(), e, CostOptions{Since: since})
+	rows := rowsBy(rep)
+	if r := rows["codex|gpt-5.5|beta"]; r.Output != 7777+10 || r.Requests != 2 {
+		t.Errorf("rollout read on: %+v", r)
+	}
+	if r := rows["grok|grok-4.6|delta"]; r.Output != 8888+1000 || r.Requests != 4 {
+		t.Errorf("updates read on: %+v", r)
+	}
+
+	// A line being written counts once it ends.
+	agedCache(t, cache)
+	appendTo(t, rollout, `{"timestamp":"2026-11-15T10:02:00Z","type":"token_usage_record","payload":{"turn_id":"t1","response_id":"r3","usage":{"input_tokens":1000,"output_tokens":5}}}`)
+	rep, _ = Cost(context.Background(), e, CostOptions{Since: since, Providers: []string{Codex}})
+	if r := rowsBy(rep)["codex|gpt-5.5|beta"]; r.Requests != 2 {
+		t.Errorf("an unfinished line counted: %+v", r)
+	}
+	agedCache(t, cache)
+	appendTo(t, rollout, "\n")
+	rep, _ = Cost(context.Background(), e, CostOptions{Since: since, Providers: []string{Codex}})
+	if r := rowsBy(rep)["codex|gpt-5.5|beta"]; r.Requests != 3 || r.Output != 7777+10+5 {
+		t.Errorf("the line once ended: %+v", r)
+	}
+
+	// Rewritten, longer than before: read from the start.
+	agedCache(t, cache)
+	write(t, rollout, strings.Repeat(" ", 10)+codexNew+strings.Repeat(" ", 4000)+"\n")
+	later := time.Now().Add(2 * time.Minute)
+	os.Chtimes(rollout, later, later)
+	rep, _ = Cost(context.Background(), e, CostOptions{Since: since, Providers: []string{Codex}})
+	if r := rowsBy(rep)["codex|gpt-5.5|beta"]; r.Output != 1000 || r.Requests != 1 {
+		t.Errorf("rewritten log: %+v", r)
+	}
+}
+
+// A scan that changed little does not write the whole cache again while
+// the file is recent; one that read a lot, or a cache old enough, does.
+func TestCostCacheWritesSeldom(t *testing.T) {
+	e := testEnv(t, nil)
+	costFixtures(t, e)
+	since := testNow.Add(-30 * 24 * time.Hour).Unix()
+	Cost(context.Background(), e, CostOptions{Since: since})
+	cache := filepath.Join(e.Base, CostCacheFile)
+	recent := time.Now().Add(-time.Minute).Truncate(time.Second)
+	os.Chtimes(cache, recent, recent)
+	f := filepath.Join(e.Home, ".claude/projects/-home-u-alpha/s1.jsonl")
+	line := `{"timestamp":"2026-11-15T09:10:00Z","requestId":"req-2","cwd":"/home/u/alpha","message":{"role":"assistant","model":"claude-haiku-4-5","id":"msg-2","usage":{"input_tokens":10,"output_tokens":20}}}` + "\n"
+	appendTo(t, f, line)
+	rep, _ := Cost(context.Background(), e, CostOptions{Since: since})
+	if rowsBy(rep)["claude|claude-haiku-4-5|alpha"].Requests != 1 {
+		t.Fatalf("new line not counted: %+v", rep.Rows)
+	}
+	if st, _ := os.Stat(cache); !st.ModTime().Equal(recent) {
+		t.Errorf("cache written for one line")
+	}
+	// Not written: the next scan reads on from the file's offsets, the
+	// same numbers.
+	rep, _ = Cost(context.Background(), e, CostOptions{Since: since})
+	if rowsBy(rep)["claude|claude-haiku-4-5|alpha"].Requests != 1 {
+		t.Fatalf("again: %+v", rep.Rows)
+	}
+	agedCache(t, cache)
+	Cost(context.Background(), e, CostOptions{Since: since})
+	if st, _ := os.Stat(cache); time.Since(st.ModTime()) > time.Minute {
+		t.Errorf("an old cache not written")
+	}
+	if rs := loadCostCache(cache).Files[f].Records; len(rs) != 2 {
+		t.Errorf("records %+v", rs)
 	}
 }

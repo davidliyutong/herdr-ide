@@ -15,10 +15,17 @@ import (
 // agent's data directory.
 const DeepSeekKeyFile = "usage/deepseek.key"
 
-// deepseekKey finds a DeepSeek API key: DEEPSEEK_API_KEY of the agent's
-// environment, Claude Code's settings when their base URL is DeepSeek's, or
-// the key file.
+// deepseekKey finds a DeepSeek API key: the key file the panel writes
+// (the user's choice, so it wins), DEEPSEEK_API_KEY of the agent's
+// environment, or Claude Code's settings when their base URL is DeepSeek's.
 func deepseekKey(e *Env) string {
+	if e.Base != "" {
+		if b, err := readFile(path.Join(e.Base, DeepSeekKeyFile)); err == nil {
+			if k := strings.TrimSpace(string(b)); k != "" {
+				return k
+			}
+		}
+	}
 	if k := strings.TrimSpace(e.getenv("DEEPSEEK_API_KEY")); k != "" {
 		return k
 	}
@@ -30,11 +37,6 @@ func deepseekKey(e *Env) string {
 			if k := strings.TrimSpace(s.Env["ANTHROPIC_AUTH_TOKEN"]); k != "" {
 				return k
 			}
-		}
-	}
-	if e.Base != "" {
-		if b, err := readFile(path.Join(e.Base, DeepSeekKeyFile)); err == nil {
-			return strings.TrimSpace(string(b))
 		}
 	}
 	return ""

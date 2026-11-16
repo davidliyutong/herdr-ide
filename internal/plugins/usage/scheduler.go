@@ -36,7 +36,10 @@ const (
 // WindowView is a window with its pace and recent history.
 type WindowView struct {
 	usage.Window
-	Pace *Pace `json:"pace,omitempty"`
+	// ID tells the account's windows apart: kind|label, with the length
+	// where two share them.
+	ID   string `json:"id"`
+	Pace *Pace  `json:"pace,omitempty"`
 	// History is [time, used %] of the window's current period (at most
 	// 60 points), for the burndown.
 	History [][2]float64 `json:"history,omitempty"`
@@ -130,6 +133,10 @@ type Plugin struct {
 	costFlights map[string]*costFlight
 	// refreshPending: a manual refresh waits for minRefreshGap.
 	refreshPending bool
+	// readyNow are the machines connected; joined those that connected
+	// since the last poll, asked on their own at the next tick.
+	readyNow map[string]bool
+	joined   map[string]bool
 
 	refresh chan struct{}
 	// refreshTimer wakes the scheduler when a pending refresh is due.
@@ -148,6 +155,8 @@ func New() *Plugin {
 		status:   map[string]StatusPage{},
 		history:  newHistory(),
 		working:  map[string]bool{},
+		readyNow: map[string]bool{},
+		joined:   map[string]bool{},
 		refresh:  make(chan struct{}, 1),
 	}
 	p.statusClient = fetchStatusJSON
@@ -213,20 +222,46 @@ func (p *Plugin) Start(ctx context.Context, h plugin.Host) {
 				lastStatus = p.now()
 				go p.pollStatus(ctx)
 			}
-			if p.due() {
-				p.Poll(ctx)
-			}
+			p.pollDue(ctx)
 		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
 		case <-p.refresh:
-			if p.enabled() && p.due() {
-				p.Poll(ctx)
+			if p.enabled() {
+				p.pollDue(ctx)
 			}
 		}
 	}
+}
+
+// pollDue polls every machine when that is due, else asks the machines
+// that connected since the last poll.
+func (p *Plugin) pollDue(ctx context.Context) {
+	if p.due() {
+		p.Poll(ctx)
+	} else if ms := p.takeJoined(); len(ms) > 0 {
+		p.poll(ctx, ms, true)
+	}
+}
+
+// takeJoined are the machines that connected since the last poll and are
+// still connected (none in manual mode or while a poll runs).
+func (p *Plugin) takeJoined() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.polling || len(p.joined) == 0 || p.refreshMode() == RefreshManual {
+		return nil
+	}
+	var out []string
+	for _, m := range p.readyList() {
+		if p.joined[m] {
+			out = append(out, m)
+		}
+	}
+	clear(p.joined)
+	return out
 }
 
 // readyMachines are the machines with an agent, the local one first.
@@ -267,13 +302,25 @@ func (p *Plugin) call(ctx context.Context, m, action string, params, out any) er
 	return fetch(ctx, m, action, params, out)
 }
 
-// onMachine forgets the agents of a machine that went away.
+// onMachine notes a machine that connected after the first poll, to ask
+// it at the next tick, and forgets the agents of a machine that went away.
 func (p *Plugin) onMachine(st machines.State) {
+	p.mu.Lock()
 	if st.Status == machines.StatusReady {
+		joined := !p.readyNow[st.ID] && !p.lastPoll.IsZero()
+		p.readyNow[st.ID] = true
+		if joined {
+			p.joined[st.ID] = true
+		}
+		p.mu.Unlock()
+		if joined {
+			p.wake()
+		}
 		return
 	}
-	p.mu.Lock()
 	defer p.mu.Unlock()
+	delete(p.readyNow, st.ID)
+	delete(p.joined, st.ID)
 	for k := range p.working {
 		if strings.HasPrefix(k, st.ID+"|") {
 			delete(p.working, k)
@@ -344,13 +391,13 @@ func (p *Plugin) interval() time.Duration {
 	return Interval(p.refreshMode(), p.now().Sub(p.lastWatch) < watchFor, len(p.working) > 0)
 }
 
-// due tells whether a poll is due: a manual refresh is pending and
-// minRefreshGap has passed, or the cadence has passed since the last poll
-// (and a machine is connected to ask).
+// due tells whether a poll is due: a machine is connected to ask, and a
+// manual refresh is pending and minRefreshGap has passed, or the cadence
+// has passed since the last poll.
 func (p *Plugin) due() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.polling {
+	if p.polling || len(p.readyList()) == 0 {
 		return false
 	}
 	since := p.now().Sub(p.lastPoll)
@@ -361,7 +408,7 @@ func (p *Plugin) due() bool {
 	if iv == 0 {
 		return false
 	}
-	return p.lastPoll.IsZero() && len(p.readyList()) > 0 || !p.lastPoll.IsZero() && since >= iv
+	return p.lastPoll.IsZero() || since >= iv
 }
 
 // keyOf is how an account is told apart: provider:id, else per machine.
@@ -387,22 +434,39 @@ func localSkip(a usage.Account) string {
 
 // Poll asks every connected machine in turn; an account one machine
 // reported is not asked again on the next (Options.Skip).
-func (p *Plugin) Poll(ctx context.Context) {
+func (p *Plugin) Poll(ctx context.Context) { p.poll(ctx, nil, false) }
+
+// poll asks machines in turn: every connected one, or with joined only
+// those (machines that connected since the last poll), which skip the
+// accounts read within the cadence and leave the cadence as it was.
+func (p *Plugin) poll(ctx context.Context, only []string, joined bool) {
 	p.mu.Lock()
 	if p.polling {
 		p.mu.Unlock()
 		return
 	}
-	p.polling = true
-	p.refreshPending = false
 	ready := p.readyList()
+	if joined {
+		ready = only
+	} else {
+		p.refreshPending = false
+		clear(p.joined)
+	}
+	if len(ready) == 0 {
+		p.mu.Unlock()
+		return
+	}
+	p.polling = true
 	now := p.now()
+	iv := p.interval()
 	// Accounts a provider asked to wait for (Retry-After) are skipped
 	// until then: by id on every machine, those without an id on theirs.
+	// Machines that joined skip the accounts read within the cadence too.
 	var skip []string
 	local := map[string][]string{}
 	for k, a := range p.accounts {
-		if !a.notBefore.After(now) {
+		recent := joined && a.view.ID != "" && a.view.Status == usage.StatusOK && now.Sub(time.Unix(a.view.FetchedAt, 0)) < iv
+		if !a.notBefore.After(now) && !recent {
 			continue
 		}
 		if a.view.ID != "" {
@@ -463,11 +527,21 @@ func (p *Plugin) Poll(ctx context.Context) {
 
 	p.mu.Lock()
 	now = p.now()
+	read := map[string]bool{}
 	for _, g := range fresh {
-		p.merge(keyOf(g.acc, g.machine), g.acc, now)
+		k := keyOf(g.acc, g.machine)
+		p.merge(k, g.acc, now)
+		read[k] = true
 	}
+	// An account seen lists the machines that saw it, and keeps those it
+	// was seen on that did not answer this poll (or were not asked).
 	for k, ms := range seen {
 		if a := p.accounts[k]; a != nil {
+			for _, m := range a.view.Machines {
+				if results[m].Status != "ok" && !slices.Contains(ms, m) {
+					ms = append(ms, m)
+				}
+			}
 			a.view.Machines = ms
 			a.view.SeenAt = now.Unix()
 		}
@@ -480,13 +554,18 @@ func (p *Plugin) Poll(ctx context.Context) {
 	for m, v := range results {
 		p.machines[m] = v
 	}
-	for m := range p.machines {
-		if !slices.Contains(ready, m) {
-			p.machines[m] = MachineView{Status: "offline", At: p.machines[m].At}
+	if !joined {
+		for m := range p.machines {
+			if !slices.Contains(ready, m) {
+				p.machines[m] = MachineView{Status: "offline", At: p.machines[m].At}
+			}
 		}
 	}
-	p.history.record(p.accounts, now)
-	p.updatedAt, p.lastPoll, p.polling = now, now, false
+	p.history.record(p.accounts, read, now)
+	p.updatedAt, p.polling = now, false
+	if !joined {
+		p.lastPoll = now
+	}
 	p.mu.Unlock()
 	p.save()
 	p.broadcast()
@@ -532,8 +611,10 @@ func firstNonEmpty(s ...string) string {
 	return ""
 }
 
-// Snapshot is the current state for the UIs.
+// Snapshot is the current state for the UIs: the accounts of the providers
+// turned on.
 func (p *Plugin) Snapshot() Snapshot {
+	on := p.options().Providers
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	now := p.now()
@@ -555,11 +636,15 @@ func (p *Plugin) Snapshot() Snapshot {
 		}
 	}
 	for _, a := range p.accounts {
+		if !slices.Contains(on, a.view.Provider) {
+			continue
+		}
 		v := a.view
 		v.Windows = make([]WindowView, 0, len(a.view.Account.Windows))
-		for _, w := range a.view.Account.Windows {
-			pts := p.history.points(v.Key, w, now)
-			v.Windows = append(v.Windows, WindowView{Window: w, Pace: pace(w, pts, now), History: pts})
+		ids := windowIDs(a.view.Account.Windows)
+		for i, w := range a.view.Account.Windows {
+			pts := p.history.points(v.Key, ids[i], w, now)
+			v.Windows = append(v.Windows, WindowView{Window: w, ID: ids[i], Pace: pace(w, pts, now), History: pts})
 		}
 		v.Account.Windows = nil
 		v.Machines = slices.Clone(v.Machines)

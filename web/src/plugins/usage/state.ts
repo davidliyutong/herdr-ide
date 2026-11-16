@@ -61,6 +61,8 @@ function loadFired(): Record<string, number> {
 export function applySnapshot(s: UsageSnapshot) {
   if (!s || !Array.isArray(s.accounts)) return;
   const prev = useUsage.getState().snapshot;
+  // An answer that started before a newer message arrived.
+  if (prev && s.updatedAt < prev.updatedAt) return;
   useUsage.setState({ snapshot: s });
   // The first snapshot of a page only arms the thresholds already passed:
   // what was said in another page or before a reload is in storage.
@@ -105,6 +107,15 @@ export async function refreshNow(): Promise<string | undefined> {
   } catch {
     return 'network';
   }
+}
+
+/** How long a cost report is shown before the panel reads it again. */
+const COST_FRESH = 15 * 60;
+
+/** Whether the cost report is missing or older than COST_FRESH. */
+export function costStale(now = Date.now() / 1000): boolean {
+  const s = useUsage.getState();
+  return !s.costLoading && (!s.cost || now - s.cost.generatedAt > COST_FRESH);
 }
 
 /** Fetches the cost of the last 90 days (the user's days). */

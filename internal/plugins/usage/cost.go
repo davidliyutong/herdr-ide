@@ -116,7 +116,8 @@ func (p *Plugin) cost(ctx context.Context, days, tz int) *CostReport {
 		return rep
 	}
 	p.mu.Lock()
-	p.costCache[key] = costEntry{at: now, rep: rep}
+	// Fresh from when the scans ended, however long they took.
+	p.costCache[key] = costEntry{at: p.now(), rep: rep}
 	for len(p.costCache) > costKeep {
 		oldest := ""
 		for k, e := range p.costCache {

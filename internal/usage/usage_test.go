@@ -336,6 +336,13 @@ func TestGrok(t *testing.T) {
 	if *a.Credits.Used != 3 || *a.Credits.Limit != 10 {
 		t.Errorf("credits %+v", a.Credits)
 	}
+	// An entry without a key lends nothing to the next one.
+	write(t, filepath.Join(e.Home, ".grok/auth.json"), `{
+	  "https://auth.x.ai::old": {"expires_at": "2020-01-01T00:00:00Z", "email": "old@example.com", "user_id": "u-old"},
+	  "https://other.example::x": {"key": "other-key"}}`)
+	if a := one(t, Limits(context.Background(), e, Options{Providers: []string{Grok}})); a.Status != StatusOK || a.ID != "" || a.Email != "" {
+		t.Errorf("entry without a key bled into the next: %+v", a)
+	}
 	// Without the percentage: on-demand used over its cap.
 	b := Account{}
 	parseGrokBilling(&b, map[string]any{"config": map[string]any{"onDemandUsed": map[string]any{"val": 5.0}, "onDemandCap": map[string]any{"val": 20.0}}})
@@ -409,6 +416,17 @@ func TestDeepSeek(t *testing.T) {
 	one(t, Limits(context.Background(), e, Options{Providers: []string{DeepSeek}}))
 	if api.header("/user/balance", "Authorization") != "Bearer sk-file" {
 		t.Errorf("file key not used")
+	}
+	// The key saved in the panel wins over the environment's.
+	e.Getenv = func(k string) string {
+		if k == "DEEPSEEK_API_KEY" {
+			return "sk-env"
+		}
+		return ""
+	}
+	one(t, Limits(context.Background(), e, Options{Providers: []string{DeepSeek}}))
+	if api.header("/user/balance", "Authorization") != "Bearer sk-file" {
+		t.Errorf("the environment's key won over the saved one")
 	}
 	if err := SetDeepSeekKey(e.Base, "bad key\n"); !errors.Is(err, ErrBadKey) {
 		t.Errorf("bad key: %v", err)

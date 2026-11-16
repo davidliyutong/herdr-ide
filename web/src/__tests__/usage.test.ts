@@ -81,6 +81,34 @@ describe('usage model', () => {
     expect(alerts(undefined, snapshot([account('kimi:z', [99], { status: 'stale' })]), [80], {})).toEqual([]);
   });
 
+  it('alerts again in a new period no page saw start, not for a reset time that moves a little', () => {
+    const fired: Record<string, number> = {};
+    const a = account('claude:p', [85]);
+    expect(alerts(undefined, snapshot([a]), [80], fired)).toHaveLength(1);
+    // The same period, its reset said a few seconds later.
+    const jitter = account('claude:p', [86]);
+    jitter.windows[0].resetsAt! += 5;
+    expect(alerts(undefined, snapshot([jitter]), [80], fired)).toEqual([]);
+    // The next period, already over the threshold when first seen.
+    const next = account('claude:p', [82]);
+    next.windows[0].resetsAt! += 18000;
+    expect(alerts(undefined, snapshot([next]), [80], fired).map((x) => x.threshold)).toEqual([80]);
+  });
+
+  it('leaves windows past their reset out of the tightest and the alerts', () => {
+    const past = account('codex:q', [95, 30]);
+    past.windows[0].resetsAt = now - 60;
+    expect(tightest(snapshot([past]))!.window.usedPct).toBe(30);
+    expect(alerts(undefined, snapshot([past]), [80], {})).toEqual([]);
+  });
+
+  it('keeps a newer snapshot over an older answer', () => {
+    applySnapshot({ ...snapshot([account('claude:n', [10])]), updatedAt: now });
+    applySnapshot({ ...snapshot([account('claude:n', [90])]), updatedAt: now - 120, polling: true });
+    expect(useUsage.getState().snapshot!.accounts[0].windows[0].usedPct).toBe(10);
+    useUsage.setState({ snapshot: undefined });
+  });
+
   it('sums the cost of days, ranks and extrapolates', () => {
     const today = new Date(2026, 10, 16, 12);
     const row = (day: string, cost: number, model: string, machine = 'local'): CostRow => ({
@@ -230,6 +258,40 @@ describe('usage panel and status item', () => {
     // Refresh asks the core.
     await act(async () => host.querySelector<HTMLButtonElement>('.usage-refresh')!.click());
     expect(calls).toContain('POST /api/p/usage/refresh');
+  });
+
+  it('does not keep the core asking from a hidden page', async () => {
+    vi.useFakeTimers();
+    const vis = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    try {
+      await act(async () => root.render(createElement(UsagePanel)));
+      await act(async () => {
+        vi.advanceTimersByTime(5 * 60_000);
+      });
+      expect(calls.filter((c) => c.includes('watch=1'))).toEqual([]);
+      vis.mockReturnValue('visible');
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      expect(calls.filter((c) => c.includes('watch=1'))).toHaveLength(1);
+    } finally {
+      vis.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('opens DeepSeek’s key form without a DeepSeek account', async () => {
+    applySnapshot({ ...snapshot([account('claude:a', [10])]), updatedAt: now + 1 });
+    await act(async () => root.render(createElement(UsagePanel)));
+    const add = host.querySelector<HTMLButtonElement>('.usage-add-key');
+    expect(add).not.toBeNull();
+    await act(async () => add!.click());
+    expect(useUsage.getState().tab).toBe('deepseek');
+    expect(host.querySelector('.usage-provider')).not.toBeNull();
+    // Turned off: neither.
+    useSettings.setState({ values: { 'usage.providers.deepseek': { value: false } } as never });
+    await act(async () => root.render(createElement(UsagePanel)));
+    expect(host.querySelector('.usage-provider')).toBeNull();
   });
 
   it('groups windows by the models they count, the session first', () => {

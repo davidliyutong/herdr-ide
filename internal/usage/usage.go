@@ -188,19 +188,26 @@ type Env struct {
 	// LocalClient is the client for the local language server (its
 	// self-signed certificate is accepted on 127.0.0.1 only).
 	LocalClient func(port int) *http.Client
+	// Memo keeps between calls what is costly to get again (agy's answer,
+	// the newest Codex log's rate limits); nil keeps nothing.
+	Memo *Memo
 }
 
+// processMemo is the Memo of the process's Envs.
+var processMemo = &Memo{}
+
 // NewEnv returns the machine's environment: home and data directory, the
-// process environment, the HTTP client (HTTPS_PROXY, 15 s timeout).
+// process environment, the process's HTTP client (HTTPS_PROXY, 15 s
+// timeout) and memo.
 func NewEnv(home, base string, environ func() []string) *Env {
 	if environ == nil {
 		environ = os.Environ
 	}
 	return &Env{
 		Home: home, Base: base, Getenv: os.Getenv, Environ: environ,
-		Client: NewClient(), URLs: DefaultURLs, Now: time.Now, GOOS: runtime.GOOS,
+		Client: sharedClient(), URLs: DefaultURLs, Now: time.Now, GOOS: runtime.GOOS,
 		Keychain: keychain, Command: runCommand, LookPath: lookPath(environ), UID: os.Getuid(), ProcRoot: "/proc",
-		LocalClient: localClient,
+		LocalClient: localClient, Memo: processMemo,
 	}
 }
 
