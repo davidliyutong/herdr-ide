@@ -70,8 +70,17 @@ func newTest(t *testing.T) (*Plugin, *fakeHost, *vaultstore.Store) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	s.KDF = testKDF
+	if err := s.SetPassphrase(pass); err != nil {
+		t.Fatal(err)
+	}
 	return p, h, s
 }
+
+const pass = "correct horse"
+
+// testKDF keeps Argon2id fast in tests (the store's tests lower its bound).
+var testKDF = vaultstore.KDF{Time: 1, Memory: 8 << 10, Threads: 1}
 
 func str(s string) *string { return &s }
 
@@ -202,57 +211,58 @@ func TestApprovals(t *testing.T) {
 
 func TestRoutes(t *testing.T) {
 	p, h, _ := newTest(t)
-	mux := http.NewServeMux()
-	for _, rt := range p.Routes() {
-		rt := rt
-		mux.HandleFunc(plugin.Pattern(ID, rt), func(w http.ResponseWriter, r *http.Request) {
-			rt.Handler(&plugin.Call{Host: h}, w, r)
-		})
+	c := newClient(p, h)
+	// Without a session the gate refuses changes and reveals.
+	if code, out := c.do("PUT", "/api/p/vault/vars/OPENAI_KEY", `{"value":"sk-1"}`); code != 401 || out["error"] != "vault_session" {
+		t.Fatalf("no session %d %v", code, out)
 	}
-	do := func(method, path, body string) (int, map[string]any) {
-		w := httptest.NewRecorder()
-		mux.ServeHTTP(w, httptest.NewRequest(method, path, strings.NewReader(body)))
-		var out map[string]any
-		json.Unmarshal(w.Body.Bytes(), &out)
-		return w.Code, out
+	if code, out := c.do("POST", "/api/p/vault/session", `{"passphrase":"wrong horse"}`); code != 403 || out["error"] != "wrong_passphrase" {
+		t.Fatalf("wrong passphrase %d %v", code, out)
 	}
-	if c, out := do("PUT", "/api/p/vault/vars/1BAD", `{"value":"x"}`); c != 400 || out["error"] != "invalid_name" {
-		t.Errorf("bad name %d %v", c, out)
+	c.session(t)
+	if code, out := c.do("PUT", "/api/p/vault/vars/1BAD", `{"value":"x"}`); code != 400 || out["error"] != "invalid_name" {
+		t.Errorf("bad name %d %v", code, out)
 	}
-	if c, out := do("PUT", "/api/p/vault/vars/OPENAI_KEY", `{"value":"sk-1","description":"d","machines":["m1"]}`); c != 200 || out["name"] != "OPENAI_KEY" {
-		t.Fatalf("set %d %v", c, out)
+	if code, out := c.do("PUT", "/api/p/vault/vars/OPENAI_KEY", `{"value":"sk-1","description":"d","machines":["m1"]}`); code != 200 || out["name"] != "OPENAI_KEY" {
+		t.Fatalf("set %d %v", code, out)
 	}
-	c, out := do("GET", "/api/p/vault", "")
-	if c != 200 || strings.Contains(mustJSON(out), "sk-1") || out["status"].(map[string]any)["mode"] != "keychain" {
-		t.Fatalf("list %d %v", c, out)
+	code, out := c.do("GET", "/api/p/vault", "")
+	if code != 200 || strings.Contains(mustJSON(out), "sk-1") || out["status"].(map[string]any)["mode"] != "passphrase" || out["session"] != true {
+		t.Fatalf("list %d %v", code, out)
 	}
-	if c, out := do("POST", "/api/p/vault/vars/OPENAI_KEY/reveal", ""); c != 200 || out["value"] != "sk-1" {
-		t.Errorf("reveal %d %v", c, out)
+	if code, out := c.do("POST", "/api/p/vault/vars/OPENAI_KEY/reveal", ""); code != 200 || out["value"] != "sk-1" {
+		t.Errorf("reveal %d %v", code, out)
 	}
 	// Without a value the old one stays.
-	do("PUT", "/api/p/vault/vars/OPENAI_KEY", `{"description":"new"}`)
-	if _, out := do("POST", "/api/p/vault/vars/OPENAI_KEY/reveal", ""); out["value"] != "sk-1" {
+	c.do("PUT", "/api/p/vault/vars/OPENAI_KEY", `{"description":"new"}`)
+	if _, out := c.do("POST", "/api/p/vault/vars/OPENAI_KEY/reveal", ""); out["value"] != "sk-1" {
 		t.Errorf("kept %v", out)
 	}
-	do("POST", "/api/p/vault/lock", "")
-	if c, out := do("POST", "/api/p/vault/vars/OPENAI_KEY/reveal", ""); c != 409 || out["error"] != "vault_locked" {
-		t.Errorf("locked reveal %d %v", c, out)
+	// Locking ends every session.
+	c.do("POST", "/api/p/vault/lock", "")
+	if code, out := c.do("POST", "/api/p/vault/vars/OPENAI_KEY/reveal", ""); code != 401 || out["error"] != "vault_session" {
+		t.Errorf("locked reveal %d %v", code, out)
 	}
-	do("POST", "/api/p/vault/unlock", `{}`)
-	if c, out := do("POST", "/api/p/vault/requests/nope", `{"answer":"once"}`); c != 404 {
-		t.Errorf("answer %d %v", c, out)
+	c.session(t)
+	if code, out := c.do("POST", "/api/p/vault/requests/nope", `{"answer":"once"}`); code != 404 {
+		t.Errorf("answer %d %v", code, out)
 	}
-	if c, _ := do("POST", "/api/p/vault/requests/nope", `{"answer":"maybe"}`); c != 400 {
-		t.Errorf("bad answer %d", c)
+	if code, _ := c.do("POST", "/api/p/vault/requests/nope", `{"answer":"maybe"}`); code != 400 {
+		t.Errorf("bad answer %d", code)
 	}
-	if c, _ := do("DELETE", "/api/p/vault/vars/OPENAI_KEY", ""); c != 200 {
-		t.Errorf("delete %d", c)
+	if code, _ := c.do("DELETE", "/api/p/vault/vars/OPENAI_KEY", ""); code != 200 {
+		t.Errorf("delete %d", code)
 	}
-	if c, _ := do("DELETE", "/api/p/vault/vars/OPENAI_KEY", ""); c != 404 {
-		t.Errorf("delete again %d", c)
+	if code, _ := c.do("DELETE", "/api/p/vault/vars/OPENAI_KEY", ""); code != 404 {
+		t.Errorf("delete again %d", code)
 	}
-	if c, out := do("GET", "/api/p/vault/log", ""); c != 200 || out["log"] == nil {
-		t.Errorf("log %d %v", c, out)
+	if code, out := c.do("GET", "/api/p/vault/log", ""); code != 200 || out["log"] == nil {
+		t.Errorf("log %d %v", code, out)
+	}
+	// Ending the session closes the gate again.
+	c.do("DELETE", "/api/p/vault/session", "")
+	if code, _ := c.do("PUT", "/api/p/vault/vars/X", `{"value":"x"}`); code != 401 {
+		t.Errorf("after the end %d", code)
 	}
 	// Without a file the vault is unavailable.
 	p2 := &Plugin{Keys: &vaultstore.MemKeyStore{}}
@@ -263,30 +273,77 @@ func TestRoutes(t *testing.T) {
 	}
 }
 
-// The passphrase form's flow: a vault without a keychain asks for one.
-func TestPassphraseRoutes(t *testing.T) {
-	p := &Plugin{Keys: &vaultstore.MemKeyStore{Fail: true}, Path: filepath.Join(t.TempDir(), "vault-dev.json")}
+// A new vault asks for a passphrase, which opens the first session;
+// sessions end unused or old; wrong passphrases in a row slow down.
+func TestPassphraseAndSessions(t *testing.T) {
+	p := &Plugin{Keys: &vaultstore.MemKeyStore{}, Path: filepath.Join(t.TempDir(), "vault-dev.json")}
 	h := &fakeHost{}
 	s, _ := p.open(h)
-	s.KDF = vaultstore.KDF{Time: 1, Memory: 64, Threads: 1}
-	call := &plugin.Call{Host: h}
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest("PUT", "/api/p/vault/vars/A", strings.NewReader(`{"value":"x"}`))
-	r.SetPathValue("name", "A")
-	p.handleSet(call, w, r)
-	if w.Code != 409 || !strings.Contains(w.Body.String(), "vault_locked") {
-		t.Fatalf("first value %d %s", w.Code, w.Body)
+	s.KDF = testKDF
+	now := time.Unix(1_000_000, 0)
+	p.now = func() time.Time { return now }
+	c := newClient(p, h)
+	if code, out := c.do("POST", "/api/p/vault/session", `{"passphrase":"x"}`); code != 409 || out["error"] != "no_passphrase" {
+		t.Fatalf("session without a passphrase %d %v", code, out)
 	}
-	if st := s.Status(); st.Mode != "passphrase" || !st.Setup {
-		t.Fatalf("status %+v", st)
+	if code, out := c.do("POST", "/api/p/vault/passphrase", `{"passphrase":"short"}`); code != 400 || out["error"] != "weak_passphrase" {
+		t.Fatalf("weak %d %v", code, out)
 	}
-	w = httptest.NewRecorder()
-	p.handleUnlock(call, w, httptest.NewRequest("POST", "/api/p/vault/unlock", strings.NewReader(`{"passphrase":"long enough"}`)))
-	if w.Code != 200 {
-		t.Fatalf("setup %d %s", w.Code, w.Body)
+	code, out := c.do("POST", "/api/p/vault/passphrase", `{"passphrase":"long enough"}`)
+	if code != 200 || out["session"] == "" {
+		t.Fatalf("setup %d %v", code, out)
 	}
-	if !strings.Contains(h.auditLog(), "vault.unlocked") || strings.Contains(h.auditLog(), "long enough") {
-		t.Errorf("audit %s", h.auditLog())
+	c.tok = out["session"].(string)
+	if code, _ := c.do("PUT", "/api/p/vault/vars/A", `{"value":"x"}`); code != 200 {
+		t.Fatalf("set in the first session %d", code)
+	}
+	// A second passphrase is a change, with the current one.
+	if code, out := c.do("POST", "/api/p/vault/passphrase", `{"passphrase":"another one"}`); code != 409 || out["error"] != "has_passphrase" {
+		t.Errorf("second %d %v", code, out)
+	}
+	// Unused for SessionIdle, it ends.
+	now = now.Add(SessionIdle + time.Second)
+	if code, _ := c.do("PUT", "/api/p/vault/vars/A", `{"value":"y"}`); code != 401 {
+		t.Errorf("idle session %d", code)
+	}
+	// Used, it lasts at most SessionMax.
+	c.session2(t, "long enough")
+	for i := 0; i < int(SessionMax/SessionIdle)+1; i++ {
+		now = now.Add(SessionIdle - time.Second)
+		c.do("GET", "/api/p/vault", "")
+	}
+	if code, _ := c.do("PUT", "/api/p/vault/vars/A", `{"value":"y"}`); code != 401 {
+		t.Errorf("old session %d", code)
+	}
+	// Wrong passphrases past failFree wait, twice as long each time.
+	for i := 0; i < failFree; i++ {
+		if code, _ := c.do("POST", "/api/p/vault/session", `{"passphrase":"wrong one"}`); code != 403 {
+			t.Fatalf("wrong %d: %d", i, code)
+		}
+	}
+	c.do("POST", "/api/p/vault/session", `{"passphrase":"wrong one"}`)
+	if code, out := c.do("POST", "/api/p/vault/session", `{"passphrase":"long enough"}`); code != 429 || out["error"] != "wait" {
+		t.Errorf("not slowed %d %v", code, out)
+	}
+	now = now.Add(2 * time.Second)
+	c.session2(t, "long enough")
+	audit := h.auditLog()
+	if !strings.Contains(audit, "vault.unlocked") || !strings.Contains(audit, "vault.passphrase_set") || strings.Contains(audit, "long enough") {
+		t.Errorf("audit %s", audit)
+	}
+	// A change keeps the values and ends the other sessions.
+	other := c.tok
+	code, out = c.do("POST", "/api/p/vault/passphrase", `{"old":"long enough","passphrase":"longer still"}`)
+	if code != 200 {
+		t.Fatalf("change %d %v", code, out)
+	}
+	c.tok = other
+	if code, _ := c.do("POST", "/api/p/vault/vars/A/reveal", ""); code != 401 {
+		t.Errorf("session of the old passphrase %d", code)
+	}
+	c.session2(t, "longer still")
+	if _, out := c.do("POST", "/api/p/vault/vars/A/reveal", ""); out["value"] != "x" {
+		t.Errorf("value after the change %v", out)
 	}
 }
 
@@ -295,8 +352,13 @@ func mustJSON(v any) string {
 	return string(b)
 }
 
-// routeMux serves the plugin's routes with h as the host.
-func routeMux(p *Plugin, h *fakeHost) func(method, path, body string) (int, map[string]any) {
+// client calls the plugin's routes with h as the host, with its session.
+type client struct {
+	mux *http.ServeMux
+	tok string
+}
+
+func newClient(p *Plugin, h *fakeHost) *client {
 	mux := http.NewServeMux()
 	for _, rt := range p.Routes() {
 		rt := rt
@@ -304,13 +366,31 @@ func routeMux(p *Plugin, h *fakeHost) func(method, path, body string) (int, map[
 			rt.Handler(&plugin.Call{Host: h}, w, r)
 		})
 	}
-	return func(method, path, body string) (int, map[string]any) {
-		w := httptest.NewRecorder()
-		mux.ServeHTTP(w, httptest.NewRequest(method, path, strings.NewReader(body)))
-		var out map[string]any
-		json.Unmarshal(w.Body.Bytes(), &out)
-		return w.Code, out
+	return &client{mux: mux}
+}
+
+func (c *client) do(method, path, body string) (int, map[string]any) {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(method, path, strings.NewReader(body))
+	if c.tok != "" {
+		r.Header.Set(SessionHeader, c.tok)
 	}
+	c.mux.ServeHTTP(w, r)
+	var out map[string]any
+	json.Unmarshal(w.Body.Bytes(), &out)
+	return w.Code, out
+}
+
+// session opens a session with the test passphrase.
+func (c *client) session(t *testing.T) { c.session2(t, pass) }
+
+func (c *client) session2(t *testing.T, passphrase string) {
+	t.Helper()
+	code, out := c.do("POST", "/api/p/vault/session", mustJSON(map[string]string{"passphrase": passphrase}))
+	if code != 200 {
+		t.Fatalf("session %d %v", code, out)
+	}
+	c.tok = out["session"].(string)
 }
 
 // Answers and changes to who may read a variable are audited, without
@@ -318,9 +398,10 @@ func routeMux(p *Plugin, h *fakeHost) func(method, path, body string) (int, map[
 func TestAnswersAndChangesAreAudited(t *testing.T) {
 	p, h, _ := newTest(t)
 	p.Timeout = 5 * time.Second
-	do := routeMux(p, h)
-	if c, _ := do("PUT", "/api/p/vault/vars/KEY", `{"value":"s3cret","machines":["m1"],"injectOnly":true}`); c != 200 {
-		t.Fatal(c)
+	c := newClient(p, h)
+	c.session(t)
+	if code, _ := c.do("PUT", "/api/p/vault/vars/KEY", `{"value":"s3cret","machines":["m1"],"injectOnly":true}`); code != 200 {
+		t.Fatal(code)
 	}
 	audit := h.auditLog()
 	if !strings.Contains(audit, `vault.saved {"inject_only":true,"machines":["m1"],"name":"KEY","value_changed":true}`) || strings.Contains(audit, "s3cret") {
@@ -331,8 +412,16 @@ func TestAnswersAndChangesAreAudited(t *testing.T) {
 		ch <- p.Handle(context.Background(), h, "m2", agentproto.VaultRequest{Tool: "env", Names: []string{"KEY"}})
 	}()
 	req := (<-h.sent)["request"].(*Request)
-	if c, _ := do("POST", "/api/p/vault/requests/"+req.ID, `{"answer":"always"}`); c != 200 {
-		t.Fatal(c)
+	// Letting a value out needs a session: a program on the core host
+	// cannot approve its own request.
+	tok := c.tok
+	c.tok = ""
+	if code, out := c.do("POST", "/api/p/vault/requests/"+req.ID, `{"answer":"always"}`); code != 401 || out["error"] != "vault_session" {
+		t.Fatalf("approval without a session %d %v", code, out)
+	}
+	c.tok = tok
+	if code, _ := c.do("POST", "/api/p/vault/requests/"+req.ID, `{"answer":"always"}`); code != 200 {
+		t.Fatal(code)
 	}
 	if r := <-ch; !r.OK {
 		t.Fatalf("always %+v", r)
@@ -343,6 +432,18 @@ func TestAnswersAndChangesAreAudited(t *testing.T) {
 	}
 	if l := p.Log(); l[0].Result != "approved_always" {
 		t.Errorf("log %+v", l[0])
+	}
+	// Denying needs no session.
+	go func() {
+		ch <- p.Handle(context.Background(), h, "m3", agentproto.VaultRequest{Tool: "env", Names: []string{"KEY"}})
+	}()
+	req = (<-h.sent)["request"].(*Request)
+	c.tok = ""
+	if code, _ := c.do("POST", "/api/p/vault/requests/"+req.ID, `{"answer":"deny"}`); code != 200 {
+		t.Fatalf("deny without a session %d", code)
+	}
+	if r := <-ch; r.Code != "denied" {
+		t.Errorf("denied %+v", r)
 	}
 	if strings.Contains(h.auditLog(), "s3cret") {
 		t.Error("a value in the audit log")

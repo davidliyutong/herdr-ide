@@ -127,13 +127,15 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   and the working tree's side is editable. Changed files are colored in the
   file explorer ([31](docs/features/31-git.md)).
 - **Variable vault.** API keys and other environment variables, encrypted
-  on the core's computer (the key in the system keychain, or from a
-  passphrase), for coding agents on every machine: Claude Code, Codex and
-  other MCP clients read them through the vault's MCP server, which the
-  panel shows how to add per machine. Each variable names the machines that
-  may read it; others ask on every page (allow once, always, deny), and
-  `run_with_env` runs a command with the variables set without showing
-  their values to the model ([30](docs/features/30-variable-vault.md)).
+  on the core's computer under a key made from your passphrase, for coding
+  agents on every machine: Claude Code, Codex and other MCP clients read
+  them through the vault's MCP server, which the panel shows how to add per
+  machine. Each variable names the machines that may read it; others ask on
+  every page (allow once, always, deny), and `run_with_env` runs a command
+  with the variables set without showing their values to the model. One
+  gate stands before every approval, reveal and change: the passphrase,
+  so no program, not even one on the core's computer, gets a value
+  without you ([30](docs/features/30-variable-vault.md)).
 - **AI usage.** A panel of the right sidebar and a status bar item show
   what the AI subscriptions signed in on your machines have left — Claude,
   Codex, Grok, Antigravity, Kimi Code and DeepSeek: each window's use, its

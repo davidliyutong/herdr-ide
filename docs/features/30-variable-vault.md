@@ -19,17 +19,18 @@ deciding.
   them.
 - Per-variable allowed machines; other machines ask the user, who allows
   once, always or denies.
+- One gate for every caller, the core host's own programs included: a
+  value leaves the vault only for a machine the variable lists or with the
+  user's approval, and approving, revealing and changing need the vault's
+  passphrase, which programs on the core host do not have.
 - Non-goal: putting variables into terminals' environments. Every program
   of a terminal would get them, for the terminal's whole life.
 - Non-goal: protection against the user's own programs on an allowed
   machine: any process of the user there can ask as an agent does.
-- Non-goal: protection against the user's own programs on the core host.
-  There approval is advisory: a local process can call the core's loopback
-  API (no `Origin` header needed) to answer its own request or reveal a
-  value, content the core serves on its own origin (code-server's webviews,
-  VS Code extensions) passes the origin check, and on macOS the keychain
-  item, created with `/usr/bin/security`, can be read by any process of the
-  user. The panel says so for the local machine.
+- Non-goal: protection against a program that drives the user's own
+  browser page after the user unlocked it (browser automation), reads the
+  core's memory (a debugger with the rights to), or guesses a weak
+  passphrase offline from the file.
 - Non-goal: configuring the CLIs. The user adds the MCP server once per
   machine; the panel shows how.
 
@@ -40,35 +41,47 @@ deciding.
 The vault is `vault[-<instance>].json` beside the settings file (0600,
 written atomically by `internal/userfile`):
 `{version, mode, kdf, check, entries: [{name, description, machines,
-injectOnly, value: {nonce, ciphertext}, created, updated}]}`. Each value is
-encrypted with AES-256-GCM under the master key, with the variable's name
-as additional data, so a ciphertext copied to another entry does not open.
-`check` is a known text sealed with the key, which tells a wrong key or
+injectOnly, value: {nonce, ciphertext}, created, updated}], forgotten}`.
+Each value is encrypted with AES-256-GCM under the master key; its
+additional data is its name, its machines (sorted) and its inject-only
+flag (file version 2), so a ciphertext copied to another entry, or an entry
+whose machines were widened or flag dropped in the file (to let a machine
+read it without asking), does not open (`corrupt`). Changing machines or
+the flag through the store seals the value again, which needs the key.
+`check` is a known text sealed with the key, which tells a wrong
 passphrase. Fields the version does not know are kept.
 
-The master key is 32 random bytes, created when the first value is stored
-and kept in the system keychain (`github.com/zalando/go-keyring`: macOS
-Keychain, Windows Credential Manager, the Secret Service on Linux; service
-`<slug>-vault`, account the file's name, so instances have keys of their
-own). The vault is then unlocked at every start by reading the key. Where
-no keychain answers (a headless Linux host), the vault turns to passphrase
-mode: the key is derived with Argon2id (time 3, 64 MiB, 4 threads; salt and
-parameters in the file), set the first time it is entered, and the vault is
-locked after every start until the passphrase is entered in the panel.
-Parameters read from the file must be within bounds (a 16-byte salt, time
-1–10, memory 8 MiB–1 GiB, 1–16 threads), or the vault does not open: an
-edited file can neither weaken the derivation nor exhaust the core's
-memory. A
-keychain vault whose key is gone or unreadable stays locked and says why
-(`key_missing`, `keychain_unavailable`); its names can still be listed and
-deleted.
+The master key is derived from the user's passphrase with Argon2id (time
+3, 64 MiB, 4 threads; a new 16-byte salt and the parameters in the file)
+and kept only in the core's memory while the vault is unlocked; the vault
+is locked after every start until the passphrase is given. A new vault
+asks for its passphrase (at least 8 characters) before its first value
+(`no_passphrase`). Parameters read from the file must be within bounds (a
+16-byte salt, time 1–10, memory 8 MiB–1 GiB, 1–16 threads), or the vault
+does not open: an edited file can neither weaken the derivation nor
+exhaust the core's memory. Changing the passphrase needs the current one
+and seals every value again under a key of a new salt.
+
+Vaults of earlier versions kept a random key in the system keychain
+(`github.com/zalando/go-keyring`; service `<slug>-vault`, account the
+file's name) and sealed values with their name only. Such a vault still
+opens with that key, its values are sealed again with their machines
+(version 2) as it opens, and it asks for a passphrase before anything else:
+setting one seals every value again under the passphrase's key and removes
+the keychain item. A keychain vault whose key is gone or unreadable stays
+locked and says why (`key_missing`, `keychain_unavailable`); it cannot be
+converted, but its names can be listed and deleted.
+
+A machine removed from the core leaves every variable's list
+(`plugin.MachineForgetter`, audited as `vault.machine_forgotten`), so a
+machine added later under the same id asks again. Taking it out seals the
+values again: while the vault is locked the machine goes into `forgotten`
+instead, which no variable lets read without asking, and is taken out of
+the lists at the next unlock. `forgotten` only ever narrows who may read.
 
 Names are environment variable names (`^[A-Za-z_][A-Za-z0-9_]*$`, at most
 128); values at most 64 KiB, descriptions at most 1 KiB, at most 1000
-variables. `machines` lists machine ids, `*` for all; removing a machine
-from the core removes its id from every variable's list
-(`plugin.MachineForgetter`, audited as `vault.machine_forgotten`), so a
-machine added later under the same id asks again. `injectOnly` variables
+variables. `machines` lists machine ids, `*` for all. `injectOnly` variables
 are only given to `run_with_env`, which does not stop a command from
 printing them encoded (base64, say): it keeps them out of the
 conversation by accident, not against a command written to reveal them.
@@ -80,11 +93,32 @@ the store at its first use. Its routes, below `/api/p/vault`
 ([reference](../reference.md#http-and-websocket-endpoints)): the list
 (state and variables without values), `PUT`/`DELETE vars/{name}`,
 `POST vars/{name}/reveal`, `POST vars/{name}/rename` (`{"to"}`: the value
-is sealed again under the new name, its additional data, so the vault must
-be unlocked; machines, description and flag stay; a taken name is
-`409 exists`), `unlock`, `lock`, the pending `requests` and their answers,
-and the access `log`. Every route that changes something is
+is sealed again under the new name, its additional data; machines,
+description and flag stay; a taken name is `409 exists`), `session`
+(open, end), `passphrase` (set, change), `lock`, the pending `requests` and
+their answers, and the access `log`. Every route that changes something is
 a writing route (refused read-only) audited with the name or request id.
+
+**The gate.** The core's API is open to any program on the core host (it
+needs no `Origin` header) and to content the core serves on its own origin
+(code-server's webviews), so neither the API nor the origin can tell the
+user from a program. The passphrase can: setting, changing, renaming and
+deleting variables, revealing a value and allowing a request (`once`,
+`always`; denying needs nothing) need a **vault session** of the page,
+sent as `X-Vault-Session`, or answer `401 vault_session`. A page opens one
+with the passphrase (`POST session`, which also unlocks the vault; setting
+or changing the passphrase opens one too): 32 random bytes the core keeps
+in memory and the page only in its own memory, never in storage that
+programs could read from disk. A session ends unused for 30 minutes, 12
+hours after it began, when the vault is locked (every one) or its
+passphrase changed (every other one); at most 32 are open, the oldest
+going. Three wrong passphrases in a row cost nothing, each one after
+doubles a wait before the next try (`429 wait` with `Retry-After`, up to 5
+minutes), across pages and programs. Opening a session and changing the
+passphrase are audited (`vault.unlocked`, `vault.passphrase_set`, with
+whether it worked), never with the passphrase. A machine's MCP server
+reaches the vault only through its agent's socket and the same rules as
+every machine: the core host's agent is the local machine's.
 
 The MCP servers' requests arrive as streams the agent opens with op
 `vault` (`plugin.Streamer`): one `VaultRequest {tool, names, client,
@@ -94,6 +128,7 @@ client, terminal and directory is shown to the user, not trusted.
 
 - `list`: every variable's name, description, `inject_only` and whether
   this machine needs approval. Works while locked.
+  (Approval, below, needs a page with a session: the gate.)
 - `get` (one name) and `env` (1–64 names): unknown names fail with
   `not_found`, an inject-only variable with `inject_only` for `get`, a
   locked vault with `vault_locked`. Names whose `machines` hold the machine
@@ -168,18 +203,43 @@ The server exits when its stdin closes, killing the commands it still runs.
 ### Web UI (`web/src/plugins/vault`)
 
 The panel **Variable Vault** of the right sidebar (command
-`view.panel.vault`, no default key): the lock state with Lock/Unlock and
-the passphrase form, requests waiting, the variables with search, an editor
-(name, description, a write-only value field that sets a new value, inject
-only, the machines allowed without asking), reveal after a confirmation
-(disabled read-only), delete after a confirmation, the access log, and per
-machine the setup (for the local machine with the note that approval
-there is advisory, also on its approval prompts): `claude mcp add --scope user <slug>-vault -- <data
-dir>/bin/<slug>-mcp`, Codex's `[mcp_servers.<slug>-vault]` in
-`~/.codex/config.toml`, and the JSON other clients take, each with a copy
-button, built from the machine's home and data directory. The approval
-prompts are drawn over every page by the plugin's status item, from its
-`/ws` messages and, for a page opened while one waits, `GET requests`.
+`view.panel.vault`, no default key):
+
+- **The gate** at the top: a new vault's card to create the passphrase
+  (twice, with a strength bar and the warning that it cannot be
+  recovered); a keychain vault's card to set one, which says why (programs
+  on the core host can read the keychain and skip approval) and what
+  happens (values sealed again, the keychain item removed); otherwise,
+  without a session, a card to unlock this page with the passphrase, and
+  with one a bar that says the page is unlocked until 30 idle minutes, with
+  Change Passphrase and Lock. A page that the gate refuses (its session
+  ended) shows the unlock card again.
+- Requests waiting for an answer.
+- Three tabs. **Variables**: search, New Variable, and a row per variable
+  with its name, the inject-only tag, its description and who may read it
+  without asking (every time asks, the machines chosen, all machines, in
+  the colors of safe to open); reveal after a confirmation, hidden again
+  after 30 s, and edit, both only with a session. The editor is a dialog:
+  name, description, a write-only value field (shown while typing on
+  request) that sets a new value, who may read without asking (ask every
+  time, chosen machines with their state, all machines), inject only as a
+  switch, and Delete after a confirmation. **Access log**: the accesses
+  since the core started by day, filtered by machine and outcome, each
+  with its time, outcome (allowed by the list, approved, refused, listed),
+  tool, names, machine, client and terminal. **Connect**: per machine,
+  `claude mcp add --scope user <slug>-vault -- <data dir>/bin/<slug>-mcp`,
+  Codex's `[mcp_servers.<slug>-vault]` in `~/.codex/config.toml` and the
+  JSON other clients take, each with a copy button, built from the
+  machine's home and data directory, and for the local machine the note
+  that variables it may read without asking are open to its programs.
+
+The approval prompts are drawn over every page by the plugin's status
+item, from its `/ws` messages and, for a page opened while one waits,
+`GET requests`: the client, machine, names, terminal and directory, the
+seconds left, and Deny, Always Allow and Allow Once; a page without a
+session asks for the passphrase in the prompt before allowing. A list
+loaded while a session started or ended says nothing about it (the page
+keeps the newer state).
 
 ## Alternatives considered
 
@@ -189,16 +249,25 @@ prompts are drawn over every page by the plugin's status item, from its
 | The vault on each machine | Secrets would be copied to every host; one store on the core host is where the user is. |
 | An MCP server over HTTP from the core | Machines would need a port reaching the core, or the core one per machine; the agent's yamux session already connects them, and nothing listens on TCP on machines. |
 | An MCP SDK | Four methods over stdio are a small amount of JSON-RPC; an SDK would add dependencies to the agent uploaded to every machine. |
-| Keychain on every machine | Headless Linux machines have none; the core host's keychain is enough, as the core holds the key. |
+| Keychain on every machine | Headless Linux machines have none; the core host holds the key. |
+| The key in the system keychain (as earlier versions) | Any program of the user reads it without a prompt (on macOS through `/usr/bin/security`; the Secret Service and the Credential Manager alike) and with the file has every value: no approval stands before a program on the core host. |
+| The loopback API or the page's origin as the user's proof | Programs on the core host call the API as pages do, and content on the core's origin passes the origin check; the passphrase is what only the user has. |
+| Biometrics (Touch ID) per approval | Not available to pages in every browser, nor in the same way on every system; the passphrase works everywhere and a session spares asking for it at every approval. |
+| Machines and flag in the clear, unauthenticated | A program on the core host could widen a variable's machines in the file and read it without asking; sealing them with the value makes such an edit unreadable. |
 | Values in the browser for editing | A value shown in a page is in its memory, its extensions' reach and its screen; the editor only sets new values. |
 
 ## Failure modes
 
-- Locked vault: `get` and `env` fail with `vault_locked`; the panel shows
-  the lock and, in passphrase mode, the form. A lost passphrase cannot be
-  recovered: delete the variables (allowed while locked) or the file.
-- Keychain entry removed: the vault stays locked with `key_missing`; the
-  values cannot be decrypted.
+- Locked vault (after every start): `get` and `env` fail with
+  `vault_locked` until a page unlocks it. A lost passphrase cannot be
+  recovered: delete the file and start again.
+- A keychain vault of an earlier version without its key (`key_missing`):
+  it stays locked and cannot be converted; its values are lost.
+- The file edited (machines widened, flag dropped, values swapped): that
+  value no longer opens (`corrupt`).
+- A page's session ended (idle, locked, the passphrase changed): the gate
+  answers `401 vault_session` and the page asks for the passphrase again.
+- Wrong passphrases in a row: `429 wait` for a while that doubles.
 - Nobody answers: the request is denied after 60 s; the agent gets
   `denied` and can ask again.
 - Too many requests waiting: past 4 of the machine (or 32 in all) the
@@ -218,17 +287,23 @@ server exposes.
 
 ## Testing
 
-- `internal/vault/vault_test.go`: round trips with a key store in memory
-  (never the system keychain), the name binding values, passphrase mode
-  (setup, wrong passphrase, lock), validation, Argon2 parameters out of
-  bounds refused, file permissions, unknown fields kept, a removed
-  machine leaving the lists.
+- `internal/vault/vault_test.go`: a new vault's passphrase first, nothing
+  in the keychain, the value not in the clear, wrong passphrases, verify;
+  the name, machines and flag binding values (swapped values, machines
+  widened and flag dropped in the file); a keychain vault of an earlier
+  version opened, sealed again and converted, its keychain item removed;
+  changing the passphrase; validation; Argon2 parameters out of bounds
+  refused; file permissions; unknown fields kept; a removed machine leaving
+  the lists at once or, locked, at the next unlock.
 - `internal/plugins/vault/vault_test.go`: lists without values, allowed
   machines, inject only, locked, approvals (once, always persisting, deny,
   timeout, requester gone, first answer wins), an answer racing the
   timeout, at most 4 waiting requests per machine and identical requests
-  sharing one, list calls coalesced, answers and saves audited, a removed
-  machine forgotten, routes, audit without values.
+  sharing one, list calls coalesced; the gate: routes refused without a
+  session, sessions opened by the passphrase or its setup and ended idle,
+  old, by a lock or a change, wrong passphrases slowed down, approvals
+  without a session refused and denials allowed; answers and saves audited
+  without values or passphrases; a removed machine forgotten.
 - `internal/vaultmcp/mcp_test.go`: JSON-RPC over pipes (initialize and
   version negotiation, notifications, tools), masking, truncation,
   timeouts that kill the process group, errors reaching the model, the
@@ -241,6 +316,10 @@ server exposes.
 - `internal/server/plugins_test.go`: agents' streams of a plugin's op, refused
   while the plugin is off; `TestMutatingRoutesAreGuarded` covers the
   vault's routes.
-- `web/src/__tests__/vault.test.ts`: the panel without values, reveal after
-  confirming, the editor's request, read-only, the approval prompt answered
-  and resolved elsewhere, the local machine's note, the setup snippets.
+- `web/src/__tests__/vault.test.ts`: the panel without values; unlocking
+  (a wrong passphrase, then the right one) before reveal and edit, reveal
+  after confirming with the session; the editor's request (machines,
+  flag) and a rename; creating the passphrase (a mismatch first); a load
+  crossing a session's start; read-only; the approval prompt asking for
+  the passphrase, denying without one and resolved elsewhere; the local
+  machine's note; the setup snippets.

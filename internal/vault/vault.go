@@ -1,11 +1,16 @@
 // Package vault is the variable vault's store on the core host: named
 // values (API keys and the like) encrypted one by one with AES-256-GCM in
-// vault[-<instance>].json beside the settings file, under a master key kept
-// in the operating system's keychain or, where there is none, derived from
-// a passphrase with Argon2id. Names, descriptions and the machines allowed
-// to read a variable are stored in the clear; values never are. The core's
-// plugin (internal/plugins/vault) serves it to the UI and to the MCP servers
-// on machines (docs/features/30-variable-vault.md).
+// vault[-<instance>].json beside the settings file, under a master key
+// derived from the user's passphrase with Argon2id and kept only in the
+// core's memory while unlocked. Names, descriptions and the machines
+// allowed to read a variable are stored in the clear; values never are,
+// and each value's encryption covers its name, its machines and its
+// inject-only flag, so a file edited to let a machine read a variable no
+// longer opens it. Vaults of earlier versions kept a random key in the
+// operating system's keychain instead; they open with it and are converted
+// to a passphrase (ConvertToPassphrase). The core's plugin
+// (internal/plugins/vault) serves it to the UI and to the MCP servers on
+// machines (docs/features/30-variable-vault.md).
 package vault
 
 import (
@@ -19,6 +24,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,13 +47,19 @@ const (
 
 // Modes of the master key.
 const (
-	// ModeNone: no key yet (no variable was ever stored).
+	// ModeNone: no key yet (no passphrase was ever set).
 	ModeNone = ""
-	// ModeKeychain: a random key in the operating system's keychain.
+	// ModeKeychain: a random key in the operating system's keychain, as
+	// vaults of earlier versions kept it; converted to a passphrase.
 	ModeKeychain = "keychain"
 	// ModePassphrase: a key derived from the user's passphrase (Argon2id).
 	ModePassphrase = "passphrase"
 )
+
+// fileVersion is the version of new files: 2 seals each value with its
+// machines and inject-only flag besides its name (adOf); version 1 files
+// are sealed again when unlocked.
+const fileVersion = 2
 
 // Errors, each with the code the UI and the MCP servers get (Code).
 var (
@@ -63,6 +75,8 @@ var (
 	ErrCorrupt       = errors.New("a value cannot be decrypted")
 	ErrFull          = errors.New("too many variables")
 	ErrExists        = errors.New("a variable of that name exists")
+	ErrNoPassphrase  = errors.New("the vault has no passphrase yet")
+	ErrHasPassphrase = errors.New("the vault has a passphrase; change it with the current one")
 )
 
 // Code is the error's code for clients: vault_locked, not_found, …
@@ -92,6 +106,10 @@ func Code(err error) string {
 		return "full"
 	case errors.Is(err, ErrExists):
 		return "exists"
+	case errors.Is(err, ErrNoPassphrase):
+		return "no_passphrase"
+	case errors.Is(err, ErrHasPassphrase):
+		return "has_passphrase"
 	}
 	return "failed"
 }
@@ -169,6 +187,11 @@ type file struct {
 	// passphrase fails to open it.
 	Check   *Sealed `json:"check,omitempty"`
 	Entries []Entry `json:"entries"`
+	// Forgotten are machines removed while the vault was locked: no
+	// variable lets them read without asking, and they are taken out of
+	// the variables' machines (whose values are sealed again) at the next
+	// unlock. The list only ever narrows who may read.
+	Forgotten []string `json:"forgotten,omitempty"`
 	// rest keeps the fields this version does not know.
 	rest map[string]json.RawMessage
 }
@@ -178,13 +201,15 @@ const checkText = "vault-check"
 // checkAD is the check's additional data; no variable can have this name.
 const checkAD = "#check"
 
-// KeyStore keeps the master key: the operating system's keychain
-// (OSKeyStore) or, in tests, a map.
+// KeyStore is where vaults of earlier versions kept the master key: the
+// operating system's keychain (OSKeyStore) or, in tests, a map. It is read
+// to open such a vault and emptied once it has a passphrase.
 type KeyStore interface {
 	// Get returns the secret, ErrKeyMissing when there is none, or another
 	// error when the keychain cannot be used.
 	Get(account string) (string, error)
 	Set(account, secret string) error
+	Delete(account string) error
 }
 
 // Info is a variable as clients see it: everything but the value.
@@ -202,11 +227,30 @@ func (i Info) Allows(m string) bool {
 	return slices.Contains(i.Machines, AllMachines) || slices.Contains(i.Machines, m)
 }
 
+// adOf is the additional data a value is sealed with: its name, and in
+// files of version 2 its machines and inject-only flag, so a value whose
+// machines or flag were changed in the file (to let a machine read it
+// without asking) no longer opens.
+func adOf(e *Entry, version int) string {
+	if version < 2 {
+		return e.Name
+	}
+	ms := slices.Clone(e.Machines)
+	slices.Sort(ms)
+	flag := ""
+	if e.InjectOnly {
+		flag = "inject-only"
+	}
+	return e.Name + "\x00" + strings.Join(ms, "\x01") + "\x00" + flag
+}
+
 // Status is the vault's state.
 type Status struct {
 	Mode   string `json:"mode"`
 	Locked bool   `json:"locked"`
-	// Setup: passphrase mode without a passphrase yet; Unlock sets it.
+	// Setup: no passphrase yet (a new vault, one of passphrase mode whose
+	// passphrase was never set, or a keychain vault to convert):
+	// SetPassphrase sets it.
 	Setup bool `json:"setup,omitempty"`
 	// Error is why a keychain key could not be read (key_missing,
 	// keychain_unavailable).
@@ -247,19 +291,25 @@ func Open(path string, keys KeyStore, account string) (*Store, error) {
 		return nil, err
 	}
 	if !sig.Exists {
-		s.f = file{Version: 1}
+		s.f = file{Version: fileVersion}
 		return s, nil
 	}
 	if err := json.Unmarshal(b, &s.f); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	_ = json.Unmarshal(b, &s.f.rest)
-	for _, k := range []string{"version", "mode", "kdf", "check", "entries"} {
+	for _, k := range []string{"version", "mode", "kdf", "check", "entries", "forgotten"} {
 		delete(s.f.rest, k)
+	}
+	if s.f.Version < 1 {
+		s.f.Version = 1
 	}
 	switch s.f.Mode {
 	case ModeKeychain:
 		s.keyErr = s.unlockKeychain()
+		if s.keyErr == nil {
+			s.keyErr = s.upgrade()
+		}
 	case ModePassphrase:
 		if s.f.KDF != nil {
 			if err := validKDF(s.f.KDF); err != nil {
@@ -281,19 +331,20 @@ func (s *Store) Path() string { return s.path }
 func (s *Store) Status() Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	st := Status{Mode: s.f.Mode, Locked: s.f.Mode != ModeNone && s.key == nil, Setup: s.setup}
+	st := Status{Mode: s.f.Mode, Locked: s.f.Mode != ModeNone && s.key == nil, Setup: s.f.Mode != ModePassphrase || s.setup}
 	if s.f.Mode == ModeKeychain && s.key == nil && s.keyErr != nil {
 		st.Error = Code(s.keyErr)
 	}
 	return st
 }
 
-func info(e *Entry) Info {
-	m := e.Machines
+// info is what clients see of e: its machines without those forgotten.
+func info(e *Entry, forgotten []string) Info {
+	m := slices.DeleteFunc(slices.Clone(e.Machines), func(x string) bool { return slices.Contains(forgotten, x) })
 	if m == nil {
 		m = []string{}
 	}
-	return Info{Name: e.Name, Description: e.Description, Machines: slices.Clone(m), InjectOnly: e.InjectOnly, Created: e.Created, Updated: e.Updated}
+	return Info{Name: e.Name, Description: e.Description, Machines: m, InjectOnly: e.InjectOnly, Created: e.Created, Updated: e.Updated}
 }
 
 // List returns the variables by name, without their values.
@@ -302,7 +353,7 @@ func (s *Store) List() []Info {
 	defer s.mu.Unlock()
 	out := make([]Info, 0, len(s.f.Entries))
 	for i := range s.f.Entries {
-		out = append(out, info(&s.f.Entries[i]))
+		out = append(out, info(&s.f.Entries[i], s.f.Forgotten))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
@@ -313,7 +364,7 @@ func (s *Store) Get(name string) (Info, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if e := s.find(name); e != nil {
-		return info(e), true
+		return info(e, s.f.Forgotten), true
 	}
 	return Info{}, false
 }
@@ -338,11 +389,23 @@ func (s *Store) Value(name string) (string, error) {
 	if s.key == nil {
 		return "", ErrLocked
 	}
-	b, err := open(s.key, e.Value, name)
+	b, err := open(s.key, e.Value, adOf(e, s.f.Version))
 	if err != nil {
 		return "", err
 	}
 	return string(b), nil
+}
+
+// reseal seals e's value again for what adOf says now (its machines or
+// flag changed), from plain, the value's text; called with s.mu held and
+// the key there.
+func (s *Store) reseal(e *Entry, plain []byte) error {
+	v, err := seal(s.key, plain, adOf(e, s.f.Version))
+	if err != nil {
+		return err
+	}
+	e.Value = v
+	return nil
 }
 
 func validMachines(ms []string) bool {
@@ -381,17 +444,22 @@ func (s *Store) Set(name string, u Update) error {
 	if e == nil && len(s.f.Entries) >= MaxEntries {
 		return ErrFull
 	}
-	var sealed *Sealed
+	// The value is sealed with the machines and the flag: changing any of
+	// them needs the key.
+	if s.key == nil {
+		return s.ensureKey()
+	}
+	var plain []byte
 	if u.Value != nil {
-		if err := s.ensureKey(); err != nil {
-			return err
-		}
-		v, err := seal(s.key, []byte(*u.Value), name)
+		plain = []byte(*u.Value)
+	} else {
+		b, err := open(s.key, e.Value, adOf(e, s.f.Version))
 		if err != nil {
 			return err
 		}
-		sealed = v
+		plain = b
 	}
+	defer clear(plain)
 	prev := slices.Clone(s.f.Entries)
 	now := s.now().UTC()
 	if e == nil {
@@ -407,11 +475,12 @@ func (s *Store) Set(name string, u Update) error {
 	if u.InjectOnly != nil {
 		e.InjectOnly = *u.InjectOnly
 	}
-	if sealed != nil {
-		e.Value = sealed
-	}
 	e.Updated = now
-	if err := s.save(); err != nil {
+	err := s.reseal(e, plain)
+	if err == nil {
+		err = s.save()
+	}
+	if err != nil {
 		s.f.Entries = prev
 		return err
 	}
@@ -445,10 +514,22 @@ func (s *Store) Allow(name, m string) error {
 	if len(e.Machines) >= MaxMachines {
 		return ErrInvalid
 	}
-	prev := e.Machines
+	if s.key == nil {
+		return ErrLocked
+	}
+	plain, err := open(s.key, e.Value, adOf(e, s.f.Version))
+	if err != nil {
+		return err
+	}
+	defer clear(plain)
+	prev := *e
 	e.Machines = append(slices.Clone(e.Machines), m)
-	if err := s.save(); err != nil {
-		e.Machines = prev
+	err = s.reseal(e, plain)
+	if err == nil {
+		err = s.save()
+	}
+	if err != nil {
+		*e = prev
 		return err
 	}
 	return nil
@@ -464,25 +545,65 @@ func (s *Store) ForgetMachine(m string) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var names []string
-	prev := make([][]string, len(s.f.Entries))
 	for i := range s.f.Entries {
-		e := &s.f.Entries[i]
-		prev[i] = e.Machines
-		if slices.Contains(e.Machines, m) {
-			e.Machines = slices.DeleteFunc(slices.Clone(e.Machines), func(x string) bool { return x == m })
-			names = append(names, e.Name)
+		if slices.Contains(s.f.Entries[i].Machines, m) {
+			names = append(names, s.f.Entries[i].Name)
 		}
 	}
 	if len(names) == 0 {
 		return nil, nil
 	}
-	if err := s.save(); err != nil {
-		for i := range s.f.Entries {
-			s.f.Entries[i].Machines = prev[i]
+	// Taking it out of the machines seals the values again, which needs
+	// the key: while locked, the machine is forgotten until the unlock.
+	if !slices.Contains(s.f.Forgotten, m) {
+		prev := s.f.Forgotten
+		s.f.Forgotten = append(slices.Clone(s.f.Forgotten), m)
+		if err := s.save(); err != nil {
+			s.f.Forgotten = prev
+			return nil, err
 		}
-		return nil, err
+	}
+	if s.key != nil {
+		if err := s.applyForgotten(); err != nil {
+			return nil, err
+		}
 	}
 	return names, nil
+}
+
+// applyForgotten takes the forgotten machines out of the variables'
+// machines, sealing their values again; called with s.mu held and the key
+// there.
+func (s *Store) applyForgotten() error {
+	if len(s.f.Forgotten) == 0 {
+		return nil
+	}
+	prev := slices.Clone(s.f.Entries)
+	for i := range s.f.Entries {
+		e := &s.f.Entries[i]
+		if !slices.ContainsFunc(e.Machines, func(x string) bool { return slices.Contains(s.f.Forgotten, x) }) {
+			continue
+		}
+		plain, err := open(s.key, e.Value, adOf(e, s.f.Version))
+		if err != nil {
+			s.f.Entries = prev
+			return err
+		}
+		e.Machines = slices.DeleteFunc(slices.Clone(e.Machines), func(x string) bool { return slices.Contains(s.f.Forgotten, x) })
+		err = s.reseal(e, plain)
+		clear(plain)
+		if err != nil {
+			s.f.Entries = prev
+			return err
+		}
+	}
+	forgotten := s.f.Forgotten
+	s.f.Forgotten = nil
+	if err := s.save(); err != nil {
+		s.f.Entries, s.f.Forgotten = prev, forgotten
+		return err
+	}
+	return nil
 }
 
 // Delete removes a variable; it needs no key.
@@ -525,18 +646,18 @@ func (s *Store) Rename(from, to string) error {
 	if s.key == nil {
 		return ErrLocked
 	}
-	plain, err := open(s.key, e.Value, from)
+	plain, err := open(s.key, e.Value, adOf(e, s.f.Version))
 	if err != nil {
 		return err
 	}
-	sealed, err := seal(s.key, plain, to)
-	clear(plain)
-	if err != nil {
-		return err
-	}
+	defer clear(plain)
 	prev := *e
-	e.Name, e.Value, e.Updated = to, sealed, time.Now().UTC()
-	if err := s.save(); err != nil {
+	e.Name, e.Updated = to, time.Now().UTC()
+	err = s.reseal(e, plain)
+	if err == nil {
+		err = s.save()
+	}
+	if err != nil {
 		*e = prev
 		return err
 	}
@@ -552,47 +673,181 @@ func (s *Store) Lock() {
 	s.keyErr = nil
 }
 
-// Unlock takes the key: from the keychain (passphrase is ignored), or
-// derived from the passphrase, which a passphrase vault without one yet
-// takes as its new passphrase.
+// Unlock takes the key derived from the passphrase (a keychain vault's
+// from the keychain; the passphrase is ignored) and seals the values of an
+// earlier version's file again, with their machines.
 func (s *Store) Unlock(passphrase string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	switch s.f.Mode {
 	case ModeNone:
-		return nil
+		return ErrNoPassphrase
 	case ModeKeychain:
-		s.keyErr = s.unlockKeychain()
+		if s.keyErr = s.unlockKeychain(); s.keyErr == nil {
+			s.keyErr = s.upgrade()
+		}
 		return s.keyErr
 	}
 	if s.setup {
-		if len([]rune(passphrase)) < 8 {
-			return ErrWeak
-		}
-		kdf := s.KDF
-		kdf.Salt = make([]byte, 16)
-		if _, err := rand.Read(kdf.Salt); err != nil {
-			return err
-		}
-		key := derive(passphrase, kdf)
-		check, err := seal(key, []byte(checkText), checkAD)
-		if err != nil {
-			return err
-		}
-		s.f.KDF, s.f.Check = &kdf, check
-		if err := s.save(); err != nil {
-			s.f.KDF, s.f.Check = nil, nil
-			return err
-		}
-		s.key, s.setup = key, false
-		return nil
+		return ErrNoPassphrase
+	}
+	if s.key != nil {
+		return s.verify(passphrase)
 	}
 	key := derive(passphrase, *s.f.KDF)
 	if b, err := open(key, s.f.Check, checkAD); err != nil || string(b) != checkText {
 		return ErrPassphrase
 	}
 	s.key = key
+	return s.upgrade()
+}
+
+// Verify checks a passphrase without changing anything (an unlocked
+// vault's, to prove the user is there).
+func (s *Store) Verify(passphrase string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.f.Mode != ModePassphrase || s.setup {
+		return ErrNoPassphrase
+	}
+	return s.verify(passphrase)
+}
+
+func (s *Store) verify(passphrase string) error {
+	key := derive(passphrase, *s.f.KDF)
+	defer clear(key)
+	if b, err := open(key, s.f.Check, checkAD); err != nil || string(b) != checkText {
+		return ErrPassphrase
+	}
 	return nil
+}
+
+// SetPassphrase gives the vault a passphrase: a new vault's first, or a
+// keychain vault's, whose values are sealed again under the passphrase's
+// key and whose keychain item is then removed (an unlocked one; a keychain
+// whose key cannot be read leaves values that cannot be opened). A vault
+// with a passphrase changes it with ChangePassphrase. The vault is
+// unlocked afterwards.
+func (s *Store) SetPassphrase(passphrase string) error {
+	if len([]rune(passphrase)) < 8 {
+		return ErrWeak
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch {
+	case s.f.Mode == ModePassphrase && !s.setup:
+		return ErrHasPassphrase
+	case s.f.Mode == ModeKeychain && s.key == nil:
+		if s.keyErr != nil {
+			return s.keyErr
+		}
+		return ErrLocked
+	case s.f.Mode == ModePassphrase && s.setup && len(s.f.Entries) > 0:
+		// Values sealed under a key never written down cannot be kept.
+		return ErrLocked
+	}
+	keychain := s.f.Mode == ModeKeychain
+	if err := s.rekey(passphrase); err != nil {
+		return err
+	}
+	s.setup = false
+	if keychain && s.keys != nil {
+		// The old key opens nothing any more; remove it all the same.
+		_ = s.keys.Delete(s.account)
+	}
+	return nil
+}
+
+// ChangePassphrase replaces the passphrase after checking the current one;
+// every value is sealed again under the new key.
+func (s *Store) ChangePassphrase(old, passphrase string) error {
+	if len([]rune(passphrase)) < 8 {
+		return ErrWeak
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.f.Mode != ModePassphrase || s.setup {
+		return ErrNoPassphrase
+	}
+	if err := s.verify(old); err != nil {
+		return err
+	}
+	if s.key == nil {
+		key := derive(old, *s.f.KDF)
+		s.key = key
+	}
+	return s.rekey(passphrase)
+}
+
+// rekey derives a new key from passphrase with a new salt and seals every
+// value and the check under it (version 2), from the key there; called
+// with s.mu held.
+func (s *Store) rekey(passphrase string) error {
+	kdf := s.KDF
+	kdf.Salt = make([]byte, saltLen)
+	if _, err := rand.Read(kdf.Salt); err != nil {
+		return err
+	}
+	key := derive(passphrase, kdf)
+	prev := s.f
+	prev.Entries = slices.Clone(s.f.Entries)
+	entries := slices.Clone(s.f.Entries)
+	for i := range entries {
+		e := &entries[i]
+		plain, err := open(s.key, e.Value, adOf(e, s.f.Version))
+		if err != nil {
+			return err
+		}
+		v, err := seal(key, plain, adOf(e, fileVersion))
+		clear(plain)
+		if err != nil {
+			return err
+		}
+		e.Value = v
+	}
+	check, err := seal(key, []byte(checkText), checkAD)
+	if err != nil {
+		return err
+	}
+	s.f.Entries, s.f.Version, s.f.Mode, s.f.KDF, s.f.Check = entries, fileVersion, ModePassphrase, &kdf, check
+	if err := s.save(); err != nil {
+		s.f = prev
+		return err
+	}
+	clear(s.key)
+	s.key = key
+	return s.applyForgotten()
+}
+
+// upgrade seals the values of a version 1 file again with their machines
+// (version 2) and takes the forgotten machines out; called with s.mu held
+// and the key there.
+func (s *Store) upgrade() error {
+	if s.f.Version < fileVersion {
+		prev := slices.Clone(s.f.Entries)
+		for i := range s.f.Entries {
+			e := &s.f.Entries[i]
+			plain, err := open(s.key, e.Value, adOf(e, s.f.Version))
+			if err != nil {
+				s.f.Entries = prev
+				return err
+			}
+			v, err := seal(s.key, plain, adOf(e, fileVersion))
+			clear(plain)
+			if err != nil {
+				s.f.Entries = prev
+				return err
+			}
+			e.Value = v
+		}
+		version := s.f.Version
+		s.f.Version = fileVersion
+		if err := s.save(); err != nil {
+			s.f.Entries, s.f.Version = prev, version
+			return err
+		}
+	}
+	return s.applyForgotten()
 }
 
 func derive(passphrase string, k KDF) []byte {
@@ -624,41 +879,15 @@ func (s *Store) unlockKeychain() error {
 	return nil
 }
 
-// ensureKey makes sure the key is there to seal a value: a vault without a
-// key gets one in the keychain, or turns to passphrase mode when the
-// keychain cannot keep it (and is locked until the passphrase is set).
+// ensureKey says why there is no key to seal a value: a vault without a
+// passphrase needs one first (SetPassphrase), any other is locked.
 func (s *Store) ensureKey() error {
 	if s.key != nil {
 		return nil
 	}
-	if s.f.Mode != ModeNone {
-		return ErrLocked
+	if s.f.Mode == ModeNone || s.setup {
+		return ErrNoPassphrase
 	}
-	key := make([]byte, 32)
-	if _, err := rand.Read(key); err != nil {
-		return err
-	}
-	if s.keys != nil {
-		if err := s.keys.Set(s.account, base64.StdEncoding.EncodeToString(key)); err == nil {
-			check, err := seal(key, []byte(checkText), checkAD)
-			if err != nil {
-				return err
-			}
-			s.f.Mode, s.f.Check = ModeKeychain, check
-			if err := s.save(); err != nil {
-				s.f.Mode, s.f.Check = ModeNone, nil
-				return err
-			}
-			s.key = key
-			return nil
-		}
-	}
-	s.f.Mode = ModePassphrase
-	if err := s.save(); err != nil {
-		s.f.Mode = ModeNone
-		return err
-	}
-	s.setup = true
 	return ErrLocked
 }
 
@@ -667,7 +896,7 @@ func (s *Store) save() error {
 	for k, v := range s.f.rest {
 		out[k] = v
 	}
-	out["version"] = 1
+	out["version"] = s.f.Version
 	if s.f.Mode != ModeNone {
 		out["mode"] = s.f.Mode
 	}
@@ -676,6 +905,9 @@ func (s *Store) save() error {
 	}
 	if s.f.Check != nil {
 		out["check"] = s.f.Check
+	}
+	if len(s.f.Forgotten) > 0 {
+		out["forgotten"] = s.f.Forgotten
 	}
 	entries := s.f.Entries
 	if entries == nil {
