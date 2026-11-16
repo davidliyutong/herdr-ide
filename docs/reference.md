@@ -136,6 +136,12 @@ in the UI; a setting with a scope can have its own value per machine, under
 | `notifications.mutedAgents` | list of strings | `["droid"]` | – | – |
 | `codeServer.install` | `push`, `download`, `existing` | `"push"` | `--code-server-install` | per machine |
 | `codeServer.path` | string | `""` | `--code-server-path` | per machine |
+| `files.showHidden` | `true`, `false` | `false` | – | – |
+| `files.exclude` | list of strings | `[".git",".svn",".hg","CVS",".DS_Store","Thumbs.db"]` | – | – |
+| `files.sortOrder` | `default`, `mixed`, `filesFirst`, `type`, `modified` | `"default"` | – | – |
+| `files.followFocus` | `true`, `false` | `true` | – | – |
+| `files.confirmTrash` | `true`, `false` | `false` | – | – |
+| `files.saveMethod` | `auto`, `replace` | `"auto"` | – | per machine |
 | `plugins.vscode.enabled` | `true`, `false` | `false` | – | – |
 | `plugins.vscode.browser` | `true`, `false` | `false` | – | – |
 | `plugins.files.enabled` | `true`, `false` | `true` | – | – |

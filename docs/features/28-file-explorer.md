@@ -39,6 +39,18 @@ app on macOS) and a pane kind `editor`. The web side is
 `web/src/plugins/files`, the core's `internal/plugins/files`, the
 machine's `internal/agent/plugin/files`.
 
+**Settings** (section `files`, the plugin's page in Settings ›
+Plugins; `internal/plugins/files/settings.go`):
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `files.showHidden` | off | Names starting with a dot are shown, in browsers where the panel's eye button was not used (each browser keeps the choice it made there). |
+| `files.exclude` | `.git`, `.svn`, `.hg`, `CVS`, `.DS_Store`, `Thumbs.db` | Patterns of names the tree never shows, as VS Code's `files.exclude`: `*`, `?`, `[abc]`, `[!abc]`; a leading `**/` matches the same; no other `/` (at most 100 patterns). Folders excluded are neither shown nor polled, also with hidden files shown. |
+| `files.sortOrder` | `default` | Folders first (`default`), `mixed`, `filesFirst`, by extension (`type`) or newest first (`modified`), folders first in those two; names sort as people sort them after. |
+| `files.followFocus` | on | The root follows the focused pane, in browsers where the crosshair was not used. |
+| `files.confirmTrash` | off | Move to Trash asks first (Delete Permanently always does). |
+| `files.saveMethod` (per machine) | `auto` | `auto` saves in place when a rename would lose something, as below; `replace` always renames a new file over the old one (hard links keep the old text, the file becomes the user's, a folder the user may not write cannot take a save). The core sends it to the agent with each save and replacing upload. |
+
 **Tree** (`tree.ts`, `FilesPanel.tsx`)
 
 - The root is the focused terminal's directory (its foreground program's,
@@ -47,7 +59,8 @@ machine's `internal/agent/plugin/files`.
   the tree stays where it is, so a click that opens a preview does not
   move it. **Follow** (the crosshair) turns this off; a crumb of the
   breadcrumb roots the tree at that directory and turns it off too. Follow
-  and hidden files are kept per browser.
+  and hidden files are kept per browser once its buttons were used, else
+  the settings `files.followFocus` and `files.showHidden` decide.
 - Directories are listed with the core's `GET /api/m/{id}/list` when they
   are expanded. Expanded directories are kept by path (at most 500; beyond
   that the oldest outside the root are forgotten), so going back to a
@@ -56,7 +69,7 @@ machine's `internal/agent/plugin/files`.
   Collapse Folders, drops the rest. Another root also clears the selection
   and the cursor, so a key never acts on rows the tree no longer shows. A
   listing that fails keeps the entries listed before, with the error
-  beside them (the root's is shown). Folders come first, names sort as
+  beside them (the root's is shown). Folders come first (`files.sortOrder`), names sort as
   people sort them (`a2` before `a10`).
 - The filter keeps entries whose names contain its text (case ignored) in
   the directories listed and kept, opens the folders that lead to them,
@@ -265,6 +278,9 @@ button.
     written. The agent that starts more than 7 days after a save left
     them (it ended during the save) removes them, and the backups the
     links name.
+  - With `files.saveMethod` set to `replace` (for every machine or one)
+    every save takes the first way; in a directory the user may not
+    write it fails with `denied`.
 
   A file changed or removed meanwhile is a `409 conflict` with its state
   now: the pane says so and offers **Load Theirs**, **Overwrite** and
@@ -428,6 +444,11 @@ the trash stay in the user's trash
   precondition (changed, removed, new, forced, through a link, too large,
   no temporary file left), a new file's mode from the umask, a save that
   cannot be written reading its text to the end (`TestReceiveDrains`).
+- `internal/plugins/files/settings_test.go`: the patterns `files.exclude`
+  takes, the save method per machine and without settings.
+- `web/src/__tests__/files.test.ts` also: the sort orders, names excluded
+  (also from polls), the switches from the settings unless the browser
+  chose, Move to Trash asking when the setting says so.
 - `internal/agent/plugin/files/save_test.go`: saves in place that keep
   hard links (same inode, every name sees the new text, also through a
   symbolic link, which stays; `replace` makes a new file), a file of

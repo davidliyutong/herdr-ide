@@ -140,7 +140,7 @@ export function FilesPanel() {
 
   // Rows are --h-row high, which scales with the UI font size.
   const ROW_HEIGHT = useSize('row');
-  const rows = useMemo(() => treeRows(s), [s.root, s.dirs, s.expanded, s.hidden, s.filter, s.edit]);
+  const rows = useMemo(() => treeRows(s), [s.root, s.dirs, s.expanded, s.hidden, s.filter, s.edit, s.exclude, s.sort]);
   const kinds = useMemo(() => new Map(rows.map((r) => [r.path, r.dir])), [rows]);
   const isDir = (p: string) => kinds.get(p) ?? p === s.root;
 

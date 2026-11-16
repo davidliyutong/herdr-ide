@@ -20,20 +20,26 @@ import { t } from '../i18n';
 import { FilesPanel, followedDir } from '../plugins/files/FilesPanel';
 import {
   crumbs,
+  excluded,
+  fromSettings,
   poll,
   polledDirs,
   relativePath,
   setFilter,
+  setHidden,
   showRoot,
   shownDirs,
+  sortEntries,
   topmost,
   treeRows,
   useTree,
   MAX_EXPANDED,
   MAX_POLLED,
+  type SortOrder,
   type TreeState,
 } from '../plugins/files/tree';
-import { badName, fileMenuEntries, menuFor, revealInExplorer } from '../plugins/files/ops';
+import { useSettings } from '../settings';
+import { badName, fileMenuEntries, menuFor, revealInExplorer, trash } from '../plugins/files/ops';
 import { registerQuickDiff } from '../plugins/files/quickDiff';
 import { actions } from '../actions';
 import { definePlugins } from '../plugins/registry';
@@ -255,6 +261,57 @@ describe('file tree rows', () => {
     off1();
     off2();
     expect(decorationsOf('m', '/r')).toEqual({});
+  });
+
+  it('sorts in the order set', () => {
+    const entries = [f('b.txt', { mtime: 3 }), d('z'), f('a.md', { mtime: 5 }), d('c'), f('a10.txt', { mtime: 1 })];
+    const names = (o: SortOrder) => sortEntries(entries, o).map((e) => e.name);
+    expect(names('default')).toEqual(['c', 'z', 'a.md', 'a10.txt', 'b.txt']);
+    expect(names('mixed')).toEqual(['a.md', 'a10.txt', 'b.txt', 'c', 'z']);
+    expect(names('filesFirst')).toEqual(['a.md', 'a10.txt', 'b.txt', 'c', 'z']);
+    expect(names('type')).toEqual(['c', 'z', 'a.md', 'a10.txt', 'b.txt']);
+    expect(names('modified')).toEqual(['c', 'z', 'a.md', 'b.txt', 'a10.txt']);
+  });
+
+  it('leaves out the names excluded, and does not poll in excluded folders', () => {
+    const exclude = ['.git', '**/node_modules', '*.pyc', '[Tt]humbs.db', 'x?'];
+    for (const [name, out] of [
+      ['.git', true],
+      ['node_modules', true],
+      ['a.pyc', true],
+      ['thumbs.db', true],
+      ['xy', true],
+      ['xyz', false],
+      ['.github', false],
+      ['a.pyc.txt', false],
+    ] as const)
+      expect(excluded(exclude, name), name).toBe(out);
+    const dirs = { '/r': { entries: [d('node_modules'), d('src'), f('Thumbs.db')] }, '/r/node_modules': { entries: [f('x')] } };
+    const s = state({ dirs, exclude, expanded: { '/r/node_modules': true, '/r/src': true } });
+    expect(treeRows(s).map((r) => r.name)).toEqual(['src']);
+    expect(shownDirs(s)).toEqual(['/r', '/r/src']);
+  });
+
+  it('takes its switches from the settings unless this browser chose', () => {
+    const values = useSettings.getState().values;
+    try {
+      localStorage.clear();
+      useSettings.setState({
+        values: {
+          ...values,
+          'files.showHidden': { value: true, source: 'global' },
+          'files.followFocus': { value: false, source: 'global' },
+        },
+      });
+      expect(fromSettings()).toMatchObject({ hidden: true, follow: false, sort: 'default' });
+      expect(useTree.getState()).toMatchObject({ hidden: true, follow: false });
+      setHidden(false);
+      useSettings.setState({ values: { ...useSettings.getState().values, 'files.sortOrder': { value: 'mixed', source: 'global' } } });
+      expect(useTree.getState()).toMatchObject({ hidden: false, follow: false, sort: 'mixed' });
+    } finally {
+      localStorage.clear();
+      useSettings.setState({ values });
+    }
   });
 });
 
@@ -571,6 +628,26 @@ describe('FilesPanel', () => {
       for (const l of ['files.quickLook', 'files.openInTerminal', 'files.rename'] as const) expect(labels).not.toContain(t(l));
     } finally {
       open.mockRestore();
+    }
+  });
+
+  it('asks before moving to the trash when the setting says so', async () => {
+    const values = useSettings.getState().values;
+    useSettings.setState({ values: { ...values, 'files.confirmTrash': { value: true, source: 'global' } } });
+    try {
+      let done = act(async () => trash('m', ['/home/u/src/main.go']));
+      await flush();
+      expect((useDialog.getState().current as { title?: string })?.title).toBe(t('files.confirm.trashTitle'));
+      await confirm(false);
+      await done;
+      expect(changes()).toEqual([]);
+      done = act(async () => trash('m', ['/home/u/src/main.go']));
+      await flush();
+      await confirm(true);
+      await done;
+      expect(changes()).toEqual([['trash', { paths: ['/home/u/src/main.go'] }]]);
+    } finally {
+      useSettings.setState({ values });
     }
   });
 

@@ -196,6 +196,7 @@ func write(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
 	if p.Force {
 		c.AuditField("force", true)
 	}
+	p.Method = saveMethod(c)
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxWrite))
 	if err != nil {
 		plugin.WriteJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "too_large", "message": err.Error()})
@@ -245,6 +246,7 @@ func upload(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
 	c.AuditField("size", r.ContentLength)
 	if p.Replace {
 		c.AuditField("replace", true)
+		p.Method = saveMethod(c)
 	}
 	if r.ContentLength > MaxUpload {
 		plugin.WriteJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "too_large", "message": "more than 4 GiB"})

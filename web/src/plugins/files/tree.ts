@@ -10,6 +10,7 @@
 import { create } from 'zustand';
 import { listDir, type RemoteStat } from '../../lib/files';
 import { loadPref, savePref } from '../../state/store';
+import { settingValue, useSettings } from '../../settings';
 import { selectAll, selectOnly, selectRange, selectToggle, type NavRow } from '../../components/tree/selection';
 import { filesApi, type Entry } from './api';
 
@@ -37,10 +38,16 @@ export interface Clipboard {
 export interface TreeState {
   m?: string;
   root?: string;
-  /** The root follows the focused terminal's directory (per browser). */
+  /** The root follows the focused terminal's directory: this browser's
+   * choice, else the setting files.followFocus. */
   follow: boolean;
-  /** Hidden files (names starting with a dot) are shown (per browser). */
+  /** Hidden files (names starting with a dot) are shown: this browser's
+   * choice, else the setting files.showHidden. */
   hidden: boolean;
+  /** Patterns of names never shown (the setting files.exclude). */
+  exclude?: readonly string[];
+  /** How a folder's entries are ordered (the setting files.sortOrder). */
+  sort?: SortOrder;
   filter: string;
   /** Expanded directories, by path (also outside the root, so going back
    * shows a directory as it was; at most MAX_EXPANDED). */
@@ -59,9 +66,27 @@ export interface TreeState {
   edit?: Edit;
 }
 
+/** Orders of a folder's entries, as VS Code's explorer.sortOrder: folders
+ * first (default), mixed, files first, by type (extension) or modified
+ * (newest first), each by name as people sort (a2 before a10) after. */
+export type SortOrder = 'default' | 'mixed' | 'filesFirst' | 'type' | 'modified';
+export const SORT_ORDERS: readonly SortOrder[] = ['default', 'mixed', 'filesFirst', 'type', 'modified'];
+
+/** What the settings decide: the switches this browser did not set, the
+ * names excluded and the order. */
+export function fromSettings(): Pick<TreeState, 'follow' | 'hidden' | 'exclude' | 'sort'> {
+  const exclude = settingValue('files.exclude');
+  const sort = settingValue('files.sortOrder');
+  return {
+    follow: loadPref<boolean | null>('files.follow', null) ?? settingValue('files.followFocus') !== false,
+    hidden: loadPref<boolean | null>('files.hidden', null) ?? settingValue('files.showHidden') === true,
+    exclude: Array.isArray(exclude) ? exclude : [],
+    sort: SORT_ORDERS.includes(sort as SortOrder) ? (sort as SortOrder) : 'default',
+  };
+}
+
 export const useTree = create<TreeState>(() => ({
-  follow: loadPref('files.follow', true),
-  hidden: loadPref('files.hidden', false),
+  ...fromSettings(),
   filter: '',
   expanded: {},
   dirs: {},
@@ -70,6 +95,10 @@ export const useTree = create<TreeState>(() => ({
 }));
 
 const set = (p: Partial<TreeState> | ((s: TreeState) => Partial<TreeState>)) => useTree.setState(p);
+
+useSettings.subscribe((st, prev) => {
+  if (st.values !== prev.values) set(fromSettings());
+});
 
 // ---- paths (POSIX, as on machines) ----
 
@@ -128,16 +157,73 @@ export interface Row {
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
-/** Folders first, then files, each by name as people sort (a2 before a10). */
-export function sortEntries(entries: readonly RemoteStat[]): RemoteStat[] {
-  return [...entries].sort((a, b) => (a.is_dir !== b.is_dir ? (a.is_dir ? -1 : 1) : collator.compare(a.name, b.name)));
+const extOf = (name: string) => {
+  const i = name.lastIndexOf('.');
+  return i > 0 ? name.slice(i + 1) : '';
+};
+
+/** A folder's entries in order. */
+export function sortEntries(entries: readonly RemoteStat[], order: SortOrder = 'default'): RemoteStat[] {
+  return [...entries].sort((a, b) => {
+    if (order !== 'mixed' && a.is_dir !== b.is_dir) return (a.is_dir ? -1 : 1) * (order === 'filesFirst' ? -1 : 1);
+    if (order === 'type' && !a.is_dir && !b.is_dir) {
+      const c = collator.compare(extOf(a.name), extOf(b.name));
+      if (c) return c;
+    }
+    if (order === 'modified' && b.mtime !== a.mtime) return b.mtime - a.mtime;
+    return collator.compare(a.name, b.name);
+  });
+}
+
+/** A glob of a name as a regular expression: * any characters, ? one,
+ * [abc] or [!abc] one of them or not; a leading **\/ (VS Code's form)
+ * matches a name too. Undefined for an empty pattern. */
+function globRe(pattern: string): RegExp | undefined {
+  const p = pattern.replace(/^(\*\*\/)+/, '');
+  if (!p) return undefined;
+  let re = '';
+  for (let i = 0; i < p.length; i++) {
+    const c = p[i];
+    if (c === '*') re += '.*';
+    else if (c === '?') re += '.';
+    else if (c === '[') {
+      const end = p.indexOf(']', i + 2);
+      if (end < 0) re += '\\[';
+      else {
+        let body = p.slice(i + 1, end).replace(/\\/g, '\\\\');
+        if (body.startsWith('!')) body = '^' + body.slice(1);
+        re += `[${body}]`;
+        i = end;
+      }
+    } else re += c.replace(/[.+^${}()|\\\]]/g, '\\$&');
+  }
+  try {
+    return new RegExp(`^${re}$`);
+  } catch {
+    return undefined;
+  }
+}
+
+const excluders = new WeakMap<readonly string[], (name: string) => boolean>();
+
+/** Whether a name matches one of the patterns (files.exclude). */
+export function excluded(patterns: readonly string[] | undefined, name: string): boolean {
+  if (!patterns?.length) return false;
+  let test = excluders.get(patterns);
+  if (!test) {
+    const res = patterns.map(globRe).filter((r): r is RegExp => !!r);
+    test = (n: string) => res.some((r) => r.test(n));
+    excluders.set(patterns, test);
+  }
+  return test(name);
 }
 
 /** The tree's rows: the root's entries and those of the expanded
- * directories below it, without hidden files unless shown. A filter keeps
- * the entries whose names hold it, and the directories (listed before)
- * that lead to one, opened. */
-export function treeRows(s: Pick<TreeState, 'root' | 'dirs' | 'expanded' | 'hidden' | 'filter' | 'edit'>): Row[] {
+ * directories below it, in the order set, without hidden files unless
+ * shown and without the names excluded. A filter keeps the entries whose
+ * names hold it, and the directories (listed before) that lead to one,
+ * opened. */
+export function treeRows(s: Pick<TreeState, 'root' | 'dirs' | 'expanded' | 'hidden' | 'filter' | 'edit' | 'exclude' | 'sort'>): Row[] {
   if (!s.root) return [];
   const needle = s.filter.trim().toLowerCase();
   const match = (name: string) => name.toLowerCase().includes(needle);
@@ -147,8 +233,8 @@ export function treeRows(s: Pick<TreeState, 'root' | 'dirs' | 'expanded' | 'hidd
     }
     const entries = s.dirs[dir]?.entries;
     if (!entries) return;
-    for (const e of sortEntries(entries)) {
-      if (!s.hidden && e.name.startsWith('.')) continue;
+    for (const e of sortEntries(entries, s.sort)) {
+      if ((!s.hidden && e.name.startsWith('.')) || excluded(s.exclude, e.name)) continue;
       const path = join(dir, e.name);
       const row: Row = {
         path,
@@ -214,13 +300,15 @@ export const MAX_EXPANDED = 500;
 
 /** The directories the tree shows: the root and the expanded directories
  * below it whose parents are shown too (not those in a collapsed folder,
- * or, while hidden files are not shown, in a hidden one). */
-export function shownDirs(s: Pick<TreeState, 'root' | 'expanded' | 'hidden'>): string[] {
+ * in an excluded one, or, while hidden files are not shown, in a hidden
+ * one). */
+export function shownDirs(s: Pick<TreeState, 'root' | 'expanded' | 'hidden' | 'exclude'>): string[] {
   const root = s.root;
   if (!root) return [];
   const shown = (p: string) => {
     for (let d = p; d !== root; d = parentOf(d)) {
-      if (!s.expanded[d] || (!s.hidden && baseName(d).startsWith('.'))) return false;
+      const name = baseName(d);
+      if (!s.expanded[d] || (!s.hidden && name.startsWith('.')) || excluded(s.exclude, name)) return false;
     }
     return true;
   };
@@ -344,7 +432,7 @@ export function setClipboard(clipboard: Clipboard | undefined) {
  * expanded directories below it not in a collapsed folder) that are
  * listed, at most MAX_POLLED. */
 export const MAX_POLLED = 200;
-export function polledDirs(s: Pick<TreeState, 'root' | 'expanded' | 'dirs' | 'hidden'>): string[] {
+export function polledDirs(s: Pick<TreeState, 'root' | 'expanded' | 'dirs' | 'hidden' | 'exclude'>): string[] {
   return shownDirs(s)
     .filter((p) => p === s.root || s.dirs[p]?.entries)
     .slice(0, MAX_POLLED);

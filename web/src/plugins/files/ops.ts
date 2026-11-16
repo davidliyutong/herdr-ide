@@ -22,6 +22,7 @@ import { errorText, filesApi, type Result } from './api';
 import { decorationsOf } from './decorations';
 import { quickDiff } from './quickDiff';
 import { isPluginOn } from '../registry';
+import { settingValue } from '../../settings';
 import { chooseFiles, droppedEntries, localPaths, pickedFiles, uploadInto } from './upload';
 import {
   baseName,
@@ -192,11 +193,21 @@ export async function rename(m: string, path: string, name: string) {
   select(to);
 }
 
-/** Moves paths into the trash; what no trash takes may be deleted for good
+/** Moves paths into the trash, after asking when the setting
+ * files.confirmTrash says so; what no trash takes may be deleted for good
  * after asking. */
 export async function trash(m: string, paths: string[]) {
   paths = topmost(paths);
   if (!paths.length) return;
+  if (settingValue('files.confirmTrash') === true) {
+    const what = paths.length === 1 ? baseName(paths[0]) : t('files.items', { n: paths.length });
+    const ok = await confirmDialog({
+      title: t('files.confirm.trashTitle'),
+      message: t('files.confirm.trash', { what }),
+      confirm: t('files.trash'),
+    });
+    if (!ok) return;
+  }
   let r: Result;
   try {
     r = await filesApi.trash(m, paths);
