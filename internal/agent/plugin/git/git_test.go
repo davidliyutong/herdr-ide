@@ -1263,6 +1263,18 @@ func TestRemote(t *testing.T) {
 	if info.Behind != 1 {
 		t.Errorf("behind %d", info.Behind)
 	}
+	// The branches have their upstream and how far behind it they are.
+	var branches []Branch
+	ok(t, env, "branches", Params{Repo: dir}, &branches)
+	found := false
+	for _, b := range branches {
+		if b.Name == "main" && !b.Remote {
+			found = b.Upstream == "origin/main" && b.Behind == 1 && b.Ahead == 0
+		}
+	}
+	if !found {
+		t.Errorf("branches %+v", branches)
+	}
 	ok(t, env, "pull", Params{Repo: dir, Rebase: true}, nil)
 	if _, err := os.Stat(filepath.Join(dir, "o.txt")); err != nil {
 		t.Error("pull")
