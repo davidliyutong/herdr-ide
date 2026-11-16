@@ -17,8 +17,8 @@ script run over ssh).
 ## Goals / non-goals
 
 - Every account the machines' CLIs are signed in to, once, with the
-  machines it was seen on: its windows with their reset countdowns, pace and
-  burndown, credits and balances, the provider's status page.
+  machines it was seen on: its windows with their reset countdowns and
+  pace, credits and balances, the provider's status page.
 - Notifications when a window reaches a threshold, starts over, or its pace
   runs it out before its reset.
 - The logs' cost by day, model, project and machine, with weekly and monthly
@@ -332,7 +332,7 @@ window over a threshold is said at the next poll.
 | Running `agy` at every poll | Each run takes seconds and a few hundred MB, at every poll on every machine with `agy` while a panel is open; its numbers change slowly, so one run per 10 minutes serves the polls between. |
 | Writing the cost cache after every scan that changed it | A log in use grows at every scan, and the cache (tens of thousands of records) was written whole each time; reading on from the file's older offsets costs a few minutes of lines. |
 | Every machine asked for every account | The same account would be asked once per machine at every poll, against the providers' rate limits. |
-| A chart library for the bars and burndown | A few SVG paths and rectangles; no dependency. |
+| A chart library for the bars | A few SVG paths and rectangles; no dependency. |
 | Each page deciding the alerts from the snapshots it saw (until 0.4) | Each page and app kept its own record, pages raced for it, a pace notice compared the reset to the second (a provider that says how long until it gives a time a second off each poll notified at every poll), use around a threshold re-armed it at each dip, a reset that moved 10 minutes counted as a new period, and a second of drift with a small dip read as a window that started over. The core sees every poll, keeps one record per window and period and survives a reload. |
 
 ## Failure modes
@@ -397,7 +397,7 @@ status pages. Resources and retention:
   out.
 - `internal/usage/cost_test.go`: the logs' dedupe rules, tiers and cache
   writes, the user's days, the incremental cache and its retention, one
-  record per response in the cache (an older cache's duplicates dropped),
+  record per response in the cache (a cache of another version not read),
   Codex and Grok logs read on from their offsets (a rewritten one from
   the start, an unfinished line once it ends), the cache written seldom,
   a cancelled scan keeping its progress.

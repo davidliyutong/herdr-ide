@@ -169,7 +169,7 @@ func (p *Plugin) fireAlerts(read map[string]bool, prev map[string][]usage.Window
 			wk := k + "|" + aks[i]
 			fire := func(kind string, th int) {
 				view := WindowView{Window: w, ID: ids[i]}
-				view.Pace = pace(w, p.history.points(k, ids[i], w, now), now)
+				view.Pace = pace(w, p.history.first(k, ids[i], w, now), now)
 				id := wk + "|" + kind
 				if th > 0 {
 					id += "|" + strconv.Itoa(th)
@@ -208,7 +208,7 @@ func (p *Plugin) fireAlerts(read map[string]bool, prev map[string][]usage.Window
 					fire(AlertThreshold, th)
 				}
 			}
-			if pc := pace(w, p.history.points(k, ids[i], w, now), now); pc != nil && pc.BeforeReset && w.UsedPct < 100 {
+			if pc := pace(w, p.history.first(k, ids[i], w, now), now); pc != nil && pc.BeforeReset && w.UsedPct < 100 {
 				rk := wk + "|" + AlertPace
 				if rec, ok := recs[rk]; !ok || laterPeriod(rec, w, now) {
 					recs[rk] = alertRecord{End: end}

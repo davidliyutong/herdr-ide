@@ -14,9 +14,7 @@ const (
 	historyKeep = 30 * 24 * time.Hour
 	// pointEvery is the least time between two points of a window whose
 	// use did not change.
-	pointEvery = 15 * time.Minute
-	// maxPoints bounds the points a snapshot carries per window.
-	maxPoints      = 60
+	pointEvery     = 15 * time.Minute
 	historyVersion = 1
 )
 
@@ -113,31 +111,19 @@ func (h *history) prune(now time.Time) {
 	}
 }
 
-// points are the points of window w (id) of its current period (the last
-// 7 days when its length is unknown), at most maxPoints, the newest kept.
-func (h *history) points(key, id string, w usage.Window, now time.Time) [][2]float64 {
-	pts := h.Windows[key][id]
+// first is the first point of window w (id) in its current period (the
+// last 7 days when its length is unknown), for its pace; nil when none.
+func (h *history) first(key, id string, w usage.Window, now time.Time) *[2]float64 {
 	from := float64(now.Add(-7 * 24 * time.Hour).Unix())
 	if w.ResetsAt > 0 && w.WindowSec > 0 {
 		from = float64(w.ResetsAt - w.WindowSec)
 	}
-	var out [][2]float64
-	for _, p := range pts {
+	for _, p := range h.Windows[key][id] {
 		if p[0] >= from {
-			out = append(out, p)
+			return &p
 		}
 	}
-	if len(out) <= maxPoints {
-		return out
-	}
-	// Every n-th point, and the last.
-	step := float64(len(out)-1) / float64(maxPoints-1)
-	thin := make([][2]float64, 0, maxPoints)
-	for i := 0; i < maxPoints; i++ {
-		thin = append(thin, out[int(float64(i)*step+0.5)])
-	}
-	thin[maxPoints-1] = out[len(out)-1]
-	return thin
+	return nil
 }
 
 // loadHistory reads the history file and the accounts it kept.

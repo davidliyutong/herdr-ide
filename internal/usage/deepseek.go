@@ -136,9 +136,3 @@ func SetDeepSeekKey(base, key string) error {
 	}
 	return os.Rename(tmp.Name(), p)
 }
-
-// HasDeepSeekKeyFile reports whether the key file exists.
-func HasDeepSeekKeyFile(base string) bool {
-	_, err := os.Stat(path.Join(base, DeepSeekKeyFile))
-	return err == nil
-}

@@ -62,7 +62,7 @@ const (
 	logGrok        = "grok"
 	logGrokLegacy  = "grok-legacy"
 	logGrokEvents  = "grok-events"
-	costCacheVer   = 1
+	costCacheVer   = 2
 	maxCacheMemory = 256 << 20
 )
 
@@ -97,9 +97,6 @@ type codexState struct {
 type costCache struct {
 	Version int                   `json:"version"`
 	Files   map[string]*fileEntry `json:"files"`
-	// dirty: loading changed it (duplicates of an earlier version
-	// dropped).
-	dirty bool
 }
 
 // CostOptions select what Cost reports.
@@ -238,7 +235,7 @@ func Cost(ctx context.Context, e *Env, o CostOptions) (*CostReport, error) {
 	cache := loadCostCache(cachePath)
 	seen := map[string]bool{}
 	logs := costLogs(e, o)
-	changed := cache.dirty
+	changed := false
 	lastSave := time.Now()
 	var read int64
 	for _, lf := range logs {
@@ -318,12 +315,6 @@ func loadCostCache(p string) *costCache {
 	var v costCache
 	if json.Unmarshal(b, &v) != nil || v.Version != costCacheVer || v.Files == nil {
 		return c
-	}
-	for _, ent := range v.Files {
-		if n := len(ent.Records); n > 0 {
-			ent.Records = dedupe(ent.Records)
-			v.dirty = v.dirty || len(ent.Records) != n
-		}
 	}
 	return &v
 }

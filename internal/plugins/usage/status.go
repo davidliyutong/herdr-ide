@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"slices"
 	"sync"
 
 	"herdr-ide/internal/usage"
@@ -56,7 +57,7 @@ func (p *Plugin) pollStatus(ctx context.Context) {
 	var mu sync.Mutex
 	got := map[string]StatusPage{}
 	for prov, page := range statusPages {
-		if !contains(enabled, prov) {
+		if !slices.Contains(enabled, prov) {
 			continue
 		}
 		mu.Lock()
@@ -111,15 +112,6 @@ func (p *Plugin) pollStatus(ctx context.Context) {
 	}
 	p.mu.Unlock()
 	p.broadcast()
-}
-
-func contains(l []string, s string) bool {
-	for _, x := range l {
-		if x == s {
-			return true
-		}
-	}
-	return false
 }
 
 type googleIncident struct {

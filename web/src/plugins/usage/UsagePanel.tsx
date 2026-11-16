@@ -49,11 +49,8 @@ function useNow(): number {
 }
 
 /** The services with an account or spend, in the order of PROVIDERS. */
-export function shownProviders(accounts: UsageAccount[], cost?: CostReport): string[] {
-  const has = new Set([
-    ...accounts.filter((a) => a.status !== 'missing').map((a) => a.provider),
-    ...(cost?.rows ?? []).map((r) => r.provider),
-  ]);
+function shownProviders(accounts: UsageAccount[], cost?: CostReport): string[] {
+  const has = new Set([...accounts.map((a) => a.provider), ...(cost?.rows ?? []).map((r) => r.provider)]);
   const known = PROVIDERS.filter((p) => has.has(p));
   return [...known, ...[...has].filter((p) => !(PROVIDERS as readonly string[]).includes(p)).sort()];
 }
@@ -309,7 +306,7 @@ function AccountCard({ account: a }: { account: UsageAccount }) {
   const bad = incident?.indicator && incident.indicator !== 'none';
   const groups = groupWindows(a.windows ?? []);
   return (
-    <section className={`usage-card status-${a.status}`} data-account={a.key}>
+    <section className="usage-card" data-account={a.key}>
       <header className="usage-card-head">
         <ProviderLogo provider={a.provider} className="lg" />
         <div className="usage-card-title">

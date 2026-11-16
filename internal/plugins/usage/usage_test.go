@@ -106,7 +106,7 @@ func TestCadence(t *testing.T) {
 	if p.due() {
 		t.Error("due before 30 minutes")
 	}
-	// A coding agent working: every 5 minutes.
+	// A coding agent working: every 10 minutes.
 	p.onAgent(machines.AgentEvent{Machine: "local", Data: json.RawMessage(`{"terminal":"t1","agent_status":"working"}`)})
 	if !p.due() {
 		t.Error("not due while an agent works")
@@ -266,39 +266,26 @@ func TestHistory(t *testing.T) {
 	}
 	s := p.Snapshot()
 	w := s.Accounts[0].Windows[0]
-	if len(w.History) != 5 || w.History[4][1] != 30 {
-		t.Errorf("history %v", w.History)
+	if pts := p.history.Windows["claude:acc-1"][w.ID]; len(pts) != 5 || pts[4][1] != 30 {
+		t.Errorf("history %v", pts)
 	}
 	// 20 % in 4 h: runs out long before the reset 3 days on.
 	if w.Pace == nil || !w.Pace.BeforeReset || w.Pace.ExhaustsAt == 0 {
 		t.Errorf("pace %+v", w.Pace)
 	}
-	// A restart shows the accounts again, with their history.
+	// A restart shows the accounts again, with their history (the pace
+	// from it).
 	q, _ := testPlugin(t, &now, nil, nil)
 	q.host = p.host
 	q.loadHistory(path)
 	s2 := q.Snapshot()
-	if len(s2.Accounts) != 1 || len(s2.Accounts[0].Windows) != 1 || len(s2.Accounts[0].Windows[0].History) != 5 {
+	if len(s2.Accounts) != 1 || len(s2.Accounts[0].Windows) != 1 || *s2.Accounts[0].Windows[0].Pace != *w.Pace {
 		t.Errorf("reloaded %+v", s2.Accounts)
 	}
 	// Points older than 30 days go.
 	q.history.prune(now.Add(31 * 24 * time.Hour))
 	if len(q.history.Windows) != 0 {
 		t.Errorf("not pruned: %v", q.history.Windows)
-	}
-}
-
-func TestHistoryPointsAreThinned(t *testing.T) {
-	h := newHistory()
-	now := time.Unix(1_800_000_000, 0)
-	var pts [][2]float64
-	for i := 0; i < 200; i++ {
-		pts = append(pts, [2]float64{float64(now.Unix() - int64(200-i)*60), float64(i) / 2})
-	}
-	h.Windows["k"] = map[string][][2]float64{"weekly|": pts}
-	got := h.points("k", "weekly|", usage.Window{Kind: "weekly"}, now)
-	if len(got) != maxPoints || got[len(got)-1] != pts[len(pts)-1] || got[0] != pts[0] {
-		t.Errorf("thinned to %d: first %v last %v", len(got), got[0], got[len(got)-1])
 	}
 }
 

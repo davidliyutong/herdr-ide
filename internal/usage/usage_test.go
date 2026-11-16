@@ -431,8 +431,11 @@ func TestDeepSeek(t *testing.T) {
 	if err := SetDeepSeekKey(e.Base, "bad key\n"); !errors.Is(err, ErrBadKey) {
 		t.Errorf("bad key: %v", err)
 	}
-	if err := SetDeepSeekKey(e.Base, ""); err != nil || HasDeepSeekKeyFile(e.Base) {
+	if err := SetDeepSeekKey(e.Base, ""); err != nil {
 		t.Errorf("remove: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(e.Base, DeepSeekKeyFile)); !os.IsNotExist(err) {
+		t.Errorf("key file left: %v", err)
 	}
 }
 

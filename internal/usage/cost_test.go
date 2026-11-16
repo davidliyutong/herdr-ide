@@ -286,8 +286,8 @@ func appendTo(t *testing.T, f, text string) {
 }
 
 // The cache keeps one record per response: a streamed response's lines
-// are one record, the one with the final usage; an older cache's
-// duplicates are dropped when it is read.
+// are one record, the one with the final usage; a cache of another version
+// is not read.
 func TestCostCacheOneRecordPerResponse(t *testing.T) {
 	e := testEnv(t, nil)
 	costFixtures(t, e)
@@ -299,18 +299,10 @@ func TestCostCacheOneRecordPerResponse(t *testing.T) {
 	if rs := c.Files[f].Records; len(rs) != 1 || rs[0].O != 500 {
 		t.Fatalf("records %+v", rs)
 	}
-	if c.dirty {
-		t.Error("a clean cache read as changed")
-	}
-	// An older cache with each line's record.
-	r := c.Files[f].Records[0]
-	low := r
-	low.O = 100
-	c.Files[f].Records = []Record{low, r, low}
+	c.Version = costCacheVer - 1
 	saveCostCache(cache, c)
-	c = loadCostCache(cache)
-	if rs := c.Files[f].Records; len(rs) != 1 || rs[0].O != 500 || !c.dirty {
-		t.Errorf("older cache %+v dirty %v", rs, c.dirty)
+	if c = loadCostCache(cache); len(c.Files) != 0 || c.Version != costCacheVer {
+		t.Errorf("a cache of another version read: %+v", c)
 	}
 }
 

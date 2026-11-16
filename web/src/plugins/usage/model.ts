@@ -21,7 +21,6 @@ export interface UsageWindow {
   resetsAt?: number;
   windowSec?: number;
   pace?: UsagePace;
-  history?: [number, number][];
 }
 
 export interface UsageCredits {
@@ -50,7 +49,7 @@ export interface UsageAccount {
   credits?: UsageCredits;
   balances?: UsageBalance[];
   available?: boolean;
-  status: 'ok' | 'stale' | 'unauth' | 'error' | 'missing' | 'skipped';
+  status: 'ok' | 'stale' | 'unauth' | 'error';
   code?: string;
   source?: string;
   asOf?: number;

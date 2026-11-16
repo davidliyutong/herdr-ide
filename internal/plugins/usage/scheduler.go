@@ -33,16 +33,13 @@ const (
 	minRefreshGap = 30 * time.Second
 )
 
-// WindowView is a window with its pace and recent history.
+// WindowView is a window with its pace.
 type WindowView struct {
 	usage.Window
 	// ID tells the account's windows apart: kind|label, with the length
 	// where two share them.
 	ID   string `json:"id"`
 	Pace *Pace  `json:"pace,omitempty"`
-	// History is [time, used %] of the window's current period (at most
-	// 60 points), for the burndown.
-	History [][2]float64 `json:"history,omitempty"`
 }
 
 // Pace compares a window's use with its time.
@@ -704,8 +701,7 @@ func (p *Plugin) Snapshot() Snapshot {
 		v.Windows = make([]WindowView, 0, len(a.view.Account.Windows))
 		ids := windowIDs(a.view.Account.Windows)
 		for i, w := range a.view.Account.Windows {
-			pts := p.history.points(v.Key, ids[i], w, now)
-			v.Windows = append(v.Windows, WindowView{Window: w, ID: ids[i], Pace: pace(w, pts, now), History: pts})
+			v.Windows = append(v.Windows, WindowView{Window: w, ID: ids[i], Pace: pace(w, p.history.first(v.Key, ids[i], w, now), now)})
 		}
 		v.Account.Windows = nil
 		v.Machines = slices.Clone(v.Machines)
@@ -739,8 +735,9 @@ func (p *Plugin) broadcast() {
 }
 
 // pace compares w's use with its time gone and projects when it runs out
-// at the rate of its history in this period (else since the period began).
-func pace(w usage.Window, pts [][2]float64, now time.Time) *Pace {
+// at the rate since from, the first point of its history in this period
+// (else since the period began).
+func pace(w usage.Window, from *[2]float64, now time.Time) *Pace {
 	if w.ResetsAt <= 0 || w.WindowSec <= 0 {
 		return nil
 	}
@@ -755,8 +752,8 @@ func pace(w usage.Window, pts [][2]float64, now time.Time) *Pace {
 		return pc
 	}
 	t0, u0 := float64(start), 0.0
-	if len(pts) > 0 && pts[0][0] >= float64(start) && t-int64(pts[0][0]) >= 600 && pts[0][1] <= w.UsedPct {
-		t0, u0 = pts[0][0], pts[0][1]
+	if from != nil && from[0] >= float64(start) && t-int64(from[0]) >= 600 && from[1] <= w.UsedPct {
+		t0, u0 = from[0], from[1]
 	}
 	dt := float64(t) - t0
 	if dt <= 0 || w.UsedPct <= u0 {

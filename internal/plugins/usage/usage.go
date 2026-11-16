@@ -1,9 +1,9 @@
 // Package usage is the core's side of the AI usage plugin: a scheduler that
 // asks the connected machines' agents for the limits of the AI
 // subscriptions signed in there (internal/agent/plugin/usage), merges the
-// accounts seen on several machines, keeps their history for burndown and
-// pace, polls the providers' status pages, and serves the result to the
-// UIs (GET /api/p/usage, /ws plugin messages). The web UI's side is
+// accounts seen on several machines, keeps their history for their pace,
+// fires the alerts, polls the providers' status pages, and serves the
+// result to the UIs (GET /api/p/usage, /ws plugin messages). The web UI's side is
 // web/src/plugins/usage; docs/features/29-ai-usage.md has the design.
 package usage
 
@@ -129,7 +129,8 @@ func (p *Plugin) Routes() []plugin.Route {
 func (p *Plugin) ID() string { return ID }
 
 // getSnapshot answers with the current snapshot; ?watch=1 (the open panel,
-// every minute) makes the adaptive refresh ask every 2 minutes.
+// every minute) counts the panel open for the adaptive refresh
+// (usage.refreshOpen).
 func (p *Plugin) getSnapshot(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("watch") == "1" {
 		p.watch()

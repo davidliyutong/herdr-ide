@@ -36,7 +36,7 @@ const view = loadPref<View>(VIEW, {});
 export const useUsage = create<UsageState>(() => ({
   costLoading: false,
   remaining: !!view.remaining,
-  tab: typeof view.tab === 'string' && view.tab !== 'limits' && view.tab !== 'cost' ? view.tab : 'overview',
+  tab: typeof view.tab === 'string' ? view.tab : 'overview',
   costDays: view.costDays === 7 || view.costDays === 90 ? view.costDays : 30,
 }));
 
