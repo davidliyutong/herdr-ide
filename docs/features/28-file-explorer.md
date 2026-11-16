@@ -74,7 +74,7 @@ machine's `internal/agent/plugin/files`.
   selection), → (expand, then the first child), ← (collapse, then the
   parent), ⌘A (Ctrl+A elsewhere) selects every row shown, letters go to
   the next row whose name starts with them (type-ahead), Enter
-  (open, kept), Space (preview, the keyboard stays in the tree), F2 (rename), Delete or ⌘⌫ (trash), Shift
+  (open, kept; on a selection of several, its files), Space (preview, the keyboard stays in the tree), F2 (rename), Delete or ⌘⌫ (trash), Shift
   with them (delete for good, after asking), ⌘/Ctrl C, X, V, Escape (the
   clipboard, then the filter). Arrows with ⌘, Ctrl or Alt are left to
   the page's shortcuts. The keys act on the selected rows the tree
@@ -96,8 +96,12 @@ machine's `internal/agent/plugin/files`.
 - Changes are typed in the tree: a new file or folder gets a row with a
   name field in its folder, F2 turns a row's name into one. Names with `/`,
   empty names, `.` and `..` are refused before anything is sent.
-- The context menu: Open, Open Preview, Open in VS Code, Open in Terminal (a
-  terminal split beside the focused pane, in the folder), New File, New
+- The context menu: Open (the files of the selection, several at once),
+  Open to the Side (a kept editor beside the focused pane, as Open places
+  editors), Open Preview, Open in VS Code, Open in Terminal (a terminal
+  split beside the focused pane, in the folder; these three for one row),
+  Open Changes (a file version control marks as changed, with a letter:
+  the quick diff provider's diff, the Git plugin's), New File, New
   Folder, Upload Files…, Upload Folder… (on a folder), Cut, Copy, Paste,
   Copy Path, Copy Relative Path (to the root), Download (`download.ts`, a
   zip for folders and several rows; not for the desktop app's own
@@ -284,6 +288,18 @@ button.
 - **Show in Explorer** reveals the file in the tree; outside its root the
   tree stops following and shows the file's folder.
 
+**Shared with other lists of files** (`ops.ts`, [27](27-plugins.md)):
+`fileMenuEntries(m, paths, options)` gives the entries of the context menu
+that open paths and copy or download them, with **Reveal in Explorer**
+(`revealInExplorer(m, path)`: the panel shown, the path's folders expanded,
+it selected and scrolled to); the Git panel's rows offer them as the
+explorer's rows do. Entries for several rows act on all of them where that
+makes sense (Open, Open to the Side, Copy Path, Copy Relative Path,
+Download, and in the explorer Cut, Copy, Move to Trash, Delete
+Permanently and dragging); a paste or a new entry goes into the folder of
+the row pointed at; Open Preview, Open in VS Code, Open in Terminal, Open
+Changes and Rename take one.
+
 **Monaco** (`web/src/plugins/monaco.ts`) is the editor of the editor pane
 and of later plugins' panes (diffs): loaded on first use (dynamic imports,
 so the main bundle does not grow), with its editor features, every
@@ -439,6 +455,10 @@ the trash stay in the user's trash
   POST, one at a time and less often after failures, a failed listing
   kept and tried again), Refresh, what a new root keeps and clears, paste
   into the root, a cut kept until moved, read-only mode, decorations.
+- `web/src/__tests__/files.test.ts` also: a selection of several rows
+  (Enter opening its files, the entries that apply to them all), Open
+  Changes for a file a provider marks as changed, the shared entries and
+  Reveal in Explorer (inside and outside the root).
 - `web/src/__tests__/filesUpload.test.ts`: a drop's folders read with
   everything in them (in batches, unreadable items counted), the deepest
   folders made, files and folders uploaded with their structure (a

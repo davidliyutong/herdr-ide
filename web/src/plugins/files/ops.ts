@@ -19,6 +19,8 @@ import { useStore, type ToastKind } from '../../state/store';
 import { useTransfers } from '../../transfers';
 import type { MenuEntry } from '../../contextMenu';
 import { errorText, filesApi, type Result } from './api';
+import { decorationsOf } from './decorations';
+import { quickDiff } from './quickDiff';
 import { isPluginOn } from '../registry';
 import { chooseFiles, droppedEntries, localPaths, pickedFiles, uploadInto } from './upload';
 import {
@@ -76,7 +78,6 @@ export function badName(name: string): string | undefined {
 
 // ---- opening ----
 
-/** Opens a file in the editor pane (one per file). */
 /** The file editors of the shown workspace of m. */
 function editors(m: string): L.PluginView[] {
   const l = terms.layout(m);
@@ -97,6 +98,18 @@ export function openEditor(m: string, path: string, o: { preview?: boolean } = {
     return actions.openView(m, preview ? view : { ...view, preview: false }, { reuse: (v) => v.path === path });
   const replaceable = (v: L.PluginView) => preview && v.preview === true && !unsavedPanes(m, [L.viewKey(v.id)]).length;
   return actions.openView(m, { ...view, preview }, { reuse: replaceable });
+}
+
+/** Opens files in editors to keep, one after the other (a selection's). */
+export async function openFiles(m: string, paths: readonly string[]) {
+  for (const p of paths) await openEditor(m, p);
+}
+
+/** Open to the Side: the file in an editor to keep, in a split beside the
+ * focused pane, as VS Code's; an editor that shows it already is focused
+ * instead, as a workspace has one per file. */
+export function openToSide(m: string, path: string) {
+  return openEditor(m, path);
 }
 
 /** Keeps a preview editor open: the next preview opens beside it. */
@@ -135,9 +148,12 @@ export async function openTerminal(m: string, dir: string) {
   }
 }
 
-/** Shows path in the tree: its directories expanded, it selected; outside
- * the root, the tree stops following panes and shows its directory. */
-export function reveal(m: string, path: string) {
+/** Reveal in Explorer: shows the explorer's panel with path in the tree,
+ * its folders expanded, it selected and scrolled to; outside the root,
+ * the tree stops following panes and shows its folder. Nothing while the
+ * explorer is off. */
+export function revealInExplorer(m: string, path: string) {
+  if (!isPluginOn('files')) return;
   const s = useTree.getState();
   useStore.getState().setPanel('files');
   if (s.m !== m || !s.root || !within(path, s.root) || path === s.root) {
@@ -148,6 +164,9 @@ export function reveal(m: string, path: string) {
   for (let d = parentOf(path); within(d, root) && d !== root; d = parentOf(d)) setExpanded(d, true);
   select(path);
 }
+
+/** Show in Explorer of the editor pane. */
+export const reveal = revealInExplorer;
 
 // ---- changes ----
 
@@ -288,33 +307,96 @@ export async function copyText(text: string) {
 /** The directory new entries and pastes go into for a target row. */
 export const dirOf = (path: string, dir: boolean) => (dir ? path : parentOf(path));
 
+/** How fileMenuEntries treats paths. */
+export interface FileMenuOptions {
+  /** Whether a path is a folder: Open and Open Preview leave folders out,
+   * Open in VS Code opens a folder as one, Open in Terminal starts in it
+   * (a file's folder otherwise). Every path is a file by default. */
+  isDir?(p: string): boolean;
+  /** What Copy Relative Path is relative to: the explorer's root by
+   * default. */
+  root?: string;
+  /** Where the keyboard goes back to after Open Preview (the list). */
+  el?: HTMLElement | null;
+  /** Leave out Reveal in Explorer (the explorer's own menu). */
+  reveal?: boolean;
+}
+
+/** The entries that open paths: Open (the files among them, several at
+ * once), Open to the Side, Open Preview (one file), Open in VS Code and
+ * Open in Terminal (one path). */
+function openEntries(m: string, paths: readonly string[], o: FileMenuOptions): MenuEntry[] {
+  const isDir = o.isDir ?? (() => false);
+  const files = paths.filter((p) => !isDir(p));
+  const one = paths.length === 1 ? paths[0] : undefined;
+  const out: MenuEntry[] = [];
+  if (files.length) {
+    out.push({ label: t('files.open'), hint: '↵', run: () => void openFiles(m, files) });
+    out.push({
+      label: t('files.openToSide'),
+      run: () => void files.reduce((p, f) => p.then(() => openToSide(m, f)), Promise.resolve<unknown>(undefined)),
+    });
+  }
+  if (one && files.length) out.push({ label: t('files.quickLook'), hint: keyLabel('space'), run: () => void quickLook(m, one, o.el) });
+  if (one && isPluginOn('vscode'))
+    out.push({ label: t('files.openInCode'), run: () => void (isDir(one) ? actions.openCode(m, one) : actions.openInCode(m, one)) });
+  if (one) out.push({ label: t('files.openInTerminal'), run: () => void openTerminal(m, dirOf(one, isDir(one))) });
+  return out;
+}
+
+/** Copy Path, Copy Relative Path and Download (a zip for folders and
+ * several paths; not for the desktop app's own machine). */
+function pathEntries(m: string, paths: readonly string[], o: FileMenuOptions): MenuEntry[] {
+  const root = o.root ?? useTree.getState().root;
+  const out: MenuEntry[] = [
+    { label: t('files.copyPath'), run: () => void copyText(paths.join('\n')) },
+    { label: t('files.copyRelativePath'), run: () => void copyText(paths.map((p) => relativePath(root, p)).join('\n')) },
+  ];
+  if (canDownload(m))
+    out.push('sep', { label: t('files.download'), icon: createElement(Download), run: () => void startDownload(m, [...paths]) });
+  return out;
+}
+
+/** The entries every list of a machine's files offers for paths (a
+ * selection, the row pointed at first), as the explorer's menu has them:
+ * Open, Open to the Side, Open Preview, Open in VS Code, Open in Terminal,
+ * Copy Path, Copy Relative Path, Download and Reveal in Explorer (one
+ * path). The Git panel's rows offer them too. They change nothing, so
+ * read-only mode keeps them. */
+export function fileMenuEntries(m: string, paths: readonly string[], o: FileMenuOptions = {}): MenuEntry[] {
+  if (!paths.length) return [];
+  const out: MenuEntry[] = [...openEntries(m, paths, o), 'sep', ...pathEntries(m, paths, o)];
+  if (o.reveal !== false && paths.length === 1 && isPluginOn('files'))
+    out.push('sep', { label: t('files.revealInExplorer'), run: () => revealInExplorer(m, paths[0]) });
+  return out;
+}
+
+/** Whether a version control provider marks the file at path as changed
+ * (a decoration with a letter on its row), so its changes can be opened. */
+function changed(m: string, path: string): boolean {
+  const d = decorationsOf(m, parentOf(path))[baseName(path)];
+  return !!d?.badge && !!quickDiff()?.openChanges;
+}
+
 /** The context menu for paths (the selection, with the row pointed at
- * first) or, with none, for the tree's root. */
+ * first) or, with none, for the tree's root. Folders, files and several of
+ * both take what applies to them: several files open at once, are cut,
+ * copied, downloaded, trashed or deleted together; a paste or a new
+ * entry goes into the folder of the row pointed at. */
 export function menuFor(m: string, paths: string[], isDir: (p: string) => boolean, el?: HTMLElement | null): MenuEntry[] {
   const s = useTree.getState();
   const root = s.root!;
   const ro = readOnly();
   const target = paths[0];
-  const one = paths.length === 1;
   const dir = target ? dirOf(target, isDir(target)) : root;
   const out: MenuEntry[] = [];
-  if (target && one) {
-    if (!isDir(target)) {
-      out.push({ label: t('files.open'), hint: '↵', run: () => void openPath(m, target, false) });
-      out.push({ label: t('files.quickLook'), hint: keyLabel('space'), run: () => void quickLook(m, target, el) });
-    }
-    if (isPluginOn('vscode'))
-      out.push({
-        label: t('files.openInCode'),
-        run: () => void (isDir(target) ? actions.openCode(m, target) : actions.openInCode(m, target)),
-      });
-    out.push({ label: t('files.openInTerminal'), run: () => void openTerminal(m, dir) });
-    out.push('sep');
-  } else if (!target) {
-    out.push({ label: t('files.openInTerminal'), run: () => void openTerminal(m, root) });
-    out.push('sep');
-  }
-  if (!ro && (one || !target)) {
+  if (target) {
+    out.push(...openEntries(m, paths, { isDir, el }));
+    if (paths.length === 1 && !isDir(target) && changed(m, target))
+      out.push({ label: t('files.openChangesItem'), run: () => quickDiff()?.openChanges?.(m, target) });
+  } else out.push({ label: t('files.openInTerminal'), run: () => void openTerminal(m, root) });
+  out.push('sep');
+  if (!ro) {
     out.push({ label: t('files.newFile'), icon: createElement(FilePlus), run: () => setEdit({ kind: 'file', path: dir }) });
     out.push({ label: t('files.newFolder'), icon: createElement(FolderPlus), run: () => setEdit({ kind: 'folder', path: dir }) });
     if (!target || isDir(target)) out.push(...uploadEntries(m, dir));
@@ -324,21 +406,14 @@ export function menuFor(m: string, paths: string[], isDir: (p: string) => boolea
     out.push({ label: t('files.cut'), hint: treeKeys.cut(), run: () => setClipboard({ m, paths, cut: true }) });
     out.push({ label: t('files.copy'), hint: treeKeys.copy(), run: () => setClipboard({ m, paths, cut: false }) });
   }
-  if (!ro && s.clipboard?.m === m && (one || !target)) {
+  if (!ro && s.clipboard?.m === m) {
     out.push({ label: t('files.paste'), hint: treeKeys.paste(), run: () => void paste(m, dir) });
   }
   out.push('sep');
-  if (target) {
-    out.push({ label: t('files.copyPath'), run: () => void copyText(paths.join('\n')) });
-    out.push({ label: t('files.copyRelativePath'), run: () => void copyText(paths.map((p) => relativePath(root, p)).join('\n')) });
-    if (canDownload(m)) {
-      out.push('sep');
-      out.push({ label: t('files.download'), icon: createElement(Download), run: () => void startDownload(m, paths) });
-    }
-  }
+  if (target) out.push(...pathEntries(m, paths, { root }));
   if (target && !ro) {
     out.push('sep');
-    if (one)
+    if (paths.length === 1)
       out.push({ label: t('files.rename'), hint: 'F2', icon: createElement(Pencil), run: () => setEdit({ kind: 'rename', path: target }) });
     out.push({ label: t('files.trash'), hint: treeKeys.trash(), icon: createElement(Trash2), run: () => void trash(m, paths) });
     out.push({ label: t('files.deletePermanently'), hint: treeKeys.remove(), danger: true, run: () => void remove(m, paths) });

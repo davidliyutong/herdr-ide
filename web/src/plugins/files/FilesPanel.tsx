@@ -47,7 +47,22 @@ import {
   setClipboard,
   type Row,
 } from './tree';
-import { copyInto, create, dirOf, dropFiles, menuFor, moveInto, openPath, panelMenu, paste, quickLook, remove, rename, trash } from './ops';
+import {
+  copyInto,
+  create,
+  dirOf,
+  dropFiles,
+  menuFor,
+  moveInto,
+  openFiles,
+  openPath,
+  panelMenu,
+  paste,
+  quickLook,
+  remove,
+  rename,
+  trash,
+} from './ops';
 import { canDownload } from '../../download';
 import { downloadUrl } from '../../lib/files';
 import { startPolling } from './poller';
@@ -169,10 +184,14 @@ export function FilesPanel() {
       return;
     }
     switch (true) {
-      case ev.key === 'Enter':
+      case ev.key === 'Enter': {
         handled();
-        if (row) void openPath(m, row.path, row.dir);
+        // On a selection of several, its files open; else the cursor's row.
+        const files = st.selection.filter((p) => kinds.get(p) === false);
+        if (row && st.selection.length > 1 && st.selection.includes(row.path)) void openFiles(m, files);
+        else if (row) void openPath(m, row.path, row.dir);
         return;
+      }
       case ev.key === ' ':
         handled();
         if (row && !row.dir) void quickLook(m, row.path, treeRef.current);
