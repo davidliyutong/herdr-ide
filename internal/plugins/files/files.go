@@ -27,6 +27,9 @@ const (
 	MaxWrite = 8 << 20
 	// MaxStat bounds the paths of one stat (the agent's limit).
 	MaxStat = 200
+	// MaxUpload bounds an upload into the explorer (the agent's limit, as
+	// the core's /upload).
+	MaxUpload = 4 << 30
 	// maxBody bounds the JSON of a change.
 	maxBody = 1 << 20
 	// timeout bounds an action; copies and removals of large trees take
@@ -61,6 +64,10 @@ type params struct {
 	Dir    string   `json:"dir,omitempty"`
 	Expect *Entry   `json:"expect,omitempty"`
 	Force  bool     `json:"force,omitempty"`
+	// Method is how a save writes a file that is there (auto, replace).
+	Method  string `json:"method,omitempty"`
+	Replace bool   `json:"replace,omitempty"`
+	Unique  bool   `json:"unique,omitempty"`
 }
 
 func (Plugin) Routes() []plugin.Route {
@@ -72,6 +79,7 @@ func (Plugin) Routes() []plugin.Route {
 		// mutating, so read-only mode polls too.
 		{Method: http.MethodPost, Path: "stat", Machine: true, Handler: stat},
 		change("mkdir"),
+		change("mkdirs"),
 		change("create"),
 		change("rename"),
 		change("move"),
@@ -79,6 +87,7 @@ func (Plugin) Routes() []plugin.Route {
 		change("trash"),
 		change("remove"),
 		{Method: http.MethodPost, Path: "write", Machine: true, Mutating: true, Audit: "write", Handler: write},
+		{Method: http.MethodPost, Path: "upload", Machine: true, Mutating: true, Audit: "upload", Handler: upload},
 	}
 }
 
@@ -114,7 +123,7 @@ func run(action string) func(c *plugin.Call, w http.ResponseWriter, r *http.Requ
 			plugin.WriteError(w, err)
 			return
 		}
-		p.Expect, p.Force = nil, false
+		p.Expect, p.Force, p.Method, p.Replace = nil, false, "", false
 		auditTargets(c, p)
 		ctx, cancel := context.WithTimeout(r.Context(), timeout)
 		defer cancel()
@@ -187,6 +196,7 @@ func write(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
 	if p.Force {
 		c.AuditField("force", true)
 	}
+	p.Method = saveMethod(c)
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxWrite))
 	if err != nil {
 		plugin.WriteJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "too_large", "message": err.Error()})
@@ -194,7 +204,7 @@ func write(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
 	defer cancel()
-	res, err := save(ctx, c, p, body)
+	res, err := send(ctx, c, "write", p, bytes.NewReader(body))
 	if err != nil {
 		var pe *plugin.Error
 		if errors.As(err, &pe) && pe.Code == "conflict" {
@@ -211,16 +221,57 @@ func write(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
 	w.Write(res)
 }
 
-// save runs the agent's write: its reply, the text as chunks, then the
-// line with the result.
-func save(ctx context.Context, c *plugin.Call, p params, body []byte) (json.RawMessage, error) {
-	conn, _, err := plugin.Open(ctx, c.Machine, "files", "write", p)
+// uploadParams reads an upload's query: path, and replace=1 to write the
+// file there instead of taking a free name.
+func uploadParams(r *http.Request) (params, error) {
+	q := r.URL.Query()
+	p := params{Path: q.Get("path"), Replace: q.Get("replace") == "1"}
+	if p.Path == "" {
+		return p, errors.New("path required")
+	}
+	return p, nil
+}
+
+// upload writes a file from the browser (the body, at most MaxUpload
+// bytes) into a folder of the explorer: under a free name, or replacing
+// the file there (replace=1), as the agent's upload does. The body streams
+// to the machine; a request that ends early leaves nothing there.
+func upload(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
+	p, err := uploadParams(r)
+	if err != nil {
+		plugin.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad_request", "message": err.Error()})
+		return
+	}
+	auditTargets(c, p)
+	c.AuditField("size", r.ContentLength)
+	if p.Replace {
+		c.AuditField("replace", true)
+		p.Method = saveMethod(c)
+	}
+	if r.ContentLength > MaxUpload {
+		plugin.WriteJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "too_large", "message": "more than 4 GiB"})
+		return
+	}
+	res, err := send(r.Context(), c, "upload", p, io.LimitReader(r.Body, MaxUpload+1))
+	if err != nil {
+		plugin.WriteError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Write(res)
+}
+
+// send runs an agent action that takes a body (write, upload): its reply,
+// the body as chunks, then the line with the result.
+func send(ctx context.Context, c *plugin.Call, action string, p params, body io.Reader) (json.RawMessage, error) {
+	conn, _, err := plugin.Open(ctx, c.Machine, "files", action, p)
 	if err != nil {
 		return nil, err
 	}
 	defer conn.Close()
 	cw := agentproto.ChunkWriter{W: conn}
-	if _, err := io.Copy(cw, bytes.NewReader(body)); err != nil {
+	if _, err := io.Copy(cw, body); err != nil {
 		return nil, &plugin.Error{Code: "transport", Message: err.Error()}
 	}
 	if err := cw.Finish(); err != nil {

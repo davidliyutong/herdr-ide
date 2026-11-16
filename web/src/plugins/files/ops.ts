@@ -4,11 +4,11 @@
 // uploads, and the context menu that offers them. Nothing that changes
 // files is offered in read-only mode.
 
-import { FilePlus, FolderPlus, Pencil, Trash2 } from 'lucide-react';
+import { Download, FilePlus, FolderPlus, FolderUp, Pencil, Trash2, Upload } from 'lucide-react';
 import { createElement } from 'react';
 import { actions, current } from '../../actions';
 import { confirmDialog } from '../../dialog';
-import { canDownload, startDownload } from '../../download';
+import { canDownload, startDownload, useDownloads } from '../../download';
 import { droppedItems, filesAreOn } from '../../drop';
 import { t } from '../../i18n';
 import { isMac, keyLabel } from '../../keys';
@@ -16,10 +16,14 @@ import * as L from '../../term/layout';
 import { terms } from '../../state/terms';
 import { unsavedPanes, withView } from '../../state/panes';
 import { useStore, type ToastKind } from '../../state/store';
-import { uploadFiles } from '../../transfers';
+import { useTransfers } from '../../transfers';
 import type { MenuEntry } from '../../contextMenu';
 import { errorText, filesApi, type Result } from './api';
+import { decorationsOf } from './decorations';
+import { quickDiff } from './quickDiff';
 import { isPluginOn } from '../registry';
+import { settingValue } from '../../settings';
+import { chooseFiles, droppedEntries, localPaths, pickedFiles, uploadInto } from './upload';
 import {
   baseName,
   join,
@@ -75,7 +79,6 @@ export function badName(name: string): string | undefined {
 
 // ---- opening ----
 
-/** Opens a file in the editor pane (one per file). */
 /** The file editors of the shown workspace of m. */
 function editors(m: string): L.PluginView[] {
   const l = terms.layout(m);
@@ -96,6 +99,18 @@ export function openEditor(m: string, path: string, o: { preview?: boolean } = {
     return actions.openView(m, preview ? view : { ...view, preview: false }, { reuse: (v) => v.path === path });
   const replaceable = (v: L.PluginView) => preview && v.preview === true && !unsavedPanes(m, [L.viewKey(v.id)]).length;
   return actions.openView(m, { ...view, preview }, { reuse: replaceable });
+}
+
+/** Opens files in editors to keep, one after the other (a selection's). */
+export async function openFiles(m: string, paths: readonly string[]) {
+  for (const p of paths) await openEditor(m, p);
+}
+
+/** Open to the Side: the file in an editor to keep, in a split beside the
+ * focused pane, as VS Code's; an editor that shows it already is focused
+ * instead, as a workspace has one per file. */
+export function openToSide(m: string, path: string) {
+  return openEditor(m, path);
 }
 
 /** Keeps a preview editor open: the next preview opens beside it. */
@@ -134,9 +149,12 @@ export async function openTerminal(m: string, dir: string) {
   }
 }
 
-/** Shows path in the tree: its directories expanded, it selected; outside
- * the root, the tree stops following panes and shows its directory. */
-export function reveal(m: string, path: string) {
+/** Reveal in Explorer: shows the explorer's panel with path in the tree,
+ * its folders expanded, it selected and scrolled to; outside the root,
+ * the tree stops following panes and shows its folder. Nothing while the
+ * explorer is off. */
+export function revealInExplorer(m: string, path: string) {
+  if (!isPluginOn('files')) return;
   const s = useTree.getState();
   useStore.getState().setPanel('files');
   if (s.m !== m || !s.root || !within(path, s.root) || path === s.root) {
@@ -147,6 +165,9 @@ export function reveal(m: string, path: string) {
   for (let d = parentOf(path); within(d, root) && d !== root; d = parentOf(d)) setExpanded(d, true);
   select(path);
 }
+
+/** Show in Explorer of the editor pane. */
+export const reveal = revealInExplorer;
 
 // ---- changes ----
 
@@ -172,11 +193,21 @@ export async function rename(m: string, path: string, name: string) {
   select(to);
 }
 
-/** Moves paths into the trash; what no trash takes may be deleted for good
+/** Moves paths into the trash, after asking when the setting
+ * files.confirmTrash says so; what no trash takes may be deleted for good
  * after asking. */
 export async function trash(m: string, paths: string[]) {
   paths = topmost(paths);
   if (!paths.length) return;
+  if (settingValue('files.confirmTrash') === true) {
+    const what = paths.length === 1 ? baseName(paths[0]) : t('files.items', { n: paths.length });
+    const ok = await confirmDialog({
+      title: t('files.confirm.trashTitle'),
+      message: t('files.confirm.trash', { what }),
+      confirm: t('files.trash'),
+    });
+    if (!ok) return;
+  }
   let r: Result;
   try {
     r = await filesApi.trash(m, paths);
@@ -241,22 +272,37 @@ export async function paste(m: string, dir: string) {
   setClipboard(failed.length ? { ...c, paths: failed } : undefined);
 }
 
-/** Uploads files dropped from outside the page into dir; in the desktop
- * app files of its own machine are copied where they are. Folders from
- * another computer cannot be uploaded. */
+/** Uploads files and folders dropped from outside the page into dir, the
+ * folders with everything in them (upload.ts); in the desktop app files
+ * of its own machine are copied where they are. It must start during the
+ * drop event, which takes the entries. */
 export async function dropFiles(m: string, dir: string, items: DataTransferItemList | ArrayLike<DataTransferItem>) {
-  const dropped = droppedItems(items);
   if (filesAreOn(m)) {
-    const here = dropped.filter((d) => d.path).map((d) => d.path);
+    const here = droppedItems(items)
+      .filter((d) => d.path)
+      .map((d) => d.path);
     if (here.length) await copyInto(m, here, dir);
     return;
   }
-  const folders = dropped.filter((d) => d.folder).length;
-  if (folders) toast(t('surface.dropNoFolders', { n: folders }), 'info');
-  const files = dropped.filter((d) => !d.folder).map((d) => d.file);
+  const { picked, unreadable } = await droppedEntries(items);
+  if (unreadable) toast(t('files.upload.unreadable', { n: unreadable }), 'info');
+  await uploadInto(m, dir, picked);
+}
+
+/** Upload Files… and Upload Folder…: the browser's dialog, then the
+ * upload into dir (in the desktop app, copies of its own machine's files
+ * where they are). */
+export async function uploadChosen(m: string, dir: string, folder: boolean) {
+  const files = await chooseFiles(folder);
   if (!files.length) return;
-  await uploadFiles(m, files, dir);
-  reloadDirs([dir]);
+  const here = filesAreOn(m) ? localPaths(files) : [];
+  if (here.length) return copyInto(m, here, dir);
+  await uploadInto(m, dir, pickedFiles(files));
+}
+
+/** Opens the uploads or the downloads panel of the status bar. */
+export function showTransfers(which: 'uploads' | 'downloads') {
+  (which === 'uploads' ? useTransfers : useDownloads).getState().setPanel(true);
 }
 
 export async function copyText(text: string) {
@@ -272,56 +318,113 @@ export async function copyText(text: string) {
 /** The directory new entries and pastes go into for a target row. */
 export const dirOf = (path: string, dir: boolean) => (dir ? path : parentOf(path));
 
+/** How fileMenuEntries treats paths. */
+export interface FileMenuOptions {
+  /** Whether a path is a folder: Open and Open Preview leave folders out,
+   * Open in VS Code opens a folder as one, Open in Terminal starts in it
+   * (a file's folder otherwise). Every path is a file by default. */
+  isDir?(p: string): boolean;
+  /** What Copy Relative Path is relative to: the explorer's root by
+   * default. */
+  root?: string;
+  /** Where the keyboard goes back to after Open Preview (the list). */
+  el?: HTMLElement | null;
+  /** Leave out Reveal in Explorer (the explorer's own menu). */
+  reveal?: boolean;
+}
+
+/** The entries that open paths: Open (the files among them, several at
+ * once), Open to the Side, Open Preview (one file), Open in VS Code and
+ * Open in Terminal (one path). */
+function openEntries(m: string, paths: readonly string[], o: FileMenuOptions): MenuEntry[] {
+  const isDir = o.isDir ?? (() => false);
+  const files = paths.filter((p) => !isDir(p));
+  const one = paths.length === 1 ? paths[0] : undefined;
+  const out: MenuEntry[] = [];
+  if (files.length) {
+    out.push({ label: t('files.open'), hint: '↵', run: () => void openFiles(m, files) });
+    out.push({
+      label: t('files.openToSide'),
+      run: () => void files.reduce((p, f) => p.then(() => openToSide(m, f)), Promise.resolve<unknown>(undefined)),
+    });
+  }
+  if (one && files.length) out.push({ label: t('files.quickLook'), hint: keyLabel('space'), run: () => void quickLook(m, one, o.el) });
+  if (one && isPluginOn('vscode'))
+    out.push({ label: t('files.openInCode'), run: () => void (isDir(one) ? actions.openCode(m, one) : actions.openInCode(m, one)) });
+  if (one) out.push({ label: t('files.openInTerminal'), run: () => void openTerminal(m, dirOf(one, isDir(one))) });
+  return out;
+}
+
+/** Copy Path, Copy Relative Path and Download (a zip for folders and
+ * several paths; not for the desktop app's own machine). */
+function pathEntries(m: string, paths: readonly string[], o: FileMenuOptions): MenuEntry[] {
+  const root = o.root ?? useTree.getState().root;
+  const out: MenuEntry[] = [
+    { label: t('files.copyPath'), run: () => void copyText(paths.join('\n')) },
+    { label: t('files.copyRelativePath'), run: () => void copyText(paths.map((p) => relativePath(root, p)).join('\n')) },
+  ];
+  if (canDownload(m))
+    out.push('sep', { label: t('files.download'), icon: createElement(Download), run: () => void startDownload(m, [...paths]) });
+  return out;
+}
+
+/** The entries every list of a machine's files offers for paths (a
+ * selection, the row pointed at first), as the explorer's menu has them:
+ * Open, Open to the Side, Open Preview, Open in VS Code, Open in Terminal,
+ * Copy Path, Copy Relative Path, Download and Reveal in Explorer (one
+ * path). The Git panel's rows offer them too. They change nothing, so
+ * read-only mode keeps them. */
+export function fileMenuEntries(m: string, paths: readonly string[], o: FileMenuOptions = {}): MenuEntry[] {
+  if (!paths.length) return [];
+  const out: MenuEntry[] = [...openEntries(m, paths, o), 'sep', ...pathEntries(m, paths, o)];
+  if (o.reveal !== false && paths.length === 1 && isPluginOn('files'))
+    out.push('sep', { label: t('files.revealInExplorer'), run: () => revealInExplorer(m, paths[0]) });
+  return out;
+}
+
+/** Whether a version control provider marks the file at path as changed
+ * (a decoration with a letter on its row), so its changes can be opened. */
+function changed(m: string, path: string): boolean {
+  const d = decorationsOf(m, parentOf(path))[baseName(path)];
+  return !!d?.badge && !!quickDiff()?.openChanges;
+}
+
 /** The context menu for paths (the selection, with the row pointed at
- * first) or, with none, for the tree's root. */
+ * first) or, with none, for the tree's root. Folders, files and several of
+ * both take what applies to them: several files open at once, are cut,
+ * copied, downloaded, trashed or deleted together; a paste or a new
+ * entry goes into the folder of the row pointed at. */
 export function menuFor(m: string, paths: string[], isDir: (p: string) => boolean, el?: HTMLElement | null): MenuEntry[] {
   const s = useTree.getState();
   const root = s.root!;
   const ro = readOnly();
   const target = paths[0];
-  const one = paths.length === 1;
   const dir = target ? dirOf(target, isDir(target)) : root;
   const out: MenuEntry[] = [];
-  if (target && one) {
-    if (!isDir(target)) {
-      out.push({ label: t('files.open'), hint: '↵', run: () => void openPath(m, target, false) });
-      out.push({ label: t('files.quickLook'), hint: keyLabel('space'), run: () => void quickLook(m, target, el) });
-    }
-    if (isPluginOn('vscode'))
-      out.push({
-        label: t('files.openInCode'),
-        run: () => void (isDir(target) ? actions.openCode(m, target) : actions.openInCode(m, target)),
-      });
-    out.push({ label: t('files.openInTerminal'), run: () => void openTerminal(m, dir) });
-    out.push('sep');
-  } else if (!target) {
-    out.push({ label: t('files.openInTerminal'), run: () => void openTerminal(m, root) });
-    out.push('sep');
-  }
-  if (!ro && (one || !target)) {
+  if (target) {
+    out.push(...openEntries(m, paths, { isDir, el }));
+    if (paths.length === 1 && !isDir(target) && changed(m, target))
+      out.push({ label: t('files.openChangesItem'), run: () => quickDiff()?.openChanges?.(m, target) });
+  } else out.push({ label: t('files.openInTerminal'), run: () => void openTerminal(m, root) });
+  out.push('sep');
+  if (!ro) {
     out.push({ label: t('files.newFile'), icon: createElement(FilePlus), run: () => setEdit({ kind: 'file', path: dir }) });
     out.push({ label: t('files.newFolder'), icon: createElement(FolderPlus), run: () => setEdit({ kind: 'folder', path: dir }) });
+    if (!target || isDir(target)) out.push(...uploadEntries(m, dir));
     out.push('sep');
   }
   if (target && !ro) {
     out.push({ label: t('files.cut'), hint: treeKeys.cut(), run: () => setClipboard({ m, paths, cut: true }) });
     out.push({ label: t('files.copy'), hint: treeKeys.copy(), run: () => setClipboard({ m, paths, cut: false }) });
   }
-  if (!ro && s.clipboard?.m === m && (one || !target)) {
+  if (!ro && s.clipboard?.m === m) {
     out.push({ label: t('files.paste'), hint: treeKeys.paste(), run: () => void paste(m, dir) });
   }
   out.push('sep');
-  if (target) {
-    out.push({ label: t('files.copyPath'), run: () => void copyText(paths.join('\n')) });
-    out.push({ label: t('files.copyRelativePath'), run: () => void copyText(paths.map((p) => relativePath(root, p)).join('\n')) });
-    if (canDownload(m)) {
-      out.push('sep');
-      out.push({ label: t('files.download'), run: () => void startDownload(m, paths) });
-    }
-  }
+  if (target) out.push(...pathEntries(m, paths, { root }));
   if (target && !ro) {
     out.push('sep');
-    if (one)
+    if (paths.length === 1)
       out.push({ label: t('files.rename'), hint: 'F2', icon: createElement(Pencil), run: () => setEdit({ kind: 'rename', path: target }) });
     out.push({ label: t('files.trash'), hint: treeKeys.trash(), icon: createElement(Trash2), run: () => void trash(m, paths) });
     out.push({ label: t('files.deletePermanently'), hint: treeKeys.remove(), danger: true, run: () => void remove(m, paths) });
@@ -329,6 +432,45 @@ export function menuFor(m: string, paths: string[], isDir: (p: string) => boolea
   if (!target) {
     out.push({ label: t('files.refresh'), run: refresh });
     out.push({ label: t('files.collapseAll'), run: collapseAll });
+    out.push('sep', ...transferEntries());
   }
+  return out;
+}
+
+/** Upload Files… and Upload Folder… into dir; none in read-only mode. */
+function uploadEntries(m: string, dir: string): MenuEntry[] {
+  if (readOnly()) return [];
+  return [
+    { label: t('files.uploadFiles'), icon: createElement(Upload), run: () => void uploadChosen(m, dir, false) },
+    { label: t('files.uploadFolder'), icon: createElement(FolderUp), run: () => void uploadChosen(m, dir, true) },
+  ];
+}
+
+const transferEntries = (): MenuEntry[] => [
+  { label: t('files.showUploads'), run: () => showTransfers('uploads') },
+  { label: t('files.showDownloads'), run: () => showTransfers('downloads') },
+];
+
+/** The panel's menu (its … button): new entries and uploads into the
+ * selected folder (the selected file's, else the root), the selection's
+ * download, Refresh, Collapse Folders and the transfers. */
+export function panelMenu(m: string, isDir: (p: string) => boolean): MenuEntry[] {
+  const s = useTree.getState();
+  const root = s.root!;
+  const cur = s.cursor;
+  const dir = cur ? dirOf(cur, isDir(cur)) : root;
+  const out: MenuEntry[] = [];
+  if (!readOnly()) {
+    out.push({ label: t('files.newFile'), icon: createElement(FilePlus), run: () => setEdit({ kind: 'file', path: dir }) });
+    out.push({ label: t('files.newFolder'), icon: createElement(FolderPlus), run: () => setEdit({ kind: 'folder', path: dir }) });
+    out.push(...uploadEntries(m, dir), 'sep');
+  }
+  if (s.selection.length && canDownload(m)) {
+    const paths = [...s.selection];
+    out.push({ label: t('files.download'), icon: createElement(Download), run: () => void startDownload(m, paths) }, 'sep');
+  }
+  out.push({ label: t('files.refresh'), run: refresh });
+  out.push({ label: t('files.collapseAll'), run: collapseAll });
+  out.push('sep', ...transferEntries());
   return out;
 }

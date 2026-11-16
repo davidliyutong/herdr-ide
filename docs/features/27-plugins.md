@@ -202,6 +202,20 @@ components rather than their own, so they look and behave alike
   type-ahead with `TypeAhead`); `<Section id title count? actions?>`, a
   collapsible group whose state is kept per browser (`section.<id>`).
   The file explorer is built with them.
+- `plugins/files/ops.ts`: what a list of a machine's files does with them,
+  as the explorer does ([28](28-file-explorer.md)).
+  `fileMenuEntries(m, paths, {isDir?, root?, el?, reveal?})` gives the
+  menu entries for paths (a selection, the row pointed at first): Open
+  (its files, several at once), Open to the Side, Open Preview (one file),
+  Open in VS Code and Open in Terminal (one path), Copy Path, Copy
+  Relative Path (to `root`, the explorer's by default), Download (a zip
+  for folders and several; not for the desktop app's own machine) and
+  Reveal in Explorer (one path; `reveal: false` leaves it out); nothing in
+  them changes files, so read-only mode keeps them. `revealInExplorer(m,
+  path)` shows the explorer's panel with the path's folders expanded and
+  it selected; `openEditor`, `openFiles`, `openToSide`, `quickLook`,
+  `openTerminal` and `copyText` are the entries' actions. The Git panel's
+  rows use them.
 
 What a plugin draws is inside an error boundary (`PluginBoundary`): a pane's
 body, the panel shown and each status bar item. One that throws while

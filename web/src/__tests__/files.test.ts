@@ -20,26 +20,38 @@ import { t } from '../i18n';
 import { FilesPanel, followedDir } from '../plugins/files/FilesPanel';
 import {
   crumbs,
+  excluded,
+  fromSettings,
   poll,
   polledDirs,
   relativePath,
   setFilter,
+  setHidden,
   showRoot,
   shownDirs,
+  sortEntries,
   topmost,
   treeRows,
   useTree,
   MAX_EXPANDED,
   MAX_POLLED,
+  type SortOrder,
   type TreeState,
 } from '../plugins/files/tree';
-import { badName, menuFor } from '../plugins/files/ops';
+import { useSettings } from '../settings';
+import { badName, fileMenuEntries, menuFor, revealInExplorer, trash } from '../plugins/files/ops';
+import { registerQuickDiff } from '../plugins/files/quickDiff';
+import { actions } from '../actions';
+import { definePlugins } from '../plugins/registry';
+import { filesPlugin } from '../plugins/files';
 import { MAX_BACKOFF_MS, startPolling } from '../plugins/files/poller';
 import { decorationsOf, registerFileDecorations } from '../plugins/files/decorations';
 import { FakeCore, settle } from './fakeTerms';
 import type { RemoteStat } from '../lib/files';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+// The explorer is on (Reveal in Explorer asks).
+definePlugins([filesPlugin]);
 
 const f = (name: string, extra: Partial<RemoteStat> = {}): RemoteStat => ({
   name,
@@ -249,6 +261,57 @@ describe('file tree rows', () => {
     off1();
     off2();
     expect(decorationsOf('m', '/r')).toEqual({});
+  });
+
+  it('sorts in the order set', () => {
+    const entries = [f('b.txt', { mtime: 3 }), d('z'), f('a.md', { mtime: 5 }), d('c'), f('a10.txt', { mtime: 1 })];
+    const names = (o: SortOrder) => sortEntries(entries, o).map((e) => e.name);
+    expect(names('default')).toEqual(['c', 'z', 'a.md', 'a10.txt', 'b.txt']);
+    expect(names('mixed')).toEqual(['a.md', 'a10.txt', 'b.txt', 'c', 'z']);
+    expect(names('filesFirst')).toEqual(['a.md', 'a10.txt', 'b.txt', 'c', 'z']);
+    expect(names('type')).toEqual(['c', 'z', 'a.md', 'a10.txt', 'b.txt']);
+    expect(names('modified')).toEqual(['c', 'z', 'a.md', 'b.txt', 'a10.txt']);
+  });
+
+  it('leaves out the names excluded, and does not poll in excluded folders', () => {
+    const exclude = ['.git', '**/node_modules', '*.pyc', '[Tt]humbs.db', 'x?'];
+    for (const [name, out] of [
+      ['.git', true],
+      ['node_modules', true],
+      ['a.pyc', true],
+      ['thumbs.db', true],
+      ['xy', true],
+      ['xyz', false],
+      ['.github', false],
+      ['a.pyc.txt', false],
+    ] as const)
+      expect(excluded(exclude, name), name).toBe(out);
+    const dirs = { '/r': { entries: [d('node_modules'), d('src'), f('Thumbs.db')] }, '/r/node_modules': { entries: [f('x')] } };
+    const s = state({ dirs, exclude, expanded: { '/r/node_modules': true, '/r/src': true } });
+    expect(treeRows(s).map((r) => r.name)).toEqual(['src']);
+    expect(shownDirs(s)).toEqual(['/r', '/r/src']);
+  });
+
+  it('takes its switches from the settings unless this browser chose', () => {
+    const values = useSettings.getState().values;
+    try {
+      localStorage.clear();
+      useSettings.setState({
+        values: {
+          ...values,
+          'files.showHidden': { value: true, source: 'global' },
+          'files.followFocus': { value: false, source: 'global' },
+        },
+      });
+      expect(fromSettings()).toMatchObject({ hidden: true, follow: false, sort: 'default' });
+      expect(useTree.getState()).toMatchObject({ hidden: true, follow: false });
+      setHidden(false);
+      useSettings.setState({ values: { ...useSettings.getState().values, 'files.sortOrder': { value: 'mixed', source: 'global' } } });
+      expect(useTree.getState()).toMatchObject({ hidden: false, follow: false, sort: 'mixed' });
+    } finally {
+      localStorage.clear();
+      useSettings.setState({ values });
+    }
   });
 });
 
@@ -533,6 +596,110 @@ describe('FilesPanel', () => {
     expect(kept).toHaveLength(MAX_EXPANDED);
     expect(kept).toContain('/home/u/x');
     expect(kept).not.toContain('/other/d0');
+  });
+
+  it('acts on a selection of several rows: opens its files, and takes what applies to them all', async () => {
+    const open = vi.spyOn(actions, 'openView').mockResolvedValue('view:x');
+    try {
+      await act(async () => row('/home/u/src/lib').click());
+      await flush();
+      useTree.setState({
+        selection: ['/home/u/src/lib/a.go', '/home/u/src/main.go', '/home/u/src/lib'],
+        cursor: '/home/u/src/main.go',
+      });
+      await key('Enter');
+      await flush();
+      expect(open.mock.calls.map((c) => c[1].path)).toEqual(['/home/u/src/lib/a.go', '/home/u/src/main.go']);
+      const isDir = (p: string) => p === '/home/u/src/lib';
+      const labels = menuFor('m', ['/home/u/src/main.go', '/home/u/src/lib'], isDir)
+        .filter(isItem)
+        .map((e) => e.label);
+      for (const l of [
+        'files.open',
+        'files.openToSide',
+        'files.cut',
+        'files.copy',
+        'files.copyPath',
+        'files.download',
+        'files.trash',
+        'files.newFile',
+      ] as const)
+        expect(labels).toContain(t(l));
+      for (const l of ['files.quickLook', 'files.openInTerminal', 'files.rename'] as const) expect(labels).not.toContain(t(l));
+    } finally {
+      open.mockRestore();
+    }
+  });
+
+  it('asks before moving to the trash when the setting says so', async () => {
+    const values = useSettings.getState().values;
+    useSettings.setState({ values: { ...values, 'files.confirmTrash': { value: true, source: 'global' } } });
+    try {
+      let done = act(async () => trash('m', ['/home/u/src/main.go']));
+      await flush();
+      expect((useDialog.getState().current as { title?: string })?.title).toBe(t('files.confirm.trashTitle'));
+      await confirm(false);
+      await done;
+      expect(changes()).toEqual([]);
+      done = act(async () => trash('m', ['/home/u/src/main.go']));
+      await flush();
+      await confirm(true);
+      await done;
+      expect(changes()).toEqual([['trash', { paths: ['/home/u/src/main.go'] }]]);
+    } finally {
+      useSettings.setState({ values });
+    }
+  });
+
+  it('offers Open Changes for a file version control marks as changed', async () => {
+    const opened: string[] = [];
+    const offDiff = registerQuickDiff({ follow: () => () => {}, original: async () => undefined, openChanges: (_m, p) => opened.push(p) });
+    const offDeco = registerFileDecorations((_m, dir) =>
+      dir === '/home/u/src' ? { 'main.go': { badge: 'M' }, lib: { badge: '•' } } : undefined,
+    );
+    try {
+      const item = (p: string) =>
+        menuFor('m', [p], () => false).find((e): e is MenuItem => isItem(e) && e.label === t('files.openChangesItem'));
+      expect(item('/home/u/src/lib/a.go')).toBeUndefined();
+      item('/home/u/src/main.go')!.run!();
+      expect(opened).toEqual(['/home/u/src/main.go']);
+    } finally {
+      offDeco();
+      offDiff();
+    }
+  });
+
+  it('shares its file entries and reveals a path in the tree', async () => {
+    const labels = fileMenuEntries('m', ['/home/u/src/lib/b.go'])
+      .filter(isItem)
+      .map((e) => e.label);
+    expect(labels).toEqual(
+      [
+        'files.open',
+        'files.openToSide',
+        'files.quickLook',
+        'files.openInTerminal',
+        'files.copyPath',
+        'files.copyRelativePath',
+        'files.download',
+        'files.revealInExplorer',
+      ].map((k) => t(k as Parameters<typeof t>[0])),
+    );
+    expect(
+      fileMenuEntries('m', ['/a', '/b'], { reveal: false })
+        .filter(isItem)
+        .map((e) => e.label),
+    ).not.toContain(t('files.quickLook'));
+    useStore.getState().setPanel(undefined);
+    await act(async () => revealInExplorer('m', '/home/u/src/lib/b.go'));
+    await flush();
+    expect(useStore.getState().panel).toBe('files');
+    expect(useTree.getState()).toMatchObject({ root: '/home/u/src', cursor: '/home/u/src/lib/b.go', selection: ['/home/u/src/lib/b.go'] });
+    expect(rows()).toContain('/home/u/src/lib/b.go');
+    // Outside the root: the tree stops following and shows its folder.
+    await act(async () => revealInExplorer('m', '/home/u/src'));
+    await flush();
+    expect(useTree.getState()).toMatchObject({ root: '/home/u', follow: false, selection: ['/home/u/src'] });
   });
 
   it('pastes into the root when the cursor is not a row', async () => {

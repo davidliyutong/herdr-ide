@@ -22,6 +22,8 @@ export type DialogRequest =
       checked?: boolean;
       /** A third answer between Cancel and confirm (Don't Save). */
       alt?: string;
+      /** What the Cancel button says (Skip), Cancel by default. */
+      cancel?: string;
       resolve(ok: boolean, checked?: boolean, alt?: boolean): void;
     }
   | {
@@ -77,6 +79,26 @@ export function confirmCheckDialog(opts: {
 }): Promise<{ checked: boolean } | undefined> {
   return new Promise((resolve) =>
     show({ kind: 'confirm', ...opts, resolve: (ok, checked) => resolve(ok ? { checked: !!checked } : undefined) }),
+  );
+}
+
+/** A question with three answers, cancel (Escape too), alt and confirm,
+ * and a box to tick: resolves with the answer and the box's state. */
+export function choiceDialog(opts: {
+  title: string;
+  message: string;
+  confirm: string;
+  alt: string;
+  cancel?: string;
+  check?: string;
+  checked?: boolean;
+}): Promise<{ answer: 'confirm' | 'alt' | 'cancel'; checked: boolean }> {
+  return new Promise((resolve) =>
+    show({
+      kind: 'confirm',
+      ...opts,
+      resolve: (ok, checked, alt) => resolve({ answer: ok ? 'confirm' : alt ? 'alt' : 'cancel', checked: !!checked }),
+    }),
   );
 }
 

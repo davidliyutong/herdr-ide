@@ -31,7 +31,7 @@ var (
 
 // Settings is the plugin's settings module (internal/registry).
 var Settings = settings.Module{
-	Sections: []settings.Section{{ID: "git", Order: 66, Plugin: "git"}},
+	Sections: []settings.Section{{ID: "git", Order: 67, Plugin: "git"}},
 	Defs: []settings.Def{
 		{Key: SettingMixedLineEndings, Type: settings.TypeEnum, Default: "keep", Enum: []string{"keep", "unify", "readOnly"},
 			Scope: settings.ScopeApp, Section: "git", Order: 10},

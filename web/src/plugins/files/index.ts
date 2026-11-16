@@ -19,6 +19,7 @@ export const filesPlugin: PluginDef = {
   title: 'files.title',
   description: 'files.description',
   icon: Files,
+  settings: { section: 'files' },
   panels: [{ id: 'files', title: 'files.title', icon: Files, component: FilesPanel, command: 'view.panel.files' }],
   paneViews: {
     editor: {

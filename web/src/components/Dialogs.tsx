@@ -74,7 +74,7 @@ function ConfirmDialog({ req }: { req: Extract<DialogRequest, { kind: 'confirm' 
       <div className="dialog-actions">
         {/* Enter cancels a destructive action unless the user moves to it. */}
         <button autoFocus={req.danger} onClick={() => done(false)}>
-          {t('dialog.cancel')}
+          {req.cancel ?? t('dialog.cancel')}
         </button>
         {req.alt && (
           <button data-answer="alt" onClick={() => done(false, true)}>

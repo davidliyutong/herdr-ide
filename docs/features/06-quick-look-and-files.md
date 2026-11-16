@@ -157,7 +157,8 @@ download chooser picks entries, nothing more.
   every file is uploaded.
 - Other files are `POST`ed to `/api/m/<machine>/upload?name=` of the pane's
   machine, one after the other, streamed with chunk framing; the reply holds
-  the path. Folders are not uploaded; they are skipped with a note. A failed
+  the path. Folders are not uploaded on panes; they are skipped with a note
+  (the file explorer uploads them, [28](28-file-explorer.md)). A failed
   or cancelled upload shows in the uploads panel (a failure also as a note),
   and the paths of the others are still pasted.
 - Dropped files go into the pane's working directory (its foreground

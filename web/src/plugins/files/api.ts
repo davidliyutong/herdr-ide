@@ -2,6 +2,7 @@
 // changes, the stat it polls and saving an editor's text. Listings and
 // file contents come from the core's own routes (lib/files.ts).
 import { hasMessage, t } from '../../i18n';
+import { sendBody, type UploadOptions } from '../../lib/files';
 
 /** The state of a path on a machine. */
 export interface Entry {
@@ -33,6 +34,11 @@ export class FilesError extends Error {
     super(message);
     this.name = 'FilesError';
   }
+
+  /** The failure as the user reads it (the uploads panel asks). */
+  userText(): string {
+    return errorText(this);
+  }
 }
 
 /** A save refused because the file changed since the editor loaded it;
@@ -47,6 +53,8 @@ export class ConflictError extends FilesError {
 /** A failure as the user reads it. */
 export function errorText(e: unknown): string {
   if (e instanceof FilesError) {
+    // The message names the backup that holds the file's content.
+    if (e.code === 'restore_failed') return t('files.error.restore_failed', { path: e.message.replace(/^restore_failed: /, '') });
     const k = `files.error.${e.code}`;
     return hasMessage(k) ? t(k) : e.message || e.code;
   }
@@ -77,7 +85,10 @@ async function change(m: string, action: string, body: Record<string, unknown>):
 }
 
 export const filesApi = {
-  mkdir: (m: string, path: string) => change(m, 'mkdir', { path }),
+  /** A new folder; a taken name fails, or with unique becomes name-1… */
+  mkdir: (m: string, path: string, o: { unique?: boolean } = {}) => change(m, 'mkdir', o.unique ? { path, unique: true } : { path }),
+  /** Folders with the folders leading to them; those there are kept. */
+  mkdirs: (m: string, paths: string[]) => change(m, 'mkdirs', { paths }),
   /** A new empty file; fails when the name is taken. */
   create: (m: string, path: string) => change(m, 'create', { path }),
   /** Renames or moves one path; never replaces anything. */
@@ -100,6 +111,20 @@ export const filesApi = {
     });
     const j = (await answer(r)) as { entries?: Entry[] };
     return j.entries ?? [];
+  },
+
+  /** Uploads a file from this computer into path: under a free name
+   * (name-1.ext… when taken), or over the file there with replace, as a
+   * save writes it. Resolves with where it landed; progress and
+   * cancelling as lib/files' uploads. */
+  async upload(m: string, path: string, file: Blob, o: UploadOptions & { replace?: boolean } = {}): Promise<string> {
+    const q = new URLSearchParams({ path });
+    if (o.replace) q.set('replace', '1');
+    const r = (await sendBody(`${base(m)}/upload?${q}`, file, {
+      ...o,
+      failure: (status, j) => new FilesError(j.error === 'too_large' ? 'upload_too_large' : (j.error ?? `http_${status}`), j.message ?? ''),
+    })) as Result;
+    return r.paths?.[0] ?? path;
   },
 
   /** Saves text into path: the file must be as loaded (mtime and size), or

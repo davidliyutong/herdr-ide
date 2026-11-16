@@ -142,6 +142,12 @@ in the UI; a setting with a scope can have its own value per machine, under
 | `plugins.git.enabled` | `true`, `false` | `true` | – | – |
 | `plugins.usage.enabled` | `true`, `false` | `true` | – | – |
 | `plugins.vault.enabled` | `true`, `false` | `true` | – | – |
+| `files.showHidden` | `true`, `false` | `false` | – | – |
+| `files.exclude` | list of strings | `[".git",".svn",".hg","CVS",".DS_Store","Thumbs.db"]` | – | – |
+| `files.sortOrder` | `default`, `mixed`, `filesFirst`, `type`, `modified` | `"default"` | – | – |
+| `files.followFocus` | `true`, `false` | `true` | – | – |
+| `files.confirmTrash` | `true`, `false` | `false` | – | – |
+| `files.saveMethod` | `auto`, `replace` | `"auto"` | – | per machine |
 | `git.mixedLineEndings` | `keep`, `unify`, `readOnly` | `"keep"` | – | – |
 | `git.changesView` | `list`, `tree` | `"list"` | – | – |
 | `git.untrackedChanges` | `mixed`, `separate` | `"mixed"` | – | – |
@@ -375,8 +381,9 @@ missing here.
 | `POST /api/m/{id}/upload` | writes | Writes the request body to a file (`?name=`, `&dir=` absolute, else the upload directory). |
 | `GET /api/m/{id}/list` | – | A directory's entries (`?path=`). |
 | `POST /api/m/{id}/p/files/stat` | – | The file explorer's poll: size, modification time and kind of 1–200 paths (`{"paths"}`; a POST because 200 paths in a query make a URL proxies refuse, but it changes nothing and read-only mode allows it); `error` (`busy`, `timeout`, `denied`, `failed`) on a path whose state is not known ([28](features/28-file-explorer.md)). |
-| `POST /api/m/{id}/p/files/{action}` | writes | The file explorer's changes (`{"path"}`, `{"path", "to"}`, `{"paths", "dir"}` or `{"paths"}`): `mkdir`, `create`, `rename` and `move` (never replacing), `copy`, `trash`, `remove` (for good); audited as `files.<action>` with the paths (`path`, `to`, `dir`, the first 50 `paths` and their `count`) and the outcome (`status`, `error`), as every plugin's change is once it ended. |
+| `POST /api/m/{id}/p/files/{action}` | writes | The file explorer's changes (`{"path"}`, `{"path", "to"}`, `{"paths", "dir"}` or `{"paths"}`): `mkdir` (`"unique": true`: a taken name becomes `name-1`…), `mkdirs` (folders with the folders leading to them, those there kept), `create`, `rename` and `move` (never replacing), `copy`, `trash`, `remove` (for good); audited as `files.<action>` with the paths (`path`, `to`, `dir`, the first 50 `paths` and their `count`) and the outcome (`status`, `error`), as every plugin's change is once it ended. |
 | `POST /api/m/{id}/p/files/write` | writes | Saves the body (at most 8 MiB) into `?path=` when the file still has `&mtime=&size=` (`&new=1`: is not there, `&force=1`: any); `409 conflict` with its state otherwise; audited as `files.write` with the path, `force` and the outcome. |
+| `POST /api/m/{id}/p/files/upload` | writes | Writes the body (at most 4 GiB) into `?path=` under a free name (`name-1.ext`…), or over the file there with `&replace=1`, as a save writes it; a request that ends early leaves nothing; audited as `files.upload` with the path, the size, `replace` and the outcome ([28](features/28-file-explorer.md)). |
 | `GET /api/m/{id}/p/git/{read}` | – | The Git plugin's reads ([31](features/31-git.md)) with their parameters in the query: `repo` (`?path=` a directory), `status`, `log` (`&skip=&limit=&branch=…&remotes=1`), `show` (`&rev=&parent=` or `&rev2=`), `blob` (`&path=&source=worktree\|index\|head\|<rev>&parent=`), `branches`, `tags`, `stashes`, `diffStat`, `watch` (tokens `token`, `refs`, `config`), each with `?repo=` the top level. |
 | `POST /api/m/{id}/p/git/{change}` | writes | The Git plugin's changes with a JSON body (at most 5 MiB; `repo` and the action's fields): `stage`, `unstage`, `applyPatch`, `discard`, `commit`, `checkout`, `branchCreate`, `branchDelete`, `branchRename`, `merge`, `rebase`, `abort`, `continue`, `cherryPick`, `revert`, `reset`, `tagCreate`, `tagDelete`, `stashPush`, `stashApply`, `stashPop`, `stashDrop` (`index` and `hash`, the entry's commit), `fetch`, `pull`, `push`; at most 20 000 `paths`; audited as `git.<action>`; failures `git_missing`, `not_a_repo`, `bad_ref`, `auth_required`, `conflicts`, `diverged`, `stale`, `timeout`, `git_failed`. |
 | `GET /api/m/{id}/code/status` | – | Whether the machine's code-server is installed and runs. While the VS Code plugin is off for the requesting client (`plugins.vscode.enabled` for the desktop app, `plugins.vscode.browser` for browsers), it, `code/start`, the proxy and the bridge answer `404 plugin_disabled`. |
@@ -465,6 +472,7 @@ On every machine (the agent's `$HOME`):
 | `~/.herdr-ide[-<instance>]/gui-keep.log` | Output of the last display keeper | Replaced at each start. |
 | `~/.herdr-ide[-<instance>]/cs-data/`, `cs-ext/` | VS Code settings, extensions | Kept; logs older than 7 days are pruned. |
 | `~/.herdr-ide[-<instance>]/uploads/` | Pasted and dropped files | Files older than 7 days are pruned. |
+| `~/.herdr-ide[-<instance>]/saves/` (0700) | The file explorer's saves in place: backups (0600) of files in directories the user may not write, the texts waiting to be written there, and links recording the backups beside other files | Removed by the save when it ended; what an agent that ended during a save left is removed, with the backups its links name, by the agent that starts more than 7 days later. |
 | `~/.herdr-ide[-<instance>]/bin/herdr-ide-mcp` (0700 directory) | Link to the executable that serves the vault's MCP server (the agent's, or on the local machine the core's) | Pointed at the running executable whenever an agent starts; kept so MCP configurations stay valid. |
 | `~/.herdr-ide[-<instance>]/usage/cost-cache.json` (0600) | The AI usage plugin's records of the AI CLIs' logs, per log file | Records and logs older than 90 days leave it at each scan. |
 | `~/.herdr-ide[-<instance>]/usage/deepseek.key` (0600) | A DeepSeek API key set in the AI usage panel | Until removed in the panel or by hand. |

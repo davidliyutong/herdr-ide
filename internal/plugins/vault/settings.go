@@ -45,7 +45,7 @@ var Settings = func() settings.Module {
 	}
 	return settings.Module{
 		// The plugin's own page in Settings, under the plugins.
-		Sections: []settings.Section{{ID: ID, Order: 68, Plugin: ID}},
+		Sections: []settings.Section{{ID: ID, Order: 69, Plugin: ID}},
 		Defs: []settings.Def{
 			num(SettingApprovalTimeout, DefaultTimeout.Seconds(), 10, 600, "", 10),
 			num(SettingAutoLock, DefaultAutoLock, 0, 1440, "", 20),
