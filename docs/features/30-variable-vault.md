@@ -19,6 +19,8 @@ deciding.
   them.
 - Per-variable allowed machines; other machines ask the user, who allows
   once, always or denies.
+- Variables moved between vaults in files encrypted under a passphrase of
+  their own, which the core builds and reads.
 - One gate for every caller, the core host's own programs included: a
   value leaves the vault only for a machine the variable lists or with the
   user's approval, and approving, revealing and changing need the vault's
@@ -231,6 +233,59 @@ saved variables as `vault.saved` (allowed machines, `inject_only`, whether
 the value changed, `from` when renamed), never with values. Other changes
 send `{type: changed}`, on which pages load the vault again.
 
+### Export and import
+
+Variables move between vaults (another computer, a new core, a backup) in
+an **export file** encrypted under a passphrase of its own
+(`internal/vault/export.go`). The core opens the vault's values and seals
+them into the file, and opens a file and saves its values: no value
+reaches a browser, which holds only the file (ciphertext).
+
+The file is a JSON envelope: `format` (`<slug>-vault-export`, after the
+product), `version` (1), `kdf` (`argon2id` with its salt, time, memory
+and threads: new files take the vault's parameters, time 3, 64 MiB, 4
+threads, and a new 16-byte salt), `cipher` (`aes-256-gcm`), `nonce` and
+`ciphertext`. Everything in the clear but the nonce is the ciphertext's
+additional data, so a file whose version or derivation was changed does
+not open. The content holds when it was exported, each variable's name,
+value, description, machines (`*` or ids), inject-only flag and times, and
+the machines its lists name with their ids, labels and whether each was
+the core's own computer. The file's passphrase has at least 12
+characters: unlike the vault's file, an export is attacked offline
+without the vault's waits, and it is only as strong as its passphrase.
+Files are at most 16 MiB and hold at most 1000 variables.
+
+**Export** (`POST export`, a writing route behind the gate): the
+variables chosen, or all; it needs the page's session and the vault's
+passphrase again (a bulk release; checked one at a time and slowed down
+as a session's), and the vault unlocked. It is recorded in the access
+log (`exported`, with the names) and audited (`vault.exported`) before
+the file is sent, and not sent when that record cannot be written. One
+file is derived at a time (`429 busy`).
+
+**Import** sends the file's text and its passphrase twice: once for a
+preview (`POST import/preview`), once with the choices (`POST import`);
+the core keeps nothing of a file between the two, so no decrypted value
+waits in its memory for an answer, and the second call checks the vault
+as it then is. The preview names each variable with its description,
+flag, whether the vault has one of that name, why it cannot be imported
+(`invalid_name`: only under another name; `invalid`: a value, description
+or machine list the vault refuses) and its machines as they map here:
+`*` stays; a machine is kept by its id (machines added in the UI get
+random ids, so the same id is the same machine record, as when importing
+into the core that exported); the local machine, whose id is the same on
+every core, only when its label (the host's name) matches too; labels
+alone map nothing, as two machines may share one. Machines that do not
+map leave the list, so they ask every time; the preview names them. The
+choices say per variable `import` (its name must be free), `overwrite`,
+`rename` (`as`, validated as any name) or `skip`; the import is one write
+of the store (`Store.Import`): a taken name, an invalid variable or more
+than 1000 variables refuse it all and change nothing. Imported values are
+sealed under the vault's key with their name, machines and flag; a new
+variable keeps the file's creation time. Imports are audited as
+`vault.imported` with the names, those overwritten and those renamed,
+never values; they release nothing, so the access log has none of them.
+
 ### Machines
 
 Every agent listens on `<run>/vault.sock` (0600; connections only from its
@@ -311,8 +366,12 @@ The panel **Variable Vault** of the right sidebar (command
   LastPass and Bitwarden honor): a passphrase saved by a browser is
   readable by programs on the computer in several browsers.
 - Requests waiting for an answer.
-- Three tabs. **Variables**: search, New Variable, and a row per variable
-  with its name, the inject-only tag, its description and who may read it
+- Three tabs. **Variables**: search, Import…, Export…, New Variable, a bar
+  to choose all variables shown (and, with some chosen, Export…, Who May
+  Read… and Delete for them together, the last two only with a session:
+  one call per variable, the ones that failed named), and a row per
+  variable with a checkbox (Shift chooses a range), its name, the
+  inject-only tag, its description and who may read it
   without asking (every time asks, the machines chosen, all machines, in
   the colors of safe to open); reveal after a confirmation, hidden again
   after 30 s, and edit, both only with a session. The editor is a dialog:
@@ -352,6 +411,20 @@ to the core (`/ws`) comes back, the status item loads the requests, and the
 vault if it was loaded, again: the core may have restarted (its requests
 and sessions gone, the vault locked) or changed meanwhile.
 
+The export and import dialogs are drawn over every page by the plugin's
+status item, so `openVaultExport(names?)` and `openVaultImport()` (exported
+by `web/src/plugins/vault`) open them from anywhere, a settings page
+included. **Export**: the variables chosen or all, the vault's passphrase
+(a page without a session opens one with it first), the file's passphrase
+twice with a strength bar and the warning that the file is only as strong
+as it; the file is saved by the browser as
+`<slug>-vault-<date>.json`. **Import**: the file and its passphrase (and
+the vault's, on a page without a session), then the preview: per variable
+its tags (exists, inject only, invalid), the machines it maps to and those
+that will ask, and what to do with it (import, skip, overwrite, import
+under a new name, checked against the vault's names and the other
+choices), with one choice for every name that exists; Import sends them.
+
 ## Alternatives considered
 
 | Alternative | Why not |
@@ -366,6 +439,9 @@ and sessions gone, the vault locked) or changed meanwhile.
 | Upgrading files sealed with less additional data | Their machine lists were not authenticated: an upgrade would seal a widened list in; none was released, so such files are refused. |
 | Biometrics (Touch ID) per approval | Not available to pages in every browser, nor in the same way on every system; the passphrase works everywhere and a session spares asking for it at every approval. |
 | Machines and flag in the clear, unauthenticated | A program on the core host could widen a variable's machines in the file and read it without asking; sealing them with the value makes such an edit unreadable. |
+| An import session on the core between the preview and the import | The decrypted values would wait in the core's memory for the user's answer, with an expiry and a bound of their own; sending the file and its passphrase again costs one more derivation and leaves nothing behind. |
+| Mapping machines by label on import | Labels are names the user gives and two machines may share one: a match could let another machine read without asking. Ids are random for machines added in the UI; the local machine's id is the same everywhere, so its label must match too. |
+| Exporting values to the browser (a JSON file the page builds) | Values would pass through the page, its memory and its extensions; the core builds the file, and the page gets ciphertext. |
 | Values in the browser for editing | A value shown in a page is in its memory, its extensions' reach and its screen; the editor only sets new values. |
 
 ## Failure modes
@@ -412,6 +488,15 @@ and sessions gone, the vault locked) or changed meanwhile.
 - The access log cannot be written (a full disk, its file not writable):
   no value leaves; the MCP server gets `log_failed`, a reveal `500
   log_failed`; list calls and refusals are answered as before.
+- An export file with a wrong passphrase, or changed: `file_passphrase`
+  (the two cannot be told apart); not an export file, or derivation
+  parameters out of bounds: `bad_file`; another version: `file_version`;
+  over 16 MiB: `too_large`. Nothing is imported.
+- An import that meets a taken name (one created since the preview), an
+  invalid variable or the bound of 1000 variables: refused as a whole,
+  the vault unchanged; the dialog says which variable.
+- One change of several chosen fails (Who May Read…, Delete): the others
+  are done; the panel names the ones that failed and why.
 - The core restarted: the access log is read back from its file; a
   repeated refusal's count may lack the calls of its last 5 s.
 
@@ -438,6 +523,16 @@ server exposes.
   could not be written at the unlock applied by the next allow or
   deletion (`TestForgottenAppliedAtTheNextChange`); renaming with other
   changes in one write, a refusal changing nothing (`TestSetRenames`).
+- `internal/vault/export_test.go`: a file's round trip, with only its
+  format, version, derivation and cipher in the clear and a salt and nonce
+  of its own; a short file passphrase, a wrong one, a changed ciphertext
+  or derivation, a nonce of another size, derivation parameters out of
+  bounds, another version, format or cipher, not JSON and too large, each
+  with its code; more than 1000 variables; the store's export (unlocked,
+  names that are not there named) and import in one write, refused as a
+  whole for a taken name, a name twice, an invalid one, a value too long
+  or a machine with a control character, the creation time kept, more
+  than 1000 variables refused.
 - `internal/userfile/userfile_test.go`: the content flushed before the
   rename and the directory after, a content that cannot be flushed
   replacing nothing (`TestWriteIsDurable`).
@@ -467,6 +562,20 @@ server exposes.
   count written once the while is over; the process chain taken from the
   header, never the request (`TestWhoAskedComesFromTheAgent`); cancelled
   and expired requests.
+- `internal/plugins/vault/transfer_test.go`: an export needs the session
+  and the vault's passphrase, a file passphrase of 12 characters, a
+  choice, names that exist and an unlocked vault; its file opens with its
+  passphrase, names the machines with their labels, is recorded as
+  `exported` and audited without values or passphrases
+  (`TestExport`); an import's preview without values, with the names that
+  exist and the machines unknown here (the local machine of another label
+  among them), a conflict refusing it all, bad choices refused, then
+  import, overwrite, skip and rename in one write, machines mapped by id,
+  audited without values (`TestImport`); the local machine kept when its
+  label matches, a wrong passphrase, a changed file, another version, not
+  a file and too large refused by both routes (`TestImportFailures`).
+  `internal/server`'s `TestMutatingRoutesAreGuarded` refuses export and
+  import read-only and from other origins.
 - `internal/vaultmcp/mcp_test.go`: JSON-RPC over pipes (initialize and
   version negotiation, notifications, tools), masking, truncation, masking
   where the capture is cut (`TestMaskAtTheCut`), timeouts that kill the
@@ -500,3 +609,12 @@ server exposes.
   when the core no longer has it; `busy` told from `wait`; the access log
   with a page's reveal, a count, the directory and the process chain, and
   the chain in the prompt; the local machine's note; the setup snippets.
+- `web/src/__tests__/vault-transfer.test.ts`: exporting the chosen
+  variables (a file passphrase under 12 characters and a mismatch
+  refused, a session opened first with the vault's passphrase, the file
+  saved under its name), all of them and a wrong passphrase said; an
+  import's preview (a wrong file passphrase said), its defaults, the
+  choice for every existing name, a new name checked before anything is
+  sent and the choices in one call; choosing all, a range with Shift,
+  exporting the chosen, giving them all machines and deleting them, one
+  failure named.

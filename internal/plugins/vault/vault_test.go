@@ -23,13 +23,14 @@ import (
 
 // fakeHost records what the plugin broadcasts and audits.
 type fakeHost struct {
+	mg       *machines.Manager
 	mu       sync.Mutex
 	messages []map[string]any
 	audits   []string
 	sent     chan map[string]any
 }
 
-func (h *fakeHost) Machines() *machines.Manager { return nil }
+func (h *fakeHost) Machines() *machines.Manager { return h.mg }
 func (h *fakeHost) Broadcast(id, m string, data any) {
 	d := data.(map[string]any)
 	h.mu.Lock()

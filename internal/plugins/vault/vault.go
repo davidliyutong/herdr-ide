@@ -91,6 +91,9 @@ type Plugin struct {
 	// Timeout of an approval; 0 is DefaultTimeout.
 	Timeout time.Duration
 
+	// fileWork is held while an export file's key is derived (transfer.go).
+	fileWork sync.Mutex
+
 	// keyMu makes installing or dropping the key one step with the sessions
 	// that go with it: an unlock and the session it opens, a lock and the
 	// end of every session, a new passphrase and its session. A lock asked
@@ -256,6 +259,9 @@ func (p *Plugin) Routes() []plugin.Route {
 		{Method: "PUT", Path: "vars/{name}", Mutating: true, Audit: "set", Handler: p.gated(p.handleSet)},
 		{Method: "DELETE", Path: "vars/{name}", Mutating: true, Audit: "delete", Handler: p.gated(p.handleDelete)},
 		{Method: "POST", Path: "vars/{name}/reveal", Mutating: true, Audit: "reveal", Handler: p.gated(p.handleReveal)},
+		{Method: "POST", Path: "export", Mutating: true, Audit: "export", Handler: p.gated(p.handleExport)},
+		{Method: "POST", Path: "import/preview", Mutating: true, Audit: "import_preview", Handler: p.gated(p.handleImportPreview)},
+		{Method: "POST", Path: "import", Mutating: true, Audit: "import", Handler: p.gated(p.handleImport)},
 		{Method: "POST", Path: "session", Mutating: true, Audit: "session", Handler: p.handleSession},
 		{Method: "DELETE", Path: "session", Mutating: true, Audit: "session_end", Handler: p.handleEndSession},
 		{Method: "POST", Path: "passphrase", Mutating: true, Audit: "passphrase", Handler: p.handlePassphrase},
@@ -290,6 +296,8 @@ func fail(w http.ResponseWriter, err error) {
 		status = http.StatusConflict
 	case "wrong_passphrase":
 		status = http.StatusForbidden
+	case "too_large":
+		status = http.StatusRequestEntityTooLarge
 	case "failed":
 		status = http.StatusInternalServerError
 	}

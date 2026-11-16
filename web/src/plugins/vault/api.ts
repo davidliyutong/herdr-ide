@@ -79,9 +79,12 @@ export type Answer = 'once' | 'always' | 'deny';
 /** A failed call: the core's error code. */
 export class VaultError extends Error {
   readonly code: string;
-  constructor(code: string, message?: string) {
+  /** The variable a failure of several is about (an import's, an export's). */
+  readonly variable?: string;
+  constructor(code: string, message?: string, variable?: string) {
     super(message || code);
     this.code = code;
+    this.variable = variable;
   }
 }
 
@@ -104,19 +107,24 @@ const base = '/api/p/vault';
 /** The page's vault session (memory only). */
 let token = '';
 
-async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function request(method: string, path: string, body?: unknown): Promise<Response> {
   const headers: Record<string, string> = {};
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (token) headers['X-Vault-Session'] = token;
   const res = await fetch(base + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
-  const data = await res.json().catch(() => ({}));
   if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
     const code = String(data.error ?? res.status);
     // The gate refused: the session ended (idle, locked, passphrase changed).
     if (code === 'vault_session') endLocalSession();
-    throw new VaultError(code, data.message);
+    throw new VaultError(code, data.message, typeof data.name === 'string' ? data.name : undefined);
   }
-  return data as T;
+  return res;
+}
+
+async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const res = await request(method, path, body);
+  return (await res.json().catch(() => ({}))) as T;
 }
 
 function endLocalSession() {
@@ -151,7 +159,47 @@ export const vaultApi = {
   requests: () => call<{ requests: VaultRequest[] }>('GET', '/requests'),
   answer: (id: string, answer: Answer) => call('POST', `/requests/${enc(id)}`, { answer }),
   log: () => call<{ log: VaultAccess[] }>('GET', '/log'),
+  /** An export file of the variables named (or all), as its text: the core
+   * seals it, so values never reach the page. */
+  exportFile: async (body: { passphrase: string; filePassphrase: string; names?: string[]; all?: boolean }) =>
+    (await request('POST', '/export', body)).text(),
+  /** What an export file holds, without values. */
+  importPreview: (file: string, passphrase: string) => call<ImportPreview>('POST', '/import/preview', { file, passphrase }),
+  /** Imports a file's variables as chosen, in one write. */
+  importFile: (file: string, passphrase: string, choices: ImportChoice[]) =>
+    call<{ imported: string[] }>('POST', '/import', { file, passphrase, choices }),
 };
+
+/** A variable of an export file, as the preview shows it (never its value). */
+export interface ImportVariable {
+  name: string;
+  description: string;
+  injectOnly: boolean;
+  /** The machines it maps to here ('*': all). */
+  machines: string[];
+  /** Machines of its list this core does not know: they will ask. */
+  unknown?: string[];
+  /** The vault has a variable of that name. */
+  exists: boolean;
+  /** Why it cannot be imported as it is: 'invalid_name' (under another
+   * name only) or 'invalid'. */
+  invalid?: string;
+}
+
+export interface ImportPreview {
+  exported?: string;
+  variables: ImportVariable[];
+  machines: { id: string; label: string; local: boolean; known: boolean }[];
+}
+
+export type ImportAction = 'import' | 'overwrite' | 'rename' | 'skip';
+
+/** What to do with the file's variable i. */
+export interface ImportChoice {
+  i: number;
+  action: ImportAction;
+  as?: string;
+}
 
 interface VaultState {
   status?: VaultStatus;

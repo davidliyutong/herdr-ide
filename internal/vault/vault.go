@@ -75,6 +75,18 @@ var (
 // Code is the error's code for clients: vault_locked, not_found, …
 func Code(err error) string {
 	switch {
+	// An export file's errors first: they may wrap the vault's (a
+	// derivation out of bounds is ErrInvalid too).
+	case errors.Is(err, ErrFileFormat):
+		return "bad_file"
+	case errors.Is(err, ErrFileVersion):
+		return "file_version"
+	case errors.Is(err, ErrFilePassphrase):
+		return "file_passphrase"
+	case errors.Is(err, ErrWeakExport):
+		return "weak_export_passphrase"
+	case errors.Is(err, ErrTooLarge):
+		return "too_large"
 	case errors.Is(err, ErrLocked):
 		return "vault_locked"
 	case errors.Is(err, ErrNotFound):
