@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"regexp"
 	"slices"
+	"strings"
 
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/machines"
@@ -74,25 +75,17 @@ func (s *Server) pluginRoutes() []route {
 						return
 					}
 				}
-				if rt.Mutating {
-					fields := map[string]any{"plugin": p.ID()}
-					if c.Machine != nil {
-						fields["machine"] = c.Machine.ID()
-					}
-					// The route's wildcards (a variable's name, a request's
-					// id) tell what was changed.
-					for _, w := range wildcards.FindAllStringSubmatch(rt.Path, -1) {
-						if v := r.PathValue(w[1]); v != "" {
-							fields[w[1]] = v
-						}
-					}
-					event := p.ID()
-					if rt.Audit != "" {
-						event += "." + rt.Audit
-					}
-					s.audit.log(r, event, fields)
+				if !rt.Mutating {
+					rt.Handler(c, w, r)
+					return
 				}
-				rt.Handler(c, w, r)
+				// A change is recorded once its handler returned (also when it
+				// panicked): what it acted on and how it ended.
+				out := &plugin.Outcome{ResponseWriter: w}
+				defer func() {
+					s.audit.log(r, pluginEvent(p, rt), pluginAuditFields(p, rt, c, r, out))
+				}()
+				rt.Handler(c, out, r)
 			}
 			if rt.Mutating {
 				h = s.writable(h)
@@ -104,6 +97,53 @@ func (s *Server) pluginRoutes() []route {
 }
 
 var wildcards = regexp.MustCompile(`\{([A-Za-z_][A-Za-z0-9_]*)\}`)
+
+// pluginEvent is the audit event of a plugin's mutating route:
+// <plugin>[.<Audit>].
+func pluginEvent(p plugin.Plugin, rt plugin.Route) string {
+	if rt.Audit != "" {
+		return p.ID() + "." + rt.Audit
+	}
+	return p.ID()
+}
+
+// pluginAuditFields are the fields of a mutating route's record: the
+// plugin, the machine, the route's wildcards (a variable's name, a
+// request's id), what the handler added (Call.AuditField) and the outcome:
+// the status and, for a failure, its code ("error"; "failed" when the
+// handler answered nothing, as when it panicked).
+func pluginAuditFields(p plugin.Plugin, rt plugin.Route, c *plugin.Call, r *http.Request, out *plugin.Outcome) map[string]any {
+	fields := map[string]any{"plugin": p.ID()}
+	if c.Machine != nil {
+		fields["machine"] = c.Machine.ID()
+	}
+	for _, w := range wildcards.FindAllStringSubmatch(rt.Path, -1) {
+		if v := r.PathValue(w[1]); v != "" {
+			fields[w[1]] = v
+		}
+	}
+	for k, v := range c.AuditFields() {
+		if _, taken := fields[k]; !taken {
+			fields[k] = v
+		}
+	}
+	status := out.Status
+	if status == 0 {
+		status = http.StatusInternalServerError
+		if out.Code == "" {
+			out.Code = "failed"
+		}
+	}
+	fields["status"] = status
+	if status >= 400 {
+		code := out.Code
+		if code == "" {
+			code = strings.ReplaceAll(strings.ToLower(http.StatusText(status)), " ", "_")
+		}
+		fields["error"] = code
+	}
+	return fields
+}
 
 // servePluginStream hands a stream an agent opened with a plugin's op to
 // that plugin (plugin.Streamer); false when no plugin serves the op. While

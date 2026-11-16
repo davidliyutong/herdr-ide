@@ -109,8 +109,8 @@ func change(action string) func(c *plugin.Call, w http.ResponseWriter, r *http.R
 		ctx, cancel := context.WithTimeout(r.Context(), writeTimeout)
 		defer cancel()
 		err := forward(ctx, c, w, action, p)
-		// The framework audited git.<action> before the body was read;
-		// this records what was changed and how it ended.
+		// The framework audits git.<action> with its status once this
+		// returns; this records what was changed and how it ended.
 		fields := auditFields(p)
 		if c.Machine != nil {
 			fields["machine"] = c.Machine.ID()

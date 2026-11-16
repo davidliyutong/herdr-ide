@@ -123,8 +123,14 @@ machine's `internal/agent/plugin/files`.
   panel open.
 
 **Changes** go through the plugin's routes, each audited as
-`files.<action>` and refused in read-only mode, where the menu and the keys
-offer none (`ops.ts`). The agent's actions (`internal/agent/plugin/files`):
+`files.<action>` once it ended, with the paths it acted on (`path`, `to`,
+`dir`, the first 50 of `paths` with their `count`) and how it ended
+(`status`, `error`), and refused in read-only mode, where the menu and the
+keys offer none (`ops.ts`). A copy or a removal stops between entries, and
+between 1 MiB chunks of a file, when the core stops waiting for it (its
+request ended, 10 minutes at most); a partial copy is removed, what a
+removal reached stays removed. The agent's actions
+(`internal/agent/plugin/files`):
 
 | Action | What it does |
 | --- | --- |
@@ -133,7 +139,7 @@ offer none (`ops.ts`). The agent's actions (`internal/agent/plugin/files`):
 | `move` | Paths into a folder under their names, replacing nothing: a taken name fails for that path alone (`failed`), the others move. |
 | `copy` | Paths into a folder: files with their modes, folders with their contents, links as links; a taken name becomes `name copy.ext`, `name copy 2.ext`… (a copy into the same folder); a folder is not copied into itself, also when the folder named is a link into it. |
 | `trash` | Into the user's trash: on macOS `~/.Trash` (`name 2.ext`… when taken); elsewhere the freedesktop.org trash, `$XDG_DATA_HOME/Trash` (`~/.local/share/Trash`) with an info file holding the original path and the time, or, for a path on another file system, the trash at the top of its mount (found along the path's real directory, with paths relative to it): `.Trash/<uid>` when `.Trash` is an administrator's (a directory with the sticky bit, not a link), else `.Trash-<uid>`. Other users may write at the top of a mount (`/tmp`), so such a trash and its `files` and `info` are used only when each is a directory of the user, not a link, closed to others (made `0700` when missing), as gio checks. A path no trash takes fails with `trash_unavailable`, and the panel offers to delete it for good. |
-| `remove` | Deletes for good (folders with their contents). |
+| `remove` | Deletes for good (folders with their contents): each folder opened relative to its parent without following a link, links removed and never followed, as `os.RemoveAll` does. |
 | `write` | An editor's save, below. |
 | `stat` | Size, modification time and kind of up to 200 paths, for the polls and the editor; `error` on a path whose state is not known: `denied`, `failed`, or `busy` and `timeout` when stats do not answer. At most 8 stats run at once on the machine, and a path being stat'ed is not stat'ed again meanwhile: a mount that does not answer holds at most 8 threads, and a stat answers within 10 s. |
 
@@ -202,6 +208,10 @@ button.
 - Closing the pane (or its tab or workspace) with unsaved changes asks
   **Save**, **Don't Save** or **Cancel** first
   ([04](04-layout-and-keyboard.md)).
+- Unsaved text stays while the pane is not drawn (another tab, workspace or
+  machine shown, another pane zoomed, the plugin off): it is still asked
+  about and saved from the question, with the version it was loaded in, and
+  comes back with the pane ([27](27-plugins.md)).
 - **Show in Explorer** reveals the file in the tree; outside its root the
   tree stops following and shows the file's folder.
 
@@ -212,7 +222,8 @@ language's colors and the services of JSON, CSS and HTML, each with its
 worker; TypeScript's service and worker are left out (larger than the rest
 together; TypeScript and JavaScript keep their colors). Its theme is made
 from the design tokens of the app's light or dark theme and follows them,
-its font is the terminal's. Its chunks ship without source maps
+its font is the terminal's and follows it, also in editors and diffs
+already open. Its chunks ship without source maps
 (`vite.config.ts`), its license and third-party notices are in
 `licenses.md`. `createEditor` and `createDiffEditor` give a plugin an editor
 in an element.
@@ -278,7 +289,8 @@ Changes answer `{"paths": [made], "failed": {path: code}}`; failures
 ## Security
 
 Every change is a mutating route: refused in read-only mode, audited
-(`files.mkdir`, `files.rename`, …), behind the core's guards. The agent
+(`files.mkdir`, `files.rename`, …, with the paths and the outcome), behind
+the core's guards. The agent
 refuses the root, directories above the home directory, the home directory
 itself and its own data directory, by name and by file identity (a home
 reached through a link, another case on a case-insensitive volume), so
@@ -312,6 +324,10 @@ the trash stay in the user's trash
   `TestMutatingRoutesAreGuarded` (`internal/server`) checks them for Origin
   and read-only mode. `internal/server/download_test.go`: `/file` answers
   404 only for a path not there (`TestFileStatFailures`, `TestStatFailure`).
+- `internal/agent/plugin/files/remove_test.go`: removals of large and
+  nested trees that follow no link, copies and removals that stop once
+  cancelled.
+- `internal/plugins/files/audit_test.go`: the paths of the audit records.
 - `web/src/__tests__/files.test.ts`: rows (order, hidden files, the filter,
   a new entry's row), breadcrumb and paths, the root following the focused
   terminal, the keyboard, the context menu's changes and the routes they

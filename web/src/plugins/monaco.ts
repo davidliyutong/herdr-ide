@@ -6,7 +6,8 @@
 // that language opens). TypeScript's and JavaScript's service is left out:
 // its worker is larger than the rest of Monaco together, and those files
 // keep their colors. Its theme follows the app's light or dark theme and
-// its colors (the design tokens), its font the terminal's.
+// its colors (the design tokens), its font the terminal's, also in editors
+// already open when they change.
 
 import type * as MonacoNs from 'monaco-editor';
 import { usePrefs } from '../prefs';
@@ -15,6 +16,7 @@ import { appearanceOf, resolveTheme, useSystemDark } from '../appearance';
 export type Monaco = typeof MonacoNs;
 export type CodeEditor = MonacoNs.editor.IStandaloneCodeEditor;
 export type DiffEditor = MonacoNs.editor.IStandaloneDiffEditor;
+export type TextModel = MonacoNs.editor.ITextModel;
 
 let loading: Promise<Monaco> | undefined;
 
@@ -133,8 +135,14 @@ function followTheme(monaco: Monaco) {
     monaco.editor.setTheme(themeName());
   };
   apply();
+  appliedFont = JSON.stringify(fontOptions());
   // After the app sets data-theme and the tokens for the new theme.
-  usePrefs.subscribe(() => requestAnimationFrame(apply));
+  usePrefs.subscribe(() =>
+    requestAnimationFrame(() => {
+      apply();
+      applyFont(() => monaco.editor.remeasureFonts());
+    }),
+  );
   useSystemDark.subscribe(() => requestAnimationFrame(apply));
 }
 
@@ -145,6 +153,32 @@ export function fontOptions(): MonacoNs.editor.IEditorOptions {
     fontFamily: `${a.fontFamily ? a.fontFamily + ', ' : ''}'JetBrains Mono', Menlo, monospace`,
     fontSize: a.fontSize,
   };
+}
+
+/** An editor or diff editor whose font follows the settings. */
+export interface FontFollower {
+  updateOptions(o: MonacoNs.editor.IEditorOptions): void;
+  onDidDispose(listener: () => void): unknown;
+}
+
+const followers = new Set<FontFollower>();
+let appliedFont = '';
+
+/** Keeps e's font with the settings until it is disposed. */
+export function followFont(e: FontFollower) {
+  followers.add(e);
+  e.onDidDispose(() => followers.delete(e));
+}
+
+/** Gives the editors made the settings' font when it changed since;
+ * remeasure has Monaco measure its characters again. */
+export function applyFont(remeasure?: () => void) {
+  const font = fontOptions();
+  const key = JSON.stringify(font);
+  if (key === appliedFont) return;
+  appliedFont = key;
+  for (const e of followers) e.updateOptions(font);
+  remeasure?.();
 }
 
 const common: MonacoNs.editor.IEditorOptions = {
@@ -162,6 +196,7 @@ export async function createEditor(
 ): Promise<{ monaco: Monaco; editor: CodeEditor }> {
   const monaco = await loadMonaco();
   const editor = monaco.editor.create(el, { ...common, ...fontOptions(), theme: themeName(), ...opts });
+  followFont(editor);
   return { monaco, editor };
 }
 
@@ -178,5 +213,6 @@ export async function createDiffEditor(
     hideUnchangedRegions: { enabled: true },
     ...opts,
   });
+  followFont(editor);
   return { monaco, editor };
 }

@@ -16,9 +16,9 @@ import { Download, FileDiff, FolderTree, Pin, RotateCcw, Save } from 'lucide-rea
 import { fileUrl } from '../../lib/files';
 import { useStore } from '../../state/store';
 import { t } from '../../i18n';
-import { useUnsaved } from '../../unsaved';
+import { keepEdit, keptEdit, takeEdit, useUnsaved, type KeptEdit } from '../../unsaved';
 import type { PaneViewProps } from '../api';
-import { createEditor, type CodeEditor, type Monaco } from '../monaco';
+import { createEditor, type CodeEditor, type Monaco, type TextModel } from '../monaco';
 import { ConflictError, errorText, filesApi, type Entry } from './api';
 import { keepEditor, reveal } from './ops';
 import { lineChanges, quickDiff, type LineChange } from './quickDiff';
@@ -54,8 +54,6 @@ function readFailure(r: Response, body = ''): string {
   if (r.status === 502 || r.status === 504) return t('files.error.transport');
   return t('files.readFailed', { error: body.trim() || r.statusText || `HTTP ${r.status}` });
 }
-
-type TextModel = NonNullable<ReturnType<CodeEditor['getModel']>>;
 
 /** Puts text in model. Into text it showed already, as one edit of the
  * part that changed (the cursor stays, undo takes it back); a new model
@@ -251,6 +249,14 @@ function useQuickDiff(m: string, path: string, ed: React.RefObject<{ editor: Cod
   return changes.length;
 }
 
+/** An editor's unsaved text while its pane's component is not mounted. */
+interface KeptText extends KeptEdit {
+  path: string;
+  model: TextModel;
+  version: Version | undefined;
+  savedAt: number;
+}
+
 function TextEditor({ m, pane, view, focused }: PaneViewProps) {
   const path = String(view.path ?? '');
   const readOnly = useStore((s) => s.readOnly);
@@ -350,26 +356,40 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
   // Closing the pane with changes not saved asks first (unsaved.ts).
   useUnsaved(m, pane, dirty, path.slice(path.lastIndexOf('/') + 1) || path, () => saveRef.current());
 
-  // The editor, once; the file, for each path.
+  // The editor, once; the file, for each path. Text with unsaved changes
+  // outlives the component while the pane is in its layout (unsaved.ts):
+  // the pane takes it back, with the version it was edited from, when it
+  // shows again.
   useEffect(() => {
     let disposed = false;
     let created: { editor: CodeEditor; monaco: Monaco } | undefined;
+    let sub: { dispose(): void } | undefined;
     (async () => {
       const first = await loadText(m, path).catch((e): Loaded => ({ kind: 'error', message: errorText(e) }));
       if (disposed) return;
-      if (first.kind !== 'text' && first.kind !== 'missing') return setStatus(first);
+      const held = keptEdit<KeptText>(m, pane)?.path === path;
+      if (first.kind !== 'text' && first.kind !== 'missing' && !held) return setStatus(first);
       const el = host.current;
       if (!el) return;
       created = await createEditor(el, { readOnly: useStore.getState().readOnly });
       if (disposed) return created.editor.dispose();
       const { monaco, editor } = created;
-      const uri = monaco.Uri.from({ scheme: 'file', path, query: `m=${m}` });
-      const model = monaco.editor.getModel(uri) ?? monaco.editor.createModel('', undefined, uri);
+      // A model of the pane's own: another pane of the file has its own text.
+      const uri = monaco.Uri.from({ scheme: 'file', path, query: `m=${m}&pane=${pane}` });
+      const kept = takeEdit<KeptText>(m, pane, (k) => k.path === path);
+      if (kept) {
+        version.current = kept.version;
+        savedAt.current = kept.savedAt;
+      }
+      const model = kept?.model ?? monaco.editor.getModel(uri) ?? monaco.editor.createModel('', undefined, uri);
       editor.setModel(model);
       ed.current = created;
       editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => void saveRef.current());
-      model.onDidChangeContent(() => setDirty(model.getAlternativeVersionId() !== savedAt.current));
-      if (first.kind === 'text') showText(first.text, first.version);
+      sub = model.onDidChangeContent(() => setDirty(model.getAlternativeVersionId() !== savedAt.current));
+      if (kept) {
+        setDirty(model.getAlternativeVersionId() !== kept.savedAt);
+        setStatus({ kind: 'ready' });
+      } else if (first.kind === 'text') showText(first.text, first.version);
       else showText('', undefined);
       if (focused) editor.focus();
     })();
@@ -377,8 +397,29 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
       disposed = true;
       const c = created ?? ed.current;
       ed.current = undefined;
-      c?.editor.getModel()?.dispose();
+      sub?.dispose();
+      const model = c?.editor.getModel();
       c?.editor.dispose();
+      if (!model) return;
+      if (model.getAlternativeVersionId() === savedAt.current) return model.dispose();
+      const base = version.current;
+      keepEdit<KeptText>(m, pane, {
+        name: path.slice(path.lastIndexOf('/') + 1) || path,
+        path,
+        model,
+        version: base,
+        savedAt: savedAt.current,
+        save: async () => {
+          try {
+            await filesApi.write(m, path, model.getValue(), base ?? 'new');
+            return true;
+          } catch (err) {
+            useStore.getState().toast(t('files.saveFailed', { error: errorText(err) }), undefined, undefined, 'error');
+            return false;
+          }
+        },
+        dispose: () => model.dispose(),
+      });
     };
     // focused only matters for the first load.
   }, [m, path, showText]);

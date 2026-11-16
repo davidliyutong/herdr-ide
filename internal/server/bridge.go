@@ -380,6 +380,8 @@ func (s *Server) handleBridge(w http.ResponseWriter, r *http.Request) {
 	s.audit.log(r, "bridge.command", map[string]any{"machine": mc.ID(), "cmd": body["cmd"], "folder": t.folder})
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
 	defer cancel()
+	// Turning VS Code off ends the command too.
+	defer context.AfterFunc(s.csProxy.workContext(), cancel)()
 	// Bring code-server up if no VS Code pane has been shown yet.
 	if !s.cs.Ready(mc) {
 		if err := s.cs.Ensure(ctx, mc); err != nil {

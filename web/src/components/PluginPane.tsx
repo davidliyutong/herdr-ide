@@ -5,10 +5,17 @@ import { useEffect, useRef } from 'react';
 import { Eye, Puzzle } from 'lucide-react';
 import { registerPane } from '../state/panes';
 import * as L from '../term/layout';
-import { paneView } from '../plugins/registry';
+import { allPlugins, paneView } from '../plugins/registry';
 import { useSettings } from '../settings';
 import { t } from '../i18n';
 import { CodeIcon } from './icons';
+import { PluginBoundary } from './PluginBoundary';
+
+/** A plugin's name as the user reads it (its id when it has none). */
+export function pluginName(id: string): string {
+  const p = allPlugins().find((x) => x.id === id);
+  return p ? t(p.title) : id;
+}
 
 export function PluginPane({ m, pane, view, focused }: { m: string; pane: string; view: L.PluginView; focused: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -29,7 +36,9 @@ export function PluginPane({ m, pane, view, focused }: { m: string; pane: string
   return (
     <div ref={ref} className="plugin-pane" tabIndex={-1}>
       {Body ? (
-        <Body m={m} pane={pane} view={view} focused={focused} />
+        <PluginBoundary plugin={pluginName(view.plugin)} resetKey={JSON.stringify(view)}>
+          <Body m={m} pane={pane} view={view} focused={focused} />
+        </PluginBoundary>
       ) : (
         <div className="plugin-pane-off muted">{t(def ? 'plugins.paneOff' : 'plugins.paneUnknown', { plugin: view.plugin })}</div>
       )}

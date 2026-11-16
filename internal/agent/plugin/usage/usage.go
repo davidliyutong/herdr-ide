@@ -6,7 +6,8 @@
 // only. Actions:
 //
 //   - limits {providers, codexHomes, claudeKeychain, skip, skipLocal}: the accounts
-//     the CLIs are signed in to, with their windows and balances;
+//     the CLIs are signed in to, with their windows and balances, until the
+//     core stops waiting;
 //   - cost {since, tzOffset, codexHomes, providers}: the logs' tokens and
 //     cost by day, model and project, until the core stops waiting;
 //   - setDeepseekKey {key}: writes (or with "" removes) the DeepSeek key
@@ -44,7 +45,7 @@ func handle(ctx context.Context, st net.Conn, action string, params json.RawMess
 		if err := plugin.Decode(params, &o); err != nil {
 			return plugin.Reply(st, nil, err)
 		}
-		ctx, cancel := context.WithTimeout(ctx, limitsTimeout)
+		ctx, cancel := untilClosed(ctx, st, limitsTimeout)
 		defer cancel()
 		return plugin.Reply(st, map[string]any{"accounts": usage.Limits(ctx, env(e), o)}, nil)
 	case "cost":
@@ -73,14 +74,12 @@ func handle(ctx context.Context, st net.Conn, action string, params json.RawMess
 }
 
 // untilClosed is ctx ended after d or when the core closes st (it stopped
-// waiting): the core sends nothing after the request, so a read returns
-// only then (or once the reply closed st).
+// waiting, plugin.UntilClosed).
 func untilClosed(ctx context.Context, st net.Conn, d time.Duration) (context.Context, context.CancelFunc) {
+	ctx, closed := plugin.UntilClosed(ctx, st)
 	ctx, cancel := context.WithTimeout(ctx, d)
-	go func() {
-		var b [1]byte
-		st.Read(b[:])
+	return ctx, func() {
 		cancel()
-	}()
-	return ctx, cancel
+		closed()
+	}
 }

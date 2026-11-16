@@ -14,8 +14,8 @@ import { useStore } from '../../state/store';
 import { confirmDialog } from '../../dialog';
 import { t } from '../../i18n';
 import type { PaneViewProps } from '../api';
-import { useUnsaved } from '../../unsaved';
-import { createDiffEditor, type DiffEditor, type Monaco } from '../monaco';
+import { keepEdit, keptEdit, takeEdit, useUnsaved, type KeptEdit } from '../../unsaved';
+import { createDiffEditor, type DiffEditor, type Monaco, type TextModel } from '../monaco';
 import { ConflictError, filesApi, errorText as filesError } from '../files/api';
 import { gitApi, errorText, type Blob } from './api';
 import { baseName, join, openFile, short, type DiffMode, type DiffView } from './ops';
@@ -95,6 +95,16 @@ type Status = { kind: 'loading' } | { kind: 'ready' } | { kind: 'binary' | 'tooL
 /** The keys of diff panes with unsaved edits. */
 export const dirtyDiffs = new Set<string>();
 
+/** A diff's unsaved edits while its pane's component is not mounted. */
+interface KeptDiff extends KeptEdit {
+  key: string;
+  original: TextModel;
+  modified: TextModel;
+  /** The working tree's file as the edits started from it. */
+  right: Blob;
+  savedAt: number;
+}
+
 export function DiffPane({ m, pane, view, focused }: PaneViewProps) {
   const d = diffOf(view);
   const readOnly = useStore((s) => s.readOnly);
@@ -109,12 +119,15 @@ export function DiffPane({ m, pane, view, focused }: PaneViewProps) {
   const [fold, setFold] = useState(true);
   const [dirty, setDirty] = useState(false);
   const [changes, setChanges] = useState(0);
-  // Panes with unsaved edits keep their file when another one opens (ops.ts openDiff).
+  // Panes with unsaved edits keep their file when another one opens (ops.ts
+  // openDiff), also while their edit is kept (unsaved.ts).
   useEffect(() => {
     if (dirty) dirtyDiffs.add(pane);
-    else dirtyDiffs.delete(pane);
-    return () => void dirtyDiffs.delete(pane);
-  }, [dirty, pane]);
+    else if (!keptEdit(m, pane)) dirtyDiffs.delete(pane);
+    return () => {
+      if (!keptEdit(m, pane)) dirtyDiffs.delete(pane);
+    };
+  }, [dirty, m, pane]);
   const editable = d.mode === 'worktree' && !readOnly;
   const key = `${d.repo}\u0000${d.path}\u0000${d.mode}\u0000${d.rev ?? ''}\u0000${d.rev2 ?? ''}\u0000${d.parent ?? ''}\u0000${d.orig ?? ''}`;
 
@@ -176,10 +189,13 @@ export function DiffPane({ m, pane, view, focused }: PaneViewProps) {
   // Closing the pane with changes not saved asks first (unsaved.ts).
   useUnsaved(m, pane, dirty, baseName(d.path), () => saveRef.current());
 
-  // The editor, once per file and mode.
+  // The editor, once per file and mode. Unsaved edits outlive the component
+  // while the pane is in its layout (unsaved.ts): the pane takes them back,
+  // with the version they were edited from, when it shows again.
   useEffect(() => {
     let disposed = false;
     let created: { editor: DiffEditor; monaco: Monaco } | undefined;
+    let sub: { dispose(): void } | undefined;
     setStatus({ kind: 'loading' });
     (async () => {
       const el = host.current;
@@ -188,26 +204,69 @@ export function DiffPane({ m, pane, view, focused }: PaneViewProps) {
       if (disposed) return created.editor.dispose();
       const { monaco, editor } = created;
       const uri = (side: string) => monaco.Uri.from({ scheme: `git-${side}`, path: '/' + d.path, query: `m=${m}&pane=${pane}` });
-      const original = monaco.editor.getModel(uri('l')) ?? monaco.editor.createModel('', undefined, uri('l'));
-      const modified = monaco.editor.getModel(uri('r')) ?? monaco.editor.createModel('', undefined, uri('r'));
+      const kept = takeEdit<KeptDiff>(m, pane, (k) => k.key === key);
+      if (kept) savedAt.current = kept.savedAt;
+      const original = kept?.original ?? monaco.editor.getModel(uri('l')) ?? monaco.editor.createModel('', undefined, uri('l'));
+      const modified = kept?.modified ?? monaco.editor.getModel(uri('r')) ?? monaco.editor.createModel('', undefined, uri('r'));
       editor.setModel({ original, modified });
       ed.current = created;
       editor.getModifiedEditor().addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => void saveRef.current());
       editor.getModifiedEditor().onDidFocusEditorText(() => (lastSide.current = 'modified'));
       editor.getOriginalEditor().onDidFocusEditorText(() => (lastSide.current = 'original'));
-      modified.onDidChangeContent(() => setDirty(modified.getAlternativeVersionId() !== savedAt.current));
+      sub = modified.onDidChangeContent(() => setDirty(modified.getAlternativeVersionId() !== savedAt.current));
       editor.onDidUpdateDiff(() => setChanges(editor.getLineChanges()?.length ?? 0));
-      await show();
+      if (kept) {
+        setDirty(modified.getAlternativeVersionId() !== kept.savedAt);
+        // The left side is read again; the right keeps the text and the
+        // version it was edited from.
+        await show(true);
+        sides.current = { ...sides.current, right: kept.right };
+      } else await show();
       if (focused) editor.getModifiedEditor().focus();
     })();
     return () => {
       disposed = true;
       const c = created ?? ed.current;
       ed.current = undefined;
+      sub?.dispose();
       const model = c?.editor.getModel();
       c?.editor.dispose();
-      model?.original.dispose();
-      model?.modified.dispose();
+      if (!model) return;
+      const { original, modified } = model;
+      const free = () => {
+        original.dispose();
+        modified.dispose();
+      };
+      if (modified.getAlternativeVersionId() === savedAt.current) return free();
+      const right = sides.current.right;
+      dirtyDiffs.add(pane);
+      keepEdit<KeptDiff>(m, pane, {
+        name: baseName(d.path),
+        key,
+        original,
+        modified,
+        right,
+        savedAt: savedAt.current,
+        save: async () => {
+          try {
+            await filesApi.write(
+              m,
+              join(d.repo, d.path),
+              modified.getValue(),
+              right.exists ? { mtime: right.mtime ?? 0, size: right.size } : 'new',
+            );
+            void changed(m, d.repo);
+            return true;
+          } catch (e) {
+            useStore.getState().toast(t('git.diff.saveFailed', { error: filesError(e) }), undefined, undefined, 'error');
+            return false;
+          }
+        },
+        dispose: () => {
+          dirtyDiffs.delete(pane);
+          free();
+        },
+      });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [m, key]);

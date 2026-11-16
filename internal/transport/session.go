@@ -83,6 +83,13 @@ var ReplyTimeout = 60 * time.Second
 
 // Open starts a stream with header h and waits for the agent's reply.
 func (s *Session) Open(ctx context.Context, h agentproto.Header) (net.Conn, *agentproto.Reply, error) {
+	return s.OpenWith(ctx, h, nil)
+}
+
+// OpenWith is Open with body written right after the header line, before
+// the reply is read: an op's data that does not fit the line (a plugin's
+// params, agentproto.Header.ParamsLength).
+func (s *Session) OpenWith(ctx context.Context, h agentproto.Header, body []byte) (net.Conn, *agentproto.Reply, error) {
 	st, err := s.ys.OpenStream()
 	if err != nil {
 		return nil, nil, err
@@ -107,6 +114,15 @@ func (s *Session) Open(ctx context.Context, h agentproto.Header) (net.Conn, *age
 	if err := agentproto.WriteLine(st, h); err != nil {
 		st.Close()
 		return nil, nil, err
+	}
+	if len(body) > 0 {
+		if _, err := st.Write(body); err != nil {
+			st.Close()
+			if ctx.Err() != nil {
+				return nil, nil, ctx.Err()
+			}
+			return nil, nil, fmt.Errorf("agent %s: %w", h.Op, err)
+		}
 	}
 	var rep agentproto.Reply
 	if err := agentproto.ReadLine(st, &rep); err != nil {

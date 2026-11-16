@@ -30,6 +30,7 @@ import { noteFocusedTerminal, sendTarget } from './lib/bridge';
 import { windowFocused } from './codeFrames';
 import { describeView, pluginMessage, useActivePlugins, usePanels } from './plugins/registry';
 import { RightBar } from './components/RightBar';
+import { PluginBoundary } from './components/PluginBoundary';
 import './plugins';
 import { actions, current, workspaceTitle } from './actions';
 import { noteFocus } from './paneHistory';
@@ -274,8 +275,19 @@ function StatusCommand({ command }: { command: string }) {
   );
 }
 
-/** The status bar's items of the plugins that are on. */
+/** The status bar's items of the plugins that are on, each in an error
+ * boundary of its own. */
 function PluginStatusItems() {
   const plugins = useActivePlugins();
-  return <>{plugins.flatMap((p) => (p.statusItems ?? []).map((Item, i) => <Item key={`${p.id}:${i}`} />))}</>;
+  return (
+    <>
+      {plugins.flatMap((p) =>
+        (p.statusItems ?? []).map((Item, i) => (
+          <PluginBoundary key={`${p.id}:${i}`} plugin={t(p.title)} compact>
+            <Item />
+          </PluginBoundary>
+        )),
+      )}
+    </>
+  );
 }

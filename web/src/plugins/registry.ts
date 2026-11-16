@@ -28,12 +28,21 @@ export function enableSetting(p: PluginDef): string | undefined {
   return p.enableSetting ?? `plugins.${p.id}.enabled`;
 }
 
-/** Whether p is on: its setting's value, on when the core has none. */
-export function pluginOn(p: PluginDef, values = useSettings.getState().values): boolean {
+/** The value of p's switch for every machine without one of its own (the
+ * app's value), on when the core has none; true for plugins always on. */
+export function pluginSwitch(p: PluginDef, values = useSettings.getState().values): boolean {
   const key = enableSetting(p);
   if (!key) return true;
   const v = values[key]?.value ?? builtinDefaults[key];
   return v !== false;
+}
+
+/** Whether p is on: its switch, or, for a setting machines can have of
+ * their own (program windows), that of any machine. */
+export function pluginOn(p: PluginDef, values = useSettings.getState().values): boolean {
+  if (pluginSwitch(p, values)) return true;
+  const own = values[enableSetting(p)!]?.machines ?? {};
+  return Object.values(own).some((v) => v !== false);
 }
 
 /** The plugins that are on. */

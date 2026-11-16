@@ -26,6 +26,7 @@ import (
 	"syscall"
 	"time"
 
+	"herdr-ide/internal/agent/plugin"
 	"herdr-ide/internal/agentproto"
 )
 
@@ -271,6 +272,10 @@ func (c *codeServer) handle(ctx context.Context, st net.Conn, h agentproto.Heade
 	case "status":
 		return agentproto.WriteLine(st, agentproto.Reply{OK: true, CS: c.status(h)})
 	case "download":
+		// The download ends when the core gives up (VS Code turned off, the
+		// request timed out): it sends nothing after the header.
+		ctx, cancel := plugin.UntilClosed(ctx, st)
+		defer cancel()
 		digest, err := c.download(ctx, h)
 		if err != nil {
 			return agentproto.Fail(st, err)

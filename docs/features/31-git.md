@@ -240,6 +240,10 @@ Code's preview editor does, so going through the changes keeps one pane):
   git's marker. Discarding ranges asks first and needs the text saved.
 - When the repository changes, both sides are read again; unsaved text
   stays.
+- Unsaved text also stays while the pane is not drawn (another tab,
+  workspace or machine shown, another pane zoomed): closing asks about it,
+  Save saves it against the file as it was when the edits began, and the
+  pane takes it back when drawn again ([27](27-plugins.md)).
 
 **Colors**: lanes take the design tokens' chart hues (`--ds-chart-*`, in
 an order that keeps neighbors apart), status letters and names VS Code's

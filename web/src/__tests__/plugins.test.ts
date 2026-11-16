@@ -13,7 +13,16 @@ vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 
 import { useStore } from '../state/store';
 import { useSettings } from '../settings';
-import { activePanels, allPlugins, definePlugins, describeView, pluginCommand, pluginMessage, pluginOn } from '../plugins/registry';
+import {
+  activePanels,
+  allPlugins,
+  definePlugins,
+  describeView,
+  pluginCommand,
+  pluginMessage,
+  pluginOn,
+  pluginSwitch,
+} from '../plugins/registry';
 import { RightBar } from '../components/RightBar';
 import { PluginPane } from '../components/PluginPane';
 import { commandEnabled, runCommand } from '../keymap';
@@ -86,8 +95,16 @@ describe('plugins', () => {
     expect(activePanels().map((p) => p.id)).toEqual(['files']);
     // A plugin with a setting of its own, and one that is always on.
     const gui = saved.find((p) => p.id === 'gui')!;
-    setValue('gui', false);
+    setValue('gui.enabled', false);
     expect(pluginOn(gui)).toBe(false);
+    expect(pluginSwitch(gui)).toBe(false);
+    // Its setting is per machine: on while any machine has it on, the
+    // switch (every machine without its own) staying off.
+    useSettings.setState((s) => ({
+      values: { ...s.values, 'gui.enabled': { value: false, source: 'global', machines: { gpu: true } } },
+    }));
+    expect(pluginOn(gui)).toBe(true);
+    expect(pluginSwitch(gui)).toBe(false);
     expect(pluginOn(saved.find((p) => p.id === 'transfers')!)).toBe(true);
     expect(() => definePlugins([files, files])).toThrow();
   });

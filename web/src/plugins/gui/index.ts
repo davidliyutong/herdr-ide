@@ -1,6 +1,8 @@
 // Program windows (docs/features/14-gui-windows.md) as a plugin: its tray in
 // the status bar and its palette items. It is turned on and off by its own
-// setting, gui.
+// setting, gui.enabled, which machines can also have of their own: the
+// Plugins page's switch sets the value machines without one take, and the
+// tray is there while any machine has program windows on.
 import { AppWindow } from 'lucide-react';
 import { GuiTray } from '../../gui/GuiMenus';
 import { useGui } from '../../gui/state';
@@ -15,7 +17,7 @@ export const guiPlugin: PluginDef = {
   title: 'plugins.gui.title',
   description: 'plugins.gui.description',
   icon: AppWindow,
-  enableSetting: 'gui',
+  enableSetting: 'gui.enabled',
   statusItems: [GuiTray],
   paletteItems() {
     const items: PaletteItem[] = [];

@@ -43,8 +43,8 @@ machines only ([02](features/02-multi-machine-transport.md)).
 | `internal/uisettings` | The user interfaces' settings (appearance, layout, terminal, colors, notifications); `tokens.go` is generated from the design tokens. |
 | `internal/registry` | What the core registers: the setting modules and the commands (used by the core and `scripts/registry`). |
 | `internal/userfile` | Atomic writes and change detection of the hand-editable files; the configuration directory made private on Linux and macOS (`private_unix.go`; on Windows its access control list keeps it the user's). |
-| `internal/plugin` | The core's side of plugins: their routes below `/api/p/<id>` and `/api/m/{id}/p/<id>` (guarded and audited as the core's own), `/ws` messages, switches (`plugins.<id>.enabled`) and the calls to their machine sides ([27](features/27-plugins.md)). |
-| `internal/agent/plugin` | The machine side of plugins: handlers of the agent's `plugin` op, registered per plugin. |
+| `internal/plugin` | The core's side of plugins: their routes below `/api/p/<id>` and `/api/m/{id}/p/<id>` (guarded as the core's own; changes audited once their handler returned, with what they acted on and how they ended), `/ws` messages, switches (`plugins.<id>.enabled`) and the calls to their machine sides ([27](features/27-plugins.md)). |
+| `internal/agent/plugin` | The machine side of plugins: handlers of the agent's `plugin` op, registered per plugin; a handler's panic fails its action, not the agent. |
 | `internal/plugins/files`, `internal/agent/plugin/files` | The file explorer plugin: its routes below `/api/m/{id}/p/files/` and its actions on machines (`mkdir`, `create`, `rename`, `move`, `copy`, `trash`, `remove`, `write` with a precondition, `stat` with a bound on stats running at once), refusing the root, the home directory and what holds it, and the agent's data directory, by file identity ([28](features/28-file-explorer.md)). |
 | `internal/plugins/git`, `internal/agent/plugin/git` | The Git plugin: its routes below `/api/m/{id}/p/git/` (reads GET, changes POST, audited as `git.<action>`) and its actions on machines, each the `git` executable with an argument vector built in the agent (no shell, paths after `--` and literal, revisions and names checked, no credential prompts, timeouts that kill the process group) ([31](features/31-git.md)). |
 | `internal/vault` | The variable vault's store on the core host: values encrypted one by one (AES-256-GCM, the name, machines and inject-only flag as additional data) in `vault[-<instance>].json`, the master key derived from the passphrase (Argon2id) and kept in memory only ([30](features/30-variable-vault.md)). Builds for Windows too. |
@@ -133,12 +133,12 @@ after a successful reply it carries op-specific bytes.
 | `fs.write` | core → agent | chunked upload, then a second reply; `unique` keeps existing files (`-1`, `-2`… names) |
 | `fs.archive` | core → agent | a zip of `Paths` (each at the root under its name, directories recursively), streamed until the agent closes the stream; with `Chunked` as `ChunkWriter` chunks ended by the empty chunk once the archive is complete |
 | `dial-unix` | core → agent | raw pipe to a socket in the agent's run directory |
-| `code-server` | core → agent | actions `status`, `install` (chunked tarball), `download` (the machine fetches `URL`, checked against `Digest`), `start`, `stop`, `install-ext`, `uninstall-ext` (their output in `Exec`), `marker`; `Bin` selects an installed code-server |
+| `code-server` | core → agent | actions `status`, `install` (chunked tarball), `download` (the machine fetches `URL`, checked against `Digest`; it stops when the core closes the stream), `start`, `stop`, `install-ext`, `uninstall-ext` (their output in `Exec`), `marker`; `Bin` selects an installed code-server |
 | `hc` | core → agent | actions `status`, `install` (after a first reply the gzip-compressed herdr-core executable, chunked, checked against `Digest`), `start`, `restart` (the core's successor adopts the programs; both with `Digest`, the executable this build carries, which the agent hashes the installed file against before running it) and `stop` (the terminal core of the agent's instance); each ends with a reply with `HC` (the installed executable's digest, whether a core answers, its version, session and socket); failures carry `Code`: `not_installed`, `bad_digest`, `start_failed`, `stop_failed` |
 | `hc-api` | core → agent | raw pipe to the terminal core's socket (herdr-core's API, `internal/hc`); starts nothing |
 | `detect` | core → agent | after the reply, `DetectEvent` lines `{terminal, agent, status}` (status `working`, `blocked`, `idle`, `done`, `unknown`; `{terminal}` when the agent left) from the agent, which follows the terminal core's terminals until the core closes the stream ([25](features/25-agent-detection.md)); starts and writes nothing |
 | `privacy` | core → agent | – (reply has `Privacy`: whether macOS's Full Disk Access lets the agent's process (`files`; on the local machine the core's) and the terminal core (`terminals`, a probe it runs with `machine.exec`) open a folder only it opens, each `granted`, `denied` or `unknown`, and the terminal core's executable); starts no terminal core, reads no file |
-| `plugin` | core → agent | `Action` of `Plugin` with `Params` (the plugin's JSON); the reply's `Plugin` is its result, or JSON lines follow until either side closes the stream; failures carry `Code` (`unknown_plugin`, `bad_params`, the plugin's own) ([27](features/27-plugins.md)) |
+| `plugin` | core → agent | `Action` of `Plugin` with `Params` (the plugin's JSON); the reply's `Plugin` is its result, or JSON lines follow until either side closes the stream; failures carry `Code` (`unknown_plugin`, `bad_params`, `failed` for a handler that panicked, the plugin's own). Params and results over 32 KiB (`MaxInline`) are not in the line, which is read byte by byte and bounded to 1 MiB: the header's `params_length` or the reply's `plugin_length` says that many bytes of JSON (at most 64 MiB) follow the line. The stream ends when the core closes it: actions that read nothing more (copies, removals, scans, machine downloads) stop then ([27](features/27-plugins.md)) |
 | `bridge` | agent → core | JSON lines between the VS Code extension and the core |
 | `vault` | agent → core | one `VaultRequest` line `{tool: list\|get\|env, names, client, terminal, cwd}` from the vault's MCP server, relayed from `vault.sock`, and one `VaultResponse` line `{ok, code, error, variables, values}`; the core decides from the machine the stream came from; refused with `Code` `plugin_disabled` while the plugin is off ([30](features/30-variable-vault.md)) |
 | `gui` | core → agent | actions `status`, `install` (fetch Xvfb in user space), `start`, `keep` (start the display keeper, which holds the display while the instance's terminal core runs), `shells` (which of the pids in `Args` were started with the display) (reply `GUI`); `video` and `video-install` (`Digest`: the video encoder's SHA-256; the second streams the gzip-compressed encoder, chunked) reply whether it is installed and the stream kinds it makes here (`GUI.Video`, `GUI.VideoEncoders`); `attach`: messages `[kind u8][len u32][payload]`, JSON events (`window`, `gone`, `layer`, `layer_gone`, `cursor`, `stats`, `video` (a window's stream starts, or ends without a codec)) and frames (`GUIFrameHeader` + JPEG/PNG, or a video frame of the whole window, `Enc` 3, 4 for key frames) from the agent, JSON commands (`watch`, `ack`, `refresh`, `codecs` (the stream kinds all viewers decode, also sent with `watch` and `refresh`), `keyframe`, input, `close`) from the core |
@@ -146,7 +146,11 @@ after a successful reply it carries op-specific bytes.
 The core waits for an agent's reply until the deadline of the request that
 opened the stream, and 60 s when it has none (`transport.ReplyTimeout`):
 actions that answer only after their work (a scan of logs, a git push, an
-install) give their own, longer deadline.
+install, a machine's download of code-server) give their own, longer
+deadline. A plugin's stream (`plugin.Open`) stays bound to the caller's
+context after the reply too: it is closed when that context ends, so a
+caller reading or writing more (a save's chunks and second reply) never
+waits on a stalled agent beyond it.
 
 yamux streams cannot be half-closed, so uploads use `ChunkWriter` framing
 (`[u32 length][data]…[0]`). Core and agent always come from the same build:
@@ -251,7 +255,10 @@ extensions (VSIXs, also from the core) → start (a running code-server is
 reused only if it serves the workbench; otherwise it is replaced). The agent records the process in `run/cs.pid` with its own pid as
 owner; it stops its own process on exit, reaps processes whose owner died,
 and stops on request. The core stops code-server after `--code-server-idle`
-without WebSocket connections through its proxy. See
+without WebSocket connections through its proxy. Turning the VS Code plugin
+off ends a preparation under way (its context; an upload's stream is closed
+and the machine's download stops with its stream) and closes the proxied
+requests and WebSockets, so code-server idles out. See
 [deployment](deployment.md#remote-resources).
 
 ## Names, renames and migration

@@ -34,7 +34,11 @@ closes its windows and a VS Code pane (kept in the layout) says the
 plugin is off with a button that turns it on. The core refuses code-server's
 status, start, proxy and the bridge's commands with `404 plugin_disabled`,
 so nothing is fetched or started on a machine; stopping a code-server still
-works.
+works. Turning it off also acts on what runs: a code-server preparation
+under way ends (an upload's stream is closed, a machine's download stops),
+and every proxied request and WebSocket is closed, also those of VS Code
+windows open in other browsers, so code-server stops after
+`--code-server-idle` without connections (`TestVSCodeOffEndsItsWork`).
 
 **Provisioning** (`internal/codeserver`, agent `codeserver.go`)
 

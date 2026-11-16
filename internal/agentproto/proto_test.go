@@ -53,3 +53,25 @@ func TestChunkReaderTruncated(t *testing.T) {
 		t.Fatal("expected error for truncated chunk")
 	}
 }
+
+// A body follows its line: read in full, bounded, the bytes after it left.
+func TestReadBody(t *testing.T) {
+	r := strings.NewReader("{\"op\":\"plugin\",\"params_length\":7}\n{\"a\":1}REST")
+	var h Header
+	if err := ReadLine(r, &h); err != nil || h.ParamsLength != 7 {
+		t.Fatalf("header %+v %v", h, err)
+	}
+	b, err := ReadBody(r, h.ParamsLength)
+	if err != nil || string(b) != `{"a":1}` {
+		t.Fatalf("body %q %v", b, err)
+	}
+	if rest, _ := io.ReadAll(r); string(rest) != "REST" {
+		t.Fatalf("rest %q", rest)
+	}
+	if _, err := ReadBody(strings.NewReader("{}"), 5); err == nil {
+		t.Error("a short body was read")
+	}
+	if _, err := ReadBody(strings.NewReader(""), MaxBody+1); err == nil {
+		t.Error("a body over MaxBody was read")
+	}
+}

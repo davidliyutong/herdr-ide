@@ -309,7 +309,11 @@ windows" section and as the flags `--gui`, `--gui-gpu` and `--gui-video`
 ([13](13-settings-and-appearance.md)). All can be set
 per remote machine ("Per machine" in the same section, which also shows each
 machine's display state); a machine without its own value follows the
-global one, and a flag fixes the value for every machine. Turning the GUI
+global one, and a flag fixes the value for every machine. Program windows
+are also a plugin ([27](27-plugins.md)): the switch on Settings › Plugins is
+the global `gui.enabled` (it says that machines with a value of their own
+keep it), and the tray and palette items are there while the global value
+or any machine's own is on. Turning the GUI
 off for a machine detaches from its display and stops adding the variables
 to its new panes; its programs keep their windows while they run. Turning
 video off sends that machine's windows as pictures from the next frame;

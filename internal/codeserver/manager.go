@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/machines"
@@ -294,7 +295,8 @@ func (mg *Manager) request(ctx context.Context, m *machines.Machine, h agentprot
 }
 
 // upload sends body through a chunked stream for actions that read data
-// after the first reply and answer with a second one.
+// after the first reply and answer with a second one; the stream is closed
+// when ctx ends (the VS Code plugin turned off), which ends the upload.
 func (mg *Manager) upload(ctx context.Context, m *machines.Machine, h agentproto.Header, body io.Reader, progress func(int64)) (*agentproto.Reply, error) {
 	h = mg.header(m, h)
 	conn, _, err := m.Open(ctx, h)
@@ -302,6 +304,7 @@ func (mg *Manager) upload(ctx context.Context, m *machines.Machine, h agentproto
 		return nil, err
 	}
 	defer conn.Close()
+	defer context.AfterFunc(ctx, func() { conn.Close() })()
 	cw := agentproto.ChunkWriter{W: conn}
 	buf := make([]byte, 256<<10)
 	var done int64
@@ -429,6 +432,10 @@ func (mg *Manager) machineDownload(ctx context.Context, m *machines.Machine, ass
 	file := TarballFile(mg.Version, asset)
 	want := mg.knownDigest(file)
 	mg.phase(m.ID(), PhaseMachineDL, mg.Version)
+	// The agent answers once the download is installed (it allows it 20
+	// minutes), and stops it when the core gives up.
+	ctx, cancel := context.WithTimeout(ctx, 21*time.Minute)
+	defer cancel()
 	rep, err := mg.request(ctx, m, agentproto.Header{Action: "download", URL: mg.tarballURL(asset), Digest: want})
 	if err != nil {
 		return err

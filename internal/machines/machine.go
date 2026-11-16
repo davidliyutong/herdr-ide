@@ -204,11 +204,17 @@ var ErrNotConnected = errors.New("machine not connected")
 
 // Open starts an agent stream on this machine.
 func (m *Machine) Open(ctx context.Context, h agentproto.Header) (net.Conn, *agentproto.Reply, error) {
+	return m.OpenWith(ctx, h, nil)
+}
+
+// OpenWith starts an agent stream on this machine with body after the
+// header line (transport.Session.OpenWith).
+func (m *Machine) OpenWith(ctx context.Context, h agentproto.Header, body []byte) (net.Conn, *agentproto.Reply, error) {
 	sess := m.Session()
 	if sess == nil {
 		return nil, nil, ErrNotConnected
 	}
-	return sess.Open(ctx, h)
+	return sess.OpenWith(ctx, h, body)
 }
 
 // Run keeps the machine connected while it is enabled, until ctx ends. A

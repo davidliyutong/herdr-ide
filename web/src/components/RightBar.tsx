@@ -10,6 +10,7 @@ import { usePanels } from '../plugins/registry';
 import { keyHint } from '../keymap';
 import { t } from '../i18n';
 import type { PanelDef } from '../plugins/api';
+import { PluginBoundary } from './PluginBoundary';
 
 /** Shows a panel, or hides the right sidebar when it is the one shown. */
 export function togglePanel(id: string) {
@@ -75,7 +76,9 @@ function Panel({ panel }: { panel: PanelDef }) {
         </button>
       </div>
       <div className="panel-body">
-        <Body />
+        <PluginBoundary plugin={t(panel.title)} resetKey={panel.id}>
+          <Body />
+        </PluginBoundary>
       </div>
     </aside>
   );

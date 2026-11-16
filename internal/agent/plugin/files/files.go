@@ -111,13 +111,18 @@ func handle(ctx context.Context, st net.Conn, action string, raw json.RawMessage
 		v, err := g.move(ctx, p.Paths, p.Dir)
 		return plugin.Reply(st, v, err)
 	case "copy":
+		// Copies and removals of large trees stop when the core gives up.
+		ctx, cancel := plugin.UntilClosed(ctx, st)
+		defer cancel()
 		v, err := g.copy(ctx, p.Paths, p.Dir)
 		return plugin.Reply(st, v, err)
 	case "trash":
 		v, err := g.each(p.Paths, g.trash)
 		return plugin.Reply(st, v, err)
 	case "remove":
-		v, err := g.each(p.Paths, g.remove)
+		ctx, cancel := plugin.UntilClosed(ctx, st)
+		defer cancel()
+		v, err := g.each(p.Paths, func(p string) (string, error) { return g.remove(ctx, p) })
 		return plugin.Reply(st, v, err)
 	case "write":
 		return g.write(st, p)
@@ -565,7 +570,7 @@ func (g *guard) each(paths []string, f action) (*Result, error) {
 	return res, nil
 }
 
-func (g *guard) remove(p string) (string, error) {
+func (g *guard) remove(ctx context.Context, p string) (string, error) {
 	abs, err := g.resolve(p)
 	if err != nil {
 		return "", err
@@ -573,7 +578,7 @@ func (g *guard) remove(p string) (string, error) {
 	if _, err := os.Lstat(abs); err != nil {
 		return "", codeOf(err)
 	}
-	return "", codeOf(os.RemoveAll(abs))
+	return "", codeOf(removeTree(ctx, abs))
 }
 
 func (g *guard) trash(p string) (string, error) {
@@ -786,7 +791,7 @@ func copyTree(ctx context.Context, src, dst string) (made bool, err error) {
 		case d.IsDir():
 			err = os.Mkdir(to, info.Mode().Perm()|0o700)
 		case d.Type().IsRegular():
-			err = copyFile(p, to, info.Mode().Perm())
+			err = copyFile(ctx, p, to, info.Mode().Perm())
 		}
 		if err == nil && p == src {
 			made = true
@@ -796,7 +801,8 @@ func copyTree(ctx context.Context, src, dst string) (made bool, err error) {
 	return made, err
 }
 
-func copyFile(src, dst string, mode fs.FileMode) error {
+// copyFile copies a file, checking ctx between chunks.
+func copyFile(ctx context.Context, src, dst string, mode fs.FileMode) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return err
@@ -806,7 +812,8 @@ func copyFile(src, dst string, mode fs.FileMode) error {
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(out, in); err != nil {
+	// Only the buffer's chunks: the file's ReadFrom would copy in its own.
+	if _, err := io.CopyBuffer(struct{ io.Writer }{out}, ctxReader{ctx, in}, make([]byte, 1<<20)); err != nil {
 		out.Close()
 		return err
 	}

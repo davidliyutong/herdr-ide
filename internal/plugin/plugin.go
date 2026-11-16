@@ -11,15 +11,18 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/machines"
 	"herdr-ide/internal/settings"
+	"herdr-ide/internal/transport"
 )
 
 // Route is an HTTP route of a plugin.
@@ -33,7 +36,8 @@ type Route struct {
 	// the machine.
 	Machine bool
 	// Mutating routes change state: refused in read-only mode, and
-	// audited as <plugin>.<Audit>.
+	// audited as <plugin>.<Audit> once the handler returned, with what it
+	// acted on (Call.AuditField) and how it ended (Outcome).
 	Mutating bool
 	Audit    string
 	Handler  func(c *Call, w http.ResponseWriter, r *http.Request)
@@ -44,6 +48,64 @@ type Call struct {
 	Host Host
 	// Machine is the route's machine (Route.Machine), nil otherwise.
 	Machine *machines.Machine
+
+	audit map[string]any
+}
+
+// AuditField adds what a mutating route acts on (a path, a name) to its
+// audit record; the core writes the record when the handler returns.
+// Values are never secrets or contents.
+func (c *Call) AuditField(key string, v any) {
+	if c.audit == nil {
+		c.audit = map[string]any{}
+	}
+	c.audit[key] = v
+}
+
+// AuditFields are the fields the handler added.
+func (c *Call) AuditFields() map[string]any { return c.audit }
+
+// Outcome is the response writer of a mutating route's handler: it keeps
+// the status and the error code of the answer (WriteError, WriteJSON with
+// an "error"), which the route's audit record carries.
+type Outcome struct {
+	http.ResponseWriter
+	Status int
+	Code   string
+}
+
+func (o *Outcome) WriteHeader(status int) {
+	if o.Status == 0 {
+		o.Status = status
+	}
+	o.ResponseWriter.WriteHeader(status)
+}
+
+func (o *Outcome) Write(b []byte) (int, error) {
+	if o.Status == 0 {
+		o.Status = http.StatusOK
+	}
+	return o.ResponseWriter.Write(b)
+}
+
+// Flush sends what was written so far.
+func (o *Outcome) Flush() {
+	if f, ok := o.ResponseWriter.(http.Flusher); ok {
+		if o.Status == 0 {
+			o.Status = http.StatusOK
+		}
+		f.Flush()
+	}
+}
+
+// Unwrap gives http.ResponseController the writer underneath.
+func (o *Outcome) Unwrap() http.ResponseWriter { return o.ResponseWriter }
+
+// noteCode records an answer's error code when w is an Outcome.
+func noteCode(w http.ResponseWriter, code string) {
+	if o, ok := w.(*Outcome); ok && o.Code == "" {
+		o.Code = code
+	}
 }
 
 // Host is the core as plugins see it.
@@ -151,17 +213,29 @@ func (e *Error) Error() string { return e.Code + ": " + e.Message }
 var ErrOffline = &Error{Code: "offline", Message: "machine not connected"}
 
 // Open runs action of plugin on mc's agent with params and returns the
-// stream after the reply (for actions that stream) and the reply's result.
+// stream after the reply (for actions that stream or send more) and the
+// reply's result. Params and results larger than agentproto.MaxInline
+// travel as bodies after their lines. The stream is closed when ctx ends,
+// also after the reply, so a caller that goes on reading or writing it is
+// bounded by ctx; closing the stream ends that watch.
 func Open(ctx context.Context, mc *machines.Machine, plugin, action string, params any) (net.Conn, json.RawMessage, error) {
-	var raw json.RawMessage
+	h := agentproto.Header{Op: agentproto.OpPlugin, Plugin: plugin, Action: action}
+	var body []byte
 	if params != nil {
 		b, err := json.Marshal(params)
 		if err != nil {
 			return nil, nil, err
 		}
-		raw = b
+		switch {
+		case len(b) > agentproto.MaxBody:
+			return nil, nil, &Error{Code: "too_large", Message: fmt.Sprintf("params of %d bytes", len(b))}
+		case len(b) > agentproto.MaxInline:
+			h.ParamsLength, body = int64(len(b)), b
+		default:
+			h.Params = b
+		}
 	}
-	conn, rep, err := mc.Open(ctx, agentproto.Header{Op: agentproto.OpPlugin, Plugin: plugin, Action: action, Params: raw})
+	conn, rep, err := mc.OpenWith(ctx, h, body)
 	if err != nil {
 		if errors.Is(err, machines.ErrNotConnected) {
 			return nil, nil, ErrOffline
@@ -175,7 +249,39 @@ func Open(ctx context.Context, mc *machines.Machine, plugin, action string, para
 		}
 		return nil, nil, &Error{Code: "transport", Message: err.Error()}
 	}
-	return conn, rep.Plugin, nil
+	c := &ctxConn{Conn: conn, stop: context.AfterFunc(ctx, func() { conn.Close() })}
+	res := rep.Plugin
+	if rep.PluginLength > 0 {
+		// The result's body comes as its reply did: within the caller's
+		// deadline, else transport.ReplyTimeout.
+		deadline := time.Now().Add(transport.ReplyTimeout)
+		if dl, ok := ctx.Deadline(); ok {
+			deadline = dl
+		}
+		_ = conn.SetReadDeadline(deadline)
+		res, err = agentproto.ReadBody(conn, rep.PluginLength)
+		_ = conn.SetReadDeadline(time.Time{})
+		if err != nil {
+			c.Close()
+			if ctx.Err() != nil {
+				err = ctx.Err()
+			}
+			return nil, nil, &Error{Code: "transport", Message: err.Error()}
+		}
+	}
+	return c, res, nil
+}
+
+// ctxConn is a plugin's stream that is closed when the caller's context
+// ends; Close ends that watch.
+type ctxConn struct {
+	net.Conn
+	stop func() bool
+}
+
+func (c *ctxConn) Close() error {
+	c.stop()
+	return c.Conn.Close()
 }
 
 // Request runs action of plugin on mc's agent and decodes its result into
@@ -194,6 +300,15 @@ func Request(ctx context.Context, mc *machines.Machine, plugin, action string, p
 
 // WriteJSON answers with v.
 func WriteJSON(w http.ResponseWriter, status int, v any) {
+	if status >= 400 {
+		switch e := v.(type) {
+		case map[string]string:
+			noteCode(w, e["error"])
+		case map[string]any:
+			code, _ := e["error"].(string)
+			noteCode(w, code)
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)

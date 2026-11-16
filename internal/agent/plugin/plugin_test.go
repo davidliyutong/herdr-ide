@@ -7,10 +7,54 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"strings"
 	"testing"
+	"time"
 
 	"herdr-ide/internal/agentproto"
 )
+
+// A result larger than a line follows the reply as a body; a small one
+// stays in the line.
+func TestLargeResultFollowsTheReply(t *testing.T) {
+	big := strings.Repeat("x", 2<<20)
+	a, b := net.Pipe()
+	go Reply(a, map[string]string{"text": big}, nil)
+	var rep agentproto.Reply
+	if err := agentproto.ReadLine(b, &rep); err != nil || !rep.OK || len(rep.Plugin) != 0 || rep.PluginLength <= 2<<20 {
+		t.Fatalf("reply %+v %v", rep.PluginLength, err)
+	}
+	body, err := agentproto.ReadBody(b, rep.PluginLength)
+	var v map[string]string
+	if err != nil || json.Unmarshal(body, &v) != nil || v["text"] != big {
+		t.Fatalf("body of %d bytes: %v", len(body), err)
+	}
+	a, b = net.Pipe()
+	go Reply(a, map[string]string{"text": "small"}, nil)
+	rep = agentproto.Reply{}
+	if err := agentproto.ReadLine(b, &rep); err != nil || rep.PluginLength != 0 || string(rep.Plugin) != `{"text":"small"}` {
+		t.Fatalf("small reply %+v %v", rep, err)
+	}
+}
+
+// UntilClosed ends the action's context when the core closes the stream.
+func TestUntilClosed(t *testing.T) {
+	a, b := net.Pipe()
+	defer a.Close()
+	ctx, cancel := UntilClosed(context.Background(), a)
+	defer cancel()
+	select {
+	case <-ctx.Done():
+		t.Fatal("ended while the stream is open")
+	case <-time.After(50 * time.Millisecond):
+	}
+	b.Close()
+	select {
+	case <-ctx.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("not ended when the core closed the stream")
+	}
+}
 
 func TestReplyAndFail(t *testing.T) {
 	a, b := net.Pipe()

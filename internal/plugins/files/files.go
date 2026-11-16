@@ -115,6 +115,7 @@ func run(action string) func(c *plugin.Call, w http.ResponseWriter, r *http.Requ
 			return
 		}
 		p.Expect, p.Force = nil, false
+		auditTargets(c, p)
 		ctx, cancel := context.WithTimeout(r.Context(), timeout)
 		defer cancel()
 		var out json.RawMessage
@@ -128,6 +129,26 @@ func run(action string) func(c *plugin.Call, w http.ResponseWriter, r *http.Requ
 			out = json.RawMessage("{}")
 		}
 		w.Write(out)
+	}
+}
+
+// maxAuditPaths bounds the paths an audit record lists; it counts them all.
+const maxAuditPaths = 50
+
+// auditTargets adds the paths a change acts on to its audit record.
+func auditTargets(c *plugin.Call, p params) {
+	if p.Path != "" {
+		c.AuditField("path", p.Path)
+	}
+	if len(p.Paths) > 0 {
+		c.AuditField("paths", p.Paths[:min(len(p.Paths), maxAuditPaths)])
+		c.AuditField("count", len(p.Paths))
+	}
+	if p.To != "" {
+		c.AuditField("to", p.To)
+	}
+	if p.Dir != "" {
+		c.AuditField("dir", p.Dir)
 	}
 }
 
@@ -161,6 +182,10 @@ func write(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		plugin.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad_request", "message": err.Error()})
 		return
+	}
+	auditTargets(c, p)
+	if p.Force {
+		c.AuditField("force", true)
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxWrite))
 	if err != nil {

@@ -726,6 +726,11 @@ export const en = {
   'plugins.page.about':
     'Plugins add panels to the right sidebar, kinds of panes, commands and status bar items. They are part of the app; turning one off hides it everywhere.',
   'plugins.page.always': 'Always on',
+  'plugins.page.perMachine':
+    'The switch is the User setting, for every machine without one of its own (Settings of a machine sets that); the plugin shows while any machine has it on.',
+  'plugins.crashed': 'Something went wrong in the plugin “{plugin}”: {error}',
+  'plugins.crashedShort': '“{plugin}” failed: {error}',
+  'plugins.retry': 'Try Again',
   'plugins.vscode.title': 'VS Code',
   'plugins.vscode.description': 'VS Code (code-server) in panes, for a folder of any machine: its editor, its changes and Git Graph.',
   'settings.plugins.vscode.enabled': 'VS Code',

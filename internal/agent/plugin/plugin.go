@@ -33,7 +33,10 @@ type Env struct {
 	Environ func() []string
 }
 
-// Handler runs the actions of one plugin. It owns st and closes it.
+// Handler runs the actions of one plugin. It owns st and closes it. params
+// are read in full, from the header or the body after it; ctx is the
+// agent's: an action that reads nothing more from st ends with the core's
+// interest through UntilClosed.
 type Handler func(ctx context.Context, st net.Conn, action string, params json.RawMessage, env *Env) error
 
 var (
@@ -122,14 +125,46 @@ func Fail(st net.Conn, err error) error {
 
 func writeResult(st net.Conn, v any) error {
 	rep := agentproto.Reply{OK: true}
+	var body []byte
 	if v != nil {
 		b, err := json.Marshal(v)
 		if err != nil {
 			return Fail(st, err)
 		}
-		rep.Plugin = b
+		switch {
+		case len(b) > agentproto.MaxBody:
+			return Fail(st, Errorf("too_large", "result of %d bytes", len(b)))
+		case len(b) > agentproto.MaxInline:
+			// A large result follows the reply line, which the core reads
+			// byte by byte and bounds.
+			rep.PluginLength, body = int64(len(b)), b
+		default:
+			rep.Plugin = b
+		}
 	}
-	return agentproto.WriteLine(st, rep)
+	if err := agentproto.WriteLine(st, rep); err != nil {
+		return err
+	}
+	if len(body) > 0 {
+		_, err := st.Write(body)
+		return err
+	}
+	return nil
+}
+
+// UntilClosed returns ctx ended also when the core closes st: it gave up
+// on the action (its request ended or timed out, the machine was left).
+// It reads one byte of st in the background, so only actions that read
+// nothing more from st after the header use it (not one that reads an
+// upload's chunks); the reply closing st ends it too. cancel releases it.
+func UntilClosed(ctx context.Context, st net.Conn) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(ctx)
+	go func() {
+		var b [1]byte
+		st.Read(b[:])
+		cancel()
+	}()
+	return ctx, cancel
 }
 
 // Stream answers with first as the result, then writes the values next
@@ -140,15 +175,10 @@ func Stream(ctx context.Context, st net.Conn, first any, next func(ctx context.C
 	if err := writeResult(st, first); err != nil {
 		return err
 	}
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
 	// The core sends nothing after the header: a read ends when it closes
 	// the stream.
-	go func() {
-		var b [1]byte
-		st.Read(b[:])
-		cancel()
-	}()
+	ctx, cancel := UntilClosed(ctx, st)
+	defer cancel()
 	for {
 		v, err := next(ctx)
 		if err != nil || v == nil {
