@@ -31,6 +31,11 @@ func trash(p, home string) (string, error) {
 	if !filepath.IsAbs(data) {
 		data = filepath.Join(home, ".local", "share")
 	}
+	// The data directory may be missing on an account no desktop used
+	// (a server's): made as gio makes it, 0700 as the specification asks.
+	if err := os.MkdirAll(data, 0o700); err != nil {
+		return "", err
+	}
 	where, err := trashFreedesktop(filepath.Join(data, "Trash"), "", p, time.Now())
 	if !errors.Is(err, syscall.EXDEV) {
 		return where, err
