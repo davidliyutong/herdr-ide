@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"herdr-ide/internal/plugin"
@@ -39,6 +40,10 @@ const (
 
 // providerSetting is the switch of a provider.
 func providerSetting(p string) string { return "usage.providers." + p }
+
+// providerGroup is the settings group of a provider: usageClaude,
+// usageCodex, ...
+func providerGroup(p string) string { return "usage" + strings.ToUpper(p[:1]) + p[1:] }
 
 // Refresh modes: manual, every n minutes, or adaptive.
 const (
@@ -76,18 +81,25 @@ var Settings = func() settings.Module {
 		settings.Def{Key: SettingThresholds, Type: settings.TypeList, Item: settings.TypeString, Default: []string{"80", "95"},
 			Options: []string{"50", "80", "90", "95"}, Scope: settings.ScopeApp, Section: "usage", Order: 20, Validate: validThresholds},
 	)
+	// One group per provider, in usage.Providers order: its switch, then
+	// its own options.
 	for i, p := range usage.Providers {
+		g := providerGroup(p)
+		o := 30 + 4*i
 		m.Defs = append(m.Defs, settings.Def{Key: providerSetting(p), Type: settings.TypeBool, Default: true,
-			Scope: settings.ScopeApp, Section: "usage", Group: "usageProviders", Order: 30 + i})
+			Scope: settings.ScopeApp, Section: "usage", Group: g, Order: o})
+		switch p {
+		case usage.Claude:
+			m.Defs = append(m.Defs, settings.Def{Key: SettingClaudeKeychain, Type: settings.TypeBool, Default: true,
+				Scope: settings.ScopeApp, Section: "usage", Group: g, Order: o + 1})
+		case usage.Codex:
+			m.Defs = append(m.Defs, settings.Def{Key: SettingCodexHomes, Type: settings.TypeList, Item: settings.TypeString, Default: []string{},
+				Scope: settings.ScopeApp, Section: "usage", Group: g, Order: o + 1})
+		case usage.Kimi:
+			m.Defs = append(m.Defs, settings.Def{Key: SettingKimiRefresh, Type: settings.TypeBool, Default: true,
+				Scope: settings.ScopeApp, Section: "usage", Group: g, Order: o + 1})
+		}
 	}
-	m.Defs = append(m.Defs,
-		settings.Def{Key: SettingCodexHomes, Type: settings.TypeList, Item: settings.TypeString, Default: []string{},
-			Scope: settings.ScopeApp, Section: "usage", Order: 50},
-		settings.Def{Key: SettingClaudeKeychain, Type: settings.TypeBool, Default: true,
-			Scope: settings.ScopeApp, Section: "usage", Order: 60},
-		settings.Def{Key: SettingKimiRefresh, Type: settings.TypeBool, Default: true,
-			Scope: settings.ScopeApp, Section: "usage", Order: 61},
-	)
 	return m
 }()
 

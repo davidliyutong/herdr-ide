@@ -163,14 +163,14 @@ in the UI; a setting with a scope can have its own value per machine, under
 | `usage.alerts` | `true`, `false` | `true` | – | – |
 | `usage.thresholds` | list of strings | `["80","95"]` | – | – |
 | `usage.providers.claude` | `true`, `false` | `true` | – | – |
+| `usage.claudeKeychain` | `true`, `false` | `true` | – | – |
 | `usage.providers.codex` | `true`, `false` | `true` | – | – |
+| `usage.codexHomes` | list of strings | `[]` | – | – |
 | `usage.providers.grok` | `true`, `false` | `true` | – | – |
 | `usage.providers.antigravity` | `true`, `false` | `true` | – | – |
 | `usage.providers.kimi` | `true`, `false` | `true` | – | – |
-| `usage.providers.deepseek` | `true`, `false` | `true` | – | – |
-| `usage.codexHomes` | list of strings | `[]` | – | – |
-| `usage.claudeKeychain` | `true`, `false` | `true` | – | – |
 | `usage.kimiRefresh` | `true`, `false` | `true` | – | – |
+| `usage.providers.deepseek` | `true`, `false` | `true` | – | – |
 | `vault.approvalTimeout` | integer, 10–600 | `60` | – | – |
 | `vault.autoLock` | integer, 0–1440 | `60` | – | – |
 | `vault.sessionIdle` | integer, 1–240 | `30` | – | – |

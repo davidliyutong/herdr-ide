@@ -786,3 +786,44 @@ func TestSkippedAnswersReplaceStandIns(t *testing.T) {
 		t.Errorf("the account %+v", a)
 	}
 }
+
+// Each provider's switch and options share one group, and the groups
+// follow usage.Providers.
+func TestProviderGroups(t *testing.T) {
+	groups := map[string]string{}
+	orders := map[string][]int{}
+	for _, d := range Settings.Defs {
+		if d.Group == "" || strings.HasPrefix(d.Group, "usageAdaptive") {
+			continue
+		}
+		orders[d.Group] = append(orders[d.Group], d.Order)
+		for _, p := range usage.Providers {
+			if d.Key == providerSetting(p) {
+				groups[p] = d.Group
+			}
+		}
+	}
+	for _, key := range []string{SettingClaudeKeychain, SettingCodexHomes, SettingKimiRefresh} {
+		for _, d := range Settings.Defs {
+			if d.Key != key {
+				continue
+			}
+			p := map[string]string{SettingClaudeKeychain: usage.Claude, SettingCodexHomes: usage.Codex, SettingKimiRefresh: usage.Kimi}[key]
+			if d.Group != groups[p] || d.Order <= 0 {
+				t.Errorf("%s in group %q, its provider's is %q", key, d.Group, groups[p])
+			}
+		}
+	}
+	prev := 0
+	for _, p := range usage.Providers {
+		g := groups[p]
+		if g == "" {
+			t.Fatalf("%s has no group", p)
+		}
+		lo := slices.Min(orders[g])
+		if lo <= prev {
+			t.Errorf("group %s (order %d) is out of provider order", g, lo)
+		}
+		prev = slices.Max(orders[g])
+	}
+}

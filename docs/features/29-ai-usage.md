@@ -65,6 +65,12 @@ script run over ssh).
 | Kimi Code | `$KIMI_CODE_HOME` or `~/.kimi-code/credentials/kimi-code*.json`; an ended token of `kimi-code.json` is renewed first (below) | `GET api.kimi.com/coding/v1/usages`, in either shape, the one with more windows (Kimi Code 2.2.0's when they tie): `usages` as Kimi Code 2.2.0 reads it (`limit_5h`, `limit_7d`, `limit_month_total`, and `limit_month_code`, Kimi Code's part of the month, labelled Code; each `used_ratio` 0–1 and `reset_time`; a month taken as 30 days) with `boosterWallet` (extra usage: its balance, used this month and monthly limit, in its currency), or `usage` (weekly) and `limits[]` (`window.duration` × `timeUnit`); numbers may be strings | the token's `user_id` (or `sub`) claim |
 | DeepSeek | the key file the panel writes (the user's choice, first), `DEEPSEEK_API_KEY`, or Claude Code's `settings.json` when its `ANTHROPIC_BASE_URL` is DeepSeek's (`https` on `api.deepseek.com` or another host below `deepseek.com`; a gateway that only has deepseek in its name does not count) | `GET api.deepseek.com/user/balance`: `balance_infos`, `is_available` (no windows) | a hash of the key |
 
+In Settings, each provider has a group of its own, in the table's order,
+holding its switch `usage.providers.<id>` and the options that concern only
+it: Claude `usage.claudeKeychain`, Codex `usage.codexHomes`, Kimi Code
+`usage.kimiRefresh`; the other providers' groups hold the switch only
+(`TestProviderGroups`).
+
 Tokens are read from the files at each poll, sent only to their provider's
 host and never returned; expiry is checked first, so an expired token is not
 even sent.
