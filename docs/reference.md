@@ -248,6 +248,7 @@ by `scripts/registry`.
 | `workspace.new` | `terminal` | `cmd+n` | – | `ctrl+shift+n` | – |
 | `workspace.edit` | `terminal` | – | – | – | – |
 | `workspace.close` | `terminal` | – | – | – | – |
+| `workspace.closeOthers` | `terminal` | – | – | – | – |
 | `tab.new` | `terminal` | `cmd+t` | – | `ctrl+shift+t` | – |
 | `tab.rename` | `terminal` | – | – | – | – |
 | `tab.next` | `terminal` | `cmd+shift+bracketright`, `ctrl+tab` | – | `ctrl+tab` | – |
@@ -262,10 +263,14 @@ by `scripts/registry`.
 | `tab.select8` | `terminal` | `cmd+8` | – | `alt+8` | – |
 | `tab.select9` | `terminal` | `cmd+9` | – | `alt+9` | – |
 | `tab.close` | `terminal` | `cmd+shift+w` | – | `ctrl+shift+w` | – |
+| `tab.closeOthers` | `terminal` | – | – | – | – |
+| `tab.closeRight` | `terminal` | – | – | – | – |
 | `pane.splitRight` | `terminal` | `cmd+d` | – | – | – |
 | `pane.splitDown` | `terminal` | `cmd+shift+d` | – | – | – |
 | `pane.close` | `terminal` | `cmd+w` | – | – | – |
 | `pane.zoom` | `terminal` | `cmd+shift+enter` | – | `ctrl+shift+enter` | – |
+| `pane.rename` | `terminal` | – | – | – | – |
+| `pane.actions` | `terminal` | – | – | – | – |
 | `pane.focusLeft` | `terminal` | `cmd+alt+left` | – | – | – |
 | `pane.focusDown` | `terminal` | `cmd+alt+down` | – | – | – |
 | `pane.focusUp` | `terminal` | `cmd+alt+up` | – | – | – |

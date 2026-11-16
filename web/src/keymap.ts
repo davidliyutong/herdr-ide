@@ -21,6 +21,7 @@ import { currentZoom, zoom, zoomAvailable, ZOOM_LEVELS } from './zoom';
 import { fullDiskAccessAvailable, openFullDiskAccess } from './fullDiskAccess';
 import { activePanels, commandOfOffPlugin, pluginCommand } from './plugins/registry';
 import { useFrames, windowFocused } from './codeFrames';
+import { openPaneMenu } from './menus';
 
 /** Where a key is pressed: the main UI, a VS Code pane, or a dialog. */
 export type KeyContext = 'terminal' | 'vscode' | 'dialog';
@@ -231,6 +232,8 @@ export function commandEnabled(id: string): boolean {
     case 'workspace.edit':
     case 'workspace.close':
       return changes && !!cur?.ws;
+    case 'workspace.closeOthers':
+      return changes && (layout?.workspaces.length ?? 0) > 1;
     case 'workspace.next':
     case 'workspace.previous':
       return (layout?.workspaces.length ?? 0) > 1;
@@ -239,6 +242,14 @@ export function commandEnabled(id: string): boolean {
     case 'tab.rename':
     case 'tab.close':
       return changes && !!cur?.tab;
+    case 'tab.closeOthers':
+      return changes && tabs > 1;
+    case 'tab.closeRight':
+      return changes && !!cur?.tab && cur.tabIndex < tabs - 1;
+    case 'pane.rename':
+      return changes && !!c?.terminal;
+    case 'pane.actions':
+      return changes && !!c?.pane;
     case 'tab.next':
     case 'tab.previous':
       return tabs > 1;
@@ -341,6 +352,11 @@ export function runCommand(id: string) {
     case 'workspace.close':
       if (s.machineId && s.workspaceId) void actions.closeWorkspace(s.machineId, s.workspaceId);
       break;
+    case 'workspace.closeOthers': {
+      const cur = current();
+      if (cur?.ws) void actions.closeOtherWorkspaces(cur.m, cur.ws.id);
+      break;
+    }
     case 'tab.new':
       void actions.newTab();
       break;
@@ -360,6 +376,18 @@ export function runCommand(id: string) {
       if (c) void actions.closeTab(c.m, c.ws, c.index);
       break;
     }
+    case 'tab.closeOthers':
+    case 'tab.closeRight': {
+      const c = actions.currentTab();
+      if (c) void actions.closeTabsBeside(c.m, c.ws, c.index, id === 'tab.closeOthers' ? 'others' : 'right');
+      break;
+    }
+    case 'pane.rename':
+      if (ctx?.terminal) actions.startRename('pane', ctx.m, ctx.terminal);
+      break;
+    case 'pane.actions':
+      if (ctx?.pane) openPaneMenu(ctx.m, ctx.pane);
+      break;
     case 'pane.splitRight':
       if (ctx?.pane) void actions.split(ctx.m, ctx.pane, 'right');
       break;

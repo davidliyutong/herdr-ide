@@ -14,6 +14,7 @@ import { closeMenu, isItem, openMenu, stepIndex, tidy, useMenu, type MenuEntry, 
 import { machineMenu, paneMenu, sidebarMenu, tabMenu, workspaceMenu } from '../menus';
 import { actions } from '../actions';
 import { useKeys } from '../keybindings';
+import { commandEnabled, keyHint, runCommand } from '../keymap';
 import { useDialog } from '../dialog';
 import { ContextMenu } from '../components/ContextMenu';
 import { definePlugins } from '../plugins/registry';
@@ -288,6 +289,49 @@ describe('menus', () => {
     find(w2, 'Move Up').run!();
     await settle();
     expect(core.layout('m')!.workspaces.map((w) => w.name)).toEqual(['two', 'one']);
+  });
+
+  it('closes the other tabs or those to the right at once with one Undo, and the other workspaces after asking', async () => {
+    const second = tabMenu('m', 'w1w1w1w1', 1);
+    expect(labels(second).slice(-3)).toEqual(['Close Tab', 'Close Other Tabs', 'Close Tabs to the Right']);
+    expect(find(tabMenu('m', 'w1w1w1w1', 2), 'Close Tabs to the Right').disabled).toBe(true);
+    find(second, 'Close Tabs to the Right').run!();
+    await settle();
+    expect(tabNames()).toEqual(['a', 'b']);
+    actions.undoClose();
+    await settle();
+    expect(tabNames()).toEqual(['a', 'b', 'd']);
+    find(tabMenu('m', 'w1w1w1w1', 1), 'Close Other Tabs').run!();
+    await settle();
+    expect(tabNames()).toEqual(['b']);
+    expect(useStore.getState().toasts.at(-1)?.msg).toBe('2 tabs closed.');
+    // The commands act on the tab shown.
+    expect(commandEnabled('tab.closeOthers')).toBe(false);
+    expect(commandEnabled('tab.closeRight')).toBe(false);
+    // One other workspace: asked about as Close Workspace asks.
+    expect(commandEnabled('workspace.closeOthers')).toBe(true);
+    find(workspaceMenu('m', 'w2w2w2w2'), 'Close Other Workspaces…').run!();
+    await vi.waitFor(() => expect(useDialog.getState().current).toBeDefined());
+    const req = useDialog.getState().current!;
+    expect(req).toMatchObject({ kind: 'confirm', title: 'Close this workspace?', message: expect.stringContaining('one') });
+    if (req.kind === 'confirm') req.resolve(true);
+    await settle();
+    expect(core.layout('m')!.workspaces.map((w) => w.name)).toEqual(['two']);
+    expect(find(workspaceMenu('m', 'w2w2w2w2'), 'Close Other Workspaces…').disabled).toBe(true);
+  });
+
+  it('renames the focused pane and opens its menu from commands, which take no key', async () => {
+    expect(keyHint('pane.rename')).toBe('');
+    expect(commandEnabled('pane.rename')).toBe(true);
+    runCommand('pane.rename');
+    expect(useStore.getState().renaming).toEqual({ kind: 'pane', m: 'm', id: 'p1' });
+    useStore.getState().setRenaming(undefined);
+    runCommand('pane.actions');
+    expect(useMenu.getState().menu?.entries.filter(isItem)[0].label).toBe('Rename Pane');
+    closeMenu(false);
+    useStore.getState().setReadOnly(true);
+    expect(commandEnabled('pane.rename')).toBe(false);
+    expect(commandEnabled('pane.actions')).toBe(false);
   });
 
   it("creates a tab in its workspace's folder, else the focused terminal's", async () => {

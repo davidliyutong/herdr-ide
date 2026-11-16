@@ -319,6 +319,18 @@ Non-goals: arbitrary docking of panes; floating panes.
   (a program window asking for attention stays visible).
   Read-only pages see titles, folders and program windows without the other
   buttons.
+- A header is a toolbar, one stop of the Tab key (from the tab bar, the
+  panes' headers follow in their order): the keyboard on it makes its pane
+  the focused one in the layout, the terminal keeping its place. ← → Home
+  End move between the title (a terminal's, to rename) and the buttons
+  shown, Enter or Space presses a button, Enter on the header or its title
+  or F2 anywhere in it renames the pane, the menu key or Shift+F10 opens
+  the pane's menu at the header, Escape gives the keyboard to the pane. A
+  press with the mouse focuses the pane, not the header. From a terminal,
+  where F2 and the like belong to the program, **Rename Pane**
+  (`pane.rename`) and **Pane Actions…** (`pane.actions`, the pane's menu at
+  its header, filtered by typing as every menu) are commands without a
+  default key: the palette runs them and keys can be bound to them.
 - Narrow headers keep one row. They drop, in this order: the folder; then
   the agent and the VS Code buttons (Open in VS Code, changes, Git Graph,
   Reload VS Code), and the ⋯ button appears, which opens the pane's menu
@@ -344,8 +356,14 @@ Non-goals: arbitrary docking of panes; floating panes.
   - a preview's header: Open in VS Code, Download (where downloads are
     offered, [06](06-quick-look-and-files.md)), Split Right / Down,
     Maximize or Restore Pane, Move to Workspace ▸, Close Pane;
-  - tab: Rename Tab, New Tab, Move Left / Right, Move to Workspace ▸, Close Tab;
-  - workspace: Edit Workspace…, New Tab, Move Up / Down, Close Workspace…;
+  - tab: Rename Tab, New Tab, Move Left / Right, Move to Workspace ▸, Close
+    Tab, Close Other Tabs, Close Tabs to the Right (`tab.closeOthers`,
+    `tab.closeRight`: at once, with one Undo for all of them, as Close
+    Tab);
+  - workspace: Edit Workspace…, New Tab, Move Up / Down, Close Workspace…,
+    Close Other Workspaces… (`workspace.closeOthers`: asking once and
+    naming them, after the question about unsaved changes, as Close
+    Workspace…);
   - machine: New Workspace…, Machine Settings… (the settings in the
     machine's scope, [13](13-settings-and-appearance.md)), Rename Machine,
     Copy SSH Host (SSH machines), Move Up / Down
@@ -707,7 +725,11 @@ described in [13](13-settings-and-appearance.md))
 - `web/src/__tests__/paneHeader.test.ts`: a header's buttons act on its own
   pane and keep the terminal's focus, rename by a double click, menu,
   read-only, a VS Code pane's header (named by its folder, its own
-  buttons).
+  buttons), the header as a toolbar (one Tab stop focusing its pane,
+  arrows, F2 and Enter, Shift+F10, a mouse press not taking the keyboard).
+- `web/src/__tests__/menus.test.ts` also: Close Other Tabs and Close Tabs
+  to the Right with one Undo, Close Other Workspaces asking, and the
+  commands `pane.rename` and `pane.actions`.
 - `web/src/__tests__/settingsDialog.test.ts`: the palette's ranking.
 
 Splits, new tabs and workspaces, closing and dragging the split handle were

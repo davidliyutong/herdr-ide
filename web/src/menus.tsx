@@ -42,7 +42,7 @@ import {
 import { actions, current, workspaceTitle } from './actions';
 import { CodeIcon } from './components/icons';
 import { isPluginOn } from './plugins/registry';
-import type { MenuEntry } from './contextMenu';
+import { openMenu, type MenuEntry } from './contextMenu';
 import { downloadDialog } from './dialog';
 import { canDownload, downloadPath } from './download';
 import { t, type MessageKey } from './i18n';
@@ -140,7 +140,12 @@ export function paneMenu(m: string, pane: string): MenuEntry[] {
   }
   const cwd = terms.directory(m, pane);
   return [
-    { label: t('menu.renamePane'), icon: <Pencil />, run: () => actions.startRename('pane', m, pane) },
+    {
+      label: t('command.pane.rename'),
+      hint: hintIf(current()?.focused === pane && current()?.m === m, 'pane.rename'),
+      icon: <Pencil />,
+      run: () => actions.startRename('pane', m, pane),
+    },
     'sep',
     ...arrange,
     'sep',
@@ -421,6 +426,22 @@ export function tabMenu(m: string, ws: string, index: number): MenuEntry[] {
       danger: true,
       run: () => void actions.closeTab(m, ws, index),
     },
+    {
+      label: t('command.tab.closeOthers'),
+      hint: hintIf(isCurrent, 'tab.closeOthers'),
+      icon: <X />,
+      danger: true,
+      disabled: n < 2,
+      run: () => void actions.closeTabsBeside(m, ws, index, 'others'),
+    },
+    {
+      label: t('command.tab.closeRight'),
+      hint: hintIf(isCurrent, 'tab.closeRight'),
+      icon: <X />,
+      danger: true,
+      disabled: index >= n - 1,
+      run: () => void actions.closeTabsBeside(m, ws, index, 'right'),
+    },
   ];
 }
 
@@ -458,5 +479,29 @@ export function workspaceMenu(m: string, ws: string): MenuEntry[] {
       danger: true,
       run: () => void actions.closeWorkspace(m, ws),
     },
+    {
+      label: t('command.workspace.closeOthers'),
+      hint: hintIf(isCurrent, 'workspace.closeOthers'),
+      icon: <X />,
+      danger: true,
+      disabled: n < 2,
+      run: () => void actions.closeOtherWorkspaces(m, ws),
+    },
   ];
+}
+
+/** Opens a pane's menu at its header (pane.actions), or in the middle of
+ * the window when the header is not drawn. */
+export function openPaneMenu(m: string, pane: string) {
+  const header = document.querySelector(`.pane-header[data-m="${CSS.escape(m)}"][data-pane="${CSS.escape(pane)}"]`);
+  const r = header?.getBoundingClientRect();
+  openMenu(
+    {
+      clientX: r ? r.left + 8 : window.innerWidth / 2,
+      clientY: r ? r.bottom : window.innerHeight / 3,
+      preventDefault() {},
+      stopPropagation() {},
+    },
+    paneMenu(m, pane),
+  );
 }

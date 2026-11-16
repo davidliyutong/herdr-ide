@@ -120,6 +120,9 @@ var Commands = func() []Command {
 		cmd("workspace.new", "workspace", on(macApp, "cmd+n"), on(pcApp, "ctrl+shift+n")),
 		cmd("workspace.edit", "workspace"),
 		cmd("workspace.close", "workspace"),
+		// Every other workspace of the machine, asking once as Close
+		// Workspace does.
+		cmd("workspace.closeOthers", "workspace"),
 
 		cmd("tab.new", "tab", on(macApp, "cmd+t"), on(pcApp, "ctrl+shift+t")),
 		cmd("tab.rename", "tab"),
@@ -132,11 +135,20 @@ var Commands = func() []Command {
 	}
 	out = append(out,
 		cmd("tab.close", "tab", on(macApp, "cmd+shift+w"), on(pcApp, "ctrl+shift+w")),
+		// As browsers offer them; at once, with one Undo, as Close Tab.
+		cmd("tab.closeOthers", "tab"),
+		cmd("tab.closeRight", "tab"),
 
 		cmd("pane.splitRight", "pane", on(macApp, "cmd+d")),
 		cmd("pane.splitDown", "pane", on(macApp, "cmd+shift+d")),
 		cmd("pane.close", "pane", on(macApp, "cmd+w")),
 		cmd("pane.zoom", "pane", on(macApp, "cmd+shift+enter"), on(pcApp, "ctrl+shift+enter")),
+		// Renames the focused terminal's pane in its header. No default:
+		// F2 and the like belong to the programs in the terminals.
+		cmd("pane.rename", "pane"),
+		// The focused pane's menu (its header's), at its header: every
+		// command of the pane from the keyboard.
+		cmd("pane.actions", "pane"),
 		cmd("pane.focusLeft", "pane", on(macApp, "cmd+alt+left")),
 		cmd("pane.focusDown", "pane", on(macApp, "cmd+alt+down")),
 		cmd("pane.focusUp", "pane", on(macApp, "cmd+alt+up")),
