@@ -240,6 +240,8 @@ type Status struct {
 
 // Update changes a variable; nil fields stay as they are.
 type Update struct {
+	// To renames the variable, in the same write as the other changes.
+	To          *string   `json:"to"`
 	Description *string   `json:"description"`
 	Machines    *[]string `json:"machines"`
 	InjectOnly  *bool     `json:"injectOnly"`
@@ -271,7 +273,7 @@ func Open(path string) (*Store, error) {
 		return s, nil
 	}
 	if err := json.Unmarshal(b, &s.f); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return nil, fmt.Errorf("%s: %w: %w", path, ErrInvalid, err)
 	}
 	_ = json.Unmarshal(b, &s.f.rest)
 	for _, k := range []string{"version", "mode", "kdf", "check", "passphraseSet", "entries", "forgotten"} {
@@ -412,12 +414,22 @@ func validMachines(ms []string) bool {
 	return true
 }
 
-// Set creates or changes a variable: a new one needs a value. Every
-// change needs the vault unlocked: the value is sealed with the machines
-// and the flag.
+// Set creates or changes a variable: a new one needs a value, and To
+// renames one that exists (taken names are refused), all in one write, so
+// a failure changes nothing. Every change needs the vault unlocked: the
+// value is sealed with the name, the machines and the flag. Machines
+// forgotten while the vault was locked leave every list first, so the
+// machines a change names are the user's choice, a forgotten one too.
 func (s *Store) Set(name string, u Update) error {
 	if !ValidName(name) {
 		return ErrInvalidName
+	}
+	to := name
+	if u.To != nil {
+		if !ValidName(*u.To) {
+			return ErrInvalidName
+		}
+		to = *u.To
 	}
 	if u.Description != nil && len(*u.Description) > MaxDescription {
 		return fmt.Errorf("%w: description longer than %d bytes", ErrInvalid, MaxDescription)
@@ -431,15 +443,25 @@ func (s *Store) Set(name string, u Update) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	e := s.find(name)
+	if e == nil && to != name {
+		return ErrNotFound
+	}
 	if e == nil && u.Value == nil {
 		return ErrValueRequired
 	}
 	if e == nil && len(s.f.Entries) >= MaxEntries {
 		return ErrFull
 	}
+	if to != name && s.find(to) != nil {
+		return ErrExists
+	}
 	if s.key == nil {
 		return s.noKey()
 	}
+	if err := s.applyForgotten(); err != nil {
+		return err
+	}
+	e = s.find(name) // the entries were written again
 	var plain []byte
 	if u.Value != nil {
 		plain = []byte(*u.Value)
@@ -466,7 +488,7 @@ func (s *Store) Set(name string, u Update) error {
 	if u.InjectOnly != nil {
 		e.InjectOnly = *u.InjectOnly
 	}
-	e.Updated = now
+	e.Name, e.Updated = to, now
 	err := s.reseal(e, plain)
 	if err == nil {
 		err = s.save()
@@ -488,7 +510,8 @@ func dedupe(ms []string) []string {
 	return out
 }
 
-// Allow adds machine m to the machines allowed to read name.
+// Allow adds machine m to the machines allowed to read name; a forgotten
+// machine (removed, and added again under the same id) is allowed again.
 func (s *Store) Allow(name, m string) error {
 	if !validMachineID(m) {
 		return ErrInvalid
@@ -499,14 +522,18 @@ func (s *Store) Allow(name, m string) error {
 	if e == nil {
 		return ErrNotFound
 	}
-	if slices.Contains(e.Machines, m) || slices.Contains(e.Machines, AllMachines) {
+	if info(e, s.f.Forgotten).Allows(m) {
 		return nil
-	}
-	if len(e.Machines) >= MaxMachines {
-		return ErrInvalid
 	}
 	if s.key == nil {
 		return ErrLocked
+	}
+	if err := s.applyForgotten(); err != nil {
+		return err
+	}
+	e = s.find(name) // the entries were written again
+	if len(e.Machines) >= MaxMachines {
+		return ErrInvalid
 	}
 	plain, err := open(s.key, e.Value, adOf(e))
 	if err != nil {
@@ -555,46 +582,48 @@ func (s *Store) ForgetMachine(m string) ([]string, error) {
 		}
 	}
 	if s.key != nil {
-		s.applyForgotten()
+		_ = s.applyForgotten() // else still enforced by info, applied at the next change
 	}
 	return names, nil
 }
 
-// applyForgotten takes the forgotten machines out of the variables'
-// machines, sealing their values again; a value that does not open keeps
-// its machines and the list stays (it is still enforced by info). Called
-// with s.mu held and the key there.
-func (s *Store) applyForgotten() {
+// applyForgotten takes the forgotten machines out of every variable's
+// machines and empties the list. A value that opens is sealed again for its
+// new machines; one that does not (the file was edited) loses them too and
+// stays unreadable, or opens again when they were what the edit added:
+// taking machines out never lets more read. Called with s.mu held and the
+// key there; on failure nothing changed and the list is still enforced by
+// info.
+func (s *Store) applyForgotten() error {
 	if len(s.f.Forgotten) == 0 {
-		return
+		return nil
 	}
+	forgotten := s.f.Forgotten
+	gone := func(x string) bool { return slices.Contains(forgotten, x) }
 	prev := slices.Clone(s.f.Entries)
-	all := true
 	for i := range s.f.Entries {
 		e := &s.f.Entries[i]
-		if !slices.ContainsFunc(e.Machines, func(x string) bool { return slices.Contains(s.f.Forgotten, x) }) {
+		if !slices.ContainsFunc(e.Machines, gone) {
 			continue
 		}
 		plain, err := open(s.key, e.Value, adOf(e))
+		e.Machines = slices.DeleteFunc(slices.Clone(e.Machines), gone)
 		if err != nil {
-			all = false
 			continue
 		}
-		before := *e
-		e.Machines = slices.DeleteFunc(slices.Clone(e.Machines), func(x string) bool { return slices.Contains(s.f.Forgotten, x) })
-		if s.reseal(e, plain) != nil {
-			*e = before
-			all = false
-		}
+		err = s.reseal(e, plain)
 		clear(plain)
+		if err != nil {
+			s.f.Entries = prev
+			return err
+		}
 	}
-	forgotten := s.f.Forgotten
-	if all {
-		s.f.Forgotten = nil
-	}
+	s.f.Forgotten = nil
 	if err := s.save(); err != nil {
 		s.f.Entries, s.f.Forgotten = prev, forgotten
+		return err
 	}
+	return nil
 }
 
 // Delete removes a variable; it needs no key.
@@ -611,48 +640,27 @@ func (s *Store) Delete(name string) error {
 		s.f.Entries = prev
 		return err
 	}
+	if s.key != nil {
+		_ = s.applyForgotten()
+	}
 	return nil
 }
 
 // Rename gives a variable another name, keeping its value, description,
-// machines and flags. Its value is sealed again under the new name (part
-// of its additional data), so the vault must be unlocked; a name taken by
-// another variable is refused.
+// machines and flags (Set with To). Its value is sealed again under the new
+// name (part of its additional data), so the vault must be unlocked; a
+// name taken by another variable is refused.
 func (s *Store) Rename(from, to string) error {
 	if !ValidName(to) {
 		return ErrInvalidName
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	e := s.find(from)
-	if e == nil {
-		return ErrNotFound
-	}
 	if from == to {
+		if _, ok := s.Get(from); !ok {
+			return ErrNotFound
+		}
 		return nil
 	}
-	if s.find(to) != nil {
-		return ErrExists
-	}
-	if s.key == nil {
-		return ErrLocked
-	}
-	plain, err := open(s.key, e.Value, adOf(e))
-	if err != nil {
-		return err
-	}
-	defer clear(plain)
-	prev := *e
-	e.Name, e.Updated = to, s.now().UTC()
-	err = s.reseal(e, plain)
-	if err == nil {
-		err = s.save()
-	}
-	if err != nil {
-		*e = prev
-		return err
-	}
-	return nil
+	return s.Set(from, Update{To: &to})
 }
 
 // Lock forgets the key until Unlock.
@@ -680,7 +688,7 @@ func (s *Store) Unlock(passphrase string) error {
 		return ErrPassphrase
 	}
 	s.key = key
-	s.applyForgotten()
+	_ = s.applyForgotten() // else still enforced by info, applied at the next change
 	return nil
 }
 
@@ -715,11 +723,13 @@ func (s *Store) SetPassphrase(passphrase string) error {
 	if s.f.Mode != ModeNone {
 		return ErrHasPassphrase
 	}
-	return s.rekey(passphrase)
+	return s.rekey(nil, passphrase)
 }
 
 // ChangePassphrase replaces the passphrase after checking the current one;
-// every value is sealed again under the new key.
+// every value is sealed again under the new key, which then unlocks the
+// vault. A failure (a value that does not open) leaves the vault as it was,
+// locked if it was.
 func (s *Store) ChangePassphrase(old, passphrase string) error {
 	if len([]rune(passphrase)) < 8 {
 		return ErrWeak
@@ -729,19 +739,19 @@ func (s *Store) ChangePassphrase(old, passphrase string) error {
 	if s.f.Mode != ModePassphrase {
 		return ErrNoPassphrase
 	}
-	if err := s.verify(old); err != nil {
-		return err
+	cur := derive(old, *s.f.KDF)
+	defer clear(cur)
+	if b, err := open(cur, s.f.Check, checkAD); err != nil || string(b) != checkText {
+		return ErrPassphrase
 	}
-	if s.key == nil {
-		s.key = derive(old, *s.f.KDF)
-	}
-	return s.rekey(passphrase)
+	return s.rekey(cur, passphrase)
 }
 
 // rekey derives a new key from passphrase with a new salt and seals every
-// value and the check under it, from the key there (none for a new
-// vault); called with s.mu held.
-func (s *Store) rekey(passphrase string) error {
+// value and the check under it, from cur, the current key (none for a new
+// vault); only once all is written is the new key installed. Called with
+// s.mu held.
+func (s *Store) rekey(cur []byte, passphrase string) error {
 	kdf := s.KDF
 	kdf.Salt = make([]byte, saltLen)
 	if _, err := rand.Read(kdf.Salt); err != nil {
@@ -751,7 +761,7 @@ func (s *Store) rekey(passphrase string) error {
 	entries := slices.Clone(s.f.Entries)
 	for i := range entries {
 		e := &entries[i]
-		plain, err := open(s.key, e.Value, adOf(e))
+		plain, err := open(cur, e.Value, adOf(e))
 		if err != nil {
 			clear(key)
 			return err
@@ -778,7 +788,7 @@ func (s *Store) rekey(passphrase string) error {
 	}
 	clear(s.key)
 	s.key = key
-	s.applyForgotten()
+	_ = s.applyForgotten() // else still enforced by info, applied at the next change
 	return nil
 }
 

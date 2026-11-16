@@ -207,22 +207,31 @@ func TestADIsInjective(t *testing.T) {
 func TestOtherVersionsRefused(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "vault.json")
 	newVault(t, path).Set("A", Update{Value: str("alpha")})
-	for name, f := range map[string]func(raw map[string]any){
-		"older version":  func(raw map[string]any) { raw["version"] = 2 },
-		"keychain mode":  func(raw map[string]any) { raw["mode"] = "keychain" },
-		"no passphrase":  func(raw map[string]any) { delete(raw, "mode") },
-		"no parameters":  func(raw map[string]any) { delete(raw, "kdf") },
-		"no check value": func(raw map[string]any) { delete(raw, "check") },
+	// The code tells the UI why: another version, or a file it cannot read.
+	for name, c := range map[string]struct {
+		f    func(raw map[string]any)
+		code string
+	}{
+		"older version":  {func(raw map[string]any) { raw["version"] = 2 }, "version"},
+		"keychain mode":  {func(raw map[string]any) { raw["mode"] = "keychain" }, "version"},
+		"no passphrase":  {func(raw map[string]any) { delete(raw, "mode") }, "invalid"},
+		"no parameters":  {func(raw map[string]any) { delete(raw, "kdf") }, "invalid"},
+		"no check value": {func(raw map[string]any) { delete(raw, "check") }, "invalid"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			p := filepath.Join(t.TempDir(), "vault.json")
 			b, _ := os.ReadFile(path)
 			os.WriteFile(p, b, 0o600)
-			edit(t, p, f)
-			if _, err := Open(p); err == nil {
-				t.Error("opened")
+			edit(t, p, c.f)
+			if _, err := Open(p); err == nil || Code(err) != c.code {
+				t.Errorf("opened, or not %s: %v", c.code, err)
 			}
 		})
+	}
+	garbled := filepath.Join(t.TempDir(), "vault.json")
+	os.WriteFile(garbled, []byte(`{"version":3,`), 0o600)
+	if _, err := Open(garbled); Code(err) != "invalid" {
+		t.Errorf("a file that is not JSON: %v", err)
 	}
 	empty := filepath.Join(t.TempDir(), "vault.json")
 	os.WriteFile(empty, []byte(`{"version":1,"entries":[]}`), 0o600)
@@ -254,6 +263,31 @@ func TestChangePassphrase(t *testing.T) {
 	}
 	if v, err := s2.Value("A"); err != nil || v != "alpha" {
 		t.Errorf("value %q %v", v, err)
+	}
+
+	// A change that fails (a value that does not open) leaves a locked
+	// vault locked, under the old passphrase.
+	s2.Set("B", Update{Value: str("beta")})
+	s2.Lock()
+	edit(t, path, func(raw map[string]any) {
+		for _, e := range raw["entries"].([]any) {
+			if e.(map[string]any)["name"] == "B" {
+				e.(map[string]any)["value"] = map[string]any{"nonce": "AAAAAAAAAAAAAAAA", "ciphertext": "AAAA"}
+			}
+		}
+	})
+	s3 := openTest(t, path)
+	if err := s3.ChangePassphrase("battery staple", "another staple"); !errors.Is(err, ErrCorrupt) || Code(err) != "corrupt" {
+		t.Fatalf("change over a value that does not open: %v", err)
+	}
+	if st := s3.Status(); !st.Locked {
+		t.Error("a failed change unlocked the vault")
+	}
+	if _, err := s3.Value("A"); !errors.Is(err, ErrLocked) {
+		t.Errorf("value after a failed change: %v", err)
+	}
+	if err := s3.Unlock("battery staple"); err != nil {
+		t.Errorf("the old passphrase after a failed change: %v", err)
 	}
 }
 
@@ -401,8 +435,9 @@ func TestForgetMachine(t *testing.T) {
 	if strings.Contains(string(b), "forgotten") {
 		t.Errorf("forgotten kept after the unlock: %s", b)
 	}
-	// A value that does not open: the machine stays forgotten, the unlock
-	// works and the other values open.
+	// A value that does not open loses the machine too (and stays
+	// unreadable): the unlock works, the other values open and nothing
+	// stays forgotten.
 	s3.Set("C", Update{Value: str("c"), Machines: &[]string{"m4"}})
 	s3.Set("D", Update{Value: str("d"), Machines: &[]string{"m4"}})
 	s3.Lock()
@@ -418,14 +453,89 @@ func TestForgetMachine(t *testing.T) {
 	if st := s4.Status(); st.Locked {
 		t.Fatal("locked")
 	}
-	if i, _ := s4.Get("C"); i.Allows("m4") {
+	if i, _ := s4.Get("C"); i.Allows("m4") || len(i.Machines) != 0 {
 		t.Errorf("C after a failed seal %v", i.Machines)
+	}
+	if _, err := s4.Value("C"); !errors.Is(err, ErrCorrupt) {
+		t.Errorf("C opens: %v", err)
 	}
 	if i, _ := s4.Get("D"); i.Allows("m4") || len(i.Machines) != 0 {
 		t.Errorf("D %v", i.Machines)
 	}
 	if v, err := s4.Value("D"); err != nil || v != "d" {
 		t.Errorf("D value %q %v", v, err)
+	}
+	if b, _ := os.ReadFile(path); strings.Contains(string(b), "forgotten") || strings.Contains(string(b), "m4") {
+		t.Errorf("m4 kept after the unlock: %s", b)
+	}
+	// The machine added again under the same id: allowing it, or choosing
+	// it in the editor, lets it read again (also after reopening).
+	if err := s4.Allow("D", "m4"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s4.Set("A", Update{Machines: &[]string{"m2", "m4"}}); err != nil {
+		t.Fatal(err)
+	}
+	s5 := reopen(t, path)
+	for _, n := range []string{"A", "D"} {
+		if i, _ := s5.Get(n); !i.Allows("m4") {
+			t.Errorf("%s does not let m4 read again: %v", n, i.Machines)
+		}
+	}
+}
+
+// A machine forgotten while the vault is locked, whose removal could not be
+// written at the unlock, is taken out of the lists at the next change (an
+// allow, a save or a deletion), and a machine that change names is then
+// allowed: one added again under the same id is not blocked.
+func TestForgottenAppliedAtTheNextChange(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Getuid() == 0 {
+		t.Skip("needs a directory the user cannot write")
+	}
+	dir := filepath.Join(t.TempDir(), "conf")
+	path := filepath.Join(dir, "vault.json")
+	s := newVault(t, path)
+	s.Set("A", Update{Value: str("a"), Machines: &[]string{"m1", "m2"}})
+	s.Set("B", Update{Value: str("b"), Machines: &[]string{"m1"}})
+	s.Lock()
+	s.ForgetMachine("m1")
+	os.Chmod(dir, 0o500)
+	err := s.Unlock(pass)
+	os.Chmod(dir, 0o700)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if i, _ := s.Get("A"); i.Allows("m1") {
+		t.Fatalf("m1 reads while forgotten %v", i.Machines)
+	}
+	if err := s.Allow("B", "m1"); err != nil {
+		t.Fatal(err)
+	}
+	if i, _ := s.Get("B"); !i.Allows("m1") {
+		t.Errorf("B after allowing m1 again %v", i.Machines)
+	}
+	if i, _ := s.Get("A"); i.Allows("m1") || strings.Join(i.Machines, ",") != "m2" {
+		t.Errorf("A %v", i.Machines)
+	}
+	b, _ := os.ReadFile(path)
+	if strings.Contains(string(b), "forgotten") {
+		t.Errorf("forgotten kept: %s", b)
+	}
+
+	// A deletion while unlocked applies them too.
+	s.Lock()
+	s.ForgetMachine("m2")
+	os.Chmod(dir, 0o500)
+	err = s.Unlock(pass)
+	os.Chmod(dir, 0o700)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Delete("B"); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(path); strings.Contains(string(b), "forgotten") || strings.Contains(string(b), "m2") {
+		t.Errorf("m2 kept after a deletion: %s", b)
 	}
 }
 
@@ -467,5 +577,53 @@ func TestRename(t *testing.T) {
 	s2.Lock()
 	if err := s2.Rename("NEW", "OTHER"); !errors.Is(err, ErrLocked) {
 		t.Fatalf("locked: %v", err)
+	}
+}
+
+// Set with To renames and changes a variable in one write: a refusal of any
+// part changes nothing, so the same change can be tried again.
+func TestSetRenames(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vault.json")
+	s := newVault(t, path)
+	s.Set("OLD", Update{Value: str("v1"), Description: str("d"), Machines: &[]string{"box"}})
+	s.Set("TAKEN", Update{Value: str("v2")})
+	for name, c := range map[string]struct {
+		u   Update
+		err error
+	}{
+		"taken name":     {Update{To: str("TAKEN"), Description: str("x")}, ErrExists},
+		"invalid name":   {Update{To: str("1bad"), Description: str("x")}, ErrInvalidName},
+		"invalid change": {Update{To: str("NEW"), Machines: &[]string{"a\nb"}}, ErrInvalid},
+		"too long":       {Update{To: str("NEW"), Description: str(strings.Repeat("x", MaxDescription+1))}, ErrInvalid},
+	} {
+		if err := s.Set("OLD", c.u); !errors.Is(err, c.err) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if err := s.Set("NOPE", Update{To: str("NEW"), Value: str("v")}); !errors.Is(err, ErrNotFound) {
+		t.Errorf("renaming a missing variable: %v", err)
+	}
+	if i, ok := s.Get("OLD"); !ok || i.Description != "d" {
+		t.Fatalf("OLD after refusals %+v", i)
+	}
+	if err := s.Set("OLD", Update{To: str("NEW"), Description: str("new"), Machines: &[]string{"box", "gpu"}, InjectOnly: boolp(true)}); err != nil {
+		t.Fatal(err)
+	}
+	s2 := reopen(t, path)
+	if _, ok := s2.Get("OLD"); ok {
+		t.Error("the old name stays")
+	}
+	i, _ := s2.Get("NEW")
+	if i.Description != "new" || !i.InjectOnly || strings.Join(i.Machines, ",") != "box,gpu" {
+		t.Errorf("renamed %+v", i)
+	}
+	if v, err := s2.Value("NEW"); err != nil || v != "v1" {
+		t.Errorf("value %q %v", v, err)
+	}
+	if err := s2.Set("NEW", Update{To: str("NEWER"), Value: str("v3")}); err != nil {
+		t.Fatal(err)
+	}
+	if v, err := s2.Value("NEWER"); err != nil || v != "v3" {
+		t.Errorf("renamed with a new value %q %v", v, err)
 	}
 }

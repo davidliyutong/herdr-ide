@@ -16,6 +16,18 @@
   font-size: var(--fs-sm);
   line-height: 1.45;
 }
+/* Why the vault did not load, with a retry. */
+.callout.vault-load-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+:not(.vault) > .callout.vault-load-error {
+  margin: 2px 10px;
+}
+.vault-load-error > span {
+  flex: 1;
+}
 
 /* ---- the gate ---- */
 .vault-gate {

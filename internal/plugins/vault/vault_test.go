@@ -6,7 +6,9 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -356,12 +358,16 @@ func TestPassphraseAndSessions(t *testing.T) {
 	if _, out := c.do("POST", "/api/p/vault/vars/A/reveal", ""); out["value"] != "x" {
 		t.Errorf("value after the change %v", out)
 	}
-	// One check at a time: a guess while another runs waits.
+	// One check at a time: a guess while another runs is told so (busy,
+	// not the wait of wrong passphrases).
 	p.mu.Lock()
 	p.guessing = true
 	p.mu.Unlock()
-	if code, out := c.do("POST", "/api/p/vault/session", `{"passphrase":"longer still"}`); code != 429 || out["error"] != "wait" {
+	if code, out := c.do("POST", "/api/p/vault/session", `{"passphrase":"longer still"}`); code != 429 || out["error"] != "busy" {
 		t.Errorf("parallel guess %d %v", code, out)
+	}
+	if code, out := c.do("POST", "/api/p/vault/passphrase", `{"old":"longer still","passphrase":"longest yet"}`); code != 429 || out["error"] != "busy" {
+		t.Errorf("parallel change %d %v", code, out)
 	}
 	p.tried(false, false)
 	// A session is not opened by a check that crossed a lock.
@@ -628,5 +634,241 @@ func TestForgetMachine(t *testing.T) {
 	}
 	if h.messageCount("changed") != 1 {
 		t.Errorf("changed %d", h.messageCount("changed"))
+	}
+}
+
+// A vault's file that does not open says why (503 with the store's code:
+// another version, a damaged file), and is opened again at the next use,
+// so moving it away needs no restart.
+func TestOpenErrors(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vault.json")
+	p := &Plugin{Path: path}
+	h := &fakeHost{}
+	c := newClient(p, h)
+	for body, want := range map[string]string{
+		`{"version":2,"mode":"keychain","entries":[]}`: "version",
+		`{"version":3,`: "invalid",
+	} {
+		os.WriteFile(path, []byte(body), 0o600)
+		if code, out := c.do("GET", "/api/p/vault", ""); code != 503 || out["error"] != want {
+			t.Errorf("%s: %d %v", body, code, out)
+		}
+		if r := p.Handle(context.Background(), h, "m1", agentproto.VaultRequest{Tool: "list"}); r.Code != "unavailable" {
+			t.Errorf("an MCP request to a vault that does not open %+v", r)
+		}
+	}
+	os.Remove(path)
+	if code, out := c.do("GET", "/api/p/vault", ""); code != 200 || out["status"].(map[string]any)["setup"] != true {
+		t.Errorf("after moving the file away %d %v", code, out)
+	}
+}
+
+// Renaming in the editor is one call: the name and the other changes are
+// saved together (audited with both names), and a refusal changes nothing.
+func TestSaveRenames(t *testing.T) {
+	p, h, _ := newTest(t)
+	c := newClient(p, h)
+	if code, _ := c.do("PUT", "/api/p/vault/vars/OLD", `{"to":"NEW"}`); code != 401 {
+		t.Errorf("without a session %d", code)
+	}
+	c.session(t)
+	c.do("PUT", "/api/p/vault/vars/OLD", `{"value":"v1","machines":["m1"]}`)
+	c.do("PUT", "/api/p/vault/vars/TAKEN", `{"value":"v2"}`)
+	if code, out := c.do("PUT", "/api/p/vault/vars/OLD", `{"to":"TAKEN","description":"x"}`); code != 409 || out["error"] != "exists" {
+		t.Errorf("taken name %d %v", code, out)
+	}
+	if code, out := c.do("PUT", "/api/p/vault/vars/GONE", `{"to":"X","description":"x"}`); code != 404 || out["error"] != "not_found" {
+		t.Errorf("missing variable %d %v", code, out)
+	}
+	code, out := c.do("PUT", "/api/p/vault/vars/OLD", `{"to":"NEW","description":"d","machines":["m1","m2"]}`)
+	if code != 200 || out["name"] != "NEW" || out["description"] != "d" {
+		t.Fatalf("rename %d %v", code, out)
+	}
+	_, out = c.do("GET", "/api/p/vault", "")
+	var names []string
+	for _, v := range out["variables"].([]any) {
+		names = append(names, v.(map[string]any)["name"].(string))
+	}
+	if strings.Join(names, ",") != "NEW,TAKEN" {
+		t.Errorf("variables %v", names)
+	}
+	if _, out := c.do("POST", "/api/p/vault/vars/NEW/reveal", ""); out["value"] != "v1" {
+		t.Errorf("value after the rename %v", out)
+	}
+	if !strings.Contains(h.auditLog(), `vault.saved {"from":"OLD","inject_only":false,"machines":["m1","m2"],"name":"NEW","value_changed":false}`) {
+		t.Errorf("audit %s", h.auditLog())
+	}
+}
+
+// accounted is how many calls with result the audit log stands for: each
+// vault.access record, plus those it says it skipped.
+func accounted(h *fakeHost, result string) (records, calls int) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, a := range h.audits {
+		ev, body, _ := strings.Cut(a, " ")
+		var f map[string]any
+		if ev != "vault.access" || json.Unmarshal([]byte(body), &f) != nil || f["result"] != result {
+			continue
+		}
+		records++
+		calls++
+		if n, ok := f["suppressed"].(float64); ok {
+			calls += int(n)
+		}
+	}
+	return records, calls
+}
+
+// Refusals a program can repeat at will are coalesced in the log and
+// written to the audit log once a while, the end of a burst included (when
+// the while is over), and make no page reload; calls that let a value out
+// are each recorded and make the pages reload at most once a while, the
+// last one included.
+func TestRefusalsAreCoalesced(t *testing.T) {
+	p, h, s := newTest(t)
+	p.noisyEvery = 200 * time.Millisecond
+	p.changedEvery = 300 * time.Millisecond
+	inject := true
+	s.Set("KEY", vaultstore.Update{Value: str("v"), Machines: &[]string{"m1"}})
+	s.Set("INJ", vaultstore.Update{Value: str("w"), Machines: &[]string{"m1"}, InjectOnly: &inject})
+	ctx := context.Background()
+	before := h.messageCount("changed")
+	for _, c := range []struct {
+		req    agentproto.VaultRequest
+		result string
+	}{
+		{agentproto.VaultRequest{Tool: "get", Names: []string{"NOPE"}}, "not_found"},
+		{agentproto.VaultRequest{Tool: "get", Names: []string{"INJ"}}, "inject_only"},
+		{agentproto.VaultRequest{Tool: "get", Names: []string{"A", "B"}}, "bad_request"},
+	} {
+		start := time.Now()
+		for i := 0; i < 10; i++ {
+			if r := p.Handle(ctx, h, "m1", c.req); r.Code != c.result {
+				t.Fatalf("%+v: %+v", c.req, r)
+			}
+		}
+		fast := time.Since(start) < p.noisyEvery
+		if l := p.Log(); l[0].Result != c.result || (fast && l[0].Count != 10) {
+			t.Errorf("log %+v", l[0])
+		}
+		if records, _ := accounted(h, c.result); fast && records != 1 {
+			t.Errorf("%s: %d audit records at once", c.result, records)
+		}
+	}
+	// The ends of the bursts are written once the while is over: every
+	// call is accounted for.
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		_, nf := accounted(h, "not_found")
+		_, io := accounted(h, "inject_only")
+		_, br := accounted(h, "bad_request")
+		if nf == 10 && io == 10 && br == 10 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("calls written: not_found %d, inject_only %d, bad_request %d\n%s", nf, io, br, h.auditLog())
+		}
+	}
+	s.Lock()
+	for i := 0; i < 3; i++ {
+		p.Handle(ctx, h, "m1", agentproto.VaultRequest{Tool: "get", Names: []string{"KEY"}})
+	}
+	if l := p.Log(); l[0].Result != "vault_locked" || l[0].Count != 3 {
+		t.Errorf("locked %+v", l[0])
+	}
+	if h.messageCount("changed") != before {
+		t.Errorf("refusals made the pages reload %d times", h.messageCount("changed")-before)
+	}
+	if err := s.Unlock(pass); err != nil {
+		t.Fatal(err)
+	}
+
+	start := time.Now()
+	for i := 0; i < 5; i++ {
+		if r := p.Handle(ctx, h, "m1", agentproto.VaultRequest{Tool: "get", Names: []string{"KEY"}}); !r.OK {
+			t.Fatalf("allowed %+v", r)
+		}
+	}
+	fast := time.Since(start) < p.changedEvery
+	if records, _ := accounted(h, "allowed"); records != 5 {
+		t.Errorf("allowed calls audited %d", records)
+	}
+	if n := h.messageCount("changed") - before; fast && n != 1 {
+		t.Errorf("reloads at once %d", n)
+	}
+	time.Sleep(2 * p.changedEvery)
+	if n := h.messageCount("changed") - before; n < 2 || (fast && n != 2) {
+		t.Errorf("reloads %d", n)
+	}
+}
+
+// A lock asked for while a passphrase is checked, or a new one set, comes
+// after the check and its session: the vault ends locked with no session
+// open, never unlocked without one (the lock undone) or locked with one.
+func TestLockDuringAPassphraseCheck(t *testing.T) {
+	p, h, s := newTest(t)
+	c := newClient(p, h)
+	consistent := func(what string) {
+		t.Helper()
+		p.mu.Lock()
+		open := len(p.sessions)
+		p.mu.Unlock()
+		if locked := s.Status().Locked; locked != (open == 0) {
+			t.Errorf("%s: locked %v with %d sessions", what, locked, open)
+		}
+	}
+	var lockDone chan struct{}
+	lockInside := func() {
+		lockDone = make(chan struct{})
+		go func() {
+			c.do("POST", "/api/p/vault/lock", "")
+			close(lockDone)
+		}()
+		select {
+		case <-lockDone:
+		case <-time.After(50 * time.Millisecond): // it waits for the check
+		}
+	}
+	c.do("POST", "/api/p/vault/lock", "")
+	p.keyStep = lockInside
+	code, _ := c.do("POST", "/api/p/vault/session", mustJSON(map[string]string{"passphrase": pass}))
+	p.keyStep = nil
+	<-lockDone
+	if code != 200 {
+		t.Errorf("session %d", code)
+	}
+	consistent("unlock")
+	if !s.Status().Locked {
+		t.Error("the lock asked for during the check was undone")
+	}
+
+	c.session(t)
+	p.keyStep = lockInside
+	code, _ = c.do("POST", "/api/p/vault/passphrase", `{"old":"correct horse","passphrase":"battery staple"}`)
+	p.keyStep = nil
+	<-lockDone
+	if code != 200 {
+		t.Errorf("change %d", code)
+	}
+	consistent("change")
+	if !s.Status().Locked {
+		t.Error("the lock asked for during the change was undone")
+	}
+
+	// Any order of an unlock and a lock ends consistent.
+	for i := 0; i < 20; i++ {
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			c.do("POST", "/api/p/vault/session", `{"passphrase":"battery staple"}`)
+		}()
+		go func() {
+			defer wg.Done()
+			time.Sleep(time.Duration(i%5) * time.Millisecond)
+			c.do("POST", "/api/p/vault/lock", "")
+		}()
+		wg.Wait()
+		consistent("race " + strconv.Itoa(i))
 	}
 }

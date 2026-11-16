@@ -9,13 +9,20 @@ import { createPortal } from 'react-dom';
 import { KeyRound, Terminal } from 'lucide-react';
 import { useStore } from '../../state/store';
 import { t } from '../../i18n';
-import { answerRequest, loadRequests, openSession, useVault, VaultError, type Answer, type VaultRequest } from './api';
+import { answerRequest, errorText, loadRequests, openSession, reloadVault, useVault, type Answer, type VaultRequest } from './api';
 import './vault.css';
 
-/** The prompts (a status bar item of the plugin, drawn over the page). */
+/** The prompts (a status bar item of the plugin, drawn over the page). It
+ * also loads the requests, and the vault, again whenever the page's
+ * connection to the core comes back (after a restart of the core its
+ * requests and sessions are gone and the vault is locked). */
 export function VaultApprovals() {
   const requests = useVault((s) => s.requests);
+  const connected = useStore((s) => s.connected);
   useEffect(() => void loadRequests(), []);
+  useEffect(() => {
+    if (connected) reloadVault();
+  }, [connected]);
   const list = Object.values(requests).sort((a, b) => a.created.localeCompare(b.created));
   if (!list.length) return null;
   return createPortal(
@@ -63,8 +70,7 @@ export function RequestCard({ req }: { req: VaultRequest }) {
       if (a !== 'deny' && !useVault.getState().session) await openSession(pass);
       await answerRequest(req.id, a);
     } catch (e) {
-      const code = e instanceof VaultError ? e.code : 'failed';
-      setErr(t(code === 'wrong_passphrase' ? 'vault.error.wrong_passphrase' : code === 'wait' ? 'vault.error.wait' : 'vault.error.failed'));
+      setErr(errorText(e));
     } finally {
       setBusy(false);
     }

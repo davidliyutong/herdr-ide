@@ -826,6 +826,10 @@ export const en = {
     'Keep API keys and other variables encrypted on the core’s computer and let coding agents (Claude Code, Codex…) on your machines read them through an MCP server, with your approval.',
   'command.view.panel.vault': 'Show Variable Vault',
   'vault.unavailable': 'The vault is unavailable: this core keeps no settings file to keep it beside.',
+  'vault.load.invalid':
+    'The vault’s file cannot be read: it is damaged or was edited by hand. Restore it, or move it away to start a new vault.',
+  'vault.load.failed': 'The vault could not be loaded.',
+  'vault.retry': 'Retry',
   'vault.lock': 'Lock',
   'vault.unlock': 'Unlock',
   'vault.passphrase': 'Passphrase',
@@ -879,6 +883,7 @@ export const en = {
   'vault.tool.list': 'list_variables',
   'vault.request.passphrase': 'Passphrase, to allow',
   'vault.error.wait': 'Too many wrong passphrases; try again in a moment.',
+  'vault.error.busy': 'Another passphrase is being checked; try again in a moment.',
   'vault.error.no_passphrase': 'The vault has no passphrase yet.',
   'vault.error.has_passphrase': 'The vault has a passphrase; change it with the current one.',
   'vault.error.vault_session': 'Unlock the vault on this page first.',
@@ -931,6 +936,9 @@ export const en = {
   'vault.result.vault_locked': 'locked',
   'vault.result.not_found': 'not found',
   'vault.result.inject_only': 'inject only',
+  'vault.result.bad_request': 'bad request',
+  'vault.result.unavailable': 'unavailable',
+  'vault.result.corrupt': 'cannot be decrypted',
   'vault.setup.about': 'Add the vault’s MCP server to the agent’s CLI on the machine, once. The command stays the same across updates.',
   'vault.setup.machine': 'Machine',
   'vault.setup.claude': 'Claude Code (run in a terminal)',
@@ -948,6 +956,9 @@ export const en = {
   'vault.error.exists': 'A variable of that name exists.',
   'vault.error.mismatch': 'The passphrases differ.',
   'vault.error.failed': 'The vault could not do that.',
+  'vault.error.corrupt':
+    'A variable’s value cannot be decrypted (the vault’s file was changed outside the app): set it again or delete it, then try again.',
+  'vault.error.full': 'The vault holds at most 1000 variables.',
   // usage plugin
   'usage.title': 'AI Usage',
   'usage.description':

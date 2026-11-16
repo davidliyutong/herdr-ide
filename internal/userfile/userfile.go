@@ -1,7 +1,7 @@
 // Package userfile reads and writes the hand-editable JSON files of the core
-// host (settings, keybindings): atomic replacement with private permissions,
-// and a signature that tells whether someone else changed the file since it
-// was last read or written.
+// host (settings, keybindings, machines, the vault): atomic, durable
+// replacement with private permissions, and a signature that tells whether
+// someone else changed the file since it was last read or written.
 package userfile
 
 import (
@@ -41,11 +41,22 @@ func Read(path string) ([]byte, Sig, error) {
 	return b, sig, err
 }
 
+// syncFile and syncDirOf flush a file's content and a directory's entries
+// to disk (tests replace them).
+var (
+	syncFile  = (*os.File).Sync
+	syncDirOf = syncDir
+)
+
 // Write replaces the file atomically (mode 0600) and returns its new
-// signature. Its directory is created with 0700; one that exists, is a
-// directory (not a link) and belongs to this user is made 0700 when others
-// may access it. The directory is the product's own configuration
-// directory, which holds nothing for other users.
+// signature. The new content is flushed to disk before it replaces the old
+// file (a failure leaves the old file), and the directory after, so a crash
+// or a power loss leaves the old file or the new one, never an empty or
+// partial one (the vault's file holds the only copy of its values). Its
+// directory is created with 0700; one that
+// exists, is a directory (not a link) and belongs to this user is made 0700
+// when others may access it. The directory is the product's own
+// configuration directory, which holds nothing for other users.
 func Write(path string, data []byte) (Sig, error) {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -63,12 +74,20 @@ func Write(path string, data []byte) (Sig, error) {
 		tmp.Close()
 		return Sig{}, err
 	}
+	if err := syncFile(tmp); err != nil {
+		tmp.Close()
+		return Sig{}, err
+	}
 	if err := tmp.Close(); err != nil {
 		return Sig{}, err
 	}
 	if err := os.Rename(tmp.Name(), path); err != nil {
 		return Sig{}, err
 	}
+	// The file is replaced: a failure to flush its directory's entry is not
+	// one of the write (callers would take the old content for the current
+	// one), only of its durability.
+	_ = syncDirOf(dir)
 	return Stat(path), nil
 }
 

@@ -52,7 +52,9 @@ deciding.
 ### Store (`internal/vault`)
 
 The vault is `vault[-<instance>].json` beside the settings file (0600,
-written atomically by `internal/userfile`):
+written atomically and durably by `internal/userfile`: the new content is
+flushed to disk before it replaces the file, and the directory after, so a
+crash or a power loss leaves the old file or the new one):
 `{version: 3, mode, kdf, check, passphraseSet, entries: [{name,
 description, machines, injectOnly, value: {nonce, ciphertext}, created,
 updated}], forgotten}`. Each value is encrypted with AES-256-GCM under the
@@ -66,9 +68,9 @@ value again, which needs the key. `check` is a known text sealed with the
 key, which tells a wrong passphrase. A file of another version that holds
 a passphrase or variables (development builds sealed differently, or kept
 the key in the system keychain) does not open (`version`), nor does one
-whose passphrase lacks its parameters or check, or that holds variables
-without a passphrase: such a file is moved away by hand. Fields the version
-does not know are kept.
+whose passphrase lacks its parameters or check, that holds variables
+without a passphrase or that is not JSON (`invalid`): such a file is moved
+away by hand. Fields the version does not know are kept.
 
 The master key is derived from the user's passphrase with Argon2id (time
 3, 64 MiB, 4 threads; a new 16-byte salt and the parameters in the file)
@@ -79,7 +81,10 @@ asks for its passphrase (at least 8 characters) before its first value
 16-byte salt, time 1–10, memory 8 MiB–1 GiB, 1–16 threads), or the vault
 does not open: an edited file can neither weaken the derivation nor
 exhaust the core's memory. Changing the passphrase needs the current one
-and seals every value again under a key of a new salt. When the passphrase
+and seals every value again under a key of a new salt; the new key is
+installed only once all is written, so a change that fails (a value that
+does not open: `corrupt`) leaves the vault as it was, locked if it was.
+When the passphrase
 was set or last changed (`passphraseSet`) is shown in the panel: a new
 vault's first passphrase needs no session (it has no values yet), so a
 passphrase set by a program instead of the user shows as one the user did
@@ -90,8 +95,12 @@ A machine removed from the core leaves every variable's list
 machine added later under the same id asks again. Taking it out seals the
 values again: until the key is there (while locked) the machine goes into
 `forgotten` instead, which no variable lets read without asking, and is
-taken out of the lists at the next unlock; a value that does not open keeps
-it forgotten. `forgotten` only ever narrows who may read.
+taken out of the lists at the next unlock, of values that do not open too
+(they stay unreadable: taking machines out never lets more read), so the
+list is then empty. Should writing that fail, the next change (a save, an
+allow, a deletion) does it first, so a machine the user then allows or
+chooses (one added again under the same id) is not hidden by an old
+`forgotten`. `forgotten` only ever narrows who may read.
 
 Names are environment variable names (`^[A-Za-z_][A-Za-z0-9_]*$`, at most
 128); values at most 64 KiB, descriptions at most 1 KiB, at most 1000
@@ -103,15 +112,20 @@ conversation by accident, not against a command written to reveal them.
 ### Core (`internal/plugins/vault`)
 
 The plugin `vault` (setting `plugins.vault.enabled`, on by default) opens
-the store at its first use. Its routes, below `/api/p/vault`
+the store at its first use; a file that does not open answers `503` with
+why (`version`, `invalid`, `failed`; `unavailable` without a settings
+file) and is opened again at the next use, so a file moved away or put
+back needs no restart. Its routes, below `/api/p/vault`
 ([reference](../reference.md#http-and-websocket-endpoints)): the list
-(state and variables without values), `PUT`/`DELETE vars/{name}`,
-`POST vars/{name}/reveal`, `POST vars/{name}/rename` (`{"to"}`: the value
-is sealed again under the new name, its additional data; machines,
-description and flag stay; a taken name is `409 exists`), `session`
-(open, end), `passphrase` (set, change), `lock`, the pending `requests` and
-their answers, and the access `log`. Every route that changes something is
-a writing route (refused read-only) audited with the name or request id.
+(state and variables without values), `PUT`/`DELETE vars/{name}` (`PUT`
+with `{"to"}` renames the variable in the same write as its other changes,
+so a refusal changes nothing), `POST vars/{name}/reveal`,
+`POST vars/{name}/rename` (`{"to"}`: the value is sealed again under the
+new name, its additional data; machines, description and flag stay; a
+taken name is `409 exists`), `session` (open, end), `passphrase` (set,
+change), `lock`, the pending `requests` and their answers, and the access
+`log`. Every route that changes something is a writing route (refused
+read-only) audited with the name or request id.
 
 **The gate.** The core's API is open to any program on the core host (it
 needs no `Origin` header), so the API cannot tell the user from a program.
@@ -128,8 +142,13 @@ open without keeping it so. A session ends unused for 30 minutes, 12
 hours after it began, when the vault is locked (every one) or its
 passphrase changed (every other one); a session that a passphrase check
 would open after such an end (the check crossed it) is not opened; at most
-32 are open, the oldest going. Passphrases are checked one at a time
-(`429 wait` while one is checked); three wrong ones in a row cost nothing,
+32 are open, the oldest going. Installing or dropping the key is one step
+with its sessions (one lock of the plugin): an unlock and the session it
+opens, a lock and the end of every session, a new passphrase and its
+session. A lock asked for while a passphrase is checked comes after the
+check and its session, so the vault never ends unlocked after a lock, nor
+locked with a session open. Passphrases are checked one at a time
+(`429 busy` while one is checked); three wrong ones in a row cost nothing,
 each one after doubles a wait before the next try (`429 wait` with
 `Retry-After`, up to 5 minutes), across pages and programs, so a program
 can also make the user wait. Opening a session and changing the passphrase
@@ -168,22 +187,33 @@ client, terminal and directory is shown to the user, not trusted.
 Each request is recorded with names only: in the audit log
 (`vault.access`; results `allowed`, `approved` (once), `approved_always`,
 `listed` or the error's code) and in a log of the last 500 kept in memory,
-shown in the panel. List calls and `busy` refusals, which a program can
-repeat at will, are merged into the previous record when they repeat it
-(`count`), audited at most once a minute per machine (with the number
-skipped) and do not make the pages reload. Answers are audited as
-`vault.answered` (machine, tool, names, answer), saved variables as
-`vault.saved` (allowed machines, `inject_only`, whether the value changed),
-never with values. Other changes send `{type: changed}`, on which pages
-load the vault again.
+shown in the panel. List calls and refusals (`busy`, `not_found`,
+`vault_locked`, `inject_only`, `bad_request`, every result but `allowed`,
+`approved`, `approved_always` and `denied`), which a program can repeat at
+will, are merged into the previous record when they repeat it (`count`),
+audited at most once a minute per machine and result (with the number
+skipped; the last of a burst is written when the minute is over, so every
+call is accounted for) and do not make the pages reload. The other records
+make the pages reload at most once a second, the last one included.
+Answers are audited as `vault.answered` (machine, tool, names, answer),
+saved variables as `vault.saved` (allowed machines, `inject_only`, whether
+the value changed, `from` when renamed), never with values. Other changes
+send `{type: changed}`, on which pages load the vault again.
 
 ### Machines
 
 Every agent listens on `<run>/vault.sock` (0600; connections only from its
 own user, by peer credentials; at most 16 at once) and relays each
-connection to the core over a stream with op `vault`, as the VS Code
-bridge's socket does. It ends with the agent; a socket another agent of the
-instance serves is left to it.
+connection to the core over a stream with op `vault`, opened once the
+connection sent its request, as the VS Code bridge's socket does. One agent
+of the instance serves it at a time, the newest: after a reconnect the old
+session's agent may linger until it notices, and the socket must lead to
+the session that works. An agent that starts takes the socket over; one
+whose socket was taken over checks every 2 s and serves it again once it
+is free (the newer agent gone, or killed and its socket left); an agent
+removes the socket when it exits only while it is its own (the same
+inode). So it is served while any agent of the instance runs, and none is
+left after the last.
 
 The MCP server is the `mcp` command of the agent and of the core (the local
 machine's agent runs in the core's process). The agent keeps
@@ -195,10 +225,13 @@ server for the data directory the link is in, without arguments.
 The server (`internal/vaultmcp`) speaks MCP over stdio (JSON-RPC 2.0, one
 message per line; revisions 2025-06-18, 2025-03-26 and 2024-11-05):
 `initialize`, `ping`, `tools/list`, `tools/call`; notifications get no
-answer. It identifies its client by its parent process's name
-(`/proc/<ppid>/comm` on Linux, `/bin/ps` on macOS) and its terminal by
-`HC_TERMINAL_ID`, which terminals of the terminal core carry. Each tool
-call is one connection to `vault.sock`. Its tools:
+answer. `notifications/cancelled` ends the call it names, which then gets
+no response: its request to the core goes away (a request waiting for the
+user's approval is then denied) and its command is killed. It identifies
+its client by its parent process's name (`/proc/<ppid>/comm` on Linux,
+`/bin/ps` on macOS) and its terminal by `HC_TERMINAL_ID`, which terminals
+of the terminal core carry. Each tool call is one connection to
+`vault.sock`. Its tools:
 
 - `list_variables`;
 - `get_variable {name}`: the value, as the tool's text: it enters the
@@ -208,6 +241,12 @@ call is one connection to `vault.sock`. Its tools:
   environment and stdin closed, and returns the exit status and up to
   64 KiB of combined output, in which each value as it appears is replaced
   with `***`; killed after `timeout` seconds (default 120, at most 600).
+  Output is captured 64 KiB (the longest value) beyond what is returned,
+  so a value cut by the limit is still masked; when even the capture is
+  cut, its last bytes that could be the beginning of a value (fewer than
+  the longest value's length), which no occurrence matches and which
+  masking the rest (`***` is shorter) would bring within the returned
+  part, are dropped.
   The process group is killed when the command returns too, so programs it
   left in the background (`sleep 999 &`) do not outlive the call with the
   values in their environment; Wait gives up after 2 s on output such a
@@ -217,7 +256,13 @@ call is one connection to `vault.sock`. Its tools:
   values out of the conversation by accident, not against a command
   written to reveal them.
 
-The server exits when its stdin closes, killing the commands it still runs.
+The server exits when its stdin closes, or on SIGTERM, SIGINT or SIGHUP,
+killing the commands it still runs first. Killed outright (SIGKILL), it
+cannot: each command's shell first starts a watcher in the command's group
+that holds the read end of a pipe whose write end only the server has, and
+kills the group when the pipe closes, which it does when the server is gone
+however it ended; on Linux the shell also gets SIGKILL when the server
+dies (`Pdeathsig`).
 
 ### Web UI (`web/src/plugins/vault`)
 
@@ -243,7 +288,9 @@ The panel **Variable Vault** of the right sidebar (command
   name, description, a write-only value field (shown while typing on
   request) that sets a new value, who may read without asking (ask every
   time, chosen machines with their state, all machines), inject only as a
-  switch, and Delete after a confirmation. **Access log**: the accesses
+  switch, and Delete after a confirmation. Saving is one call, a new name
+  included (`to`), so a save that fails changed nothing and can be tried
+  again as it is. **Access log**: the accesses
   since the core started by day, filtered by machine and outcome, each
   with its time, outcome (allowed by the list, approved, refused, listed),
   tool, names, machine, client and terminal. **Connect**: per machine,
@@ -255,13 +302,22 @@ The panel **Variable Vault** of the right sidebar (command
   programs (which reach every machine through the core or ssh), so that
   important secrets ask every time. The editor's choices say the same.
 
+A vault that does not load says why in the panel (its file of another
+version, or damaged; the core unreachable) with Retry; a core that keeps
+no settings file says so.
+
 The approval prompts are drawn over every page by the plugin's status
 item, from its `/ws` messages and, for a page opened while one waits,
 `GET requests`: the client, machine, names, terminal and directory, the
 seconds left, and Deny, Always Allow and Allow Once; a page without a
-session asks for the passphrase in the prompt before allowing. A list
-loaded while a session started or ended says nothing about it (the page
-keeps the newer state).
+session asks for the passphrase in the prompt before allowing. An answer
+that fails (the gate, the network, the core) leaves the prompt and says
+why; one the core no longer has (answered elsewhere or expired, `404`)
+closes it. A list loaded while a session started or ended says nothing
+about it (the page keeps the newer state). Whenever the page's connection
+to the core (`/ws`) comes back, the status item loads the requests, and the
+vault if it was loaded, again: the core may have restarted (its requests
+and sessions gone, the vault locked) or changed meanwhile.
 
 ## Alternatives considered
 
@@ -284,13 +340,22 @@ keeps the newer state).
 - Locked vault (after every start): `get` and `env` fail with
   `vault_locked` until a page unlocks it. A lost passphrase cannot be
   recovered: delete the file and start again.
-- A file of another version (a development build's): the vault is
-  `unavailable` and says so; move the file away to start a new one.
+- A file of another version (a development build's): the vault does not
+  open (`503 version`) and the panel says so; move the file away to start
+  a new one, then Retry. A damaged file (not JSON, a passphrase without its
+  parameters) likewise (`503 invalid`).
 - The file edited (machines widened, flag dropped, values swapped): that
-  value no longer opens (`corrupt`).
+  value no longer opens (`corrupt`); changing the passphrase fails until
+  it is set again or deleted.
+- The core killed while writing the file: the file is the old one or the
+  new one (it is flushed before it replaces the old).
 - A page's session ended (idle, locked, the passphrase changed): the gate
   answers `401 vault_session` and the page asks for the passphrase again.
-- Wrong passphrases in a row: `429 wait` for a while that doubles.
+- The core restarted or the page's connection to it lost: once it is back,
+  the page loads the vault and the requests again and finds the vault
+  locked and its session gone.
+- Wrong passphrases in a row: `429 wait` for a while that doubles; a check
+  while another runs: `429 busy`.
 - Nobody answers: the request is denied after 60 s; the agent gets
   `denied` and can ask again.
 - Too many requests waiting: past 4 of the machine (or 32 in all) the
@@ -298,9 +363,19 @@ keeps the newer state).
   answered.
 - The agent or the core gone: the MCP server reports `unavailable` for the
   call and keeps running; the next call connects again.
+- A reconnect while the old session's agent lingers: the new agent takes
+  `vault.sock` over at once; the old one, exiting, leaves it in place.
+- The MCP server killed, also with SIGKILL: the watcher in each command's
+  group kills it, with what it left in the background.
+- The client cancels a call (`notifications/cancelled`): a request
+  waiting for approval is denied, a command killed; the call gets no
+  response.
 - The plugin off: the core refuses the stream with `plugin_disabled`,
   which the agent passes to the MCP server.
 - The core keeps no settings file: the vault is `unavailable` (503).
+- Many refusals in a row (a program repeating a call): one record in the
+  log with their count, one audit record a minute per machine and result,
+  the last of a burst written when the minute is over.
 
 ## Security
 
@@ -316,29 +391,50 @@ server exposes.
   (swapped values, machines widened or added and flag dropped in the
   file), additional data with one text per content and control characters
   refused; files of other versions, of the keychain mode, without a
-  passphrase's parameters or with variables but no passphrase refused;
-  changing the passphrase; validation; Argon2 parameters out of bounds
-  refused; file permissions; unknown fields kept; a removed machine leaving
-  the lists at once or, locked, at the next unlock, and staying forgotten
-  for a value that does not open.
+  passphrase's parameters, with variables but no passphrase or not JSON
+  refused with their codes; changing the passphrase, and a change that
+  fails leaving a locked vault locked; validation; Argon2 parameters out
+  of bounds refused; file permissions; unknown fields kept; a removed
+  machine leaving the lists at once or, locked, at the next unlock, values
+  that do not open included, and allowed again afterwards; a removal that
+  could not be written at the unlock applied by the next allow or
+  deletion (`TestForgottenAppliedAtTheNextChange`); renaming with other
+  changes in one write, a refusal changing nothing (`TestSetRenames`).
+- `internal/userfile/userfile_test.go`: the content flushed before the
+  rename and the directory after, a content that cannot be flushed
+  replacing nothing (`TestWriteIsDurable`).
 - `internal/plugins/vault/vault_test.go`: lists without values, allowed
   machines, inject only, locked, approvals (once, always persisting, deny,
   timeout, requester gone, first answer wins), an answer racing the
   timeout, at most 4 waiting requests per machine and identical requests
-  sharing one, list calls coalesced; the gate: routes refused (and
-  audited) without a session, sessions opened by the passphrase or its
-  setup and ended idle (lists not counting as use), old, by a lock or a
-  change, not opened across a lock, wrong passphrases slowed down, one
-  check at a time, approvals without a session refused and denials
-  allowed; answers, saves and reveals audited without values or
-  passphrases; a removed machine forgotten.
+  sharing one, list calls coalesced; refusals coalesced and audited once a
+  while with the end of a burst written, reloads of the pages throttled
+  (`TestRefusalsAreCoalesced`); a file that does not open answered with
+  its code and opened again once moved away (`TestOpenErrors`); a rename
+  saved with the other changes (`TestSaveRenames`); the gate: routes
+  refused (and audited) without a session, sessions opened by the
+  passphrase or its setup and ended idle (lists not counting as use), old,
+  by a lock or a change, not opened across a lock, a lock asked for during
+  a check or a change coming after it (`TestLockDuringAPassphraseCheck`),
+  wrong passphrases slowed down, one check at a time (`busy`), approvals
+  without a session refused and denials allowed; answers, saves and
+  reveals audited without values or passphrases; a removed machine
+  forgotten.
 - `internal/vaultmcp/mcp_test.go`: JSON-RPC over pipes (initialize and
-  version negotiation, notifications, tools), masking, truncation,
-  timeouts that kill the process group, errors reaching the model, the
-  socket's path from the link; `run_unix_test.go`: programs left in the
-  background killed when the command returns.
+  version negotiation, notifications, tools), masking, truncation, masking
+  where the capture is cut (`TestMaskAtTheCut`), timeouts that kill the
+  process group, errors reaching the model, a cancelled call's request
+  leaving the core without a response, the socket's path from the link;
+  `run_unix_test.go`: programs left in the background killed when the
+  command returns; `signal_unix_test.go`: commands and what they left in
+  the background killed when the server gets SIGTERM, SIGHUP or SIGKILL
+  (the test binary started again as the server), and when the client
+  cancels the call.
 - `internal/agent/vault_test.go`: `vault.sock` (0600) relayed to the core as
-  op `vault`, the link to the executable.
+  op `vault`, the link to the executable; `vault.sock` and `bridge.sock`
+  served by the newest of two agents of one instance, kept when the older
+  exits, served by the other again when the newest exits first, removed
+  with the last (`TestSocketsFollowTheNewestAgent`).
 - `internal/server/machines_test.go`: removing a machine tells the plugins
   (`TestMachineRemove`).
 - `internal/server/plugins_test.go`: agents' streams of a plugin's op, refused
@@ -347,7 +443,11 @@ server exposes.
 - `web/src/__tests__/vault.test.ts`: the panel without values; unlocking
   (a wrong passphrase, then the right one) before reveal and edit, reveal
   after confirming with the session; the editor's request (machines,
-  flag) and a rename; creating the passphrase (a mismatch first); a load
-  crossing a session's start; read-only; the approval prompt asking for
-  the passphrase, denying without one and resolved elsewhere; the local
+  flag) and a rename in one call, tried again after a failure; creating
+  the passphrase (a mismatch first); a load crossing a session's start;
+  why the vault did not load, with Retry; the requests and the vault loaded
+  again when the connection to the core comes back; read-only; the
+  approval prompt asking for the passphrase, denying without one and
+  resolved elsewhere, kept with the reason when an answer fails and closed
+  when the core no longer has it; `busy` told from `wait`; the local
   machine's note; the setup snippets.

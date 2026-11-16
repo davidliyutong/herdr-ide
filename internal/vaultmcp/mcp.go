@@ -9,6 +9,7 @@ package vaultmcp
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -17,8 +18,11 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"slices"
 	"sync"
+	"syscall"
 	"time"
 
 	"herdr-ide/internal/agentproto"
@@ -54,6 +58,28 @@ type Server struct {
 
 	wmu sync.Mutex
 	out io.Writer
+
+	// calls are the tool calls in flight by request id, which the client
+	// may cancel (notifications/cancelled).
+	cmu   sync.Mutex
+	calls map[string]*inflight
+}
+
+// inflight is a tool call that runs: cancel ends it (its request to the
+// core, its command); cancelled says the client asked, so it gets no
+// response.
+type inflight struct {
+	cancel    context.CancelFunc
+	cancelled bool
+}
+
+// idKey is a request id as a map key: its JSON without spaces.
+func idKey(id json.RawMessage) string {
+	var b bytes.Buffer
+	if json.Compact(&b, id) != nil {
+		return string(id)
+	}
+	return b.String()
 }
 
 type rpcRequest struct {
@@ -90,7 +116,8 @@ func (s *Server) send(v rpcResponse) {
 }
 
 // Serve answers the messages of in on out until in ends (the CLI closed
-// it) or ctx does; commands still running are then killed.
+// it) or ctx does (Main: a signal); commands still running are then
+// killed, and Serve returns once they are.
 func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 	s.out = out
 	ctx, cancel := context.WithCancel(ctx)
@@ -98,10 +125,31 @@ func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 	var wg sync.WaitGroup
 	defer wg.Wait()
 	defer cancel()
-	sc := bufio.NewScanner(in)
-	sc.Buffer(make([]byte, 64<<10), maxLine)
-	for sc.Scan() {
-		line := sc.Bytes()
+	// Reading blocks until a line or the end of in: it runs apart, so that
+	// ctx ends Serve too.
+	lines := make(chan []byte)
+	ended := make(chan error, 1)
+	go func() {
+		sc := bufio.NewScanner(in)
+		sc.Buffer(make([]byte, 64<<10), maxLine)
+		for sc.Scan() {
+			select {
+			case lines <- slices.Clone(sc.Bytes()):
+			case <-ctx.Done():
+				return
+			}
+		}
+		ended <- sc.Err()
+	}()
+	for {
+		var line []byte
+		select {
+		case <-ctx.Done():
+			return nil
+		case err := <-ended:
+			return err
+		case line = <-lines:
+		}
 		if len(line) == 0 {
 			continue
 		}
@@ -127,19 +175,51 @@ func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 			if notification {
 				continue
 			}
+			cctx, ccancel := context.WithCancel(ctx)
+			call := &inflight{cancel: ccancel}
+			key := idKey(req.ID)
+			s.cmu.Lock()
+			if s.calls == nil {
+				s.calls = map[string]*inflight{}
+			}
+			s.calls[key] = call
+			s.cmu.Unlock()
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				res, rerr := s.call(ctx, req.Params)
-				s.send(rpcResponse{ID: req.ID, Result: res, Error: rerr})
+				defer ccancel()
+				res, rerr := s.call(cctx, req.Params)
+				s.cmu.Lock()
+				if s.calls[key] == call {
+					delete(s.calls, key)
+				}
+				cancelled := call.cancelled
+				s.cmu.Unlock()
+				if !cancelled {
+					s.send(rpcResponse{ID: req.ID, Result: res, Error: rerr})
+				}
 			}()
+		case "notifications/cancelled":
+			// The client gave up on a request: its call ends (a request
+			// waiting for the user's approval goes away, which the core
+			// takes as a denial; a command is killed) and gets no response.
+			var p struct {
+				RequestID json.RawMessage `json:"requestId"`
+			}
+			if json.Unmarshal(req.Params, &p) == nil && len(p.RequestID) > 0 {
+				s.cmu.Lock()
+				if call := s.calls[idKey(p.RequestID)]; call != nil {
+					call.cancelled = true
+					call.cancel()
+				}
+				s.cmu.Unlock()
+			}
 		default:
 			if !notification {
 				s.send(rpcResponse{ID: req.ID, Error: &rpcError{Code: -32601, Message: "method not found: " + req.Method}})
 			}
 		}
 	}
-	return sc.Err()
 }
 
 func initialize(params json.RawMessage) map[string]any {
@@ -336,7 +416,18 @@ func Main(argv0 string, args []string) int {
 		Client:   ParentName(),
 		Terminal: os.Getenv("HC_TERMINAL_ID"),
 	}
-	if err := s.Serve(context.Background(), os.Stdin, os.Stdout); err != nil {
+	return serveStdio(s)
+}
+
+// serveStdio serves MCP on stdin and stdout until stdin closes or a signal
+// asks the server to end (SIGTERM, SIGINT, SIGHUP): the commands it runs
+// are killed first, so none outlives it with the values in its
+// environment. A server killed outright (SIGKILL) cannot: its commands'
+// groups watch it (watchServer).
+func serveStdio(s *Server) int {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+	defer stop()
+	if err := s.Serve(ctx, os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}

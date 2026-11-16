@@ -50,22 +50,37 @@ describe('vault', () => {
   let status: { mode: string; locked: boolean; setup?: boolean };
   /** Holds the next list's answer until released (a load crossing a session's start). */
   let hold: Promise<void> | undefined;
+  /** Failures to answer with: of the list, a save, an answer, opening a session. */
+  type Failure = { code: number; error: string };
+  let listError: Failure | undefined;
+  let answerError: Failure | undefined;
+  let sessionError: Failure | undefined;
+  let failPut: boolean;
+  /** The core forgot the session (a restart). */
+  let sessionGone: boolean;
+  /** The requests GET requests answers. */
+  let pending: unknown[];
 
   beforeEach(async () => {
     calls = [];
     status = { mode: 'passphrase', locked: false };
     hold = undefined;
+    listError = answerError = sessionError = undefined;
+    failPut = sessionGone = false;
+    pending = [];
     await endSession().catch(() => undefined);
     useVault.setState({ status: undefined, variables: [], log: [], requests: {}, error: undefined, session: false });
-    useStore.setState({ readOnly: false });
+    useStore.setState({ readOnly: false, connected: false });
     vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
       const method = init?.method ?? 'GET';
       const headers = (init?.headers ?? {}) as Record<string, string>;
       const token = headers['X-Vault-Session'];
       calls.push({ method, url, token, body: init?.body ? JSON.parse(String(init.body)) : undefined });
       const json = (v: unknown, code = 200) => new Response(JSON.stringify(v), { status: code });
-      const open = token === TOKEN;
+      const fail = (f: Failure) => json(f.error ? { error: f.error } : {}, f.code);
+      const open = token === TOKEN && !sessionGone;
       if (url === '/api/p/vault' && method === 'GET') {
+        if (listError) return fail(listError);
         const sent = open;
         if (hold) await hold;
         return json({
@@ -79,19 +94,22 @@ describe('vault', () => {
       }
       if (url === '/api/p/vault/log')
         return json({ log: [{ time: '2026-01-01T00:00:00Z', m: 'm1', tool: 'get', names: ['GITHUB_TOKEN'], result: 'approved' }] });
-      if (url === '/api/p/vault/requests') return json({ requests: [] });
+      if (url === '/api/p/vault/requests') return json({ requests: pending });
       if (url === '/api/p/vault/session' && method === 'POST') {
+        if (sessionError) return fail(sessionError);
         const b = JSON.parse(String(init!.body));
+        sessionGone = false;
         return b.passphrase === PASS ? json({ session: TOKEN, idle: 1800, status }) : json({ error: 'wrong_passphrase' }, 403);
       }
       if (url === '/api/p/vault/session') return json({ ok: true });
       if (url === '/api/p/vault/passphrase') return json({ session: TOKEN, idle: 1800, status: { mode: 'passphrase', locked: false } });
       const answer = url.startsWith('/api/p/vault/requests/') ? JSON.parse(String(init!.body)).answer : '';
+      if (answer && answerError) return fail(answerError);
       if (answer === 'deny') return json({ ok: true });
       // The gate.
       if (!open) return json({ error: 'vault_session' }, 401);
       if (url.endsWith('/reveal')) return json({ value: 'ghp_secret' });
-      if (url.startsWith('/api/p/vault/vars/') && method === 'PUT') return json({});
+      if (url.startsWith('/api/p/vault/vars/') && method === 'PUT') return failPut ? json({ error: 'failed' }, 500) : json({});
       if (url.endsWith('/rename')) return json({ ok: true });
       if (answer) return json({ ok: true });
       return json({ error: 'not_found' }, 404);
@@ -181,7 +199,7 @@ describe('vault', () => {
     expect(document.querySelector('.vault-editor')).toBeNull();
   });
 
-  it('renames a variable, then saves what else changed under its new name', async () => {
+  it('renames a variable and saves what else changed in one call', async () => {
     await act(async () => root.render(createElement(VaultPanel)));
     await flush();
     await unlock();
@@ -189,16 +207,107 @@ describe('vault', () => {
     const form = document.querySelector<HTMLFormElement>('.vault-editor')!;
     const name = form.querySelector<HTMLInputElement>('input.input')!;
     await act(async () => type(name, 'DATABASE_PASSWORD'));
+    // The first save fails: nothing changed, and the same save is tried again.
+    failPut = true;
     await act(async () => form.querySelector<HTMLButtonElement>('button[type="submit"]')!.click());
     await flush();
-    const rename = calls.findIndex((c) => c.url.endsWith('/rename'));
-    expect(calls[rename]).toMatchObject({ method: 'POST', url: '/api/p/vault/vars/DB_PASS/rename', body: { to: 'DATABASE_PASSWORD' } });
-    const put = calls.findIndex((c) => c.method === 'PUT');
-    expect(put).toBeGreaterThan(rename);
-    expect(calls[put].url).toBe('/api/p/vault/vars/DATABASE_PASSWORD');
-    // No new value was typed: none is sent; ask every time is no machine.
-    expect(calls[put].body).not.toHaveProperty('value');
-    expect(calls[put].body).toMatchObject({ machines: [] });
+    expect(form.querySelector('.callout.error')?.textContent).toBe(t('vault.error.failed'));
+    failPut = false;
+    await act(async () => form.querySelector<HTMLButtonElement>('button[type="submit"]')!.click());
+    await flush();
+    expect(calls.some((c) => c.url.endsWith('/rename'))).toBe(false);
+    const puts = calls.filter((c) => c.method === 'PUT');
+    expect(puts).toHaveLength(2);
+    for (const put of puts) {
+      expect(put.url).toBe('/api/p/vault/vars/DB_PASS');
+      // No new value was typed: none is sent; ask every time is no machine.
+      expect(put.body).not.toHaveProperty('value');
+      expect(put.body).toMatchObject({ to: 'DATABASE_PASSWORD', machines: [] });
+    }
+    expect(document.querySelector('.vault-editor')).toBeNull();
+  });
+
+  it('says why the vault did not load, and loads it again on retry', async () => {
+    listError = { code: 503, error: 'version' };
+    await act(async () => root.render(createElement(VaultPanel)));
+    await flush();
+    expect(host.querySelector('[data-error="version"]')?.textContent).toContain(t('vault.error.version'));
+    listError = { code: 503, error: 'invalid' };
+    await act(async () => host.querySelector<HTMLButtonElement>('.vault-load-error button')!.click());
+    await flush();
+    expect(host.querySelector('[data-error="invalid"]')?.textContent).toContain(t('vault.load.invalid'));
+    // Anything else (the core unreachable) says so too, with the retry.
+    listError = { code: 502, error: '' };
+    await act(async () => host.querySelector<HTMLButtonElement>('.vault-load-error button')!.click());
+    await flush();
+    expect(host.querySelector('.vault-load-error')?.textContent).toContain(t('vault.load.failed'));
+    listError = undefined;
+    await act(async () => host.querySelector<HTMLButtonElement>('.vault-load-error button')!.click());
+    await flush();
+    expect(host.querySelector('.vault-load-error')).toBeNull();
+    expect([...host.querySelectorAll<HTMLElement>('.vault-row')].map((r) => r.dataset.name)).toEqual(['GITHUB_TOKEN', 'DB_PASS']);
+    // A core that keeps no file says that, without a retry.
+    listError = { code: 503, error: 'unavailable' };
+    await act(async () => void loadVault());
+    await flush();
+    expect(host.textContent).toBe(t('vault.unavailable'));
+  });
+
+  it('loads the requests and the vault again when the connection to the core comes back', async () => {
+    useStore.setState({ connected: true });
+    await act(async () => root.render(createElement('div', null, createElement(VaultPanel), createElement(VaultApprovals))));
+    await flush();
+    await unlock();
+    expect(useVault.getState().session).toBe(true);
+    act(() => useStore.setState({ connected: false }));
+    // The core restarted meanwhile: the session is gone, a request waits.
+    sessionGone = true;
+    pending = [{ id: 'r9', m: 'm1', tool: 'get', names: ['X'], created: '1', expires: '2' }];
+    calls = [];
+    act(() => useStore.setState({ connected: true }));
+    await flush();
+    expect(calls.map((c) => c.url)).toEqual(expect.arrayContaining(['/api/p/vault/requests', '/api/p/vault']));
+    expect(useVault.getState().session).toBe(false);
+    expect(host.querySelector('.vault-gate')?.textContent).toContain(t('vault.gate.unlock.title'));
+    expect(document.querySelector('.vault-approvals [data-request="r9"]')).not.toBeNull();
+    act(() => vaultMessage('m1', { type: 'resolved', id: 'r9', answer: 'deny' }));
+  });
+
+  it('keeps a prompt whose answer failed, and says why; drops one the core no longer has', async () => {
+    useStore.setState({ machines: { m1: { label: 'gpu-box' } } as never });
+    await act(async () => root.render(createElement(VaultApprovals)));
+    await flush();
+    const request = { id: 'r5', m: 'm1', tool: 'get', names: ['A'], created: '1', expires: '2' };
+    act(() => vaultMessage('m1', { type: 'request', request }));
+    answerError = { code: 502, error: '' };
+    await act(async () => document.querySelector<HTMLButtonElement>('[data-request="r5"] [data-answer="deny"]')!.click());
+    await flush();
+    expect(document.querySelector('[data-request="r5"] .callout.error')?.textContent).toBe(t('vault.error.failed'));
+    // Allowing without a session: the gate's refusal is said in the prompt.
+    await openSession(PASS);
+    sessionGone = true;
+    answerError = undefined;
+    await act(async () => document.querySelector<HTMLButtonElement>('[data-request="r5"] [data-answer="once"]')!.click());
+    await flush();
+    expect(document.querySelector('[data-request="r5"] .callout.error')?.textContent).toBe(t('vault.error.vault_session'));
+    expect(useVault.getState().session).toBe(false);
+    // Answered elsewhere or expired: the prompt goes.
+    answerError = { code: 404, error: 'not_found' };
+    await act(async () => document.querySelector<HTMLButtonElement>('[data-request="r5"] [data-answer="deny"]')!.click());
+    await flush();
+    expect(document.querySelector('[data-request="r5"]')).toBeNull();
+  });
+
+  it('tells a check that waits for another from wrong passphrases', async () => {
+    await act(async () => root.render(createElement(VaultPanel)));
+    await flush();
+    sessionError = { code: 429, error: 'busy' };
+    await unlock();
+    expect(host.querySelector('.vault-gate .callout.error')?.textContent).toBe(t('vault.error.busy'));
+    sessionError = { code: 429, error: 'wait' };
+    await unlock();
+    expect(host.querySelector('.vault-gate .callout.error')?.textContent).toBe(t('vault.error.wait'));
+    expect(t('vault.error.busy')).not.toBe(t('vault.error.wait'));
   });
 
   it('creates the passphrase of a new vault', async () => {

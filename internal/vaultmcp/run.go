@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -55,17 +56,67 @@ func (c *capped) Write(p []byte) (int, error) {
 // Mask replaces every occurrence of the values in s with ***, longest
 // values first. It hides values as they are, not encoded or split.
 func Mask(s string, values map[string]string) string {
+	return maskOutput(s, values, false)
+}
+
+// maskOutput is Mask for output whose capture was cut (cut): its last bytes
+// may be the beginning of a value, which no occurrence matches, and which
+// masking the rest would bring within the returned part (*** is shorter
+// than most values). Bytes that could be (fewer than the longest value's
+// length from the end) are dropped, but for an occurrence that began
+// before them, which is masked whole.
+func maskOutput(s string, values map[string]string, cut bool) string {
 	vs := make([]string, 0, len(values))
 	for _, v := range values {
 		if v != "" {
 			vs = append(vs, v)
 		}
 	}
-	sort.Slice(vs, func(i, j int) bool { return len(vs[i]) > len(vs[j]) })
-	for _, v := range vs {
-		s = strings.ReplaceAll(s, v, "***")
+	if len(vs) == 0 {
+		return s
 	}
-	return s
+	sort.Slice(vs, func(i, j int) bool { return len(vs[i]) > len(vs[j]) })
+	end := len(s)
+	if cut {
+		end = max(0, len(s)-(len(vs[0])-1))
+	}
+	// Occurrences, longest values first, none overlapping another: spans
+	// stays sorted, so the first one ending after a candidate's start is
+	// the one it could overlap.
+	type span struct{ from, to int }
+	var spans []span
+	for _, v := range vs {
+		var found []span
+		for at := 0; at < len(s); {
+			i := strings.Index(s[at:], v)
+			if i < 0 {
+				break
+			}
+			i += at
+			if k := sort.Search(len(spans), func(k int) bool { return spans[k].to > i }); k < len(spans) && spans[k].from < i+len(v) {
+				at = spans[k].to // every start before it overlaps it too
+				continue
+			}
+			found = append(found, span{i, i + len(v)})
+			at = i + len(v)
+		}
+		spans = append(spans, found...)
+		slices.SortFunc(spans, func(a, b span) int { return a.from - b.from })
+	}
+	var b strings.Builder
+	at := 0
+	for _, sp := range spans {
+		if sp.from >= end {
+			break
+		}
+		b.WriteString(s[at:sp.from])
+		b.WriteString("***")
+		at = sp.to
+	}
+	if at < end {
+		b.WriteString(s[at:end])
+	}
+	return b.String()
 }
 
 // Run runs command with sh -c in dir with env added to this process's
@@ -99,17 +150,23 @@ func (r Runner) Run(ctx context.Context, command string, env map[string]string, 
 	cmd.Stdout, cmd.Stderr = buf, buf
 	// Programs left in the background must not keep the call open (they
 	// hold the output's pipe), nor outlive it with the values in their
-	// environment: the group is killed whenever the command returns.
+	// environment: the group is killed whenever the command returns, and
+	// when the server is gone (watchServer).
 	cmd.WaitDelay = 2 * time.Second
 	newGroup(cmd)
+	started, over, err := watchServer(cmd)
+	if err != nil {
+		return Mask("cannot start: "+err.Error(), env), true
+	}
+	defer over()
 	if err := cmd.Start(); err != nil {
 		return Mask("cannot start: "+err.Error(), env), true
 	}
+	started()
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
-	var err error
 	var note string
 	select {
 	case err = <-done:
@@ -124,8 +181,8 @@ func (r Runner) Run(ctx context.Context, command string, env map[string]string, 
 		note = "[cancelled; the command was killed]\n"
 	}
 	buf.mu.Lock()
-	output := Mask(string(buf.b), env)
 	total := buf.total
+	output := maskOutput(string(buf.b), env, total > len(buf.b))
 	buf.mu.Unlock()
 	truncated := total > limit
 	if len(output) > limit {

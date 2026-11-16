@@ -95,6 +95,122 @@ func TestVaultSocketRelaysToTheCore(t *testing.T) {
 	t.Errorf("no link %s", link)
 }
 
+// coreTagged answers the streams s's agent opens as a core would, with tag
+// as every variable's value and as the bridge's answer to a message.
+func coreTagged(s *transport.Session, tag string) {
+	for {
+		c, err := s.Accept()
+		if err != nil {
+			return
+		}
+		go func() {
+			defer c.Close()
+			var h agentproto.Header
+			if agentproto.ReadLine(c, &h) != nil {
+				return
+			}
+			agentproto.WriteLine(c, agentproto.Reply{OK: true})
+			switch h.Op {
+			case agentproto.OpVault:
+				var req agentproto.VaultRequest
+				agentproto.ReadLine(c, &req)
+				agentproto.WriteLine(c, agentproto.VaultResponse{OK: true, Values: map[string]string{"K": tag}})
+			case agentproto.OpBridge:
+				var msg map[string]any
+				agentproto.ReadLine(c, &msg)
+				agentproto.WriteLine(c, map[string]string{"core": tag})
+			}
+		}()
+	}
+}
+
+// Two agents of one instance on a machine: the old session's agent that
+// lingers after a reconnect, or a second core's. The newest serves
+// vault.sock and bridge.sock; the old one exiting leaves them to it; when
+// the newest exits first, the other serves them again; the last one
+// removes them.
+func TestSocketsFollowTheNewestAgent(t *testing.T) {
+	defer agent.SetSocketWatch(20 * time.Millisecond)()
+	home, err := os.MkdirTemp("/tmp", "vlt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(home) })
+	t.Setenv("HOME", home)
+	run := filepath.Join(home, ".herdr-ide", "run")
+	start := func(tag string) *transport.Session {
+		s, err := transport.DialLocal(context.Background(), agent.Options{Logger: log.New(io.Discard, "", 0)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		go coreTagged(s, tag)
+		return s
+	}
+	// The core that answers on each socket ("" when none does).
+	ask := func(sock string, req any) string {
+		c, err := net.Dial("unix", filepath.Join(run, sock))
+		if err != nil {
+			return ""
+		}
+		defer c.Close()
+		agentproto.WriteLine(c, req)
+		c.SetReadDeadline(time.Now().Add(2 * time.Second))
+		line, err := bufio.NewReader(c).ReadBytes('\n')
+		if err != nil {
+			return ""
+		}
+		var resp struct {
+			Values map[string]string `json:"values"`
+			Core   string            `json:"core"`
+		}
+		json.Unmarshal(line, &resp)
+		return resp.Values["K"] + resp.Core
+	}
+	served := func(want string) {
+		t.Helper()
+		for _, sock := range []string{"vault.sock", "bridge.sock"} {
+			req := any(agentproto.VaultRequest{Tool: "get", Names: []string{"K"}})
+			if sock == "bridge.sock" {
+				req = map[string]string{"type": "hello"}
+			}
+			got := ""
+			for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+				if got = ask(sock, req); got == want {
+					break
+				}
+			}
+			if got != want {
+				t.Fatalf("%s reaches %q, want %q", sock, got, want)
+			}
+		}
+	}
+
+	old := start("old")
+	served("old")
+	young := start("new")
+	served("new")
+	old.Close()
+	time.Sleep(100 * time.Millisecond)
+	served("new")
+
+	third := start("third")
+	served("third")
+	third.Close()
+	served("new")
+
+	young.Close()
+	for _, sock := range []string{"vault.sock", "bridge.sock"} {
+		for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+			if _, err := os.Lstat(filepath.Join(run, sock)); os.IsNotExist(err) {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("%s left after the last agent", sock)
+			}
+		}
+	}
+}
+
 func TestLinkMCPReplacesTheLink(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "bin")
 	if err := agent.LinkMCP(dir, "/old/agent"); err != nil {

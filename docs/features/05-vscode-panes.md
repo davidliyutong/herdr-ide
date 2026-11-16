@@ -256,9 +256,12 @@ windows open in other browsers, so code-server stops after
   starts again first if it was stopped as idle.
 - **The layout document starts over** (the terminal core's state was
   removed) → its VS Code panes go with it; their windows are unmounted.
-- **Two cores on one machine (same instance)** → the bridge socket stays with
-  the first agent; the other logs that VS Code commands go to that core.
-  Separate instances avoid this.
+- **Two agents of one instance on a machine** (a reconnect while the old
+  session's agent lingers, or two cores of the same instance) → the newest
+  agent takes the bridge socket over, so VS Code reaches the session that
+  works; the other serves it again once it is free (the newer agent gone),
+  checking every 2 s. Bridge connections to the old agent end with it, and
+  the extension connects again. Separate instances keep two cores apart.
 
 ## Security
 
@@ -288,6 +291,10 @@ VS Code's "open in browser" links for forwarded ports therefore do not work.
   (`TestCodeServerDownload`), start flags (`TestCodeServerArgsDisableProxy`),
   a listener that does not serve VS Code replaced
   (`TestCodeServerReplacesBrokenListener`).
+- `internal/agent/vault_test.go`: the bridge socket (with the vault's) served
+  by the newest of two agents of one instance, kept when the older exits,
+  served by the other again when the newest exits first, removed with the
+  last (`TestSocketsFollowTheNewestAgent`).
 - `internal/server/server_test.go`: bridge window selection
   (`TestBridgePick`; `TestBridgeTargets`: a named window, the window used
   last, a fresh pane's window that connects after the request although

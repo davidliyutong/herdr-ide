@@ -50,9 +50,12 @@ const (
 	MaxPending           = 32
 	MaxPendingPerMachine = 4
 	// noisyAuditEvery is how often the audit log records a machine's
-	// list calls and busy refusals (the ones in between are counted in
-	// the next record).
+	// list calls and refusals of one kind (the ones in between are counted
+	// in the next record, written at the latest when the minute is over).
 	noisyAuditEvery = time.Minute
+	// changedEvery is how often access records make the pages load the
+	// vault again: at most once in a while, the last change included.
+	changedEvery = time.Second
 	// MaxNames is how many variables one request may name.
 	MaxNames = 64
 	// SessionIdle and SessionMax bound a vault session: unused for
@@ -85,13 +88,24 @@ type Plugin struct {
 	// Timeout of an approval; 0 is DefaultTimeout.
 	Timeout time.Duration
 
+	// keyMu makes installing or dropping the key one step with the sessions
+	// that go with it: an unlock and the session it opens, a lock and the
+	// end of every session, a new passphrase and its session. A lock asked
+	// for while a passphrase is checked waits for the check (the store's
+	// lock does too), so it is never undone by it.
+	keyMu sync.Mutex
+
 	mu      sync.Mutex
 	store   *vaultstore.Store
 	pending map[string]*Request
 	log     []Access
-	// noisy are the last audit records of list calls and busy refusals,
-	// by machine and result, with the calls not recorded since.
+	// noisy are the last audit records of list calls and refusals, by
+	// machine and result, with the calls not recorded since.
 	noisy map[string]*noisyAudit
+	// changedAt is when access records last made the pages reload, and
+	// changedLater whether one more reload is due at the end of the while.
+	changedAt    time.Time
+	changedLater bool
 	// sessions are the pages' vault sessions by token; epoch is bumped
 	// when they all end (a lock, a new passphrase), so a session opened by
 	// a check that crossed it is not taken. fails, waitUntil and guessing
@@ -102,15 +116,29 @@ type Plugin struct {
 	waitUntil time.Time
 	guessing  bool
 	now       func() time.Time
+	// noisyEvery and changedEvery replace noisyAuditEvery and changedEvery
+	// (tests).
+	noisyEvery, changedEvery time.Duration
+	// keyStep runs inside keyMu before a passphrase check opens a session
+	// and after a new passphrase is set, before its session (tests: a lock
+	// asked for there).
+	keyStep func()
 }
 
 type session struct {
 	started, used time.Time
 }
 
+// noisyAudit is the audit state of a machine's calls with one result: when
+// it was last written, the calls since that were not, the last of them (to
+// write when the while is over) and the timer that writes it, with its
+// number (a timer stopped too late finds another number and does nothing).
 type noisyAudit struct {
 	last       time.Time
 	suppressed int
+	pending    map[string]any
+	flush      *time.Timer
+	flushSeq   int
 }
 
 // New returns the plugin.
@@ -164,12 +192,21 @@ type Access struct {
 	// (once), approved_always, listed, or the error's code (denied,
 	// busy…).
 	Result string `json:"result"`
-	// Count is how many identical list calls or busy refusals in a row
-	// this record stands for (1 when absent).
+	// Count is how many identical list calls or refusals in a row this
+	// record stands for (1 when absent).
 	Count int `json:"count,omitempty"`
 }
 
-var errUnavailable = &plugin.Error{Code: "unavailable", Message: "the vault has no file (the core keeps no settings)"}
+// openError is why the vault is not there: unavailable (the core keeps no
+// settings file to keep it beside), or the store's code for a file that
+// does not open (version: of another version; invalid: damaged or edited;
+// failed: not readable). It is opened again at the next use, so a file
+// moved away or put back is taken then.
+type openError struct{ code, msg string }
+
+func (e *openError) Error() string { return e.code + ": " + e.msg }
+
+var errUnavailable = &openError{code: "unavailable", msg: "the vault has no file (the core keeps no settings)"}
 
 // open returns the store, opened at the first use.
 func (p *Plugin) open(h plugin.Host) (*vaultstore.Store, error) {
@@ -191,7 +228,7 @@ func (p *Plugin) open(h plugin.Host) (*vaultstore.Store, error) {
 	s, err := vaultstore.Open(path)
 	if err != nil {
 		h.Logger().Printf("vault: %v", err)
-		return nil, &plugin.Error{Code: "unavailable", Message: err.Error()}
+		return nil, &openError{code: vaultstore.Code(err), msg: err.Error()}
 	}
 	p.store = s
 	return s, nil
@@ -222,14 +259,16 @@ func (p *Plugin) Routes() []plugin.Route {
 	}
 }
 
-// fail answers with the store's error code.
+// fail answers with the store's error code; a vault that does not open is
+// 503 with its reason's code.
 func fail(w http.ResponseWriter, err error) {
+	var oe *openError
+	if errors.As(err, &oe) {
+		plugin.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": oe.code, "message": oe.msg})
+		return
+	}
 	var pe *plugin.Error
 	if errors.As(err, &pe) {
-		if pe.Code == "unavailable" {
-			plugin.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": pe.Code, "message": pe.Message})
-			return
-		}
 		plugin.WriteError(w, err)
 		return
 	}
@@ -396,15 +435,20 @@ func (p *Plugin) tried(ok, wrong bool) {
 	}
 }
 
-// slowDown reserves a passphrase check, or answers 429 while wrong
-// passphrases must wait or another check runs; true when it answered.
+// slowDown reserves a passphrase check, or answers 429: wait while wrong
+// passphrases must wait, busy while another check runs; true when it
+// answered.
 func (p *Plugin) slowDown(w http.ResponseWriter) bool {
 	ok, d := p.beginGuess()
 	if ok {
 		return false
 	}
 	w.Header().Set("Retry-After", strconv.Itoa(int(d.Seconds())+1))
-	plugin.WriteJSON(w, http.StatusTooManyRequests, map[string]string{"error": "wait", "message": "too many wrong passphrases, or a check running; try again later"})
+	if d <= 0 {
+		plugin.WriteJSON(w, http.StatusTooManyRequests, map[string]string{"error": "busy", "message": "another passphrase is being checked; try again in a moment"})
+		return true
+	}
+	plugin.WriteJSON(w, http.StatusTooManyRequests, map[string]string{"error": "wait", "message": "too many wrong passphrases; try again later"})
 	return true
 }
 
@@ -419,19 +463,29 @@ func (p *Plugin) handleSet(c *plugin.Call, w http.ResponseWriter, r *http.Reques
 		plugin.WriteError(w, err)
 		return
 	}
-	if err := s.Set(r.PathValue("name"), u); err != nil {
+	from := r.PathValue("name")
+	if err := s.Set(from, u); err != nil {
 		if errors.Is(err, vaultstore.ErrLocked) {
-			changed(c.Host) // a first value may have chosen passphrase mode
+			changed(c.Host) // pages that took it for unlocked learn otherwise
 		}
 		fail(w, err)
 		return
 	}
 	changed(c.Host)
-	i, _ := s.Get(r.PathValue("name"))
-	// What changed, never the value: who may read it without asking.
-	c.Host.Audit(r, "vault.saved", map[string]any{
+	name := from
+	if u.To != nil {
+		name = *u.To
+	}
+	i, _ := s.Get(name)
+	// What changed, never the value: who may read it without asking, and
+	// the name it had when it was renamed.
+	fields := map[string]any{
 		"name": i.Name, "machines": i.Machines, "inject_only": i.InjectOnly, "value_changed": u.Value != nil,
-	})
+	}
+	if name != from {
+		fields["from"] = from
+	}
+	c.Host.Audit(r, "vault.saved", fields)
 	plugin.WriteJSON(w, http.StatusOK, i)
 }
 
@@ -515,18 +569,27 @@ func (p *Plugin) handleSession(c *plugin.Call, w http.ResponseWriter, r *http.Re
 	if p.slowDown(w) {
 		return
 	}
+	// The key and the session it opens come together: a lock waits for
+	// both, and so ends the session too.
+	p.keyMu.Lock()
 	epoch := p.currentEpoch()
+	if p.keyStep != nil {
+		p.keyStep()
+	}
 	err = s.Unlock(body.Passphrase)
 	p.tried(err == nil, errors.Is(err, vaultstore.ErrPassphrase))
+	tok := ""
+	if err == nil {
+		if tok = p.newSession(epoch); tok == "" {
+			// The sessions ended while the check ran, which keyMu leaves
+			// to a lock or a new passphrase after it.
+			err = vaultstore.ErrLocked
+		}
+	}
+	p.keyMu.Unlock()
 	c.Host.Audit(r, "vault.unlocked", map[string]any{"ok": err == nil})
 	if err != nil {
 		fail(w, err)
-		return
-	}
-	tok := p.newSession(epoch)
-	if tok == "" {
-		// Locked, or a new passphrase, while the check ran.
-		fail(w, vaultstore.ErrLocked)
 		return
 	}
 	changed(c.Host)
@@ -564,19 +627,28 @@ func (p *Plugin) handlePassphrase(c *plugin.Call, w http.ResponseWriter, r *http
 	if change && p.slowDown(w) {
 		return
 	}
+	// The new key, the end of the old passphrase's sessions and the new
+	// session come together: a lock waits for them, and so ends it too.
+	p.keyMu.Lock()
 	if change {
 		err = s.ChangePassphrase(*body.Old, body.Passphrase)
 		p.tried(err == nil, errors.Is(err, vaultstore.ErrPassphrase))
 	} else {
 		err = s.SetPassphrase(body.Passphrase)
 	}
+	tok := ""
+	if err == nil {
+		if p.keyStep != nil {
+			p.keyStep()
+		}
+		tok = p.newSession(p.endSessions())
+	}
+	p.keyMu.Unlock()
 	c.Host.Audit(r, "vault.passphrase_set", map[string]any{"ok": err == nil, "change": change})
 	if err != nil {
 		fail(w, err)
 		return
 	}
-	// Sessions of the old passphrase end with it.
-	tok := p.newSession(p.endSessions())
 	changed(c.Host)
 	plugin.WriteJSON(w, http.StatusOK, map[string]any{"session": tok, "idle": SessionIdle.Seconds(), "status": s.Status()})
 }
@@ -587,8 +659,11 @@ func (p *Plugin) handleLock(c *plugin.Call, w http.ResponseWriter, r *http.Reque
 		fail(w, err)
 		return
 	}
+	// After a check that runs, never between its key and its session.
+	p.keyMu.Lock()
 	s.Lock()
 	p.endSessions()
+	p.keyMu.Unlock()
 	changed(c.Host)
 	plugin.WriteJSON(w, http.StatusOK, s.Status())
 }
@@ -744,10 +819,26 @@ func clip(s string, n int) string {
 	return s
 }
 
-// noisy results are list calls and busy refusals: a program can repeat
-// them at will, so they are coalesced in the log, rate-limited in the
-// audit log and do not make the pages reload.
-func noisy(result string) bool { return result == "listed" || result == "busy" }
+// noisy results are list calls and refusals (busy, not_found,
+// vault_locked, inject_only, bad_request…): a program can repeat them at
+// will, so they are coalesced in the log, rate-limited in the audit log
+// and do not make the pages reload. What lets a value out (allowed,
+// approved, approved_always) or is the user's answer (denied) is recorded
+// every time.
+func noisy(result string) bool {
+	switch result {
+	case "allowed", "approved", "approved_always", "denied":
+		return false
+	}
+	return true
+}
+
+func (p *Plugin) noisyAuditEvery() time.Duration {
+	if p.noisyEvery > 0 {
+		return p.noisyEvery
+	}
+	return noisyAuditEvery
+}
 
 func (p *Plugin) record(h plugin.Host, rec Access) {
 	quiet := noisy(rec.Result)
@@ -767,31 +858,104 @@ func (p *Plugin) record(h plugin.Host, rec Access) {
 		}
 	}
 	if quiet {
-		key := rec.M + "\x00" + rec.Result
-		if p.noisy == nil {
-			p.noisy = map[string]*noisyAudit{}
-		}
-		na := p.noisy[key]
-		switch {
-		case na == nil:
-			p.noisy[key] = &noisyAudit{last: rec.Time}
-		case rec.Time.Sub(na.last) < noisyAuditEvery:
-			na.suppressed++
-			audit = false
-		default:
-			if na.suppressed > 0 {
-				fields["suppressed"] = na.suppressed
-			}
-			na.last, na.suppressed = rec.Time, 0
-		}
+		audit = p.auditNoisy(h, rec.M+"\x00"+rec.Result, rec.Time, fields)
 	}
 	p.mu.Unlock()
 	if audit {
 		h.Audit(nil, "vault.access", fields)
 	}
 	if !quiet {
-		changed(h)
+		p.changedThrottled(h)
 	}
+}
+
+// auditNoisy decides whether a noisy record of key (machine and result) is
+// written now: the first one, and then one a while (noisyAuditEvery), with
+// the number not written since (suppressed). Those in between wait: the
+// last of them is written with that number when the while is over, so a
+// burst that ends is recorded too. Called with p.mu held.
+func (p *Plugin) auditNoisy(h plugin.Host, key string, at time.Time, fields map[string]any) bool {
+	if p.noisy == nil {
+		p.noisy = map[string]*noisyAudit{}
+	}
+	every := p.noisyAuditEvery()
+	na := p.noisy[key]
+	switch {
+	case na == nil:
+		p.noisy[key] = &noisyAudit{last: at}
+		return true
+	case at.Sub(na.last) < every:
+		na.suppressed++
+		na.pending = fields
+		if na.flush == nil {
+			na.flushSeq++
+			seq := na.flushSeq
+			na.flush = time.AfterFunc(every-at.Sub(na.last), func() { p.flushNoisy(h, key, seq) })
+		}
+		return false
+	}
+	if na.flush != nil {
+		na.flush.Stop()
+		na.flush = nil
+		na.flushSeq++
+	}
+	if na.suppressed > 0 {
+		fields["suppressed"] = na.suppressed
+	}
+	na.last, na.suppressed, na.pending = at, 0, nil
+	return true
+}
+
+// flushNoisy writes the last noisy record of key not written, with the
+// number of those before it that were not either; seq is the timer's.
+func (p *Plugin) flushNoisy(h plugin.Host, key string, seq int) {
+	p.mu.Lock()
+	na := p.noisy[key]
+	if na == nil || na.flushSeq != seq {
+		p.mu.Unlock()
+		return
+	}
+	na.flush = nil
+	if na.pending == nil {
+		p.mu.Unlock()
+		return
+	}
+	fields := na.pending
+	if na.suppressed > 1 {
+		fields["suppressed"] = na.suppressed - 1
+	}
+	na.last, na.suppressed, na.pending = time.Now().UTC(), 0, nil
+	p.mu.Unlock()
+	h.Audit(nil, "vault.access", fields)
+}
+
+// changedThrottled tells the pages to load the vault again after an access
+// record, at most once a while (changedEvery): a record within it is told
+// at its end, with the others of that while.
+func (p *Plugin) changedThrottled(h plugin.Host) {
+	every := changedEvery
+	if p.changedEvery > 0 {
+		every = p.changedEvery
+	}
+	now := time.Now()
+	p.mu.Lock()
+	if wait := every - now.Sub(p.changedAt); wait > 0 {
+		later := !p.changedLater
+		p.changedLater = true
+		p.mu.Unlock()
+		if later {
+			time.AfterFunc(wait, func() {
+				p.mu.Lock()
+				p.changedAt, p.changedLater = time.Now(), false
+				p.mu.Unlock()
+				changed(h)
+			})
+		}
+		return
+	}
+	p.changedAt = now
+	p.mu.Unlock()
+	changed(h)
 }
 
 // sameCall reports whether b repeats a's call (machine, tool, names,

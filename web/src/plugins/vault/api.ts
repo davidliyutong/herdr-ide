@@ -7,6 +7,7 @@
 // X-Vault-Session; the core ends it after 30 idle minutes, and a page
 // that is refused asks for the passphrase again.
 import { create } from 'zustand';
+import { hasMessage, t } from '../../i18n';
 
 export interface VaultStatus {
   /** '' (no passphrase yet) or 'passphrase'. */
@@ -48,7 +49,7 @@ export interface VaultAccess {
   client?: string;
   terminal?: string;
   result: string;
-  /** Identical list calls or busy refusals in a row (1 when absent). */
+  /** Identical list calls or refusals in a row (1 when absent). */
   count?: number;
 }
 
@@ -61,6 +62,20 @@ export class VaultError extends Error {
     super(message || code);
     this.code = code;
   }
+}
+
+/** A failure's message in the UI's language. */
+export function errorText(e: unknown): string {
+  const code = e instanceof VaultError ? e.code : 'failed';
+  const key = `vault.error.${code}`;
+  return hasMessage(key) ? t(key) : t('vault.error.failed');
+}
+
+/** Why the vault did not load, in the UI's language: its file of another
+ * version or unreadable, the core keeps no file, or a failure. */
+export function loadErrorText(code: string): string {
+  for (const key of [`vault.load.${code}`, `vault.error.${code}`]) if (hasMessage(key)) return t(key);
+  return t('vault.load.failed');
 }
 
 const base = '/api/p/vault';
@@ -102,10 +117,10 @@ const enc = encodeURIComponent;
 
 export const vaultApi = {
   list: () => call<{ status: VaultStatus; variables: VaultVariable[]; session?: boolean }>('GET', ''),
-  set: (name: string, body: { description?: string; machines?: string[]; injectOnly?: boolean; value?: string }) =>
+  /** Creates or changes a variable; `to` renames it in the same write. */
+  set: (name: string, body: { to?: string; description?: string; machines?: string[]; injectOnly?: boolean; value?: string }) =>
     call<VaultVariable>('PUT', `/vars/${enc(name)}`, body),
   remove: (name: string) => call('DELETE', `/vars/${enc(name)}`),
-  rename: (name: string, to: string) => call('POST', `/vars/${enc(name)}/rename`, { to }),
   reveal: (name: string) => call<{ value: string }>('POST', `/vars/${enc(name)}/reveal`),
   session: (passphrase: string) => call<Opened>('POST', '/session', { passphrase }),
   endSession: () => call('DELETE', '/session'),
@@ -125,7 +140,8 @@ interface VaultState {
   log: VaultAccess[];
   /** By id: requests waiting for an answer. */
   requests: Record<string, VaultRequest>;
-  /** The error code of the last load ('unavailable': the core keeps no file). */
+  /** The error code of the last load ('unavailable': the core keeps no
+   * file; 'version', 'invalid': its file does not open). */
   error?: string;
 }
 
@@ -137,8 +153,8 @@ export async function openSession(passphrase: string) {
   await loadVault();
 }
 
-/** Sets the first passphrase (converting a keychain vault) or, with old,
- * changes it; either opens a session. */
+/** Sets the first passphrase or, with old, changes it; either opens a
+ * session. */
 export async function setPassphrase(passphrase: string, old?: string) {
   opened(await vaultApi.passphrase(passphrase, old));
   await loadVault();
@@ -208,18 +224,28 @@ export function vaultMessage(_m: string, data: unknown) {
 }
 
 /** Answers a request; the first answer of any page wins, and every page
- * drops it when the core says it is resolved. Allowing needs the page's
- * session (the gate refuses it otherwise and the request stays). */
+ * drops it when the core says it is resolved. A request the core no longer
+ * has (answered elsewhere or expired: 404) is dropped; any other failure
+ * (the gate, which allowing passes only with the page's session, the
+ * network, the core) leaves it and is thrown, for the prompt to say. */
 export async function answerRequest(id: string, answer: Answer) {
   try {
     await vaultApi.answer(id, answer);
   } catch (e) {
-    if (e instanceof VaultError && e.code === 'vault_session') throw e;
-    /* answered elsewhere or expired */
+    if (!(e instanceof VaultError && e.code === 'not_found')) throw e;
   }
   useVault.setState((s) => {
     const requests = { ...s.requests };
     delete requests[id];
     return { requests };
   });
+}
+
+/** Loads the requests, and the vault if it was loaded, again: the page's
+ * connection to the core came back, and the core may have restarted (its
+ * requests and sessions gone, the vault locked) or changed meanwhile. */
+export function reloadVault() {
+  void loadRequests();
+  const s = useVault.getState();
+  if (s.status || s.error) void loadVault();
 }

@@ -225,6 +225,89 @@ func TestRunLimits(t *testing.T) {
 	}
 }
 
+// Output cut by the capture: masking shrinks the text, so the beginning of
+// a value at the cut, which no occurrence matches, would come within the
+// returned part; it is dropped, and an occurrence that began before it is
+// masked whole.
+func TestMaskAtTheCut(t *testing.T) {
+	v := map[string]string{"V": "SECRET"}
+	for _, c := range []struct {
+		in   string
+		cut  bool
+		want string
+	}{
+		{"a SECRET b SEC", true, "a *** "},
+		{"a SECRET b SEC", false, "a *** b SEC"}, // a part the command printed
+		{"xxxxSECRET", true, "xxxx***"},
+		{"SECRETSECRETSECR", true, "******"},
+		{"", true, ""},
+	} {
+		if got := maskOutput(c.in, v, c.cut); got != c.want {
+			t.Errorf("%q (cut %v): %q, want %q", c.in, c.cut, got, c.want)
+		}
+	}
+	// A shorter value inside the cut beginning of a longer one leaves none
+	// of the longer one's bytes.
+	two := map[string]string{"A": "XAB", "B": "ABCDE"}
+	if got := maskOutput("..XABCD", two, true); got != "..***" {
+		t.Errorf("overlapping values at the cut: %q", got)
+	}
+	if got := Mask("x ABCDE XAB y", two); got != "x *** *** y" {
+		t.Errorf("two values %q", got)
+	}
+	if runtime.GOOS == "windows" {
+		return
+	}
+	// A 39-byte value printed 4000 times: the capture (64 KiB beyond the
+	// limit) ends inside one, which is not shown.
+	secret := "sk-live-0123456789abcdefghijklmnopqrstuv"[:39]
+	out, failed := Runner{}.Run(context.Background(), `yes "$V" | head -n 4000`, map[string]string{"V": secret}, "", 0)
+	if failed || !strings.Contains(out, "[output truncated: 65536 of 160000 bytes]") {
+		t.Fatalf("run %q", out[:min(len(out), 200)])
+	}
+	if strings.Contains(out, secret[:4]) {
+		i := strings.Index(out, secret[:4])
+		t.Errorf("a cut value shown: %q", out[max(0, i-20):min(len(out), i+40)])
+	}
+}
+
+// A call the client cancels while it waits for the user's approval ends:
+// its request to the core goes away (the core takes it as a denial) and it
+// gets no response.
+func TestCancelledRequestLeavesTheCore(t *testing.T) {
+	asked, gone := make(chan struct{}), make(chan struct{})
+	dial := func(context.Context) (net.Conn, error) {
+		a, b := net.Pipe()
+		go func() {
+			defer b.Close()
+			var req agentproto.VaultRequest
+			if agentproto.ReadLine(b, &req) != nil {
+				return
+			}
+			close(asked)
+			io.Copy(io.Discard, b) // waits for the user, until the requester leaves
+			close(gone)
+		}()
+		return a, nil
+	}
+	c, done := startServer(t, &Server{Dial: dial})
+	defer func() {
+		c.in.Close()
+		<-done
+	}()
+	c.send(map[string]any{"jsonrpc": "2.0", "id": "call-7", "method": "tools/call", "params": map[string]any{"name": "get_variable", "arguments": map[string]any{"name": "KEY"}}})
+	<-asked
+	c.send(map[string]any{"jsonrpc": "2.0", "method": "notifications/cancelled", "params": map[string]any{"requestId": "call-7"}})
+	select {
+	case <-gone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the request to the core outlived its cancellation")
+	}
+	if r := c.call("ping", nil); r["result"] == nil {
+		t.Errorf("ping %v", r)
+	}
+}
+
 func TestSocketPath(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX paths")

@@ -29,6 +29,8 @@ import { useStore } from '../../state/store';
 import { confirmDialog } from '../../dialog';
 import { hasMessage, t } from '../../i18n';
 import {
+  errorText,
+  loadErrorText,
   loadRequests,
   loadVault,
   lockVault,
@@ -36,7 +38,6 @@ import {
   setPassphrase,
   useVault,
   vaultApi,
-  VaultError,
   type VaultAccess,
   type VaultVariable,
 } from './api';
@@ -44,18 +45,33 @@ import { RequestCard } from './Approvals';
 import { setupSnippets } from './setup';
 import './vault.css';
 
-/** A failure's message in the UI's language. */
-export function errorText(e: unknown): string {
-  const code = e instanceof VaultError ? e.code : 'failed';
-  const key = `vault.error.${code}`;
-  return hasMessage(key) ? t(key) : t('vault.error.failed');
-}
-
 function copy(text: string) {
   void navigator.clipboard?.writeText(text).catch(() => {});
 }
 
 type Tab = 'variables' | 'log' | 'connect';
+
+/** Why the vault did not load (its file of another version or unreadable,
+ * the core unreachable), with a retry: a file moved away or put back is
+ * opened at the next load. */
+function LoadError({ code }: { code: string }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="callout error vault-load-error" role="alert" data-error={code}>
+      <span>{loadErrorText(code)}</span>
+      <button
+        className="sm"
+        disabled={busy}
+        onClick={() => {
+          setBusy(true);
+          void Promise.all([loadVault(), loadRequests()]).finally(() => setBusy(false));
+        }}
+      >
+        {t('vault.retry')}
+      </button>
+    </div>
+  );
+}
 
 export function VaultPanel() {
   const { status, variables, error, requests, session } = useVault();
@@ -65,10 +81,11 @@ export function VaultPanel() {
     void loadRequests();
   }, []);
   if (error === 'unavailable') return <div className="empty-note">{t('vault.unavailable')}</div>;
-  if (!status) return null;
+  if (!status) return error ? <LoadError code={error} /> : null;
   const pending = Object.values(requests);
   return (
     <div className="vault">
+      {error && <LoadError code={error} />}
       <Gate />
       {pending.length > 0 && (
         <section className="vault-pending" aria-label={t('vault.requests')}>
@@ -464,9 +481,16 @@ function Editor({ variable, onDone }: { variable?: VaultVariable; onDone(): void
     setErr('');
     setBusy(true);
     try {
-      // A new name renames it first (its value stays, sealed under the new name).
-      if (variable && target !== variable.name) await vaultApi.rename(variable.name, target);
-      await vaultApi.set(target, { description, machines: machinesOf(), injectOnly, ...(value !== '' || !variable ? { value } : {}) });
+      // A new name renames it in the same write as the other changes (its
+      // value stays, sealed under the new name): a failure changes nothing.
+      const to = variable && target !== variable.name ? { to: target } : {};
+      await vaultApi.set(variable?.name ?? target, {
+        ...to,
+        description,
+        machines: machinesOf(),
+        injectOnly,
+        ...(value !== '' || !variable ? { value } : {}),
+      });
       await loadVault();
       onDone();
     } catch (e) {
