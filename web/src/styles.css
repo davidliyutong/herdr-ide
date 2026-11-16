@@ -1974,6 +1974,30 @@ body.dragging * {
 .dialog-body.form input:focus {
   border-color: var(--accent);
 }
+/* Before the app closes: the files with unsaved changes, each with where
+   it is and Show. */
+.unsaved-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  max-height: 14rem;
+  overflow: auto;
+}
+.unsaved-file {
+  display: grid;
+  grid-template-columns: auto minmax(0, max-content) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 8px;
+}
+.unsaved-file + .unsaved-file {
+  border-top: 1px solid var(--line);
+}
+.unsaved-place {
+  font-size: var(--fs-md);
+}
 .dir-suggestions {
   margin-top: -6px;
   border: 1px solid var(--line-2);

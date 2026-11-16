@@ -1,7 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowUp, File, Folder, X } from 'lucide-react';
-import { closeDialog, completionParts, expandPath, folderProblem, useDialog, type DialogRequest, type FolderProblem } from '../dialog';
+import {
+  closeDialog,
+  completionParts,
+  expandPath,
+  folderProblem,
+  useDialog,
+  type DialogRequest,
+  type FolderProblem,
+  type UnsavedAnswer,
+} from '../dialog';
 import { startDownload } from '../download';
+import { FileIcon } from '../fileIcons';
 import { formatSize, listDir, type RemoteStat } from '../lib/files';
 import { shortPath } from '../lib/machine';
 import { useStore } from '../state/store';
@@ -24,6 +34,7 @@ export function Dialogs() {
   if (req.kind === 'confirm') return <ConfirmDialog req={req} />;
   if (req.kind === 'risk') return <RiskDialog req={req} />;
   if (req.kind === 'download') return <DownloadDialog req={req} />;
+  if (req.kind === 'unsaved') return <UnsavedDialog req={req} />;
   return <WorkspaceDialog req={req} />;
 }
 
@@ -88,6 +99,48 @@ function ConfirmDialog({ req }: { req: Extract<DialogRequest, { kind: 'confirm' 
         )}
         <button className={req.danger ? 'primary danger' : 'primary'} autoFocus={!req.danger} onClick={() => done(true)}>
           {req.confirm}
+        </button>
+      </div>
+    </Frame>
+  );
+}
+
+/** Before the app closes: the files with unsaved changes, each with where
+ * it is (machine, workspace, tab) and Show, which keeps the app open and
+ * shows it; Save All, Don't Save or Cancel. */
+function UnsavedDialog({ req }: { req: Extract<DialogRequest, { kind: 'unsaved' }> }) {
+  const done = (v: UnsavedAnswer) => {
+    closeDialog(req);
+    req.resolve(v);
+  };
+  return (
+    <Frame title={t('unsaved.quitTitle')} onCancel={() => done('cancel')}>
+      <div className="dialog-body">
+        {t('unsaved.quitMessage', { n: req.files.length })}
+        <ul className="unsaved-list">
+          {req.files.map((f, i) => (
+            <li key={i} className="unsaved-file">
+              <FileIcon name={f.name} kind="file" />
+              <span className="unsaved-name ellipsis" title={f.name}>
+                {f.name}
+              </span>
+              <span className="unsaved-place muted ellipsis" title={f.place}>
+                {f.place}
+              </span>
+              <button className="unsaved-show" data-show={i} onClick={() => done({ show: i })}>
+                {t('unsaved.show')}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+      <div className="dialog-actions">
+        <button onClick={() => done('cancel')}>{t('dialog.cancel')}</button>
+        <button data-answer="discard" onClick={() => done('discard')}>
+          {t('unsaved.discard')}
+        </button>
+        <button className="primary" autoFocus onClick={() => done('save')}>
+          {t('unsaved.saveAll')}
         </button>
       </div>
     </Frame>

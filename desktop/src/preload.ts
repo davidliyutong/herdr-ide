@@ -1,8 +1,10 @@
 // Preload of the main window (sandboxed, context-isolated). It gives the page
 // a narrow bridge and nothing else: the commands of the menu items chosen,
 // where a file the user dropped is on disk, which folders were opened with
-// the app, (from the page) which commands' menu items to disable, and on
-// macOS three requests without arguments for Full Disk Access.
+// the app, (from the page) which commands' menu items to disable, how many
+// panes have unsaved changes and its answer when the window closes with
+// some (the shell asks it), and on macOS three requests without arguments
+// for Full Disk Access.
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
 import type { DesktopShell, OpenedFolders } from '../../web/src/shell';
 import { channels } from './bridge';
@@ -54,6 +56,18 @@ const shell: DesktopShell = {
   setDisabledCommands(commands) {
     // Strings only; the shell checks them against its menu's commands.
     if (Array.isArray(commands)) ipcRenderer.send(channels.menuState, commands.filter(isString).slice(0, 200));
+  },
+  setUnsaved(count) {
+    if (Number.isInteger(count) && count >= 0) ipcRenderer.send(channels.unsaved, Math.min(count, 10000));
+  },
+  onCloseRequest: (fn) =>
+    listen(
+      channels.closeRequest,
+      (v): v is undefined => v === undefined,
+      () => fn(),
+    ),
+  answerClose(answer) {
+    if (answer === 'asking' || answer === 'close' || answer === 'stay') ipcRenderer.send(channels.closeAnswer, answer);
   },
 };
 

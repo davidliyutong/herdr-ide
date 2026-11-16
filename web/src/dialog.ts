@@ -39,6 +39,13 @@ export type DialogRequest =
     }
   | { kind: 'download'; m: string; dir: string; resolve(v: undefined): void }
   | {
+      kind: 'unsaved';
+      /** The files with unsaved changes, and where each is. */
+      files: { name: string; place: string }[];
+      /** Save all, Don't Save, Cancel, or show the file at that index. */
+      resolve(v: UnsavedAnswer | undefined): void;
+    }
+  | {
       kind: 'risk';
       title: string;
       /** The paragraph before the list of what is at risk, and those after. */
@@ -133,6 +140,16 @@ export function saveChangesDialog(opts: { title: string; message: string }): Pro
       resolve: (ok, _checked, alt) => resolve(ok ? 'save' : alt ? 'discard' : 'cancel'),
     }),
   );
+}
+
+/** The answer to quitDialog: save every file, close without saving, keep
+ * the window (cancel), or keep it and show a file (its index). */
+export type UnsavedAnswer = 'save' | 'discard' | 'cancel' | { show: number };
+
+/** Asks, before the app closes, about the files with unsaved changes it
+ * lists with where each is (Escape cancels). */
+export function quitDialog(files: { name: string; place: string }[]): Promise<UnsavedAnswer> {
+  return new Promise((resolve) => show({ kind: 'unsaved', files, resolve: (v) => resolve(v ?? 'cancel') }));
 }
 
 /** Asks for the working directory and name of a new workspace on machine m. */

@@ -28,6 +28,16 @@ export interface DesktopShell {
   setDisabledCommands(commands: string[]): void;
   /** macOS only: Full Disk Access, which the user grants in System Settings. */
   privacy?: DesktopPrivacy;
+  /** Tells the shell how many panes have unsaved changes: while any has,
+   * closing the main window or quitting asks the page (onCloseRequest). */
+  setUnsaved(count: number): void;
+  /** Calls fn when the main window is about to close while panes have
+   * unsaved changes; the page answers with answerClose. Returns a function
+   * that stops it. */
+  onCloseRequest(fn: () => void): () => void;
+  /** The page's answer: it shows the question (at once), the window may
+   * close, or it stays. */
+  answerClose(answer: 'asking' | 'close' | 'stay'): void;
 }
 
 /** What the shell does for Full Disk Access; nothing is passed. */

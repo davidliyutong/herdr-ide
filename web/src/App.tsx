@@ -16,6 +16,7 @@ import { Dialogs } from './components/Dialogs';
 import { ContextMenu } from './components/ContextMenu';
 import { initDesktop } from './desktop';
 import { warnOnUnload } from './unsaved';
+import { followDesktopClose } from './quitGuard';
 import { takeOpenedFolders } from './drop';
 import { closeWindowPane, commandLabel, handleKey, keyHint, onChordChange, pendingChord, runCommand } from './keymap';
 import { applySettings, loadSettings } from './settings';
@@ -145,6 +146,7 @@ export function App() {
     void loadKeybindings();
     const offDesktop = initDesktop();
     const offUnload = warnOnUnload();
+    const offClose = followDesktopClose();
     const offFolders = takeOpenedFolders();
     const offWorkers = followVSCodeSwitch();
     fetch('/api/config')
@@ -164,6 +166,7 @@ export function App() {
       offTerms();
       offDesktop();
       offUnload();
+      offClose();
       offFolders();
       offWorkers();
       window.removeEventListener('keydown', onKey);

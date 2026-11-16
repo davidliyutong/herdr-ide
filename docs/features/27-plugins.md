@@ -231,7 +231,9 @@ turned off. Panes that edit files keep their unsaved text then
 and the version of the file it was edited from stay in a store keyed by
 machine and pane, the pane stays among the unsaved ones (closing it, its
 tab or its workspace asks, and Save saves the text without the pane drawn;
-leaving the page warns), and the pane takes them back when it is drawn
+leaving the page warns; closing the desktop app lists the files, each
+with where it is, and shows the one picked, [16](16-desktop-packaging.md)),
+and the pane takes them back when it is drawn
 again. They are freed when the pane leaves its machine's layout (closed,
 with its tab or workspace, also by another page) or the machine is removed,
 once saved, or when the text is clean; a machine whose layout is not read

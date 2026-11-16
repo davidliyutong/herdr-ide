@@ -147,10 +147,24 @@ export async function confirmUnsaved(m: string, panes: readonly string[]): Promi
   return true;
 }
 
+/** Set while the desktop app closes after its question was answered
+ * (Save All, Don't Save): the page does not object again. */
+let leaving = false;
+let leavingTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** The page lets the window go without objecting (the user answered the
+ * desktop app's question), for a few seconds: a close another frame's
+ * objection kept (a VS Code window's, Cancel) objects again later. */
+export function setLeaving(on: boolean) {
+  leaving = on;
+  clearTimeout(leavingTimer);
+  if (on) leavingTimer = setTimeout(() => (leaving = false), 5000);
+}
+
 /** Leaving or reloading the page with unsaved changes asks the browser's question. */
 export function warnOnUnload(): () => void {
   const onUnload = (ev: BeforeUnloadEvent) => {
-    if (!anyUnsaved()) return;
+    if (!anyUnsaved() || leaving) return;
     ev.preventDefault();
     ev.returnValue = '';
   };

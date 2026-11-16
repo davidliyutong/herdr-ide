@@ -6,7 +6,7 @@ import { exposed, onDisk, receive, sent } from './fakeElectron';
 import { desktopShellFor } from './preload';
 
 const shell = exposed.desktopShell as DesktopShell;
-const common = ['onCommand', 'onOpenFolders', 'pathForFile', 'setDisabledCommands'];
+const common = ['answerClose', 'onCloseRequest', 'onCommand', 'onOpenFolders', 'pathForFile', 'setDisabledCommands', 'setUnsaved'];
 
 test('the page gets only the desktopShell bridge, with these functions', () => {
   assert.deepEqual(Object.keys(exposed), ['desktopShell']);
@@ -74,4 +74,30 @@ test('the page tells the shell which commands to disable, as strings', () => {
   shell.setDisabledCommands(['tab.close', 7 as unknown as string, 'pane.zoom']);
   shell.setDisabledCommands('tab.close' as unknown as string[]);
   assert.deepEqual(sent, [{ channel: channels.menuState, value: ['tab.close', 'pane.zoom'] }]);
+});
+
+test('closing with unsaved changes: a count and an answer from the page, a request without data to it', () => {
+  sent.length = 0;
+  shell.setUnsaved(3);
+  shell.setUnsaved(-1);
+  shell.setUnsaved(1.5);
+  shell.setUnsaved('2' as unknown as number);
+  shell.setUnsaved(20000);
+  shell.answerClose('asking');
+  shell.answerClose('quit' as unknown as 'close');
+  shell.answerClose('close');
+  assert.deepEqual(sent, [
+    { channel: channels.unsaved, value: 3 },
+    { channel: channels.unsaved, value: 10000 },
+    { channel: channels.closeAnswer, value: 'asking' },
+    { channel: channels.closeAnswer, value: 'close' },
+  ]);
+  let asked = 0;
+  const off = shell.onCloseRequest(() => asked++);
+  receive(channels.closeRequest, undefined);
+  receive(channels.closeRequest, 'payload');
+  off();
+  receive(channels.closeRequest, undefined);
+  assert.equal(asked, 1);
+  sent.length = 0;
 });

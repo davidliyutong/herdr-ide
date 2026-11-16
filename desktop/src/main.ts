@@ -21,6 +21,7 @@ import { detectLocale, translate } from '../../web/src/i18n';
 import type { MessageKey } from '../../web/src/i18n/en';
 import type { OpenedFolders } from '../../web/src/shell';
 import { channels } from './bridge';
+import { closeGuard, isCloseAnswer, parseUnsaved, type CloseGuard } from './closeGuard';
 import { CoreProcess, coreArgs, coreEnv, coreInstance, corePort, DesktopError, desktopCookie, desktopToken, ENV_PREFIX } from './core';
 import { FolderQueue } from './folders';
 import { followCore, type ShellSettings } from './follow';
@@ -57,6 +58,8 @@ const leadingArgs = process.defaultApp ? 2 : 1;
 
 const core = new CoreProcess();
 let mainWindow: BrowserWindow | undefined;
+// The main window's page asks about unsaved changes before it closes.
+let guard: CloseGuard | undefined;
 let origin = '';
 let quitting = false;
 // Quit was chosen while the main window was open: it closes first.
@@ -208,6 +211,15 @@ ipcMain.on(channels.menuState, (event, value: unknown) => {
   if (next) applyDisabled(next);
 });
 
+ipcMain.on(channels.unsaved, (event, value: unknown) => {
+  const n = parseUnsaved(value);
+  if (fromMainPage(event) && n !== undefined) guard?.setUnsaved(n);
+});
+
+ipcMain.on(channels.closeAnswer, (event, value: unknown) => {
+  if (fromMainPage(event) && isCloseAnswer(value)) guard?.answer(value);
+});
+
 ipcMain.on(channels.foldersWanted, (event, wanted: unknown) => {
   if (!fromMainPage(event)) return;
   const contents = event.sender;
@@ -263,6 +275,26 @@ function createWindow() {
     webPreferences: { ...mainWindowPreferences, preload: join(__dirname, 'preload.cjs') },
   });
   mainWindow = win;
+  const g = closeGuard({
+    ask: () => {
+      // The question shows in the window: in front, also from the Dock's Quit.
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+      win.webContents.send(channels.closeRequest);
+    },
+    close: () => {
+      if (!win.isDestroyed()) win.close();
+    },
+    cancelled: () => {
+      quitAfterClose = false;
+    },
+    setTimer: (fn, ms) => {
+      const t = setTimeout(fn, ms);
+      return () => clearTimeout(t);
+    },
+  });
+  guard = g;
   const onTheme = () => win.setBackgroundColor(windowBackground());
   nativeTheme.on('updated', onTheme);
   // Folders opened from now on wait for the next page, which asks for them;
@@ -270,12 +302,22 @@ function createWindow() {
   win.webContents.on('did-start-navigation', (details) => {
     if (details.isMainFrame && !details.isSameDocument) folders.takenBy(undefined);
   });
+  // What a page said of its unsaved changes goes with it, once another one
+  // is there (a navigation that never commits keeps it).
+  win.webContents.on('did-navigate', () => g.reset());
+  // Closing (also quitting) with unsaved changes: the page lists them and
+  // asks; a system shutdown never waits.
+  win.on('close', (event) => {
+    if (!g.onClose(systemShutdown)) event.preventDefault();
+  });
   win.webContents.on('render-process-gone', (_event, details) => {
     folders.takenBy(undefined);
+    g.reset();
     if (!quitting) void fail(new DesktopError('desktop.rendererGone', details.reason));
   });
-  // The page has unsaved changes (an editor pane) and asks before it goes:
-  // the user decides, natively; a system shutdown never waits.
+  // A frame objects to unloading (the page with unsaved changes it did not
+  // ask about: a reload, a page that did not answer; a VS Code window): the
+  // user decides, natively; a system shutdown never waits.
   win.webContents.on('will-prevent-unload', (event) => {
     if (systemShutdown) return event.preventDefault();
     const choice = dialog.showMessageBoxSync(win, {
@@ -298,6 +340,8 @@ function createWindow() {
   win.webContents.on('did-finish-load', applyZoom);
   win.once('ready-to-show', () => win.show());
   win.on('closed', () => {
+    g.reset();
+    if (guard === g) guard = undefined;
     nativeTheme.off('updated', onTheme);
     folders.takenBy(undefined);
     mainWindow = undefined;

@@ -1565,6 +1565,10 @@ export const zhCN: Messages = {
   'unsaved.many': '要保存对 {n} 个文件（{names}）的更改吗？',
   'unsaved.save': '保存',
   'unsaved.discard': '不保存',
+  'unsaved.quitTitle': '关闭前保存更改？',
+  'unsaved.quitMessage': '以下 {n} 个文件有未保存的更改。点“显示”可跳到对应的编辑器，应用不会关闭。',
+  'unsaved.show': '显示',
+  'unsaved.saveAll': '全部保存',
   'unsaved.leave': '仍然关闭',
   'unsaved.leaveDetail': '有编辑器中的更改尚未保存，关闭窗口会丢失这些更改。',
 };

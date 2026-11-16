@@ -111,7 +111,9 @@ page ([04](features/04-layout-and-keyboard.md)). A VS Code pane gives the
 page the key of `pane.close` before VS Code sees it
 ([05](features/05-vscode-panes.md)). The main window's
 preload exposes only `desktopShell`: the commands of menu items chosen,
-which commands' items to disable (from the page), where a file or folder
+which commands' items to disable (from the page), how many panes have
+unsaved changes and the page's answer when the window closes with some
+(from the page; the shell's request carries nothing), where a file or folder
 dropped from the file manager is on disk (to create a workspace there or
 paste its path into a pane of the local machine), and the folders opened
 with the app (dropped on the Dock icon on macOS, named

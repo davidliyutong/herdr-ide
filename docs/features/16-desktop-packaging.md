@@ -58,10 +58,21 @@ system's rules run in the tests on any of them:
   `scripts/build.sh` wrote, unpackaged.
 - `quitsWithLastWindow`: closing the main window quits on Windows and
   Linux; on macOS the app stays in the Dock with its core. Quitting closes
-  the main window first: a page with changes not saved in an editor pane
-  asks natively (`will-prevent-unload`: **Close Anyway** or **Cancel**,
-  which keeps the app and its core running), and the core stops only once
-  the window has closed; a system shutdown never waits.
+  the main window first, and the core stops only once the window has
+  closed; a system shutdown never waits. While panes have changes not
+  saved (editors, diffs; the page tells the shell how many,
+  `desktopShell.setUnsaved`), closing the window or quitting asks the page
+  (`desktop/src/closeGuard.ts`, `web/src/quitGuard.ts`): it lists the files
+  with where each is (machine · workspace · tab), and **Show** beside a
+  file keeps the app open and shows its pane; **Save All** closes once
+  every file is saved (a failed save keeps the app), **Don't Save** closes,
+  **Cancel** or Escape keeps the app and its core running. The answer
+  withdraws only the page's own objection to unloading: a VS Code window
+  with unsaved files still objects, and any objection is asked about
+  natively (`will-prevent-unload`: **Close Anyway** or **Cancel**), as it
+  is when the page reloads. A page that does not take the question within
+  3 s (one that hangs), and a second close or quit while the page asks
+  (Save All waiting on a machine), go to that native question at once.
 - `foldersOf`: the folders a Linux command line names (below).
 
 **Building** (`scripts/desktop.sh`, `desktop/electron-builder.cjs`)
@@ -312,9 +323,12 @@ system's rules run in the tests on any of them:
 
 - The main window has a preload (`desktop/src/preload.ts`, sandboxed) that
   exposes one object, `desktopShell` (`web/src/shell.ts`): the commands of
-  menu items chosen, where a dropped file is on disk, and the folders
-  opened with the app. The page sends only whether it takes opened
-  folders and which commands' items to disable; messages count only from
+  menu items chosen, where a dropped file is on disk, the folders
+  opened with the app, and the question before the window closes with
+  unsaved changes (a request without data). The page sends only whether it
+  takes opened folders, which commands' items to disable, how many panes
+  have unsaved changes (an integer up to 10000) and its answer to that
+  question (`asking`, `close` or `stay`); messages count only from
   the top frame of the main window showing the core's origin. Program windows have no preload.
 - The bridge's `pathForFile` returns where a file the user dropped on the
   page is on disk (`webUtils.getPathForFile`; Electron removed
@@ -593,8 +607,17 @@ Windows and Linux, the bundle of a packaged executable, reopening through
 Launch Services after the app exited and through Electron in development,
 and `HERDR_IDE_DESKTOP_NO_OPEN`, which opens nothing) and the preload's
 functions against a stand-in for Electron (`preload`: the Full Disk Access
-requests only on macOS, carrying nothing the page passes), with no network
-or real terminal cores.
+requests only on macOS, carrying nothing the page passes; the count of
+unsaved panes and the close answer, well-formed only), closing with
+unsaved changes (`closeGuard`: the page asked, Close, Stay cancelling a
+quit, the native question for a page that does not take the question and
+for a second close while it asks, a shutdown never held, a new page
+cancelling a quit that waited on the old one),
+with no network or real terminal cores.
+`web/src/__tests__/quitGuard.test.ts` covers the page's side: the count it
+tells the shell, the files listed with where each is, Show, Save All (a
+failed or throwing save stays), Don't Save and Cancel, and the page's own
+objection to unloading withdrawn only after it let the window close.
 `web/src/__tests__/desktop.test.ts` covers the page's side of menu
 commands (dialogs, the main UI's commands acting on the VS Code pane that
 has the keyboard, ⌘W taken from VS Code to close its pane, **Open in

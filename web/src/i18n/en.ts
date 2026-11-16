@@ -1608,6 +1608,10 @@ export const en = {
   'unsaved.many': 'Do you want to save the changes you made to {n} files ({names})?',
   'unsaved.save': 'Save',
   'unsaved.discard': 'Don’t Save',
+  'unsaved.quitTitle': 'Save Changes Before Closing?',
+  'unsaved.quitMessage': 'These files have changes that are not saved ({n}). Show takes you to one and keeps the app open.',
+  'unsaved.show': 'Show',
+  'unsaved.saveAll': 'Save All',
   'unsaved.leave': 'Close Anyway',
   'unsaved.leaveDetail': 'An editor has changes that are not saved. Closing the window loses them.',
 } as const;

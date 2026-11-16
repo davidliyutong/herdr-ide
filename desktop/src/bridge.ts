@@ -18,4 +18,11 @@ export const channels = {
   revealTerminalCore: 'desktop:reveal-terminal-core',
   /** page → shell (macOS): quit and open the app again. */
   relaunch: 'desktop:relaunch',
+  /** page → shell: how many panes have unsaved changes (an integer). */
+  unsaved: 'desktop:unsaved',
+  /** shell → page: the main window is closing while panes have unsaved
+   * changes; the page asks the user. */
+  closeRequest: 'desktop:close-request',
+  /** page → shell: the answer (closeGuard.ts CloseAnswer). */
+  closeAnswer: 'desktop:close-answer',
 } as const;

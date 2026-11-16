@@ -75,11 +75,29 @@ export interface UnsavedGuard {
 }
 
 const guards = new Map<string, UnsavedGuard>();
+const unsavedListeners = new Set<() => void>();
 
 /** Marks a pane as having unsaved changes (guard) or none (undefined). */
 export function setUnsaved(m: string, pane: string, guard: UnsavedGuard | undefined) {
+  const had = guards.has(key(m, pane));
   if (guard) guards.set(key(m, pane), guard);
   else guards.delete(key(m, pane));
+  if (had !== !!guard) for (const fn of unsavedListeners) fn();
+}
+
+/** Calls fn when a pane gains or loses unsaved changes; returns a
+ * function that stops it. */
+export function onUnsavedChange(fn: () => void): () => void {
+  unsavedListeners.add(fn);
+  return () => unsavedListeners.delete(fn);
+}
+
+/** Every pane of the page with unsaved changes: its machine and key. */
+export function allUnsaved(): (UnsavedGuard & { m: string; pane: string })[] {
+  return [...guards].map(([k, g]) => {
+    const [m, pane] = k.split('\n');
+    return { ...g, m, pane };
+  });
 }
 
 /** The panes of m among panes with unsaved changes. */

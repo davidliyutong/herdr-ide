@@ -34,6 +34,9 @@ const base: DesktopShell = {
   pathForFile: () => '',
   onOpenFolders: () => () => {},
   setDisabledCommands: () => {},
+  setUnsaved: () => {},
+  onCloseRequest: () => () => {},
+  answerClose: () => {},
 };
 const asked: string[] = [];
 const mac: DesktopShell = {
