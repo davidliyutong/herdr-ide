@@ -478,9 +478,10 @@ described in [13](13-settings-and-appearance.md))
   start with what is typed come first, then those holding it, then those
   whose word starts spell it (`fpl` for Focus Pane Left), with the matched
   characters marked; a click or Enter runs an item. ↑ ↓ PgUp PgDn move, the
-  item the keyboard is on is kept in view, at most 200 items are drawn and
-  a line says how many more there are to narrow by typing, and a name cut
-  by an ellipsis shows in full as its tooltip. Escape closes it and gives
+  item the keyboard is on is kept in view, every item is listed with only
+  those in view drawn (`lib/windowed.ts`), so hundreds of workspaces and
+  agents scroll as fast as a few, and a name cut by an ellipsis shows in
+  full as its tooltip. Escape closes it and gives
   the keyboard back where it was, as the settings dialog and the Add
   Machine dialog do. `workspace.switch` opens it with workspaces and agents
   only; `app.keyboardShortcuts` opens the settings' **Keyboard Shortcuts**
@@ -715,8 +716,8 @@ described in [13](13-settings-and-appearance.md))
   and blocks of workspaces and tabs moved; `design/testdata/layout/tabs-block.json`:
   the layout's block moves.
 - `web/src/__tests__/palette.test.tsx`: the palette with 250 workspaces
-  (200 drawn and how many more, pages, the item in view), the keyboard
-  given back when it or the settings dialog closes.
+  (all listed, those in view drawn, pages to the last, the item in view),
+  the keyboard given back when it or the settings dialog closes.
 - `web/src/__tests__/followed.test.ts`: machines followed before followed
   again once connected, a removed machine forgotten.
 - `web/src/__tests__/menus.test.ts`: insertion slots, also on wrapped rows,

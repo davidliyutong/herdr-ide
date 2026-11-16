@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 //
-// The command palette with many items (the keyboard's item kept in view,
-// pages, how many more there are) and the keyboard given back when it or
-// the settings dialog closes.
+// The command palette with many items (every one listed, those in view
+// drawn, the keyboard's item kept in view, pages) and the keyboard given
+// back when it or the settings dialog closes.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
@@ -55,25 +55,31 @@ const key = (k: string) =>
   act(async () => void document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })));
 
 describe('palette', () => {
-  it('keeps the keyboard’s item in view, pages, and says how many more there are', async () => {
-    const scrolled = vi.fn();
-    Element.prototype.scrollIntoView = scrolled;
+  it('lists every item, drawing those in view, and keeps the keyboard’s item in view', async () => {
     before.focus();
     await act(async () => useStore.getState().setPalette('workspaces'));
     await act(async () => new Promise((r) => setTimeout(r, 0)));
     const items = () => [...host.querySelectorAll<HTMLElement>('.palette-item')];
-    expect(items()).toHaveLength(200);
-    expect(host.querySelector('.palette-list')?.textContent).toContain('50 more: type to narrow the list');
-    await key('PageDown');
-    expect(host.querySelector('.palette-item.sel')?.textContent).toContain('project 8');
-    expect(scrolled).toHaveBeenCalled();
+    const list = host.querySelector<HTMLElement>('.palette-list')!;
+    // 250 items in a box of their height; only those in view (and a few more) drawn.
+    expect(host.querySelector<HTMLElement>('.palette-rows')!.style.height).toBe(`${250 * parseFloat(items()[1].style.top)}px`);
+    expect(items().length).toBeGreaterThan(5);
+    expect(items().length).toBeLessThan(60);
+    expect(items()[0].getAttribute('aria-setsize')).toBe('250');
+    const page = (n: number) => Array.from({ length: n }, () => key('PageDown')).reduce((a, b) => a.then(() => b), Promise.resolve());
+    await page(1);
+    const step = Number(host.querySelector('.palette-item.sel')!.getAttribute('aria-posinset')) - 1;
+    expect(step).toBeGreaterThan(1);
     await key('ArrowUp');
-    expect(host.querySelector('.palette-item.sel')?.textContent).toContain('project 7');
+    expect(host.querySelector('.palette-item.sel')?.textContent).toContain(`project ${step - 1}`);
+    // The last item is reached and drawn: the list scrolled to it.
+    for (let i = 0; i < 300 / step + 1; i++) await key('PageDown');
+    expect(host.querySelector('.palette-item.sel')?.textContent).toContain('project 249');
+    expect(list.scrollTop).toBeGreaterThan(0);
     // Escape closes it, and the keyboard goes back where it was.
     await key('Escape');
     expect(host.querySelector('.palette')).toBeNull();
     expect(document.activeElement).toBe(before);
-    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
   });
 });
 
