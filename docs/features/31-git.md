@@ -245,7 +245,7 @@ the answer through.
 - **History** (`History.tsx`), docked at the bottom of the panel as VS
   Code's Source Control Graph: its heading stays at the bottom while it is
   collapsed; expanded, the list grows upward from it, as high as its top
-  edge is dragged (both kept per browser). It holds every commit of the
+  edge is dragged (both kept per browser, open or closed as the sections are: `section.git.history`). It holds every commit of the
   branches, newest first, with the graph's lanes (as wide as the rows in
   view need), the branches and tags at each commit in their lane's color
   (the current branch filled) and how long ago it was; pages of 200 load as
