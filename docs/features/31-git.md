@@ -189,7 +189,13 @@ the answer through.
   when the row is selected (a folder on the files inside): the row's
   buttons open the files (the explorer's editor), discard (after asking;
   untracked files are deleted) and stage or unstage (a rename with its
-  old path, so its deletion does not stay staged). The context menu has
+  old path, so its deletion does not stay staged). Discarding (a row,
+  the selection, Discard All, untracked files deleted) closes the panes
+  that show those files once it is done, in every workspace: diffs of the
+  working tree and the explorer's editors (`ops.ts` `panesOfFiles`; an
+  untracked folder's files too); panes among them with unsaved text,
+  also text kept while the pane is away, are asked about first as closing
+  would (`confirmUnsaved`): Cancel discards nothing. The context menu has
   Open Changes and the Git actions, then the explorer's file entries
   (`fileMenu.ts`): Open, Open to the Side, Open Preview, Open in VS Code
   (while its plugin is on), Open in Terminal, Copy Path, Copy Relative
@@ -521,6 +527,11 @@ terminal; what the plugin adds is a way to reach it from the browser:
   longest common subsequence of random lines; its limit of edits), the
   endings a save keeps (unchanged text as it was, changed and new lines,
   deleted lines, a last line without an ending, lone CRs).
+- `web/src/__tests__/gitDiscard.test.ts` (a scripted core's layout): the
+  panes of discarded files found and closed once discarded, the others
+  kept; unsaved text asked about first (Cancel discards nothing, Don't
+  Save discards and closes); nothing closed when the discard is not
+  confirmed.
 - `web/src/__tests__/gitState.test.ts` (time faked): which reads the
   watch's tokens start (the status, the info, the diffs' and the log's
   versions), backing off after timeouts, a change's read starting after
