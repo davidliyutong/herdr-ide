@@ -53,8 +53,9 @@ export class ConflictError extends FilesError {
 /** A failure as the user reads it. */
 export function errorText(e: unknown): string {
   if (e instanceof FilesError) {
-    // The message names the backup that holds the file's content.
-    if (e.code === 'restore_failed') return t('files.error.restore_failed', { path: e.message.replace(/^restore_failed: /, '') });
+    // The message is the cause's code.
+    if (e.code === 'partial_write')
+      return t(e.message.endsWith('no_space') ? 'files.error.partial_write.no_space' : 'files.error.partial_write');
     const k = `files.error.${e.code}`;
     return hasMessage(k) ? t(k) : e.message || e.code;
   }

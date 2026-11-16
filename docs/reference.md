@@ -147,7 +147,6 @@ in the UI; a setting with a scope can have its own value per machine, under
 | `files.sortOrder` | `default`, `mixed`, `filesFirst`, `type`, `modified` | `"default"` | – | – |
 | `files.followFocus` | `true`, `false` | `true` | – | – |
 | `files.confirmTrash` | `true`, `false` | `false` | – | – |
-| `files.saveMethod` | `auto`, `replace` | `"auto"` | – | per machine |
 | `git.mixedLineEndings` | `keep`, `unify`, `readOnly` | `"keep"` | – | – |
 | `git.changesView` | `list`, `tree` | `"list"` | – | – |
 | `git.untrackedChanges` | `mixed`, `separate` | `"mixed"` | – | – |
@@ -477,7 +476,7 @@ On every machine (the agent's `$HOME`):
 | `~/.herdr-ide[-<instance>]/gui-keep.log` | Output of the last display keeper | Replaced at each start. |
 | `~/.herdr-ide[-<instance>]/cs-data/`, `cs-ext/` | VS Code settings, extensions | Kept; logs older than 7 days are pruned. |
 | `~/.herdr-ide[-<instance>]/uploads/` | Pasted and dropped files | Files older than 7 days are pruned. |
-| `~/.herdr-ide[-<instance>]/saves/` (0700) | The file explorer's saves in place: backups (0600) of files in directories the user may not write, the texts waiting to be written there, and links recording the backups beside other files | Removed by the save when it ended; what an agent that ended during a save left is removed, with the backups its links name, by the agent that starts more than 7 days later. |
+| `~/.herdr-ide[-<instance>]/staging/` (0700) | The file explorer's uploads (0600) while they are received, before they are written to their files | Removed by the upload when it ended; what an agent that ended during one left is removed by the agent that starts more than 7 days later. |
 | `~/.herdr-ide[-<instance>]/bin/herdr-ide-mcp` (0700 directory) | Link to the executable that serves the vault's MCP server (the agent's, or on the local machine the core's) | Pointed at the running executable whenever an agent starts; kept so MCP configurations stay valid. |
 | `~/.herdr-ide[-<instance>]/usage/cost-cache.json` (0600) | The AI usage plugin's records of the AI CLIs' logs, per log file | Records and logs older than 90 days leave it at each scan. |
 | `~/.herdr-ide[-<instance>]/usage/deepseek.key` (0600) | A DeepSeek API key set in the AI usage panel | Until removed in the panel or by hand. |

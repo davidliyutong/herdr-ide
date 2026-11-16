@@ -394,9 +394,6 @@
     "settings.files.confirmTrash",
     "settings.files.exclude",
     "settings.files.followFocus",
-    "settings.files.saveMethod",
-    "settings.files.saveMethod.auto",
-    "settings.files.saveMethod.replace",
     "settings.files.showHidden",
     "settings.files.sortOrder",
     "settings.files.sortOrder.default",
@@ -956,7 +953,6 @@
       "Thumbs.db"
     ],
     "files.followFocus": true,
-    "files.saveMethod": "auto",
     "files.showHidden": false,
     "files.sortOrder": "default",
     "git.autoFetch": 0,

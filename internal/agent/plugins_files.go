@@ -5,5 +5,5 @@ package agent
 // The file explorer plugin's machine side (docs/features/28-file-explorer.md).
 import "herdr-ide/internal/agent/plugin/files"
 
-// What its saves left when an agent ended during one goes after a while.
-func init() { housekeepers = append(housekeepers, files.PruneBackups) }
+// What its uploads left when an agent ended during one goes after a while.
+func init() { housekeepers = append(housekeepers, files.PruneStaged) }

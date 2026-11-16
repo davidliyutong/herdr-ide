@@ -19,7 +19,7 @@ import { t } from '../../i18n';
 import { keepEdit, keptEdit, takeEdit, useUnsaved, type KeptEdit } from '../../unsaved';
 import type { PaneViewProps } from '../api';
 import { createEditor, type CodeEditor, type Monaco, type TextModel } from '../monaco';
-import { ConflictError, errorText, filesApi, type Entry } from './api';
+import { ConflictError, errorText, FilesError, filesApi, type Entry } from './api';
 import { keepEditor, reveal } from './ops';
 import { lineChanges, quickDiff, type LineChange } from './quickDiff';
 import { useDecorationVersion } from './decorations';
@@ -355,7 +355,15 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
         return true;
       } catch (err) {
         if (err instanceof ConflictError) setStatus({ kind: 'conflict', removed: !err.current.exists, disk: diskKey(err.current) });
-        else useStore.getState().toast(t('files.saveFailed', { error: errorText(err) }), undefined, undefined, 'error');
+        else {
+          // A write that stopped partway changed the file: saving again
+          // overwrites it, whatever it holds now.
+          const again =
+            err instanceof FilesError && err.code === 'partial_write'
+              ? { label: t('files.saveAgain'), run: () => void saveRef.current(true) }
+              : undefined;
+          useStore.getState().toast(t('files.saveFailed', { error: errorText(err) }), again, undefined, 'error');
+        }
         return false;
       } finally {
         setSaving(false);

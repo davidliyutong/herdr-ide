@@ -17,7 +17,7 @@ import type { PaneViewProps } from '../api';
 import { keepEdit, keptEdit, takeEdit, useUnsaved, type KeptEdit } from '../../unsaved';
 import { eolName, hasLoneCR, isMixed, restoreEols, unifiedEol, useMixedLineEndings, type MixedLineEndings } from '../../eol';
 import { createDiffEditor, type DiffEditor, type Monaco, type TextModel } from '../monaco';
-import { ConflictError, filesApi, errorText as filesError } from '../files/api';
+import { ConflictError, FilesError, filesApi, errorText as filesError } from '../files/api';
 import { gitApi, errorText, type Blob, type StatusFile } from './api';
 import { baseName, join, openFile, short, type DiffMode, type DiffView } from './ops';
 import { rangePatch, type Direction, type LineRange, type Side } from './patch';
@@ -208,32 +208,48 @@ export function DiffPane({ m, pane, view, focused }: PaneViewProps) {
     [m, key],
   );
 
-  const save = useCallback(async () => {
-    const c = ed.current;
-    if (!c || !editable) return false;
-    const model = c.editor.getModel()!.modified;
-    const at = model.getAlternativeVersionId();
-    const r = sides.current.right;
-    const text = toSave(model.getValue(), r);
-    try {
-      const res = await filesApi.write(m, join(d.repo, d.path), text, r.exists ? { mtime: r.mtime ?? 0, size: r.size } : 'new');
-      if (res.entry) sides.current.right = { ...r, exists: true, text, size: res.entry.size, mtime: res.entry.mtime };
-      setTexts({ left: sides.current.left.text, right: text });
-      savedAt.current = at;
-      setDirty(model.getAlternativeVersionId() !== at);
-      // Only the working tree changed: the status is read again.
-      void refresh(m, d.repo, { fresh: true });
-      return true;
-    } catch (e) {
-      if (e instanceof ConflictError) {
-        useStore
-          .getState()
-          .toast(t('git.diff.conflict', { name: baseName(d.path) }), { label: t('git.diff.reload'), run: () => void show() });
-      } else useStore.getState().toast(t('git.diff.saveFailed', { error: filesError(e) }), undefined, undefined, 'error');
-      return false;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [m, key, editable, show, eolMode]);
+  const save = useCallback(
+    async (force = false) => {
+      const c = ed.current;
+      if (!c || !editable) return false;
+      const model = c.editor.getModel()!.modified;
+      const at = model.getAlternativeVersionId();
+      const r = sides.current.right;
+      const text = toSave(model.getValue(), r);
+      try {
+        const res = await filesApi.write(
+          m,
+          join(d.repo, d.path),
+          text,
+          force ? 'force' : r.exists ? { mtime: r.mtime ?? 0, size: r.size } : 'new',
+        );
+        if (res.entry) sides.current.right = { ...r, exists: true, text, size: res.entry.size, mtime: res.entry.mtime };
+        setTexts({ left: sides.current.left.text, right: text });
+        savedAt.current = at;
+        setDirty(model.getAlternativeVersionId() !== at);
+        // Only the working tree changed: the status is read again.
+        void refresh(m, d.repo, { fresh: true });
+        return true;
+      } catch (e) {
+        if (e instanceof ConflictError) {
+          useStore
+            .getState()
+            .toast(t('git.diff.conflict', { name: baseName(d.path) }), { label: t('git.diff.reload'), run: () => void show() });
+        } else {
+          // A write that stopped partway changed the file: saving again
+          // overwrites it, whatever it holds now.
+          const again =
+            e instanceof FilesError && e.code === 'partial_write'
+              ? { label: t('files.saveAgain'), run: () => void saveRef.current(true) }
+              : undefined;
+          useStore.getState().toast(t('git.diff.saveFailed', { error: filesError(e) }), again, undefined, 'error');
+        }
+        return false;
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    },
+    [m, key, editable, show, eolMode],
+  );
   const saveRef = useRef(save);
   saveRef.current = save;
   // Closing the pane with changes not saved asks first (unsaved.ts).

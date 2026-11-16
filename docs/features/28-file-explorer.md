@@ -49,7 +49,6 @@ Plugins; `internal/plugins/files/settings.go`):
 | `files.sortOrder` | `default` | Folders first (`default`), `mixed`, `filesFirst`, by extension (`type`) or newest first (`modified`), folders first in those two; names sort as people sort them after. |
 | `files.followFocus` | on | The root follows the focused pane, in browsers where the crosshair was not used. |
 | `files.confirmTrash` | off | Move to Trash asks first (Delete Permanently always does). |
-| `files.saveMethod` (per machine) | `auto` | `auto` saves in place when a rename would lose something, as below; `replace` always renames a new file over the old one (hard links keep the old text, the file becomes the user's, a folder the user may not write cannot take a save). The core sends it to the agent with each save and replacing upload. |
 
 **Tree** (`tree.ts`, `FilesPanel.tsx`)
 
@@ -143,7 +142,7 @@ Plugins; `internal/plugins/files/settings.go`):
   10 000 entries at once. Names already in the folder are asked about
   once each (**Replace**, **Keep Both**, **Skip**, Escape skipping, a box
   applying the answer to the rest): a replaced file is written as a save
-  writes it (in place when a rename would lose something), a replaced
+  writes it (in place), a replaced
   folder is merged (its files replace those of the same names, the others
   stay), Keep Both gives the upload a free name (`name-1.ext`, a folder
   `name-1`). A name taken by the other kind (a file where a folder is
@@ -196,10 +195,10 @@ removal reached stays removed. The agent's actions
 | `rename` | One path to another; never replaces (`renameat2` with `RENAME_NOREPLACE` on Linux, `renamex_np` with `RENAME_EXCL` on macOS, a check first on file systems without them); across file systems (`EXDEV`) a copy as `copy` makes it, which replaces nothing, then the removal of the original (a copy that fails is removed, the original stays); not into itself, also through a link. |
 | `move` | Paths into a folder under their names, replacing nothing: a taken name fails for that path alone (`failed`), the others move. |
 | `copy` | Paths into a folder: files with their modes, folders with their contents, links as links; a taken name becomes `name copy.ext`, `name copy 2.ext`… (a copy into the same folder); a folder is not copied into itself, also when the folder named is a link into it. |
-| `trash` | Into the user's trash: on macOS `~/.Trash` (`name 2.ext`… when taken); elsewhere the freedesktop.org trash, `$XDG_DATA_HOME/Trash` (`~/.local/share/Trash`) with an info file holding the original path and the time, or, for a path on another file system, the trash at the top of its mount (found along the path's real directory, with paths relative to it): `.Trash/<uid>` when `.Trash` is an administrator's (a directory with the sticky bit, not a link), else `.Trash-<uid>`. Other users may write at the top of a mount (`/tmp`), so such a trash and its `files` and `info` are used only when each is a directory of the user, not a link, closed to others (made `0700` when missing), as gio checks. A path no trash takes fails with `trash_unavailable`, and the panel offers to delete it for good. |
+| `trash` | Into the user's trash: on macOS `~/.Trash` (`name 2.ext`… when taken); elsewhere the freedesktop.org trash, `$XDG_DATA_HOME/Trash` (`~/.local/share/Trash`, its folders made `0700` when missing, as on a server account no desktop used) with an info file holding the original path and the time, or, for a path on another file system, the trash at the top of its mount (found along the path's real directory, with paths relative to it): `.Trash/<uid>` when `.Trash` is an administrator's (a directory with the sticky bit, not a link), else `.Trash-<uid>`. Other users may write at the top of a mount (`/tmp`), so such a trash and its `files` and `info` are used only when each is a directory of the user, not a link, closed to others (made `0700` when missing), as gio checks. A path no trash takes fails with `trash_unavailable`, and the panel offers to delete it for good. |
 | `remove` | Deletes for good (folders with their contents): each folder opened relative to its parent without following a link, links removed and never followed, as `os.RemoveAll` does. |
 | `write` | An editor's save, below. |
-| `upload` | A file from the computer (at most 4 GiB) received in full beside the path, then given the path's name or, when taken, the first free `name-1.ext`, `name-2.ext`… in a rename that replaces nothing; with `replace` written over the file there as a save writes it (through a link its target, in place when a rename would lose something). Cut short (cancelled, the connection lost), it leaves nothing. |
+| `upload` | A file from the computer (at most 4 GiB) received in full into the agent's private `staging/` directory, then written into a new file at the path or, when taken, the first free `name-1.ext`, `name-2.ext`… (created only where nothing is); with `replace` written over the file there as a save writes it (through a link its target, in place). Cut short (cancelled, the connection lost), it leaves nothing at the path. |
 | `stat` | Size, modification time and kind of up to 200 paths, for the polls and the editor; `error` on a path whose state is not known: `denied`, `failed`, or `busy` and `timeout` when stats do not answer. At most 8 stats run at once on the machine, and a path being stat'ed is not stat'ed again meanwhile: a mount that does not answer holds at most 8 threads, and a stat answers within 10 s. |
 
 Every path is expanded as the agent's other operations do (`~`, relative to
@@ -259,51 +258,32 @@ button.
   whole text before it touches the file, so a save that breaks off
   changes nothing; a save that fails (a full disk) still reads the whole
   text, so the core gets its answer. Through a symbolic link the link's
-  target is written and the link stays. The file is then written as Vim
-  writes with `backupcopy=auto` (`save.go`):
-  - Usually a new file beside it (private while the text is written,
-    synced) gets the file's group and mode and, once the file is checked
-    again, is renamed over it: a crash leaves the old file or the new one.
-    A new path gets what the umask leaves of `0666`, as a program's new
-    file does.
-  - A rename would lose something when the file has several hard links
-    (the other names would keep the old text), belongs to another user
-    (it would become the user's), its group cannot be given to a new file
-    of the user, or its directory takes no new file. Such a file is
-    written in place: opened for writing without following a link (a file
-    the user may not write is left alone; one swapped for a link or
-    another file since it was checked is a conflict), copied from that
-    descriptor to a backup, truncated, written and synced, so
-    it keeps its inode, owner, group, mode and links. When that fails the
-    backup's content is written back and the save fails with the code of
-    what went wrong (`no_space`, `denied`, `read_only`…); a backup that
-    cannot be written back stays and the failure names it
-    (`restore_failed`). The backup is removed once the save ended.
-  - The backup (`0600`) goes beside the file
-    (`.<name>.herdr-ide-backup-<hex>`), recorded by a link in the agent's
-    private `~/.herdr-ide/saves/` (`0700`); in a directory that takes no
-    new file, or one where someone else may rename entries (another
-    user's, or one its group or others may write that is not sticky), it
-    goes into `saves/` itself, with the text waiting to be written. A
-    text staged beside the file (`.herdr-ide-save-<hex>`, also an
-    upload's) is recorded by a link there too. The agent that starts more
-    than 7 days after a save or an upload left them (it ended during it:
-    killed, a crash) removes them, and the staged texts and backups the
-    links name: only regular files of the user with those names, older
-    than 7 days themselves, never through a link. An agent whose session
-    ended waits up to 5 s for the requests still running, which then fail
-    and remove what they staged, before it exits.
-  - The staged text and the backup are used only through the descriptors
-    the agent created them with: the text is written, given the file's
-    group and mode and copied into the file from its descriptor, the
-    backup written back from its own, and a staged file is renamed only
-    while its name still names it (checked again right after the rename).
-    A file another user swapped in by name (a link to one of the user's
-    secrets) is never read, changed or given the file's name: the save is
-    a `409 conflict` and the file stays as it was.
-  - With `files.saveMethod` set to `replace` (for every machine or one)
-    every save takes the first way; in a directory the user may not
-    write it fails with `denied`.
+  target is written and the link stays. The file is then written as VS
+  Code writes a user's file (`save.go`): opened for writing without
+  following a link anywhere on its real path (`O_NOFOLLOW_ANY` on macOS,
+  `openat2` with `RESOLVE_NO_SYMLINKS` on Linux 5.6 and later) and
+  without blocking, checked to be a regular file (a FIFO or a device is
+  never written) and checked again on that descriptor (still the file as
+  loaded: a change since is a conflict, and a link swapped in for the file
+  or a directory above it is one even when forced), truncated, written
+  from its start and synced. The path keeps its file: its inode,
+  hard links (every name sees the new text), owner, group, mode, extended
+  attributes and ACLs stay, and a file in a directory the user may not
+  write is saved. A file the user may not write is left alone (`denied`,
+  its mode unchanged). A new path is created only where nothing is, with
+  what the umask leaves of `0666`, as a program's new file is. Nothing
+  else is written: no temporary file and no backup, beside the file or
+  elsewhere.
+  - A write that fails after the file was truncated (the disk filled up,
+    an I/O error) leaves part of the text in it: the save fails with
+    `partial_write` (its message the cause's code, `no_space`…), the pane
+    keeps the text, still unsaved, and the error offers **Save Again**,
+    which overwrites the file whatever it holds now. A new file whose
+    write failed is removed. VS Code writes the same way and fails the
+    same way; it keeps no backup either.
+  - While the text is written, a program that reads the file at that
+    moment (a development server reloading) can read part of it, as with
+    VS Code.
 
   A file changed or removed meanwhile is a `409 conflict` with its state
   now: the pane says so and offers **Load Theirs**, **Overwrite** and
@@ -371,7 +351,8 @@ in an element.
 Changes answer `{"paths": [made], "failed": {path: code}}`; failures
 `{"error": code}` with `not_found` (404), `exists`, `refused`, `denied`,
 `trash_unavailable`, `too_large`, `bad_params`, `no_space`, `read_only`,
-`restore_failed`, `offline` (409).
+`partial_write` (a write that stopped after the file was truncated, with
+the cause's code as its message), `offline` (409).
 
 ## Alternatives considered
 
@@ -379,12 +360,12 @@ Changes answer `{"paths": [made], "failed": {path: code}}`; failures
 | --- | --- |
 | A file system watch on machines (inotify, FSEvents) pushed over `/ws` | A watcher per expanded directory on every machine needs an owner, limits (inotify's per-user watches) and code per system; polling the directories on screen every 2 s costs one stat each and stops with the panel. |
 | Writing saves with the agent's `fs.write` (uploads) | It replaces the file without looking; a save must not overwrite a change a program made since the editor loaded the file. |
-| Always renaming a new file over the old one | It breaks hard links, gives a file of another user to the user and needs a directory the user may write; Vim and Emacs write such files in place for the same reasons. |
-| Always writing in place | A crash during the write leaves a file cut short; the rename leaves the old file or the new one, so it stays the usual way. |
+| Renaming a new file over the old one (an atomic save), as JetBrains' safe write and GIO do | It gives the path another file: hard links keep the old text, a file of another user becomes the user's, extended attributes, ACLs and macOS tags are lost, programs that follow the inode (`tail -f`, a single-file Docker bind mount) lose it, and it needs a directory the user may write. The temporary file beside the target also gave other users of a shared directory something to swap; VS Code keeps renames for its own state files. |
+| Renaming, and writing in place after a backup when a rename would lose something (Vim's `backupcopy=auto`) | Two ways and the cases between them, with a backup and a staged text beside files to keep from other users; writing in place always is one way and keeps everything a rename loses. |
+| A backup of the file before writing it in place | It only helps when the write fails midway, which the editor survives anyway (it keeps the text and saves again); it doubled what a save writes and needed a retention rule. |
 | Explorer uploads through the core's `/upload` (as panes) | It never replaces a file, cannot make folders and does not pass the explorer's guard (the data directory); the plugin's `upload` streams the same way and replaces as a save does when asked. |
 | Asking about each file inside a folder that is merged | A folder of hundreds of files would ask hundreds of times; the user chose to replace the folder's files when choosing Replace for it. |
 | Replacing a folder by removing it first | What the dropped folder does not hold would be lost; merging loses only the files replaced. |
-| Backups in the private directory only | One beside the file is where the user finds it when a crash left it, on the same file system; the private directory serves when the file's directory takes no new file. |
 | Deleting without a trash | A mistaken Delete in a tree is easy; the trash keeps the file where the system's tools find it. |
 | CodeMirror instead of Monaco | The diffs of a version control plugin want Monaco's diff editor; one editor for both. |
 | The full Monaco bundle with TypeScript's service | Its worker and source maps grew the embedded UI by more than the whole app; VS Code panes have TypeScript. |
@@ -402,19 +383,16 @@ Changes answer `{"paths": [made], "failed": {path: code}}`; failures
   entries, and the next poll lists it again.
 - A move to another file system: copied and removed; a name taken there
   fails as a rename's does.
-- A save of a file with several hard links, of another user, or in a
-  directory the user may not write: written in place after a backup, so
-  every link sees the new text and the owner stays; a write that fails
-  midway (a full disk) brings the content back from the backup.
-- The agent ends during a save in place (a crash, a kill): the backup
-  beside the file (or in `~/.herdr-ide/saves/`) holds the content before
-  the save, the file may be cut short; the backup stays for 7 days, then
-  the next agent removes it.
-- The agent is killed during an upload or a save: the partial
-  `.<slug>-save-*` beside the target (an upload's up to 4 GiB) stays for
-  7 days, recorded in `saves/`, then the next agent removes it; when only
-  its session ended, the agent waits for the upload to remove it before
-  it exits.
+- A save whose write fails after the file was truncated (a full disk):
+  `partial_write`, the file on the machine may be cut short; the pane
+  keeps the text and offers **Save Again**.
+- The agent ends during a save (a crash, a kill): before the text arrived
+  in full the file is as it was; during the write it may be cut short,
+  and the editor still holds the text.
+- The agent is killed during an upload: what it received stays in
+  `~/.herdr-ide/staging/` (up to 4 GiB) for 7 days, then the next agent
+  removes it; nothing is at the target. When only its session ended, the
+  agent waits for the upload to remove it before it exits.
 - A path changed by someone else between a listing and a change: the change
   fails (`not_found`, `exists`) and the next poll shows the directory as it
   is.
@@ -423,13 +401,13 @@ Changes answer `{"paths": [made], "failed": {path: code}}`; failures
   and the panel asks whether to delete for good.
 - A save into a file that changed since it was loaded: `409 conflict`,
   nothing written, the pane offers to load or overwrite.
-- A save that breaks off: the temporary file (`.<slug>-save-*` beside the
-  file, or in `saves/`) is removed; the file is as it was.
+- A save that breaks off before its text arrived in full: nothing was
+  written; the file is as it was.
 - An upload cut short (Cancel, the page closed, the connection lost): the
   agent removes what it received; the file there (a replaced one) is as
   it was. A folder's files that arrived before stay.
-- A name taken meanwhile by an upload's free name: the rename that
-  replaces nothing fails and the next free name is taken.
+- A name taken meanwhile by an upload's free name: creating the file there
+  fails (it never replaces one) and the next free name is taken.
 - An older agent during an upgrade: actions fail with `unknown_plugin`.
 - A plugin turned off: its routes answer `404 plugin_disabled`, the panel is
   gone and editor panes say the plugin is off.
@@ -447,11 +425,17 @@ within them it acts with the user's permissions, as a terminal does. A
 trash at the top of a mount other users write to is used only when it is
 the user's own and closed to others, so trashed files never go to a
 directory another user planted. A save writes only the file named (a
-link's target) and, for a save in place, a private backup of it (`0600`)
-beside it or in the agent's own `saves/` directory (`0700`), removed when
-the save ended. Uploads go through the same guard (an upload into the
-agent's data directory is refused), take a free name unless the user
-chose Replace, and are bounded to 4 GiB; saves are bounded to 8 MiB, lists of
+link's target), in place, through the descriptor it checked: it creates
+nothing beside the file, so it leaves nothing of its own for another user
+who may write the file's directory to swap. A save the user forces
+(Overwrite, Save Again, Replace) writes whatever regular file is at the
+path then: such a user who may also hard-link the user's files (macOS;
+Linux with `fs.protected_hardlinks` off) could have another of them
+written ([SECURITY.md](../../SECURITY.md)). Uploads are received in the
+agent's own `staging/` directory (`0700`) and go through the same
+guard (an upload into the agent's data directory is refused), take a
+free name unless the user chose Replace, and are bounded to 4 GiB; saves
+are bounded to 8 MiB, lists of
 paths to 1000, stats to 200 paths and 8 running at once. Files moved to
 the trash stay in the user's trash
 ([deployment](../deployment.md#remote-resources)).
@@ -473,26 +457,23 @@ the trash stay in the user's trash
   no temporary file left), a new file's mode from the umask, a save that
   cannot be written reading its text to the end (`TestReceiveDrains`).
 - `internal/plugins/files/settings_test.go`: the patterns `files.exclude`
-  takes, the save method per machine and without settings.
+  takes, every setting in the plugin's section.
 - `web/src/__tests__/files.test.ts` also: the sort orders, names excluded
   (also from polls), the switches from the settings unless the browser
   chose, Move to Trash asking when the setting says so.
 - `internal/agent/plugin/files/save_test.go`: saves in place that keep
-  hard links (same inode, every name sees the new text, also through a
-  symbolic link, which stays; `replace` makes a new file), a file of
-  another owner (the check replaced), a writable file in a directory
-  that is not (its text and backup in `saves/`, emptied after), a write
-  that fails midway restored from the backup and one whose restoring
-  fails keeping and naming it, and `PruneBackups` removing what is older
-  than the retention (and the staged texts and backups beside files its
-  links name, old themselves, never another file or a link;
-  `TestBackupAndStagedNames`); a file swapped for a link or another file after its
-  check is not written through (`TestSaveInPlaceRefusesASwap`); a staged
-  text and a backup swapped for links to a secret are never used by name,
-  in place, when the write fails and on the rename path, and for an
-  upload (`TestSaveUsesOnlyItsDescriptors`); a save in place in a
-  directory others may rename entries of keeps them in `saves/`
-  (`TestSaveInPlaceInASharedDirectory`).
+  the inode, hard links (every name sees the new text) and mode and add
+  nothing to the directory, also through a symbolic link, which stays
+  (`TestSaveInPlace`); a writable file in a directory that is not, a new
+  file refused there and a read-only file left alone with its mode
+  (`TestSaveInUnwritableDirectory`); a FIFO and a directory refused
+  without blocking (`TestSaveRefusesWhatIsNotAFile`); the precondition
+  checked on the file opened, a link swapped in never written through
+  (`TestSaveChecksTheFileItOpens`), also for a directory above the file,
+  forced or not (`TestSaveRefusesALinkAboveTheFile`); a write that fails midway answering
+  `partial_write` with its cause and a new file removed
+  (`TestSaveFailureIsPartial`); `PruneStaged` removing old uploads'
+  files only (`TestPruneStaged`).
 - `internal/plugins/files/files_test.go`: the routes (all but `stat`
   mutating and audited, `stat` a POST), the stat's body and a save's query;
   `TestMutatingRoutesAreGuarded` (`internal/server`) checks them for Origin
@@ -524,11 +505,11 @@ the trash stay in the user's trash
   transfer entries (none that write in read-only mode), the `DownloadURL`
   of rows dragged out.
 - `internal/agent/plugin/files/upload_test.go`: uploads under free names
-  (also a dot file), replacing in place when the file has other links, a
+  (also a dot file), replacing in place (the inode and other links kept), a
   folder never replaced by a file, the data directory refused, uploads cut
   short leaving nothing; `mkdir` with `unique` and `mkdirs`.
 - `internal/agent/serve_test.go`: an agent whose session ends during an
-  upload returns only once the upload removed what it staged
+  upload returns only once the upload removed the file it was received into
   (`TestServeWaitsForRequestsToClean`).
 - `web/src/__tests__/filesEditor.test.ts` (Monaco replaced): versions from
   the ETag, saves with them, conflicts overwritten and loaded, new files,

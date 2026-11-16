@@ -5,13 +5,11 @@ import (
 	"path"
 	"strings"
 
-	"herdr-ide/internal/plugin"
 	"herdr-ide/internal/settings"
 )
 
-// The explorer's settings (its page in Settings › Plugins). The web UI
-// reads all but saveMethod; the core sends saveMethod to the agent with
-// each save and replacing upload.
+// The explorer's settings (its page in Settings › Plugins), which the web
+// UI reads.
 const (
 	// SettingShowHidden: names starting with a dot are shown, in browsers
 	// that did not choose with the panel's eye button.
@@ -25,9 +23,6 @@ const (
 	SettingConfirmTrash = "files.confirmTrash"
 	// SettingSortOrder orders a folder's entries.
 	SettingSortOrder = "files.sortOrder"
-	// SettingSaveMethod is how saves write a file that is there (the
-	// agent's files.MethodAuto or MethodReplace), per machine.
-	SettingSaveMethod = "files.saveMethod"
 )
 
 // DefaultExclude are the names hidden by default, as VS Code's
@@ -46,8 +41,6 @@ var Settings = settings.Module{
 			Scope: settings.ScopeApp, Section: "files", Order: 30},
 		{Key: SettingFollowFocus, Type: settings.TypeBool, Default: true, Scope: settings.ScopeApp, Section: "files", Order: 40},
 		{Key: SettingConfirmTrash, Type: settings.TypeBool, Default: false, Scope: settings.ScopeApp, Section: "files", Order: 50},
-		{Key: SettingSaveMethod, Type: settings.TypeEnum, Default: "auto", Enum: []string{"auto", "replace"},
-			Scope: settings.ScopeMachine, Section: "files", Order: 60},
 	},
 }
 
@@ -72,21 +65,4 @@ func validExclude(v any) error {
 		}
 	}
 	return nil
-}
-
-// saveMethod is the save method set for the call's machine; empty (the
-// agent's auto) without settings.
-func saveMethod(c *plugin.Call) string {
-	if c.Host == nil || c.Machine == nil {
-		return ""
-	}
-	return methodFor(c.Host.Settings(), c.Machine.ID())
-}
-
-// methodFor is the save method of machine m in st ("" without settings).
-func methodFor(st *settings.Store, m string) string {
-	if st == nil {
-		return ""
-	}
-	return st.String(SettingSaveMethod, m)
 }

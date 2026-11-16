@@ -15,6 +15,7 @@
 package files
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -75,9 +76,6 @@ type Params struct {
 	// loaded); nil with Force unset: the file must not exist.
 	Expect *Entry `json:"expect,omitempty"`
 	Force  bool   `json:"force,omitempty"`
-	// Method is how a save writes a file that is there: MethodAuto (also
-	// when empty) or MethodReplace (save.go).
-	Method string `json:"method,omitempty"`
 	// Replace: an upload replaces the file at Path, as a save does;
 	// otherwise it takes a free name. Unique: a new folder takes a free
 	// name.
@@ -641,8 +639,8 @@ func (g *guard) trash(p string) (string, error) {
 // write saves an editor's text: the reply comes first, then the text as
 // chunks (agentproto.ChunkWriter), then a line with the result. The file
 // must be as the editor loaded it (Expect) unless Force; through a
-// symbolic link its target is written (the link stays). How the file is
-// written is put's (save.go).
+// symbolic link its target is written (the link stays). The text is
+// received in full, then written into the file in place (save.go).
 func (g *guard) write(st net.Conn, p Params) error {
 	abs, err := g.resolve(p.Path)
 	if err == nil {
@@ -661,9 +659,13 @@ func (g *guard) write(st net.Conn, p Params) error {
 	if err := agentproto.WriteLine(st, agentproto.Reply{OK: true}); err != nil {
 		return err
 	}
-	e, err := g.put(abs, &agentproto.ChunkReader{R: st}, p, MaxWrite)
-	if err != nil {
+	var text bytes.Buffer
+	if err := receive(&text, &agentproto.ChunkReader{R: st}, MaxWrite); err != nil {
 		return plugin.Fail(st, codeOf(err))
+	}
+	e, err := writeFile(abs, &text, p)
+	if err != nil {
+		return plugin.Fail(st, saveErr(err))
 	}
 	b, _ := json.Marshal(Result{Paths: []string{abs}, Entry: e})
 	return agentproto.WriteLine(st, agentproto.Reply{OK: true, Plugin: b})
@@ -684,7 +686,8 @@ func target(p string) (string, error) {
 	return "", codeOf(err)
 }
 
-// precondition checks that the file at p is what a save expects.
+// precondition checks that the file at p is what a save expects, before
+// the text is received; writeFile checks it again on the file it opens.
 func precondition(p string, w Params) error {
 	if w.Force {
 		return nil
@@ -695,13 +698,24 @@ func precondition(p string, w Params) error {
 		return codeOf(err)
 	case err == nil && fi.IsDir():
 		return plugin.Errorf("bad_params", "%s is a directory", p)
-	case w.Expect == nil || !w.Expect.Exists:
-		if err == nil {
-			return conflict(p, fi)
+	case err != nil:
+		if w.Expect != nil && w.Expect.Exists {
+			return conflict(p, nil)
 		}
 		return nil
-	case err != nil:
-		return conflict(p, nil)
+	}
+	return expected(p, fi, w)
+}
+
+// expected checks that the file p, which is there as fi, is what a save
+// expects: the file as the editor loaded it (its size and modification
+// time), unless Force.
+func expected(p string, fi fs.FileInfo, w Params) error {
+	switch {
+	case w.Force:
+		return nil
+	case w.Expect == nil || !w.Expect.Exists:
+		return conflict(p, fi) // a new file was expected
 	case fi.Size() != w.Expect.Size || fi.ModTime().UnixMilli() != w.Expect.MTime:
 		return conflict(p, fi)
 	}

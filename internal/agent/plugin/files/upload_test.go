@@ -59,7 +59,7 @@ func TestUpload(t *testing.T) {
 	if r := result(t, uploadText(t, env, Params{Path: filepath.Join(env.Home, ".env")}, "y")); r.Paths[0] != filepath.Join(env.Home, ".env-1") {
 		t.Fatalf("dot file: %+v", r)
 	}
-	// Replace: written over the file, in place when it has other links.
+	// Replace: written over the file in place.
 	other := filepath.Join(env.Home, "other.txt")
 	if err := os.Link(p, other); err != nil {
 		t.Skip("no hard links here:", err)
@@ -78,7 +78,7 @@ func TestUpload(t *testing.T) {
 	if rep := uploadText(t, env, Params{Path: filepath.Join(env.Base, "x")}, "x"); rep.OK || rep.Code != "refused" {
 		t.Fatalf("data directory: %+v", rep)
 	}
-	nothingLeft(t, env, env.Home)
+	nothingLeft(t, env)
 }
 
 // An upload cut short (the browser cancelled it) leaves nothing.
@@ -105,7 +105,7 @@ func TestUploadCutShort(t *testing.T) {
 		if read(t, p) != "old" {
 			t.Fatalf("replace %v: changed", replace)
 		}
-		nothingLeft(t, env, env.Home)
+		nothingLeft(t, env)
 		if _, err := os.Stat(filepath.Join(env.Home, "big-1.bin")); err == nil {
 			t.Fatal("a partial upload was kept")
 		}

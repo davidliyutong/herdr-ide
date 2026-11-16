@@ -3,11 +3,10 @@
 package files
 
 import (
-	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"testing"
@@ -16,7 +15,6 @@ import (
 	"golang.org/x/sys/unix"
 
 	"herdr-ide/internal/agent/plugin"
-	"herdr-ide/internal/brand"
 )
 
 func inode(t *testing.T, p string) uint64 {
@@ -37,25 +35,33 @@ func loaded(t *testing.T, p string) *Entry {
 	return entryOf(p, fi)
 }
 
-// nothingLeft fails when a save left a temporary file or a backup in dir
-// or in the agent's private directory.
-func nothingLeft(t *testing.T, env *plugin.Env, dir string) {
+func names(t *testing.T, dir string) []string {
 	t.Helper()
-	ents, _ := os.ReadDir(dir)
-	for _, e := range ents {
-		if strings.Contains(e.Name(), "-save-") || isBackup(e.Name()) {
-			t.Errorf("left in %s: %s", dir, e.Name())
-		}
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
 	}
-	ents, _ = os.ReadDir(filepath.Join(env.Base, savesDir))
+	var l []string
+	for _, e := range ents {
+		l = append(l, e.Name())
+	}
+	sort.Strings(l)
+	return l
+}
+
+// nothingLeft fails when the agent's private directory holds a file an
+// upload was received into.
+func nothingLeft(t *testing.T, env *plugin.Env) {
+	t.Helper()
+	ents, _ := os.ReadDir(filepath.Join(env.Base, stagingDir))
 	for _, e := range ents {
 		t.Errorf("left in the private directory: %s", e.Name())
 	}
 }
 
-// A file with several hard links is written in place: every name sees the
-// new text, the inode and the mode stay.
-func TestSaveKeepsHardLinks(t *testing.T) {
+// A save rewrites the file itself: its inode, hard links and mode stay,
+// and nothing else appears in its directory.
+func TestSaveInPlace(t *testing.T) {
 	env := testEnv(t)
 	p := filepath.Join(env.Home, "f.txt")
 	other := filepath.Join(env.Home, "other.txt")
@@ -65,11 +71,12 @@ func TestSaveKeepsHardLinks(t *testing.T) {
 		t.Skip("no hard links here:", err)
 	}
 	ino := inode(t, p)
+	before := names(t, env.Home)
 	r := result(t, saveText(t, env, Params{Path: p, Expect: loaded(t, p)}, "two, longer"))
 	if read(t, p) != "two, longer" || read(t, other) != "two, longer" || inode(t, p) != ino {
 		t.Fatalf("not written in place: %q %q", read(t, p), read(t, other))
 	}
-	if r.Entry == nil || r.Entry.Size != int64(len("two, longer")) {
+	if now := loaded(t, p); r.Entry == nil || r.Entry.Size != now.Size || r.Entry.MTime != now.MTime || now.Size != int64(len("two, longer")) {
 		t.Fatalf("entry %+v", r.Entry)
 	}
 	if fi, _ := os.Stat(p); fi.Mode().Perm() != 0o640 {
@@ -80,8 +87,6 @@ func TestSaveKeepsHardLinks(t *testing.T) {
 	if read(t, other) != "3" {
 		t.Fatalf("truncated: %q", read(t, other))
 	}
-	nothingLeft(t, env, env.Home)
-
 	// Through a symbolic link: its target is written in place, the link stays.
 	os.Symlink("f.txt", filepath.Join(env.Home, "link"))
 	result(t, saveText(t, env, Params{Path: filepath.Join(env.Home, "link"), Force: true}, "via link"))
@@ -91,40 +96,15 @@ func TestSaveKeepsHardLinks(t *testing.T) {
 	if read(t, other) != "via link" || inode(t, p) != ino {
 		t.Fatal("the link's target not written in place")
 	}
-
-	// Always replacing: a new file, the other name keeps the old text.
-	result(t, saveText(t, env, Params{Path: p, Force: true, Method: MethodReplace}, "replaced"))
-	if read(t, p) != "replaced" || read(t, other) != "via link" || inode(t, p) == ino {
-		t.Fatal("replace did not make a new file")
-	}
-	nothingLeft(t, env, env.Home)
-}
-
-// A file of another user (the check replaced: tests do not run as root) is
-// written in place, so it keeps its owner.
-func TestSaveOtherOwnersFile(t *testing.T) {
-	env := testEnv(t)
-	p := filepath.Join(env.Home, "theirs.txt")
-	write(t, p, "theirs")
-	ino := inode(t, p)
-	defer func(f func(fs.FileInfo) bool) { ownedByOther = f }(ownedByOther)
-	ownedByOther = func(fs.FileInfo) bool { return true }
-	result(t, saveText(t, env, Params{Path: p, Expect: loaded(t, p)}, "mine now"))
-	if read(t, p) != "mine now" || inode(t, p) != ino {
-		t.Fatal("not written in place")
-	}
-	nothingLeft(t, env, env.Home)
-	// The user's own file is replaced by a rename.
-	ownedByOther = func(fs.FileInfo) bool { return false }
-	result(t, saveText(t, env, Params{Path: p, Force: true}, "again"))
-	if read(t, p) != "again" || inode(t, p) == ino {
-		t.Fatal("own file not replaced")
+	want := append(before, "link")
+	sort.Strings(want)
+	if got := names(t, env.Home); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("directory now %v, was %v", got, before)
 	}
 }
 
-// A writable file in a directory that takes no new file is written in
-// place; its text and backup wait in the private directory, which is
-// emptied after. Always replacing fails there.
+// A writable file in a directory that takes no new file is saved; a new
+// file cannot be made there.
 func TestSaveInUnwritableDirectory(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root writes any directory")
@@ -136,23 +116,125 @@ func TestSaveInUnwritableDirectory(t *testing.T) {
 	write(t, p, "one")
 	os.Chmod(dir, 0o555)
 	defer os.Chmod(dir, 0o755)
-	ino := inode(t, p)
 	result(t, saveText(t, env, Params{Path: p, Expect: loaded(t, p)}, "two"))
-	if read(t, p) != "two" || inode(t, p) != ino {
-		t.Fatal("not written in place")
+	if read(t, p) != "two" {
+		t.Fatal("not written")
 	}
-	nothingLeft(t, env, dir)
-	if fi, err := os.Stat(filepath.Join(env.Base, savesDir)); err != nil || fi.Mode().Perm() != 0o700 {
-		t.Fatalf("private directory: %v %v", fi, err)
-	}
-	rep := saveText(t, env, Params{Path: p, Force: true, Method: MethodReplace}, "three")
-	if rep.OK || rep.Code != "denied" || read(t, p) != "two" {
-		t.Fatalf("replace in an unwritable directory: %+v", rep)
-	}
-	// A new file cannot be made there either way.
 	if rep := saveText(t, env, Params{Path: filepath.Join(dir, "new.txt")}, "x"); rep.Code != "denied" {
 		t.Fatalf("new file: %+v", rep)
 	}
+	// A file the user may not write is left alone: no change of its mode.
+	os.Chmod(dir, 0o755)
+	os.Chmod(p, 0o444)
+	if rep := saveText(t, env, Params{Path: p, Force: true}, "three"); rep.Code != "denied" || read(t, p) != "two" {
+		t.Fatalf("read-only file: %+v", rep)
+	}
+	if fi, _ := os.Stat(p); fi.Mode().Perm() != 0o444 {
+		t.Fatalf("mode changed: %v", fi.Mode())
+	}
+}
+
+// A FIFO or a directory is not written, and a FIFO does not hold the save.
+func TestSaveRefusesWhatIsNotAFile(t *testing.T) {
+	env := testEnv(t)
+	fifo := filepath.Join(env.Home, "fifo")
+	if err := unix.Mkfifo(fifo, 0o600); err != nil {
+		t.Skip("no FIFO:", err)
+	}
+	done := make(chan Entry)
+	go func() {
+		_, err := writeFile(fifo, strings.NewReader("x"), Params{Force: true})
+		pe, _ := codeOf(err).(*plugin.Error)
+		if pe == nil || pe.Code != "bad_params" {
+			t.Errorf("FIFO: %v", err)
+		}
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the FIFO held the save")
+	}
+	os.Mkdir(filepath.Join(env.Home, "dir"), 0o755)
+	if rep := saveText(t, env, Params{Path: filepath.Join(env.Home, "dir"), Force: true}, "x"); rep.Code != "bad_params" {
+		t.Fatalf("directory: %+v", rep)
+	}
+}
+
+// The precondition holds for the file opened: one changed, removed, or
+// swapped for a link after the first check is a conflict, and a link's
+// target is not written.
+func TestSaveChecksTheFileItOpens(t *testing.T) {
+	env := testEnv(t)
+	home, _ := filepath.EvalSymlinks(env.Home) // a save's path is real
+	p := filepath.Join(home, "f.txt")
+	write(t, p, "one")
+	was := loaded(t, p)
+	write(t, p, "changed meanwhile")
+	if _, err := writeFile(p, strings.NewReader("two"), Params{Expect: was}); !isConflict(err) || read(t, p) != "changed meanwhile" {
+		t.Fatalf("changed: %v", err)
+	}
+	secret := filepath.Join(home, "secret")
+	write(t, secret, "secret")
+	os.Remove(p)
+	os.Symlink(secret, p)
+	for _, w := range []Params{{Expect: was}, {Force: true}} {
+		if _, err := writeFile(p, strings.NewReader("two"), w); !isConflict(err) || read(t, secret) != "secret" {
+			t.Fatalf("link %+v: %v", w, err)
+		}
+	}
+	os.Remove(p)
+	if _, err := writeFile(p, strings.NewReader("two"), Params{Expect: was}); !isConflict(err) {
+		t.Fatalf("removed: %v", err)
+	}
+	// A new file that appeared: a conflict, unless forced.
+	write(t, p, "appeared")
+	if _, err := writeFile(p, strings.NewReader("new"), Params{}); !isConflict(err) || read(t, p) != "appeared" {
+		t.Fatalf("appeared: %v", err)
+	}
+	if e, err := createFile(p, strings.NewReader("new"), Params{Force: true}, true); err != nil || read(t, p) != "new" || e.Path != p {
+		t.Fatalf("forced: %v %+v", err, e)
+	}
+}
+
+// A directory above the file swapped for a link after the path was
+// resolved does not redirect a save, forced or not, nor a new file.
+func TestSaveRefusesALinkAboveTheFile(t *testing.T) {
+	env := testEnv(t)
+	home, _ := filepath.EvalSymlinks(env.Home)
+	shared, other := filepath.Join(home, "shared"), filepath.Join(home, "other")
+	os.Mkdir(shared, 0o755)
+	os.Mkdir(other, 0o755)
+	p := filepath.Join(shared, "notes.txt")
+	write(t, p, "notes")
+	write(t, filepath.Join(other, "notes.txt"), "secret")
+	was := loaded(t, p)
+	// Swapped after the path was resolved.
+	os.Rename(shared, shared+".old")
+	os.Symlink(other, shared)
+	for _, w := range []Params{{Expect: was}, {Force: true}} {
+		_, err := writeFile(p, strings.NewReader("mine"), w)
+		if !linksRefused {
+			t.Skip("this system's open cannot refuse links above the file")
+		}
+		if !isConflict(err) || read(t, filepath.Join(other, "notes.txt")) != "secret" {
+			t.Fatalf("%+v: %v", w, err)
+		}
+	}
+	// A new file in a folder whose path is resolved before it is made: a
+	// link in a parent is followed only where the path held it already.
+	n := filepath.Join(shared, "new.txt")
+	if _, err := createFile(n, strings.NewReader("x"), Params{}, false); err != nil {
+		t.Fatal(err)
+	}
+	if read(t, filepath.Join(other, "new.txt")) != "x" {
+		t.Fatal("not made in the link's directory")
+	}
+}
+
+func isConflict(err error) bool {
+	pe, ok := err.(*plugin.Error)
+	return ok && pe.Code == "conflict"
 }
 
 // failAfter is a copyBody that writes half of what it reads and fails, the
@@ -170,303 +252,56 @@ func failAfter(n int, err error) func(io.Writer, io.Reader) error {
 	}
 }
 
-// A write in place that fails midway brings the file's content back from
-// the backup and fails with the code of what went wrong.
-func TestSaveInPlaceFailureRestores(t *testing.T) {
+// A write that fails after the file was truncated says so (partial_write,
+// with the cause); a new file it failed for is removed.
+func TestSaveFailureIsPartial(t *testing.T) {
 	env := testEnv(t)
 	p := filepath.Join(env.Home, "f.txt")
-	write(t, p, "the original text")
-	if err := os.Link(p, filepath.Join(env.Home, "g.txt")); err != nil {
-		t.Skip("no hard links here:", err)
-	}
+	write(t, p, "the old text")
 	defer func(f func(io.Writer, io.Reader) error) { copyBody = f }(copyBody)
 	copyBody = failAfter(1, syscall.ENOSPC)
-	rep := saveText(t, env, Params{Path: p, Expect: loaded(t, p)}, "a new text that does not fit")
-	if rep.OK || rep.Code != "no_space" {
-		t.Fatalf("reply %+v", rep)
+	rep := saveText(t, env, Params{Path: p, Expect: loaded(t, p)}, "the new text")
+	if rep.OK || rep.Code != "partial_write" || !strings.HasSuffix(rep.Error, "no_space") || read(t, p) != "the ne" {
+		t.Fatalf("failed write: %+v %q", rep, read(t, p))
 	}
-	if read(t, p) != "the original text" {
-		t.Fatalf("not restored: %q", read(t, p))
+	// Saved again, it is whole.
+	result(t, saveText(t, env, Params{Path: p, Force: true}, "the new text"))
+	if read(t, p) != "the new text" {
+		t.Fatal("second save")
 	}
-	nothingLeft(t, env, env.Home)
-
-	// Restoring fails too: the backup stays, and the failure names it.
-	copyBody = failAfter(2, syscall.EIO)
-	rep = saveText(t, env, Params{Path: p, Force: true}, "another text")
-	if rep.OK || rep.Code != "restore_failed" {
-		t.Fatalf("reply %+v", rep)
-	}
-	var backup string
-	ents, _ := os.ReadDir(env.Home)
-	for _, e := range ents {
-		if isBackup(e.Name()) {
-			backup = filepath.Join(env.Home, e.Name())
-		}
-	}
-	if backup == "" || read(t, backup) != "the original text" || !strings.Contains(rep.Error, backup) {
-		t.Fatalf("backup %q, error %q", backup, rep.Error)
-	}
-}
-
-// A file swapped for a link or another file after it was checked is not
-// written through: the save is a conflict and nothing is written.
-func TestSaveInPlaceRefusesASwap(t *testing.T) {
-	env := testEnv(t)
-	g := &guard{env: env}
-	p := filepath.Join(env.Home, "f.txt")
-	secret := filepath.Join(env.Home, "secret")
-	src := filepath.Join(env.Home, "src")
-	write(t, p, "checked")
-	write(t, secret, "secret")
-	write(t, src, "new text")
-	sf, err := os.Open(src)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer sf.Close()
-	stage := &stagedFile{File: sf}
-	fi, _ := os.Stat(p)
-	os.Remove(p)
-	os.Symlink(secret, p)
-	if err := g.overwrite(p, stage, fi); err == nil || !strings.Contains(err.Error(), "conflict") || read(t, secret) != "secret" {
-		t.Fatalf("through a link: %v %q", err, read(t, secret))
-	}
-	os.Remove(p)
-	write(t, p, "another file")
-	if err := g.overwrite(p, stage, fi); err == nil || !strings.Contains(err.Error(), "conflict") || read(t, p) != "another file" {
-		t.Fatalf("another file: %v", err)
-	}
-	nothingLeft(t, env, env.Home)
-}
-
-// swapping replaces each file a save makes for itself, once made, by a
-// link to secret, as another user who may rename entries of its directory
-// could; it returns the names it swapped.
-func swapping(t *testing.T, secret string) *[]string {
-	t.Helper()
-	var swapped []string
-	old := made
-	t.Cleanup(func() { made = old })
-	made = func(name string) {
-		swapped = append(swapped, name)
-		if err := os.Remove(name); err != nil {
-			t.Error(err)
-		}
-		if err := os.Symlink(secret, name); err != nil {
-			t.Error(err)
-		}
-	}
-	return &swapped
-}
-
-// A staged text and a backup swapped for links to one of the user's files
-// between being made and being used: the save uses neither by name. The
-// file never gets the secret's content and the secret's mode stays, in
-// place (also when the write fails and the backup is written back), on the
-// rename path (refused as a conflict, the file as it was) and for an
-// upload under a free name.
-func TestSaveUsesOnlyItsDescriptors(t *testing.T) {
-	env := testEnv(t)
-	secret := filepath.Join(env.Home, "secret")
-	write(t, secret, "the user's secret")
-	os.Chmod(secret, 0o600)
-	unchanged := func(what string) {
-		t.Helper()
-		if fi, err := os.Lstat(secret); err != nil || fi.Mode() != 0o600 || read(t, secret) != "the user's secret" {
-			t.Fatalf("%s: secret changed: %v %v", what, fi, err)
-		}
-	}
-
-	// In place (another hard link): the text and the backup swapped.
-	p := filepath.Join(env.Home, "f.txt")
-	write(t, p, "the original text")
-	os.Chmod(p, 0o644)
-	if err := os.Link(p, filepath.Join(env.Home, "g.txt")); err != nil {
-		t.Skip("no hard links here:", err)
-	}
-	swapped := swapping(t, secret)
-	result(t, saveText(t, env, Params{Path: p, Expect: loaded(t, p)}, "the new text"))
-	if read(t, p) != "the new text" || len(*swapped) != 2 {
-		t.Fatalf("in place: %q, swapped %q", read(t, p), *swapped)
-	}
-	unchanged("in place")
-
-	// In place, failing: written back from the backup's descriptor.
-	*swapped = nil
-	orig := copyBody
-	defer func() { copyBody = orig }()
-	copyBody = failAfter(1, syscall.ENOSPC)
-	if rep := saveText(t, env, Params{Path: p, Force: true}, "a text that does not fit"); rep.OK || rep.Code != "no_space" {
-		t.Fatalf("reply %+v", rep)
-	}
-	if read(t, p) != "the new text" || len(*swapped) != 2 {
-		t.Fatalf("restored: %q, swapped %q", read(t, p), *swapped)
-	}
-	unchanged("restored")
-	copyBody = orig
-
-	// Renamed: the staged text swapped before its mode is set and it is
-	// renamed over the file.
-	q := filepath.Join(env.Home, "own.txt")
-	write(t, q, "own text")
-	os.Chmod(q, 0o644)
-	*swapped = nil
-	rep := saveText(t, env, Params{Path: q, Expect: loaded(t, q)}, "renamed text")
-	if rep.OK || rep.Code != "conflict" || len(*swapped) != 1 {
-		t.Fatalf("rename: %+v, swapped %q", rep, *swapped)
-	}
-	if fi, err := os.Lstat(q); err != nil || !fi.Mode().IsRegular() || read(t, q) != "own text" {
-		t.Fatalf("rename: the file changed: %v %v", fi, err)
-	}
-	unchanged("rename")
-
-	// An upload under a free name.
+	copyBody = failAfter(1, syscall.EIO)
 	n := filepath.Join(env.Home, "new.txt")
-	*swapped = nil
-	if rep := uploadText(t, env, Params{Path: n}, "uploaded"); rep.OK || rep.Code != "conflict" || len(*swapped) != 1 {
-		t.Fatalf("upload: %+v, swapped %q", rep, *swapped)
+	if rep := saveText(t, env, Params{Path: n}, "new"); rep.OK || rep.Code == "partial_write" {
+		t.Fatalf("new file: %+v", rep)
 	}
 	if _, err := os.Lstat(n); err == nil {
-		t.Fatal("upload: the swapped file took the name")
-	}
-	unchanged("upload")
-}
-
-// In a directory where others may rename entries (group or others may
-// write it, not sticky) a save in place stages its text and its backup in
-// the private directory; a sticky one keeps them beside the file.
-func TestSaveInPlaceInASharedDirectory(t *testing.T) {
-	env := testEnv(t)
-	for _, c := range []struct {
-		mode    fs.FileMode
-		private bool
-	}{{0o777, true}, {0o770, true}, {0o777 | fs.ModeSticky, false}, {0o755, false}} {
-		dir := filepath.Join(env.Home, fmt.Sprintf("d%o", c.mode))
-		os.Mkdir(dir, 0o755)
-		if err := os.Chmod(dir, c.mode); err != nil {
-			t.Fatal(err)
-		}
-		if fi, _ := os.Stat(dir); fi.Mode()&(fs.ModePerm|fs.ModeSticky) != c.mode {
-			t.Skipf("mode %v not taken: %v", c.mode, fi.Mode())
-		}
-		p := filepath.Join(dir, "f.txt")
-		write(t, p, "one")
-		if err := os.Link(p, filepath.Join(dir, "g.txt")); err != nil {
-			t.Skip("no hard links here:", err)
-		}
-		var names []string
-		old := made
-		made = func(name string) { names = append(names, name) }
-		result(t, saveText(t, env, Params{Path: p, Expect: loaded(t, p)}, "two"))
-		made = old
-		if read(t, p) != "two" || len(names) != 2 {
-			t.Fatalf("%v: %q %q", c.mode, read(t, p), names)
-		}
-		for _, n := range names {
-			if in := filepath.Dir(n) == filepath.Join(env.Base, savesDir); in != c.private {
-				t.Errorf("%v: %s", c.mode, n)
-			}
-		}
-		nothingLeft(t, env, dir)
-		os.Chmod(dir, 0o755)
+		t.Fatal("the new file a write failed for is kept")
 	}
 }
 
-// A backup and a staged text go beside the file, recorded by links in the
-// private directory; PruneBackups removes those older than BackupRetention
-// (and the files their links name, when those are old too), never a file
-// whose name is not a backup's or a staged text's, nor a link they name.
-func TestPruneBackups(t *testing.T) {
-	env := testEnv(t)
-	g := &guard{env: env}
-	p := filepath.Join(env.Home, "f.txt")
-	write(t, p, "content")
-	b, err := g.backup(p, strings.NewReader("content"))
-	if err != nil {
-		t.Fatal(err)
+// Old files of uploads broken off are removed; recent ones and other
+// directories' files stay.
+func TestPruneStaged(t *testing.T) {
+	base := t.TempDir()
+	d := filepath.Join(base, stagingDir)
+	os.MkdirAll(d, 0o700)
+	now := time.Now()
+	old, recent := filepath.Join(d, "upload-00000001"), filepath.Join(d, "upload-00000002")
+	write(t, old, "x")
+	write(t, recent, "y")
+	os.Chtimes(old, now.Add(-StagingRetention-time.Hour), now.Add(-StagingRetention-time.Hour))
+	elsewhere := filepath.Join(base, "keep")
+	write(t, elsewhere, "z")
+	os.Chtimes(elsewhere, now.Add(-30*24*time.Hour), now.Add(-30*24*time.Hour))
+	PruneStaged(base, now)
+	if _, err := os.Stat(old); err == nil {
+		t.Fatal("old staged upload kept")
 	}
-	if filepath.Dir(b.path) != env.Home || !isBackup(filepath.Base(b.path)) || read(t, b.path) != "content" || b.link == "" {
-		t.Fatalf("backup %+v", b)
+	if _, err := os.Stat(recent); err != nil {
+		t.Fatal("recent staged upload removed")
 	}
-	b.Close()
-	if fi, _ := os.Stat(b.path); fi.Mode().Perm() != 0o600 {
-		t.Fatalf("backup's mode %v", fi.Mode())
+	if _, err := os.Stat(elsewhere); err != nil {
+		t.Fatal("a file outside the staging directory removed")
 	}
-	// A staged text an upload left (the agent was killed during it).
-	s, err := g.createTemp(env.Home, 0o666)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s.Close()
-	if !isStaged(filepath.Base(s.name)) || s.link == "" {
-		t.Fatalf("staged %+v", s)
-	}
-	if l, err := os.Readlink(s.link); err != nil || l != s.name {
-		t.Fatalf("record %q %v", l, err)
-	}
-	// One whose upload still runs: its record is old, the file is not.
-	busy, err := g.createTemp(env.Home, 0o666)
-	if err != nil {
-		t.Fatal(err)
-	}
-	busy.Close()
-	d := filepath.Join(env.Base, savesDir)
-	stale := filepath.Join(d, "stage-0000abcd")
-	write(t, stale, "x")
-	fresh := filepath.Join(d, "backup-new-0000abcd")
-	write(t, fresh, "y")
-	// Links to files that are no backups or staged texts, or to a link
-	// named as one: only the links go.
-	notBackup := filepath.Join(env.Home, "keep.txt")
-	write(t, notBackup, "z")
-	nearly := filepath.Join(env.Home, "."+brand.Slug+stageTag+"0000abcd.txt")
-	write(t, nearly, "z")
-	linked := filepath.Join(env.Home, "."+brand.Slug+stageTag+"0000abce")
-	os.Symlink(notBackup, linked)
-	var odd []string
-	for i, target := range []string{notBackup, nearly, linked} {
-		l := filepath.Join(d, fmt.Sprintf("save-0000abc%d.link", i))
-		os.Symlink(target, l)
-		odd = append(odd, l)
-	}
-
-	old := time.Now().Add(-BackupRetention - time.Hour)
-	tv := []unix.Timeval{unix.NsecToTimeval(old.UnixNano()), unix.NsecToTimeval(old.UnixNano())}
-	for _, q := range append([]string{b.link, b.path, s.link, s.name, busy.link, nearly, linked}, odd...) {
-		if err := unix.Lutimes(q, tv); err != nil {
-			t.Fatal(err)
-		}
-	}
-	os.Chtimes(stale, old, old)
-
-	PruneBackups(env.Base, time.Now())
-	for _, gone := range append([]string{b.path, b.link, s.name, s.link, busy.link, stale}, odd...) {
-		if _, err := os.Lstat(gone); err == nil {
-			t.Errorf("%s not removed", gone)
-		}
-	}
-	for _, kept := range []string{fresh, notBackup, nearly, linked, busy.name, p} {
-		if _, err := os.Lstat(kept); err != nil {
-			t.Errorf("%s removed", kept)
-		}
-	}
-}
-
-// Names PruneBackups takes beside files.
-func TestBackupAndStagedNames(t *testing.T) {
-	for name, want := range map[string][2]bool{
-		".f.txt." + brand.Slug + backupTag + "0123abcd":  {true, false},
-		".f.txt." + brand.Slug + backupTag + "0123abcd~": {false, false},
-		"f.txt." + brand.Slug + backupTag + "0123abcd":   {false, false},
-		".f.txt." + brand.Slug + backupTag + "0123ABCD":  {false, false},
-		"." + brand.Slug + stageTag + "0123abcd":         {false, true},
-		"." + brand.Slug + stageTag + "0123abc":          {false, false},
-		"." + brand.Slug + stageTag + "0123abcd.txt":     {false, false},
-		"x." + brand.Slug + stageTag + "0123abcd":        {false, false},
-		"." + brand.Slug + stageTag + "0123abcd" + "0":   {false, false},
-	} {
-		if got := [2]bool{isBackup(name), isStaged(name)}; got != want {
-			t.Errorf("%s: %v, want %v", name, got, want)
-		}
-	}
+	PruneStaged(t.TempDir(), now) // no directory: nothing to do
 }

@@ -123,12 +123,11 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   preview editor that the next click replaces, a double click keeps it
   open, as in VS Code (text in Monaco, images, video and PDFs as Quick Look
   shows them); saves never overwrite a change made on the machine since it
-  was opened, and keep hard links, owners and symbolic links (written in
-  place after a backup when a new file would lose them, as Vim does).
+  was opened, and write the file in place as VS Code does, so hard links,
+  owners, permissions and symbolic links stay.
   Changed files are colored by their Git status and the editor's gutter
   marks changed lines. Its settings page has hidden files, excluded names,
-  the sort order, following the focused pane, asking before the trash and
-  how saves write files.
+  the sort order, following the focused pane and asking before the trash.
 - **Git.** VS Code's Source Control and Git Graph without VS Code, for the
   focused pane's repository on any machine: a panel (Ctrl+Shift+G in the
   desktop app) with the branch (a searchable branch picker for thousands

@@ -395,8 +395,11 @@ func TestTrashMac(t *testing.T) {
 	}
 }
 
+// The trash takes a file also where the data directory is missing (a
+// server account no desktop used: no ~/.local/share).
 func TestTrashAction(t *testing.T) {
 	env := testEnv(t)
+	t.Setenv("XDG_DATA_HOME", "")
 	p := filepath.Join(env.Home, "gone.txt")
 	write(t, p, "x")
 	r := result(t, call(t, env, "trash", Params{Paths: []string{p}}))

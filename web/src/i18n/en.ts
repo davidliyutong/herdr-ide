@@ -886,6 +886,7 @@ export const en = {
   'files.confirm.delete': 'Delete {what} permanently? This cannot be undone.',
   'files.copyFailed': 'The clipboard is not available.',
   'files.saveFailed': 'Not saved: {error}',
+  'files.saveAgain': 'Save Again',
   'files.unsaved': 'Unsaved changes',
   'files.readOnly': 'Read-only',
   // files that mix line endings (eol.ts), in the explorer's editor
@@ -917,8 +918,8 @@ export const en = {
   'files.error.upload_too_large': 'The file is too large to upload (more than 4 GB).',
   'files.error.no_space': 'There is no space left on the machine’s disk; the file is as it was.',
   'files.error.read_only': 'The file system is read-only.',
-  'files.error.restore_failed':
-    'Writing the file failed and its content could not be put back. The content from before the save is in {path}.',
+  'files.error.partial_write': 'Writing stopped partway, so the file on the machine may now be incomplete.',
+  'files.error.partial_write.no_space': 'The machine’s disk filled up during the write, so the file there may now be incomplete.',
   'files.error.offline': 'The machine is not connected.',
   'files.error.transport': 'The machine did not answer.',
   'files.error.plugin_disabled': 'The file explorer is off.',
@@ -1244,11 +1245,6 @@ export const en = {
     'The tree shows the focused terminal’s directory, in browsers where the crosshair button was not used (each browser keeps its own choice).',
   'settings.files.confirmTrash': 'Ask before moving to the trash',
   'settings.files.confirmTrash.desc': 'Move to Trash asks first, as Delete Permanently always does.',
-  'settings.files.saveMethod': 'How saves write files',
-  'settings.files.saveMethod.desc':
-    'In place when needed keeps hard links, the owner and the group of a file and saves into folders you may not write, after a backup that brings the file back when the write fails. Replace always writes a new file and renames it over the old one.',
-  'settings.files.saveMethod.auto': 'In place when needed',
-  'settings.files.saveMethod.replace': 'Always replace the file',
   'files.confirm.trashTitle': 'Move to the trash?',
   'files.confirm.trash': 'Move {what} to the trash on the machine?',
   'settings.plugins.usage.enabled': 'AI usage',

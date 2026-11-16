@@ -135,6 +135,8 @@ let fileStatus: number | undefined;
 /** While set, reading the file's contents waits for it. */
 let hold: Promise<void> | undefined;
 const writes: Array<{ q: URLSearchParams; body: string; raw: Uint8Array }> = [];
+/** The next write stops partway (the machine's disk is full). */
+let failWrite = false;
 
 function stubFetch() {
   vi.stubGlobal('fetch', async (input: string, init?: RequestInit) => {
@@ -167,6 +169,11 @@ function stubFetch() {
         (file && +q.get('mtime')! === file.mtime && +q.get('size')! === file.size) ||
         (!file && q.get('new') === '1');
       if (!matches) return new Response(JSON.stringify({ error: 'conflict', current: cur }), { status: 409 });
+      if (failWrite) {
+        failWrite = false;
+        file = { text: body.slice(0, 2), size: 2, mtime: (file?.mtime ?? 0) + 500 };
+        return new Response(JSON.stringify({ error: 'partial_write', message: 'partial_write: no_space' }), { status: 400 });
+      }
       file = { text: body, size: body.length, mtime: (file?.mtime ?? 0) + 1000 };
       return new Response(
         JSON.stringify({ paths: [q.get('path')], entry: { path: q.get('path'), exists: true, size: file.size, mtime: file.mtime } }),
@@ -197,6 +204,8 @@ describe('EditorPane', () => {
     fileStatus = undefined;
     hold = undefined;
     writes.length = 0;
+    failWrite = false;
+    useStore.setState({ toasts: [] });
     editor.model = undefined;
     editor.save = undefined;
     stubFetch();
@@ -272,6 +281,25 @@ describe('EditorPane', () => {
     await flush();
     expect(writes[0].q.get('new')).toBe('1');
     expect(host.querySelector('.files-conflict')).not.toBeNull();
+  });
+
+  it('keeps the text after a write that stopped partway, and saves it again over what is there', async () => {
+    await render();
+    await act(async () => editor.model!.setValue('hello world'));
+    failWrite = true;
+    await act(async () => editor.save!());
+    await flush();
+    expect(file?.text).toBe('he');
+    expect(host.querySelector('.files-dirty')).not.toBeNull();
+    const toast = useStore.getState().toasts.at(-1)!;
+    expect(toast.kind).toBe('error');
+    expect(toast.msg).toBe(t('files.saveFailed', { error: t('files.error.partial_write.no_space') }));
+    expect(toast.action?.label).toBe(t('files.saveAgain'));
+    await act(async () => toast.action!.run());
+    await flush();
+    expect(writes.at(-1)!.q.get('force')).toBe('1');
+    expect(file?.text).toBe('hello world');
+    expect(host.querySelector('.files-dirty')).toBeNull();
   });
 
   it('edits nothing in read-only mode', async () => {

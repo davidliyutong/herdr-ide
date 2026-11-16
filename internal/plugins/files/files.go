@@ -58,16 +58,14 @@ type Entry struct {
 
 // params are an action's parameters (the agent's files.Params).
 type params struct {
-	Path   string   `json:"path,omitempty"`
-	Paths  []string `json:"paths,omitempty"`
-	To     string   `json:"to,omitempty"`
-	Dir    string   `json:"dir,omitempty"`
-	Expect *Entry   `json:"expect,omitempty"`
-	Force  bool     `json:"force,omitempty"`
-	// Method is how a save writes a file that is there (auto, replace).
-	Method  string `json:"method,omitempty"`
-	Replace bool   `json:"replace,omitempty"`
-	Unique  bool   `json:"unique,omitempty"`
+	Path    string   `json:"path,omitempty"`
+	Paths   []string `json:"paths,omitempty"`
+	To      string   `json:"to,omitempty"`
+	Dir     string   `json:"dir,omitempty"`
+	Expect  *Entry   `json:"expect,omitempty"`
+	Force   bool     `json:"force,omitempty"`
+	Replace bool     `json:"replace,omitempty"`
+	Unique  bool     `json:"unique,omitempty"`
 }
 
 func (Plugin) Routes() []plugin.Route {
@@ -123,7 +121,7 @@ func run(action string) func(c *plugin.Call, w http.ResponseWriter, r *http.Requ
 			plugin.WriteError(w, err)
 			return
 		}
-		p.Expect, p.Force, p.Method, p.Replace = nil, false, "", false
+		p.Expect, p.Force, p.Replace = nil, false, false
 		auditTargets(c, p)
 		ctx, cancel := context.WithTimeout(r.Context(), timeout)
 		defer cancel()
@@ -196,7 +194,6 @@ func write(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
 	if p.Force {
 		c.AuditField("force", true)
 	}
-	p.Method = saveMethod(c)
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxWrite))
 	if err != nil {
 		plugin.WriteJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "too_large", "message": err.Error()})
@@ -246,7 +243,6 @@ func upload(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
 	c.AuditField("size", r.ContentLength)
 	if p.Replace {
 		c.AuditField("replace", true)
-		p.Method = saveMethod(c)
 	}
 	if r.ContentLength > MaxUpload {
 		plugin.WriteJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "too_large", "message": "more than 4 GiB"})

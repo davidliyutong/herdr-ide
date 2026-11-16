@@ -7,8 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -23,9 +23,9 @@ const MaxUpload = 4 << 30
 // comes first, then the file as chunks, then a line with the result. It
 // takes a free name (Path, else name-1.ext, name-2.ext…), or with Replace
 // it writes the file there as a save does (Force: through a link its
-// target, in place when a rename would lose something). The file is
-// received in full before anything at Path changes; one cut short leaves
-// nothing.
+// target, in place). The file is received in full into the agent's
+// private directory before anything at Path changes, so one cut short
+// leaves nothing there.
 func (g *guard) upload(st net.Conn, p Params) error {
 	abs, err := g.resolve(p.Path)
 	if err == nil && p.Replace {
@@ -40,53 +40,53 @@ func (g *guard) upload(st net.Conn, p Params) error {
 	if err := agentproto.WriteLine(st, agentproto.Reply{OK: true}); err != nil {
 		return err
 	}
-	r := &agentproto.ChunkReader{R: st}
-	var e *Entry
-	if p.Replace {
-		e, err = g.put(abs, r, Params{Force: true, Method: p.Method}, MaxUpload)
-	} else {
-		e, err = g.putNew(abs, r)
-	}
+	e, err := g.received(&agentproto.ChunkReader{R: st}, abs, p.Replace)
 	if err != nil {
-		return plugin.Fail(st, codeOf(err))
+		return plugin.Fail(st, saveErr(err))
 	}
 	b, _ := json.Marshal(Result{Paths: []string{e.Path}, Entry: e})
 	return agentproto.WriteLine(st, agentproto.Reply{OK: true, Plugin: b})
 }
 
-// putNew writes what r holds (at most MaxUpload bytes) into a new file
-// beside p and gives it p's name or, when that is taken, the first free
-// name-1.ext, name-2.ext…, in a rename that replaces nothing (of the file
-// it wrote only: one swapped for it by name is a conflict, put's
-// stagedFile). The new file gets what the umask leaves of 0666.
-func (g *guard) putNew(p string, r io.Reader) (*Entry, error) {
-	stage, err := g.createTemp(filepath.Dir(p), 0o666)
+// received receives an upload (r, at most MaxUpload bytes) into a file in
+// the private directory, writes it to abs (createFree, or with replace
+// writeFile) and removes that file before the upload answers.
+func (g *guard) received(r io.Reader, abs string, replace bool) (*Entry, error) {
+	stage, err := g.stagingFile()
 	if err != nil {
 		io.Copy(io.Discard, r)
 		return nil, err
 	}
-	defer stage.discard()
-	err = receive(stage, r, MaxUpload)
-	if err == nil {
-		err = stage.Sync()
+	defer func() {
+		stage.Close()
+		os.Remove(stage.Name())
+	}()
+	if err := receive(stage, r, MaxUpload); err != nil {
+		return nil, err
 	}
+	size, err := stage.Seek(0, io.SeekCurrent)
 	if err != nil {
 		return nil, err
 	}
-	made(stage.name)
+	text := io.NewSectionReader(stage, 0, size)
+	if replace {
+		return writeFile(abs, text, Params{Force: true})
+	}
+	return createFree(abs, text)
+}
+
+// createFree creates p or, when that is taken, the first free name-1.ext,
+// name-2.ext… (createFile: a new file, never one that is there) and writes
+// what text holds into it.
+func createFree(p string, text io.Reader) (*Entry, error) {
 	for i := 0; i < 1000; i++ {
 		q := numbered(p, i)
-		fi, err := stage.renameTo(q, renameNoReplace)
-		if errors.Is(err, fs.ErrExist) {
-			continue
+		e, err := createFile(q, text, Params{}, false)
+		var pe *plugin.Error
+		if errors.As(err, &pe) && pe.Code == "conflict" {
+			continue // taken
 		}
-		if errors.Is(err, errSwapped) {
-			return nil, &plugin.Error{Code: "conflict", Err: err}
-		}
-		if err != nil {
-			return nil, err
-		}
-		return entryOf(q, fi), nil
+		return e, err
 	}
 	return nil, plugin.Errorf("exists", "no free name for %s", p)
 }

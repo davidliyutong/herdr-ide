@@ -22,8 +22,8 @@ import (
 )
 
 // When the session ends during an upload, Serve returns only once the
-// upload's handler removed what it staged beside the target (and its
-// record), so an agent that exits with its session leaves nothing there.
+// upload's handler removed the file it was being received into, so an
+// agent that exits with its session leaves nothing in its data directory.
 func TestServeWaitsForRequestsToClean(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -53,19 +53,13 @@ func TestServeWaitsForRequestsToClean(t *testing.T) {
 	}
 	staged := func() []string {
 		var names []string
-		ents, _ := os.ReadDir(home)
+		ents, _ := os.ReadDir(filepath.Join(home, brand.DataDir("test"), "staging"))
 		for _, e := range ents {
-			if strings.HasPrefix(e.Name(), "."+brand.Slug+"-save-") {
-				names = append(names, e.Name())
-			}
-		}
-		ents, _ = os.ReadDir(filepath.Join(home, brand.DataDir("test"), "saves"))
-		for _, e := range ents {
-			names = append(names, "saves/"+e.Name())
+			names = append(names, "staging/"+e.Name())
 		}
 		return names
 	}
-	for deadline := time.Now().Add(5 * time.Second); len(staged()) < 2; time.Sleep(10 * time.Millisecond) {
+	for deadline := time.Now().Add(5 * time.Second); len(staged()) < 1; time.Sleep(10 * time.Millisecond) {
 		if time.Now().After(deadline) {
 			t.Fatalf("the upload staged nothing: %q", staged())
 		}
