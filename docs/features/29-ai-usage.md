@@ -76,7 +76,9 @@ only while it runs, so without help its numbers would be readable only
 minutes after it ran. Its refresh token is good once: every refresh
 returns a new one and spends the old. A renewal that kept the new tokens
 to itself would leave Kimi Code a spent refresh token and sign it out, so
-with `usage.kimiRefresh` on (the default) the agent renews the token as
+with `usage.kimiRefresh` on (the default) and the core not `--read-only`
+(a watch-only core changes nothing on machines, so there an ended token
+is `stale` until Kimi Code runs) the agent renews the token as
 Kimi Code 2.2.0 does (`internal/usage/kimiauth.go`, taken from its bundled
 `packages/oauth`) and writes the new tokens back where Kimi Code reads
 them:
@@ -349,7 +351,7 @@ window over a threshold is said at the next poll.
   out, an unreadable answer is `bad_response`, the last numbers stay.
 - An expired token: `stale` with `token_expired` and the hint to run the
   CLI; nothing is sent. Kimi Code's is renewed first unless
-  `usage.kimiRefresh` is off; a renewal Kimi Code holds the lock for is
+  `usage.kimiRefresh` is off or the core is `--read-only`; a renewal Kimi Code holds the lock for is
   `stale` with `lock_busy` until the next poll, a refused one `unauth`
   until the credential file changes.
 - 429: the account is skipped until its `Retry-After` (at most a day), also
@@ -418,8 +420,9 @@ status pages. Resources and retention:
 - `internal/plugins/usage/usage_test.go`: cadence, dedupe across machines,
   last good numbers, `Retry-After` (also without an id), the manual
   refresh's minimum gap on a fake clock, history and pace, status pages,
-  the cost report, shared scans and its cache, settings, a machine that
-  connects later asked alone, no poll without machines, machines kept
+  the cost report, shared scans and its cache, settings (Kimi Code's
+  renewal never asked of agents by a read-only core, `TestSettings`), a
+  machine that connects later asked alone, no poll without machines, machines kept
   when their poll fails, no history from kept numbers, a provider turned
   off hidden, windows' ids, the adaptive cadences as settings, the best
   answer of a poll winning with the others as issues.

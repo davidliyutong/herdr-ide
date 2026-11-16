@@ -179,8 +179,18 @@ func (p *Plugin) putDeepseekKey(c *plugin.Call, w http.ResponseWriter, r *http.R
 	plugin.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-// options are what the agents get from the settings.
+// options are what the agents get from the settings. A read-only core
+// (--read-only) changes nothing on machines: it never has an agent renew
+// Kimi Code's sign-in, which rewrites its credentials file there.
 func (p *Plugin) options() usage.Options {
+	o := p.settingsOptions()
+	if h := p.getHost(); h != nil && h.ReadOnly() {
+		o.KimiRefresh = false
+	}
+	return o
+}
+
+func (p *Plugin) settingsOptions() usage.Options {
 	o := usage.Options{ClaudeKeychain: true, KimiRefresh: true}
 	st := p.settings()
 	if st == nil {
