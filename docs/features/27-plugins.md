@@ -235,7 +235,9 @@ leaving the page warns), and the pane takes them back when it is drawn
 again. They are freed when the pane leaves its machine's layout (closed,
 with its tab or workspace, also by another page) or the machine is removed,
 once saved, or when the text is clean; a machine whose layout is not read
-(away) keeps them. Each editor pane has a model of its own, so two panes of
+(away) keeps them. A pane closed with unsaved text (asked about first)
+leaves the layout before its component unmounts: the layout no longer has
+it, so nothing is kept for it. Each editor pane has a model of its own, so two panes of
 one file keep their own text.
 
 The right sidebar (`components/RightBar.tsx`) is a rail at the window's right
@@ -317,6 +319,7 @@ on macOS) shows the panel shown last or hides it.
   panels and status items, the Plugins page's per-machine switch, editors'
   font following the settings.
 - `web/src/__tests__/keptEdits.test.ts`: an editor's and a diff's unsaved
-  text kept while the pane is away, asked about, saved without the pane and
-  freed when the layout loses the pane.
+  text kept while the pane is away (also in another tab), asked about,
+  saved without the pane and freed when the layout loses the pane; nothing
+  kept for an editor or a diff closed with unsaved text.
 - `design/testdata/layout/plugin-views.json`: plugins' panes in the layout.

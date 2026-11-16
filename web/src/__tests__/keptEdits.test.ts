@@ -247,6 +247,65 @@ describe('kept edits', () => {
     expect(anyUnsaved()).toBe(false);
   });
 
+  // Closing a pane with unsaved text asks first; the layout loses the
+  // pane, then its component unmounts: nothing is kept for it.
+  it('keeps nothing for a pane closed with unsaved text', async () => {
+    useTerms.setState({ machines: { m: { terminals: {}, layout: layoutWith('v1', 'v2') } } });
+    await mount(editorPane());
+    const model = editor.model!;
+    await act(async () => model.setValue('edited'));
+    expect(anyUnsaved()).toBe(true);
+    useTerms.setState({ machines: { m: { terminals: {}, layout: layoutWith('v2') } } });
+    await unmount();
+    expect(keptEdit('m', 'view:v1')).toBeUndefined();
+    expect(model.disposed).toBe(true);
+    expect(anyUnsaved()).toBe(false);
+    useTerms.setState({ machines: {} });
+  });
+
+  it('keeps the edit of a pane in another tab, and a closed diff’s none', async () => {
+    // The pane's tab is not the one shown: still in the layout.
+    const twoTabs = {
+      workspaces: [
+        {
+          id: 'w',
+          tabs: [
+            { root: { view: { id: 'other', plugin: 'files', kind: 'editor' } }, focused: 'view:other' },
+            { root: { view: { id: 'v1', plugin: 'files', kind: 'editor' } }, focused: 'view:v1' },
+          ],
+          selected: 0,
+        },
+      ],
+      selected: 0,
+    } as unknown as Layout;
+    useTerms.setState({ machines: { m: { terminals: {}, layout: twoTabs } } });
+    await mount(editorPane());
+    await act(async () => editor.model!.setValue('edited'));
+    await unmount();
+    expect(keptEdit('m', 'view:v1')).toBeDefined();
+    expect(anyUnsaved()).toBe(true);
+    dropEdit('m', 'view:v1');
+    // A diff closed with unsaved text: neither kept nor marked dirty.
+    useTerms.setState({ machines: { m: { terminals: {}, layout: layoutWith('d1') } } });
+    await mount(
+      createElement(DiffPane, {
+        m: 'm',
+        pane: 'view:d1',
+        view: { id: 'd1', plugin: 'git', kind: 'diff', repo: '/r', path: 'f.txt', mode: 'worktree' },
+        focused: true,
+      }),
+    );
+    const { modified } = diffEditor.model!;
+    await act(async () => modified.setValue('a\nB\nmine\n'));
+    useTerms.setState({ machines: { m: { terminals: {}, layout: layoutWith() } } });
+    await unmount();
+    expect(keptEdit('m', 'view:d1')).toBeUndefined();
+    expect(dirtyDiffs.has('view:d1')).toBe(false);
+    expect(modified.disposed).toBe(true);
+    expect(anyUnsaved()).toBe(false);
+    useTerms.setState({ machines: {} });
+  });
+
   it("keeps a diff's unsaved working tree while its pane is away", async () => {
     const diff = () =>
       createElement(DiffPane, {

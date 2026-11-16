@@ -27,11 +27,20 @@ const kept = new Map<string, KeptEdit>();
 const keyOf = (m: string, pane: string) => `${m}\n${pane}`;
 
 /** Keeps a pane's unsaved edit when its component unmounts: it stays
- * unsaved (closing asks, its save saves it) until takeEdit or dropEdit. */
+ * unsaved (closing asks, its save saves it) until takeEdit or dropEdit.
+ * A pane its machine's layout no longer has (it was closed, and what it
+ * had unsaved was asked about first) keeps nothing: the edit is freed at
+ * once. */
 export function keepEdit<T extends KeptEdit>(m: string, pane: string, edit: T) {
   const k = keyOf(m, pane);
   const old = kept.get(k);
   if (old && old !== edit) old.dispose();
+  if (paneGone(m, pane)) {
+    kept.delete(k);
+    setUnsaved(m, pane, undefined);
+    edit.dispose();
+    return;
+  }
   kept.set(k, edit);
   setUnsaved(m, pane, {
     name: edit.name,
@@ -81,18 +90,24 @@ function followLayouts() {
   unfollow ??= useTerms.subscribe((s) => dropGoneEdits(s.machines));
 }
 
+/** Whether a pane is gone for good: its machine was removed, or the
+ * machine's layout (when it is read) no longer has it (closed, its tab or
+ * workspace closed). A pane of another tab, workspace or machine shown,
+ * or behind a zoomed one, is still in its layout. */
+function paneGone(m: string, pane: string, machines = useTerms.getState().machines): boolean {
+  const known = useStore.getState().machines;
+  if (!known[m] && Object.keys(known).length > 0) return true;
+  const layout = machines[m]?.layout;
+  return !!layout && !layout.workspaces.some((ws) => ws.tabs.some((tb) => L.tabPanes(tb).includes(pane)));
+}
+
 /** Drops the kept edits of panes their machine's layout no longer has
  * (closed, their tab or workspace closed) and of machines removed; a
  * machine whose layout is not read (away) keeps them. */
 export function dropGoneEdits(machines = useTerms.getState().machines) {
-  const known = useStore.getState().machines;
   for (const k of [...kept.keys()]) {
     const [m, pane] = k.split('\n');
-    const layout = machines[m]?.layout;
-    const removed = !known[m] && Object.keys(known).length > 0;
-    if (removed || (layout && !layout.workspaces.some((ws) => ws.tabs.some((tb) => L.tabPanes(tb).includes(pane))))) {
-      dropEdit(m, pane);
-    }
+    if (paneGone(m, pane, machines)) dropEdit(m, pane);
   }
   if (!kept.size && unfollow) {
     unfollow();
