@@ -61,6 +61,11 @@
       "when": "terminal"
     },
     {
+      "id": "workspace.closeOthers",
+      "section": "workspace",
+      "when": "terminal"
+    },
+    {
       "id": "tab.new",
       "section": "tab",
       "when": "terminal"
@@ -131,6 +136,16 @@
       "when": "terminal"
     },
     {
+      "id": "tab.closeOthers",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.closeRight",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
       "id": "pane.splitRight",
       "section": "pane",
       "when": "terminal"
@@ -147,6 +162,16 @@
     },
     {
       "id": "pane.zoom",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.rename",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.actions",
       "section": "pane",
       "when": "terminal"
     },
@@ -290,6 +315,7 @@
     "command.find.open",
     "command.find.previous",
     "command.git.graph",
+    "command.pane.actions",
     "command.pane.back",
     "command.pane.close",
     "command.pane.focusDown",
@@ -299,6 +325,7 @@
     "command.pane.focusRight",
     "command.pane.focusUp",
     "command.pane.forward",
+    "command.pane.rename",
     "command.pane.splitDown",
     "command.pane.splitRight",
     "command.pane.undoClose",
@@ -311,6 +338,8 @@
     "command.section.view",
     "command.section.workspace",
     "command.tab.close",
+    "command.tab.closeOthers",
+    "command.tab.closeRight",
     "command.tab.new",
     "command.tab.next",
     "command.tab.previous",
@@ -334,6 +363,7 @@
     "command.view.zoomOut",
     "command.view.zoomReset",
     "command.workspace.close",
+    "command.workspace.closeOthers",
     "command.workspace.edit",
     "command.workspace.new",
     "command.workspace.next",

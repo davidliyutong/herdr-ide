@@ -217,6 +217,9 @@ function SettingsModal({ page: askedPage, machine: askedMachine }: { page?: stri
     const p = plugins.find((x) => x.id === sectionPlugin(id, st.sections));
     return p ? t(p.title) : id;
   };
+  /** A page's name in the navigation. */
+  const navLabel = (id: string) =>
+    id === KEYS_PAGE ? t('settings.section.keyboard') : id === MACHINE_PAGE ? t('settings.machine.overview') : pageLabel(id);
   const searching = query.trim() !== '';
   const matching = defs.filter((d) => shownInRows(d) && matchesSearch(d, query));
   // The Terminal page's Full Disk Access row (desktop app on macOS), found
@@ -293,6 +296,22 @@ function SettingsModal({ page: askedPage, machine: askedMachine }: { page?: stri
           )}
         </div>
         <div className="settings-main">
+          {/* A phone's width has no room for the list of pages: a searchable list instead. */}
+          <div className="settings-nav-pick">
+            <Picker
+              items={pages.map((s) => ({
+                value: s.id,
+                label: navLabel(s.id),
+                group: s.advanced ? t('settings.section.advanced') : s.plugin !== undefined ? t('settings.section.plugins') : undefined,
+                description: s.id !== KEYS_PAGE && s.id !== MACHINE_PAGE && modifiedIn(s.id) ? t('settings.modifiedHere') : undefined,
+              }))}
+              value={current}
+              keepOrder
+              label={t('settings.sections')}
+              aria-label={t('settings.sections')}
+              onChange={go}
+            />
+          </div>
           <nav className="settings-nav" aria-label={t('settings.sections')}>
             {pages.map((s, i) => {
               const def = s.plugin === undefined ? undefined : plugins.find((x) => x.id === s.plugin);
@@ -310,13 +329,7 @@ function SettingsModal({ page: askedPage, machine: askedMachine }: { page?: stri
                     title={off ? t('plugins.page.off', { plugin: pageLabel(s.id) }) : undefined}
                     onClick={() => go(s.id)}
                   >
-                    <span className="ellipsis">
-                      {s.id === KEYS_PAGE
-                        ? t('settings.section.keyboard')
-                        : s.id === MACHINE_PAGE
-                          ? t('settings.machine.overview')
-                          : pageLabel(s.id)}
-                    </span>
+                    <span className="ellipsis">{navLabel(s.id)}</span>
                     {s.id !== KEYS_PAGE && s.id !== MACHINE_PAGE && modifiedIn(s.id) && (
                       <span className="nav-dot" title={t('settings.modifiedHere')} />
                     )}

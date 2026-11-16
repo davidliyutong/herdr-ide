@@ -7,13 +7,14 @@ vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 
 import { useStore } from '../state/store';
 import { insertSlot, near } from '../reorderDrag';
-import { dragBegins, trackDrag } from '../drag';
+import { dragBegins, edgeScroll, trackDrag } from '../drag';
 import type { MachineState } from '../lib/machine';
 import { FakeCore, settle } from './fakeTerms';
 import { closeMenu, isItem, openMenu, stepIndex, tidy, useMenu, type MenuEntry, type MenuItem } from '../contextMenu';
 import { machineMenu, paneMenu, sidebarMenu, tabMenu, workspaceMenu } from '../menus';
 import { actions } from '../actions';
 import { useKeys } from '../keybindings';
+import { commandEnabled, keyHint, runCommand } from '../keymap';
 import { useDialog } from '../dialog';
 import { ContextMenu } from '../components/ContextMenu';
 import { definePlugins } from '../plugins/registry';
@@ -100,6 +101,43 @@ describe('drag start', () => {
     expect(document.querySelector('.drag-ghost')).not.toBeNull();
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     expect(document.querySelector('.drag-ghost')).toBeNull();
+  });
+
+  it('scrolls the sidebar while the pointer is held near its top or bottom edge', () => {
+    const rect = { left: 0, right: 200, top: 100, bottom: 500 };
+    expect(edgeScroll(rect, 50, 300)).toBe(0);
+    expect(edgeScroll(rect, 300, 490)).toBe(0);
+    expect(edgeScroll(rect, 50, 499)).toBeGreaterThan(0);
+    expect(edgeScroll(rect, 50, 101)).toBeLessThan(0);
+    // Nearer the edge (or beyond it) is faster.
+    expect(edgeScroll(rect, 50, 520)).toBeGreaterThan(edgeScroll(rect, 50, 480));
+
+    vi.useFakeTimers();
+    const list = document.createElement('div');
+    list.className = 'sidebar-scroll';
+    list.getBoundingClientRect = () => ({ ...rect, x: 0, y: 100, width: 200, height: 400, toJSON() {} });
+    let top = 0;
+    Object.defineProperty(list, 'scrollTop', { get: () => top, set: (v: number) => (top = v) });
+    document.body.append(list);
+    const find = vi.fn(() => 1);
+    trackDrag(
+      { clientX: 50, clientY: 300, screenX: 50, screenY: 300, pointerId: 1 },
+      { label: 'ws', find, marker: () => ({ box: { left: 0, top: 0, width: 1, height: 1 }, zone: 'slot' }), drop: () => Promise.resolve() },
+    );
+    const move = (y: number) =>
+      window.dispatchEvent(Object.assign(new Event('pointermove'), { pointerId: 1, clientX: 50, clientY: y, screenX: 50, screenY: y }));
+    move(495);
+    vi.advanceTimersByTime(160);
+    expect(top).toBeGreaterThan(50);
+    // The marker follows what scrolls into view.
+    expect(find.mock.calls.length).toBeGreaterThan(5);
+    const held = top;
+    move(300);
+    vi.advanceTimersByTime(160);
+    expect(top).toBe(held);
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    list.remove();
+    vi.useRealTimers();
   });
 });
 
@@ -288,6 +326,49 @@ describe('menus', () => {
     find(w2, 'Move Up').run!();
     await settle();
     expect(core.layout('m')!.workspaces.map((w) => w.name)).toEqual(['two', 'one']);
+  });
+
+  it('closes the other tabs or those to the right at once with one Undo, and the other workspaces after asking', async () => {
+    const second = tabMenu('m', 'w1w1w1w1', 1);
+    expect(labels(second).slice(-3)).toEqual(['Close Tab', 'Close Other Tabs', 'Close Tabs to the Right']);
+    expect(find(tabMenu('m', 'w1w1w1w1', 2), 'Close Tabs to the Right').disabled).toBe(true);
+    find(second, 'Close Tabs to the Right').run!();
+    await settle();
+    expect(tabNames()).toEqual(['a', 'b']);
+    actions.undoClose();
+    await settle();
+    expect(tabNames()).toEqual(['a', 'b', 'd']);
+    find(tabMenu('m', 'w1w1w1w1', 1), 'Close Other Tabs').run!();
+    await settle();
+    expect(tabNames()).toEqual(['b']);
+    expect(useStore.getState().toasts.at(-1)?.msg).toBe('2 tabs closed.');
+    // The commands act on the tab shown.
+    expect(commandEnabled('tab.closeOthers')).toBe(false);
+    expect(commandEnabled('tab.closeRight')).toBe(false);
+    // One other workspace: asked about as Close Workspace asks.
+    expect(commandEnabled('workspace.closeOthers')).toBe(true);
+    find(workspaceMenu('m', 'w2w2w2w2'), 'Close Other Workspaces…').run!();
+    await vi.waitFor(() => expect(useDialog.getState().current).toBeDefined());
+    const req = useDialog.getState().current!;
+    expect(req).toMatchObject({ kind: 'confirm', title: 'Close this workspace?', message: expect.stringContaining('one') });
+    if (req.kind === 'confirm') req.resolve(true);
+    await settle();
+    expect(core.layout('m')!.workspaces.map((w) => w.name)).toEqual(['two']);
+    expect(find(workspaceMenu('m', 'w2w2w2w2'), 'Close Other Workspaces…').disabled).toBe(true);
+  });
+
+  it('renames the focused pane and opens its menu from commands, which take no key', async () => {
+    expect(keyHint('pane.rename')).toBe('');
+    expect(commandEnabled('pane.rename')).toBe(true);
+    runCommand('pane.rename');
+    expect(useStore.getState().renaming).toEqual({ kind: 'pane', m: 'm', id: 'p1' });
+    useStore.getState().setRenaming(undefined);
+    runCommand('pane.actions');
+    expect(useMenu.getState().menu?.entries.filter(isItem)[0].label).toBe('Rename Pane');
+    closeMenu(false);
+    useStore.getState().setReadOnly(true);
+    expect(commandEnabled('pane.rename')).toBe(false);
+    expect(commandEnabled('pane.actions')).toBe(false);
   });
 
   it("creates a tab in its workspace's folder, else the focused terminal's", async () => {

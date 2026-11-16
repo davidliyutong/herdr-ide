@@ -103,6 +103,44 @@ describe('Sidebar machines', () => {
     expect(core.layout('gpu')?.selected).toBe(0);
   });
 
+  it('moves between the agents with the arrows, one Tab stop, and shows one with Enter', async () => {
+    const core = new FakeCore();
+    core.machine(
+      'gpu',
+      [FakeCore.term('t1', { agent: 'claude', agent_status: 'blocked' }), FakeCore.term('t2', { agent: 'codex', agent_status: 'done' })],
+      {
+        version: 2,
+        workspaces: [
+          { id: 'aaaaaaaa', name: 'api', cwd: '', tabs: [{ root: { terminal: 't1' }, focused: 't1' }], selected: 0 },
+          { id: 'bbbbbbbb', name: 'web', cwd: '', tabs: [{ root: { terminal: 't2' }, focused: 't2' }], selected: 0 },
+        ],
+        selected: 0,
+      },
+    );
+    core.install();
+    await act(async () =>
+      useStore.getState().setMachines([{ id: 'gpu', label: 'gpu', kind: 'ssh', status: 'ready' } as unknown as MachineState]),
+    );
+    await act(async () => core.model.subscribe('gpu'));
+    await act(settle);
+    const agents = () => [...host.querySelectorAll<HTMLElement>('.inbox-item')];
+    expect(agents().map((a) => a.tabIndex)).toEqual([0, -1]);
+    agents()[0].focus();
+    const key = (k: string) =>
+      act(
+        async () => void document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })),
+      );
+    await key('ArrowDown');
+    expect(document.activeElement).toBe(agents()[1]);
+    expect(agents().map((a) => a.tabIndex)).toEqual([-1, 0]);
+    await key('Home');
+    expect(document.activeElement).toBe(agents()[0]);
+    await key('End');
+    await key('Enter');
+    await act(settle);
+    expect(core.layout('gpu')?.selected).toBe(1);
+  });
+
   it('names workspaces without a name after their folder, keeps rows quiet and renames them in place', async () => {
     const core = new FakeCore();
     const tab = (t: string) => ({ root: { terminal: t }, focused: t });

@@ -202,6 +202,11 @@ download chooser picks entries, nothing more.
   last 50 in `localStorage` (names, machines and paths, not contents);
   opening the panel shows the ones other tabs finished. Entries can be
   removed one by one or all at once; this does not touch the files.
+- The keyboard (as in the downloads panel): the list of transfers is one
+  stop of the Tab key; ↑ ↓ Home End move between them, ← → between a
+  transfer and its buttons, Delete (or Backspace) cancels a running one or
+  removes a finished one from the list, the keyboard going on to the next;
+  Escape closes the panel and gives the keyboard back to its button.
 
 **Downloads panel** (`web/src/download.ts`, `web/src/components/Downloads.tsx`,
 `internal/server/downloads.go`; what it shares with the uploads panel is in
@@ -326,7 +331,7 @@ link underline), `web/src/__tests__/drop.test.ts`
 (dropped files' paths on the local machine, uploads and skipped folders for
 another, refused stray drops), `web/src/__tests__/transfers.test.ts`
 (progress and speed, cancelling running and waiting uploads, the fallback
-to the upload directory, the kept history, the panel), and
+to the upload directory, the kept history, the panel and its keys), and
 `TestCancelledUploadLeavesNoFile` in `internal/server/server_test.go` (an
 aborted upload through a real agent leaves no file; a complete one arrives).
 Downloads: `internal/agent/archive_test.go` (archive contents, repeated

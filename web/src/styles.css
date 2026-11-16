@@ -1830,9 +1830,17 @@ body.dragging * {
 .palette-list {
   max-height: 50vh;
   overflow: auto;
-  padding: 4px;
+  padding: 0 4px;
+}
+/* Only the items in view are drawn, placed in a box of the list's height. */
+.palette-rows {
+  position: relative;
 }
 .palette-item {
+  position: absolute;
+  left: 0;
+  right: 0;
+  box-sizing: border-box;
   display: flex;
   gap: 8px;
   align-items: center;
@@ -2165,6 +2173,10 @@ button.primary:hover,
 .settings-search .icon {
   min-width: var(--ctl-sm);
   height: var(--ctl-sm);
+}
+/* The pages as a searchable list, at a phone's width only. */
+.settings-nav-pick {
+  display: none;
 }
 /* The scope tabs: the user's settings, then each machine's. */
 .settings-scopes {
@@ -2824,8 +2836,8 @@ button.danger-text:not(:disabled) {
   letter-spacing: 0.05em;
 }
 .keys-section {
-  margin: 14px 0 2px;
-  padding: 0 10px;
+  /* Padding, not margins: the table's rows are placed by their heights. */
+  padding: 14px 10px 2px;
   font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--fg-mute);
@@ -2949,11 +2961,18 @@ button.danger-text:not(:disabled) {
   .settings-main {
     flex-direction: column;
   }
+  /* The pages are a searchable list above the page. */
   .settings-nav {
-    width: auto;
-    flex-direction: row;
-    border-right: none;
+    display: none;
+  }
+  .settings-nav-pick {
+    display: block;
+    flex: none;
+    padding: 6px 12px;
     border-bottom: 1px solid var(--line);
+  }
+  .settings-nav-pick .picker-button {
+    width: 100%;
   }
   .settings-search input {
     width: 8rem;
@@ -3715,9 +3734,4 @@ svg.picker-icon {
   padding: 4px 6px;
   border-top: 1px solid var(--line);
   font-size: var(--fs-md);
-}
-@media (max-width: 760px) {
-  .settings-nav button.sub {
-    padding-left: 10px;
-  }
 }

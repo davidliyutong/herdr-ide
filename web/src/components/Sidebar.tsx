@@ -286,6 +286,19 @@ function SidebarResizer() {
   );
 }
 
+/** The Agents section's keys: ↑ ↓ Home End move between the agents (one
+ * stop of the Tab key), Enter or Space shows the agent's pane. */
+function onInboxKey(e: React.KeyboardEvent<HTMLElement>) {
+  const rows = [...e.currentTarget.querySelectorAll<HTMLElement>(`.inbox-item${ROW}`)];
+  const at = rows.indexOf(e.target as HTMLElement);
+  if (at < 0 || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+  const to = { ArrowDown: at + 1, ArrowUp: at - 1, Home: 0, End: rows.length - 1 }[e.key];
+  if (to === undefined) return;
+  e.preventDefault();
+  e.stopPropagation();
+  rows[Math.max(0, Math.min(rows.length - 1, to))].focus();
+}
+
 function Inbox() {
   // Recomputed on every change of the terminals; the lists are small.
   useTerms((s) => s.machines);
@@ -293,8 +306,20 @@ function Inbox() {
   const all = attentionList();
   const items = all.filter((i) => i.status === 'blocked' || i.status === 'done');
   const working = all.filter((i) => i.status === 'working').length;
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => ensureTabStop(box.current, `.inbox-item${ROW}`));
   return (
-    <div className="inbox" aria-label={t('sidebar.agents')}>
+    <div
+      ref={box}
+      className="inbox"
+      role="group"
+      aria-label={t('sidebar.agents')}
+      onKeyDown={onInboxKey}
+      onFocus={(e) => {
+        const row = (e.target as HTMLElement).closest<HTMLElement>(ROW);
+        if (row && box.current) rove(box.current, row);
+      }}
+    >
       <div className="section-title">
         {t('sidebar.agents')}
         <span className="muted">
@@ -314,7 +339,9 @@ function Inbox() {
             key={`${m} ${terminal}`}
             className={`inbox-item st-${status}`}
             role="button"
-            tabIndex={0}
+            tabIndex={-1}
+            data-nav={`${m} ${terminal}`}
+            onMouseDown={keepFocus}
             onKeyDown={(e) => {
               if (e.key !== 'Enter' && e.key !== ' ') return;
               e.preventDefault();

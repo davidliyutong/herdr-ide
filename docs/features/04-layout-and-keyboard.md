@@ -141,7 +141,11 @@ Non-goals: arbitrary docking of panes; floating panes.
 
 - All drags share `drag.ts`: a drag starts after the pointer moved 6
   pixels on the screen (so a click stays a click), a ghost follows the
-  pointer, a marker shows where the drop lands, and Escape cancels. The
+  pointer, a marker shows where the drop lands, and Escape cancels. Held
+  within 32 pixels of the sidebar list's top or bottom edge (or just beyond
+  it), the pointer scrolls the list, faster nearer the edge, and the marker
+  follows what comes into view, so a workspace or machine out of view can
+  be reached with a workspace, a machine or a pane dragged. The
   distance is measured in screen coordinates: in macOS full screen the menu
   bar slides down when the pointer nears the top edge and moves the page
   under a pointer that stands still, which page coordinates would count as
@@ -294,8 +298,8 @@ Non-goals: arbitrary docking of panes; floating panes.
   opens the row's menu at the row. The focused row is outlined. Only the
   keyboard puts the focus on a row: a press of the mouse leaves it where it
   was, so the terminal of a workspace or tab clicked takes it. The agents
-  of the sidebar's Agents section are buttons (Enter or Space shows the
-  agent's pane).
+  of the sidebar's Agents section are one Tab stop too: ↑ ↓ Home End move
+  between them, Enter or Space shows the agent's pane.
 - The sidebar's list keeps where it was scrolled while the page reloads
   (per browser tab).
 
@@ -319,6 +323,18 @@ Non-goals: arbitrary docking of panes; floating panes.
   (a program window asking for attention stays visible).
   Read-only pages see titles, folders and program windows without the other
   buttons.
+- A header is a toolbar, one stop of the Tab key (from the tab bar, the
+  panes' headers follow in their order): the keyboard on it makes its pane
+  the focused one in the layout, the terminal keeping its place. ← → Home
+  End move between the title (a terminal's, to rename) and the buttons
+  shown, Enter or Space presses a button, Enter on the header or its title
+  or F2 anywhere in it renames the pane, the menu key or Shift+F10 opens
+  the pane's menu at the header, Escape gives the keyboard to the pane. A
+  press with the mouse focuses the pane, not the header. From a terminal,
+  where F2 and the like belong to the program, **Rename Pane**
+  (`pane.rename`) and **Pane Actions…** (`pane.actions`, the pane's menu at
+  its header, filtered by typing as every menu) are commands without a
+  default key: the palette runs them and keys can be bound to them.
 - Narrow headers keep one row. They drop, in this order: the folder; then
   the agent and the VS Code buttons (Open in VS Code, changes, Git Graph,
   Reload VS Code), and the ⋯ button appears, which opens the pane's menu
@@ -344,8 +360,14 @@ Non-goals: arbitrary docking of panes; floating panes.
   - a preview's header: Open in VS Code, Download (where downloads are
     offered, [06](06-quick-look-and-files.md)), Split Right / Down,
     Maximize or Restore Pane, Move to Workspace ▸, Close Pane;
-  - tab: Rename Tab, New Tab, Move Left / Right, Move to Workspace ▸, Close Tab;
-  - workspace: Edit Workspace…, New Tab, Move Up / Down, Close Workspace…;
+  - tab: Rename Tab, New Tab, Move Left / Right, Move to Workspace ▸, Close
+    Tab, Close Other Tabs, Close Tabs to the Right (`tab.closeOthers`,
+    `tab.closeRight`: at once, with one Undo for all of them, as Close
+    Tab);
+  - workspace: Edit Workspace…, New Tab, Move Up / Down, Close Workspace…,
+    Close Other Workspaces… (`workspace.closeOthers`: asking once and
+    naming them, after the question about unsaved changes, as Close
+    Workspace…);
   - machine: New Workspace…, Machine Settings… (the settings in the
     machine's scope, [13](13-settings-and-appearance.md)), Rename Machine,
     Copy SSH Host (SSH machines), Move Up / Down
@@ -456,9 +478,10 @@ described in [13](13-settings-and-appearance.md))
   start with what is typed come first, then those holding it, then those
   whose word starts spell it (`fpl` for Focus Pane Left), with the matched
   characters marked; a click or Enter runs an item. ↑ ↓ PgUp PgDn move, the
-  item the keyboard is on is kept in view, at most 200 items are drawn and
-  a line says how many more there are to narrow by typing, and a name cut
-  by an ellipsis shows in full as its tooltip. Escape closes it and gives
+  item the keyboard is on is kept in view, every item is listed with only
+  those in view drawn (`lib/windowed.ts`), so hundreds of workspaces and
+  agents scroll as fast as a few, and a name cut by an ellipsis shows in
+  full as its tooltip. Escape closes it and gives
   the keyboard back where it was, as the settings dialog and the Add
   Machine dialog do. `workspace.switch` opens it with workspaces and agents
   only; `app.keyboardShortcuts` opens the settings' **Keyboard Shortcuts**
@@ -654,7 +677,8 @@ described in [13](13-settings-and-appearance.md))
   ([05](05-vscode-panes.md), [06](06-quick-look-and-files.md)).
 - `web/src/__tests__/sidebarMachines.test.ts`: workspaces shown with their
   folder's name, rows without the tab count (in the tooltip), renaming in
-  place and an emptied name giving the folder's back.
+  place and an emptied name giving the folder's back, the Agents section's
+  arrows and Tab stop.
 - `web/src/__tests__/terms.test.ts`: reading the document after the
   terminals, with a workspace without a name and without ended
   terminals; one write at a time and another client's newer version; ended
@@ -692,12 +716,13 @@ described in [13](13-settings-and-appearance.md))
   and blocks of workspaces and tabs moved; `design/testdata/layout/tabs-block.json`:
   the layout's block moves.
 - `web/src/__tests__/palette.test.tsx`: the palette with 250 workspaces
-  (200 drawn and how many more, pages, the item in view), the keyboard
-  given back when it or the settings dialog closes.
+  (all listed, those in view drawn, pages to the last, the item in view),
+  the keyboard given back when it or the settings dialog closes.
 - `web/src/__tests__/followed.test.ts`: machines followed before followed
   again once connected, a removed machine forgotten.
 - `web/src/__tests__/menus.test.ts`: insertion slots, also on wrapped rows,
-  the area a drop counts in, drags measured on the screen, menu items and
+  the area a drop counts in, drags measured on the screen, the sidebar
+  scrolled while a drag is held at its edges, menu items and
   their commands, moves from the current position, a pane moved to
   another workspace or a new one, read-only, keyboard,
   focus and closing of the menu, submenus, a menu filtered by typing
@@ -707,7 +732,11 @@ described in [13](13-settings-and-appearance.md))
 - `web/src/__tests__/paneHeader.test.ts`: a header's buttons act on its own
   pane and keep the terminal's focus, rename by a double click, menu,
   read-only, a VS Code pane's header (named by its folder, its own
-  buttons).
+  buttons), the header as a toolbar (one Tab stop focusing its pane,
+  arrows, F2 and Enter, Shift+F10, a mouse press not taking the keyboard).
+- `web/src/__tests__/menus.test.ts` also: Close Other Tabs and Close Tabs
+  to the Right with one Undo, Close Other Workspaces asking, and the
+  commands `pane.rename` and `pane.actions`.
 - `web/src/__tests__/settingsDialog.test.ts`: the palette's ranking.
 
 Splits, new tabs and workspaces, closing and dragging the split handle were

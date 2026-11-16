@@ -204,6 +204,11 @@ export const en = {
   'command.pane.splitDown': 'Split Down',
   'command.pane.close': 'Close Pane',
   'command.pane.zoom': 'Maximize Pane',
+  'command.workspace.closeOthers': 'Close Other Workspaces…',
+  'command.tab.closeOthers': 'Close Other Tabs',
+  'command.tab.closeRight': 'Close Tabs to the Right',
+  'command.pane.rename': 'Rename Pane',
+  'command.pane.actions': 'Pane Actions…',
   'command.view.toggleSidebar': 'Toggle Sidebar',
   'command.view.zoomIn': 'Zoom In',
   'command.view.zoomOut': 'Zoom Out',
@@ -297,7 +302,6 @@ export const en = {
   'download.failed': 'Could not download {name}: {error}',
   'download.hint': 'Folders and several entries are downloaded as one zip archive.',
 
-  'menu.renamePane': 'Rename Pane',
   'menu.moveToWorkspace': 'Move to Workspace',
   'menu.restorePane': 'Restore Pane',
   'menu.machineSettings': 'Machine Settings…',
@@ -339,6 +343,7 @@ export const en = {
   'backend.stop_failed': 'The terminal service did not stop.',
   'backend.transport': 'The machine did not answer.',
   'pane.rename': '{label} · double-click to rename · drag the header to move the pane',
+  'pane.toolbar': 'Pane: {title}',
   'pane.moveFailed': 'Could not move the pane: {error}',
   'pane.dividerHint': 'Drag to resize · double-click to share equally',
   'pane.more': 'More Pane Actions',
@@ -389,7 +394,6 @@ export const en = {
   'palette.placeholder': 'Type a command, workspace or agent…',
   'palette.placeholderWorkspaces': 'Switch to a workspace or agent…',
   'palette.noMatch': 'No matches',
-  'palette.more': '{n} more: type to narrow the list',
 
   // Searchable dropdowns (components/Picker.tsx).
   'picker.search': 'Search',

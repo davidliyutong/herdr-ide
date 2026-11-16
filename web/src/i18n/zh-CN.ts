@@ -198,6 +198,11 @@ export const zhCN: Messages = {
   'command.pane.splitDown': '向下分屏',
   'command.pane.close': '关闭窗格',
   'command.pane.zoom': '最大化窗格',
+  'command.workspace.closeOthers': '关闭其他工作区…',
+  'command.tab.closeOthers': '关闭其他标签页',
+  'command.tab.closeRight': '关闭右侧标签页',
+  'command.pane.rename': '重命名窗格',
+  'command.pane.actions': '窗格操作…',
   'command.view.toggleSidebar': '显示/隐藏侧栏',
   'command.view.zoomIn': '放大',
   'command.view.zoomOut': '缩小',
@@ -288,7 +293,6 @@ export const zhCN: Messages = {
   'download.failed': '无法下载 {name}：{error}',
   'download.hint': '文件夹和多个条目会打包成一个 zip 文件下载。',
 
-  'menu.renamePane': '重命名窗格',
   'menu.moveToWorkspace': '移动到工作区',
   'menu.restorePane': '还原窗格',
   'menu.machineSettings': '机器设置…',
@@ -330,6 +334,7 @@ export const zhCN: Messages = {
   'backend.stop_failed': '终端服务未能停止。',
   'backend.transport': '机器没有响应。',
   'pane.rename': '{label} · 双击重命名 · 拖动标题栏可移动窗格',
+  'pane.toolbar': '窗格：{title}',
   'pane.moveFailed': '移动窗格失败：{error}',
   'pane.dividerHint': '拖动可调整大小 · 双击平分',
   'pane.more': '更多窗格操作',
@@ -380,7 +385,6 @@ export const zhCN: Messages = {
   'palette.placeholder': '输入命令、工作区或智能体…',
   'palette.placeholderWorkspaces': '切换到工作区或智能体…',
   'palette.noMatch': '没有匹配项',
-  'palette.more': '还有 {n} 项：输入以缩小范围',
 
   // 可搜索下拉列表（components/Picker.tsx）。
   'picker.search': '搜索',

@@ -447,6 +447,15 @@ export const actions = {
     });
   },
 
+  /** Closes every tab of a workspace but one (others) or those after it
+   * (right), at once, with one Undo, as closeTabs. */
+  async closeTabsBeside(m: string, ws: string, index: number, which: 'others' | 'right') {
+    const w = terms.layout(m)?.workspaces.find((x) => x.id === ws);
+    if (!w?.tabs[index]) return;
+    const keys = w.tabs.filter((_, i) => (which === 'others' ? i !== index : i > index)).map((tab) => L.tabPanes(tab)[0]);
+    if (keys.length) await actions.closeTabs(m, keys);
+  },
+
   /** Moves the tabs holding these panes, in their order, as one block to a
    * slot of their workspace's tabs. */
   moveTabs(m: string, keys: string[], slot: number) {
@@ -740,6 +749,12 @@ export const actions = {
   /** Moves workspaces, in their order, as one block to a slot of their machine's. */
   moveWorkspaces(m: string, ids: string[], slot: number) {
     terms.mutate(m, (l) => L.moveWorkspaces(l, ids, slot));
+  },
+
+  /** Closes every other workspace of a machine, as closeWorkspaces does. */
+  async closeOtherWorkspaces(m: string, ws: string) {
+    const others = (terms.layout(m)?.workspaces ?? []).filter((w) => w.id !== ws).map((w) => w.id);
+    if (others.length) await actions.closeWorkspaces(m, others);
   },
 
   /** Closes several workspaces of a machine: asks once, naming those with
