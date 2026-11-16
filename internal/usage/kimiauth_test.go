@@ -206,6 +206,32 @@ func TestKimiRefreshWritesRotatedTokensBack(t *testing.T) {
 	}
 }
 
+// The installed CLI's version, as its updater recorded it, else the one
+// whose renewal this follows.
+func TestKimiVersion(t *testing.T) {
+	e := testEnv(t, nil)
+	state := filepath.Join(e.Home, ".kimi-code/updates/install.json")
+	for _, c := range []struct{ file, want string }{
+		{"", kimiCLIVersion},
+		{`{"active":null,"lastFailure":null,"lastSuccess":{"version":"2.3.1","installedAt":"2026-11-04T14:24:00Z","notifiedAt":null}}`, "2.3.1"},
+		{`{"active":null,"lastFailure":null,"lastSuccess":null}`, kimiCLIVersion},
+		{`{"lastSuccess":{"version":"2.3.1\r\nX-Other: 1"}}`, kimiCLIVersion},
+		{`not json`, kimiCLIVersion},
+	} {
+		os.Remove(state)
+		if c.file != "" {
+			write(t, state, c.file)
+		}
+		if got := kimiVersion(e); got != c.want {
+			t.Errorf("%s: %q", c.file, got)
+		}
+	}
+	write(t, state, `{"lastSuccess":{"version":"2.3.1"}}`)
+	if h := kimiHeaders(e); h["User-Agent"] != "kimi-code-cli/2.3.1" || h["X-Msh-Version"] != "2.3.1" {
+		t.Errorf("headers %v", h)
+	}
+}
+
 func TestKimiRefreshOnlyWhenNeeded(t *testing.T) {
 	f := newKimiFake(t)
 	// Off: the expired token is reported, nothing written.

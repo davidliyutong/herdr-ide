@@ -103,7 +103,10 @@ them:
   `application/x-www-form-urlencoded` `client_id` (Kimi Code's),
   `grant_type=refresh_token`, `refresh_token`; `Accept:
   application/json`; Kimi Code's identity headers (`User-Agent:
-  kimi-code-cli/2.2.0`, `X-Msh-Platform: kimi_code_cli`, `X-Msh-Version`,
+  kimi-code-cli/<version>` and `X-Msh-Version` with the installed Kimi
+  Code's version as its updater recorded it, `lastSuccess.version` of
+  `<home>/updates/install.json`, else 2.2.0; `X-Msh-Platform:
+  kimi_code_cli`,
   `X-Msh-Device-Name` the host name, `X-Msh-Device-Model` (`macOS <version>
   <arch>`, else `<OS> <release> <arch>`), `X-Msh-Os-Version` the kernel's
   release, `X-Msh-Device-Id` from `<home>/device_id`, which only Kimi Code
@@ -381,7 +384,8 @@ status pages. Resources and retention:
   `skip` and `skipLocal`, the Codex log read backwards across long lines
   and once while unchanged.
 - `internal/usage/kimiauth_test.go`: Kimi Code's renewal against a fake
-  token endpoint in a temporary home: the form and identity headers, the
+  token endpoint in a temporary home: the form and identity headers (the
+  installed version from the update record, else 2.2.0), the
   rotated tokens written back byte for byte as Kimi Code writes them with
   the file's other members and mode, nothing left beside it, the lock
   released; renewed only when ending, not when off, for another host's

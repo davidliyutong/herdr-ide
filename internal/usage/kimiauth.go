@@ -21,7 +21,8 @@ package usage
 //   - Refresh: POST https://auth.kimi.com/api/oauth/token,
 //     application/x-www-form-urlencoded client_id, grant_type=refresh_token
 //     and refresh_token, Accept: application/json, with its identity
-//     headers (User-Agent kimi-code-cli/<version>, X-Msh-Platform,
+//     headers (User-Agent kimi-code-cli/<version>, the version the
+//     updater recorded in <home>/updates/install.json, X-Msh-Platform,
 //     X-Msh-Version, X-Msh-Device-Name, X-Msh-Device-Model,
 //     X-Msh-Os-Version, X-Msh-Device-Id from <home>/device_id); 3 attempts,
 //     1 s and 2 s apart, for network errors and 429/500/502/503/504; 401,
@@ -67,7 +68,8 @@ const (
 	// are never renewed here.
 	kimiSlot = "kimi-code"
 	// kimiCLIVersion is the version of Kimi Code whose renewal this
-	// follows, sent as the CLI sends its own.
+	// follows: sent as the CLI sends its own when the installed one's is
+	// not known (kimiVersion).
 	kimiCLIVersion = "2.2.0"
 	kimiPlatform   = "kimi_code_cli"
 	kimiProduct    = "kimi-code-cli"
@@ -310,10 +312,11 @@ func postForm(ctx context.Context, c *http.Client, u string, headers map[string]
 func kimiHeaders(e *Env) map[string]string {
 	host, _ := os.Hostname()
 	rel := osRelease()
+	v := kimiVersion(e)
 	h := map[string]string{
-		"User-Agent":         kimiProduct + "/" + kimiCLIVersion,
+		"User-Agent":         kimiProduct + "/" + v,
 		"X-Msh-Platform":     kimiPlatform,
-		"X-Msh-Version":      kimiCLIVersion,
+		"X-Msh-Version":      v,
 		"X-Msh-Device-Name":  asciiHeader(host),
 		"X-Msh-Device-Model": asciiHeader(kimiDeviceModel(e.GOOS, rel)),
 		"X-Msh-Os-Version":   asciiHeader(rel),
@@ -325,6 +328,28 @@ func kimiHeaders(e *Env) map[string]string {
 		}
 	}
 	return h
+}
+
+var kimiVersionRe = regexp.MustCompile(`^[0-9][0-9A-Za-z.+-]{0,31}$`)
+
+// kimiVersion is the installed Kimi Code's version as its updater recorded
+// it (<home>/updates/install.json, lastSuccess.version; the CLI sends the
+// version it was built as), else kimiCLIVersion.
+func kimiVersion(e *Env) string {
+	f, err := os.Open(path.Join(kimiHome(e), "updates", "install.json"))
+	if err != nil {
+		return kimiCLIVersion
+	}
+	defer f.Close()
+	var st struct {
+		LastSuccess *struct {
+			Version string `json:"version"`
+		} `json:"lastSuccess"`
+	}
+	if json.NewDecoder(io.LimitReader(f, 64<<10)).Decode(&st) != nil || st.LastSuccess == nil || !kimiVersionRe.MatchString(st.LastSuccess.Version) {
+		return kimiCLIVersion
+	}
+	return st.LastSuccess.Version
 }
 
 // asciiHeader keeps the printable ASCII of v, trimmed ("unknown" when
