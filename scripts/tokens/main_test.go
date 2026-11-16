@@ -16,6 +16,7 @@ const sample = `{
   "status": { "working": { "light": "#eab308", "dark": "#eab308" } },
   "git": { "added": { "light": "#587c0c", "dark": "#81b88b" } },
   "chart": { "blue": { "light": "#2e7de9", "dark": "#7aa2f7" } },
+  "fileIcon": { "lightBlue": { "light": "#2b6cb0", "dark": "#5aa3e0" } },
   "themes": [
     { "id": "first", "accent": { "light": "#3a63c8", "dark": "#7aa2f7" }, "onAccent": { "light": "#ffffff", "dark": "#0a0a0a" } },
     { "id": "second", "accent": { "light": "#005fb8", "dark": "#0078d4" }, "onAccent": { "light": "#fffffe", "dark": "#fffffd" } }
@@ -81,6 +82,7 @@ func TestGenerate(t *testing.T) {
 			"  --ds-size-toolbar: 2.1538rem;\n",
 			"  --ds-git-added: #81b88b;\n",
 			"  --ds-chart-blue: #7aa2f7;\n",
+			"  --ds-file-icon-light-blue: #5aa3e0;\n",
 			":root {\n  --ds-accent: #7aa2f7;\n  --ds-on-accent: #0a0a0a;\n",
 			":root[data-theme='light'] {\n  --ds-accent: #3a63c8;\n  --ds-on-accent: #ffffff;\n  --ds-color-background: #ffffff;\n  --ds-color-border-strong: #d4d4d4;\n",
 			":root[data-accent='second'] {\n  --ds-accent: #0078d4;\n  --ds-on-accent: #fffffd;\n}\n",

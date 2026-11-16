@@ -14,3 +14,9 @@ export function fakeSettingsApi() {
     return new Response('{"error":"unknown"}', { status: 404 });
   });
 }
+
+/** Turns VS Code on for this page, a browser (the core's verdict until it
+ * answers), as a user who accepted its risk did; it is off by default. */
+export function vscodeOn() {
+  useSettings.setState((s) => ({ values: { ...s.values, 'plugins.vscode.browser': { value: true, source: 'global' } } }));
+}

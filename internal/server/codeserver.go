@@ -29,26 +29,37 @@ type codeServerProxy struct {
 	// open upgraded (WebSocket) connections and last request per machine
 	active map[string]int
 	last   map[string]time.Time
-	// work is the context of VS Code's work: preparing code-server on
-	// machines and the proxied requests and WebSockets. It ends when the
-	// VS Code plugin is turned off (stop); the next use makes a new one.
-	work     context.Context
-	stopWork context.CancelFunc
+	// work are the contexts of VS Code's work: per kind of client, its
+	// proxied requests and WebSockets and the bridge's commands, which end
+	// when that client's switch is turned off; under prepare, preparing
+	// code-server on machines, which ends when VS Code is off for every
+	// client (stop). The next use makes a new one.
+	work     map[plugin.Client]context.Context
+	stopWork map[plugin.Client]context.CancelFunc
 }
 
+// prepare is the key of work for preparations, which serve every client.
+const prepare plugin.Client = ""
+
+// clients are the kinds of clients, each with its switch for VS Code.
+var clients = []plugin.Client{plugin.Browser, plugin.Desktop}
+
 func newCodeServerProxy(s *Server) *codeServerProxy {
-	p := &codeServerProxy{s: s, proxies: map[string]*httputil.ReverseProxy{}, active: map[string]int{}, last: map[string]time.Time{}}
+	p := &codeServerProxy{s: s, proxies: map[string]*httputil.ReverseProxy{}, active: map[string]int{}, last: map[string]time.Time{},
+		work: map[plugin.Client]context.Context{}, stopWork: map[plugin.Client]context.CancelFunc{}}
 	if st := s.opts.Settings; st != nil {
-		var key string
+		keys := map[string]bool{}
 		for _, pl := range s.opts.Plugins {
 			if pl.ID() == vscode.ID {
-				key = plugin.EnableSetting(pl)
+				for _, c := range clients {
+					keys[plugin.SettingFor(pl, c)] = true
+				}
 			}
 		}
 		st.OnChange(func(changes []settings.Change) {
-			for _, c := range changes {
-				if key != "" && c.Key == key && !s.pluginOn(vscode.ID) {
-					p.stop()
+			for _, ch := range changes {
+				if keys[ch.Key] {
+					p.follow()
 					return
 				}
 			}
@@ -57,28 +68,51 @@ func newCodeServerProxy(s *Server) *codeServerProxy {
 	return p
 }
 
-// workContext is the context of VS Code's work (see work).
-func (p *codeServerProxy) workContext() context.Context {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.work == nil {
-		p.work, p.stopWork = context.WithCancel(context.Background())
+// follow ends the work of each client whose switch is off, and the
+// preparations when every switch is.
+func (p *codeServerProxy) follow() {
+	on := false
+	for _, c := range clients {
+		if p.s.pluginOn(vscode.ID, c) {
+			on = true
+		} else {
+			p.stop(c)
+		}
 	}
-	return p.work
+	if !on {
+		p.stop(prepare)
+	}
 }
 
-// stop ends VS Code's work when the plugin is turned off: preparing
-// code-server stops at its next step (an upload, and a download on the
-// machine, end with their stream), and proxied requests and WebSockets are
-// closed, so VS Code windows open elsewhere stop working and code-server,
-// without connections, is stopped once idle (--code-server-idle).
-func (p *codeServerProxy) stop() {
+// workContext is the context of VS Code's work for client c, or of
+// preparations (prepare; see work).
+func (p *codeServerProxy) workContext(c plugin.Client) context.Context {
 	p.mu.Lock()
-	stop := p.stopWork
-	p.work, p.stopWork = nil, nil
+	defer p.mu.Unlock()
+	if p.work[c] == nil {
+		p.work[c], p.stopWork[c] = context.WithCancel(context.Background())
+	}
+	return p.work[c]
+}
+
+// stop ends VS Code's work for client c when its switch is turned off:
+// proxied requests and WebSockets of that kind of client are closed, so
+// its VS Code windows open elsewhere stop working, and code-server,
+// without connections, is stopped once idle (--code-server-idle). For
+// prepare, preparing code-server stops at its next step (an upload, and a
+// download on the machine, end with their stream).
+func (p *codeServerProxy) stop(c plugin.Client) {
+	p.mu.Lock()
+	stop := p.stopWork[c]
+	delete(p.work, c)
+	delete(p.stopWork, c)
 	p.mu.Unlock()
 	if stop != nil {
-		p.s.logger.Printf("VS Code turned off: its connections and preparations end")
+		if c == prepare {
+			p.s.logger.Printf("VS Code turned off: its preparations end")
+		} else {
+			p.s.logger.Printf("VS Code turned off for %s clients: their connections end", c)
+		}
 		stop()
 	}
 }
@@ -154,6 +188,8 @@ func (p *codeServerProxy) proxy(mc *machines.Machine) *httputil.ReverseProxy {
 			// code-server checks WebSocket Origin against Host.
 			pr.Out.Host = pr.In.Host
 			pr.Out.Header.Del(ProxySecretHeader)
+			// The desktop app's token stays in the core.
+			stripDesktopCookie(pr.Out.Header)
 			pr.SetXForwarded()
 		},
 		ModifyResponse: func(resp *http.Response) error {
@@ -208,11 +244,18 @@ func (p *codeServerProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if mc == nil {
 		return
 	}
-	work := p.workContext()
+	client := p.s.clientOf(r)
+	work := p.workContext(client)
+	// The switch again, now that the request follows its work: turned off
+	// since withPlugin, the context taken may be a new one.
+	if !p.s.pluginOn(vscode.ID, client) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "plugin_disabled"})
+		return
+	}
 	if !p.s.cs.Ready(mc) {
-		go p.s.cs.Ensure(work, mc)
+		go p.s.cs.Ensure(p.workContext(prepare), mc)
 		if r.Method == http.MethodGet && r.Header.Get("Upgrade") == "" && strings.TrimSuffix(r.URL.Path, "/") == "/m/"+mc.ID()+"/code" {
-			p.s.audit.log(r, "code_server.open", map[string]any{"machine": mc.ID(), "folder": r.URL.Query().Get("folder")})
+			p.s.audit.log(r, "code_server.open", map[string]any{"machine": mc.ID(), "folder": r.URL.Query().Get("folder"), "client": string(client)})
 			p.loadingPage(w, mc)
 			return
 		}
@@ -292,7 +335,7 @@ func (s *Server) handleCodeStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.cs.Invalidate(mc.ID())
-	go s.cs.Ensure(s.csProxy.workContext(), mc)
+	go s.cs.Ensure(s.csProxy.workContext(prepare), mc)
 	writeJSON(w, http.StatusAccepted, s.cs.Status(mc.ID()))
 }
 

@@ -64,6 +64,10 @@ type Options struct {
 	Keybindings *keybindings.Store
 	// Plugins are the core's plugins (internal/plugin).
 	Plugins []plugin.Plugin
+	// DesktopToken is the desktop app's token of this launch (its hello
+	// on stdin, --parent-stdio): requests carrying it in DesktopCookie are
+	// the desktop app's (clientOf); empty, every client is a browser.
+	DesktopToken string
 }
 
 // Server is the HTTP front of the core.
@@ -268,10 +272,18 @@ func (s *Server) originAllowed(origin string) bool {
 
 // broadcast sends a JSON message to every connected browser.
 func (s *Server) broadcast(v any) {
+	s.broadcastTo(v, nil)
+}
+
+// broadcastTo sends a JSON message to the connected browsers that to
+// takes (nil: all).
+func (s *Server) broadcastTo(v any, to func(*wsClient) bool) {
 	s.clientsMu.Lock()
 	clients := make([]*wsClient, 0, len(s.clients))
 	for c := range s.clients {
-		clients = append(clients, c)
+		if to == nil || to(c) {
+			clients = append(clients, c)
+		}
 	}
 	s.clientsMu.Unlock()
 	for _, c := range clients {
@@ -324,6 +336,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		"version":   agentproto.Version,
 		"read_only": s.opts.ReadOnly,
 		"ssh_login": s.opts.ControlDir != "",
+		"client":    s.clientOf(r),
 	})
 }
 

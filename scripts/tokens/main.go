@@ -128,6 +128,8 @@ type Tokens struct {
 	Status map[string]Themed `json:"status"`
 	Git    map[string]Themed `json:"git"`
 	Chart  map[string]Themed `json:"chart"`
+	// FileIcon: the hues of file-type icons (web/src/fileIcons.tsx).
+	FileIcon map[string]Themed `json:"fileIcon"`
 	// Themes: the first is the default.
 	Themes   []Theme `json:"themes"`
 	Terminal struct {
@@ -166,7 +168,7 @@ func parse(data []byte) (*Tokens, error) {
 		return nil, err
 	}
 	groups := map[string][]string{
-		"color": keys(t.Color), "status": keys(t.Status), "git": keys(t.Git), "chart": keys(t.Chart),
+		"color": keys(t.Color), "status": keys(t.Status), "git": keys(t.Git), "chart": keys(t.Chart), "fileIcon": keys(t.FileIcon),
 		"metric": keys(t.Metric), "size": keys(t.Size), "font.size": keys(t.Font.Size),
 	}
 	for _, group := range keys(groups) {
@@ -273,7 +275,7 @@ func css(t *Tokens) []byte {
 		for _, g := range []struct {
 			prefix string
 			colors map[string]Themed
-		}{{"color", t.Color}, {"status", t.Status}, {"git", t.Git}, {"chart", t.Chart}} {
+		}{{"color", t.Color}, {"status", t.Status}, {"git", t.Git}, {"chart", t.Chart}, {"file-icon", t.FileIcon}} {
 			for _, name := range keys(g.colors) {
 				fmt.Fprintf(&b, "  --ds-%s-%s: %s;\n", g.prefix, kebab(name), pick(g.colors[name], light).css())
 			}

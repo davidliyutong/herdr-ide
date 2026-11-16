@@ -15,6 +15,7 @@ import (
 
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/machines"
+	"herdr-ide/internal/plugins/vscode"
 )
 
 // bridgeWindow is one VS Code window (extension host) of code-server: a
@@ -151,7 +152,7 @@ func (h *bridgeHub) serve(mc *machines.Machine, conn net.Conn) {
 			if w.id != "" {
 				ev["window"] = w.id
 			}
-			h.s.broadcast(ev)
+			h.broadcast(ev)
 		case "closePane":
 			// VS Code's key for closing, pressed in this window while it
 			// has no editor (the extension binds it there, as VS Code
@@ -163,7 +164,7 @@ func (h *bridgeHub) serve(mc *machines.Machine, conn net.Conn) {
 				if w.folders != nil {
 					ev["folders"] = w.folders
 				}
-				h.s.broadcast(ev)
+				h.broadcast(ev)
 			}
 		case "download":
 			// Files chosen in VS Code's explorer: the page showing that
@@ -173,7 +174,7 @@ func (h *bridgeHub) serve(mc *machines.Machine, conn net.Conn) {
 				if w.id != "" {
 					ev["window"] = w.id
 				}
-				h.s.broadcast(ev)
+				h.broadcast(ev)
 			}
 		}
 	}
@@ -190,7 +191,14 @@ func (h *bridgeHub) focused(mc *machines.Machine, w *bridgeWindow) {
 	if w.folders != nil {
 		ev["folders"] = w.folders
 	}
-	h.s.broadcast(ev)
+	h.broadcast(ev)
+}
+
+// broadcast sends a message of VS Code's windows to the pages for which
+// VS Code is on: a page with its switch off shows no VS Code, so nothing
+// of VS Code's reaches it.
+func (h *bridgeHub) broadcast(ev map[string]any) {
+	h.s.broadcastTo(ev, func(c *wsClient) bool { return h.s.pluginOn(vscode.ID, c.client) })
 }
 
 // setTheme makes every VS Code window, now and later, use a theme of kind.
@@ -380,11 +388,15 @@ func (s *Server) handleBridge(w http.ResponseWriter, r *http.Request) {
 	s.audit.log(r, "bridge.command", map[string]any{"machine": mc.ID(), "cmd": body["cmd"], "folder": t.folder})
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
 	defer cancel()
-	// Turning VS Code off ends the command too.
-	defer context.AfterFunc(s.csProxy.workContext(), cancel)()
+	// Turning VS Code off for this client ends the command too, and
+	// bringing code-server up when it is off for every client.
+	defer context.AfterFunc(s.csProxy.workContext(s.clientOf(r)), cancel)()
 	// Bring code-server up if no VS Code pane has been shown yet.
 	if !s.cs.Ready(mc) {
-		if err := s.cs.Ensure(ctx, mc); err != nil {
+		prep, stop := context.WithCancel(ctx)
+		defer stop()
+		defer context.AfterFunc(s.csProxy.workContext(prepare), stop)()
+		if err := s.cs.Ensure(prep, mc); err != nil {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
 			return
 		}

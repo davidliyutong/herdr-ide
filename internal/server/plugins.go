@@ -31,23 +31,24 @@ func (h pluginHost) Audit(r *http.Request, event string, fields map[string]any) 
 	h.s.audit.log(r, event, fields)
 }
 
-// pluginOn reports whether the core's plugin of this id is on; a core
+// pluginOn reports whether the core's plugin of this id is on for client
+// c (a plugin.BrowserRisk plugin has a switch per kind of client); a core
 // without it (tests) has the feature on.
-func (s *Server) pluginOn(id string) bool {
+func (s *Server) pluginOn(id string, c plugin.Client) bool {
 	for _, p := range s.opts.Plugins {
 		if p.ID() == id {
-			return plugin.Enabled(s.opts.Settings, p)
+			return plugin.EnabledFor(s.opts.Settings, p, c)
 		}
 	}
 	return true
 }
 
 // withPlugin refuses a request with 404 plugin_disabled while the plugin of
-// this id is off: the core's own routes of a feature that is a plugin
-// (VS Code's).
+// this id is off for the requesting client: the core's own routes of a
+// feature that is a plugin (VS Code's).
 func (s *Server) withPlugin(id string, h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !s.pluginOn(id) {
+		if !s.pluginOn(id, s.clientOf(r)) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "plugin_disabled"})
 			return
 		}
@@ -56,8 +57,8 @@ func (s *Server) withPlugin(id string, h http.HandlerFunc) http.HandlerFunc {
 }
 
 // pluginRoutes are the plugins' routes: each answers 404 plugin_disabled
-// while its plugin is off, a machine's routes 404 for an unknown machine,
-// and mutating ones are writable and audited.
+// while its plugin is off (for the requesting client), a machine's routes
+// 404 for an unknown machine, and mutating ones are writable and audited.
 func (s *Server) pluginRoutes() []route {
 	var rs []route
 	host := pluginHost{s}
@@ -65,7 +66,7 @@ func (s *Server) pluginRoutes() []route {
 		for _, rt := range p.Routes() {
 			p, rt := p, rt
 			h := func(w http.ResponseWriter, r *http.Request) {
-				if !plugin.Enabled(s.opts.Settings, p) {
+				if !plugin.EnabledFor(s.opts.Settings, p, s.clientOf(r)) {
 					writeJSON(w, http.StatusNotFound, map[string]string{"error": "plugin_disabled"})
 					return
 				}

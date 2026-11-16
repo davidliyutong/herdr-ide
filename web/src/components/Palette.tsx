@@ -9,6 +9,10 @@ import { agentOf, terminalTitle } from '../lib/machine';
 import { useTerms } from '../state/terms';
 import { StatusDot } from './StatusDot';
 import { pluginPaletteItems } from '../plugins/registry';
+import { matchScore } from '../lib/match';
+
+// The matcher is shared with the pickers (lib/match.ts).
+export { matchScore };
 
 interface Item {
   id: string;
@@ -16,28 +20,6 @@ interface Item {
   hint?: string;
   icon?: React.ReactNode;
   run(): void;
-}
-
-const wordStart = (s: string, i: number) => i === 0 || /[\s·:/(（.-]/.test(s[i - 1]);
-
-/** How well an item matches a query: 3 when a word starts with it, 2 when
- * it holds it, 1 when its letters are the starts of words or follow each
- * other there ("fpl" for "Focus Pane Left", "spri" for "Split Right"), 0
- * otherwise. */
-export function matchScore(q: string, s: string): number {
-  q = q.toLowerCase().trim();
-  s = s.toLowerCase();
-  const at = s.indexOf(q);
-  if (at >= 0 && wordStart(s, at)) return 3;
-  if (at > 0) return 2;
-  let j = -1;
-  for (const ch of q) {
-    let k = j + 1;
-    while (k < s.length && !(s[k] === ch && (k === j + 1 || wordStart(s, k)))) k++;
-    if (k >= s.length) return 0;
-    j = k;
-  }
-  return 1;
 }
 
 export function Palette() {

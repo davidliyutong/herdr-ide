@@ -54,7 +54,16 @@ export interface Section {
   order: number;
   /** Listed after the others, under "Advanced". */
   advanced?: boolean;
+  /** The plugin it belongs to (plugins/api.ts): listed under the
+   * plugins, saying when the plugin is off. */
+  plugin?: string;
 }
+
+/** The kind of client this page is, as the core tells from its requests
+ * (the desktop app's windows carry the token of its launch): which switch
+ * of a plugin with one per kind of client applies here (plugins/api.ts
+ * browserRisk). A browser until the core answers. */
+export type Client = 'browser' | 'desktop';
 
 interface SettingsStore {
   loaded: boolean;
@@ -64,6 +73,7 @@ interface SettingsStore {
   problems: SettingProblem[];
   readOnly: boolean;
   file: string;
+  client: Client;
 }
 
 /** The built-in defaults: what the UI uses before the core answers. */
@@ -83,6 +93,7 @@ export const useSettings = create<SettingsStore>(() => ({
   problems: [],
   readOnly: false,
   file: '',
+  client: 'browser',
 }));
 
 /** A setting's global value: the core's, else the built-in default. */
@@ -111,6 +122,7 @@ export async function loadSettings(): Promise<boolean> {
       defs: j.definitions ?? [],
       readOnly: !!j.read_only,
       file: j.file ?? '',
+      client: j.client === 'desktop' ? 'desktop' : 'browser',
     });
     applySettings(j);
     return true;

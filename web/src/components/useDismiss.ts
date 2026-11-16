@@ -1,10 +1,15 @@
 import { useEffect, type RefObject } from 'react';
 
-/** Closes a popup on a press outside ref's element or on Escape. */
-export function useDismiss(open: boolean, ref: RefObject<HTMLElement | null>, close: () => void) {
+/** Closes a popup on a press outside ref's element or on Escape. A press
+ * on owner's element (the button that opens the popup, which toggles it
+ * itself) is not outside. */
+export function useDismiss(open: boolean, ref: RefObject<HTMLElement | null>, close: () => void, owner?: RefObject<HTMLElement | null>) {
   useEffect(() => {
     if (!open) return;
-    const outside = (e: PointerEvent) => !ref.current?.contains(e.target as Node) && close();
+    const outside = (e: PointerEvent) => {
+      const at = e.target as Node;
+      if (!ref.current?.contains(at) && !owner?.current?.contains(at)) close();
+    };
     const key = (e: KeyboardEvent) => e.key === 'Escape' && close();
     document.addEventListener('pointerdown', outside);
     document.addEventListener('keydown', key);
@@ -12,5 +17,5 @@ export function useDismiss(open: boolean, ref: RefObject<HTMLElement | null>, cl
       document.removeEventListener('pointerdown', outside);
       document.removeEventListener('keydown', key);
     };
-  }, [open, ref, close]);
+  }, [open, ref, close, owner]);
 }

@@ -15,9 +15,11 @@ import { FakeCore, settle } from './fakeTerms';
 import { resetClosed } from '../closedPanes';
 import { definePlugins } from '../plugins/registry';
 import { vscodePlugin } from '../plugins/vscode';
+import { vscodeOn } from './fakeSettings';
 
-// VS Code is a plugin: these tests have it on.
+// VS Code is a plugin, off by default: these tests have it on.
 definePlugins([vscodePlugin]);
+vscodeOn();
 
 describe('keyName', () => {
   it('names a key after its character on the current layout', () => {

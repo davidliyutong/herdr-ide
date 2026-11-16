@@ -66,6 +66,11 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   workspace's VS Code pane, else in one beside the terminal. VS Code panes
   split, move between tabs, maximize and come back after a restart; moving
   one or switching tabs does not reload it. Idle instances are stopped.
+  VS Code is off by default: it runs on the UI's own address, so its
+  extensions and webviews can do whatever the page can on every machine.
+  Turn it on in Settings › Plugins: in the desktop app with its switch, in
+  a browser after accepting that risk in a dialog. The two switches are
+  separate, so VS Code on in the desktop app stays off in browsers.
 - **Program windows.** Windows that programs on remote Linux machines open
   (matplotlib, the MuJoCo viewer, Qt tools) appear in browser windows, one
   per program window, with mouse and keyboard. Terminals get a virtual
@@ -101,12 +106,14 @@ workspaces and terminals of every machine in one browser tab, with VS Code
 - **Plugins and the right sidebar.** Features that come as plugins add
   panels to a sidebar on the right (⌘⌥B in the desktop app on macOS),
   panes of their own, commands and status bar items; each can be turned
-  off in Settings › Plugins. Uploads and downloads, program windows and
-  VS Code are plugins too (VS Code off, code-server is never fetched or
-  started).
+  off in Settings › Plugins, where a plugin with settings of its own
+  opens their page. Uploads and downloads, program windows and
+  VS Code are plugins too (VS Code off, the default, code-server is never
+  fetched or started).
 - **File explorer.** A tree of the machine's files in the right sidebar
   (⌘⇧E in the desktop app on macOS) that follows the focused terminal's
-  directory, as VS Code's explorer works: filter, hidden files, keys,
+  directory, as VS Code's explorer works: file-type icons, filter,
+  hidden files, keys (type a name to go to it),
   new files and folders, rename, cut, copy and paste, drag to move, drop
   files from your computer to upload them, Move to Trash, copy paths,
   download, open in a terminal or VS Code. A click shows a file in a

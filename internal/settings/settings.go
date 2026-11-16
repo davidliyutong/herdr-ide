@@ -79,11 +79,14 @@ var (
 )
 
 // Section groups settings in the UIs; sections are shown by Order, the
-// advanced ones after the others under a heading of their own.
+// advanced ones after the others under a heading of their own. A plugin's
+// section names its plugin (internal/plugin's id): the UIs list it under
+// the plugins and say when the plugin is off.
 type Section struct {
 	ID       string `json:"id"`
 	Order    int    `json:"order"`
 	Advanced bool   `json:"advanced,omitempty"`
+	Plugin   string `json:"plugin,omitempty"`
 }
 
 // Def defines a setting.

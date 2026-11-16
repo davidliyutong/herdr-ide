@@ -21,7 +21,7 @@ import { detectLocale, translate } from '../../web/src/i18n';
 import type { MessageKey } from '../../web/src/i18n/en';
 import type { OpenedFolders } from '../../web/src/shell';
 import { channels } from './bridge';
-import { CoreProcess, coreArgs, coreEnv, coreInstance, corePort, DesktopError, ENV_PREFIX } from './core';
+import { CoreProcess, coreArgs, coreEnv, coreInstance, corePort, DesktopError, desktopCookie, desktopToken, ENV_PREFIX } from './core';
 import { FolderQueue } from './folders';
 import { followCore, type ShellSettings } from './follow';
 import { menuCommands, menuTemplate, parseDisabled, type Binding } from './menu';
@@ -399,6 +399,10 @@ if (!app.requestSingleInstanceLock()) {
       buildMenu();
       const port = corePort(process.env[`${ENV_PREFIX}DESKTOP_PORT`] || (dev ? '7791' : '7781'));
       const binary = coreBinary(platform, process.arch, app.isPackaged ? process.resourcesPath : undefined, join(app.getAppPath(), '..'));
+      // The token of this launch: on the core's stdin, and in this
+      // session's cookie for the core's origin before the page loads, so
+      // the core tells the app's windows from browsers (core.ts).
+      const token = desktopToken();
       origin = await core.start(
         binary,
         coreArgs(instance, port),
@@ -406,9 +410,11 @@ if (!app.requestSingleInstanceLock()) {
         coreEnv(process.env, app.getPath('home'), platform),
         app.getPath('home'),
         () => void fail(new DesktopError('desktop.coreLost')),
+        token,
       );
       if (quitting) return;
       const ses = session.defaultSession;
+      await ses.cookies.set(desktopCookie(origin, token));
       ses.setPermissionRequestHandler((contents, permission, callback, details) => {
         callback(allowPermission(permission, details.requestingUrl, contents.getURL(), origin));
       });
