@@ -140,9 +140,6 @@ export function Sidebar() {
   // (desktop app only): dropping them creates workspaces there.
   const [dropOn, setDropOn] = useState<string>();
   const scroll = useRef<HTMLDivElement>(null);
-  // One row is the list's tab stop: the one focused last, else the
-  // workspace shown.
-  useEffect(() => ensureTabStop(scroll.current, '.ws-item.selected[data-nav]'));
   // Where the list was scrolled stays across reloads of the page, once its
   // machines are back.
   const restored = useRef(false);
@@ -370,8 +367,17 @@ function MachineItem({ m }: { m: MachineState }) {
   const sel = useMulti((s) => s.sel);
   const machinePicked = selectedIds(MACHINES, sel).includes(m.id);
   const picked = new Set(selectedIds(workspacesOf(m.id), sel));
+  const box = useRef<HTMLDivElement>(null);
+  // One row of the list is its tab stop: the one the keyboard was on last,
+  // else the workspace shown (of the machine shown).
+  useEffect(() =>
+    ensureTabStop(
+      box.current?.closest<HTMLElement>('.sidebar-scroll') ?? null,
+      selM ? `.ws-item.selected[data-m="${CSS.escape(selM)}"]` : '.ws-item.selected',
+    ),
+  );
   return (
-    <div className="machine" data-machine={m.id}>
+    <div className="machine" data-machine={m.id} ref={box}>
       <div
         className={`machine-head ${machinePicked ? 'multi' : ''}`}
         data-nav={`m:${m.id}`}

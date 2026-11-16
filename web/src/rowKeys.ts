@@ -15,18 +15,27 @@ export function keepFocus(e: React.MouseEvent) {
   if (!(e.target as HTMLElement).closest('input, textarea')) e.preventDefault();
 }
 
-/** Makes row the list's tab stop. */
+/** Makes row the list's tab stop: the keyboard was there last. */
 export function rove(list: HTMLElement, row: HTMLElement) {
   for (const el of list.querySelectorAll<HTMLElement>(`${ROW}[tabindex="0"]`)) if (el !== row) el.tabIndex = -1;
   row.tabIndex = 0;
+  delete row.dataset.autoStop;
 }
 
-/** Gives a list a tab stop when it has none: the preferred row (the one
- * shown), else the first. */
+/** Gives a list its tab stop while the keyboard has not chosen one (or the
+ * row it chose went away): the preferred row (the one shown, which may
+ * change), else the first. */
 export function ensureTabStop(list: HTMLElement | null, preferred: string) {
-  if (!list || list.querySelector(`${ROW}[tabindex="0"]`)) return;
+  if (!list) return;
+  const stop = list.querySelector<HTMLElement>(`${ROW}[tabindex="0"]`);
   const row = list.querySelector<HTMLElement>(preferred) ?? list.querySelector<HTMLElement>(ROW);
-  if (row) row.tabIndex = 0;
+  if ((stop && stop.dataset.autoStop === undefined) || !row || stop === row) return;
+  if (stop) {
+    stop.tabIndex = -1;
+    delete stop.dataset.autoStop;
+  }
+  row.tabIndex = 0;
+  row.dataset.autoStop = '';
 }
 
 /** The menu key, or Shift+F10. */

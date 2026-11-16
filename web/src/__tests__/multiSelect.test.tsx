@@ -161,8 +161,13 @@ describe('tabs selected together', () => {
 
   it('is kept by the keyboard: arrows, Shift, Ctrl+A, Delete, Escape, F2 and the menu key', async () => {
     await render(() => <Workspace />);
-    // The tab shown is the bar's tab stop.
+    // The tab shown is the bar's tab stop, until the keyboard chooses one.
     expect(tabs().map((t) => t.tabIndex)).toEqual([0, -1, -1, -1]);
+    await act(async () => actions.selectTab('m', 'w1w1w1w1', 2));
+    await act(settle);
+    expect(tabs().map((t) => t.tabIndex)).toEqual([-1, -1, 0, -1]);
+    await act(async () => actions.selectTab('m', 'w1w1w1w1', 0));
+    await act(settle);
     tabs()[0].focus();
     await key(tabs()[0], 'ArrowRight');
     expect(document.activeElement).toBe(tabs()[1]);
