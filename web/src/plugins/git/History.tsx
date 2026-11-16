@@ -17,7 +17,8 @@ import { gitApi, errorText, type Change, type Commit, type Ref } from './api';
 import { appendCommits, layoutGraph, newPaging, type Paging } from './graph';
 import { GraphCell, laneColor } from './GraphCell';
 import { badgesOf, type Badge } from './GraphPane';
-import { letterColor } from './GitPanel';
+import { folderOf, leafName, letterColor } from './GitPanel';
+import { FileIcon } from '../../fileIcons';
 import { copy, openDiff, openGraph, short } from './ops';
 
 /** The commits of a page. */
@@ -242,17 +243,20 @@ export function History({ m, root, version, branch, head }: { m: string; root: s
         }
       >
         <GraphCell row={graph.rows[l.i]} width={lanes} height={rowH} lane={LANE} through />
-        <span className="git-letter" style={{ color: letterColor(f.status) }}>
-          {f.status}
+        <FileIcon name={leafName(f.path)} kind="file" />
+        <span className={`ellipsis${f.status === 'D' ? ' git-deleted' : ''}`} style={{ color: letterColor(f.status) }}>
+          {leafName(f.path)}
         </span>
-        <span className="ellipsis">{f.path.slice(f.path.lastIndexOf('/') + 1)}</span>
-        <span className="git-path ellipsis muted">{f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : ''}</span>
+        <span className="git-path ellipsis muted">{folderOf(f.path)}</span>
         <span className="spacer" />
         {!f.binary && (
           <span className="git-stat">
             <span className="add">+{f.added}</span> <span className="del">−{f.deleted}</span>
           </span>
         )}
+        <span className="git-letter" style={{ color: letterColor(f.status) }}>
+          {f.status}
+        </span>
       </div>
     );
   };

@@ -38,12 +38,14 @@ export const short = (h: string) => h.slice(0, 7);
 /** Opens a file's diff, reusing the pane that shows the same one; a
  * change of the working tree or the index (Source Control's rows) takes
  * over any such pane without unsaved edits, as VS Code's preview editor
- * does, so going through the changes opens one pane. */
-export function openDiff(m: string, d: DiffView, from?: string) {
+ * does, so going through the changes opens one pane. With own (several
+ * files opened at once) only the file's own pane is reused. */
+export function openDiff(m: string, d: DiffView, from?: string, o: { own?: boolean } = {}) {
   const same = (v: Record<string, unknown>) =>
     v.repo === d.repo && v.path === d.path && v.mode === d.mode && (v.rev ?? '') === (d.rev ?? '') && (v.rev2 ?? '') === (d.rev2 ?? '');
   const local = (mode: unknown) => mode === 'worktree' || mode === 'staged';
-  const reuse = (v: Record<string, unknown>) => same(v) || (local(d.mode) && local(v.mode) && !dirtyDiffs.has(`view:${String(v.id)}`));
+  const reuse = (v: Record<string, unknown>) =>
+    same(v) || (!o.own && local(d.mode) && local(v.mode) && !dirtyDiffs.has(`view:${String(v.id)}`));
   // Fields of the other file it showed are dropped.
   const view = { rev: undefined, rev2: undefined, orig: undefined, parent: undefined, untracked: undefined, ...d };
   return actions.openView(m, { plugin: 'git', kind: 'diff', ...view }, { from, reuse });
@@ -61,14 +63,19 @@ export function openFile(m: string, repo: string, path: string) {
 
 /** The diff of a file of the status: of the index (staged) or of the
  * working tree. */
-export function openStatusDiff(m: string, repo: string, f: StatusFile, staged: boolean) {
-  return openDiff(m, {
-    repo,
-    path: f.path,
-    mode: staged ? 'staged' : 'worktree',
-    orig: staged && f.orig ? f.orig : undefined,
-    untracked: f.kind === 'untracked' || undefined,
-  });
+export function openStatusDiff(m: string, repo: string, f: StatusFile, staged: boolean, o: { own?: boolean } = {}) {
+  return openDiff(
+    m,
+    {
+      repo,
+      path: f.path,
+      mode: staged ? 'staged' : 'worktree',
+      orig: staged && f.orig ? f.orig : undefined,
+      untracked: f.kind === 'untracked' || undefined,
+    },
+    undefined,
+    o,
+  );
 }
 
 /** Discards the changes of files of the working tree, after asking. */

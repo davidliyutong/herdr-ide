@@ -9,6 +9,11 @@ const (
 	// lines end in more than one way (LF and CRLF): keep each line's
 	// ending, unify them, or open the file read-only.
 	SettingMixedLineEndings = "git.mixedLineEndings"
+	// SettingChangesView: Source Control's changes as a list or a tree.
+	SettingChangesView = "git.changesView"
+	// SettingUntrackedChanges: untracked files among the changes or in a
+	// group of their own.
+	SettingUntrackedChanges = "git.untrackedChanges"
 )
 
 // Settings is the plugin's settings module (internal/registry).
@@ -17,5 +22,9 @@ var Settings = settings.Module{
 	Defs: []settings.Def{
 		{Key: SettingMixedLineEndings, Type: settings.TypeEnum, Default: "keep", Enum: []string{"keep", "unify", "readOnly"},
 			Scope: settings.ScopeApp, Section: "git", Order: 10},
+		{Key: SettingChangesView, Type: settings.TypeEnum, Default: "list", Enum: []string{"list", "tree"},
+			Scope: settings.ScopeApp, Section: "git", Order: 20},
+		{Key: SettingUntrackedChanges, Type: settings.TypeEnum, Default: "mixed", Enum: []string{"mixed", "separate"},
+			Scope: settings.ScopeApp, Section: "git", Order: 21},
 	},
 }

@@ -15,7 +15,10 @@ import { useStore } from '../state/store';
 import type { MachineState } from '../lib/machine';
 import { useDialog } from '../dialog';
 import { t } from '../i18n';
-import { GitPanel, groupFiles, treeRows } from '../plugins/git/GitPanel';
+import { GitPanel, groupFiles, groupRows, rowId } from '../plugins/git/GitPanel';
+import { useMenu, isItem, type MenuItem } from '../contextMenu';
+import { useSettings } from '../settings';
+import { isMac } from '../keys';
 import { decorate, markOf } from '../plugins/git/decorations';
 import { forgetRepos, useGit } from '../plugins/git/state';
 import { ago } from '../plugins/git/History';
@@ -51,8 +54,21 @@ describe('grouping', () => {
       { path: 'a/z.ts', x: '.', y: 'M', kind: 'changed' },
       { path: 'top.ts', x: '.', y: 'M', kind: 'changed' },
     ]);
-    const rows = treeRows(g.changes).map((r) => ('dir' in r ? `${r.depth}:${r.dir}/` : `${r.depth}:${r.f.file.path}`));
-    expect(rows).toEqual(['0:a/', '1:a/b/c/', '2:a/b/c/x.ts', '2:a/b/c/y.ts', '1:a/z.ts', '0:top.ts']);
+    const show = (rows: ReturnType<typeof groupRows>) =>
+      rows.map((r) => (r.kind === 'dir' ? `${r.depth}:${r.label}/` : `${r.depth}:${r.g.file.path}`));
+    expect(show(groupRows('changes', g.changes, true))).toEqual(['0:a/', '1:b/c/', '2:a/b/c/x.ts', '2:a/b/c/y.ts', '1:a/z.ts', '0:top.ts']);
+    // A collapsed folder hides what is inside; its row stands for its files.
+    const rows = groupRows('changes', g.changes, true, new Set([rowId('changes', 'a/b/c', true)]));
+    expect(show(rows)).toEqual(['0:a/', '1:b/c/', '1:a/z.ts', '0:top.ts']);
+    const bc = rows[1];
+    expect(bc.kind === 'dir' && bc.files.map((f) => f.file.path)).toEqual(['a/b/c/x.ts', 'a/b/c/y.ts']);
+    expect(show(groupRows('changes', g.changes, false))).toEqual(['0:a/b/c/x.ts', '0:a/b/c/y.ts', '0:a/z.ts', '0:top.ts']);
+  });
+
+  it('puts untracked files in a group of their own when asked', () => {
+    const g = groupFiles(files, true);
+    expect(g.changes.map((f) => f.file.path)).toEqual(['old.txt', 'src/a.ts']);
+    expect(g.untracked.map((f) => f.file.path)).toEqual(['notes/todo.md']);
   });
 
   it('decorates the explorer’s entries and their folders', () => {
@@ -160,7 +176,25 @@ describe('GitPanel', () => {
     await act(async () => root.unmount());
     host.remove();
     vi.unstubAllGlobals();
+    useMenu.setState({ menu: undefined });
+    useSettings.setState((st) => {
+      const values = { ...st.values };
+      delete values['git.changesView'];
+      delete values['git.untrackedChanges'];
+      return { values };
+    });
   });
+
+  const rowOf = (group: string, text: string) =>
+    [...section(group).querySelectorAll<HTMLElement>('.git-row')].find((r) => r.textContent?.includes(text))!;
+  /** A click that adds a row to the selection (⌘ on macOS, else Ctrl). */
+  const toggleClick = (el: HTMLElement) =>
+    act(async () => el.dispatchEvent(new MouseEvent('click', { bubbles: true, metaKey: isMac, ctrlKey: !isMac })));
+  const key = (el: HTMLElement, k: string, mod = false) =>
+    act(async () =>
+      el.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, metaKey: mod && isMac, ctrlKey: mod && !isMac })),
+    );
+  const menuItem = (label: string) => useMenu.getState().menu?.entries.find((e): e is MenuItem => isItem(e) && e.label === label);
 
   it('shows the branch, ahead and behind, and the groups', () => {
     expect(host.querySelector('.git-branch')!.textContent).toContain('main');
@@ -213,7 +247,7 @@ describe('GitPanel', () => {
 
   it('acts on a stash by its index and commit', async () => {
     const stashes = section(t('git.group.stashes'));
-    await act(async () => stashes.querySelector<HTMLElement>('.git-group-head')!.click());
+    await act(async () => stashes.querySelector<HTMLElement>('.section-toggle')!.click());
     await act(async () => button(t('git.stash.pop'), stashes)!.click());
     await flush();
     expect(posts[0]).toEqual({ action: 'stashPop', body: { index: 0, hash: STASH, repo: ROOT } });
@@ -339,6 +373,72 @@ describe('GitPanel', () => {
     await flush();
     expect(host.querySelector('.git-title')!.textContent).toBe('u');
     expect(amend().checked).toBe(false);
+  });
+
+  // The rows behave as the file explorer's: several selected with ⌘/Ctrl
+  // and Shift clicks or the keys, every action on the selection.
+  it('acts on the selected rows of a group', async () => {
+    const changes = t('git.group.changes');
+    await toggleClick(rowOf(changes, 'old.txt'));
+    await toggleClick(rowOf(changes, 'a.ts'));
+    expect(rowOf(changes, 'a.ts').classList.contains('selected')).toBe(true);
+    await act(async () => button(t('git.stage'), rowOf(changes, 'a.ts'))!.click());
+    await flush();
+    expect(posts[0]).toEqual({ action: 'stage', body: { paths: ['src/a.ts', 'old.txt'], repo: ROOT } });
+    // Every row (⌘/Ctrl+A), and the context menu of one of them: the
+    // explorer's file entries and Git's, on the group's selected files.
+    const list = host.querySelector<HTMLElement>('.git-groups')!;
+    list.focus();
+    await key(list, 'a', true);
+    expect(section(changes).querySelectorAll('.git-row.selected')).toHaveLength(3);
+    await act(async () => rowOf(changes, 'todo.md').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })));
+    for (const label of [t('git.openDiff'), t('files.open'), t('git.openToSide'), t('files.copyPath'), t('files.copyRelativePath')])
+      expect(menuItem(label)).toBeDefined();
+    // One target of several: nothing that opens a single file.
+    expect(menuItem(t('files.quickLook'))).toBeUndefined();
+    await act(async () => menuItem(t('git.stage'))!.run!());
+    await flush();
+    expect(posts[1]).toEqual({ action: 'stage', body: { paths: ['notes/todo.md', 'old.txt', 'src/a.ts'], repo: ROOT } });
+  });
+
+  it('moves through the rows with the keys', async () => {
+    const list = host.querySelector<HTMLElement>('.git-groups')!;
+    list.focus();
+    await key(list, 'ArrowDown');
+    await key(list, 'ArrowDown');
+    expect(host.querySelector('.git-row.cursor')?.textContent).toContain('new.ts');
+    await key(list, 'End');
+    expect(host.querySelector('.git-row.cursor')?.textContent).toContain('a.ts');
+    await act(async () => list.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', shiftKey: true, bubbles: true })));
+    expect(host.querySelectorAll('.git-row.selected')).toHaveLength(2);
+  });
+
+  it('shows the changes as a tree of folders, collapsed together', async () => {
+    await act(async () => button(t('git.viewTree'))!.click());
+    expect(useSettings.getState().values['git.changesView']?.value).toBe('tree');
+    const changes = section(t('git.group.changes'));
+    expect([...changes.querySelectorAll('.git-dir-row')].map((r) => r.textContent)).toEqual(['notes', 'src']);
+    expect(changes.querySelectorAll('.git-row:not(.git-dir-row)')).toHaveLength(3);
+    // A folder stands for its files.
+    await act(async () => button(t('git.stage'), rowOf(t('git.group.changes'), 'src'))!.click());
+    await flush();
+    expect(posts[0]).toEqual({ action: 'stage', body: { paths: ['src/a.ts'], repo: ROOT } });
+    await act(async () => button(t('git.collapseAll'))!.click());
+    expect(section(t('git.group.changes')).querySelectorAll('.git-row:not(.git-dir-row)')).toHaveLength(1);
+  });
+
+  it('stages the tracked changes apart from untracked files', async () => {
+    await act(async () =>
+      useSettings.setState((st) => ({ values: { ...st.values, 'git.untrackedChanges': { value: 'separate', source: 'global' } } })),
+    );
+    const untracked = section(t('git.group.untracked'));
+    expect(untracked.querySelectorAll('.git-row')).toHaveLength(1);
+    await act(async () => button(t('git.stageAll'), section(t('git.group.changes')))!.click());
+    await flush();
+    expect(posts[0]).toEqual({ action: 'stage', body: { all: true, tracked: true, repo: ROOT } });
+    await act(async () => button(t('git.stageAll'), untracked)!.click());
+    await flush();
+    expect(posts[1]).toEqual({ action: 'stage', body: { paths: ['notes/todo.md'], repo: ROOT } });
   });
 
   it('says how long ago a commit was', () => {

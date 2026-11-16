@@ -7,12 +7,13 @@
 // opens its diff), a Cmd/Ctrl-click on a second commit compares the two,
 // and context menus on commits, badges and stashes act on them.
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ChevronDown, ChevronUp, GitBranch, RefreshCw, Search, Tag as TagIcon, X } from 'lucide-react';
 import { useStore } from '../../state/store';
 import { useSize } from '../../lib/sizes';
 import { openMenu, type MenuEntry } from '../../contextMenu';
-import { t } from '../../i18n';
+import { t, type MessageKey } from '../../i18n';
+import { FileIcon } from '../../fileIcons';
 import type { PaneViewProps } from '../api';
 import { gitApi, errorText, type Commit, type Ref, type Shown, type Stash, type StatusFile } from './api';
 import { appendCommits, layoutGraph, newPaging, type GraphCommit, type Paging } from './graph';
@@ -32,7 +33,7 @@ import {
   stashDrop,
   stashParams,
 } from './ops';
-import { letterColor } from './GitPanel';
+import { folderOf, leafName, letterColor, letterMark } from './GitPanel';
 import { changed, runGit, useRepo } from './state';
 import './git.css';
 
@@ -574,12 +575,13 @@ function Detail({
             const staged = f.x !== '.' && f.x !== '?' && f.kind !== 'unmerged';
             const letter = f.kind === 'untracked' ? 'U' : f.kind === 'unmerged' ? '!' : f.y !== '.' ? f.y : f.x;
             return (
-              <div key={f.path} className="git-row" onClick={() => void openStatusDiff(m, repo, f, staged && f.y === '.')}>
-                <span className="git-letter" style={{ color: letterColor(letter) }}>
-                  {letter}
-                </span>
-                <span className="ellipsis">{f.path}</span>
-              </div>
+              <FileLine
+                key={f.path}
+                path={f.path}
+                letter={letter}
+                title={f.orig ? `${f.orig} → ${f.path}` : f.path}
+                onClick={() => void openStatusDiff(m, repo, f, staged && f.y === '.')}
+              />
             );
           })}
         </div>
@@ -634,9 +636,10 @@ function Detail({
         <div className="git-detail-files">
           {!shown && !error && <div className="muted small">{t('git.loading')}</div>}
           {shown?.files.map((f) => (
-            <div
+            <FileLine
               key={f.path}
-              className="git-row"
+              path={f.path}
+              letter={f.status}
               title={f.orig ? `${f.orig} → ${f.path}` : f.path}
               onClick={() =>
                 void openDiff(
@@ -647,11 +650,6 @@ function Detail({
                 )
               }
             >
-              <span className="git-letter" style={{ color: letterColor(f.status) }}>
-                {f.status}
-              </span>
-              <span className="ellipsis">{f.orig ? `${f.orig} → ${f.path}` : f.path}</span>
-              <span className="spacer" />
               {f.binary ? (
                 <span className="muted small">{t('git.graph.binary')}</span>
               ) : (
@@ -659,10 +657,44 @@ function Detail({
                   <span className="add">+{f.added}</span> <span className="del">−{f.deleted}</span>
                 </span>
               )}
-            </div>
+            </FileLine>
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+/** A file of a commit or of the working tree's changes: its icon, name
+ * (in its letter's color) and folder, what the caller adds (lines added
+ * and deleted) and its letter. */
+export function FileLine({
+  path,
+  letter,
+  title,
+  onClick,
+  children,
+}: {
+  path: string;
+  letter: string;
+  title?: string;
+  onClick?(): void;
+  children?: ReactNode;
+}) {
+  const color = letterColor(letter);
+  const folder = folderOf(path);
+  return (
+    <div className={`git-file${letter === 'D' ? ' deleted' : ''}`} title={title ?? path} onClick={onClick}>
+      <FileIcon name={leafName(path)} kind={path.endsWith('/') ? 'dir' : 'file'} />
+      <span className="git-name ellipsis" style={{ color }}>
+        {leafName(path)}
+      </span>
+      {folder && <span className="git-path ellipsis muted">{folder}</span>}
+      <span className="spacer" />
+      {children}
+      <span className="git-letter" style={{ color }} aria-label={t(`git.mark.${letterMark(letter)}` as MessageKey)}>
+        {letter}
+      </span>
     </div>
   );
 }

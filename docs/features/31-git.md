@@ -164,18 +164,44 @@ the answer through.
   With nothing staged it offers to stage everything and commit. The text
   typed is kept per repository while the panel is hidden.
 - **Merge Changes**, **Staged Changes**, **Changes** (untracked files
-  among them, `U`) with counts, as a list (the folder beside the name) or a
-  tree (folders with a single folder joined). Rows show the status letter
-  in its color; a click opens the diff, the row's buttons open the file
-  (the explorer's editor), discard (after asking; untracked files are
-  deleted) and stage or unstage (a rename with its old path, so its
-  deletion does not stay staged); group headers stage, unstage or discard
-  all: **Unstage All** and, without conflicts, **Stage All** name no paths
-  (`reset`, `add --all`); with conflicts Stage All names the Changes'
-  paths, so conflicts are not marked resolved. The context menu has the
-  same.
-- **Stashes** (apply, pop, drop), each named by its index and commit;
-  none are shown when they could not be read.
+  among them, `U`, or with `git.untrackedChanges` at `separate` in
+  **Untracked Changes**) are collapsible sections (`components/tree`
+  `Section`, kept open or closed per browser as `section.git.merge`,
+  `git.staged`, `git.changes`, `git.untracked`) with their counts and
+  their actions in the header. Their rows are drawn as the file
+  explorer's (`TreeRow`, only those in view of the list): the file's icon
+  (`fileIcons.tsx`), its name and, as a list, its folder; as a tree,
+  folders before files, those with a single folder inside joined (`a/b`),
+  each collapsible, and **Collapse All** in the toolbar. The list or tree
+  is the setting `git.changesView`, which the toolbar's button sets (in
+  read-only mode, for this view only). The status letter is the row's
+  decoration in the explorer's Git marks' colors (`--ds-git-*`: conflict,
+  deleted, modified, renamed, added, untracked); a deleted file's name is
+  struck through.
+- Rows behave as the explorer's: a click selects a row and opens its
+  diff with the keyboard left in the list (VS Code's preview; a double
+  click leaves it in the diff), ⌘-click (Ctrl elsewhere) adds or removes
+  a row, Shift-click selects a range, and the keys of a tree move
+  (`navigationKey`: arrows, PgUp, PgDn, Home, End, Shift to extend, ← →
+  on folders, ⌘/Ctrl+A, type-ahead); Enter opens the diffs of the
+  selection (several each in a pane of its own), Space the cursor's in
+  the preview. Every action acts on the selected rows of the row's group
+  when the row is selected (a folder on the files inside): the row's
+  buttons open the files (the explorer's editor), discard (after asking;
+  untracked files are deleted) and stage or unstage (a rename with its
+  old path, so its deletion does not stay staged). The context menu has
+  Open Changes and the Git actions, then the explorer's file entries
+  (`fileMenu.ts`): Open, Open to the Side, Open Preview, Open in VS Code
+  (while its plugin is on), Open in Terminal, Copy Path, Copy Relative
+  Path, Download and Show in Explorer (those of a single file for one
+  target; nothing that opens a deleted file). Group headers stage,
+  unstage or discard all: **Unstage All** and, without conflicts,
+  **Stage All** name no paths (`reset`, `add --all`, or `add --update`
+  while untracked files are shown apart, whose own Stage All names
+  them); with conflicts Stage All names the Changes' paths, so conflicts
+  are not marked resolved.
+- **Stashes** (apply, pop, drop), a section closed by default, each named
+  by its index and commit; none are shown when they could not be read.
 - **History** (`History.tsx`), docked at the bottom of the panel as VS
   Code's Source Control Graph: its heading stays at the bottom while it is
   collapsed; expanded, the list grows upward from it, as high as its top
@@ -188,9 +214,9 @@ the answer through.
   already there; when the list is read again (as many commits as were
   loaded, at most 1000), a page asked for the earlier list is dropped, and
   a page that failed stops the paging until then. A click shows the
-  commit's files under it, the lanes running through (a file opens its
-  diff against the first parent); the context menu copies the hash or
-  opens the graph pane.
+  commit's files under it with their icons, the lanes running through (a
+  file opens its diff against the first parent); the context menu copies
+  the hash or opens the graph pane.
 - While shown and the page visible, the panel asks `watch` every 2 s and
   reads `status` (which has the branch, upstream and ahead/behind) when
   the token moved, at least every 10 s (changes of the working tree do
@@ -230,7 +256,7 @@ Graph's editor; `actions.openView` with `tab`):
   filter shows one branch's history; **Remote branches** turns them off.
 - A click opens the commit's details under it: hash, parents (a merge's
   parent chooses what its files are compared with), author, committer,
-  message, and its files with lines added and deleted; a file opens the
+  message, and its files (with their icons) with lines added and deleted; a file opens the
   diff against the parent. Cmd/Ctrl-click on another commit compares the
   two (files between them; a file opens its diff); the working tree's row
   lists the changed files.
@@ -316,6 +342,9 @@ Code's preview editor does, so going through the changes keeps one pane):
 
 - `git.mixedLineEndings`: files that mix line endings in diffs and the
   explorer's editor (`keep`, `unify`, `readOnly`; see the diff pane).
+- `git.changesView`: the changes as a `list` or a `tree`.
+- `git.untrackedChanges`: untracked files among the changes (`mixed`) or
+  in a group of their own (`separate`).
 
 **Colors**: lanes take the design tokens' chart hues (`--ds-chart-*`, in
 an order that keeps neighbors apart), status letters and names VS Code's
@@ -471,10 +500,14 @@ terminal; what the plugin adds is a way to reach it from the browser:
   rows with the working tree and stashes, badges, search, pages appended
   without commits already there.
 - `web/src/__tests__/gitPanel.test.ts`, `gitGraphPane.test.ts`,
-  `gitDiff.test.ts` (Monaco replaced): groups and tree, decorations, the
-  panel's actions (Stage All and Unstage All without paths, with
-  conflicts by paths, a rename unstaged with its old path, stashes by
-  their commit) and commit box, the Amend box per repository, read-only
+  `gitDiff.test.ts` (Monaco replaced): groups (untracked files apart,
+  staged with `add --update` and by their paths) and the tree (joined and
+  collapsed folders, a folder's files, Collapse All, the view set),
+  decorations, the panel's actions (Stage All and Unstage All without
+  paths, with conflicts by paths, a rename unstaged with its old path,
+  stashes by their commit), several rows selected by clicks and keys
+  with every action on them, the context menu's file entries, and commit
+  box, the Amend box per repository, read-only
   mode, a history page of an earlier list dropped; the graph's rows,
   details, compare and menus, a page of another filter dropped; the diff's
   sides per mode, range patches sent, saves (also of unsaved text after
