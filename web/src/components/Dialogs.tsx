@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowUp, File, Folder, X } from 'lucide-react';
-import { closeDialog, completionParts, useDialog, type DialogRequest } from '../dialog';
+import { closeDialog, completionParts, expandPath, folderProblem, useDialog, type DialogRequest, type FolderProblem } from '../dialog';
 import { startDownload } from '../download';
 import { formatSize, listDir, type RemoteStat } from '../lib/files';
 import { shortPath } from '../lib/machine';
 import { useStore } from '../state/store';
-import { t } from '../i18n';
+import { t, type MessageKey } from '../i18n';
 import { match } from '../lib/match';
 import { rangeOf } from './tree/selection';
 import { Highlight } from './Highlight';
@@ -132,6 +132,12 @@ function RiskDialog({ req }: { req: Extract<DialogRequest, { kind: 'risk' }> }) 
   );
 }
 
+const folderMessage: Record<FolderProblem, MessageKey> = {
+  missing: 'newWorkspace.missing',
+  file: 'newWorkspace.notFolder',
+  denied: 'newWorkspace.denied',
+};
+
 /** A new workspace's directory and name, or an existing one's (req.edit),
  * whose directory may be left empty. */
 function WorkspaceDialog({ req }: { req: Extract<DialogRequest, { kind: 'workspace' }> }) {
@@ -141,7 +147,11 @@ function WorkspaceDialog({ req }: { req: Extract<DialogRequest, { kind: 'workspa
   const [label, setLabel] = useState(req.edit?.name ?? '');
   const [dirs, setDirs] = useState<string[]>([]);
   const [sel, setSel] = useState(-1);
-  const [missing, setMissing] = useState(false);
+  // What the machine says of the typed folder: the absolute path it
+  // resolves to, or why it cannot be used; undefined while unknown.
+  const [check, setCheck] = useState<{ path: string; problem?: FolderProblem; resolved?: string }>();
+  const home = useStore((s) => s.machines[req.m]?.info?.home ?? '');
+  const typed = cwd.trim().replace(/(.)\/+$/, '$1');
 
   // Subdirectories matching what is typed, listed on the machine.
   useEffect(() => {
@@ -156,7 +166,6 @@ function WorkspaceDialog({ req }: { req: Extract<DialogRequest, { kind: 'workspa
           .map((e) => e.name)
           .sort();
         setDirs(names.length === 1 && names[0] === prefix ? [] : names.slice(0, 8));
-        setMissing(false);
       } catch {
         if (!cancelled) setDirs([]);
       }
@@ -168,6 +177,29 @@ function WorkspaceDialog({ req }: { req: Extract<DialogRequest, { kind: 'workspa
     };
   }, [cwd, req.m]);
 
+  // The whole typed path, checked on the machine while it is typed.
+  useEffect(() => {
+    setCheck(undefined);
+    if (!typed) return;
+    let cancelled = false;
+    const id = window.setTimeout(async () => {
+      try {
+        const d = await listDir(req.m, typed);
+        if (cancelled) return;
+        setCheck(d.dir.is_dir ? { path: typed, resolved: d.dir.path || expandPath(typed, home) } : { path: typed, problem: 'file' });
+      } catch (err) {
+        const problem = folderProblem(err);
+        if (!cancelled && problem) setCheck({ path: typed, problem });
+      }
+    }, 250);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(id);
+    };
+  }, [typed, req.m, home]);
+  const problem = check?.path === typed ? check.problem : undefined;
+  const resolved = check?.path === typed ? check.resolved : undefined;
+
   const done = (v: { cwd: string; label: string } | undefined) => {
     closeDialog(req);
     req.resolve(v);
@@ -177,20 +209,16 @@ function WorkspaceDialog({ req }: { req: Extract<DialogRequest, { kind: 'workspa
     setCwd(`${dir === '/' ? '' : dir}/${name}/`);
   };
   const submit = async () => {
-    const path = cwd.trim().replace(/(.)\/+$/, '$1');
-    if (!path) {
-      // An edited workspace without a directory follows its focused pane.
-      if (edit) done({ cwd: '', label: label.trim() });
-      return;
-    }
+    const path = typed;
+    // A workspace without a directory follows its focused pane.
+    if (!path) return done({ cwd: '', label: label.trim() });
     try {
       const d = await listDir(req.m, path);
       if (!d.dir.is_dir) throw new Error('not a directory');
-    } catch {
-      setMissing(true);
-      return;
+      done({ cwd: d.dir.path || expandPath(path, home), label: label.trim() });
+    } catch (err) {
+      setCheck({ path, problem: folderProblem(err) ?? 'missing' });
     }
-    done({ cwd: path, label: label.trim() });
   };
 
   return (
@@ -202,7 +230,7 @@ function WorkspaceDialog({ req }: { req: Extract<DialogRequest, { kind: 'workspa
             autoFocus
             spellCheck={false}
             value={cwd}
-            placeholder={edit ? t('editWorkspace.cwdPlaceholder') : undefined}
+            placeholder={t('editWorkspace.cwdPlaceholder')}
             onChange={(e) => setCwd(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'ArrowDown' && dirs.length) {
@@ -231,7 +259,8 @@ function WorkspaceDialog({ req }: { req: Extract<DialogRequest, { kind: 'workspa
             ))}
           </div>
         )}
-        {missing && <div className="error small">{t('newWorkspace.missing')}</div>}
+        {problem && <div className="error small">{t(folderMessage[problem])}</div>}
+        {!problem && resolved && resolved !== typed && <div className="muted small">{t('newWorkspace.resolved', { path: resolved })}</div>}
         <label>
           <span>{t('newWorkspace.label')}</span>
           <input
@@ -246,7 +275,7 @@ function WorkspaceDialog({ req }: { req: Extract<DialogRequest, { kind: 'workspa
       </div>
       <div className="dialog-actions">
         <button onClick={() => done(undefined)}>{t('dialog.cancel')}</button>
-        <button className="primary" onClick={submit}>
+        <button className="primary" disabled={!!problem} onClick={submit}>
           {t(edit ? 'editWorkspace.save' : 'newWorkspace.create')}
         </button>
       </div>

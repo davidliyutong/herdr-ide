@@ -357,7 +357,7 @@ export class TermModel {
       const address = typeof rec.address === 'string' ? rec.address : undefined;
       // The first pane of a workspace without a directory gives it its own.
       const dir = (typeof rec.cwd === 'string' && rec.cwd) || cwd;
-      if (address) this.mutate(m, (l) => (dir ? L.adoptDirectory(place(l, address), address, dir) : place(l, address)));
+      if (address) this.mutate(m, (l) => (dir ? L.adoptDirectory(place(l, address), address, dir, home) : place(l, address)));
       return address;
     });
   }

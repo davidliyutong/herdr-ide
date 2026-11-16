@@ -263,8 +263,11 @@ export const zhCN: Messages = {
   'newWorkspace.cwd': '工作目录',
   'newWorkspace.label': '名称',
   'newWorkspace.labelPlaceholder': '可选',
-  'newWorkspace.hint': '按 Tab 或 ↑↓ 补全机器上的文件夹，按回车创建。',
-  'newWorkspace.missing': '机器上不存在这个文件夹。',
+  'newWorkspace.hint': '按 Tab 或 ↑↓ 补全机器上的文件夹，按回车创建。文件夹可留空：新终端在当前焦点窗格的文件夹中启动。',
+  'newWorkspace.missing': '机器上没有这个文件夹。',
+  'newWorkspace.denied': '你没有权限打开机器上的这个文件夹。',
+  'newWorkspace.notFolder': '这不是文件夹。',
+  'newWorkspace.resolved': '→ {path}',
   'newWorkspace.create': '创建',
 
   'link.openUrl': '⌘/Ctrl+点击打开 {url}',

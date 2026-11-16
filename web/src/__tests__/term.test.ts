@@ -271,6 +271,11 @@ describe('layout', () => {
     expect(layout.workspaces[0].cwd).toBe('/home/u/app');
     layout = splitFocused(layout, 'vertical', 't2');
     expect(adoptDirectory(layout, 't2', '/home/u/lib')).toBe(layout);
+    // The home directory, where a terminal without one starts, is not taken.
+    const bare = openTerminal(createWorkspace(emptyLayout, 'w', ''), 't1');
+    expect(adoptDirectory(bare, 't1', '/home/u/', '/home/u')).toBe(bare);
+    expect(adoptDirectory(bare, 't1', '/home/u', '/home/u').workspaces[0].cwd).toBe('');
+    expect(adoptDirectory(bare, 't1', '/home/u/app', '/home/u').workspaces[0].cwd).toBe('/home/u/app');
     const ws = () => layout.workspaces[0];
     expect(soleLeaf(ws())).toBeNull();
     expect(workspaceTitle(ws(), '/home/u')).toBe('app');

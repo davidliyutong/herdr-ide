@@ -181,11 +181,13 @@ export function focusedLeaf(ws: Workspace): Leaf | null {
  * when key is its first and only pane and it has no directory yet: a
  * workspace is named after the folder its first pane started in. A
  * workspace whose directory the user emptied keeps none: its new terminals
- * start in the focused one's. */
-export function adoptDirectory(layout: Layout, key: string, dir: string): Layout {
+ * start in the focused one's. The machine's home directory (home), where
+ * a terminal without a directory starts, is not adopted: the workspace
+ * stays free of a fixed directory. */
+export function adoptDirectory(layout: Layout, key: string, dir: string, home = ''): Layout {
   const at = locate(layout, key);
   const ws = at && layout.workspaces[at.workspace];
-  if (!ws || ws.cwd || !dir) return layout;
+  if (!ws || ws.cwd || !dir || (home && normFolder(dir) === normFolder(home))) return layout;
   const sole = soleLeaf(ws);
   return sole && paneKey(sole) === key ? withWorkspace(layout, at.workspace, { ...ws, cwd: dir }) : layout;
 }

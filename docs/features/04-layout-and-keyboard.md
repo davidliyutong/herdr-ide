@@ -66,8 +66,7 @@ Non-goals: arbitrary docking of panes; floating panes.
   with a dimmed backdrop; a press on the backdrop closes it. The uploads
   and downloads panels of the status bar have a ×.
 - A new tab starts in its workspace's directory, else (none, or the home
-  directory, which a machine's first workspace takes from its first
-  terminal) in the focused terminal's, so it follows `cd` there; a split
+  directory) in the focused terminal's, so it follows `cd` there; a split
   in the directory of the pane split (a terminal's, a
   VS Code pane's folder, a preview's file's directory), else the
   workspace's (`terminal.run` on the machine's terminal core). A terminal
@@ -112,7 +111,9 @@ Non-goals: arbitrary docking of panes; floating panes.
   pane's (a terminal's current directory, which follows `cd`, or a VS Code
   pane's folder), else its own directory, the one it was created with or
   edited to or, for a workspace created without one, the directory its
-  first terminal started in (`layout.adoptDirectory`), else, for one whose
+  first terminal started in (`layout.adoptDirectory`, which does not take
+  the machine's home directory, where a terminal without a directory
+  starts), else, for one whose
   directory was emptied, its focused pane's. The folder is shown as the last
   component of its directory, `~` for
   the home directory or none, `/` for the root (`layout.workspaceTitle`;
@@ -131,7 +132,18 @@ Non-goals: arbitrary docking of panes; floating panes.
   its key. `+` at the end of the tab bar is **New Tab** in the workspace
   shown; the sidebar's head has **New Workspace…** (a folder with a plus,
   on the machine shown) and **Add Machine…** (a server with a plus), and
-  each machine's list ends with **New Workspace…** on that machine. Rows
+  each machine's list ends with **New Workspace…** on that machine. The
+  New and Edit Workspace dialog has an optional folder (prefilled with the
+  focused terminal's) and a name. The typed folder is listed on the machine
+  250 ms after the last key (`GET /api/m/{id}/list`; the newest input's
+  answer wins): "No such folder on the machine.", "Not a folder." or that
+  the user may not open it appears under the field and disables
+  Create/Save, and a folder that `~`, `~/x` or
+  a relative path resolves differently is shown as `→ /home/u/x`. The
+  workspace stores the absolute path the machine answered with, since the
+  terminal core does not expand `~`. While a check is in flight the button
+  stays enabled and submitting checks again. Left empty, the workspace has
+  no fixed folder: its new terminals start in the focused terminal's. Rows
   of machines and workspaces show a `⋯` button while pointed at, which
   opens their menu; connecting actions (sign in, retry, enable) are text
   buttons in the machine's status, never in place of an icon.
@@ -505,7 +517,7 @@ described in [13](13-settings-and-appearance.md))
   the pane, `cmd+alt+arrows` focus the pane in that direction, `cmd+[` /
   `cmd+]` go back / forward through the panes focused, `cmd+z` undo the
   last close within 5 s, `cmd+n` new workspace (asking for its
-  folder), `cmd+p` go to a workspace, `cmd+ctrl+down` / `cmd+ctrl+up` next /
+  optional folder), `cmd+p` go to a workspace, `cmd+ctrl+down` / `cmd+ctrl+up` next /
   previous workspace, `cmd+shift+a` the agent needing attention, `cmd+,`
   settings, `cmd+b` sidebar, `cmd+j` Open in VS Code
   ([05](05-vscode-panes.md)), `cmd+f` / `cmd+g` / `cmd+shift+g` find,

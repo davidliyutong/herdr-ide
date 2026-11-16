@@ -159,3 +159,27 @@ export function completionParts(value: string): [dir: string, prefix: string] {
   if (i < 0) return [value === '~' ? '~' : '', value === '~' ? '' : value];
   return [value.slice(0, i) || '/', value.slice(i + 1)];
 }
+
+/** A path the way the machine's agent reads it: "~" and "~/x" from home,
+ * a relative path below home, an absolute one as it is (without trailing
+ * slashes). Used when the machine's answer carries no path. */
+export function expandPath(path: string, home: string): string {
+  const p = path.length > 1 ? path.replace(/\/+$/, '') || '/' : path;
+  if (p.startsWith('/')) return p;
+  const h = home.length > 1 ? home.replace(/\/+$/, '') : home;
+  if (p === '~') return h;
+  return `${h === '/' ? '' : h}/${p.startsWith('~/') ? p.slice(2) : p}`;
+}
+
+/** What a failed listing of a typed folder says: the path is not there, it
+ * is not a folder, the user may not read it, or the failure tells nothing
+ * about the path (a lost connection). */
+export function folderProblem(err: unknown): FolderProblem | undefined {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (/not a directory/i.test(msg)) return 'file';
+  if (/permission denied/i.test(msg)) return 'denied';
+  if (/no such file|not exist/i.test(msg)) return 'missing';
+  return undefined;
+}
+
+export type FolderProblem = 'missing' | 'file' | 'denied';

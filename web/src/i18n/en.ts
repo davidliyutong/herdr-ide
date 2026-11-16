@@ -272,8 +272,12 @@ export const en = {
   'newWorkspace.cwd': 'Working directory',
   'newWorkspace.label': 'Name',
   'newWorkspace.labelPlaceholder': 'Optional',
-  'newWorkspace.hint': 'Tab or ↑↓ complete folders on the machine; Enter creates.',
-  'newWorkspace.missing': 'This folder does not exist on the machine.',
+  'newWorkspace.hint':
+    "Tab or ↑↓ complete folders on the machine; Enter creates. The folder is optional: without one, new terminals start in the focused pane's folder.",
+  'newWorkspace.missing': 'No such folder on the machine.',
+  'newWorkspace.denied': 'You may not open this folder on the machine.',
+  'newWorkspace.notFolder': 'Not a folder.',
+  'newWorkspace.resolved': '→ {path}',
   'newWorkspace.create': 'Create',
 
   'link.openUrl': '⌘/Ctrl+click to open {url}',
