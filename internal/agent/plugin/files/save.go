@@ -63,6 +63,10 @@ var (
 		_, err := io.Copy(struct{ io.Writer }{w}, r)
 		return err
 	}
+	// made runs with the name of each file a save or an upload makes for
+	// itself (its staged text once received, a backup once written)
+	// before the agent uses it: tests swap it for a link there.
+	made = func(name string) {}
 )
 
 // links is the number of hard links of a file.
@@ -103,7 +107,7 @@ func (g *guard) put(p string, r io.Reader, w Params, limit int64) (*Entry, error
 	auto := w.Method != MethodReplace
 	inPlace := exists && auto && (links(fi) > 1 || ownedByOther(fi))
 	dir := filepath.Dir(p)
-	var stage *os.File
+	var stage *stagedFile
 	if !inPlace {
 		// Private while the text is written, the file's mode after.
 		perm := fs.FileMode(0o666)
@@ -125,27 +129,21 @@ func (g *guard) put(p string, r io.Reader, w Params, limit int64) (*Entry, error
 			return nil, err
 		}
 	}
-	staged := stage.Name()
-	defer func() {
-		if staged != "" {
-			os.Remove(staged)
-		}
-	}()
+	defer stage.discard()
 	err = receive(stage, r, limit)
 	if err == nil {
 		err = stage.Sync()
 	}
-	if cerr := stage.Close(); err == nil {
-		err = cerr
-	}
 	if err != nil {
 		return nil, err
 	}
+	made(stage.name)
 	if !inPlace && exists {
-		// The group first: a change of group may clear mode bits.
-		if gid := gidOf(fi); gid >= 0 && os.Lchown(staged, -1, gid) != nil && auto {
+		// Through the descriptor, never the name. The group first: a
+		// change of group may clear mode bits.
+		if gid := gidOf(fi); gid >= 0 && stage.Chown(-1, gid) != nil && auto {
 			inPlace = true // the new file cannot have the file's group
-		} else if err := os.Chmod(staged, fi.Mode().Perm()); err != nil {
+		} else if err := stage.Chmod(fi.Mode().Perm()); err != nil {
 			return nil, err
 		}
 	}
@@ -153,30 +151,92 @@ func (g *guard) put(p string, r io.Reader, w Params, limit int64) (*Entry, error
 		return nil, err
 	}
 	if inPlace {
-		if err := g.overwrite(p, staged, fi); err != nil {
+		if err := g.overwrite(p, stage, fi); err != nil {
 			return nil, err
 		}
-	} else {
-		if err := os.Rename(staged, p); err != nil {
+		if fi, err = os.Stat(p); err != nil {
 			return nil, err
 		}
-		staged = ""
+		return entryOf(p, fi), nil
 	}
-	if fi, err = os.Stat(p); err != nil {
+	fi, err = stage.renameTo(p, os.Rename)
+	if errors.Is(err, errSwapped) {
+		now, _ := os.Lstat(p)
+		return nil, conflict(p, now)
+	}
+	if err != nil {
 		return nil, err
 	}
 	return entryOf(p, fi), nil
 }
 
-// overwrite writes the content of src into the file p (as fi, put's stat,
-// found it) in place: p is opened first, without following a link (a file
-// the user may not write is left alone, and one swapped for another file
-// or a link meanwhile is a conflict), then copied from that descriptor to
-// a backup, then truncated, written and synced. When that fails the
-// backup's content is written back and the failure returned; a backup
+// errSwapped is the failure of a rename whose staged file's name no longer
+// names the file the agent wrote, or whose new name names another file
+// right after: someone who may rename entries of the directory swapped
+// them meanwhile.
+var errSwapped = errors.New("replaced by another file meanwhile")
+
+// stagedFile is a file a save or an upload receives its text into, used
+// only through the descriptor the agent created it with: written, given
+// its group and mode, copied from, and renamed only while its name still
+// names that file. A file another user swapped for it by name (one who may
+// rename entries of its directory) is never read, changed or given the
+// target's name, so it cannot make the agent copy one of the user's files
+// into a file they can read, or change the mode of one.
+type stagedFile struct {
+	*os.File
+	name string // its path; "" once renamed
+}
+
+// ours is the file's stat, and whether its name still names it.
+func (s *stagedFile) ours() (fs.FileInfo, bool) {
+	ofi, err := s.Stat()
+	if err != nil || s.name == "" {
+		return ofi, false
+	}
+	lfi, err := os.Lstat(s.name)
+	return ofi, err == nil && os.SameFile(ofi, lfi)
+}
+
+// renameTo gives the file the name to with rename (os.Rename, or one that
+// replaces nothing) while its name still names it, and is its stat there;
+// errSwapped when its name or, right after the rename, to names another
+// file.
+func (s *stagedFile) renameTo(to string, rename func(from, to string) error) (fs.FileInfo, error) {
+	ofi, ok := s.ours()
+	if !ok {
+		return nil, errSwapped
+	}
+	if err := rename(s.name, to); err != nil {
+		return nil, err
+	}
+	s.name = ""
+	lfi, err := os.Lstat(to)
+	if err != nil || !os.SameFile(ofi, lfi) {
+		return nil, errSwapped
+	}
+	return lfi, nil
+}
+
+// discard closes the file and removes it unless it was renamed (only while
+// its name still names it).
+func (s *stagedFile) discard() {
+	if _, ok := s.ours(); ok {
+		os.Remove(s.name)
+	}
+	s.Close()
+}
+
+// overwrite writes the content of src (put's staged text) into the file p
+// (as fi, put's stat, found it) in place: p is opened first, without
+// following a link (a file the user may not write is left alone, and one
+// swapped for another file or a link meanwhile is a conflict), then copied
+// from that descriptor to a backup, then truncated, written from src's
+// descriptor and synced. When that fails the backup's content is written
+// back from the backup's descriptor and the failure returned; a backup
 // that cannot be written back is kept and named in the failure
 // (restore_failed). The backup is removed otherwise.
-func (g *guard) overwrite(p, src string, fi fs.FileInfo) error {
+func (g *guard) overwrite(p string, src *stagedFile, fi fs.FileInfo) error {
 	f, err := os.OpenFile(p, os.O_RDWR|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if errors.Is(err, syscall.ELOOP) {
 		return conflict(p, nil)
@@ -196,8 +256,10 @@ func (g *guard) overwrite(p, src string, fi fs.FileInfo) error {
 	if err != nil {
 		return err
 	}
-	if err := fill(f, src); err != nil {
-		if rerr := fill(f, b.path); rerr != nil {
+	made(b.path)
+	if err := fill(f, src.File); err != nil {
+		if rerr := fill(f, b.File); rerr != nil {
+			b.Close() // kept, with its record
 			if g.env.Logger != nil {
 				g.env.Logger.Printf("files: writing %s failed (%v), restoring it too (%v): its content is in %s", p, err, rerr, b.path)
 			}
@@ -211,45 +273,61 @@ func (g *guard) overwrite(p, src string, fi fs.FileInfo) error {
 	return nil
 }
 
-// fill makes the content of f that of the file src: truncated, written
-// from the start and synced.
-func fill(f *os.File, src string) error {
-	in, err := os.Open(src)
+// fill makes the content of f that of src, read through its descriptor
+// from its start: truncated, written from the start and synced.
+func fill(f, src *os.File) error {
+	sfi, err := src.Stat()
 	if err != nil {
 		return err
 	}
-	defer in.Close()
 	if err := f.Truncate(0); err != nil {
 		return err
 	}
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
-	if err := copyBody(f, in); err != nil {
+	if err := copyBody(f, io.NewSectionReader(src, 0, sfi.Size())); err != nil {
 		return err
 	}
 	return f.Sync()
 }
 
-// backupFile is a copy of a file written in place; link records it in the
-// private directory when it is beside the file.
-type backupFile struct{ path, link string }
+// backupFile is a copy of a file written in place, kept open: its content
+// is written back from this descriptor, never from its name. link records
+// it in the private directory when it is beside the file.
+type backupFile struct {
+	*os.File
+	path, link string
+}
 
+// remove closes the backup and removes it (its name only while that still
+// names the backup) and its record.
 func (b *backupFile) remove() {
-	os.Remove(b.path)
+	if ofi, err := b.Stat(); err == nil {
+		if lfi, err := os.Lstat(b.path); err == nil && os.SameFile(ofi, lfi) {
+			os.Remove(b.path)
+		}
+	}
+	b.Close()
 	if b.link != "" {
 		os.Remove(b.link)
 	}
 }
 
 // backup copies the content of the file p, read from in (0600, synced):
-// beside it when its directory takes files (.<name>.<slug>-backup-<hex>,
-// recorded by a link in the private directory so that one a crash leaves
-// is removed after BackupRetention), else into the private directory.
+// beside it when its directory takes files and nobody else may rename
+// entries there (.<name>.<slug>-backup-<hex>, recorded by a link in the
+// private directory so that one a crash leaves is removed after
+// BackupRetention), else into the private directory.
 func (g *guard) backup(p string, in io.Reader) (*backupFile, error) {
 	name := shortName(filepath.Base(p))
+	dir := filepath.Dir(p)
 	b := &backupFile{}
-	out, err := createNamed(filepath.Dir(p), "."+name+"."+brand.Slug+backupTag, 0o600)
+	var out *os.File
+	err := fs.ErrPermission
+	if !othersMayRename(dir) {
+		out, err = createNamed(dir, "."+name+"."+brand.Slug+backupTag, 0o600)
+	}
 	if errors.Is(err, fs.ErrPermission) {
 		var d string
 		if d, err = g.privateDir(); err == nil {
@@ -266,13 +344,10 @@ func (g *guard) backup(p string, in io.Reader) (*backupFile, error) {
 	if err != nil {
 		return nil, err
 	}
-	b.path = out.Name()
+	b.File, b.path = out, out.Name()
 	_, err = io.Copy(struct{ io.Writer }{out}, in)
 	if err == nil {
 		err = out.Sync()
-	}
-	if cerr := out.Close(); err == nil {
-		err = cerr
 	}
 	if err != nil {
 		b.remove()
@@ -282,9 +357,14 @@ func (g *guard) backup(p string, in io.Reader) (*backupFile, error) {
 }
 
 // stageFile is a file for a text to be written in place: beside the file
-// when its directory takes files, else in the private directory.
-func (g *guard) stageFile(dir string) (*os.File, error) {
-	f, err := createTemp(dir, 0o600)
+// when its directory takes files and nobody else may rename entries
+// there, else in the private directory.
+func (g *guard) stageFile(dir string) (*stagedFile, error) {
+	var f *stagedFile
+	err := fs.ErrPermission
+	if !othersMayRename(dir) {
+		f, err = createTemp(dir, 0o600)
+	}
 	if !errors.Is(err, fs.ErrPermission) {
 		return f, err
 	}
@@ -292,7 +372,29 @@ func (g *guard) stageFile(dir string) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	return createNamed(d, "stage-", 0o600)
+	of, err := createNamed(d, "stage-", 0o600)
+	if err != nil {
+		return nil, err
+	}
+	return &stagedFile{File: of, name: of.Name()}, nil
+}
+
+// othersMayRename reports whether someone but the user and root may rename
+// or remove the entries of the directory dir: it is another user's, or
+// its group or others may write it and it is not sticky. A save in place
+// keeps its staged text and its backup out of such a directory, although
+// it uses them only through their descriptors.
+func othersMayRename(dir string) bool {
+	fi, err := os.Stat(dir)
+	if err != nil {
+		return true
+	}
+	if st, ok := fi.Sys().(*syscall.Stat_t); ok {
+		if uid := int(st.Uid); uid != os.Geteuid() && uid != 0 {
+			return true
+		}
+	}
+	return fi.Mode().Perm()&0o022 != 0 && fi.Mode()&fs.ModeSticky == 0
 }
 
 // privateDir is the agent's directory for what saves keep outside the
@@ -349,8 +451,12 @@ func receive(w io.Writer, r io.Reader, limit int64) error {
 
 // createTemp creates a file for a save in dir (.<slug>-save-<hex>), with
 // perm less the umask.
-func createTemp(dir string, perm fs.FileMode) (*os.File, error) {
-	return createNamed(dir, "."+brand.Slug+"-save-", perm)
+func createTemp(dir string, perm fs.FileMode) (*stagedFile, error) {
+	f, err := createNamed(dir, "."+brand.Slug+"-save-", perm)
+	if err != nil {
+		return nil, err
+	}
+	return &stagedFile{File: f, name: f.Name()}, nil
 }
 
 // createNamed creates a new file in dir named prefix and 8 random hex

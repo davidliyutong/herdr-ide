@@ -9,7 +9,6 @@ import (
 	"io"
 	"io/fs"
 	"net"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -57,41 +56,33 @@ func (g *guard) upload(st net.Conn, p Params) error {
 
 // putNew writes what r holds (at most MaxUpload bytes) into a new file
 // beside p and gives it p's name or, when that is taken, the first free
-// name-1.ext, name-2.ext…, in a rename that replaces nothing. The new file
-// gets what the umask leaves of 0666.
+// name-1.ext, name-2.ext…, in a rename that replaces nothing (of the file
+// it wrote only: one swapped for it by name is a conflict, put's
+// stagedFile). The new file gets what the umask leaves of 0666.
 func putNew(p string, r io.Reader) (*Entry, error) {
 	stage, err := createTemp(filepath.Dir(p), 0o666)
 	if err != nil {
 		io.Copy(io.Discard, r)
 		return nil, err
 	}
-	staged := stage.Name()
-	defer func() {
-		if staged != "" {
-			os.Remove(staged)
-		}
-	}()
+	defer stage.discard()
 	err = receive(stage, r, MaxUpload)
 	if err == nil {
 		err = stage.Sync()
 	}
-	if cerr := stage.Close(); err == nil {
-		err = cerr
-	}
 	if err != nil {
 		return nil, err
 	}
+	made(stage.name)
 	for i := 0; i < 1000; i++ {
 		q := numbered(p, i)
-		err := renameNoReplace(staged, q)
+		fi, err := stage.renameTo(q, renameNoReplace)
 		if errors.Is(err, fs.ErrExist) {
 			continue
 		}
-		if err != nil {
-			return nil, err
+		if errors.Is(err, errSwapped) {
+			return nil, &plugin.Error{Code: "conflict", Err: err}
 		}
-		staged = ""
-		fi, err := os.Stat(q)
 		if err != nil {
 			return nil, err
 		}

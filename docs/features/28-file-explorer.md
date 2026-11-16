@@ -282,10 +282,19 @@ button.
   - The backup (`0600`) goes beside the file
     (`.<name>.herdr-ide-backup-<hex>`), recorded by a link in the agent's
     private `~/.herdr-ide/saves/` (`0700`); in a directory that takes no
-    new file it goes into `saves/` itself, with the text waiting to be
-    written. The agent that starts more than 7 days after a save left
-    them (it ended during the save) removes them, and the backups the
-    links name.
+    new file, or one where someone else may rename entries (another
+    user's, or one its group or others may write that is not sticky), it
+    goes into `saves/` itself, with the text waiting to be written. The
+    agent that starts more than 7 days after a save left them (it ended
+    during the save) removes them, and the backups the links name.
+  - The staged text and the backup are used only through the descriptors
+    the agent created them with: the text is written, given the file's
+    group and mode and copied into the file from its descriptor, the
+    backup written back from its own, and a staged file is renamed only
+    while its name still names it (checked again right after the rename).
+    A file another user swapped in by name (a link to one of the user's
+    secrets) is never read, changed or given the file's name: the save is
+    a `409 conflict` and the file stays as it was.
   - With `files.saveMethod` set to `replace` (for every machine or one)
     every save takes the first way; in a directory the user may not
     write it fails with `denied`.
@@ -466,7 +475,12 @@ the trash stay in the user's trash
   fails keeping and naming it, and `PruneBackups` removing what is older
   than the retention (and the backups beside files its links name, never
   another file); a file swapped for a link or another file after its
-  check is not written through (`TestSaveInPlaceRefusesASwap`).
+  check is not written through (`TestSaveInPlaceRefusesASwap`); a staged
+  text and a backup swapped for links to a secret are never used by name,
+  in place, when the write fails and on the rename path, and for an
+  upload (`TestSaveUsesOnlyItsDescriptors`); a save in place in a
+  directory others may rename entries of keeps them in `saves/`
+  (`TestSaveInPlaceInASharedDirectory`).
 - `internal/plugins/files/files_test.go`: the routes (all but `stat`
   mutating and audited, `stat` a POST), the stat's body and a save's query;
   `TestMutatingRoutesAreGuarded` (`internal/server`) checks them for Origin

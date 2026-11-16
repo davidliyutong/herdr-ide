@@ -3,6 +3,7 @@
 package files
 
 import (
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -217,18 +218,157 @@ func TestSaveInPlaceRefusesASwap(t *testing.T) {
 	write(t, p, "checked")
 	write(t, secret, "secret")
 	write(t, src, "new text")
+	sf, err := os.Open(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sf.Close()
+	stage := &stagedFile{File: sf}
 	fi, _ := os.Stat(p)
 	os.Remove(p)
 	os.Symlink(secret, p)
-	if err := g.overwrite(p, src, fi); err == nil || !strings.Contains(err.Error(), "conflict") || read(t, secret) != "secret" {
+	if err := g.overwrite(p, stage, fi); err == nil || !strings.Contains(err.Error(), "conflict") || read(t, secret) != "secret" {
 		t.Fatalf("through a link: %v %q", err, read(t, secret))
 	}
 	os.Remove(p)
 	write(t, p, "another file")
-	if err := g.overwrite(p, src, fi); err == nil || !strings.Contains(err.Error(), "conflict") || read(t, p) != "another file" {
+	if err := g.overwrite(p, stage, fi); err == nil || !strings.Contains(err.Error(), "conflict") || read(t, p) != "another file" {
 		t.Fatalf("another file: %v", err)
 	}
 	nothingLeft(t, env, env.Home)
+}
+
+// swapping replaces each file a save makes for itself, once made, by a
+// link to secret, as another user who may rename entries of its directory
+// could; it returns the names it swapped.
+func swapping(t *testing.T, secret string) *[]string {
+	t.Helper()
+	var swapped []string
+	old := made
+	t.Cleanup(func() { made = old })
+	made = func(name string) {
+		swapped = append(swapped, name)
+		if err := os.Remove(name); err != nil {
+			t.Error(err)
+		}
+		if err := os.Symlink(secret, name); err != nil {
+			t.Error(err)
+		}
+	}
+	return &swapped
+}
+
+// A staged text and a backup swapped for links to one of the user's files
+// between being made and being used: the save uses neither by name. The
+// file never gets the secret's content and the secret's mode stays, in
+// place (also when the write fails and the backup is written back), on the
+// rename path (refused as a conflict, the file as it was) and for an
+// upload under a free name.
+func TestSaveUsesOnlyItsDescriptors(t *testing.T) {
+	env := testEnv(t)
+	secret := filepath.Join(env.Home, "secret")
+	write(t, secret, "the user's secret")
+	os.Chmod(secret, 0o600)
+	unchanged := func(what string) {
+		t.Helper()
+		if fi, err := os.Lstat(secret); err != nil || fi.Mode() != 0o600 || read(t, secret) != "the user's secret" {
+			t.Fatalf("%s: secret changed: %v %v", what, fi, err)
+		}
+	}
+
+	// In place (another hard link): the text and the backup swapped.
+	p := filepath.Join(env.Home, "f.txt")
+	write(t, p, "the original text")
+	os.Chmod(p, 0o644)
+	if err := os.Link(p, filepath.Join(env.Home, "g.txt")); err != nil {
+		t.Skip("no hard links here:", err)
+	}
+	swapped := swapping(t, secret)
+	result(t, saveText(t, env, Params{Path: p, Expect: loaded(t, p)}, "the new text"))
+	if read(t, p) != "the new text" || len(*swapped) != 2 {
+		t.Fatalf("in place: %q, swapped %q", read(t, p), *swapped)
+	}
+	unchanged("in place")
+
+	// In place, failing: written back from the backup's descriptor.
+	*swapped = nil
+	orig := copyBody
+	defer func() { copyBody = orig }()
+	copyBody = failAfter(1, syscall.ENOSPC)
+	if rep := saveText(t, env, Params{Path: p, Force: true}, "a text that does not fit"); rep.OK || rep.Code != "no_space" {
+		t.Fatalf("reply %+v", rep)
+	}
+	if read(t, p) != "the new text" || len(*swapped) != 2 {
+		t.Fatalf("restored: %q, swapped %q", read(t, p), *swapped)
+	}
+	unchanged("restored")
+	copyBody = orig
+
+	// Renamed: the staged text swapped before its mode is set and it is
+	// renamed over the file.
+	q := filepath.Join(env.Home, "own.txt")
+	write(t, q, "own text")
+	os.Chmod(q, 0o644)
+	*swapped = nil
+	rep := saveText(t, env, Params{Path: q, Expect: loaded(t, q)}, "renamed text")
+	if rep.OK || rep.Code != "conflict" || len(*swapped) != 1 {
+		t.Fatalf("rename: %+v, swapped %q", rep, *swapped)
+	}
+	if fi, err := os.Lstat(q); err != nil || !fi.Mode().IsRegular() || read(t, q) != "own text" {
+		t.Fatalf("rename: the file changed: %v %v", fi, err)
+	}
+	unchanged("rename")
+
+	// An upload under a free name.
+	n := filepath.Join(env.Home, "new.txt")
+	*swapped = nil
+	if rep := uploadText(t, env, Params{Path: n}, "uploaded"); rep.OK || rep.Code != "conflict" || len(*swapped) != 1 {
+		t.Fatalf("upload: %+v, swapped %q", rep, *swapped)
+	}
+	if _, err := os.Lstat(n); err == nil {
+		t.Fatal("upload: the swapped file took the name")
+	}
+	unchanged("upload")
+}
+
+// In a directory where others may rename entries (group or others may
+// write it, not sticky) a save in place stages its text and its backup in
+// the private directory; a sticky one keeps them beside the file.
+func TestSaveInPlaceInASharedDirectory(t *testing.T) {
+	env := testEnv(t)
+	for _, c := range []struct {
+		mode    fs.FileMode
+		private bool
+	}{{0o777, true}, {0o770, true}, {0o777 | fs.ModeSticky, false}, {0o755, false}} {
+		dir := filepath.Join(env.Home, fmt.Sprintf("d%o", c.mode))
+		os.Mkdir(dir, 0o755)
+		if err := os.Chmod(dir, c.mode); err != nil {
+			t.Fatal(err)
+		}
+		if fi, _ := os.Stat(dir); fi.Mode()&(fs.ModePerm|fs.ModeSticky) != c.mode {
+			t.Skipf("mode %v not taken: %v", c.mode, fi.Mode())
+		}
+		p := filepath.Join(dir, "f.txt")
+		write(t, p, "one")
+		if err := os.Link(p, filepath.Join(dir, "g.txt")); err != nil {
+			t.Skip("no hard links here:", err)
+		}
+		var names []string
+		old := made
+		made = func(name string) { names = append(names, name) }
+		result(t, saveText(t, env, Params{Path: p, Expect: loaded(t, p)}, "two"))
+		made = old
+		if read(t, p) != "two" || len(names) != 2 {
+			t.Fatalf("%v: %q %q", c.mode, read(t, p), names)
+		}
+		for _, n := range names {
+			if in := filepath.Dir(n) == filepath.Join(env.Base, savesDir); in != c.private {
+				t.Errorf("%v: %s", c.mode, n)
+			}
+		}
+		nothingLeft(t, env, dir)
+		os.Chmod(dir, 0o755)
+	}
 }
 
 // A backup goes beside the file, recorded by a link in the private
