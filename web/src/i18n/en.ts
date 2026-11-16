@@ -1358,7 +1358,7 @@ export const en = {
   'settings.git.untrackedChanges.separate': 'In a group of their own',
   'settings.git.autoFetch': 'Fetch automatically',
   'settings.git.autoFetch.desc':
-    'Minutes between fetches of every remote while Source Control shows a repository; 0 fetches only when asked.',
+    'Minutes between fetches of every remote while Source Control shows a repository; 0 fetches only when asked. A fetch runs the programs the repository’s configuration names for it (its ssh command, upload-pack, credential helpers), here without a click.',
   'settings.git.autoFetch.unit': 'min',
   'settings.git.confirmSync': 'Confirm pull and push',
   'settings.git.confirmSync.desc': 'Ask before Pull, Push and Synchronize Changes run.',

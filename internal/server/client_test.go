@@ -90,6 +90,31 @@ func TestDesktopCookieNotForwarded(t *testing.T) {
 	if out.Header.Get(ProxySecretHeader) != "" || out.URL.Path != "/static/x.js" {
 		t.Fatalf("forwarded %v %s", out.Header, out.URL)
 	}
+
+	// Nor does code-server's answer reach past VS Code's switch: it may
+	// not widen a service worker's scope (to the UI's pages) nor set the
+	// desktop app's cookie; its other cookies stay.
+	resp := &http.Response{Header: http.Header{
+		"Service-Worker-Allowed": {"/"},
+		"Set-Cookie": {
+			"vscode-tkn=1; Path=/",
+			DesktopCookie + "=planted; Path=/; HttpOnly",
+			" " + DesktopCookie + " =again",
+			DesktopCookie + "-x=kept",
+		},
+	}}
+	if err := s.csProxy.proxy(mc).ModifyResponse(resp); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := resp.Header["Service-Worker-Allowed"]; ok {
+		t.Fatalf("Service-Worker-Allowed passed: %q", resp.Header.Values("Service-Worker-Allowed"))
+	}
+	if got := resp.Header.Values("Set-Cookie"); len(got) != 2 || got[0] != "vscode-tkn=1; Path=/" || got[1] != DesktopCookie+"-x=kept" {
+		t.Fatalf("cookies set %q", got)
+	}
+	if resp.Header.Get("X-Frame-Options") != "SAMEORIGIN" {
+		t.Fatalf("X-Frame-Options %q", resp.Header.Get("X-Frame-Options"))
+	}
 }
 
 // Messages of VS Code's windows reach only the pages for which VS Code is

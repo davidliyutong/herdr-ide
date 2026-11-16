@@ -181,6 +181,24 @@ func TestRedactURL(t *testing.T) {
 		"user:pass@host:o/r.git":                 "host:o/r.git",
 		"/srv/repos/a@b:c":                       "/srv/repos/a@b:c",
 		"https://user:sp%zz@host/invalid-escape": "https://host/invalid-escape",
+		// Tokens in the query or the fragment: both go.
+		"https://host/o/r.git?access_token=ghp_secret": "https://host/o/r.git",
+		"https://host/o/r.git#ghp_secret":              "https://host/o/r.git",
+		"https://ghp_secret@host/r?x=a@b":              "https://host/r",
+		"https://host/r?private_token=a@b#c":           "https://host/r",
+		// A password with a raw '/', '?' or '@'.
+		"https://user:tok/en@host/o/r":                        "https://host/o/r",
+		"https://x-access-token:a/b/c@github.com/o/r.git?x=1": "https://github.com/o/r.git",
+		"https://user:pa?ss@host/r":                           "https://host/r",
+		"https://u:a/b@c@host/p@q":                            "https://host/p@q",
+		"https://me@mail.example:s3cret@host/r":               "https://host/r",
+		// An '@' of the path stays.
+		"https://git.example.com/@scope/pkg.git": "https://git.example.com/@scope/pkg.git",
+		"https://[::1]:8080/p@q":                 "https://[::1]:8080/p@q",
+		"file:///srv/r@x.git":                    "file:///srv/r@x.git",
+		// scp-like: everything before the last '@' when it has a password.
+		"user:p@ss@host:o/r.git": "host:o/r.git",
+		"git@host:o/a@b.git":     "git@host:o/a@b.git",
 	} {
 		if got := redactURL(in); got != want {
 			t.Errorf("%q: %q, want %q", in, got, want)

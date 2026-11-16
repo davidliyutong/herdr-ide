@@ -154,7 +154,7 @@ func dedupeNames(names []string) []string {
 }
 
 // exportMachines are the machines the variables' lists name, with their
-// labels here.
+// labels, kinds and targets here.
 func exportMachines(h plugin.Host, vars []vaultstore.ExportVariable) []vaultstore.ExportMachine {
 	out := []vaultstore.ExportMachine{}
 	var seen []string
@@ -167,6 +167,7 @@ func exportMachines(h plugin.Host, vars []vaultstore.ExportVariable) []vaultstor
 			m := vaultstore.ExportMachine{ID: id, Local: id == machines.LocalID}
 			if mc := machineOf(h, id); mc != nil {
 				m.Label, m.Local = mc.Label(), mc.Local()
+				m.Kind, m.Target = mc.Kind(), mc.Target()
 			}
 			out = append(out, m)
 		}
@@ -182,11 +183,14 @@ func machineOf(h plugin.Host, id string) *machines.Machine {
 }
 
 // mapMachines maps a variable's machines in a file to this core's: "*"
-// stays, a machine is kept by its id (machines added in the UI have
-// random ids, so the same id is the same machine), and the local machine,
-// whose id is the same on every core, only when its label (the host's
-// name) is the same too; labels alone map nothing, as two machines may
-// share one. The others leave the list, so they ask every time.
+// stays; an ssh machine is kept by its id only when the file names it
+// with the same kind and target as the machine of that id here (an id
+// alone need not be the same machine: an --ssh machine's id is its target,
+// and a record imported from herdr's catalog keeps herdr's id), and the
+// local machine, whose id is the same on every core, only when its label
+// (the host's name) is the same too; labels alone map nothing, as two
+// machines may share one. The others leave the list, so they ask every
+// time.
 func mapMachines(h plugin.Host, file []vaultstore.ExportMachine, ms []string) (mapped, unknown []string) {
 	mapped = []string{}
 	for _, id := range ms {
@@ -195,10 +199,14 @@ func mapMachines(h plugin.Host, file []vaultstore.ExportMachine, ms []string) (m
 			continue
 		}
 		mc := machineOf(h, id)
-		ok := mc != nil
-		if ok && mc.Local() {
-			i := slices.IndexFunc(file, func(m vaultstore.ExportMachine) bool { return m.ID == id })
-			ok = i >= 0 && file[i].Label != "" && file[i].Label == mc.Label()
+		i := slices.IndexFunc(file, func(m vaultstore.ExportMachine) bool { return m.ID == id })
+		ok := mc != nil && i >= 0
+		switch {
+		case !ok:
+		case mc.Local():
+			ok = file[i].Label != "" && file[i].Label == mc.Label()
+		default:
+			ok = file[i].Kind == mc.Kind() && file[i].Target != "" && file[i].Target == mc.Target()
 		}
 		if ok {
 			mapped = append(mapped, id)

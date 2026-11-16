@@ -28,6 +28,7 @@ import { useGui } from './gui/state';
 import { bridgeDownload, downloadEvent, resyncDownloads } from './download';
 import { noteFocusedTerminal, sendTarget } from './lib/bridge';
 import { windowFocused } from './codeFrames';
+import { followVSCodeSwitch } from './plugins/vscode/workers';
 import { describeView, pluginMessage, useActivePlugins, usePanels } from './plugins/registry';
 import { RightBar } from './components/RightBar';
 import { PluginBoundary } from './components/PluginBoundary';
@@ -145,6 +146,7 @@ export function App() {
     const offDesktop = initDesktop();
     const offUnload = warnOnUnload();
     const offFolders = takeOpenedFolders();
+    const offWorkers = followVSCodeSwitch();
     fetch('/api/config')
       .then((r) => r.json())
       .then((c) => useStore.setState({ readOnly: !!c.read_only, sshLogin: c.ssh_login !== false }))
@@ -163,6 +165,7 @@ export function App() {
       offDesktop();
       offUnload();
       offFolders();
+      offWorkers();
       window.removeEventListener('keydown', onKey);
     };
   }, []);

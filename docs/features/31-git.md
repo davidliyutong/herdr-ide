@@ -111,7 +111,7 @@ vector the agent builds: no shell, no option from the request.
 
 | Read | What it answers |
 | --- | --- |
-| `repo` | `?path=` a directory: top level, git directories, branch (or detached) and HEAD, upstream with ahead/behind, an operation in progress (`merge`, `rebase`, `cherryPick`, `revert`), remotes with their fetch URLs (`remote -v`) without a URL's user and password (a token is often put there) or an scp-like address's user with a password, enclosing repositories. |
+| `repo` | `?path=` a directory: top level, git directories, branch (or detached) and HEAD, upstream with ahead/behind, an operation in progress (`merge`, `rebase`, `cherryPick`, `revert`), remotes with their fetch URLs (`remote -v`) without a URL's user information (also with a raw `/`, `?`, `#` or `@` in its password), query and fragment (tokens are often put there: `?access_token=`) or an scp-like address's user with a password, enclosing repositories. |
 | `status` | `status --porcelain=v2 -z --branch --untracked-files=all`: files with the index's and the working tree's letters, renames with their old path, conflicts, untracked files; branch, upstream, ahead/behind. A file whose working tree side differs from the index (and an untracked or conflicted one) has that file's modification time and size (`lstat`, nothing read), which move when it is edited again while its letters stay. |
 | `log` | `log --date-order` of the branches, tags and HEAD (with `remotes=1` the remote branches; `branch=` names some instead; on a branch without commits yet, the other branches' commits), pages of 300 (at most 1000, `skip=`): hash, parents, author, e-mail, date, subject; with the first page the refs (`for-each-ref`, tags peeled), the stashes, HEAD and its branch. |
 | `show` | `rev=` a commit's message and committer and its files (status, lines added and deleted, binary) against its parent `parent=` (1 by default; the empty tree for a root commit), or with `rev2=` the files between two commits. |
@@ -179,7 +179,11 @@ the answer through.
   --prune`) that many minutes apart while the panel shows the repository,
   the page is visible, the UI is not read-only and no change runs; quietly
   (a failure says nothing until the user fetches), then the repository is
-  read again.
+  read again. Such a fetch is a change the user did not click: it runs the
+  programs the repository's configuration names for a fetch
+  (`core.sshCommand`, `remote.<name>.uploadpack`, credential helpers), as
+  a fetch from the menu does, which is why it is off by default and the
+  setting's description says so.
 - The branch is a button that opens the branch picker (`pickers.tsx`, the
   shared searchable list, `pick`): Create Branch…, Create Branch From… and
   Check Out Detached… first, then the local branches (the current one
@@ -404,7 +408,8 @@ Code's preview editor does, so going through the changes keeps one pane):
 - `git.untrackedChanges`: untracked files among the changes (`mixed`) or
   in a group of their own (`separate`).
 - `git.autoFetch`: minutes between automatic fetches while the panel
-  shows a repository (0, the default: never).
+  shows a repository (0, the default: never); each runs the programs the
+  repository's configuration names for a fetch, without a click.
 - `git.confirmSync`: ask before Pull, Push and the sync button (off by
   default).
 - `git.graphPageSize`: the commits a page of the graph reads (50–1000,
@@ -510,7 +515,10 @@ terminal; what the plugin adds is a way to reach it from the browser:
   nothing (`GIT_OPTIONAL_LOCKS=0`) and run no file system monitor, textconv
   driver or maintenance from the repository's configuration; its clean
   filters, like a shell prompt's `git status`, still run (also for a
-  read-only viewer).
+  read-only viewer). With `git.autoFetch` above 0 (off by default, never
+  in read-only mode) the panel fetches on its own while it shows a
+  repository, which runs the programs the repository's configuration
+  names for a fetch without a click.
 - The working tree's files are read inside the repository only: a
   directory link out of it is not followed, the file is opened without
   following a link or blocking on a FIFO.
@@ -537,7 +545,8 @@ terminal; what the plugin adds is a way to reach it from the browser:
   commit and `stale` after the list changed, cherry-pick, revert, merge,
   reset, rebase); thousands of paths over several runs (`TestPathRuns`,
   `TestManyPaths`); push, fetch and pull with a bare repository and a
-  second remote (its URL without the token, `TestRedactURL`; pushed with
+  second remote (its URL without the token, also one in the query or
+  after a raw `/` in the password, `TestRedactURL`; pushed with
   its upstream set, a branch of it pulled by name), a pull of
   diverged branches (`diverged`, then rebased by `pull.rebase`); a remote
   that asks for a password (`auth_required`); timeouts and output limits

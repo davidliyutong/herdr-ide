@@ -1318,7 +1318,8 @@ export const zhCN: Messages = {
   'settings.git.untrackedChanges.mixed': '与更改放在一起',
   'settings.git.untrackedChanges.separate': '单独成组',
   'settings.git.autoFetch': '自动抓取',
-  'settings.git.autoFetch.desc': '源代码管理显示仓库时，每隔多少分钟抓取一次所有远程；为 0 时只在手动操作时抓取。',
+  'settings.git.autoFetch.desc':
+    '源代码管理显示仓库时，每隔多少分钟抓取一次所有远程；为 0 时只在手动操作时抓取。抓取会运行仓库配置为其指定的程序（ssh 命令、upload-pack、凭据助手），自动抓取时无需点击即会运行。',
   'settings.git.autoFetch.unit': '分钟',
   'settings.git.confirmSync': '拉取和推送前确认',
   'settings.git.confirmSync.desc': '执行拉取、推送和同步更改前先询问。',

@@ -80,7 +80,19 @@ func Serve(ctx context.Context, conn io.ReadWriteCloser, opts Options) error {
 	// private even if it already existed with looser permissions.
 	_ = os.Chmod(base, 0o700)
 	_ = os.Chmod(runDir, 0o700)
-	go housekeeping(base, logger)
+	// What the agent runs (requests, its sockets, housekeeping) is waited
+	// for when the session ends, at most handlerDrain, so it is done (a
+	// save or an upload removed what it staged, a socket was removed)
+	// before the process may exit.
+	var running sync.WaitGroup
+	spawn := func(f func()) {
+		running.Add(1)
+		go func() {
+			defer running.Done()
+			f()
+		}()
+	}
+	spawn(func() { housekeeping(base, logger) })
 
 	sess, err := yamux.Server(conn, agentproto.YamuxConfig(logger))
 	if err != nil {
@@ -105,19 +117,46 @@ func Serve(ctx context.Context, conn io.ReadWriteCloser, opts Options) error {
 		<-ctx.Done()
 		sess.Close()
 	}()
-	go a.serveBridge(ctx)
-	go a.serveVault(ctx)
-	go a.linkMCP()
+	spawn(func() { a.serveBridge(ctx) })
+	spawn(func() { a.serveVault(ctx) })
+	spawn(a.linkMCP)
 
 	for {
 		st, err := sess.AcceptStream()
 		if err != nil {
-			if errors.Is(err, io.EOF) || sess.IsClosed() {
+			ended := errors.Is(err, io.EOF) || sess.IsClosed()
+			// The requests still running fail with their streams, the
+			// sockets close with the context.
+			cancel()
+			sess.Close()
+			waitAtMost(&running, handlerDrain)
+			if ended {
 				return nil
 			}
 			return err
 		}
-		go a.handle(ctx, st)
+		spawn(func() { a.handle(ctx, st) })
+	}
+}
+
+// handlerDrain is how long Serve waits, once its session ended, for what
+// it runs (requests, its sockets, housekeeping) to end.
+const handlerDrain = 5 * time.Second
+
+// waitAtMost waits for wg at most d, and reports whether it ended.
+func waitAtMost(wg *sync.WaitGroup, d time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-done:
+		return true
+	case <-t.C:
+		return false
 	}
 }
 

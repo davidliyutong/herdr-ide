@@ -385,17 +385,30 @@ func (s *Server) handleBridge(w http.ResponseWriter, r *http.Request) {
 	delete(body, "folder")
 	delete(body, "window")
 	delete(body, "fresh")
+	// Turning VS Code off for this client ends the command too, and
+	// bringing code-server up when it is off for every client; the switch
+	// is checked again once the command follows them (workFor), as it may
+	// have been turned off since withPlugin.
+	client := s.clientOf(r)
+	work := s.csProxy.workFor(client, true)
+	if work == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "plugin_disabled"})
+		return
+	}
 	s.audit.log(r, "bridge.command", map[string]any{"machine": mc.ID(), "cmd": body["cmd"], "folder": t.folder})
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
 	defer cancel()
-	// Turning VS Code off for this client ends the command too, and
-	// bringing code-server up when it is off for every client.
-	defer context.AfterFunc(s.csProxy.workContext(s.clientOf(r)), cancel)()
+	defer context.AfterFunc(work, cancel)()
 	// Bring code-server up if no VS Code pane has been shown yet.
 	if !s.cs.Ready(mc) {
+		preparing := s.csProxy.workFor(client, false)
+		if preparing == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "plugin_disabled"})
+			return
+		}
 		prep, stop := context.WithCancel(ctx)
 		defer stop()
-		defer context.AfterFunc(s.csProxy.workContext(prepare), stop)()
+		defer context.AfterFunc(preparing, stop)()
 		if err := s.cs.Ensure(prep, mc); err != nil {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
 			return

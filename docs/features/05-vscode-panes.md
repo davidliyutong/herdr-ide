@@ -67,7 +67,14 @@ VS Code windows open in other browsers, and the bridge's commands it sent
 end; once both are off, a code-server preparation under way ends too (an
 upload's stream is closed, a machine's download stops), so code-server
 stops after `--code-server-idle` without connections
-(`TestVSCodeOffEndsItsWork`).
+(`TestVSCodeOffEndsItsWork`). A request checks its client's switch again
+once it took the context its work follows, so one that passed the
+route's check just before the switch went off starts nothing that
+outlives it (`TestVSCodeWorkTakenOnlyWhileOn`). While VS Code is off for
+its kind of client the page unregisters every service worker of the
+UI's origin (the UI registers none; code-server and its webviews do), so
+nothing VS Code's content left keeps running there
+(`web/src/plugins/vscode/workers.ts`).
 
 **Provisioning** (`internal/codeserver`, agent `codeserver.go`)
 
@@ -305,7 +312,12 @@ cost of a second host name or port in every deployment.
 
 The socket directory is 0700 and the socket 0600; `--auth none` is safe only
 because nothing else can connect. The proxy strips the proxy-secret header
-and the desktop app's cookie and adds `X-Frame-Options: SAMEORIGIN`.
+and the desktop app's cookie and adds `X-Frame-Options: SAMEORIGIN`. From
+code-server's answers it drops `Service-Worker-Allowed` (code-server
+allows `/` for its service worker, whose scope would then take in the
+UI's own pages and outlast VS Code's switch; a worker now stays below its
+script's path, and code-server's own PWA worker is not registered) and
+every `Set-Cookie` that names the desktop app's cookie.
 Read-only mode refuses VS Code.
 Window ids are random per extension host and broadcast to every page; a
 command naming one goes through the same guarded, audited
@@ -325,10 +337,14 @@ VS Code's "open in browser" links for forwarded ports therefore do not work.
 - The switches: `internal/server/plugins_test.go`
   (`TestCodeRoutesFollowTheirClientsSwitch`: every route of VS Code per
   client and token, `TestVSCodeOffEndsItsWork`,
+  `TestVSCodeWorkTakenOnlyWhileOn`,
   `TestVSCodeSettingOfEarlierVersions`: a settings file with only
   `plugins.vscode.enabled` loads as the desktop app's switch),
   `internal/server/client_test.go` (the client reported, the cookie kept
-  from code-server, bridge messages per switch),
+  from code-server, and code-server's `Service-Worker-Allowed` and
+  `Set-Cookie` of that cookie dropped, bridge messages per switch),
+  `web/src/__tests__/vscodeWorkers.test.ts` (service workers unregistered
+  while VS Code is off for the page's client),
   `web/src/__tests__/vscodeRisk.test.ts` (off by default; the risk dialog
   in a browser, Enable only once ticked, Cancel changing nothing, none in
   the desktop app or when turning off; each page following its client's

@@ -154,6 +154,13 @@ func (m *Machine) Label() string {
 // Local reports whether this is the machine the core runs on.
 func (m *Machine) Local() bool { return m.spec.Kind == KindLocal }
 
+// Kind returns the machine's kind (KindLocal, KindSSH).
+func (m *Machine) Kind() string { return m.spec.Kind }
+
+// Target returns an ssh machine's target as configured ("" for the local
+// machine).
+func (m *Machine) Target() string { return m.spec.Target }
+
 // StreamHandler handles streams opened by the agent (VS Code bridge).
 type StreamHandler func(m *Machine, conn net.Conn, h agentproto.Header)
 

@@ -139,7 +139,8 @@ reaches only sockets there ([02](02-multi-machine-transport.md)).
   other way round, a wrong or cut token, a core without one and no cookie
   taken as a browser (`TestCodeRoutesFollowTheirClientsSwitch`), the
   client reported to the page (`TestClientReported`), the cookie kept from
-  code-server (`TestDesktopCookieNotForwarded`), bridge messages only to
+  code-server and code-server's `Service-Worker-Allowed` and `Set-Cookie`
+  of it dropped (`TestDesktopCookieNotForwarded`), bridge messages only to
   pages whose switch is on (`TestBridgeMessagesFollowTheClientsSwitch`),
   each switch ending its client's connections
   (`TestVSCodeOffEndsItsWork`); `cmd/herdr-ide/parent_test.go`: the

@@ -62,6 +62,13 @@ type ExportMachine struct {
 	Label string `json:"label,omitempty"`
 	// Local: the core's own computer (whose id is the same on every core).
 	Local bool `json:"local,omitempty"`
+	// Kind and Target are the machine's kind and, for an ssh machine, its
+	// target on the exporting core: an import maps the id only to a
+	// machine of the same kind and target, as an id need not name the same
+	// machine on another core (an --ssh machine's id is its target).
+	// Files written before they were recorded map no ssh machine.
+	Kind   string `json:"kind,omitempty"`
+	Target string `json:"target,omitempty"`
 }
 
 // ExportVariable is a variable of an export file.

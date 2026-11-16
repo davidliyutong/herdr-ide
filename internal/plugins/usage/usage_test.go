@@ -22,9 +22,10 @@ import (
 )
 
 type fakeHost struct {
-	st   *settings.Store
-	mu   sync.Mutex
-	sent []any
+	st       *settings.Store
+	mu       sync.Mutex
+	sent     []any
+	readOnly bool
 }
 
 func (h *fakeHost) Machines() *machines.Manager { return nil }
@@ -34,7 +35,7 @@ func (h *fakeHost) Broadcast(id, m string, data any) {
 	h.mu.Unlock()
 }
 func (h *fakeHost) Audit(*http.Request, string, map[string]any) {}
-func (h *fakeHost) ReadOnly() bool                              { return false }
+func (h *fakeHost) ReadOnly() bool                              { return h.readOnly }
 func (h *fakeHost) Settings() *settings.Store                   { return h.st }
 func (h *fakeHost) Logger() *log.Logger                         { return log.New(io.Discard, "", 0) }
 
@@ -395,6 +396,20 @@ func TestSettings(t *testing.T) {
 	o := p.options()
 	if slices.Contains(o.Providers, "deepseek") || len(o.Providers) != 5 || o.ClaudeKeychain || o.KimiRefresh || !slices.Equal(o.CodexHomes, []string{"~/work-codex"}) {
 		t.Errorf("options %+v", o)
+	}
+	// A read-only core never has Kimi Code's sign-in renewed (it rewrites
+	// the credentials file on the machine), whatever the setting.
+	st.Set(SettingKimiRefresh, "", true)
+	if o := p.options(); !o.KimiRefresh {
+		t.Errorf("writable core: %+v", o)
+	}
+	p.host = &fakeHost{st: st, readOnly: true}
+	if o := p.options(); o.KimiRefresh || len(o.Providers) != 5 {
+		t.Errorf("read-only core: %+v", o)
+	}
+	p.host = &fakeHost{readOnly: true}
+	if o := p.options(); o.KimiRefresh || !o.ClaudeKeychain {
+		t.Errorf("read-only core without settings: %+v", o)
 	}
 }
 

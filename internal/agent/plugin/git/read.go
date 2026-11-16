@@ -192,28 +192,71 @@ func remoteURLs(out string) map[string]string {
 	return urls
 }
 
-// redactURL drops a URL's user information (https://user:token@host/…:
-// tokens are often put there), and of the scp-like form (user@host:path)
-// a user with a password.
+// redactURL drops what of a remote's URL may hold a token: a URL's user
+// information (https://user:token@host/…), also one whose password holds
+// a raw '/', '?' or '#' or '@', and its query and fragment
+// (?access_token=…); of the scp-like form (user@host:path) a user with a
+// password.
 func redactURL(s string) string {
 	if i := strings.Index(s, "://"); i > 0 {
-		rest := s[i+3:]
-		authority := rest
-		if j := strings.IndexByte(rest, '/'); j >= 0 {
-			authority = rest[:j]
+		head, rest := s[:i+3], s[i+3:]
+		if at := strings.IndexByte(rest, '@'); at >= 0 {
+			// The authority as a URL parser reads it ends at the first of
+			// "/?#"; an '@' past it is the path's only when what comes
+			// before is a host. Otherwise the user information ends at
+			// the last '@' before the end of the part the first '@' is in.
+			auth := rest
+			if j := strings.IndexAny(rest, "/?#"); j >= 0 {
+				auth = rest[:j]
+			}
+			if at < len(auth) || !hostPort(auth) {
+				end := len(rest)
+				if j := strings.IndexAny(rest[at:], "/?#"); j >= 0 {
+					end = at + j
+				}
+				rest = rest[strings.LastIndexByte(rest[:end], '@')+1:]
+			}
 		}
-		if at := strings.LastIndexByte(authority, '@'); at >= 0 {
-			return s[:i+3] + rest[at+1:]
+		if j := strings.IndexAny(rest, "?#"); j >= 0 {
+			rest = rest[:j]
 		}
-		return s
+		return head + rest
 	}
-	if at := strings.Index(s, "@"); at > 0 {
-		user := s[:at]
-		if !strings.ContainsAny(user, "/") && strings.Contains(user, ":") {
-			return s[at+1:]
-		}
+	host := s
+	if j := strings.IndexByte(s, '/'); j >= 0 {
+		host = s[:j]
+	}
+	if at := strings.LastIndexByte(host, '@'); at > 0 && strings.Contains(s[:at], ":") {
+		return s[at+1:]
 	}
 	return s
+}
+
+// hostPort reports whether s reads as a URL's host with an optional port
+// (empty, as file:///, included): a name of letters, digits, '-', '.' and
+// percent escapes, or a bracketed IPv6 literal.
+func hostPort(s string) bool {
+	if strings.HasPrefix(s, "[") {
+		j := strings.IndexByte(s, ']')
+		if j < 0 {
+			return false
+		}
+		s = "h" + s[j+1:]
+	}
+	host, port, hasPort := strings.Cut(s, ":")
+	if hasPort {
+		for _, c := range port {
+			if c < '0' || c > '9' {
+				return false
+			}
+		}
+	}
+	for _, c := range host {
+		if !(c == '-' || c == '.' || c == '%' || '0' <= c && c <= '9' || 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || c > 0x7f) {
+			return false
+		}
+	}
+	return true
 }
 
 // progress is the operation in progress in a git directory.

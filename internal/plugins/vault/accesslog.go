@@ -278,8 +278,12 @@ func (l *accessLog) write(rec Access, durable bool) error {
 		if err := os.MkdirAll(filepath.Dir(l.path), 0o700); err != nil {
 			return err
 		}
-		f, err := os.OpenFile(l.path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
+		f, err := os.OpenFile(l.path, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o600)
 		if err != nil {
+			return err
+		}
+		if err := endLine(f); err != nil {
+			f.Close()
 			return err
 		}
 		l.f = f
@@ -288,7 +292,14 @@ func (l *accessLog) write(rec Access, durable bool) error {
 	if err != nil {
 		return err
 	}
-	if _, err := l.f.Write(append(b, '\n')); err != nil {
+	size, serr := l.f.Seek(0, io.SeekEnd)
+	if _, err := writeLog(l.f, append(b, '\n')); err != nil {
+		// What part of the line went is cut, so the next record starts a
+		// line of its own and is read back (else the reopening ends the
+		// line: endLine).
+		if serr == nil {
+			l.f.Truncate(size)
+		}
 		l.f.Close()
 		l.f = nil
 		return err
@@ -298,6 +309,30 @@ func (l *accessLog) write(rec Access, durable bool) error {
 		return l.f.Sync()
 	}
 	return nil
+}
+
+// writeLog writes a record's line into the log's file (tests make it
+// fail partway).
+var writeLog = func(f *os.File, b []byte) (int, error) { return f.Write(b) }
+
+// endLine ends the last line of the log's file f (opened to append) when
+// it does not end with a newline: one a crash or a failed write left half
+// written, which would otherwise take in the next record, so that record
+// would be lost when the file is read back (the half line is skipped).
+func endLine(f *os.File) error {
+	st, err := f.Stat()
+	if err != nil || st.Size() == 0 {
+		return err
+	}
+	last := make([]byte, 1)
+	if _, err := f.ReadAt(last, st.Size()-1); err != nil {
+		return err
+	}
+	if last[0] == '\n' {
+		return nil
+	}
+	_, err = f.Write([]byte{'\n'})
+	return err
 }
 
 // compact writes the file again with the records kept (atomically: the

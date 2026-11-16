@@ -3,6 +3,7 @@
 package files
 
 import (
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"herdr-ide/internal/agent/plugin"
+	"herdr-ide/internal/brand"
 )
 
 func inode(t *testing.T, p string) uint64 {
@@ -217,23 +219,163 @@ func TestSaveInPlaceRefusesASwap(t *testing.T) {
 	write(t, p, "checked")
 	write(t, secret, "secret")
 	write(t, src, "new text")
+	sf, err := os.Open(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sf.Close()
+	stage := &stagedFile{File: sf}
 	fi, _ := os.Stat(p)
 	os.Remove(p)
 	os.Symlink(secret, p)
-	if err := g.overwrite(p, src, fi); err == nil || !strings.Contains(err.Error(), "conflict") || read(t, secret) != "secret" {
+	if err := g.overwrite(p, stage, fi); err == nil || !strings.Contains(err.Error(), "conflict") || read(t, secret) != "secret" {
 		t.Fatalf("through a link: %v %q", err, read(t, secret))
 	}
 	os.Remove(p)
 	write(t, p, "another file")
-	if err := g.overwrite(p, src, fi); err == nil || !strings.Contains(err.Error(), "conflict") || read(t, p) != "another file" {
+	if err := g.overwrite(p, stage, fi); err == nil || !strings.Contains(err.Error(), "conflict") || read(t, p) != "another file" {
 		t.Fatalf("another file: %v", err)
 	}
 	nothingLeft(t, env, env.Home)
 }
 
-// A backup goes beside the file, recorded by a link in the private
-// directory; PruneBackups removes those older than BackupRetention (and
-// the backups their links name), never a file that is not a backup.
+// swapping replaces each file a save makes for itself, once made, by a
+// link to secret, as another user who may rename entries of its directory
+// could; it returns the names it swapped.
+func swapping(t *testing.T, secret string) *[]string {
+	t.Helper()
+	var swapped []string
+	old := made
+	t.Cleanup(func() { made = old })
+	made = func(name string) {
+		swapped = append(swapped, name)
+		if err := os.Remove(name); err != nil {
+			t.Error(err)
+		}
+		if err := os.Symlink(secret, name); err != nil {
+			t.Error(err)
+		}
+	}
+	return &swapped
+}
+
+// A staged text and a backup swapped for links to one of the user's files
+// between being made and being used: the save uses neither by name. The
+// file never gets the secret's content and the secret's mode stays, in
+// place (also when the write fails and the backup is written back), on the
+// rename path (refused as a conflict, the file as it was) and for an
+// upload under a free name.
+func TestSaveUsesOnlyItsDescriptors(t *testing.T) {
+	env := testEnv(t)
+	secret := filepath.Join(env.Home, "secret")
+	write(t, secret, "the user's secret")
+	os.Chmod(secret, 0o600)
+	unchanged := func(what string) {
+		t.Helper()
+		if fi, err := os.Lstat(secret); err != nil || fi.Mode() != 0o600 || read(t, secret) != "the user's secret" {
+			t.Fatalf("%s: secret changed: %v %v", what, fi, err)
+		}
+	}
+
+	// In place (another hard link): the text and the backup swapped.
+	p := filepath.Join(env.Home, "f.txt")
+	write(t, p, "the original text")
+	os.Chmod(p, 0o644)
+	if err := os.Link(p, filepath.Join(env.Home, "g.txt")); err != nil {
+		t.Skip("no hard links here:", err)
+	}
+	swapped := swapping(t, secret)
+	result(t, saveText(t, env, Params{Path: p, Expect: loaded(t, p)}, "the new text"))
+	if read(t, p) != "the new text" || len(*swapped) != 2 {
+		t.Fatalf("in place: %q, swapped %q", read(t, p), *swapped)
+	}
+	unchanged("in place")
+
+	// In place, failing: written back from the backup's descriptor.
+	*swapped = nil
+	orig := copyBody
+	defer func() { copyBody = orig }()
+	copyBody = failAfter(1, syscall.ENOSPC)
+	if rep := saveText(t, env, Params{Path: p, Force: true}, "a text that does not fit"); rep.OK || rep.Code != "no_space" {
+		t.Fatalf("reply %+v", rep)
+	}
+	if read(t, p) != "the new text" || len(*swapped) != 2 {
+		t.Fatalf("restored: %q, swapped %q", read(t, p), *swapped)
+	}
+	unchanged("restored")
+	copyBody = orig
+
+	// Renamed: the staged text swapped before its mode is set and it is
+	// renamed over the file.
+	q := filepath.Join(env.Home, "own.txt")
+	write(t, q, "own text")
+	os.Chmod(q, 0o644)
+	*swapped = nil
+	rep := saveText(t, env, Params{Path: q, Expect: loaded(t, q)}, "renamed text")
+	if rep.OK || rep.Code != "conflict" || len(*swapped) != 1 {
+		t.Fatalf("rename: %+v, swapped %q", rep, *swapped)
+	}
+	if fi, err := os.Lstat(q); err != nil || !fi.Mode().IsRegular() || read(t, q) != "own text" {
+		t.Fatalf("rename: the file changed: %v %v", fi, err)
+	}
+	unchanged("rename")
+
+	// An upload under a free name.
+	n := filepath.Join(env.Home, "new.txt")
+	*swapped = nil
+	if rep := uploadText(t, env, Params{Path: n}, "uploaded"); rep.OK || rep.Code != "conflict" || len(*swapped) != 1 {
+		t.Fatalf("upload: %+v, swapped %q", rep, *swapped)
+	}
+	if _, err := os.Lstat(n); err == nil {
+		t.Fatal("upload: the swapped file took the name")
+	}
+	unchanged("upload")
+}
+
+// In a directory where others may rename entries (group or others may
+// write it, not sticky) a save in place stages its text and its backup in
+// the private directory; a sticky one keeps them beside the file.
+func TestSaveInPlaceInASharedDirectory(t *testing.T) {
+	env := testEnv(t)
+	for _, c := range []struct {
+		mode    fs.FileMode
+		private bool
+	}{{0o777, true}, {0o770, true}, {0o777 | fs.ModeSticky, false}, {0o755, false}} {
+		dir := filepath.Join(env.Home, fmt.Sprintf("d%o", c.mode))
+		os.Mkdir(dir, 0o755)
+		if err := os.Chmod(dir, c.mode); err != nil {
+			t.Fatal(err)
+		}
+		if fi, _ := os.Stat(dir); fi.Mode()&(fs.ModePerm|fs.ModeSticky) != c.mode {
+			t.Skipf("mode %v not taken: %v", c.mode, fi.Mode())
+		}
+		p := filepath.Join(dir, "f.txt")
+		write(t, p, "one")
+		if err := os.Link(p, filepath.Join(dir, "g.txt")); err != nil {
+			t.Skip("no hard links here:", err)
+		}
+		var names []string
+		old := made
+		made = func(name string) { names = append(names, name) }
+		result(t, saveText(t, env, Params{Path: p, Expect: loaded(t, p)}, "two"))
+		made = old
+		if read(t, p) != "two" || len(names) != 2 {
+			t.Fatalf("%v: %q %q", c.mode, read(t, p), names)
+		}
+		for _, n := range names {
+			if in := filepath.Dir(n) == filepath.Join(env.Base, savesDir); in != c.private {
+				t.Errorf("%v: %s", c.mode, n)
+			}
+		}
+		nothingLeft(t, env, dir)
+		os.Chmod(dir, 0o755)
+	}
+}
+
+// A backup and a staged text go beside the file, recorded by links in the
+// private directory; PruneBackups removes those older than BackupRetention
+// (and the files their links name, when those are old too), never a file
+// whose name is not a backup's or a staged text's, nor a link they name.
 func TestPruneBackups(t *testing.T) {
 	env := testEnv(t)
 	g := &guard{env: env}
@@ -246,23 +388,51 @@ func TestPruneBackups(t *testing.T) {
 	if filepath.Dir(b.path) != env.Home || !isBackup(filepath.Base(b.path)) || read(t, b.path) != "content" || b.link == "" {
 		t.Fatalf("backup %+v", b)
 	}
+	b.Close()
 	if fi, _ := os.Stat(b.path); fi.Mode().Perm() != 0o600 {
 		t.Fatalf("backup's mode %v", fi.Mode())
 	}
+	// A staged text an upload left (the agent was killed during it).
+	s, err := g.createTemp(env.Home, 0o666)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	if !isStaged(filepath.Base(s.name)) || s.link == "" {
+		t.Fatalf("staged %+v", s)
+	}
+	if l, err := os.Readlink(s.link); err != nil || l != s.name {
+		t.Fatalf("record %q %v", l, err)
+	}
+	// One whose upload still runs: its record is old, the file is not.
+	busy, err := g.createTemp(env.Home, 0o666)
+	if err != nil {
+		t.Fatal(err)
+	}
+	busy.Close()
 	d := filepath.Join(env.Base, savesDir)
 	stale := filepath.Join(d, "stage-0000abcd")
 	write(t, stale, "x")
 	fresh := filepath.Join(d, "backup-new-0000abcd")
 	write(t, fresh, "y")
-	// A link to a file that is no backup: only the link goes.
+	// Links to files that are no backups or staged texts, or to a link
+	// named as one: only the links go.
 	notBackup := filepath.Join(env.Home, "keep.txt")
 	write(t, notBackup, "z")
-	odd := filepath.Join(d, "backup-0000abcd.link")
-	os.Symlink(notBackup, odd)
+	nearly := filepath.Join(env.Home, "."+brand.Slug+stageTag+"0000abcd.txt")
+	write(t, nearly, "z")
+	linked := filepath.Join(env.Home, "."+brand.Slug+stageTag+"0000abce")
+	os.Symlink(notBackup, linked)
+	var odd []string
+	for i, target := range []string{notBackup, nearly, linked} {
+		l := filepath.Join(d, fmt.Sprintf("save-0000abc%d.link", i))
+		os.Symlink(target, l)
+		odd = append(odd, l)
+	}
 
 	old := time.Now().Add(-BackupRetention - time.Hour)
 	tv := []unix.Timeval{unix.NsecToTimeval(old.UnixNano()), unix.NsecToTimeval(old.UnixNano())}
-	for _, q := range []string{b.link, odd} {
+	for _, q := range append([]string{b.link, b.path, s.link, s.name, busy.link, nearly, linked}, odd...) {
 		if err := unix.Lutimes(q, tv); err != nil {
 			t.Fatal(err)
 		}
@@ -270,14 +440,33 @@ func TestPruneBackups(t *testing.T) {
 	os.Chtimes(stale, old, old)
 
 	PruneBackups(env.Base, time.Now())
-	for _, gone := range []string{b.path, b.link, stale, odd} {
+	for _, gone := range append([]string{b.path, b.link, s.name, s.link, busy.link, stale}, odd...) {
 		if _, err := os.Lstat(gone); err == nil {
 			t.Errorf("%s not removed", gone)
 		}
 	}
-	for _, kept := range []string{fresh, notBackup, p} {
+	for _, kept := range []string{fresh, notBackup, nearly, linked, busy.name, p} {
 		if _, err := os.Lstat(kept); err != nil {
 			t.Errorf("%s removed", kept)
+		}
+	}
+}
+
+// Names PruneBackups takes beside files.
+func TestBackupAndStagedNames(t *testing.T) {
+	for name, want := range map[string][2]bool{
+		".f.txt." + brand.Slug + backupTag + "0123abcd":  {true, false},
+		".f.txt." + brand.Slug + backupTag + "0123abcd~": {false, false},
+		"f.txt." + brand.Slug + backupTag + "0123abcd":   {false, false},
+		".f.txt." + brand.Slug + backupTag + "0123ABCD":  {false, false},
+		"." + brand.Slug + stageTag + "0123abcd":         {false, true},
+		"." + brand.Slug + stageTag + "0123abc":          {false, false},
+		"." + brand.Slug + stageTag + "0123abcd.txt":     {false, false},
+		"x." + brand.Slug + stageTag + "0123abcd":        {false, false},
+		"." + brand.Slug + stageTag + "0123abcd" + "0":   {false, false},
+	} {
+		if got := [2]bool{isBackup(name), isStaged(name)}; got != want {
+			t.Errorf("%s: %v, want %v", name, got, want)
 		}
 	}
 }
