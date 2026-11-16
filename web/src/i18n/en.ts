@@ -733,11 +733,32 @@ export const en = {
   'plugins.retry': 'Try Again',
   'plugins.vscode.title': 'VS Code',
   'plugins.vscode.description': 'VS Code (code-server) in panes, for a folder of any machine: its editor, its changes and Git Graph.',
-  'settings.plugins.vscode.enabled': 'VS Code',
+  'settings.plugins.vscode.enabled': 'VS Code in the desktop app',
   'settings.plugins.vscode.enabled.desc':
-    'VS Code windows in panes (code-server, fetched and started on a machine when first opened there). Off, nothing offers VS Code and its panes wait until it is on again.',
+    'VS Code windows in panes in the desktop app (code-server, fetched and started on a machine when first opened there). Browsers have a switch of their own. Off, nothing offers VS Code and its panes wait until it is on again.',
+  'settings.plugins.vscode.browser': 'VS Code in browsers',
+  'settings.plugins.vscode.browser.desc':
+    'VS Code windows in panes in browsers that open this server. VS Code runs on this page’s own address, so its extensions and webviews can do whatever the page can, on every machine: turn it on only after accepting that risk (the switch asks first). The desktop app’s switch is separate.',
+  'plugins.page.browserSwitch':
+    'This switch is for browsers, and asks you to accept the risk before it turns on. The desktop app has its own.',
+  'plugins.page.desktopSwitch':
+    'This switch is for the desktop app. Browsers have their own, which asks to accept the risk before it turns on.',
   'code.pluginOff': 'The VS Code plugin is off.',
+  'code.pluginOffBrowser': 'VS Code is off in browsers.',
   'code.pluginTurnOn': 'Turn It On',
+  'code.pluginTurnOnBrowser': 'Turn It On…',
+  'code.risk.title': 'Turn On VS Code in Browsers?',
+  'code.risk.intro':
+    'VS Code is served from this page’s own address (origin). Any script inside it, such as an extension, a webview or a page an extension opens, has the same access as this page and can:',
+  'code.risk.terminals': 'type into and read the terminals of every machine, and run commands there;',
+  'code.risk.files': 'read, change and delete files on every machine;',
+  'code.risk.app': 'use the variable vault while it is unlocked on this page, and change settings and machines.',
+  'code.risk.source':
+    'Extensions and the files VS Code opens come from the machines: whoever can change them there can take over every machine through your browser.',
+  'code.risk.scope':
+    'This turns VS Code on for every browser that opens this server, until you turn it off. The desktop app has a switch of its own, which this does not change.',
+  'code.risk.check': 'I understand the risk: VS Code’s extensions and webviews get this page’s access to every machine.',
+  'code.risk.enable': 'Enable',
   'plugins.gui.title': 'Program Windows',
   'plugins.gui.description': 'Windows of graphical programs on remote Linux machines, in browser windows.',
   'plugins.transfers.title': 'Uploads and Downloads',

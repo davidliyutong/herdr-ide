@@ -58,6 +58,18 @@ export interface PaletteItem {
   run(): void;
 }
 
+/** What the dialog that turns a plugin on in browsers says: what its
+ * content can reach and why, and the box to tick before Enable. */
+export interface BrowserRisk {
+  title: MessageKey;
+  /** The paragraph before the list of what it reaches, and those after. */
+  intro: MessageKey;
+  points: MessageKey[];
+  outro: MessageKey[];
+  check: MessageKey;
+  confirm: MessageKey;
+}
+
 export interface PluginDef {
   /** As the core's plugin (internal/plugin): lower-case letters and digits. */
   id: string;
@@ -67,6 +79,13 @@ export interface PluginDef {
   /** The setting that turns it on and off: plugins.<id>.enabled unless
    * it has one of its own; none for parts of the app that are always on. */
   enableSetting?: string | null;
+  /** Its content runs on the UI's own origin (VS Code's windows), where
+   * its scripts reach whatever the page reaches (the core's
+   * plugin.BrowserRisk): enableSetting is then the desktop app's switch,
+   * browsers have one of their own, plugins.<id>.browser, and turning that
+   * on asks the user to accept this risk first (registry.ts
+   * setPluginSwitch). The dialog's texts. */
+  browserRisk?: BrowserRisk;
   panels?: PanelDef[];
   /** By kind. */
   paneViews?: Record<string, PaneViewDef>;

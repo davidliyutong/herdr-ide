@@ -1,12 +1,15 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -187,33 +190,62 @@ func TestPluginChangesAuditTheirOutcome(t *testing.T) {
 	}
 }
 
-// Turning VS Code off ends its work: preparations and proxied connections
-// follow a context that ends then; the next use gets a new one.
+// Turning VS Code off for a kind of client ends that client's work (its
+// proxied connections and the bridge's commands follow a context that ends
+// then); preparations end once it is off for every client. The next use
+// gets a new context.
 func TestVSCodeOffEndsItsWork(t *testing.T) {
 	ps := registry.Plugins()
 	st := settings.New("", plugin.Settings(ps, nil))
+	for _, key := range []string{"plugins.vscode.enabled", "plugins.vscode.browser"} {
+		if err := st.Set(key, "", true); err != nil {
+			t.Fatal(err)
+		}
+	}
 	s := New(machines.NewManager(nil, nil, log.New(io.Discard, "", 0)),
 		Options{Logger: log.New(io.Discard, "", 0), Plugins: ps, Settings: st})
-	work := s.csProxy.workContext()
+	desktop, browser, prep := s.csProxy.workContext(plugin.Desktop), s.csProxy.workContext(plugin.Browser), s.csProxy.workContext(prepare)
+	ended := func(ctx context.Context) bool {
+		select {
+		case <-ctx.Done():
+			return true
+		case <-time.After(2 * time.Second):
+			return false
+		}
+	}
 	if err := st.Set("plugins.files.enabled", "", false); err != nil {
 		t.Fatal(err)
 	}
-	if work.Err() != nil {
+	if desktop.Err() != nil || browser.Err() != nil || prep.Err() != nil {
 		t.Fatal("another plugin's switch ended VS Code's work")
+	}
+	if err := st.Set("plugins.vscode.browser", "", false); err != nil {
+		t.Fatal(err)
+	}
+	if !ended(browser) {
+		t.Fatal("the browsers' work outlived their switch")
+	}
+	if desktop.Err() != nil || prep.Err() != nil {
+		t.Fatal("the browsers' switch ended the desktop app's work or the preparations")
 	}
 	if err := st.Set("plugins.vscode.enabled", "", false); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-work.Done():
-	case <-time.After(2 * time.Second):
-		t.Fatal("VS Code's work outlived its switch")
+	if !ended(desktop) || !ended(prep) {
+		t.Fatal("VS Code's work outlived its switches")
 	}
 	st.Set("plugins.vscode.enabled", "", true)
-	if s.csProxy.workContext().Err() != nil {
+	if s.csProxy.workContext(plugin.Desktop).Err() != nil || s.csProxy.workContext(prepare).Err() != nil {
 		t.Fatal("no new work after turning it on")
 	}
 }
+
+// riskyPlugin's content would run on the UI's origin: a switch per kind
+// of client.
+type riskyPlugin struct{ fakePlugin }
+
+func (riskyPlugin) ID() string   { return "risky" }
+func (riskyPlugin) BrowserRisk() {}
 
 func TestPluginSettingsDefaults(t *testing.T) {
 	m := plugin.Settings([]plugin.Plugin{fakePlugin{}}, plugin.Defaults{"fake": true})
@@ -223,24 +255,95 @@ func TestPluginSettingsDefaults(t *testing.T) {
 	if m := plugin.Settings(nil, nil); len(m.Sections) != 0 {
 		t.Fatalf("a section without settings: %+v", m.Sections)
 	}
+	// A plugin on the UI's origin: the desktop app's switch as usual, and
+	// the browsers', off whatever the defaults say.
+	m = plugin.Settings([]plugin.Plugin{riskyPlugin{}}, nil)
+	if len(m.Defs) != 2 || m.Defs[0].Key != "plugins.risky.enabled" || m.Defs[0].Default != true ||
+		m.Defs[1].Key != "plugins.risky.browser" || m.Defs[1].Default != false || m.Defs[1].Section != "plugins" {
+		t.Fatalf("defs %+v", m.Defs)
+	}
+	if plugin.SettingFor(riskyPlugin{}, plugin.Desktop) != "plugins.risky.enabled" || plugin.SettingFor(riskyPlugin{}, plugin.Browser) != "plugins.risky.browser" ||
+		plugin.SettingFor(fakePlugin{}, plugin.Browser) != "plugins.fake.enabled" {
+		t.Fatal("the switch of each client")
+	}
+	// VS Code is off by default in the desktop app and in browsers.
+	st := settings.New("", registry.Settings()...)
+	for _, key := range []string{"plugins.vscode.enabled", "plugins.vscode.browser"} {
+		if d, ok := st.Lookup(key); !ok || d.Default != false {
+			t.Errorf("%s: %+v", key, d)
+		}
+	}
+	if !st.Bool("plugins.files.enabled", "") {
+		t.Error("other plugins stay on by default")
+	}
 }
 
-// VS Code is a plugin whose routes are the core's own: off, they answer
-// plugin_disabled before anything else (code-server is not started);
-// stopping it still works.
-func TestCodeRoutesFollowTheirPlugin(t *testing.T) {
-	ps := registry.Plugins()
-	st := settings.New("", plugin.Settings(ps, nil))
+// A settings file of an earlier version, which had only
+// plugins.vscode.enabled, loads: its value is the desktop app's switch,
+// and browsers still find VS Code off.
+func TestVSCodeSettingOfEarlierVersions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.WriteFile(path, []byte(`{"plugins.vscode.enabled": true, "plugins.files.enabled": false}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st := settings.New(path, registry.Settings()...)
+	if err := st.Load(); err != nil {
+		t.Fatal(err)
+	}
+	if len(st.State().Problems) != 0 {
+		t.Fatalf("problems %+v", st.State().Problems)
+	}
+	var vs plugin.Plugin
+	for _, p := range registry.Plugins() {
+		if p.ID() == "vscode" {
+			vs = p
+		}
+	}
+	if !plugin.EnabledFor(st, vs, plugin.Desktop) || plugin.EnabledFor(st, vs, plugin.Browser) {
+		t.Fatal("the earlier value is the desktop app's switch only")
+	}
+}
+
+// VS Code is a plugin whose routes are the core's own, with a switch per
+// kind of client: each request gets its client's, and one whose switch is
+// off is answered plugin_disabled before anything else (code-server is not
+// started); stopping it still works. The desktop app is a request with
+// this launch's token in DesktopCookie; no cookie, a wrong token, or a
+// core given no token is a browser. Plugins' own routes do the same.
+func TestCodeRoutesFollowTheirClientsSwitch(t *testing.T) {
+	ps := append(registry.Plugins(), riskyPlugin{})
+	risky := plugin.Settings([]plugin.Plugin{riskyPlugin{}}, nil)
+	risky.Sections = nil // the core's plugins have it
+	st := settings.New("", append(registry.Settings(), risky)...)
+	token := strings.Repeat("a1", 32)
 	s := newTestServer()
 	s.opts.Plugins = ps
 	s.opts.Settings = st
-	h := s.Handler()
-	do := func(method, path string) *httptest.ResponseRecorder {
+	s.opts.DesktopToken = token
+	untokened := newTestServer()
+	untokened.opts.Plugins = ps
+	untokened.opts.Settings = st
+	do := func(s *Server, method, path, cookie string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, path, strings.NewReader("{}"))
 		r.Host = "127.0.0.1:7780"
+		if cookie != "" {
+			r.Header.Set("Cookie", cookie)
+		}
 		w := httptest.NewRecorder()
-		h.ServeHTTP(w, r)
+		s.Handler().ServeHTTP(w, r)
 		return w
+	}
+	desktop := DesktopCookie + "=" + token
+	clients := map[string]struct {
+		s      *Server
+		cookie string
+	}{
+		"desktop":           {s, desktop},
+		"desktop, shadowed": {s, DesktopCookie + "=x; other=1; " + desktop},
+		"browser":           {s, ""},
+		"wrong token":       {s, DesktopCookie + "=" + strings.Repeat("b2", 32)},
+		"token cut short":   {s, DesktopCookie + "=" + token[:63]},
+		"core without one":  {untokened, desktop},
 	}
 	paths := [][2]string{
 		{"GET", "/api/m/nope/code/status"},
@@ -248,21 +351,39 @@ func TestCodeRoutesFollowTheirPlugin(t *testing.T) {
 		{"POST", "/api/m/nope/bridge"},
 		{"GET", "/m/nope/code/"},
 		{"GET", "/m/nope/code"},
+		{"GET", "/api/p/risky"},
 	}
-	for _, p := range paths {
-		if w := do(p[0], p[1]); strings.Contains(w.Body.String(), "plugin_disabled") {
-			t.Errorf("%s %s with VS Code on: %d %s", p[0], p[1], w.Code, w.Body)
+	check := func(state string, on map[string]bool) {
+		t.Helper()
+		for name, c := range clients {
+			for _, p := range paths {
+				w := do(c.s, p[0], p[1], c.cookie)
+				refused := w.Code == 404 && strings.Contains(w.Body.String(), "plugin_disabled")
+				if refused == on[name] {
+					t.Errorf("%s, %s: %s %s = %d %s", state, name, p[0], p[1], w.Code, w.Body)
+				}
+			}
+			if w := do(c.s, "POST", "/api/m/nope/code/stop", c.cookie); strings.Contains(w.Body.String(), "plugin_disabled") {
+				t.Errorf("%s, %s: stop %d %s", state, name, w.Code, w.Body)
+			}
 		}
 	}
-	if err := st.Set("plugins.vscode.enabled", "", false); err != nil {
-		t.Fatal(err)
-	}
-	for _, p := range paths {
-		if w := do(p[0], p[1]); w.Code != 404 || !strings.Contains(w.Body.String(), "plugin_disabled") {
-			t.Errorf("%s %s with VS Code off: %d %s", p[0], p[1], w.Code, w.Body)
+	set := func(desktop, browser bool) {
+		for _, id := range []string{"vscode", "risky"} {
+			if err := st.Set("plugins."+id+".enabled", "", desktop); err != nil {
+				t.Fatal(err)
+			}
+			if err := st.Set("plugins."+id+".browser", "", browser); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
-	if w := do("POST", "/api/m/nope/code/stop"); strings.Contains(w.Body.String(), "plugin_disabled") {
-		t.Errorf("stop with VS Code off: %d %s", w.Code, w.Body)
-	}
+	set(false, false)
+	check("both off", nil)
+	set(true, false)
+	check("the desktop app's on", map[string]bool{"desktop": true, "desktop, shadowed": true})
+	set(false, true)
+	check("the browsers' on", map[string]bool{"browser": true, "wrong token": true, "token cut short": true, "core without one": true})
+	set(true, true)
+	check("both on", map[string]bool{"desktop": true, "desktop, shadowed": true, "browser": true, "wrong token": true, "token cut short": true, "core without one": true})
 }

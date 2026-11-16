@@ -137,13 +137,34 @@ system's rules run in the tests on any of them:
 
 **The owned core** (`desktop/src/core.ts`, `desktop/src/main.ts`)
 
-- The shell owns one child core. `--parent-stdio` adds one JSON readiness
-  message to stdout and cancels the core when stdin closes. Logs stay on
+- The shell owns one child core. `--parent-stdio` makes the core read the
+  launcher's hello, one JSON line on stdin, before it serves, adds one JSON
+  readiness message to stdout and cancels the core when stdin closes. Logs stay on
   stderr, and the core ignores SIGPIPE so that writing to the pipes of a
   crashed launcher fails instead of killing it before cleanup. The core is
   spawned with `windowsHide`, since Windows would give the console program
   a console window. Failed binding never connects the UI to an unrelated
   listener. The shell has a 30 s startup timeout.
+- **The app's token.** VS Code has a switch for the app's windows and one
+  for browsers ([05](05-vscode-panes.md)), and the core must tell the
+  app's requests from a browser's, also a browser on the same computer
+  opening the same core. At each launch the shell makes a token of 32
+  random bytes (`desktopToken` in `desktop/src/core.ts`), sends it in the
+  hello (`{"desktop_token":"<hex>"}`), and, once the core is ready and
+  before the window loads, sets it in its session as a cookie for the
+  core's origin (`<slug>-desktop`: the URL of the core, no domain, so
+  host-only; path `/`; HttpOnly, so no script of the page or of VS Code
+  reads it; SameSite=Strict; no expiry, so it is gone when the app quits;
+  `desktopCookie`). Chromium then sends it with every request of the
+  app's windows to the core, VS Code's frames, workers and WebSockets
+  included, and the core compares it with its own in constant time
+  ([08](08-web-access-and-security.md)); a cookie that cannot be set
+  fails the startup. The token is never in the core's environment, which
+  terminals, agents and code-server inherit; stdin is inherited by
+  nothing the core starts. Cookies are kept per host, not per port, so a
+  request the app's windows make to another port of `127.0.0.1` carries
+  it too: only content in those windows can make one, and the token tells
+  a core only that a request is the app's.
 - Stopping closes the core's stdin, on every system: Windows has no signal
   a process can clean up after (Node's `kill` terminates it there). The
   core allows 3 s for HTTP and 15 s for its agents; after 20 s the shell
@@ -533,21 +554,29 @@ open and close a folder without reading it, and the one in the terminal
 core is a fixed command herdr-core ends after 10 s. The existing
 HTTP guards, API allowlist, read-only behavior and CSP remain in force. On
 Windows the core keeps no ssh control sockets and offers no ssh login
-([02](02-multi-machine-transport.md)). Release builds get no secret; only
+([02](02-multi-machine-transport.md)). The token of a launch, on the
+core's stdin and in an HttpOnly cookie of the app's session for the
+core's origin, tells the core which requests are the app's windows', so
+VS Code follows the app's own switch there and the browsers' switch
+everywhere else; it is no authentication against other processes on the
+host, which reach the core over loopback anyway. Release builds get no secret; only
 the macOS Package step receives the optional signing and notarization
 credentials. See [SECURITY.md](../../SECURITY.md) for the local HTTP trust
 boundary.
 
 ## Testing
 
-`cmd/herdr-ide/parent_test.go` covers readiness, pipe EOF/error cancellation
+`cmd/herdr-ide/parent_test.go` covers the launcher's hello (`TestReadHello`),
+readiness, pipe EOF/error cancellation
 and surviving writes to broken stdout pipes (`TestBrokenPipesDoNotKill`
 skips on Windows). `desktop/src/*.test.ts` cover what differs per system
 (`platform`: the keybindings' platform, quitting with the last window and
 the app id; the core's path packaged and unpackaged; folders on a command
 line as paths or `file:` URLs, with switches and leading arguments left
 out), the owned core (`core`: isolation arguments and development instance
-names, PATH on macOS and Linux and Windows' kept as is, stopping by closing
+names, PATH on macOS and Linux and Windows' kept as is, the token of a
+launch, new each time, in the hello the core reads on stdin and not in its
+environment, and its cookie for the core's origin only, stopping by closing
 stdin without a signal, a stuck core killed after the deadline, spawn
 failures, malformed readiness, ephemeral ports, unexpected exits, late
 child errors and idempotent child shutdown, with fake Node children),

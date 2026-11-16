@@ -9,6 +9,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"flag"
@@ -155,7 +156,7 @@ func serve(args []string, logger *log.Logger) {
 	fl := flag.NewFlagSet("serve", flag.ExitOnError)
 	var (
 		listen      = fl.String("listen", "127.0.0.1:7780", "address to listen on")
-		parentStdio = fl.Bool("parent-stdio", false, "launcher lifecycle: write a ready JSON line to stdout and stop when stdin closes")
+		parentStdio = fl.Bool("parent-stdio", false, "launcher lifecycle: read the launcher's hello (a JSON line) from stdin, write a ready JSON line to stdout and stop when stdin closes")
 		insecure    = fl.Bool("insecure-listen", false, "allow a non-loopback --listen without --proxy-secret-file (anyone reaching the port gets shell access)")
 		proxySecret = fl.String("proxy-secret-file", "", "file with a secret the reverse proxy sends in the "+server.ProxySecretHeader+" header; required for requests that do not come from loopback")
 		readOnly    = fl.Bool("read-only", false, "watch only: no input, no changes to terminals or settings, no uploads, no VS Code")
@@ -181,8 +182,17 @@ func serve(args []string, logger *log.Logger) {
 	csf.register(fl)
 	prefs.RegisterFlags(fl)
 	fl.Parse(args)
+	// The launcher's pipe: its hello first, then held until it closes.
+	var parentIn io.Reader = os.Stdin
+	desktopToken := ""
 	if *parentStdio {
 		ignoreBrokenPipes() // before the first log line
+		in := bufio.NewReaderSize(os.Stdin, maxHello)
+		h, err := readHello(in)
+		if err != nil {
+			logger.Fatalf("--parent-stdio: %v", err)
+		}
+		desktopToken, parentIn = h.DesktopToken, in
 	}
 
 	if !brand.ValidInstance(*instance) {
@@ -314,12 +324,13 @@ func serve(args []string, logger *log.Logger) {
 		Keybindings:    keys,
 		HC:             embedded.HC,
 		Plugins:        plugins,
+		DesktopToken:   desktopToken,
 	})
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 	if *parentStdio {
-		go stopWithParent(os.Stdin, cancel)
+		go stopWithParent(parentIn, cancel)
 	}
 	// Edits of the files by hand apply without a restart.
 	go prefs.Watch(ctx, 2*time.Second)

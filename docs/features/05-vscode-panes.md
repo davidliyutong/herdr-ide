@@ -25,20 +25,49 @@ Code leaves (and `pane.close`, below).
 ## Design
 
 **A plugin** (`vscode`, [27](27-plugins.md); `web/src/plugins/vscode`,
-`internal/plugins/vscode`): VS Code is on unless `plugins.vscode.enabled`
-turns it off. Off, nothing offers it: the panes' buttons and menus, the
+`internal/plugins/vscode`) **with a switch per kind of client.** VS Code's
+windows are served on the UI's own origin, so any script in them (an
+extension, a webview, a page an extension opens) can do whatever the page
+can: type into the terminals of every machine, read and change their
+files, use the vault while it is unlocked on that page. VS Code is
+therefore off by default, and each kind of client has its own switch
+([08](08-web-access-and-security.md)):
+
+- `plugins.vscode.enabled`, the desktop app's windows: the Plugins page of
+  the app turns it on and off without asking, as any plugin's switch.
+- `plugins.vscode.browser`, browsers: turning it on, on the Plugins page,
+  from the **Turn It On…** of a VS Code pane or from its row in the
+  settings' search, first shows a dialog that says what VS Code's scripts
+  can reach and why, that it applies to every browser opening this core
+  until turned off, and that the desktop app's switch is separate; its
+  **Enable** works only once **I understand the risk…** is ticked. The
+  setting is the acceptance, kept in the settings file until turned off;
+  turning it off asks nothing.
+
+A desktop user who opens the same core in a browser therefore finds VS
+Code off there and must accept the risk in the browser. The core tells the
+desktop app's requests by the token of its launch
+([16](16-desktop-packaging.md)) and applies the requesting client's
+switch; `GET /api/settings` says which one the page is (`client`), and the
+UI shows and follows that switch (`enableSetting` in
+`web/src/plugins/registry.ts`), not the preload's `desktopShell`. Off for a
+client, nothing offers VS Code there: the panes' buttons and menus, the
 links' "open in VS Code", the file explorer's and Quick Look's items and
 the commands (`code.open`, `code.diff`, `code.gitGraph`, then disabled)
 go, a path opened from a terminal shows in Quick Look instead, the layer
-closes its windows and a VS Code pane (kept in the layout) says the
-plugin is off with a button that turns it on. The core refuses code-server's
-status, start, proxy and the bridge's commands with `404 plugin_disabled`,
-so nothing is fetched or started on a machine; stopping a code-server still
-works. Turning it off also acts on what runs: a code-server preparation
-under way ends (an upload's stream is closed, a machine's download stops),
-and every proxied request and WebSocket is closed, also those of VS Code
-windows open in other browsers, so code-server stops after
-`--code-server-idle` without connections (`TestVSCodeOffEndsItsWork`).
+closes its windows and a VS Code pane (kept in the layout) says VS Code is
+off with a button that turns it on. The core refuses that client
+code-server's status, start, proxy (its WebSockets included) and the
+bridge's commands with `404 plugin_disabled`, so nothing is fetched or
+started on a machine for it, and sends VS Code's bridge messages
+(`bridge.*`) only to pages whose switch is on; stopping a code-server
+still works. Turning a switch off also acts on what runs: every proxied
+request and WebSocket of that kind of client is closed, also those of
+VS Code windows open in other browsers, and the bridge's commands it sent
+end; once both are off, a code-server preparation under way ends too (an
+upload's stream is closed, a machine's download stops), so code-server
+stops after `--code-server-idle` without connections
+(`TestVSCodeOffEndsItsWork`).
 
 **Provisioning** (`internal/codeserver`, agent `codeserver.go`)
 
@@ -221,6 +250,7 @@ windows open in other browsers, so code-server stops after
 
 | Option | Why not |
 | --- | --- |
+| On by default, with one switch for every client, as earlier versions had | VS Code's scripts run with the page's access; a user should choose that, and a desktop user's choice should not reach the browsers that open the same core ([08](08-web-access-and-security.md)). |
 | Official `code serve-web` | Microsoft Marketplace and Pylance, but the server build is fetched by the CLI at runtime, licensing limits redistribution, and the user chose code-server (Open VSX). |
 | openvscode-server | No macOS builds. |
 | Remote-SSH from desktop VS Code | Not in the browser; no integration with panes. |
@@ -265,9 +295,18 @@ windows open in other browsers, so code-server stops after
 
 ## Security
 
+VS Code runs on the UI's origin: its extensions and webviews, and the files
+and extensions on the machines that feed them, have the page's access to
+every machine. That is why it is off by default, why browsers turn it on
+only after the user accepted that risk, and why the desktop app's switch
+does not turn it on in browsers (above; [08](08-web-access-and-security.md)).
+Serving code-server from an origin of its own would close the risk, at the
+cost of a second host name or port in every deployment.
+
 The socket directory is 0700 and the socket 0600; `--auth none` is safe only
 because nothing else can connect. The proxy strips the proxy-secret header
-and adds `X-Frame-Options: SAMEORIGIN`. Read-only mode refuses VS Code.
+and the desktop app's cookie and adds `X-Frame-Options: SAMEORIGIN`.
+Read-only mode refuses VS Code.
 Window ids are random per extension host and broadcast to every page; a
 command naming one goes through the same guarded, audited
 `POST /api/m/{id}/bridge` as one naming a folder, which read-only mode
@@ -283,6 +322,17 @@ VS Code's "open in browser" links for forwarded ports therefore do not work.
 
 ## Testing
 
+- The switches: `internal/server/plugins_test.go`
+  (`TestCodeRoutesFollowTheirClientsSwitch`: every route of VS Code per
+  client and token, `TestVSCodeOffEndsItsWork`,
+  `TestVSCodeSettingOfEarlierVersions`: a settings file with only
+  `plugins.vscode.enabled` loads as the desktop app's switch),
+  `internal/server/client_test.go` (the client reported, the cookie kept
+  from code-server, bridge messages per switch),
+  `web/src/__tests__/vscodeRisk.test.ts` (off by default; the risk dialog
+  in a browser, Enable only once ticked, Cancel changing nothing, none in
+  the desktop app or when turning off; each page following its client's
+  switch).
 - `internal/codeserver/artifacts_test.go` (resolution and verification),
   `internal/codeserver/manager_test.go` (`TestInstallMode`,
   `TestRecordDigest`).

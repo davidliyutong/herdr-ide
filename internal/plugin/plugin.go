@@ -140,6 +140,27 @@ type Toggled interface {
 	EnableSetting() string
 }
 
+// Client is the kind of client a request comes from, as the core tells
+// them apart (internal/server): the desktop app's windows, which prove it
+// with the token of its launch, or a browser.
+type Client string
+
+const (
+	Browser Client = "browser"
+	Desktop Client = "desktop"
+)
+
+// BrowserRisk is a plugin whose content runs on the UI's own origin (VS
+// Code's windows), where its scripts reach whatever the page reaches: the
+// terminals of every machine, their files, an unlocked vault. Browsers
+// then have a switch of their own, plugins.<id>.browser, off by default,
+// which a browser user sets only after accepting that risk (the UI asks
+// first), and the plugin's enable setting is the desktop app's switch.
+// Each client gets the plugin only while its own switch is on.
+type BrowserRisk interface {
+	BrowserRisk()
+}
+
 // Streamer is a plugin that serves streams agents open towards the core
 // with ops of its own (internal/agentproto), as the vault's MCP requests.
 // The core hands it each stream of those ops after the header, while the
@@ -162,7 +183,8 @@ var validID = regexp.MustCompile(`^[a-z][a-z0-9]*$`)
 // ValidID reports whether id can name a plugin.
 func ValidID(id string) bool { return validID.MatchString(id) }
 
-// EnableSetting is the setting that enables p.
+// EnableSetting is the setting that enables p (for a BrowserRisk plugin,
+// in the desktop app).
 func EnableSetting(p Plugin) string {
 	if t, ok := p.(Toggled); ok {
 		return t.EnableSetting()
@@ -170,22 +192,45 @@ func EnableSetting(p Plugin) string {
 	return "plugins." + p.ID() + ".enabled"
 }
 
+// BrowserSetting is the setting that enables p in browsers:
+// plugins.<id>.browser for a BrowserRisk plugin, else its enable setting.
+func BrowserSetting(p Plugin) string {
+	if _, risk := p.(BrowserRisk); risk {
+		return "plugins." + p.ID() + ".browser"
+	}
+	return EnableSetting(p)
+}
+
+// SettingFor is the setting that enables p for client c.
+func SettingFor(p Plugin, c Client) string {
+	if c == Desktop {
+		return EnableSetting(p)
+	}
+	return BrowserSetting(p)
+}
+
 // Defaults tells which plugins are on unless the user turns them off.
 type Defaults map[string]bool
 
 // Settings returns the module with the switches of the plugins without a
 // setting of their own (on by default unless off says otherwise), in the
-// section "plugins".
+// section "plugins"; a BrowserRisk plugin also gets its switch for
+// browsers, off by default.
 func Settings(ps []Plugin, off Defaults) settings.Module {
 	var m settings.Module
 	for i, p := range ps {
-		if _, own := p.(Toggled); own {
-			continue
+		if _, own := p.(Toggled); !own {
+			m.Defs = append(m.Defs, settings.Def{
+				Key: EnableSetting(p), Type: settings.TypeBool, Default: !off[p.ID()],
+				Scope: settings.ScopeApp, Section: "plugins", Order: 10 * (i + 1),
+			})
 		}
-		m.Defs = append(m.Defs, settings.Def{
-			Key: EnableSetting(p), Type: settings.TypeBool, Default: !off[p.ID()],
-			Scope: settings.ScopeApp, Section: "plugins", Order: 10 * (i + 1),
-		})
+		if _, risk := p.(BrowserRisk); risk {
+			m.Defs = append(m.Defs, settings.Def{
+				Key: BrowserSetting(p), Type: settings.TypeBool, Default: false,
+				Scope: settings.ScopeApp, Section: "plugins", Order: 10*(i+1) + 5,
+			})
+		}
 	}
 	if len(m.Defs) > 0 {
 		m.Sections = []settings.Section{{ID: "plugins", Order: 65}}
@@ -193,12 +238,18 @@ func Settings(ps []Plugin, off Defaults) settings.Module {
 	return m
 }
 
-// Enabled reports whether p is on in st (nil: on).
-func Enabled(st *settings.Store, p Plugin) bool {
+// EnabledFor reports whether p is on for client c in st (nil: on).
+func EnabledFor(st *settings.Store, p Plugin, c Client) bool {
 	if st == nil {
 		return true
 	}
-	return st.Bool(EnableSetting(p), "")
+	return st.Bool(SettingFor(p, c), "")
+}
+
+// Enabled reports whether p is on in st (nil: on): for a BrowserRisk
+// plugin, for any client.
+func Enabled(st *settings.Store, p Plugin) bool {
+	return EnabledFor(st, p, Desktop) || EnabledFor(st, p, Browser)
 }
 
 // Error is a failure of an agent action, with the code the agent gave.

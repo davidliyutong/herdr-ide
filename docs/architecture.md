@@ -69,7 +69,13 @@ The optional Electron shell (`desktop/src/main.ts`) runs on macOS, Windows
 and Linux (`desktop/src/platform.ts` holds what differs). It spawns the
 bundled core from its resources (`bin/herdr-ide`, `bin/herdr-ide.exe` on
 Windows) with `--parent-stdio`, loopback port 7781 and instance `desktop`.
-The core writes one `{ "event": "ready", "url": "…" }` line to stdout after
+The shell's first line on the core's stdin is its hello,
+`{ "desktop_token": "…" }`, which the core reads before it serves: the
+token of this launch, which the shell also sets as an HttpOnly cookie for
+the core's origin in its session, so the core tells the app's windows
+from browsers (VS Code has a switch for each,
+[08](features/08-web-access-and-security.md)). The core writes one
+`{ "event": "ready", "url": "…" }` line to stdout after
 binding its listener; stderr carries logs. The shell loads only that owned
 core's URL. Closing the parent stdin pipe cancels the core's context, and
 it is how the shell stops the core on every system (no signal is sent;
@@ -255,10 +261,13 @@ extensions (VSIXs, also from the core) → start (a running code-server is
 reused only if it serves the workbench; otherwise it is replaced). The agent records the process in `run/cs.pid` with its own pid as
 owner; it stops its own process on exit, reaps processes whose owner died,
 and stops on request. The core stops code-server after `--code-server-idle`
-without WebSocket connections through its proxy. Turning the VS Code plugin
-off ends a preparation under way (its context; an upload's stream is closed
-and the machine's download stops with its stream) and closes the proxied
-requests and WebSockets, so code-server idles out. See
+without WebSocket connections through its proxy. The VS Code plugin has a
+switch for the desktop app's windows and one for browsers
+([05](features/05-vscode-panes.md)): turning one off closes the proxied
+requests and WebSockets of that kind of client, and turning off the last
+one on also ends a preparation under way (its context; an upload's stream
+is closed and the machine's download stops with its stream), so
+code-server idles out. See
 [deployment](deployment.md#remote-resources).
 
 ## Names, renames and migration

@@ -39,9 +39,11 @@ import { t } from '../i18n';
 import { commandEnabled } from '../keymap';
 import { useSettings } from '../settings';
 import { vscodePlugin } from '../plugins/vscode';
+import { vscodeOn } from './fakeSettings';
 
-// VS Code is a plugin: these tests have it on.
+// VS Code is a plugin, off by default: these tests have it on.
 definePlugins([vscodePlugin]);
+vscodeOn();
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -311,10 +313,10 @@ describe('the windows of VS Code panes', () => {
       // The VS Code plugin off: the window goes, the pane says so and its
       // commands are disabled; on again, the window comes back.
       const setCode = (value: boolean) =>
-        act(async () => useSettings.setState((s) => ({ values: { ...s.values, 'plugins.vscode.enabled': { value, source: 'global' } } })));
+        act(async () => useSettings.setState((s) => ({ values: { ...s.values, 'plugins.vscode.browser': { value, source: 'global' } } })));
       await setCode(false);
       expect(frame()).toBeNull();
-      expect(host.querySelector('.code-off')?.textContent).toContain(t('code.pluginOff'));
+      expect(host.querySelector('.code-off')?.textContent).toContain(t('code.pluginOffBrowser'));
       expect(commandEnabled('code.open')).toBe(false);
       await setCode(true);
       expect(frame()).not.toBeNull();

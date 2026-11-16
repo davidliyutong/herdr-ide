@@ -40,6 +40,7 @@ import { ThemePicker } from './settings/ThemePicker';
 import { FullDiskAccess, fullDiskAccessMatches } from './settings/FullDiskAccess';
 import { fullDiskAccessAvailable, localMachine } from '../fullDiskAccess';
 import { PluginsPage } from './settings/PluginsPage';
+import { acceptRisk } from '../plugins/registry';
 
 export function settingLabel(key: string): string {
   const k = `settings.${key}`;
@@ -445,7 +446,10 @@ function SettingRow({
   const save = async (v: SettingValue | undefined) => {
     setError(undefined);
     if (v === undefined) return done(await resetSetting(d.key, machine?.id));
-    if (JSON.stringify(v) !== JSON.stringify(machine ? own : value)) done(await setSetting(d.key, v, machine?.id));
+    if (JSON.stringify(v) === JSON.stringify(machine ? own : value)) return;
+    // VS Code's switch for browsers asks to accept its risk first.
+    if (v === true && !(await acceptRisk(d.key))) return;
+    done(await setSetting(d.key, v, machine?.id));
   };
   const reset = () => void save(undefined);
   const menu = (): MenuEntry[] => [

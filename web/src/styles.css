@@ -1856,6 +1856,16 @@ body.dragging * {
 .dialog-check input {
   margin-top: 4px;
 }
+.risk-dialog p,
+.risk-dialog ul {
+  margin: 0 0 8px;
+}
+.risk-dialog ul {
+  padding-left: 20px;
+}
+.risk-dialog .dialog-check {
+  font-weight: 600;
+}
 .dialog-body.form {
   display: flex;
   flex-direction: column;

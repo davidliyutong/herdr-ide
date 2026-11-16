@@ -33,13 +33,25 @@ export type DialogRequest =
       edit?: { name: string };
       resolve(v: NewWorkspace | undefined): void;
     }
-  | { kind: 'download'; m: string; dir: string; resolve(v: undefined): void };
+  | { kind: 'download'; m: string; dir: string; resolve(v: undefined): void }
+  | {
+      kind: 'risk';
+      title: string;
+      /** The paragraph before the list of what is at risk, and those after. */
+      intro: string;
+      points: string[];
+      outro: string[];
+      /** The box to tick before the confirm button can be pressed. */
+      check: string;
+      confirm: string;
+      resolve(ok: boolean): void;
+    };
 
 export const useDialog = create<{ current?: DialogRequest }>(() => ({}));
 
 function show(req: DialogRequest) {
   const prev = useDialog.getState().current;
-  if (prev?.kind === 'confirm') prev.resolve(false);
+  if (prev?.kind === 'confirm' || prev?.kind === 'risk') prev.resolve(false);
   else if (prev) prev.resolve(undefined);
   useDialog.setState({ current: req });
 }
@@ -66,6 +78,20 @@ export function confirmCheckDialog(opts: {
   return new Promise((resolve) =>
     show({ kind: 'confirm', ...opts, resolve: (ok, checked) => resolve(ok ? { checked: !!checked } : undefined) }),
   );
+}
+
+/** Asks the user to accept a risk: what is at risk, a box to tick (I
+ * understand…) and the confirm button, which works only once it is
+ * ticked. Resolves true when accepted; Cancel and Escape resolve false. */
+export function riskDialog(opts: {
+  title: string;
+  intro: string;
+  points: string[];
+  outro: string[];
+  check: string;
+  confirm: string;
+}): Promise<boolean> {
+  return new Promise((resolve) => show({ kind: 'risk', ...opts, resolve }));
 }
 
 /** Asks whether to save changes before they are closed: save, discard

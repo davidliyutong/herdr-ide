@@ -31,8 +31,10 @@ func Plugins() []plugin.Plugin {
 	return []plugin.Plugin{vscode.New(), files.New(), gitplugin.New(), usageplugin.New(), vaultplugin.New()}
 }
 
-// pluginsOff are the plugins that are off until the user turns them on.
-var pluginsOff = plugin.Defaults{}
+// pluginsOff are the plugins that are off until the user turns them on:
+// VS Code, whose windows run on the UI's origin (its switch for browsers
+// is off by default too, plugin.BrowserRisk).
+var pluginsOff = plugin.Defaults{vscode.ID: true}
 
 // legacyShortcuts drops the desktop app's old shortcut settings
 // (desktop-*-key) from the settings file.
