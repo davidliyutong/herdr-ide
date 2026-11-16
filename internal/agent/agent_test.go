@@ -77,8 +77,10 @@ func TestFileOps(t *testing.T) {
 	if err != nil || len(lst.Entries) != 1 || lst.Entries[0].Name != "data.bin" {
 		t.Fatalf("list = %+v %v", lst, err)
 	}
-	if _, err := s.Request(ctx, agentproto.Header{Op: agentproto.OpFsStat, Path: "~/missing"}); err == nil {
-		t.Fatal("stat of missing file succeeded")
+	// A path not there has a code, which the core answers with 404 (a
+	// failure for another reason is not taken for a missing file).
+	if rep, err := s.Request(ctx, agentproto.Header{Op: agentproto.OpFsStat, Path: "~/missing"}); err == nil || rep == nil || rep.Code != "not_found" {
+		t.Fatalf("stat of missing file: %+v %v", rep, err)
 	}
 }
 

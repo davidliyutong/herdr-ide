@@ -45,7 +45,7 @@ machines only ([02](features/02-multi-machine-transport.md)).
 | `internal/userfile` | Atomic writes and change detection of the hand-editable files; the configuration directory made private on Linux and macOS (`private_unix.go`; on Windows its access control list keeps it the user's). |
 | `internal/plugin` | The core's side of plugins: their routes below `/api/p/<id>` and `/api/m/{id}/p/<id>` (guarded and audited as the core's own), `/ws` messages, switches (`plugins.<id>.enabled`) and the calls to their machine sides ([27](features/27-plugins.md)). |
 | `internal/agent/plugin` | The machine side of plugins: handlers of the agent's `plugin` op, registered per plugin. |
-| `internal/plugins/files`, `internal/agent/plugin/files` | The file explorer plugin: its routes below `/api/m/{id}/p/files/` and its actions on machines (`mkdir`, `create`, `rename`, `move`, `copy`, `trash`, `remove`, `write` with a precondition, `stat`), refusing the root, the home directory and what holds it, and the agent's data directory ([28](features/28-file-explorer.md)). |
+| `internal/plugins/files`, `internal/agent/plugin/files` | The file explorer plugin: its routes below `/api/m/{id}/p/files/` and its actions on machines (`mkdir`, `create`, `rename`, `move`, `copy`, `trash`, `remove`, `write` with a precondition, `stat` with a bound on stats running at once), refusing the root, the home directory and what holds it, and the agent's data directory, by file identity ([28](features/28-file-explorer.md)). |
 | `internal/plugins/git`, `internal/agent/plugin/git` | The Git plugin: its routes below `/api/m/{id}/p/git/` (reads GET, changes POST, audited as `git.<action>`) and its actions on machines, each the `git` executable with an argument vector built in the agent (no shell, paths after `--` and literal, revisions and names checked, no credential prompts, timeouts that kill the process group) ([31](features/31-git.md)). |
 | `internal/vault` | The variable vault's store on the core host: values encrypted one by one (AES-256-GCM, the name, machines and inject-only flag as additional data) in `vault[-<instance>].json`, the master key derived from the passphrase (Argon2id) and kept in memory only ([30](features/30-variable-vault.md)). Builds for Windows too. |
 | `internal/plugins/vault` | The vault plugin's core side: its routes behind the gate (sessions opened with the passphrase, `X-Vault-Session`), the MCP servers' requests (op `vault`, a `plugin.Streamer`), approvals and the access log. |
@@ -128,7 +128,7 @@ after a successful reply it carries op-specific bytes.
 | Op | Direction | Payload after the reply |
 | --- | --- | --- |
 | `hello` | core → agent | – (reply has host info and data dirs); the machine is ready once it answers |
-| `fs.stat`, `fs.list` | core → agent | – |
+| `fs.stat`, `fs.list` | core → agent | – (a failed `fs.stat` has the code `not_found` or `denied`, which `/file` answers with 404 or 403) |
 | `fs.read` | core → agent | `Length` bytes from `Offset` |
 | `fs.write` | core → agent | chunked upload, then a second reply; `unique` keeps existing files (`-1`, `-2`… names) |
 | `fs.archive` | core → agent | a zip of `Paths` (each at the root under its name, directories recursively), streamed until the agent closes the stream; with `Chunked` as `ChunkWriter` chunks ended by the empty chunk once the archive is complete |

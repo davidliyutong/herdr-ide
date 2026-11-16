@@ -39,7 +39,7 @@ import {
   crumbs,
   parentOf,
   poll,
-  reloadDirs,
+  refresh,
   select,
   setEdit,
   setExpanded,
@@ -47,6 +47,7 @@ import {
   setFollow,
   setHidden,
   showRoot,
+  shownDirs,
   stepRow,
   treeRows,
   useTree,
@@ -55,6 +56,7 @@ import {
   type Row,
 } from './tree';
 import { copyInto, create, dirOf, dropFiles, menuFor, moveInto, openPath, paste, quickLook, remove, rename, trash } from './ops';
+import { startPolling } from './poller';
 import './files.css';
 
 /** How often the shown directories are checked for changes. */
@@ -91,7 +93,7 @@ export function FilesPanel() {
   const [scroll, setScroll] = useState({ top: 0, height: 0 });
 
   // The directories shown, for decoration providers.
-  const shownKey = s.m === m && s.root ? [s.root, ...Object.keys(s.expanded).filter((d) => within(d, s.root!))].sort().join('\n') : '';
+  const shownKey = s.m === m && s.root ? shownDirs(s).sort().join('\n') : '';
   useEffect(() => {
     useShownDirs.setState({ m: shownKey ? m : undefined, dirs: shownKey ? shownKey.split('\n') : [] });
   }, [m, shownKey]);
@@ -107,13 +109,8 @@ export function FilesPanel() {
   }, [m, followed, s.follow, home]);
 
   // While the panel is shown and the page visible, the shown directories
-  // are checked for changes.
-  useEffect(() => {
-    const id = setInterval(() => {
-      if (document.visibilityState === 'visible') void poll();
-    }, POLL_MS);
-    return () => clearInterval(id);
-  }, []);
+  // are checked for changes, one poll at a time.
+  useEffect(() => startPolling(POLL_MS, poll), []);
 
   useEffect(() => {
     const el = treeRef.current;
@@ -202,10 +199,11 @@ export function FilesPanel() {
         return handled();
     }
     if (readOnly) return;
-    const sel = st.selection.length ? st.selection : cur ? [cur] : [];
-    if (ev.key === 'F2' && cur) {
+    // Only rows shown: a selection the tree does not show is not acted on.
+    const sel = (st.selection.length ? st.selection : cur ? [cur] : []).filter((p) => kinds.has(p));
+    if (ev.key === 'F2' && row) {
       handled();
-      setEdit({ kind: 'rename', path: cur });
+      setEdit({ kind: 'rename', path: row.path });
     } else if ((ev.key === 'Delete' || (isMac && ev.key === 'Backspace' && ev.metaKey)) && sel.length) {
       handled();
       if (ev.shiftKey) void remove(m, sel);
@@ -215,7 +213,7 @@ export function FilesPanel() {
       setClipboard({ m, paths: sel, cut: ev.key === 'x' });
     } else if (mod && !ev.shiftKey && !ev.altKey && ev.key === 'v' && st.clipboard) {
       handled();
-      void paste(m, cur ? dirOf(cur, isDir(cur)) : root);
+      void paste(m, row ? dirOf(row.path, row.dir) : root);
     }
   };
 
@@ -406,7 +404,7 @@ export function FilesPanel() {
             </button>
           </>
         )}
-        <button className="icon" title={t('files.refresh')} aria-label={t('files.refresh')} onClick={() => reloadDirs(Object.keys(s.dirs))}>
+        <button className="icon" title={t('files.refresh')} aria-label={t('files.refresh')} onClick={refresh}>
           <RefreshCw />
         </button>
         <button className="icon" title={t('files.collapseAll')} aria-label={t('files.collapseAll')} onClick={collapseAll}>

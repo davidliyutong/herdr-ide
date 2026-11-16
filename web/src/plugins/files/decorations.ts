@@ -53,6 +53,7 @@ export function decorationsOf(m: string, dir: string): Record<string, FileDecora
 }
 
 /** The directories the explorer shows while it is open (its root and the
- * expanded ones), for providers that follow them (Git watches their
+ * expanded ones not in a collapsed folder, tree.ts shownDirs), for
+ * providers that follow them (Git watches their
  * repositories); none while it is closed. */
 export const useShownDirs = create<{ m?: string; dirs: readonly string[] }>(() => ({ dirs: [] }));

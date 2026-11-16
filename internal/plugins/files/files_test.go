@@ -1,9 +1,13 @@
 package files
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"herdr-ide/internal/plugin"
 )
 
 func TestRoutes(t *testing.T) {
@@ -12,12 +16,13 @@ func TestRoutes(t *testing.T) {
 		if !rt.Machine {
 			t.Errorf("%s is not a machine's route", rt.Path)
 		}
-		// Everything but the stat changes files: guarded and audited.
-		if rt.Method == http.MethodGet {
-			if rt.Mutating || rt.Path != "stat" {
-				t.Errorf("GET %s", rt.Path)
+		// Everything but the stat (a POST for the length of its paths)
+		// changes files: guarded and audited.
+		if rt.Path == "stat" {
+			if rt.Mutating || rt.Method != http.MethodPost {
+				t.Errorf("%s %s: mutating %v", rt.Method, rt.Path, rt.Mutating)
 			}
-		} else if !rt.Mutating || rt.Audit != rt.Path {
+		} else if rt.Method != http.MethodPost || !rt.Mutating || rt.Audit != rt.Path {
 			t.Errorf("%s %s: mutating %v, audit %q", rt.Method, rt.Path, rt.Mutating, rt.Audit)
 		}
 		seen[rt.Path] = true
@@ -25,6 +30,18 @@ func TestRoutes(t *testing.T) {
 	for _, p := range []string{"stat", "mkdir", "create", "rename", "move", "copy", "trash", "remove", "write"} {
 		if !seen[p] {
 			t.Errorf("no route %s", p)
+		}
+	}
+}
+
+// The stat's paths are a JSON body: 1 to MaxStat of them.
+func TestStatParams(t *testing.T) {
+	many, _ := json.Marshal(map[string][]string{"paths": make([]string, MaxStat+1)})
+	for _, body := range []string{"", "{}", `{"paths": []}`, "not json", string(many)} {
+		w := httptest.NewRecorder()
+		stat(&plugin.Call{}, w, httptest.NewRequest("POST", "/stat", strings.NewReader(body)))
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("%.40q: %d", body, w.Code)
 		}
 	}
 }

@@ -42,13 +42,15 @@ func New() Plugin { return Plugin{} }
 
 func (Plugin) ID() string { return "files" }
 
-// Entry is the stat of a path (the agent's files.Entry).
+// Entry is the stat of a path (the agent's files.Entry); Error tells why
+// its state is not known.
 type Entry struct {
 	Path   string `json:"path"`
 	Exists bool   `json:"exists"`
 	IsDir  bool   `json:"is_dir,omitempty"`
 	Size   int64  `json:"size"`
 	MTime  int64  `json:"mtime"`
+	Error  string `json:"error,omitempty"`
 }
 
 // params are an action's parameters (the agent's files.Params).
@@ -66,7 +68,9 @@ func (Plugin) Routes() []plugin.Route {
 		return plugin.Route{Method: http.MethodPost, Path: action, Machine: true, Mutating: true, Audit: action, Handler: run(action)}
 	}
 	return []plugin.Route{
-		{Method: http.MethodGet, Path: "stat", Machine: true, Handler: stat},
+		// A POST for the length of its paths, but it changes nothing: not
+		// mutating, so read-only mode polls too.
+		{Method: http.MethodPost, Path: "stat", Machine: true, Handler: stat},
 		change("mkdir"),
 		change("create"),
 		change("rename"),
@@ -78,10 +82,16 @@ func (Plugin) Routes() []plugin.Route {
 	}
 }
 
-// stat answers the state of the paths (?path=…, at most MaxStat): the
-// explorer polls the directories it shows expanded.
+// stat answers the state of the paths ({"paths"}, at most MaxStat): the
+// explorer polls the directories it shows expanded. The paths are a body,
+// not a query: 200 of them make a URL longer than proxies take.
 func stat(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
-	paths := r.URL.Query()["path"]
+	var p params
+	if err := plugin.ReadJSON(r, maxBody, &p); err != nil {
+		plugin.WriteError(w, err)
+		return
+	}
+	paths := p.Paths
 	if len(paths) == 0 || len(paths) > MaxStat {
 		plugin.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad_request", "message": "between 1 and 200 paths"})
 		return

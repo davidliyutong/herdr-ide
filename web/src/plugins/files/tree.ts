@@ -3,13 +3,17 @@
 // the selection, the filter, the clipboard and the name being edited, and
 // the rows that come out of them. Directories are listed when expanded
 // (/api/m/{id}/list) and listed again when their modification time
-// changes; the panel polls the expanded ones while it is shown (poll).
+// changes; the panel polls the shown ones while it is shown (poll). Only
+// the listings of the root and the expanded directories below it are
+// kept.
 
 import { create } from 'zustand';
 import { listDir, type RemoteStat } from '../../lib/files';
 import { loadPref, savePref } from '../../state/store';
 import { filesApi, type Entry } from './api';
 
+/** A directory's listing; error is why the last listing failed (the
+ * entries listed before are kept). */
 export interface Dir {
   entries?: RemoteStat[];
   error?: string;
@@ -37,10 +41,13 @@ export interface TreeState {
   /** Hidden files (names starting with a dot) are shown (per browser). */
   hidden: boolean;
   filter: string;
-  /** Expanded directories, by path. */
+  /** Expanded directories, by path (also outside the root, so going back
+   * shows a directory as it was; at most MAX_EXPANDED). */
   expanded: Record<string, true>;
+  /** The listings of the root and the expanded directories below it. */
   dirs: Record<string, Dir>;
-  /** Directories' modification times as the last poll saw them. */
+  /** Directories' modification times when they were last listed after a
+   * poll saw them. */
   mtimes: Record<string, number>;
   selection: string[];
   /** The row the keyboard is on. */
@@ -203,30 +210,76 @@ export function topmost(paths: readonly string[]): string[] {
 
 let generation = 0;
 
-/** Shows machine m's tree rooted at root; another machine starts afresh. */
+/** At most this many expanded directories are remembered; beyond it the
+ * oldest outside the root are forgotten when the root moves. */
+export const MAX_EXPANDED = 500;
+
+/** The directories the tree shows: the root and the expanded directories
+ * below it whose parents are shown too (not those in a collapsed folder,
+ * or, while hidden files are not shown, in a hidden one). */
+export function shownDirs(s: Pick<TreeState, 'root' | 'expanded' | 'hidden'>): string[] {
+  const root = s.root;
+  if (!root) return [];
+  const shown = (p: string) => {
+    for (let d = p; d !== root; d = parentOf(d)) {
+      if (!s.expanded[d] || (!s.hidden && baseName(d).startsWith('.'))) return false;
+    }
+    return true;
+  };
+  return [root, ...Object.keys(s.expanded).filter((p) => p !== root && within(p, root) && shown(p))];
+}
+
+/** What is kept of the listings, times and expanded directories with root
+ * shown: the listings and times of root and the expanded directories
+ * below it. */
+function pruned(s: TreeState, root: string): Pick<TreeState, 'dirs' | 'mtimes' | 'expanded'> {
+  const keep = (p: string) => p === root || (!!s.expanded[p] && within(p, root));
+  const dirs = Object.fromEntries(Object.entries(s.dirs).filter(([p]) => keep(p)));
+  const mtimes = Object.fromEntries(Object.entries(s.mtimes).filter(([p]) => keep(p)));
+  const paths = Object.keys(s.expanded);
+  let over = paths.length - MAX_EXPANDED;
+  const expanded: Record<string, true> = {};
+  for (const p of paths) {
+    if (over > 0 && !within(p, root)) over--;
+    else expanded[p] = true;
+  }
+  return { dirs, mtimes, expanded };
+}
+
+/** Shows machine m's tree rooted at root; another machine starts afresh.
+ * Another root clears the selection (its rows may be gone, and a key
+ * must not act on rows not shown) and keeps only what is below it. */
 export function showRoot(m: string, root: string) {
   const s = useTree.getState();
   if (s.m === m && s.root === root) return;
   if (s.m !== m) {
     generation++;
     set({ m, root, dirs: {}, mtimes: {}, expanded: {}, selection: [], cursor: undefined, anchor: undefined, edit: undefined });
-  } else set({ root, edit: undefined });
-  if (!useTree.getState().dirs[root]?.entries) void loadDir(root);
+  } else set((st) => ({ root, ...pruned(st, root), selection: [], cursor: undefined, anchor: undefined, edit: undefined }));
+  const st = useTree.getState();
+  for (const p of shownDirs(st)) if (!st.dirs[p]?.entries && !st.dirs[p]?.loading) void loadDir(p);
 }
 
-/** Lists a directory (again). */
-export async function loadDir(path: string) {
+/** Lists a directory (again). A failure keeps the entries listed before,
+ * with the error beside them. mtime is the modification time a poll saw,
+ * recorded once the listing succeeds: after a failure the next poll tries
+ * again. A listing of a directory no longer below the root is dropped. */
+export async function loadDir(path: string, mtime?: number) {
   const { m } = useTree.getState();
   if (!m) return;
   const gen = generation;
   set((s) => ({ dirs: { ...s.dirs, [path]: { ...s.dirs[path], loading: true } } }));
+  const wanted = (s: TreeState) => gen === generation && !!s.root && within(path, s.root);
   try {
     const { entries } = await listDir(m, path);
-    if (gen !== generation) return;
-    set((s) => ({ dirs: { ...s.dirs, [path]: { entries } } }));
+    set((s) => {
+      if (!wanted(s)) return {};
+      const dirs = { ...s.dirs, [path]: { entries } };
+      return mtime === undefined ? { dirs } : { dirs, mtimes: { ...s.mtimes, [path]: mtime } };
+    });
   } catch (e) {
-    if (gen !== generation) return;
-    set((s) => ({ dirs: { ...s.dirs, [path]: { error: e instanceof Error ? e.message : String(e) } } }));
+    const error = e instanceof Error ? e.message : String(e);
+    set((s) => (wanted(s) ? { dirs: { ...s.dirs, [path]: { entries: s.dirs[path]?.entries, error } } } : {}));
   }
 }
 
@@ -234,6 +287,11 @@ export async function loadDir(path: string) {
 export function reloadDirs(paths: Iterable<string>) {
   const { dirs } = useTree.getState();
   for (const p of new Set(paths)) if (dirs[p]) void loadDir(p);
+}
+
+/** Lists the shown directories again (Refresh). */
+export function refresh() {
+  for (const p of shownDirs(useTree.getState())) void loadDir(p);
 }
 
 export function setExpanded(path: string, open: boolean) {
@@ -246,9 +304,9 @@ export function setExpanded(path: string, open: boolean) {
   if (open && !useTree.getState().dirs[path]?.entries) void loadDir(path);
 }
 
-/** Collapses every directory. */
+/** Collapses every directory (and forgets their listings). */
 export function collapseAll() {
-  set({ expanded: {} });
+  set((s) => (s.root ? pruned({ ...s, expanded: {} }, s.root) : { expanded: {} }));
 }
 
 export function setFollow(follow: boolean) {
@@ -286,58 +344,50 @@ export function setClipboard(clipboard: Clipboard | undefined) {
   set({ clipboard });
 }
 
-/** The directories a poll checks: the root and the expanded directories
- * below it that are listed, at most MAX_POLLED. */
+/** The directories a poll checks: the shown ones (the root, and the
+ * expanded directories below it not in a collapsed folder) that are
+ * listed, at most MAX_POLLED. */
 export const MAX_POLLED = 200;
-export function polledDirs(s: Pick<TreeState, 'root' | 'expanded' | 'dirs'>): string[] {
-  if (!s.root) return [];
-  const out = [s.root];
-  for (const p of Object.keys(s.expanded)) {
-    if (out.length >= MAX_POLLED) break;
-    if (p !== s.root && within(p, s.root) && s.dirs[p]?.entries) out.push(p);
-  }
-  return out;
+export function polledDirs(s: Pick<TreeState, 'root' | 'expanded' | 'dirs' | 'hidden'>): string[] {
+  return shownDirs(s)
+    .filter((p) => p === s.root || s.dirs[p]?.entries)
+    .slice(0, MAX_POLLED);
 }
 
 /** Checks the shown directories' modification times and lists again those
  * that changed (and, once, those seen the first time: the listing may be
- * older than the time). A directory gone is dropped. */
+ * older than the time). A directory gone is dropped; one whose state is
+ * not known (a mount that does not answer) stays as it is. A failed stat
+ * rejects (the poller waits longer); it ends when the listings it started
+ * do. */
 export async function poll() {
   const s = useTree.getState();
   const paths = polledDirs(s);
   if (!s.m || !paths.length) return;
   const gen = generation;
-  let entries: Entry[];
-  try {
-    entries = await filesApi.stat(s.m, paths);
-  } catch {
-    return; // offline: the next poll tries again
-  }
+  const entries: Entry[] = await filesApi.stat(s.m, paths);
   if (gen !== generation) return;
-  const mtimes = { ...useTree.getState().mtimes };
-  const changed: string[] = [];
+  const { mtimes } = useTree.getState();
+  const changed: Array<[string, number]> = [];
   const gone: string[] = [];
   for (const e of entries) {
-    if (!e.exists || !e.is_dir) {
-      gone.push(e.path);
-      continue;
-    }
-    if (mtimes[e.path] !== e.mtime) {
-      mtimes[e.path] = e.mtime;
-      changed.push(e.path);
-    }
+    if (e.error) continue;
+    if (!e.exists || !e.is_dir) gone.push(e.path);
+    else if (mtimes[e.path] !== e.mtime) changed.push([e.path, e.mtime]);
   }
-  set((st) => {
-    if (!gone.length) return { mtimes };
-    const dirs = { ...st.dirs };
-    const expanded = { ...st.expanded };
-    for (const p of gone) {
-      delete expanded[p];
-      delete mtimes[p];
-      if (p === st.root) dirs[p] = { error: 'not_found' };
-      else delete dirs[p];
-    }
-    return { mtimes, dirs, expanded };
-  });
-  reloadDirs(changed);
+  if (gone.length) {
+    set((st) => {
+      const dirs = { ...st.dirs };
+      const expanded = { ...st.expanded };
+      const mtimes = { ...st.mtimes };
+      for (const p of gone) {
+        delete expanded[p];
+        delete mtimes[p];
+        if (p === st.root) dirs[p] = { error: 'not_found' };
+        else delete dirs[p];
+      }
+      return { mtimes, dirs, expanded };
+    });
+  }
+  await Promise.all(changed.map(([p, mtime]) => loadDir(p, mtime)));
 }

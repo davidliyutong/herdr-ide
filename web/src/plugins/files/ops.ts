@@ -37,6 +37,7 @@ import {
   within,
   collapseAll,
   loadDir,
+  refresh,
 } from './tree';
 
 const toast = (msg: string, kind: ToastKind = 'error') => useStore.getState().toast(msg, undefined, undefined, kind);
@@ -207,13 +208,16 @@ export async function remove(m: string, paths: string[], why?: string) {
   reloadDirs(paths.map(parentOf));
 }
 
-/** Moves paths into dir (a drop in the tree). */
-export async function moveInto(m: string, paths: string[], dir: string) {
+/** Moves paths into dir (a drop in the tree): what it did, undefined when
+ * it failed. The machine refuses a folder moved into itself, also through
+ * a link; the names here only spare it the obvious. */
+export async function moveInto(m: string, paths: string[], dir: string): Promise<Result | undefined> {
   paths = topmost(paths).filter((p) => parentOf(p) !== dir && !within(dir, p));
-  if (!paths.length) return;
+  if (!paths.length) return {};
   const r = await attempt(() => filesApi.move(m, paths, dir));
   reloadDirs([dir, ...paths.map(parentOf)]);
   if (r?.paths?.length) select(r.paths[r.paths.length - 1]);
+  return r;
 }
 
 export async function copyInto(m: string, paths: string[], dir: string) {
@@ -225,14 +229,16 @@ export async function copyInto(m: string, paths: string[], dir: string) {
 }
 
 /** Pastes the clipboard's paths into dir: moved after a cut, copied
- * otherwise. */
+ * otherwise. A cut leaves the clipboard once moved: what failed to move
+ * stays in it, and all of it when the move failed. */
 export async function paste(m: string, dir: string) {
   const c = useTree.getState().clipboard;
   if (!c || c.m !== m) return;
-  if (c.cut) {
-    setClipboard(undefined);
-    await moveInto(m, c.paths, dir);
-  } else await copyInto(m, c.paths, dir);
+  if (!c.cut) return copyInto(m, c.paths, dir);
+  const r = await moveInto(m, c.paths, dir);
+  if (!r || useTree.getState().clipboard !== c) return;
+  const failed = c.paths.filter((p) => r.failed?.[p]);
+  setClipboard(failed.length ? { ...c, paths: failed } : undefined);
 }
 
 /** Uploads files dropped from outside the page into dir; in the desktop
@@ -321,7 +327,7 @@ export function menuFor(m: string, paths: string[], isDir: (p: string) => boolea
     out.push({ label: t('files.deletePermanently'), hint: treeKeys.remove(), danger: true, run: () => void remove(m, paths) });
   }
   if (!target) {
-    out.push({ label: t('files.refresh'), run: () => reloadDirs(Object.keys(useTree.getState().dirs)) });
+    out.push({ label: t('files.refresh'), run: refresh });
     out.push({ label: t('files.collapseAll'), run: collapseAll });
   }
   return out;

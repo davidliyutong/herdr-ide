@@ -10,7 +10,8 @@
 //
 // Every path goes through the agent's expansion. Nothing touches the root,
 // a directory holding the home directory (the home directory itself
-// included) or the agent's own data directory.
+// included) or the agent's own data directory, compared by file identity
+// (os.SameFile), so a link or a name in another case does not reach them.
 package files
 
 import (
@@ -20,11 +21,14 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math/rand/v2"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
+	"time"
 
 	"herdr-ide/internal/agent/plugin"
 	"herdr-ide/internal/agentproto"
@@ -39,18 +43,26 @@ const (
 	MaxStat = 200
 	// maxPaths bounds the paths of one trash, remove, move or copy.
 	maxPaths = 1000
+	// maxStatting bounds the stats running at once. A stat of a dead mount
+	// holds a thread in the kernel until the mount answers, and the
+	// explorer polls again every few seconds: at most this many threads
+	// wait so, and a path is not asked again while a stat of it runs.
+	maxStatting = 8
 )
 
 func init() { plugin.Register("files", handle) }
 
 // Entry is the stat of a path the explorer follows; Exists is false when
-// it is gone.
+// it is gone. Error is set (with Exists false) when its state is not known:
+// the stat failed otherwise (denied, failed) or did not answer in time
+// (busy, timeout); the explorer then keeps what it shows.
 type Entry struct {
 	Path   string `json:"path"`
 	Exists bool   `json:"exists"`
 	IsDir  bool   `json:"is_dir,omitempty"`
 	Size   int64  `json:"size"`
 	MTime  int64  `json:"mtime"` // unix milliseconds
+	Error  string `json:"error,omitempty"`
 }
 
 // Params are the parameters of every action; each reads its own fields.
@@ -81,10 +93,10 @@ func handle(ctx context.Context, st net.Conn, action string, raw json.RawMessage
 	if err := plugin.Decode(raw, &p); err != nil {
 		return plugin.Reply(st, nil, err)
 	}
-	g := guard{env: env}
+	g := &guard{env: env}
 	switch action {
 	case "stat":
-		v, err := g.stat(p.Paths)
+		v, err := g.stat(ctx, p.Paths)
 		return plugin.Reply(st, v, err)
 	case "mkdir":
 		v, err := g.mkdir(p.Path)
@@ -93,10 +105,10 @@ func handle(ctx context.Context, st net.Conn, action string, raw json.RawMessage
 		v, err := g.create(p.Path)
 		return plugin.Reply(st, v, err)
 	case "rename":
-		v, err := g.rename(p.Path, p.To)
+		v, err := g.rename(ctx, p.Path, p.To)
 		return plugin.Reply(st, v, err)
 	case "move":
-		v, err := g.move(p.Paths, p.Dir)
+		v, err := g.move(ctx, p.Paths, p.Dir)
 		return plugin.Reply(st, v, err)
 	case "copy":
 		v, err := g.copy(ctx, p.Paths, p.Dir)
@@ -114,11 +126,33 @@ func handle(ctx context.Context, st net.Conn, action string, raw json.RawMessage
 }
 
 // guard resolves paths and refuses the ones the explorer must not change.
-type guard struct{ env *plugin.Env }
+type guard struct {
+	env  *plugin.Env
+	prot *protection
+}
 
 // resolve expands p; a path is refused when it is the root or holds the
-// home directory, or is in the agent's data directory.
-func (g guard) resolve(p string) (string, error) {
+// home directory, or is in the agent's data directory: by its name, and by
+// the identity of what it names once the links of its directories are
+// followed.
+func (g *guard) resolve(p string) (string, error) {
+	abs, err := g.expand(p)
+	if err != nil {
+		return "", err
+	}
+	if g.prot == nil {
+		g.prot = protect(g.env.Home, g.env.Base)
+	}
+	if refused(abs, g.env.Home, g.env.Base) || g.prot.refuses(abs) {
+		return "", plugin.Errorf("refused", "%s is protected", abs)
+	}
+	return abs, nil
+}
+
+// expand makes p absolute and clean. Alone, it is for the directory a move
+// or copy puts paths into, which is not changed itself (the home directory
+// is a fine place to put files): each path that lands in it is resolved.
+func (g *guard) expand(p string) (string, error) {
 	if p == "" || strings.ContainsRune(p, 0) {
 		return "", plugin.Errorf("bad_params", "no path")
 	}
@@ -126,29 +160,100 @@ func (g guard) resolve(p string) (string, error) {
 	if err != nil {
 		return "", plugin.Errorf("bad_params", "%v", err)
 	}
-	abs = filepath.Clean(abs)
-	home, base := realPath(g.env.Home), realPath(g.env.Base)
-	if refused(abs, g.env.Home, g.env.Base) || refused(realPath(abs), home, base) {
-		return "", plugin.Errorf("refused", "%s is protected", abs)
-	}
-	return abs, nil
+	return filepath.Clean(abs), nil
 }
 
-// realPath is p with the links of its directory resolved (the object a
-// rename or removal of p acts on), or p as it is when that fails.
+// protection is what the explorer must not change, by file identity: the
+// home directory and every directory holding it, and the data directory.
+// Identities, not names: a home directory reached through a link
+// (/home/me -> /data/me) or named in another case on a case-insensitive
+// volume (/Users/ME) is the same directory.
+type protection struct {
+	// above are the home directory and the directories above it, along its
+	// path as configured and along its real path.
+	above []fs.FileInfo
+	// base is the data directory; nil when it is not there.
+	base fs.FileInfo
+}
+
+func protect(home, base string) *protection {
+	pr := &protection{}
+	add := func(p string) {
+		for q := filepath.Clean(p); ; q = filepath.Dir(q) {
+			if fi, err := os.Stat(q); err == nil {
+				pr.above = append(pr.above, fi)
+			}
+			if q == "/" || q == "." {
+				return
+			}
+		}
+	}
+	if home != "" {
+		add(home)
+		if r, err := filepath.EvalSymlinks(home); err == nil {
+			add(r)
+		}
+	}
+	if base != "" {
+		if fi, err := os.Stat(base); err == nil {
+			pr.base = fi
+		}
+	}
+	return pr
+}
+
+// refuses reports whether p (absolute and clean) names the home directory
+// or a directory above it, or the data directory or something in it. The
+// last name of p is not followed (a rename or removal acts on a link, not
+// on what it names); the links of its directories are.
+func (pr *protection) refuses(p string) bool {
+	rp := realPath(p)
+	if fi, err := os.Lstat(rp); err == nil {
+		for _, a := range pr.above {
+			if os.SameFile(fi, a) {
+				return true
+			}
+		}
+	}
+	if pr.base == nil {
+		return false
+	}
+	for q := rp; ; q = filepath.Dir(q) {
+		stat := os.Stat
+		if q == rp {
+			stat = os.Lstat
+		}
+		if fi, err := stat(q); err == nil && os.SameFile(fi, pr.base) {
+			return true
+		}
+		if q == "/" || q == "." {
+			return false
+		}
+	}
+}
+
+// realPath is p with the links of its directories resolved (the object a
+// rename or removal of p acts on); the part of its directory not there
+// yet stays as it is.
 func realPath(p string) string {
-	if p == "" || p == "/" {
+	if p == "/" || p == "." {
 		return p
 	}
-	dir, err := filepath.EvalSymlinks(filepath.Dir(p))
-	if err != nil {
-		return p
+	return filepath.Join(realDir(filepath.Dir(p)), filepath.Base(p))
+}
+
+func realDir(d string) string {
+	if r, err := filepath.EvalSymlinks(d); err == nil {
+		return r
 	}
-	return filepath.Join(dir, filepath.Base(p))
+	if d == "/" || d == "." {
+		return d
+	}
+	return filepath.Join(realDir(filepath.Dir(d)), filepath.Base(d))
 }
 
 // refused reports whether p is the root, holds home (or is it), or is
-// base or below it.
+// base or below it, by name.
 func refused(p, home, base string) bool {
 	if p == "/" {
 		return true
@@ -159,9 +264,34 @@ func refused(p, home, base string) bool {
 	return base != "" && within(p, filepath.Clean(base))
 }
 
-// within reports whether p is dir or below it.
+// within reports whether p is dir or below it, by name.
 func within(p, dir string) bool {
 	return p == dir || strings.HasPrefix(p, strings.TrimSuffix(dir, "/")+"/")
+}
+
+// holds reports whether dir is src or below it, following links: a copy
+// or move of src into dir would put src inside itself. A link src is
+// copied as a link, which holds nothing.
+func holds(src, dir string) bool {
+	if within(dir, src) {
+		return true
+	}
+	sfi, err := os.Lstat(src)
+	if err != nil || !sfi.IsDir() {
+		return false
+	}
+	rd, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return false
+	}
+	for q := rd; ; q = filepath.Dir(q) {
+		if fi, err := os.Stat(q); err == nil && os.SameFile(fi, sfi) {
+			return true
+		}
+		if q == "/" || q == "." {
+			return false
+		}
+	}
 }
 
 // codeOf gives an error of the file system its code.
@@ -186,10 +316,19 @@ func entryOf(p string, fi fs.FileInfo) *Entry {
 	return &Entry{Path: p, Exists: true, IsDir: fi.IsDir(), Size: fi.Size(), MTime: fi.ModTime().UnixMilli()}
 }
 
-func (g guard) stat(paths []string) ([]Entry, error) {
+// statWait bounds how long one stat waits for its paths (the core waits
+// 20 s); osStat is os.Stat, which tests replace.
+var (
+	statWait = 10 * time.Second
+	osStat   = os.Stat
+)
+
+func (g *guard) stat(ctx context.Context, paths []string) ([]Entry, error) {
 	if len(paths) > MaxStat {
 		return nil, plugin.Errorf("bad_params", "at most %d paths", MaxStat)
 	}
+	ctx, cancel := context.WithTimeout(ctx, statWait)
+	defer cancel()
 	out := make([]Entry, 0, len(paths))
 	for _, p := range paths {
 		abs, err := g.env.Expand(p)
@@ -197,18 +336,86 @@ func (g guard) stat(paths []string) ([]Entry, error) {
 			out = append(out, Entry{Path: p})
 			continue
 		}
-		fi, err := os.Stat(abs)
-		if err != nil {
+		fi, err := statShared(ctx, abs)
+		switch {
+		case err == nil:
+			out = append(out, *entryOf(p, fi))
+		case errors.Is(err, fs.ErrNotExist), errors.Is(err, syscall.ENOTDIR):
 			out = append(out, Entry{Path: p})
-			continue
+		default:
+			out = append(out, Entry{Path: p, Error: statCode(err)})
 		}
-		e := entryOf(p, fi)
-		out = append(out, *e)
 	}
 	return out, nil
 }
 
-func (g guard) mkdir(p string) (*Result, error) {
+// errBusy: maxStatting stats are running (a mount that does not answer).
+var errBusy = errors.New("too many stats running")
+
+func statCode(err error) string {
+	switch {
+	case errors.Is(err, errBusy):
+		return "busy"
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+		return "timeout"
+	case errors.Is(err, fs.ErrPermission):
+		return "denied"
+	}
+	return "failed"
+}
+
+// A flight is a stat running; who asks for its path meanwhile waits for
+// it rather than starting another.
+type flight struct {
+	done chan struct{}
+	fi   fs.FileInfo
+	err  error
+}
+
+var (
+	statGate  = make(chan struct{}, maxStatting)
+	flightsMu sync.Mutex
+	flights   = map[string]*flight{}
+)
+
+// statShared stats p, or waits for the stat of p already running, until
+// ctx ends; with maxStatting stats running it fails at once (errBusy). A
+// stat outlives a caller that stops waiting, as a system call cannot be
+// interrupted, and keeps its place among the maxStatting until it ends.
+func statShared(ctx context.Context, p string) (fs.FileInfo, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err // the paths after a stat that did not answer
+	}
+	flightsMu.Lock()
+	f := flights[p]
+	if f == nil {
+		select {
+		case statGate <- struct{}{}:
+		default:
+			flightsMu.Unlock()
+			return nil, errBusy
+		}
+		f = &flight{done: make(chan struct{})}
+		flights[p] = f
+		go func() {
+			f.fi, f.err = osStat(p)
+			flightsMu.Lock()
+			delete(flights, p)
+			flightsMu.Unlock()
+			<-statGate
+			close(f.done)
+		}()
+	}
+	flightsMu.Unlock()
+	select {
+	case <-f.done:
+		return f.fi, f.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (g *guard) mkdir(p string) (*Result, error) {
 	abs, err := g.resolve(p)
 	if err != nil {
 		return nil, err
@@ -219,7 +426,7 @@ func (g guard) mkdir(p string) (*Result, error) {
 	return &Result{Paths: []string{abs}}, nil
 }
 
-func (g guard) create(p string) (*Result, error) {
+func (g *guard) create(p string) (*Result, error) {
 	abs, err := g.resolve(p)
 	if err != nil {
 		return nil, err
@@ -232,8 +439,8 @@ func (g guard) create(p string) (*Result, error) {
 }
 
 // rename gives a path a new name or place; it never replaces what is
-// there.
-func (g guard) rename(from, to string) (*Result, error) {
+// there. Across file systems it is a copy and a removal.
+func (g *guard) rename(ctx context.Context, from, to string) (*Result, error) {
 	src, err := g.resolve(from)
 	if err != nil {
 		return nil, err
@@ -245,23 +452,45 @@ func (g guard) rename(from, to string) (*Result, error) {
 	if src == dst {
 		return &Result{Paths: []string{dst}}, nil
 	}
-	if within(dst, src) {
+	if within(dst, src) || holds(src, filepath.Dir(dst)) {
 		return nil, plugin.Errorf("bad_params", "cannot move %s into itself", src)
 	}
-	if err := renameNoReplace(src, dst); err != nil {
+	if err := moveNoReplace(ctx, src, dst); err != nil {
 		return nil, codeOf(err)
 	}
 	return &Result{Paths: []string{dst}}, nil
 }
 
+// renameFile is renameNoReplace; tests replace it.
+var renameFile = renameNoReplace
+
+// moveNoReplace renames src to dst, failing when dst exists. A rename
+// across file systems (EXDEV) copies src (as copy does, never over
+// something at dst) and removes it once copied; a copy that fails leaves
+// src as it was and removes what it made.
+func moveNoReplace(ctx context.Context, src, dst string) error {
+	err := renameFile(src, dst)
+	if !errors.Is(err, syscall.EXDEV) {
+		return err
+	}
+	made, err := copyTree(ctx, src, dst)
+	if err != nil {
+		if made {
+			os.RemoveAll(dst)
+		}
+		return err
+	}
+	return os.RemoveAll(src)
+}
+
 // move puts paths into dir under their own names, replacing nothing.
-func (g guard) move(paths []string, dir string) (*Result, error) {
-	d, err := g.resolve(dir)
+func (g *guard) move(ctx context.Context, paths []string, dir string) (*Result, error) {
+	d, err := g.expand(dir)
 	if err != nil {
 		return nil, err
 	}
 	return g.each(paths, func(src string) (string, error) {
-		r, err := g.rename(src, filepath.Join(d, filepath.Base(filepath.Clean(src))))
+		r, err := g.rename(ctx, src, filepath.Join(d, filepath.Base(filepath.Clean(src))))
 		if err != nil {
 			return "", err
 		}
@@ -271,8 +500,8 @@ func (g guard) move(paths []string, dir string) (*Result, error) {
 
 // copy copies paths into dir: under their own names, or "name copy",
 // "name copy 2"… when those are taken (a copy into the same directory).
-func (g guard) copy(ctx context.Context, paths []string, dir string) (*Result, error) {
-	d, err := g.resolve(dir)
+func (g *guard) copy(ctx context.Context, paths []string, dir string) (*Result, error) {
+	d, err := g.expand(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -281,11 +510,15 @@ func (g guard) copy(ctx context.Context, paths []string, dir string) (*Result, e
 		if err != nil {
 			return "", err
 		}
-		if within(d, src) {
+		if holds(src, d) {
 			return "", plugin.Errorf("bad_params", "cannot copy %s into itself", src)
 		}
 		dst, err := copyName(d, filepath.Base(src))
 		if err != nil {
+			return "", err
+		}
+		// dir may be a link: where the copy lands is checked too.
+		if _, err := g.resolve(dst); err != nil {
 			return "", err
 		}
 		if made, err := copyTree(ctx, src, dst); err != nil {
@@ -303,7 +536,7 @@ type action func(string) (string, error)
 
 // each runs f on every path: the paths it made, and the codes of those it
 // failed on. One path that fails alone fails the action.
-func (g guard) each(paths []string, f action) (*Result, error) {
+func (g *guard) each(paths []string, f action) (*Result, error) {
 	if len(paths) == 0 || len(paths) > maxPaths {
 		return nil, plugin.Errorf("bad_params", "between 1 and %d paths", maxPaths)
 	}
@@ -332,7 +565,7 @@ func (g guard) each(paths []string, f action) (*Result, error) {
 	return res, nil
 }
 
-func (g guard) remove(p string) (string, error) {
+func (g *guard) remove(p string) (string, error) {
 	abs, err := g.resolve(p)
 	if err != nil {
 		return "", err
@@ -343,7 +576,7 @@ func (g guard) remove(p string) (string, error) {
 	return "", codeOf(os.RemoveAll(abs))
 }
 
-func (g guard) trash(p string) (string, error) {
+func (g *guard) trash(p string) (string, error) {
 	abs, err := g.resolve(p)
 	if err != nil {
 		return "", err
@@ -359,7 +592,7 @@ func (g guard) trash(p string) (string, error) {
 // chunks (agentproto.ChunkWriter), then a line with the result. The file
 // must be as the editor loaded it (Expect) unless Force; it is replaced
 // in one rename, through a symbolic link to its target, keeping its mode.
-func (g guard) write(st net.Conn, p Params) error {
+func (g *guard) write(st net.Conn, p Params) error {
 	abs, err := g.resolve(p.Path)
 	if err == nil {
 		abs, err = target(abs)
@@ -437,27 +670,27 @@ func conflict(p string, fi fs.FileInfo) error {
 }
 
 // save writes r (at most MaxWrite bytes) into a new file beside p and
-// renames it over p once the precondition still holds.
+// renames it over p once the precondition still holds. A file replaced
+// keeps its mode; a new file gets what the umask leaves of 0666, as a
+// program's new file does. The rename replaces the file: hard links to it
+// keep the old text, and its owner becomes the user.
 func save(p string, r io.Reader, w Params) (*Entry, error) {
 	dir := filepath.Dir(p)
-	mode := os.FileMode(0o644)
+	perm, mode, keep := fs.FileMode(0o666), fs.FileMode(0), false
 	if fi, err := os.Stat(p); err == nil {
-		mode = fi.Mode().Perm()
+		// Private while the text is written, the file's mode after.
+		perm, mode, keep = 0o600, fi.Mode().Perm(), true
 	}
-	tmp, err := os.CreateTemp(dir, "."+brand.Slug+"-save-*")
+	tmp, err := createTemp(dir, perm)
 	if err != nil {
 		io.Copy(io.Discard, r)
 		return nil, err
 	}
-	n, err := io.Copy(tmp, io.LimitReader(r, MaxWrite+1))
-	if err == nil && n > MaxWrite {
-		io.Copy(io.Discard, r)
-		err = plugin.Errorf("too_large", "more than %d bytes", MaxWrite)
-	}
+	err = receive(tmp, r)
 	if cerr := tmp.Close(); err == nil {
 		err = cerr
 	}
-	if err == nil {
+	if err == nil && keep {
 		err = os.Chmod(tmp.Name(), mode)
 	}
 	if err == nil {
@@ -475,6 +708,32 @@ func save(p string, r io.Reader, w Params) (*Entry, error) {
 		return nil, err
 	}
 	return entryOf(p, fi), nil
+}
+
+// receive copies a save's text (at most MaxWrite bytes) into w. It reads r
+// to its end whatever happens (a full disk, too much text): the core sends
+// the whole text before it reads the answer.
+func receive(w io.Writer, r io.Reader) error {
+	n, err := io.Copy(w, io.LimitReader(r, MaxWrite+1))
+	if err == nil && n > MaxWrite {
+		err = plugin.Errorf("too_large", "more than %d bytes", MaxWrite)
+	}
+	if err != nil {
+		io.Copy(io.Discard, r)
+	}
+	return err
+}
+
+// createTemp creates a file for a save in dir, with perm less the umask.
+func createTemp(dir string, perm fs.FileMode) (*os.File, error) {
+	for i := 0; i < 100; i++ {
+		name := filepath.Join(dir, fmt.Sprintf(".%s-save-%08x", brand.Slug, rand.Uint32()))
+		f, err := os.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, perm)
+		if !errors.Is(err, fs.ErrExist) {
+			return f, err
+		}
+	}
+	return nil, plugin.Errorf("exists", "no free name for a save in %s", dir)
 }
 
 // copyName is the first free name in dir for a copy of base: base, then

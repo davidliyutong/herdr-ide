@@ -11,6 +11,9 @@ export interface Entry {
   size: number;
   /** Unix milliseconds. */
   mtime: number;
+  /** Set when the state is not known (busy, timeout, denied, failed):
+   * neither there nor gone. */
+  error?: string;
 }
 
 /** What a change made: the new paths, and the codes of the paths an
@@ -87,10 +90,15 @@ export const filesApi = {
   /** Deletes for good. */
   remove: (m: string, paths: string[]) => change(m, 'remove', { paths }),
 
+  /** The state of paths (at most 200; a POST, as their URL would be too
+   * long for proxies, that changes nothing). */
   async stat(m: string, paths: string[]): Promise<Entry[]> {
-    const q = new URLSearchParams();
-    for (const p of paths) q.append('path', p);
-    const j = (await answer(await fetch(`${base(m)}/stat?${q}`))) as { entries?: Entry[] };
+    const r = await fetch(`${base(m)}/stat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paths }),
+    });
+    const j = (await answer(r)) as { entries?: Entry[] };
     return j.entries ?? [];
   },
 

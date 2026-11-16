@@ -112,7 +112,7 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 	rep, err := requestAgent(ctx, mc, agentproto.Header{Op: agentproto.OpFsStat, Path: p})
 	cancel()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		http.Error(w, err.Error(), statFailure(rep, err))
 		return
 	}
 	if rep.Stat.IsDir {
@@ -120,6 +120,33 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	serveFile(w, r, mc, rep.Stat, r.URL.Query().Get("download") == "1")
+}
+
+// statFailure is the status of a failed stat of a machine's path: 404
+// only when the path is not there (an editor offers to create a file that
+// is not there), 403 without permission, 502 when the machine did not
+// answer or failed otherwise.
+func statFailure(rep *agentproto.Reply, err error) int {
+	if errors.Is(err, machines.ErrNotConnected) || rep == nil || rep.OK {
+		return http.StatusBadGateway
+	}
+	code := rep.Code
+	if code == "" {
+		// An agent from before the codes.
+		switch {
+		case strings.Contains(rep.Error, "no such file or directory"), strings.Contains(rep.Error, "not a directory"):
+			code = "not_found"
+		case strings.Contains(rep.Error, "permission denied"):
+			code = "denied"
+		}
+	}
+	switch code {
+	case "not_found":
+		return http.StatusNotFound
+	case "denied":
+		return http.StatusForbidden
+	}
+	return http.StatusBadGateway
 }
 
 // serveFile serves the file of a machine st describes, or the range asked

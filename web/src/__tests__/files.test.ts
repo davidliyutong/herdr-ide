@@ -24,13 +24,17 @@ import {
   polledDirs,
   relativePath,
   setFilter,
+  showRoot,
+  shownDirs,
   topmost,
   treeRows,
   useTree,
+  MAX_EXPANDED,
   MAX_POLLED,
   type TreeState,
 } from '../plugins/files/tree';
 import { badName, menuFor } from '../plugins/files/ops';
+import { MAX_BACKOFF_MS, startPolling } from '../plugins/files/poller';
 import { decorationsOf, registerFileDecorations } from '../plugins/files/decorations';
 import { FakeCore, settle } from './fakeTerms';
 import type { RemoteStat } from '../lib/files';
@@ -50,6 +54,10 @@ const d = (name: string) => f(name, { is_dir: true });
 /** The machine's files, by directory. */
 let tree: Record<string, RemoteStat[]>;
 let mtimes: Record<string, number>;
+/** Directories whose listing fails. */
+let failList: Set<string>;
+/** Answers of the plugin's changes, by action, instead of {paths: []}. */
+let answers: Record<string, (body: unknown) => { status: number; json: unknown }>;
 const calls: Array<{ method: string; url: string; body?: unknown }> = [];
 
 function stubFetch() {
@@ -61,22 +69,35 @@ function stubFetch() {
     const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'Content-Type': 'application/json' } });
     if (url.pathname === '/api/m/m/list') {
       const p = url.searchParams.get('path')!;
+      if (failList.has(p)) return json({ error: 'input/output error' }, 404);
       if (!tree[p]) return json({ error: 'no such directory' }, 404);
       return json({ dir: { name: p, path: p, is_dir: true }, entries: tree[p] });
     }
     if (url.pathname === '/api/m/m/p/files/stat') {
       return json({
-        entries: url.searchParams
-          .getAll('path')
-          .map((p) => ({ path: p, exists: !!tree[p], is_dir: !!tree[p], size: 0, mtime: mtimes[p] ?? 1 })),
+        entries: (body as { paths: string[] }).paths.map((p) => ({
+          path: p,
+          exists: !!tree[p],
+          is_dir: !!tree[p],
+          size: 0,
+          mtime: mtimes[p] ?? 1,
+        })),
       });
+    }
+    const action = url.pathname.replace('/api/m/m/p/files/', '');
+    if (answers[action]) {
+      const a = answers[action](body);
+      return json(a.json, a.status);
     }
     if (url.pathname.startsWith('/api/m/m/p/files/')) return json({ paths: [] });
     return json({});
   });
 }
 
-const changes = () => calls.filter((c) => c.method === 'POST').map((c) => [c.url.replace('/api/m/m/p/files/', ''), c.body]);
+const changes = () =>
+  calls.filter((c) => c.method === 'POST' && !c.url.endsWith('/stat')).map((c) => [c.url.replace('/api/m/m/p/files/', ''), c.body]);
+const lists = (p?: string) =>
+  calls.filter((c) => c.url.startsWith('/api/m/m/list') && (!p || c.url.endsWith(new URLSearchParams({ path: p }).toString()))).length;
 
 describe('file tree rows', () => {
   const state = (over: Partial<TreeState>): TreeState => ({
@@ -159,6 +180,68 @@ describe('file tree rows', () => {
     expect(polledDirs(state({ dirs, expanded }))).toHaveLength(MAX_POLLED);
   });
 
+  it('shows (and polls) only the folders not in a collapsed or hidden one', () => {
+    const dirs: TreeState['dirs'] = {};
+    for (const p of ['/r', '/r/a', '/r/a/b', '/r/c/d', '/r/.git', '/r/.git/x', '/r/e']) dirs[p] = { entries: [] };
+    // /r/c is collapsed, /r/.git hidden.
+    const expanded: TreeState['expanded'] = {
+      '/r/a': true,
+      '/r/a/b': true,
+      '/r/c/d': true,
+      '/r/.git': true,
+      '/r/.git/x': true,
+      '/r/e': true,
+    };
+    expect(shownDirs(state({ expanded }))).toEqual(['/r', '/r/a', '/r/a/b', '/r/e']);
+    expect(polledDirs(state({ dirs, expanded }))).toEqual(['/r', '/r/a', '/r/a/b', '/r/e']);
+    expect(shownDirs(state({ expanded, hidden: true }))).toEqual(['/r', '/r/a', '/r/a/b', '/r/.git', '/r/.git/x', '/r/e']);
+  });
+
+  it('polls one at a time, and less often after failures', async () => {
+    vi.useFakeTimers();
+    try {
+      let calls = 0;
+      let fail = false;
+      let done = () => {};
+      const stop = startPolling(1000, () => {
+        calls++;
+        if (fail) return Promise.reject(new Error('offline'));
+        return new Promise<void>((r) => (done = r));
+      });
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(calls).toBe(1);
+      // Still running: no other poll starts.
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(calls).toBe(1);
+      done();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(calls).toBe(2);
+      // Failures double the wait: 2 s, then 4 s.
+      fail = true;
+      done();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(calls).toBe(3);
+      await vi.advanceTimersByTimeAsync(1999);
+      expect(calls).toBe(3);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(calls).toBe(4);
+      await vi.advanceTimersByTimeAsync(3999);
+      expect(calls).toBe(4);
+      fail = false;
+      await vi.advanceTimersByTimeAsync(1);
+      expect(calls).toBe(5);
+      done();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(calls).toBe(6);
+      stop();
+      done();
+      await vi.advanceTimersByTimeAsync(MAX_BACKOFF_MS);
+      expect(calls).toBe(6);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('merges decorations of providers', () => {
     const off1 = registerFileDecorations((_m, dir) => (dir === '/r' ? { a: { color: 'red', badge: 'M' } } : undefined));
     const off2 = registerFileDecorations(() => ({ a: { badge: 'U' } }));
@@ -196,6 +279,8 @@ describe('FilesPanel', () => {
       '/home/u': [d('src')],
     };
     mtimes = {};
+    failList = new Set();
+    answers = {};
     calls.length = 0;
     stubFetch();
     core = new FakeCore();
@@ -360,7 +445,6 @@ describe('FilesPanel', () => {
   it('lists a folder again when a poll sees it changed', async () => {
     await act(async () => row('/home/u/src/lib').click());
     await flush();
-    const lists = () => calls.filter((c) => c.url.startsWith('/api/m/m/list')).length;
     await act(async () => poll());
     await flush();
     // The first poll sets the times and lists once more (the listing may be older).
@@ -378,5 +462,104 @@ describe('FilesPanel', () => {
     await act(async () => poll());
     await flush();
     expect(useTree.getState().expanded['/home/u/src/lib']).toBeUndefined();
+  });
+
+  it('asks for the times in the body of a POST', async () => {
+    await act(async () => poll());
+    const stat = calls.find((c) => c.url.startsWith('/api/m/m/p/files/stat'))!;
+    expect(stat).toMatchObject({ method: 'POST', url: '/api/m/m/p/files/stat', body: { paths: ['/home/u/src'] } });
+  });
+
+  it('keeps a folder listed when listing it again fails, and tries again', async () => {
+    await act(async () => row('/home/u/src/lib').click());
+    await flush();
+    await act(async () => poll());
+    await flush();
+    mtimes['/home/u/src/lib'] = 2;
+    failList.add('/home/u/src/lib');
+    await act(async () => poll());
+    await flush();
+    expect(rows()).toContain('/home/u/src/lib/a.go');
+    expect(useTree.getState().dirs['/home/u/src/lib'].error).toBeTruthy();
+    // The time is recorded only once a listing succeeds: the next poll lists again.
+    expect(useTree.getState().mtimes['/home/u/src/lib']).not.toBe(2);
+    const before = lists('/home/u/src/lib');
+    failList.clear();
+    tree['/home/u/src/lib'] = [...tree['/home/u/src/lib'], f('c.go')];
+    await act(async () => poll());
+    await flush();
+    expect(lists('/home/u/src/lib')).toBe(before + 1);
+    expect(rows()).toContain('/home/u/src/lib/c.go');
+    expect(useTree.getState().mtimes['/home/u/src/lib']).toBe(2);
+    await act(async () => poll());
+    await flush();
+    expect(lists('/home/u/src/lib')).toBe(before + 1);
+  });
+
+  it('refreshes the folders shown, not every folder seen', async () => {
+    await act(async () => row('/home/u/src/lib').click());
+    await flush();
+    await act(async () => row('/home/u/src/lib').click()); // collapsed again
+    await flush();
+    calls.length = 0;
+    await act(async () => host.querySelector<HTMLButtonElement>(`button[aria-label="${t('files.refresh')}"]`)!.click());
+    await flush();
+    expect(lists()).toBe(1);
+    expect(lists('/home/u/src')).toBe(1);
+  });
+
+  it('keeps what is below a new root only, and clears the selection', async () => {
+    await act(async () => row('/home/u/src/lib').click());
+    await flush();
+    useTree.setState((s) => ({ dirs: { ...s.dirs, '/elsewhere': { entries: [] } }, mtimes: { '/elsewhere': 1, '/home/u/src': 1 } }));
+    await key('End');
+    expect(useTree.getState().selection).toEqual(['/home/u/src/main.go']);
+    // The root moves (a crumb): what was selected is no longer acted on.
+    await act(async () => host.querySelectorAll<HTMLButtonElement>('.files-crumb button')[0].click());
+    await flush();
+    const s = useTree.getState();
+    expect(s).toMatchObject({ root: '/home/u', selection: [], cursor: undefined });
+    expect(Object.keys(s.dirs).sort()).toEqual(['/home/u', '/home/u/src/lib']);
+    expect(Object.keys(s.mtimes)).toEqual([]);
+    await key('Delete');
+    await flush();
+    expect(changes()).toEqual([]);
+    // Many folders opened elsewhere: the oldest outside the root are forgotten.
+    const expanded: TreeState['expanded'] = {};
+    for (let i = 0; i < MAX_EXPANDED + 10; i++) expanded[`/other/d${i}`] = true;
+    useTree.setState({ expanded: { ...expanded, '/home/u/x': true } });
+    await act(async () => showRoot('m', '/home'));
+    const kept = Object.keys(useTree.getState().expanded);
+    expect(kept).toHaveLength(MAX_EXPANDED);
+    expect(kept).toContain('/home/u/x');
+    expect(kept).not.toContain('/other/d0');
+  });
+
+  it('pastes into the root when the cursor is not a row', async () => {
+    await key('End');
+    await key('c', { metaKey: true, ctrlKey: true });
+    useTree.setState({ cursor: '/elsewhere/gone', selection: [] });
+    await key('v', { metaKey: true, ctrlKey: true });
+    await flush();
+    expect(changes()).toEqual([['copy', { paths: ['/home/u/src/main.go'], dir: '/home/u/src' }]]);
+  });
+
+  it('keeps a cut on the clipboard until it is moved', async () => {
+    const main = '/home/u/src/main.go';
+    await key('End');
+    await key('x', { metaKey: true, ctrlKey: true });
+    // The move fails: the clipboard stays.
+    answers.move = () => ({ status: 400, json: { error: 'failed', message: 'cross-device' } });
+    await act(async () => row('/home/u/src/lib').click());
+    await key('v', { metaKey: true, ctrlKey: true });
+    await flush();
+    expect(changes()).toEqual([['move', { paths: [main], dir: '/home/u/src/lib' }]]);
+    expect(useTree.getState().clipboard).toEqual({ m: 'm', paths: [main], cut: true });
+    // Some fail: those stay.
+    useTree.setState({ clipboard: { m: 'm', paths: [main, '/home/u/src/.hidden'], cut: true } });
+    answers.move = () => ({ status: 200, json: { paths: ['/home/u/src/lib/main.go'], failed: { '/home/u/src/.hidden': 'exists' } } });
+    await key('v', { metaKey: true, ctrlKey: true });
+    await flush();
+    expect(useTree.getState().clipboard).toEqual({ m: 'm', paths: ['/home/u/src/.hidden'], cut: true });
   });
 });

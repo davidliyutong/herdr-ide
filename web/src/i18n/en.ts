@@ -798,6 +798,7 @@ export const en = {
   'files.tooLarge': '{name} is too large to edit here (more than 8 MB).',
   'files.notUtf8': '{name} is not UTF-8 text; editing it here could change it.',
   'files.loading': 'Loading…',
+  'files.readFailed': 'The file could not be read: {error}',
   'files.error.conflict': 'The file changed since it was opened.',
   'files.error.not_found': 'It is not there anymore.',
   'files.error.exists': 'That name is taken.',

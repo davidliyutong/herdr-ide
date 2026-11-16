@@ -780,6 +780,7 @@ export const zhCN: Messages = {
   'files.tooLarge': '{name} 太大，无法在这里编辑（超过 8 MB）。',
   'files.notUtf8': '{name} 不是 UTF-8 文本，在这里编辑可能会改变它。',
   'files.loading': '正在载入…',
+  'files.readFailed': '无法读取文件：{error}',
   'files.error.conflict': '文件在打开后已被修改。',
   'files.error.not_found': '它已经不在了。',
   'files.error.exists': '这个名称已被占用。',

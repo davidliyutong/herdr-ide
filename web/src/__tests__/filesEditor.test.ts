@@ -32,6 +32,34 @@ class FakeModel {
     this.listeners.push(l);
   }
   dispose() {}
+  getVersionId() {
+    return this.version;
+  }
+  /** Changes made as edits undo takes back (pushEditOperations). */
+  edits = 0;
+  getPositionAt(offset: number) {
+    const lines = this.value.slice(0, offset).split('\n');
+    return { lineNumber: lines.length, column: lines[lines.length - 1].length + 1 };
+  }
+  private offsetAt(line: number, column: number) {
+    const lines = this.value.split('\n');
+    return lines.slice(0, line - 1).reduce((n, l) => n + l.length + 1, 0) + column - 1;
+  }
+  pushStackElement() {}
+  pushEditOperations(
+    _selections: unknown,
+    ops: Array<{ range: { start: number; startColumn: number; end: number; endColumn: number }; text: string }>,
+  ) {
+    for (const op of ops) {
+      const a = this.offsetAt(op.range.start, op.range.startColumn);
+      const b = this.offsetAt(op.range.end, op.range.endColumn);
+      this.value = this.value.slice(0, a) + op.text + this.value.slice(b);
+    }
+    this.edits++;
+    this.version++;
+    this.listeners.forEach((l) => l());
+    return null;
+  }
 }
 
 type FakeDecoration = { range: { start: number; end: number }; options: { linesDecorationsClassName: string } };
@@ -75,8 +103,9 @@ const monaco = {
   Range: class {
     constructor(
       public start: number,
-      _c: number,
+      public startColumn: number,
       public end: number,
+      public endColumn = 1,
     ) {}
   },
   editor: { getModel: () => null, createModel: () => new FakeModel(), OverviewRulerLane: { Left: 1 } },
@@ -91,7 +120,7 @@ vi.mock('../plugins/monaco', () => ({
 import { useStore } from '../state/store';
 import type { MachineState } from '../lib/machine';
 import { t } from '../i18n';
-import { EditorPane, loadText, versionOf } from '../plugins/files/EditorPane';
+import { CHECK_MS, EditorPane, loadText, versionOf } from '../plugins/files/EditorPane';
 import { registerQuickDiff } from '../plugins/files/quickDiff';
 import { settle } from './fakeTerms';
 
@@ -99,21 +128,36 @@ import { settle } from './fakeTerms';
 
 /** The file on the machine. */
 let file: { text: string | Uint8Array<ArrayBuffer>; size: number; mtime: number } | undefined;
-const writes: Array<{ q: URLSearchParams; body: string }> = [];
+/** The status /file answers with instead of the file (a stat that failed). */
+let fileStatus: number | undefined;
+/** While set, reading the file's contents waits for it. */
+let hold: Promise<void> | undefined;
+const writes: Array<{ q: URLSearchParams; body: string; raw: Uint8Array }> = [];
 
 function stubFetch() {
   vi.stubGlobal('fetch', async (input: string, init?: RequestInit) => {
     const url = new URL(input, 'http://x');
     const method = init?.method ?? 'GET';
     if (url.pathname === '/api/m/m/file') {
+      if (fileStatus) return new Response('lstat: input/output error', { status: fileStatus });
       if (!file) return new Response('not found', { status: 404 });
       const etag = `W/"${file.size.toString(16)}-${file.mtime.toString(16)}"`;
       const headers = { ETag: etag, 'Content-Length': String(file.size) };
+      if (method !== 'HEAD' && hold) await hold;
       return new Response(method === 'HEAD' ? null : file.text, { status: 200, headers });
     }
+    if (url.pathname === '/api/m/m/p/files/stat') {
+      const { paths } = JSON.parse(init!.body as string) as { paths: string[] };
+      return new Response(
+        JSON.stringify({
+          entries: paths.map((path) => (file ? { path, exists: true, size: file.size, mtime: file.mtime } : { path, exists: false })),
+        }),
+      );
+    }
     if (url.pathname === '/api/m/m/p/files/write') {
-      const body = new TextDecoder().decode(init!.body as Uint8Array);
-      writes.push({ q: url.searchParams, body });
+      const raw = init!.body as Uint8Array;
+      const body = new TextDecoder().decode(raw);
+      writes.push({ q: url.searchParams, body, raw });
       const q = url.searchParams;
       const cur = file ? { path: q.get('path'), exists: true, size: file.size, mtime: file.mtime } : { path: q.get('path'), exists: false };
       const matches =
@@ -148,6 +192,8 @@ describe('EditorPane', () => {
 
   beforeEach(() => {
     file = { text: 'hello', size: 5, mtime: 7000 };
+    fileStatus = undefined;
+    hold = undefined;
     writes.length = 0;
     editor.model = undefined;
     editor.save = undefined;
@@ -260,6 +306,94 @@ describe('EditorPane', () => {
     } finally {
       stop();
     }
+  });
+
+  it('says a file it cannot read is not readable, rather than opening it empty', async () => {
+    fileStatus = 403;
+    await render();
+    expect(host.querySelector('.files-editor-note.error')?.textContent).toBe(t('files.error.denied'));
+    expect(editor.model).toBeUndefined();
+    fileStatus = 502;
+    expect(await loadText('m', '/a.txt')).toEqual({ kind: 'error', message: t('files.error.transport') });
+    fileStatus = 500;
+    expect(await loadText('m', '/a.txt')).toEqual({ kind: 'error', message: t('files.readFailed', { error: 'HTTP 500' }) });
+    expect(writes).toEqual([]);
+  });
+
+  it('keeps a byte order mark it does not show', async () => {
+    file = { text: new Uint8Array([0xef, 0xbb, 0xbf, 0x68, 0x69]), size: 5, mtime: 1000 };
+    await render();
+    expect(editor.model?.getValue()).toBe('hi');
+    await act(async () => editor.model!.setValue('ho'));
+    await act(async () => editor.save!());
+    await flush();
+    expect([...writes[0].raw]).toEqual([0xef, 0xbb, 0xbf, 0x68, 0x6f]);
+    // A file without one gets none.
+    file = { text: 'plain', size: 5, mtime: 1000 };
+    expect(await loadText('m', '/b.txt')).toMatchObject({ text: 'plain', version: { bom: false } });
+  });
+
+  describe('changes on disk', () => {
+    /** Runs the timers by ms (the pane's checks), and what they started. */
+    const advance = (ms: number) =>
+      act(async () => {
+        await vi.advanceTimersByTimeAsync(ms);
+      });
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+    const renderNow = async () => {
+      await act(async () =>
+        root.render(
+          createElement(EditorPane, {
+            m: 'm',
+            pane: 'view:v1',
+            view: { id: 'v1', plugin: 'files', kind: 'editor', path: '/home/u/notes.txt' },
+            focused: false,
+          }),
+        ),
+      );
+      await advance(0);
+      await advance(0);
+    };
+
+    it('loads a changed file again by an edit undo takes back', async () => {
+      await renderNow();
+      expect(editor.model?.getValue()).toBe('hello');
+      file = { text: 'hello there', size: 11, mtime: 8000 };
+      await advance(CHECK_MS);
+      expect(editor.model?.getValue()).toBe('hello there');
+      expect(editor.model?.edits).toBe(1);
+      expect(host.querySelector('.files-dirty')).toBeNull();
+    });
+
+    it('keeps what was typed while the file was loading again, and offers the change', async () => {
+      await renderNow();
+      file = { text: 'theirs', size: 6, mtime: 8000 };
+      let release = () => {};
+      hold = new Promise((r) => (release = r));
+      await advance(CHECK_MS);
+      // The pane is reading the new text; the user types meanwhile.
+      await act(async () => editor.model!.setValue('typed'));
+      hold = undefined;
+      release();
+      await advance(0);
+      expect(editor.model?.getValue()).toBe('typed');
+      expect(host.querySelector('.files-conflict')?.textContent).toContain(t('files.conflict.changed', { name: 'notes.txt' }));
+      // Keep Editing: not offered again for the same change…
+      await act(async () => button(t('files.conflict.keep'))!.click());
+      await advance(CHECK_MS);
+      await advance(CHECK_MS);
+      expect(host.querySelector('.files-conflict')).toBeNull();
+      // …but for a newer one.
+      file = { text: 'newer', size: 5, mtime: 9000 };
+      await advance(CHECK_MS);
+      expect(host.querySelector('.files-conflict')).not.toBeNull();
+      expect(editor.model?.getValue()).toBe('typed');
+    });
   });
 
   it('shows media as Quick Look does, without the text editor', async () => {

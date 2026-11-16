@@ -127,7 +127,8 @@ type Header struct {
 type Reply struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
-	// Code classifies Error for ops that define codes (hc).
+	// Code classifies Error for ops that define codes (hc, plugins; fs.stat:
+	// not_found, denied).
 	Code string `json:"code,omitempty"`
 
 	Info    *Info       `json:"info,omitempty"`
