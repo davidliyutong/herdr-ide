@@ -273,11 +273,19 @@ as it then is. The preview names each variable with its description,
 flag, whether the vault has one of that name, why it cannot be imported
 (`invalid_name`: only under another name; `invalid`: a value, description
 or machine list the vault refuses) and its machines as they map here:
-`*` stays; a machine is kept by its id (machines added in the UI get
-random ids, so the same id is the same machine record, as when importing
-into the core that exported); the local machine, whose id is the same on
-every core, only when its label (the host's name) matches too; labels
-alone map nothing, as two machines may share one. Machines that do not
+`*` stays; an ssh machine is kept by its id only when the file names it
+with the same kind and target as the machine of that id here (the file
+seals each machine's kind and target with the variables): machines added
+in the UI get random ids, so the same id and target are the same machine
+record, as when importing into the core that exported, but an id alone
+need not be (an `--ssh` machine's id is its target, a record imported
+from herdr's catalog keeps herdr's id), so a file naming `devbox` does
+not let this core's `devbox` of another target read without asking; a
+file written before targets were recorded maps no ssh machine. A target
+is compared as written: an ssh alias this core's ssh configuration
+resolves to another host counts as the same. The local machine, whose id
+is the same on every core, maps only when its label (the host's name)
+matches too; labels alone map nothing, as two machines may share one. Machines that do not
 map leave the list, so they ask every time; the preview names them. The
 choices say per variable `import` (its name must be free), `overwrite`,
 `rename` (`as`, validated as any name) or `skip`; the import is one write
@@ -479,6 +487,7 @@ choices), with one choice for every name that exists; Import sends them.
 | Machines and flag in the clear, unauthenticated | A program on the core host could widen a variable's machines in the file and read it without asking; sealing them with the value makes such an edit unreadable. |
 | An import session on the core between the preview and the import | The decrypted values would wait in the core's memory for the user's answer, with an expiry and a bound of their own; sending the file and its passphrase again costs one more derivation and leaves nothing behind. |
 | Mapping machines by label on import | Labels are names the user gives and two machines may share one: a match could let another machine read without asking. Ids are random for machines added in the UI; the local machine's id is the same everywhere, so its label must match too. |
+| Mapping ssh machines by id alone on import | An `--ssh` machine's id is its target and a record imported from herdr's catalog keeps herdr's id, so another core may have a machine of that id that is another host: the file records each machine's kind and target, and an id maps only to a machine with both the same. |
 | Exporting values to the browser (a JSON file the page builds) | Values would pass through the page, its memory and its extensions; the core builds the file, and the page gets ciphertext. |
 | Values in the browser for editing | A value shown in a page is in its memory, its extensions' reach and its screen; the editor only sets new values. |
 
@@ -612,7 +621,9 @@ server exposes.
   exist and the machines unknown here (the local machine of another label
   among them), a conflict refusing it all, bad choices refused, then
   import, overwrite, skip and rename in one write, machines mapped by id,
-  audited without values (`TestImport`); the local machine kept when its
+  audited without values (`TestImport`); an id mapped only with the same
+  kind and target, never from a file without targets
+  (`TestImportMapsMachinesByTarget`); the local machine kept when its
   label matches, a wrong passphrase, a changed file, another version, not
   a file and too large refused by both routes (`TestImportFailures`).
   `internal/server`'s `TestMutatingRoutesAreGuarded` refuses export and

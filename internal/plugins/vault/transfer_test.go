@@ -80,7 +80,7 @@ func TestExport(t *testing.T) {
 	if err != nil || len(e.Variables) != 1 || e.Variables[0].Value != "s3cret-a" || e.Variables[0].Description != "first" {
 		t.Fatalf("file %+v %v", e, err)
 	}
-	if mustJSON(e.Machines) != `[{"id":"m1","label":"gpu"},{"id":"local","label":"mac (local)","local":true}]` {
+	if mustJSON(e.Machines) != `[{"id":"m1","label":"gpu","kind":"ssh","target":"gpu"},{"id":"local","label":"mac (local)","local":true,"kind":"local"}]` {
 		t.Errorf("machines %s", mustJSON(e.Machines))
 	}
 	// All: every variable.
@@ -213,6 +213,61 @@ func TestImport(t *testing.T) {
 	// An import is no release: the access log has none of it.
 	if l := p.Log(); len(l) != 0 {
 		t.Errorf("log %+v", l)
+	}
+}
+
+// An id is the same machine only with the same kind and target: an export
+// naming the --ssh machine devbox (its id is its target) does not let
+// another core's machine of that id but another target read without
+// asking, nor does a file that recorded no targets (an earlier version);
+// the same target maps.
+func TestImportMapsMachinesByTarget(t *testing.T) {
+	_, sh, ss := newTest(t)
+	sh.mg = machines.NewManager([]machines.Spec{
+		{ID: "devbox", Label: "devbox", Kind: machines.KindSSH, Target: "devbox"},
+		{ID: "m1", Label: "gpu", Kind: machines.KindSSH, Target: "me@gpu"},
+	}, nil, log.New(os.Stderr, "", 0))
+	ss.Set("A", vaultstore.Update{Value: str("v"), Machines: &[]string{"devbox", "m1"}})
+	vars, _ := ss.Export([]string{"A"})
+	ms := exportMachines(sh, vars)
+	if mustJSON(ms) != `[{"id":"devbox","label":"devbox","kind":"ssh","target":"devbox"},{"id":"m1","label":"gpu","kind":"ssh","target":"me@gpu"}]` {
+		t.Fatalf("exported machines %s", mustJSON(ms))
+	}
+	file, _ := vaultstore.SealExport(&vaultstore.Export{Machines: ms, Variables: vars}, filePass, ss.KDF)
+	old := make([]vaultstore.ExportMachine, len(ms))
+	for i, m := range ms {
+		old[i] = vaultstore.ExportMachine{ID: m.ID, Label: m.Label}
+	}
+	oldFile, _ := vaultstore.SealExport(&vaultstore.Export{Machines: old, Variables: vars}, filePass, ss.KDF)
+
+	p, h, s := newTest(t)
+	h.mg = machines.NewManager([]machines.Spec{
+		{ID: "devbox", Label: "devbox", Kind: machines.KindSSH, Target: "me@elsewhere"},
+		{ID: "m1", Label: "gpu", Kind: machines.KindSSH, Target: "me@gpu"},
+	}, nil, log.New(os.Stderr, "", 0))
+	c := newClient(p, h)
+	c.session(t)
+	preview := func(f []byte) (string, string) {
+		t.Helper()
+		code, out := c.do("POST", "/api/p/vault/import/preview", importReq(f, filePass, nil))
+		if code != 200 {
+			t.Fatalf("preview %d %v", code, out)
+		}
+		v := out["variables"].([]any)[0].(map[string]any)
+		return mustJSON(v["machines"]), mustJSON(v["unknown"])
+	}
+	if mapped, unknown := preview(file); mapped != `["m1"]` || unknown != `["devbox"]` {
+		t.Errorf("mapped %s, unknown %s", mapped, unknown)
+	}
+	if mapped, unknown := preview(oldFile); mapped != `[]` || unknown != `["devbox","m1"]` {
+		t.Errorf("a file without targets: mapped %s, unknown %s", mapped, unknown)
+	}
+	code, out := c.do("POST", "/api/p/vault/import", importReq(file, filePass, []map[string]any{{"i": 0, "action": "import"}}))
+	if code != 200 {
+		t.Fatalf("import %d %v", code, out)
+	}
+	if i, _ := s.Get("A"); strings.Join(i.Machines, ",") != "m1" {
+		t.Errorf("imported machines %v", i.Machines)
 	}
 }
 
