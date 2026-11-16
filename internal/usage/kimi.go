@@ -2,7 +2,7 @@ package usage
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"os"
 	"path"
 	"sort"
@@ -17,7 +17,9 @@ func kimiHome(e *Env) string {
 }
 
 // kimiAccounts reads Kimi Code's weekly quota and its shorter windows:
-// ~/.kimi-code/credentials/kimi-code*.json, GET /coding/v1/usages.
+// ~/.kimi-code/credentials/kimi-code*.json, GET /coding/v1/usages. With
+// Options.KimiRefresh an access token that has ended (or is about to) is
+// renewed first as Kimi Code renews it (kimiauth.go).
 func kimiAccounts(ctx context.Context, e *Env, o *Options) []Account {
 	dir := path.Join(kimiHome(e), "credentials")
 	ents, err := os.ReadDir(dir)
@@ -50,27 +52,37 @@ func kimiAccounts(ctx context.Context, e *Env, o *Options) []Account {
 
 func kimiAccount(ctx context.Context, e *Env, o *Options, file string) Account {
 	a := Account{Provider: Kimi, Source: "api"}
-	b, err := readFile(file)
-	var creds struct {
-		AccessToken string `json:"access_token"`
-		ExpiresAt   any    `json:"expires_at"`
-	}
-	if err != nil || json.Unmarshal(b, &creds) != nil || creds.AccessToken == "" {
+	tok, _, err := readKimiToken(file)
+	if err != nil || tok.AccessToken == "" {
 		a.Status = StatusMissing
 		return a
 	}
-	if c := jwtClaims(creds.AccessToken); c != nil {
+	if c := jwtClaims(tok.AccessToken); c != nil {
 		a.ID = str(first(c, "user_id", "sub", "uid"))
 		a.Email = str(c["email"])
 	}
 	if o.skips(Kimi, a.ID, "") {
 		return skipped(a)
 	}
-	if exp := timeOf(creds.ExpiresAt); exp > 0 && exp < e.now().Unix() {
+	if o.KimiRefresh && kimiRenewable(e, file) && tok.needsRefresh(e.now()) {
+		nt, err := renewKimi(ctx, e, file)
+		switch {
+		case errors.Is(err, errKimiRefused):
+			a.Status, a.Code = StatusUnauth, "unauthorized"
+			return a
+		case errors.Is(err, errKimiLockBusy):
+			a.Status, a.Code = StatusStale, "lock_busy"
+			return a
+		case err != nil:
+			return failed(a, err)
+		}
+		tok = nt
+	}
+	if exp := tok.expiresAt(); exp > 0 && exp < e.now().Unix() {
 		a.Status, a.Code = StatusStale, "token_expired"
 		return a
 	}
-	m, err := getMap(ctx, e.Client, "GET", e.URLs.KimiUsage, map[string]string{"Authorization": "Bearer " + creds.AccessToken}, nil)
+	m, err := getMap(ctx, e.Client, "GET", e.URLs.KimiUsage, map[string]string{"Authorization": "Bearer " + tok.AccessToken}, nil)
 	if err != nil {
 		return failed(a, err)
 	}

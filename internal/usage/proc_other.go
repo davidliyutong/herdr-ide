@@ -10,3 +10,6 @@ func ownGroup(*exec.Cmd) {}
 
 // killGroup does nothing where there are no process groups.
 func killGroup(*exec.Cmd) {}
+
+// osRelease is not asked where the agent does not run.
+func osRelease() string { return "" }

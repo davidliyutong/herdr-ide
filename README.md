@@ -146,7 +146,8 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   thresholds you choose. Laid out as CodexBar: a tile per service with its
   logo and color, an overview of what the CLIs' local logs would cost at
   API prices (by day, model, project and machine) and a page per service. Credentials
-  are read where they are, read only, and never leave the machine.
+  are read where they are and never leave the machine; only Kimi Code's
+  15-minute sign-in is renewed there, as Kimi Code renews it.
 - **Settings.** Language (English, Chinese), light/dark theme followed by
   VS Code, color themes (the accent: blue, VS Code blue, teal, violet,
   rose, amber, graphite), interface size, the desktop app's zoom, the terminals' font (picked from the monospace

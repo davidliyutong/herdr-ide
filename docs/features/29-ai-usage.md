@@ -23,11 +23,13 @@ script run over ssh).
   runs it out before its reset.
 - The logs' cost by day, model, project and machine, with weekly and monthly
   equivalents.
-- Credentials stay where they are: read only, never refreshed, never sent to
-  the core.
+- Credentials stay where they are and are never sent to the core; they
+  are read only, except Kimi Code's sign-in, which is renewed in place as
+  Kimi Code renews it (its token lasts 15 minutes).
 - Non-goals (declined): importing browser cookies, hooks that run commands,
-  refreshing OAuth tokens or writing the CLIs' files, spending Codex reset
-  credits. Providers that need a browser session have no data source here.
+  refreshing the other CLIs' OAuth tokens or writing their files, spending
+  Codex reset credits. Providers that need a browser session have no data
+  source here.
 
 ## Design
 
@@ -36,8 +38,8 @@ script run over ssh).
 `internal/usage` reads one machine; the agent's plugin
 (`internal/agent/plugin/usage`) runs its actions:
 
-- `limits {providers, codexHomes, claudeKeychain, skip, skipLocal}`: each
-  provider in parallel, each request within 15 s through `HTTPS_PROXY`,
+- `limits {providers, codexHomes, claudeKeychain, kimiRefresh, skip,
+  skipLocal}`: each provider in parallel, each request within 15 s through `HTTPS_PROXY`,
   following no redirect (a 3xx is `http_3xx`); a 429 returns
   `rate_limited` with its `Retry-After`. The answer is a list of accounts
   `{provider, id, email, plan, windows[{kind, label, usedPct, resetsAt,
@@ -60,12 +62,77 @@ script run over ssh).
 | Codex | `$CODEX_HOME` or `~/.codex/auth.json`, and each of `usage.codexHomes` | `GET chatgpt.com/backend-api/wham/usage` with `ChatGPT-Account-Id`: `rate_limit.primary_window`/`secondary_window`, `additional_rate_limits`, `credits`, `plan_type`. Without an answer (network) or with an expired token: the newest session log's `rate_limits` (read backwards from its end, and not again while the log is unchanged), as `stale` with `code: from_log` | `tokens.account_id`; email and plan from the id token's claims |
 | Grok | `$GROK_HOME` or `~/.grok/auth.json`, x.ai's issuer first | `GET cli-chat-proxy.grok.com/v1/billing?format=credits` (`X-XAI-Token-Auth: xai-grok-cli`): `creditUsagePercent` (else on-demand used over cap) for the period, `productUsage`; `/v1/settings` for the plan | `user_id` |
 | Antigravity | none: the running language server | `/bin/ps` (else `ps` on the `PATH`) for the agent's user's own Antigravity `language_server` and its `--csrf_token`; its loopback ports (`/proc` on Linux, `/usr/sbin/lsof` on macOS); `POST https://127.0.0.1:<port>/exa.language_server_pb.LanguageServerService/GetUserStatus` (then HTTP, then an empty body; no connection is kept); without one, `agy -p /usage --output-format json` (20 s, in a process group of its own that is killed when it exits or times out), at most every 10 minutes (the polls in between get its last answer) and not again for 30 minutes after it failed: it takes seconds and a few hundred MB | a hash of the email; agy 1.5 names none, so the email comes from the end of agy's log, `~/.gemini/antigravity-cli/cli.log` (`authenticated successfully as …`), and the account merges with the language server's across machines |
-| Kimi Code | `$KIMI_CODE_HOME` or `~/.kimi-code/credentials/kimi-code*.json` (its access token lasts about 15 minutes and Kimi Code renews it only while it runs, so numbers come from a machine where it ran lately) | `GET api.kimi.com/coding/v1/usages`: `usage` (weekly), `limits[]` (`window.duration` × `timeUnit`); numbers may be strings | the token's `user_id` (or `sub`) claim |
+| Kimi Code | `$KIMI_CODE_HOME` or `~/.kimi-code/credentials/kimi-code*.json`; an ended token of `kimi-code.json` is renewed first (below) | `GET api.kimi.com/coding/v1/usages`: `usage` (weekly), `limits[]` (`window.duration` × `timeUnit`); numbers may be strings | the token's `user_id` (or `sub`) claim |
 | DeepSeek | the key file the panel writes (the user's choice, first), `DEEPSEEK_API_KEY`, or Claude Code's `settings.json` when its `ANTHROPIC_BASE_URL` is DeepSeek's (`https` on `api.deepseek.com` or another host below `deepseek.com`; a gateway that only has deepseek in its name does not count) | `GET api.deepseek.com/user/balance`: `balance_infos`, `is_available` (no windows) | a hash of the key |
 
 Tokens are read from the files at each poll, sent only to their provider's
 host and never returned; expiry is checked first, so an expired token is not
 even sent.
+
+### Renewing Kimi Code's sign-in
+
+Kimi Code's access token lasts about 15 minutes, and Kimi Code renews it
+only while it runs, so without help its numbers would be readable only
+minutes after it ran. Its refresh token is good once: every refresh
+returns a new one and spends the old. A renewal that kept the new tokens
+to itself would leave Kimi Code a spent refresh token and sign it out, so
+with `usage.kimiRefresh` on (the default) the agent renews the token as
+Kimi Code 2.2.0 does (`internal/usage/kimiauth.go`, taken from its bundled
+`packages/oauth`) and writes the new tokens back where Kimi Code reads
+them:
+
+- When: a `kimi-code.json` token that ends within a minute (its
+  `expires_at` in Unix seconds; none: used as it is) on an account the
+  core did not skip. Kimi Code itself renews within the later half of a
+  token's life while it runs, so the two rarely meet.
+- Kimi Code's lock first: proper-lockfile 4.1.2 on
+  `<home>/oauth/kimi-code` (the directory and the empty file created as
+  Kimi Code creates them), that is the directory `kimi-code.lock` made with
+  `mkdir`, whose time its holder sets every 2.5 s; Kimi Code calls a lock
+  stale after 5 s and retries 120 times every 0.5 s. A lock held here is
+  kept the same way and removed with `rmdir` after. A lock someone holds
+  is waited for (every 0.5 s, at most 8 s, then the account is `stale`
+  with `lock_busy` until the next poll) and never broken: one is taken
+  over (`rmdir`, `mkdir`) only when untouched for 30 s, stale by Kimi
+  Code's rule and long abandoned, since Kimi Code throws when a lock it
+  holds was taken (its event loop may stall a few seconds). A lock that is
+  no longer the one set here is left alone when the renewal ends.
+- Under the lock the file is read again: Kimi Code (or another agent) may
+  just have renewed it, and then its token is used as it is.
+- The refresh: `POST https://auth.kimi.com/api/oauth/token`,
+  `application/x-www-form-urlencoded` `client_id` (Kimi Code's),
+  `grant_type=refresh_token`, `refresh_token`; `Accept:
+  application/json`; Kimi Code's identity headers (`User-Agent:
+  kimi-code-cli/2.2.0`, `X-Msh-Platform: kimi_code_cli`, `X-Msh-Version`,
+  `X-Msh-Device-Name` the host name, `X-Msh-Device-Model` (`macOS <version>
+  <arch>`, else `<OS> <release> <arch>`), `X-Msh-Os-Version` the kernel's
+  release, `X-Msh-Device-Id` from `<home>/device_id`, which only Kimi Code
+  makes). Three attempts, 1 s and 2 s apart, after a network error or
+  429, 500, 502, 503 or 504; once sent, a request's answer is waited for
+  even when the core stopped waiting, since the refresh token is spent
+  once the provider answers.
+- The answer needs `access_token`, `refresh_token` and a positive
+  `expires_in`; the file is written as Kimi Code writes it:
+  `{access_token, refresh_token, expires_at, scope, token_type,
+  expires_in}` (`expires_at` now + `expires_in`, `scope` `""` and
+  `token_type` `Bearer` when not given) with two spaces of indent and a
+  newline, other members the file had kept after them, to
+  `<file>.tmp.<pid>.<8 hex>` with the file's mode, fsynced and renamed.
+  Once the provider answered, its tokens are written even if the lock was
+  taken over meanwhile: the old refresh token is spent, and Kimi Code,
+  when its own refresh with it is refused, reads the file again and takes
+  them.
+- A refusal (`invalid_grant`, 401 or 403): the account is `unauth`, whose
+  card says to sign in again; the file is left as it is (Kimi Code writes
+  its own signed-out record when it meets the refusal), and the refresh is
+  not sent again until the file changes (a digest of its content, kept in
+  the agent's memory). Other failures report their code (`network`,
+  `http_<n>`, `bad_response`) and are tried at the next poll.
+- Not renewed: the other hosts' slots `kimi-code-env-<hash>.json` (whose
+  name does not say the host), and with `KIMI_DISABLE_OAUTH_LOCK=1` in the
+  agent's environment (Kimi Code renews without its lock then). One
+  renewal runs at a time in an agent; the lock keeps Kimi Code and other
+  agents (another instance) apart.
 
 ### Cost of the logs
 
@@ -223,7 +290,9 @@ browser's storage, so a reload or another tab does not repeat it.
 | Fetching from the core with credentials copied there | Tokens would leave their machines; the agents already run where the CLIs do. |
 | A window's name as "group · kind" in one line | In a narrow panel two windows of a group (Antigravity's weekly and 5-hour) were cut to the same text with different numbers; a heading per group and the kind on each row keep them apart. |
 | A burndown line per window | Drawn over the whole period, the few hours read so far were a stray dash; the even pace's mark and how far ahead of it the window is say the same at a glance. |
-| Refreshing expired OAuth tokens | Writing the CLIs' credential files races the CLIs and can sign them out; running the CLI once renews them. |
+| Refreshing every CLI's expired OAuth tokens | Writing the CLIs' credential files races the CLIs and can sign them out; running the CLI once renews them. Kimi Code is the exception the user asked for: its 15-minute token made its numbers unreadable most of the time, and its lock and file format are known, so it is renewed under its own lock. |
+| Renewing Kimi Code's token without writing it back | Its refresh tokens are good once: Kimi Code would be left with a spent one and signed out. |
+| Breaking a Kimi Code lock that is stale by its rule (5 s) | Kimi Code throws when a lock it holds changed under it; a holder whose event loop stalled would fail. A lock is taken over only when untouched for 30 s. |
 | Browser cookies for providers without a CLI token | Reads another program's secrets; declined. |
 | Running `agy` at every poll | Each run takes seconds and a few hundred MB, at every poll on every machine with `agy` while a panel is open; its numbers change slowly, so one run per 10 minutes serves the polls between. |
 | Writing the cost cache after every scan that changed it | A log in use grows at every scan, and the cache (tens of thousands of records) was written whole each time; reading on from the file's older offsets costs a few minutes of lines. |
@@ -238,7 +307,10 @@ browser's storage, so a reload or another tab does not repeat it.
 - A provider changes its response: fields the parser does not find are left
   out, an unreadable answer is `bad_response`, the last numbers stay.
 - An expired token: `stale` with `token_expired` and the hint to run the
-  CLI; nothing is sent.
+  CLI; nothing is sent. Kimi Code's is renewed first unless
+  `usage.kimiRefresh` is off; a renewal Kimi Code holds the lock for is
+  `stale` with `lock_busy` until the next poll, a refused one `unauth`
+  until the credential file changes.
 - 429: the account is skipped until its `Retry-After` (at most a day), also
   one without an id, on its machine.
 - `agy` fails or times out (20 s): `agy_failed` (or `bad_response`), the
@@ -272,6 +344,18 @@ status pages. Resources and retention:
   from its log, Antigravity's
   `skip` and `skipLocal`, the Codex log read backwards across long lines
   and once while unchanged.
+- `internal/usage/kimiauth_test.go`: Kimi Code's renewal against a fake
+  token endpoint in a temporary home: the form and identity headers, the
+  rotated tokens written back byte for byte as Kimi Code writes them with
+  the file's other members and mode, nothing left beside it, the lock
+  released; renewed only when ending, not when off, for another host's
+  slot or with `KIMI_DISABLE_OAUTH_LOCK`; a lock held by "Kimi Code"
+  waited for and left alone, one stale by its rule left too, an abandoned
+  one taken over; "Kimi Code" renewing meanwhile (its token used, nothing
+  sent); one renewal for concurrent polls; the lock kept fresh and not
+  removed once taken over; refusals (`invalid_grant`, 401) not sent again
+  until the file changes; retried 5xx, other statuses, an answer without
+  a refresh token, a redirect, the network; no token in a reply.
 - `internal/usage/proc_unix_test.go`: a fake `agy` leaving `sleep 300`
   behind; its process group is killed after it exits and when it times
   out.

@@ -1004,7 +1004,8 @@ export const en = {
   'usage.issue.unauth': 'the service refused its sign-in',
   'usage.issue.error': 'the request failed',
   'usage.hint.kimiExpired':
-    'Kimi Code’s sign-in token lasts about 15 minutes and is renewed only while Kimi Code runs; numbers come when it ran lately on one of the machines.',
+    'Kimi Code’s sign-in token lasts about 15 minutes and Kimi Code renews it only while it runs; with “Renew Kimi Code’s sign-in” on in the settings it is renewed here.',
+  'usage.hint.kimiBusy': 'Kimi Code was renewing its sign-in; the next refresh reads the new one.',
   'usage.interval': 'Refresh interval',
   'usage.asOf': 'numbers from {ago} ago',
   'usage.pctUsed': '{pct}% used',
@@ -1096,6 +1097,9 @@ export const en = {
   'settings.usage.claudeKeychain': 'Claude credentials from the macOS keychain',
   'settings.usage.claudeKeychain.desc':
     'Where Claude Code keeps its sign-in in the keychain, read it there (read only). macOS may ask to allow it on the local machine.',
+  'settings.usage.kimiRefresh': 'Renew Kimi Code’s sign-in',
+  'settings.usage.kimiRefresh.desc':
+    'Kimi Code’s sign-in lasts about 15 minutes and Kimi Code renews it only while it runs. When it has ended, renew it on that machine as Kimi Code does, under Kimi Code’s lock, writing the new tokens back to its credential file. Off: Kimi Code’s numbers come only from machines where it ran lately.',
   'command.view.panel.usage': 'Show AI Usage',
   // git plugin
   'settings.plugins.git.enabled': 'Git',

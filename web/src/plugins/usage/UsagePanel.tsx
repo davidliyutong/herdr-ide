@@ -415,6 +415,7 @@ function issueGroups(a: UsageAccount): [string, string[]][] {
 /** What to do about an account that is not ok. */
 function hint(a: UsageAccount): string {
   if (a.code === 'token_expired' && a.provider === 'kimi') return t('usage.hint.kimiExpired');
+  if (a.code === 'lock_busy') return t('usage.hint.kimiBusy');
   if (a.code === 'token_expired') return t('usage.hint.expired', { cli: providerName(a.provider) });
   if (a.code === 'from_log') return t('usage.hint.fromLog');
   if (a.status === 'unauth') return t('usage.hint.unauth', { cli: providerName(a.provider) });

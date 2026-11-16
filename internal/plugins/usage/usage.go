@@ -31,6 +31,7 @@ const (
 	SettingThresholds     = "usage.thresholds"
 	SettingCodexHomes     = "usage.codexHomes"
 	SettingClaudeKeychain = "usage.claudeKeychain"
+	SettingKimiRefresh    = "usage.kimiRefresh"
 )
 
 // providerSetting is the switch of a provider.
@@ -73,6 +74,8 @@ var Settings = func() settings.Module {
 			Scope: settings.ScopeApp, Section: "usage", Order: 50},
 		settings.Def{Key: SettingClaudeKeychain, Type: settings.TypeBool, Default: true,
 			Scope: settings.ScopeApp, Section: "usage", Order: 60},
+		settings.Def{Key: SettingKimiRefresh, Type: settings.TypeBool, Default: true,
+			Scope: settings.ScopeApp, Section: "usage", Order: 61},
 	)
 	return m
 }()
@@ -164,7 +167,7 @@ func (p *Plugin) putDeepseekKey(c *plugin.Call, w http.ResponseWriter, r *http.R
 
 // options are what the agents get from the settings.
 func (p *Plugin) options() usage.Options {
-	o := usage.Options{ClaudeKeychain: true}
+	o := usage.Options{ClaudeKeychain: true, KimiRefresh: true}
 	st := p.settings()
 	if st == nil {
 		return o
@@ -179,6 +182,7 @@ func (p *Plugin) options() usage.Options {
 	}
 	o.CodexHomes, _ = st.GetFor(SettingCodexHomes, "").([]string)
 	o.ClaudeKeychain = st.Bool(SettingClaudeKeychain, "")
+	o.KimiRefresh = st.Bool(SettingKimiRefresh, "")
 	return o
 }
 

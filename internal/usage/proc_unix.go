@@ -5,6 +5,8 @@ package usage
 import (
 	"os/exec"
 	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 // ownGroup runs cmd in a process group of its own and makes the end of
@@ -22,4 +24,13 @@ func killGroup(cmd *exec.Cmd) {
 	if cmd.Process != nil && cmd.Process.Pid > 0 {
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
+}
+
+// osRelease is the kernel's release (uname -r), as Node's os.release().
+func osRelease() string {
+	var u unix.Utsname
+	if unix.Uname(&u) != nil {
+		return ""
+	}
+	return unix.ByteSliceToString(u.Release[:])
 }

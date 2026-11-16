@@ -4,11 +4,13 @@
 // Code, DeepSeek), and the token cost of the CLIs' local logs at API prices.
 //
 // It runs where the credentials are (the agent's plugin usage,
-// internal/agent/plugin/usage): it reads the CLIs' credential files read
-// only, never refreshes or writes them, asks the providers' fixed hosts over
-// HTTPS and returns normalized numbers, an account id (a hash where the
-// provider's id is a secret) and the account's email and plan. Tokens and
-// keys never leave the machine. docs/features/29-ai-usage.md has the design.
+// internal/agent/plugin/usage): it reads the CLIs' credential files, asks
+// the providers' fixed hosts over HTTPS and returns normalized numbers, an
+// account id (a hash where the provider's id is a secret) and the account's
+// email and plan. Tokens and keys never leave the machine. It writes no
+// CLI's file but one: Kimi Code's, whose token it renews as Kimi Code does,
+// under Kimi Code's lock (Options.KimiRefresh, kimiauth.go).
+// docs/features/29-ai-usage.md has the design.
 package usage
 
 import (
@@ -139,6 +141,10 @@ type Options struct {
 	// holds back after a provider asked to wait: provider, or
 	// provider:home for a Codex home other than the default.
 	SkipLocal []string `json:"skipLocal,omitempty"`
+	// KimiRefresh lets an ended Kimi Code access token be renewed as Kimi
+	// Code renews it, under its lock, with the new tokens written back to
+	// its credential file.
+	KimiRefresh bool `json:"kimiRefresh,omitempty"`
 }
 
 // URLs are the providers' endpoints (tests point them at httptest servers).
@@ -146,12 +152,13 @@ type URLs struct {
 	ClaudeUsage, ClaudeProfile string
 	CodexUsage                 string
 	GrokBilling, GrokSettings  string
-	KimiUsage                  string
+	KimiUsage, KimiToken       string
 	DeepSeekBalance            string
 }
 
 // DefaultURLs are the providers' hosts; the only ones Limits talks to
-// besides the local Antigravity language server (127.0.0.1).
+// besides the local Antigravity language server (127.0.0.1). KimiToken
+// renews Kimi Code's sign-in (Options.KimiRefresh).
 var DefaultURLs = URLs{
 	ClaudeUsage:     "https://api.anthropic.com/api/oauth/usage",
 	ClaudeProfile:   "https://api.anthropic.com/api/oauth/profile",
@@ -159,6 +166,7 @@ var DefaultURLs = URLs{
 	GrokBilling:     "https://cli-chat-proxy.grok.com/v1/billing?format=credits",
 	GrokSettings:    "https://cli-chat-proxy.grok.com/v1/settings",
 	KimiUsage:       "https://api.kimi.com/coding/v1/usages",
+	KimiToken:       "https://auth.kimi.com/api/oauth/token",
 	DeepSeekBalance: "https://api.deepseek.com/user/balance",
 }
 

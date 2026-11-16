@@ -398,11 +398,15 @@ func TestSettings(t *testing.T) {
 	}
 	p := New()
 	p.host = &fakeHost{st: st}
+	if o := p.options(); !o.ClaudeKeychain || !o.KimiRefresh {
+		t.Errorf("default options %+v", o)
+	}
 	st.Set(providerSetting("deepseek"), "", false)
 	st.Set(SettingClaudeKeychain, "", false)
+	st.Set(SettingKimiRefresh, "", false)
 	st.Set(SettingCodexHomes, "", []any{"~/work-codex"})
 	o := p.options()
-	if slices.Contains(o.Providers, "deepseek") || len(o.Providers) != 5 || o.ClaudeKeychain || !slices.Equal(o.CodexHomes, []string{"~/work-codex"}) {
+	if slices.Contains(o.Providers, "deepseek") || len(o.Providers) != 5 || o.ClaudeKeychain || o.KimiRefresh || !slices.Equal(o.CodexHomes, []string{"~/work-codex"}) {
 		t.Errorf("options %+v", o)
 	}
 }

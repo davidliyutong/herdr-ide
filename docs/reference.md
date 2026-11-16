@@ -154,6 +154,7 @@ in the UI; a setting with a scope can have its own value per machine, under
 | `usage.providers.deepseek` | `true`, `false` | `true` | – | – |
 | `usage.codexHomes` | list of strings | `[]` | – | – |
 | `usage.claudeKeychain` | `true`, `false` | `true` | – | – |
+| `usage.kimiRefresh` | `true`, `false` | `true` | – | – |
 | `gui.enabled` | `true`, `false` | `true` | `--gui` | per remote machine |
 | `gui.gpu` | `vglrun`, `all` | `"vglrun"` | `--gui-gpu` | per remote machine |
 | `gui.video` | `true`, `false` | `true` | `--gui-video` | per remote machine |
@@ -392,6 +393,7 @@ missing here.
 | `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` | core on Linux | The user configuration directory (settings, keybindings, machines; default `~/.config`) and the cache directory (code-server downloads; default `~/.cache`). |
 | `XDG_STATE_HOME` | core | Where the SSH machines herdr saved are read from for the one-time import (`$XDG_STATE_HOME/herdr/client/endpoints.json`, default `~/.local/state/herdr/client/endpoints.json`). |
 | `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GROK_HOME`, `KIMI_CODE_HOME` | agent (AI usage plugin) | Where the AI CLIs keep their credentials and logs when not in `~/.claude`, `~/.codex`, `~/.grok`, `~/.kimi-code`. |
+| `KIMI_DISABLE_OAUTH_LOCK` | agent (AI usage plugin) | `1`: Kimi Code renews its sign-in without its lock, so the plugin does not renew it (`usage.kimiRefresh`). |
 | `DEEPSEEK_API_KEY` | agent (AI usage plugin) | The DeepSeek key whose balance is shown; before Claude Code's DeepSeek settings and the key file. |
 | `HTTPS_PROXY`, `NO_PROXY` | agent (AI usage plugin), core (status pages) | The proxy for the AI providers' hosts. |
 

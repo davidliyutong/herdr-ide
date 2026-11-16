@@ -5,9 +5,10 @@
 // logs' cost on the machine with internal/usage and answers with numbers
 // only. Actions:
 //
-//   - limits {providers, codexHomes, claudeKeychain, skip, skipLocal}: the accounts
-//     the CLIs are signed in to, with their windows and balances, until the
-//     core stops waiting;
+//   - limits {providers, codexHomes, claudeKeychain, kimiRefresh, skip,
+//     skipLocal}: the accounts the CLIs are signed in to, with their windows
+//     and balances, until the core stops waiting (an ended Kimi Code token
+//     is renewed first with kimiRefresh);
 //   - cost {since, tzOffset, codexHomes, providers}: the logs' tokens and
 //     cost by day, model and project, until the core stops waiting;
 //   - setDeepseekKey {key}: writes (or with "" removes) the DeepSeek key

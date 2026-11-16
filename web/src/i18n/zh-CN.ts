@@ -982,7 +982,9 @@ export const zhCN: Messages = {
   'usage.issue.expired': '登录已过期',
   'usage.issue.unauth': '服务拒绝了登录凭据',
   'usage.issue.error': '请求失败',
-  'usage.hint.kimiExpired': 'Kimi Code 的登录令牌约 15 分钟有效，只在 Kimi Code 运行时续期；某台机器最近运行过它时才能读到用量。',
+  'usage.hint.kimiExpired':
+    'Kimi Code 的登录令牌约 15 分钟有效，Kimi Code 只在运行时续期；在设置里打开“续期 Kimi Code 的登录”后，这里会代为续期。',
+  'usage.hint.kimiBusy': 'Kimi Code 正在续期登录；下次刷新会读到新的令牌。',
   'usage.interval': '刷新间隔',
   'usage.asOf': '数字来自{ago}前',
   'usage.pctUsed': '已用 {pct}%',
@@ -1072,6 +1074,9 @@ export const zhCN: Messages = {
   'settings.usage.codexHomes.desc': '$CODEX_HOME 或 ~/.codex 之外的 Codex 目录，每个账号一个（机器上的路径）。',
   'settings.usage.claudeKeychain': '从 macOS 钥匙串读取 Claude 凭据',
   'settings.usage.claudeKeychain.desc': 'Claude Code 把登录信息存在钥匙串时，从那里读取（只读）。在本机上 macOS 可能会询问是否允许。',
+  'settings.usage.kimiRefresh': '续期 Kimi Code 的登录',
+  'settings.usage.kimiRefresh.desc':
+    'Kimi Code 的登录约 15 分钟有效，它只在运行时续期。打开后，登录过期时在那台机器上按 Kimi Code 自己的方式、在它的锁下续期，并把新令牌写回它的凭据文件。关闭时，只有最近运行过 Kimi Code 的机器才能读到它的用量。',
   'command.view.panel.usage': '显示 AI 用量',
   // git plugin
   'settings.plugins.git.enabled': 'Git',

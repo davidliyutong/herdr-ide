@@ -7,13 +7,18 @@ import (
 )
 
 // Memo keeps between the Limits calls of a process what is costly to get
-// again: agy's answer (seconds of CPU and a few hundred MB per run) and the
+// again: agy's answer (seconds of CPU and a few hundred MB per run), the
 // rate limits of each Codex home's newest session log (a rollout is tens of
-// MB). Its methods do nothing on a nil Memo.
+// MB), and the Kimi Code credential files whose refresh token the provider
+// refused (not tried again until the file changes). Its methods do nothing
+// on a nil Memo.
 type Memo struct {
 	mu       sync.Mutex
 	agy      map[string]agyRun
 	codexLog map[string]codexLogRead
+	// kimi maps a credential file to the digest of its content when its
+	// refresh token was refused.
+	kimi map[string][32]byte
 }
 
 type agyRun struct {
@@ -104,4 +109,28 @@ func (m *Memo) keepCodexLog(home, path string, size int64, mtime time.Time, a *A
 		r.a = &c
 	}
 	m.codexLog[home] = r
+}
+
+// kimiRefused tells whether file, with content b, is the one whose refresh
+// token the provider refused.
+func (m *Memo) kimiRefused(file string, b []byte) bool {
+	if m == nil {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	sum, ok := m.kimi[file]
+	return ok && sum == kimiFileSum(b)
+}
+
+func (m *Memo) keepKimiRefused(file string, b []byte) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.kimi == nil {
+		m.kimi = map[string][32]byte{}
+	}
+	m.kimi[file] = kimiFileSum(b)
 }
