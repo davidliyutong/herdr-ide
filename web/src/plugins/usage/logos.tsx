@@ -1,6 +1,6 @@
 // The AI services' marks (web/src/assets/ai-logos, Lobe Icons, MIT) and the
 // color each one is drawn in: the service's own where it has one (Claude's
-// clay, DeepSeek's blue), else a hue that keeps the services apart, as
+// clay, DeepSeek's blue, Grok's black or white), else a hue that keeps the services apart, as
 // CodexBar does. The colors are --usage-<provider> (usage.css), darker in
 // the light theme.
 import { Bot, LayoutGrid } from 'lucide-react';

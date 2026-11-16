@@ -173,7 +173,7 @@ not read; SSH machines are.
   its mark and name and, in its color, a bar of what is left of its
   tightest window. The marks are Lobe Icons' (`web/src/assets/ai-logos`,
   MIT, drawn in one color, `logos.tsx`); each service's color is its own
-  where it has one (Claude's clay, DeepSeek's blue), else a hue that keeps
+  where it has one (Claude's clay, DeepSeek's blue, Grok's black or white: the theme's text color), else a hue that keeps
   the services apart (`--usage-<provider>`, `usage.css`, darker in the
   light theme). Under the tiles: when the numbers were read and the next
   read, the switch between used and left, and Refresh (which also reads
