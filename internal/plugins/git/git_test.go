@@ -99,3 +99,33 @@ func TestQueryParams(t *testing.T) {
 		t.Error("bad skip accepted")
 	}
 }
+
+// The plugin's settings: their defaults (what the UI does without them),
+// and values out of their range refused.
+func TestSettings(t *testing.T) {
+	st := settings.New("", Settings)
+	for k, want := range map[string]any{
+		SettingMixedLineEndings: "keep",
+		SettingChangesView:      "list",
+		SettingUntrackedChanges: "mixed",
+		SettingAutoFetch:        0.0,
+		SettingConfirmSync:      false,
+		SettingGraphPageSize:    300.0,
+	} {
+		if got := st.Get(k); got != want {
+			t.Errorf("%s = %v, want %v", k, got, want)
+		}
+	}
+	for k, bad := range map[string]any{
+		SettingMixedLineEndings: "lf",
+		SettingAutoFetch:        -1.0,
+		SettingGraphPageSize:    10.0,
+	} {
+		if err := st.Set(k, "", bad); err == nil {
+			t.Errorf("%s = %v accepted", k, bad)
+		}
+	}
+	if err := st.Set(SettingGraphPageSize, "", 500.0); err != nil {
+		t.Errorf("page size 500: %v", err)
+	}
+}

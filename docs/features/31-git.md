@@ -16,13 +16,16 @@ pane of its own.
 
 Goals: VS Code's Source Control and the Git Graph extension in one, for the
 repository of the focused pane's directory on any machine: the branch with
-ahead/behind and fetch, pull, push; staging and unstaging files and
-selected ranges; discarding; commits (amend, Cmd/Ctrl+Enter); the graph
-of every branch with ref badges, search, a branch filter, a commit's
-details and files, comparing two commits, and the actions of its context
-menus (checkout, branches, tags, merge, rebase, cherry-pick, revert,
-reset, stashes); diffs in Monaco with the working tree's side editable; the
-file explorer's colors for changed files.
+ahead/behind, a searchable branch picker, and fetch, pull, push with one
+remote or several; staging and unstaging files and selected ranges;
+discarding; commits (amend, Cmd/Ctrl+Enter); changes listed as the file
+explorer lists files (icons, a tree of folders, selection and keys); the
+graph of every branch or of those chosen with ref badges, search, a
+commit's details and files, comparing two commits, and the actions of its
+context menus (checkout, branches, tags, merge, rebase, cherry-pick,
+revert, reset, stashes); diffs in Monaco with the working tree's side
+editable, files that mix line endings kept as they are; the file
+explorer's colors for changed files; a settings page.
 
 Non-goals: an interactive rebase, conflict resolution with three panes
 (conflicted files open in the diff pane and the editor), credentials typed
@@ -286,14 +289,28 @@ Graph's editor; `actions.openView` with `tab`):
   never below their base. Badges: the current branch (bold), branches,
   remote branches (when shown), tags, HEAD when detached. Columns: the
   description, date, author, short hash. Only the rows in view are drawn;
-  the next page loads near the end, as the history's (a page of another
-  filter's or an earlier list is dropped, none appended twice).
+  the next page (`git.graphPageSize` commits, 300 by default) loads near
+  the end, as the history's (a page of another filter's or an earlier
+  list is dropped, none appended twice).
 - A search box dims what does not match (subject, author, e-mail, hash
-  prefix), Enter and the arrows go to the next and previous match. A branch
-  filter shows one branch's history; **Remote branches** turns them off.
+  prefix), Enter and the arrows go to the next and previous match.
+- The branch filter is the shared searchable list with several choices
+  (`Picker` `multiple`): local branches, each remote's branches under its
+  name, and tags; none chosen shows every branch. It holds the refs' full
+  names (`refs/heads/main`, `refs/tags/v1`, which a branch and a tag of
+  one name do not confuse), sent as the log's `branch=`; it is kept per
+  browser for each machine's repository (`git.graphFilter:<machine>:<repo>`),
+  and a ref of it deleted since is dropped (when the first page fails
+  with `bad_ref`, the filter is cleared and a toast says so). While it
+  holds refs, the working tree's row and the stashes are not shown. A
+  badge's context menu (a branch, remote branch or tag) has **Show Only
+  This Branch**, and **Add to Filter** (while the filter holds others) or
+  **Remove from Filter**. **Remote branches** turns them off in the
+  history of every branch.
 - A click opens the commit's details under it: hash, parents (a merge's
   parent chooses what its files are compared with), author, committer,
-  message, and its files (with their icons) with lines added and deleted; a file opens the
+  message, and its files (their icons, names in their letter's color,
+  folders) with lines added and deleted; a file opens the
   diff against the parent. Cmd/Ctrl-click on another commit compares the
   two (files between them; a file opens its diff); the working tree's row
   lists the changed files.
@@ -387,6 +404,8 @@ Code's preview editor does, so going through the changes keeps one pane):
   shows a repository (0, the default: never).
 - `git.confirmSync`: ask before Pull, Push and the sync button (off by
   default).
+- `git.graphPageSize`: the commits a page of the graph reads (50–1000,
+  300 by default).
 
 **Colors**: lanes take the design tokens' chart hues (`--ds-chart-*`, in
 an order that keeps neighbors apart), status letters and names VS Code's
@@ -530,7 +549,8 @@ terminal; what the plugin adds is a way to reach it from the browser:
   actions, reads as reads.
 - `internal/plugins/git/git_test.go`: routes (reads GET, changes mutating
   and audited), the read's query, a change's audit record
-  (`TestChangeAudit`); `TestMutatingRoutesAreGuarded`
+  (`TestChangeAudit`), the settings' defaults and bounds (`TestSettings`);
+  `TestMutatingRoutesAreGuarded`
   (`internal/server`) checks them.
 - `design/testdata/git/range-patches.json`: range patches (additions,
   deletions, parts of changes, ranges over several hunks, unstaging,
@@ -556,7 +576,9 @@ terminal; what the plugin adds is a way to reach it from the browser:
   the automatic fetch (time faked), and commit
   box, the Amend box per repository, read-only
   mode, a history page of an earlier list dropped; the graph's rows,
-  details, compare and menus, a page of another filter dropped; the diff's
+  details, compare and menus, a page of another filter dropped, several
+  branches and tags filtered and the filter kept, a badge's Show Only,
+  Add to Filter and Remove from Filter, the page size of the setting; the diff's
   sides per mode, range patches sent, saves (also of unsaved text after
   the repository changed, against the version it was edited from), a fast
   switch of files, a file edited again read again, ranges not applied to

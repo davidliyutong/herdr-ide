@@ -160,6 +160,7 @@ in the UI; a setting with a scope can have its own value per machine, under
 | `git.untrackedChanges` | `mixed`, `separate` | `"mixed"` | – | – |
 | `git.autoFetch` | integer, 0–240 | `0` | – | – |
 | `git.confirmSync` | `true`, `false` | `false` | – | – |
+| `git.graphPageSize` | integer, 50–1000 | `300` | – | – |
 | `gui.enabled` | `true`, `false` | `true` | `--gui` | per remote machine |
 | `gui.gpu` | `vglrun`, `all` | `"vglrun"` | `--gui-gpu` | per remote machine |
 | `gui.video` | `true`, `false` | `true` | `--gui-video` | per remote machine |
