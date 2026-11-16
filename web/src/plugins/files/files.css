@@ -23,18 +23,18 @@
   align-items: center;
   flex: 1 1 auto;
   min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
   font-size: var(--fs-md);
+}
+.files-crumbs::-webkit-scrollbar {
+  display: none;
 }
 .files-crumb {
   display: inline-flex;
   align-items: center;
   white-space: nowrap;
-  min-width: 0;
-  overflow: hidden;
-  flex: 0 1 auto;
-}
-.files-crumb:last-child {
-  flex-shrink: 0;
+  flex: 0 0 auto;
 }
 .files-crumb .link {
   border: 0;

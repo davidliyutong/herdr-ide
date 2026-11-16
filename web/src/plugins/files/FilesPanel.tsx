@@ -6,7 +6,7 @@
 // the computer that upload them. A click shows a file in Quick Look, a
 // double click (or Enter) opens it in the editor pane.
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ChevronsDownUp, Ellipsis, Eye, EyeOff, FilePlus, FolderPlus, LocateFixed, RefreshCw } from 'lucide-react';
 import { current, paneDirectory } from '../../actions';
 import { useStore } from '../../state/store';
@@ -151,6 +151,14 @@ export function FilesPanel() {
     const i = rows.findIndex((r) => r.path === s.cursor);
     if (i >= 0) el.scrollTop = revealTop(el.scrollTop, el.clientHeight, i * ROW_HEIGHT, (i + 1) * ROW_HEIGHT);
   }, [s.cursor, rows, ROW_HEIGHT]);
+
+  // The path's end stays in view: a narrow panel scrolls its start away
+  // (as VS Code's breadcrumbs do) rather than squeezing every name.
+  const crumbsRef = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const el = crumbsRef.current;
+    if (el) el.scrollLeft = el.scrollWidth;
+  }, [s.root]);
 
   if (!m || !s.root) return <div className="files-empty muted small">{t('files.noMachine')}</div>;
   const root = s.root;
@@ -370,7 +378,7 @@ export function FilesPanel() {
   return (
     <div className="files-panel">
       <div className="files-toolbar">
-        <nav className="files-crumbs ellipsis" aria-label={t('files.breadcrumb')}>
+        <nav ref={crumbsRef} className="files-crumbs" title={root} aria-label={t('files.breadcrumb')}>
           {crumbs(root, home).map(([p, name], i, all) => (
             <span key={p} className="files-crumb">
               <button

@@ -22,8 +22,11 @@ export interface FileTargets {
   el?: HTMLElement | null;
 }
 
-/** The file entries of a context menu for paths. */
+/** The file entries of a context menu for paths, without the explorer's
+ * key hints: in the Git panel Enter opens the changes, not the file. */
 export function fileEntries(m: string, o: FileTargets): MenuEntry[] {
   const there = o.paths.filter((p) => !o.gone?.has(p));
-  return fileMenuEntries(m, there, { root: o.root, isDir: (p) => !!o.dirs?.has(p), el: o.el });
+  return fileMenuEntries(m, there, { root: o.root, isDir: (p) => !!o.dirs?.has(p), el: o.el }).map((e) =>
+    e === 'sep' ? e : { ...e, hint: undefined },
+  );
 }
