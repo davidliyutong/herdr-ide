@@ -108,7 +108,7 @@ vector the agent builds: no shell, no option from the request.
 
 | Read | What it answers |
 | --- | --- |
-| `repo` | `?path=` a directory: top level, git directories, branch (or detached) and HEAD, upstream with ahead/behind, an operation in progress (`merge`, `rebase`, `cherryPick`, `revert`), remotes, enclosing repositories. |
+| `repo` | `?path=` a directory: top level, git directories, branch (or detached) and HEAD, upstream with ahead/behind, an operation in progress (`merge`, `rebase`, `cherryPick`, `revert`), remotes with their fetch URLs (`remote -v`) without a URL's user and password (a token is often put there) or an scp-like address's user with a password, enclosing repositories. |
 | `status` | `status --porcelain=v2 -z --branch --untracked-files=all`: files with the index's and the working tree's letters, renames with their old path, conflicts, untracked files; branch, upstream, ahead/behind. A file whose working tree side differs from the index (and an untracked or conflicted one) has that file's modification time and size (`lstat`, nothing read), which move when it is edited again while its letters stay. |
 | `log` | `log --date-order` of the branches, tags and HEAD (with `remotes=1` the remote branches; `branch=` names some instead; on a branch without commits yet, the other branches' commits), pages of 300 (at most 1000, `skip=`): hash, parents, author, e-mail, date, subject; with the first page the refs (`for-each-ref`, tags peeled), the stashes, HEAD and its branch. |
 | `show` | `rev=` a commit's message and committer and its files (status, lines added and deleted, binary) against its parent `parent=` (1 by default; the empty tree for a root commit), or with `rev2=` the files between two commits. |
@@ -119,7 +119,7 @@ vector the agent builds: no shell, no option from the request.
 
 | Change | git |
 | --- | --- |
-| `stage` | `add --all -- <paths>` (`all`: `add --all`) |
+| `stage` | `add --all -- <paths>` (`all`: `add --all`; with `tracked` `add --update`, which leaves untracked files out) |
 | `unstage` | `restore --staged -- <paths>`; before the first commit `rm --cached -r -f` (the working tree keeps the files); `all`: `reset -q HEAD --` |
 | `applyPatch` | `apply [--cached] [--reverse] -` with the patch on standard input |
 | `discard` | `restore --worktree -- <paths>`; untracked files `clean -f -- <paths>`, which removes nothing tracked (nor a repository inside this one, which needs a second `-f`) |
@@ -132,7 +132,7 @@ vector the agent builds: no shell, no option from the request.
 | `reset` | `reset -q --soft`/`--mixed`/`--hard <commit> --` |
 | `tagCreate`, `tagDelete` | `tag <name> <at>` or `tag --annotate --file=- <name> <at>`; `tag -d`, or `push <remote> --delete refs/tags/<name>` |
 | `stashPush`, `stashApply`, `stashPop`, `stashDrop` | `stash push [--include-untracked] [--message=…]`; `stash apply`/`pop`/`drop stash@{N}` with `index` N and `hash` the entry's commit, after `rev-parse --verify stash@{N}` gave that commit (a stash pushed or dropped meanwhile renumbers them: `stale`) |
-| `fetch`, `pull`, `push` | `fetch [--prune] <remote>` or `--all`; `pull` as the user's `pull.rebase` and `pull.ff` say, or `pull --rebase`; `push [--force-with-lease] [--set-upstream] <remote> refs/heads/<b>:refs/heads/<b>` or `refs/tags/<t>`, or `push` to the upstream |
+| `fetch`, `pull`, `push` | `fetch [--prune] <remote>` or `--all`; `pull [--rebase] [<remote> refs/heads/<b>]` (as the user's `pull.rebase` and `pull.ff` say without `--rebase`; from the upstream without a remote, a branch's name through `check-ref-format`); `push [--force-with-lease] [--set-upstream] <remote> refs/heads/<b>:refs/heads/<b>` or `refs/tags/<t>`, or `push` to the upstream |
 
 **Core side.** Reads are `GET /api/m/{id}/p/git/<action>` with their
 parameters in the query; changes `POST /api/m/{id}/p/git/<action>` with a
@@ -416,7 +416,9 @@ terminal; what the plugin adds is a way to reach it from the browser:
   lines starting with `#` kept, branches, tags, stashes named by their
   commit and `stale` after the list changed, cherry-pick, revert, merge,
   reset, rebase); thousands of paths over several runs (`TestPathRuns`,
-  `TestManyPaths`); push, fetch and pull with a bare repository, a pull of
+  `TestManyPaths`); push, fetch and pull with a bare repository and a
+  second remote (its URL without the token, `TestRedactURL`; pushed with
+  its upstream set, a branch of it pulled by name), a pull of
   diverged branches (`diverged`, then rebased by `pull.rebase`); a remote
   that asks for a password (`auth_required`); timeouts and output limits
   with a fake git, a background child holding git's output (also one in a

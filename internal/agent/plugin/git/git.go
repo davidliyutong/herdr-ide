@@ -76,6 +76,8 @@ type Params struct {
 	Paths []string `json:"paths,omitempty"`
 	// Untracked are paths a discard removes.
 	Untracked []string `json:"untracked,omitempty"`
+	// Tracked: a stage of all changes leaves untracked files out.
+	Tracked bool `json:"tracked,omitempty"`
 	// Rev is a commit or ref; Rev2 the other side of a compare. Parent
 	// is the parent (1-based) a commit is shown against or a merge is
 	// cherry-picked or reverted against.

@@ -57,6 +57,11 @@ func (r *repo) runs(ctx context.Context, action string, p Params) ([]run, error)
 	switch action {
 	case "stage":
 		if p.All {
+			if p.Tracked {
+				// The tracked files' changes only (Changes while untracked
+				// files are shown apart).
+				return []run{{args: []string{"add", "--update"}}}, nil
+			}
 			return []run{{args: []string{"add", "--all"}}}, nil
 		}
 		ps, err := paths(p.Paths)
@@ -349,11 +354,28 @@ func (r *repo) argv(ctx context.Context, action string, p Params) (run, error) {
 	case "pull":
 		// As the user's configuration says (pull.rebase, pull.ff) unless
 		// asked to rebase; branches that diverged without one fail with
-		// diverged.
+		// diverged. From the upstream, or from a remote's branch named by
+		// its full ref.
+		args := []string{"pull"}
 		if p.Rebase {
-			return run{args: []string{"pull", "--rebase"}}, nil
+			args = append(args, "--rebase")
 		}
-		return run{args: []string{"pull"}}, nil
+		if p.Remote == "" {
+			if p.Branch != "" {
+				return run{}, plugin.Errorf("bad_params", "a branch needs a remote")
+			}
+			return run{args: args}, nil
+		}
+		if err := r.remote(ctx, p.Remote); err != nil {
+			return run{}, err
+		}
+		if p.Branch == "" {
+			return run{args: append(args, p.Remote)}, nil
+		}
+		if err := r.newName(ctx, "heads", p.Branch); err != nil {
+			return run{}, err
+		}
+		return run{args: append(args, p.Remote, "refs/heads/"+p.Branch)}, nil
 
 	case "push":
 		args := []string{"push"}

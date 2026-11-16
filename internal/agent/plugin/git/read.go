@@ -40,6 +40,9 @@ type Repo struct {
 	// revert.
 	State   string   `json:"state,omitempty"`
 	Remotes []string `json:"remotes"`
+	// RemoteURLs are the remotes' fetch URLs without what could be a
+	// credential (a URL's user and password).
+	RemoteURLs map[string]string `json:"remoteUrls,omitempty"`
 	// Parents are the top levels of the repositories this one is nested
 	// in, innermost first.
 	Parents []string `json:"parents,omitempty"`
@@ -167,7 +170,50 @@ func (r *repo) info(ctx context.Context) (*Repo, error) {
 			}
 		}
 	}
+	if len(info.Remotes) > 0 {
+		if res, err := r.git(ctx, run{args: []string{"remote", "-v"}}); err == nil {
+			info.RemoteURLs = remoteURLs(string(res.out))
+		}
+	}
 	return info, nil
+}
+
+// remoteURLs reads `git remote -v`: each remote's fetch URL, redacted.
+func remoteURLs(out string) map[string]string {
+	urls := map[string]string{}
+	for _, l := range strings.Split(out, "\n") {
+		name, rest, ok := strings.Cut(l, "\t")
+		u, kind, ok2 := strings.Cut(rest, " (")
+		if !ok || !ok2 || kind != "fetch)" {
+			continue
+		}
+		urls[name] = redactURL(u)
+	}
+	return urls
+}
+
+// redactURL drops a URL's user information (https://user:token@host/…:
+// tokens are often put there), and of the scp-like form (user@host:path)
+// a user with a password.
+func redactURL(s string) string {
+	if i := strings.Index(s, "://"); i > 0 {
+		rest := s[i+3:]
+		authority := rest
+		if j := strings.IndexByte(rest, '/'); j >= 0 {
+			authority = rest[:j]
+		}
+		if at := strings.LastIndexByte(authority, '@'); at >= 0 {
+			return s[:i+3] + rest[at+1:]
+		}
+		return s
+	}
+	if at := strings.Index(s, "@"); at > 0 {
+		user := s[:at]
+		if !strings.ContainsAny(user, "/") && strings.Contains(user, ":") {
+			return s[at+1:]
+		}
+	}
+	return s
 }
 
 // progress is the operation in progress in a git directory.
