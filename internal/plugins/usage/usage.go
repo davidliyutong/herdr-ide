@@ -28,6 +28,7 @@ const (
 	SettingRefreshOpen    = "usage.refreshOpen"
 	SettingRefreshWorking = "usage.refreshWorking"
 	SettingRefreshIdle    = "usage.refreshIdle"
+	SettingAlerts         = "usage.alerts"
 	SettingThresholds     = "usage.thresholds"
 	SettingCodexHomes     = "usage.codexHomes"
 	SettingClaudeKeychain = "usage.claudeKeychain"
@@ -62,6 +63,8 @@ var Settings = func() settings.Module {
 		minutes(SettingRefreshOpen, DefaultCadence.Open, 1, 60, 11),
 		minutes(SettingRefreshWorking, DefaultCadence.Working, 1, 120, 12),
 		minutes(SettingRefreshIdle, DefaultCadence.Idle, 5, 240, 13),
+		settings.Def{Key: SettingAlerts, Type: settings.TypeBool, Default: true,
+			Scope: settings.ScopeApp, Section: "usage", Order: 19},
 		settings.Def{Key: SettingThresholds, Type: settings.TypeList, Item: settings.TypeString, Default: []string{"80", "95"},
 			Options: []string{"50", "80", "90", "95"}, Scope: settings.ScopeApp, Section: "usage", Order: 20, Validate: validThresholds},
 	)

@@ -1,6 +1,6 @@
 // The AI usage plugin's data (internal/plugins/usage) and what the panel and
-// the status bar compute from it: the tightest window, durations, alerts on
-// thresholds and resets, and the cost report's totals and rankings.
+// the status bar compute from it: the tightest window, durations, the text
+// of the core's alerts, and the cost report's totals and rankings.
 import { t } from '../../i18n';
 
 export type WindowKind = 'session' | 'weekly' | 'monthly' | 'model';
@@ -69,6 +69,22 @@ export interface StatusPage {
   url: string;
 }
 
+/** An alert the core fired (once per period of its window): a threshold
+ * reached, a window that started over, a pace that runs it out before its
+ * reset. */
+export interface UsageAlert {
+  id: string;
+  kind: 'threshold' | 'reset' | 'pace';
+  /** The account's key. */
+  key: string;
+  provider: string;
+  email?: string;
+  /** The window when the alert fired. */
+  window: UsageWindow;
+  threshold?: number;
+  at: number;
+}
+
 export interface UsageSnapshot {
   updatedAt: number;
   refresh: string;
@@ -78,6 +94,8 @@ export interface UsageSnapshot {
   accounts: UsageAccount[];
   machines: Record<string, { status: string; code?: string; at: number }>;
   status: Record<string, StatusPage>;
+  /** The alerts fired in the last hour (none while usage.alerts is off). */
+  alerts?: UsageAlert[];
 }
 
 export interface CostRow {
@@ -168,84 +186,9 @@ export function parseThresholds(v: unknown): number[] {
     .sort((a, b) => a - b);
 }
 
-export interface Alert {
-  id: string;
-  kind: 'threshold' | 'reset' | 'pace';
-  account: UsageAccount;
-  window: UsageWindow;
-  threshold?: number;
-}
-
-export const windowId = (a: UsageAccount, w: UsageWindow) => `${a.key}|${w.id ?? `${w.kind}|${w.label ?? ''}`}`;
-
-/** Two resets this close are the same period's (a provider that says how
- * long until it gives a slightly different time at each poll). */
-const SAME_PERIOD = 10 * 60;
-
-/**
- * The alerts of a new snapshot: a window that reached a threshold (once per
- * period until it falls below it again), a window that started over after
- * it had reached the lowest threshold, and a window whose pace runs it out
- * before its reset (once per period). fired keeps what was said, by alert
- * id, with the period's reset. A window past its reset says nothing.
- */
-export function alerts(
-  prev: UsageSnapshot | undefined,
-  next: UsageSnapshot,
-  thresholds: number[],
-  fired: Record<string, number>,
-  now = Date.now() / 1000,
-): Alert[] {
-  const out: Alert[] = [];
-  const before = new Map<string, UsageWindow>();
-  for (const a of prev?.accounts ?? []) for (const w of a.windows ?? []) before.set(windowId(a, w), w);
-  const low = thresholds[0];
-  for (const a of next.accounts) {
-    if (a.status !== 'ok') continue;
-    for (const w of a.windows ?? []) {
-      if (pastReset(w, now)) continue;
-      const id = windowId(a, w);
-      const period = w.resetsAt ?? 0;
-      for (const th of thresholds) {
-        const key = `${id}|${th}`;
-        if (w.usedPct >= th) {
-          // Not said yet, or said in an earlier period (no page saw the
-          // window drop below the threshold in between).
-          if (fired[key] === undefined || Math.abs(period - fired[key]) > SAME_PERIOD) {
-            fired[key] = period;
-            out.push({ id: key, kind: 'threshold', account: a, window: w, threshold: th });
-          }
-        } else if (fired[key] !== undefined) {
-          delete fired[key]; // below it again: armed for the next time
-        }
-      }
-      const old = before.get(id);
-      if (
-        old &&
-        low !== undefined &&
-        old.usedPct >= low &&
-        old.resetsAt &&
-        w.resetsAt &&
-        w.resetsAt > old.resetsAt &&
-        w.usedPct < old.usedPct
-      ) {
-        out.push({ id: `${id}|reset|${w.resetsAt}`, kind: 'reset', account: a, window: w });
-      }
-      const paceKey = `${id}|pace`;
-      if (w.pace?.beforeReset && w.usedPct < 100) {
-        if (fired[paceKey] !== period) {
-          fired[paceKey] = period;
-          out.push({ id: paceKey, kind: 'pace', account: a, window: w });
-        }
-      }
-    }
-  }
-  return out;
-}
-
 /** The text of an alert. */
-export function alertText(a: Alert): string {
-  const who = [providerName(a.account.provider), a.account.email].filter(Boolean).join(' · ');
+export function alertText(a: UsageAlert): string {
+  const who = [providerName(a.provider), a.email].filter(Boolean).join(' · ');
   const name = windowName(a.window);
   const now = Date.now() / 1000;
   switch (a.kind) {

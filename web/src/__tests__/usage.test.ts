@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 //
-// The AI usage plugin: ordering accounts, alerts on thresholds, resets and
-// pace, the cost report's sums, and the panel and status bar item drawn
+// The AI usage plugin: ordering accounts, the core's alerts shown once per
+// browser, the cost report's sums, and the panel and status bar item drawn
 // from a stubbed core.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -17,7 +17,6 @@ import { groupWindows, UsagePanel } from '../plugins/usage/UsagePanel';
 import { UsageStatusItem } from '../plugins/usage/StatusItem';
 import { applySnapshot, setView, useUsage } from '../plugins/usage/state';
 import {
-  alerts,
   costOf,
   daily,
   equivalents,
@@ -26,6 +25,7 @@ import {
   tightest,
   type CostRow,
   type UsageAccount,
+  type UsageAlert,
   type UsageSnapshot,
 } from '../plugins/usage/model';
 
@@ -59,47 +59,40 @@ describe('usage model', () => {
     expect(tightest(snapshot([account('grok:c', [])]))).toBeUndefined();
   });
 
-  it('alerts once per threshold, again after recovering, and on resets and pace', () => {
-    const fired: Record<string, number> = {};
-    const a1 = snapshot([account('claude:x', [82])]);
-    expect(alerts(undefined, a1, [80, 95], fired).map((a) => [a.kind, a.threshold])).toEqual([['threshold', 80]]);
-    // The same use again: nothing new.
-    expect(alerts(a1, snapshot([account('claude:x', [83])]), [80, 95], fired)).toEqual([]);
-    const a2 = snapshot([account('claude:x', [96])]);
-    expect(alerts(a1, a2, [80, 95], fired).map((a) => a.threshold)).toEqual([95]);
-    // The window started over: a reset, and the thresholds are armed again.
-    const reset = account('claude:x', [5]);
-    reset.windows[0].resetsAt = now + 18000;
-    expect(alerts(a2, snapshot([reset]), [80, 95], fired).map((a) => a.kind)).toEqual(['reset']);
-    expect(alerts(snapshot([reset]), a1, [80, 95], fired).map((a) => a.threshold)).toEqual([80]);
-    // A pace that runs out before the reset: once per period.
-    const fast = account('codex:y', [40]);
-    fast.windows[0].pace = { expectedPct: 10, exhaustsAt: now + 600, beforeReset: true };
-    expect(alerts(undefined, snapshot([fast]), [80], fired).map((a) => a.kind)).toEqual(['pace']);
-    expect(alerts(undefined, snapshot([fast]), [80], fired)).toEqual([]);
-    // Accounts that are not ok bring no alerts.
-    expect(alerts(undefined, snapshot([account('kimi:z', [99], { status: 'stale' })]), [80], {})).toEqual([]);
-  });
-
-  it('alerts again in a new period no page saw start, not for a reset time that moves a little', () => {
-    const fired: Record<string, number> = {};
-    const a = account('claude:p', [85]);
-    expect(alerts(undefined, snapshot([a]), [80], fired)).toHaveLength(1);
-    // The same period, its reset said a few seconds later.
-    const jitter = account('claude:p', [86]);
-    jitter.windows[0].resetsAt! += 5;
-    expect(alerts(undefined, snapshot([jitter]), [80], fired)).toEqual([]);
-    // The next period, already over the threshold when first seen.
-    const next = account('claude:p', [82]);
-    next.windows[0].resetsAt! += 18000;
-    expect(alerts(undefined, snapshot([next]), [80], fired).map((x) => x.threshold)).toEqual([80]);
-  });
-
-  it('leaves windows past their reset out of the tightest and the alerts', () => {
+  it('leaves windows past their reset out of the tightest', () => {
     const past = account('codex:q', [95, 30]);
     past.windows[0].resetsAt = now - 60;
     expect(tightest(snapshot([past]))!.window.usedPct).toBe(30);
-    expect(alerts(undefined, snapshot([past]), [80], {})).toEqual([]);
+  });
+
+  it('shows each alert of the core once in a browser: again in a snapshot, another page or after a reload', () => {
+    const alert = (id: string, at = now): UsageAlert => ({
+      id,
+      kind: 'threshold',
+      key: 'claude:x',
+      provider: 'claude',
+      email: 'x@example.com',
+      window: { kind: 'weekly', usedPct: 82, resetsAt: now + 3630 },
+      threshold: 80,
+      at,
+    });
+    const shown = () => useStore.getState().toasts.map((x) => x.msg);
+    useStore.setState({ toasts: [] });
+    localStorage.clear();
+    const s = { ...snapshot([account('claude:x', [82])]), updatedAt: now, alerts: [alert('a1'), alert('old', now - 7200)] };
+    applySnapshot(s);
+    expect(shown()).toEqual(['Claude · x@example.com: Weekly at 82%, resets in 1h 0m']);
+    // The same alert in the next snapshot, from another page of the
+    // browser (the same storage) and after a reload: not again.
+    applySnapshot({ ...s, updatedAt: now + 60 });
+    useUsage.setState({ snapshot: undefined });
+    applySnapshot({ ...s, updatedAt: now + 120 });
+    expect(shown()).toHaveLength(1);
+    // A new one is.
+    applySnapshot({ ...s, updatedAt: now + 180, alerts: [alert('a1'), alert('a2')] });
+    expect(shown()).toHaveLength(2);
+    useUsage.setState({ snapshot: undefined });
+    useStore.setState({ toasts: [] });
   });
 
   it('keeps a newer snapshot over an older answer', () => {

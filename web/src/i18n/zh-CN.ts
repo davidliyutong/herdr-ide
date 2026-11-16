@@ -1061,8 +1061,11 @@ export const zhCN: Messages = {
   'settings.usage.refreshIdle': '其他时候',
   'settings.usage.refreshIdle.desc': '其他时候两次读取之间的分钟数。',
   'settings.usage.refreshIdle.unit': '分钟',
-  'settings.usage.thresholds': '通知阈值',
-  'settings.usage.thresholds.desc': '窗口用量达到这些百分比时发出通知；第一个阈值也决定状态栏何时变色。',
+  'settings.usage.alerts': '额度将尽时提醒',
+  'settings.usage.alerts.desc':
+    '窗口用量达到下面的百分比、按当前速度会在重置前用尽，或在达到第一个百分比后重置时发出通知：前台页面里弹出提示，否则发系统通知。每个窗口的每个周期只提醒一次。',
+  'settings.usage.thresholds': '提醒阈值',
+  'settings.usage.thresholds.desc': '窗口用量达到这些百分比时提醒；第一个阈值也决定状态栏和用量条何时变色。',
   'settings.group.usageProviders': '服务商',
   'settings.usage.providers.claude': 'Claude',
   'settings.usage.providers.codex': 'Codex',

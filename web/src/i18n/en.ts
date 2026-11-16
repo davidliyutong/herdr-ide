@@ -1083,8 +1083,11 @@ export const en = {
   'settings.usage.refreshIdle': 'Otherwise',
   'settings.usage.refreshIdle.desc': 'Minutes between reads at other times.',
   'settings.usage.refreshIdle.unit': 'min',
-  'settings.usage.thresholds': 'Notify at',
-  'settings.usage.thresholds.desc': 'Percentages of a window used that bring a notification; the first also colors the status bar.',
+  'settings.usage.alerts': 'Warn when a quota runs low',
+  'settings.usage.alerts.desc':
+    'Notify when a window reaches one of the percentages below, when its pace runs it out before it resets, and when it starts over after the first of them: a toast in the page in front, else a system notification. Each once per period of the window.',
+  'settings.usage.thresholds': 'Warn at',
+  'settings.usage.thresholds.desc': 'Percentages of a window used that bring a warning; the first also colors the status bar and the bars.',
   'settings.group.usageProviders': 'Providers',
   'settings.usage.providers.claude': 'Claude',
   'settings.usage.providers.codex': 'Codex',

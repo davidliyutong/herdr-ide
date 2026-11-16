@@ -275,13 +275,46 @@ not read; SSH machines are.
 
 The status bar shows the tightest window's percentage, in the warning color
 from the first of `usage.thresholds` (default 80 and 95); a click shows the
-panel. A snapshot that takes a window over a threshold notifies once per
-period (again after it fell below, or in a new period no page saw
-start), as does a window that started over after reaching
-the first threshold and one whose pace runs it out before its reset (once
-per period): a toast, or a system notification while the page is in the
-background with `notifications.system` on. What was notified is kept in the
-browser's storage, so a reload or another tab does not repeat it.
+panel.
+
+### Alerts
+
+With `usage.alerts` on (the default) the core fires an alert after a poll
+for a window of an account read in it (`ok`, not past its reset):
+
+- **threshold**: its use reached one of `usage.thresholds`;
+- **pace**: at its pace it runs out before its reset;
+- **reset**: it started over after reaching the first threshold (it resets
+  more than 10 minutes after the reset read before, and that reset passed
+  or its use fell 10 points).
+
+Each fires at most once per period of its window: the core records the end
+of the period it fired in (the window's reset; its length from now, or a
+week, when it says none) under the account, the window's kind, label and
+length (not its id in the snapshot, which changes when a window that
+shares kind and label comes or goes) and the threshold. It fires again
+only once that period is over and the window resets more than 10 minutes
+after it, or after the window started over; a window without a reset is
+armed again when its use fell 10 points below the threshold. So use that
+hovers around a threshold, a reset time a few seconds or minutes off at
+each poll, a rolling window whose reset moves forward, machines answering
+for an account in turn and a pace that comes and goes say nothing new. The
+records are kept in the history file (a day past their period), so a
+restart does not repeat them.
+
+The snapshot carries the alerts of the last hour (`alerts`: id, kind,
+account, the window when it fired, threshold, time). A page shows those it
+has not shown: a toast in a page in front, else a system notification
+while `notifications.system` is on. What a browser showed is kept in its
+storage with the alert's time (an hour), and its pages take turns (a Web
+Lock), one in front first, so another tab or a reload does not repeat it;
+the desktop app and a browser, which do not share storage, each show it
+once. The reset and pace notices follow the same switch as the
+thresholds: a reset is said only after a threshold's warning, as its end,
+and a pace notice is that warning ahead of time; switches of their own
+would allow a "started over" without the warning it ends. While the
+switch is off no alert fires and the snapshot carries none; turned on, a
+window over a threshold is said at the next poll.
 
 ## Alternatives considered
 
@@ -298,6 +331,7 @@ browser's storage, so a reload or another tab does not repeat it.
 | Writing the cost cache after every scan that changed it | A log in use grows at every scan, and the cache (tens of thousands of records) was written whole each time; reading on from the file's older offsets costs a few minutes of lines. |
 | Every machine asked for every account | The same account would be asked once per machine at every poll, against the providers' rate limits. |
 | A chart library for the bars and burndown | A few SVG paths and rectangles; no dependency. |
+| Each page deciding the alerts from the snapshots it saw (until 0.4) | Each page and app kept its own record, pages raced for it, a pace notice compared the reset to the second (a provider that says how long until it gives a time a second off each poll notified at every poll), use around a threshold re-armed it at each dip, a reset that moved 10 minutes counted as a new period, and a second of drift with a small dip read as a window that started over. The core sees every poll, keeps one record per window and period and survives a reload. |
 
 ## Failure modes
 
@@ -366,6 +400,13 @@ status pages. Resources and retention:
   the start, an unfinished line once it ends), the cache written seldom,
   a cancelled scan keeping its progress.
 - `internal/agent/plugin/usage/usage_test.go`: the actions and their codes.
+- `internal/plugins/usage/alerts_test.go`: each alert at most once per
+  period: use jittering around a threshold, a reset that moves forward
+  (and the next period's alert), a pace notice with a reset a second off,
+  no "started over" from a second of drift, windows coming and going,
+  machines answering in turn, periods ended unseen and early resets,
+  windows without a reset (hysteresis), the switch, the snapshot's hour
+  and providers turned off, records kept across a restart.
 - `internal/plugins/usage/usage_test.go`: cadence, dedupe across machines,
   last good numbers, `Retry-After` (also without an id), the manual
   refresh's minimum gap on a fake clock, history and pace, status pages,
@@ -376,9 +417,9 @@ status pages. Resources and retention:
   answer of a poll winning with the others as issues.
 - `internal/usage/cost_test.go` (`TestPricingTiers`): tier limits
   inclusive, the current Claude models' prices.
-- `web/src/__tests__/usage.test.ts`: ordering, alerts (again in a new
-  period, not for a reset time that moves a little, none for a window past
-  its reset), the cost sums, windows grouped by their models, the panel
+- `web/src/__tests__/usage.test.ts`: ordering, the core's alerts shown
+  once per browser (again in a snapshot, from another page, after a
+  reload; none older than an hour), the cost sums, windows grouped by their models, the panel
   (tiles, the overview's rows and spend, a service's cards, its spend,
   used or left) and the status bar item against a stubbed core, the panel
   with ready machines in the store (no render loop), no `watch` from a

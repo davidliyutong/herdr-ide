@@ -1,12 +1,12 @@
 // The AI usage plugin's state in the page: the core's snapshot (GET
 // /api/p/usage, then its /ws messages), the cost report, the panel's view
-// options (kept per browser) and the alerts the snapshots bring.
+// options (kept per browser) and the alerts the snapshots carry, each shown
+// once per browser.
 import { create } from 'zustand';
 import { loadPref, savePref, useStore } from '../../state/store';
 import { getPrefs } from '../../prefs';
-import { settingValue } from '../../settings';
 import { storage } from '../../brand';
-import { alerts, alertText, parseThresholds, type CostReport, type UsageSnapshot } from './model';
+import { alertText, type CostReport, type UsageAlert, type UsageSnapshot } from './model';
 
 /** The panel shows the overview or one service (its id). */
 export type UsageTab = string;
@@ -46,30 +46,57 @@ export function setView(v: View) {
   savePref(VIEW, { remaining: s.remaining, tab: s.tab, costDays: s.costDays });
 }
 
-const FIRED = 'usage.alerts';
+/** The alerts shown in this browser, by id, with when they fired. */
+const SHOWN = 'usage.alerts';
 
-function loadFired(): Record<string, number> {
+/** How long the core keeps an alert in its snapshot. */
+const ALERT_KEEP = 3600;
+
+/** A page in the background waits this long before it takes an alert, so
+ * that a page in front shows it. */
+const BACKGROUND_DELAY = 1500;
+
+function loadShown(): Record<string, number> {
   try {
-    return JSON.parse(storage.get(FIRED) ?? '{}') as Record<string, number>;
+    const v = JSON.parse(storage.get(SHOWN) ?? '{}') as unknown;
+    return v && typeof v === 'object' ? (v as Record<string, number>) : {};
   } catch {
     return {};
   }
 }
 
-/** Takes a snapshot of the core and tells the user what crossed a
- * threshold, started over or runs out before its reset. */
+/** Takes a snapshot of the core and shows the alerts it carries that this
+ * browser has not shown. */
 export function applySnapshot(s: UsageSnapshot) {
   if (!s || !Array.isArray(s.accounts)) return;
   const prev = useUsage.getState().snapshot;
   // An answer that started before a newer message arrived.
   if (prev && s.updatedAt < prev.updatedAt) return;
   useUsage.setState({ snapshot: s });
-  // The first snapshot of a page only arms the thresholds already passed:
-  // what was said in another page or before a reload is in storage.
-  const fired = loadFired();
-  const list = alerts(prev, s, parseThresholds(settingValue('usage.thresholds')), fired);
-  storage.set(FIRED, JSON.stringify(fired));
-  for (const a of list) notify(alertText(a), a.id);
+  if (Array.isArray(s.alerts) && s.alerts.length) showAlerts(s.alerts);
+}
+
+/** Shows each alert once per browser: what was shown is kept in storage,
+ * which the browser's pages share; they take it in turn (a lock), the page
+ * in front first. */
+function showAlerts(list: UsageAlert[]) {
+  const take = () => {
+    const shown = loadShown();
+    const now = Date.now() / 1000;
+    for (const [id, at] of Object.entries(shown)) if (typeof at !== 'number' || at < now - ALERT_KEEP) delete shown[id];
+    const fresh = list.filter((a) => shown[a.id] === undefined && a.at >= now - ALERT_KEEP);
+    for (const a of fresh) shown[a.id] = a.at;
+    storage.set(SHOWN, JSON.stringify(shown));
+    for (const a of fresh) notify(alertText(a), a.id);
+  };
+  const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined;
+  if (!locks?.request) {
+    take();
+    return;
+  }
+  const front = typeof document !== 'undefined' && document.visibilityState === 'visible';
+  // take does not throw (storage is guarded): a rejection is the lock's.
+  setTimeout(() => void locks.request('usage-alerts', take).catch(take), front ? 0 : BACKGROUND_DELAY);
 }
 
 function notify(text: string, tag: string) {

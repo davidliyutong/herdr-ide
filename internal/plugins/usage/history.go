@@ -20,13 +20,17 @@ const (
 	historyVersion = 1
 )
 
-// history is the windows' use over time, per account and window, and the
-// accounts of the last poll (shown again after a restart).
+// history is the windows' use over time, per account and window, the
+// accounts of the last poll (shown again after a restart) and the alerts
+// fired in each window's current period.
 type history struct {
 	Version int `json:"version"`
 	// Windows maps account key → window id (kind|label) → [time, used %].
 	Windows  map[string]map[string][][2]float64 `json:"windows"`
 	Accounts []AccountView                      `json:"accounts,omitempty"`
+	// Alerts maps account key|kind|label|length|alert → the period it
+	// fired in.
+	Alerts map[string]alertRecord `json:"alerts,omitempty"`
 }
 
 func newHistory() *history {
@@ -175,7 +179,7 @@ func (p *Plugin) save() {
 	p.saveMu.Lock()
 	defer p.saveMu.Unlock()
 	p.mu.Lock()
-	h := &history{Version: historyVersion, Windows: p.history.Windows, Accounts: make([]AccountView, 0, len(p.accounts))}
+	h := &history{Version: historyVersion, Windows: p.history.Windows, Accounts: make([]AccountView, 0, len(p.accounts)), Alerts: p.history.Alerts}
 	for _, a := range p.accounts {
 		v := a.view
 		v.Windows = make([]WindowView, 0, len(v.Account.Windows))

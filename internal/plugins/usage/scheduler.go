@@ -127,6 +127,9 @@ type Snapshot struct {
 	Accounts  []AccountView          `json:"accounts"`
 	Machines  map[string]MachineView `json:"machines"`
 	Status    map[string]StatusPage  `json:"status"`
+	// Alerts are the alerts fired in the last hour (none while
+	// usage.alerts is off); a page shows each once.
+	Alerts []Alert `json:"alerts,omitempty"`
 }
 
 // account is what the scheduler keeps of an account.
@@ -157,6 +160,8 @@ type Plugin struct {
 	polling   bool
 	working   map[string]bool // machine|terminal of agents working
 	costCache map[string]costEntry
+	// recent are the alerts fired in the last alertKeep.
+	recent []Alert
 	// costFlights are the machines' scans in progress.
 	costFlights map[string]*costFlight
 	// refreshPending: a manual refresh waits for minRefreshGap.
@@ -576,7 +581,11 @@ func (p *Plugin) poll(ctx context.Context, only []string, joined bool) {
 		}
 	}
 	read := map[string]bool{}
+	prev := map[string][]usage.Window{}
 	for _, k := range order {
+		if a := p.accounts[k]; a != nil {
+			prev[k] = a.view.Account.Windows
+		}
 		p.merge(k, best[k].acc, now)
 		p.accounts[k].view.Issues = issues[k]
 		read[k] = true
@@ -610,6 +619,9 @@ func (p *Plugin) poll(ctx context.Context, only []string, joined bool) {
 		}
 	}
 	p.history.record(p.accounts, read, now)
+	if p.alertsOn() {
+		p.fireAlerts(read, prev, now)
+	}
 	p.updatedAt, p.polling = now, false
 	if !joined {
 		p.lastPoll = now
@@ -663,6 +675,7 @@ func firstNonEmpty(s ...string) string {
 // turned on.
 func (p *Plugin) Snapshot() Snapshot {
 	on := p.options().Providers
+	alertsOn := p.alertsOn()
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	now := p.now()
@@ -715,6 +728,7 @@ func (p *Plugin) Snapshot() Snapshot {
 	for k, v := range p.status {
 		s.Status[k] = v
 	}
+	s.Alerts = p.recentAlerts(on, alertsOn, now)
 	return s
 }
 

@@ -145,6 +145,7 @@ in the UI; a setting with a scope can have its own value per machine, under
 | `usage.refreshOpen` | integer, 1–60 | `5` | – | – |
 | `usage.refreshWorking` | integer, 1–120 | `10` | – | – |
 | `usage.refreshIdle` | integer, 5–240 | `30` | – | – |
+| `usage.alerts` | `true`, `false` | `true` | – | – |
 | `usage.thresholds` | list of strings | `["80","95"]` | – | – |
 | `usage.providers.claude` | `true`, `false` | `true` | – | – |
 | `usage.providers.codex` | `true`, `false` | `true` | – | – |
@@ -374,7 +375,7 @@ missing here.
 | `GET /api/p/vault/requests` | – | The MCP requests waiting for an answer. |
 | `POST /api/p/vault/requests/{id}` | writes, gated (but `deny`) | Answers one (`{"answer": "once"\|"always"\|"deny"}`), audited as `vault.answered`; the first answer wins, later ones and those after the request expired get `404`, so `200` means the requester gets this answer. |
 | `GET /api/p/vault/log` | – | The last 500 accesses since the core started (time, machine, client, terminal, tool, names, result: `allowed`, `approved`, `approved_always`, `listed`, `denied` or a refusal's code such as `busy`, `not_found`, `vault_locked`, `inject_only` or `bad_request`; `count` for repeated list calls or refusals merged into one), newest first; never values. |
-| `GET /api/p/usage` | – | The AI usage plugin's snapshot: accounts (provider, id, email, plan, windows with pace and history, credits, balances, status and code, machines seen on), each machine's last poll, the providers' status pages; `?watch=1` marks the panel open for the adaptive refresh ([29](features/29-ai-usage.md)). |
+| `GET /api/p/usage` | – | The AI usage plugin's snapshot: accounts (provider, id, email, plan, windows with pace and history, credits, balances, status and code, machines seen on), each machine's last poll, the providers' status pages, the alerts fired in the last hour; `?watch=1` marks the panel open for the adaptive refresh ([29](features/29-ai-usage.md)). |
 | `GET /api/p/usage/cost` | – | The cost of the machines' AI CLI logs at API prices by day, provider, model, project and machine (`?days=` 1–90, `&tz=` the user's offset east of UTC in minutes). |
 | `POST /api/p/usage/refresh` | writes | Asks every connected machine for its limits now, or 30 s after the last poll when that was sooner (202 `{queued, at}`: when the poll runs). |
 | `PUT /api/m/{id}/p/usage/deepseek-key` | writes | Writes the machine's DeepSeek key file (`{"key"}`; `""` removes it); never read back, audited without the key. |
@@ -449,7 +450,8 @@ on Linux, `%LocalAppData%\herdr-ide\code-server` on Windows) with `.sha256` side
 downloaded themselves), the settings in `settings[-<instance>].json`, the
 variable vault in `vault[-<instance>].json` (values encrypted under a key derived from its passphrase, which is kept nowhere, [30](features/30-variable-vault.md)), the
 AI usage plugin's history in `usage-history[-<instance>].json` (the last
-accounts and 30 days of their windows' use), the
+accounts, 30 days of their windows' use and the periods its alerts fired
+in, kept a day past them), the
 keybindings in `keybindings[-<instance>].json` and the machines in
 `machines[-<instance>].json` (`{"version": 1, "machines": [{id, label,
 kind, target, enabled}], "order": [ids]}`: the SSH machines, the local machine's
