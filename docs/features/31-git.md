@@ -153,8 +153,18 @@ the answer through.
   (the explorer's editor), discard (after asking; untracked files are
   deleted) and stage or unstage; group headers stage, unstage or discard
   all. The context menu has the same.
-- **Stashes** (apply, pop, drop) and **Recent Commits**: the last 12 with
-  their lanes; a click opens the graph.
+- **Stashes** (apply, pop, drop).
+- **History** (`History.tsx`), docked at the bottom of the panel as VS
+  Code's Source Control Graph: its heading stays at the bottom while it is
+  collapsed; expanded, the list grows upward from it, as high as its top
+  edge is dragged (both kept per browser). It holds every commit of the
+  branches, newest first, with the graph's lanes (as wide as the rows in
+  view need), the branches and tags at each commit in their lane's color
+  (the current branch filled) and how long ago it was; pages of 200 load as
+  the list scrolls and only the rows in view are drawn. A click shows the
+  commit's files under it, the lanes running through (a file opens its
+  diff against the first parent); the context menu copies the hash or
+  opens the graph pane.
 - While shown and the page visible, the panel asks `watch` every 2 s and
   reads `repo` and `status` again when the token moved, at least every
   10 s (changes of the working tree do not move it), and after every
@@ -231,6 +241,12 @@ Code's preview editor does, so going through the changes keeps one pane):
 - When the repository changes, both sides are read again; unsaved text
   stays.
 
+**Colors**: lanes take the design tokens' chart hues (`--ds-chart-*`, in
+an order that keeps neighbors apart), status letters and names VS Code's
+Git decoration colors (`--ds-git-*`), additions and deletions of a diff's
+counts the same added and deleted colors, an operation in progress
+(merge, rebase) a warning bar ([24](24-design-tokens.md)).
+
 **File explorer decorations** (`decorations.ts`, `follow.ts`): the
 explorer colors the changed files of the repositories followed (conflicts,
 deletions, modifications, renames, additions, untracked) with their letter,
@@ -258,6 +274,7 @@ file's working tree diff.
 | Pushing changes from a watcher on machines | A watcher per repository needs an owner and limits; one stat of a few files every 2 s while the panel is shown costs less and stops with it. |
 | Typing credentials into the UI | Passwords and passphrases would cross the core; the terminal next to the panel is where git can ask. |
 | Using VS Code's Source Control and Git Graph only | They stay ([05](05-vscode-panes.md)); code-server per machine is slow to start and large for a look at a diff. |
+| The latest commits only in the panel, the rest in the graph pane | Looking back a little further meant leaving the panel; the history docked at the bottom scrolls through every commit and the graph pane stays for filters, search and comparisons. |
 | Lanes computed on the machine | The graph changes with filters and pages in the browser; a pure function there is testable with vectors. |
 
 ## Failure modes

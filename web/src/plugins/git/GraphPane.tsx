@@ -10,6 +10,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronUp, GitBranch, RefreshCw, Search, Tag as TagIcon, X } from 'lucide-react';
 import { useStore } from '../../state/store';
+import { useSize } from '../../lib/sizes';
 import { openMenu, type MenuEntry } from '../../contextMenu';
 import { t } from '../../i18n';
 import type { PaneViewProps } from '../api';
@@ -34,7 +35,6 @@ import { letterColor } from './GitPanel';
 import { changed, runGit, useRepo } from './state';
 import './git.css';
 
-export const ROW_H = 24;
 export const LANE_W = 14;
 export const DETAIL_H = 300;
 /** The commits of a page. */
@@ -129,6 +129,8 @@ interface Loaded {
 }
 
 export function GraphPane({ m, view }: PaneViewProps) {
+  // Rows are --h-row high, which scales with the UI font size.
+  const ROW_H = useSize('row');
   const repo = String(view.repo ?? '');
   const st = useRepo(m, repo);
   const readOnly = useStore((s) => s.readOnly);

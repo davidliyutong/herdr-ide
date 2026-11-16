@@ -3,8 +3,8 @@
 // repositories are nested), its branch with ahead/behind and fetch, pull
 // and push, a commit message box (Cmd/Ctrl+Enter commits; amend), the
 // groups Merge Changes, Staged Changes and Changes as a list or a tree
-// with their actions, the stashes and the latest commits as a small
-// graph that opens the graph pane.
+// with their actions and the stashes; the history of every commit is
+// docked at the bottom (History.tsx), as VS Code's Source Control Graph.
 
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -34,16 +34,12 @@ import { confirmDialog } from '../../dialog';
 import { isMac } from '../../keys';
 import { t } from '../../i18n';
 import { followedDir } from '../files/FilesPanel';
-import { gitApi, type Commit, type Stash, type StatusFile } from './api';
+import { gitApi, type Stash, type StatusFile } from './api';
 import { MARK_COLOR, markOf } from './decorations';
-import { layoutGraph } from './graph';
 import { baseName, createBranch, discard, openFile, openGraph, openStatusDiff, short, stashDrop, stashPush } from './ops';
-import { GraphCell } from './GraphCell';
+import { History } from './History';
 import { changed, forgetRepos, runGit, useRepo, useReposOf, type RepoState } from './state';
 import './git.css';
-
-/** The commits the panel's small graph shows. */
-export const RECENT = 12;
 
 export type Group = 'merge' | 'staged' | 'changes';
 
@@ -395,8 +391,8 @@ function RepoView({ m, root, st }: { m: string; root: string; st?: RepoState }) 
           closed={closed.stashes !== false}
           onToggle={() => setClosed((c) => ({ ...c, stashes: c.stashes === false }))}
         />
-        <Recent m={m} root={root} version={st?.version ?? 0} closed={!!closed.recent} onToggle={() => toggle('recent')} />
       </div>
+      <History m={m} root={root} version={st?.version ?? 0} branch={branch} head={status?.head} />
     </>
   );
 }
@@ -645,49 +641,6 @@ function Stashes({ m, root, version, closed, onToggle }: { m: string; root: stri
                 </button>
               </span>
             )}
-          </div>
-        ))}
-    </section>
-  );
-}
-
-function Recent({ m, root, version, closed, onToggle }: { m: string; root: string; version: number; closed: boolean; onToggle(): void }) {
-  const [commits, setCommits] = useState<Commit[]>([]);
-  useEffect(() => {
-    let gone = false;
-    gitApi
-      .log(m, root, { limit: RECENT })
-      .then((l) => !gone && setCommits(l.commits))
-      .catch(() => undefined);
-    return () => {
-      gone = true;
-    };
-  }, [m, root, version]);
-  const graph = useMemo(() => layoutGraph(commits), [commits]);
-  return (
-    <section className="git-group">
-      <div className="git-group-head" onClick={onToggle}>
-        {closed ? <ChevronRight /> : <ChevronDown />}
-        <span className="ellipsis">{t('git.group.recent')}</span>
-        <span className="spacer" />
-        <span className="git-actions" onClick={(e) => e.stopPropagation()}>
-          <button className="icon" title={t('git.openGraph')} aria-label={t('git.openGraph')} onClick={() => void openGraph(m, root)}>
-            <GitGraph />
-          </button>
-        </span>
-      </div>
-      {!closed &&
-        commits.map((c, i) => (
-          <div
-            key={c.hash}
-            className="git-row git-recent"
-            title={`${short(c.hash)} ${c.author}\n${c.subject}`}
-            onClick={() => void openGraph(m, root)}
-          >
-            <GraphCell row={graph.rows[i]} width={graph.width} height={22} lane={10} />
-            <span className="ellipsis">{c.subject}</span>
-            <span className="spacer" />
-            <span className="git-path muted">{short(c.hash)}</span>
           </div>
         ))}
     </section>

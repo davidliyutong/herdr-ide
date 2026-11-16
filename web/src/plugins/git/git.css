@@ -1,14 +1,15 @@
 /* The Git plugin's panel, graph pane and diff pane (web/src/plugins/git). */
 :root {
-  /* The graph's lanes: the app's status colors, then hues between them. */
-  --git-lane-0: var(--accent);
-  --git-lane-1: var(--done);
-  --git-lane-2: var(--blocked);
-  --git-lane-3: var(--working);
-  --git-lane-4: color-mix(in srgb, var(--accent) 50%, var(--error));
-  --git-lane-5: color-mix(in srgb, var(--done) 50%, var(--accent));
-  --git-lane-6: var(--error);
-  --git-lane-7: color-mix(in srgb, var(--working) 50%, var(--done));
+  /* The graph's lanes: the chart hues of the design tokens, in an order
+     that keeps neighbors apart. */
+  --git-lane-0: var(--ds-chart-blue);
+  --git-lane-1: var(--ds-chart-orange);
+  --git-lane-2: var(--ds-chart-teal);
+  --git-lane-3: var(--ds-chart-purple);
+  --git-lane-4: var(--ds-chart-red);
+  --git-lane-5: var(--ds-chart-green);
+  --git-lane-6: var(--ds-chart-yellow);
+  --git-lane-7: var(--ds-chart-cyan);
 }
 
 /* ---- panel ---- */
@@ -33,12 +34,6 @@
 }
 .git-repo-pick {
   margin: 0 8px 4px;
-  font: inherit;
-  font-size: var(--fs-sm);
-  color: var(--fg);
-  background: var(--bg);
-  border: 1px solid var(--line-2);
-  border-radius: 4px;
 }
 .git-toolbar,
 .git-branch,
@@ -53,48 +48,60 @@
   gap: 2px;
   min-width: 0;
 }
+/* The panel's tools: a toolbar like a pane's header; the branch, a row. */
 .git-toolbar {
-  padding: 0 6px 4px 10px;
+  flex: none;
+  height: var(--h-toolbar);
+  padding: 0 4px 0 12px;
 }
 .git-title {
   font-weight: 600;
-  font-size: var(--fs-sm);
+  font-size: var(--fs-md);
 }
-.git-toolbar .icon,
-.git-branch .icon,
 .git-actions .icon,
-.git-diff-bar .icon,
-.git-graph-bar .icon,
 .git-detail-head .icon {
-  min-width: 1.5rem;
-  height: 1.5rem;
+  min-width: var(--ctl-sm);
+  height: var(--ctl-sm);
 }
-.git-panel .lucide,
-.git-diff .lucide,
-.git-graph .lucide {
-  width: 0.95rem;
-  height: 0.95rem;
-  flex: none;
+.git-actions .icon .lucide,
+.git-detail-head .icon .lucide {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
 }
 .git-branch {
-  padding: 2px 6px 4px 10px;
-  font-size: var(--fs-sm);
+  flex: none;
+  height: var(--h-row);
+  padding: 0 4px 0 12px;
+  margin-bottom: 4px;
+  font-size: var(--fs-md);
   gap: 6px;
+}
+.git-branch > .lucide {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+  color: var(--fg-dim);
 }
 .git-sync {
   display: inline-flex;
   align-items: center;
   gap: 3px;
   margin-left: auto;
-  padding: 1px 6px;
+  min-height: 0;
+  height: var(--ctl-sm);
+  padding: 0 6px;
   font: inherit;
   font-size: var(--fs-sm);
+  line-height: 1;
   color: var(--fg-dim);
   background: none;
   border: 1px solid var(--line-2);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   white-space: nowrap;
+}
+.git-sync .lucide {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
 }
 .git-sync:hover:not(:disabled) {
   color: var(--fg);
@@ -103,8 +110,9 @@
 .git-state {
   margin: 0 8px 6px;
   padding: 4px 8px;
-  border-radius: 4px;
-  background: var(--accent-soft);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+  box-shadow: inset 3px 0 0 var(--warning);
   gap: 6px;
 }
 .git-error {
@@ -123,17 +131,18 @@
 }
 .git-message {
   font: inherit;
-  font-size: var(--fs-md);
   color: var(--fg);
   background: var(--bg);
   border: 1px solid var(--line-2);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   padding: 4px 6px;
+  line-height: 1.45;
   resize: vertical;
   min-height: 2.6em;
 }
 .git-message:focus {
-  outline: 1px solid var(--focus-ring);
+  border-color: var(--accent);
+  outline: none;
 }
 .git-commit-row .primary {
   display: inline-flex;
@@ -151,38 +160,48 @@
   min-height: 0;
   overflow: auto;
 }
+/* A group's heading (Changes, Staged Changes): the design's section head. */
 .git-group-head {
   display: flex;
   align-items: center;
   gap: 4px;
-  height: 22px;
-  padding: 0 8px 0 4px;
+  height: var(--h-row);
+  padding: 0 4px 0 4px;
   font-size: var(--fs-sm);
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.04em;
   color: var(--fg-dim);
   cursor: pointer;
   user-select: none;
 }
 .git-group-head:hover {
-  background: var(--bg-2);
+  color: var(--fg);
 }
+.git-group-head > .lucide {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
+/* A count: neutral, as VS Code's (only what asks for attention takes the accent). */
 .git-count {
-  min-width: 1.3em;
+  min-width: 1.5em;
   padding: 0 5px;
-  border-radius: 8px;
+  border-radius: 999px;
   background: var(--bg-3);
-  font-weight: 400;
+  color: var(--fg-dim);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  line-height: 1.5;
   text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 .git-row {
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 22px;
+  height: var(--h-row);
   padding-right: 8px;
-  font-size: var(--fs-md);
+  font-size: var(--fs-base);
   white-space: nowrap;
   cursor: default;
   user-select: none;
@@ -217,11 +236,126 @@
   font-weight: 600;
 }
 .git-row-icon {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
   color: var(--fg-dim);
 }
-.git-recent {
-  padding-left: 6px;
+
+/* ---- the panel's history, docked at its bottom (History.tsx) ---- */
+.git-history {
+  position: relative;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-top: 1px solid var(--line);
+}
+.git-history.open {
+  /* Never more than the panel leaves. */
+  max-height: calc(100% - 4 * var(--h-row));
+}
+.git-history-head {
+  position: relative;
+}
+/* The top edge, dragged, sets the history's height. */
+.git-history-resizer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -4px;
+  height: 7px;
+  cursor: row-resize;
+  z-index: 1;
+}
+.git-history:not(.open) .git-history-resizer {
+  display: none;
+}
+.git-history-resizer:hover,
+body.resizing-row .git-history-resizer {
+  background: var(--accent-soft);
+}
+.git-history-body {
+  display: flex;
+  flex-direction: column;
+  height: calc(var(--h-row) * 12);
+  min-height: calc(var(--h-row) * 2);
+}
+.git-history-body .callout {
+  margin: 4px 8px;
+}
+.git-history-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.git-history-row,
+.git-history-file {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px 0 6px;
+  font-size: var(--fs-base);
+  white-space: nowrap;
+  user-select: none;
   cursor: pointer;
+}
+.git-history-row:hover,
+.git-history-file:hover {
+  background: var(--bg-2);
+}
+.git-history-row.open {
+  background: var(--bg-3);
+}
+.git-history-subject {
+  flex: 0 1 auto;
+}
+.git-history-meta {
+  flex: none;
+  margin-left: auto;
+  padding-left: 6px;
+  color: var(--fg-mute);
+  font-size: var(--fs-sm);
+}
+.git-history-file {
+  font-size: var(--fs-md);
+}
+.git-history-file .git-path {
+  flex: 0 1 auto;
+}
+/* A branch or tag at a commit, in its lane's color (--ref). */
+.git-ref {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 9rem;
+  height: 1.45em;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--ref);
+  background: color-mix(in srgb, var(--ref) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ref) 45%, transparent);
+}
+.git-ref.current {
+  color: var(--bg);
+  background: var(--ref);
+  border-color: var(--ref);
+}
+.git-ref.remote {
+  background: transparent;
+  font-weight: 400;
+}
+.git-ref.tag {
+  border-radius: var(--radius-sm);
+}
+.git-ref .lucide {
+  width: 0.85em;
+  height: 0.85em;
 }
 .git-graph-cell {
   flex: none;
@@ -240,37 +374,55 @@
   min-height: 0;
   background: var(--bg);
 }
+/* The graph's tools: a toolbar that hides what does not fit rather than
+   stacking letters. */
 .git-graph-bar {
+  flex: none;
   gap: 6px;
-  padding: 4px 8px;
+  height: var(--h-toolbar);
+  padding: 0 4px 0 10px;
   border-bottom: 1px solid var(--line);
-  font-size: var(--fs-sm);
+  font-size: var(--fs-md);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.git-graph-bar > * {
+  flex-shrink: 0;
 }
 .git-graph-bar select {
-  font: inherit;
   max-width: 14rem;
-  color: var(--fg);
-  background: var(--bg);
-  border: 1px solid var(--line-2);
-  border-radius: 4px;
+  min-height: var(--ctl-sm);
+  height: var(--ctl-sm);
 }
 .git-check {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   color: var(--fg-dim);
+  white-space: nowrap;
 }
 .git-search {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 1px 4px;
+  flex-shrink: 1;
+  min-width: 6rem;
+  height: var(--ctl-sm);
+  padding: 0 6px;
   border: 1px solid var(--line-2);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   color: var(--fg-dim);
+}
+.git-search:focus-within {
+  border-color: var(--accent);
+}
+.git-search .lucide {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
 }
 .git-search input {
   width: 12rem;
+  min-width: 0;
   border: 0;
   outline: none;
   font: inherit;
@@ -290,7 +442,7 @@
   align-items: center;
   gap: 8px;
   padding-right: 8px;
-  font-size: var(--fs-md);
+  font-size: var(--fs-base);
   white-space: nowrap;
   cursor: default;
   user-select: none;
@@ -299,7 +451,7 @@
   background: var(--bg-2);
 }
 .git-graph-row.sel {
-  background: var(--bg-3);
+  background: var(--accent-soft);
 }
 .git-graph-row.dim {
   opacity: 0.4;
@@ -346,11 +498,12 @@
   max-width: 14rem;
   overflow: hidden;
   text-overflow: ellipsis;
-  padding: 0 5px;
+  padding: 0 6px;
   border: 1px solid var(--line-2);
-  border-radius: 9px;
-  font-size: var(--fs-sm);
-  line-height: 16px;
+  border-radius: 999px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  line-height: 1.5;
   background: var(--bg-2);
 }
 .git-badge.current {
@@ -424,11 +577,15 @@
   min-width: 0;
   overflow: auto;
 }
+.git-stat {
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
 .git-stat .add {
-  color: var(--done);
+  color: var(--ds-git-added);
 }
 .git-stat .del {
-  color: var(--error);
+  color: var(--ds-git-deleted);
 }
 .git-note {
   padding: 12px;
@@ -445,16 +602,14 @@
 }
 .git-diff-bar {
   /* A narrow pane hides what does not fit rather than stacking letters. */
+  flex: none;
   white-space: nowrap;
   overflow: hidden;
   gap: 2px;
-  padding: 2px 6px 2px 10px;
+  height: var(--h-toolbar);
+  padding: 0 4px 0 10px;
   border-bottom: 1px solid var(--line);
-  font-size: var(--fs-sm);
-}
-.git-diff-bar .icon.on {
-  color: var(--fg);
-  background: var(--accent-soft);
+  font-size: var(--fs-md);
 }
 .git-diff-path {
   min-width: 0;
@@ -464,9 +619,10 @@
 }
 .git-diff-actions {
   gap: 6px;
-  padding: 3px 8px;
+  min-height: var(--h-toolbar);
+  padding: 2px 8px;
   border-bottom: 1px solid var(--line);
-  font-size: var(--fs-sm);
+  font-size: var(--fs-md);
   flex-wrap: wrap;
 }
 .git-diff-actions .btn {

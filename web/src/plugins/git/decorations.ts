@@ -13,13 +13,14 @@ export type Mark = 'conflict' | 'deleted' | 'modified' | 'added' | 'untracked' |
 /** The more pressing marks first. */
 const ORDER: Mark[] = ['conflict', 'deleted', 'modified', 'renamed', 'added', 'untracked'];
 
+/** VS Code's Git decoration colors (design tokens `git.*`). */
 export const MARK_COLOR: Record<Mark, string> = {
-  conflict: 'var(--blocked)',
-  deleted: 'var(--error)',
-  modified: 'var(--working)',
-  renamed: 'var(--working)',
-  added: 'var(--done)',
-  untracked: 'var(--done)',
+  conflict: 'var(--ds-git-conflict)',
+  deleted: 'var(--ds-git-deleted)',
+  modified: 'var(--ds-git-modified)',
+  renamed: 'var(--ds-git-renamed)',
+  added: 'var(--ds-git-added)',
+  untracked: 'var(--ds-git-untracked)',
 };
 
 const LETTER: Record<Mark, string> = { conflict: '!', deleted: 'D', modified: 'M', renamed: 'R', added: 'A', untracked: 'U' };

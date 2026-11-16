@@ -18,6 +18,7 @@ import { t } from '../i18n';
 import { GitPanel, groupFiles, treeRows } from '../plugins/git/GitPanel';
 import { decorate, markOf } from '../plugins/git/decorations';
 import { forgetRepos, useGit } from '../plugins/git/state';
+import { ago } from '../plugins/git/History';
 import type { StatusFile } from '../plugins/git/api';
 import { settle } from './fakeTerms';
 
@@ -59,11 +60,11 @@ describe('grouping', () => {
     expect(d['conflict.c'].badge).toBe('!');
     expect(d['old.txt'].badge).toBe('D');
     expect(d['src'].badge).toBe('•');
-    expect(d['src'].color).toBe('var(--working)');
-    expect(d['notes'].color).toBe('var(--done)');
+    expect(d['src'].color).toBe('var(--ds-git-modified)');
+    expect(d['notes'].color).toBe('var(--ds-git-untracked)');
     // Inside a folder, and from above the repository.
     expect(Object.keys(decorate([{ root: ROOT, files }], `${ROOT}/src`)).sort()).toEqual(['a.ts', 'new.ts']);
-    expect(decorate([{ root: ROOT, files }], '/home/u')).toEqual({ repo: expect.objectContaining({ color: 'var(--blocked)' }) });
+    expect(decorate([{ root: ROOT, files }], '/home/u')).toEqual({ repo: expect.objectContaining({ color: 'var(--ds-git-conflict)' }) });
     expect(decorate([{ root: ROOT, files }], '/elsewhere')).toEqual({});
   });
 });
@@ -73,6 +74,7 @@ describe('GitPanel', () => {
   let root: Root;
   const posts: Array<{ action: string; body: Record<string, unknown> }> = [];
   let status: StatusFile[];
+  const logs: URLSearchParams[] = [];
   const flush = async () => {
     for (let i = 0; i < 4; i++) await act(async () => settle());
   };
@@ -82,6 +84,7 @@ describe('GitPanel', () => {
 
   beforeEach(async () => {
     posts.length = 0;
+    logs.length = 0;
     status = files.slice(0, 4);
     forgetRepos();
     useGit.setState({ repos: {} });
@@ -109,12 +112,23 @@ describe('GitPanel', () => {
           );
         case 'status':
           return new Response(JSON.stringify({ branch: 'main', head: 'h1', upstream: 'origin/main', ahead: 1, behind: 0, files: status }));
-        case 'log':
+        case 'log': {
+          logs.push(url.searchParams);
+          // Two pages: h1 (more), then h0.
+          const second = url.searchParams.get('skip') === '1';
           return new Response(
             JSON.stringify({
-              commits: [{ hash: 'h1', parents: [], author: 'A', email: 'a@x', date: 1, subject: 'first commit' }],
-              more: false,
+              commits: second
+                ? [{ hash: 'h0', parents: [], author: 'A', email: 'a@x', date: 1, subject: 'older commit' }]
+                : [{ hash: 'h1', parents: ['h0'], author: 'A', email: 'a@x', date: 1, subject: 'first commit' }],
+              more: !second,
+              refs: second ? undefined : [{ name: 'refs/heads/main', hash: 'h1' }],
             }),
+          );
+        }
+        case 'show':
+          return new Response(
+            JSON.stringify({ base: 'h0', target: 'h1', files: [{ path: 'src/a.ts', status: 'M', added: 3, deleted: 1 }] }),
           );
         case 'stashes':
           return new Response('[]');
@@ -212,5 +226,32 @@ describe('GitPanel', () => {
     expect(host.querySelector('.git-message')).toBeNull();
     expect(button(t('git.stage'))).toBeUndefined();
     expect(button(t('git.openFile'))).toBeDefined();
+  });
+
+  // The history is docked at the bottom: every commit, a page at a time as
+  // it scrolls, the branch at its commit, a commit's files under it.
+  it("shows the history, page after page, and a commit's files", async () => {
+    const history = section(t('git.group.recent'));
+    expect(history.querySelector('.git-history-row')?.textContent).toContain('first commit');
+    expect(history.querySelector('.git-ref.current')?.textContent).toBe('main');
+    // The list is short: the next page loads at once, after the first.
+    await flush();
+    expect(logs.map((q) => q.get('skip'))).toContain('1');
+    expect([...history.querySelectorAll('.git-history-row')].map((r) => r.textContent)).toEqual([
+      expect.stringContaining('first commit'),
+      expect.stringContaining('older commit'),
+    ]);
+    await act(async () => history.querySelector<HTMLElement>('.git-history-row')!.click());
+    await flush();
+    expect(history.querySelector('.git-history-file')?.textContent).toContain('a.ts');
+  });
+
+  it('says how long ago a commit was', () => {
+    const now = 1_000_000;
+    expect(ago(now - 30, now)).toBe('1m');
+    expect(ago(now - 3 * 3600, now)).toBe('3h');
+    expect(ago(now - 2 * 86400, now)).toBe('2d');
+    expect(ago(now - 30 * 86400, now)).toBe('4w');
+    expect(ago(now - 800 * 86400, now)).toBe('2y');
   });
 });

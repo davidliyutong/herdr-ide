@@ -118,8 +118,9 @@ workspaces and terminals of every machine in one browser tab, with VS Code
 - **Git.** VS Code's Source Control and Git Graph without VS Code, for the
   focused pane's repository on any machine: a panel (Ctrl+Shift+G in the
   desktop app) with the branch, ahead/behind, fetch, pull and push, staged
-  and unstaged changes as a list or tree, commits (⌘/Ctrl+Enter, amend) and
-  stashes; a graph pane with lanes, branch and tag badges, search, a
+  and unstaged changes as a list or tree, commits (⌘/Ctrl+Enter, amend),
+  stashes and, docked at its bottom, the whole history with its graph
+  (scrolls through every commit, a click shows its files); a graph pane with lanes, branch and tag badges, search, a
   branch filter, a commit's files and context menus (checkout, branches,
   tags, merge, rebase, cherry-pick, revert, reset); diffs in Monaco, side by
   side or inline, where selected ranges are staged, unstaged or discarded
