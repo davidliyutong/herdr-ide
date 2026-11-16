@@ -240,6 +240,37 @@ func TestVSCodeOffEndsItsWork(t *testing.T) {
 	}
 }
 
+// A request takes the context of its VS Code work, and of preparing
+// code-server, only while its client's switch is on: taken before the
+// switch is turned off, turning it off ends it; asked for after (a request
+// that passed withPlugin just before), there is none, never a new context
+// that nothing would end.
+func TestVSCodeWorkTakenOnlyWhileOn(t *testing.T) {
+	ps := registry.Plugins()
+	st := settings.New("", plugin.Settings(ps, nil))
+	s := New(machines.NewManager(nil, nil, log.New(io.Discard, "", 0)),
+		Options{Logger: log.New(io.Discard, "", 0), Plugins: ps, Settings: st})
+	st.Set("plugins.vscode.enabled", "", false)
+	if s.csProxy.workFor(plugin.Desktop, true) != nil || s.csProxy.workFor(plugin.Desktop, false) != nil {
+		t.Fatal("work while off")
+	}
+	st.Set("plugins.vscode.enabled", "", true)
+	work, prep := s.csProxy.workFor(plugin.Desktop, true), s.csProxy.workFor(plugin.Desktop, false)
+	if work == nil || prep == nil || work.Err() != nil || prep.Err() != nil {
+		t.Fatal("no work while on")
+	}
+	if s.csProxy.workFor(plugin.Browser, true) != nil || s.csProxy.workFor(plugin.Browser, false) != nil {
+		t.Fatal("a browser's work while only the desktop app's switch is on")
+	}
+	st.Set("plugins.vscode.enabled", "", false)
+	if work.Err() == nil || prep.Err() == nil {
+		t.Fatal("work taken before the switch went off outlived it")
+	}
+	if s.csProxy.workFor(plugin.Desktop, true) != nil || s.csProxy.workFor(plugin.Desktop, false) != nil {
+		t.Fatal("work taken after the switch went off")
+	}
+}
+
 // riskyPlugin's content would run on the UI's origin: a switch per kind
 // of client.
 type riskyPlugin struct{ fakePlugin }

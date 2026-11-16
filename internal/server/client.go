@@ -51,6 +51,27 @@ func (s *Server) clientOf(r *http.Request) plugin.Client {
 	return plugin.Browser
 }
 
+// stripSetDesktopCookie removes from h (a response of code-server) every
+// Set-Cookie that names the desktop app's cookie, which would replace or
+// shadow the token of its launch; the others stay.
+func stripSetDesktopCookie(h http.Header) {
+	lines := h.Values("Set-Cookie")
+	var kept []string
+	for _, line := range lines {
+		name, _, _ := strings.Cut(line, "=")
+		if strings.TrimSpace(name) != DesktopCookie {
+			kept = append(kept, line)
+		}
+	}
+	if len(kept) == len(lines) {
+		return
+	}
+	h.Del("Set-Cookie")
+	for _, line := range kept {
+		h.Add("Set-Cookie", line)
+	}
+}
+
 // stripDesktopCookie removes the desktop app's cookie from the Cookie
 // headers of h (a request forwarded to code-server), keeping the others.
 func stripDesktopCookie(h http.Header) {

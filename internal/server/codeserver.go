@@ -95,6 +95,24 @@ func (p *codeServerProxy) workContext(c plugin.Client) context.Context {
 	return p.work[c]
 }
 
+// workFor is the context of client c's VS Code work (on, true), or of the
+// preparations of code-server for client c (on, false), taken only while
+// c's switch is on: nil when it is off. The switch is read after the
+// context is taken, as follow ends the work only after the setting
+// changed: a switch turned off meanwhile has either ended this context or
+// is seen here, so no request holds a new context that nothing would end.
+func (p *codeServerProxy) workFor(c plugin.Client, own bool) context.Context {
+	key := c
+	if !own {
+		key = prepare
+	}
+	ctx := p.workContext(key)
+	if !p.s.pluginOn(vscode.ID, c) {
+		return nil
+	}
+	return ctx
+}
+
 // stop ends VS Code's work for client c when its switch is turned off:
 // proxied requests and WebSockets of that kind of client are closed, so
 // its VS Code windows open elsewhere stop working, and code-server,
@@ -195,6 +213,13 @@ func (p *codeServerProxy) proxy(mc *machines.Machine) *httputil.ReverseProxy {
 		ModifyResponse: func(resp *http.Response) error {
 			// Our page frames code-server; nobody else may.
 			resp.Header.Set("X-Frame-Options", "SAMEORIGIN")
+			// Nothing code-server answers outlasts VS Code's switch on the
+			// UI's origin: no service worker of its may claim a scope above
+			// the path of its script (code-server allows / for its own),
+			// where it would control the UI's pages, and it sets no cookie
+			// named as the desktop app's.
+			resp.Header.Del("Service-Worker-Allowed")
+			stripSetDesktopCookie(resp.Header)
 			return nil
 		},
 		Transport: &http.Transport{
@@ -245,15 +270,20 @@ func (p *codeServerProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	client := p.s.clientOf(r)
-	work := p.workContext(client)
 	// The switch again, now that the request follows its work: turned off
 	// since withPlugin, the context taken may be a new one.
-	if !p.s.pluginOn(vscode.ID, client) {
+	work := p.workFor(client, true)
+	if work == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "plugin_disabled"})
 		return
 	}
 	if !p.s.cs.Ready(mc) {
-		go p.s.cs.Ensure(p.workContext(prepare), mc)
+		prep := p.workFor(client, false)
+		if prep == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "plugin_disabled"})
+			return
+		}
+		go p.s.cs.Ensure(prep, mc)
 		if r.Method == http.MethodGet && r.Header.Get("Upgrade") == "" && strings.TrimSuffix(r.URL.Path, "/") == "/m/"+mc.ID()+"/code" {
 			p.s.audit.log(r, "code_server.open", map[string]any{"machine": mc.ID(), "folder": r.URL.Query().Get("folder"), "client": string(client)})
 			p.loadingPage(w, mc)
@@ -334,8 +364,13 @@ func (s *Server) handleCodeStart(w http.ResponseWriter, r *http.Request) {
 	if mc == nil {
 		return
 	}
+	prep := s.csProxy.workFor(s.clientOf(r), false)
+	if prep == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "plugin_disabled"})
+		return
+	}
 	s.cs.Invalidate(mc.ID())
-	go s.cs.Ensure(s.csProxy.workContext(prepare), mc)
+	go s.cs.Ensure(prep, mc)
 	writeJSON(w, http.StatusAccepted, s.cs.Status(mc.ID()))
 }
 
