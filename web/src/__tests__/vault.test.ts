@@ -58,6 +58,7 @@ describe('vault', () => {
       if (url === '/api/p/vault/requests') return json({ requests: [] });
       if (url.endsWith('/reveal')) return json({ value: 'ghp_secret' });
       if (url.startsWith('/api/p/vault/vars/') && method === 'PUT') return json({});
+      if (url.endsWith('/rename')) return json({ ok: true });
       if (url.startsWith('/api/p/vault/requests/')) return json({ ok: true });
       return json({ error: 'not_found' }, 404);
     });
@@ -130,6 +131,28 @@ describe('vault', () => {
     const put = calls.find((c) => c.method === 'PUT');
     expect(put?.url).toBe('/api/p/vault/vars/OPENAI_API_KEY');
     expect(put?.body).toEqual({ description: 'OpenAI', machines: ['gpu'], injectOnly: true, value: 'sk-1' });
+  });
+
+  it('renames a variable, then saves what else changed under its new name', async () => {
+    await act(async () => root.render(createElement(VaultPanel)));
+    await flush();
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-name="DB_PASS"] [data-action="edit"]')!.click());
+    const form = host.querySelector<HTMLFormElement>('.vault-editor')!;
+    const name = form.querySelector<HTMLInputElement>('input.vault-input')!;
+    expect(name.disabled).toBe(false);
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(name, 'DATABASE_PASSWORD');
+      name.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => form.querySelector<HTMLButtonElement>('button[type="submit"]')!.click());
+    await flush();
+    const rename = calls.findIndex((c) => c.url.endsWith('/rename'));
+    expect(calls[rename]).toMatchObject({ method: 'POST', url: '/api/p/vault/vars/DB_PASS/rename', body: { to: 'DATABASE_PASSWORD' } });
+    const put = calls.findIndex((c) => c.method === 'PUT');
+    expect(put).toBeGreaterThan(rename);
+    expect(calls[put].url).toBe('/api/p/vault/vars/DATABASE_PASSWORD');
+    // No new value was typed: none is sent.
+    expect(calls[put].body).not.toHaveProperty('value');
   });
 
   it('cannot reveal or answer in read-only mode', async () => {

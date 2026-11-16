@@ -358,6 +358,7 @@ missing here.
 | `GET /api/p/vault` | – | The variable vault ([30](features/30-variable-vault.md)): `status` (`mode` `""`, `keychain` or `passphrase`, `locked`, `setup`, `error`) and the `variables` (`name`, `description`, `machines` (`*`: all), `injectOnly`, `created`, `updated`), never values; `503 unavailable` without a settings file. |
 | `PUT /api/p/vault/vars/{name}` | writes | Creates or changes a variable (`{"description"?, "machines"?, "injectOnly"?, "value"?}`; a new one needs `value`, absent keeps it); names `^[A-Za-z_][A-Za-z0-9_]*$` (≤ 128), values ≤ 64 KiB, descriptions ≤ 1 KiB; `409 vault_locked` when a value cannot be sealed. |
 | `DELETE /api/p/vault/vars/{name}` | writes | Removes a variable (also while locked). |
+| `POST /api/p/vault/vars/{name}/rename` | writes | Renames a variable (`{"to"}`), keeping its value, description, machines and flag; needs the vault unlocked; `409 exists` for a taken name; audited with both names. |
 | `POST /api/p/vault/vars/{name}/reveal` | writes | The value (`{"value"}`): the only way one reaches a browser; refused read-only, audited. |
 | `POST /api/p/vault/unlock` | writes | Unlocks: from the keychain, or with `{"passphrase"}` (sets it the first time in passphrase mode). |
 | `POST /api/p/vault/lock` | writes | Forgets the key until unlocked. |

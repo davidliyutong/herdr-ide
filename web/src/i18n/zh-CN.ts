@@ -858,6 +858,7 @@ export const zhCN: Messages = {
   'vault.error.weak_passphrase': '主口令至少需要 8 个字符。',
   'vault.error.vault_locked': '变量库已锁定。',
   'vault.error.not_found': '该变量已不存在。',
+  'vault.error.exists': '已有同名变量。',
   'vault.error.key_missing': '系统钥匙串中没有变量库的密钥，无法读取其中的值。',
   'vault.error.keychain_unavailable': '无法访问系统钥匙串。',
   'vault.error.mismatch': '两次输入的主口令不同。',

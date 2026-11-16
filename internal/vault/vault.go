@@ -62,6 +62,7 @@ var (
 	ErrKeychain      = errors.New("the keychain is unavailable")
 	ErrCorrupt       = errors.New("a value cannot be decrypted")
 	ErrFull          = errors.New("too many variables")
+	ErrExists        = errors.New("a variable of that name exists")
 )
 
 // Code is the error's code for clients: vault_locked, not_found, …
@@ -89,6 +90,8 @@ func Code(err error) string {
 		return "corrupt"
 	case errors.Is(err, ErrFull):
 		return "full"
+	case errors.Is(err, ErrExists):
+		return "exists"
 	}
 	return "failed"
 }
@@ -494,6 +497,47 @@ func (s *Store) Delete(name string) error {
 	s.f.Entries = slices.Delete(s.f.Entries, i, i+1)
 	if err := s.save(); err != nil {
 		s.f.Entries = prev
+		return err
+	}
+	return nil
+}
+
+// Rename gives a variable another name, keeping its value, description,
+// machines and flags. Its value is sealed again under the new name (the
+// name is the ciphertext's additional data), so the vault must be unlocked;
+// a name taken by another variable is refused.
+func (s *Store) Rename(from, to string) error {
+	if !ValidName(to) {
+		return ErrInvalidName
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e := s.find(from)
+	if e == nil {
+		return ErrNotFound
+	}
+	if from == to {
+		return nil
+	}
+	if s.find(to) != nil {
+		return ErrExists
+	}
+	if s.key == nil {
+		return ErrLocked
+	}
+	plain, err := open(s.key, e.Value, from)
+	if err != nil {
+		return err
+	}
+	sealed, err := seal(s.key, plain, to)
+	clear(plain)
+	if err != nil {
+		return err
+	}
+	prev := *e
+	e.Name, e.Value, e.Updated = to, sealed, time.Now().UTC()
+	if err := s.save(); err != nil {
+		*e = prev
 		return err
 	}
 	return nil

@@ -78,6 +78,7 @@ export const vaultApi = {
   set: (name: string, body: { description?: string; machines?: string[]; injectOnly?: boolean; value?: string }) =>
     call<VaultVariable>('PUT', `/vars/${enc(name)}`, body),
   remove: (name: string) => call('DELETE', `/vars/${enc(name)}`),
+  rename: (name: string, to: string) => call('POST', `/vars/${enc(name)}/rename`, { to }),
   reveal: (name: string) => call<{ value: string }>('POST', `/vars/${enc(name)}/reveal`),
   unlock: (passphrase: string) => call<VaultStatus>('POST', '/unlock', { passphrase }),
   lock: () => call<VaultStatus>('POST', '/lock'),

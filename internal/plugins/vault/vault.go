@@ -177,6 +177,7 @@ func (p *Plugin) Routes() []plugin.Route {
 		{Method: "PUT", Path: "vars/{name}", Mutating: true, Audit: "set", Handler: p.handleSet},
 		{Method: "DELETE", Path: "vars/{name}", Mutating: true, Audit: "delete", Handler: p.handleDelete},
 		{Method: "POST", Path: "vars/{name}/reveal", Mutating: true, Audit: "reveal", Handler: p.handleReveal},
+		{Method: "POST", Path: "vars/{name}/rename", Mutating: true, Audit: "rename", Handler: p.handleRename},
 		{Method: "POST", Path: "unlock", Mutating: true, Audit: "unlock", Handler: p.handleUnlock},
 		{Method: "POST", Path: "lock", Mutating: true, Audit: "lock", Handler: p.handleLock},
 		{Method: "GET", Path: "requests", Handler: p.handleRequests},
@@ -201,6 +202,8 @@ func fail(w http.ResponseWriter, err error) {
 	switch code {
 	case "not_found":
 		status = http.StatusNotFound
+	case "exists":
+		status = http.StatusConflict
 	case "vault_locked", "key_missing", "keychain_unavailable":
 		status = http.StatusConflict
 	case "failed":
@@ -258,6 +261,31 @@ func (p *Plugin) handleDelete(c *plugin.Call, w http.ResponseWriter, r *http.Req
 		fail(w, err)
 		return
 	}
+	changed(c.Host)
+	plugin.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// handleRename gives a variable another name ({"to": name}); its
+// machines, flags and value stay. Audited with both names.
+func (p *Plugin) handleRename(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
+	s, err := p.open(c.Host)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	var body struct {
+		To string `json:"to"`
+	}
+	if err := plugin.ReadJSON(r, 4096, &body); err != nil {
+		fail(w, err)
+		return
+	}
+	from := r.PathValue("name")
+	if err := s.Rename(from, body.To); err != nil {
+		fail(w, err)
+		return
+	}
+	c.Host.Audit(r, "vault.renamed", map[string]any{"name": from, "to": body.To})
 	changed(c.Host)
 	plugin.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

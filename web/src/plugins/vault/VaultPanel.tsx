@@ -253,7 +253,14 @@ function Row({ v, locked, onEdit }: { v: VaultVariable; locked: boolean; onEdit(
         >
           {value === undefined ? <Eye /> : <EyeOff />}
         </button>
-        <button className="icon" title={t('vault.edit')} aria-label={t('vault.edit')} disabled={readOnly} onClick={onEdit}>
+        <button
+          className="icon"
+          title={t('vault.edit')}
+          aria-label={t('vault.edit')}
+          data-action="edit"
+          disabled={readOnly}
+          onClick={onEdit}
+        >
           <Pencil />
         </button>
         <button
@@ -297,7 +304,10 @@ function Editor({ variable, onDone }: { variable?: VaultVariable; onDone(): void
   const save = async () => {
     setErr('');
     try {
-      await vaultApi.set(name.trim(), {
+      // A new name renames it first (its value stays, sealed under the new name).
+      const target = name.trim();
+      if (variable && target !== variable.name) await vaultApi.rename(variable.name, target);
+      await vaultApi.set(target, {
         description,
         machines: allowed,
         injectOnly,
@@ -323,7 +333,6 @@ function Editor({ variable, onDone }: { variable?: VaultVariable; onDone(): void
         <input
           className="vault-input"
           value={name}
-          disabled={!!variable}
           autoFocus={!variable}
           spellCheck={false}
           placeholder="API_KEY"

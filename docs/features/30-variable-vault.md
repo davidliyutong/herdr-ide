@@ -79,8 +79,11 @@ The plugin `vault` (setting `plugins.vault.enabled`, on by default) opens
 the store at its first use. Its routes, below `/api/p/vault`
 ([reference](../reference.md#http-and-websocket-endpoints)): the list
 (state and variables without values), `PUT`/`DELETE vars/{name}`,
-`POST vars/{name}/reveal`, `unlock`, `lock`, the pending `requests` and
-their answers, and the access `log`. Every route that changes something is
+`POST vars/{name}/reveal`, `POST vars/{name}/rename` (`{"to"}`: the value
+is sealed again under the new name, its additional data, so the vault must
+be unlocked; machines, description and flag stay; a taken name is
+`409 exists`), `unlock`, `lock`, the pending `requests` and their answers,
+and the access `log`. Every route that changes something is
 a writing route (refused read-only) audited with the name or request id.
 
 The MCP servers' requests arrive as streams the agent opens with op

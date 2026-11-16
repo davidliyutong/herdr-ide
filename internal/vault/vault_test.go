@@ -264,3 +264,50 @@ func TestForgetMachine(t *testing.T) {
 		t.Errorf("again %v", names)
 	}
 }
+
+// A renamed variable keeps its value (sealed again under its new name, read
+// back after reopening), description, machines and flag; taken names,
+// invalid names and a locked vault are refused.
+func TestRename(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vault.json")
+	keys := &MemKeyStore{}
+	s := openTest(t, path, keys)
+	if err := s.Set("OLD", Update{Value: str("v1"), Description: str("d"), Machines: &[]string{"box"}, InjectOnly: boolp(true)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Set("TAKEN", Update{Value: str("v2")}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Rename("OLD", "TAKEN"); !errors.Is(err, ErrExists) {
+		t.Fatalf("taken name: %v", err)
+	}
+	if err := s.Rename("OLD", "1bad"); !errors.Is(err, ErrInvalidName) {
+		t.Fatalf("invalid name: %v", err)
+	}
+	if err := s.Rename("NOPE", "X"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing: %v", err)
+	}
+	if err := s.Rename("OLD", "NEW"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.Get("OLD"); ok {
+		t.Fatal("the old name stays")
+	}
+	s2 := openTest(t, path, keys)
+	if err := s2.Unlock(""); err != nil {
+		t.Fatal(err)
+	}
+	if v, err := s2.Value("NEW"); err != nil || v != "v1" {
+		t.Fatalf("value after rename %q %v", v, err)
+	}
+	i, _ := s2.Get("NEW")
+	if i.Description != "d" || !i.InjectOnly || len(i.Machines) != 1 || i.Machines[0] != "box" {
+		t.Fatalf("info after rename %+v", i)
+	}
+	s2.Lock()
+	if err := s2.Rename("NEW", "OTHER"); !errors.Is(err, ErrLocked) {
+		t.Fatalf("locked: %v", err)
+	}
+}
+
+func boolp(b bool) *bool { return &b }

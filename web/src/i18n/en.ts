@@ -876,6 +876,7 @@ export const en = {
   'vault.error.weak_passphrase': 'The passphrase needs at least 8 characters.',
   'vault.error.vault_locked': 'The vault is locked.',
   'vault.error.not_found': 'The variable no longer exists.',
+  'vault.error.exists': 'A variable of that name exists.',
   'vault.error.key_missing': 'The vault’s key is not in the system keychain; its values cannot be read.',
   'vault.error.keychain_unavailable': 'The system keychain cannot be reached.',
   'vault.error.mismatch': 'The passphrases differ.',
