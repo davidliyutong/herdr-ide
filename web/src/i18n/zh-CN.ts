@@ -1146,4 +1146,12 @@ export const zhCN: Messages = {
   'git.error.empty_message': '请先输入提交消息。',
   'git.error.offline': '机器未连接。',
   'git.error.plugin_disabled': 'Git 插件已关闭。',
+  // unsaved changes
+  'unsaved.title': '未保存的更改',
+  'unsaved.one': '要保存对 {name} 的更改吗？',
+  'unsaved.many': '要保存对 {n} 个文件（{names}）的更改吗？',
+  'unsaved.save': '保存',
+  'unsaved.discard': '不保存',
+  'unsaved.leave': '仍然关闭',
+  'unsaved.leaveDetail': '有编辑器中的更改尚未保存，关闭窗口会丢失这些更改。',
 };

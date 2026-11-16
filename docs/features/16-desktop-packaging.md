@@ -57,7 +57,11 @@ system's rules run in the tests on any of them:
   app's resources, or the `dist/<slug>-<goos>-<goarch>[.exe]` that
   `scripts/build.sh` wrote, unpackaged.
 - `quitsWithLastWindow`: closing the main window quits on Windows and
-  Linux; on macOS the app stays in the Dock with its core.
+  Linux; on macOS the app stays in the Dock with its core. Quitting closes
+  the main window first: a page with changes not saved in an editor pane
+  asks natively (`will-prevent-unload`: **Close Anyway** or **Cancel**,
+  which keeps the app and its core running), and the core stops only once
+  the window has closed; a system shutdown never waits.
 - `foldersOf`: the folders a Linux command line names (below).
 
 **Building** (`scripts/desktop.sh`, `desktop/electron-builder.cjs`)

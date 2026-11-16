@@ -59,6 +59,8 @@ const core = new CoreProcess();
 let mainWindow: BrowserWindow | undefined;
 let origin = '';
 let quitting = false;
+// Quit was chosen while the main window was open: it closes first.
+let quitAfterClose = false;
 let stopped = false;
 let systemShutdown = false;
 let reportingError = false;
@@ -272,6 +274,22 @@ function createWindow() {
     folders.takenBy(undefined);
     if (!quitting) void fail(new DesktopError('desktop.rendererGone', details.reason));
   });
+  // The page has unsaved changes (an editor pane) and asks before it goes:
+  // the user decides, natively; a system shutdown never waits.
+  win.webContents.on('will-prevent-unload', (event) => {
+    if (systemShutdown) return event.preventDefault();
+    const choice = dialog.showMessageBoxSync(win, {
+      type: 'warning',
+      buttons: [t('unsaved.leave'), t('dialog.cancel')],
+      defaultId: 1,
+      cancelId: 1,
+      message: t('unsaved.title'),
+      detail: t('unsaved.leaveDetail'),
+    });
+    // preventDefault here ignores the page's objection: the window goes.
+    if (choice === 0) event.preventDefault();
+    else quitAfterClose = false;
+  });
   // Windows ends a session (log off, restart, shut down) with this.
   win.on('session-end', () => {
     systemShutdown = true;
@@ -284,12 +302,21 @@ function createWindow() {
     folders.takenBy(undefined);
     mainWindow = undefined;
     // Program windows do not keep the app open.
-    if (quitsWithLastWindow(platform)) app.quit();
+    if (quitAfterClose || quitsWithLastWindow(platform)) app.quit();
   });
   void win.loadURL(origin).catch(fail);
 }
 
 app.on('before-quit', (event) => {
+  // The main window closes first, so a page with unsaved changes can keep
+  // the app (will-prevent-unload) before the core stops; quitting goes on
+  // once it has closed.
+  if (!stopped && !systemShutdown && mainWindow && !mainWindow.isDestroyed()) {
+    event.preventDefault();
+    quitAfterClose = true;
+    mainWindow.close();
+    return;
+  }
   quitting = true;
   stopFollowing();
   if (stopped) return;

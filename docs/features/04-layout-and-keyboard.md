@@ -176,7 +176,14 @@ Non-goals: arbitrary docking of panes; floating panes.
   workspace and tab; panes closed since are passed over. The history keeps
   the last 100 steps, in the page only.
 - **Close Pane** and **Close Tab** close at once, without asking, also
-  when a program runs: they can be undone for 5 s (`closedPanes.ts`). A
+  when a program runs: they can be undone for 5 s (`closedPanes.ts`).
+  Only a pane with changes not saved (an editor, a diff's working tree)
+  asks first, as does closing its workspace: **Save**, **Don't Save** or
+  **Cancel**; a save that fails keeps it (`web/src/unsaved.ts`, which
+  panes join with `useUnsaved`). Leaving or reloading the page with such
+  changes gets the browser's question; in the desktop app the main
+  window asks natively before it closes or the app quits, and the core
+  stops only once it has closed. A
   toast says what closed, with **Undo**; **Undo Close** (`pane.undoClose`)
   puts back what closed last, as it was: the same terminals, their programs
   still running, in their place (`layout.reopen`). In the tab that kept the

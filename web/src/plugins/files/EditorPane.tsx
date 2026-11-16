@@ -14,6 +14,7 @@ import { shortPath } from '../../lib/machine';
 import { actions } from '../../actions';
 import { useStore } from '../../state/store';
 import { t } from '../../i18n';
+import { useUnsaved } from '../../unsaved';
 import type { PaneViewProps } from '../api';
 import { createEditor, type CodeEditor, type Monaco } from '../monaco';
 import { ConflictError, errorText, filesApi } from './api';
@@ -68,7 +69,7 @@ export async function loadText(m: string, path: string): Promise<Loaded> {
 
 type Status = { kind: 'loading' } | { kind: 'ready' } | { kind: 'conflict'; removed: boolean } | Exclude<Loaded, { kind: 'text' }>;
 
-export function EditorPane({ m, view, focused }: PaneViewProps) {
+export function EditorPane({ m, pane, view, focused }: PaneViewProps) {
   const path = String(view.path ?? '');
   const readOnly = useStore((s) => s.readOnly);
   const home = useStore((s) => s.machines[m]?.info?.home);
@@ -109,7 +110,7 @@ export function EditorPane({ m, view, focused }: PaneViewProps) {
   const save = useCallback(
     async (force = false) => {
       const e = ed.current?.editor;
-      if (!e || readOnly) return;
+      if (!e || readOnly) return false;
       const text = e.getValue();
       const at = e.getModel()?.getAlternativeVersionId() ?? 0;
       setSaving(true);
@@ -119,9 +120,11 @@ export function EditorPane({ m, view, focused }: PaneViewProps) {
         savedAt.current = at;
         setDirty((e.getModel()?.getAlternativeVersionId() ?? 0) !== at);
         setStatus({ kind: 'ready' });
+        return true;
       } catch (err) {
         if (err instanceof ConflictError) setStatus({ kind: 'conflict', removed: !err.current.exists });
         else useStore.getState().toast(t('files.saveFailed', { error: errorText(err) }));
+        return false;
       } finally {
         setSaving(false);
       }
@@ -130,6 +133,8 @@ export function EditorPane({ m, view, focused }: PaneViewProps) {
   );
   const saveRef = useRef(save);
   saveRef.current = save;
+  // Closing the pane with changes not saved asks first (unsaved.ts).
+  useUnsaved(m, pane, dirty, path.slice(path.lastIndexOf('/') + 1) || path, () => saveRef.current());
 
   // The editor, once; the file, for each path.
   useEffect(() => {

@@ -1168,6 +1168,14 @@ export const en = {
   'git.error.empty_message': 'Type a commit message first.',
   'git.error.offline': 'The machine is not connected.',
   'git.error.plugin_disabled': 'The Git plugin is off.',
+  // unsaved changes
+  'unsaved.title': 'Unsaved Changes',
+  'unsaved.one': 'Do you want to save the changes you made to {name}?',
+  'unsaved.many': 'Do you want to save the changes you made to {n} files ({names})?',
+  'unsaved.save': 'Save',
+  'unsaved.discard': 'Don’t Save',
+  'unsaved.leave': 'Close Anyway',
+  'unsaved.leaveDetail': 'An editor has changes that are not saved. Closing the window loses them.',
 } as const;
 
 export type MessageKey = keyof typeof en;

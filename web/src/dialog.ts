@@ -3,6 +3,7 @@
 // time; a new request cancels the previous one.
 
 import { create } from 'zustand';
+import { t } from './i18n';
 
 export interface NewWorkspace {
   cwd: string;
@@ -19,7 +20,9 @@ export type DialogRequest =
       /** A checkbox shown under the message, with its initial state. */
       check?: string;
       checked?: boolean;
-      resolve(ok: boolean, checked?: boolean): void;
+      /** A third answer between Cancel and confirm (Don't Save). */
+      alt?: string;
+      resolve(ok: boolean, checked?: boolean, alt?: boolean): void;
     }
   | {
       kind: 'workspace';
@@ -62,6 +65,20 @@ export function confirmCheckDialog(opts: {
 }): Promise<{ checked: boolean } | undefined> {
   return new Promise((resolve) =>
     show({ kind: 'confirm', ...opts, resolve: (ok, checked) => resolve(ok ? { checked: !!checked } : undefined) }),
+  );
+}
+
+/** Asks whether to save changes before they are closed: save, discard
+ * (Don't Save) or cancel (Escape, Cancel). */
+export function saveChangesDialog(opts: { title: string; message: string }): Promise<'save' | 'discard' | 'cancel'> {
+  return new Promise((resolve) =>
+    show({
+      kind: 'confirm',
+      ...opts,
+      confirm: t('unsaved.save'),
+      alt: t('unsaved.discard'),
+      resolve: (ok, _checked, alt) => resolve(ok ? 'save' : alt ? 'discard' : 'cancel'),
+    }),
   );
 }
 

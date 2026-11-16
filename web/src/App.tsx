@@ -14,6 +14,7 @@ import { SettingsDialog } from './components/SettingsDialog';
 import { Dialogs } from './components/Dialogs';
 import { ContextMenu } from './components/ContextMenu';
 import { initDesktop } from './desktop';
+import { warnOnUnload } from './unsaved';
 import { takeOpenedFolders } from './drop';
 import { commandLabel, handleFrameKey, handleKey, keyHint, onChordChange, pendingChord, runCommand } from './keymap';
 import { applySettings, loadSettings } from './settings';
@@ -139,6 +140,7 @@ export function App() {
     const offTerms = followTerms();
     void loadKeybindings();
     const offDesktop = initDesktop();
+    const offUnload = warnOnUnload();
     const offFolders = takeOpenedFolders();
     fetch('/api/config')
       .then((r) => r.json())
@@ -158,6 +160,7 @@ export function App() {
       off();
       offTerms();
       offDesktop();
+      offUnload();
       offFolders();
       window.removeEventListener('keydown', onKey);
     };

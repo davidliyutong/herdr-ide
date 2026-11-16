@@ -14,6 +14,7 @@ import { useStore } from '../../state/store';
 import { confirmDialog } from '../../dialog';
 import { t } from '../../i18n';
 import type { PaneViewProps } from '../api';
+import { useUnsaved } from '../../unsaved';
 import { createDiffEditor, type DiffEditor, type Monaco } from '../monaco';
 import { ConflictError, filesApi, errorText as filesError } from '../files/api';
 import { gitApi, errorText, type Blob } from './api';
@@ -148,7 +149,7 @@ export function DiffPane({ m, pane, view, focused }: PaneViewProps) {
 
   const save = useCallback(async () => {
     const c = ed.current;
-    if (!c || !editable) return;
+    if (!c || !editable) return false;
     const model = c.editor.getModel()!.modified;
     const text = model.getValue();
     const at = model.getAlternativeVersionId();
@@ -159,17 +160,21 @@ export function DiffPane({ m, pane, view, focused }: PaneViewProps) {
       savedAt.current = at;
       setDirty(model.getAlternativeVersionId() !== at);
       void changed(m, d.repo);
+      return true;
     } catch (e) {
       if (e instanceof ConflictError) {
         useStore
           .getState()
           .toast(t('git.diff.conflict', { name: baseName(d.path) }), { label: t('git.diff.reload'), run: () => void show() });
       } else useStore.getState().toast(t('git.diff.saveFailed', { error: filesError(e) }));
+      return false;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [m, key, editable, show]);
   const saveRef = useRef(save);
   saveRef.current = save;
+  // Closing the pane with changes not saved asks first (unsaved.ts).
+  useUnsaved(m, pane, dirty, baseName(d.path), () => saveRef.current());
 
   // The editor, once per file and mode.
   useEffect(() => {

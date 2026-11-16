@@ -135,6 +135,9 @@ its directory.
 - Every 5 s while it is shown, the pane checks the file's state: unchanged
   text is loaded again when the file changed on the machine; text with
   unsaved changes gets the conflict bar at once.
+- Closing the pane (or its tab or workspace) with unsaved changes asks
+  **Save**, **Don't Save** or **Cancel** first
+  ([04](04-layout-and-keyboard.md)).
 - **Show in Explorer** reveals the file in the tree; outside its root the
   tree stops following and shows the file's folder.
 

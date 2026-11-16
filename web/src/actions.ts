@@ -16,6 +16,7 @@ import { mediaExt } from './terminal/links';
 import { bridge, hasFrame, type BridgeCommand } from './lib/bridge';
 import { reloadFrame, setStopped } from './codeFrames';
 import { rememberClosed, takeClosed, UNDO_MS } from './closedPanes';
+import { confirmUnsaved } from './unsaved';
 import { go, paneOpen, type Spot } from './paneHistory';
 import { hasMessage, t } from './i18n';
 import { confirmCheckDialog, confirmDialog, editWorkspaceDialog, newWorkspaceDialog } from './dialog';
@@ -311,6 +312,7 @@ export const actions = {
   /** Closes a pane at once, without asking: its terminal ends UNDO_MS
    * later, and Undo Close brings it back until then (closedPanes.ts). */
   async closePane(m: string, pane: string) {
+    if (!(await confirmUnsaved(m, [pane]))) return;
     const layout = terms.layout(m);
     if (layout) closeWithUndo(m, layout, [pane], 'closed.pane');
     terms.mutate(m, (l) => L.closePane(l, pane));
@@ -366,6 +368,7 @@ export const actions = {
     const layout = terms.layout(m);
     const tab = layout?.workspaces.find((w) => w.id === ws)?.tabs[index];
     if (!layout || !tab) return;
+    if (!(await confirmUnsaved(m, L.tabPanes(tab)))) return;
     closeWithUndo(m, layout, L.tabPanes(tab), 'closed.tab');
     terms.mutate(m, (l) => L.closeTab(l, ws, index));
   },
@@ -540,6 +543,7 @@ export const actions = {
     const w = terms.layout(m)?.workspaces.find((x) => x.id === ws);
     if (!w) return;
     const addresses = L.workspaceTerminals(w);
+    if (!(await confirmUnsaved(m, w.tabs.flatMap(L.tabPanes)))) return;
     if (
       w.tabs.length > 0 &&
       !(await confirmDialog({
