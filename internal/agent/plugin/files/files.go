@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"math/rand/v2"
 	"net"
 	"os"
 	"path/filepath"
@@ -32,7 +31,6 @@ import (
 
 	"herdr-ide/internal/agent/plugin"
 	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/brand"
 )
 
 const (
@@ -77,6 +75,9 @@ type Params struct {
 	// loaded); nil with Force unset: the file must not exist.
 	Expect *Entry `json:"expect,omitempty"`
 	Force  bool   `json:"force,omitempty"`
+	// Method is how a save writes a file that is there: MethodAuto (also
+	// when empty) or MethodReplace (save.go).
+	Method string `json:"method,omitempty"`
 }
 
 // Result answers the actions that change paths: the paths they made.
@@ -313,6 +314,10 @@ func codeOf(err error) error {
 		return &plugin.Error{Code: "exists", Err: err}
 	case errors.Is(err, fs.ErrPermission):
 		return &plugin.Error{Code: "denied", Err: err}
+	case errors.Is(err, syscall.ENOSPC), errors.Is(err, syscall.EDQUOT):
+		return &plugin.Error{Code: "no_space", Err: err}
+	case errors.Is(err, syscall.EROFS):
+		return &plugin.Error{Code: "read_only", Err: err}
 	}
 	return err
 }
@@ -595,8 +600,9 @@ func (g *guard) trash(p string) (string, error) {
 
 // write saves an editor's text: the reply comes first, then the text as
 // chunks (agentproto.ChunkWriter), then a line with the result. The file
-// must be as the editor loaded it (Expect) unless Force; it is replaced
-// in one rename, through a symbolic link to its target, keeping its mode.
+// must be as the editor loaded it (Expect) unless Force; through a
+// symbolic link its target is written (the link stays). How the file is
+// written is put's (save.go).
 func (g *guard) write(st net.Conn, p Params) error {
 	abs, err := g.resolve(p.Path)
 	if err == nil {
@@ -615,7 +621,7 @@ func (g *guard) write(st net.Conn, p Params) error {
 	if err := agentproto.WriteLine(st, agentproto.Reply{OK: true}); err != nil {
 		return err
 	}
-	e, err := save(abs, &agentproto.ChunkReader{R: st}, p)
+	e, err := g.put(abs, &agentproto.ChunkReader{R: st}, p, MaxWrite)
 	if err != nil {
 		return plugin.Fail(st, codeOf(err))
 	}
@@ -672,73 +678,6 @@ func conflict(p string, fi fs.FileInfo) error {
 	}
 	b, _ := json.Marshal(e)
 	return &plugin.Error{Code: "conflict", Err: errors.New(string(b))}
-}
-
-// save writes r (at most MaxWrite bytes) into a new file beside p and
-// renames it over p once the precondition still holds. A file replaced
-// keeps its mode; a new file gets what the umask leaves of 0666, as a
-// program's new file does. The rename replaces the file: hard links to it
-// keep the old text, and its owner becomes the user.
-func save(p string, r io.Reader, w Params) (*Entry, error) {
-	dir := filepath.Dir(p)
-	perm, mode, keep := fs.FileMode(0o666), fs.FileMode(0), false
-	if fi, err := os.Stat(p); err == nil {
-		// Private while the text is written, the file's mode after.
-		perm, mode, keep = 0o600, fi.Mode().Perm(), true
-	}
-	tmp, err := createTemp(dir, perm)
-	if err != nil {
-		io.Copy(io.Discard, r)
-		return nil, err
-	}
-	err = receive(tmp, r)
-	if cerr := tmp.Close(); err == nil {
-		err = cerr
-	}
-	if err == nil && keep {
-		err = os.Chmod(tmp.Name(), mode)
-	}
-	if err == nil {
-		err = precondition(p, w)
-	}
-	if err == nil {
-		err = os.Rename(tmp.Name(), p)
-	}
-	if err != nil {
-		os.Remove(tmp.Name())
-		return nil, err
-	}
-	fi, err := os.Stat(p)
-	if err != nil {
-		return nil, err
-	}
-	return entryOf(p, fi), nil
-}
-
-// receive copies a save's text (at most MaxWrite bytes) into w. It reads r
-// to its end whatever happens (a full disk, too much text): the core sends
-// the whole text before it reads the answer.
-func receive(w io.Writer, r io.Reader) error {
-	n, err := io.Copy(w, io.LimitReader(r, MaxWrite+1))
-	if err == nil && n > MaxWrite {
-		err = plugin.Errorf("too_large", "more than %d bytes", MaxWrite)
-	}
-	if err != nil {
-		io.Copy(io.Discard, r)
-	}
-	return err
-}
-
-// createTemp creates a file for a save in dir, with perm less the umask.
-func createTemp(dir string, perm fs.FileMode) (*os.File, error) {
-	for i := 0; i < 100; i++ {
-		name := filepath.Join(dir, fmt.Sprintf(".%s-save-%08x", brand.Slug, rand.Uint32()))
-		f, err := os.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, perm)
-		if !errors.Is(err, fs.ErrExist) {
-			return f, err
-		}
-	}
-	return nil, plugin.Errorf("exists", "no free name for a save in %s", dir)
 }
 
 // copyName is the first free name in dir for a copy of base: base, then

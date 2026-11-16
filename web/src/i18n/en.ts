@@ -847,6 +847,10 @@ export const en = {
   'files.error.bad_request': 'That cannot be done.',
   'files.error.trash_unavailable': 'There is no trash for this location.',
   'files.error.too_large': 'The file is too large (more than 8 MB).',
+  'files.error.no_space': 'There is no space left on the machine’s disk; the file is as it was.',
+  'files.error.read_only': 'The file system is read-only.',
+  'files.error.restore_failed':
+    'Writing the file failed and its content could not be put back. The content from before the save is in {path}.',
   'files.error.offline': 'The machine is not connected.',
   'files.error.transport': 'The machine did not answer.',
   'files.error.plugin_disabled': 'The file explorer is off.',

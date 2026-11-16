@@ -198,15 +198,42 @@ button.
   Changes**, the provider's diff of the file.
 - ⌘S (Ctrl+S) or the toolbar saves: `POST …/p/files/write?path=&mtime=&size=`
   with the text as the body (`new=1` for a file not there yet, `force=1`
-  to overwrite). The agent checks the file is as loaded, writes a
-  temporary file beside it (private while the text is written), checks
-  again and renames it over the file, keeping its mode (a new file gets
-  what the umask leaves of `0666`, as a program's new file does); through
-  a symbolic link the link's target is written. A save that fails (a full
-  disk) still reads the whole text, so the core gets its answer.
+  to overwrite). The agent checks the file is as loaded and receives the
+  whole text before it touches the file, so a save that breaks off
+  changes nothing; a save that fails (a full disk) still reads the whole
+  text, so the core gets its answer. Through a symbolic link the link's
+  target is written and the link stays. The file is then written as Vim
+  writes with `backupcopy=auto` (`save.go`):
+  - Usually a new file beside it (private while the text is written,
+    synced) gets the file's group and mode and, once the file is checked
+    again, is renamed over it: a crash leaves the old file or the new one.
+    A new path gets what the umask leaves of `0666`, as a program's new
+    file does.
+  - A rename would lose something when the file has several hard links
+    (the other names would keep the old text), belongs to another user
+    (it would become the user's), its group cannot be given to a new file
+    of the user, or its directory takes no new file. Such a file is
+    written in place: opened for writing without following a link (a file
+    the user may not write is left alone; one swapped for a link or
+    another file since it was checked is a conflict), copied from that
+    descriptor to a backup, truncated, written and synced, so
+    it keeps its inode, owner, group, mode and links. When that fails the
+    backup's content is written back and the save fails with the code of
+    what went wrong (`no_space`, `denied`, `read_only`…); a backup that
+    cannot be written back stays and the failure names it
+    (`restore_failed`). The backup is removed once the save ended.
+  - The backup (`0600`) goes beside the file
+    (`.<name>.herdr-ide-backup-<hex>`), recorded by a link in the agent's
+    private `~/.herdr-ide/saves/` (`0700`); in a directory that takes no
+    new file it goes into `saves/` itself, with the text waiting to be
+    written. The agent that starts more than 7 days after a save left
+    them (it ended during the save) removes them, and the backups the
+    links name.
+
   A file changed or removed meanwhile is a `409 conflict` with its state
   now: the pane says so and offers **Load Theirs**, **Overwrite** and
-  **Keep Editing**.
+  **Keep Editing**. The Git plugin's diff pane saves its right side
+  through the same route ([31](31-git.md)).
 - Every 5 s while it is shown (one check at a time, less often after
   failures), the pane checks the file's state: unchanged text is loaded
   again when the file changed on the machine, as one edit of the part that
@@ -262,6 +289,9 @@ Changes answer `{"paths": [made], "failed": {path: code}}`; failures
 | --- | --- |
 | A file system watch on machines (inotify, FSEvents) pushed over `/ws` | A watcher per expanded directory on every machine needs an owner, limits (inotify's per-user watches) and code per system; polling the directories on screen every 2 s costs one stat each and stops with the panel. |
 | Writing saves with the agent's `fs.write` (uploads) | It replaces the file without looking; a save must not overwrite a change a program made since the editor loaded the file. |
+| Always renaming a new file over the old one | It breaks hard links, gives a file of another user to the user and needs a directory the user may write; Vim and Emacs write such files in place for the same reasons. |
+| Always writing in place | A crash during the write leaves a file cut short; the rename leaves the old file or the new one, so it stays the usual way. |
+| Backups in the private directory only | One beside the file is where the user finds it when a crash left it, on the same file system; the private directory serves when the file's directory takes no new file. |
 | Deleting without a trash | A mistaken Delete in a tree is easy; the trash keeps the file where the system's tools find it. |
 | CodeMirror instead of Monaco | The diffs of a version control plugin want Monaco's diff editor; one editor for both. |
 | The full Monaco bundle with TypeScript's service | Its worker and source maps grew the embedded UI by more than the whole app; VS Code panes have TypeScript. |
@@ -279,9 +309,14 @@ Changes answer `{"paths": [made], "failed": {path: code}}`; failures
   entries, and the next poll lists it again.
 - A move to another file system: copied and removed; a name taken there
   fails as a rename's does.
-- A save replaces the file by a rename: hard links to it keep the old
-  text, and its owner becomes the user (a file of another user that the
-  user may write is replaced by the user's own); its mode is kept.
+- A save of a file with several hard links, of another user, or in a
+  directory the user may not write: written in place after a backup, so
+  every link sees the new text and the owner stays; a write that fails
+  midway (a full disk) brings the content back from the backup.
+- The agent ends during a save in place (a crash, a kill): the backup
+  beside the file (or in `~/.herdr-ide/saves/`) holds the content before
+  the save, the file may be cut short; the backup stays for 7 days, then
+  the next agent removes it.
 - A path changed by someone else between a listing and a change: the change
   fails (`not_found`, `exists`) and the next poll shows the directory as it
   is.
@@ -291,7 +326,7 @@ Changes answer `{"paths": [made], "failed": {path: code}}`; failures
 - A save into a file that changed since it was loaded: `409 conflict`,
   nothing written, the pane offers to load or overwrite.
 - A save that breaks off: the temporary file (`.<slug>-save-*` beside the
-  file) is removed; the file is as it was.
+  file, or in `saves/`) is removed; the file is as it was.
 - An older agent during an upgrade: actions fail with `unknown_plugin`.
 - A plugin turned off: its routes answer `404 plugin_disabled`, the panel is
   gone and editor panes say the plugin is off.
@@ -308,7 +343,10 @@ the explorer cannot delete the machine's or its own state wholesale;
 within them it acts with the user's permissions, as a terminal does. A
 trash at the top of a mount other users write to is used only when it is
 the user's own and closed to others, so trashed files never go to a
-directory another user planted. Saves are bounded to 8 MiB, lists of
+directory another user planted. A save writes only the file named (a
+link's target) and, for a save in place, a private backup of it (`0600`)
+beside it or in the agent's own `saves/` directory (`0700`), removed when
+the save ended. Saves are bounded to 8 MiB, lists of
 paths to 1000, stats to 200 paths and 8 running at once. Files moved to
 the trash stay in the user's trash
 ([deployment](../deployment.md#remote-resources)).
@@ -329,6 +367,16 @@ the trash stay in the user's trash
   precondition (changed, removed, new, forced, through a link, too large,
   no temporary file left), a new file's mode from the umask, a save that
   cannot be written reading its text to the end (`TestReceiveDrains`).
+- `internal/agent/plugin/files/save_test.go`: saves in place that keep
+  hard links (same inode, every name sees the new text, also through a
+  symbolic link, which stays; `replace` makes a new file), a file of
+  another owner (the check replaced), a writable file in a directory
+  that is not (its text and backup in `saves/`, emptied after), a write
+  that fails midway restored from the backup and one whose restoring
+  fails keeping and naming it, and `PruneBackups` removing what is older
+  than the retention (and the backups beside files its links name, never
+  another file); a file swapped for a link or another file after its
+  check is not written through (`TestSaveInPlaceRefusesASwap`).
 - `internal/plugins/files/files_test.go`: the routes (all but `stat`
   mutating and audited, `stat` a POST), the stat's body and a save's query;
   `TestMutatingRoutesAreGuarded` (`internal/server`) checks them for Origin

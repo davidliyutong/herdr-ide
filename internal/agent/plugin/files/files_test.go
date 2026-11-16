@@ -607,11 +607,11 @@ func (fullDisk) Write([]byte) (int, error) { return 0, syscall.ENOSPC }
 // core that sends it reaches its answer.
 func TestReceiveDrains(t *testing.T) {
 	r := strings.NewReader(strings.Repeat("x", 3<<20))
-	if err := receive(fullDisk{}, r); !errors.Is(err, syscall.ENOSPC) || r.Len() != 0 {
+	if err := receive(fullDisk{}, r, MaxWrite); !errors.Is(err, syscall.ENOSPC) || r.Len() != 0 {
 		t.Fatalf("full disk: %v, %d bytes left", err, r.Len())
 	}
 	r = strings.NewReader(strings.Repeat("x", MaxWrite+10))
-	if err := receive(io.Discard, r); err == nil || r.Len() != 0 {
+	if err := receive(io.Discard, r, MaxWrite); err == nil || r.Len() != 0 {
 		t.Fatalf("too large: %v, %d bytes left", err, r.Len())
 	}
 }
