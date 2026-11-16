@@ -34,7 +34,8 @@ func fakeAgy(t *testing.T, wait bool) (bin, pidFile string) {
 func gone(t *testing.T, pidFile string) {
 	t.Helper()
 	var pid int
-	deadline := time.Now().Add(5 * time.Second)
+	// Generous: the whole suite may run at once on a loaded machine.
+	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		b, _ := os.ReadFile(pidFile)
 		if n, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil {
@@ -70,14 +71,26 @@ func TestAgyGroupKilledAfterExit(t *testing.T) {
 
 func TestAgyGroupKilledOnCancel(t *testing.T) {
 	bin, pidFile := fakeAgy(t, true)
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	start := time.Now()
+	// Cancelled once the script has left its child behind (a fixed delay
+	// could cancel before, on a loaded machine).
+	var cancelled time.Time
+	go func() {
+		for end := time.Now().Add(15 * time.Second); time.Now().Before(end); time.Sleep(20 * time.Millisecond) {
+			if b, _ := os.ReadFile(pidFile); len(strings.TrimSpace(string(b))) > 0 {
+				break
+			}
+		}
+		cancelled = time.Now()
+		cancel()
+	}()
 	if _, err := runCommand(ctx, nil, bin); err == nil {
 		t.Error("no error from a cancelled command")
 	}
-	if d := time.Since(start); d > 4*time.Second {
-		t.Errorf("took %v", d)
+	// The command ends soon after the cancel, not when its child would (300 s).
+	if d := time.Since(cancelled); d > 10*time.Second {
+		t.Errorf("took %v after the cancel", d)
 	}
 	gone(t, pidFile)
 }

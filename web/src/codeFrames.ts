@@ -162,6 +162,9 @@ export const SETTLE_MS = 15_000;
 const ASK_MS = 3_000;
 
 const ask = (k: string) => asked.set(k, Date.now());
+// The focusFrame request under way for each frame, by its number.
+const focusing = new Map<string, number>();
+let focusRun = 0;
 
 /** Whether a frame that got the keyboard was meant to. */
 function wanted(k: string, now = Date.now()): boolean {
@@ -186,21 +189,32 @@ export function mountFrame(k: string, el: HTMLIFrameElement): () => void {
 
 /** Gives a VS Code pane's window the keyboard once its iframe is placed (a
  * new pane's is made after its slot shows), within about two seconds. */
-export function focusFrame(k: string, tries = 120) {
-  ask(k);
-  requestAnimationFrame(() => {
-    const el = iframes.get(k);
-    if (!el || el.style.display === 'none') {
-      if (tries > 0) focusFrame(k, tries - 1);
-      return;
-    }
-    el.focus();
-    try {
-      el.contentWindow?.focus();
-    } catch {
-      /* not the page's origin */
-    }
-  });
+export function focusFrame(k: string) {
+  const run = ++focusRun;
+  focusing.set(k, run);
+  const attempt = (tries: number) => {
+    // A newer request for the frame, or resetFrames, ends this one: it
+    // would otherwise go on marking the frame asked for.
+    if (focusing.get(k) !== run) return;
+    ask(k);
+    requestAnimationFrame(() => {
+      if (focusing.get(k) !== run) return;
+      const el = iframes.get(k);
+      if (!el || el.style.display === 'none') {
+        if (tries > 0) attempt(tries - 1);
+        else focusing.delete(k);
+        return;
+      }
+      focusing.delete(k);
+      el.focus();
+      try {
+        el.contentWindow?.focus();
+      } catch {
+        /* not the page's origin */
+      }
+    });
+  };
+  attempt(120);
 }
 
 /** A frame got the keyboard. Asked for (a click in VS Code, focusFrame), or
@@ -350,5 +364,6 @@ export function resetFrames() {
   iframes.clear();
   asked.clear();
   loaded.clear();
+  focusing.clear();
   useFrames.setState({ frames: {}, shown: {}, stopped: {}, windows: {} });
 }

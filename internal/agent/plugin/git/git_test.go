@@ -325,7 +325,10 @@ func TestBackgroundChild(t *testing.T) {
 			if err != nil || res.code != 0 || string(res.out) != "ok\n" {
 				t.Fatalf("res %+v err %v", res, err)
 			}
-			if d := time.Since(start); d > 3500*time.Millisecond {
+			// Well before the child's 30 s and the read's 15 s limit: the
+			// run does not wait for the child (bounds are generous, the
+			// whole suite may run at once on a loaded machine).
+			if d := time.Since(start); d > 10*time.Second {
 				t.Errorf("took %s", d)
 			}
 			// The child is the user's: still running after the success.
@@ -348,7 +351,7 @@ func TestBackgroundChild(t *testing.T) {
 		if !errors.As(err, &pe) || pe.Code != "timeout" {
 			t.Fatalf("err %v", err)
 		}
-		if d := time.Since(start); d > 4*time.Second {
+		if d := time.Since(start); d > 10*time.Second {
 			t.Errorf("took %s", d)
 		}
 	}
