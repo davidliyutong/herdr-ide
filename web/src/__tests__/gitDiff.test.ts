@@ -11,6 +11,14 @@ import { createRoot, type Root } from 'react-dom/client';
 
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {}, send: () => {}, connected: true } }));
 
+/** Monaco's model gives every line one ending: CRLF when more than half
+ * have a CR, else LF. */
+const monacoText = (v: string) => {
+  const cr = (v.match(/\r/g) ?? []).length;
+  const all = (v.match(/\r\n|\r|\n/g) ?? []).length;
+  return v.replace(/\r\n|\r|\n/g, cr > all / 2 ? '\r\n' : '\n');
+};
+
 class FakeModel {
   version = 1;
   private listeners: Array<() => void> = [];
@@ -19,7 +27,7 @@ class FakeModel {
     return this.value;
   }
   setValue(v: string) {
-    this.value = v;
+    this.value = monacoText(v);
     this.version++;
     this.listeners.forEach((l) => l());
   }
@@ -102,6 +110,8 @@ import { t } from '../i18n';
 import { DiffPane, diffTitle, followed } from '../plugins/git/DiffPane';
 import { refresh, repoKey, useGit } from '../plugins/git/state';
 import type { StatusFile } from '../plugins/git/api';
+import { useSettings } from '../settings';
+import { MIXED_LINE_ENDINGS } from '../eol';
 import { settle } from './fakeTerms';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -331,5 +341,65 @@ describe('DiffPane', () => {
     expect(w.q!.get('mtime')).toBe('5000');
     expect(w.q!.get('size')).toBe(String('a\nB\nc\nD\n'.length));
     expect(w.body).toBe('a\n');
+  });
+
+  // A file whose lines end in more than one way: Monaco shows them alike;
+  // git.mixedLineEndings says what saves and range patches do.
+  describe('mixed line endings', () => {
+    const setMode = (v: string) =>
+      useSettings.setState((st) => ({ values: { ...st.values, [MIXED_LINE_ENDINGS]: { value: v, source: 'global' } } }));
+    beforeEach(() => {
+      blobs.index = { text: 'a\r\nb\nc\r\n' };
+      blobs.worktree = { text: 'a\r\nB\nc\r\nD\n', mtime: 5000 };
+    });
+    afterEach(() => setMode('keep'));
+    const changes = [
+      { originalStartLineNumber: 2, originalEndLineNumber: 2, modifiedStartLineNumber: 2, modifiedEndLineNumber: 2 },
+      { originalStartLineNumber: 3, originalEndLineNumber: 0, modifiedStartLineNumber: 4, modifiedEndLineNumber: 4 },
+    ];
+
+    it('stages ranges from the files’ bytes and saves each line’s own ending', async () => {
+      await render({ mode: 'worktree' });
+      expect(editor.model!.modified.getValue()).toBe('a\nB\nc\nD\n');
+      expect(host.querySelector('.eol-note')?.textContent).toBe(t('git.diff.eol.keep', { name: 'f.txt' }));
+      editor.lineChanges = changes;
+      await act(async () => editor.diffListener!());
+      editor.modifiedSide.selections = [{ startLineNumber: 2, endLineNumber: 2, endColumn: 2 }];
+      await act(async () => button(t('git.diff.stageRanges'))!.click());
+      await flush();
+      expect(posts.find((p) => p.path.endsWith('/applyPatch'))!.body).toEqual({
+        patch: 'diff --git a/f.txt b/f.txt\n--- a/f.txt\n+++ b/f.txt\n@@ -1,3 +1,3 @@\n a\r\n-b\n+B\n c\r\n',
+        cached: true,
+        repo: ROOT,
+      });
+      editor.model!.modified.setValue('a\nB\nc\nD\nE\n');
+      await act(async () => editor.modifiedSide.commands[0]());
+      await flush();
+      expect(posts.find((p) => p.path.endsWith('/p/files/write'))!.body).toBe('a\r\nB\nc\r\nD\nE\n');
+    });
+
+    it('saves the editor’s endings when told to unify them', async () => {
+      setMode('unify');
+      await render({ mode: 'worktree' });
+      expect(host.querySelector('.eol-note')?.textContent).toBe(t('git.diff.eol.unify', { name: 'f.txt', eol: 'LF' }));
+      editor.model!.modified.setValue('a\nB\nc\nD\nE\n');
+      await act(async () => editor.modifiedSide.commands[0]());
+      await flush();
+      expect(posts.find((p) => p.path.endsWith('/p/files/write'))!.body).toBe('a\nB\nc\nD\nE\n');
+    });
+
+    it('is read-only when told, whole files still staged', async () => {
+      setMode('readOnly');
+      await render({ mode: 'worktree' });
+      expect(editor.modifiedSide.readOnly).toBe(true);
+      expect(host.querySelector('.eol-note')?.textContent).toBe(t('git.diff.eol.readOnly', { name: 'f.txt' }));
+      editor.lineChanges = changes;
+      await act(async () => editor.diffListener!());
+      expect(button(t('git.diff.stageRanges'))!.disabled).toBe(true);
+      await act(async () => button(t('git.diff.stageFile'))!.click());
+      await flush();
+      expect(posts.find((p) => p.path.endsWith('/p/files/write'))).toBeUndefined();
+      expect(posts.find((p) => p.path.endsWith('/stage'))!.body).toEqual({ paths: ['f.txt'], repo: ROOT });
+    });
   });
 });

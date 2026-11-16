@@ -289,6 +289,33 @@ Code's preview editor does, so going through the changes keeps one pane):
   workspace or machine shown, another pane zoomed): closing asks about it,
   Save saves it against the file as it was when the edits began, and the
   pane takes it back when drawn again ([27](27-plugins.md)).
+- Files whose lines end in more than one way (LF and CRLF, or a lone CR):
+  Monaco gives a model one kind of ending, so the text comes back with
+  every line's alike and patches made of it name lines the file does not
+  have. The setting `git.mixedLineEndings` (Settings › Git) says what the
+  diff (and the file explorer's editor, [28](28-file-explorer.md)) does
+  with such a file, and a note above the diff says it:
+  - `keep` (the default): a save writes each line with its own ending
+    (`web/src/eol.ts`): the text as read and the edited text are compared
+    line by line (Myers' diff, at most 1000 edits, past that the rest as
+    one change), equal lines keep their ending, a changed line the ending
+    of the line it replaced, a new line the ending of the line before it
+    (else after it, else the file's most common one), and a last line
+    without one stays without. Range patches are made of the sides' bytes
+    (unsaved text as a save would write it), whose lines Monaco's line
+    numbers count alike, so context lines match the index and staged
+    lines keep their endings. A lone CR ends a line for Monaco but not for
+    git: ranges of such a file are not offered, whole files are.
+  - `unify`: as Monaco has it: a save writes every line with the model's
+    ending, patches are made of the model's text and may not apply.
+  - `readOnly`: the working tree's side is read-only, ranges are not
+    offered; Stage File and Unstage File work.
+
+**Settings** (the plugin's page, Settings › Plugins › Git: the section
+`git`, `internal/plugins/git/settings.go`):
+
+- `git.mixedLineEndings`: files that mix line endings in diffs and the
+  explorer's editor (`keep`, `unify`, `readOnly`; see the diff pane).
 
 **Colors**: lanes take the design tokens' chart hues (`--ds-chart-*`, in
 an order that keeps neighbors apart), status letters and names VS Code's
@@ -436,7 +463,8 @@ terminal; what the plugin adds is a way to reach it from the browser:
   (`internal/server`) checks them.
 - `design/testdata/git/range-patches.json`: range patches (additions,
   deletions, parts of changes, ranges over several hunks, unstaging,
-  discarding, the last line without a newline), run by
+  discarding, the last line without a newline, files that mix LF and
+  CRLF), run by
   `web/src/__tests__/gitPatch.test.ts` and applied with git by the Go test.
 - `web/src/__tests__/gitGraph.test.ts`: lanes (linear, branch and merge,
   octopus, parallel branches, reused lanes, parents off the page, joins),
@@ -452,7 +480,14 @@ terminal; what the plugin adds is a way to reach it from the browser:
   sides per mode, range patches sent, saves (also of unsaved text after
   the repository changed, against the version it was edited from), a fast
   switch of files, a file edited again read again, ranges not applied to
-  a file changed on disk.
+  a file changed on disk; a file that mixes line endings staged by ranges
+  of its bytes and saved with each line's own ending, unified, or
+  read-only as `git.mixedLineEndings` says.
+- `web/src/__tests__/eol.test.ts`: lines as Monaco reads them, mixed
+  files, the line diff (a shortest edit script, checked against the
+  longest common subsequence of random lines; its limit of edits), the
+  endings a save keeps (unchanged text as it was, changed and new lines,
+  deleted lines, a last line without an ending, lone CRs).
 - `web/src/__tests__/gitState.test.ts` (time faked): which reads the
   watch's tokens start (the status, the info, the diffs' and the log's
   versions), backing off after timeouts, a change's read starting after

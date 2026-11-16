@@ -155,6 +155,7 @@ in the UI; a setting with a scope can have its own value per machine, under
 | `usage.providers.deepseek` | `true`, `false` | `true` | – | – |
 | `usage.codexHomes` | list of strings | `[]` | – | – |
 | `usage.claudeKeychain` | `true`, `false` | `true` | – | – |
+| `git.mixedLineEndings` | `keep`, `unify`, `readOnly` | `"keep"` | – | – |
 | `gui.enabled` | `true`, `false` | `true` | `--gui` | per remote machine |
 | `gui.gpu` | `vglrun`, `all` | `"vglrun"` | `--gui-gpu` | per remote machine |
 | `gui.video` | `true`, `false` | `true` | `--gui-video` | per remote machine |

@@ -42,6 +42,7 @@ export const gitPlugin: PluginDef = {
   title: 'git.title',
   description: 'git.description',
   icon: GitBranch,
+  settings: { section: 'git' },
   panels: [{ id: 'git', title: 'git.title', icon: GitBranch, component: GitPanel, command: 'view.panel.git' }],
   paneViews: {
     graph: {

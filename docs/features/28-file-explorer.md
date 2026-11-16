@@ -186,6 +186,14 @@ button.
   read otherwise (403 without permission, 502 when the machine did not
   answer or its stat failed) shows the error, never an empty file. A
   UTF-8 byte order mark is not shown and a save writes it back.
+- A file whose lines end in more than one way (LF and CRLF, or a lone
+  CR): Monaco gives the text one kind of ending, so a save would rewrite
+  every line's. The Git plugin's setting `git.mixedLineEndings`
+  ([31](31-git.md)) says what the editor does with it: `keep` (by
+  default) saves each line with its own ending (`web/src/eol.ts`, after
+  a line diff of the text as loaded or saved against the edited one; new
+  lines take a neighbour's), `unify` saves the editor's endings, and
+  `readOnly` opens the file read-only. A note above the text says which.
 - **Quick diff** (`quickDiff.ts`): as in VS Code, the gutter and the
   overview ruler mark the lines that differ from what version control has
   (added, changed, removed), unsaved changes included, computed again a
@@ -349,6 +357,8 @@ the trash stay in the user's trash
 - `web/src/__tests__/filesEditor.test.ts` (Monaco replaced): versions from
   the ETag, saves with them, conflicts overwritten and loaded, new files,
   read-only mode, files that are not text, files that cannot be read (an
-  error, not an empty file), a byte order mark written back, a change on
+  error, not an empty file), a byte order mark written back, a file that
+  mixes line endings saved with each line's own ending, unified or opened
+  read-only as the setting says, a change on
   disk loaded as an edit undo takes back, typing during that load kept
   and the change offered, Keep Editing not undone by the next check.

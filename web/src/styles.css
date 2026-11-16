@@ -371,6 +371,13 @@ select:focus-visible,
 .callout.error > .lucide {
   color: var(--error);
 }
+/* A note above an editor or a diff: a file that mixes line endings (eol.ts). */
+.eol-note {
+  flex: none;
+  margin: 4px 8px;
+  padding: 4px 8px;
+  font-size: var(--fs-sm);
+}
 /* A panel's empty or unavailable state: centered, an icon, a line, an action. */
 .empty-note {
   display: flex;

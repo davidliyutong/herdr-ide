@@ -122,6 +122,8 @@ import type { MachineState } from '../lib/machine';
 import { t } from '../i18n';
 import { CHECK_MS, EditorPane, loadText, versionOf } from '../plugins/files/EditorPane';
 import { registerQuickDiff } from '../plugins/files/quickDiff';
+import { useSettings } from '../settings';
+import { MIXED_LINE_ENDINGS } from '../eol';
 import { settle } from './fakeTerms';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -400,5 +402,58 @@ describe('EditorPane', () => {
     await render('/home/u/cat.png');
     expect(host.querySelector('img')?.getAttribute('src')).toContain('cat.png');
     expect(host.querySelector('.files-editor-host')).toBeNull();
+  });
+
+  // A file that mixes line endings: the editor gives its text back with one
+  // kind (as Monaco does); the setting git.mixedLineEndings says whether a
+  // save keeps each line's own, unifies them, or the file is read-only.
+  describe('mixed line endings', () => {
+    const mixed = 'one\r\ntwo\nthree\r\nfour\n';
+    const setMode = (v: string) =>
+      useSettings.setState((s) => ({ values: { ...s.values, [MIXED_LINE_ENDINGS]: { value: v, source: 'global' } } }));
+    beforeEach(() => {
+      file = { text: mixed, size: mixed.length, mtime: 1000 };
+    });
+    afterEach(() => setMode('keep'));
+
+    it('keeps each line’s own ending when saved', async () => {
+      await render('/home/u/mixed.txt');
+      expect(host.querySelector('.eol-note')?.textContent).toBe(t('eol.keep', { name: 'mixed.txt' }));
+      await act(async () => editor.model!.setValue('one\ntwo\nTHREE\nfour\nfive\n'));
+      await act(async () => editor.save!());
+      await flush();
+      expect(writes[0].body).toBe('one\r\ntwo\nTHREE\r\nfour\nfive\n');
+      // Saved again, from what was saved.
+      await act(async () => editor.model!.setValue('one\ntwo\nTHREE\nfour\nfive\nsix\n'));
+      await act(async () => editor.save!());
+      await flush();
+      expect(writes[1].body).toBe('one\r\ntwo\nTHREE\r\nfour\nfive\nsix\n');
+    });
+
+    it('writes the editor’s endings when told to unify them', async () => {
+      setMode('unify');
+      await render('/home/u/mixed.txt');
+      expect(host.querySelector('.eol-note')?.textContent).toBe(t('eol.unify', { name: 'mixed.txt' }));
+      await act(async () => editor.model!.setValue('one\ntwo\nthree\nfour\n'));
+      await act(async () => editor.save!());
+      await flush();
+      expect(writes[0].body).toBe('one\ntwo\nthree\nfour\n');
+      expect(host.querySelector('.eol-note')).toBeNull();
+    });
+
+    it('opens such a file read-only when told', async () => {
+      setMode('readOnly');
+      await render('/home/u/mixed.txt');
+      expect(editor.readOnly).toBe(true);
+      expect(host.querySelector('.eol-note')?.textContent).toBe(t('eol.readOnly', { name: 'mixed.txt' }));
+      await act(async () => editor.model!.setValue('changed\n'));
+      await act(async () => editor.save!());
+      await flush();
+      expect(writes).toEqual([]);
+      // A file that does not mix them is edited as any.
+      file = { text: 'a\nb\n', size: 4, mtime: 2000 };
+      await render('/home/u/other.txt');
+      expect(editor.readOnly).toBe(false);
+    });
   });
 });

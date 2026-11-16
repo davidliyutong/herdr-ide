@@ -825,6 +825,10 @@ export const en = {
   'files.saveFailed': 'Not saved: {error}',
   'files.unsaved': 'Unsaved changes',
   'files.readOnly': 'Read-only',
+  // files that mix line endings (eol.ts), in the explorer's editor
+  'eol.keep': '{name} mixes line endings (LF and CRLF): the editor shows one kind, and each line keeps its own when saved.',
+  'eol.unify': '{name} mixes line endings (LF and CRLF): saving makes them all one kind.',
+  'eol.readOnly': '{name} mixes line endings (LF and CRLF): it opens read-only (Settings › Git).',
   'files.reveal': 'Show in Explorer',
   'files.revert': 'Load Again',
   'files.save': 'Save',
@@ -1136,6 +1140,13 @@ export const en = {
   'settings.plugins.git.enabled.desc': 'A Source Control panel, a Git graph and diffs in Monaco for the repositories on the machines.',
   'command.view.panel.git': 'Show Source Control',
   'command.git.graph': 'Show Git Graph',
+  'settings.section.git': 'Git',
+  'settings.git.mixedLineEndings': 'Mixed line endings',
+  'settings.git.mixedLineEndings.desc':
+    'Files whose lines end in more than one way (LF and CRLF), in the file explorer’s editor and in diffs. The editor shows one kind of ending.',
+  'settings.git.mixedLineEndings.keep': 'Keep each line’s ending',
+  'settings.git.mixedLineEndings.unify': 'Unify them on save',
+  'settings.git.mixedLineEndings.readOnly': 'Open such files read-only',
   'git.title': 'Source Control',
   'git.description':
     'VS Code’s Source Control and a Git graph for the focused pane’s repository: stage, commit, branches, stashes, fetch, pull and push, and diffs in Monaco.',
@@ -1293,6 +1304,13 @@ export const en = {
   'git.diff.saveFailed': 'Could not save: {error}',
   'git.diff.changedReloaded': '{name} changed on disk; its diff was read again. Select the ranges again.',
   'git.diff.changedUnsaved': '{name} changed on disk since it was loaded; reload it before acting on ranges.',
+  'git.diff.eol.keep': '{name} mixes line endings (LF and CRLF): each line keeps its own when saved and staged.',
+  'git.diff.eol.unify': '{name} mixes line endings (LF and CRLF): saving makes them all {eol}, and staging selected ranges may fail.',
+  'git.diff.eol.unifyPatch': '{name} mixes line endings (LF and CRLF): staging selected ranges may fail.',
+  'git.diff.eol.readOnly':
+    '{name} mixes line endings (LF and CRLF): it is read-only here and only the whole file can be staged (Settings › Git).',
+  'git.diff.eol.loneCR': '{name} has carriage returns that end no line for Git: only the whole file can be staged.',
+  'git.diff.eol.noRanges': 'Ranges of this file cannot be staged: stage the whole file.',
   'git.diff.binary': '{name} is a binary file.',
   'git.diff.tooLarge': '{name} is too large to compare (over 8 MiB).',
   'git.error.git_missing': 'Git is not installed on the machine.',

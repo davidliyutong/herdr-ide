@@ -418,5 +418,113 @@
     "result": null,
     "path": "f.txt",
     "patch": null
+  },
+  {
+    "name": "mixed line endings: a modification staged from the files’ bytes",
+    "original": "a\r\nb\nc\r\nd\n",
+    "modified": "a\r\nB\nc\r\nd\nE\r\n",
+    "changes": [
+      {
+        "originalStartLineNumber": 2,
+        "originalEndLineNumber": 2,
+        "modifiedStartLineNumber": 2,
+        "modifiedEndLineNumber": 2
+      },
+      {
+        "originalStartLineNumber": 4,
+        "originalEndLineNumber": 0,
+        "modifiedStartLineNumber": 5,
+        "modifiedEndLineNumber": 5
+      }
+    ],
+    "ranges": [
+      {
+        "startLine": 2,
+        "endLine": 2
+      }
+    ],
+    "side": "modified",
+    "direction": "forward",
+    "result": "a\r\nB\nc\r\nd\n",
+    "path": "f.txt",
+    "patch": "diff --git a/f.txt b/f.txt\n--- a/f.txt\n+++ b/f.txt\n@@ -1,4 +1,4 @@\n a\r\n-b\n+B\n c\r\n d\n"
+  },
+  {
+    "name": "mixed line endings: a CRLF line added at the end, staged",
+    "original": "a\r\nb\nc\r\nd\n",
+    "modified": "a\r\nB\nc\r\nd\nE\r\n",
+    "changes": [
+      {
+        "originalStartLineNumber": 2,
+        "originalEndLineNumber": 2,
+        "modifiedStartLineNumber": 2,
+        "modifiedEndLineNumber": 2
+      },
+      {
+        "originalStartLineNumber": 4,
+        "originalEndLineNumber": 0,
+        "modifiedStartLineNumber": 5,
+        "modifiedEndLineNumber": 5
+      }
+    ],
+    "ranges": [
+      {
+        "startLine": 5,
+        "endLine": 5
+      }
+    ],
+    "side": "modified",
+    "direction": "forward",
+    "result": "a\r\nb\nc\r\nd\nE\r\n",
+    "path": "f.txt",
+    "patch": "diff --git a/f.txt b/f.txt\n--- a/f.txt\n+++ b/f.txt\n@@ -2,3 +2,4 @@\n b\n c\r\n d\n+E\r\n"
+  },
+  {
+    "name": "mixed line endings: a modification unstaged",
+    "original": "a\r\nb\nc\r\nd\n",
+    "modified": "a\r\nB\nc\r\nd\n",
+    "changes": [
+      {
+        "originalStartLineNumber": 2,
+        "originalEndLineNumber": 2,
+        "modifiedStartLineNumber": 2,
+        "modifiedEndLineNumber": 2
+      }
+    ],
+    "ranges": [
+      {
+        "startLine": 2,
+        "endLine": 2
+      }
+    ],
+    "side": "modified",
+    "direction": "backward",
+    "result": "a\r\nb\nc\r\nd\n",
+    "path": "f.txt",
+    "patch": "diff --git a/f.txt b/f.txt\n--- a/f.txt\n+++ b/f.txt\n@@ -1,4 +1,4 @@\n a\r\n-B\n+b\n c\r\n d\n"
+  },
+  {
+    "name": "mixed line endings: the last line changed and one added without a newline",
+    "original": "x\r\ny\nz\r\n",
+    "modified": "x\r\ny\nZ\r\nw",
+    "changes": [
+      {
+        "originalStartLineNumber": 3,
+        "originalEndLineNumber": 3,
+        "modifiedStartLineNumber": 3,
+        "modifiedEndLineNumber": 4
+      }
+    ],
+    "ranges": [
+      {
+        "startLine": 3,
+        "endLine": 4
+      }
+    ],
+    "side": "modified",
+    "direction": "forward",
+    "result": "x\r\ny\nZ\r\nw",
+    "path": "f.txt",
+    "patch": "diff --git a/f.txt b/f.txt\n--- a/f.txt\n+++ b/f.txt\n@@ -1,3 +1,4 @@\n x\r\n y\n-z\r\n+Z\r\n+w\n\\ No newline at end of file\n"
   }
 ]

@@ -22,7 +22,7 @@ import (
 // the desktop app's shortcut settings of earlier versions, which became
 // keybinding rules before the settings are loaded.
 func Settings() []settings.Module {
-	return []settings.Module{uisettings.Module, codeserver.Settings, gui.Settings, plugin.Settings(Plugins(), pluginsOff), legacyShortcuts(), usageplugin.Settings}
+	return []settings.Module{uisettings.Module, codeserver.Settings, gui.Settings, plugin.Settings(Plugins(), pluginsOff), legacyShortcuts(), gitplugin.Settings, usageplugin.Settings}
 }
 
 // Plugins are the core's plugins (internal/plugin), in the order the UIs
