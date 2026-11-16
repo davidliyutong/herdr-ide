@@ -303,9 +303,6 @@ func Open(path string) (*Store, error) {
 	return s, nil
 }
 
-// Path is the vault's file.
-func (s *Store) Path() string { return s.path }
-
 // Status tells the mode and whether the vault is locked.
 func (s *Store) Status() Status {
 	s.mu.Lock()
@@ -644,23 +641,6 @@ func (s *Store) Delete(name string) error {
 		_ = s.applyForgotten()
 	}
 	return nil
-}
-
-// Rename gives a variable another name, keeping its value, description,
-// machines and flags (Set with To). Its value is sealed again under the new
-// name (part of its additional data), so the vault must be unlocked; a
-// name taken by another variable is refused.
-func (s *Store) Rename(from, to string) error {
-	if !ValidName(to) {
-		return ErrInvalidName
-	}
-	if from == to {
-		if _, ok := s.Get(from); !ok {
-			return ErrNotFound
-		}
-		return nil
-	}
-	return s.Set(from, Update{To: &to})
 }
 
 // Lock forgets the key until Unlock.

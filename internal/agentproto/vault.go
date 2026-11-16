@@ -37,8 +37,8 @@ type VaultVariable struct {
 }
 
 // VaultResponse answers a VaultRequest. Code is one of vault_locked,
-// not_found, inject_only, denied, plugin_disabled, unavailable,
-// bad_request.
+// not_found, inject_only, denied, busy, corrupt, plugin_disabled,
+// unavailable, bad_request.
 type VaultResponse struct {
 	OK        bool              `json:"ok"`
 	Code      string            `json:"code,omitempty"`

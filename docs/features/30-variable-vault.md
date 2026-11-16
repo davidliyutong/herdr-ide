@@ -119,10 +119,9 @@ back needs no restart. Its routes, below `/api/p/vault`
 ([reference](../reference.md#http-and-websocket-endpoints)): the list
 (state and variables without values), `PUT`/`DELETE vars/{name}` (`PUT`
 with `{"to"}` renames the variable in the same write as its other changes,
-so a refusal changes nothing), `POST vars/{name}/reveal`,
-`POST vars/{name}/rename` (`{"to"}`: the value is sealed again under the
-new name, its additional data; machines, description and flag stay; a
-taken name is `409 exists`), `session` (open, end), `passphrase` (set,
+so a refusal changes nothing: the value is sealed again under the new
+name, its additional data; a taken name is `409 exists`),
+`POST vars/{name}/reveal`, `session` (open, end), `passphrase` (set,
 change), `lock`, the pending `requests` and their answers, and the access
 `log`. Every route that changes something is a writing route (refused
 read-only) audited with the name or request id.

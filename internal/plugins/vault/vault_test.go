@@ -155,10 +155,10 @@ func TestApprovals(t *testing.T) {
 		if len(p.Pending()) != 1 {
 			t.Error("not pending")
 		}
-		if !p.Answer(req.ID, a) {
+		if p.answerRequest(req.ID, a) == nil {
 			t.Fatal("answer refused")
 		}
-		if p.Answer(req.ID, AnswerDeny) {
+		if p.answerRequest(req.ID, AnswerDeny) != nil {
 			t.Error("a second answer was taken")
 		}
 	}
@@ -510,7 +510,7 @@ func TestAnswerRacingTheTimeout(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				took[j] = p.Answer(req.ID, AnswerOnce)
+				took[j] = p.answerRequest(req.ID, AnswerOnce) != nil
 			}()
 		}
 		wg.Wait()
@@ -582,7 +582,7 @@ func TestPendingRequestsAreBounded(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
-	if !p.Answer(a.ID, AnswerOnce) {
+	if p.answerRequest(a.ID, AnswerOnce) == nil {
 		t.Fatal("answer refused")
 	}
 	for i := 0; i < 2; i++ {
@@ -590,7 +590,7 @@ func TestPendingRequestsAreBounded(t *testing.T) {
 			t.Errorf("shared answer %+v", r)
 		}
 	}
-	if !p.Answer(req.ID, AnswerDeny) {
+	if p.answerRequest(req.ID, AnswerDeny) == nil {
 		t.Fatal("answer refused")
 	}
 	if r := <-results; r.Code != "denied" {

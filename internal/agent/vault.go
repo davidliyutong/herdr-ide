@@ -10,17 +10,12 @@ import (
 	"time"
 
 	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/brand"
+	"herdr-ide/internal/vaultmcp"
 )
 
 // maxVaultConns bounds the MCP server connections relayed at once; more
 // wait in the listen queue.
 const maxVaultConns = 16
-
-// MCPLinkName is the stable path's name below <data dir>/bin: a link to
-// the executable that serves the mcp command (this agent's, or the core's
-// for the local machine), so an MCP configuration outlives upgrades.
-const MCPLinkName = brand.Slug + "-mcp"
 
 // serveVault accepts connections of the variable vault's MCP servers on
 // <run>/vault.sock (0600, in the 0700 run directory, and only from this
@@ -76,13 +71,14 @@ func (a *Agent) linkMCP() {
 	}
 }
 
-// LinkMCP makes dir/<slug>-mcp a link to exe, replacing another link
-// atomically.
+// LinkMCP makes dir/<slug>-mcp (vaultmcp.LinkName: the stable path an MCP
+// configuration names, so it outlives upgrades) a link to exe, replacing
+// another link atomically.
 func LinkMCP(dir, exe string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	link := filepath.Join(dir, MCPLinkName)
+	link := filepath.Join(dir, vaultmcp.LinkName)
 	if cur, err := os.Readlink(link); err == nil && cur == exe {
 		return nil
 	}

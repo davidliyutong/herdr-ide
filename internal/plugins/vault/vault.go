@@ -248,7 +248,6 @@ func (p *Plugin) Routes() []plugin.Route {
 		{Method: "PUT", Path: "vars/{name}", Mutating: true, Audit: "set", Handler: p.gated(p.handleSet)},
 		{Method: "DELETE", Path: "vars/{name}", Mutating: true, Audit: "delete", Handler: p.gated(p.handleDelete)},
 		{Method: "POST", Path: "vars/{name}/reveal", Mutating: true, Audit: "reveal", Handler: p.gated(p.handleReveal)},
-		{Method: "POST", Path: "vars/{name}/rename", Mutating: true, Audit: "rename", Handler: p.gated(p.handleRename)},
 		{Method: "POST", Path: "session", Mutating: true, Audit: "session", Handler: p.handleSession},
 		{Method: "DELETE", Path: "session", Mutating: true, Audit: "session_end", Handler: p.handleEndSession},
 		{Method: "POST", Path: "passphrase", Mutating: true, Audit: "passphrase", Handler: p.handlePassphrase},
@@ -504,31 +503,6 @@ func (p *Plugin) handleDelete(c *plugin.Call, w http.ResponseWriter, r *http.Req
 	plugin.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-// handleRename gives a variable another name ({"to": name}); its
-// machines, flags and value stay. Audited with both names.
-func (p *Plugin) handleRename(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
-	s, err := p.open(c.Host)
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	var body struct {
-		To string `json:"to"`
-	}
-	if err := plugin.ReadJSON(r, 4096, &body); err != nil {
-		fail(w, err)
-		return
-	}
-	from := r.PathValue("name")
-	if err := s.Rename(from, body.To); err != nil {
-		fail(w, err)
-		return
-	}
-	c.Host.Audit(r, "vault.renamed", map[string]any{"name": from, "to": body.To})
-	changed(c.Host)
-	plugin.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
-}
-
 // handleReveal is the only way a value reaches a browser: a writing route,
 // refused read-only and audited with the variable's name.
 func (p *Plugin) handleReveal(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
@@ -684,13 +658,9 @@ func (p *Plugin) handleRequests(c *plugin.Call, w http.ResponseWriter, r *http.R
 	plugin.WriteJSON(w, http.StatusOK, map[string]any{"requests": p.Pending()})
 }
 
-// Answer answers a pending request; the first answer wins, later ones
-// and answers after the request expired find no request. True means the
-// requesters get this answer.
-func (p *Plugin) Answer(id, answer string) bool {
-	return p.answerRequest(id, answer) != nil
-}
-
+// answerRequest answers a pending request and returns it; the first answer
+// wins, later ones and answers after the request expired find none (nil),
+// so a request returned is one whose requesters get this answer.
 func (p *Plugin) answerRequest(id, answer string) *Request {
 	p.mu.Lock()
 	defer p.mu.Unlock()

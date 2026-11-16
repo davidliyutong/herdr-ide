@@ -110,7 +110,6 @@ describe('vault', () => {
       if (!open) return json({ error: 'vault_session' }, 401);
       if (url.endsWith('/reveal')) return json({ value: 'ghp_secret' });
       if (url.startsWith('/api/p/vault/vars/') && method === 'PUT') return failPut ? json({ error: 'failed' }, 500) : json({});
-      if (url.endsWith('/rename')) return json({ ok: true });
       if (answer) return json({ ok: true });
       return json({ error: 'not_found' }, 404);
     });

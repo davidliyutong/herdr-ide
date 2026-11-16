@@ -17,6 +17,7 @@ import (
 	"herdr-ide/internal/agent"
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/transport"
+	"herdr-ide/internal/vaultmcp"
 )
 
 // An MCP server's connection to vault.sock reaches the core as a stream
@@ -80,7 +81,7 @@ func TestVaultSocketRelaysToTheCore(t *testing.T) {
 		t.Fatalf("response %s", line)
 	}
 
-	link := filepath.Join(home, ".herdr-ide", "bin", agent.MCPLinkName)
+	link := filepath.Join(home, ".herdr-ide", "bin", vaultmcp.LinkName)
 	exe, _ := os.Executable()
 	exe, _ = filepath.EvalSymlinks(exe)
 	for i := 0; i < 100; i++ {
@@ -219,7 +220,7 @@ func TestLinkMCPReplacesTheLink(t *testing.T) {
 	if err := agent.LinkMCP(dir, "/new/agent"); err != nil {
 		t.Fatal(err)
 	}
-	if target, _ := os.Readlink(filepath.Join(dir, agent.MCPLinkName)); target != "/new/agent" {
+	if target, _ := os.Readlink(filepath.Join(dir, vaultmcp.LinkName)); target != "/new/agent" {
 		t.Errorf("link -> %s", target)
 	}
 	if st, _ := os.Stat(dir); st.Mode().Perm() != 0o700 {
