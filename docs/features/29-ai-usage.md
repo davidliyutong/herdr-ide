@@ -243,10 +243,12 @@ not read; SSH machines are.
   where it has one (Claude's clay, DeepSeek's blue, Grok's black or white: the theme's text color), else a hue that keeps
   the services apart (`--usage-<provider>`, `usage.css`, darker in the
   light theme). Under the tiles: when the numbers were read and the next
-  read, the switch between used and left, and Refresh (which also reads
-  the cost again; so does showing the panel when the cost is older than 15
-  minutes). The tile shown and the switch are kept per browser. A snapshot
-  older than the one shown is ignored.
+  read, the switch between used and left, the refresh mode
+  (`usage.refresh`) and Refresh, which also reads the cost again; the
+  shown panel reads it again too once it is older than `usage.costRefresh`
+  (default 15 minutes, 1–1440), looked at when it is shown and every
+  minute while it is. The tile shown and the switch are kept per browser.
+  A snapshot older than the one shown is ignored.
 - **Overview**: the spend of the last 7, 30 or 90 days at API prices (a
   large total, tokens, the weekly and monthly equivalents), bars per day
   stacked in the services' colors (plain SVG) with a legend of each
@@ -275,7 +277,7 @@ not read; SSH machines are.
 
 The status bar shows the tightest window's percentage, in the warning color
 from the first of `usage.thresholds` (default 80 and 95); a click shows the
-panel.
+panel; `usage.statusBar` off hides it.
 
 ### Alerts
 
@@ -421,10 +423,11 @@ status pages. Resources and retention:
   once per browser (again in a snapshot, from another page, after a
   reload; none older than an hour), the cost sums, windows grouped by their models, the panel
   (tiles, the overview's rows and spend, a service's cards, its spend,
-  used or left) and the status bar item against a stubbed core, the panel
-  with ready machines in the store (no render loop), no `watch` from a
-  hidden page, DeepSeek's key form without an account, an older snapshot
-  ignored, the machines that could not read an account, the interval
-  picker.
+  used or left) and the status bar item (hidden with `usage.statusBar`
+  off) against a stubbed core, the panel with ready machines in the store
+  (no render loop), no `watch` from a hidden page, the spend read again
+  while the panel stays open (`usage.costRefresh`), DeepSeek's key form
+  without an account, an older snapshot ignored, the machines that could
+  not read an account, the interval picker.
 - `internal/server`: `TestMutatingRoutesAreGuarded` covers the plugin's
   routes.

@@ -28,6 +28,8 @@ const (
 	SettingRefreshOpen    = "usage.refreshOpen"
 	SettingRefreshWorking = "usage.refreshWorking"
 	SettingRefreshIdle    = "usage.refreshIdle"
+	SettingCostRefresh    = "usage.costRefresh"
+	SettingStatusBar      = "usage.statusBar"
 	SettingAlerts         = "usage.alerts"
 	SettingThresholds     = "usage.thresholds"
 	SettingCodexHomes     = "usage.codexHomes"
@@ -63,6 +65,12 @@ var Settings = func() settings.Module {
 		minutes(SettingRefreshOpen, DefaultCadence.Open, 1, 60, 11),
 		minutes(SettingRefreshWorking, DefaultCadence.Working, 1, 120, 12),
 		minutes(SettingRefreshIdle, DefaultCadence.Idle, 5, 240, 13),
+		// Read by the pages: how old the spend may get while the panel is
+		// open, and the status bar item.
+		settings.Def{Key: SettingCostRefresh, Type: settings.TypeNumber, Default: 15.0, Min: costMin, Max: costMax, Integer: true,
+			Scope: settings.ScopeApp, Section: "usage", Order: 15},
+		settings.Def{Key: SettingStatusBar, Type: settings.TypeBool, Default: true,
+			Scope: settings.ScopeApp, Section: "usage", Order: 18},
 		settings.Def{Key: SettingAlerts, Type: settings.TypeBool, Default: true,
 			Scope: settings.ScopeApp, Section: "usage", Order: 19},
 		settings.Def{Key: SettingThresholds, Type: settings.TypeList, Item: settings.TypeString, Default: []string{"80", "95"},
@@ -82,6 +90,8 @@ var Settings = func() settings.Module {
 	)
 	return m
 }()
+
+var costMin, costMax = settings.Range(1, 1440)
 
 // minutes is a setting of the adaptive cadence, in whole minutes.
 func minutes(key string, def time.Duration, lo, hi float64, order int) settings.Def {

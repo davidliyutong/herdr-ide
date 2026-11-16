@@ -216,6 +216,9 @@ describe('usage panel and status item', () => {
     });
     expect(item.textContent).toBe('60% left');
     expect(item.classList.contains('warn')).toBe(false);
+    // usage.statusBar off: not shown.
+    await act(async () => useSettings.setState({ values: { 'usage.statusBar': { value: false, source: 'global' } } }));
+    expect(host.querySelector('.usage-status-item')).toBeNull();
   });
 
   it('shows a tile per service and the accounts, tightest first; a service its cards', async () => {
@@ -269,6 +272,26 @@ describe('usage panel and status item', () => {
       expect(calls.filter((c) => c.includes('watch=1'))).toHaveLength(1);
     } finally {
       vis.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('reads the spend again while the panel stays open, once older than usage.costRefresh', async () => {
+    vi.useFakeTimers();
+    try {
+      useSettings.setState({ values: { 'usage.costRefresh': { value: 2, source: 'global' } } });
+      await act(async () => root.render(createElement(UsagePanel)));
+      const costs = () => calls.filter((c) => c.startsWith('GET /api/p/usage/cost')).length;
+      expect(costs()).toBe(1);
+      await act(async () => {
+        vi.advanceTimersByTime(60_000);
+      });
+      expect(costs()).toBe(1);
+      await act(async () => {
+        vi.advanceTimersByTime(2 * 60_000);
+      });
+      expect(costs()).toBe(2);
+    } finally {
       vi.useRealTimers();
     }
   });

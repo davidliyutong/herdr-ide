@@ -63,10 +63,10 @@ export function UsagePanel() {
   const snapshot = useUsage((s) => s.snapshot);
   const cost = useUsage((s) => s.cost);
   const deepseekOn = useSettings((s) => s.values['usage.providers.deepseek']?.value !== false);
-  // While the panel is open and the page shown the core asks every 2
-  // minutes (adaptive); a hidden page says nothing, so a forgotten tab
-  // does not keep it asking. The cost is read when shown and older than
-  // 15 minutes, else on demand.
+  // While the panel is open and the page shown the core asks at
+  // usage.refreshOpen (adaptive); a hidden page says nothing, so a
+  // forgotten tab does not keep it asking. The cost is read again once it
+  // is older than usage.costRefresh, else on demand.
   useEffect(() => {
     const visible = () => typeof document === 'undefined' || document.visibilityState === 'visible';
     const look = () => {
@@ -75,7 +75,7 @@ export function UsagePanel() {
       if (costStale()) void fetchCost();
     };
     look();
-    const id = setInterval(() => visible() && void fetchSnapshot(true), 60_000);
+    const id = setInterval(look, 60_000);
     document.addEventListener('visibilitychange', look);
     return () => {
       clearInterval(id);

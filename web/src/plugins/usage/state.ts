@@ -5,6 +5,7 @@
 import { create } from 'zustand';
 import { loadPref, savePref, useStore } from '../../state/store';
 import { getPrefs } from '../../prefs';
+import { settingValue } from '../../settings';
 import { storage } from '../../brand';
 import { alertText, type CostReport, type UsageAlert, type UsageSnapshot } from './model';
 
@@ -136,13 +137,17 @@ export async function refreshNow(): Promise<string | undefined> {
   }
 }
 
-/** How long a cost report is shown before the panel reads it again. */
-const COST_FRESH = 15 * 60;
+/** How long a cost report is shown before the open panel reads it again
+ * (usage.costRefresh, minutes), in seconds. */
+function costFresh(): number {
+  const m = Number(settingValue('usage.costRefresh'));
+  return (Number.isFinite(m) && m >= 1 ? m : 15) * 60;
+}
 
-/** Whether the cost report is missing or older than COST_FRESH. */
+/** Whether the cost report is missing or older than usage.costRefresh. */
 export function costStale(now = Date.now() / 1000): boolean {
   const s = useUsage.getState();
-  return !s.costLoading && (!s.cost || now - s.cost.generatedAt > COST_FRESH);
+  return !s.costLoading && (!s.cost || now - s.cost.generatedAt > costFresh());
 }
 
 /** Fetches the cost of the last 90 days (the user's days). */

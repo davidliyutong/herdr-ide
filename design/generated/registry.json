@@ -451,6 +451,7 @@
     "settings.usage.alerts",
     "settings.usage.claudeKeychain",
     "settings.usage.codexHomes",
+    "settings.usage.costRefresh",
     "settings.usage.kimiRefresh",
     "settings.usage.providers.antigravity",
     "settings.usage.providers.claude",
@@ -470,6 +471,7 @@
     "settings.usage.refreshIdle",
     "settings.usage.refreshOpen",
     "settings.usage.refreshWorking",
+    "settings.usage.statusBar",
     "settings.usage.thresholds",
     "settings.window.zoom"
   ],
@@ -952,6 +954,7 @@
     "usage.alerts": true,
     "usage.claudeKeychain": true,
     "usage.codexHomes": [],
+    "usage.costRefresh": 15,
     "usage.kimiRefresh": true,
     "usage.providers.antigravity": true,
     "usage.providers.claude": true,
@@ -963,6 +966,7 @@
     "usage.refreshIdle": 30,
     "usage.refreshOpen": 5,
     "usage.refreshWorking": 10,
+    "usage.statusBar": true,
     "usage.thresholds": [
       "80",
       "95"

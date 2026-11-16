@@ -1,5 +1,6 @@
-// The status bar's AI usage item: the tightest window of all accounts, in
-// the warning color from the first threshold on; a click shows the panel.
+// The status bar's AI usage item (usage.statusBar): the tightest window of
+// all accounts, in the warning color from the first threshold on; a click
+// shows the panel.
 import { useEffect } from 'react';
 import { Gauge } from 'lucide-react';
 import { useSettings } from '../../settings';
@@ -12,11 +13,12 @@ export function UsageStatusItem() {
   const snapshot = useUsage((s) => s.snapshot);
   const remaining = useUsage((s) => s.remaining);
   const thresholds = useSettings((s) => s.values['usage.thresholds']?.value);
+  const shown = useSettings((s) => s.values['usage.statusBar']?.value !== false);
   useEffect(() => {
     if (!useUsage.getState().snapshot) void fetchSnapshot();
   }, []);
   const top = tightest(snapshot);
-  if (!top) return null;
+  if (!top || !shown) return null;
   const pct = Math.round(remaining ? 100 - top.window.usedPct : top.window.usedPct);
   const warnAt = parseThresholds(thresholds)[0] ?? 80;
   const level = top.window.usedPct >= 100 ? 'out' : top.window.usedPct >= warnAt ? 'warn' : '';
