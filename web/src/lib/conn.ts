@@ -18,6 +18,8 @@ type Listener = {
   onBridgeDownload(machine: string, paths: string[], window?: string): void;
   /** A VS Code window got the keyboard. */
   onBridgeFocus(machine: string, window: string, folders?: string[]): void;
+  /** VS Code's key for closing was pressed in a window without editors. */
+  onBridgeClose?(machine: string, window: string, folders?: string[]): void;
   /** Progress or end of a download a page started (download.ts). */
   onDownload(ev: DownloadEvent): void;
   onGui(st: GuiState): void;
@@ -93,6 +95,9 @@ class Conn {
         break;
       case 'bridge.focus':
         if (text(m.window)) this.listener?.onBridgeFocus(m.m, m.window, strings(m.folders));
+        break;
+      case 'bridge.close':
+        if (text(m.window)) this.listener?.onBridgeClose?.(m.m, m.window, strings(m.folders));
         break;
       case 'download':
         this.listener?.onDownload(m);

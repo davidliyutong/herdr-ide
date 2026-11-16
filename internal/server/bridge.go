@@ -152,6 +152,19 @@ func (h *bridgeHub) serve(mc *machines.Machine, conn net.Conn) {
 				ev["window"] = w.id
 			}
 			h.s.broadcast(ev)
+		case "closePane":
+			// VS Code's key for closing, pressed in this window while it
+			// has no editor (the extension binds it there, as VS Code
+			// closes such a window): the page whose pane has the keyboard
+			// in it closes that pane (closeWindowPane). Only a window that
+			// said hello is one a page can name.
+			if w.id != "" {
+				ev := map[string]any{"t": "bridge.close", "m": mc.ID(), "window": w.id}
+				if w.folders != nil {
+					ev["folders"] = w.folders
+				}
+				h.s.broadcast(ev)
+			}
 		case "download":
 			// Files chosen in VS Code's explorer: the page showing that
 			// VS Code (the one with focus) downloads them (handleDownload).

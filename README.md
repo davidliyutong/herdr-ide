@@ -150,7 +150,8 @@ workspaces and terminals of every machine in one browser tab, with VS Code
 - **Settings.** Language (English, Chinese), light/dark theme followed by
   VS Code, color themes (the accent: blue, VS Code blue, teal, violet,
   rose, amber, graphite), interface size, the desktop app's zoom, the terminals' font (picked from the monospace
-  fonts installed, with a preview), line height, cursor, scrollback, bell,
+  fonts installed, with a preview), line height, cursor (a thin bar by
+  default, its thickness adjustable), scrollback, bell,
   color schemes (Dracula, Nord, Solarized, One, Gruvbox, Tomorrow…) with
   your own colors on top, notification sounds, system notifications and
   the Dock/taskbar badge each on or off, silent agents, how each machine
@@ -276,7 +277,8 @@ terminals included. On Windows and Linux `ctrl+shift+t` opens a tab,
 `ctrl++`, `ctrl+-` and `ctrl+0` zoom;
 every other key, `ctrl+c` and `ctrl+q` included, reaches the terminal.
 While VS Code has focus, its own keys come first (`cmd+j` toggles its
-bottom panel), except `cmd+w` on macOS, which closes the VS Code pane. The menu
+bottom panel, `cmd+w` closes its editor, and the VS Code pane once no
+editor is open). The menu
 bar shows the keys in effect, in the UI's language; the title bar follows
 the UI's theme.
 Change or remove the keys under **Settings → Keyboard Shortcuts**, where

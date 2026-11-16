@@ -29,6 +29,7 @@ export const prefKeys = {
   termFontWeight: 'terminal.fontWeight',
   termLineHeight: 'terminal.lineHeight',
   cursorStyle: 'terminal.cursorStyle',
+  cursorWidth: 'terminal.cursorWidth',
   cursorBlink: 'terminal.cursorBlink',
   scrollback: 'terminal.scrollback',
   copyOnSelect: 'terminal.copyOnSelect',
@@ -55,6 +56,8 @@ export interface Prefs {
   termFontWeight: 'regular' | 'medium';
   termLineHeight: number;
   cursorStyle: 'block' | 'bar' | 'underline';
+  /** The bar's and underline's thickness, CSS pixels. */
+  cursorWidth: number;
   cursorBlink: boolean;
   scrollback: number;
   copyOnSelect: boolean;

@@ -45,7 +45,8 @@ export type GlyphSpec =
   | { kind: 'shape'; text: string }
   /** Underline styles 1-5, 'strike', 'overline'. */
   | { kind: 'line'; style: number | 'strike' | 'overline' }
-  | { kind: 'cursor'; style: 'bar' | 'underline' | 'hollow' | 'block' };
+  /** width: the bar's, underline's and hollow box's lines, CSS pixels. */
+  | { kind: 'cursor'; style: 'bar' | 'underline' | 'hollow' | 'block'; width: number };
 
 export function glyphKey(g: GlyphSpec, span: number): string {
   switch (g.kind) {
@@ -56,7 +57,7 @@ export function glyphKey(g: GlyphSpec, span: number): string {
     case 'line':
       return `l${span}${g.style}`;
     case 'cursor':
-      return `c${span}${g.style}`;
+      return `c${span}${g.style}${g.width}`;
   }
 }
 
@@ -254,7 +255,7 @@ function drawLine(ctx: Ctx2D, g: Extract<GlyphSpec, { kind: 'line' | 'cursor' }>
   const { ch, cw, baseline } = m;
   const thin = Math.max(1, Math.round(ch / 16));
   if (g.kind === 'cursor') {
-    const thick = Math.max(1, Math.round(cw / 8));
+    const thick = Math.max(1, Math.min(Math.round(g.width * m.dpr), Math.round(cw / 2)));
     if (g.style === 'block') ctx.fillRect(x, y, w, ch);
     else if (g.style === 'underline') ctx.fillRect(x, y + ch - thick, w, thick);
     else if (g.style === 'bar') ctx.fillRect(x, y, thick, ch);

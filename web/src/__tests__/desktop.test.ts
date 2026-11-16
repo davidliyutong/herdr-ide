@@ -5,14 +5,12 @@ vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 
 import { keyName } from '../keys';
 import { disabledCommands, runMenuCommand } from '../desktop';
-import { handleFrameKey } from '../keymap';
-import { useKeys, type Binding } from '../keybindings';
-import registry from '../../../design/generated/registry.json';
+import { closeWindowPane } from '../keymap';
 import { useDialog } from '../dialog';
 import { useStore } from '../state/store';
 import type { MachineState } from '../lib/machine';
 import * as L from '../term/layout';
-import { resetFrames, useFrames } from '../codeFrames';
+import { frameLoaded, resetFrames, useFrames } from '../codeFrames';
 import { FakeCore, settle } from './fakeTerms';
 import { resetClosed } from '../closedPanes';
 import { definePlugins } from '../plugins/registry';
@@ -183,23 +181,34 @@ describe('runMenuCommand', () => {
     expect(useDialog.getState().current?.kind).toBe('workspace');
   });
 
-  it('takes cmd+w from VS Code before VS Code does: it closes the VS Code pane', async () => {
+  it('leaves VS Code its keys; cmd+w in a window without editors closes the pane that has the keyboard', async () => {
     core.model.mutate('m', (l) => L.splitPane(l, 't2', 'vertical', { code: { id: 'c1', folder: '/srv/app' } }));
-    useKeys.setState({ effective: registry.keybindings.mac as Binding[] });
+    useFrames.setState({ frames: { 'm|c1': { m: 'm', id: 'c1', folder: '/srv/app', load: 0 } } });
+    const iframe = document.createElement('iframe');
+    iframe.className = 'code-frame';
+    iframe.dataset.frame = 'm|c1';
+    document.body.append(iframe);
+    const w = iframe.contentWindow!;
+    frameLoaded('m|c1', iframe);
+    const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
     try {
-      const key = (init: KeyboardEventInit) => new KeyboardEvent('keydown', { cancelable: true, ...init });
-      const focus = vi.fn(() => core.model.mutate('m', (l) => L.focusPane(l, 'code:c1')));
-      // VS Code keeps its other keys.
-      expect(handleFrameKey(key({ key: 't', code: 'KeyT', metaKey: true }), focus)).toBe(false);
-      expect(handleFrameKey(key({ key: 'j', code: 'KeyJ', metaKey: true }), focus)).toBe(false);
-      expect(focus).not.toHaveBeenCalled();
-      expect(handleFrameKey(key({ key: 'w', code: 'KeyW', metaKey: true }), focus)).toBe(true);
-      expect(focus).toHaveBeenCalled();
+      // The app takes no key from VS Code.
+      const ev = new KeyboardEvent('keydown', { key: 'w', code: 'KeyW', metaKey: true, cancelable: true });
+      w.dispatchEvent(ev);
+      expect(ev.defaultPrevented).toBe(false);
+      // The extension's cmd+w, from a window whose pane does not have the keyboard: nothing.
+      closeWindowPane('m', 'w1', ['/srv/app']);
+      await settle();
+      expect(L.findLeaf(core.layout('m') as L.Layout, 'code:c1')).not.toBeNull();
+      // From the window the focused iframe shows: its pane closes.
+      iframe.focus();
+      closeWindowPane('m', 'w1', ['/srv/app']);
       await settle();
       expect(L.findLeaf(core.layout('m') as L.Layout, 'code:c1')).toBeNull();
       expect(killed()).toEqual([]);
     } finally {
-      useKeys.setState({ effective: registry.keybindings['pc-browser'] as Binding[] });
+      hasFocus.mockRestore();
+      iframe.remove();
     }
   });
 

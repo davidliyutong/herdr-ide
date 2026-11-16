@@ -218,6 +218,10 @@ export function activate(ctx: vscode.ExtensionContext) {
     vscode.window.onDidChangeWindowState((s) => s.focused && send({ type: 'focus' })),
     vscode.commands.registerCommand(`${SLUG}.sendToAgent`, sendToAgent),
     vscode.commands.registerCommand(`${SLUG}.download`, download),
+    // VS Code's key for closing, in a window without editors (package.json's
+    // keybinding, where VS Code would close the window): the page closes
+    // the pane showing this window.
+    vscode.commands.registerCommand(`${SLUG}.closePane`, () => send({ type: 'closePane' })),
     vscode.commands.registerCommand(`${SLUG}.reconnect`, () => {
       clearTimeout(reconnectTimer);
       const old = sock;

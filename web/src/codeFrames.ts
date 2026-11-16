@@ -235,34 +235,17 @@ function frameFocused(k: string) {
   else (document.activeElement as HTMLElement | null)?.blur();
 }
 
-let frameKeys: ((ev: KeyboardEvent, focus: () => void) => boolean) | undefined;
-
-/** Sets what sees a key pressed in a frame before VS Code does
- * (keymap.ts handleFrameKey): true takes the key from VS Code; focus makes
- * the frame's pane the focused one first. */
-export function onFrameKey(fn: (ev: KeyboardEvent, focus: () => void) => boolean) {
-  frameKeys = fn;
-}
-
 /** Follows the keyboard into a frame's document, after each load (the
- * loading page, then VS Code), and gives the app the keys it takes there
- * first (onFrameKey), for the frame's pane. */
+ * loading page, then VS Code). Its keys are VS Code's: the app takes none
+ * of them there (in the desktop app on macOS, the menu gets those VS Code
+ * leaves). */
 export function frameLoaded(k: string, el: HTMLIFrameElement) {
   loaded.set(k, Date.now());
   try {
     const w = el.contentWindow;
     w?.addEventListener('focus', () => frameFocused(k));
     w?.addEventListener('pointerdown', () => ask(k), true);
-    w?.addEventListener(
-      'keydown',
-      (ev) => {
-        ask(k);
-        if (!frameKeys?.(ev, () => frameFocused(k))) return;
-        ev.preventDefault();
-        ev.stopImmediatePropagation();
-      },
-      true,
-    );
+    w?.addEventListener('keydown', () => ask(k), true);
   } catch {
     /* not the page's origin */
   }

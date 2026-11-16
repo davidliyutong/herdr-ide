@@ -12,6 +12,7 @@ import { TerminalStore } from '../term/store';
 import { isLive, type BackendState, type TerminalRecord } from '../term/protocol';
 import * as L from '../term/layout';
 import { currentDisplay } from '../appearance';
+import { useStore } from './store';
 
 export interface MachineTerms {
   backend?: BackendState;
@@ -327,6 +328,9 @@ export class TermModel {
   /** Starts a terminal (the machine's shell unless argv names a program) and
    * places it with place once it runs. A new tab starts in its workspace's
    * directory, else in the focused terminal's; a split the other way round.
+   * A workspace in the home directory (the machine's first one takes it
+   * from its first terminal) sends new tabs to the focused terminal's
+   * directory too: home is where they would start without one.
    * Asked for while the machine's terminals or layout are not ready, it runs
    * once they are. */
   run(m: string, o: RunOptions, place: (l: L.Layout, address: string) => L.Layout): Promise<string | undefined> {
@@ -340,7 +344,8 @@ export class TermModel {
       });
     }
     const ws = (o.workspace && layout.workspaces.find((w) => w.id === o.workspace)) || L.selectedWorkspace(layout);
-    const base = ws?.cwd || undefined;
+    const home = useStore.getState().machines[m]?.info?.home;
+    const base = ws?.cwd && !(home && L.normFolder(ws.cwd) === L.normFolder(home)) && ws.cwd !== '~' ? ws.cwd : undefined;
     const focused = this.directory(m, ws?.tabs[ws.selected]?.focused);
     const cwd = o.cwd ?? (o.split ? (focused ?? base) : (base ?? focused));
     // The theme's colors answer the program's first color queries, made

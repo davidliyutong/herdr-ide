@@ -65,8 +65,10 @@ Non-goals: arbitrary docking of panes; floating panes.
   a window 760 pixels wide or less the open sidebar lies over the panes
   with a dimmed backdrop; a press on the backdrop closes it. The uploads
   and downloads panels of the status bar have a ×.
-- A new tab starts in its workspace's directory, else in the focused
-  terminal's; a split in the directory of the pane split (a terminal's, a
+- A new tab starts in its workspace's directory, else (none, or the home
+  directory, which a machine's first workspace takes from its first
+  terminal) in the focused terminal's, so it follows `cd` there; a split
+  in the directory of the pane split (a terminal's, a
   VS Code pane's folder, a preview's file's directory), else the
   workspace's (`terminal.run` on the machine's terminal core). A terminal
   asked for while the machine's terminals are still starting opens once
@@ -463,11 +465,12 @@ described in [13](13-settings-and-appearance.md))
   `always`. VS Code takes its own keys before the menu: `cmd+j` toggles
   its own bottom panel there, and `cmd+p`, `cmd+shift+p`, `cmd+t`,
   `cmd+1`…`cmd+9`, `cmd+f`, `cmd+,` and `cmd+n` are VS Code's; a key it
-  leaves runs the menu's command where that applies. The one exception is
-  the key of `pane.close` (`cmd+w`): the page takes it from the iframe
-  before VS Code sees it (`handleFrameKey`), so it closes the VS Code pane
-  as it closes a terminal's pane; VS Code's editors close with their
-  tab's ×.
+  leaves runs the menu's command where that applies. `cmd+w` closes
+  VS Code's editor; in a window without editors (and one editor group),
+  where VS Code would close the window, the bridge extension binds it to
+  closing the pane showing that window (`bridge.close`, `closeWindowPane`;
+  `ctrl+w` elsewhere), so a pane emptied by `cmd+w` closes with the next
+  one. The page takes no key from VS Code.
 - With a program window or one of VS Code's own windows in front, the
   menu's commands that close a pane or a tab (`pane.close`, `tab.close`)
   close that window; the others bring the main window forward and run
@@ -526,6 +529,8 @@ described in [13](13-settings-and-appearance.md))
 | Keyboard Lock API | Fullscreen-only and Chromium-only. |
 | `cmd+]` / `cmd+[` for the next / previous pane | Safari, Finder and Xcode go forward and back with them; next and previous pane keep their commands without a key, and `cmd+alt+arrows` move between panes. |
 | Asking before closing a pane or tab with a program running | A dialog stops the closing; with 5 s to undo, `cmd+w` closes at once, twice in a row too, and a close by mistake is taken back with its program untouched. |
+| The page taking `pane.close`'s key (`cmd+w`) from VS Code, as earlier versions did | It closed the whole VS Code pane where VS Code's users close an editor; VS Code now has every key first, and its key closes the pane only in a window without editors, where VS Code would close its window. |
+| Every new tab in the focused terminal's directory | A workspace created for a folder keeps its tabs there; only a workspace without one, or in the home directory where every shell starts anyway, follows the focused terminal. |
 | Reopening a closed terminal later as a new shell in its directory | Its program and screen would be gone: Undo Close brings back the same terminal, and only while it still runs. |
 
 ## Failure modes
@@ -590,8 +595,8 @@ described in [13](13-settings-and-appearance.md))
 - `web/src/__tests__/desktop.test.ts`: key names on other layouts, the
   menu's commands: closing tabs and panes at once, their terminals ending
   once the close can no longer be undone, none under dialogs, the main UI's acting on the
-  VS Code pane that has the keyboard, `cmd+w` taken from VS Code to close
-  its pane, **Open in VS Code** (a tab for the focused terminal's folder,
+  VS Code pane that has the keyboard, VS Code's keys left to it and
+  `bridge.close` closing only the pane whose iframe has the keyboard, **Open in VS Code** (a tab for the focused terminal's folder,
   selected again the next time); the commands whose items are disabled
   (nothing to switch to, a dialog open, read-only).
 - `desktop/src/menu.test.ts` (the menu's structure, items named as their

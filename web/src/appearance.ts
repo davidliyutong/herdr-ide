@@ -25,6 +25,8 @@ export interface Appearance {
   optionIsMeta: boolean;
   boldIsBright: boolean;
   cursorStyle: 'block' | 'bar' | 'underline';
+  /** The bar's and underline's thickness, CSS pixels. */
+  cursorWidth: number;
   cursorBlink: boolean;
 }
 
@@ -93,6 +95,7 @@ export function appearanceOf(p: Prefs): Appearance {
     optionIsMeta: p.optionIsMeta,
     boldIsBright: p.boldIsBright,
     cursorStyle: p.cursorStyle,
+    cursorWidth: p.cursorWidth,
     cursorBlink: p.cursorBlink,
   };
 }

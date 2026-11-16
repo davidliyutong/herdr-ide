@@ -259,10 +259,9 @@ system's rules run in the tests on any of them:
   page left (a text field, a VS Code pane or another window has the
   keyboard); Chromium's text fields edit with Cmd keys only through the
   Edit roles. While a VS Code pane has the keyboard, the menu's commands
-  for the main UI act on that pane; VS Code keeps its own keys (⌘J
-  toggles its own bottom panel there), except ⌘W (**Close Pane**), which
-  the page takes before VS Code sees it, so it closes the VS Code pane
-  ([04](04-layout-and-keyboard.md)).
+  for the main UI act on that pane; VS Code keeps its own keys first (⌘J
+  toggles its own bottom panel there, ⌘W closes its editor, and the pane
+  in a window without editors) ([04](04-layout-and-keyboard.md)).
   Keys without Cmd are shown but not registered, since macOS would offer
   them to a menu before the page. Such a key therefore runs its command
   only where the page matches keys itself: in a terminal or elsewhere in

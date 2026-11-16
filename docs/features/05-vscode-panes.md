@@ -140,11 +140,15 @@ works.
   `cmd+shift+p` are its own. In the desktop app on macOS a key VS Code
   leaves reaches the application menu, whose commands then act on the
   VS Code pane that has the keyboard, as on a terminal pane
-  ([04](04-layout-and-keyboard.md)). The key of `pane.close` (`cmd+w` in
-  the desktop app on macOS) is the one key the page takes before VS Code
-  sees it (a listener on the iframe's window, in the capture phase): it
-  closes the VS Code pane, as it closes a terminal pane, where VS Code
-  would close an editor (VS Code's editors close with their tab's ×).
+  ([04](04-layout-and-keyboard.md)). The page takes no key from VS Code:
+  `cmd+w` closes VS Code's editor. In a window without editors (and one
+  editor group), where VS Code would close its window, the bridge
+  extension binds `cmd+w` (`ctrl+w` elsewhere) to `closePane`: the core
+  passes it to the pages as `bridge.close {m, window, folders}`, and the
+  page whose iframe of that window has the keyboard closes its pane, as
+  `pane.close` would (`closeWindowPane`; nothing while a dialog is open
+  or in read-only mode). So `cmd+w` held closes the editors, then the
+  pane.
 
 **Theme** (`theme` WebSocket message, `bridgeHub.setTheme`)
 
@@ -225,7 +229,7 @@ works.
 | One VS Code window per machine and folder, shared by the panes showing it | Two panes of one folder can be on screen together in a tab, and an iframe has one place; one window per pane also tells which pane a command or a Send to Agent is for. |
 | Telling the extension its pane through the iframe's URL | The extension host runs on the machine and sees neither the page's URL nor its storage; the window's focus, which it does see, is matched with the iframe that has the keyboard. |
 | Keeping every VS Code window loaded | Each is a whole workbench in the browser, and its connection keeps code-server from stopping when idle; windows off screen are bounded by time and count instead. |
-| Taking every app key from VS Code | VS Code's own keys (`cmd+p`, `cmd+shift+p`, `cmd+j`, `cmd+1…9`) are what its users expect there; only closing the pane, which VS Code's `cmd+w` would make close an editor, goes to the app first. |
+| Taking every app key from VS Code, or `cmd+w` alone, as earlier versions did | VS Code's own keys (`cmd+p`, `cmd+shift+p`, `cmd+j`, `cmd+1…9`, `cmd+w`) are what its users expect there; a page that took `cmd+w` closed the whole pane where they meant to close an editor. |
 ## Failure modes
 
 - **code-server crashes or the agent reconnects** → proxy errors invalidate
@@ -300,7 +304,9 @@ VS Code's "open in browser" links for forwarded ports therefore do not work.
   commands' window or `fresh`, where Send to Agent goes; the browser keys of
   the earlier panel dropped. `web/src/__tests__/desktop.test.ts`: Open in VS Code
   by the menu, the menu's commands acting on the VS Code pane that has the
-  keyboard, `cmd+w` taken from VS Code. `paneHeader.test.ts` (a VS Code
+  keyboard, VS Code's keys left to it and `bridge.close` closing only the
+  pane whose iframe has the keyboard; `internal/server/download_test.go`
+  (`TestBridgeClose`). `paneHeader.test.ts` (a VS Code
   pane's header), `tabLabels.test.ts` (a VS Code tab's label).
 - `web/src/__tests__/download.test.ts` (only the focused page downloads),
   `desktop/src/policy.test.ts` (the File System Access permission).

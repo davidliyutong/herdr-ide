@@ -108,7 +108,8 @@ in the UI; a setting with a scope can have its own value per machine, under
 | `terminal.fontSize` | number, 6–40 | `13` | – | – |
 | `terminal.fontWeight` | `regular`, `medium` | `"regular"` | – | – |
 | `terminal.lineHeight` | number, 0.8–2 | `1.05` | – | – |
-| `terminal.cursorStyle` | `block`, `bar`, `underline` | `"block"` | – | – |
+| `terminal.cursorStyle` | `block`, `bar`, `underline` | `"bar"` | – | – |
+| `terminal.cursorWidth` | number, 0.5–4 | `1` | – | – |
 | `terminal.cursorBlink` | `true`, `false` | `true` | – | – |
 | `terminal.scrollback` | integer, 0–100000 | `10000` | – | – |
 | `terminal.bell` | `none`, `sound`, `visual` | `"visual"` | – | – |

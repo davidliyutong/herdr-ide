@@ -342,12 +342,11 @@ settings per browser; theming terminal applications.
   the same way (`ctrl+k ctrl+k` types `ctrl+k`, whatever the stroke is); a
   chord matching nothing ends and its key is dropped. While a dialog or
   the palette is open only `dialog` and `always` bindings run. Keys typed
-  in a VS Code pane go to VS Code, except the key of `pane.close`
-  (`cmd+w` in the desktop app on macOS), which the page takes from the
-  pane's iframe first, so it closes the VS Code pane as it closes a
-  terminal's; in the desktop app on macOS the keys VS Code leaves reach the
+  in a VS Code pane go to VS Code first, `cmd+w` (closing an editor) too;
+  in the desktop app on macOS the keys VS Code leaves reach the
   application menu, which runs the `terminal`, `vscode` and `always`
-  commands on that pane ([04](04-layout-and-keyboard.md)). Key hints (tooltips,
+  commands on that pane, and VS Code's key for closing in a window
+  without editors closes the pane ([04](04-layout-and-keyboard.md)). Key hints (tooltips,
   context menus, the palette, the status bar) show the command's direct
   shortcut in the desktop app, else its first key, and nothing when it has
   none. The status bar offers **Keyboard shortcuts** and **Command
@@ -426,7 +425,11 @@ settings per browser; theming terminal applications.
   ([16](16-desktop-packaging.md)). Every terminal setting applies at once in the
   browser's terminals ([26](26-web-terminals.md)): font family, size,
   weight and line height (a new cell size resizes the terminals), colors,
-  cursor style and blink (the cursor a program's reset returns to),
+  cursor style, thickness and blink (the cursor a program's reset
+  returns to; a thin bar by default, `terminal.cursorWidth` 0.5–4 CSS
+  pixels for the bar and the underline; a blinking cursor stays lit
+  while it moves, so a cursor held by an arrow key or followed while
+  typing is never dark),
   scrollback (lines kept by the emulator and asked for when attaching),
   copy on select, bold as bright, Option as Meta and the program clipboard;
   the bell flashes the pane, beeps or does nothing.

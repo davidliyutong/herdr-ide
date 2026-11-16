@@ -122,6 +122,27 @@ describe('TermModel', () => {
     expect(terminalOnScreen('m', 'other')).toBe(false);
   });
 
+  it('opens a tab of a workspace in the home directory where the focused terminal is', async () => {
+    const core = new FakeCore();
+    core.machine('m', [FakeCore.term('a', { foreground: { name: 'zsh', cwd: '/home/u/proj' } })], {
+      version: 2,
+      workspaces: [{ id: 'xxxxxxxx', name: '', cwd: '/home/u/', tabs: [tab('a')], selected: 0 }],
+      selected: 0,
+    });
+    const model = core.install();
+    useStore
+      .getState()
+      .setMachines([{ id: 'm', label: 'm', kind: 'ssh', status: 'ready', info: { home: '/home/u' } } as unknown as MachineState]);
+    model.subscribe('m');
+    await settle();
+    await actions.newTab('m', 'xxxxxxxx');
+    expect(core.calls.filter((c) => c.method === 'terminal.run').pop()?.params).toEqual({
+      keep: false,
+      cwd: '/home/u/proj',
+      display: expect.any(Object),
+    });
+  });
+
   it('lists agents by how much they need the user', async () => {
     const core = new FakeCore();
     core.machine('m', [

@@ -31,6 +31,8 @@ export interface Look {
   selection: number;
   match: number;
   matchCurrent: number;
+  /** The bar and underline cursors' thickness, CSS pixels. */
+  cursorWidth: number;
 }
 
 /** A range of cells in a row: columns [from, to). */
@@ -81,9 +83,14 @@ function luminance(n: number): number {
 
 /** The renderer's colors for a theme: the selection setting, amber matches
  * (dimmer on dark backgrounds so text keeps its contrast). */
-export function lookOf(selection: string, background: string): Look {
+export function lookOf(selection: string, background: string, cursorWidth = 1): Look {
   const dark = luminance(hexColor(background)) < 0.5;
-  return { selection: hexColor(selection), match: dark ? 0x5c4813 : 0xfff2b3, matchCurrent: dark ? 0x9a6a00 : 0xffc94d };
+  return {
+    selection: hexColor(selection),
+    match: dark ? 0x5c4813 : 0xfff2b3,
+    matchCurrent: dark ? 0x9a6a00 : 0xffc94d,
+    cursorWidth,
+  };
 }
 
 const inside = (cells: Cells[] | undefined, y: number, x: number) => !!cells?.some((c) => c.y === y && x >= c.from && x < c.to);
@@ -151,7 +158,13 @@ export function drawRow(row: Row, y: number, frame: Frame, look: Look, ov: Overl
   }
   if (cursorHere && cur.x < cols && !(ov.focused && cur.style === 'block')) {
     const span = row.wide[cur.x] === WIDE_WIDE ? Math.min(2, cols - cur.x) : 1;
-    glyphs.push({ col: cur.x, span, glyph: { kind: 'cursor', style: ov.focused ? cur.style : 'hollow' }, color: cursorColor, alpha: 1 });
+    glyphs.push({
+      col: cur.x,
+      span,
+      glyph: { kind: 'cursor', style: ov.focused ? cur.style : 'hollow', width: look.cursorWidth },
+      color: cursorColor,
+      alpha: 1,
+    });
   }
   return { bg: bgs, glyphs };
 }

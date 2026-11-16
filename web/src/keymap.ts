@@ -20,6 +20,7 @@ import { paneHandle } from './state/panes';
 import { currentZoom, zoom, zoomAvailable, ZOOM_LEVELS } from './zoom';
 import { fullDiskAccessAvailable, openFullDiskAccess } from './fullDiskAccess';
 import { activePanels, commandOfOffPlugin, pluginCommand } from './plugins/registry';
+import { useFrames, windowFocused } from './codeFrames';
 
 /** Where a key is pressed: the main UI, a VS Code pane, or a dialog. */
 export type KeyContext = 'terminal' | 'vscode' | 'dialog';
@@ -148,22 +149,16 @@ export function handleKey(ev: KeyboardEvent, ctx: KeyContext = keyContext()): bo
   }
 }
 
-/** Commands whose keys a VS Code pane gives the app before VS Code sees
- * them, so that they act on the pane as on a terminal's: cmd+w closes it
- * (VS Code would close an editor). VS Code keeps every other key. */
-export const PANE_COMMANDS: ReadonlySet<string> = new Set(['pane.close']);
-
-/** A key pressed in a VS Code pane, before VS Code: runs a PANE_COMMANDS
- * command bound to it as one stroke, on that pane (focus makes it the
- * focused one), and returns true (the caller keeps it from VS Code). */
-export function handleFrameKey(ev: KeyboardEvent, focus: () => void = () => {}): boolean {
-  if (ev.type !== 'keydown' || keyContext() === 'dialog' || pending) return false;
-  const stroke = strokeOf(ev);
-  const b = stroke ? bindings().find((x) => PANE_COMMANDS.has(x.command) && x.key === stroke && applies(x.when, 'vscode')) : undefined;
-  if (!b) return false;
-  focus();
-  if (!ev.repeat || REPEATING_COMMANDS.has(b.command)) runCommand(b.command);
-  return true;
+/** VS Code's key for closing, pressed in a window without editors
+ * (bridge.close; the extension binds it there, as VS Code closes such a
+ * window): closes the VS Code pane showing that window, when this page has
+ * the keyboard there. Every other key in a VS Code pane is VS Code's
+ * first. */
+export function closeWindowPane(m: string, window: string, folders?: string[]) {
+  const k = windowFocused(m, window, folders);
+  const fr = k ? useFrames.getState().frames[k] : undefined;
+  if (!fr || keyContext() === 'dialog' || !commandEnabled('pane.close')) return;
+  void actions.closePane(fr.m, L.codeKey(fr.id));
 }
 
 /** The label of a command, e.g. "New Tab". */

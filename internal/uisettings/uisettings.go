@@ -65,6 +65,7 @@ func defs() []settings.Def {
 	zoomMin, zoomMax := rng(MinZoom, MaxZoom)
 	fontMin, fontMax := rng(6, 40)
 	lineMin, lineMax := rng(0.8, 2)
+	cursorMin, cursorMax := rng(0.5, 4)
 	scrollMin, scrollMax := rng(0, MaxScrollback)
 	out := []settings.Def{
 		// Appearance.
@@ -91,8 +92,13 @@ func defs() []settings.Def {
 			Section: "terminal", Group: "text", Order: 30},
 		{Key: "terminal.lineHeight", Type: settings.TypeNumber, Default: 1.05, Min: lineMin, Max: lineMax, Step: 0.05,
 			Section: "terminal", Group: "text", Order: 40},
-		{Key: "terminal.cursorStyle", Type: settings.TypeEnum, Default: "block", Enum: []string{"block", "bar", "underline"},
+		// A thin bar by default, as text fields and editors show it; programs
+		// may ask for another shape (DECSCUSR).
+		{Key: "terminal.cursorStyle", Type: settings.TypeEnum, Default: "bar", Enum: []string{"block", "bar", "underline"},
 			Section: "terminal", Group: "cursor", Order: 50},
+		// The bar's and the underline's thickness, in CSS pixels.
+		{Key: "terminal.cursorWidth", Type: settings.TypeNumber, Default: 1, Min: cursorMin, Max: cursorMax, Step: 0.5,
+			Section: "terminal", Group: "cursor", Order: 55},
 		{Key: "terminal.cursorBlink", Type: settings.TypeBool, Default: true, Section: "terminal", Group: "cursor", Order: 60},
 		{Key: Scrollback, Type: settings.TypeNumber, Default: 10000, Min: scrollMin, Max: scrollMax, Integer: true,
 			Step: 1000, Section: "terminal", Group: "behavior", Order: 70},

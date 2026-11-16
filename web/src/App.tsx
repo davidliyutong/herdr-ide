@@ -17,7 +17,7 @@ import { ContextMenu } from './components/ContextMenu';
 import { initDesktop } from './desktop';
 import { warnOnUnload } from './unsaved';
 import { takeOpenedFolders } from './drop';
-import { commandLabel, handleFrameKey, handleKey, keyHint, onChordChange, pendingChord, runCommand } from './keymap';
+import { closeWindowPane, commandLabel, handleKey, keyHint, onChordChange, pendingChord, runCommand } from './keymap';
 import { applySettings, loadSettings } from './settings';
 import { applyKeybindings, loadKeybindings, useKeys } from './keybindings';
 import { t } from './i18n';
@@ -27,7 +27,7 @@ import * as L from './term/layout';
 import { useGui } from './gui/state';
 import { bridgeDownload, downloadEvent, resyncDownloads } from './download';
 import { noteFocusedTerminal, sendTarget } from './lib/bridge';
-import { onFrameKey, windowFocused } from './codeFrames';
+import { windowFocused } from './codeFrames';
 import { describeView, pluginMessage, useActivePlugins, usePanels } from './plugins/registry';
 import { RightBar } from './components/RightBar';
 import './plugins';
@@ -132,6 +132,7 @@ export function App() {
       onBridgeSend: (m, text, window, folders) => pasteToAgent(m, text, window, folders),
       onBridgeDownload: (m, paths, window) => bridgeDownload(m, paths, window),
       onBridgeFocus: (m, window, folders) => void windowFocused(m, window, folders),
+      onBridgeClose: (m, window, folders) => closeWindowPane(m, window, folders),
       onDownload: (ev) => downloadEvent(ev),
       onGui: (st) => useGui.getState().setState(st),
       onSettings: (m) => applySettings(m),
@@ -155,8 +156,6 @@ export function App() {
       handleKey(ev);
     };
     window.addEventListener('keydown', onKey);
-    // A VS Code pane gives the app its pane keys (cmd+w) before VS Code.
-    onFrameKey(handleFrameKey);
     return () => {
       off();
       offTerms();

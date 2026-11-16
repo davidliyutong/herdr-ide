@@ -143,7 +143,7 @@ export class TermPane {
   private renderer?: Renderer;
   private frame: Frame = newFrame(1, 1);
   private metrics?: Metrics;
-  private look: Look = { selection: 0x3b4a6b, match: 0x5c4813, matchCurrent: 0x9a6a00 };
+  private look: Look = { selection: 0x3b4a6b, match: 0x5c4813, matchCurrent: 0x9a6a00, cursorWidth: 1 };
   private appearance: Appearance;
   private stream?: number;
   /** The display facts the core has for the stream (JSON), to send changes only. */
@@ -155,6 +155,8 @@ export class TermPane {
   private disposed = false;
   private focused = false;
   private blinkOn = true;
+  /** Where the cursor was last drawn (cursorMoved). */
+  private cursorAt = '';
   private blinkTimer?: number;
   private held = false;
   private heldSince = 0;
@@ -217,7 +219,7 @@ export class TermPane {
 
   setAppearance(a: Appearance) {
     this.appearance = a;
-    this.look = lookOf(a.colors.selection, a.colors.background);
+    this.look = lookOf(a.colors.selection, a.colors.background, a.cursorWidth);
     if (!this.vt) return;
     const dpr = window.devicePixelRatio || 1;
     if (dpr !== this.dpr || !this.dprQuery) {
@@ -414,6 +416,7 @@ export class TermPane {
       return;
     }
     const changed = term.update(this.frame);
+    this.cursorMoved();
     if (changed && useFind.getState().terminal === this.o.address && useFind.getState().m === this.o.m && this.findQuery) {
       term.findRefresh();
       this.matchesChanged();
@@ -464,6 +467,19 @@ export class TermPane {
     this.textarea.style.left = `${(c.x * m.cw) / this.dpr}px`;
     this.textarea.style.top = `${(c.y * m.ch) / this.dpr}px`;
     this.textarea.style.height = `${m.ch / this.dpr}px`;
+  }
+
+  /** A blinking cursor stays lit while it moves, as in other terminals:
+   * each move starts the blink's period again, so the cursor held by an
+   * arrow key, or followed while typing, never goes dark. */
+  private cursorMoved() {
+    const c = this.frame.cursor;
+    const at = `${c.x} ${c.y} ${c.visible}`;
+    if (at === this.cursorAt) return;
+    this.cursorAt = at;
+    if (!this.focused || !c.blinking) return;
+    this.startBlink();
+    this.frame.dirty.add(c.y);
   }
 
   private startBlink() {

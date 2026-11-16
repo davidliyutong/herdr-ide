@@ -60,6 +60,12 @@
         "key": "ctrl+alt+a",
         "mac": "cmd+alt+a",
         "when": "editorTextFocus"
+      },
+      {
+        "command": "herdr-ide.closePane",
+        "key": "ctrl+w",
+        "mac": "cmd+w",
+        "when": "!editorIsOpen && !multipleEditorGroups"
       }
     ]
   },

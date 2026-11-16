@@ -514,3 +514,32 @@ func TestDownloadEdges(t *testing.T) {
 		t.Fatalf("browser gone during the stat: %+v", e)
 	}
 }
+
+// VS Code's key for closing in a window without editors reaches the pages as
+// bridge.close, naming the window; before its hello no page could tell it.
+func TestBridgeClose(t *testing.T) {
+	s := newTestServer()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c := &wsClient{s: s, ctx: ctx, cancel: cancel, send: make(chan []byte, 8)}
+	s.clients[c] = true
+	mc := machines.NewManager([]machines.Spec{{ID: "m", Label: "m", Kind: machines.KindSSH, Target: "m"}}, nil, log.New(io.Discard, "", 0)).Get("m")
+	a, b := net.Pipe()
+	go s.bridge.serve(mc, a)
+	r := bufio.NewReader(b)
+	if _, err := r.ReadString('\n'); err != nil { // the bridge's reply
+		t.Fatal(err)
+	}
+	b.Write([]byte(`{"type":"closePane"}` + "\n"))
+	b.Write([]byte(`{"type":"hello","id":"w1","folders":["/srv"]}` + "\n"))
+	b.Write([]byte(`{"type":"closePane"}` + "\n"))
+	select {
+	case m := <-c.send:
+		if string(m) != `{"folders":["/srv"],"m":"m","t":"bridge.close","window":"w1"}` {
+			t.Fatalf("got %s", m)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no bridge.close")
+	}
+	b.Close()
+}
