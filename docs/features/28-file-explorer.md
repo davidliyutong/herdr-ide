@@ -256,7 +256,13 @@ button.
   start and end, and beyond 2000 edits the lines between the first and the
   last difference are one change. With changes, the bar offers **Open
   Changes**, the provider's diff of the file.
-- ⌘S (Ctrl+S) or the toolbar saves: `POST …/p/files/write?path=&mtime=&size=`
+- ⌘S (Ctrl+S) or the toolbar saves the pane that has the keyboard: each
+  editor listens to its own keys (Monaco's shared keybinding service would
+  give the chord to the editor created last), and keys pressed on the pane's
+  toolbar or banner outside the editor save the pane too (`plugins/saveKey.ts`);
+  the chord is not bound app-wide, Ctrl+S keeps reaching terminals, and a
+  save that is running is not started again by a held key. The save:
+  `POST …/p/files/write?path=&mtime=&size=`
   with the text as the body (`new=1` for a file not there yet, `force=1`
   to overwrite). The agent checks the file is as loaded and receives the
   whole text before it touches the file, so a save that breaks off

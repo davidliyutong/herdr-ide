@@ -49,7 +49,7 @@ const editor = {
   getValue() {
     return this.model!.getValue();
   },
-  addCommand() {},
+  onKeyDown: () => ({ dispose() {} }),
   updateOptions() {},
   focus() {},
   dispose() {},
@@ -60,7 +60,13 @@ const editor = {
     return { clear() {} };
   },
 };
-const side = () => ({ addCommand() {}, onDidFocusEditorText() {}, getSelections: () => [], updateOptions() {}, focus() {} });
+const side = () => ({
+  onKeyDown: () => ({ dispose() {} }),
+  onDidFocusEditorText() {},
+  getSelections: () => [],
+  updateOptions() {},
+  focus() {},
+});
 const diffEditor = {
   model: undefined as { original: FakeModel; modified: FakeModel } | undefined,
   modifiedSide: side(),

@@ -8,7 +8,8 @@
 // selected ranges (patch.ts) are staged, unstaged or discarded from its
 // toolbar.
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { saveHandlers } from '../saveKey';
 import { ArrowDown, ArrowUp, Columns2, FileText, FoldVertical, Minus, Plus, RefreshCw, Rows2, Save, Undo2 } from 'lucide-react';
 import { useStore } from '../../state/store';
 import { confirmDialog } from '../../dialog';
@@ -252,6 +253,7 @@ export function DiffPane({ m, pane, view, focused }: PaneViewProps) {
   );
   const saveRef = useRef(save);
   saveRef.current = save;
+  const saveKeys = useMemo(() => saveHandlers(() => saveRef.current()), []);
   // Closing the pane with changes not saved asks first (unsaved.ts).
   useUnsaved(m, pane, dirty, baseName(d.path), () => saveRef.current());
 
@@ -262,6 +264,7 @@ export function DiffPane({ m, pane, view, focused }: PaneViewProps) {
     let disposed = false;
     let created: { editor: DiffEditor; monaco: Monaco } | undefined;
     let sub: { dispose(): void } | undefined;
+    let keys: Array<{ dispose(): void }> = [];
     setStatus({ kind: 'loading' });
     (async () => {
       const el = host.current;
@@ -276,7 +279,9 @@ export function DiffPane({ m, pane, view, focused }: PaneViewProps) {
       const modified = kept?.modified ?? monaco.editor.getModel(uri('r')) ?? monaco.editor.createModel('', undefined, uri('r'));
       editor.setModel({ original, modified });
       ed.current = created;
-      editor.getModifiedEditor().addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => void saveRef.current());
+      const chord = monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS;
+      // The read-only left side saves the right side too.
+      keys = [editor.getModifiedEditor(), editor.getOriginalEditor()].map((side) => side.onKeyDown((e) => saveKeys.editor(e, chord)));
       editor.getModifiedEditor().onDidFocusEditorText(() => (lastSide.current = 'modified'));
       editor.getOriginalEditor().onDidFocusEditorText(() => (lastSide.current = 'original'));
       sub = modified.onDidChangeContent(() => setDirty(modified.getAlternativeVersionId() !== savedAt.current));
@@ -296,6 +301,7 @@ export function DiffPane({ m, pane, view, focused }: PaneViewProps) {
       const c = created ?? ed.current;
       ed.current = undefined;
       sub?.dispose();
+      keys.forEach((k) => k.dispose());
       const model = c?.editor.getModel();
       c?.editor.dispose();
       if (!model) return;
@@ -445,7 +451,7 @@ export function DiffPane({ m, pane, view, focused }: PaneViewProps) {
   const canRanges = !readOnly && status.kind === 'ready' && changes > 0 && rules.ranges;
 
   return (
-    <div className="git-diff" data-autofocus tabIndex={-1}>
+    <div className="git-diff" data-autofocus tabIndex={-1} onKeyDown={saveKeys.root}>
       <div className="git-diff-bar">
         <span className="git-diff-path ellipsis" title={d.orig ? `${d.orig} → ${d.path}` : d.path}>
           {diffTitle(d)}

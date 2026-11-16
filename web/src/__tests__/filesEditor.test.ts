@@ -77,8 +77,12 @@ const editor = {
   getValue() {
     return this.model!.getValue();
   },
-  addCommand(_key: number, f: () => void) {
-    this.save = f;
+  /** The key listeners of this editor: the save chord runs `save`. */
+  onKeyDown(
+    l: (e: { equals(k: number): boolean; browserEvent: { repeat: boolean }; preventDefault(): void; stopPropagation(): void }) => void,
+  ) {
+    this.save = () => l({ equals: (k) => k === (2048 | 49), browserEvent: { repeat: false }, preventDefault() {}, stopPropagation() {} });
+    return { dispose() {} };
   },
   updateOptions(o: { readOnly?: boolean }) {
     this.readOnly = o.readOnly;
@@ -96,6 +100,7 @@ const editor = {
     return { clear: () => (editor.decorations = []) };
   },
 };
+let separate = false;
 const monaco = {
   Uri: { from: (o: unknown) => o },
   KeyMod: { CtrlCmd: 2048 },
@@ -112,8 +117,10 @@ const monaco = {
 };
 vi.mock('../plugins/monaco', () => ({
   createEditor: vi.fn(async (_el: HTMLElement, o: { readOnly?: boolean }) => {
-    editor.readOnly = o.readOnly;
-    return { monaco, editor };
+    // With `separate`, each editor is its own (as in Monaco): own model and key listener.
+    const e = separate ? Object.create(editor) : editor;
+    e.readOnly = o.readOnly;
+    return { monaco, editor: e };
   }),
 }));
 
@@ -220,6 +227,66 @@ describe('EditorPane', () => {
     await act(async () => root.unmount());
     host.remove();
     vi.unstubAllGlobals();
+  });
+
+  // The chord is each editor's own: with two panes mounted, Cmd+S in one
+  // saves its file, not the one of the editor created last.
+  it('saves each pane’s own file on the save chord, and on the chord outside the editor', async () => {
+    separate = true;
+    try {
+      const editors: Array<{ model?: FakeModel; save?: () => void }> = [];
+      const hosts = [document.createElement('div'), document.createElement('div')];
+      const roots = hosts.map((h) => {
+        document.body.append(h);
+        return createRoot(h);
+      });
+      const paths = ['/home/u/a.txt', '/home/u/b.txt'];
+      const { createEditor } = await import('../plugins/monaco');
+      const spy = vi.mocked(createEditor);
+      for (const i of [0, 1]) {
+        await act(async () =>
+          roots[i].render(
+            createElement(EditorPane, {
+              m: 'm',
+              pane: `view:v${i}`,
+              view: { id: `v${i}`, plugin: 'files', kind: 'editor', path: paths[i] },
+              focused: true,
+            }),
+          ),
+        );
+        await flush();
+        await flush();
+        editors.push((await spy.mock.results[spy.mock.results.length - 1].value).editor);
+      }
+      await act(async () => editors[0].model!.setValue('first'));
+      await act(async () => editors[0].save!());
+      await flush();
+      expect(writes.map((w) => [w.q.get('path'), w.body])).toEqual([['/home/u/a.txt', 'first']]);
+
+      // On the toolbar, outside Monaco: Ctrl+S (Cmd+S on macOS) of the pane at hand.
+      await act(async () => editors[1].model!.setValue('second'));
+      const bar = hosts[1].querySelector<HTMLElement>('.files-editor')!;
+      const key = (init: KeyboardEventInit) => {
+        const ev = new KeyboardEvent('keydown', { key: 's', bubbles: true, cancelable: true, ...init });
+        bar.dispatchEvent(ev);
+        return ev;
+      };
+      const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+      const chord = mac ? { metaKey: true } : { ctrlKey: true };
+      expect(key({ ...chord, shiftKey: true }).defaultPrevented).toBe(false);
+      expect(key({ ...chord, repeat: true }).defaultPrevented).toBe(true);
+      expect(writes).toHaveLength(1);
+      expect(key(chord).defaultPrevented).toBe(true);
+      await flush();
+      expect(writes.map((w) => [w.q.get('path'), w.body])).toEqual([
+        ['/home/u/a.txt', 'first'],
+        ['/home/u/b.txt', 'second'],
+      ]);
+      for (const r of roots) await act(async () => r.unmount());
+      hosts.forEach((h) => h.remove());
+    } finally {
+      separate = false;
+    }
   });
 
   it('reads the version from the ETag', () => {

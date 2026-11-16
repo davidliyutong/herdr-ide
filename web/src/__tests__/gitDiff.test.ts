@@ -45,8 +45,13 @@ const side = () => ({
   commands: [] as Array<() => void>,
   focusListener: undefined as (() => void) | undefined,
   readOnly: undefined as boolean | undefined,
-  addCommand(_k: number, f: () => void) {
-    this.commands.push(f);
+  onKeyDown(
+    f: (e: { equals(k: number): boolean; browserEvent: { repeat: boolean }; preventDefault(): void; stopPropagation(): void }) => void,
+  ) {
+    this.commands.push(() =>
+      f({ equals: (k) => k === (2048 | 49), browserEvent: { repeat: false }, preventDefault() {}, stopPropagation() {} }),
+    );
+    return { dispose() {} };
   },
   onDidFocusEditorText(f: () => void) {
     this.focusListener = f;

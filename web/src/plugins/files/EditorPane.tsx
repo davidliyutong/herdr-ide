@@ -11,7 +11,8 @@
 // Binary files, text that is not UTF-8 and files over MAX_SIZE offer a
 // download; a UTF-8 byte order mark is kept. Read-only mode edits nothing.
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { saveHandlers } from '../saveKey';
 import { Download, FileDiff, FolderTree, Pin, RotateCcw, Save } from 'lucide-react';
 import { fileUrl } from '../../lib/files';
 import { useStore } from '../../state/store';
@@ -373,6 +374,7 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
   );
   const saveRef = useRef(save);
   saveRef.current = save;
+  const saveKeys = useMemo(() => saveHandlers(() => saveRef.current()), []);
   // The first edit keeps a preview open, as in VS Code.
   useEffect(() => {
     if (dirty && view.preview === true) keepEditor(m, pane);
@@ -388,6 +390,7 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
     let disposed = false;
     let created: { editor: CodeEditor; monaco: Monaco } | undefined;
     let sub: { dispose(): void } | undefined;
+    let keys: { dispose(): void } | undefined;
     (async () => {
       const first = await loadText(m, path).catch((e): Loaded => ({ kind: 'error', message: errorText(e) }));
       if (disposed) return;
@@ -411,7 +414,7 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
       const model = kept?.model ?? monaco.editor.getModel(uri) ?? monaco.editor.createModel('', undefined, uri);
       editor.setModel(model);
       ed.current = created;
-      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => void saveRef.current());
+      keys = editor.onKeyDown((e) => saveKeys.editor(e, monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS));
       sub = model.onDidChangeContent(() => setDirty(model.getAlternativeVersionId() !== savedAt.current));
       if (kept) {
         setDirty(model.getAlternativeVersionId() !== kept.savedAt);
@@ -425,6 +428,7 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
       const c = created ?? ed.current;
       ed.current = undefined;
       sub?.dispose();
+      keys?.dispose();
       const model = c?.editor.getModel();
       c?.editor.dispose();
       if (!model) return;
@@ -513,7 +517,7 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
   );
 
   return (
-    <div className="files-editor" data-autofocus tabIndex={-1}>
+    <div className="files-editor" data-autofocus tabIndex={-1} onKeyDown={saveKeys.root}>
       <EditorBar m={m} pane={pane} view={view}>
         {dirty && (
           <span className="files-dirty" title={t('files.unsaved')} aria-label={t('files.unsaved')}>

@@ -349,7 +349,9 @@ Code's preview editor does, so going through the changes keeps one pane):
 - Monaco's diff editor (`createDiffEditor`): side by side or inline,
   unchanged regions collapsed (a toggle), previous and next change, the
   number of changes. Binary files and files over 8 MiB are not shown.
-- In `worktree` mode the right side saves with ⌘S (Ctrl+S) or the toolbar
+- In `worktree` mode the right side saves with the toolbar's button or
+  ⌘S (Ctrl+S) pressed in either side's editor or on the toolbar (each pane
+  saves its own file, as the file explorer's editors do)
   through the file explorer's save (`POST …/p/files/write`), with the size
   and modification time `blob` gave: a file changed meanwhile is not
   overwritten (a toast offers to load it again). Unsaved text keeps the
