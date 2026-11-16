@@ -203,7 +203,7 @@ describe('workspaces and machines selected together', () => {
   const rows = () => [...host.querySelectorAll<HTMLElement>('.ws-item[data-ws-id]')];
   const heads = () => [...host.querySelectorAll<HTMLElement>('.machine-head')];
 
-  it('closes several workspaces after one confirmation naming them', async () => {
+  it('closes several workspaces at once, and one Undo brings them back with their terminals', async () => {
     await render(() => <Sidebar />);
     await act(async () => rows()[2].dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true })));
     expect(rows().map((r) => r.classList.contains('multi'))).toEqual([true, false, true]);
@@ -215,15 +215,18 @@ describe('workspaces and machines selected together', () => {
     await act(async () => rows()[2].dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true })));
     expect(selectedIds({ kind: 'workspace', m: 'm' })).toEqual(['w2w2w2w2', 'w3w3w3w3']);
     const items = await menuOf(rows()[2]);
-    expect(items.map((i) => i.label)).toEqual(['Close 2 Workspaces…']);
+    expect(items.map((i) => i.label)).toEqual(['Close 2 Workspaces']);
+    const before = core.layout('m')!.workspaces;
     items[0].run!();
-    await vi.waitFor(() => expect(useDialog.getState().current).toBeDefined());
-    const req = useDialog.getState().current!;
-    expect(req).toMatchObject({ kind: 'confirm', title: 'Close 2 workspaces?', message: expect.stringContaining('“two”, “three”') });
-    if (req.kind === 'confirm') req.resolve(true);
     await settle();
+    expect(useDialog.getState().current).toBeUndefined();
     expect(core.layout('m')!.workspaces.map((w) => w.name)).toEqual(['one']);
-    expect(core.calls.filter((c) => c.method === 'terminal.kill').map((c) => c.params.terminal)).toEqual(['p5', 'p6']);
+    expect(useStore.getState().toasts.at(-1)?.msg).toBe('2 workspaces closed.');
+    // Their terminals run until the time to undo is over.
+    expect(core.calls.filter((c) => c.method === 'terminal.kill')).toEqual([]);
+    actions.undoClose();
+    await settle();
+    expect(core.layout('m')!.workspaces).toEqual(before);
   });
 
   it('acts on several machines from their menu, asking once, and removes the SSH ones', async () => {

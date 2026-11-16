@@ -333,6 +333,20 @@ export function closeWorkspace(layout: Layout, wsId: string): Layout {
   return { ...layout, workspaces, selected: afterRemoval(layout.selected, index, layout.workspaces.length) };
 }
 
+/** Puts a closed workspace back at its place (index, within the list),
+ * empty, as it was but for its tabs, which come back after it (reopen),
+ * and selects it; a workspace of that id there already stays as it is.
+ * The blank workspace a layout gets when its last one closed (no tab,
+ * name or directory, and not among known, the workspaces there when it
+ * closed) goes. */
+export function restoreWorkspace(layout: Layout, ws: Workspace, index: number, known: readonly string[] = []): Layout {
+  if (workspaceIndex(layout, ws.id) >= 0) return layout;
+  const kept = layout.workspaces.filter((w) => w.tabs.length || w.name || w.cwd || known.includes(w.id));
+  const place = clampIndex(index, kept.length + 1);
+  const workspaces = [...kept.slice(0, place), { ...ws, tabs: [], selected: 0 }, ...kept.slice(place)];
+  return { ...layout, workspaces, selected: place };
+}
+
 export function moveWorkspace(layout: Layout, wsId: string, to: number): Layout {
   const from = workspaceIndex(layout, wsId);
   const target = clampIndex(to, layout.workspaces.length);

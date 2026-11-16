@@ -68,6 +68,27 @@ describe('layout.reopen', () => {
     expect(both.workspaces[0].selected).toBe(0);
   });
 
+  it('puts a closed workspace back at its place, empty, for its tabs to follow', () => {
+    const one: L.Workspace = { id: 'aaaaaaaa', name: 'one', cwd: '/srv', tabs: [{ root: t('t1'), focused: 't1' }], selected: 0 };
+    const two: L.Workspace = { id: 'bbbbbbbb', name: 'two', cwd: '', tabs: [], selected: 0, extra: 1 };
+    const three: L.Workspace = { ...one, id: 'cccccccc', name: 'three' };
+    const after = L.closeWorkspace({ version: 2, workspaces: [one, two, three], selected: 2 }, 'bbbbbbbb');
+    const back = L.restoreWorkspace(after, two, 1);
+    expect(back.workspaces.map((w) => w.name)).toEqual(['one', 'two', 'three']);
+    expect(back.workspaces[1]).toEqual({ ...two, tabs: [] });
+    expect(back.selected).toBe(1);
+    // Past the end: at the end; one there already: as it is.
+    expect(L.restoreWorkspace(after, two, 9).workspaces.map((w) => w.name)).toEqual(['one', 'three', 'two']);
+    expect(L.restoreWorkspace(back, { ...two, name: 'again' }, 0)).toBe(back);
+    // The blank one a layout got when its last workspace closed goes.
+    const blank: L.Workspace = { id: 'dddddddd', name: '', cwd: '', tabs: [], selected: 0 };
+    const alone = L.restoreWorkspace({ version: 2, workspaces: [blank], selected: 0 }, one, 0, ['aaaaaaaa']);
+    expect(alone.workspaces.map((w) => w.id)).toEqual(['aaaaaaaa']);
+    // One that was there when it closed stays.
+    const known = L.restoreWorkspace({ version: 2, workspaces: [blank], selected: 0 }, one, 0, ['aaaaaaaa', 'dddddddd']);
+    expect(known.workspaces.map((w) => w.id)).toEqual(['aaaaaaaa', 'dddddddd']);
+  });
+
   it('brings a tab of a workspace that is gone to the selected one', () => {
     const all: L.Closed = { ws: 'gone', index: 3, tab: { root: t('t1'), focused: 't1' }, closed: ['t1'] };
     const back = L.reopen(layoutWith({ root: t('t5'), focused: 't5' }), all, new Map([['t1', t('t8')]]));
@@ -154,6 +175,35 @@ describe('closing with a way back, and going back, with a terminal core', () => 
     expect(L.panesOf(tabs()[0].root as L.Node)).toEqual(['t1', 't2']);
     await actions.closeTab('m', 'wwwwwwww', 0);
     await vi.waitFor(() => expect(killed().sort()).toEqual(['t1', 't2']), { timeout: 2000 });
+    expect(commandEnabled('pane.undoClose')).toBe(false);
+  });
+
+  it('closes a workspace at once and puts it back with its tabs and terminals', async () => {
+    // A second tab, shown, in the workspace.
+    await setup([running('t3', '/srv/c')]);
+    core.model.mutate('m', (l) => L.openTerminal(l, 't3', 'wwwwwwww'));
+    await settle();
+    const before = core.layout('m')!;
+    const terminals = L.workspaceTerminals(before.workspaces[0]);
+    expect(terminals).toHaveLength(3);
+    await actions.closeWorkspace('m', 'wwwwwwww');
+    await settle();
+    expect(useDialog.getState().current).toBeUndefined();
+    // The layout keeps a blank workspace to open terminals in.
+    expect(core.layout('m')!.workspaces.map((w) => [w.name, w.tabs.length])).toEqual([['', 0]]);
+    expect(killed()).toEqual([]);
+    for (const a of terminals) expect(Number(closing(a)[0])).toBeGreaterThan(Date.now());
+    expect(commandEnabled('pane.undoClose')).toBe(true);
+    runCommand('pane.undoClose');
+    await settle();
+    const back = core.layout('m')!;
+    expect(back.workspaces).toEqual(before.workspaces);
+    for (const a of terminals) expect(closing(a).at(-1)).toBe('');
+    await new Promise((r) => setTimeout(r, 500));
+    expect(killed()).toEqual([]);
+    // Once the time is over, its terminals end.
+    await actions.closeWorkspace('m', 'wwwwwwww');
+    await vi.waitFor(() => expect(killed().sort()).toEqual([...terminals].sort()), { timeout: 2000 });
     expect(commandEnabled('pane.undoClose')).toBe(false);
   });
 

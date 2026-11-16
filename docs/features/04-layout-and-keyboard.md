@@ -81,7 +81,7 @@ Non-goals: arbitrary docking of panes; floating panes.
   too, and a middle click closes a tab, as in browsers. Closing the last
   tab leaves its workspace in the sidebar, empty: the panes' area says it
   has no open terminals and offers **New Tab**; the workspace goes only
-  with **Close Workspace…**. A program that ends by
+  with **Close Workspace**. A program that ends by
   itself closes its pane the same way, and the finished terminal is removed
   from the terminal core.
 - Zoom shows the focused pane alone in its tab; it is this browser's own
@@ -181,8 +181,9 @@ Non-goals: arbitrary docking of panes; floating panes.
   after going back drops what lay ahead. Going to a pane shows its machine,
   workspace and tab; panes closed since are passed over. The history keeps
   the last 100 steps, in the page only.
-- **Close Pane** and **Close Tab** close at once, without asking, also
-  when a program runs: they can be undone for 5 s (`closedPanes.ts`).
+- **Close Pane**, **Close Tab** and **Close Workspace** close at once,
+  without asking, also when a program runs: they can be undone for 5 s
+  (`closedPanes.ts`).
   Only a pane with changes not saved (an editor, a diff's working tree)
   asks first, as does closing its workspace: **Save**, **Don't Save** or
   **Cancel**; a save that fails keeps it (`web/src/unsaved.ts`, which
@@ -196,7 +197,10 @@ Non-goals: arbitrary docking of panes; floating panes.
   closed pane's neighbors, unchanged since, the tab is as it was, with its
   splits' shares; a tab that changed meanwhile gets the pane split in
   beside its neighbor of then; a closed tab comes back at its place in its
-  workspace (the selected one when that is gone). A terminal whose program
+  workspace (the selected one when that is gone); a closed workspace comes
+  back at its place among the machine's, with its name, directory and
+  tabs, showing the tab it showed (`layout.restoreWorkspace`, then each
+  tab as a closed tab). A terminal whose program
   ended meanwhile, or a VS Code or preview opened again elsewhere, stays
   closed. The closed terminals end when the 5 s are over: each gets the
   label `closing` with that time (`TermModel.closeLater`), and every page
@@ -205,8 +209,7 @@ Non-goals: arbitrary docking of panes; floating panes.
   (reloaded, quit); Undo Close empties the label. In the desktop app on
   macOS its key is `cmd+z`: the page takes it in a terminal, while text
   fields and VS Code keep it for Undo (the Shell menu's item shows the key
-  without taking it). Closing a workspace still asks, and ends its
-  terminals at once.
+  without taking it).
 - Dragging a tab off the tab bar onto a pane of the tab shown merges the
   tabs, as Edge's split screen does: the dragged tab's panes, with their
   own splits, become a split of that pane on the side the pointer is
@@ -269,8 +272,8 @@ Non-goals: arbitrary docking of panes; floating panes.
     chosen, which is shown with the last of them; `layout.moveTabsToWorkspace`),
     **Close N Tabs**, at once, with one **Undo** for all of them, each back
     at its place (`closedPanes.ts` groups the records of one closing);
-  - workspaces: **Close N Workspaces…**, asking once and naming them (the
-    first five, then how many more), after the question about unsaved
+  - workspaces: **Close N Workspaces**, at once, with one **Undo** for all
+    of them, each back at its place, after the question about unsaved
     changes of any of them;
   - machines: **Retry**, **Enable**, **Disable…** (asking once, naming
     them, with the box to stop the terminal services of those connected)
@@ -364,10 +367,10 @@ Non-goals: arbitrary docking of panes; floating panes.
     Tab, Close Other Tabs, Close Tabs to the Right (`tab.closeOthers`,
     `tab.closeRight`: at once, with one Undo for all of them, as Close
     Tab);
-  - workspace: Edit Workspace…, New Tab, Move Up / Down, Close Workspace…,
-    Close Other Workspaces… (`workspace.closeOthers`: asking once and
-    naming them, after the question about unsaved changes, as Close
-    Workspace…);
+  - workspace: Edit Workspace…, New Tab, Move Up / Down, Close Workspace,
+    Close Other Workspaces (`workspace.closeOthers`: at once, with one
+    Undo for all of them, after the question about unsaved changes, as
+    Close Workspace);
   - machine: New Workspace…, Machine Settings… (the settings in the
     machine's scope, [13](13-settings-and-appearance.md)), Rename Machine,
     Copy SSH Host (SSH machines), Move Up / Down
@@ -662,8 +665,10 @@ described in [13](13-settings-and-appearance.md))
   directory).
 - `web/src/__tests__/reopen.test.ts`: a closed pane put back in its place
   with its splits' shares, beside its neighbor in a tab that changed, a
-  closed tab at its place; a closed terminal kept running until the time to
-  undo is over, the same terminal put back by Undo Close, one labeled
+  closed tab at its place, a closed workspace at its place with its tabs
+  and the tab it showed; a closed terminal kept running until the time to
+  undo is over, the same terminal put back by Undo Close (also a
+  workspace's, several closed together coming back with one Undo), one labeled
   closing by a page that is gone ended; going back and forward past closed
   panes.
 - `web/src/__tests__/tabLabels.test.ts`: tabs numbered unless named, a tab
@@ -735,7 +740,7 @@ described in [13](13-settings-and-appearance.md))
   buttons), the header as a toolbar (one Tab stop focusing its pane,
   arrows, F2 and Enter, Shift+F10, a mouse press not taking the keyboard).
 - `web/src/__tests__/menus.test.ts` also: Close Other Tabs and Close Tabs
-  to the Right with one Undo, Close Other Workspaces asking, and the
+  to the Right with one Undo, Close Other Workspaces with one Undo, and the
   commands `pane.rename` and `pane.actions`.
 - `web/src/__tests__/settingsDialog.test.ts`: the palette's ranking.
 

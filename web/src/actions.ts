@@ -15,7 +15,7 @@ import { agentOf, agentStatus, statusRank, terminalTitle, type AgentStatus } fro
 import { mediaExt } from './terminal/links';
 import { bridge, hasFrame, type BridgeCommand } from './lib/bridge';
 import { reloadFrame, setStopped } from './codeFrames';
-import { closingGroup, rememberClosed, takeClosed, UNDO_MS } from './closedPanes';
+import { closingGroup, rememberClosed, rememberWorkspace, takeClosed, UNDO_MS, type ClosedRecord } from './closedPanes';
 import { nameList } from './state/multiSelect';
 import { confirmUnsaved } from './unsaved';
 import { go, paneOpen, type Spot } from './paneHistory';
@@ -225,14 +225,16 @@ export function runningProgram(r: TerminalRecord | undefined): string {
 function closeWithUndo(m: string, layout: L.Layout, tabs: string[][], message: string) {
   const group = closingGroup();
   const now = Date.now();
-  let any = false;
-  for (const panes of tabs) {
-    const c = rememberClosed(m, layout, panes, now, group);
-    if (!c) continue;
-    any = true;
-    for (const a of c.terminals) terms.closeLater(m, a, c.deadline);
-  }
-  if (any) useStore.getState().toast(message, { label: t('closed.undo'), run: () => actions.undoClose(), ttl: UNDO_MS });
+  const closed = tabs.flatMap((panes) => rememberClosed(m, layout, panes, now, group) ?? []);
+  undoable(m, closed, message);
+}
+
+/** Has the terminals of records end when Undo Close can no longer bring
+ * them back, and says how to bring them back (nothing without records). */
+function undoable(m: string, closed: ClosedRecord[], message: string, always = false) {
+  for (const c of closed) for (const a of c.terminals) terms.closeLater(m, a, c.deadline);
+  if (closed.length || always)
+    useStore.getState().toast(message, { label: t('closed.undo'), run: () => actions.undoClose(), ttl: UNDO_MS });
 }
 
 /** Names as a confirmation lists them: quoted, the first few, then how many more. */
@@ -362,9 +364,16 @@ export const actions = {
    * together), as they were and where they were, their terminals' programs
    * still running. */
   undoClose() {
-    // Tabs come back at their places: the first ones first.
-    const records = takeClosed().sort((a, b) => a.index - b.index);
+    const { tabs, workspaces } = takeClosed();
+    // Workspaces first, at their places (the first first), then the tabs
+    // at theirs: the first ones first.
     let shown: string | undefined;
+    for (const w of workspaces.sort((a, b) => a.index - b.index)) {
+      useStore.getState().selectMachine(w.m);
+      terms.mutate(w.m, (l) => L.restoreWorkspace(l, w.workspace, w.index, w.known));
+      shown = w.m;
+    }
+    const records = tabs.sort((a, b) => a.index - b.index);
     for (const c of records) {
       const { m } = c;
       const restored = new Map<string, L.Leaf>();
@@ -387,6 +396,14 @@ export const actions = {
       useStore.getState().selectMachine(m);
       terms.mutate(m, (l) => L.reopen(l, c, restored));
       shown = m;
+    }
+    // Each workspace shows the tab it showed, and the last one is shown.
+    for (const w of workspaces) {
+      terms.mutate(w.m, (l) => {
+        const now = l.workspaces.find((x) => x.id === w.workspace.id);
+        const back = now && Math.min(w.workspace.selected, now.tabs.length - 1);
+        return back !== undefined && back >= 0 ? L.selectTab(l, w.workspace.id, back) : l;
+      });
     }
     const layout = shown ? terms.layout(shown) : undefined;
     const focused = layout && L.focusedPane(layout);
@@ -712,24 +729,10 @@ export const actions = {
     await actions.newTab(m, id);
   },
 
-  /** Closes a workspace after asking, unless it has no tab, and ends its terminals. */
+  /** Closes a workspace at once, without asking: its terminals end
+   * UNDO_MS later, and Undo Close brings it back until then. */
   async closeWorkspace(m: string, ws: string) {
-    const w = terms.layout(m)?.workspaces.find((x) => x.id === ws);
-    if (!w) return;
-    const addresses = L.workspaceTerminals(w);
-    if (!(await confirmUnsaved(m, w.tabs.flatMap(L.tabPanes)))) return;
-    if (
-      w.tabs.length > 0 &&
-      !(await confirmDialog({
-        title: t('confirm.closeWorkspaceTitle'),
-        message: t('confirm.closeWorkspace', { label: workspaceTitle(m, w) }),
-        confirm: t('confirm.close'),
-        danger: true,
-      }))
-    )
-      return;
-    terms.mutate(m, (l) => L.closeWorkspace(l, ws));
-    await Promise.all(addresses.map((a) => terms.kill(m, a)));
+    return actions.closeWorkspaces(m, [ws]);
   },
 
   /** Moves a tab to a slot of its workspace's tabs: 0 is before the first
@@ -757,12 +760,13 @@ export const actions = {
     if (others.length) await actions.closeWorkspaces(m, others);
   },
 
-  /** Closes several workspaces of a machine: asks once, naming those with
-   * tabs, and ends their terminals. */
+  /** Closes workspaces of a machine at once, without asking (but for
+   * unsaved changes): their terminals end UNDO_MS later, and one Undo
+   * Close brings them all back, at their places, until then. */
   async closeWorkspaces(m: string, ids: string[]) {
     const layout = terms.layout(m);
     const list = ids.map((id) => layout?.workspaces.find((w) => w.id === id)).filter((w) => w !== undefined);
-    if (list.length <= 1) return list[0] && actions.closeWorkspace(m, list[0].id);
+    if (!list.length) return;
     if (
       !(await confirmUnsaved(
         m,
@@ -770,21 +774,16 @@ export const actions = {
       ))
     )
       return;
-    if (
-      list.some((w) => w.tabs.length > 0) &&
-      !(await confirmDialog({
-        title: t('confirm.closeWorkspacesTitle', { n: list.length }),
-        message: t('confirm.closeWorkspaces', { names: quotedNames(list.map((w) => workspaceTitle(m, w))) }),
-        confirm: t('confirm.close'),
-        danger: true,
-      }))
-    )
-      return;
     // What they hold now: another client may have changed them meanwhile.
-    const now = terms.layout(m)?.workspaces.filter((w) => ids.includes(w.id)) ?? [];
-    const addresses = now.flatMap(L.workspaceTerminals);
+    const now = terms.layout(m);
+    if (!now) return;
+    const group = closingGroup();
+    const at = Date.now();
+    const closed = list.flatMap((w) => rememberWorkspace(m, now, w.id, at, group) ?? []);
+    const message =
+      list.length === 1 ? t('closed.workspace', { label: workspaceTitle(m, list[0]) }) : t('closed.workspaces', { n: list.length });
+    undoable(m, closed, message, true);
     terms.mutate(m, (l) => ids.reduce((acc, id) => L.closeWorkspace(acc, id), l));
-    await Promise.all(addresses.map((a) => terms.kill(m, a)));
   },
 
   /** Starts renaming in place; the tab, workspace or pane header shows an editor. */

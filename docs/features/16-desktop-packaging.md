@@ -261,7 +261,7 @@ system's rules run in the tests on any of them:
   Keyboard Shortcuts, Quit, titled Exit on Windows), Shell, Edit, View,
   **Window** (Minimize) and **Help** (About). The other menus are the same
   everywhere: **Shell** (New Tab, Split Right, Split Down, New, Rename and
-  Close Workspace…, Rename Tab, Close Pane, Close Tab, Add Machine…),
+  Close Workspace, Rename Tab, Close Pane, Close Tab, Add Machine…),
   **Edit** (Undo, Redo, Cut, Copy, Paste, Select All, Find…, Find Next,
   Find Previous), **View** (Command Palette…, Go to Workspace…, Go to Agent
   Needing Attention, Toggle Sidebar, Open in VS Code, Maximize Pane,

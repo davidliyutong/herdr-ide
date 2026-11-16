@@ -320,15 +320,15 @@ describe('menus', () => {
   it('moves workspaces', async () => {
     const w2 = workspaceMenu('m', 'w2w2w2w2');
     expect(find(w2, 'Move Down').disabled).toBe(true);
-    expect(find(w2, 'Close Workspace…').hint).toBeUndefined();
+    expect(find(w2, 'Close Workspace').hint).toBeUndefined();
     // No default binding closes a workspace: the current one's item shows none either.
-    expect(find(workspaceMenu('m', 'w1w1w1w1'), 'Close Workspace…').hint).toBeUndefined();
+    expect(find(workspaceMenu('m', 'w1w1w1w1'), 'Close Workspace').hint).toBeUndefined();
     find(w2, 'Move Up').run!();
     await settle();
     expect(core.layout('m')!.workspaces.map((w) => w.name)).toEqual(['two', 'one']);
   });
 
-  it('closes the other tabs or those to the right at once with one Undo, and the other workspaces after asking', async () => {
+  it('closes the other tabs or those to the right, and the other workspaces, at once with one Undo', async () => {
     const second = tabMenu('m', 'w1w1w1w1', 1);
     expect(labels(second).slice(-3)).toEqual(['Close Tab', 'Close Other Tabs', 'Close Tabs to the Right']);
     expect(find(tabMenu('m', 'w1w1w1w1', 2), 'Close Tabs to the Right').disabled).toBe(true);
@@ -345,16 +345,17 @@ describe('menus', () => {
     // The commands act on the tab shown.
     expect(commandEnabled('tab.closeOthers')).toBe(false);
     expect(commandEnabled('tab.closeRight')).toBe(false);
-    // One other workspace: asked about as Close Workspace asks.
+    // One other workspace: closed at once, as Close Workspace closes, with Undo.
     expect(commandEnabled('workspace.closeOthers')).toBe(true);
-    find(workspaceMenu('m', 'w2w2w2w2'), 'Close Other Workspaces…').run!();
-    await vi.waitFor(() => expect(useDialog.getState().current).toBeDefined());
-    const req = useDialog.getState().current!;
-    expect(req).toMatchObject({ kind: 'confirm', title: 'Close this workspace?', message: expect.stringContaining('one') });
-    if (req.kind === 'confirm') req.resolve(true);
+    find(workspaceMenu('m', 'w2w2w2w2'), 'Close Other Workspaces').run!();
     await settle();
+    expect(useDialog.getState().current?.kind).not.toBe('confirm');
     expect(core.layout('m')!.workspaces.map((w) => w.name)).toEqual(['two']);
-    expect(find(workspaceMenu('m', 'w2w2w2w2'), 'Close Other Workspaces…').disabled).toBe(true);
+    expect(useStore.getState().toasts.at(-1)?.msg).toBe('Workspace “one” closed.');
+    expect(find(workspaceMenu('m', 'w2w2w2w2'), 'Close Other Workspaces').disabled).toBe(true);
+    actions.undoClose();
+    await settle();
+    expect(core.layout('m')!.workspaces.map((w) => w.name)).toEqual(['one', 'two']);
   });
 
   it('renames the focused pane and opens its menu from commands, which take no key', async () => {
