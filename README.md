@@ -124,15 +124,20 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   editor's gutter marks changed lines.
 - **Git.** VS Code's Source Control and Git Graph without VS Code, for the
   focused pane's repository on any machine: a panel (Ctrl+Shift+G in the
-  desktop app) with the branch, ahead/behind, fetch, pull and push, staged
-  and unstaged changes as a list or tree, commits (⌘/Ctrl+Enter, amend),
-  stashes and, docked at its bottom, the whole history with its graph
-  (scrolls through every commit, a click shows its files); a graph pane with lanes, branch and tag badges, search, a
-  branch filter, a commit's files and context menus (checkout, branches,
-  tags, merge, rebase, cherry-pick, revert, reset); diffs in Monaco, side by
-  side or inline, where selected ranges are staged, unstaged or discarded
-  and the working tree's side is editable. Changed files are colored in the
-  file explorer ([31](docs/features/31-git.md)).
+  desktop app) with the branch (a searchable branch picker for thousands
+  of branches), ahead/behind, fetch, pull and push with one remote or
+  several, staged and unstaged changes in collapsible groups as a list or
+  a tree of folders, with file icons, several selected and acted on as in
+  the file explorer, commits (⌘/Ctrl+Enter, amend), stashes and, docked at
+  its bottom, the whole history with its graph (scrolls through every
+  commit, a click shows its files); a graph pane with lanes, branch and
+  tag badges, search, a filter of several branches, a commit's files and
+  context menus (checkout, branches, tags, merge, rebase, cherry-pick,
+  revert, reset); diffs in Monaco, side by side or inline, where selected
+  ranges are staged, unstaged or discarded and the working tree's side is
+  editable, files that mix line endings keeping each line's own. Changed
+  files are colored in the file explorer; Settings › Plugins › Git has the
+  plugin's settings ([31](docs/features/31-git.md)).
 - **Variable vault.** API keys and other environment variables, encrypted
   on the core's computer under a key made from your passphrase, for coding
   agents on every machine: Claude Code, Codex and other MCP clients read
