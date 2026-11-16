@@ -16,7 +16,8 @@ import type { MachineState } from '../lib/machine';
 import { useDialog } from '../dialog';
 import { t } from '../i18n';
 import { GitPanel, groupFiles, groupRows, rowId } from '../plugins/git/GitPanel';
-import { useMenu, isItem, type MenuItem } from '../contextMenu';
+import { useMenu, isItem, type MenuEntry, type MenuItem } from '../contextMenu';
+import { fileMenuEntries } from '../plugins/files/ops';
 import { useSettings } from '../settings';
 import { isMac } from '../keys';
 import { decorate, markOf } from '../plugins/git/decorations';
@@ -416,10 +417,16 @@ describe('GitPanel', () => {
     await key(list, 'a', true);
     expect(section(changes).querySelectorAll('.git-row.selected')).toHaveLength(3);
     await act(async () => rowOf(changes, 'todo.md').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })));
-    for (const label of [t('git.openDiff'), t('files.open'), t('git.openToSide'), t('files.copyPath'), t('files.copyRelativePath')])
+    for (const label of [t('git.openDiff'), t('files.open'), t('files.openToSide'), t('files.copyPath'), t('files.copyRelativePath')])
       expect(menuItem(label)).toBeDefined();
     // One target of several: nothing that opens a single file.
     expect(menuItem(t('files.quickLook'))).toBeUndefined();
+    // The explorer's entries, in its order, for the files that are there
+    // (old.txt is deleted).
+    const labels = (entries: MenuEntry[]) => entries.map((e) => (isItem(e) ? e.label : '-'));
+    const entries = useMenu.getState().menu!.entries;
+    const shared = fileMenuEntries('m', [`${ROOT}/notes/todo.md`, `${ROOT}/src/a.ts`], { root: ROOT });
+    expect(labels(entries.slice(entries.indexOf('sep') + 1))).toEqual(labels(shared));
     await act(async () => menuItem(t('git.stage'))!.run!());
     await flush();
     expect(posts[1]).toEqual({ action: 'stage', body: { paths: ['notes/todo.md', 'old.txt', 'src/a.ts'], repo: ROOT } });

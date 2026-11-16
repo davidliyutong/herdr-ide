@@ -1413,7 +1413,6 @@ export const en = {
   'git.group.untracked': 'Untracked Changes',
   'git.changes': 'Changes',
   'git.collapseAll': 'Collapse All',
-  'git.openToSide': 'Open to the Side',
   'git.group.stashes': 'Stashes',
   'git.group.recent': 'Recent Commits',
   'git.stage': 'Stage Changes',

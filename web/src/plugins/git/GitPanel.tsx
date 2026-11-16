@@ -60,21 +60,9 @@ import { confirmSync, fetchFrom, pickBranch, pullFrom, pushTo } from './pickers'
 import { followedDir } from '../files/FilesPanel';
 import { gitApi, type Stash, type StatusFile } from './api';
 import { MARK_COLOR, type Mark } from './decorations';
-import {
-  baseName,
-  createBranch,
-  discard,
-  join,
-  openFile,
-  openGraph,
-  openStatusDiff,
-  short,
-  stashDrop,
-  stashParams,
-  stashPush,
-} from './ops';
+import { baseName, createBranch, discard, join, openGraph, openStatusDiff, short, stashDrop, stashParams, stashPush } from './ops';
 import { fileEntries } from './fileMenu';
-import { copyText } from '../files/ops';
+import { copyText, openFiles as openEditors } from '../files/ops';
 import { History } from './History';
 import { changed, forgetRepos, repoKey, runGit, useGit, useRepo, useReposOf, type RepoState } from './state';
 import type { RepoInfo } from './api';
@@ -463,9 +451,12 @@ function RepoView({ m, root, st }: { m: string; root: string; st?: RepoState }) 
     for (const g of files) await openStatusDiff(m, root, g.file, group === 'staged', { own });
     if (back) list.current?.focus();
   };
-  const openFiles = (files: GroupedFile[]) => {
-    for (const g of files) if (g.letter !== 'D') void openFile(m, root, g.file.path);
-  };
+  /** Opens files in the explorer's editors (deleted ones have none). */
+  const openFiles = (files: GroupedFile[]) =>
+    void openEditors(
+      m,
+      files.filter((g) => g.letter !== 'D').map((g) => join(root, g.file.path)),
+    );
 
   const toggleDir = (id: string, expand?: boolean) =>
     setCollapsed((c) => {
@@ -557,17 +548,18 @@ function RepoView({ m, root, st }: { m: string; root: string; st?: RepoState }) 
     const targets = targetsOf(row);
     const files = rowFiles(targets);
     const group = row.group;
-    const dirs = targets.every((r) => r.kind === 'dir');
-    const gone = new Set(files.filter((g) => g.letter === 'D').map((g) => join(root, g.file.path)));
+    // Open Changes: the files selected (a folder opens or closes).
+    const own = rowFiles(targets.filter((r) => r.kind === 'file'));
     const git: MenuEntry[] = [];
-    if (!dirs) git.push({ label: t('git.openDiff'), hint: '↵', run: () => void openDiffs(files, group) });
+    if (own.length) git.push({ label: t('git.openDiff'), hint: '↵', run: () => void openDiffs(own, group) });
     if (group === 'staged') git.push({ label: t('git.unstage'), disabled: readOnly, run: () => unstage(files) });
     else git.push({ label: t('git.stage'), disabled: readOnly, run: () => stage(files) });
     if (group === 'changes' || group === 'untracked')
       git.push({ label: t('git.discard'), danger: true, disabled: readOnly, run: () => discardFiles(files) });
-    const paths = dirs
-      ? targets.map((r) => join(root, (r as Extract<ChangeRow, { kind: 'dir' }>).path))
-      : files.map((g) => join(root, g.file.path));
+    // The explorer's file entries for the rows: files and the tree's folders.
+    const paths = targets.map((r) => join(root, r.kind === 'dir' ? r.path : r.g.file.path));
+    const dirs = new Set(targets.flatMap((r) => (r.kind === 'dir' ? [join(root, r.path)] : [])));
+    const gone = new Set(targets.flatMap((r) => (r.kind === 'file' && r.g.letter === 'D' ? [join(root, r.g.file.path)] : [])));
     openMenu(ev, [...git, 'sep', ...fileEntries(m, { paths, root, dirs, gone, el: list.current })]);
   };
 

@@ -7,7 +7,7 @@ import { confirmDialog } from '../../dialog';
 import { useStore } from '../../state/store';
 import { terms } from '../../state/terms';
 import * as L from '../../term/layout';
-import { confirmUnsaved, dropEdit, dropGoneEdits } from '../../unsaved';
+import { confirmUnsaved } from '../../unsaved';
 import { t, type MessageKey } from '../../i18n';
 import { openEditor } from '../files/ops';
 import type { Stash, StatusFile } from './api';
@@ -101,14 +101,12 @@ export function panesOfFiles(layout: L.Layout, repo: string, paths: readonly str
   return out;
 }
 
-/** Closes panes without asking (what they had unsaved was asked about),
- * with the edits kept for them. */
+/** Closes panes without asking (what they had unsaved was asked about):
+ * the edits kept for them go with them (unsaved.ts), as does what a pane
+ * unmounting now would keep. */
 function closePanes(m: string, panes: readonly string[]) {
   if (!panes.length) return;
   terms.mutate(m, (l) => panes.reduce((acc, p) => L.closePane(acc, p), l));
-  for (const p of panes) dropEdit(m, p);
-  // A pane unmounting keeps its unsaved text; the layout has it no longer.
-  setTimeout(() => dropGoneEdits(), 0);
 }
 
 /** Discards the changes of files of the working tree, after asking; the

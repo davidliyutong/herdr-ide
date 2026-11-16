@@ -1372,7 +1372,6 @@ export const zhCN: Messages = {
   'git.group.untracked': '未跟踪的更改',
   'git.changes': '更改',
   'git.collapseAll': '全部折叠',
-  'git.openToSide': '在侧边打开',
   'git.group.stashes': '储藏',
   'git.group.recent': '最近的提交',
   'git.stage': '暂存更改',

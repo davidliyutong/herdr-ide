@@ -230,11 +230,13 @@ the answer through.
   untracked folder's files too); panes among them with unsaved text,
   also text kept while the pane is away, are asked about first as closing
   would (`confirmUnsaved`): Cancel discards nothing. The context menu has
-  Open Changes and the Git actions, then the explorer's file entries
-  (`fileMenu.ts`): Open, Open to the Side, Open Preview, Open in VS Code
-  (while its plugin is on), Open in Terminal, Copy Path, Copy Relative
-  Path, Download and Show in Explorer (those of a single file for one
-  target; nothing that opens a deleted file). Group headers stage,
+  Open Changes (the selected files) and the Git actions, then the
+  explorer's own file entries (`files/ops.ts` `fileMenuEntries`, through
+  `fileMenu.ts`), in its order: Open, Open to the Side, Open Preview,
+  Open in VS Code (while its plugin is on), Open in Terminal, Copy Path,
+  Copy Relative Path, Download and Reveal in Explorer, for the rows' files
+  and the tree's folders that are there (a deleted file has nothing to
+  open, download or reveal). Group headers stage,
   unstage or discard all: **Unstage All** and, without conflicts,
   **Stage All** name no paths (`reset`, `add --all`, or `add --update`
   while untracked files are shown apart, whose own Stage All names
@@ -569,7 +571,8 @@ terminal; what the plugin adds is a way to reach it from the browser:
   decorations, the panel's actions (Stage All and Unstage All without
   paths, with conflicts by paths, a rename unstaged with its old path,
   stashes by their commit), several rows selected by clicks and keys
-  with every action on them, the context menu's file entries, the branch
+  with every action on them, the context menu's file entries (the
+  explorer's, in its order, without the deleted file), the branch
   picker (groups, a branch, a remote branch tracked, a tag detached, a
   branch created from what is typed), the repository picker, several
   remotes (publishing asks which, Fetch From…, Pull From… a remote's
