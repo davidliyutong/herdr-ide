@@ -8,6 +8,13 @@ import { isMac } from './keys';
 /** Rows of a list carry data-nav (their id). */
 export const ROW = '[data-nav]';
 
+/** A press with the mouse leaves the keyboard where it was (the terminal
+ * shown next takes it, as before rows could be focused); only the keyboard
+ * puts it on a row. A name being edited in the row keeps its presses. */
+export function keepFocus(e: React.MouseEvent) {
+  if (!(e.target as HTMLElement).closest('input, textarea')) e.preventDefault();
+}
+
 /** Makes row the list's tab stop. */
 export function rove(list: HTMLElement, row: HTMLElement) {
   for (const el of list.querySelectorAll<HTMLElement>(`${ROW}[tabindex="0"]`)) if (el !== row) el.tabIndex = -1;

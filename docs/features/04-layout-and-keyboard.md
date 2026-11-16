@@ -291,7 +291,9 @@ Non-goals: arbitrary docking of panes; floating panes.
   what a click does, F2 renames in place, Delete (⌘⌫ on macOS) closes the
   tab or workspace, or the selection (workspaces asking first; tabs with
   Undo), or removes SSH machines (asking), and the menu key or Shift+F10
-  opens the row's menu at the row. The focused row is outlined. The agents
+  opens the row's menu at the row. The focused row is outlined. Only the
+  keyboard puts the focus on a row: a press of the mouse leaves it where it
+  was, so the terminal of a workspace or tab clicked takes it. The agents
   of the sidebar's Agents section are buttons (Enter or Space shows the
   agent's pane).
 - The sidebar's list keeps where it was scrolled while the page reloads

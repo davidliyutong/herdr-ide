@@ -27,7 +27,7 @@ import {
   type MultiScope,
 } from '../state/multiSelect';
 import { navigationKey, TypeAhead, type NavRow } from './tree';
-import { ensureTabStop, isDeleteKey, isMenuKey, isToggleKey, openRowMenu, rove, ROW } from '../rowKeys';
+import { ensureTabStop, isDeleteKey, isMenuKey, isToggleKey, keepFocus, openRowMenu, rove, ROW } from '../rowKeys';
 
 const MACHINES: MultiScope = { kind: 'machine' };
 const workspacesOf = (m: string): MultiScope => ({ kind: 'workspace', m });
@@ -383,6 +383,7 @@ function MachineItem({ m }: { m: MachineState }) {
         aria-expanded={open}
         aria-selected={machinePicked}
         tabIndex={-1}
+        onMouseDown={keepFocus}
         onPointerDown={(e) => {
           if (e.button !== 0 || readOnly || renamingMachine || (e.target as HTMLElement).closest('button, input')) return;
           if (e.shiftKey || e.metaKey || e.ctrlKey) return;
@@ -480,6 +481,7 @@ function MachineItem({ m }: { m: MachineState }) {
               tabIndex={-1}
               data-nav={`show:${m.id}`}
               data-nav-parent={`m:${m.id}`}
+              onMouseDown={keepFocus}
               onClick={() => actions.showMachine(m.id)}
             >
               {t('sidebar.showTerminals')}
@@ -510,6 +512,7 @@ function MachineItem({ m }: { m: MachineState }) {
                 aria-selected={picked.has(w.id) || selected}
                 aria-current={selected || undefined}
                 tabIndex={-1}
+                onMouseDown={keepFocus}
                 // A click shows it; with ⌘/Ctrl or Shift it selects instead.
                 onClick={(e) => {
                   if (editing || clickRow(e, workspacesOf(m.id), w.id, shownWorkspace(m.id))) return;
@@ -584,6 +587,7 @@ function MachineItem({ m }: { m: MachineState }) {
               tabIndex={-1}
               data-nav={`new:${m.id}`}
               data-nav-parent={`m:${m.id}`}
+              onMouseDown={keepFocus}
               title={t('sidebar.newWorkspaceOn', { machine: m.label })}
               onClick={() => void actions.newWorkspace(m.id)}
             >

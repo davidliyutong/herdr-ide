@@ -270,6 +270,12 @@ describe('workspaces and machines selected together', () => {
     // The workspace shown is the list's tab stop.
     const stop = () => [...list.querySelectorAll<HTMLElement>('[data-nav]')].filter((e) => e.tabIndex === 0);
     expect(stop()).toEqual([rows()[0]]);
+    // A press of the mouse leaves the keyboard where it is (the terminal), on rows and tabs alike.
+    for (const el of [rows()[1], heads()[0]]) {
+      const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+      el.dispatchEvent(down);
+      expect(down.defaultPrevented).toBe(true);
+    }
     rows()[0].focus();
     await key(rows()[0], 'ArrowDown');
     expect(document.activeElement).toBe(rows()[1]);

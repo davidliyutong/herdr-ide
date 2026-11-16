@@ -30,7 +30,7 @@ import {
   useMulti,
   type MultiScope,
 } from '../state/multiSelect';
-import { ensureTabStop, isDeleteKey, isMenuKey, isToggleKey, openRowMenu, rove, ROW } from '../rowKeys';
+import { ensureTabStop, isDeleteKey, isMenuKey, isToggleKey, keepFocus, openRowMenu, rove, ROW } from '../rowKeys';
 
 const tabsOf = (m: string, ws: string): MultiScope => ({ kind: 'tab', m, ws });
 
@@ -227,7 +227,8 @@ export function Workspace() {
                   e.preventDefault();
                   void actions.closeTab(m, ws.id, i);
                 }}
-                onMouseDown={(e) => e.button === 1 && e.preventDefault()}
+                // A middle click's scrolling is not started either.
+                onMouseDown={keepFocus}
                 onContextMenu={(e) => !editing && openMenu(e, tabMenuFor(m, ws.id, i, key))}
                 title={readOnly ? about : t('workspace.tabHint', { label: about })}
                 aria-label={tb.name ? name : t('workspace.tabNumber', { n: i + 1, title })}
