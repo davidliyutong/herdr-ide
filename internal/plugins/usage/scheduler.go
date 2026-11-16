@@ -519,7 +519,9 @@ func (p *Plugin) poll(ctx context.Context, only []string, joined bool) {
 		machine string
 		acc     usage.Account
 	}
-	var fresh []got
+	// fresh are the answers with something to show; named every answer
+	// that names its account (an id), skipped ones too.
+	var fresh, named []got
 	for _, m := range ready {
 		o := opts
 		o.Skip = slices.Clone(skip)
@@ -545,6 +547,9 @@ func (p *Plugin) poll(ctx context.Context, only []string, joined bool) {
 			}
 			k := keyOf(a, m)
 			seen[k] = append(seen[k], m)
+			if a.ID != "" {
+				named = append(named, got{m, a})
+			}
 			if a.Status == usage.StatusSkipped {
 				continue
 			}
@@ -602,11 +607,9 @@ func (p *Plugin) poll(ctx context.Context, only []string, joined bool) {
 	}
 	// A machine that names an account it reported without an id before (an
 	// id read later, or kept from an earlier version) replaces that
-	// account at once, rather than showing both until forgetAfter.
-	for _, g := range fresh {
-		if g.acc.ID == "" {
-			continue
-		}
+	// account at once, rather than showing both until forgetAfter; also
+	// when it was told to skip the account another machine read first.
+	for _, g := range named {
 		stand := keyOf(usage.Account{Provider: g.acc.Provider, Home: g.acc.Home}, g.machine)
 		if _, again := seen[stand]; !again {
 			delete(p.accounts, stand)

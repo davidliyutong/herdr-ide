@@ -202,7 +202,9 @@ alone, with the accounts read within the cadence in `skip`, without moving
 the cadence (not in `manual` mode). Accounts are keyed
 `provider:id`; one without an id stays apart per machine, until that machine
 names it with an id: the named account then replaces it at once rather than
-showing beside it (`TestNamedAccountReplacesItsStandIn`). An answer without
+showing beside it, also when that machine's answer was skipped because
+another machine read the account first (`TestNamedAccountReplacesItsStandIn`,
+`TestSkippedAnswersReplaceStandIns`). An answer without
 numbers keeps the last good ones with the new status and code (the card
 says how old they are). Per account the best answer of a poll counts,
 whatever the order the machines answered in (numbers from the provider,

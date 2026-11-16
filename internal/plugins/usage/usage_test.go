@@ -754,3 +754,35 @@ func TestNamedAccountReplacesItsStandIn(t *testing.T) {
 		t.Errorf("the other machine's account went: %+v", s.Accounts)
 	}
 }
+
+// Machines that read the account's id after another one did are told to
+// skip it: their answers, skipped, replace their accounts without an id
+// all the same, and the account lists every machine.
+func TestSkippedAnswersReplaceStandIns(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	named := false
+	p, _ := testPlugin(t, &now, []string{"local", "box", "gpu"}, func(m string, o usage.Options) ([]usage.Account, error) {
+		a := usage.Account{Provider: "antigravity", Status: "ok", AsOf: now.Unix(), Windows: []usage.Window{win("weekly", 50, 0, 0)}}
+		if named {
+			a.ID = "h1"
+			if slices.Contains(o.Skip, "antigravity:h1") {
+				a = usage.Account{Provider: "antigravity", ID: "h1", Status: usage.StatusSkipped}
+			}
+		}
+		return []usage.Account{a}, nil
+	})
+	p.Poll(context.Background())
+	if n := len(p.Snapshot().Accounts); n != 3 {
+		t.Fatalf("%d accounts without an id", n)
+	}
+	named = true
+	now = now.Add(time.Hour)
+	p.Poll(context.Background())
+	s := p.Snapshot()
+	if len(s.Accounts) != 1 {
+		t.Fatalf("accounts %+v", s.Accounts)
+	}
+	if a := find(s, "antigravity:h1"); a == nil || len(a.Machines) != 3 {
+		t.Errorf("the account %+v", a)
+	}
+}
