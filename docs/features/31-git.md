@@ -179,7 +179,11 @@ the answer through.
   --prune`) that many minutes apart while the panel shows the repository,
   the page is visible, the UI is not read-only and no change runs; quietly
   (a failure says nothing until the user fetches), then the repository is
-  read again.
+  read again. Such a fetch is a change the user did not click: it runs the
+  programs the repository's configuration names for a fetch
+  (`core.sshCommand`, `remote.<name>.uploadpack`, credential helpers), as
+  a fetch from the menu does, which is why it is off by default and the
+  setting's description says so.
 - The branch is a button that opens the branch picker (`pickers.tsx`, the
   shared searchable list, `pick`): Create Branch…, Create Branch From… and
   Check Out Detached… first, then the local branches (the current one
@@ -404,7 +408,8 @@ Code's preview editor does, so going through the changes keeps one pane):
 - `git.untrackedChanges`: untracked files among the changes (`mixed`) or
   in a group of their own (`separate`).
 - `git.autoFetch`: minutes between automatic fetches while the panel
-  shows a repository (0, the default: never).
+  shows a repository (0, the default: never); each runs the programs the
+  repository's configuration names for a fetch, without a click.
 - `git.confirmSync`: ask before Pull, Push and the sync button (off by
   default).
 - `git.graphPageSize`: the commits a page of the graph reads (50–1000,
@@ -510,7 +515,10 @@ terminal; what the plugin adds is a way to reach it from the browser:
   nothing (`GIT_OPTIONAL_LOCKS=0`) and run no file system monitor, textconv
   driver or maintenance from the repository's configuration; its clean
   filters, like a shell prompt's `git status`, still run (also for a
-  read-only viewer).
+  read-only viewer). With `git.autoFetch` above 0 (off by default, never
+  in read-only mode) the panel fetches on its own while it shows a
+  repository, which runs the programs the repository's configuration
+  names for a fetch without a click.
 - The working tree's files are read inside the repository only: a
   directory link out of it is not followed, the file is opened without
   following a link or blocking on a FIFO.
