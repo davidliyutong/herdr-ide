@@ -10,6 +10,7 @@ import {
   editWorkspace,
   focusedLeaf,
   dropOnPane,
+  dropTabOnPane,
   emptyLayout,
   focusDirection,
   focusedPane,
@@ -197,6 +198,8 @@ function applyOp(layout: Layout, op: Record<string, unknown>): Layout {
       return focusDirection(layout, op.dir as Direction);
     case 'dropOnPane':
       return dropOnPane(layout, s('terminal') ?? s('pane'), s('target'), op.zone as DropZone);
+    case 'dropTabOnPane':
+      return dropTabOnPane(layout, s('workspace'), n('tab'), s('target'), op.zone as DropZone);
   }
   throw new Error(`unknown op ${String(op.op)}`);
 }

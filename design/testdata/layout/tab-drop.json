@@ -1,0 +1,159 @@
+{
+  "description": "Dropping a whole tab on an edge of a pane of another tab of its workspace: the tab goes, its panes (with their own split) become a split of that pane on that side, the target's tab is selected and the moved tab's focused pane has the focus. A tab dropped on its own pane, or on a pane of another workspace, changes nothing.",
+  "input": {
+    "version": 2,
+    "workspaces": [
+      {
+        "id": "w1",
+        "name": "one",
+        "cwd": "",
+        "tabs": [
+          {
+            "root": {
+              "terminal": "a"
+            },
+            "focused": "a"
+          },
+          {
+            "name": "pair",
+            "root": {
+              "split": "vertical",
+              "ratio": 0.4,
+              "children": [
+                {
+                  "terminal": "b"
+                },
+                {
+                  "terminal": "c"
+                }
+              ]
+            },
+            "focused": "c"
+          },
+          {
+            "root": {
+              "view": {
+                "id": "g",
+                "plugin": "git",
+                "kind": "graph"
+              }
+            },
+            "focused": "view:g"
+          }
+        ],
+        "selected": 1
+      },
+      {
+        "id": "w2",
+        "name": "two",
+        "cwd": "",
+        "tabs": [
+          {
+            "root": {
+              "terminal": "z"
+            },
+            "focused": "z"
+          }
+        ],
+        "selected": 0
+      }
+    ],
+    "selected": 0
+  },
+  "ops": [
+    {
+      "op": "dropTabOnPane",
+      "workspace": "w1",
+      "tab": 1,
+      "target": "b",
+      "zone": "left"
+    },
+    {
+      "op": "dropTabOnPane",
+      "workspace": "w1",
+      "tab": 1,
+      "target": "z",
+      "zone": "left"
+    },
+    {
+      "op": "dropTabOnPane",
+      "workspace": "w1",
+      "tab": 1,
+      "target": "a",
+      "zone": "right"
+    },
+    {
+      "op": "dropTabOnPane",
+      "workspace": "w1",
+      "tab": 1,
+      "target": "a",
+      "zone": "bottom"
+    }
+  ],
+  "changed": true,
+  "expected": {
+    "version": 2,
+    "workspaces": [
+      {
+        "id": "w1",
+        "name": "one",
+        "cwd": "",
+        "tabs": [
+          {
+            "root": {
+              "split": "horizontal",
+              "ratio": 0.5,
+              "children": [
+                {
+                  "split": "vertical",
+                  "ratio": 0.5,
+                  "children": [
+                    {
+                      "terminal": "a"
+                    },
+                    {
+                      "view": {
+                        "id": "g",
+                        "plugin": "git",
+                        "kind": "graph"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "split": "vertical",
+                  "ratio": 0.4,
+                  "children": [
+                    {
+                      "terminal": "b"
+                    },
+                    {
+                      "terminal": "c"
+                    }
+                  ]
+                }
+              ]
+            },
+            "focused": "view:g"
+          }
+        ],
+        "selected": 0
+      },
+      {
+        "id": "w2",
+        "name": "two",
+        "cwd": "",
+        "tabs": [
+          {
+            "root": {
+              "terminal": "z"
+            },
+            "focused": "z"
+          }
+        ],
+        "selected": 0
+      }
+    ],
+    "selected": 0
+  }
+}

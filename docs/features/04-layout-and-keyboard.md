@@ -135,7 +135,7 @@ Non-goals: arbitrary docking of panes; floating panes.
   buttons in the machine's status, never in place of an icon.
 
 **Rearranging and renaming** (`web/src/drag.ts`, `paneDrag.ts`,
-`reorderDrag.ts`, `InlineEdit.tsx`)
+`tabDrag.ts`, `reorderDrag.ts`, `InlineEdit.tsx`)
 
 - All drags share `drag.ts`: a drag starts after the pointer moved 6
   pixels on the screen (so a click stays a click), a ghost follows the
@@ -201,6 +201,19 @@ Non-goals: arbitrary docking of panes; floating panes.
   fields and VS Code keep it for Undo (the Shell menu's item shows the key
   without taking it). Closing a workspace still asks, and ends its
   terminals at once.
+- Dragging a tab off the tab bar onto a pane of the tab shown merges the
+  tabs, as Edge's split screen does: the dragged tab's panes, with their
+  own splits, become a split of that pane on the side the pointer is
+  nearest (its half is highlighted; there is no middle), the dragged tab
+  goes and the merged one is shown with the dragged tab's focused pane
+  focused. Every kind of pane merges alike: terminals, VS Code (its window
+  follows), previews and plugin views. Since a press shows the pressed tab
+  (as in browsers), the tab shown before it comes back once the drag
+  begins (or, when that was the dragged tab, the next tab, else the one
+  before), so it can be dropped beside that one; resting the pointer on
+  another tab of the bar for half a second shows that tab instead. A drag
+  that reorders, ends elsewhere or is cancelled leaves the dragged tab
+  shown. Splitting a pane back out into a tab is a pane drag onto `+`.
 - Dragging a tab along the tab bar, or a workspace along its machine's list
   in the sidebar, shows an insertion bar and reorders it. A drop lands in a
   slot of the current order (0 before the first item, n after the last);

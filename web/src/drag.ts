@@ -24,6 +24,11 @@ export interface DragOps<T> {
   drop(target: T): Promise<unknown>;
   /** Toast text for a failed drop (default: the error). */
   failed?(error: string): string;
+  /** Called once the pointer moved far enough for a drag to begin. */
+  begin?(): void;
+  /** Called once a drag that began ends, with whether it drops, before
+   * the drop. */
+  end?(dropped: boolean): void;
 }
 
 /** The pointer position a drag starts from. */
@@ -59,6 +64,7 @@ export function trackDrag<T>(ev: DragStart, ops: DragOps<T>) {
       marker = document.createElement('div');
       marker.className = 'drop-marker';
       document.body.append(marker, ghost);
+      ops.begin?.();
     }
     ghost.style.transform = `translate(${e.clientX + 12}px, ${e.clientY + 8}px)`;
     target = ops.find(e.clientX, e.clientY);
@@ -75,6 +81,7 @@ export function trackDrag<T>(ev: DragStart, ops: DragOps<T>) {
     window.removeEventListener('pointercancel', onCancel);
     window.removeEventListener('keydown', onKey, true);
     if (!ghost) return;
+    ops.end?.(commit && !!target);
     ghost.remove();
     marker?.remove();
     document.body.classList.remove('dragging');

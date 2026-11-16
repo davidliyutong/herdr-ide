@@ -25,7 +25,8 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   workspace's menu edits its name and folder; without a folder, new
   terminals start in the focused pane's); drag a pane onto another
   workspace in the sidebar, or use its **Move to Workspace** menu, to move
-  it there; drag tabs,
+  it there; drag a tab onto a pane of another tab to split them side by
+  side, as in Edge (terminals, VS Code and plugin panes alike); drag tabs,
   workspaces and machines to reorder them; drag the sidebar's edge or a split's
   handle to resize them (a double click restores the default or equal
   sizes); every tab has a × and a middle

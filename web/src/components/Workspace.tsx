@@ -15,7 +15,7 @@ import { aggregate, agentStatus, codeText, shortPath, terminalTitle } from '../l
 import { t, type MessageKey } from '../i18n';
 import { withKey } from '../keymap';
 import { InlineEdit } from './InlineEdit';
-import { startTabDrag } from '../reorderDrag';
+import { startTabDrag } from '../tabDrag';
 import { openMenu } from '../contextMenu';
 import { tabMenu } from '../menus';
 
@@ -94,8 +94,9 @@ export function Workspace() {
                   if (e.button !== 0 || editing || (e.target as HTMLElement).closest('button, input')) return;
                   // A tab is shown on press, as in browsers: a press that turns
                   // into a drag (or whose release lands elsewhere) still switches.
+                  const shown = ws.selected;
                   actions.selectTab(m, ws.id, i);
-                  if (!readOnly) startTabDrag(e, { m, ws: ws.id, index: i, label: name });
+                  if (!readOnly) startTabDrag(e, { m, ws: ws.id, index: i, label: name, shown });
                 }}
                 // A middle click closes the tab, as in browsers.
                 onAuxClick={(e) => {

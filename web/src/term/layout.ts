@@ -548,6 +548,30 @@ export function movePane(layout: Layout, key: string, target: string, axis: Axis
   return splitPane(closePane(layout, key), target, axis, leaf, before);
 }
 
+/** Moves a whole tab beside a pane of another tab of its workspace, as a
+ * split of that pane (after it, or before): the tab goes, its panes keep
+ * their own splits, the target's tab is selected and the moved tab's
+ * focused pane has the focus. Nothing when the pane is in the moved tab. */
+export function mergeTab(layout: Layout, workspace: string, tab: number, target: string, axis: Axis, before = false): Layout {
+  const index = workspaceIndex(layout, workspace);
+  const ws = layout.workspaces[index];
+  const from = ws?.tabs[tab];
+  const at = locate(layout, target);
+  if (!from || !at || at.workspace !== index || at.tab === tab) return layout;
+  const tabs = ws.tabs.map((t, i) =>
+    i === at.tab ? { ...t, root: splitting(t.root, target, axis, from.root, before), focused: from.focused } : t,
+  );
+  const remaining = tabs.filter((_, i) => i !== tab);
+  return withWorkspace(layout, index, { ...ws, tabs: remaining, selected: at.tab > tab ? at.tab - 1 : at.tab }, true);
+}
+
+/** The layout after dropping a tab on a zone of a pane of another tab: an
+ * edge places the tab's panes on that side; the middle, beside it. */
+export function dropTabOnPane(layout: Layout, workspace: string, tab: number, target: string, zone: DropZone): Layout {
+  const axis: Axis = zone === 'top' || zone === 'bottom' ? 'vertical' : 'horizontal';
+  return mergeTab(layout, workspace, tab, target, axis, zone === 'left' || zone === 'top');
+}
+
 /** Moves a pane into a new tab at the end of a workspace and selects it. */
 export function moveToNewTab(layout: Layout, key: string, workspace: string): Layout {
   const leaf = findLeaf(layout, key);

@@ -1,5 +1,5 @@
-// Dragging a tab within the tab bar, or a workspace within its machine's list
-// in the sidebar, reorders it in the machine's layout document; dragging a
+// Dragging a tab within the tab bar (tabDrag.ts), or a workspace within its
+// machine's list in the sidebar, reorders it in the machine's layout document; dragging a
 // machine's header among the machines reorders the machines (the core stores
 // their order). A drop lands
 // in a slot of the current order: 0 before the first item, n after the
@@ -86,19 +86,6 @@ function startReorder(
     },
     marker: (slot) => ({ box: slot.box, zone: 'slot' }),
     drop: (slot) => o.move(slot.index),
-  });
-}
-
-/** Starts tracking a possible drag of a tab within its tab bar. */
-export function startTabDrag(ev: DragStart, src: { m: string; ws: string; index: number; label: string }) {
-  startReorder(ev, {
-    label: src.label,
-    id: String(src.index),
-    axis: 'x',
-    list: () => document.querySelector(`.tabs[data-m="${CSS.escape(src.m)}"][data-ws="${CSS.escape(src.ws)}"]`),
-    items: '.tab[data-tab]',
-    idAttr: 'data-tab',
-    move: async (index) => actions.moveTab(src.m, src.ws, src.index, index),
   });
 }
 
