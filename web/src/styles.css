@@ -940,6 +940,11 @@ body.resizing .sidebar-resizer::after {
   color: var(--fg-mute);
   margin: 0 -2px;
 }
+/* A preview pane's title (a file shown by a single click, replaced by the
+   next one), as VS Code's preview editors. */
+.is-preview {
+  font-style: italic;
+}
 .tab .inline-edit {
   width: 10em;
   padding: 0 4px;

@@ -23,13 +23,35 @@ export function dirname(p: string) {
   return i > 0 ? p.slice(0, i) : '/';
 }
 
+/** Whether a path is shown by MediaView (an image, video, audio or PDF). */
+export const isMediaPath = (path: string) => mediaExt.test(path);
+
+/** An image, video, audio file or PDF of a machine, as large as fits. */
+export function MediaView({ m, path }: { m: string; path: string }) {
+  const [videoError, setVideoError] = useState(false);
+  useEffect(() => setVideoError(false), [path]);
+  const url = fileUrl(m, path);
+  return (
+    <>
+      {imageExt.test(path) && <img src={url} alt={path} />}
+      {videoExt.test(path) &&
+        (videoError ? (
+          <div className="pad muted">{t('preview.videoUnsupported')}</div>
+        ) : (
+          <video src={url} controls autoPlay loop muted playsInline onError={() => setVideoError(true)} />
+        ))}
+      {audioExt.test(path) && <audio src={url} controls autoPlay />}
+      {/\.pdf$/i.test(path) && <iframe className="pdf-frame" src={url} title={path} />}
+    </>
+  );
+}
+
 export function PreviewPane({ m, pane, path }: { m: string; pane: string; path: string }) {
   const readOnly = useStore((s) => s.readOnly);
   const [siblings, setSiblings] = useState<RemoteStat[]>([]);
   const [dirEntries, setDirEntries] = useState<RemoteStat[] | undefined>();
   const [error, setError] = useState<string>();
   const [text, setText] = useState<string>();
-  const [videoError, setVideoError] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const isMedia = mediaExt.test(path);
@@ -43,7 +65,6 @@ export function PreviewPane({ m, pane, path }: { m: string; pane: string; path: 
     setError(undefined);
     setText(undefined);
     setDirEntries(undefined);
-    setVideoError(false);
     (async () => {
       // A path without a media extension may be a directory or a text file.
       if (!isMedia) {
@@ -113,15 +134,7 @@ export function PreviewPane({ m, pane, path }: { m: string; pane: string; path: 
       </div>
       <div className="preview-body">
         {error && <div className="error pad">{error}</div>}
-        {imageExt.test(path) && <img src={url} alt={path} />}
-        {videoExt.test(path) &&
-          (videoError ? (
-            <div className="pad muted">{t('preview.videoUnsupported')}</div>
-          ) : (
-            <video src={url} controls autoPlay loop muted playsInline onError={() => setVideoError(true)} />
-          ))}
-        {audioExt.test(path) && <audio src={url} controls autoPlay />}
-        {/\.pdf$/i.test(path) && <iframe className="pdf-frame" src={url} title={path} />}
+        {isMedia && <MediaView m={m} path={path} />}
         {text !== undefined && <pre className="text-preview">{text}</pre>}
         {dirEntries && (
           <div className="dir-list">

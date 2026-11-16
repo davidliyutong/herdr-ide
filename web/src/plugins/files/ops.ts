@@ -12,10 +12,9 @@ import { canDownload, startDownload } from '../../download';
 import { droppedItems, filesAreOn } from '../../drop';
 import { t } from '../../i18n';
 import { isMac, keyLabel } from '../../keys';
-import { mediaExt } from '../../terminal/links';
 import * as L from '../../term/layout';
 import { terms } from '../../state/terms';
-import { withView } from '../../state/panes';
+import { unsavedPanes, withView } from '../../state/panes';
 import { useStore, type ToastKind } from '../../state/store';
 import { uploadFiles } from '../../transfers';
 import type { MenuEntry } from '../../contextMenu';
@@ -75,21 +74,43 @@ export function badName(name: string): string | undefined {
 // ---- opening ----
 
 /** Opens a file in the editor pane (one per file). */
-export function openEditor(m: string, path: string) {
-  return actions.openView(m, { plugin: 'files', kind: 'editor', path }, { reuse: (v) => v.path === path });
+/** The file editors of the shown workspace of m. */
+function editors(m: string): L.PluginView[] {
+  const l = terms.layout(m);
+  const ws = l && L.selectedWorkspace(l);
+  return ws ? L.pluginViews(ws, 'files', 'editor').map((v) => v.view) : [];
 }
 
-/** Opens a file as its kind wants: media in Quick Look, other files in the
- * editor; a directory is expanded or collapsed. */
-export function openPath(m: string, path: string, dir: boolean) {
+/** Opens a file in the editor, as VS Code does: a preview (a single click)
+ * shows it in the workspace's preview editor, which the next preview
+ * replaces unless it has unsaved changes; otherwise (a double click, Enter)
+ * it stays open. An editor that shows the file already is focused, and
+ * kept (no longer a preview) unless this is a preview too. Media files
+ * show in the same editor, as Quick Look shows them. */
+export function openEditor(m: string, path: string, o: { preview?: boolean } = {}) {
+  const preview = !!o.preview;
+  const view = { plugin: 'files', kind: 'editor', path };
+  if (editors(m).some((v) => v.path === path))
+    return actions.openView(m, preview ? view : { ...view, preview: false }, { reuse: (v) => v.path === path });
+  const replaceable = (v: L.PluginView) => preview && v.preview === true && !unsavedPanes(m, [L.viewKey(v.id)]).length;
+  return actions.openView(m, { ...view, preview }, { reuse: replaceable });
+}
+
+/** Keeps a preview editor open: the next preview opens beside it. */
+export function keepEditor(m: string, pane: string) {
+  terms.mutate(m, (l) => L.setViewFields(l, pane, { preview: false }));
+}
+
+/** Opens a file in the editor (preview, else to keep); a directory is
+ * expanded or collapsed. */
+export function openPath(m: string, path: string, dir: boolean, preview = false) {
   if (dir) return setExpanded(path, !useTree.getState().expanded[path]);
-  if (mediaExt.test(path)) return actions.openPreview(m, path);
-  return openEditor(m, path);
+  return openEditor(m, path, { preview });
 }
 
-/** Shows a path in Quick Look and gives the keyboard back to el. */
+/** Shows a file in the preview editor and gives the keyboard back to el. */
 export async function quickLook(m: string, path: string, el?: HTMLElement | null) {
-  await actions.openPreview(m, path);
+  await openEditor(m, path, { preview: true });
   el?.focus();
 }
 

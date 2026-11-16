@@ -11,6 +11,7 @@ import { registerFileDecorations } from '../files/decorations';
 import { followedDir } from '../files/FilesPanel';
 import { gitApi, errorText } from './api';
 import { gitDecorations } from './decorations';
+import './follow';
 import { DiffPane, diffOf, diffTitle } from './DiffPane';
 import { GitPanel } from './GitPanel';
 import { GraphPane } from './GraphPane';

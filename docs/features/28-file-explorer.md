@@ -18,9 +18,11 @@ terminal's directory, with what VS Code's explorer does (expand, collapse,
 filter, hidden files, the keyboard, new files and folders, rename, the
 trash, delete, cut, copy and paste, drag and drop, copy paths, download,
 open in a terminal or VS Code); files from the computer dropped on it are
-uploaded; a click shows a file in Quick Look; text files open in an editor
-pane that never overwrites a change made on the machine since it loaded the
-file.
+uploaded; a click shows a file in a preview editor that the next click
+replaces and a double click keeps, as VS Code's preview editors (media
+too, as Quick Look shows them); the editor never overwrites a change made
+on the machine since it loaded the file; files changed in version control
+are colored in the tree and the editor's gutter marks the changed lines.
 
 Non-goals: an IDE (language services beyond what Monaco has for JSON, CSS
 and HTML, search across files: VS Code panes do that; version control:
@@ -41,7 +43,7 @@ machine's `internal/agent/plugin/files`.
 - The root is the focused terminal's directory (its foreground program's,
   as for splits), a VS Code pane's folder, or the workspace's directory
   when no pane has the focus. While a preview or an editor has the focus
-  the tree stays where it is, so a click that opens Quick Look does not
+  the tree stays where it is, so a click that opens a preview does not
   move it. **Follow** (the crosshair) turns this off; a crumb of the
   breadcrumb roots the tree at that directory and turns it off too. Follow
   and hidden files are kept per browser.
@@ -55,18 +57,25 @@ machine's `internal/agent/plugin/files`.
   directory of thousands of entries scrolls without drawing them all.
 - Keys on the tree: ↑ ↓ (with Shift to extend the selection), Home, End,
   → (expand, then the first child), ← (collapse, then the parent), Enter
-  (open), Space (Quick Look), F2 (rename), Delete or ⌘⌫ (trash), Shift
+  (open, kept), Space (preview, the keyboard stays in the tree), F2 (rename), Delete or ⌘⌫ (trash), Shift
   with them (delete for good, after asking), ⌘/Ctrl C, X, V, Escape (the
   clipboard, then the filter). The page's own shortcuts work as anywhere
   outside a terminal.
 - A click selects (⌘/Ctrl adds, Shift extends), expands a folder or shows
-  a file in Quick Look (`actions.openPreview`) and keeps the keyboard in
-  the tree; a double click or Enter opens a file: media in Quick Look,
-  anything else in the editor pane.
+  a file in the workspace's **preview editor** (`openEditor` with
+  `preview`) and keeps the keyboard in the tree; the next click shows its
+  file in the same pane, as VS Code's preview editors do, so browsing
+  files does not fill the workspace with panes. A double click or Enter
+  keeps the file open: an editor showing it already is kept (no longer a
+  preview), else it opens in an editor of its own. The preview's title is
+  in italics in its header and tab; the pin button of its bar, a double
+  click or its first edit keeps it. A preview with unsaved changes is
+  never replaced. One pane kind shows every file: text in Monaco, media
+  (images, video, audio, PDF) as Quick Look shows them.
 - Changes are typed in the tree: a new file or folder gets a row with a
   name field in its folder, F2 turns a row's name into one. Names with `/`,
   empty names, `.` and `..` are refused before anything is sent.
-- The context menu: Open, Quick Look, Open in VS Code, Open in Terminal (a
+- The context menu: Open, Open Preview, Open in VS Code, Open in Terminal (a
   terminal split beside the focused pane, in the folder), New File, New
   Folder, Cut, Copy, Paste, Copy Path, Copy Relative Path (to the root),
   Download (`download.ts`; not for the desktop app's own machine), Rename,
@@ -88,7 +97,11 @@ machine's `internal/agent/plugin/files`.
 - **Decorations**: `registerFileDecorations(provider)`
   (`decorations.ts`) lets another plugin color names and add a badge and a
   tooltip, per directory (version control status); `refreshDecorations()`
-  draws them again.
+  draws them again. While the panel is shown it publishes the directories
+  it shows (its root and the expanded ones, `useShownDirs`), so a provider
+  can follow them: the Git plugin watches their repositories
+  ([31](31-git.md)), and the tree is colored as VS Code's without the Git
+  panel open.
 
 **Changes** go through the plugin's routes, each audited as
 `files.<action>` and refused in read-only mode, where the menu and the keys
@@ -114,16 +127,28 @@ paths (trash, remove, move, copy) holds at most 1000; one that fails alone
 fails the request, several report the failed ones by code.
 
 **Editor pane** (`EditorPane.tsx`, `{view: {plugin: 'files', kind:
-'editor', path}}`; one per file in a workspace, opened again it is
-focused). Its title is the file's name, new terminals beside it start in
-its directory.
+'editor', path, preview}}`; one per file in a workspace, opened again it is
+focused; `preview` marks the workspace's preview editor). Its title is the
+file's name, new terminals beside it start in its directory. Images,
+video, audio and PDFs show as in Quick Look (`MediaView`), with a download
+button.
 
 - It reads the file with `HEAD` and `GET /api/m/{id}/file`; the response's
   ETag carries the size and modification time the save sends back. Files
   over 8 MiB, binary files (a NUL in the first 8000 bytes) and text that is
   not valid UTF-8 are not opened (a save could change what the editor did
-  not show); the pane offers Quick Look. A path not there yet opens empty
+  not show); the pane offers to download them. A path not there yet opens empty
   and is created by the first save.
+- **Quick diff** (`quickDiff.ts`): as in VS Code, the gutter and the
+  overview ruler mark the lines that differ from what version control has
+  (added, changed, removed), unsaved changes included, computed again a
+  quarter of a second after typing stops. A provider
+  (`registerQuickDiff`; the Git plugin) gives the text the file is compared
+  with (the index's) and follows the file's repository while the editor
+  shows it; the lines are compared with Myers' algorithm after the common
+  start and end, and beyond 2000 edits the lines between the first and the
+  last difference are one change. With changes, the bar offers **Open
+  Changes**, the provider's diff of the file.
 - ⌘S (Ctrl+S) or the toolbar saves: `POST …/p/files/write?path=&mtime=&size=`
   with the text as the body (`new=1` for a file not there yet, `force=1`
   to overwrite). The agent checks the file is as loaded, writes a

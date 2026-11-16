@@ -3,7 +3,9 @@
 // The file explorer's editor pane (plugins/files/EditorPane.tsx) with
 // Monaco replaced: it loads a file with the version in its ETag, saves with
 // that version, and on a conflict offers to load the file again or to
-// overwrite it; files that are not text open in Quick Look.
+// overwrite it; files that are not text are offered for download; media
+// show as in Quick Look; a preview is kept by its first edit; the gutter
+// marks lines that differ from the quick diff provider's text.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
@@ -32,6 +34,8 @@ class FakeModel {
   dispose() {}
 }
 
+type FakeDecoration = { range: { start: number; end: number }; options: { linesDecorationsClassName: string } };
+
 const editor = {
   model: undefined as FakeModel | undefined,
   save: undefined as (() => void) | undefined,
@@ -53,12 +57,29 @@ const editor = {
   },
   focus() {},
   dispose() {},
+  onDidChangeModelContent(l: () => void) {
+    this.model?.onDidChangeContent(l);
+    return { dispose() {} };
+  },
+  /** The quick diff's decorations shown last. */
+  decorations: [] as FakeDecoration[],
+  createDecorationsCollection(d: FakeDecoration[]) {
+    editor.decorations = d;
+    return { clear: () => (editor.decorations = []) };
+  },
 };
 const monaco = {
   Uri: { from: (o: unknown) => o },
   KeyMod: { CtrlCmd: 2048 },
   KeyCode: { KeyS: 49 },
-  editor: { getModel: () => null, createModel: () => new FakeModel() },
+  Range: class {
+    constructor(
+      public start: number,
+      _c: number,
+      public end: number,
+    ) {}
+  },
+  editor: { getModel: () => null, createModel: () => new FakeModel(), OverviewRulerLane: { Left: 1 } },
 };
 vi.mock('../plugins/monaco', () => ({
   createEditor: vi.fn(async (_el: HTMLElement, o: { readOnly?: boolean }) => {
@@ -71,6 +92,7 @@ import { useStore } from '../state/store';
 import type { MachineState } from '../lib/machine';
 import { t } from '../i18n';
 import { EditorPane, loadText, versionOf } from '../plugins/files/EditorPane';
+import { registerQuickDiff } from '../plugins/files/quickDiff';
 import { settle } from './fakeTerms';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -213,7 +235,7 @@ describe('EditorPane', () => {
     expect(writes).toEqual([]);
   });
 
-  it('sends files that are not text to Quick Look', async () => {
+  it('offers files that are not text for download', async () => {
     file = { text: new Uint8Array([0x89, 0x50, 0, 1]), size: 4, mtime: 1 };
     expect((await loadText('m', '/a.bin')).kind).toBe('binary');
     file = { text: new Uint8Array([0xff, 0xfe, 0x41]), size: 3, mtime: 1 };
@@ -223,6 +245,26 @@ describe('EditorPane', () => {
     file = { text: new Uint8Array([0, 0]), size: 2, mtime: 1 };
     await render('/home/u/a.bin');
     expect(host.textContent).toContain(t('files.binary', { name: 'a.bin' }));
-    expect(button(t('files.quickLook'))).toBeDefined();
+    expect(host.querySelector('a.btn')?.getAttribute('href')).toContain('download=1');
+  });
+
+  it("marks the lines that differ from the quick diff provider's text", async () => {
+    const stop = registerQuickDiff({ follow: () => () => {}, original: async () => 'hello\nold\n' });
+    try {
+      file = { text: 'hello\nnew\nmore\n', size: 15, mtime: 1 };
+      await render();
+      await flush();
+      expect(editor.decorations.map((d) => [d.range.start, d.range.end, d.options.linesDecorationsClassName])).toEqual([
+        [2, 3, 'qd-modified'],
+      ]);
+    } finally {
+      stop();
+    }
+  });
+
+  it('shows media as Quick Look does, without the text editor', async () => {
+    await render('/home/u/cat.png');
+    expect(host.querySelector('img')?.getAttribute('src')).toContain('cat.png');
+    expect(host.querySelector('.files-editor-host')).toBeNull();
   });
 });

@@ -39,6 +39,9 @@ export function pluginOn(p: PluginDef, values = useSettings.getState().values): 
 /** The plugins that are on. */
 export const activePlugins = (): PluginDef[] => plugins.filter((p) => pluginOn(p));
 
+/** Whether the plugin of this id is there and on. */
+export const isPluginOn = (id: string): boolean => activePlugins().some((p) => p.id === id);
+
 /** The plugins that are on, re-rendered when settings change. */
 export function useActivePlugins(): PluginDef[] {
   const values = useSettings((s) => s.values);
@@ -93,5 +96,6 @@ export function describeView(m: string, view: import('../term/layout').PluginVie
     title: def?.title(m, view) ?? view.plugin,
     path: def?.path?.(m, view),
     directory: def?.directory?.(m, view),
+    preview: def?.preview?.(m, view) ?? false,
   };
 }

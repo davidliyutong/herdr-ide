@@ -127,7 +127,11 @@ export function Workspace() {
                 ) : view ? (
                   <>
                     <LeafIcon m={m} leaf={view} className="tab-kind" />
-                    <span className="tab-label ellipsis">{paneTitle(m, view, tb.focused)}</span>
+                    <span
+                      className={`tab-label ellipsis ${L.isPluginLeaf(view) && describeView(m, view.view).preview ? 'is-preview' : ''}`}
+                    >
+                      {paneTitle(m, view, tb.focused)}
+                    </span>
                   </>
                 ) : (
                   <span className="tab-label tab-num">{tabLabel(tb, i)}</span>

@@ -26,6 +26,7 @@ export const filesPlugin: PluginDef = {
       title: (_m, v) => baseName(pathOf(v)) || 'editor',
       path: (_m, v) => pathOf(v) || undefined,
       directory: (_m, v) => (pathOf(v) ? parentOf(pathOf(v)) : undefined),
+      preview: (_m, v) => v.preview === true,
       component: EditorPane,
     },
   },

@@ -33,7 +33,7 @@ import { APP_SLUG } from '../../brand';
 import { t } from '../../i18n';
 import { isMac } from '../../keys';
 import { useSize } from '../../lib/sizes';
-import { decorationsOf, useDecorationVersion } from './decorations';
+import { decorationsOf, useDecorationVersion, useShownDirs } from './decorations';
 import {
   collapseAll,
   crumbs,
@@ -67,8 +67,6 @@ const DRAG_TYPE = `application/x-${APP_SLUG}-files`;
  * another pane (a preview, an editor) has the focus, which keeps the tree
  * where it is. */
 
-/** How long a click waits for a second one before Quick Look shows the file. */
-const DOUBLE_CLICK_MS = 250;
 export function followedDir(): string | undefined {
   const c = current();
   if (!c) return undefined;
@@ -89,10 +87,15 @@ export function FilesPanel() {
   const s = useTree();
   useDecorationVersion((d) => d.v);
   const treeRef = useRef<HTMLDivElement>(null);
-  const lookTimer = useRef<number | undefined>(undefined);
-  useEffect(() => () => window.clearTimeout(lookTimer.current), []);
   const [drop, setDrop] = useState<string>();
   const [scroll, setScroll] = useState({ top: 0, height: 0 });
+
+  // The directories shown, for decoration providers.
+  const shownKey = s.m === m && s.root ? [s.root, ...Object.keys(s.expanded).filter((d) => within(d, s.root!))].sort().join('\n') : '';
+  useEffect(() => {
+    useShownDirs.setState({ m: shownKey ? m : undefined, dirs: shownKey ? shownKey.split('\n') : [] });
+  }, [m, shownKey]);
+  useEffect(() => () => useShownDirs.setState({ m: undefined, dirs: [] }), []);
 
   // The root: the followed directory, else where the tree is, else home.
   useEffect(() => {
@@ -223,13 +226,9 @@ export function FilesPanel() {
     if (mod) return select(row.path, 'toggle');
     select(row.path);
     if (row.dir) setExpanded(row.path, !row.expanded);
-    else {
-      // A second click soon after opens the editor instead (onDoubleClick):
-      // Quick Look waits for it, so a double click opens one pane.
-      window.clearTimeout(lookTimer.current);
-      const path = row.path;
-      lookTimer.current = window.setTimeout(() => void quickLook(m, path, treeRef.current), DOUBLE_CLICK_MS);
-    }
+    // A click shows the file in the preview editor; a double click keeps it
+    // open (onDoubleClick), in the same pane.
+    else void quickLook(m, row.path, treeRef.current);
   };
 
   // ---- drags ----
@@ -327,9 +326,7 @@ export function FilesPanel() {
         draggable={!readOnly && !renaming}
         onClick={(ev) => onRowClick(ev, row)}
         onDoubleClick={() => {
-          if (row.dir) return;
-          window.clearTimeout(lookTimer.current);
-          void openPath(m, row.path, false);
+          if (!row.dir) void openPath(m, row.path, false);
         }}
         onContextMenu={(ev) => {
           if (!useTree.getState().selection.includes(row.path)) select(row.path);

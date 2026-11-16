@@ -159,14 +159,12 @@
 .files-editor-bar {
   display: flex;
   align-items: center;
-  gap: 4px;
+  justify-content: flex-end;
+  gap: 2px;
   height: var(--h-toolbar);
   padding: 0 4px 0 10px;
   border-bottom: 1px solid var(--line);
   font-size: var(--fs-md);
-}
-.files-editor-path {
-  color: var(--fg-dim);
 }
 .files-dirty {
   color: var(--fg);
@@ -198,4 +196,34 @@
 }
 .files-editor-host[hidden] {
   display: none;
+}
+
+/* The editor's quick diff: bars in the gutter, as VS Code's. */
+.monaco-editor .qd-added,
+.monaco-editor .qd-modified {
+  margin-left: 3px;
+  width: 3px !important;
+}
+.monaco-editor .qd-added {
+  background: var(--ds-git-added);
+}
+.monaco-editor .qd-modified {
+  background: var(--ds-git-modified);
+}
+/* Removed lines: a small triangle at the bottom of the line before them. */
+.monaco-editor .qd-deleted {
+  margin-left: 3px;
+}
+.monaco-editor .qd-deleted::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: -4px;
+  border-left: 4px solid var(--ds-git-deleted);
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+}
+.monaco-editor .qd-deleted.qd-top::after {
+  top: -4px;
+  bottom: auto;
 }

@@ -231,10 +231,23 @@ Code's preview editor does, so going through the changes keeps one pane):
 - When the repository changes, both sides are read again; unsaved text
   stays.
 
-**File explorer decorations** (`decorations.ts`): with the panel or a pane
-following a repository, the explorer colors its changed files (conflicts,
+**File explorer decorations** (`decorations.ts`, `follow.ts`): the
+explorer colors the changed files of the repositories followed (conflicts,
 deletions, modifications, renames, additions, untracked) with their letter,
-and their folders with the most pressing change inside.
+and their folders with the most pressing change inside, in VS Code's Git
+decoration colors (`--ds-git-*`, [24](24-design-tokens.md)). Besides the
+panel's and the panes' repositories, the plugin follows those of the
+directories the explorer shows while it is open (its root and the expanded
+ones; [28](28-file-explorer.md)): the repository of a directory is asked
+once (`repo`) and remembered, a directory in none for a minute, and each
+is watched as the panel's are while a directory of it is shown.
+
+**Quick diff** (`follow.ts`): the plugin gives the file explorer's editor
+the index's text of a file (`blob` with `source=index`), read again when
+the repository changed, so the editor's gutter marks the lines that differ
+from it, as VS Code's; untracked files have none. The repository of a file
+an editor shows is watched while it is shown. **Open Changes** opens the
+file's working tree diff.
 
 ## Alternatives considered
 

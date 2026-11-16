@@ -37,6 +37,9 @@ export interface PaneViewDef {
   path?(m: string, view: PluginView): string | undefined;
   /** The directory new terminals beside it start in. */
   directory?(m: string, view: PluginView): string | undefined;
+  /** Whether the pane is a preview, which the next one replaces (its title
+   * is in italics, as VS Code's preview editors). */
+  preview?(m: string, view: PluginView): boolean;
   component: ComponentType<PaneViewProps>;
 }
 

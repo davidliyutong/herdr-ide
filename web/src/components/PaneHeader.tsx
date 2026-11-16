@@ -131,7 +131,7 @@ function PluginHeading({ m, view, home }: { m: string; view: L.PluginView; home?
   return (
     <>
       <LeafIcon m={m} leaf={{ view }} className="pane-kind" />
-      <span className="pane-title" title={d.path ? `${d.title} · ${d.path}` : d.title}>
+      <span className={`pane-title ${d.preview ? 'is-preview' : ''}`} title={d.path ? `${d.title} · ${d.path}` : d.title}>
         {d.title}
       </span>
       {d.path && (

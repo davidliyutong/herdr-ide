@@ -1,24 +1,28 @@
 // The file explorer's editor pane ({view: {plugin: 'files', kind: 'editor',
-// path}}): a text file of the pane's machine in Monaco. Cmd+S (Ctrl+S)
+// path, preview}}): a text file of the pane's machine in Monaco, or an
+// image, video, audio file or PDF as Quick Look shows it. A preview (a
+// single click in the tree) is replaced by the next one until it is kept:
+// by a double click, the pin button or the first edit. Cmd+S (Ctrl+S)
 // saves it, with the size and modification time it was loaded with: a file
 // changed since (by a program, another page) is not overwritten; the pane
 // offers to load it again or to overwrite it. While the text has no unsaved
 // changes, a change on disk loads it again by itself. Binary files, text
-// that is not UTF-8 and files over MAX_SIZE open in Quick Look instead.
-// Read-only mode edits nothing.
+// that is not UTF-8 and files over MAX_SIZE offer a download. Read-only
+// mode edits nothing.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Eye, FolderTree, RotateCcw, Save } from 'lucide-react';
+import { Download, FileDiff, FolderTree, Pin, RotateCcw, Save } from 'lucide-react';
 import { fileUrl } from '../../lib/files';
-import { shortPath } from '../../lib/machine';
-import { actions } from '../../actions';
 import { useStore } from '../../state/store';
 import { t } from '../../i18n';
 import { useUnsaved } from '../../unsaved';
 import type { PaneViewProps } from '../api';
 import { createEditor, type CodeEditor, type Monaco } from '../monaco';
 import { ConflictError, errorText, filesApi } from './api';
-import { reveal } from './ops';
+import { keepEditor, reveal } from './ops';
+import { lineChanges, quickDiff, type LineChange } from './quickDiff';
+import { useDecorationVersion } from './decorations';
+import { isMediaPath, MediaView } from '../../components/PreviewPane';
 import './files.css';
 
 /** The largest file the editor opens (the core's limit for a save). */
@@ -69,10 +73,128 @@ export async function loadText(m: string, path: string): Promise<Loaded> {
 
 type Status = { kind: 'loading' } | { kind: 'ready' } | { kind: 'conflict'; removed: boolean } | Exclude<Loaded, { kind: 'text' }>;
 
-export function EditorPane({ m, pane, view, focused }: PaneViewProps) {
+export function EditorPane(props: PaneViewProps) {
+  const path = String(props.view.path ?? '');
+  // Another component for media, so that the text editor's state starts
+  // afresh when a preview pane turns from one kind to the other.
+  return isMediaPath(path) ? <MediaFile {...props} /> : <TextEditor {...props} />;
+}
+
+/** The editor bar: the file's state and the pane's tools, a pin for a
+ * preview (the pane's header has the file's name and path). */
+function EditorBar({ m, pane, view, children }: Pick<PaneViewProps, 'm' | 'pane' | 'view'> & { children?: React.ReactNode }) {
   const path = String(view.path ?? '');
   const readOnly = useStore((s) => s.readOnly);
-  const home = useStore((s) => s.machines[m]?.info?.home);
+  return (
+    <div className="files-editor-bar">
+      {children}
+      {view.preview === true && !readOnly && (
+        <button className="icon" title={t('files.keep')} aria-label={t('files.keep')} onClick={() => keepEditor(m, pane)}>
+          <Pin />
+        </button>
+      )}
+      <button className="icon" title={t('files.reveal')} aria-label={t('files.reveal')} onClick={() => reveal(m, path)}>
+        <FolderTree />
+      </button>
+    </div>
+  );
+}
+
+/** An image, video, audio file or PDF. */
+function MediaFile({ m, pane, view }: PaneViewProps) {
+  const path = String(view.path ?? '');
+  return (
+    <div className="files-editor" data-autofocus tabIndex={-1}>
+      <EditorBar m={m} pane={pane} view={view}>
+        <span className="spacer" />
+        <a className="icon" href={fileUrl(m, path, true)} title={t('preview.download')} aria-label={t('preview.download')}>
+          <Download />
+        </a>
+      </EditorBar>
+      <div className="preview-body">
+        <MediaView m={m} path={path} />
+      </div>
+    </div>
+  );
+}
+
+/** How long after a keystroke the quick diff is computed again. */
+const DIFF_DELAY_MS = 250;
+
+/** The editor's quick diff: bars in the gutter and the overview ruler
+ * where the text (unsaved changes included) differs from version
+ * control's, as VS Code shows them; the number of changed places. */
+function useQuickDiff(m: string, path: string, ed: React.RefObject<{ editor: CodeEditor; monaco: Monaco } | undefined>, ready: boolean) {
+  const version = useDecorationVersion((s) => s.v);
+  const original = useRef<string | undefined>(undefined);
+  const [changes, setChanges] = useState<LineChange[]>([]);
+  const timer = useRef<number | undefined>(undefined);
+
+  const compute = useCallback(() => {
+    const text = ed.current?.editor.getValue();
+    setChanges(original.current === undefined || text === undefined ? [] : lineChanges(original.current, text));
+  }, [ed]);
+
+  useEffect(() => quickDiff()?.follow(m, path), [m, path]);
+  useEffect(() => {
+    if (!ready) return;
+    let cancelled = false;
+    const p = quickDiff()?.original(m, path) ?? Promise.resolve(undefined);
+    p.catch(() => undefined).then((text) => {
+      if (cancelled) return;
+      original.current = text;
+      compute();
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [m, path, ready, version, compute]);
+
+  // Again after edits, once typing pauses.
+  useEffect(() => {
+    const e = ed.current?.editor;
+    if (!ready || !e) return;
+    const sub = e.onDidChangeModelContent(() => {
+      window.clearTimeout(timer.current);
+      timer.current = window.setTimeout(compute, DIFF_DELAY_MS);
+    });
+    return () => {
+      sub.dispose();
+      window.clearTimeout(timer.current);
+    };
+  }, [ready, ed, compute]);
+
+  // The decorations.
+  useEffect(() => {
+    const c = ed.current;
+    if (!c || !ready) return;
+    const style = getComputedStyle(document.documentElement);
+    const color = (kind: string) => style.getPropertyValue(`--ds-git-${kind}`).trim() || '#888888';
+    const { monaco, editor } = c;
+    const lane = monaco.editor.OverviewRulerLane.Left;
+    const collection = editor.createDecorationsCollection(
+      changes.map((ch) => {
+        const kind = ch.kind === 'deleted' ? 'deleted' : ch.kind === 'added' ? 'added' : 'modified';
+        const [start, end] = ch.kind === 'deleted' ? [Math.max(ch.after, 1), Math.max(ch.after, 1)] : [ch.start, ch.end];
+        return {
+          range: new monaco.Range(start, 1, end, 1),
+          options: {
+            isWholeLine: true,
+            linesDecorationsClassName: `qd-${kind}${ch.kind === 'deleted' && ch.after === 0 ? ' qd-top' : ''}`,
+            overviewRuler: { color: color(kind), position: lane },
+          },
+        };
+      }),
+    );
+    return () => collection.clear();
+  }, [changes, ready, ed]);
+
+  return changes.length;
+}
+
+function TextEditor({ m, pane, view, focused }: PaneViewProps) {
+  const path = String(view.path ?? '');
+  const readOnly = useStore((s) => s.readOnly);
   const host = useRef<HTMLDivElement>(null);
   const ed = useRef<{ editor: CodeEditor; monaco: Monaco }>(undefined);
   /** The version on disk the text was loaded or saved as; undefined for a
@@ -133,6 +255,10 @@ export function EditorPane({ m, pane, view, focused }: PaneViewProps) {
   );
   const saveRef = useRef(save);
   saveRef.current = save;
+  // The first edit keeps a preview open, as in VS Code.
+  useEffect(() => {
+    if (dirty && view.preview === true) keepEditor(m, pane);
+  }, [dirty, view.preview, m, pane]);
   // Closing the pane with changes not saved asks first (unsaved.ts).
   useUnsaved(m, pane, dirty, path.slice(path.lastIndexOf('/') + 1) || path, () => saveRef.current());
 
@@ -194,32 +320,41 @@ export function EditorPane({ m, pane, view, focused }: PaneViewProps) {
     return () => clearInterval(id);
   }, [m, path, status.kind, dirty, saving, reload]);
 
+  const changed = useQuickDiff(m, path, ed, status.kind === 'ready' || status.kind === 'conflict');
+  const open = quickDiff()?.openChanges;
+  const changes =
+    changed > 0 && open ? (
+      <button
+        className="icon"
+        title={t('files.openChanges', { n: changed })}
+        aria-label={t('files.openChanges', { n: changed })}
+        onClick={() => open(m, path)}
+      >
+        <FileDiff />
+      </button>
+    ) : null;
+
   const name = path.split('/').pop() || path;
   const note = (key: Parameters<typeof t>[0]) => (
     <div className="files-editor-note muted">
       <p>{t(key, { name })}</p>
-      <button className="btn" onClick={() => void actions.openPreview(m, path)}>
-        <Eye /> {t('files.quickLook')}
-      </button>
+      <a className="btn" href={fileUrl(m, path, true)}>
+        <Download /> {t('preview.download')}
+      </a>
     </div>
   );
 
   return (
     <div className="files-editor" data-autofocus tabIndex={-1}>
-      <div className="files-editor-bar">
-        <span className="files-editor-path ellipsis" title={path}>
-          {shortPath(path, home)}
-        </span>
+      <EditorBar m={m} pane={pane} view={view}>
         {dirty && (
           <span className="files-dirty" title={t('files.unsaved')} aria-label={t('files.unsaved')}>
             ●
           </span>
         )}
-        {readOnly && <span className="muted small">{t('files.readOnly')}</span>}
+        {readOnly && <span className="tag">{t('files.readOnly')}</span>}
         <span className="spacer" />
-        <button className="icon" title={t('files.reveal')} aria-label={t('files.reveal')} onClick={() => reveal(m, path)}>
-          <FolderTree />
-        </button>
+        {changes}
         <button className="icon" title={t('files.revert')} aria-label={t('files.revert')} onClick={() => void reload()}>
           <RotateCcw />
         </button>
@@ -234,7 +369,7 @@ export function EditorPane({ m, pane, view, focused }: PaneViewProps) {
             <Save />
           </button>
         )}
-      </div>
+      </EditorBar>
       {status.kind === 'conflict' && (
         <div className="files-conflict" role="alert">
           <span>{t(status.removed ? 'files.conflict.removed' : 'files.conflict.changed', { name })}</span>
