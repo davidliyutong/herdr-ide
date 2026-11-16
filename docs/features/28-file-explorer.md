@@ -17,8 +17,9 @@ Goals: a tree of the shown machine's files that follows the focused
 terminal's directory, with what VS Code's explorer does (expand, collapse,
 filter, hidden files, the keyboard, new files and folders, rename, the
 trash, delete, cut, copy and paste, drag and drop, copy paths, download,
-open in a terminal or VS Code); files from the computer dropped on it are
-uploaded; a click shows a file in a preview editor that the next click
+open in a terminal or VS Code); files and folders from the computer
+dropped on it or chosen in its menus are uploaded with their structure,
+asking about names taken, and rows dragged out of the page download; a click shows a file in a preview editor that the next click
 replaces and a double click keeps, as VS Code's preview editors (media
 too, as Quick Look shows them); the editor never overwrites a change made
 on the machine since it loaded the file; files changed in version control
@@ -97,17 +98,46 @@ machine's `internal/agent/plugin/files`.
   empty names, `.` and `..` are refused before anything is sent.
 - The context menu: Open, Open Preview, Open in VS Code, Open in Terminal (a
   terminal split beside the focused pane, in the folder), New File, New
-  Folder, Cut, Copy, Paste, Copy Path, Copy Relative Path (to the root),
-  Download (`download.ts`; not for the desktop app's own machine), Rename,
-  Move to Trash, Delete Permanently; on the empty part of the tree, the
-  root's entries and Refresh (the shown directories listed again),
-  Collapse Folders.
+  Folder, Upload Files…, Upload Folder… (on a folder), Cut, Copy, Paste,
+  Copy Path, Copy Relative Path (to the root), Download (`download.ts`, a
+  zip for folders and several rows; not for the desktop app's own
+  machine), Rename, Move to Trash, Delete Permanently; on the empty part
+  of the tree, the root's entries and Refresh (the shown directories
+  listed again), Collapse Folders, Show Uploads and Show Downloads (the
+  status bar's panels). The panel's **…** button has New File, New Folder,
+  Upload Files… and Upload Folder… (into the cursor's folder, else the
+  root), Download of the selection, Refresh, Collapse Folders and the
+  transfers.
 - Drags: rows dragged onto a folder (or the empty part, the root, or a
-  crumb) move there, with Alt they copy. Files from the computer are
-  uploaded into the folder (`transfers.ts`, followed in the uploads tray);
-  in the desktop app files of its own machine are copied where they are,
-  not uploaded. Folders from another computer cannot be uploaded, as on
-  panes.
+  crumb) move there, with Alt they copy; the folder under the pointer is
+  highlighted, the whole tree for the root. Dropped out of the page onto
+  the computer they download (`DownloadURL`: one file as itself, folders
+  and several rows as the zip the core makes; Chromium's browsers and the
+  desktop app take it, Firefox and Safari ignore it), also in read-only
+  mode, but not from the desktop app's own machine. Such a download is the
+  browser's own: it does not show in the downloads panel, which hears
+  only of downloads the page started.
+- **Uploads** (`upload.ts`): files and folders dropped from the computer,
+  or chosen with Upload Files… and Upload Folder… (the browser's dialog),
+  go into the folder with their structure: a dropped folder is read with
+  everything in it (`webkitGetAsEntry`, its readers' batches; items that
+  cannot be read are left out with a note), a chosen one from its files'
+  relative paths (the browser does not tell its empty folders); at most
+  10 000 entries at once. Names already in the folder are asked about
+  once each (**Replace**, **Keep Both**, **Skip**, Escape skipping, a box
+  applying the answer to the rest): a replaced file is written as a save
+  writes it (in place when a rename would lose something), a replaced
+  folder is merged (its files replace those of the same names, the others
+  stay), Keep Both gives the upload a free name (`name-1.ext`, a folder
+  `name-1`). A name taken by the other kind (a file where a folder is
+  dropped) is kept beside without asking. A folder's folders are made
+  first (`mkdir` with `unique`, then `mkdirs` for its deepest ones), then
+  its files go one after the other as one upload of the uploads panel
+  (`transfers.ts` `uploadPlaced`: the progress of its files together,
+  Cancel stopping it, what arrived staying; a file that fails does not
+  stop the others, and the upload fails saying how many did); each file
+  dropped alone is an upload of its own. In the desktop app files of its
+  own machine are copied where they are (`copy`), not uploaded.
 - **Polling**: while the panel is shown and the page visible, every 2 s
   the panel asks `POST …/p/files/stat` for the modification times of the
   shown directories, the root and the expanded ones below it that are not
@@ -144,13 +174,15 @@ removal reached stays removed. The agent's actions
 
 | Action | What it does |
 | --- | --- |
-| `mkdir`, `create` | A folder, an empty file; a taken name fails with `exists`. |
+| `mkdir`, `create` | A folder, an empty file; a taken name fails with `exists`, or with `unique` (a folder uploaded beside one of its name) the folder gets the first free `name-1`, `name-2`… |
+| `mkdirs` | Folders with the folders leading to them (an upload's); those there are kept, a file in the way fails with `exists`. |
 | `rename` | One path to another; never replaces (`renameat2` with `RENAME_NOREPLACE` on Linux, `renamex_np` with `RENAME_EXCL` on macOS, a check first on file systems without them); across file systems (`EXDEV`) a copy as `copy` makes it, which replaces nothing, then the removal of the original (a copy that fails is removed, the original stays); not into itself, also through a link. |
 | `move` | Paths into a folder under their names, replacing nothing: a taken name fails for that path alone (`failed`), the others move. |
 | `copy` | Paths into a folder: files with their modes, folders with their contents, links as links; a taken name becomes `name copy.ext`, `name copy 2.ext`… (a copy into the same folder); a folder is not copied into itself, also when the folder named is a link into it. |
 | `trash` | Into the user's trash: on macOS `~/.Trash` (`name 2.ext`… when taken); elsewhere the freedesktop.org trash, `$XDG_DATA_HOME/Trash` (`~/.local/share/Trash`) with an info file holding the original path and the time, or, for a path on another file system, the trash at the top of its mount (found along the path's real directory, with paths relative to it): `.Trash/<uid>` when `.Trash` is an administrator's (a directory with the sticky bit, not a link), else `.Trash-<uid>`. Other users may write at the top of a mount (`/tmp`), so such a trash and its `files` and `info` are used only when each is a directory of the user, not a link, closed to others (made `0700` when missing), as gio checks. A path no trash takes fails with `trash_unavailable`, and the panel offers to delete it for good. |
 | `remove` | Deletes for good (folders with their contents): each folder opened relative to its parent without following a link, links removed and never followed, as `os.RemoveAll` does. |
 | `write` | An editor's save, below. |
+| `upload` | A file from the computer (at most 4 GiB) received in full beside the path, then given the path's name or, when taken, the first free `name-1.ext`, `name-2.ext`… in a rename that replaces nothing; with `replace` written over the file there as a save writes it (through a link its target, in place when a rename would lose something). Cut short (cancelled, the connection lost), it leaves nothing. |
 | `stat` | Size, modification time and kind of up to 200 paths, for the polls and the editor; `error` on a path whose state is not known: `denied`, `failed`, or `busy` and `timeout` when stats do not answer. At most 8 stats run at once on the machine, and a path being stat'ed is not stat'ed again meanwhile: a mount that does not answer holds at most 8 threads, and a stat answers within 10 s. |
 
 Every path is expanded as the agent's other operations do (`~`, relative to
@@ -270,7 +302,8 @@ in an element.
 | Route | Writes | Purpose |
 | --- | --- | --- |
 | `POST /api/m/{id}/p/files/stat` | – | `{"paths"}` (1–200): `{"entries": [{path, exists, is_dir, size, mtime, error}]}`. A POST because 200 paths in a query make a URL longer than proxies take; it changes nothing, so it is not audited and read-only mode allows it. |
-| `POST /api/m/{id}/p/files/mkdir` | writes | `{"path"}`. |
+| `POST /api/m/{id}/p/files/mkdir` | writes | `{"path"}`, `"unique": true` for a free name. |
+| `POST /api/m/{id}/p/files/mkdirs` | writes | `{"paths"}`. |
 | `POST /api/m/{id}/p/files/create` | writes | `{"path"}`: an empty file. |
 | `POST /api/m/{id}/p/files/rename` | writes | `{"path", "to"}`. |
 | `POST /api/m/{id}/p/files/move` | writes | `{"paths", "dir"}`. |
@@ -278,10 +311,12 @@ in an element.
 | `POST /api/m/{id}/p/files/trash` | writes | `{"paths"}`. |
 | `POST /api/m/{id}/p/files/remove` | writes | `{"paths"}`. |
 | `POST /api/m/{id}/p/files/write` | writes | The body (at most 8 MiB) into `?path=`, with `&mtime=&size=`, `&new=1` or `&force=1`; `409 {"error": "conflict", "current"}`. |
+| `POST /api/m/{id}/p/files/upload` | writes | The body (at most 4 GiB, streamed to the machine) into `?path=` under a free name, or over the file there with `&replace=1`; audited with `size` and `replace`. |
 
 Changes answer `{"paths": [made], "failed": {path: code}}`; failures
 `{"error": code}` with `not_found` (404), `exists`, `refused`, `denied`,
-`trash_unavailable`, `too_large`, `bad_params`, `offline` (409).
+`trash_unavailable`, `too_large`, `bad_params`, `no_space`, `read_only`,
+`restore_failed`, `offline` (409).
 
 ## Alternatives considered
 
@@ -291,6 +326,9 @@ Changes answer `{"paths": [made], "failed": {path: code}}`; failures
 | Writing saves with the agent's `fs.write` (uploads) | It replaces the file without looking; a save must not overwrite a change a program made since the editor loaded the file. |
 | Always renaming a new file over the old one | It breaks hard links, gives a file of another user to the user and needs a directory the user may write; Vim and Emacs write such files in place for the same reasons. |
 | Always writing in place | A crash during the write leaves a file cut short; the rename leaves the old file or the new one, so it stays the usual way. |
+| Explorer uploads through the core's `/upload` (as panes) | It never replaces a file, cannot make folders and does not pass the explorer's guard (the data directory); the plugin's `upload` streams the same way and replaces as a save does when asked. |
+| Asking about each file inside a folder that is merged | A folder of hundreds of files would ask hundreds of times; the user chose to replace the folder's files when choosing Replace for it. |
+| Replacing a folder by removing it first | What the dropped folder does not hold would be lost; merging loses only the files replaced. |
 | Backups in the private directory only | One beside the file is where the user finds it when a crash left it, on the same file system; the private directory serves when the file's directory takes no new file. |
 | Deleting without a trash | A mistaken Delete in a tree is easy; the trash keeps the file where the system's tools find it. |
 | CodeMirror instead of Monaco | The diffs of a version control plugin want Monaco's diff editor; one editor for both. |
@@ -327,6 +365,11 @@ Changes answer `{"paths": [made], "failed": {path: code}}`; failures
   nothing written, the pane offers to load or overwrite.
 - A save that breaks off: the temporary file (`.<slug>-save-*` beside the
   file, or in `saves/`) is removed; the file is as it was.
+- An upload cut short (Cancel, the page closed, the connection lost): the
+  agent removes what it received; the file there (a replaced one) is as
+  it was. A folder's files that arrived before stay.
+- A name taken meanwhile by an upload's free name: the rename that
+  replaces nothing fails and the next free name is taken.
 - An older agent during an upgrade: actions fail with `unknown_plugin`.
 - A plugin turned off: its routes answer `404 plugin_disabled`, the panel is
   gone and editor panes say the plugin is off.
@@ -346,7 +389,9 @@ the user's own and closed to others, so trashed files never go to a
 directory another user planted. A save writes only the file named (a
 link's target) and, for a save in place, a private backup of it (`0600`)
 beside it or in the agent's own `saves/` directory (`0700`), removed when
-the save ended. Saves are bounded to 8 MiB, lists of
+the save ended. Uploads go through the same guard (an upload into the
+agent's data directory is refused), take a free name unless the user
+chose Replace, and are bounded to 4 GiB; saves are bounded to 8 MiB, lists of
 paths to 1000, stats to 200 paths and 8 running at once. Files moved to
 the trash stay in the user's trash
 ([deployment](../deployment.md#remote-resources)).
@@ -394,6 +439,19 @@ the trash stay in the user's trash
   POST, one at a time and less often after failures, a failed listing
   kept and tried again), Refresh, what a new root keeps and clears, paste
   into the root, a cut kept until moved, read-only mode, decorations.
+- `web/src/__tests__/filesUpload.test.ts`: a drop's folders read with
+  everything in them (in batches, unreadable items counted), the deepest
+  folders made, files and folders uploaded with their structure (a
+  folder as one upload, its folders made first), names taken asked about
+  (replace, keep both, skip, once for all; a folder replaced merged, the
+  other kind kept beside), a folder's upload adding up its files, failing
+  once they went and stopping when cancelled, the menus' upload and
+  transfer entries (none that write in read-only mode), the `DownloadURL`
+  of rows dragged out.
+- `internal/agent/plugin/files/upload_test.go`: uploads under free names
+  (also a dot file), replacing in place when the file has other links, a
+  folder never replaced by a file, the data directory refused, uploads cut
+  short leaving nothing; `mkdir` with `unique` and `mkdirs`.
 - `web/src/__tests__/filesEditor.test.ts` (Monaco replaced): versions from
   the ETag, saves with them, conflicts overwritten and loaded, new files,
   read-only mode, files that are not text, files that cannot be read (an

@@ -1,0 +1,116 @@
+//go:build unix
+
+package files
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"net"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"herdr-ide/internal/agent/plugin"
+	"herdr-ide/internal/agentproto"
+)
+
+// MaxUpload bounds an upload into the explorer (as the core's /upload).
+const MaxUpload = 4 << 30
+
+// upload writes a file uploaded from the explorer into Path: the reply
+// comes first, then the file as chunks, then a line with the result. It
+// takes a free name (Path, else name-1.ext, name-2.ext…), or with Replace
+// it writes the file there as a save does (Force: through a link its
+// target, in place when a rename would lose something). The file is
+// received in full before anything at Path changes; one cut short leaves
+// nothing.
+func (g *guard) upload(st net.Conn, p Params) error {
+	abs, err := g.resolve(p.Path)
+	if err == nil && p.Replace {
+		if abs, err = target(abs); err == nil {
+			_, err = g.resolve(abs)
+		}
+	}
+	if err != nil {
+		return plugin.Reply(st, nil, err)
+	}
+	defer st.Close()
+	if err := agentproto.WriteLine(st, agentproto.Reply{OK: true}); err != nil {
+		return err
+	}
+	r := &agentproto.ChunkReader{R: st}
+	var e *Entry
+	if p.Replace {
+		e, err = g.put(abs, r, Params{Force: true, Method: p.Method}, MaxUpload)
+	} else {
+		e, err = putNew(abs, r)
+	}
+	if err != nil {
+		return plugin.Fail(st, codeOf(err))
+	}
+	b, _ := json.Marshal(Result{Paths: []string{e.Path}, Entry: e})
+	return agentproto.WriteLine(st, agentproto.Reply{OK: true, Plugin: b})
+}
+
+// putNew writes what r holds (at most MaxUpload bytes) into a new file
+// beside p and gives it p's name or, when that is taken, the first free
+// name-1.ext, name-2.ext…, in a rename that replaces nothing. The new file
+// gets what the umask leaves of 0666.
+func putNew(p string, r io.Reader) (*Entry, error) {
+	stage, err := createTemp(filepath.Dir(p), 0o666)
+	if err != nil {
+		io.Copy(io.Discard, r)
+		return nil, err
+	}
+	staged := stage.Name()
+	defer func() {
+		if staged != "" {
+			os.Remove(staged)
+		}
+	}()
+	err = receive(stage, r, MaxUpload)
+	if err == nil {
+		err = stage.Sync()
+	}
+	if cerr := stage.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return nil, err
+	}
+	for i := 0; i < 1000; i++ {
+		q := numbered(p, i)
+		err := renameNoReplace(staged, q)
+		if errors.Is(err, fs.ErrExist) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		staged = ""
+		fi, err := os.Stat(q)
+		if err != nil {
+			return nil, err
+		}
+		return entryOf(q, fi), nil
+	}
+	return nil, plugin.Errorf("exists", "no free name for %s", p)
+}
+
+// numbered is p for i 0, else p with -i before its extension (as uploads
+// into the machine's directories are named; a name that is all extension,
+// .env, gets it at the end).
+func numbered(p string, i int) string {
+	if i == 0 {
+		return p
+	}
+	dir, base := filepath.Split(p)
+	ext := filepath.Ext(base)
+	if ext == base {
+		ext = ""
+	}
+	return filepath.Join(dir, fmt.Sprintf("%s-%d%s", strings.TrimSuffix(base, ext), i, ext))
+}

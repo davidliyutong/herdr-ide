@@ -7,7 +7,7 @@
 // double click (or Enter) opens it in the editor pane.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronsDownUp, Eye, EyeOff, FilePlus, FolderPlus, LocateFixed, RefreshCw } from 'lucide-react';
+import { ChevronsDownUp, Ellipsis, Eye, EyeOff, FilePlus, FolderPlus, LocateFixed, RefreshCw } from 'lucide-react';
 import { current, paneDirectory } from '../../actions';
 import { useStore } from '../../state/store';
 import { useTerms } from '../../state/terms';
@@ -25,6 +25,7 @@ import { TypeAhead, clickSelection, navigationKey, stepId } from '../../componen
 import { FileIcon } from '../../fileIcons';
 import { decorationsOf, useDecorationVersion, useShownDirs } from './decorations';
 import {
+  baseName,
   collapseAll,
   crumbs,
   navRows,
@@ -46,7 +47,9 @@ import {
   setClipboard,
   type Row,
 } from './tree';
-import { copyInto, create, dirOf, dropFiles, menuFor, moveInto, openPath, paste, quickLook, remove, rename, trash } from './ops';
+import { copyInto, create, dirOf, dropFiles, menuFor, moveInto, openPath, panelMenu, paste, quickLook, remove, rename, trash } from './ops';
+import { canDownload } from '../../download';
+import { downloadUrl } from '../../lib/files';
 import { startPolling } from './poller';
 import './files.css';
 
@@ -54,6 +57,22 @@ import './files.css';
 export const POLL_MS = 2000;
 /** The drag type of paths dragged inside the tree. */
 const DRAG_TYPE = `application/x-${APP_SLUG}-files`;
+
+/** The DownloadURL of rows dragged out of the page ("type:name:url", as
+ * Chromium takes it): one file as itself, anything else as the zip the
+ * core makes, named as the core names it. */
+export function dragOutUrl(m: string, paths: string[], isDir: (p: string) => boolean): string | undefined {
+  if (!paths.length) return undefined;
+  let name: string;
+  if (paths.length === 1) name = baseName(paths[0]) + (isDir(paths[0]) ? '.zip' : '');
+  else {
+    let dir = parentOf(paths[0]);
+    for (const p of paths) while (dir !== '/' && !p.startsWith(dir + '/')) dir = parentOf(dir);
+    name = dir === '/' ? 'download.zip' : baseName(dir) + '.zip';
+  }
+  // A colon would end the name early.
+  return `application/octet-stream:${name.replace(/:/g, '_')}:${location.origin}${downloadUrl(m, paths)}`;
+}
 
 /** The directory the tree follows: the focused terminal's (a VS Code
  * pane's folder), the workspace's without a focused pane; undefined while
@@ -197,10 +216,14 @@ export function FilesPanel() {
   // ---- drags ----
   const dropDir = (row?: Row) => (row ? dirOf(row.path, row.dir) : root);
   const onDragStart = (ev: React.DragEvent, row: Row) => {
-    if (readOnly) return ev.preventDefault();
     const paths = targets(row.path);
-    ev.dataTransfer.setData(DRAG_TYPE, JSON.stringify({ m, paths }));
-    ev.dataTransfer.effectAllowed = 'copyMove';
+    const out = canDownload(m) ? dragOutUrl(m, paths, isDir) : undefined;
+    if (readOnly && !out) return ev.preventDefault();
+    // Rows move or copy inside the tree; dropped on the computer (where
+    // the browser takes DownloadURL: Chromium's), they download.
+    if (!readOnly) ev.dataTransfer.setData(DRAG_TYPE, JSON.stringify({ m, paths }));
+    if (out) ev.dataTransfer.setData('DownloadURL', out);
+    ev.dataTransfer.effectAllowed = readOnly ? 'copy' : 'copyMove';
   };
   const accepts = (dt: DataTransfer) => !readOnly && (Array.from(dt.types).includes(DRAG_TYPE) || carriesFiles(dt));
   const onDragOver = (ev: React.DragEvent, row?: Row) => {
@@ -296,7 +319,7 @@ export function FilesPanel() {
         dimmed={cut.has(row.path)}
         data-path={row.path}
         title={deco?.tooltip ? `${row.path}\n${deco.tooltip}` : row.path}
-        draggable={!readOnly && !renaming}
+        draggable={!renaming && (!readOnly || canDownload(m))}
         onClick={(ev) => onRowClick(ev, row)}
         onDoubleClick={() => {
           if (!row.dir) void openPath(m, row.path, false);
@@ -391,6 +414,18 @@ export function FilesPanel() {
           onClick={() => setFollow(!s.follow)}
         >
           <LocateFixed />
+        </button>
+        <button
+          className="icon"
+          title={t('files.more')}
+          aria-label={t('files.more')}
+          aria-haspopup="menu"
+          onClick={(ev) => {
+            const r = ev.currentTarget.getBoundingClientRect();
+            openMenu({ clientX: r.left, clientY: r.bottom, preventDefault: () => {}, stopPropagation: () => {} }, panelMenu(m, isDir));
+          }}
+        >
+          <Ellipsis />
         </button>
       </div>
       <input

@@ -78,6 +78,11 @@ type Params struct {
 	// Method is how a save writes a file that is there: MethodAuto (also
 	// when empty) or MethodReplace (save.go).
 	Method string `json:"method,omitempty"`
+	// Replace: an upload replaces the file at Path, as a save does;
+	// otherwise it takes a free name. Unique: a new folder takes a free
+	// name.
+	Replace bool `json:"replace,omitempty"`
+	Unique  bool `json:"unique,omitempty"`
 }
 
 // Result answers the actions that change paths: the paths they made.
@@ -100,7 +105,10 @@ func handle(ctx context.Context, st net.Conn, action string, raw json.RawMessage
 		v, err := g.stat(ctx, p.Paths)
 		return plugin.Reply(st, v, err)
 	case "mkdir":
-		v, err := g.mkdir(p.Path)
+		v, err := g.mkdir(p.Path, p.Unique)
+		return plugin.Reply(st, v, err)
+	case "mkdirs":
+		v, err := g.each(p.Paths, g.mkdirs)
 		return plugin.Reply(st, v, err)
 	case "create":
 		v, err := g.create(p.Path)
@@ -127,6 +135,8 @@ func handle(ctx context.Context, st net.Conn, action string, raw json.RawMessage
 		return plugin.Reply(st, v, err)
 	case "write":
 		return g.write(st, p)
+	case "upload":
+		return g.upload(st, p)
 	}
 	return plugin.Reply(st, nil, plugin.Errorf("bad_params", "unknown action %q", action))
 }
@@ -425,15 +435,45 @@ func statShared(ctx context.Context, p string) (fs.FileInfo, error) {
 	}
 }
 
-func (g *guard) mkdir(p string) (*Result, error) {
+// mkdir makes a folder; a taken name fails, or with unique the folder
+// gets the first free name-1, name-2… (a folder uploaded beside one of
+// its name).
+func (g *guard) mkdir(p string, unique bool) (*Result, error) {
 	abs, err := g.resolve(p)
 	if err != nil {
 		return nil, err
 	}
-	if err := os.Mkdir(abs, 0o755); err != nil {
-		return nil, codeOf(err)
+	for i := 0; i < 1000; i++ {
+		q := abs
+		if i > 0 {
+			q = fmt.Sprintf("%s-%d", abs, i)
+		}
+		err := os.Mkdir(q, 0o755)
+		if err == nil {
+			return &Result{Paths: []string{q}}, nil
+		}
+		if !unique || !errors.Is(err, fs.ErrExist) {
+			return nil, codeOf(err)
+		}
 	}
-	return &Result{Paths: []string{abs}}, nil
+	return nil, plugin.Errorf("exists", "no free name for %s", abs)
+}
+
+// mkdirs makes a folder with the folders that lead to it; one there
+// already is fine (the folders of an upload), a file in the way is
+// exists.
+func (g *guard) mkdirs(p string) (string, error) {
+	abs, err := g.resolve(p)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(abs, 0o755); err != nil {
+		if errors.Is(err, syscall.ENOTDIR) {
+			return "", &plugin.Error{Code: "exists", Err: err}
+		}
+		return "", codeOf(err)
+	}
+	return abs, nil
 }
 
 func (g *guard) create(p string) (*Result, error) {

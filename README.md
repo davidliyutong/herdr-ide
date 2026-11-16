@@ -115,7 +115,10 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   directory, as VS Code's explorer works: file-type icons, filter,
   hidden files, keys (type a name to go to it),
   new files and folders, rename, cut, copy and paste, drag to move, drop
-  files from your computer to upload them, Move to Trash, copy paths,
+  files and folders from your computer (or choose them with Upload Files…
+  and Upload Folder…) to upload them with their structure, asking whether
+  to replace, keep both or skip names already there, drag rows out to
+  download them, Move to Trash, copy paths,
   download, open in a terminal or VS Code. A click shows a file in a
   preview editor that the next click replaces, a double click keeps it
   open, as in VS Code (text in Monaco, images, video and PDFs as Quick Look

@@ -27,7 +27,7 @@ func TestRoutes(t *testing.T) {
 		}
 		seen[rt.Path] = true
 	}
-	for _, p := range []string{"stat", "mkdir", "create", "rename", "move", "copy", "trash", "remove", "write"} {
+	for _, p := range []string{"stat", "mkdir", "mkdirs", "create", "rename", "move", "copy", "trash", "remove", "write", "upload"} {
 		if !seen[p] {
 			t.Errorf("no route %s", p)
 		}
@@ -62,5 +62,26 @@ func TestWriteParams(t *testing.T) {
 		if _, err := writeParams(req(q)); err == nil {
 			t.Errorf("%s: accepted", q)
 		}
+	}
+}
+
+func TestUploadParams(t *testing.T) {
+	req := func(q string) *http.Request { return httptest.NewRequest("POST", "/u?"+q, nil) }
+	if p, err := uploadParams(req("path=/a/b.txt")); err != nil || p.Path != "/a/b.txt" || p.Replace {
+		t.Fatalf("free name: %+v %v", p, err)
+	}
+	if p, err := uploadParams(req("path=/a/b.txt&replace=1")); err != nil || !p.Replace {
+		t.Fatalf("replace: %+v %v", p, err)
+	}
+	if _, err := uploadParams(req("replace=1")); err == nil {
+		t.Fatal("no path accepted")
+	}
+	// Over the limit: refused before anything reaches the machine.
+	r := httptest.NewRequest("POST", "/u?path=/a", strings.NewReader("x"))
+	r.ContentLength = MaxUpload + 1
+	w := httptest.NewRecorder()
+	upload(&plugin.Call{}, w, r)
+	if w.Code != http.StatusRequestEntityTooLarge || !strings.Contains(w.Body.String(), "too_large") {
+		t.Fatalf("too large: %d %s", w.Code, w.Body)
 	}
 }

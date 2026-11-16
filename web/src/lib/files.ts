@@ -62,6 +62,17 @@ export interface UploadOptions {
 export function uploadFile(m: string, name: string, body: Blob, dir?: string, opts: UploadOptions = {}): Promise<RemoteStat> {
   const q = new URLSearchParams({ name });
   if (dir) q.set('dir', dir);
+  return sendBody(`/api/m/${encodeURIComponent(m)}/upload?${q}`, body, opts) as Promise<RemoteStat>;
+}
+
+/** POSTs body to url with the progress and cancelling of uploadFile, and
+ * resolves with the JSON answer. A failure rejects with failure(status,
+ * answer), by default an Error with the answer's error. */
+export function sendBody(
+  url: string,
+  body: Blob,
+  opts: UploadOptions & { failure?(status: number, answer: { error?: string; message?: string }): Error } = {},
+): Promise<unknown> {
   return new Promise((resolve, reject) => {
     if (opts.signal?.aborted) {
       reject(new UploadCancelled());
@@ -70,19 +81,20 @@ export function uploadFile(m: string, name: string, body: Blob, dir?: string, op
     const xhr = new XMLHttpRequest();
     const abort = () => xhr.abort();
     const done = () => opts.signal?.removeEventListener('abort', abort);
-    xhr.open('POST', `/api/m/${encodeURIComponent(m)}/upload?${q}`);
+    xhr.open('POST', url);
     // Upload listeners must be set before send().
     xhr.upload.onprogress = (e) => opts.onProgress?.(e.loaded);
     xhr.upload.onload = () => opts.onSent?.();
     xhr.onload = () => {
       done();
-      let j: { error?: string } = {};
+      let j: { error?: string; message?: string } = {};
       try {
         j = JSON.parse(xhr.responseText);
       } catch {
         /* not JSON: the status says it */
       }
-      if (xhr.status >= 200 && xhr.status < 300) resolve(j as RemoteStat);
+      if (xhr.status >= 200 && xhr.status < 300) resolve(j);
+      else if (opts.failure) reject(opts.failure(xhr.status, j));
       else reject(new Error(j.error ?? (xhr.statusText || `HTTP ${xhr.status}`)));
     };
     xhr.onerror = () => {

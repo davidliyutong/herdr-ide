@@ -4,11 +4,11 @@
 // uploads, and the context menu that offers them. Nothing that changes
 // files is offered in read-only mode.
 
-import { FilePlus, FolderPlus, Pencil, Trash2 } from 'lucide-react';
+import { Download, FilePlus, FolderPlus, FolderUp, Pencil, Trash2, Upload } from 'lucide-react';
 import { createElement } from 'react';
 import { actions, current } from '../../actions';
 import { confirmDialog } from '../../dialog';
-import { canDownload, startDownload } from '../../download';
+import { canDownload, startDownload, useDownloads } from '../../download';
 import { droppedItems, filesAreOn } from '../../drop';
 import { t } from '../../i18n';
 import { isMac, keyLabel } from '../../keys';
@@ -16,10 +16,11 @@ import * as L from '../../term/layout';
 import { terms } from '../../state/terms';
 import { unsavedPanes, withView } from '../../state/panes';
 import { useStore, type ToastKind } from '../../state/store';
-import { uploadFiles } from '../../transfers';
+import { useTransfers } from '../../transfers';
 import type { MenuEntry } from '../../contextMenu';
 import { errorText, filesApi, type Result } from './api';
 import { isPluginOn } from '../registry';
+import { chooseFiles, droppedEntries, localPaths, pickedFiles, uploadInto } from './upload';
 import {
   baseName,
   join,
@@ -241,22 +242,37 @@ export async function paste(m: string, dir: string) {
   setClipboard(failed.length ? { ...c, paths: failed } : undefined);
 }
 
-/** Uploads files dropped from outside the page into dir; in the desktop
- * app files of its own machine are copied where they are. Folders from
- * another computer cannot be uploaded. */
+/** Uploads files and folders dropped from outside the page into dir, the
+ * folders with everything in them (upload.ts); in the desktop app files
+ * of its own machine are copied where they are. It must start during the
+ * drop event, which takes the entries. */
 export async function dropFiles(m: string, dir: string, items: DataTransferItemList | ArrayLike<DataTransferItem>) {
-  const dropped = droppedItems(items);
   if (filesAreOn(m)) {
-    const here = dropped.filter((d) => d.path).map((d) => d.path);
+    const here = droppedItems(items)
+      .filter((d) => d.path)
+      .map((d) => d.path);
     if (here.length) await copyInto(m, here, dir);
     return;
   }
-  const folders = dropped.filter((d) => d.folder).length;
-  if (folders) toast(t('surface.dropNoFolders', { n: folders }), 'info');
-  const files = dropped.filter((d) => !d.folder).map((d) => d.file);
+  const { picked, unreadable } = await droppedEntries(items);
+  if (unreadable) toast(t('files.upload.unreadable', { n: unreadable }), 'info');
+  await uploadInto(m, dir, picked);
+}
+
+/** Upload Files… and Upload Folder…: the browser's dialog, then the
+ * upload into dir (in the desktop app, copies of its own machine's files
+ * where they are). */
+export async function uploadChosen(m: string, dir: string, folder: boolean) {
+  const files = await chooseFiles(folder);
   if (!files.length) return;
-  await uploadFiles(m, files, dir);
-  reloadDirs([dir]);
+  const here = filesAreOn(m) ? localPaths(files) : [];
+  if (here.length) return copyInto(m, here, dir);
+  await uploadInto(m, dir, pickedFiles(files));
+}
+
+/** Opens the uploads or the downloads panel of the status bar. */
+export function showTransfers(which: 'uploads' | 'downloads') {
+  (which === 'uploads' ? useTransfers : useDownloads).getState().setPanel(true);
 }
 
 export async function copyText(text: string) {
@@ -301,6 +317,7 @@ export function menuFor(m: string, paths: string[], isDir: (p: string) => boolea
   if (!ro && (one || !target)) {
     out.push({ label: t('files.newFile'), icon: createElement(FilePlus), run: () => setEdit({ kind: 'file', path: dir }) });
     out.push({ label: t('files.newFolder'), icon: createElement(FolderPlus), run: () => setEdit({ kind: 'folder', path: dir }) });
+    if (!target || isDir(target)) out.push(...uploadEntries(m, dir));
     out.push('sep');
   }
   if (target && !ro) {
@@ -316,7 +333,7 @@ export function menuFor(m: string, paths: string[], isDir: (p: string) => boolea
     out.push({ label: t('files.copyRelativePath'), run: () => void copyText(paths.map((p) => relativePath(root, p)).join('\n')) });
     if (canDownload(m)) {
       out.push('sep');
-      out.push({ label: t('files.download'), run: () => void startDownload(m, paths) });
+      out.push({ label: t('files.download'), icon: createElement(Download), run: () => void startDownload(m, paths) });
     }
   }
   if (target && !ro) {
@@ -329,6 +346,45 @@ export function menuFor(m: string, paths: string[], isDir: (p: string) => boolea
   if (!target) {
     out.push({ label: t('files.refresh'), run: refresh });
     out.push({ label: t('files.collapseAll'), run: collapseAll });
+    out.push('sep', ...transferEntries());
   }
+  return out;
+}
+
+/** Upload Files… and Upload Folder… into dir; none in read-only mode. */
+function uploadEntries(m: string, dir: string): MenuEntry[] {
+  if (readOnly()) return [];
+  return [
+    { label: t('files.uploadFiles'), icon: createElement(Upload), run: () => void uploadChosen(m, dir, false) },
+    { label: t('files.uploadFolder'), icon: createElement(FolderUp), run: () => void uploadChosen(m, dir, true) },
+  ];
+}
+
+const transferEntries = (): MenuEntry[] => [
+  { label: t('files.showUploads'), run: () => showTransfers('uploads') },
+  { label: t('files.showDownloads'), run: () => showTransfers('downloads') },
+];
+
+/** The panel's menu (its … button): new entries and uploads into the
+ * selected folder (the selected file's, else the root), the selection's
+ * download, Refresh, Collapse Folders and the transfers. */
+export function panelMenu(m: string, isDir: (p: string) => boolean): MenuEntry[] {
+  const s = useTree.getState();
+  const root = s.root!;
+  const cur = s.cursor;
+  const dir = cur ? dirOf(cur, isDir(cur)) : root;
+  const out: MenuEntry[] = [];
+  if (!readOnly()) {
+    out.push({ label: t('files.newFile'), icon: createElement(FilePlus), run: () => setEdit({ kind: 'file', path: dir }) });
+    out.push({ label: t('files.newFolder'), icon: createElement(FolderPlus), run: () => setEdit({ kind: 'folder', path: dir }) });
+    out.push(...uploadEntries(m, dir), 'sep');
+  }
+  if (s.selection.length && canDownload(m)) {
+    const paths = [...s.selection];
+    out.push({ label: t('files.download'), icon: createElement(Download), run: () => void startDownload(m, paths) }, 'sep');
+  }
+  out.push({ label: t('files.refresh'), run: refresh });
+  out.push({ label: t('files.collapseAll'), run: collapseAll });
+  out.push('sep', ...transferEntries());
   return out;
 }
