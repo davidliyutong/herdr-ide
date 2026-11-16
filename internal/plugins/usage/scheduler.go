@@ -600,6 +600,18 @@ func (p *Plugin) poll(ctx context.Context, only []string, joined bool) {
 			a.view.SeenAt = now.Unix()
 		}
 	}
+	// A machine that names an account it reported without an id before (an
+	// id read later, or kept from an earlier version) replaces that
+	// account at once, rather than showing both until forgetAfter.
+	for _, g := range fresh {
+		if g.acc.ID == "" {
+			continue
+		}
+		stand := keyOf(usage.Account{Provider: g.acc.Provider, Home: g.acc.Home}, g.machine)
+		if _, again := seen[stand]; !again {
+			delete(p.accounts, stand)
+		}
+	}
 	for k, a := range p.accounts {
 		if now.Sub(time.Unix(a.view.SeenAt, 0)) > forgetAfter {
 			delete(p.accounts, k)

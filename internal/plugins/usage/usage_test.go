@@ -711,3 +711,31 @@ func TestBestAnswerWins(t *testing.T) {
 		t.Errorf("best of two failures %+v", a)
 	}
 }
+
+func TestNamedAccountReplacesItsStandIn(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	named := false
+	p, _ := testPlugin(t, &now, []string{"local", "box"}, func(m string, o usage.Options) ([]usage.Account, error) {
+		a := usage.Account{Provider: "antigravity", Status: "ok", AsOf: now.Unix(), Windows: []usage.Window{win("weekly", 50, 0, 0)}}
+		if named && m == "local" {
+			a.ID = "h1"
+		}
+		return []usage.Account{a}, nil
+	})
+	p.Poll(context.Background())
+	if find(p.Snapshot(), "antigravity:@local") == nil {
+		t.Fatal("no account without an id")
+	}
+	// The machine reads the account's id: one card, not two.
+	named = true
+	now = now.Add(time.Hour)
+	p.Poll(context.Background())
+	s := p.Snapshot()
+	if find(s, "antigravity:@local") != nil || find(s, "antigravity:h1") == nil {
+		t.Errorf("accounts %+v", s.Accounts)
+	}
+	// Another machine's account without an id is its own.
+	if find(s, "antigravity:@box") == nil {
+		t.Errorf("the other machine's account went: %+v", s.Accounts)
+	}
+}

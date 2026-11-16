@@ -198,7 +198,9 @@ machine's `skipLocal`. A machine that connects after a poll (the SSH ones
 after the local one at start, or a reconnect) is asked at the next tick,
 alone, with the accounts read within the cadence in `skip`, without moving
 the cadence (not in `manual` mode). Accounts are keyed
-`provider:id`; one without an id stays apart per machine. An answer without
+`provider:id`; one without an id stays apart per machine, until that machine
+names it with an id: the named account then replaces it at once rather than
+showing beside it (`TestNamedAccountReplacesItsStandIn`). An answer without
 numbers keeps the last good ones with the new status and code (the card
 says how old they are). Per account the best answer of a poll counts,
 whatever the order the machines answered in (numbers from the provider,
