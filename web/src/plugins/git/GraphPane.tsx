@@ -53,6 +53,9 @@ export function pageSize(v: unknown): number {
   return Math.min(1000, Math.max(50, n));
 }
 
+/** The most refs the filter holds (the machine's log takes 100). */
+export const MAX_FILTER = 100;
+
 /** Where a repository's branch filter is kept, per browser. */
 export const filterKey = (m: string, repo: string) => `git.graphFilter:${m}:${repo}`;
 
@@ -187,6 +190,11 @@ export function GraphPane({ m, view }: PaneViewProps) {
   // The refs shown (none: every branch), kept per repository.
   const [filter, setFilterNow] = useState<string[]>(() => loadPref<string[]>(filterKey(m, repo), []));
   const setFilter = (f: string[]) => {
+    // The machine takes the history of at most MAX_FILTER refs at once.
+    if (f.length > MAX_FILTER) {
+      useStore.getState().toast(t('git.graph.filterMax', { n: MAX_FILTER }));
+      f = f.slice(0, MAX_FILTER);
+    }
     setFilterNow(f);
     savePref(filterKey(m, repo), f);
   };

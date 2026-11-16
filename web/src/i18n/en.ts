@@ -1301,6 +1301,7 @@ export const en = {
   'git.graph.branches': 'Branches',
   'git.graph.allBranches': 'All branches',
   'git.graph.filterPlaceholder': 'Show the history of branches and tags',
+  'git.graph.filterMax': 'The graph shows the history of at most {n} branches and tags at once.',
   'git.graph.filterGone': 'A branch of the filter no longer exists: every branch is shown.',
   'git.graph.showOnly': 'Show Only This Branch',
   'git.graph.addToFilter': 'Add to Filter',

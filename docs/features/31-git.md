@@ -298,7 +298,8 @@ Graph's editor; `actions.openView` with `tab`):
   (`Picker` `multiple`): local branches, each remote's branches under its
   name, and tags; none chosen shows every branch. It holds the refs' full
   names (`refs/heads/main`, `refs/tags/v1`, which a branch and a tag of
-  one name do not confuse), sent as the log's `branch=`; it is kept per
+  one name do not confuse), sent as the log's `branch=` (at most 100, as
+  the machine's log takes; more are cut with a toast); it is kept per
   browser for each machine's repository (`git.graphFilter:<machine>:<repo>`),
   and a ref of it deleted since is dropped (when the first page fails
   with `bad_ref`, the filter is cleared and a toast says so). While it

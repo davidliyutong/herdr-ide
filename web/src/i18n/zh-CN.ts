@@ -1269,6 +1269,7 @@ export const zhCN: Messages = {
   'git.graph.branches': '分支',
   'git.graph.allBranches': '所有分支',
   'git.graph.filterPlaceholder': '显示这些分支和标签的历史',
+  'git.graph.filterMax': 'Git 图一次最多显示 {n} 个分支和标签的历史。',
   'git.graph.filterGone': '筛选中的某个分支已不存在：现在显示所有分支。',
   'git.graph.showOnly': '仅显示此分支',
   'git.graph.addToFilter': '添加到筛选',
