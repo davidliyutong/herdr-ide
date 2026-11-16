@@ -77,14 +77,21 @@ func (s *Session) Err() error {
 	return s.err
 }
 
+// ReplyTimeout bounds the wait for an agent's reply when the caller's
+// context has no deadline, so a stream whose reply never comes ends.
+var ReplyTimeout = 60 * time.Second
+
 // Open starts a stream with header h and waits for the agent's reply.
 func (s *Session) Open(ctx context.Context, h agentproto.Header) (net.Conn, *agentproto.Reply, error) {
 	st, err := s.ys.OpenStream()
 	if err != nil {
 		return nil, nil, err
 	}
-	deadline := time.Now().Add(60 * time.Second)
-	if dl, ok := ctx.Deadline(); ok && dl.Before(deadline) {
+	// The reply comes within ReplyTimeout unless the caller's context says
+	// otherwise: actions that answer only after their work (a scan of logs,
+	// a git push) give their own, longer deadline.
+	deadline := time.Now().Add(ReplyTimeout)
+	if dl, ok := ctx.Deadline(); ok {
 		deadline = dl
 	}
 	_ = st.SetDeadline(deadline)

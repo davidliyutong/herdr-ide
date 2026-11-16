@@ -143,6 +143,11 @@ after a successful reply it carries op-specific bytes.
 | `vault` | agent → core | one `VaultRequest` line `{tool: list\|get\|env, names, client, terminal, cwd}` from the vault's MCP server, relayed from `vault.sock`, and one `VaultResponse` line `{ok, code, error, variables, values}`; the core decides from the machine the stream came from; refused with `Code` `plugin_disabled` while the plugin is off ([30](features/30-variable-vault.md)) |
 | `gui` | core → agent | actions `status`, `install` (fetch Xvfb in user space), `start`, `keep` (start the display keeper, which holds the display while the instance's terminal core runs), `shells` (which of the pids in `Args` were started with the display) (reply `GUI`); `video` and `video-install` (`Digest`: the video encoder's SHA-256; the second streams the gzip-compressed encoder, chunked) reply whether it is installed and the stream kinds it makes here (`GUI.Video`, `GUI.VideoEncoders`); `attach`: messages `[kind u8][len u32][payload]`, JSON events (`window`, `gone`, `layer`, `layer_gone`, `cursor`, `stats`, `video` (a window's stream starts, or ends without a codec)) and frames (`GUIFrameHeader` + JPEG/PNG, or a video frame of the whole window, `Enc` 3, 4 for key frames) from the agent, JSON commands (`watch`, `ack`, `refresh`, `codecs` (the stream kinds all viewers decode, also sent with `watch` and `refresh`), `keyframe`, input, `close`) from the core |
 
+The core waits for an agent's reply until the deadline of the request that
+opened the stream, and 60 s when it has none (`transport.ReplyTimeout`):
+actions that answer only after their work (a scan of logs, a git push, an
+install) give their own, longer deadline.
+
 yamux streams cannot be half-closed, so uploads use `ChunkWriter` framing
 (`[u32 length][data]…[0]`). Core and agent always come from the same build:
 the agent is uploaded by content hash, so the protocol needs no version
