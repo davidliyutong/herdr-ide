@@ -62,3 +62,18 @@ func TestOptions(t *testing.T) {
 		t.Errorf("unsorted: %v %v", Agents, Schemes)
 	}
 }
+
+// The color theme setting offers the design tokens' themes, the first by
+// default.
+func TestColorThemes(t *testing.T) {
+	for _, d := range defs() {
+		if d.Key != ColorTheme {
+			continue
+		}
+		if !slices.Equal(d.Enum, tokenThemes) || d.Default != tokenThemes[0] {
+			t.Errorf("enum %v default %v, tokens %v", d.Enum, d.Default, tokenThemes)
+		}
+		return
+	}
+	t.Fatal("no color theme setting")
+}

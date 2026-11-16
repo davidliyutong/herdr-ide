@@ -339,6 +339,14 @@
     "command.workspace.next",
     "command.workspace.previous",
     "command.workspace.switch",
+    "settings.appearance.colorTheme",
+    "settings.appearance.colorTheme.amber",
+    "settings.appearance.colorTheme.blue",
+    "settings.appearance.colorTheme.graphite",
+    "settings.appearance.colorTheme.rose",
+    "settings.appearance.colorTheme.teal",
+    "settings.appearance.colorTheme.violet",
+    "settings.appearance.colorTheme.vscode",
     "settings.appearance.language",
     "settings.appearance.language.auto",
     "settings.appearance.language.en",
@@ -852,6 +860,7 @@
     ]
   },
   "settings": {
+    "appearance.colorTheme": "blue",
     "appearance.language": "auto",
     "appearance.theme": "system",
     "appearance.uiFontSize": 13,

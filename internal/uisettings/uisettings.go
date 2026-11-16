@@ -23,6 +23,7 @@ type terminalColors struct {
 const (
 	Language     = "appearance.language"
 	Theme        = "appearance.theme"
+	ColorTheme   = "appearance.colorTheme"
 	UIFontSize   = "appearance.uiFontSize"
 	Zoom         = "window.zoom"
 	FontFamily   = "terminal.fontFamily"
@@ -69,6 +70,10 @@ func defs() []settings.Def {
 		// Appearance.
 		{Key: Theme, Type: settings.TypeEnum, Default: "system", Enum: []string{"system", "light", "dark"},
 			Section: "appearance", Order: 10},
+		// The accent of the chrome (design/tokens.json themes); the neutrals
+		// are the same in every one.
+		{Key: ColorTheme, Type: settings.TypeEnum, Default: tokenThemes[0], Enum: append([]string(nil), tokenThemes...),
+			Section: "appearance", Order: 15},
 		{Key: Language, Type: settings.TypeEnum, Default: "auto", Enum: []string{"auto", "en", "zh-CN"},
 			Section: "appearance", Order: 20},
 		{Key: UIFontSize, Type: settings.TypeNumber, Default: 13, Min: uiMin, Max: uiMax, Integer: true,

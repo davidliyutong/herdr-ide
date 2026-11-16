@@ -8,31 +8,22 @@
 .files-empty {
   padding: 12px;
 }
+/* The panel's tools: a toolbar like a pane's header. */
 .files-toolbar {
   display: flex;
   align-items: center;
-  gap: 1px;
-  padding: 0 6px 4px 10px;
+  gap: 2px;
+  flex: none;
+  height: var(--h-toolbar);
+  padding: 0 4px 0 12px;
   min-width: 0;
-}
-.files-toolbar .icon {
-  min-width: 1.6rem;
-  height: 1.6rem;
-}
-.files-toolbar .icon .lucide {
-  width: 0.95rem;
-  height: 0.95rem;
-}
-.files-toolbar .icon.on {
-  color: var(--fg);
-  background: var(--accent-soft);
 }
 .files-crumbs {
   display: flex;
   align-items: center;
   flex: 1 1 auto;
   min-width: 0;
-  font-size: var(--fs-sm);
+  font-size: var(--fs-md);
 }
 .files-crumb {
   display: inline-flex;
@@ -60,12 +51,16 @@
 .files-filter {
   margin: 0 8px 4px;
   font: inherit;
-  font-size: var(--fs-sm);
   color: var(--fg);
   background: var(--bg);
   border: 1px solid var(--line-2);
-  border-radius: 4px;
-  padding: 3px 6px;
+  border-radius: var(--radius-sm);
+  height: var(--ctl);
+  padding: 0 6px;
+  outline: none;
+}
+.files-filter:focus {
+  border-color: var(--accent);
 }
 .files-tree {
   position: relative;
@@ -84,12 +79,12 @@
   position: absolute;
   left: 0;
   right: 0;
-  height: 22px;
+  height: var(--h-row);
   display: flex;
   align-items: center;
   gap: 4px;
   padding-right: 8px;
-  font-size: var(--fs-md);
+  font-size: var(--fs-base);
   cursor: default;
   user-select: none;
   white-space: nowrap;
@@ -99,6 +94,9 @@
 }
 .files-row.selected {
   background: var(--bg-3);
+}
+.files-tree:focus-within .files-row.selected {
+  background: var(--accent-soft);
 }
 .files-tree:focus-visible .files-row.cursor {
   outline: 1px solid var(--focus-ring);
@@ -112,17 +110,17 @@
 }
 .files-twisty {
   display: inline-flex;
-  width: 14px;
+  width: var(--ic-sm);
   flex: none;
   color: var(--fg-dim);
 }
 .files-twisty svg {
-  width: 14px;
-  height: 14px;
+  width: var(--ic-sm);
+  height: var(--ic-sm);
 }
 .files-icon {
-  width: 15px;
-  height: 15px;
+  width: var(--ic);
+  height: var(--ic);
   flex: none;
   color: var(--fg-dim);
 }
@@ -130,8 +128,8 @@
   flex: 1;
 }
 .files-link {
-  width: 12px;
-  height: 12px;
+  width: var(--fs-md);
+  height: var(--fs-md);
   flex: none;
   color: var(--fg-mute);
 }
@@ -144,7 +142,8 @@
   flex: 1;
   min-width: 0;
   padding: 0 4px;
-  height: 20px;
+  min-height: 0;
+  height: var(--ctl-sm);
 }
 .files-note {
   padding: 8px 12px;
@@ -161,10 +160,10 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 2px 6px 2px 10px;
+  height: var(--h-toolbar);
+  padding: 0 4px 0 10px;
   border-bottom: 1px solid var(--line);
-  font-size: var(--fs-sm);
-  min-height: 1.9rem;
+  font-size: var(--fs-md);
 }
 .files-editor-path {
   color: var(--fg-dim);
@@ -177,7 +176,7 @@
   align-items: center;
   gap: 6px;
   padding: 6px 10px;
-  background: color-mix(in srgb, var(--blocked) 16%, transparent);
+  background: color-mix(in srgb, var(--warning) 16%, transparent);
   border-bottom: 1px solid var(--line);
   font-size: var(--fs-sm);
 }
@@ -190,8 +189,8 @@
   gap: 6px;
 }
 .files-editor-note .btn svg {
-  width: 14px;
-  height: 14px;
+  width: var(--ic-sm);
+  height: var(--ic-sm);
 }
 .files-editor-host {
   flex: 1;

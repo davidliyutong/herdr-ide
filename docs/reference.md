@@ -100,6 +100,7 @@ in the UI; a setting with a scope can have its own value per machine, under
 | Setting | Values | Default | Flag | Scope |
 | --- | --- | --- | --- | --- |
 | `appearance.theme` | `system`, `light`, `dark` | `"system"` | – | – |
+| `appearance.colorTheme` | `blue`, `vscode`, `teal`, `violet`, `rose`, `amber`, `graphite` | `"blue"` | – | – |
 | `appearance.language` | `auto`, `en`, `zh-CN` | `"auto"` | – | – |
 | `appearance.uiFontSize` | integer, 11–20 | `13` | – | – |
 | `window.zoom` | integer, 50–300 | `100` | – | – |

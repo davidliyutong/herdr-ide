@@ -138,7 +138,12 @@ export async function runGit(m: string, root: string, action: string, params: Re
     const code = e instanceof GitError ? e.code : '';
     useStore
       .getState()
-      .toast(errorText(e), undefined, code === 'auth_required' || code === 'conflicts' || code === 'git_failed' ? 12000 : undefined);
+      .toast(
+        errorText(e),
+        undefined,
+        code === 'auth_required' || code === 'conflicts' || code === 'git_failed' ? 12000 : undefined,
+        'error',
+      );
     return false;
   } finally {
     patch(m, root, () => ({ busy: undefined }));

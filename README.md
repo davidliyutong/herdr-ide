@@ -138,7 +138,8 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   would cost at API prices, by day, model, project and machine. Credentials
   are read where they are, read only, and never leave the machine.
 - **Settings.** Language (English, Chinese), light/dark theme followed by
-  VS Code, interface size, the desktop app's zoom, the terminals' font (picked from the monospace
+  VS Code, color themes (the accent: blue, VS Code blue, teal, violet,
+  rose, amber, graphite), interface size, the desktop app's zoom, the terminals' font (picked from the monospace
   fonts installed, with a preview), line height, cursor, scrollback, bell,
   color schemes (Dracula, Nord, Solarized, One, Gruvbox, Tomorrow…) with
   your own colors on top, notification sounds, system notifications and

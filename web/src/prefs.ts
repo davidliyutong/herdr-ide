@@ -22,6 +22,7 @@ export interface TermColors {
 export const prefKeys = {
   locale: 'appearance.language',
   theme: 'appearance.theme',
+  colorTheme: 'appearance.colorTheme',
   uiFontSize: 'appearance.uiFontSize',
   termFontFamily: 'terminal.fontFamily',
   termFontSize: 'terminal.fontSize',
@@ -47,6 +48,7 @@ export type PrefKey = keyof typeof prefKeys;
 export interface Prefs {
   locale: 'auto' | 'en' | 'zh-CN';
   theme: 'system' | 'dark' | 'light';
+  colorTheme: string;
   uiFontSize: number;
   termFontFamily: string;
   termFontSize: number;

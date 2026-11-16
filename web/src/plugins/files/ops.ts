@@ -16,7 +16,7 @@ import { mediaExt } from '../../terminal/links';
 import * as L from '../../term/layout';
 import { terms } from '../../state/terms';
 import { withView } from '../../state/panes';
-import { useStore } from '../../state/store';
+import { useStore, type ToastKind } from '../../state/store';
 import { uploadFiles } from '../../transfers';
 import type { MenuEntry } from '../../contextMenu';
 import { errorText, filesApi, type Result } from './api';
@@ -39,7 +39,7 @@ import {
   loadDir,
 } from './tree';
 
-const toast = (msg: string) => useStore.getState().toast(msg);
+const toast = (msg: string, kind: ToastKind = 'error') => useStore.getState().toast(msg, undefined, undefined, kind);
 const mod = isMac ? 'cmd' : 'ctrl';
 /** The keys the tree takes, as menus show them. */
 export const treeKeys = {
@@ -224,7 +224,7 @@ export async function dropFiles(m: string, dir: string, items: DataTransferItemL
     return;
   }
   const folders = dropped.filter((d) => d.folder).length;
-  if (folders) toast(t('surface.dropNoFolders', { n: folders }));
+  if (folders) toast(t('surface.dropNoFolders', { n: folders }), 'info');
   const files = dropped.filter((d) => !d.folder).map((d) => d.file);
   if (!files.length) return;
   await uploadFiles(m, files, dir);

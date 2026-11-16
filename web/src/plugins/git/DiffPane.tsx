@@ -166,7 +166,7 @@ export function DiffPane({ m, pane, view, focused }: PaneViewProps) {
         useStore
           .getState()
           .toast(t('git.diff.conflict', { name: baseName(d.path) }), { label: t('git.diff.reload'), run: () => void show() });
-      } else useStore.getState().toast(t('git.diff.saveFailed', { error: filesError(e) }));
+      } else useStore.getState().toast(t('git.diff.saveFailed', { error: filesError(e) }), undefined, undefined, 'error');
       return false;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

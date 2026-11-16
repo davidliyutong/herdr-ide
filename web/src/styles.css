@@ -1,6 +1,7 @@
 :root {
   /* The UI's colors are the design tokens (tokens.css, generated from
-     design/tokens.json). */
+     design/tokens.json; docs/features/24-design-tokens.md). Neutrals are
+     the same in every color theme; the accent is the theme's. */
   --bg: var(--ds-color-background);
   --bg-1: var(--ds-color-sidebar);
   --bg-2: var(--ds-color-hover);
@@ -10,26 +11,48 @@
   --fg: var(--ds-color-foreground);
   --fg-dim: var(--ds-color-muted);
   --fg-mute: var(--ds-color-faint);
-  --accent: var(--ds-color-primary);
+  /* The accent marks focus, the selection, the one emphasized control and
+     what asks for the user (an agent waiting, a badge); not every state. */
+  --accent: var(--ds-accent);
+  --on-accent: var(--ds-on-accent);
+  --accent-soft: color-mix(in srgb, var(--ds-accent) 16%, transparent);
+  --focus-ring: var(--ds-accent);
   --working: var(--ds-status-working);
-  --blocked: var(--ds-status-blocked);
+  --blocked: var(--ds-accent);
   --done: var(--ds-status-done);
   --idle: var(--ds-status-idle);
   --error: var(--ds-status-error);
+  --warning: var(--ds-color-warning);
+  --blocked-glow: color-mix(in srgb, var(--blocked) 25%, transparent);
   --overlay: color-mix(in srgb, var(--ds-color-background) 75%, transparent);
   --float: color-mix(in srgb, var(--ds-color-accent) 94%, transparent);
   --backdrop: rgba(0, 0, 0, 0.4);
   --shadow: rgba(0, 0, 0, 0.5);
   --checker-a: #171717;
   --checker-b: #101010;
-  --on-accent: var(--ds-color-on-primary);
-  --focus-ring: var(--ds-color-focus-ring);
-  --accent-soft: color-mix(in srgb, var(--ds-color-primary) 14%, transparent);
-  --blocked-glow: color-mix(in srgb, var(--ds-status-blocked) 25%, transparent);
+  --radius-sm: var(--ds-metric-radius-small);
   --radius: var(--ds-metric-radius);
-  /* Sizes are in rem so that the UI font size setting scales the chrome. */
-  --fs-sm: 0.846rem;
-  --fs-md: 0.923rem;
+  --radius-lg: var(--ds-metric-radius-large);
+  /* Sizes are in rem so that the UI font size setting scales the chrome
+     alike everywhere: a header row (the sidebars' heads, the tab bar), a
+     toolbar (a pane's header, a panel's tools), the status bar, list rows,
+     icon buttons and their icons. */
+  --h-header: var(--ds-size-header);
+  --h-toolbar: var(--ds-size-toolbar);
+  --h-status: var(--ds-size-status-bar);
+  --h-row: var(--ds-size-row);
+  --ctl: var(--ds-size-control);
+  --ctl-sm: var(--ds-size-control-small);
+  --ic: var(--ds-size-icon);
+  --ic-sm: var(--ds-size-icon-small);
+  --fs-xs: var(--ds-font-size-xs);
+  --fs-sm: var(--ds-font-size-sm);
+  --fs-md: var(--ds-font-size-md);
+  --fs-base: var(--ds-font-size-base);
+  --fs-lg: var(--ds-font-size-lg);
+  --fs-xl: var(--ds-font-size-xl);
+  --fs-display: var(--ds-font-size-display);
+  --mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
   color-scheme: dark;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Noto Sans CJK SC', sans-serif;
   font-size: 13px;
@@ -42,8 +65,8 @@
   --shadow: rgba(10, 10, 10, 0.18);
   --checker-a: #f3f3f3;
   --checker-b: #e8e8e8;
-  --accent-soft: color-mix(in srgb, var(--ds-color-primary) 10%, transparent);
-  --blocked-glow: color-mix(in srgb, var(--ds-status-blocked) 20%, transparent);
+  --accent-soft: color-mix(in srgb, var(--ds-accent) 12%, transparent);
+  --blocked-glow: color-mix(in srgb, var(--blocked) 20%, transparent);
   color-scheme: light;
 }
 
@@ -86,60 +109,285 @@ body.dragging iframe {
   vertical-align: middle;
 }
 
+/* Buttons: secondary by default (a neutral fill), .primary for the one
+   emphasized action of a place (the accent), .ghost and .icon without a
+   fill. All are a control high. */
 button,
 .btn {
   font: inherit;
   color: var(--fg);
   background: var(--bg-3);
   border: 1px solid var(--line-2);
-  border-radius: 4px;
-  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  padding: 0 10px;
+  min-height: var(--ctl);
   cursor: pointer;
   text-decoration: none;
-  line-height: 18px;
+  line-height: calc(var(--ctl) - 2px);
 }
 button:hover,
 .btn:hover {
-  border-color: var(--accent);
+  background: color-mix(in srgb, var(--fg) 8%, var(--bg-3));
+}
+button.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--fg-dim);
+}
+button.ghost:hover:not(:disabled) {
+  background: var(--bg-3);
+  color: var(--fg);
+}
+button.sm,
+.btn.sm {
+  min-height: var(--ctl-sm);
+  line-height: calc(var(--ctl-sm) - 2px);
+  padding: 0 8px;
+  font-size: var(--fs-md);
+}
+button > .lucide,
+.btn > .lucide {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
 }
 button:disabled {
   opacity: 0.5;
   cursor: default;
 }
+/* An icon button: a control square with an icon; .sm in rows and fields. */
 .icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 1.85rem;
-  height: 1.85rem;
-  padding: 0 0.3rem;
+  min-width: var(--ctl);
+  height: var(--ctl);
+  min-height: 0;
+  padding: 0 4px;
   background: transparent;
   border: none;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   color: var(--fg-dim);
   cursor: pointer;
+  line-height: 1;
 }
-.icon .lucide {
-  width: 1.2rem;
-  height: 1.2rem;
+.icon .lucide,
+button.icon > .lucide {
+  width: var(--ic);
+  height: var(--ic);
+}
+.icon.sm {
+  min-width: var(--ctl-sm);
+  height: var(--ctl-sm);
+  padding: 0 2px;
+}
+.icon.sm .lucide,
+button.icon.sm > .lucide {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
 }
 .icon:hover:not(:disabled) {
   color: var(--fg);
   background: var(--bg-3);
 }
+/* A toggle among icon buttons that is on. */
+.icon.on,
+.icon[aria-pressed='true'] {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
 :focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: -2px;
 }
+/* Fields: a control high, the accent on focus. */
 select,
+.input,
 .settings-input,
 .inline-edit {
   font: inherit;
   color: var(--fg);
   background: var(--bg);
   border: 1px solid var(--line-2);
-  border-radius: 4px;
-  padding: 3px 6px;
+  border-radius: var(--radius-sm);
+  padding: 0 6px;
+  min-height: var(--ctl);
+  outline: none;
+}
+textarea.input {
+  padding: 4px 6px;
+  line-height: 1.45;
+}
+select:focus-visible,
+.input:focus,
+.settings-input:focus,
+.inline-edit:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+.input::placeholder {
+  color: var(--fg-mute);
+}
+/* A count or a short state beside a title: .badge is filled with the
+   accent (it asks for attention), .tag only outlined. */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.4em;
+  height: 1.4em;
+  padding: 0 0.45em;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 1.55em;
+  padding: 0 0.5em;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  color: var(--fg-dim);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+/* A toolbar row: a pane's header, a panel's tools, an editor's bar. */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  min-width: 0;
+  height: var(--h-toolbar);
+  padding: 0 4px 0 10px;
+  font-size: var(--fs-md);
+}
+/* A collapsible group of a panel (changes, history, variables): a row
+   with a caret, an upper-case title, its count and its actions. */
+.section-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  height: var(--h-row);
+  padding: 0 4px 0 4px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+  cursor: pointer;
+  user-select: none;
+}
+.section-head:hover {
+  color: var(--fg);
+}
+.section-head .lucide {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
+.section-head .section-actions {
+  margin-left: auto;
+  display: flex;
+  visibility: hidden;
+}
+.section-head:hover .section-actions,
+.section-head:focus-within .section-actions {
+  visibility: visible;
+}
+/* An on/off switch, for a setting of a form. */
+.switch {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  width: 2.15rem;
+  height: 1.2rem;
+  border-radius: 999px;
+  background: var(--line-2);
+  border: none;
+  padding: 0;
+  min-height: 0;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: calc(1.2rem - 4px);
+  height: calc(1.2rem - 4px);
+  border-radius: 50%;
+  background: var(--fg);
+  transition: transform 0.12s;
+}
+.switch[aria-checked='true'] {
+  background: var(--accent);
+}
+.switch[aria-checked='true']::after {
+  background: var(--on-accent);
+  transform: translateX(calc(2.15rem - 1.2rem));
+}
+.switch:hover {
+  background: color-mix(in srgb, var(--fg) 30%, var(--line-2));
+}
+.switch[aria-checked='true']:hover {
+  background: var(--accent);
+  filter: brightness(1.08);
+}
+/* A note in a panel or a form: info is plain, .warning and .error have a
+   bar of their color. */
+.callout {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  background: var(--bg-2);
+  font-size: var(--fs-md);
+  line-height: 1.45;
+}
+.callout > .lucide {
+  flex: none;
+  margin-top: 1px;
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+  color: var(--fg-dim);
+}
+.callout.warning {
+  box-shadow: inset 3px 0 0 var(--warning);
+}
+.callout.warning > .lucide {
+  color: var(--warning);
+}
+.callout.error {
+  box-shadow: inset 3px 0 0 var(--error);
+}
+.callout.error > .lucide {
+  color: var(--error);
+}
+/* A panel's empty or unavailable state: centered, an icon, a line, an action. */
+.empty-note {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 24px 16px;
+  text-align: center;
+  color: var(--fg-dim);
+  font-size: var(--fs-md);
+  line-height: 1.45;
+}
+.empty-note > .lucide {
+  width: 1.85rem;
+  height: 1.85rem;
+  color: var(--fg-mute);
+  stroke-width: 1.5;
 }
 
 .muted {
@@ -147,6 +395,9 @@ select,
 }
 .small {
   font-size: var(--fs-sm);
+}
+.mono {
+  font-family: var(--mono);
 }
 .pad {
   padding: 8px 12px;
@@ -180,7 +431,7 @@ select,
 .app {
   display: grid;
   grid-template-columns: var(--sidebar-w, 20rem) minmax(0, 1fr) var(--panel-w, 0) var(--rail-w, 0);
-  grid-template-rows: minmax(0, 1fr) 1.85rem;
+  grid-template-rows: minmax(0, 1fr) var(--h-status);
   grid-template-areas: 'sidebar main panel rail' 'status status status status';
   height: 100%;
 }
@@ -194,20 +445,25 @@ select,
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
-  padding-top: 6px;
+  gap: 4px;
+  /* The first button is centered on the header row beside it. */
+  padding-top: calc((var(--h-header) - var(--ds-size-rail-button)) / 2);
   background: var(--bg-1);
   border-left: 1px solid var(--line);
   min-height: 0;
 }
 .rail-button {
-  width: 2rem;
-  height: 2rem;
+  position: relative;
+  width: var(--ds-size-rail-button);
+  height: var(--ds-size-rail-button);
+  min-height: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 6px;
-  color: var(--fg-dim);
+  padding: 0;
+  border: none;
+  border-radius: var(--radius);
+  color: var(--fg-mute);
   background: transparent;
 }
 .rail-button:hover {
@@ -216,11 +472,23 @@ select,
 }
 .rail-button.active {
   color: var(--fg);
-  background: var(--accent-soft);
+  background: var(--bg-3);
+}
+/* The shown panel's button: a bar of the accent on the rail's edge. */
+.rail-button.active::before {
+  content: '';
+  position: absolute;
+  left: calc((var(--ds-size-rail) - var(--ds-size-rail-button)) / -2);
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent);
 }
 .rail-button svg {
-  width: 1.05rem;
-  height: 1.05rem;
+  width: var(--ds-size-rail-icon);
+  height: var(--ds-size-rail-icon);
+  stroke-width: 1.6;
 }
 .panel {
   grid-area: panel;
@@ -235,14 +503,16 @@ select,
 .panel-head {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 6px 6px 4px 12px;
+  gap: 2px;
+  flex: none;
+  height: var(--h-header);
+  padding: 0 4px 0 12px;
 }
 .panel-title {
   flex: 1;
   font-weight: 600;
-  font-size: 0.78rem;
-  letter-spacing: 0.4px;
+  font-size: var(--fs-sm);
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--fg-dim);
 }
@@ -323,11 +593,14 @@ body.resizing .panel-resizer::after {
   display: flex;
   align-items: center;
   gap: 2px;
-  padding: 8px 8px 4px 14px;
+  flex: none;
+  height: var(--h-header);
+  padding: 0 4px 0 14px;
 }
 .brand {
   font-weight: 600;
-  letter-spacing: 0.3px;
+  font-size: var(--fs-base);
+  letter-spacing: 0.02em;
   flex: 1;
 }
 .sidebar-scroll {
@@ -361,10 +634,14 @@ body.resizing .sidebar-resizer::after {
 }
 /* Buttons of a row (machine, workspace) shown while the row is pointed at. */
 .row-action {
-  min-width: 1.6rem;
-  height: 1.6rem;
-  margin: -4px -4px -4px 0;
+  min-width: var(--ctl-sm);
+  height: var(--ctl-sm);
+  margin: -2px -4px -2px 0;
   visibility: hidden;
+}
+.row-action .lucide {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
 }
 .machine-head:hover .row-action,
 .ws-item:hover .row-action,
@@ -373,9 +650,10 @@ body.resizing .sidebar-resizer::after {
 }
 .section-title {
   font-size: var(--fs-sm);
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.6px;
-  color: var(--fg-mute);
+  letter-spacing: 0.04em;
+  color: var(--fg-dim);
   padding: 8px 14px 4px;
 }
 .inbox {
@@ -388,7 +666,8 @@ body.resizing .sidebar-resizer::after {
   display: flex;
   gap: 8px;
   align-items: center;
-  padding: 5px 14px;
+  min-height: var(--h-row);
+  padding: 3px 14px;
   cursor: pointer;
 }
 .inbox-item:hover {
@@ -399,10 +678,7 @@ body.resizing .sidebar-resizer::after {
   flex: 1;
 }
 .inbox-title {
-  font-size: var(--fs-md);
-}
-.inbox-item.st-blocked .inbox-title {
-  color: var(--blocked);
+  font-size: var(--fs-base);
 }
 
 .machine {
@@ -412,8 +688,8 @@ body.resizing .sidebar-resizer::after {
   display: flex;
   gap: 6px;
   align-items: center;
-  min-height: 2rem;
-  padding: 4px 12px 4px 8px;
+  min-height: var(--h-row);
+  padding: 2px 8px 2px 8px;
   cursor: pointer;
   font-weight: 600;
   user-select: none;
@@ -446,7 +722,7 @@ body.resizing .sidebar-resizer::after {
   animation: pulse 1.2s infinite;
 }
 .ms-auth_required {
-  background: var(--blocked);
+  background: var(--warning);
 }
 .ms-error {
   background: var(--error);
@@ -468,8 +744,8 @@ body.resizing .sidebar-resizer::after {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 1.85rem;
-  padding: 3px 12px 3px 30px;
+  min-height: var(--h-row);
+  padding: 2px 8px 2px 30px;
   cursor: pointer;
   color: var(--fg-dim);
 }
@@ -484,7 +760,6 @@ body.resizing .sidebar-resizer::after {
 }
 .ws-item.add {
   color: var(--fg-mute);
-  font-size: var(--fs-md);
 }
 .ws-item.add .lucide {
   margin-left: -1px;
@@ -566,12 +841,12 @@ body.resizing .sidebar-resizer::after {
    stays visible and nothing scrolls. One row is as tall as an icon button;
    the toggle and the breadcrumb stay on the first row. */
 .tabbar {
-  --tab-row: 1.85rem;
+  --tab-row: var(--ctl);
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  min-height: 2.6rem;
-  padding: calc((2.6rem - 1px - var(--tab-row)) / 2) 8px;
+  min-height: var(--h-header);
+  padding: calc((var(--h-header) - 1px - var(--tab-row)) / 2) 4px calc((var(--h-header) - 1px - var(--tab-row)) / 2) 8px;
   border-bottom: 1px solid var(--line);
   background: var(--ds-color-tab-bar);
   flex: none;
@@ -597,8 +872,8 @@ body.resizing .sidebar-resizer::after {
   gap: 6px;
   height: var(--tab-row);
   max-width: 100%;
-  padding: 0 6px 0 10px;
-  border-radius: 5px;
+  padding: 0 4px 0 10px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   color: var(--fg-dim);
   white-space: nowrap;
@@ -624,14 +899,19 @@ body.resizing .sidebar-resizer::after {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.55rem;
-  height: 1.55rem;
+  width: var(--ctl-sm);
+  height: var(--ctl-sm);
+  min-height: 0;
   background: none;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   color: var(--fg-mute);
   padding: 0;
   visibility: hidden;
+}
+.tab-close .lucide {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
 }
 .tab-close:hover {
   color: var(--fg);
@@ -649,8 +929,8 @@ body.resizing .sidebar-resizer::after {
 }
 /* A tab of VS Code or a preview alone: its mark before its name. */
 .tab-kind.lucide {
-  width: 1rem;
-  height: 1rem;
+  width: var(--ic-sm);
+  height: var(--ic-sm);
   margin-right: -2px;
 }
 /* A tab of several panes: a small split mark (the count is in its tooltip). */
@@ -817,8 +1097,12 @@ body.resizing .sidebar-resizer::after {
   white-space: nowrap;
 }
 .find-bar .icon {
-  min-width: 1.6rem;
-  height: 1.6rem;
+  min-width: var(--ctl-sm);
+  height: var(--ctl-sm);
+}
+.find-bar .icon .lucide {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
 }
 .math-render {
   /* Not a scroll box of its own: KaTeX's struts reach a few pixels past
@@ -906,11 +1190,11 @@ body.resizing .sidebar-resizer::after {
   align-items: center;
   gap: 6px;
   flex: none;
-  /* Its buttons are the tab bar's size (an .icon), with a little room. */
-  height: 2.3rem;
+  /* A toolbar (.toolbar's height), its buttons icon buttons. */
+  height: var(--h-toolbar);
   box-sizing: border-box;
-  padding: 0 3px 0 8px;
-  font-size: var(--fs-sm);
+  padding: 0 4px 0 10px;
+  font-size: var(--fs-md);
   line-height: 1;
   background: var(--bg-1);
   color: var(--fg-dim);
@@ -938,8 +1222,8 @@ body.resizing .sidebar-resizer::after {
 }
 /* What a pane other than a terminal is: VS Code's mark, a preview's eye. */
 .pane-kind.lucide {
-  width: 1.15rem;
-  height: 1.15rem;
+  width: var(--ic-sm);
+  height: var(--ic-sm);
   margin-right: -2px;
 }
 .pane-header .code-icon {
@@ -992,22 +1276,23 @@ body.resizing .sidebar-resizer::after {
   gap: 1px;
   flex: none;
 }
-/* As large as the tab bar's and sidebar's icon buttons. */
+/* Icon buttons, as large as every toolbar's. */
 .pane-actions button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.85rem;
-  height: 1.85rem;
+  width: var(--ctl);
+  height: var(--ctl);
+  min-height: 0;
   padding: 0;
   background: none;
   border: none;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   color: var(--fg-dim);
 }
 .pane-actions .lucide {
-  width: 1.15rem;
-  height: 1.15rem;
+  width: var(--ic);
+  height: var(--ic);
 }
 /* With several panes, only the focused one and the one pointed at show
    their buttons, so the keyboard's pane stands out; a program window that
@@ -1139,13 +1424,20 @@ body.dragging * {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 5px 10px 5px 8px;
-  border-radius: 5px;
+  min-height: var(--h-row);
+  padding: 2px 10px 2px 8px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   color: var(--fg);
 }
 .context-item.sel {
-  background: var(--bg-3);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.context-item.sel .context-icon,
+.context-item.sel .context-chevron,
+.context-item.sel .hint {
+  color: inherit;
 }
 .context-item.danger.sel,
 .context-item.danger:not(.disabled) .context-icon {
@@ -1263,7 +1555,9 @@ body.dragging * {
   display: flex;
   gap: 6px;
   align-items: center;
-  padding: 6px 10px;
+  height: var(--h-toolbar);
+  padding: 0 4px 0 10px;
+  font-size: var(--fs-md);
   border-bottom: 1px solid var(--line);
 }
 .preview-body {
@@ -1308,7 +1602,8 @@ body.dragging * {
 .dir-entry {
   display: flex;
   gap: 8px;
-  padding: 4px 12px;
+  min-height: var(--h-row);
+  padding: 2px 12px;
   cursor: pointer;
   align-items: center;
 }
@@ -1324,29 +1619,52 @@ body.dragging * {
   grid-area: status;
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 0 10px;
-  font-size: var(--fs-sm);
+  gap: 4px;
+  padding: 0 6px;
+  font-size: var(--fs-md);
   border-top: 1px solid var(--line);
   background: var(--bg-1);
   min-width: 0;
 }
-/* Only the focused pane's description gives way to a narrow window. */
+/* Every item of the status bar is a stretch of text or a button as high
+   as a small control, with the same padding and the bar's text color;
+   only the focused pane's description gives way to a narrow window. */
+.statusbar > * {
+  height: var(--ctl-sm);
+  line-height: var(--ctl-sm);
+  padding: 0 6px;
+  color: var(--fg-dim);
+}
 .statusbar > :not(.ellipsis):not(.spacer) {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   flex: none;
   white-space: nowrap;
 }
-.conn.on {
-  color: var(--done);
+.statusbar > .spacer {
+  padding: 0;
 }
-.conn.off {
-  color: var(--blocked);
+/* The connection: a dot of its state beside plain text. */
+.conn::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--done);
+}
+.conn.off::before {
+  background: var(--warning);
+  animation: pulse 1.2s infinite;
+}
+.statusbar .lucide {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
 }
 .prefix-badge {
   background: var(--accent);
   color: var(--on-accent);
-  padding: 0 6px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   font-weight: 600;
 }
 /* The commands the status bar offers (the list of shortcuts, the palette),
@@ -1355,20 +1673,24 @@ body.dragging * {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-height: 0;
   background: none;
   border: none;
-  padding: 0 2px;
+  border-radius: var(--radius-sm);
   color: var(--fg-dim);
   white-space: nowrap;
+  line-height: 1;
 }
 .status-command:hover {
   color: var(--fg);
+  background: var(--bg-3);
 }
 .status-command kbd {
-  font-family: var(--mono, monospace);
-  padding: 0 4px;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  padding: 1px 4px;
   border: 1px solid var(--line-2);
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
 }
 
 /* ---------- palette / modal / toast ---------- */
@@ -1411,12 +1733,19 @@ body.dragging * {
   display: flex;
   gap: 8px;
   align-items: center;
-  padding: 6px 10px;
-  border-radius: 6px;
+  min-height: var(--h-toolbar);
+  padding: 2px 10px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .palette-item.sel {
-  background: var(--bg-3);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.palette-item.sel .muted,
+.palette-item.sel .hint {
+  color: inherit;
+  opacity: 0.85;
 }
 .palette-item .hint {
   margin-left: auto;
@@ -1432,7 +1761,8 @@ body.dragging * {
 .modal-head {
   display: flex;
   align-items: center;
-  padding: 8px 10px 8px 14px;
+  height: var(--h-header);
+  padding: 0 6px 0 14px;
   border-bottom: 1px solid var(--line);
 }
 .auth-term {
@@ -1442,20 +1772,42 @@ body.dragging * {
 .toasts {
   position: fixed;
   right: 14px;
-  bottom: 36px;
+  bottom: calc(var(--h-status) + 12px);
   display: flex;
   flex-direction: column;
   gap: 8px;
   z-index: 60;
 }
+/* A toast is plain; one that reports a failure or a warning has an icon
+   and a bar of its color. */
 .toast {
-  background: var(--bg-3);
+  background: var(--bg-2);
   border: 1px solid var(--line-2);
-  border-left: 3px solid var(--blocked);
   padding: 8px 12px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   max-width: 420px;
   box-shadow: 0 8px 24px var(--shadow);
+}
+.toast > .lucide {
+  flex: none;
+  width: var(--ic);
+  height: var(--ic);
+}
+.toast.error {
+  box-shadow:
+    inset 3px 0 0 var(--error),
+    0 8px 24px var(--shadow);
+}
+.toast.error > .lucide {
+  color: var(--error);
+}
+.toast.warning {
+  box-shadow:
+    inset 3px 0 0 var(--warning),
+    0 8px 24px var(--shadow);
+}
+.toast.warning > .lucide {
+  color: var(--warning);
 }
 
 /* ---------- dialogs ---------- */
@@ -1493,8 +1845,9 @@ body.dragging * {
   color: var(--fg);
   background: var(--bg);
   border: 1px solid var(--line-2);
-  border-radius: 5px;
-  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  height: var(--h-toolbar);
+  padding: 0 8px;
   outline: none;
 }
 .dialog-body.form input:focus {
@@ -1533,7 +1886,7 @@ body.dragging * {
 .ssh-host-detail {
   margin-left: auto;
   padding-left: 12px;
-  font-family: ui-monospace, monospace;
+  font-family: var(--mono);
 }
 .download-body {
   display: flex;
@@ -1545,7 +1898,7 @@ body.dragging * {
   align-items: center;
   gap: 6px;
   min-width: 0;
-  font-family: ui-monospace, monospace;
+  font-family: var(--mono);
   font-size: var(--fs-md);
 }
 .download-path-text {
@@ -1609,9 +1962,11 @@ button.download-name:hover {
   padding: 14px 16px 16px;
 }
 .dialog-actions button {
-  padding: 4px 14px;
+  min-height: var(--h-toolbar);
+  padding: 0 14px;
 }
-button.primary {
+button.primary,
+.btn.primary {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--on-accent);
@@ -1620,8 +1975,10 @@ button.primary.danger {
   background: var(--error);
   border-color: var(--error);
 }
-button.primary:hover {
-  filter: brightness(1.08);
+button.primary:hover,
+.btn.primary:hover {
+  background: var(--accent);
+  filter: brightness(1.1);
 }
 
 /* ---------- inline rename ---------- */
@@ -1689,8 +2046,8 @@ button.primary:hover {
   color: var(--fg);
 }
 .settings-search .icon {
-  min-width: 1.5rem;
-  height: 1.5rem;
+  min-width: var(--ctl-sm);
+  height: var(--ctl-sm);
 }
 /* The scope tabs: the user's settings, then each machine's. */
 .settings-scopes {
@@ -1926,19 +2283,19 @@ button.primary:hover {
   margin: 12px 0 4px;
   padding: 8px 10px;
   border: 1px solid var(--line-2);
-  border-left: 3px solid var(--blocked);
-  border-radius: 6px;
+  border-left: 3px solid var(--warning);
+  border-radius: var(--radius);
 }
 .settings-problems > svg {
   flex: none;
-  color: var(--blocked);
+  color: var(--warning);
 }
 .settings-locked {
   display: flex;
   align-items: center;
   gap: 4px;
   margin-top: 4px;
-  color: var(--blocked);
+  color: var(--warning);
 }
 button.link {
   display: inline-flex;
@@ -1974,8 +2331,8 @@ button.disclosure:hover {
   border-radius: 0;
   background: transparent;
   color: var(--fg-dim);
-  padding: 3px 12px;
-  min-height: 1.85rem;
+  padding: 0 12px;
+  min-height: var(--ctl);
 }
 .segmented button + button {
   border-left: 1px solid var(--line-2);
@@ -2047,8 +2404,8 @@ button.disclosure:hover {
   background: var(--bg);
 }
 .list-chip .icon {
-  min-width: 1.5rem;
-  height: 1.5rem;
+  min-width: var(--ctl-sm);
+  height: var(--ctl-sm);
 }
 .list-add {
   display: inline-flex;
@@ -2135,6 +2492,73 @@ button.disclosure:hover {
 button.danger-text:not(:disabled) {
   color: var(--error);
 }
+/* The color theme: a card per theme, its accent on both backgrounds. */
+.theme-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
+  gap: 8px;
+  width: min(46rem, 100%);
+}
+.theme-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  min-height: 0;
+  padding: 6px;
+  line-height: 1.3;
+  background: transparent;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  color: var(--fg-dim);
+  text-align: left;
+}
+.theme-card:hover:not(:disabled) {
+  background: var(--bg-2);
+  color: var(--fg);
+}
+.theme-card.on {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  color: var(--fg);
+}
+.theme-swatch {
+  display: flex;
+  height: 2.6rem;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.theme-swatch-half {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+}
+.theme-swatch-half:first-child {
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+}
+.theme-swatch-half:last-child {
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.theme-swatch-bar {
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+}
+.theme-swatch-button {
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+.theme-name {
+  font-size: var(--fs-md);
+}
 /* Terminal colors: a scheme with a preview, then named swatches. */
 .scheme-control select {
   min-width: 14rem;
@@ -2147,7 +2571,7 @@ button.danger-text:not(:disabled) {
   padding: 0 8px;
   border: 1px solid var(--line-2);
   border-radius: 6px;
-  font-family: var(--mono, monospace);
+  font-family: var(--mono);
 }
 .scheme-text {
   margin-right: 6px;
@@ -2202,8 +2626,8 @@ button.danger-text:not(:disabled) {
   font-weight: 500;
 }
 .swatch-reset {
-  min-width: 1.5rem;
-  height: 1.5rem;
+  min-width: var(--ctl-sm);
+  height: var(--ctl-sm);
 }
 /* The keyboard shortcuts: a table of commands, keys and where they come from. */
 .keys-toolbar {
@@ -2284,8 +2708,8 @@ button.danger-text:not(:disabled) {
 }
 .key-add,
 .keys-source .icon {
-  min-width: 1.6rem;
-  height: 1.6rem;
+  min-width: var(--ctl-sm);
+  height: var(--ctl-sm);
   opacity: 0;
 }
 .keys-row:hover .key-add,
@@ -2301,7 +2725,7 @@ button.danger-text:not(:disabled) {
 }
 .key-chip kbd,
 .key-recorder {
-  font-family: var(--mono, monospace);
+  font-family: var(--mono);
   font-size: var(--fs-sm);
   padding: 1px 6px;
   border: 1px solid var(--line-2);
@@ -2311,8 +2735,8 @@ button.danger-text:not(:disabled) {
   white-space: nowrap;
 }
 .key-remove {
-  min-width: 1.4rem;
-  height: 1.4rem;
+  min-width: var(--ctl-sm);
+  height: var(--ctl-sm);
   visibility: hidden;
 }
 .key-chip:hover .key-remove,
@@ -2320,10 +2744,10 @@ button.danger-text:not(:disabled) {
   visibility: visible;
 }
 .key-chip.conflict kbd {
-  border-color: var(--blocked);
+  border-color: var(--warning);
 }
 .key-chip.conflict svg {
-  color: var(--blocked);
+  color: var(--warning);
 }
 .key-recorder {
   min-width: 10rem;
@@ -2346,19 +2770,19 @@ button.danger-text:not(:disabled) {
   .sidebar-backdrop {
     display: block;
     position: fixed;
-    inset: 0 0 1.85rem 0;
+    inset: 0 0 var(--h-status) 0;
     z-index: 39;
     background: var(--backdrop);
   }
   .app,
   .app.no-sidebar {
     grid-template-columns: minmax(0, 1fr) var(--rail-w, 0);
-    grid-template-rows: minmax(0, 1fr) 1.85rem;
+    grid-template-rows: minmax(0, 1fr) var(--h-status);
     grid-template-areas: 'main rail' 'status status';
   }
   .panel {
     position: fixed;
-    inset: 0 var(--rail-w, 0) 1.85rem auto;
+    inset: 0 var(--rail-w, 0) var(--h-status) auto;
     width: min(var(--panel-px, 320px), 82vw);
     z-index: 40;
     box-shadow: -8px 0 30px var(--shadow);
@@ -2369,13 +2793,13 @@ button.danger-text:not(:disabled) {
   .panel-backdrop {
     display: block;
     position: fixed;
-    inset: 0 var(--rail-w, 0) 1.85rem 0;
+    inset: 0 var(--rail-w, 0) var(--h-status) 0;
     z-index: 39;
     background: var(--backdrop);
   }
   .sidebar {
     position: fixed;
-    inset: 0 auto 1.85rem 0;
+    inset: 0 auto var(--h-status) 0;
     width: 82vw;
     z-index: 40;
     box-shadow: 8px 0 30px var(--shadow);
@@ -2436,10 +2860,11 @@ button.danger-text:not(:disabled) {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 1.5rem;
+  height: var(--ctl-sm);
+  min-height: 0;
   padding: 0 6px;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--fg-dim);
   font: inherit;
@@ -2452,8 +2877,8 @@ button.danger-text:not(:disabled) {
 .gui-tray .lucide,
 .gui-menu-item .lucide,
 .gui-note .lucide {
-  width: 1rem;
-  height: 1rem;
+  width: var(--ic-sm);
+  height: var(--ic-sm);
   flex: none;
 }
 .gui-note {
@@ -2463,10 +2888,11 @@ button.danger-text:not(:disabled) {
   color: var(--fg-dim);
 }
 button.gui-note {
-  height: 1.5rem;
+  height: var(--ctl-sm);
+  min-height: 0;
   padding: 0 6px;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: transparent;
   font: inherit;
   cursor: pointer;
@@ -2495,7 +2921,7 @@ button.gui-note:hover {
   padding: 6px 8px;
   border-radius: 6px;
   background: var(--bg);
-  font-family: ui-monospace, monospace;
+  font-family: var(--mono);
   font-size: var(--fs-sm);
   white-space: pre-wrap;
   word-break: break-word;
@@ -2664,12 +3090,12 @@ button.gui-note:hover {
   display: flex;
 }
 .transfer-actions .icon {
-  min-width: 1.6rem;
-  height: 1.6rem;
+  min-width: var(--ctl-sm);
+  height: var(--ctl-sm);
 }
 .transfer-actions .icon .lucide {
-  width: 1rem;
-  height: 1rem;
+  width: var(--ic-sm);
+  height: var(--ic-sm);
 }
 
 /* The page of a browser window showing one program window. */
@@ -2718,7 +3144,7 @@ button.gui-note:hover {
   border: 1px solid var(--line-2);
   border-radius: 6px;
   color: var(--fg-dim);
-  font-family: ui-monospace, monospace;
+  font-family: var(--mono);
   font-size: 11px;
   line-height: 1.5;
   pointer-events: none;
@@ -2927,11 +3353,11 @@ button.gui-note:hover {
   background: var(--fg-dim);
 }
 .usage-window.warn .usage-bar-fill {
-  background: var(--blocked);
+  background: var(--warning);
 }
 .usage-window.warn .usage-pct,
 .usage-window.out .usage-pct {
-  color: var(--blocked);
+  color: var(--warning);
 }
 .usage-window.out .usage-bar-fill {
   background: var(--error);
@@ -2946,7 +3372,7 @@ button.gui-note:hover {
   opacity: 0.6;
 }
 .usage-pace-warn {
-  color: var(--blocked);
+  color: var(--warning);
 }
 .usage-burndown {
   display: block;
@@ -3015,10 +3441,11 @@ button.gui-note:hover {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 1.5rem;
+  height: var(--ctl-sm);
+  min-height: 0;
   padding: 0 6px;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--fg-dim);
   font: inherit;
@@ -3029,11 +3456,11 @@ button.gui-note:hover {
   background: var(--bg-3);
 }
 .usage-status-item .lucide {
-  width: 1rem;
-  height: 1rem;
+  width: var(--ic-sm);
+  height: var(--ic-sm);
 }
 .usage-status-item.warn {
-  color: var(--blocked);
+  color: var(--warning);
 }
 .usage-status-item.out {
   color: var(--error);

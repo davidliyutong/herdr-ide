@@ -108,7 +108,14 @@ function defineThemes(monaco: Monaco) {
             'editorLineNumber.activeForeground': v('--ds-color-muted', '#acacac'),
             'editorWidget.background': v('--ds-color-sidebar', dark ? '#171717' : '#fafafa'),
             'editorWidget.border': v('--ds-color-border-strong', dark ? '#3a3a3a' : '#d4d4d4'),
-            focusBorder: v('--ds-color-focus-ring', '#8a8a8a'),
+            focusBorder: v('--ds-accent', dark ? '#7aa2f7' : '#3a63c8'),
+            'editorCursor.foreground': v('--ds-accent', dark ? '#7aa2f7' : '#3a63c8'),
+            'editorGutter.addedBackground': v('--ds-git-added', dark ? '#81b88b' : '#587c0c'),
+            'editorGutter.modifiedBackground': v('--ds-git-modified', dark ? '#e2c08d' : '#895503'),
+            'editorGutter.deletedBackground': v('--ds-git-deleted', dark ? '#c74e39' : '#ad0707'),
+            'minimapGutter.addedBackground': v('--ds-git-added', dark ? '#81b88b' : '#587c0c'),
+            'minimapGutter.modifiedBackground': v('--ds-git-modified', dark ? '#e2c08d' : '#895503'),
+            'minimapGutter.deletedBackground': v('--ds-git-deleted', dark ? '#c74e39' : '#ad0707'),
           }
         : {},
     });

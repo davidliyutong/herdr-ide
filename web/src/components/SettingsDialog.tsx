@@ -36,6 +36,7 @@ import { FontPicker } from './settings/FontPicker';
 import { desktopShell } from '../shell';
 import { ZOOM_KEY } from '../zoom';
 import { colorKeys, ThemeColors, schemeLabel } from './settings/Colors';
+import { ThemePicker } from './settings/ThemePicker';
 import { FullDiskAccess, fullDiskAccessMatches } from './settings/FullDiskAccess';
 import { fullDiskAccessAvailable, localMachine } from '../fullDiskAccess';
 import { PluginsPage } from './settings/PluginsPage';
@@ -531,6 +532,8 @@ function Control({
         </label>
       );
     case 'enum':
+      if (d.key === 'appearance.colorTheme')
+        return <ThemePicker value={String(value)} disabled={disabled} onChange={(id) => onChange(id)} />;
       return (d.enum ?? []).length > 4 ? (
         <select value={String(value)} disabled={disabled} aria-label={settingLabel(d.key)} onChange={(e) => onChange(e.target.value)}>
           {(d.enum ?? []).map((o) => (

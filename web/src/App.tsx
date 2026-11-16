@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { CircleAlert, TriangleAlert } from 'lucide-react';
 import { useStore } from './state/store';
 import { terms, useTerms } from './state/terms';
 import { rememberFollowed } from './state/followed';
@@ -174,7 +175,7 @@ export function App() {
           '--sidebar-w': `${sidebarWidth}px`,
           '--panel-w': panelShown ? `${panelWidth}px` : '0px',
           '--panel-px': `${panelWidth}px`,
-          '--rail-w': panels.length ? '2.6rem' : '0px',
+          '--rail-w': panels.length ? 'var(--ds-size-rail)' : '0px',
         } as React.CSSProperties
       }
     >
@@ -193,11 +194,13 @@ export function App() {
       <ContextMenu />
       <div className="toasts">
         {toasts.map((toast) => (
-          <div key={toast.id} className="toast">
+          <div key={toast.id} className={`toast ${toast.kind ?? ''}`} role={toast.kind === 'error' ? 'alert' : 'status'}>
+            {toast.kind === 'error' && <CircleAlert />}
+            {toast.kind === 'warning' && <TriangleAlert />}
             <span>{toast.msg}</span>
             {toast.action && (
               <button
-                className="primary"
+                className="sm"
                 onClick={() => {
                   toast.action!.run();
                   useStore.setState((s) => ({ toasts: s.toasts.filter((x) => x.id !== toast.id) }));
@@ -246,9 +249,9 @@ function StatusBar({ connected, chord }: { connected: boolean; chord: boolean })
     <footer className="statusbar">
       <span className={`conn ${connected ? 'on' : 'off'}`}>{connected ? t('app.connected') : t('app.reconnecting')}</span>
       {readOnly && <span className="prefix-badge ro">{t('app.readOnly')}</span>}
-      <span className="muted">{t('app.machines', { n: counts })}</span>
+      <span>{t('app.machines', { n: counts })}</span>
       {about && machine && (
-        <span className="muted ellipsis">
+        <span className="ellipsis">
           {machine.label} · {about.title} · {shortPath(about.path, machine.info?.home) || '~'}
         </span>
       )}
@@ -265,7 +268,7 @@ function StatusBar({ connected, chord }: { connected: boolean; chord: boolean })
 function StatusCommand({ command }: { command: string }) {
   const key = keyHint(command);
   return (
-    <button className="status-command muted small" data-command={command} onClick={() => runCommand(command)}>
+    <button className="status-command" data-command={command} onClick={() => runCommand(command)}>
       {commandLabel(command)}
       {key && <kbd>{key}</kbd>}
     </button>

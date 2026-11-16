@@ -127,7 +127,9 @@ export async function runUpload(id: string, file: File): Promise<string | undefi
       } catch (e) {
         if (e instanceof UploadCancelled || e instanceof UploadDisconnected) throw e;
         // The cause only ("permission denied"): the rest repeats the path.
-        useStore.getState().toast(t('app.uploadDirFailed', { dir: x.dir, error: message(e).split(': ').pop()! }));
+        useStore
+          .getState()
+          .toast(t('app.uploadDirFailed', { dir: x.dir, error: message(e).split(': ').pop()! }), undefined, undefined, 'error');
       }
     }
     return attempt(undefined);
@@ -143,7 +145,7 @@ export async function runUpload(id: string, file: File): Promise<string | undefi
       return undefined;
     }
     end(id, { status: 'failed', error: message(e) });
-    useStore.getState().toast(t('app.uploadFailed', { error: message(e) }));
+    useStore.getState().toast(t('app.uploadFailed', { error: message(e) }), undefined, undefined, 'error');
   }
 }
 

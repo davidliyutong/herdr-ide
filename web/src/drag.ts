@@ -84,7 +84,7 @@ export function trackDrag<T>(ev: DragStart, ops: DragOps<T>) {
     if (commit && target)
       ops.drop(target).catch((e) => {
         const error = String(e?.message ?? e);
-        useStore.getState().toast(ops.failed ? ops.failed(error) : error);
+        useStore.getState().toast(ops.failed ? ops.failed(error) : error, undefined, undefined, 'error');
       });
   };
   const swallow = (e: Event) => {

@@ -30,7 +30,7 @@ async function graphOfFocused() {
     const info = await gitApi.repo(m, dir);
     await openGraph(m, info.root);
   } catch (e) {
-    s.toast(errorText(e));
+    s.toast(errorText(e), undefined, undefined, 'error');
   }
 }
 

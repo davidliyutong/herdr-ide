@@ -29,7 +29,7 @@ function WindowsButton({ entries, className, label }: { entries: Entry[]; classN
   const machines = new Set(entries.map((e) => e.m));
   const openOne = (e: Entry) => {
     setOpen(false);
-    if (!openGuiWindow(e.m, e.w)) useStore.getState().toast(t('gui.popupBlocked'));
+    if (!openGuiWindow(e.m, e.w)) useStore.getState().toast(t('gui.popupBlocked'), undefined, undefined, 'warning');
   };
   return (
     <span className="gui-menu-anchor" ref={ref}>

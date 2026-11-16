@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"go/format"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -113,16 +114,33 @@ type Terminal struct {
 	Palette    []Color `json:"palette"`
 }
 
+// Theme is a color theme the user chooses: the accent and the text on it.
+// The neutrals (background, text, borders) are the same in every theme.
+type Theme struct {
+	ID       string  `json:"id"`
+	Accent   *Themed `json:"accent"`
+	OnAccent *Themed `json:"onAccent"`
+}
+
 // Tokens is design/tokens.json.
 type Tokens struct {
-	Color    map[string]Themed `json:"color"`
-	Status   map[string]Themed `json:"status"`
+	Color  map[string]Themed `json:"color"`
+	Status map[string]Themed `json:"status"`
+	Git    map[string]Themed `json:"git"`
+	Chart  map[string]Themed `json:"chart"`
+	// Themes: the first is the default.
+	Themes   []Theme `json:"themes"`
 	Terminal struct {
 		Light *Terminal `json:"light"`
 		Dark  *Terminal `json:"dark"`
 	} `json:"terminal"`
+	// Metric: lengths that stay in CSS pixels.
 	Metric map[string]float64 `json:"metric"`
-	Font   struct {
+	// Size: lengths of the chrome in CSS pixels at the root font size,
+	// written in rem so that the UI font size setting scales them.
+	Size map[string]float64 `json:"size"`
+	Font struct {
+		Root float64            `json:"root"`
 		Size map[string]float64 `json:"size"`
 	} `json:"font"`
 }
@@ -148,7 +166,8 @@ func parse(data []byte) (*Tokens, error) {
 		return nil, err
 	}
 	groups := map[string][]string{
-		"color": keys(t.Color), "status": keys(t.Status), "metric": keys(t.Metric), "font.size": keys(t.Font.Size),
+		"color": keys(t.Color), "status": keys(t.Status), "git": keys(t.Git), "chart": keys(t.Chart),
+		"metric": keys(t.Metric), "size": keys(t.Size), "font.size": keys(t.Font.Size),
 	}
 	for _, group := range keys(groups) {
 		if len(groups[group]) == 0 {
@@ -160,11 +179,27 @@ func parse(data []byte) (*Tokens, error) {
 			}
 		}
 	}
-	for _, group := range []map[string]float64{t.Metric, t.Font.Size} {
+	for _, group := range []map[string]float64{t.Metric, t.Size, t.Font.Size} {
 		for name, v := range group {
 			if v <= 0 {
 				return nil, fmt.Errorf("%s must be positive", name)
 			}
+		}
+	}
+	if t.Font.Root <= 0 {
+		return nil, errors.New("font.root must be positive")
+	}
+	if len(t.Themes) == 0 {
+		return nil, errors.New("themes has no themes")
+	}
+	seen := map[string]bool{}
+	for _, th := range t.Themes {
+		if !tokenName.MatchString(th.ID) || seen[th.ID] {
+			return nil, fmt.Errorf("theme %q: ids are camelCase letters and digits, each once", th.ID)
+		}
+		seen[th.ID] = true
+		if th.Accent == nil || th.OnAccent == nil {
+			return nil, fmt.Errorf("theme %s needs accent and onAccent", th.ID)
 		}
 	}
 	for name, term := range map[string]*Terminal{"light": t.Terminal.Light, "dark": t.Terminal.Dark} {
@@ -210,25 +245,38 @@ func kebab(s string) string {
 	return b.String()
 }
 
+// rem writes a length in CSS pixels at the root font size in rem.
+func rem(px, root float64) string {
+	return strconv.FormatFloat(math.Round(px/root*10000)/10000, 'f', -1, 64) + "rem"
+}
+
 // css renders web/src/tokens.css in the form Prettier keeps. The dark
 // theme is the default and <html data-theme="light"> selects the light
-// one, as in web/src/styles.css.
+// one, as in web/src/styles.css; <html data-accent="id"> selects a color
+// theme other than the first.
 func css(t *Tokens) []byte {
 	var b bytes.Buffer
 	fmt.Fprintf(&b, "/* %s */\n", header)
+	pick := func(c Themed, light bool) Color {
+		if light {
+			return c.Light
+		}
+		return c.Dark
+	}
+	accent := func(th Theme, light bool) {
+		fmt.Fprintf(&b, "  --ds-accent: %s;\n", pick(*th.Accent, light).css())
+		fmt.Fprintf(&b, "  --ds-on-accent: %s;\n", pick(*th.OnAccent, light).css())
+	}
 	block := func(selector string, light bool) {
-		pick := func(c Themed) Color {
-			if light {
-				return c.Light
-			}
-			return c.Dark
-		}
 		fmt.Fprintf(&b, "%s {\n", selector)
-		for _, name := range keys(t.Color) {
-			fmt.Fprintf(&b, "  --ds-color-%s: %s;\n", kebab(name), pick(t.Color[name]).css())
-		}
-		for _, name := range keys(t.Status) {
-			fmt.Fprintf(&b, "  --ds-status-%s: %s;\n", kebab(name), pick(t.Status[name]).css())
+		accent(t.Themes[0], light)
+		for _, g := range []struct {
+			prefix string
+			colors map[string]Themed
+		}{{"color", t.Color}, {"status", t.Status}, {"git", t.Git}, {"chart", t.Chart}} {
+			for _, name := range keys(g.colors) {
+				fmt.Fprintf(&b, "  --ds-%s-%s: %s;\n", g.prefix, kebab(name), pick(g.colors[name], light).css())
+			}
 		}
 		term := t.Terminal.Dark
 		if light {
@@ -246,14 +294,27 @@ func css(t *Tokens) []byte {
 			for _, name := range keys(t.Metric) {
 				fmt.Fprintf(&b, "  --ds-metric-%s: %spx;\n", kebab(name), num(t.Metric[name]))
 			}
+			for _, name := range keys(t.Size) {
+				fmt.Fprintf(&b, "  --ds-size-%s: %s;\n", kebab(name), rem(t.Size[name], t.Font.Root))
+			}
 			for _, name := range keys(t.Font.Size) {
-				fmt.Fprintf(&b, "  --ds-font-size-%s: %spx;\n", kebab(name), num(t.Font.Size[name]))
+				fmt.Fprintf(&b, "  --ds-font-size-%s: %s;\n", kebab(name), rem(t.Font.Size[name], t.Font.Root))
 			}
 		}
 		b.WriteString("}\n")
 	}
 	block(":root", false)
 	block(":root[data-theme='light']", true)
+	// The other themes: their dark accent, then their light one, which is
+	// more specific than both the dark one and the light theme's default.
+	for _, th := range t.Themes[1:] {
+		fmt.Fprintf(&b, ":root[data-accent='%s'] {\n", th.ID)
+		accent(th, false)
+		b.WriteString("}\n")
+		fmt.Fprintf(&b, ":root[data-accent='%s'][data-theme='light'] {\n", th.ID)
+		accent(th, true)
+		b.WriteString("}\n")
+	}
 	return b.Bytes()
 }
 
@@ -278,6 +339,15 @@ func golang(t *Tokens) ([]byte, error) {
 			b.WriteString("\n")
 		}
 		b.WriteString("},\n},\n")
+	}
+	b.WriteString("}\n\n")
+	b.WriteString("// tokenThemes are the color themes, the default first.\n")
+	b.WriteString("var tokenThemes = []string{")
+	for i, th := range t.Themes {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		fmt.Fprintf(&b, "%q", th.ID)
 	}
 	b.WriteString("}\n")
 	return format.Source(b.Bytes())

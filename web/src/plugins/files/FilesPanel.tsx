@@ -32,6 +32,7 @@ import { InlineEdit } from '../../components/InlineEdit';
 import { APP_SLUG } from '../../brand';
 import { t } from '../../i18n';
 import { isMac } from '../../keys';
+import { useSize } from '../../lib/sizes';
 import { decorationsOf, useDecorationVersion } from './decorations';
 import {
   collapseAll,
@@ -58,7 +59,6 @@ import './files.css';
 
 /** How often the shown directories are checked for changes. */
 export const POLL_MS = 2000;
-const ROW_HEIGHT = 22;
 /** The drag type of paths dragged inside the tree. */
 const DRAG_TYPE = `application/x-${APP_SLUG}-files`;
 
@@ -120,6 +120,8 @@ export function FilesPanel() {
     return () => ro.disconnect();
   }, []);
 
+  // Rows are --h-row high, which scales with the UI font size.
+  const ROW_HEIGHT = useSize('row');
   const rows = useMemo(() => treeRows(s), [s.root, s.dirs, s.expanded, s.hidden, s.filter, s.edit]);
   const kinds = useMemo(() => new Map(rows.map((r) => [r.path, r.dir])), [rows]);
   const isDir = (p: string) => kinds.get(p) ?? p === s.root;
@@ -133,7 +135,7 @@ export function FilesPanel() {
     const top = i * ROW_HEIGHT;
     if (top < el.scrollTop) el.scrollTop = top;
     else if (top + ROW_HEIGHT > el.scrollTop + el.clientHeight) el.scrollTop = top + ROW_HEIGHT - el.clientHeight;
-  }, [s.cursor, rows]);
+  }, [s.cursor, rows, ROW_HEIGHT]);
 
   if (!m || !s.root) return <div className="files-empty muted small">{t('files.noMachine')}</div>;
   const root = s.root;
@@ -282,7 +284,7 @@ export function FilesPanel() {
   const cut = new Set(s.clipboard?.cut && s.clipboard.m === m ? s.clipboard.paths : []);
 
   const drawRow = (row: Row, index: number) => {
-    const style = { top: index * ROW_HEIGHT, paddingLeft: 6 + row.depth * 12 };
+    const style = { top: index * ROW_HEIGHT, height: ROW_HEIGHT, paddingLeft: 6 + row.depth * 12 };
     if (row.creating) {
       return (
         <div key={`new:${row.path}`} className="files-row editing" style={style} role="none">

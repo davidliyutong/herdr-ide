@@ -20,9 +20,14 @@ export interface ToastAction {
   ttl?: number;
 }
 
+/** How a toast looks: plain, or with the icon and bar of a warning or a
+ * failure. Only these two have a color: most toasts report something done. */
+export type ToastKind = 'info' | 'warning' | 'error';
+
 export interface Toast {
   id: number;
   msg: string;
+  kind?: ToastKind;
   action?: ToastAction;
 }
 
@@ -100,7 +105,7 @@ export interface UIState {
   setRenaming(r: Renaming | undefined): void;
   /** Shows a toast for ttl ms (default: 5 s, 15 s with an action, or the
    * action's own) and returns its id. */
-  toast(msg: string, action?: ToastAction, ttl?: number): number;
+  toast(msg: string, action?: ToastAction, ttl?: number, kind?: ToastKind): number;
   openAuth(m?: string): void;
   openAddMachine(open: boolean): void;
   setReadOnly(v: boolean): void;
@@ -203,9 +208,9 @@ export const useStore = create<UIState>((set, get) => ({
   readOnly: false,
   setReadOnly: (readOnly) => set({ readOnly }),
   sshLogin: true,
-  toast: (msg, action, ttl) => {
+  toast: (msg, action, ttl, kind) => {
     const id = ++toastSeq;
-    set((s) => ({ toasts: [...s.toasts, { id, msg, action }] }));
+    set((s) => ({ toasts: [...s.toasts, { id, msg, action, kind }] }));
     // A toast with an action waits longer for the click.
     if (!action?.sticky)
       setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), action?.ttl ?? ttl ?? (action ? 15000 : 5000));

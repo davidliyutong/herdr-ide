@@ -8,6 +8,7 @@ import { getPrefs, usePrefs, type Prefs, type TermColors } from './prefs';
 import { conn } from './lib/conn';
 import type { TermFontWeight } from './terminal/fonts';
 import type { Display } from './term/connection';
+import { accentAttribute } from './themes';
 
 export type ThemeKind = 'dark' | 'light';
 
@@ -105,6 +106,9 @@ function apply(p: Prefs) {
   const kind = resolveTheme(p.theme);
   const root = document.documentElement;
   root.dataset.theme = kind;
+  const accent = accentAttribute(p.colorTheme);
+  if (accent) root.dataset.accent = accent;
+  else delete root.dataset.accent;
   root.style.fontSize = `${p.uiFontSize}px`;
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', getComputedStyle(root).getPropertyValue('--bg').trim());
   conn.setTheme(kind);

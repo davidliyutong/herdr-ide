@@ -123,7 +123,7 @@ export function EditorPane({ m, pane, view, focused }: PaneViewProps) {
         return true;
       } catch (err) {
         if (err instanceof ConflictError) setStatus({ kind: 'conflict', removed: !err.current.exists });
-        else useStore.getState().toast(t('files.saveFailed', { error: errorText(err) }));
+        else useStore.getState().toast(t('files.saveFailed', { error: errorText(err) }), undefined, undefined, 'error');
         return false;
       } finally {
         setSaving(false);

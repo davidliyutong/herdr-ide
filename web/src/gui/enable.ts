@@ -27,7 +27,7 @@ export async function enableGui(m: string, terminals: string[] = []): Promise<vo
     const j = await r.json().catch(() => ({}));
     if (!r.ok) {
       const code = `gui.error.${j.error}`;
-      s.toast(t('gui.enableFailed', { error: hasMessage(code) ? t(code) : String(j.error ?? r.status) }));
+      s.toast(t('gui.enableFailed', { error: hasMessage(code) ? t(code) : String(j.error ?? r.status) }), undefined, undefined, 'error');
       return;
     }
     const res = j as EnableResult;
@@ -42,6 +42,6 @@ export async function enableGui(m: string, terminals: string[] = []): Promise<vo
       run: () => void navigator.clipboard?.writeText(res.command),
     });
   } catch {
-    s.toast(t('settings.error.network'));
+    s.toast(t('settings.error.network'), undefined, undefined, 'error');
   }
 }

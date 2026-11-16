@@ -84,7 +84,7 @@ function notify(text: string, tag: string) {
     };
     return;
   }
-  useStore.getState().toast(text);
+  useStore.getState().toast(text, undefined, undefined, 'warning');
 }
 
 /** Fetches the snapshot; watch tells the core the panel is open. */

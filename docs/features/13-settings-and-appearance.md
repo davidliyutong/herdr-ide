@@ -380,6 +380,15 @@ settings per browser; theming terminal applications.
   which switches VS Code ([05](05-vscode-panes.md)); in the desktop app the
   shell reads the setting from the core, and its title bar follows it
   ([16](16-desktop-packaging.md)).
+- Color theme (`appearance.colorTheme`): the accent of the chrome, one of
+  the design tokens' themes (Blue, the default, from the app's icon;
+  VS Code Blue; Teal; Violet; Rose; Amber; Graphite, the neutral accent of
+  earlier versions). The neutrals (backgrounds, text, borders) are the same
+  in every theme, so only focus, the selection, the emphasized control and
+  what asks for the user change. A theme other than the first sets
+  `<html data-accent>` ([24](24-design-tokens.md)); an id this client does
+  not know (a newer core's) shows the first. The settings show the themes
+  as cards with the accent on both backgrounds.
 - Terminal palettes: the Default scheme's dark colors are GitHub Dark
   Default (Ghostty's theme of that name: colors made for a near-black
   background) on the UI's `--bg` with its `--fg`; its light ones GitHub
