@@ -260,3 +260,25 @@ func TestMemoConcurrent(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// agy 1.5 names no account: its log does, so its account merges with the
+// language server's (the email's hash) across machines.
+func TestAgyAccountFromItsLog(t *testing.T) {
+	e, _ := agyEnv(t, agyOut, nil)
+	write(t, filepath.Join(e.Home, agyLog), "I1116 18:36:40.004176 1 server_oauth.go:221] applyAuthResult: email=old@example.com, authMethod=consumer\n"+
+		"I1116 18:36:40.004185 1 server_oauth.go:226] OAuth: authenticated successfully as AG@Example.com\n")
+	a := one(t, Limits(context.Background(), e, Options{Providers: []string{Antigravity}}))
+	if a.Status != StatusOK || a.Email != "AG@Example.com" || a.ID != HashID("ag@example.com") {
+		t.Fatalf("account %+v", a)
+	}
+	// The memo keeps the identity; skipped by it on another machine.
+	b := one(t, Limits(context.Background(), e, Options{Providers: []string{Antigravity}, Skip: []string{"antigravity:" + HashID("ag@example.com")}}))
+	if b.Status != StatusSkipped || b.ID != a.ID {
+		t.Errorf("skip by the log's identity %+v", b)
+	}
+	// No log: no id.
+	e2, _ := agyEnv(t, agyOut, nil)
+	if a := one(t, Limits(context.Background(), e2, Options{Providers: []string{Antigravity}})); a.ID != "" {
+		t.Errorf("id without a log %+v", a)
+	}
+}

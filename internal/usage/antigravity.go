@@ -5,8 +5,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -285,12 +287,45 @@ func agyUsage(ctx context.Context, e *Env) (Account, bool) {
 		}
 	} else {
 		a.Status, a.AsOf = StatusOK, e.now().Unix()
+		if a.ID == "" {
+			// agy 1.5 names no account; its log does, as the language
+			// server's id is made: the email's hash.
+			if email := agyEmail(e); email != "" {
+				a.Email, a.ID = email, HashID(strings.ToLower(email))
+			}
+		}
 	}
 	// A run the caller cut short says nothing about agy.
 	if ctx.Err() == nil {
 		e.Memo.keepAgy(bin, a, e.now())
 	}
 	return a, true
+}
+
+// agyLog is agy's log below the home directory, where each run notes the
+// account it signed in as.
+const agyLog = ".gemini/antigravity-cli/cli.log"
+
+var agyAccountRe = regexp.MustCompile(`(?:authenticated successfully as|applyAuthResult: email=)\s*([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})`)
+
+// agyEmail is the account agy last signed in as, from the end of its log;
+// "" when the log does not say.
+func agyEmail(e *Env) string {
+	f, err := os.Open(path.Join(e.Home, agyLog))
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	const tail = 256 << 10
+	if st, err := f.Stat(); err == nil && st.Size() > tail {
+		f.Seek(st.Size()-tail, io.SeekStart)
+	}
+	b, _ := io.ReadAll(io.LimitReader(f, tail))
+	m := agyAccountRe.FindAllSubmatch(b, -1)
+	if len(m) == 0 {
+		return ""
+	}
+	return string(m[len(m)-1][1])
 }
 
 // parseAgy reads agy's JSON output (the last JSON value it prints).

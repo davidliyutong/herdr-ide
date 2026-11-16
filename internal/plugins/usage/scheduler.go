@@ -70,6 +70,34 @@ type AccountView struct {
 	FetchedAt int64 `json:"fetchedAt,omitempty"`
 	// SeenAt is when a machine last reported it.
 	SeenAt int64 `json:"seenAt"`
+	// Issues are the machines whose answer for it was not ok in the poll
+	// that last read it (a sign-in expired there), while the account's
+	// numbers and status come from the best answer.
+	Issues []Issue `json:"issues,omitempty"`
+}
+
+// Issue is a machine whose answer for an account was not ok.
+type Issue struct {
+	Machine string `json:"machine"`
+	Status  string `json:"status"`
+	Code    string `json:"code,omitempty"`
+}
+
+// answerRank orders a poll's answers for one account, the best first:
+// numbers from the provider, then numbers from elsewhere (a log), then an
+// expired sign-in, a failed request, a refused sign-in.
+func answerRank(a usage.Account) int {
+	switch {
+	case a.Status == usage.StatusOK:
+		return 0
+	case len(a.Windows) > 0 || a.Credits != nil || len(a.Balances) > 0:
+		return 1
+	case a.Status == usage.StatusStale:
+		return 2
+	case a.Status == usage.StatusError:
+		return 3
+	}
+	return 4
 }
 
 // MachineView is how the last poll of a machine went.
@@ -388,7 +416,7 @@ func (p *Plugin) wake() {
 
 // interval is the current cadence; p.mu is held.
 func (p *Plugin) interval() time.Duration {
-	return Interval(p.refreshMode(), p.now().Sub(p.lastWatch) < watchFor, len(p.working) > 0)
+	return Interval(p.refreshMode(), p.now().Sub(p.lastWatch) < watchFor, len(p.working) > 0, p.cadence())
 }
 
 // due tells whether a poll is due: a machine is connected to ask, and a
@@ -527,10 +555,30 @@ func (p *Plugin) poll(ctx context.Context, only []string, joined bool) {
 
 	p.mu.Lock()
 	now = p.now()
-	read := map[string]bool{}
+	// Per account the best answer of this poll counts, whatever the order
+	// the machines answered in: a sign-in that expired on one machine does
+	// not hide the numbers another read. Machines whose answer was not ok
+	// are the account's issues.
+	best := map[string]got{}
+	issues := map[string][]Issue{}
+	var order []string
 	for _, g := range fresh {
 		k := keyOf(g.acc, g.machine)
-		p.merge(k, g.acc, now)
+		if g.acc.Status != usage.StatusOK {
+			issues[k] = append(issues[k], Issue{Machine: g.machine, Status: g.acc.Status, Code: g.acc.Code})
+		}
+		b, ok := best[k]
+		if !ok {
+			order = append(order, k)
+		}
+		if !ok || answerRank(g.acc) < answerRank(b.acc) {
+			best[k] = g
+		}
+	}
+	read := map[string]bool{}
+	for _, k := range order {
+		p.merge(k, best[k].acc, now)
+		p.accounts[k].view.Issues = issues[k]
 		read[k] = true
 	}
 	// An account seen lists the machines that saw it, and keeps those it

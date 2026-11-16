@@ -25,6 +25,9 @@ const ID = "usage"
 // Settings of the plugin.
 const (
 	SettingRefresh        = "usage.refresh"
+	SettingRefreshOpen    = "usage.refreshOpen"
+	SettingRefreshWorking = "usage.refreshWorking"
+	SettingRefreshIdle    = "usage.refreshIdle"
 	SettingThresholds     = "usage.thresholds"
 	SettingCodexHomes     = "usage.codexHomes"
 	SettingClaudeKeychain = "usage.claudeKeychain"
@@ -39,7 +42,15 @@ const (
 	RefreshAdaptive = "adaptive"
 )
 
-var refreshModes = []string{RefreshManual, "1", "2", "5", "15", "30", RefreshAdaptive}
+var refreshModes = []string{RefreshManual, "1", "2", "5", "15", "30", "60", RefreshAdaptive}
+
+// Cadence is the adaptive mode's: while a panel is open, while a coding
+// agent works, otherwise.
+type Cadence struct{ Open, Working, Idle time.Duration }
+
+// DefaultCadence asks every 5 minutes while a panel is open, every 10
+// while an agent works, else every 30.
+var DefaultCadence = Cadence{Open: 5 * time.Minute, Working: 10 * time.Minute, Idle: 30 * time.Minute}
 
 // Settings is the plugin's settings module (internal/registry).
 var Settings = func() settings.Module {
@@ -47,6 +58,9 @@ var Settings = func() settings.Module {
 	m.Defs = append(m.Defs,
 		settings.Def{Key: SettingRefresh, Type: settings.TypeEnum, Default: RefreshAdaptive, Enum: refreshModes,
 			Scope: settings.ScopeApp, Section: "usage", Order: 10},
+		minutes(SettingRefreshOpen, DefaultCadence.Open, 1, 60, 11),
+		minutes(SettingRefreshWorking, DefaultCadence.Working, 1, 120, 12),
+		minutes(SettingRefreshIdle, DefaultCadence.Idle, 5, 240, 13),
 		settings.Def{Key: SettingThresholds, Type: settings.TypeList, Item: settings.TypeString, Default: []string{"80", "95"},
 			Options: []string{"50", "80", "90", "95"}, Scope: settings.ScopeApp, Section: "usage", Order: 20, Validate: validThresholds},
 	)
@@ -62,6 +76,13 @@ var Settings = func() settings.Module {
 	)
 	return m
 }()
+
+// minutes is a setting of the adaptive cadence, in whole minutes.
+func minutes(key string, def time.Duration, lo, hi float64, order int) settings.Def {
+	mn, mx := settings.Range(lo, hi)
+	return settings.Def{Key: key, Type: settings.TypeNumber, Default: def.Minutes(), Min: mn, Max: mx, Integer: true,
+		Scope: settings.ScopeApp, Section: "usage", Group: "usageAdaptive", Order: order}
+}
 
 // validThresholds accepts percentages from 1 to 100.
 func validThresholds(v any) error {
@@ -170,21 +191,40 @@ func (p *Plugin) refreshMode() string {
 	return RefreshAdaptive
 }
 
+// cadence is the adaptive mode's from the settings.
+func (p *Plugin) cadence() Cadence {
+	c := DefaultCadence
+	st := p.settings()
+	if st == nil {
+		return c
+	}
+	get := func(key string, d *time.Duration) {
+		if n, ok := st.GetFor(key, "").(float64); ok && n >= 1 {
+			*d = time.Duration(n) * time.Minute
+		}
+	}
+	get(SettingRefreshOpen, &c.Open)
+	get(SettingRefreshWorking, &c.Working)
+	get(SettingRefreshIdle, &c.Idle)
+	return c
+}
+
 // Interval is how often the scheduler asks in mode: none (0) for manual;
-// adaptive asks every 2 minutes while a panel is open, every 5 while a
-// coding agent works, otherwise every 30.
-func Interval(mode string, watching, working bool) time.Duration {
+// adaptive asks at c's cadences: while a panel is open, while a coding
+// agent works, otherwise (the shortest that applies).
+func Interval(mode string, watching, working bool, c Cadence) time.Duration {
 	switch mode {
 	case RefreshManual:
 		return 0
 	case RefreshAdaptive, "":
-		switch {
-		case watching:
-			return 2 * time.Minute
-		case working:
-			return 5 * time.Minute
+		iv := c.Idle
+		if working {
+			iv = min(iv, c.Working)
 		}
-		return 30 * time.Minute
+		if watching {
+			iv = min(iv, c.Open)
+		}
+		return iv
 	}
 	n, err := strconv.Atoi(mode)
 	if err != nil || n <= 0 {

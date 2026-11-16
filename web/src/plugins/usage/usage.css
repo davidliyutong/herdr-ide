@@ -5,7 +5,8 @@
      that keeps the services apart. */
   --usage-claude: #d97757;
   --usage-codex: #4aa8b8;
-  --usage-grok: #3fb08a;
+  /* Grok's mark is black and white: the text color of the theme. */
+  --usage-grok: var(--fg);
   --usage-antigravity: #5cb85f;
   --usage-kimi: #f0663c;
   --usage-deepseek: #6b84ff;
@@ -13,7 +14,7 @@
 :root[data-theme='light'] {
   --usage-claude: #c15f3c;
   --usage-codex: #1f7f8f;
-  --usage-grok: #1d8a63;
+  --usage-grok: var(--fg);
   --usage-antigravity: #2f8a35;
   --usage-kimi: #c9461d;
   --usage-deepseek: #3f5ae0;
@@ -111,6 +112,11 @@
   gap: 6px;
   min-width: 0;
   color: var(--fg-mute);
+  font-size: var(--fs-sm);
+}
+/* How often the core reads, beside Refresh. */
+.usage-interval {
+  max-width: 9em;
   font-size: var(--fs-sm);
 }
 .usage-refresh .spin {
@@ -311,6 +317,20 @@
 .usage-machines {
   padding-top: 8px;
   border-top: 1px solid var(--line);
+}
+/* Machines that could not read the account while another could. */
+.usage-issues {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: var(--warning);
+  font-size: var(--fs-sm);
+}
+.usage-issues > .lucide {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  margin-top: 2px;
 }
 
 /* ---- the overview's accounts ---- */

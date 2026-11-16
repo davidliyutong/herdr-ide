@@ -59,8 +59,8 @@ script run over ssh).
 | Claude | `~/.claude/.credentials.json` (`$CLAUDE_CONFIG_DIR`) `claudeAiOauth`; on macOS the keychain item `Claude Code-credentials` when the file has none (`usage.claudeKeychain`) | `GET api.anthropic.com/api/oauth/usage` (`anthropic-beta: oauth-2025-04-20`): `five_hour`, `seven_day`, `seven_day_opus`, `seven_day_sonnet` (`utilization`, `resets_at`), `extra_usage` (amounts in cents) | `~/.claude.json`'s `oauthAccount.accountUuid`, else `/api/oauth/profile` |
 | Codex | `$CODEX_HOME` or `~/.codex/auth.json`, and each of `usage.codexHomes` | `GET chatgpt.com/backend-api/wham/usage` with `ChatGPT-Account-Id`: `rate_limit.primary_window`/`secondary_window`, `additional_rate_limits`, `credits`, `plan_type`. Without an answer (network) or with an expired token: the newest session log's `rate_limits` (read backwards from its end, and not again while the log is unchanged), as `stale` with `code: from_log` | `tokens.account_id`; email and plan from the id token's claims |
 | Grok | `$GROK_HOME` or `~/.grok/auth.json`, x.ai's issuer first | `GET cli-chat-proxy.grok.com/v1/billing?format=credits` (`X-XAI-Token-Auth: xai-grok-cli`): `creditUsagePercent` (else on-demand used over cap) for the period, `productUsage`; `/v1/settings` for the plan | `user_id` |
-| Antigravity | none: the running language server | `/bin/ps` (else `ps` on the `PATH`) for the agent's user's own Antigravity `language_server` and its `--csrf_token`; its loopback ports (`/proc` on Linux, `/usr/sbin/lsof` on macOS); `POST https://127.0.0.1:<port>/exa.language_server_pb.LanguageServerService/GetUserStatus` (then HTTP, then an empty body; no connection is kept); without one, `agy -p /usage --output-format json` (20 s, in a process group of its own that is killed when it exits or times out), at most every 10 minutes (the polls in between get its last answer) and not again for 30 minutes after it failed: it takes seconds and a few hundred MB | a hash of the email (agy 1.5 names none: its account stays apart per machine) |
-| Kimi Code | `$KIMI_CODE_HOME` or `~/.kimi-code/credentials/kimi-code*.json` | `GET api.kimi.com/coding/v1/usages`: `usage` (weekly), `limits[]` (`window.duration` × `timeUnit`); numbers may be strings | the token's `user_id` (or `sub`) claim |
+| Antigravity | none: the running language server | `/bin/ps` (else `ps` on the `PATH`) for the agent's user's own Antigravity `language_server` and its `--csrf_token`; its loopback ports (`/proc` on Linux, `/usr/sbin/lsof` on macOS); `POST https://127.0.0.1:<port>/exa.language_server_pb.LanguageServerService/GetUserStatus` (then HTTP, then an empty body; no connection is kept); without one, `agy -p /usage --output-format json` (20 s, in a process group of its own that is killed when it exits or times out), at most every 10 minutes (the polls in between get its last answer) and not again for 30 minutes after it failed: it takes seconds and a few hundred MB | a hash of the email; agy 1.5 names none, so the email comes from the end of agy's log, `~/.gemini/antigravity-cli/cli.log` (`authenticated successfully as …`), and the account merges with the language server's across machines |
+| Kimi Code | `$KIMI_CODE_HOME` or `~/.kimi-code/credentials/kimi-code*.json` (its access token lasts about 15 minutes and Kimi Code renews it only while it runs, so numbers come from a machine where it ran lately) | `GET api.kimi.com/coding/v1/usages`: `usage` (weekly), `limits[]` (`window.duration` × `timeUnit`); numbers may be strings | the token's `user_id` (or `sub`) claim |
 | DeepSeek | the key file the panel writes (the user's choice, first), `DEEPSEEK_API_KEY`, or Claude Code's `settings.json` when its `ANTHROPIC_BASE_URL` is DeepSeek's (`https` on `api.deepseek.com` or another host below `deepseek.com`; a gateway that only has deepseek in its name does not count) | `GET api.deepseek.com/user/balance`: `balance_infos`, `is_available` (no windows) | a hash of the key |
 
 Tokens are read from the files at each poll, sent only to their provider's
@@ -104,12 +104,15 @@ goes on from there.
 ### Core
 
 `internal/plugins/usage` is a `plugin.Starter`. Every 10 s it checks
-whether a poll is due by `usage.refresh`: `manual`, every 1, 2, 5, 15 or 30
-minutes, or `adaptive` (default): every 2 minutes while a panel is open in a
+whether a poll is due by `usage.refresh` (also chosen beside the panel's
+Refresh): `manual`, every 1, 2, 5, 15, 30 or 60 minutes, or `adaptive`
+(default), the shortest of these that applies, each a setting in whole
+minutes: `usage.refreshOpen` (default 5, 1–60) while a panel is open in a
 page that is shown (its `GET /api/p/usage?watch=1` every minute counts for
-3; a hidden page sends none), every 5 while a coding
+3; a hidden page sends none), `usage.refreshWorking` (default 10, 1–120)
+while a coding
 agent works in any terminal (the agent detection's events,
-[25](25-agent-detection.md)), else every 30. `POST /api/p/usage/refresh`
+[25](25-agent-detection.md)), else `usage.refreshIdle` (default 30, 5–240). `POST /api/p/usage/refresh`
 (and a new DeepSeek key) polls at once if the last poll is at least 30 s
 old, else when it is: it answers 202 with `at`, when that poll runs, and
 requests before then share it, so a client cannot make the machines ask
@@ -127,7 +130,12 @@ alone, with the accounts read within the cadence in `skip`, without moving
 the cadence (not in `manual` mode). Accounts are keyed
 `provider:id`; one without an id stays apart per machine. An answer without
 numbers keeps the last good ones with the new status and code (the card
-says how old they are). Accounts no machine reported for 7 days are
+says how old they are). Per account the best answer of a poll counts,
+whatever the order the machines answered in (numbers from the provider,
+then numbers from a log, then an expired sign-in, a failed request, a
+refused sign-in): a sign-in that expired on one machine does not hide the
+numbers another machine read. The machines whose answer was not ok are the
+account's `issues`, which its card lists by reason. Accounts no machine reported for 7 days are
 forgotten; those of a provider turned off leave the snapshot at once.
 
 The history (`usage-history[-<instance>].json` beside the settings, 0600)
@@ -217,7 +225,7 @@ browser's storage, so a reload or another tab does not repeat it.
 | A burndown line per window | Drawn over the whole period, the few hours read so far were a stray dash; the even pace's mark and how far ahead of it the window is say the same at a glance. |
 | Refreshing expired OAuth tokens | Writing the CLIs' credential files races the CLIs and can sign them out; running the CLI once renews them. |
 | Browser cookies for providers without a CLI token | Reads another program's secrets; declined. |
-| Running `agy` at every poll | Each run takes seconds and a few hundred MB, every 2 minutes on every machine with `agy` while a panel is open; its numbers change slowly, so one run per 10 minutes serves the polls between. |
+| Running `agy` at every poll | Each run takes seconds and a few hundred MB, at every poll on every machine with `agy` while a panel is open; its numbers change slowly, so one run per 10 minutes serves the polls between. |
 | Writing the cost cache after every scan that changed it | A log in use grows at every scan, and the cache (tens of thousands of records) was written whole each time; reading on from the file's older offsets costs a few minutes of lines. |
 | Every machine asked for every account | The same account would be asked once per machine at every poll, against the providers' rate limits. |
 | A chart library for the bars and burndown | A few SVG paths and rectangles; no dependency. |
@@ -260,7 +268,8 @@ status pages. Resources and retention:
   DeepSeek gateway, `skipLocal`.
 - `internal/usage/resources_test.go`: the language server's client
   leaves no connection open, the agent's polls share one client, `agy` at
-  most every 10 minutes and backed off after a failure, Antigravity's
+  most every 10 minutes and backed off after a failure, agy's account
+  from its log, Antigravity's
   `skip` and `skipLocal`, the Codex log read backwards across long lines
   and once while unchanged.
 - `internal/usage/proc_unix_test.go`: a fake `agy` leaving `sleep 300`
@@ -279,7 +288,8 @@ status pages. Resources and retention:
   the cost report, shared scans and its cache, settings, a machine that
   connects later asked alone, no poll without machines, machines kept
   when their poll fails, no history from kept numbers, a provider turned
-  off hidden, windows' ids.
+  off hidden, windows' ids, the adaptive cadences as settings, the best
+  answer of a poll winning with the others as issues.
 - `internal/usage/cost_test.go` (`TestPricingTiers`): tier limits
   inclusive, the current Claude models' prices.
 - `web/src/__tests__/usage.test.ts`: ordering, alerts (again in a new
@@ -289,6 +299,7 @@ status pages. Resources and retention:
   used or left) and the status bar item against a stubbed core, the panel
   with ready machines in the store (no render loop), no `watch` from a
   hidden page, DeepSeek's key form without an account, an older snapshot
-  ignored.
+  ignored, the machines that could not read an account, the interval
+  picker.
 - `internal/server`: `TestMutatingRoutesAreGuarded` covers the plugin's
   routes.

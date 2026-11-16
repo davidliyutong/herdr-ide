@@ -11,7 +11,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../../state/store';
-import { useSettings } from '../../settings';
+import { setSetting, useSettings } from '../../settings';
 import { t } from '../../i18n';
 import { costStale, fetchCost, fetchSnapshot, refreshNow, setDeepseekKey, setView, useUsage, type UsageTab } from './state';
 import {
@@ -146,11 +146,16 @@ function Tiles({ providers, accounts, shown }: { providers: string[]; accounts: 
   );
 }
 
-/** When the numbers were read, the used/left switch and Refresh. */
+/** The refresh modes of usage.refresh, as the settings list them. */
+const REFRESH_MODES = ['adaptive', 'manual', '1', '2', '5', '15', '30', '60'] as const;
+
+/** When the numbers were read, the used/left switch, how often to read
+ * (usage.refresh) and Refresh. */
 function Meta() {
   const snapshot = useUsage((s) => s.snapshot);
   const remaining = useUsage((s) => s.remaining);
   const readOnly = useSettings((s) => s.readOnly);
+  const mode = useSettings((s) => String(s.values['usage.refresh']?.value ?? snapshot?.refresh ?? 'adaptive'));
   const now = useNow();
   const [error, setError] = useState<string>();
   const refresh = async () => {
@@ -181,6 +186,22 @@ function Meta() {
             </button>
           ))}
         </div>
+        <select
+          className="usage-interval"
+          title={t('usage.interval')}
+          aria-label={t('usage.interval')}
+          value={mode}
+          disabled={readOnly}
+          onChange={(e) => {
+            void setSetting('usage.refresh', e.target.value).then((err) => err && setError(err));
+          }}
+        >
+          {REFRESH_MODES.map((m) => (
+            <option key={m} value={m}>
+              {t(`settings.usage.refresh.${m}` as 'settings.usage.refresh.manual')}
+            </option>
+          ))}
+        </select>
         <button
           className="icon sm usage-refresh"
           title={t('usage.refresh')}
@@ -342,6 +363,12 @@ function AccountCard({ account: a }: { account: UsageAccount }) {
       {a.machines.length > 0 && (
         <div className="usage-machines muted">{t('usage.seenOn', { machines: a.machines.map((m) => labels[m] ?? m).join(', ') })}</div>
       )}
+      {issueGroups(a).map(([reason, ms]) => (
+        <div key={reason} className="usage-issues">
+          <AlertTriangle />
+          <span>{t('usage.issues', { machines: ms.map((m) => labels[m] ?? m).join(', '), reason })}</span>
+        </div>
+      ))}
     </section>
   );
 }
@@ -374,8 +401,20 @@ function windowLabel(w: UsageWindow, grouped = false): string {
   return w.label && !grouped ? `${w.label} · ${kind}` : kind;
 }
 
+/** The machines that could not read an account, by why. */
+function issueGroups(a: UsageAccount): [string, string[]][] {
+  const by = new Map<string, string[]>();
+  for (const i of a.issues ?? []) {
+    const reason =
+      i.status === 'stale' ? t('usage.issue.expired') : i.status === 'unauth' ? t('usage.issue.unauth') : t('usage.issue.error');
+    by.set(reason, [...(by.get(reason) ?? []), i.machine]);
+  }
+  return [...by.entries()];
+}
+
 /** What to do about an account that is not ok. */
 function hint(a: UsageAccount): string {
+  if (a.code === 'token_expired' && a.provider === 'kimi') return t('usage.hint.kimiExpired');
   if (a.code === 'token_expired') return t('usage.hint.expired', { cli: providerName(a.provider) });
   if (a.code === 'from_log') return t('usage.hint.fromLog');
   if (a.status === 'unauth') return t('usage.hint.unauth', { cli: providerName(a.provider) });

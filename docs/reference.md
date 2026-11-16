@@ -141,7 +141,10 @@ in the UI; a setting with a scope can have its own value per machine, under
 | `plugins.git.enabled` | `true`, `false` | `true` | – | – |
 | `plugins.usage.enabled` | `true`, `false` | `true` | – | – |
 | `plugins.vault.enabled` | `true`, `false` | `true` | – | – |
-| `usage.refresh` | `manual`, `1`, `2`, `5`, `15`, `30`, `adaptive` | `"adaptive"` | – | – |
+| `usage.refresh` | `manual`, `1`, `2`, `5`, `15`, `30`, `60`, `adaptive` | `"adaptive"` | – | – |
+| `usage.refreshOpen` | integer, 1–60 | `5` | – | – |
+| `usage.refreshWorking` | integer, 1–120 | `10` | – | – |
+| `usage.refreshIdle` | integer, 5–240 | `30` | – | – |
 | `usage.thresholds` | list of strings | `["80","95"]` | – | – |
 | `usage.providers.claude` | `true`, `false` | `true` | – | – |
 | `usage.providers.codex` | `true`, `false` | `true` | – | – |

@@ -58,6 +58,9 @@ export interface UsageAccount {
   machines: string[];
   fetchedAt?: number;
   seenAt: number;
+  /** Machines whose answer was not ok in the poll that last read it,
+   * while its numbers come from the best answer. */
+  issues?: { machine: string; status: string; code?: string }[];
 }
 
 export interface StatusPage {

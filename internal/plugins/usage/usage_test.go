@@ -83,12 +83,13 @@ func TestInterval(t *testing.T) {
 		{RefreshManual, true, true, 0},
 		{"1", false, false, time.Minute},
 		{"15", true, false, 15 * time.Minute},
-		{RefreshAdaptive, true, true, 2 * time.Minute},
-		{RefreshAdaptive, false, true, 5 * time.Minute},
+		{"60", false, false, time.Hour},
+		{RefreshAdaptive, true, true, 5 * time.Minute},
+		{RefreshAdaptive, false, true, 10 * time.Minute},
 		{RefreshAdaptive, false, false, 30 * time.Minute},
 	}
 	for _, c := range cases {
-		if got := Interval(c.mode, c.watching, c.working); got != c.want {
+		if got := Interval(c.mode, c.watching, c.working, DefaultCadence); got != c.want {
 			t.Errorf("%s watching=%v working=%v: %v, want %v", c.mode, c.watching, c.working, got, c.want)
 		}
 	}
@@ -114,18 +115,33 @@ func TestCadence(t *testing.T) {
 	if p.due() {
 		t.Error("due after the agent stopped")
 	}
-	// The panel open (GET ?watch=1): every 2 minutes.
+	// The panel open (GET ?watch=1): every 5 minutes.
 	p.Poll(context.Background())
 	now = now.Add(2 * time.Minute)
 	w := httptest.NewRecorder()
 	p.getSnapshot(&plugin.Call{}, w, httptest.NewRequest("GET", "/api/p/usage?watch=1", nil))
+	if p.due() {
+		t.Error("due 2 minutes after a poll with the panel open")
+	}
+	now = now.Add(3 * time.Minute)
+	p.watch() // the open panel's next minute
 	if !p.due() {
 		t.Error("not due with the panel open")
 	}
 	var s Snapshot
 	json.Unmarshal(w.Body.Bytes(), &s)
-	if s.Interval != 120 || s.Refresh != RefreshAdaptive {
+	if s.Interval != 300 || s.Refresh != RefreshAdaptive {
 		t.Errorf("snapshot cadence %d %s", s.Interval, s.Refresh)
+	}
+	// The adaptive cadences are settings.
+	if err := p.settings().Set(SettingRefreshOpen, "", 15.0); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.settings().Set(SettingRefreshOpen, "", 0.5); err == nil {
+		t.Error("half a minute accepted")
+	}
+	if s := p.Snapshot(); s.Interval != 900 {
+		t.Errorf("set cadence %d", s.Interval)
 	}
 	// Manual: never by itself.
 	p.settings().Set(SettingRefresh, "", RefreshManual)
@@ -673,5 +689,34 @@ func TestWindowIDs(t *testing.T) {
 	ids := windowIDs([]usage.Window{win("session", 1, 0, 18000), win("session", 2, 0, 3600), win("weekly", 3, 0, 0), win("weekly", 4, 0, 0), {Kind: "model", Label: "M"}})
 	if !slices.Equal(ids, []string{"session||18000", "session||3600", "weekly||0", "weekly||0#1", "model|M"}) {
 		t.Errorf("ids %q", ids)
+	}
+}
+
+// The best answer of a poll counts whatever the machines' order: a sign-in
+// expired on one machine does not hide the numbers another read; it is
+// listed as an issue.
+func TestBestAnswerWins(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	p, _ := testPlugin(t, &now, []string{"local", "box"}, func(m string, o usage.Options) ([]usage.Account, error) {
+		if m == "local" {
+			return []usage.Account{{Provider: "kimi", ID: "u1", Status: "stale", Code: "token_expired"}}, nil
+		}
+		return []usage.Account{{Provider: "kimi", ID: "u1", Status: "ok", AsOf: now.Unix(), Windows: []usage.Window{win("weekly", 30, 0, 0)}}}, nil
+	})
+	p.Poll(context.Background())
+	a := find(p.Snapshot(), "kimi:u1")
+	if a == nil || a.Status != "ok" || len(a.Windows) != 1 || len(a.Issues) != 1 || a.Issues[0].Machine != "local" || a.Issues[0].Code != "token_expired" {
+		t.Fatalf("account %+v", a)
+	}
+	// The other order: the same.
+	p2, _ := testPlugin(t, &now, []string{"box", "local"}, func(m string, o usage.Options) ([]usage.Account, error) {
+		if m == "local" {
+			return []usage.Account{{Provider: "kimi", ID: "u1", Status: "unauth", Code: "unauthorized"}}, nil
+		}
+		return []usage.Account{{Provider: "kimi", ID: "u1", Status: "error", Code: "network"}}, nil
+	})
+	p2.Poll(context.Background())
+	if a := find(p2.Snapshot(), "kimi:u1"); a == nil || a.Status != "error" || len(a.Issues) != 2 {
+		t.Errorf("best of two failures %+v", a)
 	}
 }

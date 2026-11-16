@@ -365,6 +365,7 @@
     "settings.group.clipboard",
     "settings.group.cursor",
     "settings.group.text",
+    "settings.group.usageAdaptive",
     "settings.group.usageProviders",
     "settings.gui.enabled",
     "settings.gui.gpu",
@@ -461,8 +462,12 @@
     "settings.usage.refresh.2",
     "settings.usage.refresh.30",
     "settings.usage.refresh.5",
+    "settings.usage.refresh.60",
     "settings.usage.refresh.adaptive",
     "settings.usage.refresh.manual",
+    "settings.usage.refreshIdle",
+    "settings.usage.refreshOpen",
+    "settings.usage.refreshWorking",
     "settings.usage.thresholds",
     "settings.window.zoom"
   ],
@@ -951,6 +956,9 @@
     "usage.providers.grok": true,
     "usage.providers.kimi": true,
     "usage.refresh": "adaptive",
+    "usage.refreshIdle": 30,
+    "usage.refreshOpen": 5,
+    "usage.refreshWorking": 10,
     "usage.thresholds": [
       "80",
       "95"

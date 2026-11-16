@@ -280,6 +280,24 @@ describe('usage panel and status item', () => {
     }
   });
 
+  it('lists the machines that could not read an account another machine read, and sets the interval', async () => {
+    const a = account('kimi:u1', [20], {
+      machines: ['local', 'box'],
+      issues: [{ machine: 'box', status: 'stale', code: 'token_expired' }],
+    });
+    applySnapshot({ ...snapshot([a]), updatedAt: now + 2 });
+    setView({ tab: 'kimi' });
+    await act(async () => root.render(createElement(UsagePanel)));
+    expect(host.querySelector('.usage-issues')?.textContent).toContain('box');
+    const select = host.querySelector<HTMLSelectElement>('.usage-interval')!;
+    await act(async () => {
+      select.value = '30';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(calls).toContain('PUT /api/settings');
+    useUsage.setState({ snapshot: undefined });
+  });
+
   it('opens DeepSeek’s key form without a DeepSeek account', async () => {
     applySnapshot({ ...snapshot([account('claude:a', [10])]), updatedAt: now + 1 });
     await act(async () => root.render(createElement(UsagePanel)));
