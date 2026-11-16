@@ -159,6 +159,26 @@ describe('GitPanel', () => {
           return new Response(JSON.stringify([{ index: 0, hash: STASH, base: 'h1', date: 1, message: 'WIP on main' }]));
         case 'watch':
           return new Response(JSON.stringify({ token: 't' }));
+        case 'branches':
+          return new Response(
+            JSON.stringify([
+              {
+                name: 'main',
+                full: 'refs/heads/main',
+                hash: 'h1',
+                current: true,
+                upstream: 'origin/main',
+                ahead: 1,
+                date: 1,
+                subject: 's',
+              },
+              { name: 'topic', full: 'refs/heads/topic', hash: 'h0', date: 1, subject: 'older commit' },
+              { name: 'origin/main', full: 'refs/remotes/origin/main', hash: 'h1', remote: true, date: 1, subject: 's' },
+              { name: 'origin/feature', full: 'refs/remotes/origin/feature', hash: 'h0', remote: true, date: 1, subject: 's' },
+            ]),
+          );
+        case 'tags':
+          return new Response(JSON.stringify([{ name: 'v1', hash: 'h0', date: 1 }]));
       }
       return new Response('{}');
     });
@@ -365,11 +385,9 @@ describe('GitPanel', () => {
     const amend = () => host.querySelector<HTMLInputElement>('.git-amend input')!;
     await act(async () => amend().click());
     expect(amend().checked).toBe(true);
-    const pick = host.querySelector<HTMLSelectElement>('.git-repo-pick')!;
-    await act(async () => {
-      pick.value = '/home/u';
-      pick.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    await act(async () => host.querySelector<HTMLButtonElement>('.git-repo-pick')!.click());
+    const row = [...document.querySelectorAll<HTMLElement>('.picker-row')].find((r) => r.textContent?.startsWith('u'))!;
+    await act(async () => row.click());
     await flush();
     expect(host.querySelector('.git-title')!.textContent).toBe('u');
     expect(amend().checked).toBe(false);
@@ -439,6 +457,62 @@ describe('GitPanel', () => {
     await act(async () => button(t('git.stageAll'), untracked)!.click());
     await flush();
     expect(posts[1]).toEqual({ action: 'stage', body: { paths: ['notes/todo.md'], repo: ROOT } });
+  });
+
+  // The branch opens a searchable list of branches, remote branches and
+  // tags: one checks out, a name typed creates a branch.
+  it('checks out branches from the branch picker', async () => {
+    const rows = () => [...document.querySelectorAll<HTMLElement>('.picker-row')];
+    const open = async () => {
+      await act(async () => host.querySelector<HTMLButtonElement>('.git-branch-pick')!.click());
+      await flush();
+    };
+    await open();
+    expect([...document.querySelectorAll('.picker-group')].map((g) => g.textContent)).toEqual([
+      t('git.pick.branches'),
+      t('git.pick.remote', { remote: 'origin' }),
+      t('git.pick.tags'),
+    ]);
+    expect(rows().find((r) => r.textContent?.startsWith('main'))?.textContent).toContain('origin/main ↑1');
+    await act(async () =>
+      rows()
+        .find((r) => r.textContent?.startsWith('topic'))!
+        .click(),
+    );
+    await flush();
+    expect(posts[0]).toEqual({ action: 'checkout', body: { name: 'topic', repo: ROOT } });
+    // A remote branch without a local one: a new branch that tracks it.
+    await open();
+    await act(async () =>
+      rows()
+        .find((r) => r.textContent?.startsWith('origin/feature'))!
+        .click(),
+    );
+    await flush();
+    expect(posts[1]).toEqual({ action: 'branchCreate', body: { name: 'feature', at: 'origin/feature', checkout: true, repo: ROOT } });
+    // A tag: detached.
+    await open();
+    await act(async () =>
+      rows()
+        .find((r) => r.textContent?.startsWith('v1'))!
+        .click(),
+    );
+    await flush();
+    expect(posts[2]).toEqual({ action: 'checkout', body: { rev: 'v1', repo: ROOT } });
+    // What is typed names a new branch.
+    await open();
+    const search = document.querySelector<HTMLInputElement>('.picker-search')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, 'new-thing');
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () =>
+      rows()
+        .find((r) => r.textContent === t('git.pick.createNamed', { name: 'new-thing' }))!
+        .click(),
+    );
+    await flush();
+    expect(posts[3]).toEqual({ action: 'branchCreate', body: { name: 'new-thing', checkout: true, repo: ROOT } });
   });
 
   it('says how long ago a commit was', () => {

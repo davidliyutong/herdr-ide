@@ -172,9 +172,10 @@ export async function deleteBranch(m: string, repo: string, name: string, remote
   if (force) await runGit(m, repo, 'branchDelete', { name, force: true });
 }
 
-/** Checks a remote branch out as a local one that tracks it. */
-export async function checkoutRemote(m: string, repo: string, remoteBranch: string) {
-  const local = remoteBranch.slice(remoteBranch.indexOf('/') + 1);
+/** Checks a remote branch out as a local one that tracks it (named as
+ * on the remote: without the remote's name, remote when it has a /). */
+export async function checkoutRemote(m: string, repo: string, remoteBranch: string, remote?: string) {
+  const local = remote ? remoteBranch.slice(remote.length + 1) : remoteBranch.slice(remoteBranch.indexOf('/') + 1);
   return runGit(m, repo, 'branchCreate', { name: local, at: remoteBranch, checkout: true });
 }
 

@@ -618,3 +618,26 @@ body.resizing-row .git-history-resizer {
 .git-deleted {
   text-decoration: line-through;
 }
+/* The branch in the panel: a button that opens the branch picker. */
+.git-branch-pick {
+  min-width: 0;
+  min-height: 0;
+  height: var(--ctl-sm);
+  padding: 0 4px;
+  margin-left: -4px;
+  font: inherit;
+  color: var(--fg);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+}
+.git-branch-pick:hover:not(:disabled) {
+  background: var(--bg-2);
+}
+.git-branch-pick:disabled {
+  cursor: default;
+  color: var(--fg);
+  opacity: 1;
+}

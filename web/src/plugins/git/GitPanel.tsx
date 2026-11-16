@@ -20,6 +20,7 @@ import {
   CloudUpload,
   Ellipsis,
   FileText,
+  FolderGit2,
   GitBranch,
   GitGraph,
   List,
@@ -53,6 +54,8 @@ import {
   type Selection,
 } from '../../components/tree';
 import { FileIcon } from '../../fileIcons';
+import { Picker } from '../../components/Picker';
+import { pickBranch } from './pickers';
 import { followedDir } from '../files/FilesPanel';
 import { gitApi, type Stash, type StatusFile } from './api';
 import { MARK_COLOR, type Mark } from './decorations';
@@ -252,13 +255,15 @@ export function GitPanel() {
   return (
     <div className="git-panel">
       {roots.length > 1 && (
-        <select className="git-repo-pick" value={root} onChange={(e) => setPicked(e.target.value)} aria-label={t('git.repository')}>
-          {roots.map((r) => (
-            <option key={r} value={r}>
-              {baseName(r)} — {r}
-            </option>
-          ))}
-        </select>
+        <Picker
+          className="git-repo-pick"
+          aria-label={t('git.repository')}
+          label={t('git.repository')}
+          items={roots.map((r) => ({ value: r, label: baseName(r), description: r, icon: <FolderGit2 /> }))}
+          value={root}
+          keepOrder
+          onChange={setPicked}
+        />
       )}
       {/* Its own state (the amend box, the history, the stashes) per repository. */}
       <RepoView key={`${m}\u0000${root}`} m={m} root={root} st={st} />
@@ -680,9 +685,14 @@ function RepoView({ m, root, st }: { m: string; root: string; st?: RepoState }) 
       </div>
       <div className="git-branch">
         <GitBranch />
-        <span className="ellipsis" title={branch ?? status?.head}>
+        <button
+          className="git-branch-pick ellipsis"
+          title={readOnly ? (branch ?? status?.head) : t('git.pick.title', { branch: branch ?? short(status?.head ?? '') })}
+          disabled={readOnly}
+          onClick={(e) => void pickBranch(m, root, e.currentTarget, { current: branch, remotes: info?.remotes ?? [] })}
+        >
           {branch ?? (status?.head ? t('git.detached', { commit: short(status.head) }) : t('git.noCommits'))}
-        </span>
+        </button>
         {status?.upstream ? (
           <button
             className="git-sync"

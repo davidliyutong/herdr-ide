@@ -148,7 +148,7 @@ the answer through.
 
 - The repository of the focused pane's directory (a terminal's, a VS Code
   pane's folder, the workspace's), kept while another pane (a diff, the
-  graph) has the focus; a picker when the directory is in nested
+  graph) has the focus; a searchable list (`Picker`) when the directory is in nested
   repositories. A directory in no repository is remembered until
   **Refresh**; a failure that says nothing about it (offline, busy,
   timeout) is shown and the directory asked again 10 s later. What the
@@ -158,6 +158,18 @@ the answer through.
   pull, then push) or **Publish Branch** without an upstream, Pull and
   Push; More: Fetch (all remotes, pruned), Pull (Rebase), Force Push (with
   lease), Create Branch, Stash Changes, tree or list.
+- The branch is a button that opens the branch picker (`pickers.tsx`, the
+  shared searchable list, `pick`): Create Branch…, Create Branch From… and
+  Check Out Detached… first, then the local branches (the current one
+  checked, each with its upstream and ahead/behind or that the upstream
+  is gone, and its last commit's subject and age), each remote's branches
+  under its name, and the tags; typing filters (thousands of refs stay
+  fast: only the rows in view are drawn) and offers **Create branch
+  “…”** for a valid name typed. A local branch is checked out; a remote
+  branch checks out the local branch of its name, else a new one that
+  tracks it; a tag is checked out detached. Create Branch From… and Check
+  Out Detached… ask for a branch, remote branch or tag the same way, or a
+  commit's hash typed. In read-only mode the branch is not a button.
 - A banner while a merge, rebase, cherry-pick or revert is in progress, with
   Abort and Continue.
 - The commit box: Cmd/Ctrl+Enter or **Commit**; **Amend last commit**.
@@ -512,7 +524,9 @@ terminal; what the plugin adds is a way to reach it from the browser:
   decorations, the panel's actions (Stage All and Unstage All without
   paths, with conflicts by paths, a rename unstaged with its old path,
   stashes by their commit), several rows selected by clicks and keys
-  with every action on them, the context menu's file entries, and commit
+  with every action on them, the context menu's file entries, the branch
+  picker (groups, a branch, a remote branch tracked, a tag detached, a
+  branch created from what is typed), the repository picker, and commit
   box, the Amend box per repository, read-only
   mode, a history page of an earlier list dropped; the graph's rows,
   details, compare and menus, a page of another filter dropped; the diff's
