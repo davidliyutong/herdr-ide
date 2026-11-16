@@ -45,7 +45,7 @@ func (g *guard) upload(st net.Conn, p Params) error {
 	if p.Replace {
 		e, err = g.put(abs, r, Params{Force: true, Method: p.Method}, MaxUpload)
 	} else {
-		e, err = putNew(abs, r)
+		e, err = g.putNew(abs, r)
 	}
 	if err != nil {
 		return plugin.Fail(st, codeOf(err))
@@ -59,8 +59,8 @@ func (g *guard) upload(st net.Conn, p Params) error {
 // name-1.ext, name-2.ext…, in a rename that replaces nothing (of the file
 // it wrote only: one swapped for it by name is a conflict, put's
 // stagedFile). The new file gets what the umask leaves of 0666.
-func putNew(p string, r io.Reader) (*Entry, error) {
-	stage, err := createTemp(filepath.Dir(p), 0o666)
+func (g *guard) putNew(p string, r io.Reader) (*Entry, error) {
+	stage, err := g.createTemp(filepath.Dir(p), 0o666)
 	if err != nil {
 		io.Copy(io.Discard, r)
 		return nil, err

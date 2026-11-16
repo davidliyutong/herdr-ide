@@ -37,16 +37,18 @@ const (
 	// MethodReplace always renames a new file over the old one; it fails
 	// in a directory that takes no new file.
 	MethodReplace = "replace"
-	// BackupRetention is how long what a save broken off by the agent's
-	// end left (a backup, a staged text) is kept: the agent that starts
-	// after it removes it (PruneBackups).
+	// BackupRetention is how long what a save or an upload broken off by
+	// the agent's end left (a backup, a staged text) is kept: the agent
+	// that starts after it removes it (PruneBackups).
 	BackupRetention = 7 * 24 * time.Hour
 	// savesDir is the private directory (0700) in the agent's data
 	// directory for staged texts and backups that cannot go beside their
-	// file, and for the links that record the backups beside files.
+	// file, and for the links that record those beside files.
 	savesDir = "saves"
 	// backupTag marks backups beside files: .<name>.<slug>-backup-<hex>.
 	backupTag = "-backup-"
+	// stageTag marks staged texts beside files: .<slug>-save-<hex>.
+	stageTag = "-save-"
 )
 
 // Tests replace these.
@@ -114,7 +116,7 @@ func (g *guard) put(p string, r io.Reader, w Params, limit int64) (*Entry, error
 		if exists {
 			perm = 0o600
 		}
-		stage, err = createTemp(dir, perm)
+		stage, err = g.createTemp(dir, perm)
 		if err != nil {
 			if !(exists && auto && errors.Is(err, fs.ErrPermission)) {
 				io.Copy(io.Discard, r)
@@ -186,6 +188,7 @@ var errSwapped = errors.New("replaced by another file meanwhile")
 type stagedFile struct {
 	*os.File
 	name string // its path; "" once renamed
+	link string // its record in the private directory (createTemp)
 }
 
 // ours is the file's stat, and whether its name still names it.
@@ -219,12 +222,15 @@ func (s *stagedFile) renameTo(to string, rename func(from, to string) error) (fs
 }
 
 // discard closes the file and removes it unless it was renamed (only while
-// its name still names it).
+// its name still names it), and its record.
 func (s *stagedFile) discard() {
 	if _, ok := s.ours(); ok {
 		os.Remove(s.name)
 	}
 	s.Close()
+	if s.link != "" {
+		os.Remove(s.link)
+	}
 }
 
 // overwrite writes the content of src (put's staged text) into the file p
@@ -334,12 +340,7 @@ func (g *guard) backup(p string, in io.Reader) (*backupFile, error) {
 			out, err = createNamed(d, "backup-"+name+"-", 0o600)
 		}
 	} else if err == nil {
-		if d, derr := g.privateDir(); derr == nil {
-			link := filepath.Join(d, fmt.Sprintf("backup-%08x.link", rand.Uint32()))
-			if os.Symlink(out.Name(), link) == nil {
-				b.link = link
-			}
-		}
+		b.link = g.record(out.Name(), "backup")
 	}
 	if err != nil {
 		return nil, err
@@ -363,7 +364,7 @@ func (g *guard) stageFile(dir string) (*stagedFile, error) {
 	var f *stagedFile
 	err := fs.ErrPermission
 	if !othersMayRename(dir) {
-		f, err = createTemp(dir, 0o600)
+		f, err = g.createTemp(dir, 0o600)
 	}
 	if !errors.Is(err, fs.ErrPermission) {
 		return f, err
@@ -449,14 +450,33 @@ func receive(w io.Writer, r io.Reader, limit int64) error {
 	return err
 }
 
-// createTemp creates a file for a save in dir (.<slug>-save-<hex>), with
-// perm less the umask.
-func createTemp(dir string, perm fs.FileMode) (*stagedFile, error) {
-	f, err := createNamed(dir, "."+brand.Slug+"-save-", perm)
+// createTemp creates a file for a save or an upload in dir
+// (.<slug>-save-<hex>), with perm less the umask, recorded by a link in
+// the private directory so that one the agent's end leaves (killed, a
+// crash) is removed after BackupRetention.
+func (g *guard) createTemp(dir string, perm fs.FileMode) (*stagedFile, error) {
+	f, err := createNamed(dir, "."+brand.Slug+stageTag, perm)
 	if err != nil {
 		return nil, err
 	}
-	return &stagedFile{File: f, name: f.Name()}, nil
+	return &stagedFile{File: f, name: f.Name(), link: g.record(f.Name(), "save")}, nil
+}
+
+// record links the file p, which a save or an upload made beside a file,
+// from the private directory (<kind>-<hex>.link), so that PruneBackups
+// finds it should the agent end before it is removed or renamed; the link,
+// "" when it could not be made (the file then has no retention, as before
+// it was recorded).
+func (g *guard) record(p, kind string) string {
+	d, err := g.privateDir()
+	if err != nil {
+		return ""
+	}
+	link := filepath.Join(d, fmt.Sprintf("%s-%08x.link", kind, rand.Uint32()))
+	if os.Symlink(p, link) != nil {
+		return ""
+	}
+	return link
 }
 
 // createNamed creates a new file in dir named prefix and 8 random hex
@@ -472,17 +492,42 @@ func createNamed(dir, prefix string, perm fs.FileMode) (*os.File, error) {
 	return nil, plugin.Errorf("exists", "no free name in %s", dir)
 }
 
-// isBackup reports whether name is that of a backup beside a file.
+// isBackup reports whether name is that of a backup beside a file:
+// .<name>.<slug>-backup-<8 hex digits>.
 func isBackup(name string) bool {
-	return strings.HasPrefix(name, ".") && strings.Contains(name, "."+brand.Slug+backupTag)
+	tag := "." + brand.Slug + backupTag
+	i := strings.LastIndex(name, tag)
+	return i > 0 && strings.HasPrefix(name, ".") && isHex8(name[i+len(tag):])
 }
 
-// PruneBackups removes what saves left in the data directory base more
-// than BackupRetention before now: staged texts and backups in the private
-// directory, and the backups beside files its links record (only a file
-// whose name is a backup's). A save leaves them only when the agent ended
-// during it (a crash, a kill), or when restoring a file failed, which
-// names the backup. The agent runs it when it starts.
+// isStaged reports whether name is that of a staged text beside a file:
+// .<slug>-save-<8 hex digits>.
+func isStaged(name string) bool {
+	prefix := "." + brand.Slug + stageTag
+	return strings.HasPrefix(name, prefix) && isHex8(name[len(prefix):])
+}
+
+func isHex8(s string) bool {
+	if len(s) != 8 {
+		return false
+	}
+	for _, c := range s {
+		if !('0' <= c && c <= '9' || 'a' <= c && c <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// PruneBackups removes what saves and uploads left in the data directory
+// base more than BackupRetention before now: staged texts and backups in
+// the private directory, and the staged texts and backups beside files its
+// links record. A recorded file is removed only when its own name is a
+// backup's or a staged text's (isBackup, isStaged), it is a regular file
+// of the user (the link's last element is never followed) and it is older
+// than the retention too. They are left only when the agent ended during a
+// save or an upload (a crash, a kill), or when restoring a file failed,
+// which names the backup. The agent runs it when it starts.
 func PruneBackups(base string, now time.Time) {
 	d := filepath.Join(base, savesDir)
 	ents, err := os.ReadDir(d)
@@ -497,8 +542,8 @@ func PruneBackups(base string, now time.Time) {
 			continue
 		}
 		if fi.Mode()&fs.ModeSymlink != 0 {
-			if t, err := os.Readlink(p); err == nil && filepath.IsAbs(t) && isBackup(filepath.Base(t)) {
-				if tfi, err := os.Lstat(t); err == nil && tfi.Mode().IsRegular() {
+			if t, err := os.Readlink(p); err == nil && filepath.IsAbs(t) && (isBackup(filepath.Base(t)) || isStaged(filepath.Base(t))) {
+				if tfi, err := os.Lstat(t); err == nil && tfi.Mode().IsRegular() && !ownedByOther(tfi) && !tfi.ModTime().After(cutoff) {
 					os.Remove(t)
 				}
 			}

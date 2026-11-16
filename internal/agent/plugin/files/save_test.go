@@ -16,6 +16,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"herdr-ide/internal/agent/plugin"
+	"herdr-ide/internal/brand"
 )
 
 func inode(t *testing.T, p string) uint64 {
@@ -371,9 +372,10 @@ func TestSaveInPlaceInASharedDirectory(t *testing.T) {
 	}
 }
 
-// A backup goes beside the file, recorded by a link in the private
-// directory; PruneBackups removes those older than BackupRetention (and
-// the backups their links name), never a file that is not a backup.
+// A backup and a staged text go beside the file, recorded by links in the
+// private directory; PruneBackups removes those older than BackupRetention
+// (and the files their links name, when those are old too), never a file
+// whose name is not a backup's or a staged text's, nor a link they name.
 func TestPruneBackups(t *testing.T) {
 	env := testEnv(t)
 	g := &guard{env: env}
@@ -386,23 +388,51 @@ func TestPruneBackups(t *testing.T) {
 	if filepath.Dir(b.path) != env.Home || !isBackup(filepath.Base(b.path)) || read(t, b.path) != "content" || b.link == "" {
 		t.Fatalf("backup %+v", b)
 	}
+	b.Close()
 	if fi, _ := os.Stat(b.path); fi.Mode().Perm() != 0o600 {
 		t.Fatalf("backup's mode %v", fi.Mode())
 	}
+	// A staged text an upload left (the agent was killed during it).
+	s, err := g.createTemp(env.Home, 0o666)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	if !isStaged(filepath.Base(s.name)) || s.link == "" {
+		t.Fatalf("staged %+v", s)
+	}
+	if l, err := os.Readlink(s.link); err != nil || l != s.name {
+		t.Fatalf("record %q %v", l, err)
+	}
+	// One whose upload still runs: its record is old, the file is not.
+	busy, err := g.createTemp(env.Home, 0o666)
+	if err != nil {
+		t.Fatal(err)
+	}
+	busy.Close()
 	d := filepath.Join(env.Base, savesDir)
 	stale := filepath.Join(d, "stage-0000abcd")
 	write(t, stale, "x")
 	fresh := filepath.Join(d, "backup-new-0000abcd")
 	write(t, fresh, "y")
-	// A link to a file that is no backup: only the link goes.
+	// Links to files that are no backups or staged texts, or to a link
+	// named as one: only the links go.
 	notBackup := filepath.Join(env.Home, "keep.txt")
 	write(t, notBackup, "z")
-	odd := filepath.Join(d, "backup-0000abcd.link")
-	os.Symlink(notBackup, odd)
+	nearly := filepath.Join(env.Home, "."+brand.Slug+stageTag+"0000abcd.txt")
+	write(t, nearly, "z")
+	linked := filepath.Join(env.Home, "."+brand.Slug+stageTag+"0000abce")
+	os.Symlink(notBackup, linked)
+	var odd []string
+	for i, target := range []string{notBackup, nearly, linked} {
+		l := filepath.Join(d, fmt.Sprintf("save-0000abc%d.link", i))
+		os.Symlink(target, l)
+		odd = append(odd, l)
+	}
 
 	old := time.Now().Add(-BackupRetention - time.Hour)
 	tv := []unix.Timeval{unix.NsecToTimeval(old.UnixNano()), unix.NsecToTimeval(old.UnixNano())}
-	for _, q := range []string{b.link, odd} {
+	for _, q := range append([]string{b.link, b.path, s.link, s.name, busy.link, nearly, linked}, odd...) {
 		if err := unix.Lutimes(q, tv); err != nil {
 			t.Fatal(err)
 		}
@@ -410,14 +440,33 @@ func TestPruneBackups(t *testing.T) {
 	os.Chtimes(stale, old, old)
 
 	PruneBackups(env.Base, time.Now())
-	for _, gone := range []string{b.path, b.link, stale, odd} {
+	for _, gone := range append([]string{b.path, b.link, s.name, s.link, busy.link, stale}, odd...) {
 		if _, err := os.Lstat(gone); err == nil {
 			t.Errorf("%s not removed", gone)
 		}
 	}
-	for _, kept := range []string{fresh, notBackup, p} {
+	for _, kept := range []string{fresh, notBackup, nearly, linked, busy.name, p} {
 		if _, err := os.Lstat(kept); err != nil {
 			t.Errorf("%s removed", kept)
+		}
+	}
+}
+
+// Names PruneBackups takes beside files.
+func TestBackupAndStagedNames(t *testing.T) {
+	for name, want := range map[string][2]bool{
+		".f.txt." + brand.Slug + backupTag + "0123abcd":  {true, false},
+		".f.txt." + brand.Slug + backupTag + "0123abcd~": {false, false},
+		"f.txt." + brand.Slug + backupTag + "0123abcd":   {false, false},
+		".f.txt." + brand.Slug + backupTag + "0123ABCD":  {false, false},
+		"." + brand.Slug + stageTag + "0123abcd":         {false, true},
+		"." + brand.Slug + stageTag + "0123abc":          {false, false},
+		"." + brand.Slug + stageTag + "0123abcd.txt":     {false, false},
+		"x." + brand.Slug + stageTag + "0123abcd":        {false, false},
+		"." + brand.Slug + stageTag + "0123abcd" + "0":   {false, false},
+	} {
+		if got := [2]bool{isBackup(name), isStaged(name)}; got != want {
+			t.Errorf("%s: %v, want %v", name, got, want)
 		}
 	}
 }

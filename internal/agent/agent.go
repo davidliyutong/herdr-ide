@@ -109,15 +109,48 @@ func Serve(ctx context.Context, conn io.ReadWriteCloser, opts Options) error {
 	go a.serveVault(ctx)
 	go a.linkMCP()
 
+	var running sync.WaitGroup
 	for {
 		st, err := sess.AcceptStream()
 		if err != nil {
-			if errors.Is(err, io.EOF) || sess.IsClosed() {
+			ended := errors.Is(err, io.EOF) || sess.IsClosed()
+			// The requests still running fail with their streams; give them
+			// the time to clean up (a save or an upload removes the file it
+			// staged) before the process may exit.
+			cancel()
+			sess.Close()
+			waitAtMost(&running, handlerDrain)
+			if ended {
 				return nil
 			}
 			return err
 		}
-		go a.handle(ctx, st)
+		running.Add(1)
+		go func() {
+			defer running.Done()
+			a.handle(ctx, st)
+		}()
+	}
+}
+
+// handlerDrain is how long Serve waits, once its session ended, for the
+// requests that still run to end.
+const handlerDrain = 5 * time.Second
+
+// waitAtMost waits for wg at most d, and reports whether it ended.
+func waitAtMost(wg *sync.WaitGroup, d time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-done:
+		return true
+	case <-t.C:
+		return false
 	}
 }
 
