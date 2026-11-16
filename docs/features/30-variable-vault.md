@@ -28,6 +28,8 @@ deciding.
   every machine (through the core's terminals, or ssh with the user's
   keys), so only variables that ask every time are kept from them; the
   panel says so and recommends asking every time for important secrets.
+  The user accepts this as long as every read is logged: no value leaves
+  the vault without its record in the access log, written to disk first.
 - Non-goal: putting variables into terminals' environments. Every program
   of a terminal would get them, for the terminal's whole life.
 - Non-goal: protection against the user's own programs on an allowed
@@ -158,10 +160,17 @@ reaches the vault only through its agent's socket and the same rules as
 every machine: the core host's agent is the local machine's.
 
 The MCP servers' requests arrive as streams the agent opens with op
-`vault` (`plugin.Streamer`): one `VaultRequest {tool, names, client,
-terminal, cwd}` line, one `VaultResponse` line. The core takes the machine
-from the session the stream came on; what the request says about its
-client, terminal and directory is shown to the user, not trusted.
+`vault` (`plugin.Streamer`): a header whose `process` is the process
+connected to `vault.sock` (by its peer credentials) and up to 7 of its
+parents, `{pid, name}` each as the agent read them from the kernel
+(`/proc/<pid>/stat` on Linux, `kern.proc.pid` on macOS), then one
+`VaultRequest {tool, names, client, terminal, cwd}` line and one
+`VaultResponse` line. The core takes the machine from the session the
+stream came on and the process chain from the header, never from the
+request; what the request says about its client, terminal and directory
+is shown to the user, not trusted. A process can name itself as it likes
+(its name, not its pid), so the chain says who asked as far as the
+machine's kernel knows, not what the program is.
 
 - `list`: every variable's name, description, `inject_only` and whether
   this machine needs approval. Works while locked.
@@ -183,17 +192,40 @@ client, terminal and directory is shown to the user, not trusted.
   late gets `404`. The core then sends `{type: resolved, id, answer}`,
   which closes the prompt on every page.
 
-Each request is recorded with names only: in the audit log
-(`vault.access`; results `allowed`, `approved` (once), `approved_always`,
-`listed` or the error's code) and in a log of the last 500 kept in memory,
-shown in the panel. List calls and refusals (`busy`, `not_found`,
-`vault_locked`, `inject_only`, `bad_request`, every result but `allowed`,
-`approved`, `approved_always` and `denied`), which a program can repeat at
-will, are merged into the previous record when they repeat it (`count`),
-audited at most once a minute per machine and result (with the number
-skipped; the last of a burst is written when the minute is over, so every
-call is accounted for) and do not make the pages reload. The other records
-make the pages reload at most once a second, the last one included.
+**Every read is logged.** A variable that lists machines can be read by
+any program on them, and the core host's programs reach every machine
+(through the core's terminals or ssh): the user accepts that, as long as
+every value that leaves the vault is recorded. Each request of an MCP
+server and each value a page takes (a reveal, an export) is a record of
+the **access log**, with its time, machine (`""` for a page), tool,
+names, result, the process chain the agent saw, the client, terminal and
+directory the request named, and a page's address and browser; never a
+value. Results: `allowed` (by the variables' machines), `approved`
+(once), `approved_always`, `revealed`, `exported` (these let values
+out), `listed`, `denied` (by the user), `expired` (no answer in time),
+`cancelled` (the requester went away), `log_failed` or the error's code.
+The log is kept in `vault[-<instance>]-access.jsonl` beside the vault's
+file (0600, a JSON record a line) and read back at the core's start, so
+the panel shows what happened before a restart. A record that lets values
+out is appended and flushed to disk before they leave; when it cannot be
+written the values do not leave (`log_failed`, to the MCP server and as a
+reveal's `500`). The log keeps the last 1000 records that let values out
+and, apart, the last 500 others, so lists and refusals, which a program
+can repeat at will, never push a release out; the file is written again
+with what is kept once it holds twice as many lines. Every record is
+audited too (`vault.access`, a page's as `vault.revealed` and
+`vault.exported`) when the core writes an audit log (`--audit-log`).
+
+List calls and refusals (`busy`, `not_found`, `vault_locked`,
+`inject_only`, `bad_request`, `cancelled`: every result but those that
+let values out, `denied`, `expired` and `log_failed`) are merged into the
+previous record when they repeat it (`count`, written again at most every
+5 s), audited at most once a minute per machine and result (with the
+number skipped; the last of a burst is written when the minute is over,
+so every call is accounted for) and do not make the pages reload. A
+release is never merged: each one is a record of its own, in the access
+log and the audit log. The other records make the pages reload at most
+once a second, the last one included.
 Answers are audited as `vault.answered` (machine, tool, names, answer),
 saved variables as `vault.saved` (allowed machines, `inject_only`, whether
 the value changed, `from` when renamed), never with values. Other changes
@@ -289,10 +321,12 @@ The panel **Variable Vault** of the right sidebar (command
   time, chosen machines with their state, all machines), inject only as a
   switch, and Delete after a confirmation. Saving is one call, a new name
   included (`to`), so a save that fails changed nothing and can be tried
-  again as it is. **Access log**: the accesses
-  since the core started by day, filtered by machine and outcome, each
-  with its time, outcome (allowed by the list, approved, refused, listed),
-  tool, names, machine, client and terminal. **Connect**: per machine,
+  again as it is. **Access log**: the records
+  the log keeps, by day, filtered by machine (or pages) and outcome, each
+  with its time, outcome (values let out: allowed by the list, shown or
+  exported by a page; approved; refused; listed), tool, names, machine,
+  client, terminal and directory, the process chain the agent saw (the
+  asking process first), and for a page its address. **Connect**: per machine,
   `claude mcp add --scope user <slug>-vault -- <data dir>/bin/<slug>-mcp`,
   Codex's `[mcp_servers.<slug>-vault]` in `~/.codex/config.toml` and the
   JSON other clients take, each with a copy button, built from the
@@ -375,6 +409,11 @@ and sessions gone, the vault locked) or changed meanwhile.
 - Many refusals in a row (a program repeating a call): one record in the
   log with their count, one audit record a minute per machine and result,
   the last of a burst written when the minute is over.
+- The access log cannot be written (a full disk, its file not writable):
+  no value leaves; the MCP server gets `log_failed`, a reveal `500
+  log_failed`; list calls and refusals are answered as before.
+- The core restarted: the access log is read back from its file; a
+  repeated refusal's count may lack the calls of its last 5 s.
 
 ## Security
 
@@ -419,6 +458,15 @@ server exposes.
   without a session refused and denials allowed; answers, saves and
   reveals audited without values or passphrases; a removed machine
   forgotten.
+- `internal/plugins/vault/accesslog_test.go`: the access log read back
+  after a restart with releases, counts and who asked, 0600 and without
+  values (`TestAccessLogSurvivesARestart`); releases never merged and
+  never pushed out by refusals (`TestReleasesAreNeverCoalesced`); a
+  release whose record cannot be written refused (`TestUnloggedReleaseIsRefused`);
+  the file written again past its bound and read back the same; a merged
+  count written once the while is over; the process chain taken from the
+  header, never the request (`TestWhoAskedComesFromTheAgent`); cancelled
+  and expired requests.
 - `internal/vaultmcp/mcp_test.go`: JSON-RPC over pipes (initialize and
   version negotiation, notifications, tools), masking, truncation, masking
   where the capture is cut (`TestMaskAtTheCut`), timeouts that kill the
@@ -430,7 +478,8 @@ server exposes.
   (the test binary started again as the server), and when the client
   cancels the call.
 - `internal/agent/vault_test.go`: `vault.sock` (0600) relayed to the core as
-  op `vault`, the link to the executable; `vault.sock` and `bridge.sock`
+  op `vault` with the connecting process and its parent in the header, the
+  link to the executable; `vault.sock` and `bridge.sock`
   served by the newest of two agents of one instance, kept when the older
   exits, served by the other again when the newest exits first, removed
   with the last (`TestSocketsFollowTheNewestAgent`).
@@ -448,5 +497,6 @@ server exposes.
   again when the connection to the core comes back; read-only; the
   approval prompt asking for the passphrase, denying without one and
   resolved elsewhere, kept with the reason when an answer fails and closed
-  when the core no longer has it; `busy` told from `wait`; the local
-  machine's note; the setup snippets.
+  when the core no longer has it; `busy` told from `wait`; the access log
+  with a page's reveal, a count, the directory and the process chain, and
+  the chain in the prompt; the local machine's note; the setup snippets.

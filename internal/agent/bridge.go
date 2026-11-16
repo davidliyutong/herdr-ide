@@ -20,6 +20,6 @@ import (
 // the others serve it again once it is free (serveSocket).
 func (a *Agent) serveBridge(ctx context.Context) {
 	a.serveSocket(ctx, "bridge", filepath.Join(a.runDir, "bridge.sock"), func(c net.Conn) {
-		go a.relayFirst(c, agentproto.OpBridge, 0, nil)
+		go a.relayFirst(c, agentproto.Header{Op: agentproto.OpBridge}, 0, nil)
 	})
 }

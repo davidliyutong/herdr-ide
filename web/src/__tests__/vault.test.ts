@@ -60,6 +60,8 @@ describe('vault', () => {
   let sessionGone: boolean;
   /** The requests GET requests answers. */
   let pending: unknown[];
+  /** The access log GET log answers. */
+  let accessLog: unknown[];
 
   beforeEach(async () => {
     calls = [];
@@ -68,6 +70,7 @@ describe('vault', () => {
     listError = answerError = sessionError = undefined;
     failPut = sessionGone = false;
     pending = [];
+    accessLog = [{ time: '2026-01-01T00:00:00Z', m: 'm1', tool: 'get', names: ['GITHUB_TOKEN'], result: 'approved' }];
     await endSession().catch(() => undefined);
     useVault.setState({ status: undefined, variables: [], log: [], requests: {}, error: undefined, session: false });
     useStore.setState({ readOnly: false, connected: false });
@@ -92,8 +95,7 @@ describe('vault', () => {
           ],
         });
       }
-      if (url === '/api/p/vault/log')
-        return json({ log: [{ time: '2026-01-01T00:00:00Z', m: 'm1', tool: 'get', names: ['GITHUB_TOKEN'], result: 'approved' }] });
+      if (url === '/api/p/vault/log') return json({ log: accessLog });
       if (url === '/api/p/vault/requests') return json({ requests: pending });
       if (url === '/api/p/vault/session' && method === 'POST') {
         if (sessionError) return fail(sessionError);
@@ -392,6 +394,48 @@ describe('vault', () => {
     expect(document.querySelector('[data-request="r2"]')).not.toBeNull();
     act(() => vaultMessage('m1', { type: 'resolved', id: 'r2', answer: 'deny' }));
     expect(document.querySelector('[data-request="r2"]')).toBeNull();
+  });
+
+  it('shows who asked: the process chain the agent saw, the directory, a page', async () => {
+    useStore.setState({ machines: { m1: { label: 'gpu-box' } } as never });
+    const chain = [
+      { pid: 4242, name: 'herdr-ide-mcp' },
+      { pid: 4200, name: 'claude' },
+    ];
+    accessLog = [
+      { id: 3, time: '2026-01-02T10:00:00Z', m: '', tool: 'reveal', names: ['GITHUB_TOKEN'], remote: '127.0.0.1:5555', result: 'revealed' },
+      { id: 2, time: '2026-01-02T09:00:00Z', m: 'm1', tool: 'get', names: ['NOPE'], result: 'cancelled', count: 3 },
+      {
+        id: 1,
+        time: '2026-01-02T08:00:00Z',
+        m: 'm1',
+        tool: 'env',
+        names: ['A'],
+        client: 'claude',
+        cwd: '/srv/app',
+        process: chain,
+        result: 'allowed',
+      },
+    ];
+    await act(async () => root.render(createElement('div', null, createElement(VaultPanel), createElement(VaultApprovals))));
+    await flush();
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')][1].click());
+    const entries = [...host.querySelectorAll<HTMLElement>('.vault-entry')];
+    expect(entries.map((e) => e.dataset.result)).toEqual(['revealed', 'cancelled', 'allowed']);
+    expect(entries[0].textContent).toContain(t('vault.log.page'));
+    expect(entries[0].textContent).toContain('127.0.0.1:5555');
+    expect(entries[0].textContent).toContain(t('vault.result.revealed'));
+    expect(entries[1].textContent).toContain(t('vault.log.count', { count: 3 }));
+    expect(entries[2].textContent).toContain('/srv/app');
+    expect(entries[2].querySelector('.vault-entry-process')?.textContent).toBe('herdr-ide-mcp (4242) ← claude (4200)');
+    // Pages are a choice of the machine filter.
+    const filter = host.querySelector<HTMLSelectElement>(`select[aria-label="${t('vault.log.machine')}"]`)!;
+    expect([...filter.options].map((o) => o.textContent)).toEqual([t('vault.log.allMachines'), t('vault.log.page'), 'gpu-box']);
+    // The prompt shows the chain too.
+    const request = { id: 'r8', m: 'm1', tool: 'get', names: ['A'], client: 'claude', process: chain, created: '1', expires: '2' };
+    act(() => vaultMessage('m1', { type: 'request', request }));
+    expect(document.querySelector('[data-request="r8"] [data-meta="process"]')?.textContent).toBe('herdr-ide-mcp (4242) ← claude (4200)');
+    act(() => vaultMessage('m1', { type: 'resolved', id: 'r8', answer: 'deny' }));
   });
 
   it('says what the local machine may read', async () => {

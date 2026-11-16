@@ -35,6 +35,7 @@ import {
   loadVault,
   lockVault,
   openSession,
+  processText,
   setPassphrase,
   useVault,
   vaultApi,
@@ -648,16 +649,15 @@ function Editor({ variable, onDone }: { variable?: VaultVariable; onDone(): void
 
 // ---- the access log ----
 
+/** Outcomes: values let out (by the list, or by a page: a reveal, an
+ * export), approved by the user, refused, listed. */
 const OUTCOME: Record<string, 'ok' | 'asked' | 'refused' | 'info'> = {
   allowed: 'ok',
+  revealed: 'ok',
+  exported: 'ok',
   approved: 'asked',
   approved_always: 'asked',
   listed: 'info',
-  denied: 'refused',
-  busy: 'refused',
-  vault_locked: 'refused',
-  not_found: 'refused',
-  inject_only: 'refused',
 };
 
 function resultText(result: string): string {
@@ -665,20 +665,40 @@ function resultText(result: string): string {
   return hasMessage(key) ? t(key) : result;
 }
 
-/** The accesses since the core started, by day, filtered by machine and
- * outcome. */
+/** The machine filter's value of a page's records (machine ''). */
+const PAGE = '\0page';
+
+/** Who asked: the machine, the client and terminal it reported and the
+ * directory; a page's address. */
+function whoText(a: VaultAccess, label: (m: string) => string): string {
+  if (!a.m) return [t('vault.log.page'), a.remote].filter(Boolean).join(' · ');
+  return [
+    label(a.m),
+    a.client || t('vault.request.unknownClient'),
+    a.terminal && t('vault.request.terminal', { terminal: a.terminal }),
+    a.cwd,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+/** The accesses kept in the vault's access log, by day, filtered by
+ * machine (or pages) and outcome. */
 function AccessLog() {
   const log = useVault((s) => s.log);
   const machines = useStore((s) => s.machines);
   const [machine, setMachine] = useState('');
   const [outcome, setOutcome] = useState('');
-  const shown = log.filter((a) => (!machine || a.m === machine) && (!outcome || (OUTCOME[a.result] ?? 'refused') === outcome));
+  const shown = log.filter(
+    (a) => (!machine || (machine === PAGE ? !a.m : a.m === machine)) && (!outcome || (OUTCOME[a.result] ?? 'refused') === outcome),
+  );
   const days = new Map<string, VaultAccess[]>();
   for (const a of shown.slice(0, 300)) {
     const d = new Date(a.time).toLocaleDateString();
     days.set(d, [...(days.get(d) ?? []), a]);
   }
-  const ids = [...new Set(log.map((a) => a.m))];
+  const ids = [...new Set(log.map((a) => a.m || PAGE))];
+  const label = (m: string) => machines[m]?.label ?? m;
   return (
     <>
       <div className="vault-toolbar">
@@ -686,7 +706,7 @@ function AccessLog() {
           <option value="">{t('vault.log.allMachines')}</option>
           {ids.map((m) => (
             <option key={m} value={m}>
-              {machines[m]?.label ?? m}
+              {m === PAGE ? t('vault.log.page') : label(m)}
             </option>
           ))}
         </select>
@@ -711,7 +731,7 @@ function AccessLog() {
               <h4 className="section-head">{day}</h4>
               <ul>
                 {list.map((a, i) => (
-                  <li key={i} className={`vault-entry ${OUTCOME[a.result] ?? 'refused'}`}>
+                  <li key={a.id ?? i} className={`vault-entry ${OUTCOME[a.result] ?? 'refused'}`} data-result={a.result}>
                     <span className="vault-entry-time mono">{new Date(a.time).toLocaleTimeString()}</span>
                     <span className="vault-entry-body">
                       <span className="vault-entry-line">
@@ -726,15 +746,14 @@ function AccessLog() {
                           ))}
                         </span>
                       )}
-                      <span className="vault-entry-who muted ellipsis">
-                        {[
-                          machines[a.m]?.label ?? a.m,
-                          a.client || t('vault.request.unknownClient'),
-                          a.terminal && t('vault.request.terminal', { terminal: a.terminal }),
-                        ]
-                          .filter(Boolean)
-                          .join(' · ')}
+                      <span className="vault-entry-who muted ellipsis" title={a.userAgent}>
+                        {whoText(a, label)}
                       </span>
+                      {(a.process ?? []).length > 0 && (
+                        <span className="vault-entry-who vault-entry-process muted ellipsis" title={t('vault.log.process')}>
+                          {processText(a.process)}
+                        </span>
+                      )}
                     </span>
                   </li>
                 ))}

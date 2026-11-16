@@ -29,6 +29,12 @@ export interface VaultVariable {
   updated: string;
 }
 
+/** A process behind a request, as the machine's agent saw it. */
+export interface VaultProcess {
+  pid: number;
+  name?: string;
+}
+
 export interface VaultRequest {
   id: string;
   m: string;
@@ -37,20 +43,35 @@ export interface VaultRequest {
   client?: string;
   terminal?: string;
   cwd?: string;
+  /** The process that asked, then its parents. */
+  process?: VaultProcess[];
   created: string;
   expires: string;
 }
 
 export interface VaultAccess {
+  id?: number;
   time: string;
+  /** The machine whose MCP server asked; '' for a page (a reveal, an export). */
   m: string;
+  /** get, env, list; reveal, export (a page's). */
   tool: string;
   names?: string[];
   client?: string;
   terminal?: string;
+  cwd?: string;
+  process?: VaultProcess[];
+  /** A page's address and browser. */
+  remote?: string;
+  userAgent?: string;
   result: string;
   /** Identical list calls or refusals in a row (1 when absent). */
   count?: number;
+}
+
+/** A process chain as text: the asking process first, then its parents. */
+export function processText(ps?: VaultProcess[]): string {
+  return (ps ?? []).map((p) => (p.name ? `${p.name} (${p.pid})` : String(p.pid))).join(' ← ');
 }
 
 export type Answer = 'once' | 'always' | 'deny';
