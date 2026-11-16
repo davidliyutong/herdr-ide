@@ -19,6 +19,7 @@ import { useStore, type ToastKind } from '../../state/store';
 import { uploadFiles } from '../../transfers';
 import type { MenuEntry } from '../../contextMenu';
 import { errorText, filesApi, type Result } from './api';
+import { isPluginOn } from '../registry';
 import {
   baseName,
   join,
@@ -280,10 +281,11 @@ export function menuFor(m: string, paths: string[], isDir: (p: string) => boolea
       out.push({ label: t('files.open'), hint: '↵', run: () => void openPath(m, target, false) });
       out.push({ label: t('files.quickLook'), hint: keyLabel('space'), run: () => void quickLook(m, target, el) });
     }
-    out.push({
-      label: t('files.openInCode'),
-      run: () => void (isDir(target) ? actions.openCode(m, target) : actions.openInCode(m, target)),
-    });
+    if (isPluginOn('vscode'))
+      out.push({
+        label: t('files.openInCode'),
+        run: () => void (isDir(target) ? actions.openCode(m, target) : actions.openInCode(m, target)),
+      });
     out.push({ label: t('files.openInTerminal'), run: () => void openTerminal(m, dir) });
     out.push('sep');
   } else if (!target) {

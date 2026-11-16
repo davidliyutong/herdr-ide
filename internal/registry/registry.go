@@ -13,6 +13,7 @@ import (
 	gitplugin "herdr-ide/internal/plugins/git"
 	usageplugin "herdr-ide/internal/plugins/usage"
 	vaultplugin "herdr-ide/internal/plugins/vault"
+	"herdr-ide/internal/plugins/vscode"
 	"herdr-ide/internal/settings"
 	"herdr-ide/internal/uisettings"
 )
@@ -27,7 +28,7 @@ func Settings() []settings.Module {
 // Plugins are the core's plugins (internal/plugin), in the order the UIs
 // list them.
 func Plugins() []plugin.Plugin {
-	return []plugin.Plugin{files.New(), gitplugin.New(), usageplugin.New(), vaultplugin.New()}
+	return []plugin.Plugin{vscode.New(), files.New(), gitplugin.New(), usageplugin.New(), vaultplugin.New()}
 }
 
 // pluginsOff are the plugins that are off until the user turns them on.

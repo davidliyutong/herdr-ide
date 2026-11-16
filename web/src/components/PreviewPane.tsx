@@ -13,6 +13,7 @@ import { fileUrl, formatSize, listDir, type RemoteStat } from '../lib/files';
 import { mediaExt } from '../terminal/links';
 import { actions } from '../actions';
 import { t } from '../i18n';
+import { usePluginOn } from '../plugins/registry';
 
 const imageExt = /\.(png|jpe?g|gif|webp|avif|svg|bmp|ico)$/i;
 const videoExt = /\.(mp4|webm|mov|m4v|mkv|ogv)$/i;
@@ -48,6 +49,7 @@ export function MediaView({ m, path }: { m: string; path: string }) {
 
 export function PreviewPane({ m, pane, path }: { m: string; pane: string; path: string }) {
   const readOnly = useStore((s) => s.readOnly);
+  const code = usePluginOn('vscode');
   const [siblings, setSiblings] = useState<RemoteStat[]>([]);
   const [dirEntries, setDirEntries] = useState<RemoteStat[] | undefined>();
   const [error, setError] = useState<string>();
@@ -130,7 +132,9 @@ export function PreviewPane({ m, pane, path }: { m: string; pane: string; path: 
         <a className="btn" href={fileUrl(m, path, true)}>
           {t('preview.download')}
         </a>
-        {!readOnly && <button onClick={() => void actions.openInCode(m, path, 1, undefined, pane)}>{t('preview.openInCode')}</button>}
+        {!readOnly && code && (
+          <button onClick={() => void actions.openInCode(m, path, 1, undefined, pane)}>{t('preview.openInCode')}</button>
+        )}
       </div>
       <div className="preview-body">
         {error && <div className="error pad">{error}</div>}

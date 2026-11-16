@@ -103,6 +103,7 @@ on macOS) shows the panel shown last or hides it.
 | --- | --- | --- |
 | `transfers` | always on | The uploads and downloads trays of the status bar ([06](06-quick-look-and-files.md)). |
 | `gui` | `gui` | The program windows' tray and palette items ([14](14-gui-windows.md)). |
+| `vscode` | `plugins.vscode.enabled` | VS Code (code-server) in panes: the commands `code.open`, `code.diff`, `code.gitGraph`, the panes' buttons and menu items, the windows' layer ([05](05-vscode-panes.md)). Its routes are the core's own (`/api/m/{id}/code/*`, `/m/{id}/code/`, `/api/m/{id}/bridge`), which answer `plugin_disabled` while it is off (`withPlugin`), stopping code-server excepted. |
 | `files` | `plugins.files.enabled` | The file explorer's panel and its editor pane, with Monaco loaded on first use ([28](28-file-explorer.md)). |
 | `vault` | `plugins.vault.enabled` | The variable vault: its panel, approval prompts, the op `vault` and the `mcp` command ([30](30-variable-vault.md)). |
 | `usage` | `plugins.usage.enabled` | The AI usage panel, its status bar item and its scheduler in the core ([29](29-ai-usage.md)). |

@@ -30,6 +30,30 @@ func (h pluginHost) Audit(r *http.Request, event string, fields map[string]any) 
 	h.s.audit.log(r, event, fields)
 }
 
+// pluginOn reports whether the core's plugin of this id is on; a core
+// without it (tests) has the feature on.
+func (s *Server) pluginOn(id string) bool {
+	for _, p := range s.opts.Plugins {
+		if p.ID() == id {
+			return plugin.Enabled(s.opts.Settings, p)
+		}
+	}
+	return true
+}
+
+// withPlugin refuses a request with 404 plugin_disabled while the plugin of
+// this id is off: the core's own routes of a feature that is a plugin
+// (VS Code's).
+func (s *Server) withPlugin(id string, h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !s.pluginOn(id) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "plugin_disabled"})
+			return
+		}
+		h(w, r)
+	}
+}
+
 // pluginRoutes are the plugins' routes: each answers 404 plugin_disabled
 // while its plugin is off, a machine's routes 404 for an unknown machine,
 // and mutating ones are writable and audited.

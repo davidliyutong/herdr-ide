@@ -706,6 +706,13 @@ export const zhCN: Messages = {
   'plugins.paneUnknown': '此窗格属于插件“{plugin}”，当前版本没有这个插件。',
   'plugins.page.about': '插件为右侧栏添加面板，并添加窗格类型、命令和状态栏项目。插件是应用的一部分；关闭后在所有地方都会隐藏。',
   'plugins.page.always': '始终开启',
+  'plugins.vscode.title': 'VS Code',
+  'plugins.vscode.description': '在窗格里打开任意机器上某个文件夹的 VS Code（code-server）：编辑器、更改和 Git Graph。',
+  'settings.plugins.vscode.enabled': 'VS Code',
+  'settings.plugins.vscode.enabled.desc':
+    '在窗格里显示 VS Code 窗口（code-server，第一次在某台机器上打开时下载并启动）。关闭后不再提供 VS Code，已有的 VS Code 窗格会等它重新打开。',
+  'code.pluginOff': 'VS Code 插件已关闭。',
+  'code.pluginTurnOn': '打开插件',
   'plugins.gui.title': '程序窗口',
   'plugins.gui.description': '把远程 Linux 机器上图形程序的窗口显示在浏览器窗口里。',
   'plugins.transfers.title': '上传和下载',

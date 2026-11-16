@@ -6,7 +6,7 @@
 // they came from (docs/features/05-vscode-panes.md).
 
 import * as L from './term/layout';
-import { describeView } from './plugins/registry';
+import { describeView, isPluginOn } from './plugins/registry';
 import { isLive, type TerminalRecord } from './term/protocol';
 import { terms, useTerms } from './state/terms';
 import { useStore } from './state/store';
@@ -678,15 +678,17 @@ export const actions = {
     return { m: c.m, pane: leaf ? c.focused : undefined, terminal, cwd };
   },
 
-  /** Opens a path found in a pane (from; the focused pane by default): media
-   * in a preview pane (openPreview), anything else in VS Code at the line:
+  /** Opens a path found in a pane (from; the focused pane by default): media,
+   * and anything with the VS Code plugin off, in a preview pane
+   * (openPreview), anything else in VS Code at the line:
    * in a VS Code pane of the workspace, the one of from's tab whose folder
    * holds the file first, then one of another tab that holds it, then any
    * of from's tab, then any; else in a new one split beside from, for the
    * terminal's directory or the workspace's when the file is below it, else
    * for the file's directory. */
   async openPath(m: string, path: string, line?: number, col?: number, from?: string) {
-    if (mediaExt.test(path)) return actions.openPreview(m, path, from);
+    // Without VS Code, Quick Look shows text as well.
+    if (mediaExt.test(path) || !isPluginOn('vscode')) return actions.openPreview(m, path, from);
     return actions.openInCode(m, path, line, col, from);
   },
 

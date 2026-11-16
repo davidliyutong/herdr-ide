@@ -19,7 +19,7 @@ import { findStep, openFind, useFind } from './vt/find';
 import { paneHandle } from './state/panes';
 import { currentZoom, zoom, zoomAvailable, ZOOM_LEVELS } from './zoom';
 import { fullDiskAccessAvailable, openFullDiskAccess } from './fullDiskAccess';
-import { activePanels, pluginCommand } from './plugins/registry';
+import { activePanels, commandOfOffPlugin, pluginCommand } from './plugins/registry';
 
 /** Where a key is pressed: the main UI, a VS Code pane, or a dialog. */
 export type KeyContext = 'terminal' | 'vscode' | 'dialog';
@@ -225,6 +225,7 @@ export function commandEnabled(id: string): boolean {
   if (/^tab\.select[1-9]$/.test(id)) return tabs > 1;
   const plugin = pluginCommand(id);
   if (plugin) return plugin.enabled?.() ?? true;
+  if (commandOfOffPlugin(id)) return false;
   switch (id) {
     case 'view.togglePanel':
       return activePanels().length > 0;
@@ -271,10 +272,6 @@ export function commandEnabled(id: string): boolean {
     case 'find.next':
     case 'find.previous':
       return !!c?.terminal;
-    case 'code.open':
-    case 'code.diff':
-    case 'code.gitGraph':
-      return changes && !!c;
     case 'app.agentAttention':
       return attentionList().length > 0;
     case 'app.addMachine':
@@ -443,15 +440,6 @@ export function runCommand(id: string) {
     case 'find.previous':
       if (useFind.getState().terminal) findStep(false);
       else if (ctx?.terminal) openFind(ctx.m, ctx.terminal);
-      break;
-    case 'code.open':
-      if (ctx) void actions.openCode(ctx.m, ctx.cwd);
-      break;
-    case 'code.diff':
-      if (ctx) void actions.openDiff(ctx.m, ctx.cwd, ctx.pane);
-      break;
-    case 'code.gitGraph':
-      if (ctx) void actions.openGitGraph(ctx.m, ctx.cwd, ctx.pane);
       break;
   }
 }

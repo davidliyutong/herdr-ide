@@ -4,16 +4,18 @@
 // plugin {plugin, m, data}). The core's side of each is in internal/plugin;
 // docs/features/27-plugins.md has the design. Plugins are compiled in.
 import type { ComponentType } from 'react';
-import type { LucideIcon } from 'lucide-react';
 import type { MessageKey } from '../i18n';
 import type { PluginView } from '../term/layout';
+
+/** An icon: lucide's, or one drawn the same way (components/icons.tsx). */
+export type IconComponent = ComponentType<{ className?: string }>;
 
 /** A panel of the right sidebar. */
 export interface PanelDef {
   /** Unique among all panels: <plugin> or <plugin>.<name>. */
   id: string;
   title: MessageKey;
-  icon: LucideIcon;
+  icon: IconComponent;
   component: ComponentType;
   /** The command that shows it (declared in internal/keybindings). */
   command?: string;
@@ -30,7 +32,7 @@ export interface PaneViewProps {
 /** A kind of pane a plugin draws: the layout's leaf {view: {id, plugin,
  * kind, ...}}, whose other fields are the plugin's. */
 export interface PaneViewDef {
-  icon: LucideIcon;
+  icon: IconComponent;
   /** The pane's title, for its header and tab. */
   title(m: string, view: PluginView): string;
   /** A path the pane is about (header, status bar), if any. */
@@ -61,7 +63,7 @@ export interface PluginDef {
   id: string;
   title: MessageKey;
   description?: MessageKey;
-  icon: LucideIcon;
+  icon: IconComponent;
   /** The setting that turns it on and off: plugins.<id>.enabled unless
    * it has one of its own; none for parts of the app that are always on. */
   enableSetting?: string | null;

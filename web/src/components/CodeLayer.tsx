@@ -23,6 +23,8 @@ import {
   type Frame,
 } from '../codeFrames';
 import { t } from '../i18n';
+import { setSetting } from '../settings';
+import { usePluginOn } from '../plugins/registry';
 
 type Machines = ReturnType<typeof useStore.getState>['machines'];
 let usableOf: { machines?: Machines; list: string } = { list: '' };
@@ -65,15 +67,17 @@ function codeViewsOfLayouts(s: { machines: Layouts }): string {
   return viewsOf.list;
 }
 
-/** Why a machine's VS Code panes show no VS Code: read-only mode, the
- * machine disabled, or code-server stopped from this page. */
-export type CodeOff = 'readOnly' | 'disabled' | 'stopped';
+/** Why a machine's VS Code panes show no VS Code: the VS Code plugin off,
+ * read-only mode, the machine disabled, or code-server stopped from this
+ * page. */
+export type CodeOff = 'plugin' | 'readOnly' | 'disabled' | 'stopped';
 
 export function useCodeOff(m: string): CodeOff | undefined {
+  const on = usePluginOn('vscode');
   const readOnly = useStore((s) => s.readOnly);
   const disabled = useStore((s) => s.machines[m]?.status === 'disabled');
   const stopped = useFrames((s) => !!s.stopped[m]);
-  return readOnly ? 'readOnly' : disabled ? 'disabled' : stopped ? 'stopped' : undefined;
+  return !on ? 'plugin' : readOnly ? 'readOnly' : disabled ? 'disabled' : stopped ? 'stopped' : undefined;
 }
 
 /** The iframes of the VS Code panes, over the panes; once per page. */
@@ -82,14 +86,16 @@ export function CodeLayer() {
   const shown = useFrames((s) => s.shown);
   const stopped = useFrames((s) => s.stopped);
   const readOnly = useStore((s) => s.readOnly);
+  const on = usePluginOn('vscode');
   const usableList = useStore(usableMachines);
   const viewsList = useTerms(codeViewsOfLayouts);
   const usable = useMemo(() => new Set(usableList ? usableList.split('\n') : []), [usableList]);
   const views = useMemo(() => new Set(viewsList ? viewsList.split('\n') : []), [viewsList]);
 
   useEffect(() => {
-    // Disabled and removed machines have no code-server.
-    const off = (m: string) => readOnly || !usable.has(m) || !!stopped[m];
+    // Disabled and removed machines have no code-server, nor any with the
+    // plugin off.
+    const off = (m: string) => !on || readOnly || !usable.has(m) || !!stopped[m];
     // A view is alive while its machine's layout holds it; unknown while
     // that layout is not read (the machine is away).
     const alive = (fr: Frame) => (views.has(`${fr.m}|`) ? views.has(frameKey(fr.m, fr.id)) : undefined);
@@ -102,7 +108,7 @@ export function CodeLayer() {
     // Frames off screen expire.
     const timer = window.setInterval(update, 60_000);
     return () => window.clearInterval(timer);
-  }, [shown, stopped, readOnly, usable, views]);
+  }, [shown, stopped, readOnly, usable, views, on]);
 
   // Frames are placed relative to the layer: placed again when the window
   // or the layer (the workspace's area, as the sidebar changes) resizes.
@@ -163,6 +169,18 @@ export function CodeSlot({ m, pane, view }: { m: string; pane: string; view: L.C
 
 function CodeOffNote({ m, off }: { m: string; off: CodeOff }) {
   const label = useStore((s) => s.machines[m]?.label ?? m);
+  const readOnly = useStore((s) => s.readOnly);
+  if (off === 'plugin')
+    return (
+      <div className="code-off">
+        <span>{t('code.pluginOff')}</span>
+        {!readOnly && (
+          <button onClick={() => void setSetting('plugins.vscode.enabled', true)}>
+            <Power /> {t('code.pluginTurnOn')}
+          </button>
+        )}
+      </div>
+    );
   if (off === 'stopped')
     return (
       <div className="code-off">

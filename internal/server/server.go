@@ -24,6 +24,7 @@ import (
 	"herdr-ide/internal/keybindings"
 	"herdr-ide/internal/machines"
 	"herdr-ide/internal/plugin"
+	"herdr-ide/internal/plugins/vscode"
 	"herdr-ide/internal/settings"
 )
 
@@ -169,20 +170,23 @@ func (s *Server) routes() []route {
 		{"POST /api/m/{id}/hc/{action}", s.writable(s.handleHCAction)},
 		{"GET /api/m/{id}/privacy", s.handlePrivacy},
 		{"GET /api/m/{id}/auth", s.writable(s.handleAuth)},
-		{"POST /api/m/{id}/bridge", s.writable(s.handleBridge)},
+		// Commands to VS Code windows, which start code-server.
+		{"POST /api/m/{id}/bridge", s.withPlugin(vscode.ID, s.writable(s.handleBridge))},
 		{"GET /api/m/{id}/file", s.handleFile},
 		{"GET /api/m/{id}/download", s.handleDownload},
 		{"POST /api/m/{id}/upload", s.writable(s.handleUpload)},
 		{"GET /api/m/{id}/list", s.handleList},
-		{"GET /api/m/{id}/code/status", s.handleCodeStatus},
-		{"POST /api/m/{id}/code/start", s.writable(s.handleCodeStart)},
+		// VS Code is a plugin (internal/plugins/vscode): off, its routes
+		// answer plugin_disabled; stopping stays, it only frees resources.
+		{"GET /api/m/{id}/code/status", s.withPlugin(vscode.ID, s.handleCodeStatus)},
+		{"POST /api/m/{id}/code/start", s.withPlugin(vscode.ID, s.writable(s.handleCodeStart))},
 		{"POST /api/m/{id}/code/stop", s.handleCodeStop},
-		{"/m/{id}/code", func(w http.ResponseWriter, r *http.Request) {
+		{"/m/{id}/code", s.withPlugin(vscode.ID, func(w http.ResponseWriter, r *http.Request) {
 			u := *r.URL
 			u.Path += "/"
 			http.Redirect(w, r, u.String(), http.StatusFound)
-		}},
-		{"/m/{id}/code/", s.writable(s.csProxy.ServeHTTP)},
+		})},
+		{"/m/{id}/code/", s.withPlugin(vscode.ID, s.writable(s.csProxy.ServeHTTP))},
 		{"GET /m/{id}/gui/{win}", s.handleGUIPage},
 		{"GET /m/{id}/gui/{win}/ws", s.handleGUIWS},
 		{"POST /m/{id}/gui/{win}/close", s.writable(s.handleGUIClose)},

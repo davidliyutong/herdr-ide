@@ -34,6 +34,14 @@ import { noteFocusedTerminal, sendTarget } from '../lib/bridge';
 import { CodeLayer, CodeSlot } from '../components/CodeLayer';
 import { storage } from '../brand';
 import { registerPane } from '../state/panes';
+import { definePlugins } from '../plugins/registry';
+import { t } from '../i18n';
+import { commandEnabled } from '../keymap';
+import { useSettings } from '../settings';
+import { vscodePlugin } from '../plugins/vscode';
+
+// VS Code is a plugin: these tests have it on.
+definePlugins([vscodePlugin]);
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -299,6 +307,16 @@ describe('the windows of VS Code panes', () => {
       expect(frame()).toBeNull();
       expect(host.querySelector('.code-off')?.textContent).toContain('a is disabled');
       await act(async () => useStore.getState().upsertMachine(machine('a')));
+      expect(frame()).not.toBeNull();
+      // The VS Code plugin off: the window goes, the pane says so and its
+      // commands are disabled; on again, the window comes back.
+      const setCode = (value: boolean) =>
+        act(async () => useSettings.setState((s) => ({ values: { ...s.values, 'plugins.vscode.enabled': { value, source: 'global' } } })));
+      await setCode(false);
+      expect(frame()).toBeNull();
+      expect(host.querySelector('.code-off')?.textContent).toContain(t('code.pluginOff'));
+      expect(commandEnabled('code.open')).toBe(false);
+      await setCode(true);
       expect(frame()).not.toBeNull();
       // The pane closed in the layout: its window goes.
       await act(async () => void core.model.mutate('a', (l) => L.closePane(l, 'code:c1')));

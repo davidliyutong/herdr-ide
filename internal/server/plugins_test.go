@@ -131,3 +131,45 @@ func TestPluginSettingsDefaults(t *testing.T) {
 		t.Fatalf("a section without settings: %+v", m.Sections)
 	}
 }
+
+// VS Code is a plugin whose routes are the core's own: off, they answer
+// plugin_disabled before anything else (code-server is not started);
+// stopping it still works.
+func TestCodeRoutesFollowTheirPlugin(t *testing.T) {
+	ps := registry.Plugins()
+	st := settings.New("", plugin.Settings(ps, nil))
+	s := newTestServer()
+	s.opts.Plugins = ps
+	s.opts.Settings = st
+	h := s.Handler()
+	do := func(method, path string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, path, strings.NewReader("{}"))
+		r.Host = "127.0.0.1:7780"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	paths := [][2]string{
+		{"GET", "/api/m/nope/code/status"},
+		{"POST", "/api/m/nope/code/start"},
+		{"POST", "/api/m/nope/bridge"},
+		{"GET", "/m/nope/code/"},
+		{"GET", "/m/nope/code"},
+	}
+	for _, p := range paths {
+		if w := do(p[0], p[1]); strings.Contains(w.Body.String(), "plugin_disabled") {
+			t.Errorf("%s %s with VS Code on: %d %s", p[0], p[1], w.Code, w.Body)
+		}
+	}
+	if err := st.Set("plugins.vscode.enabled", "", false); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range paths {
+		if w := do(p[0], p[1]); w.Code != 404 || !strings.Contains(w.Body.String(), "plugin_disabled") {
+			t.Errorf("%s %s with VS Code off: %d %s", p[0], p[1], w.Code, w.Body)
+		}
+	}
+	if w := do("POST", "/api/m/nope/code/stop"); strings.Contains(w.Body.String(), "plugin_disabled") {
+		t.Errorf("stop with VS Code off: %d %s", w.Code, w.Body)
+	}
+}

@@ -17,6 +17,11 @@ import { PaneHeader } from '../components/PaneHeader';
 import * as L from '../term/layout';
 import { useMenu } from '../contextMenu';
 import { FakeCore, settle } from './fakeTerms';
+import { definePlugins } from '../plugins/registry';
+import { vscodePlugin } from '../plugins/vscode';
+
+// VS Code is a plugin: these tests have it on.
+definePlugins([vscodePlugin]);
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

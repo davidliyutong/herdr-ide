@@ -11,6 +11,11 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { MenuEntry, MenuItem } from '../contextMenu';
+import { definePlugins } from '../plugins/registry';
+import { vscodePlugin } from '../plugins/vscode';
+
+// VS Code is a plugin: these tests have it on.
+definePlugins([vscodePlugin]);
 
 /** Messages the page sent the core. */
 const sent = vi.hoisted(() => [] as unknown[]);

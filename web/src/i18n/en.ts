@@ -723,6 +723,13 @@ export const en = {
   'plugins.page.about':
     'Plugins add panels to the right sidebar, kinds of panes, commands and status bar items. They are part of the app; turning one off hides it everywhere.',
   'plugins.page.always': 'Always on',
+  'plugins.vscode.title': 'VS Code',
+  'plugins.vscode.description': 'VS Code (code-server) in panes, for a folder of any machine: its editor, its changes and Git Graph.',
+  'settings.plugins.vscode.enabled': 'VS Code',
+  'settings.plugins.vscode.enabled.desc':
+    'VS Code windows in panes (code-server, fetched and started on a machine when first opened there). Off, nothing offers VS Code and its panes wait until it is on again.',
+  'code.pluginOff': 'The VS Code plugin is off.',
+  'code.pluginTurnOn': 'Turn It On',
   'plugins.gui.title': 'Program Windows',
   'plugins.gui.description': 'Windows of graphical programs on remote Linux machines, in browser windows.',
   'plugins.transfers.title': 'Uploads and Downloads',

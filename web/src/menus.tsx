@@ -40,6 +40,7 @@ import {
 } from 'lucide-react';
 import { actions, current, workspaceTitle } from './actions';
 import { CodeIcon } from './components/icons';
+import { isPluginOn } from './plugins/registry';
 import type { MenuEntry } from './contextMenu';
 import { downloadDialog } from './dialog';
 import { canDownload, downloadPath } from './download';
@@ -107,8 +108,10 @@ export function paneMenu(m: string, pane: string): MenuEntry[] {
     danger: true,
     run: () => void actions.closePane(m, pane),
   };
+  const code = isPluginOn('vscode');
   if (leaf && L.isCodeLeaf(leaf)) {
     const machine = s.machines[m]?.label ?? m;
+    if (!code) return [...arrange, 'sep', close];
     return [
       { label: t('code.reload'), icon: <RotateCw />, run: () => actions.reloadCode(m, leaf.code.id) },
       'sep',
@@ -123,7 +126,9 @@ export function paneMenu(m: string, pane: string): MenuEntry[] {
   if (leaf && L.isPreviewLeaf(leaf)) {
     const path = leaf.preview.path;
     return [
-      { label: t('preview.openInCode'), icon: <CodeIcon />, run: () => void actions.openInCode(m, path, 1, undefined, pane) },
+      ...(code
+        ? [{ label: t('preview.openInCode'), icon: <CodeIcon />, run: () => void actions.openInCode(m, path, 1, undefined, pane) }]
+        : []),
       ...(canDownload(m) ? [{ label: t('preview.download'), icon: <Download />, run: () => void downloadPath(m, path) }] : []),
       'sep',
       ...arrange,
@@ -137,15 +142,19 @@ export function paneMenu(m: string, pane: string): MenuEntry[] {
     'sep',
     ...arrange,
     'sep',
-    { label: t('command.code.open'), hint: hint('code.open'), icon: <CodeIcon />, run: () => void actions.openCode(m, cwd) },
-    { label: t('command.code.diff'), hint: hint('code.diff'), icon: <FileDiff />, run: () => void actions.openDiff(m, cwd, pane) },
-    {
-      label: t('command.code.gitGraph'),
-      hint: hint('code.gitGraph'),
-      icon: <GitGraph />,
-      run: () => void actions.openGitGraph(m, cwd, pane),
-    },
-    'sep',
+    ...(code
+      ? ([
+          { label: t('command.code.open'), hint: hint('code.open'), icon: <CodeIcon />, run: () => void actions.openCode(m, cwd) },
+          { label: t('command.code.diff'), hint: hint('code.diff'), icon: <FileDiff />, run: () => void actions.openDiff(m, cwd, pane) },
+          {
+            label: t('command.code.gitGraph'),
+            hint: hint('code.gitGraph'),
+            icon: <GitGraph />,
+            run: () => void actions.openGitGraph(m, cwd, pane),
+          },
+          'sep',
+        ] satisfies MenuEntry[])
+      : []),
     close,
   ];
 }
@@ -182,7 +191,7 @@ export function surfaceMenu(o: {
       icon: <Eye />,
       run: () => void actions.openPreview(o.ctx.m, r.path, o.ctx.pane),
     });
-    if (!mediaExt.test(r.path))
+    if (!mediaExt.test(r.path) && isPluginOn('vscode'))
       out.push({
         label: t('link.menuCode', { name }),
         icon: <CodeIcon />,

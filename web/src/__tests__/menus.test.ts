@@ -16,6 +16,11 @@ import { actions } from '../actions';
 import { useKeys } from '../keybindings';
 import { useDialog } from '../dialog';
 import { ContextMenu } from '../components/ContextMenu';
+import { definePlugins } from '../plugins/registry';
+import { vscodePlugin } from '../plugins/vscode';
+
+// VS Code is a plugin: these tests have it on.
+definePlugins([vscodePlugin]);
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

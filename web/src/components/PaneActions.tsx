@@ -9,6 +9,7 @@ import { openMenu } from '../contextMenu';
 import { paneMenu } from '../menus';
 import { CodeIcon } from './icons';
 import { t } from '../i18n';
+import { usePluginOn } from '../plugins/registry';
 
 /** A pane's commands: a terminal's program windows and its folder in VS Code
  * (folder, changes, Git Graph), reloading VS Code, then split, zoom, the
@@ -18,13 +19,14 @@ import { t } from '../i18n';
  * leaves the keyboard where it is. */
 export function PaneActions({ m, pane, leaf, zoomed }: { m: string; pane: string; leaf: L.Leaf; zoomed?: boolean }) {
   const readOnly = useStore((s) => s.readOnly);
+  const code = usePluginOn('vscode');
   const terminal = L.isTerminalLeaf(leaf);
   return (
     <span className="pane-actions" onMouseDown={(e) => (e.target as HTMLElement).closest('button') && e.preventDefault()}>
       {terminal && <PaneGuiButton m={m} terminal={pane} />}
       {!readOnly && (
         <>
-          {terminal && (
+          {terminal && code && (
             <>
               <button
                 className="code"
@@ -53,7 +55,7 @@ export function PaneActions({ m, pane, leaf, zoomed }: { m: string; pane: string
               <span className="sep code" />
             </>
           )}
-          {L.isCodeLeaf(leaf) && (
+          {L.isCodeLeaf(leaf) && code && (
             <button
               className="code"
               title={t('code.reload')}

@@ -24,6 +24,18 @@ Code leaves (and `pane.close`, below).
 
 ## Design
 
+**A plugin** (`vscode`, [27](27-plugins.md); `web/src/plugins/vscode`,
+`internal/plugins/vscode`): VS Code is on unless `plugins.vscode.enabled`
+turns it off. Off, nothing offers it: the panes' buttons and menus, the
+links' "open in VS Code", the file explorer's and Quick Look's items and
+the commands (`code.open`, `code.diff`, `code.gitGraph`, then disabled)
+go, a path opened from a terminal shows in Quick Look instead, the layer
+closes its windows and a VS Code pane (kept in the layout) says the
+plugin is off with a button that turns it on. The core refuses code-server's
+status, start, proxy and the bridge's commands with `404 plugin_disabled`,
+so nothing is fetched or started on a machine; stopping a code-server still
+works.
+
 **Provisioning** (`internal/codeserver`, agent `codeserver.go`)
 
 - The `codeServer.install` setting (settings dialog, also per machine in

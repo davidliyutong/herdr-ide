@@ -101,8 +101,9 @@ workspaces and terminals of every machine in one browser tab, with VS Code
 - **Plugins and the right sidebar.** Features that come as plugins add
   panels to a sidebar on the right (⌘⌥B in the desktop app on macOS),
   panes of their own, commands and status bar items; each can be turned
-  off in Settings › Plugins. Uploads and downloads and program windows are
-  plugins too.
+  off in Settings › Plugins. Uploads and downloads, program windows and
+  VS Code are plugins too (VS Code off, code-server is never fetched or
+  started).
 - **File explorer.** A tree of the machine's files in the right sidebar
   (⌘⇧E in the desktop app on macOS) that follows the focused terminal's
   directory, as VS Code's explorer works: filter, hidden files, keys,

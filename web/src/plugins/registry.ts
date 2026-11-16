@@ -49,6 +49,11 @@ export function useActivePlugins(): PluginDef[] {
   return plugins.filter((p) => pluginOn(p, values));
 }
 
+/** Whether the plugin of this id is on, for components. */
+export function usePluginOn(id: string): boolean {
+  return useActivePlugins().some((p) => p.id === id);
+}
+
 /** The panels of the plugins that are on. */
 export const activePanels = (): PanelDef[] => activePlugins().flatMap((p) => p.panels ?? []);
 
@@ -70,6 +75,12 @@ export function pluginCommand(id: string): CommandDef | undefined {
     for (const panel of p.panels ?? []) if (panel.command === id) return panelCommand(panel);
   }
   return undefined;
+}
+
+/** Whether a command belongs to a plugin that is off (it is then disabled
+ * and runs nothing). */
+export function commandOfOffPlugin(id: string): boolean {
+  return plugins.some((p) => !pluginOn(p) && (!!p.commands?.[id] || (p.panels ?? []).some((panel) => panel.command === id)));
 }
 
 /** A panel's command shows it, or hides the sidebar when it is shown. */
