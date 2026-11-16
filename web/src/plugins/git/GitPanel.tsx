@@ -17,6 +17,7 @@ import {
   ArrowUpDown,
   Check,
   ChevronsDownUp,
+  Cloud,
   CloudUpload,
   Ellipsis,
   FileText,
@@ -55,7 +56,7 @@ import {
 } from '../../components/tree';
 import { FileIcon } from '../../fileIcons';
 import { Picker } from '../../components/Picker';
-import { pickBranch } from './pickers';
+import { confirmSync, fetchFrom, pickBranch, pullFrom, pushTo } from './pickers';
 import { followedDir } from '../files/FilesPanel';
 import { gitApi, type Stash, type StatusFile } from './api';
 import { MARK_COLOR, type Mark } from './decorations';
@@ -73,8 +74,10 @@ import {
   stashPush,
 } from './ops';
 import { fileEntries } from './fileMenu';
+import { copyText } from '../files/ops';
 import { History } from './History';
-import { changed, forgetRepos, runGit, useRepo, useReposOf, type RepoState } from './state';
+import { changed, forgetRepos, repoKey, runGit, useGit, useRepo, useReposOf, type RepoState } from './state';
+import type { RepoInfo } from './api';
 import './git.css';
 
 export type Group = 'merge' | 'staged' | 'changes' | 'untracked';
@@ -89,6 +92,7 @@ export interface GroupedFile {
 /** The settings of the panel (internal/plugins/git). */
 export const CHANGES_VIEW = 'git.changesView';
 export const UNTRACKED_CHANGES = 'git.untrackedChanges';
+export const AUTO_FETCH = 'git.autoFetch';
 
 /** The status's files in VS Code's groups: conflicts, the index's changes,
  * the working tree's changes (untracked files among them, or apart when
@@ -364,14 +368,38 @@ function RepoView({ m, root, st }: { m: string; root: string; st?: RepoState }) 
   };
 
   const sync = async () => {
-    if (!status?.upstream) return;
+    if (!status?.upstream || !(await confirmSync('sync', status.upstream))) return;
     if (status.behind && !(await runGit(m, root, 'pull', {}))) return;
     if (status.ahead || status.behind) await runGit(m, root, 'push', {});
   };
-  const publish = () => {
-    const remote = info?.remotes.includes('origin') ? 'origin' : info?.remotes[0];
-    if (remote && branch) void runGit(m, root, 'push', { remote, branch, setUpstream: true });
+  /** Pull from the upstream, else from a remote's branch chosen. */
+  const pull = async (anchor: Element, rebase = false) => {
+    if (!status?.upstream) return pullFrom(m, root, anchor, info, { branch, rebase });
+    if (await confirmSync('pull', status.upstream)) await runGit(m, root, 'pull', rebase ? { rebase } : {});
   };
+  /** Push to the upstream, else publish the branch (to a remote chosen
+   * when there are several). */
+  const push = async (anchor: Element, force = false) => {
+    if (!status?.upstream) return branch ? pushTo(m, root, anchor, info, branch) : undefined;
+    if (await confirmSync('push', status.upstream)) await runGit(m, root, 'push', force ? { forceWithLease: true } : {});
+  };
+
+  // Fetches every remote now and then while the panel shows the
+  // repository and the page is visible (git.autoFetch, minutes); quietly:
+  // what fails is seen when the user fetches.
+  const autoFetch = Number(useSettings((s) => s.values[AUTO_FETCH]?.value) ?? 0);
+  const hasRemotes = !!info?.remotes.length;
+  useEffect(() => {
+    if (!(autoFetch > 0) || readOnly || !hasRemotes) return;
+    const timer = setInterval(() => {
+      if (document.visibilityState !== 'visible' || useGit.getState().repos[repoKey(m, root)]?.busy) return;
+      void gitApi.run(m, root, 'fetch', { all: true, prune: true }).then(
+        () => changed(m, root),
+        () => undefined,
+      );
+    }, autoFetch * 60_000);
+    return () => clearInterval(timer);
+  }, [m, root, autoFetch, readOnly, hasRemotes]);
 
   const toggleView = () => {
     const next = tree ? 'list' : 'tree';
@@ -382,16 +410,26 @@ function RepoView({ m, root, st }: { m: string; root: string; st?: RepoState }) 
 
   const moreMenu = (e: React.MouseEvent) => {
     const remotes = info?.remotes ?? [];
+    const anchor = e.currentTarget;
     const items: MenuEntry[] = [
       { label: t('git.fetch'), disabled: !remotes.length, run: () => void runGit(m, root, 'fetch', { all: true, prune: true }) },
-      { label: t('git.pull'), disabled: !status?.upstream, run: () => void runGit(m, root, 'pull', {}) },
-      { label: t('git.pullRebase'), disabled: !status?.upstream, run: () => void runGit(m, root, 'pull', { rebase: true }) },
-      { label: t('git.push'), disabled: !status?.upstream, run: () => void runGit(m, root, 'push', {}) },
+      { label: t('git.fetchFrom'), disabled: !remotes.length, run: () => void fetchFrom(m, root, anchor, info) },
+      'sep',
+      { label: t('git.pull'), disabled: !status?.upstream, run: () => void pull(anchor) },
+      { label: t('git.pullRebase'), disabled: !status?.upstream, run: () => void pull(anchor, true) },
+      { label: t('git.pullFrom'), disabled: !remotes.length, run: () => void pullFrom(m, root, anchor, info, { branch }) },
+      'sep',
+      { label: t('git.push'), disabled: !status?.upstream, run: () => void push(anchor) },
+      {
+        label: t('git.pushTo'),
+        disabled: !remotes.length || !branch,
+        run: () => void pushTo(m, root, anchor, info, branch!, true),
+      },
       {
         label: t('git.forcePush'),
         disabled: !status?.upstream,
         danger: true,
-        run: () => void runGit(m, root, 'push', { forceWithLease: true }),
+        run: () => void push(anchor, true),
       },
       'sep',
       { label: t('git.branch.create'), run: () => void createBranch(m, root) },
@@ -708,7 +746,12 @@ function RepoView({ m, root, st }: { m: string; root: string; st?: RepoState }) 
         ) : (
           branch &&
           !!info?.remotes.length && (
-            <button className="git-sync" disabled={readOnly || !!busy} title={t('git.publish')} onClick={publish}>
+            <button
+              className="git-sync"
+              disabled={readOnly || !!busy}
+              title={t('git.publish')}
+              onClick={(e) => void pushTo(m, root, e.currentTarget, info, branch)}
+            >
               <CloudUpload />
               <span>{t('git.publish')}</span>
             </button>
@@ -720,8 +763,8 @@ function RepoView({ m, root, st }: { m: string; root: string; st?: RepoState }) 
               className="icon"
               title={t('git.pull')}
               aria-label={t('git.pull')}
-              disabled={readOnly || !!busy || !status?.upstream}
-              onClick={() => void runGit(m, root, 'pull', {})}
+              disabled={readOnly || !!busy || (!status?.upstream && !branch)}
+              onClick={(e) => void pull(e.currentTarget)}
             >
               <ArrowDown />
             </button>
@@ -729,8 +772,8 @@ function RepoView({ m, root, st }: { m: string; root: string; st?: RepoState }) 
               className="icon"
               title={t('git.push')}
               aria-label={t('git.push')}
-              disabled={readOnly || !!busy || !status?.upstream}
-              onClick={() => void runGit(m, root, 'push', {})}
+              disabled={readOnly || !!busy || (!status?.upstream && !branch)}
+              onClick={(e) => void push(e.currentTarget)}
             >
               <ArrowUp />
             </button>
@@ -795,6 +838,7 @@ function RepoView({ m, root, st }: { m: string; root: string; st?: RepoState }) 
           />
         ))}
         <Stashes m={m} root={root} version={st?.refs ?? 0} />
+        <Remotes m={m} root={root} info={info} branch={branch} upstream={status?.upstream} />
       </div>
       <History key={`${m}\u0000${root}`} m={m} root={root} version={st?.refs ?? 0} branch={branch} head={status?.head} />
     </>
@@ -917,6 +961,69 @@ function Stashes({ m, root, version }: { m: string; root: string; version: numbe
                     <ArrowUp />
                   </button>
                 </>
+              )
+            }
+          />
+        ))}
+      </div>
+    </Section>
+  );
+}
+
+/** The remotes, each with its URL (without a credential): fetch from one,
+ * pull one's branch, push the branch to it; closed by default. */
+function Remotes({ m, root, info, branch, upstream }: { m: string; root: string; info?: RepoInfo; branch?: string; upstream?: string }) {
+  const readOnly = useStore((s) => s.readOnly);
+  const rowH = useSize('row');
+  const remotes = info?.remotes ?? [];
+  if (!remotes.length) return null;
+  const only = (remote: string): RepoInfo => ({ ...info!, remotes: [remote] });
+  const menu = (e: React.MouseEvent, remote: string): MenuEntry[] => {
+    const anchor = e.currentTarget;
+    const url = info?.remoteUrls?.[remote];
+    return [
+      {
+        label: t('git.graph.fetchRemote', { remote }),
+        disabled: readOnly,
+        run: () => void runGit(m, root, 'fetch', { remote, prune: true }),
+      },
+      { label: t('git.pullFrom'), disabled: readOnly, run: () => void pullFrom(m, root, anchor, only(remote), { branch }) },
+      {
+        label: t('git.graph.pushBranch', { remote }),
+        disabled: readOnly || !branch,
+        run: () => void pushTo(m, root, anchor, only(remote), branch!),
+      },
+      'sep',
+      { label: t('git.remote.copyUrl'), disabled: !url, run: () => void copyText(url!) },
+      { label: t('git.graph.copyName'), run: () => void copyText(remote) },
+    ];
+  };
+  return (
+    <Section id="git.remotes" title={t('git.group.remotes')} count={remotes.length} defaultOpen={false}>
+      <div className="git-rows" style={{ height: remotes.length * rowH }}>
+        {remotes.map((r, i) => (
+          <TreeRow
+            key={r}
+            className="git-row"
+            style={{ top: i * rowH, height: rowH }}
+            depth={0}
+            icon={<Cloud className="git-row-icon" />}
+            label={r}
+            description={info?.remoteUrls?.[r]}
+            title={[r, info?.remoteUrls?.[r], upstream?.startsWith(r + '/') ? t('git.remote.upstream', { upstream }) : '']
+              .filter(Boolean)
+              .join('\n')}
+            onContextMenu={(e) => openMenu(e, menu(e, r))}
+            actions={
+              readOnly ? undefined : (
+                <button
+                  className="icon"
+                  title={t('git.graph.fetchRemote', { remote: r })}
+                  aria-label={t('git.graph.fetchRemote', { remote: r })}
+                  onClick={() => void runGit(m, root, 'fetch', { remote: r, prune: true })}
+                >
+                  <RefreshCw />
+                </button>
               )
             }
           />

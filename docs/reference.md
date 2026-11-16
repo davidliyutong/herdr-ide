@@ -158,6 +158,8 @@ in the UI; a setting with a scope can have its own value per machine, under
 | `git.mixedLineEndings` | `keep`, `unify`, `readOnly` | `"keep"` | – | – |
 | `git.changesView` | `list`, `tree` | `"list"` | – | – |
 | `git.untrackedChanges` | `mixed`, `separate` | `"mixed"` | – | – |
+| `git.autoFetch` | integer, 0–240 | `0` | – | – |
+| `git.confirmSync` | `true`, `false` | `false` | – | – |
 | `gui.enabled` | `true`, `false` | `true` | `--gui` | per remote machine |
 | `gui.gpu` | `vglrun`, `all` | `"vglrun"` | `--gui-gpu` | per remote machine |
 | `gui.video` | `true`, `false` | `true` | `--gui-video` | per remote machine |

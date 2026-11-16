@@ -93,6 +93,9 @@ describe('GitPanel', () => {
   const posts: Array<{ action: string; body: Record<string, unknown> }> = [];
   let status: StatusFile[];
   let parents: string[] | undefined;
+  /** The repository's remotes and the branch's upstream. */
+  let remotes: string[];
+  let upstream: string | undefined;
   /** Answers log requests instead of the two pages below, when set. */
   let logImpl: ((q: URLSearchParams) => Promise<Response>) | undefined;
   const logs: URLSearchParams[] = [];
@@ -108,6 +111,8 @@ describe('GitPanel', () => {
     logs.length = 0;
     status = files.slice(0, 4);
     parents = undefined;
+    remotes = ['origin'];
+    upstream = 'origin/main';
     logImpl = undefined;
     forgetRepos();
     useGit.setState({ repos: {} });
@@ -129,13 +134,14 @@ describe('GitPanel', () => {
               head: 'h1',
               ahead: 1,
               behind: 0,
-              upstream: 'origin/main',
-              remotes: ['origin'],
+              upstream,
+              remotes,
+              remoteUrls: Object.fromEntries(remotes.map((r) => [r, `https://example.com/${r}.git`])),
               parents,
             }),
           );
         case 'status':
-          return new Response(JSON.stringify({ branch: 'main', head: 'h1', upstream: 'origin/main', ahead: 1, behind: 0, files: status }));
+          return new Response(JSON.stringify({ branch: 'main', head: 'h1', upstream, ahead: 1, behind: 0, files: status }));
         case 'log': {
           if (logImpl) return logImpl(url.searchParams);
           logs.push(url.searchParams);
@@ -513,6 +519,99 @@ describe('GitPanel', () => {
     );
     await flush();
     expect(posts[3]).toEqual({ action: 'branchCreate', body: { name: 'new-thing', checkout: true, repo: ROOT } });
+  });
+
+  // Several remotes: the one to push to, fetch from or pull from is asked
+  // (with its URL); with one, nothing is asked.
+  describe('remotes', () => {
+    const rows = () => [...document.querySelectorAll<HTMLElement>('.picker-row')];
+    const choose = async (text: string) => {
+      await flush();
+      await act(async () =>
+        rows()
+          .find((r) => r.textContent?.startsWith(text))!
+          .click(),
+      );
+      await flush();
+    };
+    const more = async (label: string) => {
+      await act(async () => button(t('git.more'))!.click());
+      await act(async () => menuItem(label)!.run!());
+    };
+    beforeEach(async () => {
+      remotes = ['origin', 'upstream'];
+      await act(async () => button(t('git.refresh'))!.click());
+      await flush();
+    });
+
+    it('asks which remote publishes a branch without an upstream', async () => {
+      upstream = undefined;
+      await act(async () => button(t('git.refresh'))!.click());
+      await flush();
+      await act(async () => button(t('git.publish'))!.click());
+      await flush();
+      expect(rows().map((r) => r.textContent)).toEqual([
+        'originhttps://example.com/origin.git',
+        'upstreamhttps://example.com/upstream.git',
+      ]);
+      await choose('upstream');
+      expect(posts[0]).toEqual({ action: 'push', body: { remote: 'upstream', branch: 'main', setUpstream: true, repo: ROOT } });
+    });
+
+    it('fetches from and pulls from a remote chosen', async () => {
+      await more(t('git.fetchFrom'));
+      await choose('upstream');
+      expect(posts[0]).toEqual({ action: 'fetch', body: { remote: 'upstream', prune: true, repo: ROOT } });
+      await more(t('git.pullFrom'));
+      await choose('origin');
+      // The remote's branches, by their names there.
+      expect(rows().map((r) => r.textContent?.split(/s|older/)[0])).toEqual(['main', 'feature']);
+      await choose('feature');
+      expect(posts[1]).toEqual({ action: 'pull', body: { remote: 'origin', branch: 'feature', repo: ROOT } });
+    });
+
+    it('lists the remotes with their URLs', async () => {
+      const list = section(t('git.group.remotes'));
+      await act(async () => list.querySelector<HTMLElement>('.section-toggle')!.click());
+      expect([...list.querySelectorAll('.git-row')].map((r) => r.textContent)).toEqual([
+        'originhttps://example.com/origin.git',
+        'upstreamhttps://example.com/upstream.git',
+      ]);
+      await act(async () => button(t('git.graph.fetchRemote', { remote: 'upstream' }), list)!.click());
+      await flush();
+      expect(posts[0]).toEqual({ action: 'fetch', body: { remote: 'upstream', prune: true, repo: ROOT } });
+    });
+  });
+
+  it('asks before a pull when told to', async () => {
+    await act(async () =>
+      useSettings.setState((st) => ({ values: { ...st.values, 'git.confirmSync': { value: true, source: 'global' } } })),
+    );
+    await act(async () => button(t('git.pull'))!.click());
+    const req = useDialog.getState().current as { kind: string; message: string; resolve(ok: boolean): void };
+    expect(req.message).toBe(t('git.confirm.pull', { target: 'origin/main' }));
+    await act(async () => req.resolve(true));
+    await flush();
+    expect(posts[0]).toEqual({ action: 'pull', body: { repo: ROOT } });
+    useSettings.setState((st) => ({ values: { ...st.values, 'git.confirmSync': { value: false, source: 'global' } } }));
+  });
+
+  it('fetches every remote now and then when told to', async () => {
+    await act(async () => root.unmount());
+    useSettings.setState((st) => ({ values: { ...st.values, 'git.autoFetch': { value: 1, source: 'global' } } }));
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      root = createRoot(host);
+      await act(async () => root.render(createElement(GitPanel)));
+      await flush();
+      expect(posts).toEqual([]);
+      await act(async () => vi.advanceTimersByTime(60_000));
+      await flush();
+      expect(posts).toEqual([{ action: 'fetch', body: { all: true, prune: true, repo: ROOT } }]);
+    } finally {
+      vi.useRealTimers();
+      useSettings.setState((st) => ({ values: { ...st.values, 'git.autoFetch': { value: 0, source: 'global' } } }));
+    }
   });
 
   it('says how long ago a commit was', () => {

@@ -156,8 +156,27 @@ the answer through.
   is its own: another repository starts afresh.
 - The branch (or the detached commit) with a sync button (`behind↓ ahead↑`:
   pull, then push) or **Publish Branch** without an upstream, Pull and
-  Push; More: Fetch (all remotes, pruned), Pull (Rebase), Force Push (with
-  lease), Create Branch, Stash Changes, tree or list.
+  Push; More: Fetch (all remotes, pruned), **Fetch From…**, Pull, Pull
+  (Rebase), **Pull From…**, Push, **Push To…**, Force Push (with lease),
+  Create Branch, Stash Changes, tree or list. A repository may have
+  several remotes, and nothing picks one silently: Pull and Push go to
+  the branch's upstream; without one, Push (and Publish Branch) pushes to
+  a remote that becomes the upstream and Pull pulls a remote's branch,
+  the remote asked (`pick`, each with its URL) when there are several.
+  Fetch From… asks for a remote (`fetch --prune <remote>`); Pull From…
+  for a remote and one of its branches (those fetched, by their names
+  there, or a name typed: `pull <remote> refs/heads/<name>`); Push To…
+  for a remote, which becomes the upstream. With `git.confirmSync` on,
+  Pull, Push and the sync button ask first, naming where they go.
+- **Remotes**, a section closed by default: each remote with its fetch
+  URL (without a user or password, which the machine drops); a button
+  fetches from it, the context menu fetches, pulls from it, pushes the
+  branch to it, or copies its URL or name.
+- With `git.autoFetch` above 0, every remote is fetched (`fetch --all
+  --prune`) that many minutes apart while the panel shows the repository,
+  the page is visible, the UI is not read-only and no change runs; quietly
+  (a failure says nothing until the user fetches), then the repository is
+  read again.
 - The branch is a button that opens the branch picker (`pickers.tsx`, the
   shared searchable list, `pick`): Create Branch…, Create Branch From… and
   Check Out Detached… first, then the local branches (the current one
@@ -284,9 +303,10 @@ Graph's editor; `actions.openView` with `tab`):
   hard, after asking), Compare with HEAD, copy hash or subject. A branch:
   check out (double click too), merge into the current one, rebase the
   current one onto it, rename, delete (asked again to force one not
-  merged), push to `origin` (or the first remote) with upstream. A remote
-  branch: check out as a local branch that tracks it, merge, fetch its
-  remote, delete it on the remote. A tag: delete, push. A stash: apply, pop,
+  merged), push to the remote (the only one, else **Push To…** asks
+  which) with upstream. A remote branch: check out as a local branch that
+  tracks it, merge, fetch its remote, delete it on the remote. A tag:
+  delete, push (to a remote asked as a branch's). A stash: apply, pop,
   drop.
 
 **Diff pane** (`DiffPane.tsx`, `{view: {plugin: 'git', kind: 'diff', repo,
@@ -363,6 +383,10 @@ Code's preview editor does, so going through the changes keeps one pane):
 - `git.changesView`: the changes as a `list` or a `tree`.
 - `git.untrackedChanges`: untracked files among the changes (`mixed`) or
   in a group of their own (`separate`).
+- `git.autoFetch`: minutes between automatic fetches while the panel
+  shows a repository (0, the default: never).
+- `git.confirmSync`: ask before Pull, Push and the sync button (off by
+  default).
 
 **Colors**: lanes take the design tokens' chart hues (`--ds-chart-*`, in
 an order that keeps neighbors apart), status letters and names VS Code's
@@ -526,7 +550,10 @@ terminal; what the plugin adds is a way to reach it from the browser:
   stashes by their commit), several rows selected by clicks and keys
   with every action on them, the context menu's file entries, the branch
   picker (groups, a branch, a remote branch tracked, a tag detached, a
-  branch created from what is typed), the repository picker, and commit
+  branch created from what is typed), the repository picker, several
+  remotes (publishing asks which, Fetch From…, Pull From… a remote's
+  branch, the Remotes section with URLs), the question before a pull,
+  the automatic fetch (time faked), and commit
   box, the Amend box per repository, read-only
   mode, a history page of an earlier list dropped; the graph's rows,
   details, compare and menus, a page of another filter dropped; the diff's

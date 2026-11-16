@@ -16,6 +16,8 @@ export interface RepoInfo {
   /** An operation in progress. */
   state?: 'merge' | 'rebase' | 'cherryPick' | 'revert';
   remotes: string[];
+  /** The remotes' fetch URLs, without what could be a credential. */
+  remoteUrls?: Record<string, string>;
   /** Repositories this one is nested in, innermost first. */
   parents?: string[];
 }

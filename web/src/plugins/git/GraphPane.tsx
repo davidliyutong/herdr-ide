@@ -35,6 +35,7 @@ import {
 } from './ops';
 import { folderOf, leafName, letterColor, letterMark } from './GitPanel';
 import { changed, runGit, useRepo } from './state';
+import { pushTag, pushTo, remoteOf } from './pickers';
 import './git.css';
 
 export const LANE_W = 14;
@@ -251,8 +252,10 @@ export function GraphPane({ m, view }: PaneViewProps) {
 
   const run = (action: string, params: Record<string, unknown> = {}) => void runGit(m, repo, action, params);
   const current = data?.branch;
-  const remoteOf = (name: string) => name.slice(0, name.indexOf('/'));
-  const pushRemote = () => (st?.info?.remotes.includes('origin') ? 'origin' : st?.info?.remotes[0]);
+  const remoteNames = st?.info?.remotes ?? [];
+  /** Push to the only remote, or To… one chosen (several). */
+  const pushLabel = (key: 'git.graph.pushBranch' | 'git.graph.pushTag') =>
+    remoteNames.length === 1 ? t(key, { remote: remoteNames[0] }) : t('git.pushTo');
 
   const commitMenu = (e: React.MouseEvent, c: Commit) => {
     e.preventDefault();
@@ -298,8 +301,8 @@ export function GraphPane({ m, view }: PaneViewProps) {
     e.preventDefault();
     e.stopPropagation();
     let items: MenuEntry[] = [];
+    const at = { x: e.clientX, y: e.clientY };
     if (b.kind === 'branch') {
-      const remote = pushRemote();
       items = [
         {
           label: t('git.graph.checkoutBranch', { branch: b.name }),
@@ -321,16 +324,20 @@ export function GraphPane({ m, view }: PaneViewProps) {
         { label: t('git.branch.delete'), danger: true, disabled: readOnly || b.current, run: () => void deleteBranch(m, repo, b.name) },
         'sep',
         {
-          label: t('git.graph.pushBranch', { remote: remote ?? '' }),
-          disabled: readOnly || !remote,
-          run: () => run('push', { remote, branch: b.name, setUpstream: true }),
+          label: pushLabel('git.graph.pushBranch'),
+          disabled: readOnly || !remoteNames.length,
+          run: () => void pushTo(m, repo, at, st?.info, b.name),
         },
         { label: t('git.graph.copyName'), run: () => copy(b.name) },
       ];
     } else if (b.kind === 'remote') {
-      const remote = remoteOf(b.name);
+      const remote = remoteOf(b.name, remoteNames);
       items = [
-        { label: t('git.graph.checkoutRemote', { branch: b.name }), disabled: readOnly, run: () => void checkoutRemote(m, repo, b.name) },
+        {
+          label: t('git.graph.checkoutRemote', { branch: b.name }),
+          disabled: readOnly,
+          run: () => void checkoutRemote(m, repo, b.name, remote),
+        },
         {
           label: t('git.graph.mergeInto', { branch: b.name, current: current ?? 'HEAD' }),
           disabled: readOnly,
@@ -347,13 +354,12 @@ export function GraphPane({ m, view }: PaneViewProps) {
         { label: t('git.graph.copyName'), run: () => copy(b.name) },
       ];
     } else if (b.kind === 'tag') {
-      const remote = pushRemote();
       items = [
         { label: t('git.tag.delete'), danger: true, disabled: readOnly, run: () => void deleteTag(m, repo, b.name) },
         {
-          label: t('git.graph.pushTag', { remote: remote ?? '' }),
-          disabled: readOnly || !remote,
-          run: () => run('push', { remote, tag: b.name }),
+          label: pushLabel('git.graph.pushTag'),
+          disabled: readOnly || !remoteNames.length,
+          run: () => void pushTag(m, repo, at, st?.info, b.name),
         },
         { label: t('git.graph.copyName'), run: () => copy(b.name) },
       ];

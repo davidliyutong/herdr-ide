@@ -1,14 +1,20 @@
 // The Git plugin's searchable lists (components/Picker.tsx pick): the
 // branch picker of the panel (check out a local, remote or tag ref, or
 // create a branch from what is typed), a ref to create a branch from or
-// to check out detached, and a remote. They read the refs when opened and
-// stay fast with thousands of them (only the rows in view are drawn).
+// to check out detached, a remote and a remote's branch. They read the
+// refs when opened and stay fast with thousands of them (only the rows in
+// view are drawn). With them, what acts on a chosen remote: Fetch From…,
+// Pull From…, Push To… and publishing a branch, which asks for the remote
+// when there are several; and the question before a pull or push that
+// the setting git.confirmSync asks.
 
-import { GitBranch, GitBranchPlus, GitCommitHorizontal, Plus, Tag as TagIcon } from 'lucide-react';
+import { Cloud, GitBranch, GitBranchPlus, GitCommitHorizontal, Plus, Tag as TagIcon } from 'lucide-react';
+import { confirmDialog } from '../../dialog';
+import { settingValue } from '../../settings';
 import { pick, type PickAnchor, type PickerItem } from '../../components/Picker';
 import { useStore } from '../../state/store';
 import { t } from '../../i18n';
-import { gitApi, errorText, type Branch, type Tag } from './api';
+import { gitApi, errorText, type Branch, type RepoInfo, type Tag } from './api';
 import { ago } from './History';
 import { checkoutRemote, createBranch } from './ops';
 import { badRefName } from './prompt';
@@ -152,4 +158,104 @@ export async function pickRef(
   });
   if (!chosen) return undefined;
   return typeof chosen === 'object' ? chosen.create : refName(chosen);
+}
+
+/** The setting: ask before a pull, a push or a synchronization. */
+export const CONFIRM_SYNC = 'git.confirmSync';
+
+/** Asks before a pull, push or both when the setting says so; true to go
+ * on. */
+export async function confirmSync(kind: 'pull' | 'push' | 'sync', target: string): Promise<boolean> {
+  if (settingValue(CONFIRM_SYNC) !== true) return true;
+  return confirmDialog({
+    title: t(`git.${kind}` as 'git.pull'),
+    message: t(`git.confirm.${kind}` as 'git.confirm.pull', { target }),
+    confirm: t(`git.${kind}` as 'git.pull'),
+  });
+}
+
+/** A remote of the repository: the only one without asking, else the one
+ * chosen (each with its URL). */
+export async function pickRemote(anchor: PickAnchor, info: RepoInfo | undefined, ask = false): Promise<string | undefined> {
+  const remotes = info?.remotes ?? [];
+  if (!remotes.length) return undefined;
+  if (remotes.length === 1 && !ask) return remotes[0];
+  return pick(anchor, {
+    items: remotes.map((r) => ({ value: r, label: r, description: info?.remoteUrls?.[r], icon: <Cloud /> })),
+    placeholder: t('git.pick.remotePlaceholder'),
+    label: t('git.pick.remotePlaceholder'),
+    keepOrder: true,
+  });
+}
+
+/** A branch of a remote, by its name there: those fetched, or a name
+ * typed. */
+export async function pickRemoteBranch(
+  m: string,
+  repo: string,
+  anchor: PickAnchor,
+  remote: string,
+  o: { remotes: readonly string[]; current?: string },
+): Promise<string | undefined> {
+  let branches: Branch[];
+  try {
+    branches = await gitApi.branches(m, repo);
+  } catch (e) {
+    toast(e);
+    return undefined;
+  }
+  const items: PickerItem[] = branches
+    .filter((b) => b.remote && remoteOf(b.name, o.remotes) === remote)
+    .map((b) => ({
+      value: b.name.slice(remote.length + 1),
+      label: b.name.slice(remote.length + 1),
+      detail: detailOf(b.subject, b.date),
+      icon: <GitBranch />,
+    }))
+    .filter((i) => i.value !== 'HEAD');
+  const chosen = await pick(anchor, {
+    items,
+    value: o.current && items.some((i) => i.value === o.current) ? o.current : undefined,
+    placeholder: t('git.pick.remoteBranchPlaceholder', { remote }),
+    label: t('git.pick.remoteBranchPlaceholder', { remote }),
+    create: (q) => (badRefName(q) ? undefined : t('git.pick.remoteBranch', { name: q })),
+  });
+  if (!chosen) return undefined;
+  return typeof chosen === 'object' ? chosen.create : chosen;
+}
+
+/** Fetch From…: a remote chosen, pruned. */
+export async function fetchFrom(m: string, repo: string, anchor: PickAnchor, info: RepoInfo | undefined) {
+  const remote = await pickRemote(anchor, info, true);
+  if (remote) await runGit(m, repo, 'fetch', { remote, prune: true });
+}
+
+/** Pull From…: a remote (asked when there are several) and one of its
+ * branches. */
+export async function pullFrom(
+  m: string,
+  repo: string,
+  anchor: PickAnchor,
+  info: RepoInfo | undefined,
+  o: { branch?: string; rebase?: boolean } = {},
+) {
+  const remote = await pickRemote(anchor, info);
+  if (!remote) return;
+  const branch = await pickRemoteBranch(m, repo, anchor, remote, { remotes: info?.remotes ?? [], current: o.branch });
+  if (!branch || !(await confirmSync('pull', `${remote}/${branch}`))) return;
+  await runGit(m, repo, 'pull', { remote, branch, rebase: o.rebase || undefined });
+}
+
+/** Push To… (and publishing a branch): to a remote (asked when there are
+ * several, or always with ask), which becomes the branch's upstream. */
+export async function pushTo(m: string, repo: string, anchor: PickAnchor, info: RepoInfo | undefined, branch: string, ask = false) {
+  const remote = await pickRemote(anchor, info, ask);
+  if (!remote || !(await confirmSync('push', `${remote}/${branch}`))) return;
+  await runGit(m, repo, 'push', { remote, branch, setUpstream: true });
+}
+
+/** Pushes a tag to a remote (asked when there are several). */
+export async function pushTag(m: string, repo: string, anchor: PickAnchor, info: RepoInfo | undefined, tag: string) {
+  const remote = await pickRemote(anchor, info);
+  if (remote) await runGit(m, repo, 'push', { remote, tag });
 }

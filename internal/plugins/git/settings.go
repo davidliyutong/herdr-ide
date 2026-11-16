@@ -14,12 +14,23 @@ const (
 	// SettingUntrackedChanges: untracked files among the changes or in a
 	// group of their own.
 	SettingUntrackedChanges = "git.untrackedChanges"
+	// SettingAutoFetch: minutes between fetches of every remote while the
+	// panel shows a repository (0: never).
+	SettingAutoFetch = "git.autoFetch"
+	// SettingConfirmSync: ask before pulling, pushing or synchronizing.
+	SettingConfirmSync = "git.confirmSync"
 )
+
+var autoFetchMin, autoFetchMax = settings.Range(0, 240)
 
 // Settings is the plugin's settings module (internal/registry).
 var Settings = settings.Module{
 	Sections: []settings.Section{{ID: "git", Order: 67, Plugin: "git"}},
 	Defs: []settings.Def{
+		{Key: SettingAutoFetch, Type: settings.TypeNumber, Default: 0.0, Min: autoFetchMin, Max: autoFetchMax, Integer: true,
+			Scope: settings.ScopeApp, Section: "git", Order: 30},
+		{Key: SettingConfirmSync, Type: settings.TypeBool, Default: false,
+			Scope: settings.ScopeApp, Section: "git", Order: 31},
 		{Key: SettingMixedLineEndings, Type: settings.TypeEnum, Default: "keep", Enum: []string{"keep", "unify", "readOnly"},
 			Scope: settings.ScopeApp, Section: "git", Order: 10},
 		{Key: SettingChangesView, Type: settings.TypeEnum, Default: "list", Enum: []string{"list", "tree"},
