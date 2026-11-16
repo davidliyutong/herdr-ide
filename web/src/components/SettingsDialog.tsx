@@ -42,6 +42,7 @@ import { FullDiskAccess, fullDiskAccessMatches } from './settings/FullDiskAccess
 import { fullDiskAccessAvailable, localMachine } from '../fullDiskAccess';
 import { PluginHeader, PluginsPage } from './settings/PluginsPage';
 import { Picker, type PickerItem } from './Picker';
+import { useReturnFocus } from './useDismiss';
 import { acceptRisk, pluginSwitch, sectionPlugin, usePluginList } from '../plugins/registry';
 import type { PluginDef } from '../plugins/api';
 
@@ -174,6 +175,8 @@ function SettingsModal({ page: askedPage, machine: askedMachine }: { page?: stri
   const keysFile = useKeys((k) => k.file);
   const plugins = usePluginList((s) => s.list);
   const search = useRef<HTMLInputElement>(null);
+  // Closed, the keyboard goes back where it was (a terminal, the sidebar).
+  useReturnFocus(true);
 
   // Opened again while open (a machine's menu, a key): show what was asked.
   useEffect(() => {

@@ -375,6 +375,7 @@ export const zhCN: Messages = {
   'palette.placeholder': '输入命令、工作区或智能体…',
   'palette.placeholderWorkspaces': '切换到工作区或智能体…',
   'palette.noMatch': '没有匹配项',
+  'palette.more': '还有 {n} 项：输入以缩小范围',
 
   // 可搜索下拉列表（components/Picker.tsx）。
   'picker.search': '搜索',

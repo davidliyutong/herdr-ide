@@ -4,6 +4,7 @@ import { useStore } from '../state/store';
 import { actions } from '../actions';
 import { t } from '../i18n';
 import { validTarget } from '../lib/machine';
+import { useReturnFocus } from './useDismiss';
 
 export interface AddMachineForm {
   target: string;
@@ -72,6 +73,7 @@ export function AddMachineDialog() {
   // The list shows while the target field has the keyboard.
   const [focused, setFocused] = useState(true);
   const close = () => useStore.getState().openAddMachine(false);
+  useReturnFocus(open);
 
   useEffect(() => {
     if (!open) return;

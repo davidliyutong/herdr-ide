@@ -384,6 +384,7 @@ export const en = {
   'palette.placeholder': 'Type a command, workspace or agent…',
   'palette.placeholderWorkspaces': 'Switch to a workspace or agent…',
   'palette.noMatch': 'No matches',
+  'palette.more': '{n} more: type to narrow the list',
 
   // Searchable dropdowns (components/Picker.tsx).
   'picker.search': 'Search',

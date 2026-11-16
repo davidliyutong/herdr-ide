@@ -297,8 +297,9 @@ settings per browser; theming terminal applications.
     otherwise. The terminal font is a
     picker (`settings/FontPicker.tsx`): the bundled JetBrains Mono first,
     then the monospace fonts installed on the computer, each drawn in
-    itself, searchable, and any other typed name; a preview line in the
-    chosen font and size below. The fonts are listed with the Local Font
+    itself, searchable, and any other typed name (Escape or a choice gives
+    the keyboard back to its button); a preview line in the chosen font
+    and size below. The fonts are listed with the Local Font
     Access API where the browser has it (Chromium, and the desktop app,
     which grants its pages the permission), asked on the first opening, and
     filtered to the families that are really fixed-pitch
@@ -336,7 +337,10 @@ settings per browser; theming terminal applications.
     none (a core on Windows, read-only mode).
   Changing one setting re-renders only what changed: the field or button
   used keeps the keyboard and the page its scroll position. Changing the
-  language reloads the page that changed it.
+  language reloads the page that changed it. Closing the dialog (Escape,
+  its ×, a press beside it) gives the keyboard back to what had it before
+  it opened. In the searchable lists a name cut by an ellipsis shows in
+  full as the row's tooltip.
 - The keyboard page is a table of every command with its keys in effect,
   grouped by section, and where they come from (Default or User, with a bar
   on rows the user changed): double-clicking a row (or **Change

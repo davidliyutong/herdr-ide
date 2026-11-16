@@ -434,6 +434,13 @@ function PickerList<V extends string>(p: ListProps<V>) {
                   aria-setsize={options}
                   aria-posinset={pos}
                   onPointerMove={() => selectable(r) && i !== active && setActive(i)}
+                  onMouseEnter={(e) => {
+                    // A label or description cut by an ellipsis is the row's tooltip in full.
+                    const el = e.currentTarget;
+                    const cut = [...el.querySelectorAll<HTMLElement>('.ellipsis')].some((x) => x.scrollWidth > x.clientWidth);
+                    if (!cut || r.kind !== 'item') return el.removeAttribute('title');
+                    el.title = [r.item.label, r.item.description].filter(Boolean).join(' · ') + (r.item.detail ? `\n${r.item.detail}` : '');
+                  }}
                   onClick={() => run(i)}
                 >
                   {r.kind === 'create' ? (
