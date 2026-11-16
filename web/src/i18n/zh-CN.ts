@@ -278,6 +278,8 @@ export const zhCN: Messages = {
   'menu.startCore': '启动终端服务',
   'menu.restartCore': '重启终端服务…',
   'menu.stopCore': '停止终端服务（结束所有终端）…',
+  'menu.filter': '输入以筛选',
+  'menu.noMatch': '没有匹配的项',
   'core.stopTitle': '停止 {machine} 的终端服务？',
   'core.stopInfo': '这台机器上的所有终端及其中的程序都会结束。终端服务会保持停止，直到你再次启动它。',
   'core.restartTitle': '重启 {machine} 的终端服务？',

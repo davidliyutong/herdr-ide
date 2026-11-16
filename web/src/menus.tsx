@@ -96,7 +96,7 @@ export function paneMenu(m: string, pane: string): MenuEntry[] {
     label: t('menu.moveToWorkspace'),
     icon: <ArrowRightLeft />,
     submenu: [
-      ...others.map((w) => ({ label: workspaceTitle(m, w), run: () => actions.movePaneToWorkspace(m, pane, w.id) })),
+      ...others.map((w) => ({ label: workspaceTitle(m, w), keywords: w.cwd, run: () => actions.movePaneToWorkspace(m, pane, w.id) })),
       ...(others.length ? ['sep' as const] : []),
       { label: t('command.workspace.new'), icon: <FolderPlus />, run: () => void actions.movePaneToNewWorkspace(m, pane) },
     ],

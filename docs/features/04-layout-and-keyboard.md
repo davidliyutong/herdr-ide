@@ -304,13 +304,25 @@ Non-goals: arbitrary docking of panes; floating panes.
   past either end is disabled. A move item uses the position the tab or
   workspace has when it runs, which another client may have changed since
   the menu opened.
-- The menu takes the keyboard: ↑↓ (skipping disabled items), Home/End,
-  Enter or Space runs, Escape or Tab closes; key bindings do not run
-  while it is open. Running an item or closing from the keyboard gives focus
-  back to what had it, before the item runs, so items that move focus
-  (rename, split) keep it. A click elsewhere, scrolling, leaving the window
-  or resizing closes it. The menu keeps its own width next to the window's
-  right edge.
+- The menu takes the keyboard: ↑↓ (skipping disabled items), PgUp/PgDn,
+  Home/End, Enter or Space runs, Escape or Tab closes; key bindings do not
+  run while it is open. Running an item or closing from the keyboard gives
+  focus back to what had it, before the item runs, so items that move focus
+  (rename, split) keep it. A click elsewhere, scrolling the page, leaving
+  the window or resizing closes it. The menu keeps its own width next to
+  the window's right edge.
+- Menus of any length stay usable. Typing filters the menu or submenu
+  that has the keyboard: a field at its top shows what is typed (a menu of
+  10 items or more, such as **Move to Workspace ▸** on a machine with many
+  workspaces, shows it from the start), the items whose names match stay in
+  the menu's order with the matched characters marked (the command
+  palette's matcher; an item may also match by words it does not show, a
+  workspace by its directory), separators go and disabled items stay; the
+  first match has the keyboard. Backspace widens the filter, Escape clears
+  it and then closes the menu, and a space is typed while filtering. A menu
+  taller than the window scrolls within it, the item the keyboard moves to
+  is scrolled into view, and scrolling the menu itself keeps it open. A
+  name cut with an ellipsis shows in full as the item's tooltip.
 - Read-only mode offers no items, so the browser's menu shows. A pane's
   text has its own menu (copy, paste, find, open or copy a path or URL,
   download it or files of the pane's directory;
@@ -612,8 +624,10 @@ described in [13](13-settings-and-appearance.md))
   the area a drop counts in, drags measured on the screen, menu items and
   their commands, moves from the current position, a pane moved to
   another workspace or a new one, read-only, keyboard,
-  focus and closing of the menu, submenus, the machine's menu and its
-  terminal service under Troubleshooting.
+  focus and closing of the menu, submenus, a menu filtered by typing
+  (Backspace, Escape, keywords, no match), a submenu of 300 items (its
+  field from the start, pages, the item in view, scrolling inside it), the
+  machine's menu and its terminal service under Troubleshooting.
 - `web/src/__tests__/paneHeader.test.ts`: a header's buttons act on its own
   pane and keep the terminal's focus, rename by a double click, menu,
   read-only, a VS Code pane's header (named by its folder, its own

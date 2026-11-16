@@ -1,8 +1,11 @@
 // In-app context menu: one at a time, opened at the pointer by openMenu and
-// rendered by components/ContextMenu.tsx.
+// rendered by components/ContextMenu.tsx. Menus of any length stay usable:
+// typing filters the items of the menu that has the keyboard (filterMenu),
+// and a menu taller than the window scrolls.
 
 import type { ReactNode } from 'react';
 import { create } from 'zustand';
+import { match, type MatchRange } from './lib/match';
 
 export interface MenuItem {
   label: string;
@@ -14,6 +17,8 @@ export interface MenuItem {
   /** Items shown beside this one when it is pointed at (or opened with →,
    * Enter or a click); such an item runs nothing itself. */
   submenu?: MenuEntry[];
+  /** More text the filter matches, not shown (a workspace's machine). */
+  keywords?: string;
   run?(): void;
 }
 
@@ -53,6 +58,34 @@ export function stepIndex(entries: MenuEntry[], cur: number, step: 1 | -1): numb
     if (isItem(e) && !e.disabled) return i;
   }
   return -1;
+}
+
+/** Menus with this many items or more show their filter field from the
+ * start; shorter ones show it once a key is typed. */
+export const FILTER_FIELD_AT = 10;
+
+/** An entry of a menu as shown: its index among the menu's entries and,
+ * while filtering, the characters of its label the query matched. */
+export interface ShownEntry {
+  entry: MenuEntry;
+  index: number;
+  ranges?: MatchRange[];
+}
+
+/** The entries a filter shows, in the menu's order: every entry without a
+ * query; else the items whose label (or keywords) match it, without
+ * separators. Disabled items stay, so the filter never hides why an item
+ * cannot run. */
+export function filterMenu(entries: readonly MenuEntry[], query: string): ShownEntry[] {
+  if (!query.trim()) return entries.map((entry, index) => ({ entry, index }));
+  const out: ShownEntry[] = [];
+  entries.forEach((entry, index) => {
+    if (!isItem(entry)) return;
+    const m = match(query, entry.label);
+    if (m) out.push({ entry, index, ranges: m.ranges });
+    else if (entry.keywords && match(query, entry.keywords)) out.push({ entry, index });
+  });
+  return out;
 }
 
 /** Opens a menu at the pointer instead of the browser's. With no items (for

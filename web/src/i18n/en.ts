@@ -286,6 +286,8 @@ export const en = {
   'menu.startCore': 'Start Terminal Service',
   'menu.restartCore': 'Restart Terminal Service…',
   'menu.stopCore': 'Stop Terminal Service (Ends All Terminals)…',
+  'menu.filter': 'Type to filter',
+  'menu.noMatch': 'No matching items',
   'core.stopTitle': 'Stop the terminal service of {machine}?',
   'core.stopInfo': 'Every terminal on the machine ends, with its program. The service stays stopped until you start it again.',
   'core.restartTitle': 'Restart the terminal service of {machine}?',

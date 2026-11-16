@@ -1449,6 +1449,51 @@ body.dragging * {
   font-size: var(--fs-md);
   outline: none;
   user-select: none;
+  /* Taller than the window: its items scroll, the filter stays on top. */
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 8px);
+}
+.context-list {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* What is typed to filter the items. */
+.context-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  min-height: var(--h-row);
+  margin: 0 0 4px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--line);
+  color: var(--fg-mute);
+}
+.context-filter .lucide {
+  flex: none;
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
+.context-filter input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  color: var(--fg);
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: 0;
+}
+.context-filter input::placeholder {
+  color: var(--fg-mute);
+}
+.context-empty {
+  padding: 4px 10px 6px;
+}
+.context-item.sel mark.match {
+  text-decoration-color: currentColor;
 }
 .context-item {
   display: flex;
