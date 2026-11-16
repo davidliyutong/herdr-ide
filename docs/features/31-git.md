@@ -111,7 +111,7 @@ vector the agent builds: no shell, no option from the request.
 
 | Read | What it answers |
 | --- | --- |
-| `repo` | `?path=` a directory: top level, git directories, branch (or detached) and HEAD, upstream with ahead/behind, an operation in progress (`merge`, `rebase`, `cherryPick`, `revert`), remotes with their fetch URLs (`remote -v`) without a URL's user and password (a token is often put there) or an scp-like address's user with a password, enclosing repositories. |
+| `repo` | `?path=` a directory: top level, git directories, branch (or detached) and HEAD, upstream with ahead/behind, an operation in progress (`merge`, `rebase`, `cherryPick`, `revert`), remotes with their fetch URLs (`remote -v`) without a URL's user information (also with a raw `/`, `?`, `#` or `@` in its password), query and fragment (tokens are often put there: `?access_token=`) or an scp-like address's user with a password, enclosing repositories. |
 | `status` | `status --porcelain=v2 -z --branch --untracked-files=all`: files with the index's and the working tree's letters, renames with their old path, conflicts, untracked files; branch, upstream, ahead/behind. A file whose working tree side differs from the index (and an untracked or conflicted one) has that file's modification time and size (`lstat`, nothing read), which move when it is edited again while its letters stay. |
 | `log` | `log --date-order` of the branches, tags and HEAD (with `remotes=1` the remote branches; `branch=` names some instead; on a branch without commits yet, the other branches' commits), pages of 300 (at most 1000, `skip=`): hash, parents, author, e-mail, date, subject; with the first page the refs (`for-each-ref`, tags peeled), the stashes, HEAD and its branch. |
 | `show` | `rev=` a commit's message and committer and its files (status, lines added and deleted, binary) against its parent `parent=` (1 by default; the empty tree for a root commit), or with `rev2=` the files between two commits. |
@@ -545,7 +545,8 @@ terminal; what the plugin adds is a way to reach it from the browser:
   commit and `stale` after the list changed, cherry-pick, revert, merge,
   reset, rebase); thousands of paths over several runs (`TestPathRuns`,
   `TestManyPaths`); push, fetch and pull with a bare repository and a
-  second remote (its URL without the token, `TestRedactURL`; pushed with
+  second remote (its URL without the token, also one in the query or
+  after a raw `/` in the password, `TestRedactURL`; pushed with
   its upstream set, a branch of it pulled by name), a pull of
   diverged branches (`diverged`, then rebased by `pull.rebase`); a remote
   that asks for a password (`auth_required`); timeouts and output limits
