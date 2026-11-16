@@ -151,7 +151,9 @@ the answer through.
 
 - The repository of the focused pane's directory (a terminal's, a VS Code
   pane's folder, the workspace's), kept while another pane (a diff, the
-  graph) has the focus; a searchable list (`Picker`) when the directory is in nested
+  graph) has the focus; a panel drawn afresh then (the panel opened as a
+  pane, in a tab of its own) takes that of the terminal or VS Code pane of
+  the workspace focused last (`recentDirectory`); a searchable list (`Picker`) when the directory is in nested
   repositories. A directory in no repository is remembered until
   **Refresh**; a failure that says nothing about it (offline, busy,
   timeout) is shown and the directory asked again 10 s later. What the

@@ -5,6 +5,7 @@
 // files is offered in read-only mode.
 
 import { Download, FilePlus, FolderPlus, FolderUp, Pencil, Trash2, Upload } from 'lucide-react';
+import { showPanel } from '../../panelPanes';
 import { createElement } from 'react';
 import { actions, current } from '../../actions';
 import { confirmDialog } from '../../dialog';
@@ -153,14 +154,15 @@ export async function openTerminal(m: string, dir: string) {
   }
 }
 
-/** Reveal in Explorer: shows the explorer's panel with path in the tree,
+/** Reveal in Explorer: shows the explorer's panel (its pane in the tab
+ * shown, else the sidebar's) with path in the tree,
  * its folders expanded, it selected and scrolled to; outside the root,
  * the tree stops following panes and shows its folder. Nothing while the
  * explorer is off. */
 export function revealInExplorer(m: string, path: string) {
   if (!isPluginOn('files')) return;
   const s = useTree.getState();
-  useStore.getState().setPanel('files');
+  showPanel('files');
   if (s.m !== m || !s.root || !within(path, s.root) || path === s.root) {
     setFollow(false);
     showRoot(m, parentOf(path));

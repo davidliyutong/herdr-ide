@@ -57,7 +57,7 @@ import {
 import { FileIcon } from '../../fileIcons';
 import { Picker } from '../../components/Picker';
 import { confirmSync, fetchFrom, pickBranch, pullFrom, pushTo } from './pickers';
-import { followedDir } from '../files/FilesPanel';
+import { followedDir, recentDirectory } from '../files/FilesPanel';
 import { gitApi, type Stash, type StatusFile } from './api';
 import { MARK_COLOR, type Mark } from './decorations';
 import { baseName, createBranch, discard, join, openGraph, openStatusDiff, short, stashDrop, stashParams, stashPush } from './ops';
@@ -226,7 +226,7 @@ export function GitPanel() {
   useEffect(() => {
     if (dir) setLastDir(dir);
   }, [dir]);
-  const shownDir = dir ?? lastDir ?? home;
+  const shownDir = dir ?? lastDir ?? recentDirectory() ?? home;
   const { roots, error } = useReposOf(m, shownDir);
   const [picked, setPicked] = useState<string>();
   const root = roots && roots.length ? (picked && roots.includes(picked) ? picked : roots[0]) : undefined;

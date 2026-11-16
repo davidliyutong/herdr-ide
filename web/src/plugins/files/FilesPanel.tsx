@@ -9,6 +9,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ChevronsDownUp, Ellipsis, Eye, EyeOff, FilePlus, FolderPlus, LocateFixed, RefreshCw } from 'lucide-react';
 import { current, paneDirectory } from '../../actions';
+import { recentSpots } from '../../paneHistory';
 import { useStore } from '../../state/store';
 import { useTerms } from '../../state/terms';
 import * as L from '../../term/layout';
@@ -101,6 +102,24 @@ export function followedDir(): string | undefined {
   if (!leaf) return c.ws?.cwd || undefined;
   if (L.isTerminalLeaf(leaf) || L.isCodeLeaf(leaf)) return paneDirectory(c.m, leaf) ?? (c.ws?.cwd || undefined);
   return undefined;
+}
+
+/** The directory of the terminal or VS Code pane of the workspace shown
+ * that had the focus last (the focus history, paneHistory.ts), for a
+ * panel drawn while a pane without one has the focus: a panel opened as a
+ * pane, in a tab of its own, follows the pane the user was in. */
+export function recentDirectory(): string | undefined {
+  const c = current();
+  if (!c?.ws) return undefined;
+  for (const s of recentSpots()) {
+    if (s.m !== c.m) continue;
+    const leaf = c.ws.tabs.map((tab) => L.leafOf(tab.root, s.pane)).find(Boolean);
+    if (leaf && (L.isTerminalLeaf(leaf) || L.isCodeLeaf(leaf))) {
+      const dir = paneDirectory(c.m, leaf);
+      if (dir) return dir;
+    }
+  }
+  return c.ws.cwd || undefined;
 }
 
 export function FilesPanel() {

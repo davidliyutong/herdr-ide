@@ -5,7 +5,7 @@ import { useEffect, useRef } from 'react';
 import { Eye, Puzzle } from 'lucide-react';
 import { registerPane } from '../state/panes';
 import * as L from '../term/layout';
-import { allPlugins, paneView } from '../plugins/registry';
+import { allPlugins, findPanel, paneView, PANEL_VIEW } from '../plugins/registry';
 import { useSettings } from '../settings';
 import { t } from '../i18n';
 import { CodeIcon } from './icons';
@@ -50,7 +50,8 @@ export function PluginPane({ m, pane, view, focused }: { m: string; pane: string
 export function LeafIcon({ leaf, className }: { m: string; leaf: L.Leaf; className?: string }) {
   if (L.isCodeLeaf(leaf)) return <CodeIcon className={className} />;
   if (L.isPluginLeaf(leaf)) {
-    const Icon = paneView(leaf.view.plugin, leaf.view.kind).def?.icon ?? Puzzle;
+    const v = leaf.view;
+    const Icon = (v.kind === PANEL_VIEW ? findPanel(v.plugin, v.panel)?.icon : undefined) ?? paneView(v.plugin, v.kind).def?.icon ?? Puzzle;
     return <Icon className={className} />;
   }
   return <Eye className={className} />;

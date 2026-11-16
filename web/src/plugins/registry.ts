@@ -1,4 +1,5 @@
 // The plugins the app has and which of them are on (api.ts).
+import { createElement } from 'react';
 import { create } from 'zustand';
 import { riskDialog } from '../dialog';
 import { t } from '../i18n';
@@ -121,10 +122,47 @@ export function usePanels(): PanelDef[] {
   return useActivePlugins().flatMap((p) => p.panels ?? []);
 }
 
+/** The kind of pane that shows a panel of the right sidebar, which every
+ * plugin with panels has: `{view: {plugin, kind: 'panel', panel}}`, panel
+ * being the panel's id. */
+export const PANEL_VIEW = 'panel';
+
+/** A plugin's panel by its id. */
+export function findPanel(plugin: string, id: unknown): PanelDef | undefined {
+  return plugins.find((p) => p.id === plugin)?.panels?.find((x) => x.id === id);
+}
+
+/** The plugin a panel belongs to. */
+export function panelPlugin(panel: PanelDef): PluginDef | undefined {
+  return plugins.find((p) => p.panels?.includes(panel));
+}
+
+/** The drawer of a plugin's panels as panes: the panel's component, in a
+ * pane as in the sidebar. */
+const panelViews = new WeakMap<PluginDef, PaneViewDef>();
+function panelView(p: PluginDef): PaneViewDef {
+  let def = panelViews.get(p);
+  if (!def) {
+    def = {
+      icon: p.panels![0].icon,
+      title: (_m, v) => t(findPanel(p.id, v.panel)?.title ?? p.title),
+      component: ({ view }) => {
+        const panel = findPanel(view.plugin, view.panel);
+        return panel
+          ? createElement('div', { className: 'panel-pane', 'data-panel': panel.id }, createElement(panel.component))
+          : createElement('div', { className: 'plugin-pane-off muted' }, t('plugins.panelUnknown'));
+      },
+    };
+    panelViews.set(p, def);
+  }
+  return def;
+}
+
 /** The drawer of a pane kind, also of a plugin that is off (it says so). */
 export function paneView(plugin: string, kind: string): { def?: PaneViewDef; on: boolean } {
   const p = plugins.find((x) => x.id === plugin);
-  return { def: p?.paneViews?.[kind], on: !!p && pluginOn(p) };
+  const def = p?.paneViews?.[kind] ?? (kind === PANEL_VIEW && p?.panels?.length ? panelView(p) : undefined);
+  return { def, on: !!p && pluginOn(p) };
 }
 
 /** The handler of a command that a plugin that is on runs. */

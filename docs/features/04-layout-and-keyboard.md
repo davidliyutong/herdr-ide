@@ -172,7 +172,10 @@ Non-goals: arbitrary docking of panes; floating panes.
   new tab, on another workspace of its machine in the sidebar into a new
   tab at the end of that workspace, which is then shown. Escape cancels. All of these are edits of the layout document.
   VS Code and preview panes move the same way; a VS Code pane keeps its
-  window wherever it goes ([05](05-vscode-panes.md)).
+  window wherever it goes ([05](05-vscode-panes.md)). A panel of the right
+  sidebar (its rail button or title) dropped on the panes the same way
+  becomes a pane there ([27](27-plugins.md)); editors and diffs open in
+  tabs of their own ([28](28-file-explorer.md)).
 - A pane's **Move to Workspace** submenu lists the machine's other
   workspaces and **New Workspace…**: the pane goes into a new tab at the
   end of the one chosen, which is shown with the pane focused. A new

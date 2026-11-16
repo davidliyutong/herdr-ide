@@ -2,15 +2,24 @@
 // on (web/src/plugins), and the panel shown. On a wide window the panel
 // takes a column of its own and covers no pane; on a narrow one it lies
 // over the panes, as the left sidebar does, and a press beside it or
-// Escape hides it. Large content (diffs, editors, graphs) opens as panes.
+// Escape hides it. Large content (diffs, editors, graphs) opens as panes,
+// and a panel itself can be a pane (panelPanes.ts): its rail button or its
+// title dragged onto the panes, or Open in Pane.
 import { useEffect } from 'react';
-import { X } from 'lucide-react';
+import { SquareArrowOutUpLeft, X } from 'lucide-react';
 import { PANEL_WIDTH, useStore } from '../state/store';
 import { usePanels } from '../plugins/registry';
 import { keyHint } from '../keymap';
 import { t } from '../i18n';
 import type { PanelDef } from '../plugins/api';
 import { PluginBoundary } from './PluginBoundary';
+import { openPanelInPane, startPanelDrag } from '../panelPanes';
+
+/** A press that may become a drag of a panel onto the panes. */
+function dragPanel(ev: React.PointerEvent, panel: PanelDef) {
+  if (ev.button !== 0 || useStore.getState().readOnly) return;
+  startPanelDrag(ev, panel);
+}
 
 /** Shows a panel, or hides the right sidebar when it is the one shown. */
 export function togglePanel(id: string) {
@@ -40,6 +49,7 @@ export function RightBar() {
               aria-label={label}
               aria-pressed={p.id === id}
               data-panel={p.id}
+              onPointerDown={(e) => dragPanel(e, p)}
               onClick={() => togglePanel(p.id)}
             >
               <Icon />
@@ -53,6 +63,7 @@ export function RightBar() {
 
 function Panel({ panel }: { panel: PanelDef }) {
   const Body = panel.component;
+  const readOnly = useStore((s) => s.readOnly);
   useEffect(() => {
     // Escape hides the panel while it lies over the panes.
     const onKey = (ev: KeyboardEvent) => {
@@ -65,7 +76,19 @@ function Panel({ panel }: { panel: PanelDef }) {
     <aside className="panel" data-panel={panel.id} aria-label={t(panel.title)}>
       <PanelResizer />
       <div className="panel-head">
-        <span className="panel-title ellipsis">{t(panel.title)}</span>
+        <span className="panel-title ellipsis" title={t('plugins.dragPanel')} onPointerDown={(e) => dragPanel(e, panel)}>
+          {t(panel.title)}
+        </span>
+        {!readOnly && (
+          <button
+            className="icon"
+            title={t('plugins.openInPane')}
+            aria-label={t('plugins.openInPane')}
+            onClick={() => void openPanelInPane(panel)}
+          >
+            <SquareArrowOutUpLeft />
+          </button>
+        )}
         <button
           className="icon"
           title={t('plugins.hidePanel')}

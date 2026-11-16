@@ -24,6 +24,7 @@ import {
   Link,
   Maximize2,
   Minimize2,
+  PanelRight,
   Pencil,
   Play,
   Plus,
@@ -53,6 +54,7 @@ import { conn } from './lib/conn';
 import { terms } from './state/terms';
 import * as L from './term/layout';
 import { tabId } from './state/multiSelect';
+import { moveToSidebar, panelOfView } from './panelPanes';
 
 /** A command's key, as menu items show it; none when it is unbound. */
 const hint = (action: string) => keyHint(action) || undefined;
@@ -124,7 +126,13 @@ export function paneMenu(m: string, pane: string): MenuEntry[] {
       close,
     ];
   }
-  if (leaf && L.isPluginLeaf(leaf)) return [...arrange, 'sep', close];
+  if (leaf && L.isPluginLeaf(leaf)) {
+    const view = leaf.view;
+    const toSidebar: MenuEntry[] = panelOfView(view)
+      ? [{ label: t('plugins.moveToSidebar'), icon: <PanelRight />, run: () => void moveToSidebar(m, pane, view) }, 'sep']
+      : [];
+    return [...toSidebar, ...arrange, 'sep', close];
+  }
   if (leaf && L.isPreviewLeaf(leaf)) {
     const path = leaf.preview.path;
     return [

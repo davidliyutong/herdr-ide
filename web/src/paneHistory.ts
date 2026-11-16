@@ -32,6 +32,11 @@ function target(step: -1 | 1, open: (s: Spot) => boolean): number | undefined {
   return undefined;
 }
 
+/** The panes focused, the latest first. */
+export function recentSpots(): readonly Spot[] {
+  return [...spots].reverse();
+}
+
 export function canGo(step: -1 | 1, open: (s: Spot) => boolean): boolean {
   return target(step, open) !== undefined;
 }

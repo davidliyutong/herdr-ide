@@ -252,6 +252,25 @@ press beside it or Escape hides it. Its width and the panel shown are kept per
 browser. **Toggle Right Sidebar** (`view.togglePanel`, ⌘⌥B in the desktop app
 on macOS) shows the panel shown last or hides it.
 
+A panel can also be a pane of the layout (`web/src/panelPanes.ts`): the
+pane kind `panel` (`{view: {plugin, kind: 'panel', panel}}`, `PANEL_VIEW`),
+which every plugin with panels has (`registry.ts` `paneView`), draws the
+panel's component in a pane, where it splits, moves, takes a tab, is zoomed
+and closes as any pane does, also with Undo Close. A panel becomes one by a
+drag of its rail button or its title onto the panes: a pane's edge splits
+it there (its middle, as there is nothing to swap, on its right), a tab
+puts it beside that tab's focused pane, the new-tab button or another
+workspace in the sidebar gives it a tab of its own; its pane in the tab
+shown moves there instead of a second one opening. **Open in Pane** in the
+panel's header splits it beside the focused pane. Either way the sidebar
+stops showing it; its rail button stays and still shows it there, so a
+panel can be in the sidebar and a pane at once (both draw the same state).
+**Move to Sidebar** in the pane's header and menu closes the pane and shows
+the panel in the sidebar. What shows a panel for the user (Reveal in
+Explorer, a usage notification) focuses its pane in the tab shown, else
+shows it in the sidebar (`showPanel`). A pane whose panel this version
+does not have says so. Read-only pages do not drag panels into panes.
+
 ### Plugins
 
 | Plugin | Setting | What it adds |
@@ -309,6 +328,10 @@ on macOS) shows the panel shown last or hides it.
 - `web/src/__tests__/plugins.test.ts`: switches (also one per machine), the
   rail and panels, commands, messages, panes of plugins that are off or
   unknown.
+- `web/src/__tests__/panelPanes.test.ts`: a panel drawn in a pane and named
+  after it, drops on a pane's edges and middle, a tab, the new-tab button,
+  its pane moved instead of a second one, Open in Pane, Move to Sidebar,
+  `showPanel`.
 - `web/src/__tests__/vscodeRisk.test.ts`: the switch of the page's kind
   of client, the risk dialog before the browsers' switch turns on.
 - `internal/registry/registry_test.go`: plugins' sections name plugins of

@@ -3,6 +3,7 @@
 // options (kept per browser) and the alerts the snapshots carry, each shown
 // once per browser.
 import { create } from 'zustand';
+import { showPanel } from '../../panelPanes';
 import { loadPref, savePref, useStore } from '../../state/store';
 import { getPrefs } from '../../prefs';
 import { settingValue } from '../../settings';
@@ -107,7 +108,7 @@ function notify(text: string, tag: string) {
     const n = new Notification(text, { tag: `usage|${tag}` });
     n.onclick = () => {
       window.focus();
-      useStore.getState().setPanel('usage');
+      showPanel('usage');
       n.close();
     };
     return;

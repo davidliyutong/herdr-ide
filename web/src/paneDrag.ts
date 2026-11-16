@@ -32,29 +32,36 @@ export function dropZone(r: Box, x: number, y: number): Zone {
 }
 
 function findTarget(src: DragSource, x: number, y: number): DropTarget | undefined {
+  return dropTargetAt(src.m, x, y, src);
+}
+
+/** Where a pane (or a panel, which becomes one) dropped at x, y on machine
+ * m's panes would go: a pane other than skip.pane, a tab not holding it,
+ * the new-tab button, or a workspace other than skip.ws in the sidebar. */
+export function dropTargetAt(m: string, x: number, y: number, skip: { pane?: string; ws?: string } = {}): DropTarget | undefined {
   const el = document.elementFromPoint(x, y) as HTMLElement | null;
   const pane = el?.closest<HTMLElement>('.pane[data-pane]');
-  if (pane && pane.dataset.m === src.m && pane.dataset.pane !== src.pane) {
+  if (pane && pane.dataset.m === m && pane.dataset.pane !== skip.pane) {
     const rect = pane.getBoundingClientRect();
     return { kind: 'pane', pane: pane.dataset.pane!, zone: dropZone(rect, x, y), rect };
   }
   const tab = el?.closest<HTMLElement>('.tab[data-tab]');
-  if (tab && tab.dataset.m === src.m) {
+  if (tab && tab.dataset.m === m) {
     const index = Number(tab.dataset.tab);
-    const tabs = terms.layout(src.m)?.workspaces.find((w) => w.id === tab.dataset.ws)?.tabs;
-    if (tabs?.[index] && !L.tabPanes(tabs[index]).includes(src.pane))
+    const tabs = terms.layout(m)?.workspaces.find((w) => w.id === tab.dataset.ws)?.tabs;
+    if (tabs?.[index] && !(skip.pane && L.tabPanes(tabs[index]).includes(skip.pane)))
       return { kind: 'tab', ws: tab.dataset.ws!, index, rect: tab.getBoundingClientRect() };
   }
   const add = el?.closest<HTMLElement>('[data-new-tab]');
-  if (add && add.dataset.m === src.m) return { kind: 'newTab', ws: add.dataset.newTab!, rect: add.getBoundingClientRect() };
+  if (add && add.dataset.m === m) return { kind: 'newTab', ws: add.dataset.newTab!, rect: add.getBoundingClientRect() };
   // Another workspace of the machine, in the sidebar.
   const row = el?.closest<HTMLElement>('.ws-item[data-ws-id]');
-  if (row && row.dataset.m === src.m && row.dataset.wsId !== src.ws)
+  if (row && row.dataset.m === m && row.dataset.wsId !== skip.ws)
     return { kind: 'workspace', ws: row.dataset.wsId!, rect: row.getBoundingClientRect() };
 }
 
 /** The part of the target a drop would fill, for the highlight. */
-function markerRect(tg: DropTarget): Box {
+export function markerRect(tg: DropTarget): Box {
   const r = tg.rect;
   if (tg.kind !== 'pane') return r;
   switch (tg.zone) {

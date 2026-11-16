@@ -563,6 +563,16 @@ body.resizing .panel-resizer::after {
   min-height: 0;
   outline: none;
 }
+/* A panel of the right sidebar as a pane (panelPanes.ts): its body as in
+   the sidebar. */
+.panel-pane {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.panel-head .panel-title {
+  cursor: grab;
+}
 .plugin-pane-off {
   margin: auto;
   padding: 16px;
