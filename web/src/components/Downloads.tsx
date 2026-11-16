@@ -97,6 +97,7 @@ export function DownloadsTray() {
       canCancelAll={(active) => active.length > 1}
       cancelAll={cancelAllDownloads}
       clear={clearDownloadHistory}
+      remove={(x) => (x.status === 'starting' || x.status === 'downloading' ? () => cancelDownload(x.id) : () => forgetDownload(x.id))}
       row={Row}
     />
   );

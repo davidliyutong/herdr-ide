@@ -122,6 +122,13 @@ export function TransfersTray() {
       canCancelAll={(active) => active.filter(cancellable).length > 1}
       cancelAll={cancelAllUploads}
       clear={clearUploadHistory}
+      remove={(x) =>
+        cancellable(x)
+          ? () => cancelUpload(x.id)
+          : x.status === 'done' || x.status === 'failed' || x.status === 'cancelled'
+            ? () => forgetUpload(x.id)
+            : undefined
+      }
       row={Row}
     />
   );

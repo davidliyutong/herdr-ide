@@ -214,6 +214,45 @@ describe('the uploads panel', () => {
     expect(button()).toBeNull();
   });
 
+  it('moves between uploads with the keyboard and removes them with Delete', async () => {
+    const entry = (id: string, status: string) => ({
+      id,
+      m: 'ws2',
+      machine: 'gpu box',
+      name: id,
+      size: 1,
+      sent: 1,
+      speed: 0,
+      status,
+      ended: 1,
+    });
+    useTransfers.setState({ history: [entry('x', 'done'), entry('y', 'failed'), entry('z', 'cancelled')] as never, panel: true });
+    await act(async () => {});
+    const items = () => [...host.querySelectorAll<HTMLElement>('.transfer-item')];
+    // One stop of the Tab key; the buttons are reached with the arrows.
+    expect(items().map((r) => r.tabIndex)).toEqual([0, -1, -1]);
+    expect([...host.querySelectorAll<HTMLButtonElement>('.transfer-item button')].every((b) => b.tabIndex === -1)).toBe(true);
+    items()[0].focus();
+    const key = (k: string) =>
+      act(
+        async () => void document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })),
+      );
+    await key('ArrowDown');
+    expect(document.activeElement).toBe(items()[1]);
+    await key('ArrowRight');
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('Remove from the list');
+    await key('ArrowLeft');
+    expect(document.activeElement).toBe(items()[1]);
+    await key('End');
+    expect(document.activeElement).toBe(items()[2]);
+    await key('Home');
+    await key('Delete');
+    expect(history().map((x) => x.id)).toEqual(['y', 'z']);
+    // Escape closes the panel.
+    await act(async () => void document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(useTransfers.getState().panel).toBe(false);
+  });
+
   it('cancels every running and waiting upload at once', async () => {
     let done!: Promise<unknown>;
     await act(async () => {
