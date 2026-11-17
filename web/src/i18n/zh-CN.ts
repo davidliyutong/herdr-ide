@@ -1443,6 +1443,7 @@ export const zhCN: Messages = {
   'browser.ask': '{machine} 的端口 {port} 现在没有被转发。',
   'browser.askForward': '转发并打开',
   'browser.refused': '只能打开 http 和 https 地址。',
+  'browser.refusedOwn': '这是应用自己的地址，不在窗格里显示。',
   'browser.outside': '应用的页面无法显示这个地址：只能显示本机 localhost 上的地址。它会在你的浏览器中打开。',
   'browser.outsideOpen': '打开',
   'browser.loadFailed': '页面没有加载：{error}',

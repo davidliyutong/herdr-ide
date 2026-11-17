@@ -48,7 +48,7 @@ import {
   useForwards,
   type ListeningPort,
 } from './api';
-import { clearPage, frameKey, reloadPage, showPage, stepPage, useFrames } from './frames';
+import { clearPage, frameKey, reloadPage, showPage, stepPage, unloadForward, useFrames } from './frames';
 import { BrowserSlot } from './BrowserLayer';
 
 type Status =
@@ -57,7 +57,8 @@ type Status =
   | { s: 'ready' }
   /** A page that cannot be framed here: it opens in the browser. */
   | { s: 'outside' }
-  | { s: 'refused' }
+  /** own: the app's own address, which a pane does not show. */
+  | { s: 'refused'; own?: boolean }
   /** A machine's port that is not forwarded and that the user did not ask
    * for in this page: the pane asks before it makes the forward. */
   | { s: 'ask' }
@@ -99,7 +100,7 @@ export function BrowserPane({ m, pane, view }: PaneViewProps) {
     if (!url) return fail({ s: 'start' });
     // A view with a machine's port names that machine's own loopback.
     const p = parseAddress(url, !!(vm && port));
-    if (p.kind !== 'page') return fail({ s: 'refused' });
+    if (p.kind !== 'page') return fail({ s: 'refused', own: p.kind === 'refused' && p.own });
     const cur = useFrames.getState();
     // The frame already shows this address (the pane came back, or the
     // webview's own navigation moved the view): only the forward's use.
@@ -163,7 +164,7 @@ export function BrowserPane({ m, pane, view }: PaneViewProps) {
       setNote('');
       const p = parseAddress(input, isRemote(m));
       if (p.kind === 'empty') return;
-      if (p.kind === 'refused') return setNote(t('browser.refused'));
+      if (p.kind === 'refused') return setNote(t(p.own ? 'browser.refusedOwn' : 'browser.refused'));
       const f = pageView(m, input)!;
       if (!canFrame(f.url, !!(f.m && f.port))) {
         // Only loopback addresses can be framed in a browser.
@@ -269,7 +270,7 @@ function Body({
     return (
       <div className="browser-cover muted">{vm && port ? t('browser.starting', { machine: label, port }) : t('browser.portsLoading')}</div>
     );
-  if (status.s === 'refused') return <div className="browser-cover muted">{t('browser.refused')}</div>;
+  if (status.s === 'refused') return <div className="browser-cover muted">{t(status.own ? 'browser.refusedOwn' : 'browser.refused')}</div>;
   if (status.s === 'outside')
     return (
       <div className="browser-cover">
@@ -475,6 +476,8 @@ function PortsPopover({
     } catch {
       /* already gone */
     }
+    // The pages it carried are gone with it: their panes say so at once.
+    unloadForward(fm, fp);
     void loadForwards();
   };
   return (

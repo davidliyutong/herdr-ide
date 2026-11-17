@@ -198,7 +198,9 @@ export function otherHost(uiHost: string = globalThis.location?.hostname ?? ''):
 /** What the address field made of what was typed. */
 export type Parsed =
   | { kind: 'empty' }
-  | { kind: 'refused' }
+  /** own: the address is the app's own (isOwnAddress), which a pane does
+   * not show; else it is no http(s) address of a page. */
+  | { kind: 'refused'; own?: true }
   /** url is complete; loopback: on this computer's loopback (the machine's
    * localhost, in a pane of a machine); port: its port (80 and 443 by
    * default). */
@@ -226,7 +228,7 @@ export function parseAddress(input: string, theirs = false): Parsed {
     const port = Number(s);
     if (port < 1 || port > 65535) return { kind: 'refused' };
     const url = `http://localhost:${port}/`;
-    return !theirs && isOwnAddress(new URL(url)) ? { kind: 'refused' } : { kind: 'page', url, loopback: true, port };
+    return !theirs && isOwnAddress(new URL(url)) ? { kind: 'refused', own: true } : { kind: 'page', url, loopback: true, port };
   }
   if (REFUSED.test(s) || /\s/.test(s)) return { kind: 'refused' };
   const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(s);
@@ -247,7 +249,7 @@ export function parseAddress(input: string, theirs = false): Parsed {
   if (loopback && u.hostname !== 'localhost') u.hostname = 'localhost';
   // As it is written now: 0.0.0.0 with the core's port is the core too. A
   // machine's own loopback is another computer's, whatever its port.
-  if (!(theirs && loopback) && isOwnAddress(u)) return { kind: 'refused' };
+  if (!(theirs && loopback) && isOwnAddress(u)) return { kind: 'refused', own: true };
   return { kind: 'page', url: u.href, loopback, port };
 }
 

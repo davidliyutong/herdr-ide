@@ -99,7 +99,7 @@ A forwarded service is another site than the UI and must stay one.
 - The core's own address is no page for a pane: an address on the UI's
   origin, or, for a UI on a loopback host, on any loopback host with the
   UI's port (the core answers under each), is refused where it is typed
-  (`parseAddress`), where a text links to it (`web/src/lib/webUrl.ts`) and
+  (`parseAddress`, with a message that says it is the app's own address), where a text links to it (`web/src/lib/webUrl.ts`) and
   where a guest of the desktop app goes or attaches
   (`desktop/src/policy.ts`). In a pane of a remote machine a loopback
   address is that machine's own, so a port of the core's number is taken
@@ -244,9 +244,10 @@ right click and the chevron beside it open a menu of the kinds of tab:
   open outside is in the toolbar.
 - **A forward ended** while its tab stayed open → idle, or stopped by
   another client: within 5 minutes the mounted frame makes it again when
-  the user asked for the port in this page; stopped in this page's
-  **Ports**, or never asked for here: its page is taken off and the pane
-  asks (**Forward and open**).
+  the user asked for the port in this page; never asked for here: its
+  page is taken off then and the pane asks (**Forward and open**). Stopped
+  in this page's **Ports**: the pages it carried are taken off at once
+  (`unloadForward`) and their panes ask.
 - **Core restart** → forwards are gone; the same holds.
 - **The page was reloaded, the app restarted, or another client shows the
   tab** → the pane uses the forward if it still exists, else asks.

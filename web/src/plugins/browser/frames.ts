@@ -258,6 +258,14 @@ export function unloadPage(k: string) {
   useFrames.setState((s) => ({ retries: { ...s.retries, [k]: (s.retries[k] ?? 0) + 1 } }));
 }
 
+/** Takes off every page shown through the forward of machine m's port,
+ * which the user stopped: their panes ask before it is made again. */
+export function unloadForward(m: string, port: number) {
+  for (const [k, page] of Object.entries(useFrames.getState().pages)) {
+    if (page.forward?.m === m && page.forward.port === port) unloadPage(k);
+  }
+}
+
 /** Moves back or forward in frame k. An iframe goes over the trail and
  * returns the page it is at; a webview follows its page's own history. */
 export function stepPage(k: string, step: -1 | 1): Page | undefined {

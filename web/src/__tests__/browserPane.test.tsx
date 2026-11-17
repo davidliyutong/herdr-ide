@@ -286,7 +286,7 @@ describe('the address field', () => {
     // The UI is on 127.0.0.1:5173: the same port under any loopback name.
     for (const typed of ['localhost:5173', '5173', 'http://127.0.0.1:5173/api/m/a/hc/stop', 'http://[::1]:5173/']) {
       await typeAddress(h.host, typed);
-      expect(h.host.querySelector('.browser-error')?.textContent, typed).toBe(t('browser.refused'));
+      expect(h.host.querySelector('.browser-error')?.textContent, typed).toBe(t('browser.refusedOwn'));
       expect(h.view().url, typed).toBe('');
     }
     expect(iframe()).toBeNull();
@@ -297,7 +297,7 @@ describe('the address field', () => {
     // client's) loads nothing.
     h = await mountPane({ url: 'http://localhost:5173/' });
     await flush();
-    expect(text()).toBe(t('browser.refused'));
+    expect(text()).toBe(t('browser.refusedOwn'));
     expect(iframe()).toBeNull();
   });
 
@@ -377,6 +377,33 @@ describe('Ports', () => {
     await click(popover.querySelector(`[aria-label="${t('browser.forwardStop', { machine: 'Box', port: 3000 })}"]`));
     await flush();
     expect(calls.some((c) => c.method === 'DELETE' && c.url === '/api/m/a/p/browser/forwards/3000')).toBe(true);
+  });
+
+  it('takes a stopped forward’s page off at once and asks before making it again', async () => {
+    let stopped = false;
+    const fw = { m: 'a', port: 3000, local: 3000, created: '', connections: 0 };
+    const calls = fakeBrowserApi({
+      forwards: () => json({ forwards: stopped ? [] : [fw], available: true }),
+      stop: () => {
+        stopped = true;
+        return json({ ok: true });
+      },
+    });
+    // The user asked for the port in this page: the pane made the forward.
+    h = await mountPane({ url: 'http://localhost:3000/', m: 'a', port: 3000 }, { asked: true });
+    await flush();
+    expect(Object.keys(useFrames.getState().pages)).toEqual(['a|p1']);
+    await click(h.host.querySelector(`[aria-label="${t('browser.ports')}"]`));
+    await flush();
+    const posts = calls.filter((c) => c.method === 'POST').length;
+    await click(h.host.querySelector(`[aria-label="${t('browser.forwardStop', { machine: 'Box', port: 3000 })}"]`));
+    await flush();
+    // Stopping took the port back and the page off: the pane asks, and
+    // nothing made the forward again.
+    expect(forwardGranted('a', 3000)).toBe(false);
+    expect(useFrames.getState().pages).toEqual({});
+    expect(h.host.textContent).toContain(t('browser.ask', { port: 3000, machine: 'Box' }));
+    expect(calls.filter((c) => c.method === 'POST').length).toBe(posts);
   });
 
   it('keeps the forward in use while the pane is mounted', async () => {

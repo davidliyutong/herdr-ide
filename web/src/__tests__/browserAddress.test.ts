@@ -94,7 +94,7 @@ describe('the address field', () => {
       'http://[::ffff:127.0.0.1]:5173/',
       'HTTP://LOCALHOST:5173',
     ]) {
-      expect(parseAddress(s), s).toEqual({ kind: 'refused' });
+      expect(parseAddress(s), s).toEqual({ kind: 'refused', own: true });
       expect(canFrame(s), s).toBe(false);
     }
     // Another port is another program's, and another host another computer.

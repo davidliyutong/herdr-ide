@@ -1489,6 +1489,7 @@ export const en = {
   'browser.ask': 'Port {port} of {machine} is not forwarded now.',
   'browser.askForward': 'Forward and open',
   'browser.refused': 'Only http and https addresses can be opened.',
+  'browser.refusedOwn': 'This is the app’s own address, which is not shown in a pane.',
   'browser.outside':
     'This address cannot be shown in the app’s page: only addresses on this computer’s localhost can. It opens in your browser.',
   'browser.outsideOpen': 'Open It',
