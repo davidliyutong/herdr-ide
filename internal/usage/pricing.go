@@ -122,6 +122,23 @@ func ParsePrices(lines []string) (map[string]Tier, error) {
 	return out, nil
 }
 
+// ValidPrices checks the user's prices as ParsePrices makes them: at most
+// MaxOwnPrices, names as ownModel, prices from 0 to 10000. The agent
+// refuses others (CostOptions.Prices), so a scan never prices with them.
+func ValidPrices(own map[string]Tier) error {
+	if len(own) > MaxOwnPrices {
+		return fmt.Errorf("at most %d prices", MaxOwnPrices)
+	}
+	ok := func(v float64) bool { return !math.IsNaN(v) && v >= 0 && v <= 10000 }
+	for k, t := range own {
+		if !ownModel.MatchString(k) || t.InputMax != nil || t.CacheWrite1h != nil ||
+			!ok(t.Input) || !ok(t.Cached) || !ok(t.Output) || t.CacheWrite != nil && !ok(*t.CacheWrite) {
+			return fmt.Errorf("a price that is not one of usage.prices: %q", k)
+		}
+	}
+	return nil
+}
+
 // Tier picks the tier of a prompt of n tokens: the first whose InputMax
 // is at least n ("100K tokens or fewer").
 func (m *ModelPrice) Tier(n int64) (int, Tier) {

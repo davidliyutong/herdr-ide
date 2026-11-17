@@ -175,13 +175,18 @@ up in three ways:
   table does not price, a dated version of a listed one not listed again.
   It writes nothing: each finding is checked against the provider's own
   page, which stays an entry's `source`. Only the script reaches the
-  network; the core and the agents read the embedded table.
+  network (https on `raw.githubusercontent.com`, no other redirect, at
+  most 64 MiB); the core and the agents read the embedded table. A key of
+  that table with other characters than model names have is left out
+  and counted, so no control character or text of its own reaches the
+  output.
 - `usage.prices` (Settings › AI usage › Your prices) holds the user's
   prices, a line each: `<model> <input> <cached> <output> [<cache write>]`
   in USD per million tokens, the model a prefix as in the table, one price
   for any prompt length (`usage.ParsePrices`; at most 50, numbers from 0 to
   10000). The core sends them with each scan (`CostOptions.Prices`) and
-  keys its cache of the spend by them, so a change shows at the next read.
+  keys its cache of the spend by them, so a change shows at the next read;
+  an agent refuses prices the setting could not hold (`usage.ValidPrices`).
   One of the same name as an entry of the table replaces it, and the
   longest prefix of both lists wins (`PricingWith`).
 - A model without a price still counts its tokens (the Tokens view), and

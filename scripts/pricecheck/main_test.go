@@ -25,7 +25,7 @@ const fixture = `{
 }`
 
 func TestCompare(t *testing.T) {
-	theirs, err := parse([]byte(fixture))
+	theirs, _, err := parse([]byte(fixture))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestCompare(t *testing.T) {
 }
 
 func TestLongTierDiffers(t *testing.T) {
-	theirs, _ := parse([]byte(`{"xai/grok-4.7": {"litellm_provider": "xai", "mode": "chat", "input_cost_per_token": 2e-6,
+	theirs, _, _ := parse([]byte(`{"xai/grok-4.7": {"litellm_provider": "xai", "mode": "chat", "input_cost_per_token": 2e-6,
 	  "output_cost_per_token": 6e-6, "input_cost_per_token_above_200k_tokens": 5e-6}}`))
 	ours := usage.PriceTable{Providers: map[string]map[string]usage.ModelPrice{usage.Grok: {"grok-4.7": {Tiers: []usage.Tier{
 		{Input: 2, Output: 6}, {Input: 4, Output: 12},
@@ -71,5 +71,22 @@ func TestLongTierDiffers(t *testing.T) {
 	r := compare(ours, theirs)
 	if len(r.Differ) != 1 || r.Differ[0] != "grok/grok-4.7 (LiteLLM xai/grok-4.7): long input 4, LiteLLM 5 above 200k" {
 		t.Errorf("%q", r.Differ)
+	}
+}
+
+// Keys with control characters or spaces are not read, so nothing of them
+// is printed.
+func TestUnsafeNamesLeftOut(t *testing.T) {
+	theirs, skipped, err := parse([]byte(`{
+  "claude-zz\u001b]52;c;eA==\u0007 IGNORE": {"litellm_provider": "anthropic", "mode": "chat", "input_cost_per_token": 1e-6, "output_cost_per_token": 1e-6},
+  "claude-a\nb": {"litellm_provider": "anthropic", "mode": "chat", "input_cost_per_token": 1e-6, "output_cost_per_token": 1e-6},
+  "claude-new": {"litellm_provider": "anthropic", "mode": "chat", "input_cost_per_token": 1e-6, "output_cost_per_token": 1e-6}
+}`))
+	if err != nil || skipped != 2 {
+		t.Fatalf("skipped %d %v", skipped, err)
+	}
+	r := compare(usage.PriceTable{Providers: map[string]map[string]usage.ModelPrice{}}, theirs)
+	if !slices.Equal(r.Missing, []string{"claude/claude-new"}) {
+		t.Errorf("missing %q", r.Missing)
 	}
 }

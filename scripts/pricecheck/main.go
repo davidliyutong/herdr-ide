@@ -8,7 +8,10 @@
 //	go run ./scripts/pricecheck              # fetches LiteLLM's table
 //	go run ./scripts/pricecheck -src FILE    # a copy of it
 //
-// The exit status is 1 when something differs or is missing.
+// The exit status is 1 when something differs or is missing. The table is
+// someone else's: a model name with other characters than those of model
+// names (letters, digits, . _ : / @ -) is left out and counted, so the
+// output carries no control characters or text of its own.
 package main
 
 import (
@@ -63,13 +66,21 @@ var notCLI = regexp.MustCompile(`(audio|realtime|image|tts|transcribe|search|cha
 
 var longKey = regexp.MustCompile(`^(input|output)_cost_per_token_above_(\d+)k_tokens$`)
 
-func parse(b []byte) (map[string]entry, error) {
+// safeName is what a model's key may be to be read at all.
+var safeName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,199}$`)
+
+// parse reads LiteLLM's table; skipped counts the keys left out (safeName).
+func parse(b []byte) (out map[string]entry, skipped int, err error) {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(b, &raw); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	out := map[string]entry{}
+	out = map[string]entry{}
 	for k, v := range raw {
+		if !safeName.MatchString(k) {
+			skipped++
+			continue
+		}
 		var e entry
 		if json.Unmarshal(v, &e) != nil {
 			continue
@@ -87,7 +98,7 @@ func parse(b []byte) (map[string]entry, error) {
 		}
 		out[k] = e
 	}
-	return out, nil
+	return out, skipped, nil
 }
 
 // name is a LiteLLM key without its provider prefix (xai/grok-4.7).
@@ -204,7 +215,12 @@ func compare(ours usage.PriceTable, theirs map[string]entry) report {
 }
 
 func fetch(url string) ([]byte, error) {
-	c := &http.Client{Timeout: 60 * time.Second}
+	c := &http.Client{Timeout: 60 * time.Second, CheckRedirect: func(req *http.Request, _ []*http.Request) error {
+		if req.URL.Scheme != "https" || req.URL.Host != "raw.githubusercontent.com" {
+			return fmt.Errorf("redirect to %s refused", req.URL.Redacted())
+		}
+		return nil
+	}}
 	resp, err := c.Get(url)
 	if err != nil {
 		return nil, err
@@ -230,10 +246,13 @@ func main() {
 		fmt.Fprintln(os.Stderr, "pricecheck:", err)
 		os.Exit(2)
 	}
-	theirs, err := parse(b)
+	theirs, skipped, err := parse(b)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "pricecheck:", err)
 		os.Exit(2)
+	}
+	if skipped > 0 {
+		fmt.Printf("skipped: %d model keys with characters model names do not have\n", skipped)
 	}
 	r := compare(usage.Pricing, theirs)
 	for _, l := range r.Differ {

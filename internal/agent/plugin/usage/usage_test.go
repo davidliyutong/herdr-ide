@@ -5,6 +5,7 @@ package usage
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 
 	"herdr-ide/internal/agent/plugin"
 	"herdr-ide/internal/agentproto"
+	"herdr-ide/internal/usage"
 )
 
 func call(t *testing.T, e *plugin.Env, action, params string) agentproto.Reply {
@@ -61,6 +63,26 @@ func TestActions(t *testing.T) {
 	}
 	if rep = call(t, e, "limits", `[1]`); rep.OK || rep.Code != "bad_params" {
 		t.Errorf("bad params %+v", rep)
+	}
+	// The user's prices as the setting makes them, nothing else.
+	many := map[string]any{}
+	for i := range usage.MaxOwnPrices + 1 {
+		many[fmt.Sprintf("m%d", i)] = map[string]float64{"input": 1}
+	}
+	tooMany, _ := json.Marshal(map[string]any{"prices": many})
+	for _, bad := range []string{
+		string(tooMany),
+		`{"prices":{"":{"input":1}}}`,
+		`{"prices":{"grok-5":{"input":-1}}}`,
+		`{"prices":{"grok-5":{"input":1,"inputMax":5}}}`,
+		`{"prices":{"grok-5":{"input":1,"cacheWrite":20000}}}`,
+	} {
+		if rep = call(t, e, "cost", bad); rep.OK || rep.Code != "bad_params" {
+			t.Errorf("prices %s: %+v", bad, rep)
+		}
+	}
+	if rep = call(t, e, "cost", `{"prices":{"grok-5":{"input":3,"cached":0.75,"output":9}}}`); !rep.OK {
+		t.Errorf("good prices %+v", rep)
 	}
 }
 

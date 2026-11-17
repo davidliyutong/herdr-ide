@@ -54,6 +54,9 @@ func handle(ctx context.Context, st net.Conn, action string, params json.RawMess
 		if err := plugin.Decode(params, &o); err != nil {
 			return plugin.Reply(st, nil, err)
 		}
+		if err := usage.ValidPrices(o.Prices); err != nil {
+			return plugin.Reply(st, nil, plugin.Errorf("bad_params", "usage: %v", err))
+		}
 		ctx, cancel := untilClosed(ctx, st, costTimeout)
 		defer cancel()
 		rep, err := usage.Cost(ctx, env(e), o)

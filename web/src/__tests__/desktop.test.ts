@@ -240,8 +240,19 @@ describe('runMenuCommand', () => {
       leaveWindowPane('m', 'w1', ['/srv/app']);
       expect(document.activeElement).not.toBe(header);
       iframe.focus();
+      // Nor while a dialog is open.
+      const backdrop = document.createElement('div');
+      backdrop.className = 'modal-backdrop';
+      document.body.append(backdrop);
+      leaveWindowPane('m', 'w1', ['/srv/app']);
+      backdrop.remove();
+      expect(document.activeElement).toBe(iframe);
+      const before = JSON.stringify(core.layout('m'));
       leaveWindowPane('m', 'w1', ['/srv/app']);
       expect(document.activeElement).toBe(header);
+      // The pane had the focus already: the layout is as it was.
+      await settle();
+      expect(JSON.stringify(core.layout('m'))).toBe(before);
       // There code.open shows the pane focused before VS Code.
       runMenuCommand('code.open');
       await vi.waitFor(() => expect(core.layout('m')?.workspaces[0].selected).toBe(0));
