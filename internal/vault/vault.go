@@ -236,9 +236,11 @@ type Authenticator struct {
 	ID    string `json:"id"`
 	Kind  string `json:"kind"`
 	Label string `json:"label"`
-	// RPID, Credential, Algorithm (COSE) and PublicKey
-	// (SubjectPublicKeyInfo) are a WebAuthn credential's; SignCount the
-	// last counter its authenticator signed.
+	// Origin is the page a WebAuthn credential was added from and proves
+	// for; RPID (its host name), Credential, Algorithm (COSE) and PublicKey
+	// (SubjectPublicKeyInfo) are the credential's; SignCount the last
+	// counter its authenticator signed.
+	Origin     string    `json:"origin,omitempty"`
 	RPID       string    `json:"rpId,omitempty"`
 	Credential []byte    `json:"credential,omitempty"`
 	Algorithm  int       `json:"alg,omitempty"`

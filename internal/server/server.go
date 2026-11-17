@@ -76,14 +76,17 @@ type Options struct {
 
 // Server is the HTTP front of the core.
 type Server struct {
-	opts    Options
-	mg      *machines.Manager
-	logger  *log.Logger
-	origins map[string]bool
-	hosts   map[string]bool
-	csProxy *codeServerProxy
-	cs      *codeserver.Manager
-	bridge  *bridgeHub
+	// localhostPort is the port the core holds on both loopback addresses
+	// (OwnLocalhost); "" when it does not.
+	localhostPort string
+	opts          Options
+	mg            *machines.Manager
+	logger        *log.Logger
+	origins       map[string]bool
+	hosts         map[string]bool
+	csProxy       *codeServerProxy
+	cs            *codeserver.Manager
+	bridge        *bridgeHub
 	// downloads the pages follow in their downloads panel
 	downloads downloadsHub
 	gui       *gui.Manager
@@ -265,6 +268,62 @@ func (s *Server) guard(next http.Handler) http.Handler {
 	})
 }
 
+// OwnLocalhost tells the server that the core listens on port on both
+// loopback addresses (127.0.0.1 and ::1), so that http://localhost:<port>
+// leads to it whichever a browser tries (trustedOrigin). Called before the
+// server serves.
+func (s *Server) OwnLocalhost(port string) { s.localhostPort = port }
+
+// trustedOrigin is the request's Origin when no other program can serve a
+// page of that origin (plugin.Call.TrustedOrigin): an --allowed-origin,
+// which the operator names, or the core's own under the name localhost:
+// its port, held on both loopback addresses, asked for under that very
+// Host from this host. A loopback origin on another port is another
+// program's, and without both addresses "localhost" may lead to whoever
+// took the other one. The origin comes back lower-cased, as browsers
+// write it.
+//
+// A browser sends no Origin with a page's own GETs: there the page says
+// that the request is its own (Sec-Fetch-Site: same-origin) and the origin
+// is the request's Host, under the scheme that makes it one the core
+// vouches for. That only tells a page what it may offer (the vault's
+// list); what proves a page's origin is what its authenticator signed.
+func (s *Server) trustedOrigin(r *http.Request) string {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		if (r.Method != http.MethodGet && r.Method != http.MethodHead) || r.Header.Get("Sec-Fetch-Site") != "same-origin" {
+			return ""
+		}
+		for _, scheme := range []string{"http", "https"} {
+			if got := s.trustedOriginOf(r, scheme+"://"+r.Host); got != "" {
+				return got
+			}
+		}
+		return ""
+	}
+	return s.trustedOriginOf(r, origin)
+}
+
+func (s *Server) trustedOriginOf(r *http.Request, origin string) string {
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	norm := strings.ToLower(u.Scheme + "://" + u.Host)
+	if s.origins[norm] {
+		return norm
+	}
+	port := u.Port()
+	if port == "" {
+		port = "80"
+	}
+	if s.localhostPort != "" && u.Scheme == "http" && strings.EqualFold(u.Hostname(), "localhost") && port == s.localhostPort &&
+		strings.EqualFold(u.Host, r.Host) && sameHost(r) {
+		return norm
+	}
+	return ""
+}
+
 // originAllowed reports whether a request for host (its Host header) may
 // carry origin: an --allowed-origin, or the request's own origin on
 // loopback, which is the page the core served. Another page of the same
@@ -273,6 +332,10 @@ func (s *Server) guard(next http.Handler) http.Handler {
 // their own Origin, and the core has no login to stop them. The scheme of a
 // loopback origin is not compared: the core serves no TLS, so behind a proxy
 // on loopback that does, the page's is https and the request's is not.
+// Without a port in the Host the scheme is what tells http://localhost (port
+// 80) from https://localhost (443), so there the origin must be the http
+// one, which the core serves; a TLS proxy on the default port names its
+// origin with --allowed-origin.
 func (s *Server) originAllowed(origin, host string) bool {
 	if origin == "null" {
 		return false
@@ -284,7 +347,13 @@ func (s *Server) originAllowed(origin, host string) bool {
 	if s.origins[strings.ToLower(u.Scheme+"://"+u.Host)] {
 		return true
 	}
-	return (u.Scheme == "http" || u.Scheme == "https") && isLoopbackHost(u.Hostname()) && strings.EqualFold(u.Host, host)
+	if !isLoopbackHost(u.Hostname()) || !strings.EqualFold(u.Host, host) {
+		return false
+	}
+	if _, _, err := net.SplitHostPort(host); err != nil {
+		return u.Scheme == "http"
+	}
+	return u.Scheme == "http" || u.Scheme == "https"
 }
 
 // broadcast sends a JSON message to every connected browser.

@@ -8,6 +8,7 @@
 // and a page that is refused asks for the passphrase again.
 import { create } from 'zustand';
 import { hasMessage, t } from '../../i18n';
+import type { Fresh } from './proof';
 
 export interface VaultStatus {
   /** '' (no passphrase yet) or 'passphrase'. */
@@ -160,17 +161,21 @@ export const vaultApi = {
       guard?: VaultGuard | null;
     }>('GET', ''),
   /** Creates or changes a variable; `to` renames it in the same write. */
-  set: (name: string, body: { to?: string; description?: string; machines?: string[]; injectOnly?: boolean; value?: string }) =>
-    call<VaultVariable>('PUT', `/vars/${enc(name)}`, body),
+  set: (
+    name: string,
+    body: { to?: string; description?: string; machines?: string[]; injectOnly?: boolean; value?: string },
+    fresh?: Fresh,
+  ) => call<VaultVariable>('PUT', `/vars/${enc(name)}`, { ...body, ...fresh }),
   remove: (name: string) => call('DELETE', `/vars/${enc(name)}`),
-  reveal: (name: string) => call<{ value: string }>('POST', `/vars/${enc(name)}/reveal`),
+  reveal: (name: string, fresh?: Fresh) => call<{ value: string }>('POST', `/vars/${enc(name)}/reveal`, fresh),
   session: (passphrase: string) => call<Opened>('POST', '/session', { passphrase }),
   sessionByProof: (proof: Proof) => call<Opened>('POST', '/session', { proof }),
   /** A nonce for a proof of the purpose (and what the page may use to make it). */
   proof: (purpose: ProofPurpose) => call<ProofChallenge>('POST', '/proof', purpose),
   addAuthenticator: (body: NewAuthenticator) => call<{ guard: VaultGuard | null }>('POST', '/authenticators', body),
   removeAuthenticator: (id: string) => call<{ guard: VaultGuard | null }>('DELETE', `/authenticators/${enc(id)}`),
-  setGuard: (verifyEachAllow: boolean) => call<{ guard: VaultGuard | null }>('POST', '/guard', { verifyEachAllow }),
+  setGuard: (verifyEachAllow: boolean, passphrase?: string) =>
+    call<{ guard: VaultGuard | null }>('POST', '/guard', { verifyEachAllow, ...(passphrase ? { passphrase } : {}) }),
   endSession: () => call('DELETE', '/session'),
   passphrase: (passphrase: string, old?: string) =>
     call<Opened>('POST', '/passphrase', old === undefined ? { passphrase } : { old, passphrase }),
@@ -198,6 +203,8 @@ export interface Authenticator {
   id: string;
   kind: 'webauthn' | 'desktop';
   label: string;
+  /** The page a WebAuthn credential was added from, and proves for. */
+  origin?: string;
   /** The host name a WebAuthn credential is for. */
   rpId?: string;
   created: string;
@@ -211,9 +218,17 @@ export interface VaultGuard {
   verifyEachAllow: boolean;
   /** The app this page runs in can prompt the user itself. */
   desktop: boolean;
+  /** This page's origin is one the core vouches for: WebAuthn credentials
+   * can be added and used from it. */
+  webauthn: boolean;
 }
 
-export type ProofPurpose = { for: 'session' } | { for: 'answer'; request: string; answer: 'once' | 'always' } | { for: 'register' };
+export type ProofPurpose =
+  | { for: 'session' }
+  | { for: 'answer'; request: string; answer: 'once' | 'always' }
+  | { for: 'register' }
+  /** Showing the variable's value / letting more machines read it. */
+  | { for: 'reveal' | 'change'; request: string };
 
 /** A nonce the core issued for a purpose; it is also WebAuthn's challenge
  * (base64url). */
@@ -348,8 +363,8 @@ export async function removeAuthenticator(id: string) {
 }
 
 /** Sets the rule that every Allow needs a proof or the passphrase. */
-export async function setVerifyEachAllow(on: boolean) {
-  useVault.setState({ guard: (await vaultApi.setGuard(on)).guard });
+export async function setVerifyEachAllow(on: boolean, passphrase?: string) {
+  useVault.setState({ guard: (await vaultApi.setGuard(on, passphrase)).guard });
 }
 
 /** Sets the first passphrase or, with old, changes it; either opens a

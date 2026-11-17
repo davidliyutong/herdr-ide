@@ -1,12 +1,21 @@
 // Windows Hello through PowerShell and the Windows.Security.Credentials.UI
-// UserConsentVerifier. UNVERIFIED ON WINDOWS: it was written without a
-// Windows machine to run it on, and only its arguments and its reading of
-// the output are tested. To check there:
-//   - the prompt comes to the front of the app's window, not behind it (a
-//     window of a hidden powershell.exe may not be allowed to take focus);
-//   - a restricted PowerShell (constrained language mode, a policy that
-//     blocks Add-Type) ends non-zero and so counts as unavailable;
-//   - cancelling, a wrong PIN and a machine without Hello each answer false.
+// UserConsentVerifier. The app starts powershell.exe from the system
+// directory (powershellPath), with no profile and no questions, and gives it
+// a script on stdin; the prompt's message travels in an environment variable
+// (MESSAGE_VAR), never in the script. The script awaits the WinRT operation
+// through AsTask and prints the result, which is compared with what means
+// yes: "Available" for the check, "Verified" for a request. Anything else
+// (the user cancelling, a wrong PIN, a machine without Hello, a PowerShell
+// that is restricted or fails, a timeout) counts as false.
+
+import { win32 } from 'node:path';
+
+/** powershell.exe by its full path under the system directory, so that no
+ * program a PATH entry or the working directory could name stands in for
+ * it. */
+export function powershellPath(systemRoot: string | undefined): string {
+  return win32.join(systemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+}
 
 /** The arguments of powershell.exe: no profile, no questions, the script on
  * stdin. */

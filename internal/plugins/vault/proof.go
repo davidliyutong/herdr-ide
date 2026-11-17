@@ -27,8 +27,12 @@ import (
 //
 //   - a WebAuthn credential (a browser's platform authenticator or a
 //     security key) signs the nonce as its challenge, with the user
-//     verified; the core checks the signature with the key it stored, the
-//     page's origin and the host name the credential is for;
+//     verified; the core checks the signature with the key it stored and
+//     that the page that asked is the one the credential was added from.
+//     A credential is the browser's for a host name, whatever the port, so
+//     its origin is kept and compared, and only an origin the core vouches
+//     for takes part (plugin.Call.TrustedOrigin): the user's fingerprint
+//     on a page another program serves on localhost proves nothing here;
 //   - the desktop app's shell, after a prompt of the system the user
 //     answered (Touch ID, Windows Hello), signs the nonce and its purpose
 //     with the key of its launch (plugin.Call.DesktopProof). The shell asks
@@ -45,6 +49,11 @@ const (
 	ForSession  = "session"
 	ForAnswer   = "answer"
 	ForRegister = "register"
+	// ForReveal and ForChange are for one variable (purpose.Request is its
+	// name), where every Allow is verified: showing its value to the page,
+	// and widening who may read it.
+	ForReveal = "reveal"
+	ForChange = "change"
 )
 
 const (
@@ -61,7 +70,7 @@ const (
 type purpose struct {
 	For string `json:"for"`
 	// Request and Answer: the request a proof for an answer is made for,
-	// and that answer.
+	// and that answer; for a reveal or a change Request is the variable.
 	Request string `json:"request,omitempty"`
 	Answer  string `json:"answer,omitempty"`
 }
@@ -157,15 +166,15 @@ func (p *Plugin) peekProof(nonce string) (purpose, bool) {
 	return pp.purpose, true
 }
 
-// originOf is the request's origin and the host name a WebAuthn credential
-// of its page is for ("" without an Origin header: no page sent it).
-func originOf(r *http.Request) (origin, rpID string) {
-	origin = r.Header.Get("Origin")
-	u, err := url.Parse(origin)
-	if origin == "" || err != nil || u.Hostname() == "" {
+// originOf is the origin of the call's page when the core vouches for it,
+// and the host name a WebAuthn credential of that page is for; "" for any
+// other origin: a credential is neither added nor taken there.
+func originOf(c *plugin.Call) (origin, rpID string) {
+	u, err := url.Parse(c.TrustedOrigin)
+	if c.TrustedOrigin == "" || err != nil || u.Hostname() == "" {
 		return "", ""
 	}
-	return origin, strings.ToLower(u.Hostname())
+	return c.TrustedOrigin, strings.ToLower(u.Hostname())
 }
 
 // desktopCan reports whether this call may bring the desktop shell's proof.
@@ -203,13 +212,15 @@ func (p *Plugin) checkProof(c *plugin.Call, r *http.Request, s *vaultstore.Store
 		}
 		return vaultstore.KindDesktop, p.usedAuthenticator(s, id, now, nil)
 	}
-	origin, rpID := originOf(r)
+	origin, rpID := originOf(c)
 	cred := b64(pb.Credential)
 	if origin == "" || len(cred) == 0 {
 		return "", errProof
 	}
 	for _, a := range g.Authenticators {
-		if a.Kind != vaultstore.KindWebAuthn || a.RPID != rpID || !bytes.Equal(a.Credential, cred) {
+		// The credential of this very page: the same origin, not only the
+		// same host name.
+		if a.Kind != vaultstore.KindWebAuthn || a.Origin != origin || a.RPID != rpID || !bytes.Equal(a.Credential, cred) {
 			continue
 		}
 		key, err := webauthn.ParsePublicKey(a.Algorithm, a.PublicKey)
@@ -217,7 +228,7 @@ func (p *Plugin) checkProof(c *plugin.Call, r *http.Request, s *vaultstore.Store
 			return "", errProof
 		}
 		count, err := webauthn.VerifyAssertion(key, b64(pb.ClientDataJSON), b64(pb.AuthenticatorData), b64(pb.Signature),
-			webauthn.Expect{Challenge: challenge, Origin: origin, RPID: rpID})
+			webauthn.Expect{Challenge: challenge, Origin: a.Origin, RPID: a.RPID})
 		// A counter that does not grow is a copy of the authenticator;
 		// those that do not count always say 0.
 		if err != nil || ((count != 0 || a.SignCount != 0) && count <= a.SignCount) {
@@ -244,6 +255,69 @@ func (p *Plugin) usedAuthenticator(s *vaultstore.Store, id string, at time.Time,
 	})
 }
 
+// fresh is the user's word for one action, sent with it: an
+// authenticator's proof made for the action, or the vault's passphrase
+// again. Where every Allow is verified it is what an action needs; a
+// session is then not enough.
+type fresh struct {
+	Proof      *proofBody `json:"proof"`
+	Passphrase string     `json:"passphrase"`
+}
+
+// verified checks what f brings for want. given says whether it brought
+// anything; ok whether that holds. What does not hold is answered here (a
+// refused proof, a wrong passphrase, slowed down as every check), so the
+// caller only returns.
+func (p *Plugin) verified(c *plugin.Call, w http.ResponseWriter, r *http.Request, s *vaultstore.Store, f fresh, want purpose) (given, ok bool) {
+	switch {
+	case f.Proof != nil:
+		kind, err := p.checkProof(c, r, s, f.Proof, want)
+		if err != nil {
+			refuseProof(c, w, r, err, want)
+			return true, false
+		}
+		c.Host.Audit(r, "vault.proved", map[string]any{"ok": true, "for": want.For, "kind": kind})
+		p.touch(c.Host)
+		return true, true
+	case f.Passphrase != "":
+		if st := s.Status(); st.Mode != vaultstore.ModePassphrase || st.Locked {
+			fail(w, vaultstore.ErrLocked)
+			return true, false
+		}
+		if p.slowDown(w) {
+			return true, false
+		}
+		err := s.Verify(f.Passphrase)
+		p.tried(err == nil, errors.Is(err, vaultstore.ErrPassphrase))
+		if err != nil {
+			fail(w, err)
+			return true, false
+		}
+		p.touch(c.Host)
+		return true, true
+	}
+	return false, false
+}
+
+// strict reports whether every Allow is verified: the guard's rule, and a
+// guard that does not open (a file changed outside), which cannot say that
+// the rule is off. A locked vault has no rule to ask: nothing is allowed
+// from it anyway.
+func strict(s *vaultstore.Store) bool {
+	g, err := s.Guard()
+	if err != nil {
+		return !errors.Is(err, vaultstore.ErrLocked) && !errors.Is(err, vaultstore.ErrNoPassphrase)
+	}
+	return g.VerifyEachAllow
+}
+
+// needFresh answers an action that, where every Allow is verified, came
+// without a proof or the passphrase.
+func needFresh(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
+	c.Host.Audit(r, "denied.vault_proof", map[string]any{"route": r.Method + " " + r.URL.Path})
+	plugin.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "vault_proof", "message": "every Allow is verified: an authenticator's proof or the vault's passphrase is needed"})
+}
+
 // refuseProof answers a proof that does not hold; a locked vault says so.
 func refuseProof(c *plugin.Call, w http.ResponseWriter, r *http.Request, err error, pu purpose) {
 	c.Host.Audit(r, "vault.proved", map[string]any{"ok": false, "for": pu.For})
@@ -256,9 +330,11 @@ func refuseProof(c *plugin.Call, w http.ResponseWriter, r *http.Request, err err
 
 // authenticatorInfo is an authenticator as pages see it: no key.
 type authenticatorInfo struct {
-	ID       string    `json:"id"`
-	Kind     string    `json:"kind"`
-	Label    string    `json:"label"`
+	ID    string `json:"id"`
+	Kind  string `json:"kind"`
+	Label string `json:"label"`
+	// Origin is the page a WebAuthn credential proves for.
+	Origin   string    `json:"origin,omitempty"`
 	RPID     string    `json:"rpId,omitempty"`
 	Created  time.Time `json:"created"`
 	LastUsed time.Time `json:"lastUsed,omitzero"`
@@ -273,12 +349,15 @@ func (p *Plugin) guardState(c *plugin.Call, s *vaultstore.Store) map[string]any 
 	}
 	list := []authenticatorInfo{}
 	for _, a := range g.Authenticators {
-		list = append(list, authenticatorInfo{ID: a.ID, Kind: a.Kind, Label: a.Label, RPID: a.RPID, Created: a.Created, LastUsed: a.LastUsed})
+		list = append(list, authenticatorInfo{ID: a.ID, Kind: a.Kind, Label: a.Label, Origin: a.Origin, RPID: a.RPID, Created: a.Created, LastUsed: a.LastUsed})
 	}
+	origin, _ := originOf(c)
 	return map[string]any{
 		"authenticators": list, "verifyEachAllow": g.VerifyEachAllow,
-		// Whether the app this page runs in can prompt the user itself.
-		"desktop": desktopCan(c),
+		// Whether the app this page runs in can prompt the user itself,
+		// and whether this page's origin is one a WebAuthn credential can
+		// be added for and used from.
+		"desktop": desktopCan(c), "webauthn": origin != "",
 	}
 }
 
@@ -318,8 +397,14 @@ func (p *Plugin) handleProof(c *plugin.Call, w http.ResponseWriter, r *http.Requ
 			return
 		}
 		pu = purpose{For: ForRegister}
+	case ForReveal, ForChange:
+		if _, ok := s.Get(pu.Request); !ok {
+			plugin.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "not_found", "message": "no such variable"})
+			return
+		}
+		pu = purpose{For: pu.For, Request: pu.Request}
 	default:
-		plugin.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad_request", "message": "for is session, answer or register"})
+		plugin.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad_request", "message": "for is session, answer, register, reveal or change"})
 		return
 	}
 	g, err := s.Guard()
@@ -327,12 +412,12 @@ func (p *Plugin) handleProof(c *plugin.Call, w http.ResponseWriter, r *http.Requ
 		fail(w, err)
 		return
 	}
-	_, rpID := originOf(r)
+	origin, rpID := originOf(c)
 	creds := []string{}
 	desktop := false
 	for _, a := range g.Authenticators {
 		switch {
-		case a.Kind == vaultstore.KindWebAuthn && rpID != "" && a.RPID == rpID:
+		case a.Kind == vaultstore.KindWebAuthn && origin != "" && a.Origin == origin:
 			creds = append(creds, base64.RawURLEncoding.EncodeToString(a.Credential))
 		case a.Kind == vaultstore.KindDesktop:
 			desktop = desktopCan(c)
@@ -353,6 +438,9 @@ func (p *Plugin) handleProofPurpose(c *plugin.Call, w http.ResponseWriter, r *ht
 		return
 	}
 	out := map[string]any{"for": pu.For, "answer": pu.Answer}
+	if pu.For == ForReveal || pu.For == ForChange {
+		out["name"] = pu.Request
+	}
 	if pu.For == ForAnswer {
 		p.mu.Lock()
 		req, pending := p.pending[pu.Request]
@@ -361,13 +449,15 @@ func (p *Plugin) handleProofPurpose(c *plugin.Call, w http.ResponseWriter, r *ht
 			plugin.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "not_found", "message": "no such request (answered or expired)"})
 			return
 		}
-		label := req.M
+		// The label is the user's name for the machine, which programs
+		// can change; the target (an ssh machine's address) is beside it.
+		label, target := req.M, ""
 		if mg := c.Host.Machines(); mg != nil {
 			if mc := mg.Get(req.M); mc != nil {
-				label = mc.Label()
+				label, target = mc.Label(), mc.Target()
 			}
 		}
-		out["request"] = map[string]any{"id": req.ID, "machine": label, "tool": req.Tool, "names": req.Names}
+		out["request"] = map[string]any{"id": req.ID, "machine": label, "target": target, "tool": req.Tool, "names": req.Names}
 	}
 	plugin.WriteJSON(w, http.StatusOK, out)
 }
@@ -437,7 +527,11 @@ func (p *Plugin) handleAddAuthenticator(c *plugin.Call, w http.ResponseWriter, r
 			return
 		}
 	case vaultstore.KindWebAuthn:
-		origin, rpID := originOf(r)
+		origin, rpID := originOf(c)
+		if origin == "" {
+			plugin.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "webauthn_origin", "message": "a fingerprint is added from the UI's own address by name: http://localhost on the core's port, or the reverse proxy's"})
+			return
+		}
 		e := webauthn.Expect{Challenge: challenge, Origin: origin, RPID: rpID}
 		spki := b64(body.PublicKey)
 		cred, err := webauthn.VerifyRegistration(b64(body.ClientDataJSON), b64(body.AuthenticatorData), e)
@@ -455,13 +549,13 @@ func (p *Plugin) handleAddAuthenticator(c *plugin.Call, w http.ResponseWriter, r
 			refuseProof(c, w, r, errProof, want)
 			return
 		}
-		a.RPID, a.Credential, a.Algorithm, a.PublicKey, a.SignCount = rpID, cred, body.Algorithm, spki, count
+		a.Origin, a.RPID, a.Credential, a.Algorithm, a.PublicKey, a.SignCount = origin, rpID, cred, body.Algorithm, spki, count
 	}
 	err = s.UpdateGuard(func(g *vaultstore.Guard) error {
 		kept := g.Authenticators[:0]
 		for _, o := range g.Authenticators {
 			// One desktop authenticator, and a credential once.
-			same := o.Kind == a.Kind && (a.Kind == vaultstore.KindDesktop || (o.RPID == a.RPID && bytes.Equal(o.Credential, a.Credential)))
+			same := o.Kind == a.Kind && (a.Kind == vaultstore.KindDesktop || (o.Origin == a.Origin && bytes.Equal(o.Credential, a.Credential)))
 			if !same {
 				kept = append(kept, o)
 			}
@@ -519,9 +613,10 @@ func (p *Plugin) handleGuard(c *plugin.Call, w http.ResponseWriter, r *http.Requ
 		return
 	}
 	var body struct {
-		VerifyEachAllow *bool `json:"verifyEachAllow"`
+		VerifyEachAllow *bool  `json:"verifyEachAllow"`
+		Passphrase      string `json:"passphrase"`
 	}
-	if err := plugin.ReadJSON(r, 4<<10, &body); err != nil {
+	if err := plugin.ReadJSON(r, 64<<10, &body); err != nil {
 		plugin.WriteError(w, err)
 		return
 	}
@@ -530,6 +625,17 @@ func (p *Plugin) handleGuard(c *plugin.Call, w http.ResponseWriter, r *http.Requ
 		return
 	}
 	c.AuditField("verifyEachAllow", *body.VerifyEachAllow)
+	// Turning the rule off takes the passphrase with the request: the
+	// page's session, which a program driving the page has too, would
+	// otherwise end the rule that stands against such a program.
+	if !*body.VerifyEachAllow && strict(s) {
+		if given, ok := p.verified(c, w, r, s, fresh{Passphrase: body.Passphrase}, purpose{}); !given {
+			plugin.WriteJSON(w, http.StatusForbidden, map[string]string{"error": "wrong_passphrase", "message": "the vault's passphrase is needed to end the rule"})
+			return
+		} else if !ok {
+			return
+		}
+	}
 	if err := s.UpdateGuard(func(g *vaultstore.Guard) error { g.VerifyEachAllow = *body.VerifyEachAllow; return nil }); err != nil {
 		fail(w, err)
 		return

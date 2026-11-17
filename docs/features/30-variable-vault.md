@@ -171,7 +171,8 @@ passphrase is needed once.
 
 - A **proof** answers a nonce the core issued (`POST proof`) for one
   purpose: `session`, `answer` with a request's id and `once` or `always`,
-  or `register`. A nonce is 32 random bytes, good for one try and two
+  `reveal` or `change` with a variable's name, or `register`. A nonce is
+  32 random bytes, good for one try and two
   minutes; at most 32 wait, the oldest giving way; they end with the
   sessions (a lock, a new passphrase).
 - A **WebAuthn credential** (a browser's platform authenticator such as
@@ -181,16 +182,35 @@ passphrase is needed once.
   request's `Origin`, not cross-origin), the authenticator data (the hash
   of the host name the credential is for, the user present and verified),
   the signature (ES256, RS256 or EdDSA) with the key it stored, and a
-  signature counter that grows where the authenticator counts. A
-  credential is for a host name (`localhost`, or the reverse proxy's):
-  each is added from a page of that name, and WebAuthn does not work on a
-  page opened by IP address (`http://127.0.0.1:…`), where the panel offers
-  the same page under `localhost`.
+  signature counter that grows where the authenticator counts.
+- A browser keeps a credential for a **host name**, whatever the port, and
+  a program of the core host writes its requests' headers as it likes. So
+  the credential is bound to the **origin** it was added from, which is
+  the one the authenticator must have signed, and credentials are added
+  and taken only for origins the core vouches for
+  (`plugin.Call.TrustedOrigin`): an `--allowed-origin` (the reverse
+  proxy's), or `http://localhost` on the core's own port while the core
+  holds that port on both loopback addresses (it takes `::1` beside
+  `127.0.0.1` at its start, `internal/loopback`; when another program
+  holds it, the core says so and vouches for no loopback origin). A
+  browser sends no `Origin` with a page's own GET, so for the list, which
+  tells the page whether to offer fingerprints (`webauthn`), the page's
+  word that the request is its own (`Sec-Fetch-Site: same-origin`) and
+  the request's Host stand for it; that decides what is offered, never
+  what is taken. A page
+  that another program serves on `localhost:3000` can ask the user's
+  fingerprint to sign a nonce; what it signs names that page's origin and
+  is refused. WebAuthn does not work on a page opened by IP address
+  (`http://127.0.0.1:…`), where the panel offers the same page under
+  `localhost`.
 - The **desktop app** prompts with the system (Touch ID on macOS, Windows
   Hello on Windows): its page hands the shell's main process the nonce, the
   shell asks the core what the nonce is for (`GET proof/{nonce}`, answered
   only to the desktop app) and shows that in the prompt ("allow <machine>
-  to read <names> once"), and after the user confirmed signs the nonce
+  (<its address>) to read <names> once": the machine by its label, which
+  programs can change, and its ssh address; every name, or as many as fit
+  and how many more, never a list cut short), and after the user confirmed
+  signs the nonce
   with its purpose (HMAC-SHA-256) with a key of this launch, which it gave
   the core in its hello and which never leaves its main process
   (`desktop/src/verify.ts`). The core takes such a proof only from the
@@ -210,14 +230,26 @@ passphrase is needed once.
   session the passphrase opened (`401 vault_passphrase` otherwise): adding
   and removing authenticators, the rule below, the automatic lock's time,
   imports and exports.
-- **Verify every Allow** (the guard's rule, off unless set): `once` and
-  `always` then need a proof made for that request and answer, or the
-  passphrase again in the answer; a session is not enough
-  (`401 vault_proof`). A program that drives the user's unlocked page, or
-  content on the page's origin, can then no longer allow a request. The
-  rule is in the vault, not a setting: settings are changed without the
-  gate, by the very programs the rule is for. It outlives a new
-  passphrase.
+- **Verify every Allow** (the guard's rule, off unless set): a session is
+  then not enough to let a value out (`401 vault_proof`). Allowing a
+  request (`once`, `always`) needs a proof made for that request and
+  answer; showing a value to the page (`reveal`) and a change that lets a
+  variable go where it did not (a machine added to those that read without
+  asking, every machine, or inject-only taken off) need a proof made for
+  that variable and purpose; each can bring the passphrase instead
+  (`passphrase` in the request). Other changes, and a new variable, whose
+  value the page brings itself, take the session. A program that drives
+  the user's unlocked page, or content on the page's origin, can then no
+  longer get at a value. The rule is in the vault, not a setting: settings
+  are changed without the gate, by the very programs the rule is for.
+  Ending it takes the passphrase with the request, not the session that
+  set it. A guard that does not open counts as the rule on. It outlives a
+  new passphrase.
+- **The automatic lock** is a setting, changed without the gate: while the
+  vault is unlocked a change shortens its time but does not lengthen it
+  (the time is capped at the setting's when the passphrase unlocked the
+  vault); a page's own time for the unlock (`POST autolock`, a
+  passphrase's session) is not capped.
 - Proofs are audited as `vault.proved` (`ok`, `for`, the authenticator's
   kind), refusals as `denied.vault_proof` and `denied.vault_passphrase`.
 
@@ -571,6 +603,9 @@ choices), with one choice for every name that exists; Import sends them.
 | The prompt's text from the page | A page could show the user one request and have another approved; the shell asks the core what the nonce is for. |
 | Reading the attestation of a new credential | It needs a CBOR parser and proves the authenticator's make, which the vault does not ask; the browser hands the public key itself, and an assertion made at once proves the key. |
 | Verify every Allow as a setting | Settings are changed through the API without the gate, so a program would turn the rule off before allowing. |
+| A WebAuthn credential checked by its host name and the request's `Origin` | `localhost` is every port of the computer to a browser, and a program writes its request's `Origin`: a page it serves on another port would have the user's fingerprint open the vault. The origin the authenticator signed is what cannot be forged, so the credential is bound to it. |
+| Vouching for `localhost` while the core listens on `127.0.0.1` only | Whoever takes `::1` on the same port answers under the same origin in a browser that tries it first. |
+| The rule for requests only | A session could then add the asking machine to a variable's readers, or show the value, which is the same value out by another door. |
 | A proof's session changing what guards the vault | A fingerprint would then add another fingerprint, or put the automatic lock off, after which the passphrase is never asked again. |
 | Machines and flag in the clear, unauthenticated | A program on the core host could widen a variable's machines in the file and read it without asking; sealing them with the value makes such an edit unreadable. |
 | An import session on the core between the preview and the import | The decrypted values would wait in the core's memory for the user's answer, with an expiry and a bound of their own; sending the file and its passphrase again costs one more derivation and leaves nothing behind. |
@@ -661,7 +696,12 @@ server exposes.
   used twice, for another purpose, from another origin or host, by another
   key, with a counter that went back, after its time, on a locked vault; a
   proof allowing its request and answer only; Verify every Allow against a
-  session, with the passphrase, and deny; the desktop shell's proof (only
+  session, with the passphrase, and deny; a credential offered and taken
+  only at its own origin, a page of another port refused, also when its
+  assertion is posted as the UI's; the rule covering reveals and grants
+  and ended only with the passphrase
+  (`TestVerifyEveryAllowCoversValuesAndGrants`); a setting not lengthening
+  an unlock (`TestAutoLockSettingDoesNotLengthenAnUnlock`); the desktop shell's proof (only
   the desktop client, only once on, only for the nonce's purpose, none
   without a key) and what the shell learns of a nonce; the bound of
   waiting nonces. `internal/server/plugins_test.go`

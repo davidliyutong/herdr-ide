@@ -51,11 +51,11 @@ import { Picker, type PickerItem } from '../../components/Picker';
 import type { MachineState } from '../../lib/machine';
 import { RequestCard } from './Approvals';
 import { setupSnippets } from './setup';
-import { StrengthBar, noManager } from './fields';
+import { FreshPassphrase, StrengthBar, noManager } from './fields';
 import { openVaultExport, openVaultImport } from './dialogs';
 import { AutoLockButton } from './AutoLock';
 import { GuardSection } from './Guard';
-import { prove, ways } from './proof';
+import { prove, ways, widens, withFresh } from './proof';
 import { useWayName } from './useWay';
 
 export { passStrength } from './fields';
@@ -563,8 +563,13 @@ function Row({
   onSelect(on: boolean, range: boolean): void;
   onEdit(): void;
 }) {
+  const guard = useVault((s) => s.guard);
   const [value, setValue] = useState<string>();
   const [err, setErr] = useState('');
+  // Where every Allow is verified and no authenticator can answer, the
+  // passphrase is asked here.
+  const [asking, setAsking] = useState(false);
+  const [pass, setPass] = useState('');
   // A revealed value hides itself after a while.
   useEffect(() => {
     if (value === undefined) return;
@@ -578,10 +583,26 @@ function Row({
       message: t('vault.revealMessage', { name: v.name }),
       confirm: t('vault.reveal'),
     });
-    if (!ok) return;
+    if (ok) await show();
+  };
+  const show = async (passphrase?: string) => {
     try {
-      setValue((await vaultApi.reveal(v.name)).value);
-      setErr('');
+      const r = await withFresh({
+        guard,
+        purpose: { for: 'reveal', request: v.name },
+        needed: !!guard?.verifyEachAllow,
+        passphrase,
+        send: (fresh) => vaultApi.reveal(v.name, fresh),
+      });
+      if (r.done) {
+        setValue(r.value.value);
+        setErr('');
+        setAsking(false);
+        setPass('');
+      } else if (r.reason === 'passphrase') {
+        setErr('');
+        setAsking(true);
+      } else setErr(t('vault.proof.cancelled'));
     } catch (e) {
       setErr(errorText(e));
     }
@@ -626,6 +647,34 @@ function Row({
           <Pencil />
         </button>
       </div>
+      {asking && value === undefined && (
+        <form
+          className="vault-request-actions"
+          data-fresh="reveal"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void show(pass);
+          }}
+        >
+          <FreshPassphrase value={pass} onChange={setPass} />
+          <div className="vault-request-buttons">
+            <button
+              type="button"
+              onClick={() => {
+                setAsking(false);
+                setPass('');
+                setErr('');
+              }}
+            >
+              {t('dialog.cancel')}
+            </button>
+            <span className="spacer" />
+            <button className="primary" type="submit" disabled={!pass}>
+              {t('vault.reveal')}
+            </button>
+          </div>
+        </form>
+      )}
       {value !== undefined && (
         <div className="vault-value">
           <code>{value}</code>
@@ -706,10 +755,31 @@ function BulkAccess({ names, onDone }: { names: string[]; onDone(err?: string): 
   const [mode, setMode] = useState<AccessMode>('ask');
   const [picked, setPicked] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const guard = useVault((s) => s.guard);
+  const variables = useVault((s) => s.variables);
+  const [asking, setAsking] = useState(false);
+  const [pass, setPass] = useState('');
   const save = async () => {
-    setBusy(true);
     const machines = machinesFor(mode, picked);
-    const err = await eachVariable(names, (n) => vaultApi.set(n, { machines }));
+    const wide = (n: string) => {
+      const cur = variables.find((x) => x.name === n);
+      return !!guard?.verifyEachAllow && !!cur && widens(cur, { machines });
+    };
+    const w = ways(guard);
+    // The passphrase is asked once for all, where no proof can be made.
+    if (!asking && !w.desktop && !w.webauthn && names.some(wide)) return setAsking(true);
+    setBusy(true);
+    const err = await eachVariable(names, async (n) => {
+      // A proof is made for one variable: each is asked.
+      const r = await withFresh({
+        guard,
+        purpose: { for: 'change', request: n },
+        needed: wide(n),
+        passphrase: asking ? pass : undefined,
+        send: (fresh) => vaultApi.set(n, { machines }, fresh),
+      });
+      if (!r.done) throw new VaultError('proof_cancelled');
+    });
     setBusy(false);
     await loadVault();
     onDone(err);
@@ -743,13 +813,14 @@ function BulkAccess({ names, onDone }: { names: string[]; onDone(err?: string): 
             ))}
           </div>
           <AccessChooser mode={mode} picked={picked} onMode={setMode} onPicked={setPicked} />
+          {asking && <FreshPassphrase value={pass} onChange={setPass} />}
         </div>
         <div className="dialog-actions">
           <span className="spacer" />
           <button type="button" onClick={() => onDone()}>
             {t('dialog.cancel')}
           </button>
-          <button className="primary" type="submit" disabled={busy || (mode === 'some' && !picked.length)}>
+          <button className="primary" type="submit" disabled={busy || (mode === 'some' && !picked.length) || (asking && !pass)}>
             {t('vault.save')}
           </button>
         </div>
@@ -772,6 +843,11 @@ function Editor({ variable, onDone }: { variable?: VaultVariable; onDone(): void
   const [picked, setPicked] = useState<string[]>(initial.filter((m) => m !== '*'));
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  const guard = useVault((s) => s.guard);
+  // Where every Allow is verified and no authenticator can answer, a change
+  // that lets more read the value asks for the passphrase.
+  const [asking, setAsking] = useState(false);
+  const [pass, setPass] = useState('');
   const target = name.trim();
   const nameOk = /^[A-Za-z_][A-Za-z0-9_]*$/.test(target) && target.length <= 128;
   const machinesOf = (): string[] => machinesFor(mode, picked);
@@ -782,13 +858,26 @@ function Editor({ variable, onDone }: { variable?: VaultVariable; onDone(): void
       // A new name renames it in the same write as the other changes (its
       // value stays, sealed under the new name): a failure changes nothing.
       const to = variable && target !== variable.name ? { to: target } : {};
-      await vaultApi.set(variable?.name ?? target, {
+      const body = {
         ...to,
         description,
         machines: machinesOf(),
         injectOnly,
         ...(value !== '' || !variable ? { value } : {}),
+      };
+      const r = await withFresh({
+        guard,
+        purpose: { for: 'change', request: variable?.name ?? target },
+        needed: !!guard?.verifyEachAllow && !!variable && widens(variable, body),
+        passphrase: asking ? pass : undefined,
+        send: (fresh) => vaultApi.set(variable?.name ?? target, body, fresh),
       });
+      if (!r.done) {
+        // The editor stays as it is.
+        if (r.reason === 'passphrase') setAsking(true);
+        else setErr(t('vault.proof.cancelled'));
+        return;
+      }
       await loadVault();
       onDone();
     } catch (e) {
@@ -891,6 +980,12 @@ function Editor({ variable, onDone }: { variable?: VaultVariable; onDone(): void
               onClick={() => setInjectOnly(!injectOnly)}
             />
           </div>
+          {asking && (
+            <div className="vault-field" data-fresh="change">
+              <small>{t('vault.fresh.change')}</small>
+              <FreshPassphrase value={pass} onChange={setPass} />
+            </div>
+          )}
           {err && <div className="callout error">{err}</div>}
         </div>
         <div className="dialog-actions">
@@ -906,7 +1001,7 @@ function Editor({ variable, onDone }: { variable?: VaultVariable; onDone(): void
           <button
             className="primary"
             type="submit"
-            disabled={busy || !nameOk || (!variable && !value) || (mode === 'some' && !picked.length)}
+            disabled={busy || !nameOk || (!variable && !value) || (mode === 'some' && !picked.length) || (asking && !pass)}
           >
             {t('vault.save')}
           </button>

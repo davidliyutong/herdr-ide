@@ -21,6 +21,11 @@ cd dist/packages/herdr-ide-$(go env GOOS)-$(go env GOARCH)
 ./herdr-ide    # http://127.0.0.1:7780
 ```
 
+The core listens on `127.0.0.1:7780` and takes the same port on `::1`, so
+`http://localhost:7780` is the same page; fingerprints for the variable
+vault ([30](features/30-variable-vault.md)) need the page opened by that
+name, since a browser keeps none for an IP address.
+
 Each `dist/release/` archive contains the core and its licenses
 (`licenses/`). Release archives are for Linux and macOS on amd64 and arm64.
 A core for Windows x64 ships only inside the [desktop app](#desktop-app)'s

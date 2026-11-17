@@ -86,15 +86,22 @@ func (p *Plugin) sessionLimits(h plugin.Host) (idle, most time.Duration) {
 }
 
 // autoLockAfter is how long the vault stays unlocked without use; 0 never
-// locks it. The time a page set for this unlock (setLockFor) comes first.
+// locks it. The time a page set for this unlock (setLockFor) comes first;
+// else the setting's, at most its time when the vault was unlocked
+// (capLock).
 func (p *Plugin) autoLockAfter(h plugin.Host) time.Duration {
 	p.mu.Lock()
 	set, d := p.lockForSet, p.lockFor
+	capped, limit := p.lockCapSet, p.lockCap
 	p.mu.Unlock()
 	if set {
 		return d
 	}
-	return p.autoLockSetting(h)
+	after := p.autoLockSetting(h)
+	if capped && limit > 0 && (after == 0 || after > limit) {
+		return limit
+	}
+	return after
 }
 
 // autoLockSetting is the auto-lock's time vault.autoLock sets.

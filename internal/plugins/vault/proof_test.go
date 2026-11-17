@@ -153,11 +153,20 @@ func TestProofOpensASession(t *testing.T) {
 	if code, out := c.do("POST", "/api/p/vault/authenticators", mustJSON(bad)); code != 401 || out["error"] != "vault_proof" {
 		t.Fatalf("another key: %d %v", code, out)
 	}
+	// Not from a page the core does not vouch for.
+	c.untrusted = true
+	nonce, _ = c.nonce(t, `{"for":"register"}`)
+	bad["nonce"], bad["publicKey"] = nonce, a.spki(t)
+	bad["clientDataJSON"], bad["assertion"] = enc(clientData("webauthn.create", nonce, c.origin)), a.assertion(t, nonce, c.origin)
+	if code, out := c.do("POST", "/api/p/vault/authenticators", mustJSON(bad)); code != 400 || out["error"] != "webauthn_origin" {
+		t.Fatalf("an origin not vouched for: %d %v", code, out)
+	}
+	c.untrusted = false
 	c.register(t, a)
 	_, list := c.do("GET", "/api/p/vault", "")
 	guard := list["guard"].(map[string]any)
 	auths := guard["authenticators"].([]any)
-	if len(auths) != 1 || auths[0].(map[string]any)["rpId"] != "localhost" || auths[0].(map[string]any)["label"] != "Touch ID" {
+	if a0 := auths[0].(map[string]any); len(auths) != 1 || a0["rpId"] != "localhost" || a0["origin"] != testOrigin || a0["label"] != "Touch ID" || guard["webauthn"] != true {
 		t.Fatalf("guard %v", guard)
 	}
 	// Neither the page nor the file gets the key in the clear.
@@ -249,7 +258,24 @@ func TestProofOpensASession(t *testing.T) {
 		t.Errorf("credentials of another host %v", out)
 	}
 	refused("the page of another host", a.assertion(t, nonce, c.origin))
-	c.origin = testOrigin
+	// A credential is the browser's for "localhost" on every port, so a
+	// page another program serves there can have the nonce signed. Its
+	// origin is not the credential's: the core does not vouch for it and
+	// offers nothing there...
+	c.origin, c.untrusted = "http://localhost:3000", true
+	nonce, out = c.nonce(t, `{"for":"session"}`)
+	if len(out["credentials"].([]any)) != 0 {
+		t.Errorf("credentials offered to another port's page: %v", out)
+	}
+	refused("a page on another port", a.assertion(t, nonce, c.origin))
+	if _, list := c.do("GET", "/api/p/vault", ""); list["guard"].(map[string]any)["webauthn"] != false {
+		t.Errorf("an origin not vouched for may add credentials: %v", list["guard"])
+	}
+	// ...and a program that posts that page's assertion as the UI's own
+	// request is refused by what the browser signed: the page's origin.
+	c.origin, c.untrusted = testOrigin, false
+	nonce, _ = c.nonce(t, `{"for":"session"}`)
+	refused("another port's assertion posted as the UI's", a.assertion(t, nonce, "http://localhost:3000"))
 
 	// A locked vault takes no proof (it holds no key), and its nonces end.
 	nonce, _ = c.nonce(t, `{"for":"session"}`)
@@ -476,5 +502,103 @@ func TestProofNoncesAreBounded(t *testing.T) {
 	p.mu.Unlock()
 	if n != MaxProofs || kept {
 		t.Errorf("%d nonces, the first kept: %v", n, kept)
+	}
+}
+
+// Where every Allow is verified, what lets a value out another way needs
+// the user's word too: showing it to the page, and letting more machines
+// read it or the model see it. Ending the rule takes the passphrase.
+func TestVerifyEveryAllowCoversValuesAndGrants(t *testing.T) {
+	p, h, _ := newTest(t)
+	c := newClient(p, h)
+	c.origin = testOrigin
+	c.session(t)
+	if code, _ := c.do("PUT", "/api/p/vault/vars/KEY", `{"value":"s3cret","machines":["m1"],"injectOnly":true}`); code != 200 {
+		t.Fatal(code)
+	}
+	if code, _ := c.do("PUT", "/api/p/vault/vars/OTHER", `{"value":"x","machines":[]}`); code != 200 {
+		t.Fatal(code)
+	}
+	a := newAuthenticator(t)
+	c.register(t, a)
+	if code, _ := c.do("POST", "/api/p/vault/guard", `{"verifyEachAllow":true}`); code != 200 {
+		t.Fatal(code)
+	}
+	needs := func(what string, code int, out map[string]any) {
+		t.Helper()
+		if code != 401 || out["error"] != "vault_proof" {
+			t.Errorf("%s: %d %v", what, code, out)
+		}
+	}
+	proof := func(purpose map[string]string) map[string]string {
+		t.Helper()
+		nonce, _ := c.nonce(t, mustJSON(purpose))
+		return a.assertion(t, nonce, c.origin)
+	}
+	// Showing a value: the session is not enough, nor a proof for another
+	// variable or purpose.
+	code, out := c.do("POST", "/api/p/vault/vars/KEY/reveal", "")
+	needs("a reveal with a session", code, out)
+	code, out = c.do("POST", "/api/p/vault/vars/KEY/reveal", mustJSON(map[string]any{"proof": proof(map[string]string{"for": "reveal", "request": "OTHER"})}))
+	needs("a proof for another variable", code, out)
+	code, out = c.do("POST", "/api/p/vault/vars/KEY/reveal", mustJSON(map[string]any{"proof": proof(map[string]string{"for": "change", "request": "KEY"})}))
+	needs("a proof for another purpose", code, out)
+	if code, out := c.do("POST", "/api/p/vault/vars/KEY/reveal", mustJSON(map[string]any{"proof": proof(map[string]string{"for": "reveal", "request": "KEY"})})); code != 200 || out["value"] != "s3cret" {
+		t.Errorf("a reveal with its proof: %d %v", code, out)
+	}
+	if code, out := c.do("POST", "/api/p/vault/vars/KEY/reveal", mustJSON(map[string]string{"passphrase": pass})); code != 200 || out["value"] != "s3cret" {
+		t.Errorf("a reveal with the passphrase: %d %v", code, out)
+	}
+	if code, _ := c.do("POST", "/api/p/vault/proof", `{"for":"reveal","request":"NOPE"}`); code != 404 {
+		t.Errorf("a nonce for no variable: %d", code)
+	}
+	// Letting another machine read, every machine, or the model see it.
+	for what, body := range map[string]string{
+		"another machine": `{"machines":["m1","m2"]}`, "every machine": `{"machines":["*"]}`, "no longer inject-only": `{"injectOnly":false}`,
+	} {
+		code, out := c.do("PUT", "/api/p/vault/vars/KEY", body)
+		needs(what+" with a session", code, out)
+	}
+	if i, _ := p.store.Get("KEY"); len(i.Machines) != 1 || !i.InjectOnly {
+		t.Fatalf("changed by refused requests: %+v", i)
+	}
+	if code, out := c.do("PUT", "/api/p/vault/vars/KEY", mustJSON(map[string]any{"machines": []string{"m1", "m2"}, "proof": proof(map[string]string{"for": "change", "request": "KEY"})})); code != 200 {
+		t.Errorf("a grant with its proof: %d %v", code, out)
+	}
+	// What narrows or leaves the readers needs only the session, and so
+	// does a new variable, whose value the page brings itself.
+	for what, body := range map[string]string{
+		"fewer machines": `{"machines":["m1"]}`, "a description": `{"description":"d"}`, "a new value": `{"value":"n3w"}`, "inject-only": `{"injectOnly":true}`,
+	} {
+		if code, out := c.do("PUT", "/api/p/vault/vars/KEY", body); code != 200 {
+			t.Errorf("%s: %d %v", what, code, out)
+		}
+	}
+	if code, out := c.do("PUT", "/api/p/vault/vars/NEW", `{"value":"v","machines":["*"]}`); code != 200 {
+		t.Errorf("a new variable: %d %v", code, out)
+	}
+	// The rule ends with the passphrase, not with the session that set it.
+	if code, out := c.do("POST", "/api/p/vault/guard", `{"verifyEachAllow":false}`); code != 403 || out["error"] != "wrong_passphrase" {
+		t.Errorf("ending the rule with a session: %d %v", code, out)
+	}
+	if code, out := c.do("POST", "/api/p/vault/guard", `{"verifyEachAllow":false,"passphrase":"wrong horse"}`); code != 403 {
+		t.Errorf("a wrong passphrase: %d %v", code, out)
+	}
+	p.tried(true, false)
+	if g, _ := p.store.Guard(); !g.VerifyEachAllow {
+		t.Fatal("the rule ended without the passphrase")
+	}
+	if code, out := c.do("POST", "/api/p/vault/guard", mustJSON(map[string]any{"verifyEachAllow": false, "passphrase": pass})); code != 200 {
+		t.Fatalf("ending the rule with the passphrase: %d %v", code, out)
+	}
+	// Without the rule a session shows values and grants as before.
+	if code, _ := c.do("POST", "/api/p/vault/vars/KEY/reveal", ""); code != 200 {
+		t.Errorf("a reveal without the rule: %d", code)
+	}
+	if code, _ := c.do("PUT", "/api/p/vault/vars/KEY", `{"machines":["*"]}`); code != 200 {
+		t.Errorf("a grant without the rule: %d", code)
+	}
+	if !strings.Contains(h.auditLog(), "denied.vault_proof") {
+		t.Errorf("audit %s", h.auditLog())
 	}
 }

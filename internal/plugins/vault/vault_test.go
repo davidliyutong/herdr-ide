@@ -396,11 +396,13 @@ func mustJSON(v any) string {
 type client struct {
 	mux *http.ServeMux
 	tok string
-	// origin is the page's (the Origin header of its requests), kind the
-	// kind of client, desktop the check of the desktop shell's MACs.
-	origin  string
-	kind    plugin.Client
-	desktop func(msg, mac []byte) bool
+	// origin is the page's (the Origin header of its requests), which the
+	// core vouches for unless untrusted; kind the kind of client, desktop
+	// the check of the desktop shell's MACs.
+	origin    string
+	untrusted bool
+	kind      plugin.Client
+	desktop   func(msg, mac []byte) bool
 }
 
 func newClient(p *Plugin, h *fakeHost) *client {
@@ -408,7 +410,11 @@ func newClient(p *Plugin, h *fakeHost) *client {
 	for _, rt := range p.Routes() {
 		rt := rt
 		c.mux.HandleFunc(plugin.Pattern(ID, rt), func(w http.ResponseWriter, r *http.Request) {
-			rt.Handler(&plugin.Call{Host: h, Client: c.kind, DesktopProof: c.desktop}, w, r)
+			call := &plugin.Call{Host: h, Client: c.kind, DesktopProof: c.desktop}
+			if !c.untrusted {
+				call.TrustedOrigin = c.origin
+			}
+			rt.Handler(call, w, r)
 		})
 	}
 	return c

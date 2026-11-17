@@ -2,6 +2,8 @@
 // password managers away (a passphrase a browser saved is readable by
 // programs on the computer in several browsers) and a rough strength.
 
+import { t } from '../../i18n';
+
 /** Password managers are kept away from passphrase fields. */
 export const noManager = {
   autoComplete: 'off',
@@ -33,4 +35,22 @@ export function StrengthBar({ value }: { value: string }) {
 /** A passphrase's length in characters (as the core counts them). */
 export function chars(s: string): number {
   return [...s].length;
+}
+
+/** The passphrase field of an action that, where every Allow is verified,
+ * needs the user's word and has no authenticator to give it. */
+export function FreshPassphrase({ value, onChange }: { value: string; onChange(v: string): void }) {
+  return (
+    <input
+      className="input"
+      type="password"
+      {...noManager}
+      autoFocus
+      data-field="fresh-passphrase"
+      placeholder={t('vault.fresh.passphrase')}
+      aria-label={t('vault.fresh.passphrase')}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  );
 }

@@ -126,6 +126,85 @@ func TestPluginCallClient(t *testing.T) {
 	}
 }
 
+// The core vouches for an origin only when no other program serves pages of
+// it: an --allowed-origin, or http://localhost on its own port once it
+// holds that port on both loopback addresses, asked for under that Host
+// from this host. A fingerprint is bound to such an origin only.
+func TestTrustedOrigin(t *testing.T) {
+	s := newTestServer("https://ide.example.com")
+	req := func(host, origin, remote, forwarded string) *http.Request {
+		r := httptest.NewRequest("POST", "/api/p/fake/things/x", nil)
+		r.Host, r.RemoteAddr = host, remote
+		if origin != "" {
+			r.Header.Set("Origin", origin)
+		}
+		if forwarded != "" {
+			r.Header.Set("X-Forwarded-For", forwarded)
+		}
+		return r
+	}
+	const here = "127.0.0.1:50000"
+	// Before the core holds both loopback addresses, not even its own.
+	if got := s.trustedOrigin(req("localhost:7780", "http://localhost:7780", here, "")); got != "" {
+		t.Errorf("localhost before both addresses are held: %q", got)
+	}
+	s.OwnLocalhost("7780")
+	for _, c := range []struct{ host, origin, remote, forwarded, want string }{
+		{"localhost:7780", "http://localhost:7780", here, "", "http://localhost:7780"},
+		{"LocalHost:7780", "http://LOCALHOST:7780", "[::1]:50000", "", "http://localhost:7780"},
+		{"ide.example.com", "https://ide.example.com", "10.0.0.7:4000", "10.0.0.9", "https://ide.example.com"},
+		// Another program's page on localhost, whatever Host its request names.
+		{"localhost:3000", "http://localhost:3000", here, "", ""},
+		{"localhost:7780", "http://localhost:3000", here, "", ""},
+		// An address is no name a credential can be for; other names of
+		// loopback are not the core's to vouch for.
+		{"127.0.0.1:7780", "http://127.0.0.1:7780", here, "", ""},
+		{"app.localhost:7780", "http://app.localhost:7780", here, "", ""},
+		{"localhost:7780", "https://localhost:7780", here, "", ""},
+		// Through a proxy or from another host it is the proxy's origin
+		// that counts, which the operator names.
+		{"localhost:7780", "http://localhost:7780", here, "10.0.0.9", ""},
+		{"localhost:7780", "http://localhost:7780", "10.0.0.7:4000", "", ""},
+		{"ide.example.com", "http://ide.example.com", "10.0.0.7:4000", "", ""},
+		{"localhost:7780", "", here, "", ""},
+		{"localhost:7780", "null", here, "", ""},
+	} {
+		if got := s.trustedOrigin(req(c.host, c.origin, c.remote, c.forwarded)); got != c.want {
+			t.Errorf("host %s origin %s from %s (forwarded %q): %q, want %q", c.host, c.origin, c.remote, c.forwarded, got, c.want)
+		}
+	}
+	// A page's own GET carries no Origin: the page's word that the request
+	// is its own stands for it, under the scheme the core vouches for.
+	get := func(host, site, remote, forwarded string) string {
+		r := req(host, "", remote, forwarded)
+		r.Method = "GET"
+		if site != "" {
+			r.Header.Set("Sec-Fetch-Site", site)
+		}
+		return s.trustedOrigin(r)
+	}
+	for _, c := range []struct{ host, site, remote, forwarded, want string }{
+		{"localhost:7780", "same-origin", here, "", "http://localhost:7780"},
+		{"ide.example.com", "same-origin", "10.0.0.7:4000", "10.0.0.9", "https://ide.example.com"},
+		{"localhost:7780", "", here, "", ""},
+		{"localhost:7780", "same-site", here, "", ""},
+		{"localhost:7780", "cross-site", here, "", ""},
+		{"localhost:3000", "same-origin", here, "", ""},
+		{"127.0.0.1:7780", "same-origin", here, "", ""},
+	} {
+		if got := get(c.host, c.site, c.remote, c.forwarded); got != c.want {
+			t.Errorf("GET host %s site %q: %q, want %q", c.host, c.site, got, c.want)
+		}
+	}
+	// Not for a request that changes something: there a browser sends
+	// the Origin itself.
+	r := req("localhost:7780", "", here, "")
+	r.Header.Set("Sec-Fetch-Site", "same-origin")
+	if got := s.trustedOrigin(r); got != "" {
+		t.Errorf("a POST without Origin: %q", got)
+	}
+}
+
 func TestPluginDisabled(t *testing.T) {
 	ps := []plugin.Plugin{fakePlugin{}}
 	st := settings.New("", plugin.Settings(ps, nil))

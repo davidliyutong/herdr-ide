@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { helloFor, MESSAGE_VAR, POWERSHELL_ARGS, type RunPowerShell } from './windowsHello';
+import { helloFor, MESSAGE_VAR, POWERSHELL_ARGS, powershellPath, type RunPowerShell } from './windowsHello';
 
 function hello(out: string | Error) {
   const calls: Array<{ script: string; env: Record<string, string> }> = [];
@@ -14,6 +14,14 @@ function hello(out: string | Error) {
 
 test('PowerShell runs without profile or questions, reading the script from stdin', () => {
   assert.deepEqual(POWERSHELL_ARGS, ['-NoProfile', '-NonInteractive', '-Command', '-']);
+});
+
+test('PowerShell is run by its full path under the system directory', () => {
+  const tail = 'System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+  assert.equal(powershellPath('D:\\WinNT'), `D:\\WinNT\\${tail}`);
+  assert.equal(powershellPath('C:\\Windows\\'), `C:\\Windows\\${tail}`);
+  assert.equal(powershellPath(undefined), `C:\\Windows\\${tail}`);
+  assert.equal(powershellPath(''), `C:\\Windows\\${tail}`);
 });
 
 test('available only for the output Available', async () => {

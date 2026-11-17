@@ -147,6 +147,12 @@ type Plugin struct {
 	// set the countdown (lockForSet; 0: never).
 	lockFor    time.Duration
 	lockForSet bool
+	// lockCap is vault.autoLock's time when the vault was unlocked
+	// (lockCapSet; 0: never): the setting, which programs change without
+	// the gate, shortens the current unlock's time but does not lengthen
+	// it.
+	lockCap    time.Duration
+	lockCapSet bool
 }
 
 type session struct {
@@ -542,12 +548,27 @@ func (p *Plugin) handleSet(c *plugin.Call, w http.ResponseWriter, r *http.Reques
 		fail(w, err)
 		return
 	}
-	var u vaultstore.Update
-	if err := plugin.ReadJSON(r, vaultstore.MaxValue*8, &u); err != nil {
+	var body struct {
+		vaultstore.Update
+		fresh
+	}
+	if err := plugin.ReadJSON(r, vaultstore.MaxValue*8, &body); err != nil {
 		plugin.WriteError(w, err)
 		return
 	}
+	u := body.Update
 	from := r.PathValue("name")
+	// Where every Allow is verified, letting more machines read a variable
+	// without asking, or the model see one that was only injected, is an
+	// Allow: it needs the user's word for it, as allowing a request does.
+	if cur, exists := s.Get(from); exists && widens(cur, u) && strict(s) {
+		if given, ok := p.verified(c, w, r, s, body.fresh, purpose{For: ForChange, Request: from}); !given {
+			needFresh(c, w, r)
+			return
+		} else if !ok {
+			return
+		}
+	}
 	if err := s.Set(from, u); err != nil {
 		if errors.Is(err, vaultstore.ErrLocked) {
 			changed(c.Host) // pages that took it for unlocked learn otherwise
@@ -571,6 +592,23 @@ func (p *Plugin) handleSet(c *plugin.Call, w http.ResponseWriter, r *http.Reques
 	}
 	c.Host.Audit(r, "vault.saved", fields)
 	plugin.WriteJSON(w, http.StatusOK, i)
+}
+
+// widens reports whether a change lets a variable's value go where it did
+// not: to a machine that had to ask, or to the model's reach when it was
+// inject-only.
+func widens(cur vaultstore.Info, u vaultstore.Update) bool {
+	if u.InjectOnly != nil && cur.InjectOnly && !*u.InjectOnly {
+		return true
+	}
+	if u.Machines != nil {
+		for _, m := range *u.Machines {
+			if !cur.Allows(m) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (p *Plugin) handleDelete(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
@@ -597,6 +635,23 @@ func (p *Plugin) handleReveal(c *plugin.Call, w http.ResponseWriter, r *http.Req
 		return
 	}
 	name := r.PathValue("name")
+	// Where every Allow is verified a value shown to the page is one too:
+	// the request brings a proof made for this variable, or the passphrase.
+	if strict(s) {
+		var f fresh
+		if r.ContentLength != 0 {
+			if err := plugin.ReadJSON(r, 64<<10, &f); err != nil {
+				plugin.WriteError(w, err)
+				return
+			}
+		}
+		if given, ok := p.verified(c, w, r, s, f, purpose{For: ForReveal, Request: name}); !given {
+			needFresh(c, w, r)
+			return
+		} else if !ok {
+			return
+		}
+	}
 	v, err := s.Value(name)
 	if err != nil {
 		fail(w, err)
@@ -645,9 +700,13 @@ func (p *Plugin) handleSession(c *plugin.Call, w http.ResponseWriter, r *http.Re
 	if p.keyStep != nil {
 		p.keyStep()
 	}
+	wasLocked := s.Status().Locked
 	err = s.Unlock(body.Passphrase)
 	p.tried(err == nil, errors.Is(err, vaultstore.ErrPassphrase))
 	tok := ""
+	if err == nil && wasLocked {
+		p.capLock(c.Host)
+	}
 	if err == nil {
 		if tok = p.newSession(c.Host, epoch, false); tok == "" {
 			// The sessions ended while the check ran, which keyMu leaves
@@ -741,6 +800,8 @@ func (p *Plugin) handlePassphrase(c *plugin.Call, w http.ResponseWriter, r *http
 			p.keyStep()
 		}
 		tok = p.newSession(c.Host, p.endSessions(), false)
+		// A new key, set with the passphrase, unlocks as an unlock does.
+		p.capLock(c.Host)
 	}
 	p.keyMu.Unlock()
 	c.Host.Audit(r, "vault.passphrase_set", map[string]any{"ok": err == nil, "change": change})
@@ -813,11 +874,10 @@ func (p *Plugin) resolve(req *Request, answer string) bool {
 func (p *Plugin) handleAnswer(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Answer string `json:"answer"`
-		// Proof is an authenticator's, made for this request and answer;
-		// Passphrase the vault's, again. Either stands for a session, and
-		// one of them is needed where every Allow is verified.
-		Proof      *proofBody `json:"proof"`
-		Passphrase string     `json:"passphrase"`
+		// A proof made for this request and answer, or the passphrase
+		// again: either stands for a session, and one of them is needed
+		// where every Allow is verified.
+		fresh
 	}
 	if err := plugin.ReadJSON(r, 64<<10, &body); err != nil {
 		plugin.WriteError(w, err)
@@ -828,7 +888,7 @@ func (p *Plugin) handleAnswer(c *plugin.Call, w http.ResponseWriter, r *http.Req
 	case AnswerOnce, AnswerAlways:
 		// Letting a value out is the user's, behind the gate; denying
 		// needs no proof.
-		if !p.mayAllow(c, w, r, id, body.Answer, body.Proof, body.Passphrase) {
+		if !p.mayAllow(c, w, r, id, body.Answer, body.fresh) {
 			return
 		}
 	case AnswerDeny:
@@ -850,45 +910,19 @@ func (p *Plugin) handleAnswer(c *plugin.Call, w http.ResponseWriter, r *http.Req
 // mayAllow reports whether the request may allow request id (answer once
 // or always), having answered it otherwise: with a proof made for this
 // request and answer, with the passphrase again, or with a session, unless
-// the vault's rule wants every Allow verified (then a session is not
-// enough: a program driving the page's session cannot allow).
-func (p *Plugin) mayAllow(c *plugin.Call, w http.ResponseWriter, r *http.Request, id, answer string, pb *proofBody, passphrase string) bool {
+// every Allow is verified (then a session is not enough: a program driving
+// the page's session cannot allow).
+func (p *Plugin) mayAllow(c *plugin.Call, w http.ResponseWriter, r *http.Request, id, answer string, f fresh) bool {
 	s, err := p.open(c.Host)
 	if err != nil {
 		fail(w, err)
 		return false
 	}
-	switch {
-	case pb != nil:
-		want := purpose{For: ForAnswer, Request: id, Answer: answer}
-		kind, err := p.checkProof(c, r, s, pb, want)
-		if err != nil {
-			refuseProof(c, w, r, err, want)
-			return false
-		}
-		c.Host.Audit(r, "vault.proved", map[string]any{"ok": true, "for": want.For, "kind": kind})
-		p.touch(c.Host)
-		return true
-	case passphrase != "":
-		if st := s.Status(); st.Mode != vaultstore.ModePassphrase || st.Locked {
-			fail(w, vaultstore.ErrLocked)
-			return false
-		}
-		if p.slowDown(w) {
-			return false
-		}
-		err := s.Verify(passphrase)
-		p.tried(err == nil, errors.Is(err, vaultstore.ErrPassphrase))
-		if err != nil {
-			fail(w, err)
-			return false
-		}
-		p.touch(c.Host)
-		return true
+	if given, ok := p.verified(c, w, r, s, f, purpose{For: ForAnswer, Request: id, Answer: answer}); given {
+		return ok
 	}
-	if g, err := s.Guard(); err == nil && g.VerifyEachAllow {
-		c.Host.Audit(r, "denied.vault_proof", map[string]any{"route": r.Method + " " + r.URL.Path})
-		plugin.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "vault_proof", "message": "every Allow is verified: an authenticator's proof or the vault's passphrase is needed"})
+	if strict(s) {
+		needFresh(c, w, r)
 		return false
 	}
 	if !p.sessionOf(c.Host, r, true) {

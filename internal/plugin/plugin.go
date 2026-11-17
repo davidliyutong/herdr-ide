@@ -50,6 +50,15 @@ type Call struct {
 	Machine *machines.Machine
 	// Client is the kind of client the request comes from.
 	Client Client
+	// TrustedOrigin is the request's Origin when the core vouches that no
+	// other program serves pages of it: an --allowed-origin, or
+	// http://localhost on the core's own port while the core holds that
+	// port on both loopback addresses. "" for every other origin and for
+	// a request without one, but a page's own GET, which a browser sends
+	// without Origin (Sec-Fetch-Site: same-origin and the request's Host
+	// stand for it there). What a browser binds to an origin (a WebAuthn
+	// credential) is taken only for such an origin.
+	TrustedOrigin string
 	// DesktopProof checks a MAC that the desktop app's shell made of msg
 	// with the key of its launch: the shell's word that the user answered
 	// a prompt of the system (Touch ID, Windows Hello). Nil in a core the

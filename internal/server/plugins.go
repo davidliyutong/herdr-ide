@@ -70,7 +70,7 @@ func (s *Server) pluginRoutes() []route {
 					writeJSON(w, http.StatusNotFound, map[string]string{"error": "plugin_disabled"})
 					return
 				}
-				c := &plugin.Call{Host: host, Client: s.clientOf(r), DesktopProof: s.desktopProof()}
+				c := &plugin.Call{Host: host, Client: s.clientOf(r), DesktopProof: s.desktopProof(), TrustedOrigin: s.trustedOrigin(r)}
 				if rt.Machine {
 					if c.Machine = s.machine(w, r); c.Machine == nil {
 						return

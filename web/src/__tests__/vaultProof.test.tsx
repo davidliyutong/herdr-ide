@@ -17,7 +17,7 @@ import { useDialog } from '../dialog';
 import { t } from '../i18n';
 import { VaultPanel } from '../plugins/vault/VaultPanel';
 import { RequestCard } from '../plugins/vault/Approvals';
-import { endSession, useVault, type VaultGuard, type VaultRequest } from '../plugins/vault/api';
+import { endSession, useVault, type VaultGuard, type VaultRequest, type VaultVariable } from '../plugins/vault/api';
 import { b64urlDecode, b64urlEncode, localhostUrl, prove, ways, webauthnState } from '../plugins/vault/proof';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -45,12 +45,19 @@ const auth = (over: Partial<VaultGuard['authenticators'][number]> = {}) => ({
   id: 'a1',
   kind: 'webauthn' as const,
   label: 'Laptop',
+  origin: location.origin,
   rpId: 'localhost',
   created: '2026-03-01T00:00:00Z',
   lastUsed: '2026-03-05T00:00:00Z',
   ...over,
 });
-const guardOf = (over: Partial<VaultGuard> = {}): VaultGuard => ({ authenticators: [], verifyEachAllow: false, desktop: false, ...over });
+const guardOf = (over: Partial<VaultGuard> = {}): VaultGuard => ({
+  authenticators: [],
+  verifyEachAllow: false,
+  desktop: false,
+  webauthn: true,
+  ...over,
+});
 
 const REQ: VaultRequest = {
   id: 'r1',
@@ -79,6 +86,9 @@ describe('vault authenticators', () => {
   let creds: string[];
   let desktopUsable: boolean;
   let refuseProof: boolean;
+  let variables: VaultVariable[];
+  // The core's rule, which the page may not know yet.
+  let serverRule: boolean;
   let get: ReturnType<typeof vi.fn>;
   let create: ReturnType<typeof vi.fn>;
 
@@ -88,6 +98,8 @@ describe('vault authenticators', () => {
     creds = [];
     desktopUsable = false;
     refuseProof = false;
+    variables = [];
+    serverRule = false;
     get = vi.fn(async () => assertion());
     create = vi.fn(async () => ({
       rawId: new Uint8Array([9, 9, 9]).buffer,
@@ -128,7 +140,7 @@ describe('vault authenticators', () => {
           session: open,
           sessionProof: token === PROOF_TOKEN,
           idle: 600,
-          variables: [],
+          variables,
           guard,
         });
       if (url === '/api/p/vault/log') return json({ log: [] });
@@ -140,6 +152,17 @@ describe('vault authenticators', () => {
         return body.passphrase === PASS
           ? json({ session: PASS_TOKEN, status: { mode: 'passphrase', locked: false } })
           : json({ error: 'wrong_passphrase' }, 403);
+      }
+      if (url.startsWith('/api/p/vault/vars/')) {
+        const name = decodeURIComponent(url.split('/')[5]);
+        const rule = serverRule || !!guard?.verifyEachAllow;
+        const widening = method === 'PUT' && body.injectOnly === false;
+        if ((url.endsWith('/reveal') || widening) && rule) {
+          if (body?.proof && refuseProof) return json({ error: 'vault_proof' }, 401);
+          if (body?.passphrase && body.passphrase !== PASS) return json({ error: 'wrong_passphrase' }, 403);
+          if (!body?.proof && !body?.passphrase) return json({ error: 'vault_proof' }, 401);
+        }
+        return url.endsWith('/reveal') ? json({ value: 'secret-' + name }) : json({ name, machines: [], injectOnly: body.injectOnly });
       }
       if (url.startsWith('/api/p/vault/requests/')) {
         if (body.proof && refuseProof) return json({ error: 'vault_proof' }, 401);
@@ -158,6 +181,8 @@ describe('vault authenticators', () => {
         return json({ guard });
       }
       if (url === '/api/p/vault/guard') {
+        // Ending the rule takes the passphrase.
+        if (!body.verifyEachAllow && guard?.verifyEachAllow && body.passphrase !== PASS) return json({ error: 'wrong_passphrase' }, 403);
         guard = { ...guard!, verifyEachAllow: body.verifyEachAllow };
         return json({ guard });
       }
@@ -212,7 +237,12 @@ describe('vault authenticators', () => {
       const web = guardOf({ authenticators: [auth()] });
       expect(ways(web)).toEqual({ desktop: false, webauthn: true });
       // A credential of another host is of no use here.
-      expect(ways(guardOf({ authenticators: [auth({ rpId: 'other.example' })] })).webauthn).toBe(false);
+      expect(ways(guardOf({ authenticators: [auth({ rpId: 'other.example', origin: 'https://other.example' })] })).webauthn).toBe(false);
+      // The same host name from another origin (another port or scheme) is not this page's.
+      expect(ways(guardOf({ authenticators: [auth({ origin: 'http://localhost:1' })] })).webauthn).toBe(false);
+      expect(ways(guardOf({ authenticators: [auth({ origin: undefined })] })).webauthn).toBe(false);
+      // The core does not vouch for this origin.
+      expect(ways(guardOf({ authenticators: [auth()], webauthn: false })).webauthn).toBe(false);
       expect(ways(null)).toEqual({ desktop: false, webauthn: false });
       const desk = guardOf({ authenticators: [auth({ kind: 'desktop', rpId: undefined })], desktop: true });
       // The guard has it but the page is no desktop app.
@@ -225,16 +255,20 @@ describe('vault authenticators', () => {
     });
 
     it('knows an IP host and an insecure page, and the localhost address of a loopback one', () => {
-      expect(webauthnState()).toBe('ready');
+      expect(webauthnState(guardOf())).toBe('ready');
+      // On a name the core does not vouch for: a note, no adding.
+      expect(webauthnState(guardOf({ webauthn: false }))).toBe('untrusted');
+      expect(webauthnState(null)).toBe('untrusted');
       Object.defineProperty(window, 'isSecureContext', { value: false, configurable: true });
-      expect(webauthnState()).toBe('unavailable');
+      expect(webauthnState(guardOf())).toBe('unavailable');
       Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true });
       vi.stubGlobal('location', { hostname: '127.0.0.1', port: '8080', pathname: '/x', search: '?a=1' });
-      expect(webauthnState()).toBe('ip-host');
+      expect(webauthnState(guardOf())).toBe('ip-host');
       expect(localhostUrl()).toBe('http://localhost:8080/x?a=1');
       expect(ways(guardOf({ authenticators: [auth({ rpId: '127.0.0.1' })] })).webauthn).toBe(false);
+      expect(webauthnState(guardOf())).toBe('ip-host');
       vi.stubGlobal('location', { hostname: '192.168.1.5', port: '8080', pathname: '/', search: '' });
-      expect(webauthnState()).toBe('ip-host');
+      expect(webauthnState(guardOf())).toBe('ip-host');
       expect(localhostUrl()).toBeNull();
     });
   });
@@ -476,6 +510,190 @@ describe('vault authenticators', () => {
       expect(urls.indexOf('POST /api/p/vault/session', urls.indexOf('POST /api/p/vault/session') + 1)).toBeGreaterThan(-1);
       expect(calls.find((c) => c.url.endsWith('/guard'))).toMatchObject({ token: PASS_TOKEN, body: { verifyEachAllow: true } });
       expect(useVault.getState().sessionProof).toBe(false);
+    });
+
+    it('shows the origin of a credential and offers adding only where the core vouches for the page', async () => {
+      guard = guardOf({ authenticators: [auth(), auth({ id: 'a2', origin: 'http://localhost:1', label: 'Other port' })] });
+      await renderPanel();
+      await unlock();
+      const rows = [...section()!.querySelectorAll<HTMLElement>('[data-auth]')];
+      expect(rows[0].textContent).toContain(location.origin);
+      expect(rows[1].textContent).toContain('http://localhost:1');
+      expect(section()!.querySelector('[data-action="add-webauthn"]')).not.toBeNull();
+      expect(section()!.querySelector('[data-note="untrusted"]')).toBeNull();
+      guard = { ...guard!, webauthn: false };
+      await act(async () => void (await import('../plugins/vault/api')).loadVault());
+      await flush();
+      expect(section()!.querySelector('[data-action="add-webauthn"]')).toBeNull();
+      expect(section()!.querySelector('[data-note="untrusted"]')?.textContent).toBe(t('vault.guard.untrusted'));
+    });
+
+    it('ending the rule asks for the passphrase and sends it; turning it on needs none', async () => {
+      guard = guardOf({ verifyEachAllow: true });
+      await renderPanel();
+      await unlock();
+      const box = () => section()!.querySelector<HTMLInputElement>('[data-switch="verify"] input')!;
+      expect(host.querySelector('[data-field="guard-passphrase"]')).not.toBeNull();
+      await click('[data-switch="verify"] input');
+      expect(calls.some((c) => c.url.endsWith('/guard'))).toBe(false);
+      expect(section()!.querySelector('.callout.error')?.textContent).toBe(t('vault.guard.needPassphrase'));
+      expect(box().checked).toBe(true);
+      await act(async () => type(host.querySelector<HTMLInputElement>('[data-field="guard-passphrase"]')!, PASS));
+      await click('[data-switch="verify"] input');
+      expect(calls.find((c) => c.url.endsWith('/guard'))?.body).toEqual({ verifyEachAllow: false, passphrase: PASS });
+      expect(box().checked).toBe(false);
+      await click('[data-switch="verify"] input');
+      expect(calls.filter((c) => c.url.endsWith('/guard')).pop()?.body).toEqual({ verifyEachAllow: true });
+    });
+  });
+
+  describe('a variable where every Allow is verified', () => {
+    const VAR: VaultVariable = { name: 'API', description: '', machines: [], injectOnly: true, created: '', updated: '' };
+    const ruled = (over: Partial<VaultGuard> = {}) => guardOf({ verifyEachAllow: true, ...over });
+    const reveals = () => calls.filter((c) => c.url === '/api/p/vault/vars/API/reveal');
+    const puts = () => calls.filter((c) => c.method === 'PUT');
+    const proofs = () => calls.filter((c) => c.url === '/api/p/vault/proof');
+    const confirm = async () => {
+      const dlg = useDialog.getState().current;
+      await act(async () => {
+        if (dlg?.kind === 'confirm') dlg.resolve(true);
+      });
+      await flush();
+    };
+    const reveal = async () => {
+      await click('[data-name="API"] [data-action="reveal"]');
+      await confirm();
+    };
+    const editor = () => document.body.querySelector<HTMLFormElement>('.vault-editor');
+    const open = async () => {
+      variables = [VAR];
+      await renderPanel();
+      await unlock();
+    };
+    const widen = async () => {
+      await click('[data-name="API"] [data-action="edit"]');
+      await act(async () => editor()!.querySelector<HTMLElement>('[role="switch"]')!.click());
+    };
+    const submit = async () => {
+      await act(async () => editor()!.querySelector<HTMLButtonElement>('button[type="submit"]')!.click());
+      await flush();
+    };
+    const fresh = () => document.body.querySelector<HTMLInputElement>('[data-field="fresh-passphrase"]');
+
+    it('shows a value by a proof made for its name, before the first request', async () => {
+      creds = [CRED];
+      guard = ruled({ authenticators: [auth()] });
+      await open();
+      await reveal();
+      expect(proofs()[0].body).toEqual({ for: 'reveal', request: 'API' });
+      expect(reveals()).toHaveLength(1);
+      expect(reveals()[0].body.proof).toMatchObject({ nonce: NONCE, credential: CRED });
+      expect(host.querySelector('.vault-value')?.textContent).toContain('secret-API');
+    });
+
+    it('shows a value by the passphrase when no proof can be made, and keeps asking after a wrong one', async () => {
+      guard = ruled();
+      await open();
+      await reveal();
+      expect(reveals()).toHaveLength(0);
+      const field = () => host.querySelector<HTMLInputElement>('[data-fresh="reveal"] input')!;
+      expect(field()).not.toBeNull();
+      await act(async () => type(field(), 'nope'));
+      await act(async () => host.querySelector<HTMLButtonElement>('[data-fresh="reveal"] button[type="submit"]')!.click());
+      await flush();
+      expect(reveals()[0].body).toEqual({ passphrase: 'nope' });
+      expect(host.querySelector('.callout.error')?.textContent).toBe(t('vault.error.wrong_passphrase'));
+      expect(host.querySelector('.vault-value')).toBeNull();
+      await act(async () => type(field(), PASS));
+      await act(async () => host.querySelector<HTMLButtonElement>('[data-fresh="reveal"] button[type="submit"]')!.click());
+      await flush();
+      expect(reveals()[1].body).toEqual({ passphrase: PASS });
+      expect(host.querySelector('.vault-value')?.textContent).toContain('secret-API');
+      expect(host.querySelector('[data-fresh="reveal"]')).toBeNull();
+    });
+
+    it('sends nothing extra while the page does not know of the rule, then answers vault_proof with a proof', async () => {
+      creds = [CRED];
+      guard = guardOf({ authenticators: [auth()] });
+      serverRule = true;
+      await open();
+      await reveal();
+      expect(reveals()).toHaveLength(2);
+      expect(reveals()[0].body).toBeUndefined();
+      expect(reveals()[1].body.proof).toBeDefined();
+      expect(host.querySelector('.vault-value')).not.toBeNull();
+    });
+
+    it('leaves the row as it was when the proof is cancelled or refused', async () => {
+      creds = [CRED];
+      guard = ruled({ authenticators: [auth()] });
+      await open();
+      get.mockRejectedValueOnce(new DOMException('no', 'NotAllowedError'));
+      await reveal();
+      expect(reveals()).toHaveLength(0);
+      expect(host.querySelector('.callout.error')?.textContent).toBe(t('vault.proof.cancelled'));
+      expect(host.querySelector('.vault-value')).toBeNull();
+      refuseProof = true;
+      await reveal();
+      expect(host.querySelector('.callout.error')?.textContent).toBe(t('vault.error.vault_proof'));
+      expect(host.querySelector('.vault-value')).toBeNull();
+    });
+
+    it('saves a widening change by a proof made for the variable’s current name', async () => {
+      creds = [CRED];
+      guard = ruled({ authenticators: [auth()] });
+      await open();
+      await widen();
+      await submit();
+      expect(proofs()[0].body).toEqual({ for: 'change', request: 'API' });
+      expect(puts()).toHaveLength(1);
+      expect(puts()[0].body).toMatchObject({ injectOnly: false, proof: { nonce: NONCE, credential: CRED } });
+      expect(editor()).toBeNull();
+    });
+
+    it('saves a widening change by the passphrase, asked in the editor', async () => {
+      guard = ruled();
+      await open();
+      await widen();
+      await submit();
+      expect(puts()).toHaveLength(0);
+      expect(editor()).not.toBeNull();
+      expect(fresh()).not.toBeNull();
+      expect(editor()!.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(true);
+      await act(async () => type(fresh()!, PASS));
+      await submit();
+      expect(puts()[0].body).toMatchObject({ injectOnly: false, passphrase: PASS });
+      expect(editor()).toBeNull();
+    });
+
+    it('keeps the editor when the proof is cancelled or refused', async () => {
+      creds = [CRED];
+      guard = ruled({ authenticators: [auth()] });
+      await open();
+      await widen();
+      get.mockRejectedValueOnce(new DOMException('no', 'NotAllowedError'));
+      await submit();
+      expect(puts()).toHaveLength(0);
+      expect(editor()!.querySelector('.callout.error')?.textContent).toBe(t('vault.proof.cancelled'));
+      refuseProof = true;
+      await submit();
+      expect(editor()!.querySelector('.callout.error')?.textContent).toBe(t('vault.error.vault_proof'));
+    });
+
+    it('asks nothing for a change that lets no more read the value', async () => {
+      guard = ruled({ authenticators: [auth()] });
+      await open();
+      await click('[data-name="API"] [data-action="edit"]');
+      await act(async () => {
+        const area = editor()!.querySelector<HTMLTextAreaElement>('textarea')!;
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(area, 'note');
+        area.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await submit();
+      expect(proofs()).toHaveLength(0);
+      expect(puts()).toHaveLength(1);
+      expect(puts()[0].body.proof).toBeUndefined();
+      expect(puts()[0].body.passphrase).toBeUndefined();
     });
   });
 });

@@ -41,13 +41,21 @@ func isLoopbackAddr(remote string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+// sameHost reports whether r comes from a program of the core's own host
+// that talks to the loopback address directly: a loopback peer, a loopback
+// Host, and no proxy in between (a proxy on the same host keeps the public
+// Host or adds X-Forwarded-For).
+func sameHost(r *http.Request) bool {
+	return isLoopbackAddr(r.RemoteAddr) && isLoopbackHost(hostOnly(r.Host)) && r.Header.Get("X-Forwarded-For") == ""
+}
+
 // proxySecretOK reports whether r carries the proxy secret, or needs none: a
 // browser on this host talking to the loopback address directly.
 func (s *Server) proxySecretOK(r *http.Request) bool {
 	if s.opts.ProxySecret == "" {
 		return true
 	}
-	if isLoopbackAddr(r.RemoteAddr) && isLoopbackHost(hostOnly(r.Host)) && r.Header.Get("X-Forwarded-For") == "" {
+	if sameHost(r) {
 		return true
 	}
 	got := r.Header.Get(ProxySecretHeader)

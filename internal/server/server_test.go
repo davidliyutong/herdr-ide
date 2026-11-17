@@ -83,6 +83,11 @@ func TestGuard(t *testing.T) {
 		{"LocalHost:7780", "http://localhost:7780", 200},
 		{"[::1]:7780", "http://[::1]:7780", 200},
 		{"localhost:8443", "https://localhost:8443", 200}, // behind a TLS proxy on loopback
+		// Without a port the scheme tells the port: only the http one is
+		// the core's.
+		{"localhost", "http://localhost", 200},
+		{"localhost", "https://localhost", 403},
+		{"[::1]", "https://[::1]", 403},
 		{"[::1]:7780", "", 200},
 		{"ide.example.com", "https://ide.example.com", 200},
 		{"dev.example.com", "http://localhost:5173", 200}, // an --allowed-origin on loopback

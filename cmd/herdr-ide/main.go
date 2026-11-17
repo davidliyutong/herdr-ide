@@ -23,6 +23,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -32,6 +33,7 @@ import (
 	"herdr-ide/internal/codeserver"
 	"herdr-ide/internal/embedded"
 	"herdr-ide/internal/keybindings"
+	"herdr-ide/internal/loopback"
 	"herdr-ide/internal/machines"
 	"herdr-ide/internal/registry"
 	"herdr-ide/internal/server"
@@ -342,6 +344,21 @@ func serve(args []string, logger *log.Logger) {
 		logger.Fatal(err)
 	}
 	defer ln.Close()
+	// "localhost" names 127.0.0.1 and ::1, and a browser tries either
+	// first: the core takes the other one's port too, so that the name
+	// leads to it and to no program that would answer in its stead. Only
+	// then does it vouch for http://localhost:<port> (fingerprints for the
+	// vault are bound to that origin).
+	other, owned, oerr := loopback.Other(ln)
+	if oerr != nil {
+		logger.Printf("another program listens on the other loopback address of this port (%v): http://localhost:%d may lead to it; use http://%s", oerr, ln.Addr().(*net.TCPAddr).Port, ln.Addr())
+	}
+	if other != nil {
+		defer other.Close()
+	}
+	if owned {
+		srv.OwnLocalhost(strconv.Itoa(ln.Addr().(*net.TCPAddr).Port))
+	}
 	machinesDone := make(chan struct{})
 	go func() {
 		mg.Run(ctx)
@@ -366,6 +383,13 @@ func serve(args []string, logger *log.Logger) {
 			logger.Printf("launcher disconnected: %v", err)
 			cancel()
 		}
+	}
+	if other != nil {
+		go func() {
+			if err := hs.Serve(other); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				logger.Printf("serving %s: %v", other.Addr(), err)
+			}
+		}()
 	}
 	if err := hs.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		logger.Fatal(err)

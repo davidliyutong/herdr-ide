@@ -41,11 +41,12 @@ export function GuardSection() {
     };
   }, []);
   if (!guard) return null;
-  const state = webauthnState();
+  const state = webauthnState(guard);
   const alt = state === 'ip-host' ? localhostUrl() : null;
   const desktopOn = guard.authenticators.find((a) => a.kind === 'desktop');
   const askPass = !session || sessionProof;
-  const showPass = askPass || form !== undefined;
+  // Ending the rule that every Allow is verified takes the passphrase too.
+  const showPass = askPass || form !== undefined || guard.verifyEachAllow;
 
   /** Runs a change after a session the passphrase opened. */
   const run = async (fn: () => Promise<unknown>) => {
@@ -104,7 +105,7 @@ export function GuardSection() {
                 <b>{a.label}</b>
                 <span className="muted">
                   {t(`vault.guard.kind.${a.kind}`)}
-                  {a.rpId ? ` · ${a.rpId}` : ''} · {t('vault.guard.added', { date: day(a.created) })}
+                  {a.origin || a.rpId ? ` · ${a.origin || a.rpId}` : ''} · {t('vault.guard.added', { date: day(a.created) })}
                   {a.lastUsed ? ` · ${t('vault.guard.lastUsed', { date: day(a.lastUsed) })}` : ''}
                 </span>
               </span>
@@ -185,6 +186,11 @@ export function GuardSection() {
           )}
         </div>
       )}
+      {state === 'untrusted' && (
+        <div className="vault-hint" data-note="untrusted">
+          {t('vault.guard.untrusted')}
+        </div>
+      )}
       {state === 'unavailable' && <div className="vault-hint">{t('vault.guard.unavailable')}</div>}
       {prompt && (
         <label className="vault-check" data-switch="desktop">
@@ -211,7 +217,8 @@ export function GuardSection() {
             // Read now: the box is controlled, and shows the old state again
             // by the time a session has been opened.
             const on = e.target.checked;
-            void run(() => setVerifyEachAllow(on));
+            if (!on && !pass) return setErr(t('vault.guard.needPassphrase'));
+            void run(() => setVerifyEachAllow(on, on ? undefined : pass));
           }}
         />
         <span>

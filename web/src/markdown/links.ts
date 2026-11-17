@@ -3,6 +3,7 @@
 // here and anything not named is refused.
 
 import { fileUrl } from '../lib/files';
+import { safeWebUrl } from '../lib/webUrl';
 
 /** Where relative references of a document resolve: the machine and the
  * directory of the document. */
@@ -17,12 +18,13 @@ export interface MarkdownBase {
 const dropped = /[\p{Cc}\p{Cf}\s]/gu;
 const schemeOf = (href: string): string | undefined => /^([a-z][a-z0-9+.-]*):/i.exec(href.replace(dropped, ''))?.[1]?.toLowerCase();
 
-/** The href when it is an `http:`, `https:` or `mailto:` URL; anything else
- * (other schemes, protocol-relative `//host`, paths, fragments) gives
- * undefined. Relative references are `relativePath`'s. */
+/** The URL (as the browser will resolve it) when the href is an absolute
+ * `http://` or `https://` URL or a `mailto:` one that does not lead to the
+ * page's own origin; anything else (other schemes, `http:/x`, `http:x`,
+ * protocol-relative `//host`, paths, fragments) gives undefined. Relative
+ * references are `relativePath`'s. */
 export function safeLink(href: string): string | undefined {
-  const s = schemeOf(href);
-  return s === 'http' || s === 'https' || s === 'mailto' ? href : undefined;
+  return safeWebUrl(href);
 }
 
 /** The file path a relative reference names from directory dir, normalized

@@ -18,8 +18,22 @@ import { Markdown, type MarkdownProps } from '../markdown/Markdown';
 describe('safeLink', () => {
   const cases: [string, string | undefined][] = [
     ['https://a.example/x?y=1#z', 'https://a.example/x?y=1#z'],
-    ['http://a.example', 'http://a.example'],
-    ['HTTPS://A.EXAMPLE', 'HTTPS://A.EXAMPLE'],
+    // As the browser will resolve it.
+    ['http://a.example', 'http://a.example/'],
+    ['HTTPS://A.EXAMPLE', 'https://a.example/'],
+    [' \thttps://a.example/a b', 'https://a.example/a%20b'],
+    // Relative to the page in a browser, not absolute.
+    ['http:/api/x', undefined],
+    ['http:x', undefined],
+    ['https:/x', undefined],
+    ['https:x', undefined],
+    ['http:\\\\evil.example', undefined],
+    // The page's own origin (jsdom's), by any spelling.
+    ['http://localhost:3000/api/m/x/hc/stop', undefined],
+    ['HTTP://LOCALHOST:3000/', undefined],
+    ['http://localhost:3000', undefined],
+    ['http://localhost:3001/', 'http://localhost:3001/'],
+    ['https://localhost:3000/', 'https://localhost:3000/'],
     ['mailto:a@b.example', 'mailto:a@b.example'],
     ['javascript:alert(1)', undefined],
     ['JaVaScRiPt:alert(1)', undefined],
@@ -177,18 +191,30 @@ describe('Markdown', () => {
         '[data](data:text/html,x)',
         '',
         '[proto](//evil.example/x)',
+        '',
+        '[one](http:/api/x)',
+        '',
+        '[two](http:x)',
+        '',
+        '[three](https:/x)',
+        '',
+        '[own](http://localhost:3000/api/x)',
       ].join('\n'),
     });
     const link = (text: string) => [...host.querySelectorAll('a')].find((a) => a.textContent === text);
     expect(link('bad')).toBeUndefined();
     expect(host.textContent).toContain('bad');
     const ok = link('ok')!;
-    expect(ok.getAttribute('href')).toBe('https://a.example');
+    expect(ok.getAttribute('href')).toBe('https://a.example/');
     expect(ok.getAttribute('target')).toBe('_blank');
     expect(ok.getAttribute('rel')).toBe('noopener noreferrer');
     expect(link('mail')?.getAttribute('href')).toBe('mailto:a@b.example');
     expect(link('data')).toBeUndefined();
     expect(link('proto')).toBeUndefined();
+    for (const n of ['one', 'two', 'three', 'own']) {
+      expect(link(n)).toBeUndefined();
+      expect(host.textContent).toContain(n);
+    }
     expect(host.querySelectorAll('[href^="javascript" i]').length).toBe(0);
   });
 
@@ -229,6 +255,17 @@ describe('Markdown', () => {
     expect(remote.textContent).toBe('a');
     expect(remote.getAttribute('rel')).toBe('noopener noreferrer');
     expect(host.textContent).toContain('b');
+  });
+
+  it('turns a remote image into a link only by the link rule', async () => {
+    await show({
+      text: ['![one](http:/api/x.png)', '', '![two](http://localhost:3000/api/x.png)', '', '![three](HTTPS://X.EXAMPLE/p.png)'].join('\n'),
+      base: { m: 'box', dir: '/home/u' },
+    });
+    expect(host.querySelectorAll('img').length).toBe(0);
+    expect([...host.querySelectorAll('a')].map((a) => a.getAttribute('href'))).toEqual(['https://x.example/p.png']);
+    expect(host.textContent).toContain('one');
+    expect(host.textContent).toContain('two');
   });
 
   it('loads no relative image without a base', async () => {

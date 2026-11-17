@@ -167,6 +167,50 @@ func TestRunLimitsGoWithEnv(t *testing.T) {
 	}
 }
 
+// A setting changed while the vault is unlocked shortens the time before it
+// locks but does not lengthen it: settings are changed without the gate, so
+// a longer time, or never, counts from the next unlock with the passphrase.
+func TestAutoLockSettingDoesNotLengthenAnUnlock(t *testing.T) {
+	p, h, s := newTest(t)
+	h.st = settings.New("", Settings)
+	c := newClient(p, h)
+	set := func(minutes float64) {
+		t.Helper()
+		if err := h.st.Set(SettingAutoLock, "", minutes); err != nil {
+			t.Fatal(err)
+		}
+	}
+	set(30)
+	c.do("POST", "/api/p/vault/lock", "")
+	c.session(t) // unlocks
+	if got := p.autoLockAfter(h); got != 30*time.Minute {
+		t.Fatalf("after the unlock: %v", got)
+	}
+	set(0) // never
+	if got := p.autoLockAfter(h); got != 30*time.Minute {
+		t.Errorf("never, set while unlocked: %v", got)
+	}
+	set(600)
+	if got := p.autoLockAfter(h); got != 30*time.Minute {
+		t.Errorf("a longer time, set while unlocked: %v", got)
+	}
+	set(5)
+	if got := p.autoLockAfter(h); got != 5*time.Minute {
+		t.Errorf("a shorter time: %v", got)
+	}
+	// A page's own time, through the gate, is not capped.
+	if code, _ := c.do("POST", "/api/p/vault/autolock", `{"minutes":0}`); code != 200 || p.autoLockAfter(h) != 0 {
+		t.Errorf("a page's never: %d %v", code, p.autoLockAfter(h))
+	}
+	// The next unlock takes the setting as it is then.
+	set(0)
+	c.do("POST", "/api/p/vault/lock", "")
+	c.session(t)
+	if got := p.autoLockAfter(h); got != 0 || s.Status().Locked {
+		t.Errorf("never, at the next unlock: %v", got)
+	}
+}
+
 // A page sets the auto-lock's time for this unlock (presets, a time of its
 // own, never), behind the gate; the list says when the vault locks; the
 // vault locks at that time; the next unlock follows the setting again.

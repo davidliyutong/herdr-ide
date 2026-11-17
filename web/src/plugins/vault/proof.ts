@@ -36,16 +36,27 @@ export function b64urlDecode(s: string): Uint8Array<ArrayBuffer> {
 
 // ---- what this page can do ----
 
-export type WebAuthnState = 'ready' | 'ip-host' | 'unavailable';
+export type WebAuthnState = 'ready' | 'ip-host' | 'untrusted' | 'unavailable';
 
-/** WebAuthn credentials are for a host name: on an IP address (a LAN
- * address, 127.0.0.1) the browser refuses them, so the page must be opened
- * by name (localhost for the same computer). */
-export function webauthnState(): WebAuthnState {
+/** Whether the browser can make WebAuthn assertions on this page. */
+function browserCan(): boolean {
+  return window.isSecureContext && typeof PublicKeyCredential !== 'undefined' && !!navigator.credentials;
+}
+
+/** What this page can do with WebAuthn credentials:
+ * - 'ip-host': the page is on an IP address (a LAN address, 127.0.0.1),
+ *   where the browser refuses them; opened by name (localhost for the same
+ *   computer) it may work;
+ * - 'unavailable': the browser or the connection has no WebAuthn;
+ * - 'untrusted': the core does not vouch for this origin, so a credential
+ *   is neither added nor taken here (another program may answer on a
+ *   localhost address, and its page would collect the user's touch);
+ * - 'ready': credentials can be added and used from this origin. */
+export function webauthnState(guard?: VaultGuard | null): WebAuthnState {
   const host = location.hostname;
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(':')) return 'ip-host';
-  if (!window.isSecureContext || typeof PublicKeyCredential === 'undefined' || !navigator.credentials) return 'unavailable';
-  return 'ready';
+  if (!browserCan()) return 'unavailable';
+  return guard?.webauthn ? 'ready' : 'untrusted';
 }
 
 /** This page's address under localhost, when it is on a loopback IP: the
@@ -65,7 +76,7 @@ export function verifyUser(): DesktopVerifyUser | undefined {
 export interface Ways {
   /** The app's own prompt. */
   desktop: boolean;
-  /** A WebAuthn credential of this host. */
+  /** A WebAuthn credential added from this page's origin. */
   webauthn: boolean;
 }
 
@@ -74,7 +85,7 @@ export function ways(guard?: VaultGuard | null): Ways {
   const list = guard?.authenticators ?? [];
   return {
     desktop: !!guard?.desktop && !!verifyUser() && list.some((a) => a.kind === 'desktop'),
-    webauthn: webauthnState() === 'ready' && list.some((a) => a.kind === 'webauthn' && a.rpId === location.hostname),
+    webauthn: webauthnState(guard) === 'ready' && list.some((a) => a.kind === 'webauthn' && a.origin === location.origin),
   };
 }
 
@@ -126,11 +137,11 @@ async function desktopMac(nonce: string): Promise<DesktopProof | null> {
 
 /** Asks the core for a nonce for the purpose and has it proved: by the
  * desktop prompt when the app has one on, else by a WebAuthn credential of
- * this host. Null when the user did not confirm. */
+ * this origin (the core lists only those). Null when the user did not confirm. */
 export async function prove(purpose: ProofPurpose): Promise<Proof | null> {
   const ch = await vaultApi.proof(purpose);
   if (ch.desktop && verifyUser()) return desktopMac(ch.nonce);
-  if (webauthnState() === 'ready' && ch.credentials.length) return webauthnGet(ch, ch.credentials);
+  if (browserCan() && ch.credentials.length) return webauthnGet(ch, ch.credentials);
   throw new VaultError('vault_proof');
 }
 
@@ -187,4 +198,63 @@ export async function registerDesktop(label: string, passphrase: string): Promis
   if (!p) return false;
   await addAuthenticator({ kind: 'desktop', label, passphrase, nonce: ch.nonce, mac: p.mac });
   return true;
+}
+
+// ---- a proof or the passphrase for one action ----
+
+/** What goes with an action where every Allow is verified. */
+export type Fresh = { proof: Proof } | { passphrase: string };
+
+export type FreshResult<T> =
+  | { done: true; value: T }
+  /** The user did not confirm the proof. */
+  | { done: false; reason: 'cancelled' }
+  /** No proof can be made here: the passphrase is needed. */
+  | { done: false; reason: 'passphrase' };
+
+/** Runs send for an action of the vault that, where every Allow is
+ * verified, needs the user's word made for it (purpose): a proof when the
+ * page can make one, else the passphrase given. `needed` is what the page
+ * knows of the rule; a core that refuses with vault_proof anyway (the rule
+ * was turned on elsewhere) gets the same. A proof the core refuses, or a
+ * wrong passphrase, is thrown for the caller to say. */
+export async function withFresh<T>(o: {
+  guard?: VaultGuard | null;
+  purpose: ProofPurpose;
+  needed: boolean;
+  passphrase?: string;
+  send: (fresh?: Fresh) => Promise<T>;
+}): Promise<FreshResult<T>> {
+  const make = async (): Promise<Fresh | 'passphrase' | null> => {
+    if (o.passphrase) return { passphrase: o.passphrase };
+    const w = ways(o.guard);
+    if (!w.desktop && !w.webauthn) return 'passphrase';
+    const proof = await prove(o.purpose);
+    return proof ? { proof } : null;
+  };
+  const sent = async (f: Fresh | undefined): Promise<FreshResult<T>> => ({ done: true, value: await o.send(f) });
+  if (o.needed || o.passphrase) {
+    const f = await make();
+    if (f === null) return { done: false, reason: 'cancelled' };
+    if (f === 'passphrase') return { done: false, reason: 'passphrase' };
+    return sent(f);
+  }
+  try {
+    return await sent(undefined);
+  } catch (e) {
+    if (!(e instanceof VaultError && e.code === 'vault_proof')) throw e;
+    const f = await make();
+    if (f === null) return { done: false, reason: 'cancelled' };
+    if (f === 'passphrase') return { done: false, reason: 'passphrase' };
+    return sent(f);
+  }
+}
+
+/** Whether a change lets a variable's value go where it did not (the
+ * core's test): a machine added to those that may read it without asking,
+ * or inject-only dropped. */
+export function widens(cur: { machines: string[]; injectOnly: boolean }, u: { machines?: string[]; injectOnly?: boolean }): boolean {
+  if (u.injectOnly === false && cur.injectOnly) return true;
+  const allowed = (m: string) => cur.machines.includes('*') || cur.machines.includes(m);
+  return (u.machines ?? []).some((m) => !allowed(m));
 }

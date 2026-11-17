@@ -43,7 +43,7 @@ import { APP_ID, coreBinary, foldersOf, keyPlatform, quitsWithLastWindow, type P
 import { allowPermission, isExternal, isInternal, mainWindowPreferences, webPreferences } from './policy';
 import { bundleOf, privacyActions, terminalCoreExecutable } from './privacy';
 import { verifier, type Verifier } from './verify';
-import { helloFor, HELLO_TIMEOUT_MS, POWERSHELL_ARGS, type RunPowerShell } from './windowsHello';
+import { helloFor, HELLO_TIMEOUT_MS, POWERSHELL_ARGS, powershellPath, type RunPowerShell } from './windowsHello';
 
 const platform = process.platform as Platform;
 app.setName(APP_NAME);
@@ -280,7 +280,7 @@ ipcMain.handle(channels.verifyProve, async (event, nonce: unknown) => (fromMainP
 /** Runs PowerShell with the script on stdin (Windows Hello). */
 const runPowerShell: RunPowerShell = (script, env) =>
   new Promise((resolve, reject) => {
-    const child = spawn('powershell.exe', POWERSHELL_ARGS, {
+    const child = spawn(powershellPath(process.env.SystemRoot), POWERSHELL_ARGS, {
       env: { ...process.env, ...env },
       stdio: 'pipe',
       shell: false,

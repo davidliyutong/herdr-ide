@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
 import test from 'node:test';
 import { translate } from '../../web/src/i18n';
 import type { Platform } from './platform';
@@ -6,7 +7,7 @@ import { clean, proofMac, verifier, type VerifyDeps } from './verify';
 
 const key = 'k3'.repeat(20);
 const nonce = 'abcDEF123_-abcDEF123_-abcDEF123_-abcDEF123x';
-const request = { id: 'r1', machine: 'build-box', tool: 'run', names: ['A', 'B'] };
+const request = { id: 'r1', machine: 'build-box', target: '', tool: 'run', names: ['A', 'B'] };
 
 test('the MAC matches the core: the same vectors as its proofMessage', () => {
   assert.equal(
@@ -15,6 +16,17 @@ test('the MAC matches the core: the same vectors as its proofMessage', () => {
   );
   assert.equal(proofMac(key, nonce, { for: 'session' }), '699277e0dbc28eea46e8923901d22f826a86be22c8cd2a04ac8a30de0e06a307');
   assert.equal(proofMac(key, nonce, { for: 'register' }), '7776425c6474e2ac900eacbe4962d3f1b4ad33195e2c3bfae40bbc2f32fc1c8a');
+});
+
+test('a reveal and a change sign the variable’s name where an answer signs the request id', () => {
+  const mac = (message: string) => createHmac('sha256', Buffer.from(key, 'utf8')).update(message).digest('hex');
+  const reveal = proofMac(key, nonce, { for: 'reveal', name: 'API_KEY' });
+  const change = proofMac(key, nonce, { for: 'change', name: 'API_KEY' });
+  assert.equal(reveal, mac(`vault-proof\n${nonce}\nreveal\nAPI_KEY\n`));
+  assert.equal(change, mac(`vault-proof\n${nonce}\nchange\nAPI_KEY\n`));
+  assert.notEqual(reveal, change);
+  assert.notEqual(reveal, proofMac(key, nonce, { for: 'reveal', name: 'OTHER' }));
+  assert.notEqual(reveal, proofMac(key, nonce, { for: 'session' }));
 });
 
 /** A verifier of a platform, with its prompts recorded; `answer` is what the
@@ -69,6 +81,30 @@ test('a confirmed prompt gives the MAC, and its text names what is approved', as
     ['win32', { for: 'register', answer: '' }, 'Confirm to turn on Windows Hello for the variable vault.', { for: 'register' }],
     ['win32', answer('once'), 'Confirm to allow build-box to read A, B once.', { for: 'answer', answer: 'once', request }],
     ['win32', answer('always'), 'Confirm to allow build-box to always read A, B.', { for: 'answer', answer: 'always', request }],
+    [
+      'darwin',
+      { for: 'reveal', answer: '', name: 'API_KEY' },
+      'show the value of API_KEY in the variable vault',
+      { for: 'reveal', name: 'API_KEY' },
+    ],
+    [
+      'darwin',
+      { for: 'change', answer: '', name: 'API_KEY' },
+      'let more machines read API_KEY in the variable vault',
+      { for: 'change', name: 'API_KEY' },
+    ],
+    [
+      'win32',
+      { for: 'reveal', name: 'API_KEY' },
+      'Confirm to show the value of API_KEY in the variable vault.',
+      { for: 'reveal', name: 'API_KEY' },
+    ],
+    [
+      'win32',
+      { for: 'change', name: 'API_KEY' },
+      'Confirm to let more machines read API_KEY in the variable vault.',
+      { for: 'change', name: 'API_KEY' },
+    ],
   ];
   for (const [platform, purpose, text, p] of cases) {
     const { v, prompts, fetched } = setup({ platform, purpose });
@@ -132,6 +168,21 @@ test('an unknown nonce and every malformed purpose give null without a prompt', 
     answer('once', { names: 'A' }),
     answer('once', { names: ['A', 2] }),
     answer('once', { names: [] }),
+    answer('once', { target: undefined }),
+    answer('once', { target: 5 }),
+    { ...answer('once'), name: 'A' },
+    { for: 'session', name: 'A' },
+    { for: 'reveal' },
+    { for: 'reveal', name: '' },
+    { for: 'reveal', name: '1ABC' },
+    { for: 'reveal', name: 'A-B' },
+    { for: 'reveal', name: 'A B' },
+    { for: 'reveal', name: 'A\n' },
+    { for: 'reveal', name: 'A'.repeat(65) },
+    { for: 'reveal', name: ['A'] },
+    { for: 'change', name: 'A', request },
+    { for: 'change', name: 'A', answer: 'once' },
+    { for: 'change', request: 'A' },
     answer('once', { names: Array.from({ length: 17 }, (_, i) => `N${i}`) }),
   ];
   for (const purpose of bad) {
@@ -140,6 +191,7 @@ test('an unknown nonce and every malformed purpose give null without a prompt', 
     assert.deepEqual(prompts, []);
   }
   assert.notEqual(await setup({ purpose: answer('once', { names: Array.from({ length: 16 }, (_, i) => `N${i}`) }) }).v.prove(nonce), null);
+  assert.notEqual(await setup({ purpose: { for: 'reveal', name: 'A'.repeat(64) } }).v.prove(nonce), null);
 });
 
 test('a purpose that cannot be fetched gives null', async () => {
@@ -197,9 +249,42 @@ test('a machine label and names are cleaned and cut before they go in a prompt',
   const machine = /^allow (.*) to read /.exec(text)![1];
   assert.equal(Array.from(machine).length, 60);
   assert.ok(machine.startsWith('evil Allow everything'));
-  const names = /to read (.*) once$/.exec(text)![1];
-  assert.equal(Array.from(names).length, 120);
-  assert.ok(names.startsWith('A B, nnn'));
+  // The first two names fit; the third would pass 120 characters and is counted.
+  assert.match(text, / to read A B, n{100} and 1 more once$/);
+});
+
+test('names are never cut silently: as many as fit in 120 characters, then how many more', async () => {
+  const many = Array.from({ length: 16 }, (_, i) => `NAME_${String(i).padStart(2, '0')}`);
+  // Seven characters each, joined by ", ": 13 names take 13*7 + 12*2 = 115, a 14th would pass 120.
+  const { v, prompts } = setup({ purpose: answer('once', { names: many }) });
+  assert.notEqual(await v.prove(nonce), null);
+  assert.match(prompts[0], new RegExp(`^allow build-box to read ${many.slice(0, 13).join(', ')} and 3 more once$`));
+  const exact = setup({ purpose: answer('once', { names: ['a'.repeat(59), 'b'.repeat(59)] }), platform: 'win32' });
+  assert.notEqual(await exact.v.prove(nonce), null);
+  assert.equal(exact.prompts[0], `Confirm to allow build-box to read ${'a'.repeat(59)}, ${'b'.repeat(59)} once.`);
+  const over = setup({ purpose: answer('once', { names: ['a'.repeat(60), 'b'.repeat(60)] }) });
+  assert.notEqual(await over.v.prove(nonce), null);
+  assert.equal(over.prompts[0], `allow build-box to read ${'a'.repeat(60)} and 1 more once`);
+  // One name longer than the room is cut with the mark, and the rest counted.
+  const long = setup({ purpose: answer('once', { names: ['c'.repeat(200), 'd'] }) });
+  assert.notEqual(await long.v.prove(nonce), null);
+  assert.equal(long.prompts[0], `allow build-box to read ${'c'.repeat(119)}… and 1 more once`);
+});
+
+test('the machine is its label, then its ssh address in parentheses when that differs', async () => {
+  const text = async (platform: Platform, machine: string, target: string) => {
+    const { v, prompts } = setup({ platform, purpose: answer('once', { machine, target }) });
+    assert.notEqual(await v.prove(nonce), null);
+    return prompts[0];
+  };
+  assert.equal(await text('darwin', 'build-box', ''), 'allow build-box to read A, B once');
+  assert.equal(await text('darwin', 'build-box', 'build-box'), 'allow build-box to read A, B once');
+  assert.equal(await text('darwin', 'build-box', 'me@10.0.0.5'), 'allow build-box (me@10.0.0.5) to read A, B once');
+  assert.equal(await text('win32', 'prod', 'root@evil.example'), 'Confirm to allow prod (root@evil.example) to read A, B once.');
+  // Both are cleaned: a label that says another address cannot hide the real one.
+  assert.equal(await text('darwin', 'me@safe\nhost', 'me@evil.example\u202E'), 'allow me@safe host (me@evil.example) to read A, B once');
+  const long = await text('darwin', 'x'.repeat(100), 'y'.repeat(100));
+  assert.equal(long, `allow ${'x'.repeat(59)}… (${'y'.repeat(59)}…) to read A, B once`);
 });
 
 test('a call while a prompt is open gives null; the next one after it runs', async () => {

@@ -93,11 +93,24 @@ func (p *Plugin) autoLock(h plugin.Host) {
 // setting's range does.
 const MaxAutoLock = 1440 * time.Minute
 
-// clearLockFor drops the time a page set: the next unlock follows the
-// setting again.
+// clearLockFor drops the time a page set and the unlock's cap: the next
+// unlock follows the setting again.
 func (p *Plugin) clearLockFor() {
 	p.mu.Lock()
 	p.lockFor, p.lockForSet = 0, false
+	p.lockCap, p.lockCapSet = 0, false
+	p.mu.Unlock()
+}
+
+// capLock notes the setting's time as the passphrase unlocks the vault: the
+// most this unlock lasts without use, unless a page sets another time
+// through the gate (handleAutoLock). Programs of the core host change
+// settings without the gate, so a longer time, or never, counts from the
+// next unlock, which the passphrase makes.
+func (p *Plugin) capLock(h plugin.Host) {
+	d := p.autoLockSetting(h)
+	p.mu.Lock()
+	p.lockCap, p.lockCapSet = d, true
 	p.mu.Unlock()
 }
 

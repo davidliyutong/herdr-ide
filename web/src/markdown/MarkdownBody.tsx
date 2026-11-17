@@ -170,10 +170,11 @@ function components(base: MarkdownBase | undefined, onOpenPath: ((path: string) 
     img({ node: _node, src, alt }) {
       const source = typeof src === 'string' ? imageSource(src, base) : undefined;
       if (source !== undefined) return <img src={source} alt={alt ?? ''} />;
-      if (typeof src === 'string' && /^https?:/i.test(src.trim()) && safeLink(src) !== undefined) {
+      const remote = typeof src === 'string' && /^https?:/i.test(src.trim()) ? safeLink(src) : undefined;
+      if (remote !== undefined) {
         return (
-          <a href={src} target="_blank" rel="noopener noreferrer">
-            {alt || src}
+          <a href={remote} target="_blank" rel="noopener noreferrer">
+            {alt || remote}
           </a>
         );
       }
