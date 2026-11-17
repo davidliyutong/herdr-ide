@@ -130,6 +130,10 @@ type Tokens struct {
 	Chart  map[string]Themed `json:"chart"`
 	// FileIcon: the hues of file-type icons (web/src/fileIcons.tsx).
 	FileIcon map[string]Themed `json:"fileIcon"`
+	// Syntax: the colors of code by the role of a token (comment, keyword,
+	// string…; web/src/highlight). Opaque, since the editor takes them as
+	// they are.
+	Syntax map[string]Themed `json:"syntax"`
 	// Themes: the first is the default.
 	Themes   []Theme `json:"themes"`
 	Terminal struct {
@@ -169,7 +173,7 @@ func parse(data []byte) (*Tokens, error) {
 	}
 	groups := map[string][]string{
 		"color": keys(t.Color), "status": keys(t.Status), "git": keys(t.Git), "chart": keys(t.Chart), "fileIcon": keys(t.FileIcon),
-		"metric": keys(t.Metric), "size": keys(t.Size), "font.size": keys(t.Font.Size),
+		"syntax": keys(t.Syntax), "metric": keys(t.Metric), "size": keys(t.Size), "font.size": keys(t.Font.Size),
 	}
 	for _, group := range keys(groups) {
 		if len(groups[group]) == 0 {
@@ -179,6 +183,11 @@ func parse(data []byte) (*Tokens, error) {
 			if !tokenName.MatchString(name) {
 				return nil, fmt.Errorf("%s.%s: names are camelCase letters and digits", group, name)
 			}
+		}
+	}
+	for name, c := range t.Syntax {
+		if c.Light.Alpha != 1 || c.Dark.Alpha != 1 {
+			return nil, fmt.Errorf("syntax.%s: syntax colors are opaque", name)
 		}
 	}
 	for _, group := range []map[string]float64{t.Metric, t.Size, t.Font.Size} {
@@ -275,7 +284,7 @@ func css(t *Tokens) []byte {
 		for _, g := range []struct {
 			prefix string
 			colors map[string]Themed
-		}{{"color", t.Color}, {"status", t.Status}, {"git", t.Git}, {"chart", t.Chart}, {"file-icon", t.FileIcon}} {
+		}{{"color", t.Color}, {"status", t.Status}, {"git", t.Git}, {"chart", t.Chart}, {"file-icon", t.FileIcon}, {"syntax", t.Syntax}} {
 			for _, name := range keys(g.colors) {
 				fmt.Fprintf(&b, "  --ds-%s-%s: %s;\n", g.prefix, kebab(name), pick(g.colors[name], light).css())
 			}

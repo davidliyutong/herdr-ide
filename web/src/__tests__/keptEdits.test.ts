@@ -96,6 +96,7 @@ const monaco = {
   editor: { getModel: () => null, createModel: (v: string) => new FakeModel(v), OverviewRulerLane: { Left: 1 } },
 };
 vi.mock('../plugins/monaco', () => ({
+  setLanguage: vi.fn(),
   createEditor: vi.fn(async () => ({ monaco, editor })),
   createDiffEditor: vi.fn(async () => ({ monaco, editor: diffEditor })),
 }));

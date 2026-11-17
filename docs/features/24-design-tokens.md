@@ -58,6 +58,13 @@ colors programs draw with in panes, which stay the terminal settings'
     `purple`, `brown`, `grey`. Icons are graphics: each keeps 3:1 against
     the background, the sidebars, a hovered and a selected row in both
     themes (`fileIcons.test.ts`).
+  - `syntax.<role>`: the colors of code by the role of a token: `comment`,
+    `keyword`, `string`, `number`, `type`, `function`, `property`, `tag`,
+    `attribute`, `delimiter`, `regexp` (`web/src/highlight`), for the
+    editors, the previews and code in rendered Markdown. They are opaque
+    (the editor takes colors as they are) and keep 4.5:1 against the
+    background in both themes (`highlight.test.ts`); the dark ones are the
+    chart hues.
   - `themes`: the color themes, each `{id, accent, onAccent}` with a light
     and a dark value; the first is the default. `accent` keeps 3:1
     against the background and `onAccent` 4.5:1 on the accent

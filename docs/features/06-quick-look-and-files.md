@@ -78,7 +78,20 @@ download chooser picks entries, nothing more.
   `download=1`.
 - Images, video and audio use native elements; PDFs an iframe; text files
   read the first 2 MiB and refuse binary content; directories list entries
-  that open on click. Sibling media in the same directory are navigable with
+  that open on click. Text is colored in the language of the file's name or
+  first line ([28](28-file-explorer.md), `web/src/highlight`). A Markdown
+  file shows rendered, with a toolbar button for its source
+  (`web/src/markdown`): GitHub's tables, task lists, strikethrough and
+  footnotes, formulas (KaTeX, with the terminal's limits), and code blocks
+  colored by their fence's language with a copy button. A file is text the
+  page does not trust, so the renderer shows HTML in it as text; a link
+  keeps its target only for `http`, `https` and `mailto` (opened outside
+  the page), a link to a file beside the document shows that file in the
+  pane, and any other link is its text; an image loads only from a `data:`
+  URL of a raster type, a `blob:` URL or a file beside the document, through
+  the file route. A remote image is a link instead: loading it would tell
+  its server who reads the file. The renderer (react-markdown) loads when a
+  Markdown file is first shown. Sibling media in the same directory are navigable with
   ← →. Stepping to a sibling or entering a directory shows that path in the
   same preview pane (the layout document's path changes, so every client
   follows).

@@ -1722,6 +1722,22 @@ body.dragging * {
   word-break: break-all;
   background: var(--bg);
 }
+.markdown-preview {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 100%;
+  padding: 16px 20px;
+  background: var(--bg);
+  font-size: var(--ds-font-size-base);
+}
+.markdown-preview img {
+  max-height: none;
+  margin: 0;
+}
+.markdown-preview > .markdown {
+  max-width: 820px;
+  margin: 0 auto;
+}
 .dir-list {
   width: 100%;
   background: var(--bg);

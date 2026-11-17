@@ -4,7 +4,7 @@
 // directory shows that path in the same pane.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Code as CodeIcon, Eye } from 'lucide-react';
 import { useStore } from '../state/store';
 import { terms } from '../state/terms';
 import { registerPane } from '../state/panes';
@@ -14,6 +14,9 @@ import { mediaExt } from '../terminal/links';
 import { actions } from '../actions';
 import { t } from '../i18n';
 import { usePluginOn } from '../plugins/registry';
+import { Code } from '../highlight/Code';
+import { languageOf } from '../highlight/languages';
+import { Markdown } from '../markdown/Markdown';
 
 const imageExt = /\.(png|jpe?g|gif|webp|avif|svg|bmp|ico)$/i;
 const videoExt = /\.(mp4|webm|mov|m4v|mkv|ogv)$/i;
@@ -54,11 +57,15 @@ export function PreviewPane({ m, pane, path }: { m: string; pane: string; path: 
   const [dirEntries, setDirEntries] = useState<RemoteStat[] | undefined>();
   const [error, setError] = useState<string>();
   const [text, setText] = useState<string>();
+  // Whether a Markdown file shows rendered (per pane, not kept).
+  const [rendered, setRendered] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const isMedia = mediaExt.test(path);
   const url = fileUrl(m, path);
   const show = (next: string) => terms.mutate(m, (l) => L.setPreviewPath(l, pane, next));
+  const isMarkdown = languageOf(path) === 'markdown';
+  const base = useMemo(() => ({ m, dir: dirname(path) }), [m, path]);
 
   useEffect(() => registerPane(m, pane, { focus: () => containerRef.current?.focus() }), [m, pane]);
 
@@ -129,6 +136,16 @@ export function PreviewPane({ m, pane, path }: { m: string; pane: string; path: 
           </>
         )}
         <span className="spacer" />
+        {isMarkdown && text !== undefined && (
+          <button
+            className="icon"
+            title={rendered ? t('preview.source') : t('preview.rendered')}
+            aria-label={rendered ? t('preview.source') : t('preview.rendered')}
+            onClick={() => setRendered(!rendered)}
+          >
+            {rendered ? <CodeIcon /> : <Eye />}
+          </button>
+        )}
         <a className="btn" href={fileUrl(m, path, true)}>
           {t('preview.download')}
         </a>
@@ -139,7 +156,14 @@ export function PreviewPane({ m, pane, path }: { m: string; pane: string; path: 
       <div className="preview-body">
         {error && <div className="error pad">{error}</div>}
         {isMedia && <MediaView m={m} path={path} />}
-        {text !== undefined && <pre className="text-preview">{text}</pre>}
+        {text !== undefined &&
+          (isMarkdown && rendered ? (
+            <div className="markdown-preview">
+              <Markdown text={text} base={base} onOpenPath={show} />
+            </div>
+          ) : (
+            <Code className="text-preview" text={text} lang={languageOf(path, text.split('\n', 1)[0])} />
+          ))}
         {dirEntries && (
           <div className="dir-list">
             {dirEntries.map((e) => (

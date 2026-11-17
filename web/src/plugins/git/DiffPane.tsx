@@ -17,7 +17,7 @@ import { t } from '../../i18n';
 import type { PaneViewProps } from '../api';
 import { keepEdit, keptEdit, takeEdit, useUnsaved, type KeptEdit } from '../../unsaved';
 import { eolName, hasLoneCR, isMixed, restoreEols, unifiedEol, useMixedLineEndings, type MixedLineEndings } from '../../eol';
-import { createDiffEditor, type DiffEditor, type Monaco, type TextModel } from '../monaco';
+import { createDiffEditor, setLanguage, type DiffEditor, type Monaco, type TextModel } from '../monaco';
 import { ConflictError, FilesError, filesApi, errorText as filesError } from '../files/api';
 import { gitApi, errorText, type Blob, type StatusFile } from './api';
 import { baseName, join, openFile, short, type DiffMode, type DiffView } from './ops';
@@ -197,6 +197,7 @@ export function DiffPane({ m, pane, view, focused }: PaneViewProps) {
       if (model) {
         if (model.original.getValue() !== s.left.text) model.original.setValue(s.left.text);
         if (!keepDirty && model.modified.getValue() !== s.right.text) model.modified.setValue(s.right.text);
+        if (c) for (const side of [model.original, model.modified]) setLanguage(c.monaco, side, d.path);
         if (!keepDirty) {
           savedAt.current = model.modified.getAlternativeVersionId();
           setDirty(false);

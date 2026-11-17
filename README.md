@@ -83,7 +83,10 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   otherwise) to browsers that decode it, still ones as exact pictures.
 - **Quick Look.** ⌘/Ctrl-click or right-click a path in a terminal, also one
   wrapped over several lines, to preview images, GIFs, videos (with
-  seeking), audio, PDFs, text or directories in a preview pane.
+  seeking), audio, PDFs, text or directories in a preview pane. Code is
+  colored in about 125 languages with VS Code's grammars (also Makefiles,
+  TOML, Dockerfiles and scripts without an extension), in the editor and
+  the diffs too, and Markdown files show rendered.
 - **Formulas.** Rest the pointer on a LaTeX formula an agent wrote in a
   pane (`$…$`, `$$…$$`, `\(…\)`, `\[…\]`, also with the backslashes its
   markdown dropped) to see it typeset, and copy its source.

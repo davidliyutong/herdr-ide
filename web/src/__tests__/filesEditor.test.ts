@@ -116,6 +116,7 @@ const monaco = {
   editor: { getModel: () => null, createModel: () => new FakeModel(), OverviewRulerLane: { Left: 1 } },
 };
 vi.mock('../plugins/monaco', () => ({
+  setLanguage: vi.fn(),
   createEditor: vi.fn(async (_el: HTMLElement, o: { readOnly?: boolean }) => {
     // With `separate`, each editor is its own (as in Monaco): own model and key listener.
     const e = separate ? Object.create(editor) : editor;

@@ -1,19 +1,26 @@
 // Monaco, the editor of VS Code, for plugins' panes (the file explorer's
 // editor, diffs). It loads on first use: the main bundle does not carry it.
-// What loads is its core with every editor feature, the syntax colors of
-// all its languages and the language services of JSON, CSS and HTML, each
-// with its worker (a file of its own the browser fetches when a model of
-// that language opens). TypeScript's and JavaScript's service is left out:
-// its worker is larger than the rest of Monaco together, and those files
-// keep their colors. Its theme follows the app's light or dark theme and
-// its colors (the design tokens), its font the terminal's, also in editors
-// already open when they change.
+// What loads is its core with every editor feature, its languages (their
+// brackets, comments and indentation) and the language services of JSON,
+// CSS and HTML, each with its worker (a file of its own the browser fetches
+// when a model of that language opens). TypeScript's and JavaScript's
+// service is left out: its worker is larger than the rest of Monaco
+// together, and those files keep their colors. Code is colored by the
+// app's own highlighter (../highlight: TextMate grammars, as VS Code's),
+// which also knows languages Monaco does not (Makefile, TOML, CMake…);
+// Monaco's own coloring stays for the languages that highlighter lacks and
+// for JSON. Its theme follows the app's light or dark theme and its colors
+// (the design tokens), its font the terminal's, also in editors already
+// open when they change.
 
 import type * as MonacoNs from 'monaco-editor';
 import { usePrefs } from '../prefs';
 import { locale } from '../i18n';
 import { allowedLocales } from './monacoLocales';
 import { appearanceOf, resolveTheme, useSystemDark } from '../appearance';
+import { lineTokenizer, type LineTokenizer } from '../highlight/highlighter';
+import { LANGS, languageOf } from '../highlight/languages';
+import { ROLES, ROLE_STYLE, ROLE_TOKEN } from '../highlight/roles';
 
 export type Monaco = typeof MonacoNs;
 export type CodeEditor = MonacoNs.editor.IStandaloneCodeEditor;
@@ -62,8 +69,74 @@ async function load(): Promise<Monaco> {
     },
   };
   const m = monaco as unknown as Monaco;
+  registerLanguages(m);
   followTheme(m);
   return m;
+}
+
+/** A line's state for Monaco: the tokenizer's own, compared by it. */
+class LineState implements MonacoNs.languages.IState {
+  constructor(
+    readonly tokenizer: LineTokenizer,
+    readonly state: unknown,
+  ) {}
+  clone() {
+    return new LineState(this.tokenizer, this.state);
+  }
+  equals(other: MonacoNs.languages.IState) {
+    return other instanceof LineState && this.tokenizer.same(this.state, other.state);
+  }
+}
+
+/** The app's highlighter as Monaco's tokenizer of a language: a token's
+ * type is its role, which the themes color (defineThemes). Null (plain
+ * text) when the grammar cannot be loaded. */
+async function tokensProvider(id: string): Promise<MonacoNs.languages.TokensProvider | null> {
+  const t = await lineTokenizer(id).catch(() => undefined);
+  if (!t) return null;
+  return {
+    getInitialState: () => new LineState(t, t.initial),
+    tokenize(line, state) {
+      const r = t.line(line, (state as LineState).state);
+      return { endState: new LineState(t, r.state), tokens: r.tokens.map((x) => ({ startIndex: x.start, scopes: x.role ?? '' })) };
+    },
+  };
+}
+
+const PAIRS: [string, string][] = [
+  ['{', '}'],
+  ['[', ']'],
+  ['(', ')'],
+];
+
+/** Gives Monaco the app's languages: those it lacks get an id with their
+ * comment signs and the common brackets, and all are colored by the app's
+ * highlighter. A factory registered for a language replaces the one Monaco
+ * registered for its own coloring; the grammar loads when a model of the
+ * language first shows. */
+function registerLanguages(monaco: Monaco) {
+  const known = new Set(monaco.languages.getLanguages().map((l) => l.id));
+  for (const l of LANGS) {
+    if (!known.has(l.id)) {
+      monaco.languages.register({ id: l.id });
+      const pairs = [...PAIRS.map(([open, close]) => ({ open, close })), { open: '"', close: '"' }, { open: "'", close: "'" }];
+      monaco.languages.setLanguageConfiguration(l.id, {
+        comments: typeof l.comment === 'string' ? { lineComment: l.comment } : l.comment ? { blockComment: l.comment } : undefined,
+        brackets: PAIRS,
+        autoClosingPairs: pairs,
+        surroundingPairs: pairs,
+      });
+    }
+    if (!l.ownTokens) monaco.languages.registerTokensProviderFactory(l.id, { create: () => tokensProvider(l.id) });
+  }
+}
+
+/** Sets a model's language by its file's name and, for a name that says
+ * nothing, by the program its text's first line names (`#!/bin/sh`). A
+ * file the app's table does not know keeps what Monaco made of its name. */
+export function setLanguage(monaco: Monaco, model: TextModel, fileName: string) {
+  const id = languageOf(fileName) ?? languageOf(fileName, model.getLineContent(1));
+  if (id && model.getLanguageId() !== id) monaco.editor.setModelLanguage(model, id);
 }
 
 /** A CSS color as Monaco takes it (#rrggbb or #rrggbbaa). */
@@ -97,10 +170,23 @@ function defineThemes(monaco: Monaco) {
     // The tokens are those of the theme in use; the other theme gets
     // Monaco's own colors until it is in use.
     const own = document.documentElement.dataset.theme === kind || (!document.documentElement.dataset.theme && dark);
+    // A token's type is its role (tokensProvider); Monaco's own tokenizers
+    // name theirs alike (comment, keyword, string, number, type, tag…), so
+    // the languages they still color take the same colors. JSON's keys are
+    // strings to its tokenizer.
+    const rules: MonacoNs.editor.ITokenThemeRule[] = [];
+    if (own) {
+      const rule = (token: string, css: string, fontStyle?: string) => {
+        const c = v(css, '');
+        if (c) rules.push({ token, foreground: c.slice(1), fontStyle });
+      };
+      for (const role of ROLES) rule(role, ROLE_TOKEN[role], ROLE_STYLE[role]);
+      rule('string.key', ROLE_TOKEN.property);
+    }
     monaco.editor.defineTheme(THEME[kind], {
       base: dark ? 'vs-dark' : 'vs',
       inherit: true,
-      rules: [],
+      rules,
       colors: own
         ? {
             'editor.background': v('--ds-color-background', dark ? '#0a0a0a' : '#ffffff'),

@@ -43,7 +43,14 @@ function brand(): Plugin {
 // list leaves them out (src/terminal/fonts/README.md,
 // scripts/fetch-ghostty-vt.sh, src/assets/vscodium/README.md,
 // src/assets/ai-logos/README.md). Monaco bundles code of other projects,
-// whose notices it ships beside its license.
+// whose notices it ships beside its license. The grammars code is colored
+// with (@shikijs/langs) are those of the collection tm-grammars, built from
+// many projects' grammars: its notices name each one's license. They are
+// read from that package, a development dependency of the version
+// @shikijs/langs was built from, which nothing else uses.
+const grammarsVersion = (): string =>
+  (JSON.parse(readFileSync(new URL('./node_modules/tm-grammars/package.json', import.meta.url), 'utf8')) as { version: string }).version;
+
 function bundledLicenses(): Plugin {
   return {
     name: 'bundled-licenses',
@@ -58,7 +65,8 @@ function bundledLicenses(): Plugin {
           `\n## libghostty-vt (Ghostty cf5519b22f91, MIT)\n\n${read('./src/vt/LICENSE')}\n` +
           `\n## VSCodium logo (VSCodium ca7f7b44b5e5, MIT)\n\n${read('./src/assets/vscodium/LICENSE')}\n` +
           `\n## AI service marks (Lobe Icons, @lobehub/icons-static-svg 1.102.0, MIT)\n\n${read('./src/assets/ai-logos/LICENSE')}\n` +
-          `\n## Third-party notices of monaco-editor\n\n${read('./node_modules/monaco-editor/ThirdPartyNotices.txt')}\n`;
+          `\n## Third-party notices of monaco-editor\n\n${read('./node_modules/monaco-editor/ThirdPartyNotices.txt')}\n` +
+          `\n## Third-party notices of the code grammars (tm-grammars ${grammarsVersion()}, through Shiki)\n\n${read('./node_modules/tm-grammars/NOTICE')}\n`;
       },
     },
   };
@@ -78,10 +86,13 @@ function katexWoff2(): Plugin {
   };
 }
 
-// Monaco (src/plugins/monaco.ts) is shipped without source maps: its maps
-// would be most of the embedded UI's size, for code that is not ours.
+// Chunks made only of packages' code are shipped without source maps:
+// Monaco (src/plugins/monaco.ts), the code grammars and their highlighter
+// (src/highlight; a grammar is data), KaTeX. Their maps would be most of
+// the embedded UI's size, for code that is not ours. A chunk with a module
+// of the app keeps its map.
 function monacoWithoutMaps(): Plugin {
-  const ours = (id: string) => !/[\\/]node_modules[\\/]monaco-editor[\\/]/.test(id) && !id.startsWith('\0');
+  const ours = (id: string) => !/[\\/]node_modules[\\/]/.test(id) && !id.startsWith('\0');
   return {
     name: 'monaco-without-maps',
     generateBundle: {

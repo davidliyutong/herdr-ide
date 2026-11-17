@@ -382,6 +382,10 @@ export const zhCN: Messages = {
   'preview.openInCode': '在 VS Code 中打开',
   'preview.previous': '上一个（←）',
   'preview.next': '下一个（→）',
+  'preview.rendered': '显示渲染结果',
+  'preview.source': '显示源码',
+  'markdown.copy': '复制代码',
+  'markdown.copied': '已复制',
   'preview.videoUnsupported': '浏览器无法解码这个视频（可能是 HEVC/MKV 等编码）。可以下载，或在 VS Code 中打开。',
   'transfers.close': '关闭',
 

@@ -103,6 +103,7 @@ const monaco = {
   editor: { getModel: () => null, createModel: () => new FakeModel() },
 };
 vi.mock('../plugins/monaco', () => ({
+  setLanguage: vi.fn(),
   createDiffEditor: vi.fn(async (_el: HTMLElement, o: Record<string, unknown>) => {
     editor.opts = { ...o };
     return { monaco, editor };

@@ -19,7 +19,7 @@ import { useStore } from '../../state/store';
 import { t } from '../../i18n';
 import { keepEdit, keptEdit, takeEdit, useUnsaved, type KeptEdit } from '../../unsaved';
 import type { PaneViewProps } from '../api';
-import { createEditor, type CodeEditor, type Monaco, type TextModel } from '../monaco';
+import { createEditor, setLanguage, type CodeEditor, type Monaco, type TextModel } from '../monaco';
 import { ConflictError, errorText, FilesError, filesApi, type Entry } from './api';
 import { keepEditor, reveal } from './ops';
 import { lineChanges, quickDiff, type LineChange } from './quickDiff';
@@ -304,7 +304,10 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
     dismissed.current = undefined;
     const c = ed.current;
     const model = c?.editor.getModel() ?? undefined;
-    if (c && model) applyText(c.monaco, model, text, shown.current === model);
+    if (c && model) {
+      applyText(c.monaco, model, text, shown.current === model);
+      setLanguage(c.monaco, model, path);
+    }
     shown.current = model;
     markClean();
     setStatus({ kind: 'ready' });

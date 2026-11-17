@@ -335,16 +335,54 @@ Changes and Rename take one.
 
 **Monaco** (`web/src/plugins/monaco.ts`) is the editor of the editor pane
 and of later plugins' panes (diffs): loaded on first use (dynamic imports,
-so the main bundle does not grow), with its editor features, every
-language's colors and the services of JSON, CSS and HTML, each with its
-worker; TypeScript's service and worker are left out (larger than the rest
-together; TypeScript and JavaScript keep their colors). Its theme is made
-from the design tokens of the app's light or dark theme and follows them,
-its font is the terminal's and follows it, also in editors and diffs
-already open. Its chunks ship without source maps
+so the main bundle does not grow), with its editor features, its
+languages (brackets, comments, indentation) and the services of JSON, CSS
+and HTML, each with its worker; TypeScript's service and worker are left
+out (larger than the rest together; TypeScript and JavaScript keep their
+colors). Its theme is made from the design tokens of the app's light or
+dark theme and follows them, its font is the terminal's and follows it,
+also in editors and diffs already open. Its chunks ship without source maps
 (`vite.config.ts`), its license and third-party notices are in
 `licenses.md`. `createEditor` and `createDiffEditor` give a plugin an editor
 in an element.
+
+**Colors of code** (`web/src/highlight`) are the app's own, shared by the
+editors, the diffs, the preview pane and code in rendered Markdown:
+
+- The grammars are TextMate grammars, as VS Code's, from Shiki
+  (`@shikijs/langs`), run by the browser's regular expression engine (no
+  second WebAssembly module). `languages.ts` lists the languages colored,
+  about 125: each grammar is a chunk of its own, loaded when a file or a
+  code block of that language first shows. Monaco's own languages lack
+  Makefile, TOML, CMake, diff, `.env`, Nix, Zig, Haskell, LaTeX, Vue, TSX
+  and more, which the table adds with their comment signs and brackets;
+  ignore files (`.gitignore` and its kin) have a small grammar of the app's
+  (`grammars.ts`).
+- `languageOf` tells a file's language: by its whole name (`Makefile`,
+  `CMakeLists.txt`, `.bashrc`), a name's start (`Dockerfile.dev`,
+  `.env.local`), its extension, the same without an ending such as `.in`
+  or `.example`, and for a name that says nothing by the program of its
+  first line (`#!/usr/bin/env python3`). The editor and diff panes set
+  their models' language with it (`setLanguage`); a file the table does not
+  know keeps what Monaco makes of its name.
+- Tokens are colored by role, not by theme (`roles.ts`): Shiki colors with
+  one theme whose colors stand for roles (comment, keyword, string, number,
+  type, function, property, tag, attribute, delimiter, regexp, and those
+  of markup and diffs), and the design tokens' `syntax` colors give each
+  role its color in the theme in use ([24](24-design-tokens.md)). Text is
+  tokenized once whichever theme shows it, and switching themes changes
+  colors only. In Monaco a token's type is its role
+  (`registerTokensProviderFactory`, which replaces Monaco's own coloring of
+  a language) and the theme's rules color the roles; JSON keeps the
+  tokenizer of its language service, whose token names take the same
+  rules. Outside Monaco, `Code` renders spans of the classes `syn-<role>`.
+- Code over 300,000 characters and lines over 20,000 stay plain, and a line
+  is given up after half a second.
+- The grammars are about 5 MB of the embedded UI. Chunks made only of
+  packages' code (the grammars, the highlighter, Monaco, KaTeX, the Markdown
+  renderer) ship without source maps (`vite.config.ts`), which would
+  otherwise double that; the grammars' third-party notices (those of the
+  collection they come from, `tm-grammars`) are in `licenses.md`.
 
 ### Routes
 
@@ -382,6 +420,9 @@ the cause's code as its message), `offline` (409).
 | Replacing a folder by removing it first | What the dropped folder does not hold would be lost; merging loses only the files replaced. |
 | Deleting without a trash | A mistaken Delete in a tree is easy; the trash keeps the file where the system's tools find it. |
 | CodeMirror instead of Monaco | The diffs of a version control plugin want Monaco's diff editor; one editor for both. |
+| Monaco's own colors (Monarch grammars) | It has 80 languages and no way to add VS Code's grammars: a Makefile, a TOML or a `.env` file stayed plain, a file without an extension too, and previews and Markdown would need a second highlighter anyway. |
+| Shiki's themes (`@shikijs/monaco`) | That bridge takes over Monaco's themes, which the app rebuilds from its tokens at every change of a preference, and a theme's colors would have to be tokenized again for the other theme; roles are tokenized once and colored by the tokens. |
+| Shiki's Oniguruma engine | A second WebAssembly module on the page (SECURITY.md lists them) for grammars the browser's engine runs. |
 | The full Monaco bundle with TypeScript's service | Its worker and source maps grew the embedded UI by more than the whole app; VS Code panes have TypeScript. |
 | Opening files in VS Code only | code-server takes a while to start on each machine and a pane's room; a small fix should not need it. |
 
@@ -456,6 +497,14 @@ the trash stay in the user's trash
 
 ## Testing
 
+- `web/src/__tests__/highlight.test.ts`: the language table (unique ids,
+  names, extensions and aliases; every grammar loads and tokenizes in the
+  browser's engine), the language of file names and first lines, the roles
+  of tokens in several languages, the line tokenizer the editor uses, a
+  style for every role, and 4.5:1 of every syntax color against the
+  background in both themes. `markdown.test.tsx`: what links and images
+  may point to, HTML and scripts in the text creating no elements, code
+  blocks colored, formulas through KaTeX's renderer.
 - `internal/agent/plugin/files/files_test.go` (HOME in a temporary
   directory): each action, renames and moves that replace nothing (also
   across file systems, `TestMoveAcrossFileSystems`), copies with new

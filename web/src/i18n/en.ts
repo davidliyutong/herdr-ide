@@ -392,6 +392,10 @@ export const en = {
   'preview.openInCode': 'Open in VS Code',
   'preview.previous': 'Previous (←)',
   'preview.next': 'Next (→)',
+  'preview.rendered': 'Show rendered',
+  'preview.source': 'Show source',
+  'markdown.copy': 'Copy code',
+  'markdown.copied': 'Copied',
   'preview.videoUnsupported': 'The browser cannot decode this video (e.g. HEVC or MKV). Download it or open it in VS Code.',
   'transfers.close': 'Close',
 
