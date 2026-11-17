@@ -465,12 +465,17 @@ export const actions = {
   },
 
   /** Closes every tab of a workspace but one (others) or those after it
-   * (right), at once, with one Undo, as closeTabs. */
+   * (right), at once, with one Undo, as closeTabs; pinned tabs stay. */
   async closeTabsBeside(m: string, ws: string, index: number, which: 'others' | 'right') {
     const w = terms.layout(m)?.workspaces.find((x) => x.id === ws);
     if (!w?.tabs[index]) return;
-    const keys = w.tabs.filter((_, i) => (which === 'others' ? i !== index : i > index)).map((tab) => L.tabPanes(tab)[0]);
+    const keys = w.tabs.filter((tab, i) => !tab.pinned && (which === 'others' ? i !== index : i > index)).map((tab) => L.tabPanes(tab)[0]);
     if (keys.length) await actions.closeTabs(m, keys);
+  },
+
+  /** Pins a tab (it moves to the end of the pinned ones) or unpins it. */
+  pinTab(m: string, ws: string, index: number, pinned: boolean) {
+    terms.mutate(m, (l) => L.pinTab(l, ws, index, pinned));
   },
 
   /** Moves the tabs holding these panes, in their order, as one block to a

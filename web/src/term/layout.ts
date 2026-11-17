@@ -38,6 +38,9 @@ export type Node = Leaf | Split | Extra;
 export type Tab = Extra & {
   /** Set only when the user named the tab. */
   name?: string;
+  /** Pinned: it stays left of the others, Close Others and Close to the
+   * Right leave it, and its button unpins it instead of closing it. */
+  pinned?: true;
   root: Node;
   /** The pane with the keyboard focus (paneKey). */
   focused: string;
@@ -229,12 +232,13 @@ function parseNode(raw: Extra): Node {
 
 function parseTab(raw: unknown): Tab | null {
   if (!isObject(raw) || !isObject(raw.root)) return null;
-  const { name, root: rawRoot, focused, ...extra } = raw;
+  const { name, root: rawRoot, focused, pinned, ...extra } = raw;
   const root = parseNode(rawRoot);
   const panes = panesOf(root);
   return {
     ...extra,
     ...(typeof name === 'string' && name ? { name } : {}),
+    ...(pinned === true ? { pinned: true as const } : {}),
     root,
     focused: typeof focused === 'string' && panes.includes(focused) ? focused : (panes[0] ?? ''),
   };
@@ -298,6 +302,15 @@ const workspaceIndex = (layout: Layout, wsId: string) => layout.workspaces.findI
 /** The layout with the workspace at index replaced, and selected when select is set. */
 function withWorkspace(layout: Layout, index: number, ws: Workspace, select = false): Layout {
   return { ...layout, workspaces: layout.workspaces.map((w, i) => (i === index ? ws : w)), ...(select ? { selected: index } : {}) };
+}
+
+/** A workspace with its pinned tabs first, each group in its order, the
+ * selected tab kept; the same workspace when they are. */
+function pinnedFirst(ws: Workspace): Workspace {
+  const pinned = ws.tabs.filter((t) => t.pinned);
+  if (ws.tabs.slice(0, pinned.length).every((t) => t.pinned)) return ws;
+  const tabs = [...pinned, ...ws.tabs.filter((t) => !t.pinned)];
+  return { ...ws, tabs, selected: Math.max(0, tabs.indexOf(ws.tabs[ws.selected])) };
 }
 
 function updateWorkspace(layout: Layout, wsId: string, change: (ws: Workspace) => Workspace): Layout {
@@ -378,11 +391,39 @@ export function closeTab(layout: Layout, workspace: string, tab: number): Layout
   );
 }
 
+/** Pins a tab (to the end of the pinned ones) or unpins it (to the start
+ * of the others). A preview editor of a tab pinned is kept, as a pinned
+ * tab is not one to replace. */
+export function pinTab(layout: Layout, workspace: string, tab: number, pinned: boolean): Layout {
+  return updateWorkspace(layout, workspace, (ws) => {
+    const current = ws.tabs[tab];
+    if (!current || !!current.pinned === pinned) return ws;
+    const { pinned: _, ...rest } = current;
+    const next: Tab = pinned ? { ...rest, root: keptPreviews(rest.root), pinned: true } : rest;
+    const tabs = ws.tabs.map((t, i) => (i === tab ? next : t));
+    const target = tabs.filter((t, i) => t.pinned && i !== tab).length;
+    return { ...ws, tabs: moved(tabs, tab, target), selected: afterMove(ws.selected, tab, target) };
+  });
+}
+
+/** A tree whose plugin views shown as previews (`preview: true`) are kept. */
+function keptPreviews(node: Node): Node {
+  if (isPluginLeaf(node)) return node.view.preview === true ? { ...node, view: { ...node.view, preview: false } } : node;
+  if (!isSplit(node)) return node;
+  const [a, b] = node.children;
+  const ka = keptPreviews(a);
+  const kb = keptPreviews(b);
+  return ka === a && kb === b ? node : { ...node, children: [ka, kb] };
+}
+
+/** Moves a tab; the pinned tabs stay first (a tab moved among the others'
+ * places stops at their edge). */
 export function moveTab(layout: Layout, workspace: string, from: number, to: number): Layout {
   return updateWorkspace(layout, workspace, (ws) => {
     const target = clampIndex(to, ws.tabs.length);
     if (!ws.tabs[from] || from === target) return ws;
-    return { ...ws, tabs: moved(ws.tabs, from, target), selected: afterMove(ws.selected, from, target) };
+    const next = pinnedFirst({ ...ws, tabs: moved(ws.tabs, from, target), selected: afterMove(ws.selected, from, target) });
+    return next.tabs.every((t, i) => t === ws.tabs[i]) ? ws : next;
   });
 }
 
@@ -401,9 +442,9 @@ export function movedBlock<T>(list: readonly T[], picked: readonly number[], slo
  * slot of its tabs; the selected tab stays selected. */
 export function moveTabs(layout: Layout, workspace: string, tabs: readonly number[], slot: number): Layout {
   return updateWorkspace(layout, workspace, (ws) => {
-    const next = movedBlock(ws.tabs, tabs, slot);
-    if (next.every((t, i) => t === ws.tabs[i])) return ws;
-    return { ...ws, tabs: next, selected: Math.max(0, next.indexOf(ws.tabs[ws.selected])) };
+    const next = pinnedFirst({ ...ws, tabs: movedBlock(ws.tabs, tabs, slot) });
+    if (next.tabs.every((t, i) => t === ws.tabs[i])) return ws;
+    return { ...next, selected: Math.max(0, next.tabs.indexOf(ws.tabs[ws.selected])) };
   });
 }
 
@@ -433,10 +474,8 @@ export function moveTabsToWorkspace(layout: Layout, workspace: string, tabs: rea
   const before = [...set].filter((i) => i < src.selected).length;
   const selected = kept >= 0 ? kept : clampIndex(src.selected - before, rest.length);
   const dst = layout.workspaces[to];
-  const added = [...dst.tabs, ...moving];
-  const workspaces = layout.workspaces.map((w, i) =>
-    i === from ? { ...w, tabs: rest, selected } : i === to ? { ...w, tabs: added, selected: added.length - 1 } : w,
-  );
+  const added = pinnedFirst({ ...dst, tabs: [...dst.tabs, ...moving], selected: dst.tabs.length + moving.length - 1 });
+  const workspaces = layout.workspaces.map((w, i) => (i === from ? { ...w, tabs: rest, selected } : i === to ? added : w));
   return { ...layout, workspaces, selected: to };
 }
 
@@ -908,5 +947,5 @@ export function reopen(layout: Layout, c: Closed, restored: ReadonlyMap<string, 
   const place = Math.min(Math.max(c.index, 0), ws.tabs.length);
   const tab: Tab = { ...c.tab, root, focused: focused ?? panesOf(root)[0] };
   const tabs = [...ws.tabs.slice(0, place), tab, ...ws.tabs.slice(place)];
-  return withWorkspace(layout, index, { ...ws, tabs, selected: place }, true);
+  return withWorkspace(layout, index, pinnedFirst({ ...ws, tabs, selected: place }), true);
 }

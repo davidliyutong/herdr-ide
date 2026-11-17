@@ -243,9 +243,13 @@ export function commandEnabled(id: string): boolean {
     case 'tab.close':
       return changes && !!cur?.tab;
     case 'tab.closeOthers':
-      return changes && tabs > 1;
+      return changes && !!cur?.ws && cur.ws.tabs.some((t, i) => i !== cur.tabIndex && !t.pinned);
     case 'tab.closeRight':
-      return changes && !!cur?.tab && cur.tabIndex < tabs - 1;
+      return changes && !!cur?.ws && cur.ws.tabs.some((t, i) => i > cur.tabIndex && !t.pinned);
+    case 'tab.pin':
+      return changes && !!cur?.tab && !cur.tab.pinned;
+    case 'tab.unpin':
+      return changes && !!cur?.tab?.pinned;
     case 'pane.rename':
       return changes && !!c?.terminal;
     case 'pane.actions':
@@ -380,6 +384,12 @@ export function runCommand(id: string) {
     case 'tab.closeRight': {
       const c = actions.currentTab();
       if (c) void actions.closeTabsBeside(c.m, c.ws, c.index, id === 'tab.closeOthers' ? 'others' : 'right');
+      break;
+    }
+    case 'tab.pin':
+    case 'tab.unpin': {
+      const c = actions.currentTab();
+      if (c) actions.pinTab(c.m, c.ws, c.index, id === 'tab.pin');
       break;
     }
     case 'pane.rename':

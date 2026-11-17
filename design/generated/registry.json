@@ -146,6 +146,16 @@
       "when": "terminal"
     },
     {
+      "id": "tab.pin",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.unpin",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
       "id": "pane.splitRight",
       "section": "pane",
       "when": "terminal"
@@ -342,6 +352,7 @@
     "command.tab.closeRight",
     "command.tab.new",
     "command.tab.next",
+    "command.tab.pin",
     "command.tab.previous",
     "command.tab.rename",
     "command.tab.select1",
@@ -353,6 +364,7 @@
     "command.tab.select7",
     "command.tab.select8",
     "command.tab.select9",
+    "command.tab.unpin",
     "command.view.panel.files",
     "command.view.panel.git",
     "command.view.panel.usage",

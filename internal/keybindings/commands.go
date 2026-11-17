@@ -138,6 +138,10 @@ var Commands = func() []Command {
 		// As browsers offer them; at once, with one Undo, as Close Tab.
 		cmd("tab.closeOthers", "tab"),
 		cmd("tab.closeRight", "tab"),
+		// Pinned tabs stay first and Close Others and Close to the Right
+		// leave them; as VS Code and browsers offer, without a key.
+		cmd("tab.pin", "tab"),
+		cmd("tab.unpin", "tab"),
 
 		cmd("pane.splitRight", "pane", on(macApp, "cmd+d")),
 		cmd("pane.splitDown", "pane", on(macApp, "cmd+shift+d")),

@@ -358,6 +358,31 @@ describe('menus', () => {
     expect(core.layout('m')!.workspaces.map((w) => w.name)).toEqual(['one', 'two']);
   });
 
+  it('pins a tab: it goes first, Close Others and Close to the Right leave it, Unpin takes it back', async () => {
+    // The tabs are a, b, d; b is shown.
+    expect(commandEnabled('tab.pin')).toBe(true);
+    expect(commandEnabled('tab.unpin')).toBe(false);
+    find(tabMenu('m', 'w1w1w1w1', 2), 'Pin Tab').run!();
+    await settle();
+    expect(tabNames()).toEqual(['d', 'a', 'b']);
+    expect(core.layout('m')!.workspaces[0].tabs[0].pinned).toBe(true);
+    // The pinned tab's menu unpins it; a tab moved before it stops after it.
+    expect(labels(tabMenu('m', 'w1w1w1w1', 0))).toContain('Unpin Tab');
+    find(tabMenu('m', 'w1w1w1w1', 1), 'Move Left').run!();
+    await settle();
+    expect(tabNames()).toEqual(['d', 'a', 'b']);
+    // Close Others from the last tab keeps the pinned one.
+    find(tabMenu('m', 'w1w1w1w1', 2), 'Close Other Tabs').run!();
+    await settle();
+    expect(tabNames()).toEqual(['d', 'b']);
+    // Only pinned tabs besides it: nothing to close.
+    expect(find(tabMenu('m', 'w1w1w1w1', 1), 'Close Other Tabs').disabled).toBe(true);
+    expect(find(tabMenu('m', 'w1w1w1w1', 0), 'Close Tabs to the Right').disabled).toBe(false);
+    find(tabMenu('m', 'w1w1w1w1', 0), 'Unpin Tab').run!();
+    await settle();
+    expect(core.layout('m')!.workspaces[0].tabs.some((t) => t.pinned)).toBe(false);
+  });
+
   it('renames the focused pane and opens its menu from commands, which take no key', async () => {
     expect(keyHint('pane.rename')).toBe('');
     expect(commandEnabled('pane.rename')).toBe(true);

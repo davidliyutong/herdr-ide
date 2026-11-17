@@ -26,6 +26,8 @@ import {
   Minimize2,
   PanelRight,
   Pencil,
+  Pin,
+  PinOff,
   Play,
   Plus,
   Power,
@@ -407,6 +409,10 @@ export function tabMenu(m: string, ws: string, index: number): MenuEntry[] {
   const c = current();
   const isCurrent = c?.m === m && c.ws?.id === ws && c.tabIndex === index;
   const n = w.tabs.length;
+  const pinned = !!w.tabs[index]?.pinned;
+  // Close Others and Close to the Right leave pinned tabs.
+  const others = w.tabs.some((x, i) => i !== index && !x.pinned);
+  const right = w.tabs.some((x, i) => i > index && !x.pinned);
   // A move uses the position when it runs: another client may have moved tabs.
   const move = (by: -1 | 1) => () => {
     const tab = w.tabs[index];
@@ -419,6 +425,12 @@ export function tabMenu(m: string, ws: string, index: number): MenuEntry[] {
       hint: hintIf(isCurrent, 'tab.rename'),
       icon: <Pencil />,
       run: () => actions.startRename('tab', m, `${ws}:${index}`),
+    },
+    {
+      label: t(pinned ? 'command.tab.unpin' : 'command.tab.pin'),
+      hint: hintIf(isCurrent, pinned ? 'tab.unpin' : 'tab.pin'),
+      icon: pinned ? <PinOff /> : <Pin />,
+      run: () => actions.pinTab(m, ws, index, !pinned),
     },
     'sep',
     { label: t('command.tab.new'), hint: hint('tab.new'), icon: <Plus />, run: () => void actions.newTab(m, ws) },
@@ -439,7 +451,7 @@ export function tabMenu(m: string, ws: string, index: number): MenuEntry[] {
       hint: hintIf(isCurrent, 'tab.closeOthers'),
       icon: <X />,
       danger: true,
-      disabled: n < 2,
+      disabled: !others,
       run: () => void actions.closeTabsBeside(m, ws, index, 'others'),
     },
     {
@@ -447,7 +459,7 @@ export function tabMenu(m: string, ws: string, index: number): MenuEntry[] {
       hint: hintIf(isCurrent, 'tab.closeRight'),
       icon: <X />,
       danger: true,
-      disabled: index >= n - 1,
+      disabled: !right,
       run: () => void actions.closeTabsBeside(m, ws, index, 'right'),
     },
   ];

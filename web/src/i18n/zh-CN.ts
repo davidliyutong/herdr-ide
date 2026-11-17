@@ -201,6 +201,8 @@ export const zhCN: Messages = {
   'command.workspace.closeOthers': '关闭其他工作区',
   'command.tab.closeOthers': '关闭其他标签页',
   'command.tab.closeRight': '关闭右侧标签页',
+  'command.tab.pin': '固定标签页',
+  'command.tab.unpin': '取消固定标签页',
   'command.pane.rename': '重命名窗格',
   'command.pane.actions': '窗格操作…',
   'command.view.toggleSidebar': '显示/隐藏侧栏',

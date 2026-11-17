@@ -19,6 +19,7 @@ import {
   layoutTerminals,
   locate,
   moveTab,
+  pinTab,
   moveTabs,
   moveTabsToWorkspace,
   moveWorkspaces,
@@ -168,6 +169,8 @@ function applyOp(layout: Layout, op: Record<string, unknown>): Layout {
       return closeTab(layout, s('workspace'), n('tab'));
     case 'moveTab':
       return moveTab(layout, s('workspace'), n('from'), n('to'));
+    case 'pinTab':
+      return pinTab(layout, s('workspace'), n('tab'), op.pinned as boolean);
     case 'moveTabs':
       return moveTabs(layout, s('workspace'), op.tabs as number[], n('slot'));
     case 'moveTabsToWorkspace':

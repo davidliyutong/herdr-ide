@@ -83,6 +83,18 @@ Non-goals: arbitrary docking of panes; floating panes.
   with **Close Workspace**. A program that ends by
   itself closes its pane the same way, and the finished terminal is removed
   from the terminal core.
+- A tab can be pinned (Pin Tab in its menu, `tab.pin` and `tab.unpin`
+  without a default key), as VS Code pins editors and browsers pin tabs:
+  it keeps its name and shows a pin where others have ×, and a click on
+  the pin unpins it. Pinned tabs stay first, left of a small gap: pinning
+  moves a tab to the end of the pinned ones, unpinning to the start of the
+  others, and a tab dragged among the others' places stops at their edge
+  (`L.pinTab`; the layout's tab carries `pinned: true`, so every browser
+  shows it). Close Other Tabs and Close Tabs to the Right leave pinned
+  tabs and a middle click does not close one; Close Tab, Close Pane on its
+  last pane and Close Workspace still do, with Undo. A pinned tab showing
+  a preview editor keeps it, as a pinned tab is not one for the next
+  preview to replace.
 - Zoom shows the focused pane alone in its tab; it is this browser's own
   view, not written to the document.
 - Tabs and workspaces are shown in the document's order. Tabs that do not
@@ -379,10 +391,10 @@ Non-goals: arbitrary docking of panes; floating panes.
   - a preview's header: Open in VS Code, Download (where downloads are
     offered, [06](06-quick-look-and-files.md)), Split Right / Down,
     Maximize or Restore Pane, Move to Workspace ▸, Close Pane;
-  - tab: Rename Tab, New Tab, Move Left / Right, Move to Workspace ▸, Close
-    Tab, Close Other Tabs, Close Tabs to the Right (`tab.closeOthers`,
-    `tab.closeRight`: at once, with one Undo for all of them, as Close
-    Tab);
+  - tab: Rename Tab, Pin Tab or Unpin Tab, New Tab, Move Left / Right,
+    Move to Workspace ▸, Close Tab, Close Other Tabs, Close Tabs to the
+    Right (`tab.closeOthers`, `tab.closeRight`: at once, with one Undo for
+    all of them, as Close Tab; pinned tabs stay);
   - workspace: Edit Workspace…, New Tab, Move Up / Down, Close Workspace,
     Close Other Workspaces (`workspace.closeOthers`: at once, with one
     Undo for all of them, after the question about unsaved changes, as
@@ -756,8 +768,12 @@ described in [13](13-settings-and-appearance.md))
   buttons), the header as a toolbar (one Tab stop focusing its pane,
   arrows, F2 and Enter, Shift+F10, a mouse press not taking the keyboard).
 - `web/src/__tests__/menus.test.ts` also: Close Other Tabs and Close Tabs
-  to the Right with one Undo, Close Other Workspaces with one Undo, and the
-  commands `pane.rename` and `pane.actions`.
+  to the Right with one Undo, Close Other Workspaces with one Undo, the
+  commands `pane.rename` and `pane.actions`, and pinning (the tab first, a
+  tab moved before it stopping after it, Close Other Tabs leaving it,
+  Unpin).
+- `design/testdata/layout/pinned.json`: pinning and unpinning, moves
+  around pinned tabs, a pinned preview editor kept.
 - `web/src/__tests__/settingsDialog.test.ts`: the palette's ranking.
 
 Splits, new tabs and workspaces, closing and dragging the split handle were

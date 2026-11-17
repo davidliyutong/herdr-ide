@@ -278,6 +278,8 @@ by `scripts/registry`.
 | `tab.close` | `terminal` | `cmd+shift+w` | – | `ctrl+shift+w` | – |
 | `tab.closeOthers` | `terminal` | – | – | – | – |
 | `tab.closeRight` | `terminal` | – | – | – | – |
+| `tab.pin` | `terminal` | – | – | – | – |
+| `tab.unpin` | `terminal` | – | – | – | – |
 | `pane.splitRight` | `terminal` | `cmd+d` | – | – | – |
 | `pane.splitDown` | `terminal` | `cmd+shift+d` | – | – | – |
 | `pane.close` | `terminal` | `cmd+w` | – | – | – |

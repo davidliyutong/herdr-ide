@@ -947,7 +947,8 @@ body.resizing .sidebar-resizer::after {
     inset 0 0 0 1px var(--line-2),
     inset 0 -2px 0 var(--accent);
 }
-.tab-close {
+.tab-close,
+.tab-pin {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -961,13 +962,27 @@ body.resizing .sidebar-resizer::after {
   padding: 0;
   visibility: hidden;
 }
-.tab-close .lucide {
+.tab-close .lucide,
+.tab-pin .lucide {
   width: var(--ic-sm);
   height: var(--ic-sm);
 }
-.tab-close:hover {
+.tab-close:hover,
+.tab-pin:not(:disabled):hover {
   color: var(--fg);
   background: var(--line);
+}
+/* A pinned tab shows its pin (a click unpins it) where others have ×, and
+   a gap parts the pinned tabs from the others. */
+.tab-pin {
+  visibility: visible;
+}
+.tab-pin:disabled {
+  opacity: 1;
+  cursor: default;
+}
+.tab.pinned + .tab:not(.pinned) {
+  margin-left: 6px;
 }
 .tab:hover .tab-close,
 .tab.active .tab-close,

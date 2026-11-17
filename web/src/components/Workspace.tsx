@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Columns2, PanelLeft, Plus, X } from 'lucide-react';
+import { Columns2, PanelLeft, Pin, Plus, X } from 'lucide-react';
 import { useStore } from '../state/store';
 import { terms, useTerms } from '../state/terms';
 import * as L from '../term/layout';
@@ -191,7 +191,7 @@ export function Workspace() {
             return (
               <div
                 key={`${i}:${tb.focused}`}
-                className={`tab ${i === ws.selected ? 'active' : ''} ${picked.has(key) ? 'multi' : ''}`}
+                className={`tab ${i === ws.selected ? 'active' : ''} ${picked.has(key) ? 'multi' : ''} ${tb.pinned ? 'pinned' : ''}`}
                 role="tab"
                 aria-selected={i === ws.selected || picked.has(key)}
                 tabIndex={-1}
@@ -221,9 +221,9 @@ export function Workspace() {
                   clearMulti();
                   actions.selectTab(m, ws.id, i);
                 }}
-                // A middle click closes the tab, as in browsers.
+                // A middle click closes the tab, as in browsers; not a pinned one.
                 onAuxClick={(e) => {
-                  if (e.button !== 1 || readOnly || editing) return;
+                  if (e.button !== 1 || readOnly || editing || tb.pinned) return;
                   e.preventDefault();
                   void actions.closeTab(m, ws.id, i);
                 }}
@@ -261,19 +261,37 @@ export function Workspace() {
                   <span className="tab-label tab-num">{tabLabel(tb, i)}</span>
                 )}
                 {count > 1 && <Columns2 className="tab-split" aria-label={t('workspace.paneCount', { n: count })} />}
-                {!readOnly && (
+                {tb.pinned ? (
+                  // A pinned tab's button unpins it (Close Tab still closes it).
                   <button
                     tabIndex={-1}
-                    className="tab-close"
-                    title={withKey(t('command.tab.close'), 'tab.close')}
-                    aria-label={t('command.tab.close')}
+                    className="tab-pin"
+                    title={withKey(t('command.tab.unpin'), 'tab.unpin')}
+                    aria-label={t('command.tab.unpin')}
+                    aria-pressed
+                    disabled={readOnly}
                     onClick={(e) => {
                       e.stopPropagation();
-                      void actions.closeTab(m, ws.id, i);
+                      actions.pinTab(m, ws.id, i, false);
                     }}
                   >
-                    <X />
+                    <Pin />
                   </button>
+                ) : (
+                  !readOnly && (
+                    <button
+                      tabIndex={-1}
+                      className="tab-close"
+                      title={withKey(t('command.tab.close'), 'tab.close')}
+                      aria-label={t('command.tab.close')}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void actions.closeTab(m, ws.id, i);
+                      }}
+                    >
+                      <X />
+                    </button>
+                  )
                 )}
               </div>
             );

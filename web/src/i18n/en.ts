@@ -207,6 +207,8 @@ export const en = {
   'command.workspace.closeOthers': 'Close Other Workspaces',
   'command.tab.closeOthers': 'Close Other Tabs',
   'command.tab.closeRight': 'Close Tabs to the Right',
+  'command.tab.pin': 'Pin Tab',
+  'command.tab.unpin': 'Unpin Tab',
   'command.pane.rename': 'Rename Pane',
   'command.pane.actions': 'Pane Actions…',
   'command.view.toggleSidebar': 'Toggle Sidebar',

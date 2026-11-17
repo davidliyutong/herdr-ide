@@ -30,7 +30,8 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   workspaces and machines to reorder them; drag the sidebar's edge or a split's
   handle to resize them (a double click restores the default or equal
   sizes); every tab has a × and a middle
-  click closes it; right-click a pane header, tab, workspace or machine
+  click closes it, and a pinned tab stays first with a pin instead;
+  right-click a pane header, tab, workspace or machine
   for its commands, or a pane's text to copy, paste or open a path. Everything is
   in reach of the mouse; the few default keys take nothing from the
   programs in the terminals (`ctrl+b` reaches tmux), and every key can be
