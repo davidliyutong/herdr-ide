@@ -135,7 +135,7 @@ after a successful reply it carries op-specific bytes.
 
 | Op | Direction | Payload after the reply |
 | --- | --- | --- |
-| `hello` | core → agent | – (reply has host info and data dirs); the machine is ready once it answers |
+| `hello` | core → agent | – (reply has host info and data dirs, and apart from them, since clients see those, the `SSH_CONNECTION` of the ssh session the agent runs in, which the core gives the machine's new terminals); the machine is ready once it answers |
 | `fs.stat`, `fs.list` | core → agent | – (a failed `fs.stat` has the code `not_found` or `denied`, which `/file` answers with 404 or 403) |
 | `fs.read` | core → agent | `Length` bytes from `Offset` |
 | `fs.write` | core → agent | chunked upload, then a second reply; `unique` keeps existing files (`-1`, `-2`… names) |

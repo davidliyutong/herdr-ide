@@ -56,6 +56,18 @@ against a running core by the integration tests):
   local machine's agent in its own process, so without this its terminals
   would take themselves for nested sessions, and an agent's hooks would
   report to the herdr pane the core was started from.
+- The new terminals of an ssh machine get `SSH_CONNECTION` and `SSH_CLIENT`
+  from the core (`internal/server/sshenv.go`), with the values of the ssh
+  session its agent runs in, which the agent tells in its hello apart from
+  the information clients see. A terminal core that systemd started as a
+  service of the user has not inherited them, and programs take them as the
+  sign that the user's clipboard and browser are on another computer: Codex
+  then also copies through the terminal (OSC 52), takes pastes from it and
+  logs in with a device code; prompts show the host name. Only an
+  `SSH_CONNECTION` of two addresses and two ports is passed on; a value the
+  client gave stays; the local machine gets none, since there they would
+  not be true. `terminal.sshEnv` (on by default, per machine) turns them
+  off. Terminals that already run keep their environment.
 - The protocol is generation 1 and only grows within it.
 
 ## Goals / non-goals
@@ -203,6 +215,11 @@ the status of a core on the socket and the API pipe;
 `TestHCVerifiedBeforeStartAndSocketPrivate` an executable of another
 digest or changed in place (same size and time) refused by `start` and
 `restart`, and the socket made 0600 after both.
+`internal/server/term_test.go` (`TestTermRunGetsTheSSHSession`,
+`TestSSHEnv`): the ssh session's variables in a new terminal of an ssh
+machine, a client's own value kept, the setting off, nothing but addresses
+and ports passed on, none for the local machine, none in the state clients
+see; `internal/agent/agent_test.go` the hello telling the session.
 `internal/agent/procutil_test.go` (`TestCleanEnv`): the variables of
 terminals and multiplexers removed (every `HC_*`), `TMUX_TMPDIR`,
 `TERM_PROGRAM` and the product's own kept. `TestIntegrationTerminal` (`internal/hc`) and `TestIntegrationHC`

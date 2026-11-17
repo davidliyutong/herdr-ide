@@ -1039,13 +1039,28 @@ func (c *termClient) call(m *termIn) {
 		// variables replace any the client gave, so a client cannot point
 		// them elsewhere.
 		if mc := c.s.mg.Get(m.M); mc != nil {
+			var added []string
 			if env := c.s.displayEnv(mc); len(env) > 0 {
-				names, ok := addEnv(params, env)
+				names, ok := addEnv(params, env, true)
 				if !ok {
 					c.fail(m.RID, "usage", "")
 					return
 				}
-				ev["env"] = names
+				added = names
+			}
+			// Programs on an ssh machine learn that their terminal is shown
+			// elsewhere (sshEnv); what the client gave stays.
+			if env := c.s.sshEnv(mc); len(env) > 0 {
+				names, ok := addEnv(params, env, false)
+				if !ok {
+					c.fail(m.RID, "usage", "")
+					return
+				}
+				added = append(added, names...)
+			}
+			if len(added) > 0 {
+				sort.Strings(added)
+				ev["env"] = added
 			}
 		}
 	}

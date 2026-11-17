@@ -171,7 +171,7 @@ func (a *Agent) handle(ctx context.Context, st net.Conn) {
 	var err error
 	switch h.Op {
 	case agentproto.OpHello:
-		err = agentproto.WriteLine(st, agentproto.Reply{OK: true, Info: a.info()})
+		err = agentproto.WriteLine(st, agentproto.Reply{OK: true, Info: a.info(), SSH: os.Getenv("SSH_CONNECTION")})
 		st.Close()
 	case agentproto.OpFsStat, agentproto.OpFsList, agentproto.OpFsRead, agentproto.OpFsWrite:
 		err = a.handleFS(st, h)

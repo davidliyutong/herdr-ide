@@ -5,7 +5,15 @@ vi.mock('../lib/conn', () => ({ conn: { sendNow: () => {} } }));
 import { useStore } from '../state/store';
 import { usePrefs } from '../prefs';
 import { fakeSettingsApi } from './fakeSettings';
-import { CLIP_AUTO_MS, PROGRAM_CLIP_MS, forgetProgramClipboard, programClipboard, programCopied, userInput } from '../vt/clipboard';
+import {
+  CLIP_AUTO_MS,
+  PROGRAM_CLIP_MS,
+  forgetProgramClipboard,
+  programClipboard,
+  programCopied,
+  userInput,
+  userRelease,
+} from '../vt/clipboard';
 
 const clip = (text: string, m = 'm') => programCopied(m, text);
 const typed = () => userInput();
@@ -55,6 +63,19 @@ describe('OSC 52 from programs', () => {
     expect(useStore.getState().toasts).toHaveLength(1);
     vi.advanceTimersByTime(1);
     expect(useStore.getState().toasts).toHaveLength(0);
+  });
+
+  it('counts from the release of a button the program tracks, keeping an earlier copy', () => {
+    vi.useFakeTimers();
+    // A drag over a program's own selection that takes longer than the gate.
+    typed();
+    clip('first');
+    vi.advanceTimersByTime(CLIP_AUTO_MS + 1);
+    userRelease();
+    expect(programClipboard('m')).toBe('first');
+    clip('dragged over');
+    expect(writeText).toHaveBeenLastCalledWith('dragged over');
+    expect(programClipboard('m')).toBe('dragged over');
   });
 
   it('asks when the browser refuses the write', async () => {

@@ -141,7 +141,11 @@ type Reply struct {
 	// not_found, denied).
 	Code string `json:"code,omitempty"`
 
-	Info    *Info       `json:"info,omitempty"`
+	Info *Info `json:"info,omitempty"`
+	// SSH (OpHello) is the SSH_CONNECTION of the session the agent was
+	// started in ("" when it was not started over ssh). It is apart from
+	// Info, which every client of the core sees.
+	SSH     string      `json:"ssh,omitempty"`
 	Stat    *Stat       `json:"stat,omitempty"`
 	Entries []Stat      `json:"entries,omitempty"`
 	Exec    *ExecResult `json:"exec,omitempty"`

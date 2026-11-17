@@ -568,6 +568,9 @@ export const zhCN: Messages = {
   'settings.terminal.programClipboard.auto': '自动',
   'settings.terminal.programClipboard.ask': '询问',
   'settings.terminal.programClipboard.off': '从不',
+  'settings.terminal.sshEnv': '终端里的 SSH 变量',
+  'settings.terminal.sshEnv.desc':
+    'SSH 机器上的新终端带上 SSH_CONNECTION 和 SSH_CLIENT，让程序知道终端显示在另一台电脑上：Codex 会把选中的内容复制到你的剪贴板，Neovim 和登录命令也按 SSH 会话处理。',
   'settings.terminal.mathHover': '公式预览',
   'settings.terminal.mathHover.desc':
     '鼠标停在窗格里的 LaTeX 公式上（$…$、$$…$$、\\(…\\)、\\[…\\]，比如智能体写的公式）时，显示渲染后的公式。',

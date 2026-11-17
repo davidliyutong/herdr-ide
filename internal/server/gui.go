@@ -110,10 +110,11 @@ func (s *Server) handleGUIEnable(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// addEnv sets env in the "env" object of parameters p, replacing the
-// caller's values for these names, and returns the names it set. ok is
-// false when "env" is not an object of strings (p is then unchanged).
-func addEnv(p map[string]json.RawMessage, env map[string]string) (names []string, ok bool) {
+// addEnv sets env in the "env" object of parameters p and returns the names
+// it set: with replace also those the caller gave a value, else only the
+// others. ok is false when "env" is not an object of strings (p is then
+// unchanged).
+func addEnv(p map[string]json.RawMessage, env map[string]string, replace bool) (names []string, ok bool) {
 	var given map[string]string
 	if raw, set := p["env"]; set && json.Unmarshal(raw, &given) != nil {
 		return nil, false
@@ -122,8 +123,14 @@ func addEnv(p map[string]json.RawMessage, env map[string]string) (names []string
 		given = map[string]string{}
 	}
 	for k, v := range env {
+		if _, set := given[k]; set && !replace {
+			continue
+		}
 		given[k] = v
 		names = append(names, k)
+	}
+	if len(names) == 0 {
+		return nil, true
 	}
 	sort.Strings(names)
 	b, err := json.Marshal(given)

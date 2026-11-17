@@ -116,6 +116,7 @@ in the UI; a setting with a scope can have its own value per machine, under
 | `terminal.bell` | `none`, `sound`, `visual` | `"visual"` | – | – |
 | `terminal.optionIsMeta` | `true`, `false` | `false` | – | – |
 | `terminal.mathHover` | `true`, `false` | `true` | – | – |
+| `terminal.sshEnv` | `true`, `false` | `true` | – | per remote machine |
 | `terminal.copyOnSelect` | `true`, `false` | `false` | – | – |
 | `terminal.programClipboard` | `auto`, `ask`, `off` | `"auto"` | – | – |
 | `terminal.colorScheme.dark` | `default`, `dracula`, `gruvbox-dark`, `gruvbox-light`, `nord`, `one-dark`, `one-light`, `solarized-dark`, `solarized-light`, `tomorrow`, `tomorrow-night` | `"default"` | – | – |

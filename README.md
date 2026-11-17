@@ -17,7 +17,8 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   WebGL (Canvas 2D without it). Keys are encoded for the program in the
   pane (kitty keyboard protocol included). Mouse, scrollback (selections
   scroll past the edge and copy whole), IME, OSC 52 copy (a selection in
-  Claude Code goes straight to the clipboard), resizable splits, and
+  Claude Code, or in Codex on an SSH machine, goes straight to the
+  clipboard), resizable splits, and
   programs see the UI theme's colors. Workspaces, tabs and splits are a
   layout document kept on each machine, the same in every browser and the
   desktop app. Drag a pane by its header to swap or move it; double-click

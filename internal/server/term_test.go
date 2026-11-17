@@ -23,7 +23,10 @@ import (
 
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/machines"
+	"herdr-ide/internal/registry"
+	"herdr-ide/internal/settings"
 	"herdr-ide/internal/transport"
+	"herdr-ide/internal/uisettings"
 )
 
 // fakeTermCore is a terminal core on a machine's socket: it answers the
@@ -186,6 +189,16 @@ func (f *fakeTermCore) serve(c net.Conn) {
 // the machine's socket.
 func termServer(t *testing.T, opts Options, core bool) (*Server, *fakeTermCore, *lockedWriter) {
 	t.Helper()
+	return termServerSSH(t, opts, core, "")
+}
+
+// termServerSSH is termServer with the machine's agent started in the ssh
+// session ssh (its SSH_CONNECTION; "" for none). The agent runs in the
+// test's process, so without this it would report the session the tests
+// themselves run in.
+func termServerSSH(t *testing.T, opts Options, core bool, ssh string) (*Server, *fakeTermCore, *lockedWriter) {
+	t.Helper()
+	t.Setenv("SSH_CONNECTION", ssh)
 	dialLocal := dialAgent(t)
 	home, err := os.MkdirTemp("/tmp", "hct")
 	if err != nil {
@@ -700,6 +713,84 @@ func TestTermRunGetsTheDisplay(t *testing.T) {
 	core.mu.Unlock()
 	if strings.Contains(last, "env") {
 		t.Fatalf("env without a display: %s", last)
+	}
+}
+
+// New terminals of an ssh machine get the variables of its agent's ssh
+// session, which a terminal core running as a service does not pass on:
+// what the client gave stays, the audit log names the ones added, the
+// setting turns them off, and clients do not see the session in the
+// machine's state.
+func TestTermRunGetsTheSSHSession(t *testing.T) {
+	st := settings.New("", registry.Settings()...)
+	s, core, audit := termServerSSH(t, Options{Settings: st}, true, "10.0.0.2 51000 10.0.0.9 22")
+	c := dialTerm(t, s)
+	c.ready()
+	last := func() string {
+		core.mu.Lock()
+		defer core.mu.Unlock()
+		return core.calls[len(core.calls)-1]
+	}
+	c.send(map[string]any{"t": "call", "rid": 1, "m": "x", "method": "terminal.run", "params": map[string]any{"argv": []string{"sh"}}})
+	if m := c.until("res"); m["error"] != nil {
+		t.Fatalf("run %v", m)
+	}
+	if got := last(); !strings.Contains(got, `"SSH_CONNECTION":"10.0.0.2 51000 10.0.0.9 22"`) || !strings.Contains(got, `"SSH_CLIENT":"10.0.0.2 51000 22"`) {
+		t.Fatalf("run params %s", got)
+	}
+	if a := audit.String(); !strings.Contains(a, `"env":["SSH_CLIENT","SSH_CONNECTION"]`) || strings.Contains(a, "51000") {
+		t.Fatalf("audit %s", a)
+	}
+	// The client's own value stays, and the display's variables come too.
+	s.displayEnv = func(*machines.Machine) map[string]string { return map[string]string{"DISPLAY": ":20"} }
+	c.send(map[string]any{"t": "call", "rid": 2, "m": "x", "method": "terminal.run",
+		"params": map[string]any{"argv": []string{"sh"}, "env": map[string]string{"SSH_CONNECTION": "mine"}}})
+	c.until("res")
+	if got := last(); !strings.Contains(got, `"SSH_CONNECTION":"mine"`) || !strings.Contains(got, `"SSH_CLIENT":"10.0.0.2 51000 22"`) || !strings.Contains(got, `"DISPLAY":":20"`) {
+		t.Fatalf("run params %s", got)
+	}
+	if a := audit.String(); !strings.Contains(a, `"env":["DISPLAY","SSH_CLIENT"]`) {
+		t.Fatalf("audit %s", a)
+	}
+	s.displayEnv = func(*machines.Machine) map[string]string { return nil }
+	// Clients see the machine, not its ssh session.
+	if b, _ := json.Marshal(s.mg.Get("x").State()); strings.Contains(string(b), "51000") {
+		t.Fatalf("state %s", b)
+	}
+	// Off for this machine: nothing is added.
+	if err := st.Set(uisettings.SSHEnv, "x", false); err != nil {
+		t.Fatal(err)
+	}
+	c.send(map[string]any{"t": "call", "rid": 3, "m": "x", "method": "terminal.run", "params": map[string]any{"argv": []string{"sh"}}})
+	c.until("res")
+	if got := last(); strings.Contains(got, "env") {
+		t.Fatalf("env with the setting off: %s", got)
+	}
+}
+
+// Only addresses and ports become the ssh variables, and the local machine
+// gets none.
+func TestSSHEnv(t *testing.T) {
+	for conn, client := range map[string]string{
+		"10.0.0.2 51000 10.0.0.9 22":        "10.0.0.2 51000 22",
+		"  fe80::1%en0 4022 fe80::2%en0 22": "fe80::1%en0 4022 22",
+		"::1 1 ::1 2":                       "::1 1 2",
+	} {
+		env := sshEnv(conn)
+		if env["SSH_CLIENT"] != client || env["SSH_CONNECTION"] != strings.Join(strings.Fields(conn), " ") {
+			t.Errorf("%q: %v", conn, env)
+		}
+	}
+	for _, conn := range []string{"", "10.0.0.2 51000 10.0.0.9", "host 1 host 2", "10.0.0.2 x 10.0.0.9 22", "10.0.0.2 70000 10.0.0.9 22",
+		"10.0.0.2 1 10.0.0.9 22 extra", "10.0.0.2 1 10.0.0.9 22\nEVIL=1", "$(id) 1 10.0.0.9 22"} {
+		if env := sshEnv(conn); env != nil {
+			t.Errorf("%q: %v", conn, env)
+		}
+	}
+	mg := machines.NewManager([]machines.Spec{{ID: "local", Kind: machines.KindLocal, Enabled: true}}, nil, log.New(io.Discard, "", 0))
+	s := New(mg, Options{Logger: log.New(io.Discard, "", 0), Plugins: testPlugins()})
+	if env := s.machineSSHEnv(mg.Get("local")); env != nil {
+		t.Errorf("local machine: %v", env)
 	}
 }
 

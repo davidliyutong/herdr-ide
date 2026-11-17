@@ -583,6 +583,9 @@ export const en = {
   'settings.terminal.programClipboard.auto': 'Automatic',
   'settings.terminal.programClipboard.ask': 'Ask',
   'settings.terminal.programClipboard.off': 'Never',
+  'settings.terminal.sshEnv': 'SSH variables in terminals',
+  'settings.terminal.sshEnv.desc':
+    'New terminals on SSH machines get SSH_CONNECTION and SSH_CLIENT, so programs know the terminal is shown on another computer: Codex then copies a selection to your clipboard, and Neovim and login commands behave as in an SSH session.',
   'settings.terminal.mathHover': 'Formula preview',
   'settings.terminal.mathHover.desc':
     'Rest the pointer on a LaTeX formula in a pane ($…$, $$…$$, \\(…\\), \\[…\\]), such as one an agent wrote, to see it rendered.',

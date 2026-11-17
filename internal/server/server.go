@@ -86,6 +86,10 @@ type Server struct {
 	// displayEnv is the environment of a machine's virtual display that new
 	// terminals get (gui.Manager.PaneEnv; tests replace it).
 	displayEnv func(*machines.Machine) map[string]string
+	// sshEnv is the environment that tells the programs of a new terminal
+	// on an ssh machine that the terminal is shown elsewhere
+	// (machineSSHEnv).
+	sshEnv func(*machines.Machine) map[string]string
 	// home is the core host user's home directory, whose ~/.ssh/config the
 	// Add Machine dialog lists (os.UserHomeDir; tests replace it).
 	home func() (string, error)
@@ -129,6 +133,7 @@ func New(mg *machines.Manager, opts Options) *Server {
 	s.csProxy = newCodeServerProxy(s)
 	s.initGUI()
 	s.displayEnv = s.gui.PaneEnv
+	s.sshEnv = s.machineSSHEnv
 	s.initSettings()
 	// A machine that connects (again) ends the wait of its terminal backend.
 	s.ready = map[string]bool{}

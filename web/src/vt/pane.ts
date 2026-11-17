@@ -18,7 +18,7 @@ import { Terminal, newFrame, type Frame, type Row } from './terminal';
 import { createRenderer, replaceCanvas, lookOf, hexColor, type Cells, type Look, type Overlay, type Renderer } from './renderer';
 import { measureCell, type Metrics } from './atlas';
 import { keyInput, isMac, modsOf, mouseButton, textInput, wheelLines } from './input';
-import { forgetProgramClipboard, programClipboard, programClipboardCopied, programCopied, userInput } from './clipboard';
+import { forgetProgramClipboard, programClipboard, programClipboardCopied, programCopied, userInput, userRelease } from './clipboard';
 import { findResult, useFind } from './find';
 import { carriesFiles } from '../drop';
 import { linksAround, linkTitle, openLink, safeUrl, selectedLink, type LinkContext, type RowText } from '../terminal/links';
@@ -800,6 +800,9 @@ export class TermPane {
     this.autoTimer = undefined;
     const c = this.cellAt(ev.clientX, ev.clientY);
     if (d.kind === 'mouse') {
+      // The program may answer the release with a copy of what was dragged
+      // over: the automatic gate counts from here, not from the press.
+      userRelease();
       this.send(term.encodeMouse({ action: 'release', button: d.button, mods: modsOf(ev), x: c.px, y: c.py }), false);
       return;
     }

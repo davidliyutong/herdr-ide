@@ -170,12 +170,24 @@ returns. Focus changes are reported to programs that asked (mode 1004).
 - Programs' clipboard writes (OSC 52, up to Ghostty's limit;
   `vt/clipboard.ts`), by `terminal.programClipboard`: **Automatic** copies
   at once when the write arrives within 10 s of this page's last key, text,
-  paste or button press in a terminal and the browser allows it, with a
+  paste or button press in a terminal, or of the release of a button the
+  program tracks (a program copies what was dragged over at the release,
+  however long the drag took), and the browser allows it, with a
   toast saying what was copied; otherwise, or when the browser refuses, a
   toast offers **Copy** (5 s). **Ask** always asks; **Off** ignores them. A
   copy that passed the automatic gate is kept for the menu's **Copy** and
   ⌘C for 2 minutes or until the next key or button press in a terminal.
   Reading the clipboard (OSC 52 `?`) is not answered.
+- Which programs copy this way is theirs to decide. Claude Code writes
+  OSC 52 for its selection. Codex writes the clipboard of the machine it
+  runs on and adds OSC 52 only where it finds a multiplexer or an ssh
+  session (`SSH_CONNECTION`), so the terminals of ssh machines carry the
+  agent's ssh session ([21](21-terminal-core.md), `terminal.sshEnv`); on
+  the local machine its own copy is already the user's clipboard when the
+  page runs there. Codex copies on release unless its `copy_on_select` is
+  off, which `auto` means in a core started from Ghostty 1.2 or Kitty on
+  macOS, whose `TERM_PROGRAM` the terminals inherit: set
+  `copy_on_select = "always"` in Codex's configuration there.
 - Find (`vt/find.ts`, `components/FindBar.tsx`): the `find.open` binding
   (⌘F on macOS, Ctrl+Shift+F elsewhere in browsers) or **Find…** in the
   menu opens a bar at the terminal's top right corner, with a one-line

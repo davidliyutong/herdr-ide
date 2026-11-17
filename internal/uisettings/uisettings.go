@@ -35,6 +35,10 @@ const (
 	ColorsPrefix = "terminal.colors."
 )
 
+// SSHEnv is read by the core: whether the new terminals of an ssh machine
+// get the variables of its ssh session (internal/server/sshenv.go).
+const SSHEnv = "terminal.sshEnv"
+
 // MaxScrollback is the most lines a terminal keeps above its screen.
 const MaxScrollback = 100_000
 
@@ -121,6 +125,9 @@ func defs() []settings.Def {
 		{Key: "terminal.optionIsMeta", Type: settings.TypeBool, Default: false, Section: "terminal", Group: "behavior", Order: 90},
 		// LaTeX formulas in panes shown rendered under the pointer.
 		{Key: "terminal.mathHover", Type: settings.TypeBool, Default: true, Section: "terminal", Group: "behavior", Order: 100},
+		// SSH_CONNECTION and SSH_CLIENT in the terminals of ssh machines.
+		{Key: SSHEnv, Type: settings.TypeBool, Default: true, Scope: settings.ScopeRemoteMachine,
+			Section: "terminal", Group: "behavior", Order: 105},
 		{Key: "terminal.copyOnSelect", Type: settings.TypeBool, Default: false, Section: "terminal", Group: "clipboard", Order: 110},
 		// What a program's clipboard write (OSC 52) does.
 		{Key: "terminal.programClipboard", Type: settings.TypeEnum, Default: "auto", Enum: []string{"auto", "ask", "off"},

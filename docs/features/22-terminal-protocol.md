@@ -79,7 +79,8 @@ terminal core and answers with its result or its error kind. A
 `terminal.run` on a remote machine whose virtual display is ready gets the
 display's variables in its `env` ([14](14-gui-windows.md)); they replace
 those of the client, whose other variables stay, and the audit entry names
-them. Reading
+them. On an ssh machine it also gets `SSH_CONNECTION` and `SSH_CLIENT`
+([21](21-terminal-core.md)) where the client gave none. Reading
 methods: `terminal.list`, `terminal.get`, `terminal.read`, `doc.get`,
 `templates.list`. Writing methods: `terminal.run`, `terminal.kill`,
 `terminal.rm`, `terminal.keep`, `terminal.label`, `terminal.interrupt`,
