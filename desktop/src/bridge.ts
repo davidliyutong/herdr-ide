@@ -25,4 +25,10 @@ export const channels = {
   closeRequest: 'desktop:close-request',
   /** page → shell: the answer (closeGuard.ts CloseAnswer). */
   closeAnswer: 'desktop:close-answer',
+  /** page → shell, answered: which system prompt proves the user is there
+   * ('touchid', 'hello' or null). */
+  verifyAvailable: 'desktop:verify-available',
+  /** page → shell, answered: a nonce (a string) to prove; the proof's MAC
+   * or null. */
+  verifyProve: 'desktop:verify-prove',
 } as const;

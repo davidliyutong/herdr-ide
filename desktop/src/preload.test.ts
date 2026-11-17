@@ -2,11 +2,20 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { DesktopShell, OpenedFolders } from '../../web/src/shell';
 import { channels } from './bridge';
-import { exposed, onDisk, receive, sent } from './fakeElectron';
+import { answers, exposed, invoked, onDisk, receive, sent } from './fakeElectron';
 import { desktopShellFor } from './preload';
 
 const shell = exposed.desktopShell as DesktopShell;
-const common = ['answerClose', 'onCloseRequest', 'onCommand', 'onOpenFolders', 'pathForFile', 'setDisabledCommands', 'setUnsaved'];
+const common = [
+  'answerClose',
+  'onCloseRequest',
+  'onCommand',
+  'onOpenFolders',
+  'pathForFile',
+  'setDisabledCommands',
+  'setUnsaved',
+  'verifyUser',
+];
 
 test('the page gets only the desktopShell bridge, with these functions', () => {
   assert.deepEqual(Object.keys(exposed), ['desktopShell']);
@@ -100,4 +109,43 @@ test('closing with unsaved changes: a count and an answer from the page, a reque
   receive(channels.closeRequest, undefined);
   assert.equal(asked, 1);
   sent.length = 0;
+});
+
+test('verifyUser asks the main process and passes on only what has the right form', async () => {
+  const { verifyUser } = shell;
+  assert.deepEqual(Object.keys(verifyUser!).sort(), ['available', 'prove']);
+  for (const [got, want] of [
+    ['touchid', 'touchid'],
+    ['hello', 'hello'],
+    [null, null],
+    [undefined, null],
+    ['biometrics', null],
+    [{ kind: 'touchid' }, null],
+    [new Error('no handler'), null],
+  ] as const) {
+    answers.set(channels.verifyAvailable, got);
+    assert.equal(await verifyUser!.available(), want);
+  }
+  const mac = 'ab'.repeat(32);
+  for (const [got, want] of [
+    [mac, mac],
+    [mac.toUpperCase(), null],
+    [mac + 'a', null],
+    ['not hex'.padEnd(64, 'a'), null],
+    [null, null],
+    [7, null],
+    [new Error('refused'), null],
+  ] as const) {
+    answers.set(channels.verifyProve, got);
+    assert.equal(await verifyUser!.prove('n'.repeat(43)), want);
+  }
+  // Only a string nonce goes on, and nothing else with it.
+  invoked.length = 0;
+  answers.set(channels.verifyProve, mac);
+  for (const bad of [undefined, null, 5, {}, ['x'], { toString: () => 'x' }])
+    assert.equal(await verifyUser!.prove(bad as unknown as string), null);
+  assert.deepEqual(invoked, []);
+  assert.equal(await verifyUser!.prove('n'.repeat(43)), mac);
+  assert.deepEqual(invoked, [{ channel: channels.verifyProve, args: ['n'.repeat(43)] }]);
+  for (const platform of ['win32', 'linux', 'darwin']) assert.ok(desktopShellFor(platform).verifyUser);
 });

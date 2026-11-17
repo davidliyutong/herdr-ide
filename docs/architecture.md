@@ -70,11 +70,14 @@ and Linux (`desktop/src/platform.ts` holds what differs). It spawns the
 bundled core from its resources (`bin/herdr-ide`, `bin/herdr-ide.exe` on
 Windows) with `--parent-stdio`, loopback port 7781 and instance `desktop`.
 The shell's first line on the core's stdin is its hello,
-`{ "desktop_token": "…" }`, which the core reads before it serves: the
-token of this launch, which the shell also sets as an HttpOnly cookie for
-the core's origin in its session, so the core tells the app's windows
-from browsers (VS Code has a switch for each,
-[08](features/08-web-access-and-security.md)). The core writes one
+`{ "desktop_token": "…", "verify_key": "…" }`, which the core reads before
+it serves: the token of this launch, which the shell also sets as an
+HttpOnly cookie for the core's origin in its session, so the core tells
+the app's windows from browsers (VS Code has a switch for each,
+[08](features/08-web-access-and-security.md)), and the key with which the
+shell's main process signs that the user answered a prompt of the system
+(Touch ID, Windows Hello) for the variable vault
+([30](features/30-variable-vault.md)); the key stays in that process. The core writes one
 `{ "event": "ready", "url": "…" }` line to stdout after
 binding its listener; stderr carries logs. The shell loads only that owned
 core's URL. Closing the parent stdin pipe cancels the core's context, and

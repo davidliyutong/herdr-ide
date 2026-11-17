@@ -108,6 +108,9 @@ type Plugin struct {
 	mu      sync.Mutex
 	store   *vaultstore.Store
 	pending map[string]*Request
+	// proofs are the nonces waiting for an authenticator's proof
+	// (proof.go); they end with the sessions.
+	proofs map[string]*pendingProof
 	// alog is the access log (accesslog.go), opened at its first use.
 	alog *accessLog
 	// noisy are the last audit records of list calls and refusals, by
@@ -148,6 +151,9 @@ type Plugin struct {
 
 type session struct {
 	started, used time.Time
+	// proof: an authenticator's proof opened it, not the passphrase
+	// (proof.go); such a session does not change what guards the vault.
+	proof bool
 }
 
 // noisyAudit is the audit state of a machine's calls with one result: when
@@ -266,14 +272,19 @@ func (p *Plugin) Routes() []plugin.Route {
 		{Method: "PUT", Path: "vars/{name}", Mutating: true, Audit: "set", Handler: p.gated(p.handleSet)},
 		{Method: "DELETE", Path: "vars/{name}", Mutating: true, Audit: "delete", Handler: p.gated(p.handleDelete)},
 		{Method: "POST", Path: "vars/{name}/reveal", Mutating: true, Audit: "reveal", Handler: p.gated(p.handleReveal)},
-		{Method: "POST", Path: "export", Mutating: true, Audit: "export", Handler: p.gated(p.handleExport)},
-		{Method: "POST", Path: "import/preview", Mutating: true, Audit: "import_preview", Handler: p.gated(p.handleImportPreview)},
-		{Method: "POST", Path: "import", Mutating: true, Audit: "import", Handler: p.gated(p.handleImport)},
+		{Method: "POST", Path: "export", Mutating: true, Audit: "export", Handler: p.gatedPassphrase(p.handleExport)},
+		{Method: "POST", Path: "import/preview", Mutating: true, Audit: "import_preview", Handler: p.gatedPassphrase(p.handleImportPreview)},
+		{Method: "POST", Path: "import", Mutating: true, Audit: "import", Handler: p.gatedPassphrase(p.handleImport)},
 		{Method: "POST", Path: "session", Mutating: true, Audit: "session", Handler: p.handleSession},
 		{Method: "DELETE", Path: "session", Mutating: true, Audit: "session_end", Handler: p.handleEndSession},
 		{Method: "POST", Path: "passphrase", Mutating: true, Audit: "passphrase", Handler: p.handlePassphrase},
 		{Method: "POST", Path: "lock", Mutating: true, Audit: "lock", Handler: p.handleLock},
-		{Method: "POST", Path: "autolock", Mutating: true, Audit: "autolock", Handler: p.gated(p.handleAutoLock)},
+		{Method: "POST", Path: "autolock", Mutating: true, Audit: "autolock", Handler: p.gatedPassphrase(p.handleAutoLock)},
+		{Method: "POST", Path: "proof", Mutating: true, Audit: "proof", Handler: p.handleProof},
+		{Method: "GET", Path: "proof/{nonce}", Handler: p.handleProofPurpose},
+		{Method: "POST", Path: "authenticators", Mutating: true, Audit: "authenticator_add", Handler: p.gatedPassphrase(p.handleAddAuthenticator)},
+		{Method: "DELETE", Path: "authenticators/{id}", Mutating: true, Audit: "authenticator_delete", Handler: p.gatedPassphrase(p.handleDeleteAuthenticator)},
+		{Method: "POST", Path: "guard", Mutating: true, Audit: "guard", Handler: p.gatedPassphrase(p.handleGuard)},
 		{Method: "GET", Path: "requests", Handler: p.handleRequests},
 		{Method: "POST", Path: "requests/{id}", Mutating: true, Audit: "answer", Handler: p.handleAnswer},
 		{Method: "GET", Path: "log", Handler: p.handleLog},
@@ -325,9 +336,13 @@ func (p *Plugin) handleList(c *plugin.Call, w http.ResponseWriter, r *http.Reque
 	// what passes the gate keeps a session from ending idle.
 	idle, _ := p.sessionLimits(c.Host)
 	st := s.Status()
+	open, byProof := p.sessionKind(c.Host, r, false)
 	plugin.WriteJSON(w, http.StatusOK, map[string]any{
-		"status": st, "variables": s.List(), "session": p.sessionOf(c.Host, r, false), "idle": idle.Seconds(),
+		"status": st, "variables": s.List(), "session": open, "sessionProof": open && byProof, "idle": idle.Seconds(),
 		"autoLock": p.autoLockState(c.Host, st.Locked || st.Setup),
+		// What guards the vault beside the passphrase (proof.go); none
+		// while it is locked.
+		"guard": p.guardState(c, s),
 	})
 }
 
@@ -341,9 +356,16 @@ func (p *Plugin) clock() time.Time {
 // sessionOf reports whether the request carries a session that is open;
 // use marks it used.
 func (p *Plugin) sessionOf(h plugin.Host, r *http.Request, use bool) bool {
+	open, _ := p.sessionKind(h, r, use)
+	return open
+}
+
+// sessionKind is sessionOf, and whether a proof opened the session
+// rather than the passphrase.
+func (p *Plugin) sessionKind(h plugin.Host, r *http.Request, use bool) (open, byProof bool) {
 	tok := r.Header.Get(SessionHeader)
 	if tok == "" {
-		return false
+		return false, false
 	}
 	idle, most := p.sessionLimits(h)
 	p.mu.Lock()
@@ -352,16 +374,17 @@ func (p *Plugin) sessionOf(h plugin.Host, r *http.Request, use bool) bool {
 	if !ok || now.Sub(ss.used) > idle || now.Sub(ss.started) > most {
 		delete(p.sessions, tok)
 		p.mu.Unlock()
-		return false
+		return false, false
 	}
 	if use {
 		ss.used = now
 	}
+	byProof = ss.proof
 	p.mu.Unlock()
 	if use {
 		p.touch(h)
 	}
-	return true
+	return true, byProof
 }
 
 // gated refuses a request without an open session (401 vault_session):
@@ -374,6 +397,31 @@ func (p *Plugin) gated(h func(*plugin.Call, http.ResponseWriter, *http.Request))
 		}
 		h(c, w, r)
 	}
+}
+
+// gatedPassphrase is gated for what guards the vault itself (its
+// authenticators, the rule to verify each Allow, the automatic lock) and
+// for values in bulk (imports, exports): the session must be one the
+// passphrase opened (401 vault_passphrase for one a proof opened).
+func (p *Plugin) gatedPassphrase(h func(*plugin.Call, http.ResponseWriter, *http.Request)) func(*plugin.Call, http.ResponseWriter, *http.Request) {
+	return func(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
+		if open, byProof := p.sessionKind(c.Host, r, true); !open || byProof {
+			refusePassphraseSession(c, w, r, open)
+			return
+		}
+		h(c, w, r)
+	}
+}
+
+// refusePassphraseSession refuses a request that needs a session the
+// passphrase opened: without any session as refuseSession does.
+func refusePassphraseSession(c *plugin.Call, w http.ResponseWriter, r *http.Request, open bool) {
+	if !open {
+		refuseSession(c, w, r)
+		return
+	}
+	c.Host.Audit(r, "denied.vault_passphrase", map[string]any{"route": r.Method + " " + r.URL.Path})
+	plugin.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "vault_passphrase", "message": "this needs a session opened with the vault's passphrase"})
 }
 
 // refuseSession answers 401 vault_session and audits the refusal.
@@ -391,7 +439,8 @@ func (p *Plugin) currentEpoch() uint64 {
 
 // newSession opens a session and returns its token, unless the sessions
 // ended since epoch (then ""); the oldest goes when there are MaxSessions.
-func (p *Plugin) newSession(h plugin.Host, epoch uint64) string {
+// byProof marks a session an authenticator's proof opened.
+func (p *Plugin) newSession(h plugin.Host, epoch uint64, byProof bool) string {
 	b := make([]byte, 32)
 	rand.Read(b)
 	tok := hex.EncodeToString(b)
@@ -419,7 +468,7 @@ func (p *Plugin) newSession(h plugin.Host, epoch uint64) string {
 		}
 		delete(p.sessions, oldest)
 	}
-	p.sessions[tok] = &session{started: now, used: now}
+	p.sessions[tok] = &session{started: now, used: now, proof: byProof}
 	return tok
 }
 
@@ -429,6 +478,7 @@ func (p *Plugin) endSessions() uint64 {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.sessions = nil
+	p.proofs = nil
 	p.epoch++
 	return p.epoch
 }
@@ -570,7 +620,8 @@ func (p *Plugin) handleSession(c *plugin.Call, w http.ResponseWriter, r *http.Re
 		return
 	}
 	var body struct {
-		Passphrase string `json:"passphrase"`
+		Passphrase string     `json:"passphrase"`
+		Proof      *proofBody `json:"proof"`
 	}
 	if err := plugin.ReadJSON(r, 64<<10, &body); err != nil {
 		plugin.WriteError(w, err)
@@ -578,6 +629,10 @@ func (p *Plugin) handleSession(c *plugin.Call, w http.ResponseWriter, r *http.Re
 	}
 	if st := s.Status(); st.Mode != vaultstore.ModePassphrase {
 		fail(w, vaultstore.ErrNoPassphrase)
+		return
+	}
+	if body.Proof != nil {
+		p.sessionByProof(c, w, r, s, body.Proof)
 		return
 	}
 	if p.slowDown(w) {
@@ -594,7 +649,7 @@ func (p *Plugin) handleSession(c *plugin.Call, w http.ResponseWriter, r *http.Re
 	p.tried(err == nil, errors.Is(err, vaultstore.ErrPassphrase))
 	tok := ""
 	if err == nil {
-		if tok = p.newSession(c.Host, epoch); tok == "" {
+		if tok = p.newSession(c.Host, epoch, false); tok == "" {
 			// The sessions ended while the check ran, which keyMu leaves
 			// to a lock or a new passphrase after it.
 			err = vaultstore.ErrLocked
@@ -610,6 +665,34 @@ func (p *Plugin) handleSession(c *plugin.Call, w http.ResponseWriter, r *http.Re
 	changed(c.Host)
 	idle, _ := p.sessionLimits(c.Host)
 	plugin.WriteJSON(w, http.StatusOK, map[string]any{"session": tok, "idle": idle.Seconds(), "status": s.Status()})
+}
+
+// sessionByProof opens a session for an authenticator's proof made for it
+// (proof.go). The vault stays as it is: a locked one is refused, since a
+// proof holds no key.
+func (p *Plugin) sessionByProof(c *plugin.Call, w http.ResponseWriter, r *http.Request, s *vaultstore.Store, pb *proofBody) {
+	want := purpose{For: ForSession}
+	// As with the passphrase, the check and the session it opens are one
+	// step for a lock.
+	p.keyMu.Lock()
+	epoch := p.currentEpoch()
+	kind, err := p.checkProof(c, r, s, pb, want)
+	tok := ""
+	if err == nil {
+		if tok = p.newSession(c.Host, epoch, true); tok == "" {
+			err = vaultstore.ErrLocked
+		}
+	}
+	p.keyMu.Unlock()
+	if err != nil {
+		refuseProof(c, w, r, err, want)
+		return
+	}
+	c.Host.Audit(r, "vault.proved", map[string]any{"ok": true, "for": want.For, "kind": kind})
+	p.touch(c.Host)
+	changed(c.Host)
+	idle, _ := p.sessionLimits(c.Host)
+	plugin.WriteJSON(w, http.StatusOK, map[string]any{"session": tok, "proof": true, "idle": idle.Seconds(), "status": s.Status()})
 }
 
 func (p *Plugin) handleEndSession(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
@@ -657,7 +740,7 @@ func (p *Plugin) handlePassphrase(c *plugin.Call, w http.ResponseWriter, r *http
 		if p.keyStep != nil {
 			p.keyStep()
 		}
-		tok = p.newSession(c.Host, p.endSessions())
+		tok = p.newSession(c.Host, p.endSessions(), false)
 	}
 	p.keyMu.Unlock()
 	c.Host.Audit(r, "vault.passphrase_set", map[string]any{"ok": err == nil, "change": change})
@@ -730,17 +813,22 @@ func (p *Plugin) resolve(req *Request, answer string) bool {
 func (p *Plugin) handleAnswer(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Answer string `json:"answer"`
+		// Proof is an authenticator's, made for this request and answer;
+		// Passphrase the vault's, again. Either stands for a session, and
+		// one of them is needed where every Allow is verified.
+		Proof      *proofBody `json:"proof"`
+		Passphrase string     `json:"passphrase"`
 	}
-	if err := plugin.ReadJSON(r, 4<<10, &body); err != nil {
+	if err := plugin.ReadJSON(r, 64<<10, &body); err != nil {
 		plugin.WriteError(w, err)
 		return
 	}
+	id := r.PathValue("id")
 	switch body.Answer {
 	case AnswerOnce, AnswerAlways:
 		// Letting a value out is the user's, behind the gate; denying
 		// needs no proof.
-		if !p.sessionOf(c.Host, r, true) {
-			refuseSession(c, w, r)
+		if !p.mayAllow(c, w, r, id, body.Answer, body.Proof, body.Passphrase) {
 			return
 		}
 	case AnswerDeny:
@@ -748,7 +836,7 @@ func (p *Plugin) handleAnswer(c *plugin.Call, w http.ResponseWriter, r *http.Req
 		plugin.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad_request", "message": "answer is once, always or deny"})
 		return
 	}
-	req := p.answerRequest(r.PathValue("id"), body.Answer)
+	req := p.answerRequest(id, body.Answer)
 	if req == nil {
 		plugin.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "not_found", "message": "no such request (answered or expired)"})
 		return
@@ -757,6 +845,57 @@ func (p *Plugin) handleAnswer(c *plugin.Call, w http.ResponseWriter, r *http.Req
 		"id": req.ID, "machine": req.M, "tool": req.Tool, "names": req.Names, "answer": body.Answer,
 	})
 	plugin.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// mayAllow reports whether the request may allow request id (answer once
+// or always), having answered it otherwise: with a proof made for this
+// request and answer, with the passphrase again, or with a session, unless
+// the vault's rule wants every Allow verified (then a session is not
+// enough: a program driving the page's session cannot allow).
+func (p *Plugin) mayAllow(c *plugin.Call, w http.ResponseWriter, r *http.Request, id, answer string, pb *proofBody, passphrase string) bool {
+	s, err := p.open(c.Host)
+	if err != nil {
+		fail(w, err)
+		return false
+	}
+	switch {
+	case pb != nil:
+		want := purpose{For: ForAnswer, Request: id, Answer: answer}
+		kind, err := p.checkProof(c, r, s, pb, want)
+		if err != nil {
+			refuseProof(c, w, r, err, want)
+			return false
+		}
+		c.Host.Audit(r, "vault.proved", map[string]any{"ok": true, "for": want.For, "kind": kind})
+		p.touch(c.Host)
+		return true
+	case passphrase != "":
+		if st := s.Status(); st.Mode != vaultstore.ModePassphrase || st.Locked {
+			fail(w, vaultstore.ErrLocked)
+			return false
+		}
+		if p.slowDown(w) {
+			return false
+		}
+		err := s.Verify(passphrase)
+		p.tried(err == nil, errors.Is(err, vaultstore.ErrPassphrase))
+		if err != nil {
+			fail(w, err)
+			return false
+		}
+		p.touch(c.Host)
+		return true
+	}
+	if g, err := s.Guard(); err == nil && g.VerifyEachAllow {
+		c.Host.Audit(r, "denied.vault_proof", map[string]any{"route": r.Method + " " + r.URL.Path})
+		plugin.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "vault_proof", "message": "every Allow is verified: an authenticator's proof or the vault's passphrase is needed"})
+		return false
+	}
+	if !p.sessionOf(c.Host, r, true) {
+		refuseSession(c, w, r)
+		return false
+	}
+	return true
 }
 
 // Log returns the access log, newest first (none before the first use).

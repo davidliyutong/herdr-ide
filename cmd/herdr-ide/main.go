@@ -184,7 +184,7 @@ func serve(args []string, logger *log.Logger) {
 	fl.Parse(args)
 	// The launcher's pipe: its hello first, then held until it closes.
 	var parentIn io.Reader = os.Stdin
-	desktopToken := ""
+	desktopToken, verifyKey := "", ""
 	if *parentStdio {
 		ignoreBrokenPipes() // before the first log line
 		in := bufio.NewReaderSize(os.Stdin, maxHello)
@@ -192,7 +192,7 @@ func serve(args []string, logger *log.Logger) {
 		if err != nil {
 			logger.Fatalf("--parent-stdio: %v", err)
 		}
-		desktopToken, parentIn = h.DesktopToken, in
+		desktopToken, verifyKey, parentIn = h.DesktopToken, h.VerifyKey, in
 	}
 
 	if !brand.ValidInstance(*instance) {
@@ -310,21 +310,22 @@ func serve(args []string, logger *log.Logger) {
 	cs.RemoveLegacyCaches()
 	cs.Settings = prefs
 	srv := server.New(mg, server.Options{
-		AllowedOrigins: origins,
-		Static:         static,
-		Logger:         logger,
-		ControlDir:     controlDir,
-		CodeServer:     cs,
-		CodeServerIdle: *csIdle,
-		ReadOnly:       *readOnly,
-		ProxySecret:    secret,
-		Audit:          audit,
-		UserHeader:     *userHeader,
-		Settings:       prefs,
-		Keybindings:    keys,
-		HC:             embedded.HC,
-		Plugins:        plugins,
-		DesktopToken:   desktopToken,
+		AllowedOrigins:   origins,
+		Static:           static,
+		Logger:           logger,
+		ControlDir:       controlDir,
+		CodeServer:       cs,
+		CodeServerIdle:   *csIdle,
+		ReadOnly:         *readOnly,
+		ProxySecret:      secret,
+		Audit:            audit,
+		UserHeader:       *userHeader,
+		Settings:         prefs,
+		Keybindings:      keys,
+		HC:               embedded.HC,
+		Plugins:          plugins,
+		DesktopToken:     desktopToken,
+		DesktopVerifyKey: verifyKey,
 	})
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

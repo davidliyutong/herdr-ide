@@ -162,6 +162,65 @@ worked), never with the passphrase; reveals and deletions as
 reaches the vault only through its agent's socket and the same rules as
 every machine: the core host's agent is the local machine's.
 
+**Authenticators** (`proof.go`, `internal/webauthn`). A fingerprint can
+stand in for the passphrase while the vault is unlocked: it opens a
+session, or allows one request. It never unlocks the vault. The
+authenticators are sealed with the key (the store's guard), so they are
+read only while the vault is unlocked, and after a start or a lock the
+passphrase is needed once.
+
+- A **proof** answers a nonce the core issued (`POST proof`) for one
+  purpose: `session`, `answer` with a request's id and `once` or `always`,
+  or `register`. A nonce is 32 random bytes, good for one try and two
+  minutes; at most 32 wait, the oldest giving way; they end with the
+  sessions (a lock, a new passphrase).
+- A **WebAuthn credential** (a browser's platform authenticator such as
+  Touch ID or Windows Hello, or a security key) signs the nonce as its
+  challenge. The core checks, with the standard library only: the client
+  data (`webauthn.get`, the challenge, the page's origin, which is the
+  request's `Origin`, not cross-origin), the authenticator data (the hash
+  of the host name the credential is for, the user present and verified),
+  the signature (ES256, RS256 or EdDSA) with the key it stored, and a
+  signature counter that grows where the authenticator counts. A
+  credential is for a host name (`localhost`, or the reverse proxy's):
+  each is added from a page of that name, and WebAuthn does not work on a
+  page opened by IP address (`http://127.0.0.1:…`), where the panel offers
+  the same page under `localhost`.
+- The **desktop app** prompts with the system (Touch ID on macOS, Windows
+  Hello on Windows): its page hands the shell's main process the nonce, the
+  shell asks the core what the nonce is for (`GET proof/{nonce}`, answered
+  only to the desktop app) and shows that in the prompt ("allow <machine>
+  to read <names> once"), and after the user confirmed signs the nonce
+  with its purpose (HMAC-SHA-256) with a key of this launch, which it gave
+  the core in its hello and which never leaves its main process
+  (`desktop/src/verify.ts`). The core takes such a proof only from the
+  desktop client. The page thus cannot have one thing shown and another
+  signed, nor sign anything without the prompt.
+- **Adding** one needs a session the passphrase opened, the passphrase
+  again (checked and slowed down as any), and the proof of a `register`
+  nonce: for WebAuthn what the browser's `create()` answered (its public
+  key as the browser gives it, `getPublicKey()`, so no attestation is
+  parsed) and an assertion the new credential made of the same nonce,
+  which shows that the key stored is the authenticator's; for the desktop
+  app the shell's proof, so its prompt was answered once. At most 16; one
+  desktop authenticator. A new passphrase removes them all: whoever knew
+  the old one may have added theirs.
+- A **session a proof opened** is marked. It answers requests and changes
+  and shows variables as any session; what guards the vault takes a
+  session the passphrase opened (`401 vault_passphrase` otherwise): adding
+  and removing authenticators, the rule below, the automatic lock's time,
+  imports and exports.
+- **Verify every Allow** (the guard's rule, off unless set): `once` and
+  `always` then need a proof made for that request and answer, or the
+  passphrase again in the answer; a session is not enough
+  (`401 vault_proof`). A program that drives the user's unlocked page, or
+  content on the page's origin, can then no longer allow a request. The
+  rule is in the vault, not a setting: settings are changed without the
+  gate, by the very programs the rule is for. It outlives a new
+  passphrase.
+- Proofs are audited as `vault.proved` (`ok`, `for`, the authenticator's
+  kind), refusals as `denied.vault_proof` and `denied.vault_passphrase`.
+
 The MCP servers' requests arrive as streams the agent opens with op
 `vault` (`plugin.Streamer`): a header whose `process` is the process
 connected to `vault.sock` (by its peer credentials) and up to 7 of its
@@ -177,7 +236,7 @@ machine's kernel knows, not what the program is.
 
 - `list`: every variable's name, description, `inject_only` and whether
   this machine needs approval. Works while locked.
-  (Approval, below, needs a page with a session: the gate.)
+  (Approval, below, needs a page with a session or a proof: the gate.)
 - `get` (one name) and `env` (1–64 names): unknown names fail with
   `not_found`, an inject-only variable with `inject_only` for `get`, a
   locked vault with `vault_locked`. Names whose `machines` hold the machine
@@ -401,6 +460,15 @@ dies (`Pdeathsig`).
 The panel **Variable Vault** of the right sidebar (command
 `view.panel.vault`, no default key):
 
+- **Fingerprint and security keys** (`Guard.tsx`, while the vault is
+  unlocked): the authenticators with their host name and when they were
+  added and last used, each with Remove; Add for a WebAuthn credential of
+  this page's host (a label and the passphrase; on a page opened by a
+  loopback IP address a link to the same page under `localhost`); in the
+  desktop app a switch to approve with Touch ID or Windows Hello; and the
+  checkbox Verify every Allow. Each asks for the passphrase first when the
+  page's session is a proof's. The unlock card offers the fingerprint
+  beside the passphrase while the vault is unlocked.
 - **The gate** at the top: a new vault's card to create the passphrase
   (twice, with a strength bar and the warning that it cannot be
   recovered); otherwise, without a session, a card to unlock this page with
@@ -495,9 +563,15 @@ choices), with one choice for every name that exists; Import sends them.
 | An MCP SDK | Four methods over stdio are a small amount of JSON-RPC; an SDK would add dependencies to the agent uploaded to every machine. |
 | Keychain on every machine | Headless Linux machines have none; the core host holds the key. |
 | The key in the system keychain (as development builds did) | Any program of the user reads it without a prompt (on macOS through `/usr/bin/security`; the Secret Service and the Credential Manager alike) and with the file has every value: no approval stands before a program on the core host. Such files are not converted: no request can show that the user, not a program, chose the new passphrase, and none was released. |
-| The loopback API or the page's origin as the user's proof | Programs on the core host call the API as pages do, and content on the core's origin passes the origin check; the passphrase is what only the user has. |
+| The loopback API or the page's origin as the user's proof | Programs on the core host call the API as pages do, and content on the core's origin passes the origin check; the passphrase is what only the user has, and an authenticator's proof what only the user makes. |
 | Upgrading files sealed with less additional data | Their machine lists were not authenticated: an upgrade would seal a widened list in; none was released, so such files are refused. |
-| Biometrics (Touch ID) per approval | Not available to pages in every browser, nor in the same way on every system; the passphrase works everywhere and a session spares asking for it at every approval. |
+| A fingerprint that unlocks the vault | The key would have to wait somewhere a fingerprint releases it from: a system keychain (the row above), or a key wrapped by an authenticator's secret, which few platform authenticators give. A proof on an unlocked vault stores no key anywhere. |
+| WebAuthn in the desktop app | Its page is on `http://127.0.0.1:<port>`, an address no credential can be for, and Electron's Touch ID authenticator needs a keychain access group and a provisioning profile that builds signed ad hoc do not have. The shell's own prompt works in every build. |
+| The desktop shell's prompt answered to the page as yes or no | Any script of the page would report yes; a MAC with a key only the shell's main process holds is what the core can check. |
+| The prompt's text from the page | A page could show the user one request and have another approved; the shell asks the core what the nonce is for. |
+| Reading the attestation of a new credential | It needs a CBOR parser and proves the authenticator's make, which the vault does not ask; the browser hands the public key itself, and an assertion made at once proves the key. |
+| Verify every Allow as a setting | Settings are changed through the API without the gate, so a program would turn the rule off before allowing. |
+| A proof's session changing what guards the vault | A fingerprint would then add another fingerprint, or put the automatic lock off, after which the passphrase is never asked again. |
 | Machines and flag in the clear, unauthenticated | A program on the core host could widen a variable's machines in the file and read it without asking; sealing them with the value makes such an edit unreadable. |
 | An import session on the core between the preview and the import | The decrypted values would wait in the core's memory for the user's answer, with an expiry and a bound of their own; sending the file and its passphrase again costs one more derivation and leaves nothing behind. |
 | Mapping machines by label on import | Labels are names the user gives and two machines may share one: a match could let another machine read without asking. Ids are random for machines added in the UI; the local machine's id is the same everywhere, so its label must match too. |
@@ -573,6 +647,31 @@ server exposes.
 
 ## Testing
 
+- `internal/webauthn/webauthn_test.go`: assertions of the three algorithms;
+  a wrong challenge, origin, host name, ceremony, cross-origin, the user not
+  verified or not present; changed data and signatures, another key; keys
+  that do not fit their algorithm, short or of another curve; inputs over
+  their bounds; registrations and their credential id; random bytes never
+  panicking. `internal/vault/guard_test.go`: the guard sealed, read only
+  unlocked, another vault's or an edited one not opening, a new passphrase
+  ending the authenticators and keeping the rule.
+  `internal/plugins/vault/proof_test.go`: adding an authenticator (the
+  passphrase again, a key that is not the authenticator's refused), a
+  proof opening a marked session and what that session may not do, a proof
+  used twice, for another purpose, from another origin or host, by another
+  key, with a counter that went back, after its time, on a locked vault; a
+  proof allowing its request and answer only; Verify every Allow against a
+  session, with the passphrase, and deny; the desktop shell's proof (only
+  the desktop client, only once on, only for the nonce's purpose, none
+  without a key) and what the shell learns of a nonce; the bound of
+  waiting nonces. `internal/server/plugins_test.go`
+  (`TestPluginCallClient`): a call's client and the shell's MAC, which the
+  token does not make. `desktop/src/verify.test.ts`: the MAC's test
+  vectors, the prompt's text per purpose with labels cleaned, and every
+  malformed nonce or purpose and cancelled prompt giving nothing;
+  `windowsHello.test.ts`, `preload.test.ts`, `core.test.ts`.
+  `web/src/__tests__/vaultProof.test.tsx`: the ways a page has, the
+  ceremonies' options and what is posted, the card and the panel.
 - `internal/vault/vault_test.go`: a new vault's passphrase first (and when
   it was set), the value not in the clear, wrong passphrases leaving it
   locked, verify; the version, name, machines and flag binding values

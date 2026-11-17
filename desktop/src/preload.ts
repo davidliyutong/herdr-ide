@@ -4,7 +4,8 @@
 // the app, (from the page) which commands' menu items to disable, how many
 // panes have unsaved changes and its answer when the window closes with
 // some (the shell asks it), and on macOS three requests without arguments
-// for Full Disk Access.
+// for Full Disk Access. verifyUser takes a nonce to the main process, which
+// asks the core what it is for and shows that in the system's prompt.
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
 import type { DesktopShell, OpenedFolders } from '../../web/src/shell';
 import { channels } from './bridge';
@@ -34,6 +35,8 @@ function isOpened(v: unknown): v is OpenedFolders {
     o.skipped >= 0
   );
 }
+
+const isHex = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
 
 const shell: DesktopShell = {
   onCommand: (fn) => listen(channels.command, isString, fn),
@@ -68,6 +71,26 @@ const shell: DesktopShell = {
     ),
   answerClose(answer) {
     if (answer === 'asking' || answer === 'close' || answer === 'stay') ipcRenderer.send(channels.closeAnswer, answer);
+  },
+  verifyUser: {
+    async available() {
+      try {
+        const v: unknown = await ipcRenderer.invoke(channels.verifyAvailable);
+        return v === 'touchid' || v === 'hello' ? v : null;
+      } catch {
+        return null;
+      }
+    },
+    async prove(nonce) {
+      // Only a string goes on; the main process checks its form.
+      if (typeof nonce !== 'string') return null;
+      try {
+        const v: unknown = await ipcRenderer.invoke(channels.verifyProve, nonce);
+        return isHex(v) ? v : null;
+      } catch {
+        return null;
+      }
+    },
   },
 };
 

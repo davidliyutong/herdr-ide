@@ -117,6 +117,8 @@ async function request(method: string, path: string, body?: unknown): Promise<Re
     const code = String(data.error ?? res.status);
     // The gate refused: the session ended (idle, locked, passphrase changed).
     if (code === 'vault_session') endLocalSession();
+    // The session a proof opened may not change what guards the vault.
+    if (code === 'vault_passphrase') useVault.setState({ sessionProof: true });
     throw new VaultError(code, data.message, typeof data.name === 'string' ? data.name : undefined);
   }
   return res;
@@ -129,29 +131,46 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 
 function endLocalSession() {
   token = '';
-  useVault.setState({ session: false });
+  useVault.setState({ session: false, sessionProof: false });
 }
 
 interface Opened {
   session: string;
   status: VaultStatus;
+  /** The session was opened by an authenticator's proof. */
+  proof?: boolean;
 }
 
 function opened(o: Opened) {
   token = o.session;
-  useVault.setState({ session: true, status: o.status });
+  useVault.setState({ session: true, sessionProof: !!o.proof, status: o.status });
 }
 
 const enc = encodeURIComponent;
 
 export const vaultApi = {
-  list: () => call<{ status: VaultStatus; variables: VaultVariable[]; session?: boolean; idle?: number; autoLock?: AutoLock }>('GET', ''),
+  list: () =>
+    call<{
+      status: VaultStatus;
+      variables: VaultVariable[];
+      session?: boolean;
+      sessionProof?: boolean;
+      idle?: number;
+      autoLock?: AutoLock;
+      guard?: VaultGuard | null;
+    }>('GET', ''),
   /** Creates or changes a variable; `to` renames it in the same write. */
   set: (name: string, body: { to?: string; description?: string; machines?: string[]; injectOnly?: boolean; value?: string }) =>
     call<VaultVariable>('PUT', `/vars/${enc(name)}`, body),
   remove: (name: string) => call('DELETE', `/vars/${enc(name)}`),
   reveal: (name: string) => call<{ value: string }>('POST', `/vars/${enc(name)}/reveal`),
   session: (passphrase: string) => call<Opened>('POST', '/session', { passphrase }),
+  sessionByProof: (proof: Proof) => call<Opened>('POST', '/session', { proof }),
+  /** A nonce for a proof of the purpose (and what the page may use to make it). */
+  proof: (purpose: ProofPurpose) => call<ProofChallenge>('POST', '/proof', purpose),
+  addAuthenticator: (body: NewAuthenticator) => call<{ guard: VaultGuard | null }>('POST', '/authenticators', body),
+  removeAuthenticator: (id: string) => call<{ guard: VaultGuard | null }>('DELETE', `/authenticators/${enc(id)}`),
+  setGuard: (verifyEachAllow: boolean) => call<{ guard: VaultGuard | null }>('POST', '/guard', { verifyEachAllow }),
   endSession: () => call('DELETE', '/session'),
   passphrase: (passphrase: string, old?: string) =>
     call<Opened>('POST', '/passphrase', old === undefined ? { passphrase } : { old, passphrase }),
@@ -160,7 +179,8 @@ export const vaultApi = {
    * setting's. */
   autoLock: (minutes: number | null) => call<AutoLock>('POST', '/autolock', { minutes }),
   requests: () => call<{ requests: VaultRequest[] }>('GET', '/requests'),
-  answer: (id: string, answer: Answer) => call('POST', `/requests/${enc(id)}`, { answer }),
+  answer: (id: string, answer: Answer, verify?: { proof?: Proof; passphrase?: string }) =>
+    call('POST', `/requests/${enc(id)}`, { answer, ...verify }),
   log: () => call<{ log: VaultAccess[] }>('GET', '/log'),
   /** An export file of the variables named (or all), as its text: the core
    * seals it, so values never reach the page. */
@@ -172,6 +192,72 @@ export const vaultApi = {
   importFile: (file: string, passphrase: string, choices: ImportChoice[]) =>
     call<{ imported: string[] }>('POST', '/import', { file, passphrase, choices }),
 };
+
+/** What the core keeps beside the passphrase to approve with. */
+export interface Authenticator {
+  id: string;
+  kind: 'webauthn' | 'desktop';
+  label: string;
+  /** The host name a WebAuthn credential is for. */
+  rpId?: string;
+  created: string;
+  lastUsed?: string;
+}
+
+/** Null while the vault is locked. */
+export interface VaultGuard {
+  authenticators: Authenticator[];
+  /** Every Allow needs a proof or the passphrase, not a session alone. */
+  verifyEachAllow: boolean;
+  /** The app this page runs in can prompt the user itself. */
+  desktop: boolean;
+}
+
+export type ProofPurpose = { for: 'session' } | { for: 'answer'; request: string; answer: 'once' | 'always' } | { for: 'register' };
+
+/** A nonce the core issued for a purpose; it is also WebAuthn's challenge
+ * (base64url). */
+export interface ProofChallenge {
+  nonce: string;
+  rpId: string;
+  /** The ids of this host's WebAuthn credentials. */
+  credentials: string[];
+  /** The desktop authenticator is on and usable here. */
+  desktop: boolean;
+  /** Seconds the nonce lives. */
+  ttl: number;
+}
+
+export interface WebAuthnProof {
+  nonce: string;
+  credential: string;
+  clientDataJSON: string;
+  authenticatorData: string;
+  signature: string;
+}
+
+export interface DesktopProof {
+  nonce: string;
+  /** Hex. */
+  mac: string;
+}
+
+export type Proof = WebAuthnProof | DesktopProof;
+
+export type NewAuthenticator =
+  | {
+      kind: 'webauthn';
+      label: string;
+      passphrase: string;
+      nonce: string;
+      clientDataJSON: string;
+      authenticatorData: string;
+      publicKey: string;
+      alg: number;
+      /** The new credential's proof of the same nonce. */
+      assertion: WebAuthnProof;
+    }
+  | { kind: 'desktop'; label: string; passphrase: string; nonce: string; mac: string };
 
 /** A variable of an export file, as the preview shows it (never its value). */
 export interface ImportVariable {
@@ -220,6 +306,11 @@ interface VaultState {
   status?: VaultStatus;
   /** This page has an open session: it may change, reveal and approve. */
   session: boolean;
+  /** The session was opened by an authenticator's proof, not the
+   * passphrase: what guards the vault asks for the passphrase. */
+  sessionProof: boolean;
+  /** What guards the vault; null while it is locked, undefined until loaded. */
+  guard?: VaultGuard | null;
   variables: VaultVariable[];
   log: VaultAccess[];
   /** By id: requests waiting for an answer. */
@@ -232,12 +323,33 @@ interface VaultState {
   autoLock?: AutoLock;
 }
 
-export const useVault = create<VaultState>(() => ({ variables: [], log: [], requests: {}, session: false }));
+export const useVault = create<VaultState>(() => ({ variables: [], log: [], requests: {}, session: false, sessionProof: false }));
 
 /** Opens a session with the passphrase (unlocking the vault). */
 export async function openSession(passphrase: string) {
   opened(await vaultApi.session(passphrase));
   await loadVault();
+}
+
+/** Opens a session with an authenticator's proof made for it (the vault
+ * must be unlocked already). */
+export async function openSessionWithProof(proof: Proof) {
+  opened(await vaultApi.sessionByProof(proof));
+  await loadVault();
+}
+
+/** Adds an authenticator; the session must be the passphrase's. */
+export async function addAuthenticator(body: NewAuthenticator) {
+  useVault.setState({ guard: (await vaultApi.addAuthenticator(body)).guard });
+}
+
+export async function removeAuthenticator(id: string) {
+  useVault.setState({ guard: (await vaultApi.removeAuthenticator(id)).guard });
+}
+
+/** Sets the rule that every Allow needs a proof or the passphrase. */
+export async function setVerifyEachAllow(on: boolean) {
+  useVault.setState({ guard: (await vaultApi.setGuard(on)).guard });
 }
 
 /** Sets the first passphrase or, with old, changes it; either opens a
@@ -280,6 +392,8 @@ export async function loadVault() {
       variables: list.variables ?? [],
       log: log.log ?? [],
       session: !!token,
+      sessionProof: !!token && !!list.sessionProof,
+      guard: list.guard ?? null,
       idle: list.idle,
       autoLock: list.autoLock,
       error: undefined,
@@ -330,12 +444,17 @@ export function vaultMessage(_m: string, data: unknown) {
  * has (answered elsewhere or expired: 404) is dropped; any other failure
  * (the gate, which allowing passes only with the page's session, the
  * network, the core) leaves it and is thrown, for the prompt to say. */
-export async function answerRequest(id: string, answer: Answer) {
+export async function answerRequest(id: string, answer: Answer, verify?: { proof?: Proof; passphrase?: string }) {
   try {
-    await vaultApi.answer(id, answer);
+    await vaultApi.answer(id, answer, verify);
   } catch (e) {
     if (!(e instanceof VaultError && e.code === 'not_found')) throw e;
   }
+  dropRequest(id);
+}
+
+/** Forgets a request the core no longer has. */
+export function dropRequest(id: string) {
   useVault.setState((s) => {
     const requests = { ...s.requests };
     delete requests[id];

@@ -2,8 +2,10 @@
 // not allowed to read a variable asks, and the first answer of any page
 // wins; the others close the prompt when the core says it is resolved. No
 // answer within the core's timeout is a denial. Allowing passes the gate:
-// a page without a session asks for the passphrase in the prompt itself;
-// denying needs nothing.
+// a page without a session proves it is the user, by an authenticator (the
+// fingerprint, the app's prompt) when it has one, else with the passphrase,
+// asked in the prompt itself; where the vault verifies every Allow a
+// session is not enough either; denying needs nothing.
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Cpu, KeyRound, Terminal } from 'lucide-react';
@@ -11,6 +13,7 @@ import { useStore } from '../../state/store';
 import { t } from '../../i18n';
 import {
   answerRequest,
+  dropRequest,
   errorText,
   loadRequests,
   openSession,
@@ -18,8 +21,11 @@ import {
   reloadVault,
   useVault,
   type Answer,
+  VaultError,
   type VaultRequest,
 } from './api';
+import { prove, ways } from './proof';
+import { useWayName } from './useWay';
 import './vault.css';
 
 /** The prompts (a status bar item of the plugin, drawn over the page). It
@@ -69,6 +75,15 @@ export function RequestCard({ req }: { req: VaultRequest }) {
   const readOnly = useStore((s) => s.readOnly);
   const local = useStore((s) => s.machines[req.m]?.kind === 'local');
   const session = useVault((s) => s.session);
+  const guard = useVault((s) => s.guard);
+  const verify = !!guard?.verifyEachAllow;
+  // A session alone allows, unless every Allow is verified.
+  const oneClick = session && !verify;
+  const w = ways(guard);
+  const [usePass, setUsePass] = useState(false);
+  const byProof = !oneClick && (w.desktop || w.webauthn) && !usePass;
+  const needPass = !oneClick && !byProof;
+  const wayName = useWayName(w);
   const [pass, setPass] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -77,9 +92,22 @@ export function RequestCard({ req }: { req: VaultRequest }) {
     setErr('');
     setBusy(true);
     try {
-      if (a !== 'deny' && !useVault.getState().session) await openSession(pass);
-      await answerRequest(req.id, a);
+      if (a === 'deny' || oneClick) {
+        await answerRequest(req.id, a);
+      } else if (byProof) {
+        const proof = await prove({ for: 'answer', request: req.id, answer: a });
+        if (!proof) return setErr(t('vault.proof.cancelled'));
+        await answerRequest(req.id, a, { proof });
+      } else if (verify) {
+        // The passphrase stands for the proof, so no session is opened.
+        await answerRequest(req.id, a, { passphrase: pass });
+      } else {
+        await openSession(pass);
+        await answerRequest(req.id, a);
+      }
     } catch (e) {
+      // The request is gone (answered elsewhere or expired).
+      if (e instanceof VaultError && e.code === 'not_found') dropRequest(req.id);
       setErr(errorText(e));
     } finally {
       setBusy(false);
@@ -125,7 +153,15 @@ export function RequestCard({ req }: { req: VaultRequest }) {
             void answer('once');
           }}
         >
-          {!session && (
+          {byProof && (
+            <div className="vault-request-proof" data-proof="">
+              <span className="muted">{t('vault.request.proveWith', { way: wayName })}</span>
+              <button type="button" className="sm ghost" data-action="use-passphrase" onClick={() => setUsePass(true)}>
+                {t('vault.request.usePassphrase')}
+              </button>
+            </div>
+          )}
+          {needPass && (
             <input
               className="input"
               type="password"
@@ -140,15 +176,22 @@ export function RequestCard({ req }: { req: VaultRequest }) {
               onChange={(e) => setPass(e.target.value)}
             />
           )}
+          {needPass && (w.desktop || w.webauthn) && (
+            <div className="vault-request-proof">
+              <button type="button" className="sm ghost" data-action="use-proof" onClick={() => setUsePass(false)}>
+                {t('vault.request.useProof', { way: wayName })}
+              </button>
+            </div>
+          )}
           <div className="vault-request-buttons">
             <button type="button" className="ghost" data-answer="deny" disabled={busy} onClick={() => void answer('deny')}>
               {t('vault.deny')}
             </button>
             <span className="spacer" />
-            <button type="button" data-answer="always" disabled={busy || (!session && !pass)} onClick={() => void answer('always')}>
+            <button type="button" data-answer="always" disabled={busy || (needPass && !pass)} onClick={() => void answer('always')}>
               {t('vault.allowAlways')}
             </button>
-            <button type="submit" className="primary" data-answer="once" disabled={busy || (!session && !pass)}>
+            <button type="submit" className="primary" data-answer="once" disabled={busy || (needPass && !pass)}>
               {t('vault.allowOnce')}
             </button>
           </div>

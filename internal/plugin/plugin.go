@@ -48,6 +48,13 @@ type Call struct {
 	Host Host
 	// Machine is the route's machine (Route.Machine), nil otherwise.
 	Machine *machines.Machine
+	// Client is the kind of client the request comes from.
+	Client Client
+	// DesktopProof checks a MAC that the desktop app's shell made of msg
+	// with the key of its launch: the shell's word that the user answered
+	// a prompt of the system (Touch ID, Windows Hello). Nil in a core the
+	// shell did not start or gave no key.
+	DesktopProof func(msg, mac []byte) bool
 
 	audit map[string]any
 }

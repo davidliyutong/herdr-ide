@@ -2,6 +2,9 @@ package server
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"log"
@@ -31,7 +34,13 @@ func (fakePlugin) Routes() []plugin.Route {
 		if c.Machine != nil {
 			m = c.Machine.ID()
 		}
-		plugin.WriteJSON(w, http.StatusOK, map[string]string{"m": m})
+		// What a call knows of its client, and whether the desktop shell's
+		// MAC of "msg" in the header X-Mac holds.
+		proved := false
+		if mac, err := hex.DecodeString(r.Header.Get("X-Mac")); err == nil && c.DesktopProof != nil {
+			proved = c.DesktopProof([]byte("msg"), mac)
+		}
+		plugin.WriteJSON(w, http.StatusOK, map[string]any{"m": m, "client": c.Client, "canProve": c.DesktopProof != nil, "proved": proved})
 	}
 	return []plugin.Route{
 		{Method: "GET", Path: "", Handler: ok},
@@ -69,6 +78,51 @@ func TestPluginRoutes(t *testing.T) {
 	}
 	if w := do("GET", "/api/m/nope/p/fake/state"); w.Code != 404 {
 		t.Errorf("unknown machine: %d %s", w.Code, w.Body)
+	}
+}
+
+// A plugin's call knows which kind of client asks and, in a core the
+// desktop app's shell started with a key, checks the shell's MACs: its word
+// that the user answered a prompt of the system.
+func TestPluginCallClient(t *testing.T) {
+	s := newTestServer()
+	token, key := strings.Repeat("Z9", 20), strings.Repeat("k3", 20)
+	mac := func(k string) string {
+		m := hmac.New(sha256.New, []byte(k))
+		m.Write([]byte("msg"))
+		return hex.EncodeToString(m.Sum(nil))
+	}
+	get := func(cookie, xmac string) map[string]any {
+		r := httptest.NewRequest("GET", "/api/p/fake", nil)
+		r.Host = "127.0.0.1:7780"
+		if cookie != "" {
+			r.Header.Set("Cookie", DesktopCookie+"="+cookie)
+		}
+		r.Header.Set("X-Mac", xmac)
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		var out map[string]any
+		json.Unmarshal(w.Body.Bytes(), &out)
+		return out
+	}
+	// A core no shell started: every client is a browser, nothing proves.
+	if out := get(token, mac(key)); out["client"] != "browser" || out["canProve"] != false || out["proved"] != false {
+		t.Errorf("without a shell: %v", out)
+	}
+	s.opts.DesktopToken, s.opts.DesktopVerifyKey = token, key
+	if out := get(token, mac(key)); out["client"] != "desktop" || out["proved"] != true {
+		t.Errorf("the desktop app: %v", out)
+	}
+	if out := get("", mac(key)); out["client"] != "browser" {
+		t.Errorf("a browser: %v", out)
+	}
+	// The token, which every request of the app's pages carries, is not
+	// the key.
+	if out := get(token, mac(token)); out["proved"] != false {
+		t.Errorf("a MAC made with the token: %v", out)
+	}
+	if out := get(token, "zz"); out["proved"] != false {
+		t.Errorf("no MAC: %v", out)
 	}
 }
 

@@ -38,6 +38,17 @@ export interface DesktopShell {
   /** The page's answer: it shows the question (at once), the window may
    * close, or it stays. */
   answerClose(answer: 'asking' | 'close' | 'stay'): void;
+  /** The system's own prompt (Touch ID, Windows Hello) that stands in for
+   * the vault's passphrase. */
+  verifyUser?: DesktopVerifyUser;
+}
+
+export interface DesktopVerifyUser {
+  /** Which prompt the app has, if any. */
+  available(): Promise<'touchid' | 'hello' | null>;
+  /** Prompts the user for the nonce's purpose; the proof's MAC (hex), or
+   * null when the user did not confirm. */
+  prove(nonce: string): Promise<string | null>;
 }
 
 /** What the shell does for Full Disk Access; nothing is passed. */

@@ -158,7 +158,11 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   with the variables set without showing their values to the model. One
   gate stands before every approval, reveal and change: the passphrase,
   so no program, not even one on the core's computer, approves a request
-  or reads a variable that asks every time without you; every value that
+  or reads a variable that asks every time without you. While the vault is
+  unlocked a fingerprint can stand in for it: Touch ID or Windows Hello in
+  the desktop app, whose prompt names the machine and the variables, or a
+  WebAuthn credential in a browser; with Verify every Allow each approval
+  needs one. Every value that
   leaves the vault is first written to its access log. It locks after an
   hour without use; the panel counts down and sets another time for the
   current unlock (presets or one you type). Variables move

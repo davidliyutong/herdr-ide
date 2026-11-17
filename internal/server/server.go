@@ -68,6 +68,10 @@ type Options struct {
 	// on stdin, --parent-stdio): requests carrying it in DesktopCookie are
 	// the desktop app's (clientOf); empty, every client is a browser.
 	DesktopToken string
+	// DesktopVerifyKey is the key of this launch with which the desktop
+	// app's shell signs that the user answered a prompt of the system
+	// (its hello; desktopProof); empty, no such proof is taken.
+	DesktopVerifyKey string
 }
 
 // Server is the HTTP front of the core.

@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 
 const dir = await mkdtemp(join(tmpdir(), 'desktop-tests-'));
 // The tests, built and run from one list: none is built without running.
-const tests = ['closeGuard', 'core', 'folders', 'follow', 'menu', 'platform', 'policy', 'preload', 'privacy'];
+const tests = ['closeGuard', 'core', 'folders', 'follow', 'menu', 'platform', 'policy', 'preload', 'privacy', 'verify', 'windowsHello'];
 try {
   await build({
     entryPoints: tests.map((name) => `src/${name}.test.ts`),

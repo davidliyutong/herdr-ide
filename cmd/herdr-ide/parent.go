@@ -30,9 +30,14 @@ func stopWithParent(in io.Reader, cancel context.CancelFunc) {
 // hello is the launcher's first line on stdin (--parent-stdio): what the
 // core needs from it before it serves. DesktopToken is the desktop app's
 // token of this launch (internal/server's DesktopCookie); stdin, unlike
-// the environment, is inherited by nothing the core starts.
+// the environment, is inherited by nothing the core starts. VerifyKey is
+// the key with which the shell signs that the user answered a prompt of
+// the system (Touch ID, Windows Hello; server.Options.DesktopVerifyKey):
+// unlike the token, which every request of the app's pages carries, it
+// never leaves the shell's main process.
 type hello struct {
 	DesktopToken string `json:"desktop_token,omitempty"`
+	VerifyKey    string `json:"verify_key,omitempty"`
 }
 
 // maxHello bounds the hello line.
@@ -59,6 +64,9 @@ func readHello(in *bufio.Reader) (hello, error) {
 	}
 	if h.DesktopToken != "" && !validToken.MatchString(h.DesktopToken) {
 		return hello{}, errors.New("launcher hello: malformed desktop token")
+	}
+	if h.VerifyKey != "" && (!validToken.MatchString(h.VerifyKey) || h.VerifyKey == h.DesktopToken) {
+		return hello{}, errors.New("launcher hello: malformed verify key")
 	}
 	return h, nil
 }

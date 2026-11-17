@@ -8,8 +8,10 @@ import {
   powerMonitor,
   session,
   shell,
+  systemPreferences,
   type BaseWindow,
   type IpcMainEvent,
+  type IpcMainInvokeEvent,
 } from 'electron';
 import { spawn } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
@@ -22,13 +24,26 @@ import type { MessageKey } from '../../web/src/i18n/en';
 import type { OpenedFolders } from '../../web/src/shell';
 import { channels } from './bridge';
 import { closeGuard, isCloseAnswer, parseUnsaved, type CloseGuard } from './closeGuard';
-import { CoreProcess, coreArgs, coreEnv, coreInstance, corePort, DesktopError, desktopCookie, desktopToken, ENV_PREFIX } from './core';
+import {
+  CoreProcess,
+  coreArgs,
+  coreEnv,
+  coreInstance,
+  corePort,
+  DesktopError,
+  desktopCookie,
+  desktopToken,
+  ENV_PREFIX,
+  verifyKey,
+} from './core';
 import { FolderQueue } from './folders';
 import { followCore, type ShellSettings } from './follow';
 import { menuCommands, menuTemplate, parseDisabled, type Binding } from './menu';
 import { APP_ID, coreBinary, foldersOf, keyPlatform, quitsWithLastWindow, type Platform } from './platform';
 import { allowPermission, isExternal, isInternal, mainWindowPreferences, webPreferences } from './policy';
 import { bundleOf, privacyActions, terminalCoreExecutable } from './privacy';
+import { verifier, type Verifier } from './verify';
+import { helloFor, HELLO_TIMEOUT_MS, POWERSHELL_ARGS, type RunPowerShell } from './windowsHello';
 
 const platform = process.platform as Platform;
 app.setName(APP_NAME);
@@ -198,7 +213,7 @@ function applyBindings(b: Binding[]) {
 }
 
 // Messages count only from the top frame of the main window showing the core.
-function fromMainPage(event: IpcMainEvent): boolean {
+function fromMainPage(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
   const frame = event.senderFrame;
   return (
     !!mainWindow && !!frame && event.sender === mainWindow.webContents && frame === event.sender.mainFrame && isInternal(frame.url, origin)
@@ -254,6 +269,52 @@ ipcMain.on(channels.revealTerminalCore, (event) => {
 ipcMain.on(channels.relaunch, (event) => {
   if (fromMainPage(event)) privacy.relaunch();
 });
+
+// The system's prompt for the variable vault (verify.ts). The verifier
+// exists once the core runs, with the key of this launch, which only this
+// process holds.
+let verify: Verifier | undefined;
+ipcMain.handle(channels.verifyAvailable, async (event) => (fromMainPage(event) && verify ? await verify.available() : null));
+ipcMain.handle(channels.verifyProve, async (event, nonce: unknown) => (fromMainPage(event) && verify ? await verify.prove(nonce) : null));
+
+/** Runs PowerShell with the script on stdin (Windows Hello). */
+const runPowerShell: RunPowerShell = (script, env) =>
+  new Promise((resolve, reject) => {
+    const child = spawn('powershell.exe', POWERSHELL_ARGS, {
+      env: { ...process.env, ...env },
+      stdio: 'pipe',
+      shell: false,
+      windowsHide: true,
+    });
+    let out = '';
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error('timeout'));
+    }, HELLO_TIMEOUT_MS);
+    child.stdout.on('data', (data: Buffer) => {
+      out = (out + data.toString()).slice(-4096);
+    });
+    child.on('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (code === 0) resolve(out);
+      else reject(new Error(`exit ${code}`));
+    });
+    child.stdin.on('error', () => {});
+    child.stdin.end(script);
+  });
+
+/** What the core says a nonce of the vault's proofs is for. */
+async function proofPurpose(nonce: string): Promise<unknown> {
+  const res = await session.defaultSession.fetch(`${origin}/api/p/vault/proof/${encodeURIComponent(nonce)}`, {
+    credentials: 'include',
+    signal: AbortSignal.timeout(5000),
+  });
+  return res.ok ? await res.json() : undefined;
+}
 
 /** The page's background (color.background in design/tokens.json), shown before it paints. */
 function windowBackground(): string {
@@ -447,6 +508,9 @@ if (!app.requestSingleInstanceLock()) {
       // session's cookie for the core's origin before the page loads, so
       // the core tells the app's windows from browsers (core.ts).
       const token = desktopToken();
+      // The key of the system's prompts: to the core in the hello, and to
+      // nothing else.
+      const key = verifyKey();
       origin = await core.start(
         binary,
         coreArgs(instance, port),
@@ -455,8 +519,17 @@ if (!app.requestSingleInstanceLock()) {
         app.getPath('home'),
         () => void fail(new DesktopError('desktop.coreLost')),
         token,
+        key,
       );
       if (quitting) return;
+      verify = verifier(key, {
+        platform,
+        canPromptTouchID: () => platform === 'darwin' && systemPreferences.canPromptTouchID(),
+        promptTouchID: (reason) => systemPreferences.promptTouchID(reason),
+        hello: helloFor(runPowerShell),
+        purpose: proofPurpose,
+        t,
+      });
       const ses = session.defaultSession;
       await ses.cookies.set(desktopCookie(origin, token));
       ses.setPermissionRequestHandler((contents, permission, callback, details) => {

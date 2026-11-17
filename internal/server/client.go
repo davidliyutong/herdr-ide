@@ -1,6 +1,8 @@
 package server
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
 	"crypto/subtle"
 	"net/http"
 	"strings"
@@ -49,6 +51,22 @@ func (s *Server) clientOf(r *http.Request) plugin.Client {
 		return plugin.Desktop
 	}
 	return plugin.Browser
+}
+
+// desktopProof checks MACs of the desktop app's shell (plugin.Call): HMAC
+// with SHA-256 and the key of this launch, which the shell's main process
+// keeps to itself and uses only after a prompt of the system the user
+// answered. Nil without a key.
+func (s *Server) desktopProof() func(msg, mac []byte) bool {
+	key := s.opts.DesktopVerifyKey
+	if key == "" {
+		return nil
+	}
+	return func(msg, mac []byte) bool {
+		h := hmac.New(sha256.New, []byte(key))
+		h.Write(msg)
+		return hmac.Equal(h.Sum(nil), mac)
+	}
 }
 
 // stripSetDesktopCookie removes from h (a response of code-server) every

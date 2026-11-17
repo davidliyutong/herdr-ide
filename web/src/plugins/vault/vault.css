@@ -610,6 +610,59 @@
   gap: 6px;
 }
 
+/* The prompt's choice between the fingerprint and the passphrase. */
+.vault-request-proof {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: var(--fs-sm);
+}
+
+/* ---- fingerprint and security keys ---- */
+/* A details element: its children are spaced by margins, not a flex gap. */
+.vault-guard > :not(summary) {
+  margin-top: 8px;
+}
+.vault-guard > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-weight: 600;
+}
+.vault-auths {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.vault-auths li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.vault-auth-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  font-size: var(--fs-sm);
+}
+.vault-auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.vault-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: var(--fs-sm);
+}
+
 /* ---- export and import ---- */
 .modal.dialog.vault-transfer {
   width: min(520px, 94vw);

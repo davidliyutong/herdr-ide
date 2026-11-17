@@ -61,9 +61,22 @@ export function desktopToken(random: (n: number) => Buffer = randomBytes): strin
   return random(32).toString('hex');
 }
 
+/** A new key for the system's prompts (verify.ts): 32 random bytes as hex,
+ * for one launch. Unlike the token it is sent to the core only in the
+ * hello and kept in the main process: never in a cookie, an environment
+ * variable, an argument or a log. */
+export function verifyKey(random: (n: number) => Buffer = randomBytes): string {
+  return random(32).toString('hex');
+}
+
 /** The launcher's hello, the first line the core reads on stdin. */
-export function coreHello(token: string): string {
-  return JSON.stringify(token ? { desktop_token: token } : {}) + '\n';
+export function coreHello(token: string, verifyKey = ''): string {
+  return (
+    JSON.stringify({
+      ...(token && { desktop_token: token }),
+      ...(verifyKey && { verify_key: verifyKey }),
+    }) + '\n'
+  );
 }
 
 /** What Electron's cookies.set gets for the token: the core's origin only
@@ -116,7 +129,8 @@ export class CoreProcess {
   }
 
   // port is the one passed in --listen; 0 accepts the port the core chose.
-  // token is the desktop app's of this launch, sent in the hello.
+  // token and verifyKey are the desktop app's of this launch, sent in the
+  // hello.
   async start(
     binary: string,
     args: string[],
@@ -125,6 +139,7 @@ export class CoreProcess {
     cwd: string,
     onExit: () => void,
     token = '',
+    verifyKey = '',
   ): Promise<string> {
     // windowsHide: the core is a console program, which would get a window.
     const child = spawn(binary, args, { env, cwd, stdio: 'pipe', shell: false, windowsHide: true });
@@ -132,7 +147,7 @@ export class CoreProcess {
     child.stdin.on('error', () => {});
     // The core reads the hello before it serves; stdin stays open (its
     // end stops the core).
-    child.stdin.write(coreHello(token));
+    child.stdin.write(coreHello(token, verifyKey));
     child.stderr.on('data', (data: Buffer) => {
       this.stderr = (this.stderr + data.toString()).slice(-16_384);
       process.stderr.write(data);

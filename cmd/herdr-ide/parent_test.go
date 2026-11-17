@@ -87,11 +87,18 @@ func TestReadHello(t *testing.T) {
 	if h, err := readHello(bufio.NewReader(strings.NewReader("{}\n"))); err != nil || h.DesktopToken != "" {
 		t.Fatalf("a launcher without a token: %+v, %v", h, err)
 	}
+	// The key the shell signs the user's presence with comes the same way.
+	key := strings.Repeat("7a", 32)
+	if h, err := readHello(bufio.NewReader(strings.NewReader(`{"desktop_token":"` + token + `","verify_key":"` + key + `"}` + "\n"))); err != nil || h.VerifyKey != key {
+		t.Fatalf("a hello with a verify key: %+v, %v", h, err)
+	}
 	for name, line := range map[string]string{
 		"gone":          "",
 		"unfinished":    `{"desktop_token":"` + token + `"}`,
 		"not JSON":      "hello\n",
 		"short token":   `{"desktop_token":"abc"}` + "\n",
+		"short key":     `{"desktop_token":"` + token + `","verify_key":"abc"}` + "\n",
+		"key is token":  `{"desktop_token":"` + token + `","verify_key":"` + token + `"}` + "\n",
 		"cookie syntax": `{"desktop_token":"` + token + `; x=1"}` + "\n",
 		"too long":      `{"desktop_token":"` + strings.Repeat("a", maxHello) + `"}` + "\n",
 	} {

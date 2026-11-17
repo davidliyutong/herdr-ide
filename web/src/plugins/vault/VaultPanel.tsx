@@ -13,6 +13,7 @@ import {
   Eye,
   EyeOff,
   FileUp,
+  Fingerprint,
   History,
   KeyRound,
   Lock,
@@ -37,6 +38,7 @@ import {
   loadVault,
   lockVault,
   openSession,
+  openSessionWithProof,
   processText,
   setPassphrase,
   useVault,
@@ -52,6 +54,9 @@ import { setupSnippets } from './setup';
 import { StrengthBar, noManager } from './fields';
 import { openVaultExport, openVaultImport } from './dialogs';
 import { AutoLockButton } from './AutoLock';
+import { GuardSection } from './Guard';
+import { prove, ways } from './proof';
+import { useWayName } from './useWay';
 
 export { passStrength } from './fields';
 import './vault.css';
@@ -86,6 +91,7 @@ function LoadError({ code }: { code: string }) {
 
 export function VaultPanel() {
   const { status, variables, error, requests, session } = useVault();
+  const readOnly = useStore((s) => s.readOnly);
   const [tab, setTab] = useState<Tab>('variables');
   useEffect(() => {
     void loadVault();
@@ -105,6 +111,7 @@ export function VaultPanel() {
           ))}
         </section>
       )}
+      {!status.locked && !status.setup && !readOnly && <GuardSection />}
       {(status.mode === 'passphrase' || variables.length > 0) && (
         <>
           <div className="segmented vault-tabs" role="tablist">
@@ -262,6 +269,10 @@ function PassphraseCard({ kind, onDone }: { kind: 'create' | 'change'; onDone?()
 
 /** Unlocking this page's session with the passphrase. */
 function UnlockCard() {
+  const locked = useVault((s) => s.status?.locked);
+  const guard = useVault((s) => s.guard);
+  const w = ways(guard);
+  const wayName = useWayName(w);
   const [pass, setPass] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -271,6 +282,20 @@ function UnlockCard() {
     try {
       await openSession(pass);
       setPass('');
+    } catch (e) {
+      setErr(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  // An authenticator's proof opens a session while the vault is unlocked.
+  const withProof = async () => {
+    setErr('');
+    setBusy(true);
+    try {
+      const proof = await prove({ for: 'session' });
+      if (proof) await openSessionWithProof(proof);
+      else setErr(t('vault.proof.cancelled'));
     } catch (e) {
       setErr(errorText(e));
     } finally {
@@ -306,6 +331,11 @@ function UnlockCard() {
           {t('vault.unlock')}
         </button>
       </div>
+      {!locked && (w.desktop || w.webauthn) && (
+        <button type="button" data-action="proof-session" disabled={busy} onClick={() => void withProof()}>
+          <Fingerprint /> {t('vault.gate.withProof', { way: wayName })}
+        </button>
+      )}
       {err && <div className="callout error">{err}</div>}
     </form>
   );

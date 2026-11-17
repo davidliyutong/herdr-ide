@@ -198,9 +198,59 @@ type file struct {
 	// the variables' machines (whose values are sealed again) at the next
 	// unlock. The list only ever narrows who may read.
 	Forgotten []string `json:"forgotten,omitempty"`
+	// Guard is the sealed Guard (none: no authenticator, no rule).
+	Guard *Sealed `json:"guard,omitempty"`
 	// rest keeps the fields this version does not know.
 	rest map[string]json.RawMessage
 }
+
+// Guard is what the user set to guard the vault beside its passphrase. It
+// is sealed with the key, so a file edited without it cannot gain an
+// authenticator, and it is read only while the vault is unlocked: what it
+// allows, proving the user without the passphrase, is for an unlocked
+// vault only.
+type Guard struct {
+	// Authenticators prove that the user is there in the passphrase's
+	// stead: to open a session and to allow a request.
+	Authenticators []Authenticator `json:"authenticators,omitempty"`
+	// VerifyEachAllow: allowing a request needs a proof made for it (an
+	// authenticator's or the passphrase); a session is not enough.
+	VerifyEachAllow bool `json:"verifyEachAllow,omitempty"`
+}
+
+// Kinds of authenticator.
+const (
+	// KindWebAuthn is a credential of a browser's platform authenticator
+	// or a security key, for one host name (RPID).
+	KindWebAuthn = "webauthn"
+	// KindDesktop is the desktop app's own prompt (Touch ID, Windows
+	// Hello), which the app's shell vouches for; it has no key here.
+	KindDesktop = "desktop"
+)
+
+// MaxAuthenticators bounds a vault's authenticators.
+const MaxAuthenticators = 16
+
+// Authenticator is one way to prove the user without the passphrase.
+type Authenticator struct {
+	ID    string `json:"id"`
+	Kind  string `json:"kind"`
+	Label string `json:"label"`
+	// RPID, Credential, Algorithm (COSE) and PublicKey
+	// (SubjectPublicKeyInfo) are a WebAuthn credential's; SignCount the
+	// last counter its authenticator signed.
+	RPID       string    `json:"rpId,omitempty"`
+	Credential []byte    `json:"credential,omitempty"`
+	Algorithm  int       `json:"alg,omitempty"`
+	PublicKey  []byte    `json:"publicKey,omitempty"`
+	SignCount  uint32    `json:"signCount,omitempty"`
+	Created    time.Time `json:"created"`
+	LastUsed   time.Time `json:"lastUsed,omitzero"`
+}
+
+// guardAD is the guard's additional data; no variable's nor the check's is
+// the same.
+const guardAD = "#guard"
 
 const checkText = "vault-check"
 
@@ -288,7 +338,7 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("%s: %w: %w", path, ErrInvalid, err)
 	}
 	_ = json.Unmarshal(b, &s.f.rest)
-	for _, k := range []string{"version", "mode", "kdf", "check", "passphraseSet", "entries", "forgotten"} {
+	for _, k := range []string{"version", "mode", "kdf", "check", "passphraseSet", "entries", "forgotten", "guard"} {
 		delete(s.f.rest, k)
 	}
 	switch s.f.Mode {
@@ -655,6 +705,73 @@ func (s *Store) Delete(name string) error {
 	return nil
 }
 
+func openGuard(key []byte, v *Sealed) (Guard, error) {
+	var g Guard
+	b, err := open(key, v, guardAD)
+	if err != nil {
+		return g, err
+	}
+	if err := json.Unmarshal(b, &g); err != nil {
+		return Guard{}, ErrCorrupt
+	}
+	return g, nil
+}
+
+func sealGuard(key []byte, g Guard) (*Sealed, error) {
+	b, err := json.Marshal(g)
+	if err != nil {
+		return nil, err
+	}
+	return seal(key, b, guardAD)
+}
+
+// Guard returns what guards the vault beside its passphrase; ErrLocked
+// while the vault is locked.
+func (s *Store) Guard() (Guard, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.guard()
+}
+
+func (s *Store) guard() (Guard, error) {
+	if s.key == nil {
+		return Guard{}, s.noKey()
+	}
+	if s.f.Guard == nil {
+		return Guard{}, nil
+	}
+	return openGuard(s.key, s.f.Guard)
+}
+
+// UpdateGuard changes the guard with fn and writes it; an error of fn
+// leaves it as it was. ErrLocked while the vault is locked.
+func (s *Store) UpdateGuard(fn func(*Guard) error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	g, err := s.guard()
+	if err != nil {
+		return err
+	}
+	if err := fn(&g); err != nil {
+		return err
+	}
+	if len(g.Authenticators) > MaxAuthenticators {
+		return fmt.Errorf("%w: at most %d authenticators", ErrInvalid, MaxAuthenticators)
+	}
+	prev := s.f.Guard
+	if len(g.Authenticators) == 0 && !g.VerifyEachAllow {
+		s.f.Guard = nil
+	} else if s.f.Guard, err = sealGuard(s.key, g); err != nil {
+		s.f.Guard = prev
+		return err
+	}
+	if err := s.save(); err != nil {
+		s.f.Guard = prev
+		return err
+	}
+	return nil
+}
+
 // Lock forgets the key until Unlock.
 func (s *Store) Lock() {
 	s.mu.Lock()
@@ -771,8 +888,25 @@ func (s *Store) rekey(cur []byte, passphrase string) error {
 		clear(key)
 		return err
 	}
+	// A new passphrase ends every authenticator: whoever knew the old one
+	// may have added theirs. The rule stays.
+	var guard *Sealed
+	if s.f.Guard != nil {
+		g, err := openGuard(cur, s.f.Guard)
+		if err != nil {
+			clear(key)
+			return err
+		}
+		if g.VerifyEachAllow {
+			if guard, err = sealGuard(key, Guard{VerifyEachAllow: true}); err != nil {
+				clear(key)
+				return err
+			}
+		}
+	}
 	prev := s.f
 	s.f.Entries, s.f.Version, s.f.Mode, s.f.KDF, s.f.Check, s.f.PassphraseSet = entries, FileVersion, ModePassphrase, &kdf, check, s.now().UTC()
+	s.f.Guard = guard
 	if err := s.save(); err != nil {
 		s.f = prev
 		clear(key)
@@ -822,6 +956,9 @@ func (s *Store) save() error {
 	out["entries"] = entries
 	if len(s.f.Forgotten) > 0 {
 		out["forgotten"] = s.f.Forgotten
+	}
+	if s.f.Guard != nil {
+		out["guard"] = s.f.Guard
 	}
 	b, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {

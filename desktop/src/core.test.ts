@@ -13,6 +13,7 @@ import {
   desktopCookie,
   DesktopError,
   desktopToken,
+  verifyKey,
 } from './core';
 
 function fakeCore(source: string) {
@@ -182,6 +183,8 @@ test('the token of a launch goes to the core on stdin and into a cookie of its o
   );
   assert.equal(coreHello(token), `{"desktop_token":"${token}"}\n`);
   assert.equal(coreHello(''), '{}\n');
+  assert.equal(coreHello(token, 'ab'), `{"desktop_token":"${token}","verify_key":"ab"}\n`);
+  assert.equal(coreHello('', 'ab'), '{"verify_key":"ab"}\n');
 
   // A core that answers only when its first line on stdin is the hello
   // with this token, and whose environment holds no token.
@@ -219,4 +222,22 @@ test('the token of a launch goes to the core on stdin and into a cookie of its o
   assert.equal(DESKTOP_COOKIE, `${APP_SLUG}-desktop`);
   for (const origin of ['https://127.0.0.1:7781', 'http://localhost:7781', 'http://127.0.0.1:7781/x', 'http://example.com'])
     assert.throws(() => desktopCookie(origin, token));
+});
+
+test('the key of the system prompts is another random value than the token, sent only in the hello', () => {
+  const key = verifyKey();
+  assert.match(key, /^[0-9a-f]{64}$/);
+  assert.notEqual(key, desktopToken());
+  assert.notEqual(verifyKey(), key);
+  assert.equal(
+    verifyKey((n) => Buffer.alloc(n, 2)),
+    '02'.repeat(32),
+  );
+  const token = desktopToken();
+  const hello = JSON.parse(coreHello(token, key));
+  assert.equal(hello.desktop_token, token);
+  assert.equal(hello.verify_key, key);
+  assert.notEqual(hello.verify_key, hello.desktop_token);
+  // The cookie carries the token only.
+  assert.ok(!JSON.stringify(desktopCookie('http://127.0.0.1:7781', token)).includes(key));
 });

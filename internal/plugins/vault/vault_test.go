@@ -375,7 +375,7 @@ func TestPassphraseAndSessions(t *testing.T) {
 	// A session is not opened by a check that crossed a lock.
 	epoch := p.currentEpoch()
 	c.do("POST", "/api/p/vault/lock", "")
-	if tok := p.newSession(h, epoch); tok != "" {
+	if tok := p.newSession(h, epoch, false); tok != "" {
 		t.Error("a session opened across a lock")
 	}
 	// Refusals of the gate and reveals are audited.
@@ -396,17 +396,22 @@ func mustJSON(v any) string {
 type client struct {
 	mux *http.ServeMux
 	tok string
+	// origin is the page's (the Origin header of its requests), kind the
+	// kind of client, desktop the check of the desktop shell's MACs.
+	origin  string
+	kind    plugin.Client
+	desktop func(msg, mac []byte) bool
 }
 
 func newClient(p *Plugin, h *fakeHost) *client {
-	mux := http.NewServeMux()
+	c := &client{mux: http.NewServeMux(), kind: plugin.Browser}
 	for _, rt := range p.Routes() {
 		rt := rt
-		mux.HandleFunc(plugin.Pattern(ID, rt), func(w http.ResponseWriter, r *http.Request) {
-			rt.Handler(&plugin.Call{Host: h}, w, r)
+		c.mux.HandleFunc(plugin.Pattern(ID, rt), func(w http.ResponseWriter, r *http.Request) {
+			rt.Handler(&plugin.Call{Host: h, Client: c.kind, DesktopProof: c.desktop}, w, r)
 		})
 	}
-	return &client{mux: mux}
+	return c
 }
 
 func (c *client) do(method, path, body string) (int, map[string]any) {
@@ -414,6 +419,9 @@ func (c *client) do(method, path, body string) (int, map[string]any) {
 	r := httptest.NewRequest(method, path, strings.NewReader(body))
 	if c.tok != "" {
 		r.Header.Set(SessionHeader, c.tok)
+	}
+	if c.origin != "" {
+		r.Header.Set("Origin", c.origin)
 	}
 	c.mux.ServeHTTP(w, r)
 	var out map[string]any
