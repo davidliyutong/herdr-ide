@@ -156,6 +156,16 @@
       "when": "terminal"
     },
     {
+      "id": "browser.open",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "browser.reload",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
       "id": "pane.splitRight",
       "section": "pane",
       "when": "terminal"
@@ -318,6 +328,8 @@
     "command.app.fullDiskAccess",
     "command.app.keyboardShortcuts",
     "command.app.settings",
+    "command.browser.open",
+    "command.browser.reload",
     "command.code.diff",
     "command.code.gitGraph",
     "command.code.open",
@@ -398,6 +410,10 @@
     "settings.appearance.theme.light",
     "settings.appearance.theme.system",
     "settings.appearance.uiFontSize",
+    "settings.browser.forwardIdle",
+    "settings.browser.openLinks",
+    "settings.browser.openLinks.external",
+    "settings.browser.openLinks.pane",
     "settings.codeServer.install",
     "settings.codeServer.install.download",
     "settings.codeServer.install.existing",
@@ -449,6 +465,7 @@
     "settings.notifications.mutedAgents",
     "settings.notifications.sound",
     "settings.notifications.system",
+    "settings.plugins.browser.enabled",
     "settings.plugins.files.enabled",
     "settings.plugins.git.enabled",
     "settings.plugins.usage.enabled",
@@ -456,6 +473,7 @@
     "settings.plugins.vscode.browser",
     "settings.plugins.vscode.enabled",
     "settings.section.appearance",
+    "settings.section.browser",
     "settings.section.codeServer",
     "settings.section.colors",
     "settings.section.files",
@@ -962,6 +980,8 @@
     "appearance.language": "auto",
     "appearance.theme": "system",
     "appearance.uiFontSize": 13,
+    "browser.forwardIdle": 30,
+    "browser.openLinks": "pane",
     "codeServer.install": "push",
     "codeServer.path": "",
     "files.confirmTrash": false,
@@ -992,6 +1012,7 @@
     ],
     "notifications.sound": true,
     "notifications.system": true,
+    "plugins.browser.enabled": true,
     "plugins.files.enabled": true,
     "plugins.git.enabled": true,
     "plugins.usage.enabled": true,

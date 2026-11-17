@@ -5,10 +5,11 @@ import { togglePanel } from '../components/RightBar';
 import { transfersPlugin } from './transfers';
 import { guiPlugin } from './gui';
 import { vscodePlugin } from './vscode';
+import { browserPlugin } from './browser';
 import { filesPlugin } from './files';
 import { usagePlugin } from './usage';
 import { vaultPlugin } from './vault';
 import { gitPlugin } from './git';
 
 setPanelCommand((panel) => ({ run: () => togglePanel(panel.id) }));
-definePlugins([transfersPlugin, guiPlugin, vscodePlugin, filesPlugin, gitPlugin, usagePlugin, vaultPlugin]);
+definePlugins([transfersPlugin, guiPlugin, vscodePlugin, browserPlugin, filesPlugin, gitPlugin, usagePlugin, vaultPlugin]);

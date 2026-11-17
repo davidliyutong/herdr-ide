@@ -41,6 +41,16 @@ export interface DesktopShell {
   /** The system's own prompt (Touch ID, Windows Hello) that stands in for
    * the vault's passphrase. */
   verifyUser?: DesktopVerifyUser;
+  /** The browser panes' webviews (plugins/browser): present when the shell
+   * lets the page show any web address in an Electron <webview>. */
+  browser?: DesktopBrowser;
+}
+
+export interface DesktopBrowser {
+  /** Calls fn with the address a page in a webview opened in a window of
+   * its own (a popup); the page shows it in a new browser tab. Returns a
+   * function that stops it. */
+  onOpen(fn: (url: string) => void): () => void;
 }
 
 export interface DesktopVerifyUser {

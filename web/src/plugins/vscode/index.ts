@@ -41,6 +41,8 @@ export const vscodePlugin: PluginDef = {
     check: 'code.risk.check',
     confirm: 'code.risk.enable',
   },
+  // VS Code for the workspace's folder, as a tab of its own.
+  newTabItems: () => [{ id: 'code', title: 'plugins.vscode.title', icon: CodeIcon, run: (m) => void actions.openCode(m) }],
   commands: {
     'code.open': {
       enabled: can,

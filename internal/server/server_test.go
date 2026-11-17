@@ -324,6 +324,11 @@ func TestCSPOnAppShell(t *testing.T) {
 		if csp := w.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "frame-ancestors 'self'") || !strings.Contains(csp, "script-src 'self' 'wasm-unsafe-eval';") || strings.Contains(csp, "'unsafe-eval'") || strings.Contains(csp, "script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline'") {
 			t.Errorf("%s: csp = %q", c.path, csp)
 		}
+		// Frames: the UI's own and pages on loopback under any port (the
+		// browser pane); no other site, and no scheme but http there.
+		if csp := w.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "; frame-src 'self' http://localhost:* http://127.0.0.1:*; ") {
+			t.Errorf("%s: frames allowed by %q", c.path, csp)
+		}
 		if w.Header().Get("X-Content-Type-Options") != "nosniff" {
 			t.Errorf("%s: nosniff missing", c.path)
 		}

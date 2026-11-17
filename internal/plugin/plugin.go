@@ -59,6 +59,10 @@ type Call struct {
 	// stand for it there). What a browser binds to an origin (a WebAuthn
 	// credential) is taken only for such an origin.
 	TrustedOrigin string
+	// SameHost: the request comes from a program of the core's own host
+	// talking to its loopback address directly, not through a proxy: what
+	// listens on the core host's loopback is this client's localhost.
+	SameHost bool
 	// DesktopProof checks a MAC that the desktop app's shell made of msg
 	// with the key of its launch: the shell's word that the user answered
 	// a prompt of the system (Touch ID, Windows Hello). Nil in a core the

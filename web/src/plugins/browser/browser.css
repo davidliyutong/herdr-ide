@@ -1,0 +1,146 @@
+/* The browser plugin's panes (web/src/plugins/browser): the layer of their
+ * frames over the panes (BrowserLayer.tsx, as .code-layer), and a pane's
+ * toolbar and the states in its body. */
+.browser-layer {
+  grid-area: main;
+  position: relative;
+  overflow: hidden;
+  z-index: 2;
+  pointer-events: none;
+}
+.browser-frame {
+  position: absolute;
+  display: none;
+  border: 0;
+  background: var(--bg);
+  pointer-events: auto;
+}
+/* A webview takes pointer events from the page's own splitters as iframes
+ * do (styles.css). */
+body.resizing webview,
+body.resizing-row webview,
+body.dragging webview {
+  pointer-events: none;
+}
+.browser-pane {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+.browser-bar {
+  position: relative;
+  gap: 4px;
+  padding: 0 4px;
+  border-bottom: 1px solid var(--line);
+}
+.browser-address {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: calc(var(--h-toolbar) - 8px);
+  font-size: var(--fs-md);
+}
+.browser-chip {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: var(--fs-sm);
+  color: var(--fg-dim);
+}
+.browser-note {
+  flex: none;
+  padding: 4px 12px;
+  font-size: var(--fs-sm);
+  border-bottom: 1px solid var(--line);
+}
+.browser-error {
+  color: var(--error);
+}
+.browser-slot {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: var(--bg);
+}
+/* In place of the page: a start page, a failure, a notice. */
+.browser-cover {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  text-align: center;
+  overflow: auto;
+}
+.browser-start {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  max-width: 480px;
+}
+.browser-url {
+  max-width: 100%;
+  font-family: monospace;
+}
+.browser-failure {
+  white-space: pre-wrap;
+}
+.browser-ports {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 0;
+  text-align: left;
+}
+.browser-ports-head {
+  padding: 4px 0 2px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+}
+.browser-port {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-start;
+  text-align: left;
+}
+.browser-port-n {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.browser-popover {
+  position: absolute;
+  top: 100%;
+  right: 4px;
+  z-index: 6;
+  width: min(320px, calc(100% - 8px));
+  max-height: 60vh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--float);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px var(--shadow);
+}
+.browser-forward {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}

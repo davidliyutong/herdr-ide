@@ -139,7 +139,10 @@ in the UI; a setting with a scope can have its own value per machine, under
 | `codeServer.install` | `push`, `download`, `existing` | `"push"` | `--code-server-install` | per machine |
 | `codeServer.path` | string | `""` | `--code-server-path` | per machine |
 | `plugins.vscode.enabled` | `true`, `false` | `false` | – | – |
+| `browser.openLinks` | `pane`, `external` | `"pane"` | – | – |
 | `plugins.vscode.browser` | `true`, `false` | `false` | – | – |
+| `plugins.browser.enabled` | `true`, `false` | `true` | – | – |
+| `browser.forwardIdle` | integer, 0–1440 | `30` | – | – |
 | `plugins.files.enabled` | `true`, `false` | `true` | – | – |
 | `plugins.git.enabled` | `true`, `false` | `true` | – | – |
 | `plugins.usage.enabled` | `true`, `false` | `true` | – | – |
@@ -281,6 +284,8 @@ by `scripts/registry`.
 | `tab.closeRight` | `terminal` | – | – | – | – |
 | `tab.pin` | `terminal` | – | – | – | – |
 | `tab.unpin` | `terminal` | – | – | – | – |
+| `browser.open` | `terminal` | – | – | – | – |
+| `browser.reload` | `terminal` | – | – | – | – |
 | `pane.splitRight` | `terminal` | `cmd+d` | – | – | – |
 | `pane.splitDown` | `terminal` | `cmd+shift+d` | – | – | – |
 | `pane.close` | `terminal` | `cmd+w` | – | – | – |
@@ -404,6 +409,10 @@ missing here.
 | `POST /m/{id}/gui/{win}/close` | writes | Asks a program window to close. |
 | `POST /api/m/{id}/gui/enable` | writes | Gives open terminals the machine's display (`{"terminals": [...]}`, empty for all). |
 | `GET /api/gui` | – | The program windows of every machine. |
+| `GET /api/p/browser/forwards` | – | The port forwards of the browser pane ([32](features/32-browser-and-ports.md)): `forwards` (`m`, `port` on the machine, `local` on the core host's loopback, `created`, `connections`) and `available`, whether the client is on the core's own host and can use them. |
+| `POST /api/m/{id}/p/browser/forwards` | writes | Makes or finds the forward of `{"port"}` on the machine and answers it; asking again counts as a use. `403 forward_local_only` for a client not on the core's host, `400 local_machine` for the local machine, `400 too_many` beyond 32, `409 offline`. Audited as `browser.forward` with both ports. |
+| `DELETE /api/m/{id}/p/browser/forwards/{port}` | writes | Stops one, with its connections; `404` when there is none. |
+| `GET /api/m/{id}/p/browser/listening` | – | The TCP ports the user's programs listen on, on the machine's loopback or every address: `ports` (`port`, `process`). |
 | `GET /api/p/vault` | – | The variable vault ([30](features/30-variable-vault.md)): `status` (`mode` `""` or `passphrase`, `locked`, `setup` (no passphrase yet), `passphraseSet`), the `variables` (`name`, `description`, `machines` (`*`: all), `injectOnly`, `created`, `updated`), never values, `session`: whether the request's `X-Vault-Session` is open, `sessionProof`: whether an authenticator's proof opened it, not the passphrase, `guard` (while unlocked): the `authenticators` (`id`, `kind` `webauthn` or `desktop`, `label`, `origin`, `rpId`, `created`, `lastUsed`; no keys), `verifyEachAllow`, `desktop` (the desktop app this page runs in can prompt the user) and `webauthn` (the request's origin is one the core vouches for, where a credential can be added and used), `idle`: the seconds a session lasts unused (`vault.sessionIdle`), and `autoLock`: `after` (seconds without use before the vault locks, 0 never), `custom` (a page set it for this unlock), `setting` (`vault.autoLock`'s seconds) and, while unlocked, `lockAt` (when it locks if unused). `503` when the vault does not open, with why: `unavailable` (no settings file), `version` (a file of another version), `invalid` (a damaged or hand-edited file) or `failed` (not readable); it is opened again at the next request. The routes marked *gated* answer `401 vault_session` without an open session. |
 | `PUT /api/p/vault/vars/{name}` | writes, gated | Creates or changes a variable (`{"to"?, "description"?, "machines"?, "injectOnly"?, "value"?}`; a new one needs `value`, absent keeps it; `to` renames it in the same write, its value sealed again under the new name, `404 not_found` for a variable that does not exist and `409 exists` for a taken name, so a refusal changes nothing); names `^[A-Za-z_][A-Za-z0-9_]*$` (≤ 128), values ≤ 64 KiB, descriptions ≤ 1 KiB; `409 no_passphrase` before the vault has a passphrase. Audited as `vault.saved` with the name (and `from`, the name before a rename), the machines, the flag and whether the value changed. With the vault's rule to verify every Allow, a change that lets more machines read it, or takes inject-only off, needs `"proof"` (of a `change` nonce for the variable) or `"passphrase"` in the body (`401 vault_proof`). |
 | `DELETE /api/p/vault/vars/{name}` | writes, gated | Removes a variable. |

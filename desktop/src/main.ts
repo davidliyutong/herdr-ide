@@ -40,7 +40,18 @@ import { FolderQueue } from './folders';
 import { followCore, type ShellSettings } from './follow';
 import { menuCommands, menuTemplate, parseDisabled, type Binding } from './menu';
 import { APP_ID, coreBinary, foldersOf, keyPlatform, quitsWithLastWindow, type Platform } from './platform';
-import { allowPermission, isExternal, isInternal, mainWindowPreferences, webPreferences } from './policy';
+import {
+  allowGuestPermission,
+  allowPermission,
+  BROWSER_PARTITION,
+  guestMayNavigate,
+  guestPreferences,
+  isExternal,
+  isInternal,
+  mainWindowPreferences,
+  popupGate,
+  webPreferences,
+} from './policy';
 import { bundleOf, privacyActions, terminalCoreExecutable } from './privacy';
 import { verifier, type Verifier } from './verify';
 import { helloFor, HELLO_TIMEOUT_MS, POWERSHELL_ARGS, powershellPath, type RunPowerShell } from './windowsHello';
@@ -130,7 +141,34 @@ function openExternal(url: string) {
 
 // Install on every window, including program windows and standalone VS Code.
 app.on('web-contents-created', (_event, contents) => {
-  contents.on('will-attach-webview', (event) => event.preventDefault());
+  // A webview attaches only in the main window's own page, and only as the
+  // browser panes' guest (policy.ts guestPreferences).
+  contents.on('will-attach-webview', (event, prefs, params) => {
+    const ok =
+      !!mainWindow && contents === mainWindow.webContents && isInternal(contents.getURL(), origin) && guestPreferences(prefs, params);
+    if (!ok) event.preventDefault();
+  });
+  if (contents.getType() === 'webview') {
+    // A guest is a web page of the browser pane: it follows http(s) links
+    // itself, and a popup becomes a new browser tab in the page, a few at a
+    // time (policy.ts popupGate). Its scripts never hand anything to the
+    // system's browser, and it gets no menu.
+    contents.on('will-navigate', (event, url) => {
+      if (!guestMayNavigate(url)) event.preventDefault();
+    });
+    contents.on('will-redirect', (event, url) => {
+      if (!guestMayNavigate(url)) event.preventDefault();
+    });
+    const mayPopup = popupGate();
+    contents.setWindowOpenHandler(({ url }) => {
+      const host = contents.hostWebContents;
+      if (guestMayNavigate(url) && host && !host.isDestroyed() && host.mainFrame && mayPopup()) {
+        host.mainFrame.send(channels.browserOpen, url);
+      }
+      return { action: 'deny' };
+    });
+    return;
+  }
   contents.on('will-navigate', (event, url) => {
     if (!isInternal(url, origin)) {
       event.preventDefault();
@@ -538,6 +576,14 @@ if (!app.requestSingleInstanceLock()) {
       ses.setPermissionCheckHandler((contents, permission, requestingOrigin) => {
         return allowPermission(permission, requestingOrigin, contents?.getURL() || '', origin);
       });
+      // The browser panes' guests live in their own partition, so they share
+      // nothing with the app. The desktop cookie above is set in the default
+      // session only: that separation keeps a guest from being taken for the
+      // app by the core. A guest gets no permission but full screen; downloads
+      // keep Electron's save dialog (no will-download handler saves by itself).
+      const guests = session.fromPartition(BROWSER_PARTITION);
+      guests.setPermissionRequestHandler((_contents, permission, callback) => callback(allowGuestPermission(permission)));
+      guests.setPermissionCheckHandler((_contents, permission) => allowGuestPermission(permission));
       stopFollowing = followCore(origin, keys, { bindings: applyBindings, settings: applySettings });
       createWindow();
     })

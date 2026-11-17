@@ -8,6 +8,7 @@ import { conn } from './lib/conn';
 import { Sidebar } from './components/Sidebar';
 import { Workspace } from './components/Workspace';
 import { CodeLayer } from './components/CodeLayer';
+import { BrowserLayer } from './plugins/browser/BrowserLayer';
 import { Palette } from './components/Palette';
 import { AuthDialog } from './components/AuthDialog';
 import { AddMachineDialog } from './components/AddMachineDialog';
@@ -30,7 +31,7 @@ import { bridgeDownload, downloadEvent, resyncDownloads } from './download';
 import { noteFocusedTerminal, sendTarget } from './lib/bridge';
 import { windowFocused } from './codeFrames';
 import { followVSCodeSwitch } from './plugins/vscode/workers';
-import { describeView, pluginMessage, useActivePlugins, usePanels } from './plugins/registry';
+import { describeView, pluginMessage, useActivePlugins, usePanels, usePluginOn } from './plugins/registry';
 import { RightBar } from './components/RightBar';
 import { PluginBoundary } from './components/PluginBoundary';
 import './plugins';
@@ -109,6 +110,7 @@ export function App() {
   const connected = useStore((s) => s.connected);
   const toasts = useStore((s) => s.toasts);
   const panels = usePanels();
+  const browserOn = usePluginOn('browser');
   const panel = useStore((s) => s.panel);
   const panelWidth = useStore((s) => s.panelWidth);
   const panelShown = panels.some((p) => p.id === panel);
@@ -191,6 +193,7 @@ export function App() {
       {sidebarOpen && <div className="sidebar-backdrop" onClick={() => actions.toggleSidebar()} />}
       <Workspace />
       <CodeLayer />
+      {browserOn && <BrowserLayer />}
       <RightBar />
       <StatusBar connected={connected} chord={chord} />
       <Palette />

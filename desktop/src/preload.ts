@@ -3,7 +3,7 @@
 // where a file the user dropped is on disk, which folders were opened with
 // the app, (from the page) which commands' menu items to disable, how many
 // panes have unsaved changes and its answer when the window closes with
-// some (the shell asks it), and on macOS three requests without arguments
+// some (the shell asks it), the addresses the browser panes' webviews open as popups, and on macOS three requests without arguments
 // for Full Disk Access. verifyUser takes a nonce to the main process, which
 // asks the core what it is for and shows that in the system's prompt.
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
@@ -35,6 +35,15 @@ function isOpened(v: unknown): v is OpenedFolders {
     o.skipped >= 0
   );
 }
+
+const isWebURL = (v: unknown): v is string => {
+  if (typeof v !== 'string') return false;
+  try {
+    return ['http:', 'https:'].includes(new URL(v).protocol);
+  } catch {
+    return false;
+  }
+};
 
 const isHex = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
 
@@ -72,6 +81,7 @@ const shell: DesktopShell = {
   answerClose(answer) {
     if (answer === 'asking' || answer === 'close' || answer === 'stay') ipcRenderer.send(channels.closeAnswer, answer);
   },
+  browser: { onOpen: (fn) => listen(channels.browserOpen, isWebURL, fn) },
   verifyUser: {
     async available() {
       try {

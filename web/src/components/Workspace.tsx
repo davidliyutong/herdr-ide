@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Columns2, PanelLeft, Pin, Plus, X } from 'lucide-react';
+import { ChevronDown, Columns2, PanelLeft, Pin, Plus, X } from 'lucide-react';
 import { useStore } from '../state/store';
 import { terms, useTerms } from '../state/terms';
 import * as L from '../term/layout';
@@ -9,7 +9,7 @@ import { PaneHeader } from './PaneHeader';
 import { CodeSlot } from './CodeLayer';
 import { PreviewPane } from './PreviewPane';
 import { LeafIcon, PluginPane } from './PluginPane';
-import { describeView } from '../plugins/registry';
+import { describeView, newTabGroups, useActivePlugins } from '../plugins/registry';
 import { StatusDot } from './StatusDot';
 import { aggregate, agentStatus, codeText, shortPath, terminalTitle } from '../lib/machine';
 import { t, type MessageKey } from '../i18n';
@@ -17,7 +17,7 @@ import { withKey } from '../keymap';
 import { InlineEdit } from './InlineEdit';
 import { startTabDrag } from '../tabDrag';
 import { openMenu } from '../contextMenu';
-import { tabMenu, tabsMenu } from '../menus';
+import { newTabMenu, tabMenu, tabsMenu } from '../menus';
 import {
   clearMulti,
   clickRow,
@@ -114,6 +114,8 @@ export function Workspace() {
   const layout = mt?.layout;
   const ws = layout ? L.selectedWorkspace(layout) : undefined;
   const sel = useMulti((s) => s.sel);
+  // The new-tab menu follows the plugins that are on.
+  useActivePlugins();
   const tabsRef = useRef<HTMLDivElement>(null);
   // One tab is the bar's tab stop: the one focused last, else the one shown.
   useEffect(() => ensureTabStop(tabsRef.current, '.tab.active'));
@@ -138,6 +140,7 @@ export function Workspace() {
     );
   }
   const tab = ws.tabs[ws.selected];
+  const kinds = newTabGroups(m).length > 0;
   const picked = new Set(selectedIds(tabsOf(m, ws.id), sel));
   const tabStatus = (tb: L.Tab) => aggregate(L.tabTerminals(tb).map((a) => agentStatus(mt.terminals[a])));
 
@@ -297,16 +300,37 @@ export function Workspace() {
             );
           })}
           {!readOnly && (
-            <button
-              className="icon new-tab"
-              title={withKey(t('command.tab.new'), 'tab.new')}
-              aria-label={t('command.tab.new')}
-              onClick={() => void actions.newTab(m, ws.id)}
-              data-new-tab={ws.id}
-              data-m={m}
-            >
-              <Plus />
-            </button>
+            <>
+              <button
+                className="icon new-tab"
+                title={withKey(t('command.tab.new'), 'tab.new')}
+                aria-label={t('command.tab.new')}
+                // Cmd/Ctrl+click and a right click offer the kinds of tab.
+                onClick={(e) => (e.metaKey || e.ctrlKey ? openMenu(e, newTabMenu(m, ws.id)) : void actions.newTab(m, ws.id))}
+                onContextMenu={(e) => openMenu(e, newTabMenu(m, ws.id))}
+                data-new-tab={ws.id}
+                data-m={m}
+              >
+                <Plus />
+              </button>
+              {kinds && (
+                <button
+                  className="icon sm new-tab-kinds"
+                  title={t('tab.newMenu')}
+                  aria-label={t('tab.newMenu')}
+                  aria-haspopup="menu"
+                  onClick={(e) => {
+                    const r = e.currentTarget.getBoundingClientRect();
+                    openMenu(
+                      { clientX: r.left, clientY: r.bottom, preventDefault: () => {}, stopPropagation: () => e.stopPropagation() },
+                      newTabMenu(m, ws.id),
+                    );
+                  }}
+                >
+                  <ChevronDown />
+                </button>
+              )}
+            </>
           )}
         </div>
       </div>

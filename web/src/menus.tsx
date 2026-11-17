@@ -38,13 +38,14 @@ import {
   ServerPlus,
   Settings,
   Square,
+  SquareTerminal,
   Trash2,
   Wrench,
   X,
 } from 'lucide-react';
 import { actions, current, workspaceTitle } from './actions';
 import { CodeIcon } from './components/icons';
-import { isPluginOn } from './plugins/registry';
+import { isPluginOn, newTabGroups } from './plugins/registry';
 import { openMenu, type MenuEntry } from './contextMenu';
 import { downloadDialog } from './dialog';
 import { canDownload, downloadPath } from './download';
@@ -65,6 +66,21 @@ const hint = (action: string) => keyHint(action) || undefined;
 const hintIf = (current: boolean, action: string) => (current ? hint(action) : undefined);
 
 const workspaceOf = (m: string, ws: string) => terms.layout(m)?.workspaces.find((w) => w.id === ws);
+
+/** The new-tab button's menu: the kinds of tab, Terminal first, then what
+ * each plugin that is on offers (plugin order, a separator between
+ * plugins). The tab opens in workspace ws of machine m. */
+export function newTabMenu(m: string, ws: string): MenuEntry[] {
+  if (useStore.getState().readOnly) return [];
+  const out: MenuEntry[] = [
+    { label: t('tab.newKind.terminal'), icon: <SquareTerminal />, hint: hint('tab.new'), run: () => void actions.newTab(m, ws) },
+  ];
+  for (const group of newTabGroups(m)) {
+    out.push('sep');
+    for (const item of group) out.push({ label: t(item.title), icon: <item.icon />, run: () => void item.run(m, ws) });
+  }
+  return out;
+}
 
 /** A pane's menu: what it is (a terminal's name, VS Code's window, a
  * preview's file), splitting it (a new terminal in its directory), showing

@@ -86,6 +86,18 @@ export interface PluginSettingsDef {
   extra?: ComponentType<PluginSettingsProps>;
 }
 
+/** A kind of tab a plugin offers in the tab bar's new-tab menu, after
+ * Terminal; the plugin's items follow each other, a separator between
+ * plugins. */
+export interface NewTabItem {
+  id: string;
+  title: MessageKey;
+  icon: IconComponent;
+  /** Opens the tab on machine m, in the workspace with id `workspace`
+   * (the one shown). */
+  run(m: string, workspace: string): void | Promise<void>;
+}
+
 export interface PluginDef {
   /** As the core's plugin (internal/plugin): lower-case letters and digits. */
   id: string;
@@ -112,6 +124,9 @@ export interface PluginDef {
   /** Shown in the status bar, right of the machine's line. */
   statusItems?: ComponentType[];
   paletteItems?(): PaletteItem[];
+  /** The kinds of tab it adds to the new-tab menu for machine m: any
+   * number, in the order it lists them. Nothing while the plugin is off. */
+  newTabItems?(m: string): NewTabItem[];
   /** A message of its core side for machine m ("" for the core's). */
   onMessage?(m: string, data: unknown): void;
 }

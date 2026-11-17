@@ -133,6 +133,15 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   Changed files are colored by their Git status and the editor's gutter
   marks changed lines. Its settings page has hidden files, excluded names,
   the sort order, following the focused pane and asking before the trash.
+- **Browser.** A tab can be a browser: a development server on a remote
+  machine's `localhost` shows in a pane through a port forward, as
+  `ssh -L` would give it, and ⌘/Ctrl-click on a link in a terminal opens it
+  there in a new tab. Forwards listen on the core's computer only, end when
+  unused, and their pages stay another site than the UI. The pane lists the
+  machine's listening ports; the desktop app shows any web page in it.
+  ⌘/Ctrl-click the new-tab button (or its chevron) to choose the kind of
+  tab: terminal, VS Code, browser
+  ([32](docs/features/32-browser-and-ports.md)).
 - **Git.** VS Code's Source Control and Git Graph without VS Code, for the
   focused pane's repository on any machine: a panel (Ctrl+Shift+G in the
   desktop app) with the branch (a searchable branch picker for thousands

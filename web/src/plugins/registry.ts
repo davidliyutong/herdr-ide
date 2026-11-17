@@ -4,7 +4,7 @@ import { create } from 'zustand';
 import { riskDialog } from '../dialog';
 import { t } from '../i18n';
 import { builtinDefaults, setSetting, useSettings, type Client, type Section } from '../settings';
-import type { CommandDef, PaletteItem, PanelDef, PaneViewDef, PluginDef } from './api';
+import type { CommandDef, NewTabItem, PaletteItem, PanelDef, PaneViewDef, PluginDef } from './api';
 
 let plugins: PluginDef[] = [];
 
@@ -189,6 +189,14 @@ export function setPanelCommand(f: (panel: PanelDef) => CommandDef) {
 
 /** The palette's items of the plugins that are on. */
 export const pluginPaletteItems = (): PaletteItem[] => activePlugins().flatMap((p) => p.paletteItems?.() ?? []);
+
+/** The kinds of tab the plugins that are on add to the new-tab menu for
+ * machine m, a group for each plugin that has any, in plugin order. */
+export function newTabGroups(m: string): NewTabItem[][] {
+  return activePlugins()
+    .map((p) => p.newTabItems?.(m) ?? [])
+    .filter((items) => items.length > 0);
+}
 
 /** Hands a message of a plugin's core side to the plugin, when it is on. */
 export function pluginMessage(plugin: string, m: string, data: unknown) {

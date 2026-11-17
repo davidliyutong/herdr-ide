@@ -142,6 +142,10 @@ var Commands = func() []Command {
 		// leave them; as VS Code and browsers offer, without a key.
 		cmd("tab.pin", "tab"),
 		cmd("tab.unpin", "tab"),
+		// The browser plugin: a new tab with an empty browser pane on the
+		// focused machine, and the focused browser pane's page again.
+		cmd("browser.open", "tab"),
+		cmd("browser.reload", "tab"),
 
 		cmd("pane.splitRight", "pane", on(macApp, "cmd+d")),
 		cmd("pane.splitDown", "pane", on(macApp, "cmd+shift+d")),

@@ -8,6 +8,7 @@ import { desktopShellFor } from './preload';
 const shell = exposed.desktopShell as DesktopShell;
 const common = [
   'answerClose',
+  'browser',
   'onCloseRequest',
   'onCommand',
   'onOpenFolders',
@@ -148,4 +149,26 @@ test('verifyUser asks the main process and passes on only what has the right for
   assert.equal(await verifyUser!.prove('n'.repeat(43)), mac);
   assert.deepEqual(invoked, [{ channel: channels.verifyProve, args: ['n'.repeat(43)] }]);
   for (const platform of ['win32', 'linux', 'darwin']) assert.ok(desktopShellFor(platform).verifyUser);
+});
+
+test('browser.onOpen delivers http(s) addresses only, while it listens', () => {
+  const got: string[] = [];
+  const off = shell.browser!.onOpen((url) => got.push(url));
+  receive(channels.browserOpen, 'https://example.com/a');
+  receive(channels.browserOpen, 'http://localhost:3000');
+  for (const bad of [
+    'file:///etc/passwd',
+    'javascript:alert(1)',
+    'data:text/html,x',
+    'example.com',
+    '',
+    5,
+    null,
+    { url: 'https://example.com' },
+  ]) {
+    receive(channels.browserOpen, bad);
+  }
+  off();
+  receive(channels.browserOpen, 'https://example.com/b');
+  assert.deepEqual(got, ['https://example.com/a', 'http://localhost:3000']);
 });

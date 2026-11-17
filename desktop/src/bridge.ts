@@ -31,4 +31,7 @@ export const channels = {
   /** page → shell, answered: a nonce (a string) to prove; the proof's MAC
    * or null. */
   verifyProve: 'desktop:verify-prove',
+  /** shell → page: the address a page in a browser pane's webview opened in
+   * a window of its own (a URL string); the page shows it in a new tab. */
+  browserOpen: 'desktop:browser-open',
 } as const;
