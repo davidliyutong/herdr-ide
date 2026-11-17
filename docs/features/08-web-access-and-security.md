@@ -33,8 +33,12 @@ core on `127.0.0.1:7781`, [16](16-desktop-packaging.md)).
    browser must carry `X-herdr-ide-Proxy-Secret` (constant-time compare). A
    same-host proxy is recognized by its non-loopback Host or
    `X-Forwarded-For`, so it cannot skip the secret.
-3. **Host / Origin allowlist**: loopback plus `--allowed-origin`, against DNS
-   rebinding and cross-site WebSocket hijacking.
+3. **Host / Origin checks**: the Host is loopback or an `--allowed-origin`'s,
+   against DNS rebinding. An Origin is an `--allowed-origin` or, on loopback,
+   the request's own (the host and port of its Host header), against
+   cross-site WebSocket hijacking: a page on another loopback port, such as
+   a development server or a forwarded port of a machine, is another site,
+   and the core has no login that would stop its scripts.
 4. **Read-only mode** (`--read-only`): terminals are shown but only
    observed: no input, size or focus reaches them, writing calls of the
    terminal protocol are refused and no terminal core is installed or
@@ -111,6 +115,7 @@ reaches only sockets there ([02](02-multi-machine-transport.md)).
 | Telling the desktop app by `desktopShell` or its user agent | Both are the page's own claims: any page, VS Code's scripts in a browser included, can make them. Only a secret the browser never sees tells the app's requests apart. |
 | The desktop token in the core's environment | Programs the core starts (the local agent's terminals, code-server) would inherit it unless every path scrubbed it, and `/proc/<pid>/environ` keeps the original; stdin is inherited by nothing. |
 | A header the desktop app adds to its requests (`webRequest`) | Every request of every window would pass through the main process, and service workers' and WebSockets' requests depend on Electron's proxying; a cookie of the session is sent by Chromium itself. |
+| Any loopback Origin accepted | Every program listening on a loopback port of the computer serves pages whose scripts could then open the core's WebSockets: a development server's dependencies, another user's service, a port forwarded from a machine. Only the page the core served has its Host as Origin. |
 | Serving code-server from an origin of its own | Would close the risk itself, but needs a second host name or port that every deployment's proxy, certificate and allowed origins would have to carry. |
 
 ## Failure modes
@@ -127,7 +132,8 @@ reaches only sockets there ([02](02-multi-machine-transport.md)).
 
 ## Testing
 
-- `internal/server/server_test.go`: Host/Origin guard (`TestGuard`), proxy
+- `internal/server/server_test.go`: Host/Origin guard, other loopback ports
+  and the other loopback name refused (`TestGuard`), proxy
   secret: local, remote, wrong secret, same-host proxy
   (`TestProxySecret`), CSP and headers on the shell, a client-side route
   and an unknown API path (`TestCSPOnAppShell`), every mutating route

@@ -246,7 +246,7 @@ func (s *Server) guard(next http.Handler) http.Handler {
 			http.Error(w, brand.Slug+": host not allowed (add --allowed-origin)", http.StatusForbidden)
 			return
 		}
-		if origin := r.Header.Get("Origin"); origin != "" && !s.originAllowed(origin) {
+		if origin := r.Header.Get("Origin"); origin != "" && !s.originAllowed(origin, r.Host) {
 			// Same-origin GETs of static assets never carry a foreign Origin;
 			// anything that does is refused.
 			http.Error(w, brand.Slug+": origin not allowed", http.StatusForbidden)
@@ -256,7 +256,15 @@ func (s *Server) guard(next http.Handler) http.Handler {
 	})
 }
 
-func (s *Server) originAllowed(origin string) bool {
+// originAllowed reports whether a request for host (its Host header) may
+// carry origin: an --allowed-origin, or the request's own origin on
+// loopback, which is the page the core served. Another page of the same
+// machine (a development server, a forwarded port, any program listening on
+// another loopback port) is another site: its scripts open WebSockets with
+// their own Origin, and the core has no login to stop them. The scheme of a
+// loopback origin is not compared: the core serves no TLS, so behind a proxy
+// on loopback that does, the page's is https and the request's is not.
+func (s *Server) originAllowed(origin, host string) bool {
 	if origin == "null" {
 		return false
 	}
@@ -264,10 +272,10 @@ func (s *Server) originAllowed(origin string) bool {
 	if err != nil {
 		return false
 	}
-	if isLoopbackHost(u.Hostname()) {
+	if s.origins[strings.ToLower(u.Scheme+"://"+u.Host)] {
 		return true
 	}
-	return s.origins[strings.ToLower(u.Scheme+"://"+u.Host)]
+	return (u.Scheme == "http" || u.Scheme == "https") && isLoopbackHost(u.Hostname()) && strings.EqualFold(u.Host, host)
 }
 
 // broadcast sends a JSON message to every connected browser.

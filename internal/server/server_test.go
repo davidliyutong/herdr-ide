@@ -73,19 +73,31 @@ func newTestServer(origins ...string) *Server {
 }
 
 func TestGuard(t *testing.T) {
-	h := newTestServer("https://ide.example.com").Handler()
+	h := newTestServer("https://ide.example.com", "http://localhost:5173", "https://dev.example.com").Handler()
 	cases := []struct {
 		host, origin string
 		want         int
 	}{
 		{"127.0.0.1:7780", "", 200},
-		{"localhost:7780", "http://localhost:5173", 200},
+		{"localhost:7780", "http://localhost:7780", 200}, // the page the core served
+		{"LocalHost:7780", "http://localhost:7780", 200},
+		{"[::1]:7780", "http://[::1]:7780", 200},
+		{"localhost:8443", "https://localhost:8443", 200}, // behind a TLS proxy on loopback
 		{"[::1]:7780", "", 200},
 		{"ide.example.com", "https://ide.example.com", 200},
-		{"evil.example.com", "", 403},                   // DNS rebinding
-		{"127.0.0.1:7780", "https://evil.example", 403}, // cross-site
+		{"dev.example.com", "http://localhost:5173", 200}, // an --allowed-origin on loopback
+		{"evil.example.com", "", 403},                     // DNS rebinding
+		{"127.0.0.1:7780", "https://evil.example", 403},   // cross-site
 		{"127.0.0.1:7780", "null", 403},
 		{"ide.example.com", "http://ide.example.com", 403}, // scheme must match
+		// Another page of the same machine is another site: a development
+		// server, a forwarded port, the same port under the other name.
+		{"localhost:7780", "http://localhost:3000", 403},
+		{"127.0.0.1:7780", "http://localhost:7780", 403},
+		{"localhost:7780", "http://127.0.0.1:7780", 403},
+		{"localhost:7780", "http://app.localhost:7780", 403},
+		{"localhost:7780", "ftp://localhost:7780", 403},
+		{"ide.example.com", "http://localhost:7780", 403},
 	}
 	for _, c := range cases {
 		r := httptest.NewRequest("GET", "/api/machines", nil)
