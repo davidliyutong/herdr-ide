@@ -10,6 +10,7 @@ import { createRoot, type Root } from 'react-dom/client';
 
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 
+import { storage } from '../brand';
 import { useStore } from '../state/store';
 import { useSettings } from '../settings';
 import type { MachineState } from '../lib/machine';
@@ -19,10 +20,13 @@ import { applySnapshot, setView, useUsage } from '../plugins/usage/state';
 import {
   costOf,
   daily,
+  dailyTokens,
   equivalents,
   rank,
+  rankTokens,
   sortAccounts,
   tightest,
+  tokenKinds,
   type CostRow,
   type UsageAccount,
   type UsageAlert,
@@ -143,6 +147,61 @@ describe('usage model', () => {
   });
 });
 
+describe('usage tokens', () => {
+  const today = new Date(2026, 10, 16, 12);
+  const row = (day: string, model: string, over: Partial<CostRow> = {}): CostRow => ({
+    day,
+    provider: 'codex',
+    model,
+    project: 'p',
+    machine: 'local',
+    input: 100,
+    cached: 50,
+    cacheWrite: 20,
+    output: 30,
+    reasoning: 10,
+    requests: 2,
+    cost: 1,
+    priced: true,
+    ...over,
+  });
+  const rows = [
+    row('2026-11-16', 'known'),
+    row('2026-11-15', 'new-model', { cost: 0, priced: false, input: 1000 }),
+    row('2026-08-01', 'known'),
+  ];
+
+  it('sums the kinds, with reasoning inside the output', () => {
+    expect(tokenKinds(rows, 7, today)).toEqual({
+      input: 1100,
+      cached: 100,
+      cacheWrite: 40,
+      output: 60,
+      reasoning: 20,
+      total: 1300,
+      requests: 4,
+    });
+  });
+
+  it('gives a series per day, unpriced rows included', () => {
+    const d = dailyTokens(rows, 3, today);
+    expect(d.map((x) => [x.day, x.total])).toEqual([
+      ['2026-11-14', 0],
+      ['2026-11-15', 1100],
+      ['2026-11-16', 200],
+    ]);
+    expect(d[2].cached).toBe(50);
+  });
+
+  it('ranks by tokens and marks the model without a price', () => {
+    const r = rankTokens(rows, 'model', 30, today);
+    expect(r.map((x) => [x.name, x.tokens, x.cost, x.unpriced])).toEqual([
+      ['new-model', 1100, 0, true],
+      ['known', 200, 1, false],
+    ]);
+  });
+});
+
 describe('usage panel and status item', () => {
   let host: HTMLDivElement;
   let root: Root;
@@ -177,6 +236,21 @@ describe('usage panel and status item', () => {
                 cost: 12.5,
                 priced: true,
               },
+              {
+                day,
+                provider: 'claude',
+                model: 'mystery-1',
+                project: 'alpha',
+                machine: 'local',
+                input: 4000,
+                cached: 0,
+                cacheWrite: 0,
+                output: 1000,
+                reasoning: 300,
+                requests: 3,
+                cost: 0,
+                priced: false,
+              },
             ],
           }),
         );
@@ -187,7 +261,7 @@ describe('usage panel and status item', () => {
     });
     useSettings.setState({ values: {}, readOnly: false });
     useUsage.setState({ snapshot: undefined, cost: undefined });
-    setView({ tab: 'overview', remaining: false, costDays: 30 });
+    setView({ tab: 'overview', remaining: false, costDays: 30, metric: 'spend' });
     useStore.getState().setPanel(undefined);
     host = document.createElement('div');
     document.body.append(host);
@@ -384,6 +458,30 @@ describe('usage panel and status item', () => {
     expect(host.querySelector('.usage-spend .callout.error')!.textContent).toContain('offline');
     // A service's own spend.
     await act(async () => host.querySelector<HTMLButtonElement>('.usage-tile[data-provider="claude"]')!.click());
-    expect([...host.querySelectorAll('.usage-stat-value')].map((e) => e.textContent)).toEqual(['$12.50', '$12.50', '2', '2']);
+    expect([...host.querySelectorAll('.usage-stat-value')].map((e) => e.textContent)).toEqual(['$12.50', '$12.50', '5.0k', '5.0k']);
+  });
+
+  it('switches to tokens: kinds, the model without a price, kept per browser', async () => {
+    await act(async () => root.render(createElement(UsagePanel)));
+    await act(async () => {});
+    const sw = () => [...host.querySelectorAll<HTMLButtonElement>('.usage-spend [aria-pressed]')];
+    expect(sw().map((b) => b.getAttribute('aria-pressed'))).toEqual(['true', 'false']);
+    await act(async () => sw()[1].click());
+    expect(host.querySelector('.usage-big')!.textContent).toBe('~5.0k');
+    const legend = host.querySelector('.usage-kind-legend')!.textContent!;
+    expect(legend).toContain('input 4.0k');
+    expect(legend).toContain('output 1.0k (reasoning 300)');
+    expect([...host.querySelectorAll('.usage-daily title')].pop()!.textContent).toContain('5.0k (input 4.0k');
+    const first = host.querySelector('.usage-rank li')!;
+    expect(first.textContent).toContain('mystery-1');
+    expect(first.textContent).toContain('no price');
+    expect(host.querySelectorAll('.usage-noprice')).toHaveLength(1);
+    expect(useUsage.getState().metric).toBe('tokens');
+    expect(JSON.parse(storage.get('usage.view') ?? '{}').metric).toBe('tokens');
+    // A service shows its tokens by kind.
+    await act(async () => host.querySelector<HTMLButtonElement>('.usage-tile[data-provider="claude"]')!.click());
+    expect(host.querySelector('.usage-kind-legend')).not.toBeNull();
+    await act(async () => host.querySelectorAll<HTMLButtonElement>('.usage-spend [aria-pressed]')[0].click());
+    expect(useUsage.getState().metric).toBe('spend');
   });
 });

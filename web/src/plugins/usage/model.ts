@@ -107,6 +107,8 @@ export interface CostRow {
   cached: number;
   cacheWrite: number;
   output: number;
+  /** Part of output. */
+  reasoning?: number;
   requests: number;
   cost: number;
   priced: boolean;
@@ -245,13 +247,82 @@ export function rank(rows: CostRow[], by: RankBy, n: number, today = new Date(),
     const name = label(r) || '–';
     const e = sums.get(name) ?? { name, cost: 0, tokens: 0 };
     e.cost += r.cost;
-    e.tokens += r.input + r.cached + r.cacheWrite + r.output;
+    e.tokens += rowTokens(r);
     sums.set(name, e);
   }
   return [...sums.values()].sort((a, b) => b.cost - a.cost || b.tokens - a.tokens);
 }
 
-/** What a measured cost comes to in a week and in a month (168 and 750
+/** The tokens of a row, all kinds (reasoning is part of the output). */
+export function rowTokens(r: CostRow): number {
+  return r.input + r.cached + r.cacheWrite + r.output;
+}
+
+export interface TokenKinds {
+  input: number;
+  /** Cache reads. */
+  cached: number;
+  cacheWrite: number;
+  /** Includes the reasoning tokens. */
+  output: number;
+  /** The part of output spent on reasoning. */
+  reasoning: number;
+  /** All four kinds. */
+  total: number;
+  requests: number;
+}
+
+const emptyKinds = (): TokenKinds => ({ input: 0, cached: 0, cacheWrite: 0, output: 0, reasoning: 0, total: 0, requests: 0 });
+
+function addRow(k: TokenKinds, r: CostRow) {
+  k.input += r.input;
+  k.cached += r.cached;
+  k.cacheWrite += r.cacheWrite;
+  k.output += r.output;
+  k.reasoning += r.reasoning ?? 0;
+  k.total += rowTokens(r);
+  k.requests += r.requests;
+}
+
+/** The tokens of the rows of the last n days by kind, with the requests;
+ * priced or not. */
+export function tokenKinds(rows: CostRow[], n: number, today = new Date()): TokenKinds {
+  const from = lastDays(n, today)[0];
+  const k = emptyKinds();
+  for (const r of rows) if (r.day >= from) addRow(k, r);
+  return k;
+}
+
+/** Tokens per day of the last n days, oldest first, by kind. */
+export function dailyTokens(rows: CostRow[], n: number, today = new Date()): ({ day: string } & TokenKinds)[] {
+  const days = lastDays(n, today);
+  const by = new Map(days.map((d) => [d, emptyKinds()]));
+  for (const r of rows) {
+    const k = by.get(r.day);
+    if (k) addRow(k, r);
+  }
+  return days.map((day) => ({ day, ...by.get(day)! }));
+}
+
+/** The tokens of the last n days by model, project or machine, most first;
+ * `unpriced` marks a name with a row the price table does not know (its
+ * tokens count all the same, its cost is 0). */
+export function rankTokens(rows: CostRow[], by: RankBy, n: number, today = new Date(), label: (r: CostRow) => string = (r) => r[by] ?? '') {
+  const from = lastDays(n, today)[0];
+  const sums = new Map<string, { name: string; tokens: number; cost: number; unpriced: boolean }>();
+  for (const r of rows) {
+    if (r.day < from) continue;
+    const name = label(r) || '–';
+    const e = sums.get(name) ?? { name, tokens: 0, cost: 0, unpriced: false };
+    e.tokens += rowTokens(r);
+    e.cost += r.cost;
+    if (!r.priced) e.unpriced = true;
+    sums.set(name, e);
+  }
+  return [...sums.values()].sort((a, b) => b.tokens - a.tokens || b.cost - a.cost);
+}
+
+/** What a measured cost (or token count) comes to in a week and in a month (168 and 750
  * hours, as the ai-usage report counts them). */
 export function equivalents(cost: number, days: number, weekHours = 168, monthHours = 750) {
   const hours = days * 24;

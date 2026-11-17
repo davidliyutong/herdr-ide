@@ -262,7 +262,8 @@ not read; SSH machines are.
   (`usage.refresh`) and Refresh, which also reads the cost again; the
   shown panel reads it again too once it is older than `usage.costRefresh`
   (default 15 minutes, 1–1440), looked at when it is shown and every
-  minute while it is. The tile shown and the switch are kept per browser.
+  minute while it is. The tile shown and the switches (used or left,
+  spend or tokens) are kept per browser.
   A snapshot older than the one shown is ignored.
 - **Overview**: the spend of the last 7, 30 or 90 days at API prices (a
   large total, tokens, the weekly and monthly equivalents), bars per day
@@ -273,6 +274,19 @@ not read; SSH machines are.
   reset and a small bar; a click shows its service. While DeepSeek is
   turned on and no machine has its key, a link opens its page, which has
   the key form.
+- **Spend or Tokens**: a switch (two buttons) in the overview's spend
+  header and in each service's spend section, one choice for both. In
+  Tokens the period's tokens are the large figure, with the requests, the
+  tokens per week and month at this pace, a thin bar of the shares of
+  input, cache reads, cache writes and output (opacity steps of the accent
+  color) and a legend with each kind's count, the output saying how much
+  of it was reasoning. The daily bars show tokens (stacked by service in
+  the overview, by kind in a service), their tooltips giving the day, the
+  total and the kinds. The rankings order by tokens, with the cost as the
+  muted figure and the bar following the tokens. A model the price table
+  does not know counts fully here and carries a "no price" tag, so that
+  what it used shows before it has a price. Spend shows everything as
+  before.
 - **A service**: a card per account: its mark, email, plan, when it was
   read; its status page's incident and what to do about a status other
   than ok; its windows grouped by the group of models they count (a
@@ -454,11 +468,13 @@ status pages. Resources and retention:
   answer of a poll winning with the others as issues.
 - `internal/usage/cost_test.go` (`TestPricingTiers`): tier limits
   inclusive, the current Claude models' prices.
-- `web/src/__tests__/usage.test.ts`: ordering, the core's alerts shown
+- `web/src/__tests__/usage.test.ts`: ordering, the token sums, series and
+  ranking (`tokenKinds`, `dailyTokens`, `rankTokens`), the core's alerts shown
   once per browser (again in a snapshot, from another page, after a
   reload; none older than an hour), the cost sums, windows grouped by their models, the panel
   (tiles, the overview's rows and spend, a service's cards, a wallet's
-  currency, its spend,
+  currency, its spend, the Spend / Tokens switch with its kinds, the
+  model without a price and the choice kept,
   used or left) and the status bar item (hidden with `usage.statusBar`
   off) against a stubbed core, the panel with ready machines in the store
   (no render loop), no `watch` from a hidden page, the spend read again

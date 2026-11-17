@@ -471,6 +471,29 @@
   height: 8px;
   border-radius: 2px;
 }
+.usage-spend {
+  --usage-kind-input: var(--accent);
+  --usage-kind-cached: color-mix(in srgb, var(--accent) 65%, transparent);
+  --usage-kind-cacheWrite: color-mix(in srgb, var(--accent) 40%, transparent);
+  --usage-kind-output: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.usage-kinds {
+  display: flex;
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--line-2);
+}
+.usage-kinds i {
+  display: block;
+  height: 100%;
+}
+.usage-noprice {
+  font-size: var(--fs-xs);
+  border: 1px solid var(--line-2);
+  border-radius: 3px;
+  padding: 0 4px;
+}
 .usage-rank {
   list-style: none;
   margin: 0;

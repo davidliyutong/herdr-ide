@@ -168,8 +168,9 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   account even when several machines share it, with notifications at the
   thresholds you choose. Laid out as CodexBar: a tile per service with its
   logo and color, an overview of what the CLIs' local logs would cost at
-  API prices (by day, model, project and machine) and a page per service. Credentials
-  are read where they are and never leave the machine; only Kimi Code's
+  API prices (by day, model, project and machine; or the tokens by kind,
+  which also count the models without a price) and a page per service.
+  Credentials are read where they are and never leave the machine; only Kimi Code's
   15-minute sign-in is renewed there, as Kimi Code renews it.
 - **Settings.** Language (English, Chinese), light/dark theme followed by
   VS Code, color themes (the accent: blue, VS Code blue, teal, violet,

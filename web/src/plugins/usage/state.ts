@@ -13,6 +13,8 @@ import { alertText, type CostReport, type UsageAlert, type UsageSnapshot } from 
 /** The panel shows the overview or one service (its id). */
 export type UsageTab = string;
 
+export type Metric = 'spend' | 'tokens';
+
 interface UsageState {
   snapshot?: UsageSnapshot;
   cost?: CostReport;
@@ -20,6 +22,8 @@ interface UsageState {
   costError?: string;
   /** Show what is left instead of what is used. */
   remaining: boolean;
+  /** The spend section shows money or tokens. */
+  metric: Metric;
   tab: UsageTab;
   costDays: 7 | 30 | 90;
 }
@@ -28,6 +32,7 @@ const VIEW = 'usage.view';
 
 interface View {
   remaining?: boolean;
+  metric?: Metric;
   tab?: UsageTab;
   costDays?: 7 | 30 | 90;
 }
@@ -37,6 +42,7 @@ const view = loadPref<View>(VIEW, {});
 export const useUsage = create<UsageState>(() => ({
   costLoading: false,
   remaining: !!view.remaining,
+  metric: view.metric === 'tokens' ? 'tokens' : 'spend',
   tab: typeof view.tab === 'string' ? view.tab : 'overview',
   costDays: view.costDays === 7 || view.costDays === 90 ? view.costDays : 30,
 }));
@@ -45,7 +51,7 @@ export const useUsage = create<UsageState>(() => ({
 export function setView(v: View) {
   useUsage.setState(v);
   const s = useUsage.getState();
-  savePref(VIEW, { remaining: s.remaining, tab: s.tab, costDays: s.costDays });
+  savePref(VIEW, { remaining: s.remaining, metric: s.metric, tab: s.tab, costDays: s.costDays });
 }
 
 /** The alerts shown in this browser, by id, with when they fired. */

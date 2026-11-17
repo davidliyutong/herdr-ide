@@ -13,25 +13,28 @@ import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../../state/store';
 import { setSetting, useSettings } from '../../settings';
 import { t } from '../../i18n';
-import { costStale, fetchCost, fetchSnapshot, refreshNow, setDeepseekKey, setView, useUsage, type UsageTab } from './state';
+import { type Metric, costStale, fetchCost, fetchSnapshot, refreshNow, setDeepseekKey, setView, useUsage, type UsageTab } from './state';
 import {
   costOf,
   daily,
   duration,
   equivalents,
-  lastDays,
   money,
   parseThresholds,
   pastReset,
   PROVIDERS,
   providerName,
   rank,
+  rankTokens,
   sortAccounts,
+  dailyTokens,
   tightestWindow,
+  tokenKinds,
   tokens,
   type CostReport,
   type CostRow,
   type RankBy,
+  type TokenKinds,
   type UsageAccount,
   type UsageWindow,
 } from './model';
@@ -505,19 +508,63 @@ function Money({ account: a }: { account: UsageAccount }) {
 
 // ---- spend ----
 
+const KINDS = ['input', 'cached', 'cacheWrite', 'output'] as const;
+type Kind = (typeof KINDS)[number];
+
+const kindColor = (k: Kind) => `var(--usage-kind-${k})`;
+
+/** The spend / tokens switch, shared by the overview and the services. */
+function MetricSwitch() {
+  const metric = useUsage((s) => s.metric);
+  return (
+    <div className="segmented sm" role="group" aria-label={t('usage.metric')}>
+      {(['spend', 'tokens'] as const).map((m) => (
+        <button key={m} aria-pressed={metric === m} className={metric === m ? 'on' : ''} onClick={() => setView({ metric: m })}>
+          {t(`usage.metric.${m}`)}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** The kinds of tokens as a thin stacked bar of their shares, and a legend
+ * with each one's count (the output says how much of it was reasoning). */
+function KindBreakdown({ kinds }: { kinds: TokenKinds }) {
+  return (
+    <>
+      <div className="usage-kinds" role="img" aria-label={t('usage.tokens.kinds')}>
+        {KINDS.map((k) =>
+          kinds[k] > 0 ? <i key={k} style={{ background: kindColor(k), width: `${(kinds[k] / kinds.total) * 100}%` }} /> : null,
+        )}
+      </div>
+      <div className="usage-legend usage-kind-legend">
+        {KINDS.map((k) => (
+          <span key={k} className="usage-legend-item">
+            <i style={{ background: kindColor(k) }} />
+            {t(`usage.tokens.${k}`)} {tokens(kinds[k])}
+            {k === 'output' && kinds.reasoning > 0 && ` (${t('usage.tokens.reasoning')} ${tokens(kinds.reasoning)})`}
+          </span>
+        ))}
+      </div>
+    </>
+  );
+}
+
 /** The overview's spend: the days chosen, all services. */
 function Spend() {
-  const { cost, costLoading, costError, costDays } = useUsage(
-    useShallow((s) => ({ cost: s.cost, costLoading: s.costLoading, costError: s.costError, costDays: s.costDays })),
+  const { cost, costLoading, costError, costDays, metric } = useUsage(
+    useShallow((s) => ({ cost: s.cost, costLoading: s.costLoading, costError: s.costError, costDays: s.costDays, metric: s.metric })),
   );
   const labels = useStore(useShallow((s) => Object.fromEntries(Object.entries(s.machines).map(([id, st]) => [id, st.label]))));
   const [by, setBy] = useState<RankBy>('model');
   const today = new Date();
+  const isTokens = metric === 'tokens';
   return (
     <section className="usage-card usage-spend">
       <div className="usage-card-line">
-        <span className="usage-heading">{t('usage.spend.title', { days: costDays })}</span>
+        <span className="usage-heading">{t(isTokens ? 'usage.tokens.title' : 'usage.spend.title', { days: costDays })}</span>
         <span className="spacer" />
+        <MetricSwitch />
         <div className="segmented sm" role="radiogroup" aria-label={t('usage.spend.days')}>
           {([7, 30, 90] as const).map((d) => (
             <button
@@ -538,35 +585,45 @@ function Spend() {
         (() => {
           const rows = cost.rows;
           const total = costOf(rows, costDays, today);
-          const eq = equivalents(total, costDays, cost.weekHours, cost.monthHours);
-          const tok = tokensOf(rows, costDays, today);
-          const ranking = rank(rows, by, costDays, today, (r) =>
-            by === 'machine' ? (labels[r.machine] ?? r.machine) : (r[by] ?? ''),
-          ).slice(0, 8);
+          const kinds = tokenKinds(rows, costDays, today);
+          const eq = equivalents(isTokens ? kinds.total : total, costDays, cost.weekHours, cost.monthHours);
+          const label = (r: CostRow) => (by === 'machine' ? (labels[r.machine] ?? r.machine) : (r[by] ?? ''));
+          const ranking = isTokens
+            ? rankTokens(rows, by, costDays, today, label).slice(0, 8)
+            : rank(rows, by, costDays, today, label)
+                .slice(0, 8)
+                .map((r) => ({ ...r, unpriced: false }));
           const failed = Object.entries(cost.machines).filter(([, m]) => m.error);
           const unpriced = [...new Set(Object.values(cost.machines).flatMap((m) => m.unpriced ?? []))];
+          const main = (r: (typeof ranking)[number]) => (isTokens ? r.tokens : r.cost);
           return (
             <>
-              <div className="usage-big">~{money(total)}</div>
+              <div className="usage-big">~{isTokens ? tokens(kinds.total) : money(total)}</div>
               <div className="usage-sub muted">
-                {t('usage.spend.tokens', { tokens: tokens(tok) })} ·{' '}
-                {t('usage.cost.equivalentShort', { week: money(eq.week), month: money(eq.month) })}
+                {isTokens ? (
+                  <>
+                    {t('usage.tokens.requests', { n: kinds.requests })} ·{' '}
+                    {t('usage.tokens.equivalentShort', { week: tokens(Math.round(eq.week)), month: tokens(Math.round(eq.month)) })}
+                  </>
+                ) : (
+                  <>
+                    {t('usage.spend.tokens', { tokens: tokens(kinds.total) })} ·{' '}
+                    {t('usage.cost.equivalentShort', { week: money(eq.week), month: money(eq.month) })}
+                  </>
+                )}
               </div>
-              <DailyBars rows={rows} days={costDays} stacked />
+              {isTokens && <KindBreakdown kinds={kinds} />}
+              <DailyBars rows={rows} days={costDays} stacked metric={metric} />
               <div className="usage-legend">
-                {shownProviders([], cost).map((p) => (
-                  <span key={p} className="usage-legend-item">
-                    <i style={{ background: providerColor(p) }} />
-                    {providerName(p)}{' '}
-                    {money(
-                      costOf(
-                        rows.filter((r) => r.provider === p),
-                        costDays,
-                        today,
-                      ),
-                    )}
-                  </span>
-                ))}
+                {shownProviders([], cost).map((p) => {
+                  const mine = rows.filter((r) => r.provider === p);
+                  return (
+                    <span key={p} className="usage-legend-item">
+                      <i style={{ background: providerColor(p) }} />
+                      {providerName(p)} {isTokens ? tokens(tokenKinds(mine, costDays, today).total) : money(costOf(mine, costDays, today))}
+                    </span>
+                  );
+                })}
               </div>
               <div className="usage-card-line">
                 <span className="usage-heading">{t('usage.spend.top')}</span>
@@ -583,9 +640,10 @@ function Spend() {
                 {ranking.map((r) => (
                   <li key={r.name}>
                     <span className="ellipsis">{r.name}</span>
-                    <span className="muted">{tokens(r.tokens)}</span>
-                    <span className="usage-rank-cost">{money(r.cost)}</span>
-                    <div className="usage-rank-bar" style={{ width: `${ranking[0].cost ? (r.cost / ranking[0].cost) * 100 : 0}%` }} />
+                    {r.unpriced && <span className="usage-noprice muted">{t('usage.tokens.noPrice')}</span>}
+                    {isTokens ? <span className="muted">{money(r.cost)}</span> : <span className="muted">{tokens(r.tokens)}</span>}
+                    <span className="usage-rank-cost">{isTokens ? tokens(r.tokens) : money(r.cost)}</span>
+                    <div className="usage-rank-bar" style={{ width: `${main(ranking[0]) ? (main(r) / main(ranking[0])) * 100 : 0}%` }} />
                   </li>
                 ))}
               </ol>
@@ -607,21 +665,43 @@ function Spend() {
 /** A service's own spend: today, 30 days, tokens, its chart and model. */
 function ProviderSpend({ provider }: { provider: string }) {
   const cost = useUsage((s) => s.cost);
+  const metric = useUsage((s) => s.metric);
   if (!cost) return null;
   const rows = cost.rows.filter((r) => r.provider === provider);
   if (!rows.length) return null;
   const today = new Date();
-  const top = rank(rows, 'model', 30, today)[0];
+  const isTokens = metric === 'tokens';
+  const top = (isTokens ? rankTokens(rows, 'model', 30, today) : rank(rows, 'model', 30, today))[0];
+  const kinds = tokenKinds(rows, 30, today);
+  const eq = equivalents(kinds.total, 30, cost.weekHours, cost.monthHours);
   return (
     <section className="usage-card usage-spend">
-      <div className="usage-heading">{t('usage.spend.title', { days: 30 })}</div>
-      <div className="usage-stats">
-        <Stat label={t('usage.cost.today')} value={money(costOf(rows, 1, today))} />
-        <Stat label={t('usage.cost.days', { n: 30 })} value={money(costOf(rows, 30, today))} />
-        <Stat label={t('usage.spend.tokensToday')} value={tokens(tokensOf(rows, 1, today))} />
-        <Stat label={t('usage.spend.tokens30')} value={tokens(tokensOf(rows, 30, today))} />
+      <div className="usage-card-line">
+        <span className="usage-heading">{t(isTokens ? 'usage.tokens.title' : 'usage.spend.title', { days: 30 })}</span>
+        <span className="spacer" />
+        <MetricSwitch />
       </div>
-      <DailyBars rows={rows} days={30} />
+      {isTokens ? (
+        <>
+          <div className="usage-stats">
+            <Stat label={t('usage.spend.tokensToday')} value={tokens(tokensOf(rows, 1, today))} />
+            <Stat label={t('usage.spend.tokens30')} value={tokens(kinds.total)} />
+          </div>
+          <div className="usage-sub muted">
+            {t('usage.tokens.requests', { n: kinds.requests })} ·{' '}
+            {t('usage.tokens.equivalentShort', { week: tokens(Math.round(eq.week)), month: tokens(Math.round(eq.month)) })}
+          </div>
+          <KindBreakdown kinds={kinds} />
+        </>
+      ) : (
+        <div className="usage-stats">
+          <Stat label={t('usage.cost.today')} value={money(costOf(rows, 1, today))} />
+          <Stat label={t('usage.cost.days', { n: 30 })} value={money(costOf(rows, 30, today))} />
+          <Stat label={t('usage.spend.tokensToday')} value={tokens(tokensOf(rows, 1, today))} />
+          <Stat label={t('usage.spend.tokens30')} value={tokens(tokensOf(rows, 30, today))} />
+        </div>
+      )}
+      <DailyBars rows={rows} days={30} metric={metric} />
       {top && <div className="usage-sub muted">{t('usage.spend.topModel', { model: top.name })}</div>}
       <p className="usage-footnote muted">{t('usage.cost.about')}</p>
     </section>
@@ -639,51 +719,76 @@ function Stat({ label, value }: { label: string; value: string }) {
 
 /** The tokens of the rows of the last n days. */
 export function tokensOf(rows: CostRow[], n: number, today = new Date()): number {
-  const from = lastDays(n, today)[0];
-  return rows.reduce((s, r) => (r.day >= from ? s + r.input + r.cached + r.cacheWrite + r.output : s), 0);
+  return tokenKinds(rows, n, today).total;
 }
 
-/** The cost per day as bars (plain SVG): in the service's color, or, for
- * several services, stacked in theirs. */
-function DailyBars({ rows, days, stacked }: { rows: CostRow[]; days: number; stacked?: boolean }) {
+/** The day's tokens as a tooltip: the total and the kinds. */
+function tokensTitle(day: string, k: TokenKinds): string {
+  const kinds = KINDS.map((x) => `${t(`usage.tokens.${x}`)} ${tokens(k[x])}`).join(', ');
+  return `${day}: ${tokens(k.total)} (${kinds})`;
+}
+
+/** The cost or the tokens per day as bars (plain SVG): the cost in the
+ * service's color, or, with `stacked`, in the services' colors; the tokens
+ * stacked by service with `stacked`, else by kind. */
+function DailyBars({ rows, days, stacked, metric = 'spend' }: { rows: CostRow[]; days: number; stacked?: boolean; metric?: Metric }) {
   const W = 300;
   const H = 72;
   const today = new Date();
-  const series = daily(rows, days, today);
+  const isTokens = metric === 'tokens';
   const providers = stacked ? shownProviders([], { rows } as CostReport) : [];
-  const per = stacked
-    ? providers.map((p) =>
-        daily(
-          rows.filter((r) => r.provider === p),
-          days,
-          today,
-        ),
-      )
-    : [];
-  const max = Math.max(...series.map((s) => s.cost), 0.01);
-  const bw = W / series.length;
+  const all = dailyTokens(rows, days, today);
+  const cost = daily(rows, days, today);
+  type Layer = { key: string; color: string; values: number[] };
+  let layers: Layer[];
+  if (!isTokens) {
+    layers = stacked
+      ? providers.map((p) => ({
+          key: p,
+          color: providerColor(p),
+          values: daily(
+            rows.filter((r) => r.provider === p),
+            days,
+            today,
+          ).map((d) => d.cost),
+        }))
+      : [{ key: 'cost', color: 'var(--brand)', values: cost.map((d) => d.cost) }];
+  } else {
+    layers = stacked
+      ? providers.map((p) => ({
+          key: p,
+          color: providerColor(p),
+          values: dailyTokens(
+            rows.filter((r) => r.provider === p),
+            days,
+            today,
+          ).map((d) => d.total),
+        }))
+      : KINDS.map((k) => ({ key: k, color: kindColor(k), values: all.map((d) => d[k]) }));
+  }
+  const totals = isTokens ? all.map((d) => d.total) : cost.map((d) => d.cost);
+  const max = Math.max(...totals, isTokens ? 1 : 0.01);
+  const bw = W / totals.length;
   return (
     <div className="usage-daily-box">
-      <span className="usage-daily-max muted">{money(max)}</span>
-      <svg className="usage-daily" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={t('usage.cost.daily')}>
+      <span className="usage-daily-max muted">{isTokens ? tokens(max) : money(max)}</span>
+      <svg
+        className="usage-daily"
+        viewBox={`0 0 ${W} ${H}`}
+        preserveAspectRatio="none"
+        role="img"
+        aria-label={t(isTokens ? 'usage.tokens.daily' : 'usage.cost.daily')}
+      >
         <line x1={0} x2={W} y1={H - 0.5} y2={H - 0.5} className="usage-daily-axis" />
-        {series.map((s, i) => {
-          if (!stacked) {
-            const h = (s.cost / max) * (H - 2);
-            return (
-              <rect key={s.day} x={i * bw + bw * 0.15} y={H - h} width={bw * 0.7} height={h} rx={1} fill="var(--brand)">
-                <title>{`${s.day}: ${money(s.cost)}`}</title>
-              </rect>
-            );
-          }
+        {totals.map((_, i) => {
           let y = H;
           return (
-            <g key={s.day}>
-              <title>{`${s.day}: ${money(s.cost)}`}</title>
-              {providers.map((p, k) => {
-                const h = (per[k][i].cost / max) * (H - 2);
+            <g key={all[i].day}>
+              <title>{isTokens ? tokensTitle(all[i].day, all[i]) : `${cost[i].day}: ${money(cost[i].cost)}`}</title>
+              {layers.map((l) => {
+                const h = (l.values[i] / max) * (H - 2);
                 y -= h;
-                return h > 0 ? <rect key={p} x={i * bw + bw * 0.15} y={y} width={bw * 0.7} height={h} fill={providerColor(p)} /> : null;
+                return h > 0 ? <rect key={l.key} x={i * bw + bw * 0.15} y={y} width={bw * 0.7} height={h} fill={l.color} /> : null;
               })}
             </g>
           );
