@@ -132,7 +132,7 @@ nothing VS Code's content left keeps running there
 
   | From | Opens | Reuses |
   | --- | --- | --- |
-  | **Open in VS Code** (`code.open`: a terminal header's button, the pane menu, the palette, `cmd+j` in the desktop app on macOS, `ctrl+shift+j` in the desktop app elsewhere) | a new tab of the selected workspace, for the terminal's directory (the focused pane's for the key), else the workspace's folder | the workspace's VS Code pane for that folder, in any tab: it is selected |
+  | **Open in VS Code** (`code.open`: a terminal header's button, the pane menu, the palette, `cmd+j` in the desktop app on macOS, `ctrl+shift+j` in the desktop app elsewhere) | a new tab of the selected workspace, for the terminal's directory (the focused pane's for the key), else the workspace's folder; on a VS Code pane with the keyboard in the page, the pane focused before it instead (below) | the workspace's VS Code pane for that folder, in any tab: it is selected |
   | **Show Changes in VS Code** (`code.diff`), **Open Git Graph** (`code.gitGraph`) | a split to the right of the pane they came from, then runs the command there | the VS Code pane of that tab for that folder |
   | cmd/ctrl+click on a file in a terminal, **Open … in VS Code** in its menu | the file at its line in a VS Code pane of the terminal's workspace, else in a split beside the terminal, for the terminal's directory or the workspace's when the file is below it, else for the file's directory | of the workspace's VS Code panes: one of the terminal's tab whose folder holds the file, then one of another tab that holds it, then any of the terminal's tab, then any |
 
@@ -189,6 +189,19 @@ nothing VS Code's content left keeps running there
   `pane.close` would (`closeWindowPane`; nothing while a dialog is open
   or in read-only mode). So `cmd+w` held closes the editors, then the
   pane.
+- The keyboard goes back from VS Code to the page with the bridge
+  extension's **Give the Keyboard Back** (`ctrl+b` on macOS,
+  `ctrl+alt+shift+b` elsewhere, where `ctrl+b` is VS Code's sidebar; not
+  while VS Code's terminal has the keyboard, where the key stays the
+  shell's, e.g. tmux's prefix; VS Code's Keyboard Shortcuts rebind it):
+  the core passes it to the pages as `bridge.leave {m, window, folders}`,
+  and the page whose iframe of that window has the keyboard moves it to
+  that pane's header (`leaveWindowPane`; nothing while a dialog is open).
+  There the page's keys work: **Open in VS Code** (`cmd+j`) on a VS Code
+  pane hides VS Code again, showing the pane focused before it (Pane
+  Back), as VS Code's own `cmd+j` hides its panel; without a pane before
+  it, it stays. So `cmd+j` in a terminal shows VS Code, and `ctrl+b`,
+  `cmd+j` there go back.
 
 **Theme** (`theme` WebSocket message, `bridgeHub.setTheme`)
 
@@ -381,9 +394,11 @@ VS Code's "open in browser" links for forwarded ports therefore do not work.
   commands' window or `fresh`, where Send to Agent goes; the browser keys of
   the earlier panel dropped. `web/src/__tests__/desktop.test.ts`: Open in VS Code
   by the menu, the menu's commands acting on the VS Code pane that has the
-  keyboard, VS Code's keys left to it and `bridge.close` closing only the
-  pane whose iframe has the keyboard; `internal/server/download_test.go`
-  (`TestBridgeClose`). `paneHeader.test.ts` (a VS Code
+  keyboard, VS Code's keys left to it, `bridge.close` closing only the
+  pane whose iframe has the keyboard, and `bridge.leave` moving the
+  keyboard to that pane's header, where Open in VS Code shows the pane
+  focused before it; `internal/server/download_test.go`
+  (`TestBridgeClose`, also `bridge.leave`). `paneHeader.test.ts` (a VS Code
   pane's header), `tabLabels.test.ts` (a VS Code tab's label).
 - `web/src/__tests__/download.test.ts` (only the focused page downloads),
   `desktop/src/policy.test.ts` (the File System Access permission).

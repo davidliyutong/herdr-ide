@@ -222,6 +222,11 @@ export function activate(ctx: vscode.ExtensionContext) {
     // keybinding, where VS Code would close the window): the page closes
     // the pane showing this window.
     vscode.commands.registerCommand(`${SLUG}.closePane`, () => send({ type: 'closePane' })),
+    // The key that gives the keyboard back to the page (ctrl+b on macOS;
+    // in VS Code's terminal the key stays the shell's): the page moves it
+    // to the header of the pane showing this window, where its own keys
+    // (cmd+j hiding VS Code again) work.
+    vscode.commands.registerCommand(`${SLUG}.leave`, () => send({ type: 'leave' })),
     vscode.commands.registerCommand(`${SLUG}.reconnect`, () => {
       clearTimeout(reconnectTimer);
       const old = sock;

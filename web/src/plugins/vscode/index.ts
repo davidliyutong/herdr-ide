@@ -8,8 +8,10 @@
 // app (plugins.vscode.enabled) and one for browsers
 // (plugins.vscode.browser), both off by default; turning the browsers' on
 // asks the user to accept that risk (browserRisk).
-import { actions } from '../../actions';
+import { actions, current, spotOpen } from '../../actions';
+import { canGo } from '../../paneHistory';
 import { useStore } from '../../state/store';
+import * as L from '../../term/layout';
 import type { PluginDef } from '../api';
 import { isPluginOn } from '../registry';
 import { CodeIcon } from '../../components/icons';
@@ -18,6 +20,13 @@ import { CodeIcon } from '../../components/icons';
 export const codeOn = () => isPluginOn('vscode');
 
 const can = () => !useStore.getState().readOnly && !!actions.focusedContext();
+
+/** Whether the focused pane of the tab shown is a VS Code pane. */
+function codePaneFocused(): boolean {
+  const c = current();
+  const leaf = c?.tab && c.focused ? L.leafOf(c.tab.root, c.focused) : null;
+  return !!leaf && L.isCodeLeaf(leaf);
+}
 
 export const vscodePlugin: PluginDef = {
   id: 'vscode',
@@ -37,7 +46,11 @@ export const vscodePlugin: PluginDef = {
       enabled: can,
       run() {
         const c = actions.focusedContext();
-        if (c) void actions.openCode(c.m, c.cwd);
+        if (!c) return;
+        // On a VS Code pane it hides VS Code again, as its own cmd+j hides
+        // its panel: the pane focused before it (Pane Back) is shown.
+        if (codePaneFocused() && canGo(-1, spotOpen)) return actions.goPane(-1);
+        void actions.openCode(c.m, c.cwd);
       },
     },
     'code.diff': {

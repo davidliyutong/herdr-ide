@@ -5,7 +5,8 @@ vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 
 import { keyName } from '../keys';
 import { disabledCommands, runMenuCommand } from '../desktop';
-import { closeWindowPane } from '../keymap';
+import { closeWindowPane, leaveWindowPane } from '../keymap';
+import { noteFocus, resetHistory } from '../paneHistory';
 import { useDialog } from '../dialog';
 import { useStore } from '../state/store';
 import type { MachineState } from '../lib/machine';
@@ -211,6 +212,46 @@ describe('runMenuCommand', () => {
     } finally {
       hasFocus.mockRestore();
       iframe.remove();
+    }
+  });
+
+  it('gives the keyboard back from VS Code to its pane header, where code.open hides VS Code again', async () => {
+    resetHistory();
+    core.model.mutate('m', (l) => L.focusPane(l, 't1'));
+    noteFocus({ m: 'm', pane: 't1' });
+    runMenuCommand('code.open');
+    await vi.waitFor(() => expect(core.layout('m')?.workspaces[0].tabs).toHaveLength(2));
+    const key = L.codeViews(L.parseLayout(core.layout('m')).workspaces[0])[0].key;
+    const id = key.slice('code:'.length);
+    noteFocus({ m: 'm', pane: key });
+    useFrames.setState({ frames: { [`m|${id}`]: { m: 'm', id, folder: '/srv/app', load: 0 } } });
+    const iframe = document.createElement('iframe');
+    iframe.className = 'code-frame';
+    iframe.dataset.frame = `m|${id}`;
+    const header = document.createElement('div');
+    header.className = 'pane-header';
+    header.tabIndex = 0;
+    header.dataset.m = 'm';
+    header.dataset.pane = key;
+    document.body.append(iframe, header);
+    const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    try {
+      // From a window whose pane does not have the keyboard: nothing.
+      leaveWindowPane('m', 'w1', ['/srv/app']);
+      expect(document.activeElement).not.toBe(header);
+      iframe.focus();
+      leaveWindowPane('m', 'w1', ['/srv/app']);
+      expect(document.activeElement).toBe(header);
+      // There code.open shows the pane focused before VS Code.
+      runMenuCommand('code.open');
+      await vi.waitFor(() => expect(core.layout('m')?.workspaces[0].selected).toBe(0));
+      expect(core.layout('m')?.workspaces[0].tabs[0].focused).toBe('t1');
+      expect(L.codeViews(L.parseLayout(core.layout('m')).workspaces[0])).toHaveLength(1);
+    } finally {
+      hasFocus.mockRestore();
+      iframe.remove();
+      header.remove();
+      resetHistory();
     }
   });
 

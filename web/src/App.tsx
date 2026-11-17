@@ -18,7 +18,7 @@ import { initDesktop } from './desktop';
 import { warnOnUnload } from './unsaved';
 import { followDesktopClose } from './quitGuard';
 import { takeOpenedFolders } from './drop';
-import { closeWindowPane, commandLabel, handleKey, keyHint, onChordChange, pendingChord, runCommand } from './keymap';
+import { closeWindowPane, leaveWindowPane, commandLabel, handleKey, keyHint, onChordChange, pendingChord, runCommand } from './keymap';
 import { applySettings, loadSettings } from './settings';
 import { applyKeybindings, loadKeybindings, useKeys } from './keybindings';
 import { t } from './i18n';
@@ -136,6 +136,7 @@ export function App() {
       onBridgeDownload: (m, paths, window) => bridgeDownload(m, paths, window),
       onBridgeFocus: (m, window, folders) => void windowFocused(m, window, folders),
       onBridgeClose: (m, window, folders) => closeWindowPane(m, window, folders),
+      onBridgeLeave: (m, window, folders) => leaveWindowPane(m, window, folders),
       onDownload: (ev) => downloadEvent(ev),
       onGui: (st) => useGui.getState().setState(st),
       onSettings: (m) => applySettings(m),

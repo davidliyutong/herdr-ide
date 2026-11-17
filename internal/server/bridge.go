@@ -153,14 +153,21 @@ func (h *bridgeHub) serve(mc *machines.Machine, conn net.Conn) {
 				ev["window"] = w.id
 			}
 			h.broadcast(ev)
-		case "closePane":
-			// VS Code's key for closing, pressed in this window while it
-			// has no editor (the extension binds it there, as VS Code
-			// closes such a window): the page whose pane has the keyboard
-			// in it closes that pane (closeWindowPane). Only a window that
-			// said hello is one a page can name.
+		case "closePane", "leave":
+			// closePane: VS Code's key for closing, pressed in this window
+			// while it has no editor (the extension binds it there, as
+			// VS Code closes such a window): the page whose pane has the
+			// keyboard in it closes that pane (closeWindowPane). leave: the
+			// extension's key for giving the keyboard back to the page:
+			// that page moves it to the pane's header (leaveWindowPane),
+			// so the page's own keys work there. Only a window that said
+			// hello is one a page can name.
 			if w.id != "" {
-				ev := map[string]any{"t": "bridge.close", "m": mc.ID(), "window": w.id}
+				kind := "bridge.close"
+				if msg.Type == "leave" {
+					kind = "bridge.leave"
+				}
+				ev := map[string]any{"t": kind, "m": mc.ID(), "window": w.id}
 				if w.folders != nil {
 					ev["folders"] = w.folders
 				}

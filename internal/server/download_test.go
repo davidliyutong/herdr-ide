@@ -577,6 +577,7 @@ func TestDownloadEdges(t *testing.T) {
 
 // VS Code's key for closing in a window without editors reaches the pages as
 // bridge.close, naming the window; before its hello no page could tell it.
+// The extension's key for leaving VS Code reaches them as bridge.leave.
 func TestBridgeClose(t *testing.T) {
 	s := newTestServer()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -600,6 +601,16 @@ func TestBridgeClose(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("no bridge.close")
+	}
+	// The key that gives the keyboard back to the page: bridge.leave.
+	b.Write([]byte(`{"type":"leave"}` + "\n"))
+	select {
+	case m := <-c.send:
+		if string(m) != `{"folders":["/srv"],"m":"m","t":"bridge.leave","window":"w1"}` {
+			t.Fatalf("got %s", m)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no bridge.leave")
 	}
 	b.Close()
 }

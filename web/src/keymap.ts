@@ -162,6 +162,19 @@ export function closeWindowPane(m: string, window: string, folders?: string[]) {
   void actions.closePane(fr.m, L.codeKey(fr.id));
 }
 
+/** The extension's key for leaving VS Code, pressed in a window
+ * (bridge.leave): when this page has the keyboard in that window's pane,
+ * it moves to the pane's header, where the page's keys work (code.open
+ * then hides VS Code again). */
+export function leaveWindowPane(m: string, window: string, folders?: string[]) {
+  const k = windowFocused(m, window, folders);
+  const fr = k ? useFrames.getState().frames[k] : undefined;
+  if (!fr || keyContext() === 'dialog') return;
+  const pane = L.codeKey(fr.id);
+  const header = document.querySelector<HTMLElement>(`.pane-header[data-m="${CSS.escape(fr.m)}"][data-pane="${CSS.escape(pane)}"]`);
+  header?.focus({ preventScroll: true });
+}
+
 /** The label of a command, e.g. "New Tab". */
 export function commandLabel(id: string): string {
   const k = `command.${id}`;

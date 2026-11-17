@@ -194,7 +194,9 @@ var Commands = func() []Command {
 		cmd("find.next", "find", on(macApp, "cmd+g")),
 		cmd("find.previous", "find", on(macApp, "cmd+shift+g")),
 
-		// Inside VS Code its own cmd+j (its panel) runs instead.
+		// Inside VS Code its own cmd+j (its panel) runs instead; on a
+		// VS Code pane whose header has the keyboard (the bridge
+		// extension's ctrl+b) it shows the pane focused before it.
 		cmd("code.open", "code", on(macApp, "cmd+j"), on(pcApp, "ctrl+shift+j")),
 		cmd("code.diff", "code"),
 		cmd("code.gitGraph", "code"),
