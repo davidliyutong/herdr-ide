@@ -216,10 +216,12 @@ func TestAutoLockSetByPage(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if p.autoLockAfter(h) != time.Hour {
-		t.Errorf("after the lock: %v", p.autoLockAfter(h))
-	}
-	if !strings.Contains(h.auditLog(), `"reason":"idle"`) {
-		t.Errorf("audit %s", h.auditLog())
+	// The lock is audited, and the vault's own time forgotten, just after
+	// the vault is locked.
+	for !strings.Contains(h.auditLog(), `"reason":"idle"`) || p.autoLockAfter(h) != time.Hour {
+		if time.Now().After(deadline) {
+			t.Fatalf("after the lock: %v, audit %s", p.autoLockAfter(h), h.auditLog())
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
