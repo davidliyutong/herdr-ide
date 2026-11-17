@@ -185,9 +185,10 @@ returns. Focus changes are reported to programs that asked (mode 1004).
   agent's ssh session ([21](21-terminal-core.md), `terminal.sshEnv`); on
   the local machine its own copy is already the user's clipboard when the
   page runs there. Codex copies on release unless its `copy_on_select` is
-  off, which `auto` means in a core started from Ghostty 1.2 or Kitty on
-  macOS, whose `TERM_PROGRAM` the terminals inherit: set
-  `copy_on_select = "always"` in Codex's configuration there.
+  off; its `auto` copies in a terminal that says it is Ghostty without a
+  version, which is what herdr-core tells every program
+  (`TERM_PROGRAM=ghostty`, [21](21-terminal-core.md)), whatever terminal
+  the core was started from.
 - Find (`vt/find.ts`, `components/FindBar.tsx`): the `find.open` binding
   (⌘F on macOS, Ctrl+Shift+F elsewhere in browsers) or **Find…** in the
   menu opens a bar at the terminal's top right corner, with a one-line

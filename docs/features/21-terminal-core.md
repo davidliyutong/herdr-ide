@@ -8,9 +8,10 @@ output, and stores small JSON documents for its clients. It knows no workspaces,
 tabs or panes. One account can run several cores side by side, one per
 session name.
 
-Facts the design relies on (herdr-core 0.1.21, `schema/README.md`,
-`src/wire.rs`, `src/server.rs`, `src/paths.rs`, `src/client.rs`, checked
-against a running core by the integration tests):
+Facts the design relies on (herdr-core 0.1.21, `schema/README.md` and,
+below `crates/herdr-core/src/`, `wire.rs`, `server.rs`, `paths.rs`,
+`client.rs` and `api/run.rs`, checked against a running core by the
+integration tests):
 
 - The API is JSON-RPC 2.0, one message per line, on a unix socket. `hello`
   with `framed: true` switches the connection to frames
@@ -45,8 +46,13 @@ against a running core by the integration tests):
   prompts for Desktop, Documents and Downloads) therefore treat a
   terminal's programs as herdr-core's, not as those of the app that
   started the core ([16](16-desktop-packaging.md)).
-- Programs inherit the core's environment plus `HC_TERMINAL_ID`,
-  `HC_TERMINAL_SOCKET`, `TERM=xterm-256color` and `COLORTERM`. The agent
+- Programs get the core's environment without the variables that name a
+  terminal (`TERM`, `TERM_PROGRAM`, `TERM_PROGRAM_VERSION`, `COLORTERM`),
+  which herdr-core sets itself: `TERM=xterm-256color`,
+  `COLORTERM=truecolor` and `TERM_PROGRAM=ghostty`, with no version. To
+  that it adds `HC_TERMINAL_ID`, `HC_TERMINAL_SOCKET`, `HC_SCOPE` (by
+  which it finds a terminal's programs again), `HC_SESSION` when the core
+  has one, `PWD`, and what the client that runs the terminal passes. The agent
   starts the core (and code-server and the display) with its own
   environment without the variables of a terminal or multiplexer it was
   started in (`cleanEnv` in `internal/agent/procutil.go`): herdr-core's
