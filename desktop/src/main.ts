@@ -142,27 +142,32 @@ function openExternal(url: string) {
 // Install on every window, including program windows and standalone VS Code.
 app.on('web-contents-created', (_event, contents) => {
   // A webview attaches only in the main window's own page, and only as the
-  // browser panes' guest (policy.ts guestPreferences).
+  // browser panes' guest, at an address that is not the core's (policy.ts
+  // guestPreferences).
   contents.on('will-attach-webview', (event, prefs, params) => {
     const ok =
-      !!mainWindow && contents === mainWindow.webContents && isInternal(contents.getURL(), origin) && guestPreferences(prefs, params);
+      !!mainWindow &&
+      contents === mainWindow.webContents &&
+      isInternal(contents.getURL(), origin) &&
+      guestPreferences(prefs, params, origin);
     if (!ok) event.preventDefault();
   });
   if (contents.getType() === 'webview') {
     // A guest is a web page of the browser pane: it follows http(s) links
-    // itself, and a popup becomes a new browser tab in the page, a few at a
-    // time (policy.ts popupGate). Its scripts never hand anything to the
-    // system's browser, and it gets no menu.
+    // itself, never to the core's own address, and a popup becomes a new
+    // browser tab in the page, a few at a time (policy.ts popupGate). Its
+    // scripts never hand anything to the system's browser, and it gets no
+    // menu.
     contents.on('will-navigate', (event, url) => {
-      if (!guestMayNavigate(url)) event.preventDefault();
+      if (!guestMayNavigate(url, origin)) event.preventDefault();
     });
     contents.on('will-redirect', (event, url) => {
-      if (!guestMayNavigate(url)) event.preventDefault();
+      if (!guestMayNavigate(url, origin)) event.preventDefault();
     });
     const mayPopup = popupGate();
     contents.setWindowOpenHandler(({ url }) => {
       const host = contents.hostWebContents;
-      if (guestMayNavigate(url) && host && !host.isDestroyed() && host.mainFrame && mayPopup()) {
+      if (guestMayNavigate(url, origin) && host && !host.isDestroyed() && host.mainFrame && mayPopup()) {
         host.mainFrame.send(channels.browserOpen, url);
       }
       return { action: 'deny' };

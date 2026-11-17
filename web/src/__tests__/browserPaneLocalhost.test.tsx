@@ -23,7 +23,7 @@ const iframe = () => document.querySelector<HTMLIFrameElement>('.browser-layer i
 describe('a page with the UI on localhost', () => {
   it('loads a forwarded page from 127.0.0.1', async () => {
     fakeBrowserApi();
-    h = await mountPane({ url: 'http://localhost:3000/docs', m: 'a', port: 3000 });
+    h = await mountPane({ url: 'http://localhost:3000/docs', m: 'a', port: 3000 }, { asked: true });
     await flush();
     expect(iframe()?.getAttribute('src')).toBe('http://127.0.0.1:3000/docs');
   });

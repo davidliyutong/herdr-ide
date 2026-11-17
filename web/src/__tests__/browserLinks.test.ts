@@ -20,7 +20,7 @@ import * as L from '../term/layout';
 import { useSettings } from '../settings';
 import { definePlugins } from '../plugins/registry';
 import { browserPlugin } from '../plugins/browser';
-import { useForwards } from '../plugins/browser/api';
+import { forwardGranted, resetGrants, useForwards } from '../plugins/browser/api';
 import { openLink } from '../terminal/links';
 import { FakeCore, settle } from './fakeTerms';
 import { fakeBrowserApi, json } from './browserHarness';
@@ -45,6 +45,7 @@ beforeEach(async () => {
   definePlugins([browserPlugin]);
   set('plugins.browser.enabled', true);
   set('browser.openLinks', 'pane');
+  resetGrants();
   useForwards.setState({ forwards: [], available: true });
   core = new FakeCore();
   for (const id of ['a', 'l'])
@@ -75,14 +76,17 @@ describe('a loopback URL in a terminal of a remote machine', () => {
     expect(tabs().length).toBe(2);
     expect(views()).toMatchObject([{ url: 'http://localhost:3000/docs?x=1', m: 'a', port: 3000 }]);
     expect(open).not.toHaveBeenCalled();
+    // The click is the user asking for that port: its pane makes the forward.
+    expect(forwardGranted('a', 3000)).toBe(true);
+    expect(forwardGranted('a', 8080)).toBe(false);
     // Every loopback name is the machine's own; the port is the URL's.
     await click('http://127.0.0.1:8080/');
-    await click('http://0.0.0.0:5173/a');
+    await click('http://0.0.0.0:5174/a');
     await click('http://[::1]:9000/');
     expect(views().map((v) => [v.url, v.port])).toEqual([
       ['http://localhost:3000/docs?x=1', 3000],
       ['http://localhost:8080/', 8080],
-      ['http://localhost:5173/a', 5173],
+      ['http://localhost:5174/a', 5174],
       ['http://localhost:9000/', 9000],
     ]);
     expect(tabs().length).toBe(5);
@@ -93,6 +97,17 @@ describe('a loopback URL in a terminal of a remote machine', () => {
     await click('http://localhost:3000/');
     expect(open).toHaveBeenCalledWith('http://localhost:3000/', '_blank', 'noopener');
     expect(tabs().length).toBe(1);
+    expect(forwardGranted('a', 3000)).toBe(false);
+  });
+
+  it('opens nothing for the core’s own address, under either loopback name', async () => {
+    // The UI is on 127.0.0.1:5173; a machine's port of that number reads
+    // as the core's address and is not opened from a text.
+    for (const url of ['http://127.0.0.1:5173/api/m/a/hc/stop', 'http://localhost:5173/', 'http://[::1]:5173/x', 'https://localhost:5173/'])
+      await click(url);
+    expect(open).not.toHaveBeenCalled();
+    expect(tabs().length).toBe(1);
+    expect(forwardGranted('a', 5173)).toBe(false);
   });
 
   it('asks the core whether forwards are available when it does not know yet', async () => {
@@ -114,6 +129,8 @@ describe('a loopback URL in a terminal of the local machine', () => {
     expect(v.view.m).toBeUndefined();
     expect(v.view.port).toBeUndefined();
     expect(open).not.toHaveBeenCalled();
+    // No forward is involved, so none is asked for.
+    expect(forwardGranted('l', 3000)).toBe(false);
   });
 });
 

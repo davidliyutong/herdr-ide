@@ -14,12 +14,15 @@ package browser
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
 	"sort"
 	"strconv"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
 
 	"herdr-ide/internal/loopback"
@@ -35,8 +38,10 @@ const (
 	MaxForwards = 32
 	// maxConns bounds a forward's connections at a time.
 	maxConns = 128
-	// SettingIdle is how many minutes a forward stays without a connection
-	// before it ends (0: until it is stopped).
+	// SettingIdle is how many minutes a forward stays unused before it
+	// ends (0: until it is stopped). A use is a connection accepted, bytes
+	// carried, or a client asking for the forward; a connection that only
+	// stays open is none.
 	SettingIdle = "browser.forwardIdle"
 	// SettingLinks is where a link of a terminal opens: in a browser pane
 	// or outside the app. The web UI reads it.
@@ -45,6 +50,14 @@ const (
 	DefaultIdle = 30
 	// reapEvery is how often idle forwards are looked for.
 	reapEvery = 30 * time.Second
+	// useEvery is how often at most the bytes a forward carries are noted
+	// as a use of it.
+	useEvery = time.Second
+	// acceptPauseMin and acceptPauseMax bound the pause before a listener
+	// accepts again after a temporary failure; it doubles from one to the
+	// other, as net/http's does.
+	acceptPauseMin = 5 * time.Millisecond
+	acceptPauseMax = time.Second
 )
 
 // Settings is the plugin's settings module (internal/registry).
@@ -78,14 +91,25 @@ type key struct {
 
 type forward struct {
 	key
-	local         int
-	lns           []net.Listener
-	created, used time.Time
-	conns         int
+	local   int
+	lns     []net.Listener
+	created time.Time
+	// used is when the forward was last used (use), in nanoseconds of
+	// Unix time: read and written without the plugin's lock, since every
+	// chunk of bytes carried looks at it.
+	used  atomic.Int64
+	conns int
 	// ctx ends with the forward: its connections end with it.
 	ctx    context.Context
 	cancel context.CancelFunc
 }
+
+// use notes a use of the forward at now: a connection accepted, or a
+// client asking for it.
+func (f *forward) use(now time.Time) { f.used.Store(now.UnixNano()) }
+
+// lastUse is when the forward was last used.
+func (f *forward) lastUse() time.Time { return time.Unix(0, f.used.Load()) }
 
 // Plugin is the browser plugin.
 type Plugin struct {
@@ -131,7 +155,9 @@ func (p *Plugin) Start(ctx context.Context, h plugin.Host) {
 }
 
 // reap ends the forwards unused for the setting's minutes, and all of them
-// while the plugin is off.
+// while the plugin is off. A forward's open connections do not keep it:
+// one that carried nothing for that long ends with it, so a program that
+// holds a connection open cannot keep a way into the machine.
 func (p *Plugin) reap(h plugin.Host) {
 	idle := time.Duration(DefaultIdle) * time.Minute
 	off := false
@@ -143,7 +169,7 @@ func (p *Plugin) reap(h plugin.Host) {
 	}
 	now := p.clock()
 	p.closeWhere(func(f *forward) bool {
-		return off || (idle > 0 && f.conns == 0 && now.Sub(f.used) > idle)
+		return off || (idle > 0 && now.Sub(f.lastUse()) > idle)
 	})
 }
 
@@ -198,8 +224,9 @@ func (f *forward) public() Forward {
 // pref when it is free (so the page's address is the one the service
 // expects), else on one the system picks. The same port is taken on ::1,
 // where "localhost" may lead first: a port whose ::1 side another program
-// holds is not used, since a browser could then reach that program in the
-// forward's stead. A host without IPv6 loopback listens on 127.0.0.1 only.
+// holds, or that cannot be taken for any other reason, is not used, since
+// a browser could then reach another program in the forward's stead. Only
+// a host without IPv6 loopback listens on 127.0.0.1 alone (loopback.Other).
 func listenLoopback(pref int) ([]net.Listener, int, error) {
 	try := func(port int) ([]net.Listener, int, error) {
 		l4, err := net.Listen("tcp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
@@ -207,15 +234,18 @@ func listenLoopback(pref int) ([]net.Listener, int, error) {
 			return nil, 0, err
 		}
 		local := l4.Addr().(*net.TCPAddr).Port
-		l6, err := net.Listen("tcp6", net.JoinHostPort("::1", strconv.Itoa(local)))
-		if err == nil {
+		l6, owned, err := loopback.Other(l4)
+		switch {
+		case l6 != nil:
 			return []net.Listener{l4, l6}, local, nil
+		case owned:
+			return []net.Listener{l4}, local, nil
 		}
-		if loopback.InUse(err) {
-			l4.Close()
-			return nil, 0, err
+		l4.Close()
+		if err == nil {
+			err = errors.New("the other loopback address of the port is not this program's")
 		}
-		return []net.Listener{l4}, local, nil
+		return nil, 0, err
 	}
 	// Ports below 1024 are the system's to give.
 	if pref >= 1024 {
@@ -242,7 +272,7 @@ func (p *Plugin) ensure(h plugin.Host, m string, port int) (Forward, error) {
 	defer p.mu.Unlock()
 	now := p.clock()
 	if f := p.forwards[k]; f != nil {
-		f.used = now
+		f.use(now)
 		return f.public(), nil
 	}
 	if len(p.forwards) >= MaxForwards {
@@ -257,7 +287,8 @@ func (p *Plugin) ensure(h plugin.Host, m string, port int) (Forward, error) {
 		parent = context.Background()
 	}
 	ctx, cancel := context.WithCancel(parent)
-	f := &forward{key: k, local: local, lns: lns, created: now.UTC(), used: now, ctx: ctx, cancel: cancel}
+	f := &forward{key: k, local: local, lns: lns, created: now.UTC(), ctx: ctx, cancel: cancel}
+	f.use(now)
 	if p.forwards == nil {
 		p.forwards = map[key]*forward{}
 	}
@@ -268,13 +299,44 @@ func (p *Plugin) ensure(h plugin.Host, m string, port int) (Forward, error) {
 	return f.public(), nil
 }
 
-// serve carries the connections of one listener to the machine.
+// temporary reports whether a failed Accept may succeed when tried again:
+// the process or the system is out of descriptors for now, a connection
+// ended before it was accepted, or a deadline passed.
+func temporary(err error) bool {
+	if errors.Is(err, syscall.EMFILE) || errors.Is(err, syscall.ENFILE) || errors.Is(err, syscall.ECONNABORTED) {
+		return true
+	}
+	var ne net.Error
+	return errors.As(err, &ne) && ne.Timeout()
+}
+
+// serve carries the connections of one listener to the machine, until the
+// listener is closed (the forward ended). A temporary failure to accept is
+// tried again after a pause that grows; any other ends the forward, which
+// would else stay listed with a listener nobody serves.
 func (p *Plugin) serve(h plugin.Host, f *forward, ln net.Listener) {
+	var pause time.Duration
 	for {
 		c, err := ln.Accept()
 		if err != nil {
+			if errors.Is(err, net.ErrClosed) || f.ctx.Err() != nil {
+				return
+			}
+			if temporary(err) {
+				pause = min(max(2*pause, acceptPauseMin), acceptPauseMax)
+				select {
+				case <-time.After(pause):
+					continue
+				case <-f.ctx.Done():
+					return
+				}
+			}
+			if p.closeWhere(func(x *forward) bool { return x == f }) > 0 {
+				h.Logger().Printf("browser: the forward of port %d of %s ended: %v", f.port, f.m, err)
+			}
 			return
 		}
+		pause = 0
 		p.mu.Lock()
 		if f.conns >= maxConns {
 			p.mu.Unlock()
@@ -282,18 +344,33 @@ func (p *Plugin) serve(h plugin.Host, f *forward, ln net.Listener) {
 			continue
 		}
 		f.conns++
-		f.used = p.clock()
+		f.use(p.clock())
 		p.mu.Unlock()
 		go func() {
 			defer func() {
 				p.mu.Lock()
 				f.conns--
-				f.used = p.clock()
 				p.mu.Unlock()
 			}()
 			p.carry(h, f, c)
 		}()
 	}
+}
+
+// carrying is a connection's writer that notes the bytes going through it
+// as a use of its forward, at most every useEvery: a clock reading and a
+// comparison for a chunk.
+type carrying struct {
+	io.Writer
+	p *Plugin
+	f *forward
+}
+
+func (w carrying) Write(b []byte) (int, error) {
+	if now := w.p.clock().UnixNano(); now-w.f.used.Load() >= int64(useEvery) {
+		w.f.used.Store(now)
+	}
+	return w.Writer.Write(b)
 }
 
 // carry connects c to the forward's port on its machine and copies both
@@ -311,12 +388,12 @@ func (p *Plugin) carry(h plugin.Host, f *forward, c net.Conn) {
 	defer st.Close()
 	done := make(chan struct{})
 	go func() {
-		io.Copy(st, c)
+		io.Copy(carrying{st, p, f}, c)
 		st.Close()
 		c.Close()
 		close(done)
 	}()
-	io.Copy(c, st)
+	io.Copy(carrying{c, p, f}, st)
 	c.Close()
 	st.Close()
 	<-done

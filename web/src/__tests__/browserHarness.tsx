@@ -14,7 +14,7 @@ import { browserPlugin } from '../plugins/browser';
 import { PluginPane } from '../components/PluginPane';
 import { BrowserLayer } from '../plugins/browser/BrowserLayer';
 import { resetFrames } from '../plugins/browser/frames';
-import { useForwards } from '../plugins/browser/api';
+import { grantForward, resetGrants, useForwards } from '../plugins/browser/api';
 import { FakeCore, settle } from './fakeTerms';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -77,9 +77,14 @@ function Host() {
 }
 
 /** Machine a (an ssh machine called Box) whose only tab, after a
- * terminal's, is a browser pane with these fields; rendered. */
-export async function mountPane(fields: Record<string, unknown>): Promise<Harness> {
+ * terminal's, is a browser pane with these fields; rendered. The view is
+ * one found in the layout, which the user did not ask for in this page;
+ * with `asked` the user did (as after typing its port), so the pane makes
+ * its forward. */
+export async function mountPane(fields: Record<string, unknown>, opts: { asked?: boolean } = {}): Promise<Harness> {
   resetFrames();
+  resetGrants();
+  if (opts.asked && typeof fields.m === 'string' && typeof fields.port === 'number') grantForward(fields.m, fields.port);
   useForwards.setState({ forwards: [], available: undefined });
   definePlugins([browserPlugin]);
   const core = new FakeCore();

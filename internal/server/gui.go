@@ -149,7 +149,7 @@ func (s *Server) handleGUIPage(w http.ResponseWriter, r *http.Request) {
 	}
 	r2 := r.Clone(r.Context())
 	r2.URL.Path = "/"
-	spaHandler(s.opts.Static).ServeHTTP(w, r2)
+	spaHandler(s.opts.Static, s.appCSP).ServeHTTP(w, r2)
 }
 
 // handleGUIWS streams one window to a browser window: JSON events and

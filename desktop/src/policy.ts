@@ -62,18 +62,52 @@ export const mainWindowPreferences = {
  * storage and permissions are apart from the app's own. */
 export const BROWSER_PARTITION = 'persist:browser';
 
-/** Addresses a webview may load or follow: http(s) without credentials. */
-export function guestMayNavigate(url: string): boolean {
-  return isExternal(url);
+/** Whether a URL's host name is one of a computer's own loopback, as the
+ * core's guard reads a Host: `localhost` and the names below it, an address
+ * of 127.0.0.0/8, `[::1]`, and such an IPv4 address written as an IPv6 one
+ * (the same rule as web/src/lib/webUrl.ts). */
+function isLoopbackName(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  return (
+    h === 'localhost' ||
+    h.endsWith('.localhost') ||
+    /^127(?:\.\d{1,3}){3}$/.test(h) ||
+    h === '[::1]' ||
+    /^\[::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}\]$/.test(h)
+  );
+}
+
+const portOf = (u: URL): string => u.port || (u.protocol === 'https:' ? '443' : '80');
+
+/** Whether url leads to the core, whose origin is given: any loopback host
+ * with the core's port, under either scheme. The core answers under every
+ * name of its computer's loopback, so the UI is one more web page to a
+ * guest that names it otherwise; an origin that does not read counts as
+ * the core's, so that nothing is taken for another page by mistake. */
+function leadsToCore(url: string, origin: string): boolean {
+  try {
+    const u = new URL(url);
+    const core = new URL(origin);
+    return isLoopbackName(u.hostname) && portOf(u) === portOf(core);
+  } catch {
+    return true;
+  }
+}
+
+/** Addresses a webview may load or follow: http(s) without credentials,
+ * and never the core's own (origin), which is no page for a pane: a page
+ * shown in one must not put the UI there or open it as a tab. */
+export function guestMayNavigate(url: string, origin: string): boolean {
+  return isExternal(url) && !leadsToCore(url, origin);
 }
 
 /** Decides a webview's attach (will-attach-webview): false cancels it. An
- * attach is allowed only for the browser partition and an http(s) address;
- * the guest's preferences are then rewritten in place, whatever the page
- * asked for, so that it is an ordinary sandboxed web page with no preload
- * and no Node. */
-export function guestPreferences(prefs: WebPreferences, params: Record<string, string>): boolean {
-  if (params.partition !== BROWSER_PARTITION || !guestMayNavigate(params.src ?? '')) return false;
+ * attach is allowed only for the browser partition and an http(s) address
+ * that is not the core's (origin); the guest's preferences are then
+ * rewritten in place, whatever the page asked for, so that it is an
+ * ordinary sandboxed web page with no preload and no Node. */
+export function guestPreferences(prefs: WebPreferences, params: Record<string, string>, origin: string): boolean {
+  if (params.partition !== BROWSER_PARTITION || !guestMayNavigate(params.src ?? '', origin)) return false;
   const loose = prefs as WebPreferences & { preloadURL?: string };
   delete loose.preload;
   delete loose.preloadURL;

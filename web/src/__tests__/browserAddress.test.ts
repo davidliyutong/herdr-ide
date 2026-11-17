@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
+// @vitest-environment-options {"url": "http://127.0.0.1:5173/"}
 //
 // The browser plugin's address rules: where a page of a machine's port is
 // framed from (never the UI's own host name), and what the address field
-// takes.
+// takes: never the core's own address (the UI is on 127.0.0.1:5173 here).
 
 import { describe, expect, it } from 'vitest';
+import { isOwnAddress } from '../lib/webUrl';
 import { canFrame, forwardedSrc, hostPort, loopbackSrc, meantUrl, otherHost, parseAddress } from '../plugins/browser/api';
 
 describe('the address rule', () => {
@@ -44,7 +46,7 @@ describe('the address field', () => {
     expect(parseAddress('localhost:3000/docs?x=1')).toEqual(page('http://localhost:3000/docs?x=1', true, 3000));
     expect(parseAddress('127.0.0.1:8080')).toEqual(page('http://localhost:8080/', true, 8080));
     expect(parseAddress('[::1]:9000/a')).toEqual(page('http://localhost:9000/a', true, 9000));
-    expect(parseAddress('0.0.0.0:5173')).toEqual(page('http://localhost:5173/', true, 5173));
+    expect(parseAddress('0.0.0.0:5174')).toEqual(page('http://localhost:5174/', true, 5174));
     expect(parseAddress('localhost')).toEqual(page('http://localhost/', true, 80));
   });
 
@@ -74,6 +76,34 @@ describe('the address field', () => {
     }
   });
 
+  it('refuses the core’s own address, under any name of the loopback and either scheme', () => {
+    for (const s of [
+      '5173',
+      'localhost:5173',
+      '127.0.0.1:5173/api/m/x/hc/stop',
+      'http://127.0.0.1:5173/',
+      'http://localhost:5173/x',
+      'https://localhost:5173/',
+      'http://[::1]:5173',
+      '[::1]:5173',
+      '0.0.0.0:5173',
+      'http://127.0.0.2:5173/',
+      'http://127.1:5173/',
+      'http://2130706433:5173/',
+      'http://app.localhost:5173/',
+      'http://[::ffff:127.0.0.1]:5173/',
+      'HTTP://LOCALHOST:5173',
+    ]) {
+      expect(parseAddress(s), s).toEqual({ kind: 'refused' });
+      expect(canFrame(s), s).toBe(false);
+    }
+    // Another port is another program's, and another host another computer.
+    expect(parseAddress('5174')).toEqual(page('http://localhost:5174/', true, 5174));
+    expect(parseAddress('localhost:517')).toEqual(page('http://localhost:517/', true, 517));
+    expect(parseAddress('http://example.com:5173/')).toEqual(page('http://example.com:5173/', false, 5173));
+    expect(parseAddress('http://192.168.1.5:5173/')).toEqual(page('http://192.168.1.5:5173/', false, 5173));
+  });
+
   it('frames loopback addresses only, in a browser', () => {
     expect(canFrame('http://localhost:3000/')).toBe(true);
     expect(canFrame('https://example.com/')).toBe(false);
@@ -82,5 +112,23 @@ describe('the address field', () => {
 
   it('names a page by its host', () => {
     expect(hostPort('http://localhost:3000/x')).toBe('localhost:3000');
+  });
+});
+
+describe('a machine’s own loopback with the core’s port number', () => {
+  // The page is http://127.0.0.1:5173 here: the core's address in these tests.
+  it('is no page of this computer, and is one of a remote machine', () => {
+    for (const input of ['5173', 'localhost:5173', 'http://127.0.0.1:5173/x', '0.0.0.0:5173']) {
+      expect(parseAddress(input).kind, input).toBe('refused');
+      expect(parseAddress(input, true), input).toMatchObject({ kind: 'page', loopback: true, port: 5173 });
+    }
+    expect(canFrame('http://localhost:5173/')).toBe(false);
+    expect(canFrame('http://localhost:5173/', true)).toBe(true);
+  });
+
+  it('stays refused under the page’s own origin when the page is not on loopback', () => {
+    const own = { origin: 'https://ide.example.com', hostname: 'ide.example.com', port: '', protocol: 'https:' };
+    expect(isOwnAddress(new URL('https://ide.example.com/api/x'), own)).toBe(true);
+    expect(isOwnAddress(new URL('http://localhost:443/'), own)).toBe(false);
   });
 });

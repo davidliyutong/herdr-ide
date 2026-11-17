@@ -6,6 +6,7 @@ import { hasMessage, t } from '../../i18n';
 import { actions, current } from '../../actions';
 import { useStore } from '../../state/store';
 import { desktopShell } from '../../shell';
+import { isOwnAddress } from '../../lib/webUrl';
 
 /** A port of a machine reachable on the core's host: Port on machine M is
  * on the loopback port Local there. */
@@ -109,6 +110,60 @@ export function noteForward(f: Forward) {
   useForwards.setState((s) => ({ forwards: [...s.forwards.filter((x) => !(x.m === f.m && x.port === f.port)), f] }));
 }
 
+// Which forwards this page may make. A forward leads into a machine, so it
+// is made only for a port the user asked for in this page: typed into a
+// pane's address field or chosen in its Ports, a link clicked in a
+// terminal, or confirmed in a pane that asked (Forward and open). A view
+// found in the layout, which every client and every script of the page
+// writes, and a popup of a page shown in a pane are nobody's request: for
+// those a pane only uses a forward that exists.
+
+const granted = new Set<string>();
+const grantKey = (m: string, port: number) => `${m}|${port}`;
+
+/** The user asked, in this page, for the port of machine m: its forward
+ * may be made, and made again when it ended, until the page is left. */
+export function grantForward(m: string, port: number) {
+  granted.add(grantKey(m, port));
+}
+
+/** Whether the user asked for the port of machine m in this page. */
+export function forwardGranted(m: string, port: number): boolean {
+  return granted.has(grantKey(m, port));
+}
+
+/** The user stopped the forward: a pane that shows the port asks before
+ * it is made again. */
+export function revokeForward(m: string, port: number) {
+  granted.delete(grantKey(m, port));
+}
+
+/** Forgets what the user asked for (tests). */
+export function resetGrants() {
+  granted.clear();
+}
+
+/**
+ * The forward of a machine's port for a pane that shows it, a use of it:
+ * made or found when the user asked for the port in this page
+ * (forwardGranted); else only found, when the core's list has it, and
+ * undefined when it has not: the pane asks the user. Fails as the core's
+ * requests do, and with forward_local_only, without asking for a forward,
+ * when the core says this client can use none.
+ */
+export async function attachForward(m: string, port: number): Promise<Forward | undefined> {
+  if (!forwardGranted(m, port)) {
+    const r = await browserApi.forwards();
+    const forwards = r.forwards ?? [];
+    useForwards.setState({ forwards, available: !!r.available });
+    if (!r.available) throw new BrowserError('forward_local_only', '');
+    if (!forwards.some((f) => f.m === m && f.port === port)) return undefined;
+  }
+  const f = await browserApi.ensure(m, port);
+  noteForward(f);
+  return f;
+}
+
 /** The text of a failure for the user. */
 export function errorText(e: unknown, machine = ''): string {
   if (e instanceof BrowserError) {
@@ -157,14 +212,21 @@ const REFUSED = /^(?:javascript|data|file|blob|about|vbscript|view-source|chrome
  * a host without a scheme (http:// for loopback names, https:// for any
  * other), or a full address; only http and https are taken. A loopback
  * name other than localhost (127.0.0.1, [::1], 0.0.0.0) is written as
- * localhost: for a machine it means that machine's own.
+ * localhost: for a machine it means that machine's own. The core's own
+ * address, under any loopback name, is no page for a pane (isOwnAddress):
+ * the UI is not shown inside itself, where a page of a pane could send it. With
+ * theirs the address is a machine's own (a pane of a remote machine, a
+ * view shown through a forward): its loopback is that machine's, where
+ * the core's port number is some other program's.
  */
-export function parseAddress(input: string): Parsed {
+export function parseAddress(input: string, theirs = false): Parsed {
   const s = input.trim();
   if (!s) return { kind: 'empty' };
   if (/^\d{1,5}$/.test(s)) {
     const port = Number(s);
-    return port >= 1 && port <= 65535 ? { kind: 'page', url: `http://localhost:${port}/`, loopback: true, port } : { kind: 'refused' };
+    if (port < 1 || port > 65535) return { kind: 'refused' };
+    const url = `http://localhost:${port}/`;
+    return !theirs && isOwnAddress(new URL(url)) ? { kind: 'refused' } : { kind: 'page', url, loopback: true, port };
   }
   if (REFUSED.test(s) || /\s/.test(s)) return { kind: 'refused' };
   const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(s);
@@ -183,6 +245,9 @@ export function parseAddress(input: string): Parsed {
   const loopback = isLoopbackHost(u.hostname);
   const port = Number(u.port) || (u.protocol === 'https:' ? 443 : 80);
   if (loopback && u.hostname !== 'localhost') u.hostname = 'localhost';
+  // As it is written now: 0.0.0.0 with the core's port is the core too. A
+  // machine's own loopback is another computer's, whatever its port.
+  if (!(theirs && loopback) && isOwnAddress(u)) return { kind: 'refused' };
   return { kind: 'page', url: u.href, loopback, port };
 }
 
@@ -233,8 +298,8 @@ export function meantUrl(real: string, port: number, local: number): string | un
 /** Where a page may be shown: in the frame, or only outside the app. A
  * browser frames loopback addresses only (the page's CSP); the desktop
  * app's webview takes any http or https address. */
-export function canFrame(url: string): boolean {
-  const p = parseAddress(url);
+export function canFrame(url: string, theirs = false): boolean {
+  const p = parseAddress(url, theirs);
   return p.kind === 'page' && (p.loopback || !!desktopShell?.browser);
 }
 
@@ -247,35 +312,52 @@ export function hostPort(url: string): string {
   }
 }
 
+/** Whether m is a machine reached over ssh: its loopback is its own, and a
+ * pane shows it through a forward. */
+export function isRemote(m: string): boolean {
+  return useStore.getState().machines[m]?.kind === 'ssh';
+}
+
 /** The view fields of the page at an address in a pane of machine m: on a
  * remote machine a loopback address is that machine's port (shown through
  * a forward); anywhere else the address is its own. Undefined for what is
  * no address of a page. */
 export function pageView(m: string, input: string): { url: string; m?: string; port?: number } | undefined {
-  const p = parseAddress(input);
+  const remote = isRemote(m);
+  const p = parseAddress(input, remote);
   if (p.kind !== 'page') return undefined;
-  const remote = useStore.getState().machines[m]?.kind === 'ssh';
   if (!p.loopback || !remote) return { url: p.url };
   // The forward carries bytes: the page loads over http (the frame's CSP).
   return { url: `http://localhost:${p.port}${rest(new URL(p.url))}`, m, port: p.port };
 }
 
 /** Opens a browser pane in a new tab of machine m: empty, or at an
- * address (see pageView). Returns the pane's key. */
+ * address (see pageView). Its callers act for the user (a link clicked in
+ * a terminal, the new-tab menu, a command), so a port of the machine it
+ * leads to is one the user asked for. Returns the pane's key. */
 export async function openBrowserTab(m: string, input = ''): Promise<string | undefined> {
   const fields = input ? pageView(m, input) : { url: '' };
   if (!fields) return undefined;
+  if (fields.m && fields.port) grantForward(fields.m, fields.port);
   return actions.openView(m, { plugin: 'browser', kind: 'page', ...fields }, { tab: true });
 }
 
-/** Opens a popup's address (a webview's) as a browser tab of the machine
- * shown; an address on a forward's local port is that machine's port. */
+/** Opens a popup's address (a webview's) as a browser tab. A page asked
+ * for it, not the user, so it leads into no machine by itself: an address
+ * on the local port of a forward that exists is that forward's machine and
+ * port, in a tab of that machine, which uses the forward and does not make
+ * it again once it ended; any other address is its own, a loopback one this
+ * computer's, in a tab of the machine shown. What is no http(s) page opens
+ * nothing. */
 export async function openPopup(url: string) {
   const m = current()?.m;
   if (!m) return;
   for (const f of useForwards.getState().forwards) {
     const meant = meantUrl(url, f.port, f.local);
-    if (meant) return void (await openBrowserTab(f.m, meant));
+    if (meant)
+      return void (await actions.openView(f.m, { plugin: 'browser', kind: 'page', url: meant, m: f.m, port: f.port }, { tab: true }));
   }
-  await openBrowserTab(m, url);
+  const p = parseAddress(url);
+  if (p.kind !== 'page') return;
+  await actions.openView(m, { plugin: 'browser', kind: 'page', url: p.url }, { tab: true });
 }

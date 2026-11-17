@@ -348,10 +348,16 @@ func serve(args []string, logger *log.Logger) {
 	// first: the core takes the other one's port too, so that the name
 	// leads to it and to no program that would answer in its stead. Only
 	// then does it vouch for http://localhost:<port> (fingerprints for the
-	// vault are bound to that origin).
+	// vault are bound to that origin): not when another program holds
+	// that address, nor when it could not be taken for any other reason
+	// but the host having none.
 	other, owned, oerr := loopback.Other(ln)
-	if oerr != nil {
+	switch {
+	case oerr == nil:
+	case loopback.InUse(oerr):
 		logger.Printf("another program listens on the other loopback address of this port (%v): http://localhost:%d may lead to it; use http://%s", oerr, ln.Addr().(*net.TCPAddr).Port, ln.Addr())
+	default:
+		logger.Printf("the other loopback address of this port could not be taken (%v): http://localhost:%d may lead to another program that takes it; use http://%s", oerr, ln.Addr().(*net.TCPAddr).Port, ln.Addr())
 	}
 	if other != nil {
 		defer other.Close()

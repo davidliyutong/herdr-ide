@@ -250,6 +250,14 @@ export function clearPage(k: string) {
   });
 }
 
+/** Takes the page off a frame whose forward ended and is not this page's
+ * to make again, and has its pane look at its view again: it asks the
+ * user. */
+export function unloadPage(k: string) {
+  clearPage(k);
+  useFrames.setState((s) => ({ retries: { ...s.retries, [k]: (s.retries[k] ?? 0) + 1 } }));
+}
+
 /** Moves back or forward in frame k. An iframe goes over the trail and
  * returns the page it is at; a webview follows its page's own history. */
 export function stepPage(k: string, step: -1 | 1): Page | undefined {

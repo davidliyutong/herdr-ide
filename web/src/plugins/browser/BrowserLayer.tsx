@@ -20,11 +20,12 @@ import {
   reportNav,
   showPage,
   showSlot,
+  unloadPage,
   useFrames,
   type Frame,
   type Page,
 } from './frames';
-import { browserApi, errorText, meantUrl, noteForward, openPopup } from './api';
+import { attachForward, errorText, meantUrl, openPopup } from './api';
 import './browser.css';
 
 type Layouts = ReturnType<typeof useTerms.getState>['machines'];
@@ -210,8 +211,10 @@ function createWebview(ref: RefObject<HTMLElement | null>, k: string, m: string,
 }
 
 /** Uses a frame's forward every few minutes while the frame is mounted: a
- * forward that nothing uses ends idle. When the forward ended and is made
- * again on another local port, the frame loads from it. */
+ * forward that nothing uses ends idle. When the forward ended it is made
+ * again only if the user asked for its port in this page (attachForward),
+ * and the frame loads from it when it is on another local port; else the
+ * page goes, and its pane asks. */
 function useKeepAlive(k: string, page: Page) {
   const fw = page.forward;
   const m = fw?.m;
@@ -219,9 +222,9 @@ function useKeepAlive(k: string, page: Page) {
   useEffect(() => {
     if (m === undefined || port === undefined) return;
     const timer = window.setInterval(() => {
-      browserApi.ensure(m, port).then(
+      attachForward(m, port).then(
         (f) => {
-          noteForward(f);
+          if (!f) return unloadPage(k);
           const cur = useFrames.getState().pages[k];
           if (cur?.forward && cur.forward.local !== f.local) {
             const src = cur.src.replace(/:\d+(?=\/|$)/, `:${f.local}`);

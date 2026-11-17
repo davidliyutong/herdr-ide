@@ -75,11 +75,15 @@ test('permissions require both the requesting frame and top window to belong to 
   assert.equal('autoplayPolicy' in webPreferences, false);
 });
 
-test('a webview attaches only for the browser partition and an http(s) address without credentials', () => {
+test('a webview attaches only for the browser partition and an http(s) address without credentials that is not the core’s', () => {
   const ok = { partition: BROWSER_PARTITION, src: 'https://example.com/a' };
-  assert.ok(guestPreferences({}, ok));
-  assert.ok(guestPreferences({}, { ...ok, src: 'http://localhost:3000' }));
+  assert.ok(guestPreferences({}, ok, origin));
+  assert.ok(guestPreferences({}, { ...ok, src: 'http://localhost:3000' }, origin));
   const refused: Array<Record<string, string>> = [
+    // The core's own address, under either loopback name.
+    { ...ok, src: `${origin}/` },
+    { ...ok, src: 'http://localhost:7781/m/local/code/' },
+    { ...ok, src: 'http://[::1]:7781/' },
     { ...ok, partition: 'persist:other' },
     { ...ok, partition: '' },
     { src: ok.src },
@@ -92,9 +96,11 @@ test('a webview attaches only for the browser partition and an http(s) address w
   ];
   for (const params of refused) {
     const prefs: WebPreferences = { nodeIntegration: true };
-    assert.equal(guestPreferences(prefs, params), false, JSON.stringify(params));
+    assert.equal(guestPreferences(prefs, params, origin), false, JSON.stringify(params));
     assert.equal(prefs.nodeIntegration, true, 'a refused attach leaves the preferences alone');
   }
+  // Without the core's origin nothing attaches.
+  assert.equal(guestPreferences({}, ok, ''), false);
 });
 
 test('an allowed attach resets every dangerous preference of the guest', () => {
@@ -113,7 +119,7 @@ test('an allowed attach resets every dangerous preference of the guest', () => {
     preloadURL: 'file:///tmp/evil.js',
     partition: 'default',
   };
-  assert.ok(guestPreferences(prefs as WebPreferences, { partition: BROWSER_PARTITION, src: 'https://example.com' }));
+  assert.ok(guestPreferences(prefs as WebPreferences, { partition: BROWSER_PARTITION, src: 'https://example.com' }, origin));
   assert.deepEqual(prefs, {
     nodeIntegration: false,
     nodeIntegrationInSubFrames: false,
@@ -130,8 +136,8 @@ test('an allowed attach resets every dangerous preference of the guest', () => {
 });
 
 test('a guest navigates to http(s) addresses without credentials only', () => {
-  assert.ok(guestMayNavigate('https://example.com/x?y#z'));
-  assert.ok(guestMayNavigate('http://127.0.0.1:8080/'));
+  assert.ok(guestMayNavigate('https://example.com/x?y#z', origin));
+  assert.ok(guestMayNavigate('http://127.0.0.1:8080/', origin));
   for (const url of [
     'file:///etc/passwd',
     'javascript:alert(1)',
@@ -142,8 +148,48 @@ test('a guest navigates to http(s) addresses without credentials only', () => {
     '',
     'x',
   ]) {
-    assert.equal(guestMayNavigate(url), false, url);
+    assert.equal(guestMayNavigate(url, origin), false, url);
   }
+});
+
+test('a guest never navigates to the core, under any name of the loopback', () => {
+  // The core is on 127.0.0.1:7781 and answers on that port under every
+  // loopback name; a page in a pane must not load the UI or open it as a tab.
+  for (const url of [
+    origin,
+    `${origin}/`,
+    `${origin}/api/m/local/hc/stop`,
+    'http://localhost:7781/',
+    'http://LOCALHOST:7781/m/local/code/',
+    'http://[::1]:7781/',
+    'http://127.0.0.2:7781/',
+    'http://127.1:7781/',
+    'http://2130706433:7781/',
+    'http://app.localhost:7781/',
+    'http://[::ffff:127.0.0.1]:7781/',
+    'https://localhost:7781/',
+    'https://127.0.0.1:7781/x',
+  ]) {
+    assert.equal(guestMayNavigate(url, origin), false, url);
+  }
+  // Another port is another program, another host another computer.
+  for (const url of [
+    'http://127.0.0.1:7780/',
+    'http://localhost:7782/',
+    'http://localhost/',
+    'http://[::1]:3000/',
+    'http://192.168.1.5:7781/',
+    'https://example.com:7781/',
+    'http://localhost.example.com:7781/',
+  ]) {
+    assert.equal(guestMayNavigate(url, origin), true, url);
+  }
+  // A core on a scheme's own port is known by it.
+  assert.equal(guestMayNavigate('http://localhost/', 'http://127.0.0.1'), false);
+  assert.equal(guestMayNavigate('http://localhost:80/x', 'http://127.0.0.1'), false);
+  assert.equal(guestMayNavigate('http://localhost:8080/', 'http://127.0.0.1'), true);
+  // An origin that does not read is nobody's: nothing is allowed by it.
+  for (const bad of ['', 'not an origin']) assert.equal(guestMayNavigate('https://example.com/', bad), false, bad);
 });
 
 test('a guest gets no permission but full screen', () => {

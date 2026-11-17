@@ -324,13 +324,67 @@ func TestCSPOnAppShell(t *testing.T) {
 		if csp := w.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "frame-ancestors 'self'") || !strings.Contains(csp, "script-src 'self' 'wasm-unsafe-eval';") || strings.Contains(csp, "'unsafe-eval'") || strings.Contains(csp, "script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline'") {
 			t.Errorf("%s: csp = %q", c.path, csp)
 		}
-		// Frames: the UI's own and pages on loopback under any port (the
-		// browser pane); no other site, and no scheme but http there.
-		if csp := w.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "; frame-src 'self' http://localhost:* http://127.0.0.1:*; ") {
+		// Frames: the UI's own and pages under the other loopback name
+		// than the UI's, on any port (the browser pane); no other site,
+		// and no scheme but http there.
+		if csp := w.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "; frame-src 'self' http://127.0.0.1:*; ") {
 			t.Errorf("%s: frames allowed by %q", c.path, csp)
 		}
 		if w.Header().Get("X-Content-Type-Options") != "nosniff" {
 			t.Errorf("%s: nosniff missing", c.path)
+		}
+	}
+
+	// The policy lets the page frame loopback pages only under the
+	// loopback name it is not served from: cookies ignore ports, so a
+	// frame under the UI's own name, also one that went there by itself,
+	// would share the cookies of the UI's host. Any other host frames
+	// none, and neither does the desktop app, whose browser panes are
+	// webviews.
+	token := strings.Repeat("d", 64)
+	s = New(machines.NewManager(nil, nil, log.New(os.Stderr, "", 0)), Options{
+		Logger:         log.New(os.Stderr, "", 0),
+		Static:         fstest.MapFS{"index.html": {Data: []byte("<html></html>")}},
+		AllowedOrigins: []string{"https://ide.example.com"},
+		DesktopToken:   token,
+	})
+	h = s.Handler()
+	for _, c := range []struct {
+		host, cookie, want string
+	}{
+		{"localhost:7780", "", "'self' http://127.0.0.1:*"},
+		{"localhost", "", "'self' http://127.0.0.1:*"},
+		{"LocalHost:7780", "", "'self' http://127.0.0.1:*"},
+		{"127.0.0.1:7780", "", "'self' http://localhost:*"},
+		{"127.0.0.1", "", "'self' http://localhost:*"},
+		// Other names of the loopback, and a reverse proxy's.
+		{"[::1]:7780", "", "'self'"},
+		{"127.0.0.2:7780", "", "'self'"},
+		{"app.localhost:7780", "", "'self'"},
+		{"ide.example.com", "", "'self'"},
+		// The desktop app's own requests; a wrong token is a browser's.
+		{"127.0.0.1:7780", DesktopCookie + "=" + token, "'self'"},
+		{"localhost:7780", DesktopCookie + "=" + token, "'self'"},
+		{"127.0.0.1:7780", DesktopCookie + "=" + strings.Repeat("e", 64), "'self' http://localhost:*"},
+	} {
+		// The shell on its own path, on a client-side route, and on a
+		// program window's path, which another handler serves.
+		for _, path := range []string{"/", "/some/route", "/m/x/gui/1"} {
+			r := httptest.NewRequest("GET", path, nil)
+			r.Host = c.host
+			if c.cookie != "" {
+				r.Header.Set("Cookie", c.cookie)
+			}
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			csp := w.Header().Get("Content-Security-Policy")
+			if w.Code != 200 || !strings.Contains(csp, "; frame-src "+c.want+"; ") {
+				t.Errorf("%s%s (cookie %t): %d, frames allowed by %q, want %q", c.host, path, c.cookie != "", w.Code, csp, c.want)
+			}
+			// Never the name the page itself is on, nor every loopback page.
+			if strings.Contains(csp, "http://localhost:* http://127.0.0.1:*") || strings.Contains(csp, "http://"+strings.ToLower(hostOnly(c.host))+":*") {
+				t.Errorf("%s%s: the policy frames the UI's own host: %q", c.host, path, csp)
+			}
 		}
 	}
 }

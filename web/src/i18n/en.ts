@@ -1458,7 +1458,7 @@ export const en = {
   'settings.browser.openLinks.external': 'Outside the app',
   'settings.browser.forwardIdle': 'Forwards end after',
   'settings.browser.forwardIdle.desc':
-    'Minutes a port forward stays without a connection or use before it ends; 0 keeps forwards until they are stopped.',
+    'Minutes a port forward stays unused before it ends, with the connections still open: no new connection, no data through it, no pane showing it. 0 keeps forwards until they are stopped.',
   'settings.browser.forwardIdle.unit': 'min',
   'command.browser.open': 'New Browser Tab',
   'command.browser.reload': 'Reload Browser Page',
@@ -1485,6 +1485,9 @@ export const en = {
   'browser.error.network': 'The server did not answer: {error}',
   'browser.error.failed': 'The port could not be forwarded: {error}',
   'browser.error.host': 'Pages of ports are shown on 127.0.0.1 or localhost only: open the app from one of them.',
+  'browser.error.other_machine': 'This pane names a port of another machine, which is not opened from here. Enter the address again.',
+  'browser.ask': 'Port {port} of {machine} is not forwarded now.',
+  'browser.askForward': 'Forward and open',
   'browser.refused': 'Only http and https addresses can be opened.',
   'browser.outside':
     'This address cannot be shown in the app’s page: only addresses on this computer’s localhost can. It opens in your browser.',

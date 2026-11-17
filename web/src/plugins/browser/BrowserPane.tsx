@@ -2,11 +2,18 @@
 // port?}}): a toolbar (back, forward, reload, the address, the machine and
 // port of a forwarded page, Ports, open outside) over a body in which the
 // layer places the page's frame (BrowserLayer.tsx, frames.ts). With m and
-// port the page is that machine's port, shown through a port forward the
-// pane makes before it loads and keeps in use while it is mounted; without
-// them the frame loads the address itself. `url` is the address as the user
-// means it (http://localhost:3000/docs), also while the frame is on the
-// local port of a forward.
+// port the page is that machine's port, shown through a port forward that
+// is there before the page loads and stays in use while the pane is
+// mounted; without them the frame loads the address itself. `url` is the
+// address as the user means it (http://localhost:3000/docs), also while the
+// frame is on the local port of a forward.
+//
+// The view is the layout's, which every client and every script of the
+// page can write, and a forward leads into a machine: the pane makes one
+// only for a port the user asked for in this page (api.ts grantForward:
+// this toolbar, Ports, a link clicked, Forward and open below). For any
+// other view it uses the forward when it exists and asks when it does not,
+// and it takes m only when it is the machine of its own layout.
 //
 // An iframe gives no word of where its page goes: back and forward go over
 // the addresses loaded from this toolbar, and the address field shows the
@@ -23,18 +30,21 @@ import { desktopShell } from '../../shell';
 import { useDismiss } from '../../components/useDismiss';
 import type { PaneViewProps } from '../api';
 import {
-  BrowserError,
+  attachForward,
   browserApi,
+  BrowserError,
   canFrame,
   errorText,
   forwardedSrc,
+  grantForward,
   hostPort,
+  isRemote,
   loadForwards,
   loopbackSrc,
-  noteForward,
   otherHost,
   pageView,
   parseAddress,
+  revokeForward,
   useForwards,
   type ListeningPort,
 } from './api';
@@ -48,7 +58,14 @@ type Status =
   /** A page that cannot be framed here: it opens in the browser. */
   | { s: 'outside' }
   | { s: 'refused' }
+  /** A machine's port that is not forwarded and that the user did not ask
+   * for in this page: the pane asks before it makes the forward. */
+  | { s: 'ask' }
   | { s: 'error'; code: string; text: string };
+
+/** The code of the failure of a view that names another machine than its
+ * layout's; nothing is retried for it. */
+const OTHER_MACHINE = 'other_machine';
 
 /** Fields of a view that say where its page is. */
 type Fields = { url: string; m?: string; port?: number; title?: string };
@@ -72,7 +89,7 @@ export function BrowserPane({ m, pane, view }: PaneViewProps) {
 
   const setFields = useCallback((f: Fields) => terms.mutate(m, (l) => L.setViewFields(l, pane, { ...f, m: f.m, port: f.port })), [m, pane]);
 
-  // Makes the forward (a use of it), then loads the page.
+  // Has the forward (a use of it), then loads the page.
   useEffect(() => {
     let dead = false;
     const fail = (s: Status) => {
@@ -80,7 +97,8 @@ export function BrowserPane({ m, pane, view }: PaneViewProps) {
       setStatus(s);
     };
     if (!url) return fail({ s: 'start' });
-    const p = parseAddress(url);
+    // A view with a machine's port names that machine's own loopback.
+    const p = parseAddress(url, !!(vm && port));
     if (p.kind !== 'page') return fail({ s: 'refused' });
     const cur = useFrames.getState();
     // The frame already shows this address (the pane came back, or the
@@ -92,12 +110,15 @@ export function BrowserPane({ m, pane, view }: PaneViewProps) {
       setStatus({ s: 'ready' });
     };
     if (vm && port) {
+      // A port of the layout's own machine, or nothing: no request.
+      if (vm !== m) return fail({ s: 'error', code: OTHER_MACHINE, text: t('browser.error.other_machine') });
       if (!otherHost()) return fail({ s: 'error', code: 'host', text: t('browser.error.host') });
       if (!shown) setStatus({ s: 'loading' });
-      browserApi.ensure(vm, port).then(
+      attachForward(vm, port).then(
         (f) => {
           if (dead) return;
-          noteForward(f);
+          // Not forwarded, and not asked for by the user here.
+          if (!f) return fail({ s: 'ask' });
           load(forwardedSrc(url, f.local)!, { m: vm, port, local: f.local });
         },
         (e) => {
@@ -118,7 +139,7 @@ export function BrowserPane({ m, pane, view }: PaneViewProps) {
     return () => {
       dead = true;
     };
-  }, [k, url, vm, port, label, attempt, retries]);
+  }, [m, k, url, vm, port, label, attempt, retries]);
 
   // A webview's own navigation: the view's address follows (debounced).
   const latest = useRef({ url, setFields });
@@ -140,15 +161,17 @@ export function BrowserPane({ m, pane, view }: PaneViewProps) {
   const go = useCallback(
     (input: string) => {
       setNote('');
-      const p = parseAddress(input);
+      const p = parseAddress(input, isRemote(m));
       if (p.kind === 'empty') return;
       if (p.kind === 'refused') return setNote(t('browser.refused'));
       const f = pageView(m, input)!;
-      if (!canFrame(f.url)) {
+      if (!canFrame(f.url, !!(f.m && f.port))) {
         // Only loopback addresses can be framed in a browser.
         outside(f.url);
         return setFields({ url: f.url, m: undefined, port: undefined, title: undefined });
       }
+      // The user asked for this port of the machine, here.
+      if (f.m && f.port) grantForward(f.m, f.port);
       const same = f.url === url && f.m === vm && f.port === port;
       if (same) return reloadPage(k);
       setFields({ ...f, title: undefined });
@@ -189,7 +212,21 @@ export function BrowserPane({ m, pane, view }: PaneViewProps) {
       )}
       {(note || nav?.error) && <div className="browser-note browser-error">{note || t('browser.loadFailed', { error: nav!.error! })}</div>}
       <BrowserSlot m={m} id={view.id}>
-        <Body m={m} label={label} url={url} port={port} vm={vm} status={status} onGo={go} onRetry={() => setAttempt((a) => a + 1)} />
+        <Body
+          m={m}
+          label={label}
+          url={url}
+          port={port}
+          vm={vm}
+          status={status}
+          onGo={go}
+          onRetry={() => setAttempt((a) => a + 1)}
+          onForward={() => {
+            if (!vm || !port || vm !== m) return;
+            grantForward(vm, port);
+            setAttempt((a) => a + 1);
+          }}
+        />
       </BrowserSlot>
     </div>
   );
@@ -204,6 +241,7 @@ function Body({
   status,
   onGo,
   onRetry,
+  onForward,
 }: {
   m: string;
   label: string;
@@ -213,6 +251,8 @@ function Body({
   status: Status;
   onGo(input: string): void;
   onRetry(): void;
+  /** The user asks for the view's forward. */
+  onForward(): void;
 }) {
   if (status.s === 'ready') return null;
   if (status.s === 'start') {
@@ -242,11 +282,22 @@ function Body({
         </div>
       </div>
     );
+  if (status.s === 'ask')
+    return (
+      <div className="browser-cover" data-testid="browser-ask">
+        <div className="browser-start">
+          <div className="muted">{t('browser.ask', { machine: label, port: port ?? 0 })}</div>
+          <button className="primary" onClick={onForward}>
+            {t('browser.askForward')}
+          </button>
+        </div>
+      </div>
+    );
   return (
     <div className="browser-cover">
       <div className="browser-start">
         <div className="browser-failure">{status.text}</div>
-        <button onClick={onRetry}>{t('browser.retry')}</button>
+        {status.code !== OTHER_MACHINE && <button onClick={onRetry}>{t('browser.retry')}</button>}
       </div>
     </div>
   );
@@ -366,8 +417,10 @@ function ListeningPorts({ m, onOpen }: { m: string; onOpen(port: number): void }
   useEffect(() => {
     let dead = false;
     setPorts('loading');
+    // On this computer the core's own port is no page for a pane.
+    const mine = (p: ListeningPort) => !isRemote(m) && parseAddress(String(p.port)).kind !== 'page';
     browserApi.listening(m).then(
-      (p) => !dead && setPorts(p),
+      (p) => !dead && setPorts(p.filter((x) => !mine(x))),
       () => !dead && setPorts('failed'),
     );
     return () => {
@@ -414,6 +467,9 @@ function PortsPopover({
   const labels = useStore((s) => s.machines);
   useEffect(() => void loadForwards(), []);
   const stop = async (fm: string, fp: number) => {
+    // Stopped by the user: a pane showing the port asks before it is made
+    // again, also one that had asked for it.
+    revokeForward(fm, fp);
     try {
       await browserApi.stop(fm, fp);
     } catch {

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// @vitest-environment-options {"url": "http://127.0.0.1:5173/"}
 //
 // The frames of browser panes: which are kept, hidden and dropped, and that
 // a view's element survives its pane moving (a new tab, another tab shown),
@@ -60,7 +61,7 @@ describe('a view’s element', () => {
 
   it('is not recreated when its pane moves to another tab, and goes with its view', async () => {
     fakeBrowserApi();
-    h = await mountPane({ url: 'http://localhost:3000/', m: 'a', port: 3000 });
+    h = await mountPane({ url: 'http://localhost:3000/', m: 'a', port: 3000 }, { asked: true });
     await flush();
     const el = document.querySelector('.browser-layer iframe');
     expect(el).not.toBeNull();
@@ -96,7 +97,7 @@ describe('a view’s element', () => {
         : original.call(this);
     };
     try {
-      h = await mountPane({ url: 'http://localhost:3000/', m: 'a', port: 3000 });
+      h = await mountPane({ url: 'http://localhost:3000/', m: 'a', port: 3000 }, { asked: true });
       await flush();
       const el = document.querySelector<HTMLElement>('.browser-layer iframe')!;
       expect([el.style.display, el.style.left, el.style.top, el.style.width, el.style.height]).toEqual([

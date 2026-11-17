@@ -33,7 +33,14 @@ describe('safeLink', () => {
     ['HTTP://LOCALHOST:3000/', undefined],
     ['http://localhost:3000', undefined],
     ['http://localhost:3001/', 'http://localhost:3001/'],
-    ['https://localhost:3000/', 'https://localhost:3000/'],
+    // The page's server under another name of the loopback, or the other
+    // scheme: the same port is the same server.
+    ['https://localhost:3000/', undefined],
+    ['http://127.0.0.1:3000/api/m/x/hc/stop', undefined],
+    ['http://[::1]:3000/', undefined],
+    ['http://127.0.0.9:3000/', undefined],
+    ['http://127.0.0.1:3001/', 'http://127.0.0.1:3001/'],
+    ['http://192.168.1.5:3000/', 'http://192.168.1.5:3000/'],
     ['mailto:a@b.example', 'mailto:a@b.example'],
     ['javascript:alert(1)', undefined],
     ['JaVaScRiPt:alert(1)', undefined],
@@ -199,6 +206,8 @@ describe('Markdown', () => {
         '[three](https:/x)',
         '',
         '[own](http://localhost:3000/api/x)',
+        '',
+        '[other-name](http://127.0.0.1:3000/api/x)',
       ].join('\n'),
     });
     const link = (text: string) => [...host.querySelectorAll('a')].find((a) => a.textContent === text);
@@ -211,7 +220,7 @@ describe('Markdown', () => {
     expect(link('mail')?.getAttribute('href')).toBe('mailto:a@b.example');
     expect(link('data')).toBeUndefined();
     expect(link('proto')).toBeUndefined();
-    for (const n of ['one', 'two', 'three', 'own']) {
+    for (const n of ['one', 'two', 'three', 'own', 'other-name']) {
       expect(link(n)).toBeUndefined();
       expect(host.textContent).toContain(n);
     }

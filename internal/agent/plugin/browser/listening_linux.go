@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/hex"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -29,21 +30,7 @@ func listening(ctx context.Context) []Port {
 		if err != nil {
 			continue
 		}
-		sc := bufio.NewScanner(f)
-		sc.Scan() // the header
-		for sc.Scan() {
-			// sl local_address rem_address st tx rx tr tm->when retrnsmt uid timeout inode
-			fields := strings.Fields(sc.Text())
-			if len(fields) < 10 || fields[3] != "0A" || fields[7] != uid {
-				continue
-			}
-			addr, port, ok := strings.Cut(fields[1], ":")
-			n, err := strconv.ParseUint(port, 16, 16)
-			if !ok || err != nil || !reachable(addr) {
-				continue
-			}
-			inodes[fields[9]] = int(n)
-		}
+		listeners(f, uid, inodes)
 		f.Close()
 	}
 	names := processes(ctx, inodes)
@@ -52,6 +39,27 @@ func listening(ctx context.Context) []Port {
 		out = append(out, Port{Port: port, Process: names[inode]})
 	}
 	return out
+}
+
+// listeners reads the kernel's table of TCP sockets (the text of
+// /proc/net/tcp or tcp6) and adds the listening sockets of user uid that a
+// dial to loopback reaches to inodes: the port of each by its inode.
+func listeners(table io.Reader, uid string, inodes map[string]int) {
+	sc := bufio.NewScanner(table)
+	sc.Scan() // the header
+	for sc.Scan() {
+		// sl local_address rem_address st tx rx tr tm->when retrnsmt uid timeout inode
+		fields := strings.Fields(sc.Text())
+		if len(fields) < 10 || fields[3] != "0A" || fields[7] != uid {
+			continue
+		}
+		addr, port, ok := strings.Cut(fields[1], ":")
+		n, err := strconv.ParseUint(port, 16, 16)
+		if !ok || err != nil || !reachable(addr) {
+			continue
+		}
+		inodes[fields[9]] = int(n)
+	}
 }
 
 // reachable reports whether a socket bound to the kernel's hex address

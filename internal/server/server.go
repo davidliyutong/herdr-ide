@@ -212,7 +212,7 @@ func (s *Server) routes() []route {
 	rs = append(rs, s.pluginRoutes()...)
 	if s.opts.Static != nil {
 		rs = append(rs,
-			route{"/", spaHandler(s.opts.Static).ServeHTTP})
+			route{"/", spaHandler(s.opts.Static, s.appCSP).ServeHTTP})
 	}
 	return rs
 }
@@ -465,7 +465,9 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
-func spaHandler(fsys fs.FS) http.Handler {
+// spaHandler serves the web UI's files, and the app shell for any other
+// path that is not the API's; csp is the shell's policy for a request.
+func spaHandler(fsys fs.FS, csp func(*http.Request) string) http.Handler {
 	files := http.FileServer(http.FS(fsys))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, err := fs.Stat(fsys, "index.html"); err != nil {
@@ -476,7 +478,7 @@ func spaHandler(fsys fs.FS) http.Handler {
 		// Every page served here, the app shell on any path among them,
 		// gets the policy that keeps scripts on our origin and the page out
 		// of other sites' frames.
-		w.Header().Set("Content-Security-Policy", appCSP)
+		w.Header().Set("Content-Security-Policy", csp(r))
 		p := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
 		if p == "api" || strings.HasPrefix(p, "api/") {
 			// An API path no route took is not a page of the UI.

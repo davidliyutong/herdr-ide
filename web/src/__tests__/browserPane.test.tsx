@@ -4,12 +4,16 @@
 // The browser pane with the UI on 127.0.0.1: the forward is made before the
 // page loads (on localhost, the other name), failures say what happened and
 // retry, Ports opens and stops, and an address that cannot be framed opens
-// outside.
+// outside. A forward is made only for a port the user asked for in this
+// page: a view found in the layout uses the forward that exists, or asks.
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { t } from '../i18n';
 import { useFrames } from '../plugins/browser/frames';
+import type { MachineState } from '../lib/machine';
+import { forwardGranted } from '../plugins/browser/api';
+import { useStore } from '../state/store';
 import { click, fakeBrowserApi, flush, json, mountPane, typeAddress, type Harness } from './browserHarness';
 
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
@@ -24,12 +28,15 @@ afterEach(() => {
 
 const iframe = () => document.querySelector<HTMLIFrameElement>('.browser-layer iframe');
 const text = () => h!.host.querySelector('.browser-slot')?.textContent ?? '';
+const button = (label: string) => [...h!.host.querySelectorAll('button')].find((b) => b.textContent === label);
+const requests = (calls: { method: string; url: string }[]) => calls.map((c) => `${c.method} ${c.url}`);
+const forwardOf = (port: number, local = port) => ({ m: 'a', port, local, created: '', connections: 0 });
 
 describe('a forwarded page', () => {
   it('makes the forward, then loads the page from the other loopback name on its local port', async () => {
     let answer!: (r: Response) => void;
     const calls = fakeBrowserApi({ forward: () => new Promise<Response>((r) => (answer = r)) });
-    h = await mountPane({ url: 'http://localhost:3000/docs', m: 'a', port: 3000 });
+    h = await mountPane({ url: 'http://localhost:3000/docs', m: 'a', port: 3000 }, { asked: true });
     // Nothing loads before the forward is there.
     expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual(['POST /api/m/a/p/browser/forwards']);
     expect(calls[0].body).toEqual({ port: 3000 });
@@ -50,7 +57,7 @@ describe('a forwarded page', () => {
 
   it('shows the machine and port alone when the local port is the same', async () => {
     fakeBrowserApi();
-    h = await mountPane({ url: 'http://localhost:3000/', m: 'a', port: 3000 });
+    h = await mountPane({ url: 'http://localhost:3000/', m: 'a', port: 3000 }, { asked: true });
     await flush();
     expect(iframe()?.getAttribute('src')).toBe('http://localhost:3000/');
     expect(h.host.querySelector('.browser-chip')?.textContent).toBe(t('browser.chip', { machine: 'Box', port: 3000 }));
@@ -69,7 +76,7 @@ describe('a forwarded page', () => {
       const calls = fakeBrowserApi({
         forward: (b) => (fail ? answer() : json({ m: 'a', port: b.port, local: b.port, created: '', connections: 0 })),
       });
-      h = await mountPane({ url: 'http://localhost:3000/', m: 'a', port: 3000 });
+      h = await mountPane({ url: 'http://localhost:3000/', m: 'a', port: 3000 }, { asked: true });
       await flush();
       expect(text()).toContain(message);
       expect(iframe()).toBeNull();
@@ -84,13 +91,146 @@ describe('a forwarded page', () => {
 
   it('is reloaded by the command, which makes a new element', async () => {
     fakeBrowserApi();
-    h = await mountPane({ url: 'http://localhost:3000/', m: 'a', port: 3000 });
+    h = await mountPane({ url: 'http://localhost:3000/', m: 'a', port: 3000 }, { asked: true });
     await flush();
     const first = iframe();
     const { reloadPage, frameKey } = await import('../plugins/browser/frames');
     await act(async () => reloadPage(frameKey('a', 'p1')));
     expect(iframe()).not.toBe(first);
     expect(iframe()?.getAttribute('src')).toBe('http://localhost:3000/');
+  });
+});
+
+describe('a view found in the layout', () => {
+  // Any client, and any script of the page, writes the layout: a view of
+  // it is not the user asking for a way into the machine.
+  it('makes no forward: the pane asks, and makes it when the user says so', async () => {
+    const calls = fakeBrowserApi();
+    h = await mountPane({ url: 'http://localhost:3000/docs', m: 'a', port: 3000 });
+    await flush();
+    expect(requests(calls)).toEqual(['GET /api/p/browser/forwards']);
+    expect(iframe()).toBeNull();
+    expect(h.host.querySelector('[data-testid="browser-ask"]')).not.toBeNull();
+    expect(text()).toBe(t('browser.ask', { machine: 'Box', port: 3000 }) + t('browser.askForward'));
+    expect(forwardGranted('a', 3000)).toBe(false);
+    // Reload and Retry are not the user asking for the forward either.
+    const { reloadPage, frameKey } = await import('../plugins/browser/frames');
+    await act(async () => reloadPage(frameKey('a', 'p1')));
+    await flush();
+    expect(calls.filter((c) => c.method === 'POST')).toEqual([]);
+    expect(iframe()).toBeNull();
+    await click(button(t('browser.askForward')));
+    await flush();
+    expect(forwardGranted('a', 3000)).toBe(true);
+    expect(calls.filter((c) => c.method === 'POST').map((c) => [c.url, c.body])).toEqual([['/api/m/a/p/browser/forwards', { port: 3000 }]]);
+    expect(iframe()?.getAttribute('src')).toBe('http://localhost:3000/docs');
+    expect(h.host.querySelector('[data-testid="browser-ask"]')).toBeNull();
+  });
+
+  it('uses the forward that exists, without asking', async () => {
+    const calls = fakeBrowserApi({
+      forwards: () => json({ forwards: [forwardOf(4000), forwardOf(3000, 41000)], available: true }),
+      forward: (b) => json(forwardOf(b.port, 41000)),
+    });
+    h = await mountPane({ url: 'http://localhost:3000/docs', m: 'a', port: 3000 });
+    await flush();
+    // The list first, then the request that uses the forward.
+    expect(requests(calls)).toEqual(['GET /api/p/browser/forwards', 'POST /api/m/a/p/browser/forwards']);
+    expect(iframe()?.getAttribute('src')).toBe('http://localhost:41000/docs');
+    expect(h.host.querySelector('[data-testid="browser-ask"]')).toBeNull();
+    // Using it is not asking for it: once it ended, the pane would ask.
+    expect(forwardGranted('a', 3000)).toBe(false);
+  });
+
+  it('asks when the list has the port of another machine only, or another port', async () => {
+    const calls = fakeBrowserApi({
+      forwards: () => json({ forwards: [{ ...forwardOf(3000), m: 'b' }, forwardOf(3001)], available: true }),
+    });
+    h = await mountPane({ url: 'http://localhost:3000/', m: 'a', port: 3000 });
+    await flush();
+    expect(calls.filter((c) => c.method === 'POST')).toEqual([]);
+    expect(h.host.querySelector('[data-testid="browser-ask"]')).not.toBeNull();
+  });
+
+  it('makes no request for a port of another machine than its layout’s', async () => {
+    const calls = fakeBrowserApi({ forwards: () => json({ forwards: [{ ...forwardOf(3000), m: 'b' }], available: true }) });
+    h = await mountPane({ url: 'http://localhost:3000/', m: 'b', port: 3000 }, { asked: true });
+    await flush();
+    expect(calls).toEqual([]);
+    expect(iframe()).toBeNull();
+    expect(text()).toBe(t('browser.error.other_machine'));
+    // Nothing to retry, and nothing to confirm.
+    expect(button(t('browser.retry'))).toBeUndefined();
+    expect(button(t('browser.askForward'))).toBeUndefined();
+    const { reloadPage, frameKey } = await import('../plugins/browser/frames');
+    await act(async () => reloadPage(frameKey('a', 'p1')));
+    await flush();
+    expect(calls).toEqual([]);
+  });
+
+  it('says what happened when the list cannot be read, and Retry reads it again', async () => {
+    let fail = true;
+    const calls = fakeBrowserApi({
+      forwards: () => {
+        if (fail) throw new TypeError('Failed to fetch');
+        return json({ forwards: [forwardOf(3000)], available: true });
+      },
+    });
+    h = await mountPane({ url: 'http://localhost:3000/', m: 'a', port: 3000 });
+    await flush();
+    expect(text()).toContain(t('browser.error.network', { error: 'Failed to fetch' }));
+    expect(calls.filter((c) => c.method === 'POST')).toEqual([]);
+    expect(iframe()).toBeNull();
+    fail = false;
+    await click(button(t('browser.retry')));
+    await flush();
+    expect(iframe()?.getAttribute('src')).toBe('http://localhost:3000/');
+  });
+
+  it('does not offer a forward to a client that can use none', async () => {
+    const calls = fakeBrowserApi({ forwards: () => json({ forwards: [forwardOf(3000)], available: false }) });
+    h = await mountPane({ url: 'http://localhost:3000/', m: 'a', port: 3000 });
+    await flush();
+    expect(text()).toContain(t('browser.error.forward_local_only'));
+    expect(button(t('browser.askForward'))).toBeUndefined();
+    expect(calls.filter((c) => c.method === 'POST')).toEqual([]);
+  });
+
+  it('is kept in use while its forward exists, and asks once the forward ended', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      let exists = true;
+      const calls = fakeBrowserApi({ forwards: () => json({ forwards: exists ? [forwardOf(3000)] : [], available: true }) });
+      h = await mountPane({ url: 'http://localhost:3000/', m: 'a', port: 3000 });
+      await flush();
+      expect(iframe()?.getAttribute('src')).toBe('http://localhost:3000/');
+      const posts = () => calls.filter((c) => c.method === 'POST').length;
+      expect(posts()).toBe(1);
+      // While it exists, the list says so and the forward is used again.
+      await act(async () => void vi.advanceTimersByTime(5 * 60_000 + 1));
+      await flush();
+      expect(posts()).toBe(2);
+      expect(iframe()).not.toBeNull();
+      // It ended (idle, stopped, the core restarted): nothing brings it
+      // back but the user.
+      exists = false;
+      await act(async () => void vi.advanceTimersByTime(5 * 60_000 + 1));
+      await flush();
+      await flush();
+      expect(posts()).toBe(2);
+      expect(iframe()).toBeNull();
+      expect(useFrames.getState().pages).toEqual({});
+      expect(h.host.querySelector('[data-testid="browser-ask"]')).not.toBeNull();
+      await act(async () => void vi.advanceTimersByTime(15 * 60_000));
+      await flush();
+      expect(posts()).toBe(2);
+      await click(button(t('browser.askForward')));
+      await flush();
+      expect(posts()).toBe(3);
+      expect(iframe()?.getAttribute('src')).toBe('http://localhost:3000/');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -101,8 +241,11 @@ describe('the address field', () => {
     // An empty pane: the field has the keyboard and the start page is there.
     expect(h.host.querySelector('.browser-address')?.hasAttribute('data-autofocus')).toBe(true);
     expect(text()).toContain(t('browser.start'));
+    expect(forwardGranted('a', 3000)).toBe(false);
     await typeAddress(h.host, '3000');
     expect(h.view()).toMatchObject({ url: 'http://localhost:3000/', m: 'a', port: 3000 });
+    // Typed here: the user asked for the port, and its forward is made.
+    expect(forwardGranted('a', 3000)).toBe(true);
     expect(iframe()?.getAttribute('src')).toBe('http://localhost:3000/');
     await typeAddress(h.host, 'localhost:4000/x');
     expect(h.view()).toMatchObject({ url: 'http://localhost:4000/x', m: 'a', port: 4000 });
@@ -130,6 +273,48 @@ describe('the address field', () => {
     expect(iframe()).toBeNull();
   });
 
+  it('refuses the core’s own address on this computer', async () => {
+    const calls = fakeBrowserApi();
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    h = await mountPane({ url: '' });
+    // The pane's machine is this computer: its loopback is the core's own.
+    await act(async () => {
+      useStore
+        .getState()
+        .setMachines([{ id: 'a', label: 'Mac', kind: 'local', status: 'ready', info: { home: '/home/u' } } as unknown as MachineState]);
+    });
+    // The UI is on 127.0.0.1:5173: the same port under any loopback name.
+    for (const typed of ['localhost:5173', '5173', 'http://127.0.0.1:5173/api/m/a/hc/stop', 'http://[::1]:5173/']) {
+      await typeAddress(h.host, typed);
+      expect(h.host.querySelector('.browser-error')?.textContent, typed).toBe(t('browser.refused'));
+      expect(h.view().url, typed).toBe('');
+    }
+    expect(iframe()).toBeNull();
+    expect(open).not.toHaveBeenCalled();
+    expect(calls.filter((c) => c.method === 'POST')).toEqual([]);
+    h.unmount();
+    // A view that names it without a machine's port (the layout is every
+    // client's) loads nothing.
+    h = await mountPane({ url: 'http://localhost:5173/' });
+    await flush();
+    expect(text()).toBe(t('browser.refused'));
+    expect(iframe()).toBeNull();
+  });
+
+  it('takes the core’s port number as a remote machine’s own port', async () => {
+    const calls = fakeBrowserApi();
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    h = await mountPane({ url: '' });
+    // Machine a is reached over ssh: its localhost:5173 is another program.
+    await typeAddress(h.host, '5173');
+    await flush();
+    expect(h.host.querySelector('.browser-error')).toBeNull();
+    expect(h.view()).toMatchObject({ url: 'http://localhost:5173/', m: 'a', port: 5173 });
+    expect(calls.filter((c) => c.method === 'POST').map((c) => [c.url, c.body])).toEqual([['/api/m/a/p/browser/forwards', { port: 5173 }]]);
+    // Never opened outside, where the address would be the core's own.
+    expect(open).not.toHaveBeenCalled();
+  });
+
   it('opens an address that cannot be framed outside, and the pane says so', async () => {
     fakeBrowserApi();
     const open = vi.spyOn(window, 'open').mockReturnValue(null);
@@ -147,7 +332,7 @@ describe('the address field', () => {
   it('opens the real address outside, from the toolbar', async () => {
     fakeBrowserApi({ forward: (b) => json({ m: 'a', port: b.port, local: 41000, created: '', connections: 0 }) });
     const open = vi.spyOn(window, 'open').mockReturnValue(null);
-    h = await mountPane({ url: 'http://localhost:3000/a', m: 'a', port: 3000 });
+    h = await mountPane({ url: 'http://localhost:3000/a', m: 'a', port: 3000 }, { asked: true });
     await flush();
     await click(h.host.querySelector(`[aria-label="${t('browser.openOutside')}"]`));
     expect(open).toHaveBeenCalledWith('http://localhost:41000/a', '_blank', 'noopener');
@@ -156,7 +341,7 @@ describe('the address field', () => {
 
 describe('Ports', () => {
   const route = {
-    listening: () => json({ ports: [{ port: 5173, process: 'node' }, { port: 8080 }] }),
+    listening: () => json({ ports: [{ port: 5174, process: 'node' }, { port: 8080 }] }),
     forwards: () => json({ forwards: [{ m: 'a', port: 3000, local: 41000, created: '', connections: 0 }], available: true }),
   };
 
@@ -169,11 +354,15 @@ describe('Ports', () => {
     expect(calls.some((c) => c.method === 'GET' && c.url === '/api/m/a/p/browser/listening')).toBe(true);
     const popover = h.host.querySelector('.browser-popover')!;
     const buttons = [...popover.querySelectorAll<HTMLButtonElement>('.browser-port')];
-    expect(buttons.map((b) => b.textContent)).toEqual(['5173node', '8080']);
+    expect(buttons.map((b) => b.textContent)).toEqual(['5174node', '8080']);
+    expect(forwardGranted('a', 5174)).toBe(false);
     await click(buttons[0]);
     await flush();
-    expect(h.view()).toMatchObject({ url: 'http://localhost:5173/', m: 'a', port: 5173 });
-    expect(iframe()?.getAttribute('src')).toBe('http://localhost:5173/');
+    expect(h.view()).toMatchObject({ url: 'http://localhost:5174/', m: 'a', port: 5174 });
+    // Chosen here: the user asked for the port, and its forward is made.
+    expect(forwardGranted('a', 5174)).toBe(true);
+    expect(calls.filter((c) => c.method === 'POST').at(-1)?.body).toEqual({ port: 5174 });
+    expect(iframe()?.getAttribute('src')).toBe('http://localhost:5174/');
     expect(h.host.querySelector('.browser-popover')).toBeNull();
   });
 
@@ -194,11 +383,14 @@ describe('Ports', () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     try {
       const calls = fakeBrowserApi();
-      h = await mountPane({ url: 'http://localhost:3000/', m: 'a', port: 3000 });
+      h = await mountPane({ url: 'http://localhost:3000/', m: 'a', port: 3000 }, { asked: true });
       await act(async () => void (await Promise.resolve()));
       const before = calls.filter((c) => c.method === 'POST').length;
       await act(async () => void vi.advanceTimersByTime(5 * 60_000 + 1));
+      // The user asked for the port: the forward is made again if it ended,
+      // without a look at the list.
       expect(calls.filter((c) => c.method === 'POST').length).toBe(before + 1);
+      expect(calls.filter((c) => c.method === 'GET')).toEqual([]);
       expect(Object.keys(useFrames.getState().pages)).toEqual(['a|p1']);
     } finally {
       vi.useRealTimers();
