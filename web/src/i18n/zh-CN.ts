@@ -1201,6 +1201,8 @@ export const zhCN: Messages = {
   'usage.cost.unpriced': '没有价格（计入 token，不计费用）：{models}',
   'usage.cost.machineFailed': '{m}：无法读取日志（{code}）。',
   'usage.statusTitle': 'AI 用量：{what}，{pct}',
+  'usage.hover.today': '今日：{cost} · {tokens} tokens',
+  'usage.hover.hint': '点击查看详情',
   'usage.dur.dh': '{d} 天 {h} 小时',
   'usage.dur.hm': '{h} 小时 {m} 分',
   'usage.dur.m': '{m} 分钟',

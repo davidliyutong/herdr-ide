@@ -1232,6 +1232,8 @@ export const en = {
   'usage.cost.unpriced': 'Without prices (tokens counted, no cost): {models}',
   'usage.cost.machineFailed': '{m}: the logs could not be read ({code}).',
   'usage.statusTitle': 'AI usage: {what}, {pct}',
+  'usage.hover.today': 'Today: {cost} · {tokens} tokens',
+  'usage.hover.hint': 'Click for details',
   'usage.dur.dh': '{d}d {h}h',
   'usage.dur.hm': '{h}h {m}m',
   'usage.dur.m': '{m}m',

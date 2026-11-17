@@ -8,6 +8,7 @@ import type { StoreApi, UseBoundStore } from 'zustand';
 import { locale, t } from '../i18n';
 import type { ListState } from '../transferList';
 import { useDismiss, useReturnFocus } from './useDismiss';
+import { useHoverOpen } from './useHoverOpen';
 import { ensureTabStop, rove, ROW } from '../rowKeys';
 
 export function duration(ms: number): string {
@@ -167,6 +168,9 @@ export function TransferTray<T extends { id: string }>(p: TrayProps<T>) {
   const ref = useRef<HTMLSpanElement>(null);
   const rows = useRef<HTMLDivElement>(null);
   const close = useCallback(() => list.getState().setPanel(false), [list]);
+  const setOpen = useCallback((v: boolean) => list.getState().setPanel(v), [list]);
+  // The mouse resting on the button opens the panel; a click keeps it.
+  const hover = useHoverOpen(open, setOpen);
   useDismiss(open, ref, close);
   // Closed (Escape, ×), the keyboard goes back to the button.
   useReturnFocus(open);
@@ -185,19 +189,30 @@ export function TransferTray<T extends { id: string }>(p: TrayProps<T>) {
   const Icon = p.icon;
   const Row = p.row;
   return (
-    <span className="gui-menu-anchor" ref={ref}>
+    <span className="gui-menu-anchor" ref={ref} {...hover.anchor}>
       <button
         className={`gui-tray transfers-tray ${busy ? 'attention' : ''}`}
         title={p.title}
         aria-label={p.title}
         aria-expanded={open}
-        onClick={() => list.getState().setPanel(!open)}
+        onClick={() => {
+          hover.cancel();
+          if (open && hover.hover) hover.pin();
+          else setOpen(!open);
+        }}
       >
         <Icon />
         {busy && <span className="gui-count">{p.count(active)}</span>}
       </button>
       {open && (
-        <div className="gui-menu transfers-panel" role="dialog" aria-label={p.title}>
+        <div
+          className="gui-menu transfers-panel"
+          role="dialog"
+          aria-label={p.title}
+          // Used (a press, the keyboard), a panel opened by hover is kept.
+          onPointerDown={hover.pin}
+          onFocus={hover.pin}
+        >
           <div className="transfers-head">
             <span className="transfers-title">{p.title}</span>
             <span className="spacer" />

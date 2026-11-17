@@ -181,6 +181,16 @@ download chooser picks entries, nothing more.
   the status bar, where a button appears once the browser has uploaded
   something; while files go it shows how many and how far they are
   together. The note of a drop that uploads has a **Show** button for it.
+- The mouse resting on the button for 200 ms opens the panel without a
+  click, and it closes 300 ms after the mouse has left the button and the
+  panel (the pointer may cross the gap between them). A panel opened this
+  way does not take the keyboard. A click on the button while it is open
+  that way, or a press or the keyboard in the panel, keeps it open until
+  the button, a press outside, Escape or × closes it; a click while it is
+  closed opens it kept, as does other code (a starting upload). Only a
+  mouse hovers; touch and pen click, and the
+  keyboard is as before (Enter and Space toggle, Escape closes)
+  (`web/src/components/useHoverOpen.ts`).
 - The files of one paste or drop are queued together. A running upload
   shows the bytes sent of its size, its speed over the last 3 seconds and
   the time left; a waiting one shows that it waits. The browser sends the
@@ -214,7 +224,8 @@ download chooser picks entries, nothing more.
 
 - The same design as the uploads panel, with its own button in the status
   bar (shown once the browser has downloaded something): the downloads
-  running, then the finished ones, newest first.
+  running, then the finished ones, newest first. It opens on hover and
+  is kept by a click as the uploads panel is.
 - A browser tells a page nothing about the downloads it saves, so the core
   reports them. A download whose link has an id (8–64 URL-safe characters;
   the page makes 128 random bits) is followed. Before starting it, the page

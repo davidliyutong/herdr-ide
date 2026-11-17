@@ -556,3 +556,42 @@
   align-self: flex-start;
   font-size: var(--fs-sm);
 }
+
+/* The card of the status bar's item while the mouse rests on it. */
+.usage-hover {
+  width: min(300px, calc(100vw - 16px));
+  min-width: 0;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: var(--fs-sm);
+  white-space: normal;
+  pointer-events: none;
+}
+.usage-hover-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.usage-hover-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.usage-hover-line .ai-logo {
+  width: 12px;
+  height: 12px;
+  flex: none;
+}
+.usage-hover-id {
+  min-width: 0;
+}
+.usage-hover-today {
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+.usage-hover-hint {
+  font-size: var(--fs-sm);
+}

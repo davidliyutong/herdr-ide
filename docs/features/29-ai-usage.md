@@ -294,6 +294,24 @@ The status bar shows the tightest window's percentage, in the warning color
 from the first of `usage.thresholds` (default 80 and 95); a click shows the
 panel; `usage.statusBar` off hides it.
 
+The mouse resting on the item for 200 ms (a mouse only; touch and pen
+click) shows a card above it, right-aligned to the item, at most 300 px
+wide and kept on the screen, which closes 300 ms after the mouse leaves
+(`web/src/components/useHoverOpen.ts`, shared with the uploads and
+downloads trays):
+
+- A line per account, the tightest first, at most 6: the service's mark and
+  name, the account's email where the service has more than one account,
+  its tightest window's name, a thin bar in the service's color (the warning and error colors as in the
+  panel), the percentage used or left (the panel's toggle) and when the
+  window resets.
+- A last line with today's spend and tokens, once the panel or another
+  reader has loaded the cost report; the hover never reads it.
+- A hint that a click shows the details.
+- The card is a `role="tooltip"` that the button names with
+  `aria-describedby` while it shows; nothing in it takes the keyboard, and
+  the button has no `title`, so no second tooltip shows.
+
 ### Alerts
 
 With `usage.alerts` on (the default) the core fires an alert after a poll
@@ -447,5 +465,9 @@ status pages. Resources and retention:
   while the panel stays open (`usage.costRefresh`), DeepSeek's key form
   without an account, an older snapshot ignored, the machines that could
   not read an account, the interval picker.
+- `web/src/__tests__/hoverOpen.test.ts`: the trays opening on hover, closing
+  after the pointer leaves, kept by a click, touch ignored, and the status
+  bar item's card (accounts tightest first, today's spend once the cost is
+  loaded, the click still showing the panel).
 - `internal/server`: `TestMutatingRoutesAreGuarded` covers the plugin's
   routes.

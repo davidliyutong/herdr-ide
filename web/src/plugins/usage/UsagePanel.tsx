@@ -460,7 +460,7 @@ function WindowRow({ w, grouped, now }: { w: UsageWindow; grouped: boolean; now:
 
 /** A window's bar in its service's color (the warning and error colors over
  * the threshold and out), with quarter marks and the even pace's mark. */
-function Bar({ w, remaining, small }: { w: UsageWindow; remaining: boolean; small?: boolean }) {
+export function Bar({ w, remaining, small }: { w: UsageWindow; remaining: boolean; small?: boolean }) {
   const shown = Math.min(100, Math.max(0, remaining ? 100 - w.usedPct : w.usedPct));
   // The even pace's mark, once the window is under way.
   const pace =
