@@ -36,6 +36,7 @@ const (
 	SettingCodexHomes     = "usage.codexHomes"
 	SettingClaudeKeychain = "usage.claudeKeychain"
 	SettingKimiRefresh    = "usage.kimiRefresh"
+	SettingPrices         = "usage.prices"
 )
 
 // providerSetting is the switch of a provider.
@@ -74,6 +75,10 @@ var Settings = func() settings.Module {
 		// open, and the status bar item.
 		settings.Def{Key: SettingCostRefresh, Type: settings.TypeNumber, Default: 15.0, Min: costMin, Max: costMax, Integer: true,
 			Scope: settings.ScopeApp, Section: "usage", Order: 15},
+		// The user's prices, for models the price table does not know yet
+		// or prices it has wrong (usage.ParsePrices).
+		settings.Def{Key: SettingPrices, Type: settings.TypeList, Item: settings.TypeString, Default: []string{},
+			Scope: settings.ScopeApp, Section: "usage", Order: 16, Validate: validPrices},
 		settings.Def{Key: SettingStatusBar, Type: settings.TypeBool, Default: true,
 			Scope: settings.ScopeApp, Section: "usage", Order: 18},
 		settings.Def{Key: SettingAlerts, Type: settings.TypeBool, Default: true,
@@ -125,6 +130,28 @@ func validThresholds(v any) error {
 		}
 	}
 	return nil
+}
+
+// validPrices accepts what usage.ParsePrices reads.
+func validPrices(v any) error {
+	l, _ := v.([]string)
+	_, err := usage.ParsePrices(l)
+	return err
+}
+
+// prices are the user's prices (usage.prices) and a key that tells them
+// apart in the spend's cache.
+func (p *Plugin) prices() (map[string]usage.Tier, string) {
+	st := p.settings()
+	if st == nil {
+		return nil, ""
+	}
+	l, _ := st.GetFor(SettingPrices, "").([]string)
+	own, err := usage.ParsePrices(l)
+	if err != nil || len(own) == 0 {
+		return nil, ""
+	}
+	return own, strings.Join(l, "\n")
 }
 
 // Routes of the plugin.

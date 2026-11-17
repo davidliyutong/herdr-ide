@@ -370,6 +370,30 @@ func TestCostReport(t *testing.T) {
 	}
 }
 
+// The user's prices reach the machines' scans, and a change of them is
+// not served from the spend's cache.
+func TestCostWithOwnPrices(t *testing.T) {
+	now := time.Date(2026, 11, 16, 3, 0, 0, 0, time.UTC)
+	p, h := testPlugin(t, &now, []string{"local"}, nil)
+	var got []map[string]usage.Tier
+	p.fetch = func(ctx context.Context, m, action string, params, out any) error {
+		got = append(got, params.(usage.CostOptions).Prices)
+		return json.Unmarshal([]byte(`{"files":1}`), out)
+	}
+	p.cost(context.Background(), 7, 0)
+	if err := h.st.Set(SettingPrices, "", []any{"grok-5 x 1 2"}); err == nil {
+		t.Error("a bad price accepted")
+	}
+	if err := h.st.Set(SettingPrices, "", []any{"grok-5 3 0.75 9"}); err != nil {
+		t.Fatal(err)
+	}
+	p.cost(context.Background(), 7, 0)
+	p.cost(context.Background(), 7, 0)
+	if len(got) != 2 || got[0] != nil || got[1]["grok-5"].Output != 9 {
+		t.Errorf("prices sent %+v", got)
+	}
+}
+
 func TestSettings(t *testing.T) {
 	st := settings.New("", Settings)
 	if st.String(SettingRefresh, "") != RefreshAdaptive {

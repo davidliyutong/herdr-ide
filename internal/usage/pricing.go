@@ -3,6 +3,11 @@ package usage
 import (
 	_ "embed"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"math"
+	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -56,6 +61,65 @@ func (p PriceTable) ModelPricing(provider, model string) (string, *ModelPrice) {
 		}
 	}
 	return best, bp
+}
+
+// PricingWith is ModelPricing with the user's prices (own, by model name
+// prefix, for every provider): one of the same name as an entry of the
+// table replaces it, and the longest prefix of the two lists wins, so a
+// price the user gives for a model the table does not know applies before
+// a release adds it.
+func (p PriceTable) PricingWith(provider, model string, own map[string]Tier) (string, *ModelPrice) {
+	best, bp := p.ModelPricing(provider, model)
+	for k, t := range own {
+		if strings.HasPrefix(model, k) && (len(k) > len(best) || k == best) {
+			best, bp = k, &ModelPrice{Source: "usage.prices", Tiers: []Tier{t}}
+		}
+	}
+	return best, bp
+}
+
+// MaxOwnPrices bounds the user's prices.
+const MaxOwnPrices = 50
+
+var ownModel = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,99}$`)
+
+// ParsePrices reads the user's prices (setting usage.prices): one model per
+// line, "<model> <input> <cached> <output> [<cache write>]", in USD per
+// million tokens, the model a prefix of the names it prices (as the
+// table's). A price applies to prompts of any length; cache writes cost
+// the input price unless given (1-hour ones twice that).
+func ParsePrices(lines []string) (map[string]Tier, error) {
+	if len(lines) > MaxOwnPrices {
+		return nil, fmt.Errorf("at most %d prices", MaxOwnPrices)
+	}
+	out := map[string]Tier{}
+	for _, l := range lines {
+		f := strings.Fields(l)
+		if len(f) == 0 {
+			continue
+		}
+		if len(f) < 4 || len(f) > 5 || !ownModel.MatchString(f[0]) {
+			return nil, fmt.Errorf("%q: a price is: model input cached output [cache write], in USD per million tokens", l)
+		}
+		var n [4]float64
+		for i, x := range f[1:] {
+			v, err := strconv.ParseFloat(x, 64)
+			if err != nil || math.IsNaN(v) || v < 0 || v > 10000 {
+				return nil, fmt.Errorf("%q: prices are numbers from 0 to 10000", l)
+			}
+			n[i] = v
+		}
+		if _, dup := out[f[0]]; dup {
+			return nil, errors.New("a model has two prices: " + f[0])
+		}
+		t := Tier{Input: n[0], Cached: n[1], Output: n[2]}
+		if len(f) == 5 {
+			w := n[3]
+			t.CacheWrite = &w
+		}
+		out[f[0]] = t
+	}
+	return out, nil
 }
 
 // Tier picks the tier of a prompt of n tokens: the first whose InputMax

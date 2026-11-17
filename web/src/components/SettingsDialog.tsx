@@ -516,6 +516,12 @@ function SettingRow({
   readOnly: boolean;
 }) {
   const [error, setError] = useState<string>();
+  // Opened at this row (openSettings({row: key})): it is brought into view.
+  const asked = useStore((s) => s.settings?.row === d.key);
+  const rowRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (asked) rowRef.current?.scrollIntoView?.({ block: 'center' });
+  }, [asked]);
   const own = machine ? state?.machines?.[machine.id] : undefined;
   const global = state?.value ?? d.default;
   const value = machine ? (own ?? global) : global;
@@ -557,8 +563,9 @@ function SettingRow({
   const description = desc(d.key);
   return (
     <div
-      className={`setting ${modified ? 'modified' : ''}`}
+      className={`setting ${modified ? 'modified' : ''} ${asked ? 'asked' : ''}`}
       data-key={d.key}
+      ref={rowRef}
       onContextMenu={(e) => !(e.target as HTMLElement).closest('input, select') && openMenu(e, menu())}
     >
       <div className="setting-head">

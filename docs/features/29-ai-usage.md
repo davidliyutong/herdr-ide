@@ -162,6 +162,32 @@ model prefix, with tiers by prompt length and cache-write prices (5 minutes:
 the input price unless given; 1 hour: twice it). A week is 168 hours and a
 month 750 for the equivalents (cost × 168 or 750 / the range's hours).
 
+Prices change and models come out between releases, so the table is kept
+up in three ways:
+
+- Each release runs `go run ./scripts/pricecheck` (RELEASING.md), which
+  compares the table with LiteLLM's public price table
+  (`model_prices_and_context_window.json`, which follows the providers'
+  pages): an entry whose prices differ there, one LiteLLM does not have,
+  one with a single price where LiteLLM has a long-context one, and the
+  models of the families the CLIs use (`grok-<digit>`, `claude-`,
+  `gpt-5` and later; not images, audio, realtime or search) that the
+  table does not price, a dated version of a listed one not listed again.
+  It writes nothing: each finding is checked against the provider's own
+  page, which stays an entry's `source`. Only the script reaches the
+  network; the core and the agents read the embedded table.
+- `usage.prices` (Settings › AI usage › Your prices) holds the user's
+  prices, a line each: `<model> <input> <cached> <output> [<cache write>]`
+  in USD per million tokens, the model a prefix as in the table, one price
+  for any prompt length (`usage.ParsePrices`; at most 50, numbers from 0 to
+  10000). The core sends them with each scan (`CostOptions.Prices`) and
+  keys its cache of the spend by them, so a change shows at the next read.
+  One of the same name as an entry of the table replaces it, and the
+  longest prefix of both lists wins (`PricingWith`).
+- A model without a price still counts its tokens (the Tokens view), and
+  the spend's note naming such models has a link that opens the settings
+  at `usage.prices`.
+
 The scanner keeps `usage/cost-cache.json` below the agent's data directory
 (0600): per log its size, time, the offset after its last complete line,
 its records, one per key (Claude logs a streamed response once per content
@@ -467,7 +493,16 @@ status pages. Resources and retention:
   off hidden, windows' ids, the adaptive cadences as settings, the best
   answer of a poll winning with the others as issues.
 - `internal/usage/cost_test.go` (`TestPricingTiers`): tier limits
-  inclusive, the current Claude models' prices.
+  inclusive, the current Claude models' prices; `TestOwnPrices`: the
+  user's prices read and refused, replacing the table's entry of their
+  name, the longest prefix winning, applied by the scan.
+- `internal/plugins/usage` (`TestCostWithOwnPrices`): the setting refuses
+  a bad line, its prices reach the scans, and a change is not served from
+  the cache.
+- `scripts/pricecheck/main_test.go`: differing prices (a dated version of
+  LiteLLM's matched, not a longer model that starts with the name), a
+  long-context tier that differs, entries LiteLLM lacks, new models of the
+  families without images, realtime or dated duplicates.
 - `web/src/__tests__/usage.test.ts`: ordering, the token sums, series and
   ranking (`tokenKinds`, `dailyTokens`, `rankTokens`), the core's alerts shown
   once per browser (again in a snapshot, from another page, after a

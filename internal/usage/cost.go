@@ -109,6 +109,9 @@ type CostOptions struct {
 	TZOffset   int      `json:"tzOffset,omitempty"`
 	CodexHomes []string `json:"codexHomes,omitempty"`
 	Providers  []string `json:"providers,omitempty"`
+	// Prices are the user's (usage.prices, ParsePrices), over the table's
+	// (PricingWith).
+	Prices map[string]Tier `json:"prices,omitempty"`
 }
 
 // CostRow is a day's tokens and cost of one model in one project.
@@ -894,7 +897,7 @@ func aggregateCost(c *costCache, seen map[string]bool, o CostOptions) *CostRepor
 	for _, k := range plain {
 		r := k.r
 		day := time.Unix(r.T, 0).In(zone).Format("2006-01-02")
-		label, mp := Pricing.ModelPricing(k.provider, r.M)
+		label, mp := Pricing.PricingWith(k.provider, r.M, o.Prices)
 		cost, priced := 0.0, mp != nil
 		if priced {
 			basis := r.X

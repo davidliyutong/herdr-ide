@@ -232,6 +232,61 @@ func TestPricingTiers(t *testing.T) {
 	}
 }
 
+func TestOwnPrices(t *testing.T) {
+	own, err := ParsePrices([]string{"grok-5 3 0.75 9", "  ", "claude-opus-4-6 1 0.1 2 1.5", "claude-opus 100 100 100"})
+	if err != nil || len(own) != 3 {
+		t.Fatalf("parse %v %v", own, err)
+	}
+	if w := own["claude-opus-4-6"].CacheWrite; w == nil || *w != 1.5 || own["grok-5"].CacheWrite != nil {
+		t.Errorf("cache write %+v", own)
+	}
+	for _, bad := range [][]string{
+		{"grok-5 1 2"},
+		{"grok-5 1 2 3 4 5"},
+		{"grok-5 1 2 x"},
+		{"grok-5 -1 2 3"},
+		{"grok-5 1 2 3e9"},
+		{"grok-5 NaN 2 3"},
+		{"-grok 1 2 3"},
+		{"grok-5 1 2 3", "grok-5 1 2 3"},
+		make([]string, MaxOwnPrices+1),
+	} {
+		if _, err := ParsePrices(bad); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+	// The table's grok-4.7, the same as 4.6.
+	if key, mp := Pricing.PricingWith("grok", "grok-4.7-fast", nil); key != "grok-4.7" || !near(mp.Tiers[0].Cost(1e6, 1e6, 0, 0, 1e6), 2+0.5+6) {
+		t.Errorf("grok 4.7: %q", key)
+	}
+	// A model the table does not know; the same name replaces the
+	// table's; a shorter one of the user loses to the table's, a longer
+	// one wins.
+	if key, mp := Pricing.PricingWith("grok", "grok-5-mini", own); key != "grok-5" || mp.Tiers[0].Output != 9 {
+		t.Errorf("unknown model: %q", key)
+	}
+	if key, mp := Pricing.PricingWith("claude", "claude-opus-4-6-20260101", own); key != "claude-opus-4-6" || mp.Tiers[0].Input != 1 {
+		t.Errorf("same name: %q %+v", key, mp)
+	}
+	if key, mp := Pricing.PricingWith("claude", "claude-opus-4-5", own); key != "claude-opus-4-5" || mp.Tiers[0].Input != 5 {
+		t.Errorf("shorter: %q %+v", key, mp)
+	}
+	if key, _ := Pricing.PricingWith("claude", "claude-opus-x", own); key != "claude-opus" {
+		t.Errorf("longer: %q", key)
+	}
+	// The scan applies them.
+	e := testEnv(t, nil)
+	costFixtures(t, e)
+	codex, _ := ParsePrices([]string{"gpt-5.3-codex 1 0.1 10"})
+	rep, err := Cost(context.Background(), e, CostOptions{Since: testNow.Add(-30 * 24 * time.Hour).Unix(), Providers: []string{Codex}, Prices: codex})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l := rowsBy(rep)["codex|gpt-5.3-codex|gamma"]; !near(l.Cost, (100*1+10*10)/1e6+(100*1+50*0.1+20*10)/1e6) {
+		t.Errorf("own price applied %+v", l)
+	}
+}
+
 // cancelAfter is a context whose Err turns to Canceled after n checks.
 type cancelAfter struct {
 	context.Context

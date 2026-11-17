@@ -1244,6 +1244,7 @@ export const en = {
   'usage.cost.about':
     'What the CLIs’ local logs (Claude Code, Codex, Grok) would cost at the providers’ API prices; a week is 168 hours, a month 750.',
   'usage.cost.unpriced': 'Without prices (tokens counted, no cost): {models}',
+  'usage.cost.setPrices': 'Set their prices',
   'usage.cost.machineFailed': '{m}: the logs could not be read ({code}).',
   'usage.statusTitle': 'AI usage: {what}, {pct}',
   'usage.hover.today': 'Today: {cost} · {tokens} tokens',
@@ -1312,6 +1313,9 @@ export const en = {
   'settings.usage.costRefresh.desc':
     'Minutes the spend of the CLIs’ logs is shown while the panel is open before the machines’ logs are read again; Refresh reads them at once.',
   'settings.usage.costRefresh.unit': 'min',
+  'settings.usage.prices': 'Your prices',
+  'settings.usage.prices.desc':
+    'API prices for models the built-in table does not know yet, or to correct it: one model per line, "model input cached output [cache write]" in USD per million tokens, e.g. "grok-5 3 0.75 9". The model is a prefix of the names it prices; yours replaces a built-in price of the same name, and the longest name wins.',
   'settings.usage.statusBar': 'Show in the status bar',
   'settings.usage.statusBar.desc':
     'The tightest window of all accounts, in the warning color from the first threshold on; a click shows the panel.',

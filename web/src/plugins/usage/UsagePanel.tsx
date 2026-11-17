@@ -649,7 +649,14 @@ function Spend() {
               </ol>
               {ranking.length === 0 && <div className="muted">{t('usage.cost.empty')}</div>}
               <p className="usage-footnote muted">{t('usage.cost.about')}</p>
-              {unpriced.length > 0 && <p className="usage-footnote muted">{t('usage.cost.unpriced', { models: unpriced.join(', ') })}</p>}
+              {unpriced.length > 0 && (
+                <p className="usage-footnote muted">
+                  {t('usage.cost.unpriced', { models: unpriced.join(', ') })}{' '}
+                  <button className="link" onClick={() => useStore.getState().openSettings({ page: 'usage', row: 'usage.prices' })}>
+                    {t('usage.cost.setPrices')}
+                  </button>
+                </p>
+              )}
               {failed.map(([m, x]) => (
                 <div key={m} className="callout error">
                   {t('usage.cost.machineFailed', { m: labels[m] ?? m, code: x.error ?? '' })}

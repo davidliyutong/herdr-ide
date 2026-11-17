@@ -159,6 +159,7 @@ in the UI; a setting with a scope can have its own value per machine, under
 | `usage.refreshWorking` | integer, 1–120 | `10` | – | – |
 | `usage.refreshIdle` | integer, 5–240 | `30` | – | – |
 | `usage.costRefresh` | integer, 1–1440 | `15` | – | – |
+| `usage.prices` | list of strings | `[]` | – | – |
 | `usage.statusBar` | `true`, `false` | `true` | – | – |
 | `usage.alerts` | `true`, `false` | `true` | – | – |
 | `usage.thresholds` | list of strings | `["80","95"]` | – | – |

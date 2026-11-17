@@ -1213,6 +1213,7 @@ export const zhCN: Messages = {
   'usage.cost.empty': '这些天的日志里没有用量。',
   'usage.cost.about': '各 CLI 本地日志（Claude Code、Codex、Grok）按各家 API 价格折算的费用；一周按 168 小时、一个月按 750 小时计。',
   'usage.cost.unpriced': '没有价格（计入 token，不计费用）：{models}',
+  'usage.cost.setPrices': '设置价格',
   'usage.cost.machineFailed': '{m}：无法读取日志（{code}）。',
   'usage.statusTitle': 'AI 用量：{what}，{pct}',
   'usage.hover.today': '今日：{cost} · {tokens} tokens',
@@ -1278,6 +1279,9 @@ export const zhCN: Messages = {
   'settings.usage.costRefresh': '花费重新读取间隔',
   'settings.usage.costRefresh.desc': '面板打开时，CLI 日志的花费显示多少分钟后重新读取各机器的日志；点“刷新”会立即读取。',
   'settings.usage.costRefresh.unit': '分钟',
+  'settings.usage.prices': '自定义价格',
+  'settings.usage.prices.desc':
+    '内置价格表还没有的模型，或要更正的价格：每行一个模型，格式为“模型 输入 缓存读取 输出 [缓存写入]”，单位是每百万 token 的美元价格，例如“grok-5 3 0.75 9”。模型名按前缀匹配；与内置条目同名时以你的为准，多个匹配时取最长的名字。',
   'settings.usage.statusBar': '在状态栏显示',
   'settings.usage.statusBar.desc': '在状态栏显示所有账号里最紧张的窗口，达到第一个阈值起变为警告色；点击打开面板。',
   'settings.usage.alerts': '额度将尽时提醒',

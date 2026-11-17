@@ -63,7 +63,8 @@ type costFlight struct {
 // cost asks the connected machines for their logs' cost of the last days
 // (the user's days: tz minutes east of UTC), all at once.
 func (p *Plugin) cost(ctx context.Context, days, tz int) *CostReport {
-	key := strconv.Itoa(days) + "|" + strconv.Itoa(tz)
+	own, priceKey := p.prices()
+	key := strconv.Itoa(days) + "|" + strconv.Itoa(tz) + "|" + priceKey
 	now := p.now()
 	p.mu.Lock()
 	if p.costCache == nil {
@@ -81,7 +82,7 @@ func (p *Plugin) cost(ctx context.Context, days, tz int) *CostReport {
 	local := now.In(zone)
 	since := time.Date(local.Year(), local.Month(), local.Day()-(days-1), 0, 0, 0, 0, zone).Unix()
 	o := p.options()
-	params := usage.CostOptions{Since: since, TZOffset: tz, CodexHomes: o.CodexHomes, Providers: o.Providers}
+	params := usage.CostOptions{Since: since, TZOffset: tz, CodexHomes: o.CodexHomes, Providers: o.Providers, Prices: own}
 	rep := &CostReport{
 		GeneratedAt: now.Unix(), Days: days, TZOffset: tz, Since: since,
 		WeekHours: usage.Pricing.WeekHours, MonthHours: usage.Pricing.MonthHours,
