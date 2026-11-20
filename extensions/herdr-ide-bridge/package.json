@@ -71,12 +71,12 @@
     "typecheck": "tsc -p ."
   },
   "devDependencies": {
-    "@types/node": "^26.6.5",
-    "@types/vscode": "^1.90.0",
-    "@vscode/vsce": "^4.0.0",
+    "@types/node": "^26.6.6",
+    "@types/vscode": "^1.146.0",
+    "@vscode/vsce": "^4.1.1",
     "esbuild": "^0.28.2",
     "typescript": "^7.0.2",
-    "prettier": "^3.6.2"
+    "prettier": "^3.10.1"
   },
   "l10n": "./l10n",
   "packageManager": "pnpm@12.8.1"
