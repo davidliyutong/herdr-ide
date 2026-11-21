@@ -25,7 +25,15 @@ export interface GuiState {
   m: string;
   phase: GuiPhase;
   error?: string;
+  /** VirtualGL works on the machine. */
   gpu?: boolean;
+  /** The kind of the display that is ready: xwayland draws with a GPU. */
+  display?: 'xvfb' | 'xwayland';
+  /** On a machine with several NVIDIA GPUs, the one (as nvidia-smi counts
+   * them) windows of Vulkan programs come from. */
+  vulkan_gpu?: number;
+  /** New panes' programs see only the GPUs of their CUDA_VISIBLE_DEVICES. */
+  pick?: boolean;
   windows: GuiWindow[];
 }
 

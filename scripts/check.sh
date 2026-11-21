@@ -17,6 +17,8 @@
 #      module whose digest scripts/fetch-ghostty-vt.sh recorded
 #   9. every shared test vector (design/testdata) is run by the web UI's
 #      tests
+#  10. the GPU selection library the agent embeds (internal/agent/gpupick)
+#      is the one scripts/build-gpupick.sh built from its source
 set -euo pipefail
 cd "$(dirname "$0")/.."
 fail=0
@@ -84,6 +86,7 @@ go run ./scripts/registry -check || fail=1
 
 echo "==> terminal emulator module"
 scripts/fetch-ghostty-vt.sh --check || fail=1
+scripts/build-gpupick.sh --check || fail=1
 
 echo "==> shared test vectors"
 # The web UI's tests run every vector: they name the file

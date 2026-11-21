@@ -86,8 +86,12 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   (matplotlib, the MuJoCo viewer, Qt tools) appear in browser windows, one
   per program window, with mouse and keyboard. Terminals get a virtual
   display automatically (a shell opened before can be given it from
-  its menu); Xvfb is fetched without root when a machine lacks it, and
-  VirtualGL renders OpenGL on the GPU where it is installed. Windows that
+  its menu). Where a machine has a GPU and Xwayland, the display draws with
+  the GPU, so OpenGL and Vulkan programs (Isaac Sim) render on it; elsewhere
+  it is Xvfb, fetched without root when a machine lacks it, with VirtualGL
+  for OpenGL on the GPU where that is installed. On machines with several
+  NVIDIA GPUs a program can show its window from the one its
+  `CUDA_VISIBLE_DEVICES` names. Windows that
   keep changing are sent as video (H.264 on NVIDIA, Intel and AMD GPUs, VP8
   otherwise) to browsers that decode it, still ones as exact pictures.
 - **Quick Look.** ⌘/Ctrl-click or right-click a path in a terminal, also one

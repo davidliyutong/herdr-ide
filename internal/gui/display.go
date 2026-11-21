@@ -211,8 +211,8 @@ func (m *Manager) publish(states ...State) {
 	}
 }
 
-func (m *Manager) request(ctx context.Context, mc *machines.Machine, action string) (*agentproto.GUIStatus, error) {
-	conn, rep, err := mc.Open(ctx, agentproto.Header{Op: agentproto.OpGUI, Action: action})
+func (m *Manager) request(ctx context.Context, mc *machines.Machine, action string, args ...string) (*agentproto.GUIStatus, error) {
+	conn, rep, err := mc.Open(ctx, agentproto.Header{Op: agentproto.OpGUI, Action: action, Args: args})
 	if err != nil {
 		return nil, err
 	}
@@ -223,16 +223,30 @@ func (m *Manager) request(ctx context.Context, mc *machines.Machine, action stri
 	return rep.GUI, nil
 }
 
+// wantKind is the kind of display a machine with status st gets when asked
+// (the setting) is asked for.
+func wantKind(st *agentproto.GUIStatus, asked string) string {
+	if asked != DisplayXvfb && st.GPUDisplay {
+		return agentproto.GUIXwayland
+	}
+	return agentproto.GUIXvfb
+}
+
 // plan decides from a display's status what preparing it takes: the agent
 // actions to run, or the phase to stop at. Read-only mode starts nothing.
-func plan(st *agentproto.GUIStatus, readOnly bool) (actions []string, stop string) {
+// A display of another kind than asked for is started anew, which the
+// agent does only while no program uses it.
+func plan(st *agentproto.GUIStatus, readOnly bool, asked string) (actions []string, stop string) {
+	want := wantKind(st, asked)
 	switch {
 	case !st.Supported:
 		return nil, PhaseUnsupported
-	case st.Running:
+	case st.Running && (readOnly || st.Kind == "" || st.Kind == want):
 		return nil, ""
 	case readOnly:
 		return nil, PhaseNotRunning
+	case st.Running, want == agentproto.GUIXwayland:
+		return []string{"start"}, ""
 	case st.Xvfb == "" && !st.Installable:
 		return nil, PhaseUnavailable
 	case st.Xvfb == "":
@@ -261,7 +275,8 @@ func (m *Manager) prepare(d *display, sess *transport.Session) {
 	m.mu.Lock()
 	d.status = st
 	m.mu.Unlock()
-	actions, stop := plan(st, m.ReadOnly)
+	asked := m.displayKind(mc.ID())
+	actions, stop := plan(st, m.ReadOnly, asked)
 	if stop != "" {
 		m.setPhase(d, stop, nil)
 		return
@@ -269,7 +284,11 @@ func (m *Manager) prepare(d *display, sess *transport.Session) {
 	for _, a := range actions {
 		m.setPhase(d, map[string]string{"install": PhaseInstalling, "start": PhaseStarting}[a], nil)
 		m.audit("gui."+a, map[string]any{"machine": mc.ID()})
-		if st, err = m.request(ctx, mc, a); err != nil {
+		var args []string
+		if a == "start" {
+			args = []string{asked}
+		}
+		if st, err = m.request(ctx, mc, a, args...); err != nil {
 			m.fail(d, sess, err)
 			return
 		}
@@ -319,6 +338,82 @@ func (m *Manager) prepare(d *display, sess *transport.Session) {
 	if _, push := afterAttach(m.ReadOnly, m.video(mc.ID())); push {
 		go m.prepareVideo(d)
 	}
+	if _, push := afterAttach(m.ReadOnly, m.pick(mc.ID())); push {
+		go m.preparePick(d)
+	}
+}
+
+// ApplyDisplay follows a change of the display setting for a machine: a
+// display of another kind than now asked for is prepared anew, which
+// replaces it unless a program uses it (then it stays until it ends).
+func (m *Manager) ApplyDisplay(mc *machines.Machine) {
+	if !m.enabled(mc.ID()) || mc.Local() {
+		return
+	}
+	m.mu.Lock()
+	d := m.ds[mc.ID()]
+	if d != nil && d.stream != nil {
+		if d.status != nil && d.status.Kind == wantKind(d.status, m.displayKind(mc.ID())) {
+			m.mu.Unlock()
+			return
+		}
+		detachLocked(d)
+		d.phase, d.err = PhaseStarting, ""
+		st := m.stateLocked(d)
+		m.mu.Unlock()
+		m.publish(st)
+	} else {
+		m.mu.Unlock()
+	}
+	m.ensure(mc, true)
+}
+
+// ApplyPick follows a change of the GPU selection setting for a machine:
+// turning it on puts the library on the machine; new panes get it, or no
+// longer.
+func (m *Manager) ApplyPick(mc *machines.Machine) {
+	m.mu.Lock()
+	d := m.ds[mc.ID()]
+	if d == nil || d.stream == nil {
+		m.mu.Unlock()
+		return
+	}
+	st := m.stateLocked(d)
+	m.mu.Unlock()
+	m.publish(st)
+	if _, push := afterAttach(m.ReadOnly, m.pick(mc.ID())); push {
+		go m.preparePick(d)
+	}
+}
+
+// preparePick has a machine with several NVIDIA GPUs install the library
+// that shows a program only the GPUs of its CUDA_VISIBLE_DEVICES, which
+// the agent carries. Without it panes get the display as before.
+func (m *Manager) preparePick(d *display) {
+	mc := d.mc
+	m.mu.Lock()
+	need := d.status != nil && vulkanGPU(d.status) != nil && d.status.Pick == ""
+	m.mu.Unlock()
+	if !need {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	m.audit("gui.pick", map[string]any{"machine": mc.ID()})
+	st, err := m.request(ctx, mc, "pick")
+	if err != nil {
+		m.Logger.Printf("gui %s: GPU selection: %v", mc.Label(), err)
+		return
+	}
+	m.mu.Lock()
+	if d.status == nil || d.gone {
+		m.mu.Unlock()
+		return
+	}
+	d.status.Pick = st.Pick
+	state := m.stateLocked(d)
+	m.mu.Unlock()
+	m.publish(state)
 }
 
 // ApplyVideo follows a change of the video setting for a machine: viewed
@@ -348,7 +443,8 @@ func (m *Manager) ApplyVideo(mc *machines.Machine) {
 
 // afterAttach is what the core does on a machine once its display is
 // ready: start the display keeper, push the video encoder (when video is
-// on for it). Read-only mode starts and pushes nothing.
+// on for it; the same decides installing the GPU selection library).
+// Read-only mode starts and pushes nothing.
 func afterAttach(readOnly, video bool) (keep, push bool) {
 	if readOnly {
 		return false, false

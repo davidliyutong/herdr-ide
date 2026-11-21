@@ -47,7 +47,7 @@ func (s *Server) initGUI() {
 	if s.opts.Settings != nil {
 		s.opts.Settings.OnChange(func(changes []settings.Change) {
 			for _, c := range changes {
-				if c.Key != gui.SettingGUI && c.Key != gui.SettingVideo {
+				if c.Key != gui.SettingGUI && c.Key != gui.SettingVideo && c.Key != gui.SettingDisplay && c.Key != gui.SettingGPUPick {
 					continue
 				}
 				// A global change affects every machine without its own value.
@@ -56,9 +56,14 @@ func (s *Server) initGUI() {
 						continue
 					}
 					if mc := s.mg.Get(st.ID); mc != nil && st.Status == machines.StatusReady {
-						if c.Key == gui.SettingVideo {
+						switch c.Key {
+						case gui.SettingVideo:
 							s.gui.ApplyVideo(mc)
-						} else {
+						case gui.SettingDisplay:
+							s.gui.ApplyDisplay(mc)
+						case gui.SettingGPUPick:
+							s.gui.ApplyPick(mc)
+						default:
 							s.gui.Apply(mc)
 						}
 					}

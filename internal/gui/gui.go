@@ -12,9 +12,15 @@ import (
 
 // Settings.
 const (
-	SettingGUI   = "gui.enabled"
-	SettingGPU   = "gui.gpu"
-	SettingVideo = "gui.video"
+	SettingGUI     = "gui.enabled"
+	SettingDisplay = "gui.display"
+	SettingGPU     = "gui.gpu"
+	SettingGPUPick = "gui.gpuPick"
+	SettingVideo   = "gui.video"
+
+	// DisplayAuto: the GPU display where the machine can run it.
+	DisplayAuto = agentproto.GUIDisplayAuto
+	DisplayXvfb = agentproto.GUIXvfb
 
 	GPUVglrun = "vglrun"
 	GPUAll    = "all"
@@ -42,10 +48,21 @@ var Settings = settings.Module{
 			Usage: "show windows of programs on remote Linux machines: new panes get a virtual display (DISPLAY), Xvfb is fetched in user space when missing; true or false (on or off); also per machine in the UI",
 		},
 		{
+			Key: SettingDisplay, Type: settings.TypeEnum, Default: DisplayAuto, Enum: []string{DisplayAuto, DisplayXvfb},
+			Scope: settings.ScopeRemoteMachine, Section: "gui", Order: 15,
+			Flag:  "gui-display",
+			Usage: "the virtual display: auto (Xwayland drawing with a GPU where the machine has one and an Xwayland, so that OpenGL and Vulkan programs render on the GPU; Xvfb elsewhere) or xvfb (always Xvfb); a display changes kind while no program uses it; also per machine in the UI",
+		},
+		{
 			Key: SettingGPU, Type: settings.TypeEnum, Default: GPUVglrun, Enum: []string{GPUVglrun, GPUAll},
 			Scope: settings.ScopeRemoteMachine, Section: "gui", Order: 20,
 			Flag:  "gui-gpu",
 			Usage: "OpenGL on machines with VirtualGL: vglrun (programs started with vglrun render on the GPU) or all (every program in new panes runs under VirtualGL); also per machine in the UI",
+		},
+		{
+			Key: SettingGPUPick, Type: settings.TypeBool, Default: false, Scope: settings.ScopeRemoteMachine, Section: "gui", Order: 25,
+			Flag:  "gui-gpu-pick",
+			Usage: "on machines with several NVIDIA GPUs, preload a library into the programs of new panes that leaves a program started with CUDA_VISIBLE_DEVICES only the GPUs it names (indices are rewritten to count among those), so that a Vulkan program can show its window from the chosen GPU instead of only from the driver's first one; true or false; also per machine in the UI",
 		},
 		{
 			Key: SettingVideo, Type: settings.TypeBool, Default: true, Scope: settings.ScopeRemoteMachine, Section: "gui", Order: 30,
@@ -80,9 +97,19 @@ const (
 
 // State is what browsers see for one machine.
 type State struct {
-	Machine string                 `json:"m"`
-	Phase   string                 `json:"phase"`
-	Error   string                 `json:"error,omitempty"`
-	GPU     bool                   `json:"gpu,omitempty"`
-	Windows []agentproto.GUIWindow `json:"windows"`
+	Machine string `json:"m"`
+	Phase   string `json:"phase"`
+	Error   string `json:"error,omitempty"`
+	// GPU: VirtualGL works on the machine (vglrun renders on the GPU).
+	GPU bool `json:"gpu,omitempty"`
+	// Display is the kind of the display that is ready ("xvfb",
+	// "xwayland").
+	Display string `json:"display,omitempty"`
+	// VulkanGPU is, on a machine with several NVIDIA GPUs, the one (as
+	// nvidia-smi counts them) that windows of Vulkan programs come from;
+	// Pick tells that new panes get the library that makes it the one a
+	// program's CUDA_VISIBLE_DEVICES names.
+	VulkanGPU *int                   `json:"vulkan_gpu,omitempty"`
+	Pick      bool                   `json:"pick,omitempty"`
+	Windows   []agentproto.GUIWindow `json:"windows"`
 }

@@ -144,6 +144,13 @@ export const zhCN: Messages = {
   'gui.state.installing': '正在获取 Xvfb',
   'gui.state.starting': '正在启动',
   'gui.state.ready': '就绪',
+  'gui.state.gpuDisplay': 'GPU 显示',
+  'gui.state.vulkanGpu': 'Vulkan 窗口仅来自 GPU {n}',
+  'gui.state.vulkanGpu.desc':
+    'NVIDIA 驱动只让这张卡（按 nvidia-smi 的编号）显示 Vulkan 程序的窗口。在其他卡上渲染的程序（例如用别的 CUDA_VISIBLE_DEVICES 启动的 Isaac Sim）会创建交换链失败。打开本页的“跟随 CUDA_VISIBLE_DEVICES”可解除这一限制。',
+  'gui.state.vulkanPick': 'Vulkan 窗口来自 GPU {n} 或 CUDA_VISIBLE_DEVICES',
+  'gui.state.vulkanPick.desc':
+    '新窗格里带 CUDA_VISIBLE_DEVICES 启动的程序只看得见它指定的卡，并从这些卡显示窗口；其他程序的 Vulkan 窗口来自 GPU {n}（按 nvidia-smi 的编号）。',
   'gui.state.error': '出错',
   'gui.state.not_running': '未运行（只读）',
   'gui.state.disconnected': '未连接',
@@ -619,9 +626,17 @@ export const zhCN: Messages = {
   'settings.codeServer.path.placeholder': '自动查找',
   'settings.gui.enabled': '显示程序窗口',
   'settings.gui.enabled.desc': '远程 Linux 机器上程序（matplotlib、MuJoCo 等）的窗口在浏览器窗口中打开。对之后新建的窗格生效。',
+  'settings.gui.display': '显示',
+  'settings.gui.display.desc':
+    '“自动”会在有 GPU 且装有 Xwayland 的机器上使用由 GPU 绘制的显示（Xwayland）：OpenGL 和 Vulkan 程序无需 vglrun 即在 GPU 上渲染。其他机器，以及选择 Xvfb 时，显示在内存中绘制。只有在没有程序在显示上开着窗口或连接时，显示才会更换种类。',
+  'settings.gui.display.auto': '自动',
+  'settings.gui.display.xvfb': 'Xvfb',
+  'settings.gui.gpuPick': '跟随 CUDA_VISIBLE_DEVICES',
+  'settings.gui.gpuPick.desc':
+    '在有多张 NVIDIA 显卡的机器上，带 CUDA_VISIBLE_DEVICES 启动的程序只看得见它指定的卡，如同只分到这些卡的容器，因此 Isaac Sim 这类 Vulkan 程序可以从所选的卡显示窗口，而不限于驱动的第一张卡。新窗格里的程序会预加载一个小库；它把 CUDA_VISIBLE_DEVICES 里的编号改写为在剩余卡中的序号（2 变为 0），nvidia-smi 也只列出这些卡。来自非显示所用显卡的窗口要经 CPU 拷贝，速度较慢。',
   'settings.gui.gpu': 'GPU 渲染（VirtualGL）',
   'settings.gui.gpu.desc':
-    '适用于装有 VirtualGL 的机器。使用 vglrun 时：以“vglrun 程序”启动的程序在 GPU 上渲染。所有程序：新建窗格中的所有程序都在 VirtualGL 下运行。',
+    '适用于装有 VirtualGL 的机器。使用 vglrun 时：以“vglrun 程序”启动的程序在 GPU 上渲染。所有程序：新建窗格中的所有程序都在 VirtualGL 下运行；由 GPU 绘制的显示除外，那里 OpenGL 本来就在 GPU 上渲染。',
   'settings.gui.gpu.vglrun': '使用 vglrun 时',
   'settings.gui.gpu.all': '所有程序',
   'settings.gui.video': '以视频传输持续变化的窗口',

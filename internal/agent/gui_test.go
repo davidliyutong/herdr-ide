@@ -234,15 +234,51 @@ func TestHelperXClient(t *testing.T) {
 	}
 }
 
+// TestHelperCompositor is the GPU display's compositor for a test's
+// Xwayland, as the command gui-wl is for an agent's.
+func TestHelperCompositor(t *testing.T) {
+	node := os.Getenv("GUI_TEST_COMPOSITOR")
+	if node == "" {
+		return
+	}
+	if err := Compositor(3, node, os.Getenv("GUI_TEST_NVIDIA") != "", log.New(os.Stderr, "gui-wl: ", 0)); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
 // guiTestXvfb starts a display for a test agent, or skips when the machine
 // has no Xvfb (GUI_TEST_INSTALL=1 fetches the distribution package).
-func guiTestXvfb(t testing.TB) *gui {
+func guiTestXvfb(t testing.TB) *gui { return guiTestDisplay(t, agentproto.GUIXvfb) }
+
+// guiTestDisplay starts a display of kind for a test agent, or skips when
+// the machine cannot run one.
+func guiTestDisplay(t testing.TB, kind string) *gui {
 	t.Helper()
 	if runtime.GOOS != "linux" {
 		t.Skip("virtual displays are provided on Linux only")
 	}
 	g := newGUI(testAgent(t))
-	if g.findXvfb() == "" {
+	if kind == agentproto.GUIXwayland {
+		if _, ok := g.gpuDisplay(); !ok {
+			t.Skip("no Xwayland or no GPU on this machine")
+		}
+		old := compositorCommand
+		compositorCommand = func(node string, nvidia bool) (*exec.Cmd, error) {
+			exe, err := os.Executable() // it is started in the agent's home
+			if err != nil {
+				return nil, err
+			}
+			cmd := exec.Command(exe, "-test.run=^TestHelperCompositor$")
+			cmd.Env = append(os.Environ(), "GUI_TEST_COMPOSITOR="+node)
+			if nvidia {
+				cmd.Env = append(cmd.Env, "GUI_TEST_NVIDIA=1")
+			}
+			return cmd, nil
+		}
+		t.Cleanup(func() { compositorCommand = old })
+	} else if g.findXvfb() == "" {
 		if os.Getenv("GUI_TEST_INSTALL") != "1" {
 			t.Skip("no Xvfb on this machine")
 		}
@@ -252,8 +288,11 @@ func guiTestXvfb(t testing.TB) *gui {
 			t.Fatalf("install: %v", err)
 		}
 	}
-	if err := g.start(); err != nil {
+	if err := g.start(kind); err != nil {
 		t.Fatalf("start: %v", err)
+	}
+	if got := g.readState().kind(); got != kind {
+		t.Fatalf("the display is %s, not %s: %s", got, kind, g.accelErr)
 	}
 	t.Cleanup(func() {
 		st := g.readState()
@@ -273,8 +312,14 @@ type guiMsg struct {
 
 // A program's window is announced with its pane, streamed, receives input
 // and is closed through the window manager.
-func TestGUIWindows(t *testing.T) {
-	g := guiTestXvfb(t)
+func TestGUIWindows(t *testing.T) { testGUIWindows(t, agentproto.GUIXvfb) }
+
+// The same on the GPU display: Xwayland with the agent's compositor is to
+// the window manager the X server Xvfb is.
+func TestGUIWindowsGPU(t *testing.T) { testGUIWindows(t, agentproto.GUIXwayland) }
+
+func testGUIWindows(t *testing.T, kind string) {
+	g := guiTestDisplay(t, kind)
 	n, _ := g.display()
 	cookie, _ := g.serverCookie()
 

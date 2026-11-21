@@ -488,25 +488,124 @@ func TestExportCommand(t *testing.T) {
 }
 
 // Read-only mode shows a running display but installs and starts nothing.
+// The GPU display is started where the machine can run it and the setting
+// does not say xvfb; a display of the other kind is started anew (the
+// agent replaces it while no program uses it).
 func TestPlan(t *testing.T) {
+	const xvfb, xwl = agentproto.GUIXvfb, agentproto.GUIXwayland
 	for _, c := range []struct {
 		st       agentproto.GUIStatus
 		readOnly bool
+		asked    string
 		actions  string
 		stop     string
 	}{
-		{agentproto.GUIStatus{}, false, "", PhaseUnsupported},
-		{agentproto.GUIStatus{Supported: true, Running: true}, true, "", ""},
-		{agentproto.GUIStatus{Supported: true, Xvfb: "/usr/bin/Xvfb"}, true, "", PhaseNotRunning},
-		{agentproto.GUIStatus{Supported: true, Installable: true}, true, "", PhaseNotRunning},
-		{agentproto.GUIStatus{Supported: true}, false, "", PhaseUnavailable},
-		{agentproto.GUIStatus{Supported: true, Installable: true}, false, "install start", ""},
-		{agentproto.GUIStatus{Supported: true, Xvfb: "/usr/bin/Xvfb"}, false, "start", ""},
+		{agentproto.GUIStatus{}, false, DisplayAuto, "", PhaseUnsupported},
+		{agentproto.GUIStatus{Supported: true, Running: true}, true, DisplayAuto, "", ""},
+		{agentproto.GUIStatus{Supported: true, Xvfb: "/usr/bin/Xvfb"}, true, DisplayAuto, "", PhaseNotRunning},
+		{agentproto.GUIStatus{Supported: true, Installable: true}, true, DisplayAuto, "", PhaseNotRunning},
+		{agentproto.GUIStatus{Supported: true}, false, DisplayAuto, "", PhaseUnavailable},
+		{agentproto.GUIStatus{Supported: true, Installable: true}, false, DisplayAuto, "install start", ""},
+		{agentproto.GUIStatus{Supported: true, Xvfb: "/usr/bin/Xvfb"}, false, DisplayAuto, "start", ""},
+		// The GPU display needs no Xvfb; with xvfb asked for it is not used.
+		{agentproto.GUIStatus{Supported: true, GPUDisplay: true}, false, DisplayAuto, "start", ""},
+		{agentproto.GUIStatus{Supported: true, GPUDisplay: true}, false, DisplayXvfb, "", PhaseUnavailable},
+		{agentproto.GUIStatus{Supported: true, GPUDisplay: true, Installable: true}, false, DisplayXvfb, "install start", ""},
+		{agentproto.GUIStatus{Supported: true, GPUDisplay: true}, true, DisplayAuto, "", PhaseNotRunning},
+		// A display that runs: attached when it is of the kind wanted, or
+		// of an agent that names none; started anew otherwise, never in
+		// read-only mode.
+		{agentproto.GUIStatus{Supported: true, Running: true, Kind: xwl, GPUDisplay: true}, false, DisplayAuto, "", ""},
+		{agentproto.GUIStatus{Supported: true, Running: true, Kind: xvfb, GPUDisplay: true}, false, DisplayAuto, "start", ""},
+		{agentproto.GUIStatus{Supported: true, Running: true, Kind: xvfb, GPUDisplay: true}, true, DisplayAuto, "", ""},
+		{agentproto.GUIStatus{Supported: true, Running: true, Kind: xwl, GPUDisplay: true}, false, DisplayXvfb, "start", ""},
+		{agentproto.GUIStatus{Supported: true, Running: true, Kind: xvfb, GPUDisplay: true}, false, DisplayXvfb, "", ""},
+		{agentproto.GUIStatus{Supported: true, Running: true, Kind: xvfb}, false, DisplayAuto, "", ""},
+		{agentproto.GUIStatus{Supported: true, Running: true, GPUDisplay: true}, false, DisplayAuto, "", ""},
 	} {
-		actions, stop := plan(&c.st, c.readOnly)
+		actions, stop := plan(&c.st, c.readOnly, c.asked)
 		if strings.Join(actions, " ") != c.actions || stop != c.stop {
-			t.Errorf("plan(%+v, %v) = %v, %q", c.st, c.readOnly, actions, stop)
+			t.Errorf("plan(%+v, %v, %s) = %v, %q", c.st, c.readOnly, c.asked, actions, stop)
 		}
+	}
+}
+
+// On a machine with several NVIDIA GPUs browsers are told which one
+// windows of Vulkan programs come from. With the setting on and the
+// library installed, panes get it with the table of GPUs, before
+// VirtualGL's libraries; on the GPU display VirtualGL is not preloaded.
+func TestPaneEnvGPUs(t *testing.T) {
+	mg := testMachines()
+	zero := 0
+	status := func() *agentproto.GUIStatus {
+		return &agentproto.GUIStatus{Supported: true, Display: ":20", XAuthority: "/h/.x/run/xauth", Running: true, Kind: agentproto.GUIXvfb,
+			GPU: true, VGLPreload: "/usr/lib/libdlfaker.so:/usr/lib/libvglfaker.so", Pick: "/h/.x/gpupick/0123/gpupick.so",
+			GPUs: []agentproto.GUIGPU{
+				{Index: 0, Minor: 1, UUID: "GPU-70987003", Model: "A"},
+				{Index: 1, Minor: 0, UUID: "GPU-dd0ff3fe", Model: "A"},
+			}}
+	}
+	setup := func(m *Manager, st *agentproto.GUIStatus) State {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		d := m.get(mg.Get("m1"))
+		d.status, d.phase = st, PhaseReady
+		return m.stateLocked(d)
+	}
+	off := testManager(t)
+	st := setup(off, status())
+	if st.VulkanGPU == nil || *st.VulkanGPU != 1 || st.Pick || st.Display != agentproto.GUIXvfb {
+		t.Errorf("state = %+v", st)
+	}
+	if env := off.PaneEnv(mg.Get("m1")); env["LD_PRELOAD"] != "" || env["GPUPICK_TABLE"] != "" {
+		t.Errorf("setting off: %v", env)
+	}
+
+	on := testManager(t, "--gui-gpu-pick", "true")
+	if st := setup(on, status()); !st.Pick {
+		t.Errorf("state with the setting on = %+v", st)
+	}
+	env := on.PaneEnv(mg.Get("m1"))
+	if env["LD_PRELOAD"] != "/h/.x/gpupick/0123/gpupick.so" || env["GPUPICK_TABLE"] != "GPU-70987003=1,GPU-dd0ff3fe=0" ||
+		env["GPUPICK_MIXED"] != "" || env["GPUPICK_DISPLAY"] != "" || env["VGL_DISPLAY"] != "egl0" {
+		t.Errorf("env = %v", env)
+	}
+	// The GPU display draws with one of them; GPUs of two models.
+	gpu := status()
+	gpu.Kind, gpu.DisplayMinor, gpu.GPUs[1].Model = agentproto.GUIXwayland, &zero, "B"
+	if st := setup(on, gpu); st.Display != agentproto.GUIXwayland {
+		t.Errorf("state on the GPU display = %+v", st)
+	}
+	if env := on.PaneEnv(mg.Get("m1")); env["GPUPICK_DISPLAY"] != "0" || env["GPUPICK_MIXED"] != "1" {
+		t.Errorf("env on the GPU display = %v", env)
+	}
+	// Not without the library, nor with a single GPU.
+	missing := status()
+	missing.Pick = ""
+	if st := setup(on, missing); st.Pick {
+		t.Errorf("state without the library = %+v", st)
+	}
+	if env := on.PaneEnv(mg.Get("m1")); env["LD_PRELOAD"] != "" || env["DISPLAY"] != ":20" {
+		t.Errorf("env without the library = %v", env)
+	}
+	one := status()
+	one.GPUs = one.GPUs[:1]
+	if st := setup(on, one); st.Pick || st.VulkanGPU != nil {
+		t.Errorf("state with one GPU = %+v", st)
+	}
+	if env := on.PaneEnv(mg.Get("m1")); env["LD_PRELOAD"] != "" {
+		t.Errorf("env with one GPU = %v", env)
+	}
+
+	// With every program under VirtualGL: both libraries, gpupick first.
+	all := testManager(t, "--gui-gpu-pick", "true", "--gui-gpu", "all")
+	setup(all, status())
+	if env := all.PaneEnv(mg.Get("m1")); env["LD_PRELOAD"] != "/h/.x/gpupick/0123/gpupick.so:/usr/lib/libdlfaker.so:/usr/lib/libvglfaker.so" || env["VGL_ISACTIVE"] != "1" {
+		t.Errorf("gui-gpu=all env = %v", env)
+	}
+	setup(all, gpu)
+	if env := all.PaneEnv(mg.Get("m1")); env["LD_PRELOAD"] != "/h/.x/gpupick/0123/gpupick.so" || env["VGL_ISACTIVE"] != "" || env["VGL_DISPLAY"] != "egl0" {
+		t.Errorf("gui-gpu=all env on the GPU display = %v", env)
 	}
 }
 

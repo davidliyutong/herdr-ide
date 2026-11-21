@@ -33,7 +33,8 @@ terminals (they belong to the user and run in the terminal core).
 | VS Code extension host | code-server | 5 min after its window disconnects (`--reconnection-grace-time`) |
 | curl / wget (machine downloads) | the agent's `download` request | the download finishes, fails, or runs 20 min |
 | ssh ControlMaster (cores on Linux and macOS; Windows' OpenSSH has none) | OpenSSH | 10 min unused (`ControlPersist`), or its ServerAlive checks fail (1 min). When a session through it lost the agent while ssh kept running, or a connection probe through it timed out, the core tells it to take no new sessions (`ssh -O stop`); it then ends with the sessions still open through it, which may belong to other instances of the user |
-| Xvfb | itself (own session, see [14](14-gui-windows.md)) | 1 min after its last client (programs, the agent's window manager, the display keeper) disconnected (`-terminate`, armed by one connection right after start); not with the agent, so programs survive disconnects. xorg-server before 21.1: when its last client leaves; a server that never got a client stays until an agent attaches |
+| Xvfb, or Xwayland for a GPU display | itself (own session, see [14](14-gui-windows.md)) | 1 min after its last client (programs, the agent's window manager, the display keeper) disconnected (`-terminate`, armed by one connection right after start); not with the agent, so programs survive disconnects. xorg-server before 21.1: when its last client leaves; a server that never got a client stays until an agent attaches. Also ended by the agent to start one of the other kind, only while no program is connected |
+| the GPU display's compositor (`herdr-ide gui-wl`) | itself (own session), started by the agent with its Xwayland | its Xwayland exits or never starts (the other end of their socket pair closes) |
 | display keeper (`herdr-ide gui-keep`) | itself (own session, one per instance by `run/gui-keep.lock`) | the instance's terminal core no longer runs (checked every 5 s; a core restarted within 30 s is followed), or the display ends; so Xvfb ends soon after the terminal core and its programs |
 | video encoder | the agent's window manager (own process group) | 5 s without frames, the window no longer watched, resized or gone, video turned off, or the agent exits |
 | `apt-get download xvfb` | the agent's `install` request | the download finishes, fails, or runs 5 min |
@@ -67,14 +68,16 @@ terminals (they belong to the user and run in the terminal core).
 | `code-server/<version>/` | removed after 14 days unused; touched on start |
 | `code-server/.download-*`, `.install-*` | removed when the download or install ends; left by a killed agent, removed with unused versions after 14 days |
 | `xvfb/<version>/` | removed after 14 days unused when another version is unpacked; touched on start |
+| `gpupick/<sha256 prefix>/` | removed after 14 days unused when another build is installed; touched when a display's status is read; `gpupick/.fetch-*` of an install that did not finish after 1 h |
 | `xvfb/.fetch-*` | removed when the install ends; left by a killed agent, removed by the next agent after 1 h |
 | `video/<digest prefix>/` | removed after 14 days unused when another build is installed |
-| `run/gui.json`, `run/xauth`, `run/xauth.server` | kept: the reserved display stays valid for panes; the cookie is replaced at each Xvfb start |
+| `run/gui.json`, `run/xauth`, `run/xauth.server` | kept: the reserved display stays valid for panes; the cookie is replaced at each start of the display |
 | download cache (core host) | kept; legacy caches after renames are removed |
 | settings, keybindings and machines files (core host) | one file each per instance, replaced whole on change |
 
-Directories are per instance except `agent/`, `code-server/`, `xvfb/` and
-`video/`, which are shared and therefore never deleted while recently used.
+Directories are per instance except `agent/`, `code-server/`, `xvfb/`,
+`gpupick/` and `video/`, which are shared and therefore never deleted while
+recently used.
 The full list of paths is in [reference](../reference.md#files-and-directories).
 
 ## Alternatives considered

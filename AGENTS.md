@@ -26,9 +26,10 @@ extension.
 | --- | --- |
 | Install JS deps | `make deps` |
 | Unit tests (Go + web + desktop) | `make test` |
-| All checks (gofmt, vet, also for linux/amd64, darwin/arm64 and windows/amd64, tsc, prettier, no import cycles among the web UI's modules, brand/doc/README consistency, generated tokens, the terminal emulator's digest, shared test vectors run by the web tests) | `make check` |
+| All checks (gofmt, vet, also for linux/amd64, darwin/arm64 and windows/amd64, tsc, prettier, no import cycles among the web UI's modules, brand/doc/README consistency, generated tokens, the terminal emulator's digest, the GPU selection library's digests, shared test vectors run by the web tests) | `make check` |
 | Regenerate the design tokens' CSS and Go after editing `design/tokens.json`, and `design/generated/registry.json` with the settings and commands tables of `docs/reference.md` after changing settings or commands | `make tokens` |
 | Rebuild the web UI's terminal emulator (Ghostty's libghostty-vt as WebAssembly; zig 0.17) | `make vt-wasm` |
+| Rebuild the library machines preload to show a program only the GPUs of its `CUDA_VISIBLE_DEVICES` (`scripts/gpupick`; zig 0.17) | `make gpupick` |
 | Integration test with a real terminal core (`HC_TEST_BIN=<herdr-core>`; the pinned one: `go run ./scripts/fetch-hc -exe <file> <os>/<arch>`) | `make it` |
 | Full build into `dist/` | `make build` (or `scripts/build.sh`) |
 | Desktop app of this system (macOS, Windows, Linux): unpacked / installers (DMG and zip, NSIS setup, AppImage and deb) | `make desktop-app` / `make desktop-dist` (`scripts/desktop.sh app` / `dist` in Git Bash on Windows) |
@@ -113,6 +114,10 @@ playbooks):
   change it only with `make vt-wasm` (zig 0.17), which rewrites the digest;
   libghostty-vt's functions read and write wasm memory, whose buffer may
   change after any call, so take views again after each one.
+- `internal/agent/gpupick/*.so` are build artifacts of
+  `scripts/gpupick/gpupick.c` with recorded digests, of the source too:
+  after changing the source run `make gpupick` (zig 0.17) and commit the
+  libraries with it. Its tests run on Linux only (`TestGPUPick`).
 - yamux streams cannot be half-closed: use `agentproto.ChunkWriter` for
   uploads that expect a reply.
 - `web/dist` is embedded at build time; run `pnpm -C web build` (or

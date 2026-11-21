@@ -50,7 +50,8 @@ settings per browser; theming terminal applications.
   and `notifications`; code-server's advanced `codeServer`
   (`codeServer.install`, `codeServer.path`, scope `machine`: one machine is
   offline, another has its own code-server); the program windows' advanced
-  `gui` (`gui.enabled`, `gui.gpu`, `gui.video`, scope `remote-machine`);
+  `gui` (`gui.enabled`, `gui.display`, `gui.gpu`, `gui.gpuPick`, `gui.video`,
+  scope `remote-machine`);
   the user interfaces' advanced `performance`
   (`performance.keptTerminals`: how many terminals a page keeps attached
   while they are not shown, 12 by default, 0 to 64,
@@ -128,7 +129,8 @@ settings per browser; theming terminal applications.
   at each start, GUI settings when a display is prepared or a frame is
   sent.
 - The flags that lock settings are `--code-server-install`,
-  `--code-server-path`, `--gui`, `--gui-gpu` and `--gui-video`
+  `--code-server-path`, `--gui`, `--gui-display`, `--gui-gpu`,
+  `--gui-gpu-pick` and `--gui-video`
   (`Def.Flag`, registered with the other flags by `RegisterFlags`). A
   locked setting reports `source: flag` and `locked`, the UI shows it
   disabled with the flag's name, and changes to it, global or per

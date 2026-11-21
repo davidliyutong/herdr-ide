@@ -26,29 +26,33 @@ import (
 	"time"
 
 	"github.com/jezek/xgb"
+	"github.com/jezek/xgb/xproto"
 
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/brand"
 )
 
 // gui provides the virtual display that programs in terminals draw their
-// windows on (see docs/features/14-gui-windows.md). It is Xvfb, found on the
-// machine or unpacked from the distribution's package in user space, so no
-// privileged installation is needed.
+// windows on (see docs/features/14-gui-windows.md). It is an X server of one
+// of two kinds: Xwayland drawing with a GPU, with the agent's own compositor
+// (guiwl.go), where the machine has an Xwayland and a GPU; else Xvfb, found
+// on the machine or unpacked from the distribution's package in user space.
+// Neither needs a privileged installation.
 //
 // Ownership and reclamation: the display number is reserved in run/gui.json,
-// so panes keep a valid environment across restarts; each Xvfb start writes
-// a new cookie to run/xauth.server (Xvfb's) and run/xauth (the panes'). Xvfb
-// runs in its own session and outlives the agent (programs would die with
-// their display); it exits by itself guiIdleSeconds after its last client
-// disconnected (-terminate). The display keeper (guikeep.go) is a client
-// while the instance's terminal core runs.
+// so panes keep a valid environment across restarts; each start writes a new
+// cookie to run/xauth.server (the server's) and run/xauth (the panes'). The
+// server runs in its own session and outlives the agent (programs would die
+// with their display); it exits by itself guiIdleSeconds after its last
+// client disconnected (-terminate), and Xwayland's compositor with it. The
+// display keeper (guikeep.go) is a client while the instance's terminal
+// core runs.
 //
 // Other users can bind X sockets in /tmp, abstract ones included, and X
 // clients cannot tell which server they reach. So a display number is only
 // used while no other user's lock file, socket or listener is on it, and the
-// agent sends the cookie only to a server whose peer credentials are this
-// instance's Xvfb.
+// agent sends the cookie only to a server whose peer credentials are the
+// one this instance started.
 type gui struct {
 	a  *Agent
 	mu sync.Mutex
@@ -63,6 +67,14 @@ type gui struct {
 	videoMu    sync.Mutex
 	videoBin   string
 	videoKinds []string
+
+	// accelErr is why the GPU display did not start, since when this agent
+	// starts the plain one; pickOK the GPU selection library once checked.
+	accelMu       sync.Mutex
+	accelErr      string
+	pickMu        sync.Mutex
+	pickOK        string
+	pickInstallMu sync.Mutex
 }
 
 const (
@@ -70,17 +82,34 @@ const (
 	// window manager is a client while an agent is connected, the keeper
 	// while the terminal core runs.
 	guiIdleSeconds = 60
-	// guiScreen is the size of the virtual screen; windows larger than it
-	// still work, but input reaches only the part on the screen.
-	guiScreen = "2560x1440x24"
+	// guiWidth and guiHeight are the size of the virtual screen; windows
+	// larger than it still work, but input reaches only the part on the
+	// screen.
+	guiWidth, guiHeight = 2560, 1440
 	// guiFirstDisplay leaves the low numbers to real X servers.
 	guiFirstDisplay = 20
 )
+
+func guiScreenSize() (w, h int) { return guiWidth, guiHeight }
 
 type guiState struct {
 	Display int    `json:"display"`
 	Pid     int    `json:"pid,omitempty"`
 	Bin     string `json:"bin,omitempty"`
+	// Kind is the kind of the server Pid; Node and Minor the GPU a GPU
+	// display draws with (its render node, and its NVIDIA minor if any).
+	Kind  string `json:"kind,omitempty"`
+	Node  string `json:"node,omitempty"`
+	Minor *int   `json:"minor,omitempty"`
+}
+
+// kind is the kind of the display server of st; servers started by earlier
+// builds were all Xvfb.
+func (st guiState) kind() string {
+	if st.Kind == "" {
+		return agentproto.GUIXvfb
+	}
+	return st.Kind
 }
 
 type vglInfo struct {
@@ -480,7 +509,7 @@ func (g *gui) prune(keep string) {
 	}
 }
 
-// running reports whether the Xvfb this instance started serves display n:
+// running reports whether the server this instance started serves display n:
 // every socket a client may reach (on Linux the abstract one too, which
 // clients try first) answers with that process and our user.
 func (g *gui) running(n int) bool {
@@ -497,8 +526,9 @@ func (g *gui) running(n int) bool {
 	return true
 }
 
-// terminateArgs makes Xvfb exit guiIdleSeconds after its last client left.
-// The delay needs xorg-server 21.1; older servers exit at once instead.
+// terminateArgs makes a display server exit guiIdleSeconds after its last
+// client left. The delay needs xorg-server 21.1; older servers exit at once
+// instead.
 func terminateArgs(bin string) (args []string, delay bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -511,8 +541,11 @@ func terminateArgs(bin string) (args []string, delay bool) {
 	return []string{"-terminate"}, false
 }
 
-// start runs Xvfb on the reserved display unless it is running.
-func (g *gui) start() error {
+// start runs a display server on the reserved display unless one runs: the
+// GPU display when asked is not GUIXvfb and the machine can run it, Xvfb
+// otherwise and when the GPU display does not come up. A display of the
+// other kind is replaced while no program uses it.
+func (g *gui) start(asked string) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	defer g.lock()()
@@ -520,13 +553,54 @@ func (g *gui) start() error {
 	if err != nil {
 		return err
 	}
+	kind := g.wanted(asked)
 	if g.running(n) {
-		return nil
+		st := g.readState()
+		if st.kind() == kind {
+			return nil
+		}
+		if pid := g.user(n); pid != 0 {
+			comm, _ := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/comm")
+			g.a.logger.Printf("gui: display :%d stays %s while process %d (%s) uses it", n, st.kind(), pid, strings.TrimSpace(string(comm)))
+			return nil
+		}
+		g.a.logger.Printf("gui: replacing the %s display :%d by %s", st.kind(), n, kind)
+		g.stop(n, st)
 	}
-	bin := g.findXvfb()
-	if bin == "" {
+	if kind == agentproto.GUIXwayland {
+		err := g.startServer(n, kind)
+		if err == nil {
+			return nil
+		}
+		// Not tried again by this agent: the plain display serves until
+		// the machine connects anew.
+		g.a.logger.Printf("gui: the GPU display did not start, using Xvfb: %v", err)
+		g.accelMu.Lock()
+		g.accelErr = err.Error()
+		g.accelMu.Unlock()
+		if g.findXvfb() == "" {
+			return fmt.Errorf("the GPU display did not start (%v) and Xvfb is not installed", err)
+		}
+	}
+	return g.startServer(n, agentproto.GUIXvfb)
+}
+
+// startServer starts a display server of kind on display n and waits until
+// it serves it.
+func (g *gui) startServer(n int, kind string) error {
+	st := guiState{Display: n, Kind: kind}
+	var gpu gpuDisplay
+	if kind == agentproto.GUIXwayland {
+		var ok bool
+		if gpu, ok = g.gpuDisplay(); !ok {
+			return errors.New("no Xwayland or no GPU that can be opened")
+		}
+		st.Bin, st.Node, st.Minor = gpu.bin, gpu.node, gpu.minor
+	} else if st.Bin = g.findXvfb(); st.Bin == "" {
 		return errors.New("Xvfb is not installed")
 	}
+	bin := st.Bin
+	name := filepath.Base(bin)
 	if err := g.newCookie(n); err != nil {
 		return err
 	}
@@ -536,51 +610,137 @@ func (g *gui) start() error {
 		_ = os.Chtimes(dir, now, now) // in use: keep it in cleanups
 	}
 	terminate, delay := terminateArgs(bin)
-	args := append([]string{fmt.Sprintf(":%d", n),
-		"-nolisten", "tcp", "-auth", g.serverAuthPath(),
-		"-screen", "0", guiScreen}, terminate...)
-	cmd := exec.Command(bin, args...)
+	if kind == agentproto.GUIXwayland && !delay {
+		// The check that it draws with the GPU is a client that leaves.
+		return errors.New("this Xwayland exits with its first client (no -terminate delay)")
+	}
+	args := []string{fmt.Sprintf(":%d", n), "-nolisten", "tcp", "-auth", g.serverAuthPath()}
+	if kind == agentproto.GUIXwayland {
+		args = append(args, "-geometry", fmt.Sprintf("%dx%d", guiWidth, guiHeight))
+	} else {
+		args = append(args, "-screen", "0", fmt.Sprintf("%dx%dx24", guiWidth, guiHeight))
+	}
+	cmd := exec.Command(bin, append(args, terminate...)...)
 	cmd.Env = cleanEnv()
 	// Its own session: it survives the agent and the ssh connection.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	logPath := filepath.Join(g.a.base, "xvfb.log")
-	if lf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600); err == nil {
+	if kind == agentproto.GUIXwayland {
+		logPath = filepath.Join(g.a.base, "xwayland.log")
+	}
+	lf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC|os.O_APPEND, 0o600)
+	if err == nil {
 		cmd.Stdout = lf
 		cmd.Stderr = lf
 		defer lf.Close()
+	}
+	if kind == agentproto.GUIXwayland {
+		// The compositor and Xwayland talk over a socket pair: no Wayland
+		// socket exists that another program could connect to. Each has
+		// its end as file descriptor 3.
+		// Close-on-exec, so that no other program the agent starts
+		// meanwhile inherits an end.
+		syscall.ForkLock.RLock()
+		pair, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+		if err == nil {
+			syscall.CloseOnExec(pair[0])
+			syscall.CloseOnExec(pair[1])
+		}
+		syscall.ForkLock.RUnlock()
+		if err != nil {
+			return err
+		}
+		ends := []*os.File{os.NewFile(uintptr(pair[0]), "compositor"), os.NewFile(uintptr(pair[1]), "xwayland")}
+		defer ends[0].Close()
+		defer ends[1].Close()
+		comp, err := compositorCommand(gpu.node, gpu.nvidia)
+		if err != nil {
+			return err
+		}
+		comp.Env = append(comp.Env, cleanEnv()...)
+		comp.Dir = g.a.home
+		comp.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		comp.ExtraFiles = []*os.File{ends[0]}
+		if lf != nil {
+			comp.Stderr = lf
+		}
+		if err := comp.Start(); err != nil {
+			return err
+		}
+		// It ends when Xwayland does, also one that never starts: the
+		// other end of the pair is then closed everywhere.
+		go comp.Wait()
+		cmd.ExtraFiles = []*os.File{ends[1]}
+		env := []string{"WAYLAND_SOCKET=3"}
+		for _, kv := range cmd.Env {
+			if !strings.HasPrefix(kv, "WAYLAND_") {
+				env = append(env, kv)
+			}
+		}
+		cmd.Env = env
 	}
 	if err := cmd.Start(); err != nil {
 		return err
 	}
 	exited := make(chan struct{})
 	go func() { cmd.Wait(); close(exited) }()
-	g.writeState(guiState{Display: n, Pid: cmd.Process.Pid, Bin: bin})
+	st.Pid = cmd.Process.Pid
+	g.writeState(st)
+	giveUp := func() {
+		cmd.Process.Signal(syscall.SIGTERM)
+		select {
+		case <-exited:
+		case <-time.After(5 * time.Second):
+			cmd.Process.Kill()
+			<-exited
+		}
+		os.Remove(xSocket(n))
+		os.Remove(xLock(n))
+	}
 	deadline := time.After(15 * time.Second)
 	for !g.running(n) {
 		select {
 		case <-exited:
 			out, _ := os.ReadFile(logPath)
-			return fmt.Errorf("Xvfb exited: %s", lastN(string(out), 600))
+			return fmt.Errorf("%s exited: %s", name, lastN(string(out), 600))
 		case <-deadline:
 			// Not answering, or someone else answers on one of its sockets.
 			cmd.Process.Kill()
-			return fmt.Errorf("Xvfb did not take display :%d within 15 s", n)
+			return fmt.Errorf("%s did not take display :%d within 15 s", name, n)
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
 	// -terminate counts from the last client leaving: one connection arms
 	// it, so a display nobody attaches to still exits. (Without the delay
 	// the server would exit right away; the next attach is its first client.)
-	if delay {
-		if x, err := g.connect(n); err == nil {
-			x.Close()
+	if kind != agentproto.GUIXwayland {
+		if delay {
+			if x, err := g.connect(n); err == nil {
+				x.Close()
+			}
 		}
+		return nil
+	}
+	// Without DRI3 Xwayland draws on the CPU (its GPU did not work): Xvfb
+	// does the same with less.
+	x, err := g.connect(n)
+	if err != nil {
+		giveUp()
+		return err
+	}
+	r, err := xproto.QueryExtension(x, 4, "DRI3").Reply()
+	x.Close()
+	if err != nil || !r.Present {
+		giveUp()
+		out, _ := os.ReadFile(logPath)
+		return fmt.Errorf("Xwayland does not draw with the GPU of %s: %s", gpu.node, lastN(string(out), 600))
 	}
 	return nil
 }
 
 // connect opens an X connection to display n, sending the cookie only to
-// this instance's Xvfb (checked on the connection and on every socket).
+// this instance's display server (checked on the connection and on every
+// socket).
 func (g *gui) connect(n int) (*xgb.Conn, error) {
 	cookie, err := g.serverCookie()
 	if err != nil {
@@ -592,7 +752,7 @@ func (g *gui) connect(n int) (*xgb.Conn, error) {
 	}
 	if pid, uid, err := peerCred(conn.(*net.UnixConn)); err != nil || uid != os.Getuid() || pid != g.readState().Pid || !g.running(n) {
 		conn.Close()
-		return nil, fmt.Errorf("display :%d is not served by this instance's Xvfb", n)
+		return nil, fmt.Errorf("display :%d is not served by this instance's display server", n)
 	}
 	x, err := xgb.NewConnNetWithCookieHex(conn, hex.EncodeToString(cookie))
 	if err != nil {
@@ -679,6 +839,8 @@ func (g *gui) status() *agentproto.GUIStatus {
 	}
 	st.Xvfb = g.findXvfb()
 	st.Installable = st.Xvfb == "" && installable()
+	st.GPUs = nvidiaGPUs()
+	_, st.GPUDisplay = g.gpuDisplay()
 	unlock := g.lock()
 	n, err := g.display()
 	unlock()
@@ -689,6 +851,14 @@ func (g *gui) status() *agentproto.GUIStatus {
 	st.Display = fmt.Sprintf(":%d", n)
 	st.XAuthority = g.xauthPath()
 	st.Running = g.running(n)
+	if st.Running {
+		cur := g.readState()
+		st.Kind = cur.kind()
+		if st.Kind == agentproto.GUIXwayland {
+			st.DisplayMinor = cur.Minor
+		}
+	}
+	st.Pick = g.pickPath()
 	if v := g.virtualGL(); v.run != "" {
 		st.VGL, st.GPU, st.VGLPreload = v.run, v.gpu, v.preload
 	}
@@ -741,7 +911,15 @@ func (g *gui) handle(ctx context.Context, st net.Conn, h agentproto.Header) erro
 			return agentproto.Fail(st, err)
 		}
 	case "start":
-		if err := g.start(); err != nil {
+		asked := agentproto.GUIDisplayAuto
+		if len(h.Args) > 0 {
+			asked = h.Args[0]
+		}
+		if err := g.start(asked); err != nil {
+			return agentproto.Fail(st, err)
+		}
+	case "pick":
+		if err := g.installPick(); err != nil {
 			return agentproto.Fail(st, err)
 		}
 	case "shells":

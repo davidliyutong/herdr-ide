@@ -154,13 +154,15 @@ func TestRevealFailures(t *testing.T) {
 func TestRevealLeavesTheFileManager(t *testing.T) {
 	env := testEnv(t)
 	shortWait(t, 5*time.Second)
-	fakeReveal(t, "sleep 3 &\necho 'file manager started' >&2\nexit 0\n")
+	fakeReveal(t, "sleep 30 &\necho 'file manager started' >&2\nexit 0\n")
 	for i := 0; i < maxRevealing+2; i++ {
 		start := time.Now()
 		if rep := call(t, env, "reveal", Params{Path: "~"}); !rep.OK {
 			t.Fatalf("reveal %d: %s %s", i, rep.Code, rep.Error)
 		}
-		if d := time.Since(start); d > 2*time.Second {
+		// Well below the wait's limit, which an answer that waited for the
+		// window would take, with room for a loaded machine.
+		if d := time.Since(start); d > 4*time.Second {
 			t.Fatalf("reveal %d answered after %v", i, d)
 		}
 		if len(revealGate) != 0 {

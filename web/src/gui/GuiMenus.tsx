@@ -167,7 +167,16 @@ export function GuiMachineStatus({ m }: { m: string }) {
   return (
     <span className={`gui-state ${st.phase}`} title={st.error}>
       {t(`gui.state.${st.phase}` as 'gui.state.ready')}
-      {st.gpu && st.phase === 'ready' && ' · GPU'}
+      {st.phase === 'ready' && st.display === 'xwayland' && ` · ${t('gui.state.gpuDisplay')}`}
+      {st.gpu && st.phase === 'ready' && ' · VirtualGL'}
+      {st.phase === 'ready' && st.vulkan_gpu !== undefined && (
+        <span
+          data-vulkan-gpu={st.vulkan_gpu}
+          title={t(st.pick ? 'gui.state.vulkanPick.desc' : 'gui.state.vulkanGpu.desc', { n: st.vulkan_gpu })}
+        >
+          {` · ${t(st.pick ? 'gui.state.vulkanPick' : 'gui.state.vulkanGpu', { n: st.vulkan_gpu })}`}
+        </span>
+      )}
     </span>
   );
 }

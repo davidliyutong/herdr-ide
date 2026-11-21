@@ -62,8 +62,10 @@
     两个开关相互独立，在桌面应用中打开 VS Code 不会让浏览器里也打开。
 - **程序窗口**：远端 Linux 机器上程序打开的窗口（matplotlib、MuJoCo 查看器、Qt 工具等）会以浏览器窗口的形式出现，一个程序窗口对应一个浏览器窗口，支持鼠标和键盘。
   终端会自动获得虚拟显示（之前打开的 shell 可以从它的菜单补上）；
-  机器上没有 Xvfb 时会以普通用户身份获取，无需 root；
+  机器有 GPU 和 Xwayland 时，显示由 GPU 绘制，OpenGL 和 Vulkan 程序（如 Isaac Sim）直接在 GPU 上渲染；
+  其他机器使用 Xvfb，机器上没有时会以普通用户身份获取，无需 root；
   装有 VirtualGL 的机器可用 GPU 渲染 OpenGL。
+  在有多张 NVIDIA 显卡的机器上，程序可以从 `CUDA_VISIBLE_DEVICES` 指定的那张卡显示窗口。
   持续变化的窗口以视频传输给能解码的浏览器（NVIDIA、Intel、AMD 显卡上用 H.264，否则用 VP8），静止的窗口以精确的图片传输。
 - **快速查看**：在终端里 ⌘/Ctrl+点击或右键路径（折成多行的长路径也可以），即可在预览窗格里预览图片、GIF、视频（可拖动进度）、音频、PDF、文本和目录。
   代码按约 125 种语言着色，用的是 VS Code 同款语法（Makefile、TOML、Dockerfile 和没有扩展名的脚本也认得），编辑器和 diff 里同样如此，Markdown 文件直接显示渲染结果。

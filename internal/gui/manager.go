@@ -4,6 +4,8 @@ import (
 	"log"
 	"net"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -97,6 +99,59 @@ func (m *Manager) gpu(machine string) string {
 	return m.Settings.String(SettingGPU, machine)
 }
 
+// displayKind is the kind of display asked for on the machine.
+func (m *Manager) displayKind(machine string) string {
+	if m.Settings == nil {
+		return DisplayAuto
+	}
+	return m.Settings.String(SettingDisplay, machine)
+}
+
+// pick tells whether programs of the machine's new panes see only the GPUs
+// of their CUDA_VISIBLE_DEVICES.
+func (m *Manager) pick(machine string) bool {
+	return m.Settings != nil && m.Settings.Bool(SettingGPUPick, machine)
+}
+
+// vulkanGPU is the GPU of a machine with several NVIDIA GPUs that the
+// driver shows windows of Vulkan programs from: its first one, the one
+// with the lowest minor; nil elsewhere.
+func vulkanGPU(st *agentproto.GUIStatus) *agentproto.GUIGPU {
+	if st == nil || len(st.GPUs) < 2 {
+		return nil
+	}
+	first := &st.GPUs[0]
+	for i := range st.GPUs {
+		if st.GPUs[i].Minor < first.Minor {
+			first = &st.GPUs[i]
+		}
+	}
+	return first
+}
+
+// pickEnv is what the library gpupick reads in a pane's environment
+// (scripts/gpupick/gpupick.c), nil when the pane gets none: the setting is
+// off, the machine has no second NVIDIA GPU or the library is not there.
+func (m *Manager) pickEnv(machine string, st *agentproto.GUIStatus) map[string]string {
+	if !m.pick(machine) || vulkanGPU(st) == nil || st.Pick == "" {
+		return nil
+	}
+	var table []string
+	mixed := false
+	for _, g := range st.GPUs {
+		table = append(table, g.UUID+"="+strconv.Itoa(g.Minor))
+		mixed = mixed || g.Model != st.GPUs[0].Model
+	}
+	env := map[string]string{"LD_PRELOAD": st.Pick, "GPUPICK_TABLE": strings.Join(table, ",")}
+	if mixed {
+		env["GPUPICK_MIXED"] = "1"
+	}
+	if st.DisplayMinor != nil {
+		env["GPUPICK_DISPLAY"] = strconv.Itoa(*st.DisplayMinor)
+	}
+	return env
+}
+
 // get returns the display record of a machine; m.mu is held.
 func (m *Manager) get(mc *machines.Machine) *display {
 	d := m.ds[mc.ID()]
@@ -122,6 +177,13 @@ func (m *Manager) stateLocked(d *display) State {
 	}
 	if d.status != nil {
 		st.GPU = d.status.GPU
+		if g := vulkanGPU(d.status); g != nil {
+			st.VulkanGPU = &g.Index
+		}
+		if d.phase == PhaseReady {
+			st.Display = d.status.Kind
+			st.Pick = m.pickEnv(d.mc.ID(), d.status) != nil
+		}
 	}
 	for _, id := range d.order {
 		if w := d.windows[id]; w != nil {
@@ -161,10 +223,19 @@ func (m *Manager) PaneEnv(mc *machines.Machine) map[string]string {
 		return nil
 	}
 	env := map[string]string{"DISPLAY": d.status.Display, "XAUTHORITY": d.status.XAuthority}
+	for k, v := range m.pickEnv(mc.ID(), d.status) {
+		env[k] = v
+	}
 	if d.status.GPU {
 		env["VGL_DISPLAY"] = "egl0"
-		if m.gpu(mc.ID()) == GPUAll && d.status.VGLPreload != "" {
-			env["LD_PRELOAD"] = d.status.VGLPreload
+		// On the GPU display OpenGL renders on the GPU by itself; running
+		// every program under VirtualGL would only add a copy of each frame.
+		if m.gpu(mc.ID()) == GPUAll && d.status.VGLPreload != "" && d.status.Kind != agentproto.GUIXwayland {
+			if pick := env["LD_PRELOAD"]; pick != "" {
+				env["LD_PRELOAD"] = pick + ":" + d.status.VGLPreload
+			} else {
+				env["LD_PRELOAD"] = d.status.VGLPreload
+			}
 			env["VGL_ISACTIVE"] = "1"
 		}
 	}

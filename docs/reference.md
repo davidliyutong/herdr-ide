@@ -15,6 +15,7 @@ here; both READMEs link to this page instead of repeating it.
 | `herdr-ide agent [--instance NAME]` | Per-machine helper, speaking the core's protocol on stdin and stdout; started by the core over ssh, never by hand. Linux and macOS. |
 | `~/.herdr-ide[-<instance>]/bin/herdr-ide-mcp` | The same MCP server on a machine, a link to the binary the core uploaded there (the same program, built without the server and the UI: it has `mcp`, `agent`, `gui-keep` and `version`); started by the stable link's name it takes no arguments and asks the agent of the data directory the link is in. |
 | `herdr-ide gui-keep --instance NAME` | Holds a machine's virtual display while the instance's terminal core runs; started by the agent, never by hand. |
+| `herdr-ide gui-wl --device NODE [--nvidia]` | The compositor of a machine's GPU display: a Wayland server that shows nothing, for the one Xwayland on the socket it inherits as file descriptor 3, which it tells to draw with the GPU of the render node (`--nvidia`: offering NVIDIA's buffer layouts); started by the agent, never by hand. |
 
 ## `serve` flags
 
@@ -57,7 +58,9 @@ here; both READMEs link to this page instead of repeating it.
 | Flag | Default | Description |
 | --- | --- | --- |
 | `--gui` | `true` | Show windows of programs on remote Linux machines in browser windows: new panes get a virtual display (`DISPLAY`, `XAUTHORITY`); Xvfb is fetched in user space when missing. Applies to panes created afterwards. `true` or `false` (`on` and `off` are accepted too). The setting `gui.enabled`. |
-| `--gui-gpu` | `vglrun` | OpenGL on machines with VirtualGL: `vglrun` (programs started with `vglrun` render on the GPU) or `all` (every program in new panes runs under VirtualGL). The setting `gui.gpu`. |
+| `--gui-display` | `auto` | The virtual display: `auto` (Xwayland drawing with a GPU, with the agent's own compositor, where the machine has an Xwayland and a GPU whose render node the user may open, so OpenGL and Vulkan programs render on the GPU; Xvfb elsewhere and when that does not come up) or `xvfb` (always Xvfb). A display changes kind while no program is connected to it. The setting `gui.display`. |
+| `--gui-gpu` | `vglrun` | OpenGL on machines with VirtualGL: `vglrun` (programs started with `vglrun` render on the GPU) or `all` (every program in new panes runs under VirtualGL, except on a display that draws with the GPU). The setting `gui.gpu`. |
+| `--gui-gpu-pick` | `false` | On machines with several NVIDIA GPUs, preload the library gpupick into the programs of new panes: a program started with `CUDA_VISIBLE_DEVICES` sees only the GPUs it names (its indices are rewritten to count among those), so a Vulkan program shows its window from the chosen GPU instead of only from the driver's first one. `true` or `false`. The setting `gui.gpuPick`. |
 | `--gui-video` | `true` | Send program windows that keep changing as video (H.264 on machines with an NVIDIA, Intel or AMD GPU, else VP8 on the CPU) to browsers that decode it with WebCodecs, encoded on the machine by the encoder the core brings; pictures otherwise, and always with `false` (`on`/`off` accepted). Release builds embed the encoder; a build without it (no `scripts/build-ffmpeg.sh` before `make build`) sends pictures. The setting `gui.video`. |
 
 These flags set settings ([settings](#settings)); the settings dialog and the
@@ -186,7 +189,9 @@ in the UI; a setting with a scope can have its own value per machine, under
 | `vault.runMaxTimeout` | integer, 5–3600 | `600` | – | – |
 | `vault.runOutput` | integer, 4–1024 | `64` | – | – |
 | `gui.enabled` | `true`, `false` | `true` | `--gui` | per remote machine |
+| `gui.display` | `auto`, `xvfb` | `"auto"` | `--gui-display` | per remote machine |
 | `gui.gpu` | `vglrun`, `all` | `"vglrun"` | `--gui-gpu` | per remote machine |
+| `gui.gpuPick` | `true`, `false` | `false` | `--gui-gpu-pick` | per remote machine |
 | `gui.video` | `true`, `false` | `true` | `--gui-video` | per remote machine |
 | `performance.keptTerminals` | integer, 0–64 | `12` | – | – |
 
@@ -502,6 +507,8 @@ On every machine (the agent's `$HOME`):
 | `~/.herdr-ide/xvfb/<version>/` | Xvfb unpacked from the distribution's package (shared by instances) | Versions unused for 14 days are removed when another is unpacked. |
 | `~/.herdr-ide/video/<sha256 prefix>/encoder` | Video encoder pushed by the core (`gui-video`, shared by instances), run only while its SHA-256 matches | Builds unused for 14 days are removed when another is installed; unfinished installs after 1 h. |
 | `~/.herdr-ide[-<instance>]/xvfb.log` | Output of the last Xvfb started | Replaced at each start. |
+| `~/.herdr-ide[-<instance>]/xwayland.log` | Output of the last Xwayland started for a GPU display, and of its compositor | Replaced at each start. |
+| `~/.herdr-ide/gpupick/<sha256 prefix>/gpupick.so` | The library that shows a program only the GPUs of its `CUDA_VISIBLE_DEVICES` (0600, shared by instances), written by the agent when `gui.gpuPick` is on for a machine with several NVIDIA GPUs | Builds unused for 14 days are removed when another is installed. |
 | `~/.herdr-ide[-<instance>]/gui-keep.log` | Output of the last display keeper | Replaced at each start. |
 | `~/.herdr-ide[-<instance>]/cs-data/`, `cs-ext/` | VS Code settings, extensions | Kept; logs older than 7 days are pruned. |
 | `~/.herdr-ide[-<instance>]/uploads/` | Pasted and dropped files | Files older than 7 days are pruned. |

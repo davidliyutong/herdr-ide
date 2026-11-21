@@ -150,6 +150,13 @@ export const en = {
   'gui.state.installing': 'Fetching Xvfb',
   'gui.state.starting': 'Starting',
   'gui.state.ready': 'Ready',
+  'gui.state.gpuDisplay': 'GPU display',
+  'gui.state.vulkanGpu': 'Vulkan windows from GPU {n} only',
+  'gui.state.vulkanGpu.desc':
+    'NVIDIA’s driver shows windows of Vulkan programs only from this GPU (as nvidia-smi counts them). A program that renders on another one, such as Isaac Sim started with another CUDA_VISIBLE_DEVICES, fails to create its swapchain. “Follow CUDA_VISIBLE_DEVICES” in these settings lifts this.',
+  'gui.state.vulkanPick': 'Vulkan windows from GPU {n} or CUDA_VISIBLE_DEVICES',
+  'gui.state.vulkanPick.desc':
+    'Programs of new panes started with CUDA_VISIBLE_DEVICES see only the GPUs it names and show their windows from them; others show Vulkan windows from GPU {n} (as nvidia-smi counts them).',
   'gui.state.error': 'Error',
   'gui.state.not_running': 'Not running (read-only)',
   'gui.state.disconnected': 'Not connected',
@@ -637,9 +644,17 @@ export const en = {
   'settings.gui.enabled': 'Show program windows',
   'settings.gui.enabled.desc':
     'Windows of programs on remote Linux machines (matplotlib, MuJoCo, …) open in browser windows. Applies to panes created afterwards.',
+  'settings.gui.display': 'Display',
+  'settings.gui.display.desc':
+    'Automatic uses a display that draws with the GPU (Xwayland) where the machine has a GPU and an Xwayland: OpenGL and Vulkan programs render on the GPU without vglrun. Elsewhere, and with Xvfb chosen, the display draws in memory. A display changes kind while no program has a window or a connection on it.',
+  'settings.gui.display.auto': 'Automatic',
+  'settings.gui.display.xvfb': 'Xvfb',
+  'settings.gui.gpuPick': 'Follow CUDA_VISIBLE_DEVICES',
+  'settings.gui.gpuPick.desc':
+    'On machines with several NVIDIA GPUs, a program started with CUDA_VISIBLE_DEVICES sees only the GPUs it names, as in a container given those GPUs, so a Vulkan program such as Isaac Sim can show its window from the chosen GPU instead of only from the driver’s first one. A small library is preloaded into the programs of new panes; it rewrites the indices in CUDA_VISIBLE_DEVICES to count among the GPUs left (2 becomes 0), and nvidia-smi lists only those. Windows from another GPU than the display’s are copied through the CPU, which is slower.',
   'settings.gui.gpu': 'GPU rendering (VirtualGL)',
   'settings.gui.gpu.desc':
-    'On machines with VirtualGL. With vglrun: programs started as “vglrun program” render on the GPU. All programs: every program in new panes runs under VirtualGL.',
+    'On machines with VirtualGL. With vglrun: programs started as “vglrun program” render on the GPU. All programs: every program in new panes runs under VirtualGL, except on a display that draws with the GPU, where OpenGL renders on it anyway.',
   'settings.gui.gpu.vglrun': 'With vglrun',
   'settings.gui.gpu.all': 'All programs',
   'settings.gui.video': 'Stream changing windows as video',

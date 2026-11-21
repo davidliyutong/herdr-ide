@@ -4,7 +4,7 @@ DEV_LISTEN ?= 127.0.0.1:7790
 SLUG := $(shell sed -n 's/^[[:space:]]*Slug = "\(.*\)"$$/\1/p' internal/brand/brand.go)
 EXT  := extensions/$(SLUG)-bridge
 
-.PHONY: deps build test check tokens vt-wasm it dev-core dev-web desktop-app desktop-dist desktop-install desktop-icons dev-desktop clean
+.PHONY: deps build test check tokens vt-wasm gpupick it dev-core dev-web desktop-app desktop-dist desktop-install desktop-icons dev-desktop clean
 
 # Electron's binary runs the desktop app in development; checks and the
 # launcher tests need only its types (ELECTRON_SKIP_BINARY_DOWNLOAD=1, as CI
@@ -44,6 +44,11 @@ tokens:
 # (needs zig 0.17; GHOSTTY_SRC=<checkout> skips the clone).
 vt-wasm:
 	scripts/fetch-ghostty-vt.sh
+
+# gpupick, the library that shows a program only the NVIDIA GPUs of its
+# CUDA_VISIBLE_DEVICES, for Linux machines (needs zig 0.17).
+gpupick:
+	scripts/build-gpupick.sh
 
 it:
 	go test -tags integration -count=1 ./internal/agent -run Integration -v

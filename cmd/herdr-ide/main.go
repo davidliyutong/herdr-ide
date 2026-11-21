@@ -11,12 +11,15 @@
 //	herdr-ide gui-keep --instance NAME
 //	                                 holds a machine's virtual display;
 //	                                 started by the agent (Linux and macOS)
+//	herdr-ide gui-wl --device NODE [--nvidia]
+//	                                 the compositor of a machine's GPU
+//	                                 display; started by the agent
 //	herdr-ide version
 //
 // The copies the core carries for machines of other platforms are this
 // program built with the tag "machine": without the server, the web UI and
 // what the core embeds for machines, so they have the commands mcp, agent,
-// gui-keep and version only.
+// gui-keep, gui-wl and version only.
 package main
 
 import (

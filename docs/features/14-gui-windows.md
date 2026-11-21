@@ -7,13 +7,17 @@ matplotlib figure, the MuJoCo viewer, a Qt tool. Over plain ssh they fail
 (`cannot open display`) or fall back to no output. Machines are typically
 shared servers and workstations where the user has no root, so nothing may
 require installing system packages, and nothing may listen on TCP. What is
-needed is the program's window, not a remote desktop.
+needed is the program's window, not a remote desktop. Such programs often
+draw with the GPU: OpenGL (MuJoCo), or Vulkan, which a simulator like Isaac
+Sim cannot do without, and on a server with several GPUs the user picks the
+one that is free.
 
 ## Goals / non-goals
 
 Goals: windows of programs on remote Linux machines appear in the browser,
 one browser window per program window, with keyboard and mouse; no
-privileged installation; GPU rendering where VirtualGL is installed;
+privileged installation; OpenGL and Vulkan programs render on the machine's
+GPU where it has one, on the GPU the user chose where it has several;
 programs survive network interruptions; nothing to configure for the common
 case.
 
@@ -26,7 +30,8 @@ input methods.
 
 **Display** (agent `internal/agent/gui.go`)
 
-- Each instance has one virtual display per machine: Xvfb, found on `PATH`,
+- Each instance has one virtual display per machine, an X server of one of
+  two kinds. The plain one is Xvfb, which draws in memory: found on `PATH`,
   in `/usr/bin` or `/usr/local/bin`, or else fetched with
   `apt-get download xvfb` (no privileges; apt checks the package against its
   signed lists) and unpacked with `dpkg-deb -x` into
@@ -34,6 +39,36 @@ input methods.
   uses the libraries, `xkbcomp` and keyboard data that a desktop or Xwayland
   already put on the machine; it was verified on Ubuntu 24.04 machines that
   have no Xvfb.
+- The GPU display is Xwayland (found in the same places, never fetched)
+  drawing with a GPU through glamor, which gives its clients DRI3: OpenGL
+  and Vulkan drivers then render on the GPU and hand the X server finished
+  buffers, without VirtualGL. Xwayland shows its screen in a window of a
+  Wayland compositor, and machines have none. Nobody looks at that window
+  (the agent captures the windows of programs from the X side, below), so
+  the compositor is the agent's own and shows nothing
+  (`internal/agent/guiwl.go`): the machine's binary run as `gui-wl`, a
+  Wayland server for one client. It offers what Xwayland needs to start
+  with a GPU (`wl_compositor`, `wl_shm`, `wl_output`, `xdg_wm_base`, and
+  `wl_drm`, which names the GPU's render node and without which Xwayland
+  before 24.1 does not use glamor), configures the one toplevel, releases
+  every buffer as soon as it is committed (closing its descriptor unread)
+  and answers frame callbacks 60 times a second while there are any, so an
+  idle display costs nothing. The two talk over a socket pair, each with its
+  end as descriptor 3 (`WAYLAND_SOCKET`): no Wayland socket exists on disk.
+  The compositor ends when Xwayland does; a client that breaks the protocol
+  is left.
+- Which kind starts is the setting `gui.display`: `auto` (the default)
+  takes the GPU display where the machine has an Xwayland whose
+  `-terminate` takes a delay and a GPU whose render node the user may open,
+  `xvfb` always the plain one. Xwayland that does not come up, or comes up
+  drawing on the CPU (no DRI3: glamor did not work with the GPU), is ended
+  and Xvfb started instead; that agent does not try again, the next
+  connection does. A display of another kind than asked for (after the
+  setting changed, or a machine that got its display from an earlier build)
+  is replaced while nothing but the instance's own processes is connected
+  to it (the X-Resource extension names every client's process); with a
+  program on it, it stays until it ended. Terminals keep their `DISPLAY`:
+  the number and the cookie file are the same.
 - The display number is reserved in `run/gui.json` (from `:20`) and kept
   across restarts, so panes keep a valid `DISPLAY`. The socket has to be
   `/tmp/.X11-unix/X<n>`: libxcb before 1.16 (Ubuntu 24.04 ships 1.15) cannot
@@ -48,13 +83,13 @@ input methods.
   that both sockets answer with it (clients try the abstract one first). A
   file lock (`run/gui.lock`) serializes
   reservation and start between agents of the instance.
-- Each Xvfb start writes a new MIT-MAGIC-COOKIE-1 for the display: Xvfb reads
-  `run/xauth.server`, terminals get `run/xauth` (both 0600). Programs that edit
-  their `XAUTHORITY` file cannot leave the server without a cookie, which
-  would let any local user in. Xvfb runs with `-nolisten tcp`, a 2560×1440
-  screen, in its own session so that it survives the agent and the ssh
-  connection, and with `-terminate 60`: it exits a minute after its last
-  client disconnected. Its clients are the programs, the agent's window
+- Each start writes a new MIT-MAGIC-COOKIE-1 for the display: the server
+  reads `run/xauth.server`, terminals get `run/xauth` (both 0600). Programs
+  that edit their `XAUTHORITY` file cannot leave the server without a cookie,
+  which would let any local user in. The server (of either kind) runs with
+  `-nolisten tcp`, a 2560×1440 screen, in its own session so that it survives
+  the agent and the ssh connection, and with `-terminate 60`: it exits a
+  minute after its last client disconnected. Its clients are the programs, the agent's window
   manager while the core is connected, and the display keeper while the
   instance's terminal core runs, so the display belongs to the server whose
   terminals have `DISPLAY`: it stays while they may start programs and ends
@@ -73,6 +108,69 @@ input methods.
   Xvfb, so a display nobody attaches to exits too. xorg-server before 21.1
   lacks the delay: such a server exits as soon as its last client leaves,
   and one that never got a client stays until an agent attaches.
+
+**GPUs** (agent `internal/agent/guigpu.go`, library `scripts/gpupick`)
+
+- The GPU display draws with one GPU. On a machine with NVIDIA GPUs it is
+  the driver's first one (the one whose device node is `/dev/nvidia0`, read
+  from `/proc/driver/nvidia/gpus/*/information`; it need not be the first
+  on the bus or in `nvidia-smi`), found by its PCI address among the render
+  nodes; elsewhere the first render node the user may open. On NVIDIA GPUs
+  the compositor also offers linux-dmabuf with buffer layouts (modifiers):
+  NVIDIA's driver shares a buffer with the X server only in a layout both
+  name, and copies every frame through the CPU otherwise. Which layouts a
+  GPU has only its driver knows, and the compositor loads no driver; a
+  layout is a number made of five fields
+  (`DRM_FORMAT_MOD_NVIDIA_BLOCK_LINEAR_2D`), so it offers every one the
+  fields can name, and linear, for the formats Xwayland makes buffers of
+  (541 per format), and Xwayland and the programs take those their driver
+  has. Mesa's drivers share buffers without named layouts, so other GPUs
+  get no linux-dmabuf.
+- NVIDIA's driver shows windows of Vulkan programs on a display without its
+  own X driver only from the first GPU a program sees, whatever GPU the
+  display draws with (Xwayland on another GPU did not change it, and
+  OpenGL was slow there), and no setting of the driver changes which one
+  that is. A program told to render on another GPU fails with "could not
+  find both graphics and present queues"; Isaac Sim, started with
+  `CUDA_VISIBLE_DEVICES` naming a free GPU as IsaacLab does, with
+  `createSwapchain failed`. This holds on Xvfb too, where the driver copies
+  frames to the window itself. The display state in the settings names that
+  GPU on machines with more than one (`vulkan_gpu`, counted as
+  `nvidia-smi` does).
+- With the setting `gui.gpuPick` (off by default) a program chooses: the
+  library gpupick is preloaded into the programs of new panes
+  (`LD_PRELOAD`), and a program started with `CUDA_VISIBLE_DEVICES` sees
+  only the GPUs that names, as a container given those GPUs would. Opening
+  the device node `/dev/nvidiaN` of any other one fails (`EPERM`), which
+  the driver takes as a GPU it may not use, so the chosen one is its first.
+  The pane's environment carries the machine's GPUs (`GPUPICK_TABLE`: UUID
+  and node number of each, in bus order; `GPUPICK_MIXED` when they are of
+  several models; `GPUPICK_DISPLAY`, the node number of the GPU display's
+  GPU). The first program of a tree works the set out and passes it on in
+  `GPUPICK_KEEP`; it rewrites the indices in `CUDA_VISIBLE_DEVICES` to count
+  among the GPUs left (`2` becomes `0`, `3,0` becomes `1,0`), which is how
+  CUDA and `nvidia-smi` number them from then on, and leaves UUIDs. Indices
+  are taken as bus order: with GPUs of several models CUDA counts fastest
+  first unless `CUDA_DEVICE_ORDER=PCI_BUS_ID`, so then only with that set.
+  A value that names no GPU, one twice, all of them, or a UUID two GPUs
+  could have changes nothing. When the display's GPU is out of sight,
+  NVIDIA's GLX cannot reach the display (`BadValue` at `glXCreateContext`),
+  so the library sets `__GLX_VENDOR_LIBRARY_NAME=mesa` unless it is set:
+  Mesa's GLX draws through Vulkan on a visible GPU, and `vglrun` renders on
+  it through EGL as before.
+- The library is 10 kB of C without dependencies beyond the C library, built
+  for linux/amd64 and linux/arm64 against glibc 2.17
+  (`scripts/build-gpupick.sh`, zig's C compiler; the builds and their
+  digests are committed, `make check` verifies them) and carried by the
+  agent, which writes it to `~/.herdr-ide/gpupick/<sha256 prefix>/` (0600,
+  shared by instances) when the core asks (action `pick`, audited as
+  `gui.pick`; never in read-only mode), checks that the dynamic loader
+  takes it (a home directory mounted `noexec` would make every program
+  complain) and removes builds unused for 14 days. Machines with fewer than
+  two NVIDIA GPUs get nothing.
+- From a GPU other than the display's a window's frames go through the CPU
+  (the driver's own copy), which is slower than sharing buffers: see
+  Testing.
 
 **Terminals** (`internal/server/gui.go`, `internal/server/term_backend.go`,
 `internal/gui`)
@@ -112,9 +210,13 @@ input methods.
   display.
 - On machines with a working VirtualGL EGL back end (`vglrun` found, its
   `eglinfo egl0` succeeds) terminals also get `VGL_DISPLAY=egl0`, so
-  `vglrun program` renders on the GPU without a 3D X server. With
-  `gui.gpu` set to `all` terminals get VirtualGL's `LD_PRELOAD` and `VGL_ISACTIVE=1`, as
-  if the shell ran under `vglrun`.
+  `vglrun program` renders on the GPU without a 3D X server, on either kind
+  of display. With `gui.gpu` set to `all` terminals get VirtualGL's
+  `LD_PRELOAD` and `VGL_ISACTIVE=1`, as if the shell ran under `vglrun`,
+  except on the GPU display, where OpenGL renders on the GPU anyway and
+  VirtualGL would add a copy of every frame. With `gui.gpuPick` on, on a
+  machine with several NVIDIA GPUs and the library installed, they get
+  gpupick's variables, its library first in `LD_PRELOAD`.
 
 **Window manager and capture** (agent `internal/agent/guiwm.go`)
 
@@ -307,10 +409,14 @@ input methods.
   two seconds later unless a viewer is showing it again (a reload) or another
   browser window still shows it. Losing the connection closes nothing.
 
-**Settings**: `gui.enabled` (`true`, `false`), `gui.gpu` (`vglrun`, `all`)
-and `gui.video` (`true`, `false`), in the settings dialog's "Program
-windows" section and as the flags `--gui`, `--gui-gpu` and `--gui-video`
-([13](13-settings-and-appearance.md)). All can be set
+**Settings**: `gui.enabled` (`true`, `false`), `gui.display` (`auto`,
+`xvfb`), `gui.gpu` (`vglrun`, `all`), `gui.gpuPick` (`true`, `false`) and
+`gui.video` (`true`, `false`), in the settings dialog's "Program windows"
+section and as the flags `--gui`, `--gui-display`, `--gui-gpu`,
+`--gui-gpu-pick` and `--gui-video` ([13](13-settings-and-appearance.md)).
+A change of `gui.display` prepares the machine's display anew (its browser
+windows reconnect); one of `gui.gpuPick` installs the library and applies
+to panes created afterwards. All can be set
 per remote machine ("Per machine" in the same section, which also shows each
 machine's display state); a machine without its own value follows the
 global one, and a flag fixes the value for every machine. Program windows
@@ -330,6 +436,17 @@ turning it on pushes the encoder if needed.
 | VNC (TigerVNC `Xvnc`, x11vnc) with noVNC | A whole desktop in one canvas instead of program windows; `Xvnc` was on one of seven machines tried and needs a package installed by root. |
 | Xpra with its HTML5 client | Seamless windows, but all inside one browser page; rootless only through a conda environment with Python, GTK and ffmpeg; its protocol changes between versions while core and agent ship together. |
 | GTK Broadway | Only GTK programs; not Tk (matplotlib's default), Qt or GLFW (MuJoCo). |
+| Only Xvfb (before) | No DRI3: OpenGL is Mesa's on the CPU unless every program is started under VirtualGL, and NVIDIA's Vulkan copies every frame through the CPU (Isaac Sim's viewport: 24–33 frames per second against 80–100 on the GPU display). |
+| An existing compositor under Xwayland (weston, cage, sway, fetched like Xvfb) | Machines have none, and each brings libraries of its own that are missing there (wlroots, libseat, libdisplay-info); the one built in is 400 lines without a dependency and draws nothing, which is all that is asked of it. Xwayland on headless weston served as the reference: the same frame rates. |
+| Asking the driver for its buffer layouts (EGL, as compositors do) | The machine's binary is static and loads no library; a helper that does would be one more program to build and push for a list the driver takes its own from anyway. |
+| No buffer layouts for NVIDIA | Xwayland starts and draws with the GPU, but programs fall back to copying frames: Isaac Sim 32–34 frames per second, `glxgears` 300–550 instead of 6000. |
+| An X server with NVIDIA's own driver (Xorg, no monitor) | Needs root and the right to set display modes; `Xorg.wrap` gives it to console users only. |
+| Xwayland on the GPU the program chose, or a display per GPU | The driver presents Vulkan only from its first GPU whatever the display draws with; measured with Xwayland on another one. A terminal's `DISPLAY` is set before its programs choose a GPU. |
+| A Vulkan layer that makes its own swapchain on any GPU | The copy the driver already makes from its first GPU, written anew for every GPU, against applications that use several devices at once; hiding the other GPUs gets the driver's own path for the chosen one. |
+| Hiding GPUs in a mount or user namespace, or with seccomp | Unprivileged user namespaces are restricted on current distributions; a seccomp filter cannot read a path, and one that asks a supervisor stops every `open` of the program. A preloaded library sees the path and costs a comparison. |
+| A command to put before the program (as `vglrun`) instead of preloading | The launch commands of projects set `CUDA_VISIBLE_DEVICES` themselves; with the library in the pane's environment they work unchanged. Off by default, since it changes what a program sees. |
+| Rendering the viewport on the first GPU and the rest on the chosen one | Possible in Isaac Sim (`--/renderer/multiGpu/activeCudaGpus`), but a setting of each application, and the first GPU is often the busy one. |
+| Isaac Sim without a window, with its own stream | WebRTC with media over UDP, which does not pass the ssh connection. |
 | Terminal graphics (sixel, Kitty) | The browser's emulator has none ([26](26-web-terminals.md)); not interactive. |
 | Starting the display on the first connection (socket activation) | Xvfb cannot take a listening socket; relaying through the agent would end every program's connection when the agent exits. |
 | A display per pane or per workspace | Many X servers for windows that rarely exist; one display with per-window capture separates windows anyway. |
@@ -374,7 +491,36 @@ turning it on pushes the encoder if needed.
   after Xvfb idled out → a new number is reserved; panes created earlier
   point at the old one and reach whatever server holds it (see Security).
 - **Old xorg-server** (before 21.1) → Xvfb exits as soon as its last client
-  leaves instead of a minute later; the next connect starts it again.
+  leaves instead of a minute later; the next connect starts it again. An
+  Xwayland that old is not used.
+- **No Xwayland, no GPU or no access to its render node** (the user is not
+  in the `render` group) → the plain display; OpenGL on the CPU or through
+  `vglrun`.
+- **Xwayland does not come up or draws on the CPU** → it is ended, Xvfb
+  starts in its place (an error only when there is no Xvfb either: then it
+  is fetched at the next attempt) and the agent logs why; Xwayland's and the
+  compositor's output is in `~/.herdr-ide[-<instance>]/xwayland.log`.
+- **The compositor ends** (killed) → Xwayland loses its connection and
+  exits, programs lose the display; the next preparation starts a new one.
+- **Display in use when its kind should change** → it stays; the agent logs
+  the process that uses it. It is replaced at a later preparation (a
+  reconnect, a change of the setting) once nothing uses it.
+- **A Vulkan program renders on another GPU than the driver's first**
+  (several NVIDIA GPUs, `gui.gpuPick` off) → it fails to create its
+  swapchain; the settings name the GPU that works and the setting.
+- **`gui.gpuPick` on, GPU chosen is not the display's** → Vulkan windows
+  work, copied through the CPU (Isaac Sim 17–26 frames per second);
+  OpenGL through Mesa on that GPU, or `vglrun`.
+- **Two NVIDIA Vulkan drivers registered** (a stale `nvidia_icd.json` in
+  `/etc/vulkan/icd.d` beside the package's) → every GPU is listed twice;
+  programs that mind (Isaac Sim) say so. `VK_DRIVER_FILES` naming one file
+  avoids it; removing the stale file is the administrator's.
+- **gpupick cannot be preloaded** (home directory mounted `noexec`, a C
+  library that is not glibc) → the install fails and is logged; panes get
+  the display without it.
+- **A program of another word size, or one that is setuid** → the loader
+  does not preload the library (and says so for the former); it sees every
+  GPU.
 - **Install interrupted** (agent killed) → its `.fetch-*` directory is removed
   by the next agent after an hour.
 - **Another window manager on the display** (two cores of one instance) →
@@ -425,7 +571,16 @@ created earlier keeps `DISPLAY` after its display ended. Window contents and
 input travel the same guarded paths as terminals: same-origin pages,
 Host/Origin checks, proxy secret. In read-only mode nothing is installed or
 started, browser windows show windows but send no input, and closing is
-refused. Xvfb packages are fetched through apt, which verifies them. The video
+refused. The GPU display adds no way in: its compositor listens nowhere and
+opens no file (it passes the render node's name on; Xwayland opens it as
+the user), talks to Xwayland over a socket pair made close-on-exec, bounds
+what that one client can make it hold, and Xwayland is checked like Xvfb
+(peer credentials of the process the agent started, the cookie). A display
+is replaced only while no program is connected to it. gpupick is off by
+default; it is written by the agent from its own binary into a directory
+only the user can write, restricts what a program sees and grants nothing,
+and the table it reads comes from the driver's own description of the GPUs
+with UUIDs of one fixed form. Xvfb packages are fetched through apt, which verifies them. The video
 encoder is run only as pushed by the core and verified by its SHA-256; it
 reads frames from a pipe and writes packets to one. See
 [SECURITY.md](../../SECURITY.md).
@@ -507,3 +662,37 @@ default in the dialog detached and re-attached its display.
 `TestIntegrationTermShells` types into a real shell of a real herdr-core
 as enabling does: the shell waits at its prompt, the text runs and the
 terminal keeps its size.
+
+GPU display and GPUs: `internal/agent/guiwl_test.go` speaks the client's
+side of the wire protocol to the compositor (the globals, the device and
+the layouts, the toplevel's configure, a buffer released with its
+descriptor closed, the frame callback, ids given back, the end with its
+client; a client that breaks the protocol is left) and checks that the
+layouts offered include those a Blackwell GPU's driver names;
+`internal/agent/guigpu_test.go` the GPUs read from the driver's description
+(bus order, a first GPU that is not first on the bus, malformed entries),
+the display's GPU, which kind is wanted, the fallback to Xvfb with an
+Xwayland that exits, the change of kind only while no program is on the
+display, and gpupick itself on Linux (the set kept, indices rewritten,
+UUIDs, several models, inheritance, the GLX vendor, ordinary files
+untouched, a damaged copy replaced); `TestGUIWindowsGPU` runs the window
+test on Xwayland with the compositor where the machine has both;
+`internal/gui/gui_test.go` the plan for both kinds and the panes'
+environment; `web/src/__tests__/guiStatus.test.ts` the state shown.
+Measured on a machine with four RTX PRO 6000 Blackwell (driver 580.159,
+Ubuntu 24.04, Xwayland 23.2.6), shared with other users, whose first GPU
+for the driver is the second in `nvidia-smi`: Isaac Sim 6.2 (an empty
+stage, a 1280×720 viewport in a 1440×900 window) draws 24–33 frames per
+second on Xvfb, 98–104 on Xwayland under headless weston and 79–84 under
+the agent's compositor with that GPU more loaded; started with another GPU
+it fails on both as described, and with gpupick draws 17–26 on either.
+`glxgears` without `vglrun` runs at 5500–7000 frames per second on the GPU
+display (2400 on Xvfb, on the CPU), with `vglrun` at 2000–4400, and with a
+GPU chosen that is not the display's at 300–470 through Mesa. Capturing a
+1440×900 window through MIT-SHM takes 0.22–0.28 ms on the GPU display
+against 0.16–0.20 ms on Xvfb. End to end in Chrome on macOS: a pane's
+environment as described, `vkcube` at 61 frames per second as H.264, Isaac
+Sim started in a pane with `CUDA_VISIBLE_DEVICES=0` shown and clicked in a
+browser window, the display replaced in both directions by the setting.
+Not run: a GPU with Mesa's drivers under Xwayland, linux/arm64, and
+Xwayland 24.1 or newer (read in its sources: it takes `wl_drm` as before).

@@ -7,6 +7,31 @@ import (
 	"io"
 )
 
+// Kinds of virtual display, and what the action start is asked for
+// (Header.Args[0]): GUIDisplayAuto is the GPU display where it works, the
+// plain one elsewhere.
+const (
+	// GUIXvfb draws in memory: OpenGL is Mesa's on the CPU (or VirtualGL's),
+	// and Vulkan programs copy every frame through the CPU.
+	GUIXvfb = "xvfb"
+	// GUIXwayland is the GPU display: Xwayland drawing with a GPU, with the
+	// agent's own compositor.
+	GUIXwayland    = "xwayland"
+	GUIDisplayAuto = "auto"
+)
+
+// GUIGPU is one NVIDIA GPU of a machine.
+type GUIGPU struct {
+	// Index counts the GPUs in PCI bus order, as nvidia-smi does.
+	Index int `json:"index"`
+	// Minor is the N of the GPU's device node /dev/nvidiaN: the order the
+	// driver itself has them in.
+	Minor int    `json:"minor"`
+	UUID  string `json:"uuid"`
+	Model string `json:"model,omitempty"`
+	PCI   string `json:"pci,omitempty"`
+}
+
 // GUIStatus describes a machine's virtual display (OpGUI).
 type GUIStatus struct {
 	// Supported is false where the agent cannot provide a display (macOS).
@@ -21,6 +46,21 @@ type GUIStatus struct {
 	Display    string `json:"display,omitempty"`
 	XAuthority string `json:"xauthority,omitempty"`
 	Running    bool   `json:"running"`
+	// Kind is the kind of the display that runs (GUIXvfb, GUIXwayland).
+	// GPUDisplay reports that the machine can run the GPU display: an
+	// Xwayland is installed, a GPU's render node can be opened and no
+	// attempt failed since the agent started.
+	Kind       string `json:"kind,omitempty"`
+	GPUDisplay bool   `json:"gpu_display,omitempty"`
+	// GPUs are the machine's NVIDIA GPUs, in nvidia-smi's order.
+	// DisplayMinor is the Minor of the one the running GPU display draws
+	// with, absent when it draws with none of them.
+	GPUs         []GUIGPU `json:"gpus,omitempty"`
+	DisplayMinor *int     `json:"display_minor,omitempty"`
+	// Pick is the path of the library that shows a program only the GPUs
+	// of its CUDA_VISIBLE_DEVICES (action pick installs it), empty while
+	// it is not installed.
+	Pick string `json:"pick,omitempty"`
 	// VirtualGL: VGL is vglrun's path, GPU reports a working EGL device and
 	// VGLPreload is the LD_PRELOAD value vglrun would use.
 	VGL        string `json:"vgl,omitempty"`
