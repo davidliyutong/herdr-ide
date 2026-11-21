@@ -112,7 +112,8 @@ type Plugin struct {
 	pending map[string]*Request
 	// proofs are the nonces waiting for an authenticator's proof
 	// (proof.go); they end with the sessions.
-	proofs map[string]*pendingProof
+	proofs   map[string]*pendingProof
+	proofSeq uint64
 	// alog is the access log (accesslog.go), opened at its first use.
 	alog *accessLog
 	// noisy are the last audit records of list calls and refusals, by

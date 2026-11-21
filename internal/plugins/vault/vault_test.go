@@ -66,9 +66,24 @@ func (h *fakeHost) messageCount(t string) (n int) {
 	return n
 }
 
+// closeOnCleanup closes p's access log when t ends so Windows can remove
+// t.TempDir() cleanly.
+func closeOnCleanup(t *testing.T, p *Plugin) {
+	t.Helper()
+	t.Cleanup(func() {
+		p.mu.Lock()
+		al := p.alog
+		p.mu.Unlock()
+		if al != nil {
+			al.close()
+		}
+	})
+}
+
 func newTest(t *testing.T) (*Plugin, *fakeHost, *vaultstore.Store) {
 	t.Helper()
 	p := &Plugin{Path: filepath.Join(t.TempDir(), "vault.json"), Timeout: 200 * time.Millisecond}
+	closeOnCleanup(t, p)
 	h := &fakeHost{sent: make(chan map[string]any, 8)}
 	s, err := p.open(h)
 	if err != nil {
@@ -281,6 +296,7 @@ func TestRoutes(t *testing.T) {
 // sessions end unused or old; wrong passphrases in a row slow down.
 func TestPassphraseAndSessions(t *testing.T) {
 	p := &Plugin{Path: filepath.Join(t.TempDir(), "vault-dev.json")}
+	closeOnCleanup(t, p)
 	h := &fakeHost{}
 	s, _ := p.open(h)
 	s.KDF = testKDF
@@ -659,6 +675,7 @@ func TestForgetMachine(t *testing.T) {
 func TestOpenErrors(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "vault.json")
 	p := &Plugin{Path: path}
+	closeOnCleanup(t, p)
 	h := &fakeHost{}
 	c := newClient(p, h)
 	for body, want := range map[string]string{

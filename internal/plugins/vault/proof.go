@@ -81,6 +81,7 @@ type pendingProof struct {
 	purpose
 	challenge []byte
 	issued    stamp
+	seq       uint64
 }
 
 // proofBody is a proof as a page sends it.
@@ -130,14 +131,20 @@ func (p *Plugin) issueProof(pu purpose) string {
 			delete(p.proofs, k)
 			continue
 		}
-		if oldest == "" || pp.issued.since(now) > p.proofs[oldest].issued.since(now) {
+		if oldest == "" {
+			oldest = k
+			continue
+		}
+		d, od := pp.issued.since(now), p.proofs[oldest].issued.since(now)
+		if d > od || (d == od && pp.seq < p.proofs[oldest].seq) {
 			oldest = k
 		}
 	}
 	if len(p.proofs) >= MaxProofs {
 		delete(p.proofs, oldest)
 	}
-	p.proofs[nonce] = &pendingProof{purpose: pu, challenge: challenge, issued: now}
+	p.proofSeq++
+	p.proofs[nonce] = &pendingProof{purpose: pu, challenge: challenge, issued: now, seq: p.proofSeq}
 	return nonce
 }
 

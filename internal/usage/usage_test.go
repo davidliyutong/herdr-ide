@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -515,7 +516,7 @@ func TestDeepSeek(t *testing.T) {
 	}
 	st, _ := os.Stat(filepath.Join(e.Base, DeepSeekKeyFile))
 	dst, _ := os.Stat(filepath.Join(e.Base, "usage"))
-	if st.Mode().Perm() != 0o600 || dst.Mode().Perm() != 0o700 {
+	if runtime.GOOS != "windows" && (st.Mode().Perm() != 0o600 || dst.Mode().Perm() != 0o700) {
 		t.Errorf("modes %v %v", st.Mode(), dst.Mode())
 	}
 	one(t, Limits(context.Background(), e, Options{Providers: []string{DeepSeek}}))
@@ -627,6 +628,9 @@ func TestAntigravityAgyFallback(t *testing.T) {
 }
 
 func TestProcPorts(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Linux /proc symlinks")
+	}
 	root := t.TempDir()
 	fd := filepath.Join(root, "77", "fd")
 	os.MkdirAll(fd, 0o700)

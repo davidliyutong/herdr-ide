@@ -27,7 +27,9 @@ func reopened(t *testing.T, p *Plugin) *Plugin {
 	if p.alog != nil {
 		p.alog.close()
 	}
-	return &Plugin{Path: p.Path, Timeout: p.Timeout}
+	p2 := &Plugin{Path: p.Path, Timeout: p.Timeout}
+	closeOnCleanup(t, p2)
+	return p2
 }
 
 // The access log is kept beside the vault's file (0600) and read back by

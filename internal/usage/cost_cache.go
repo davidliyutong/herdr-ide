@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"os"
-	"path"
+	"path/filepath"
 	"time"
 )
 
@@ -137,7 +137,7 @@ func dedupe(rs []Record) []Record {
 // streaming JSON through a buffered writer to avoid a second full-size
 // buffer in memory.
 func saveCostCache(p string, c *costCache) error {
-	dir := path.Dir(p)
+	dir := filepath.Dir(p)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}

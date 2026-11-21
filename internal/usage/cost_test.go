@@ -6,7 +6,9 @@ import (
 	"context"
 	"math"
 	"os"
+	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -134,12 +136,12 @@ func TestCostCache(t *testing.T) {
 	}
 	cache := filepath.Join(e.Base, CostCacheFile)
 	st, err := os.Stat(cache)
-	if err != nil || st.Mode().Perm() != 0o600 {
+	if err != nil || (runtime.GOOS != "windows" && st.Mode().Perm() != 0o600) {
 		t.Fatalf("cache %v %v", st, err)
 	}
 	// An unchanged file is not read again: the cache's records count.
 	c := loadCostCache(cache)
-	p := filepath.Join(e.Home, ".codex/archived_sessions/rollout-old.jsonl")
+	p := path.Join(e.Home, ".codex/archived_sessions/rollout-old.jsonl")
 	ent := c.Files[p]
 	ent.Records[0].O = 999
 	saveCostCache(cache, c)
@@ -163,7 +165,7 @@ func TestCostCache(t *testing.T) {
 	os.Remove(f)
 	agedCache(t, cache)
 	Cost(context.Background(), e, CostOptions{Since: since, Providers: []string{Claude}})
-	if _, ok := loadCostCache(cache).Files[f]; ok {
+	if _, ok := loadCostCache(cache).Files[path.Join(e.Home, ".claude/projects/-home-u-alpha/s1.jsonl")]; ok {
 		t.Errorf("removed log still cached")
 	}
 }
@@ -183,7 +185,9 @@ func TestCostRetention(t *testing.T) {
 		t.Errorf("rows %+v since %d", rep.Rows, rep.Since)
 	}
 	c := loadCostCache(filepath.Join(e.Base, CostCacheFile))
-	if _, ok := c.Files[f]; ok || len(c.Files[recent].Records) != 1 {
+	oldKey := path.Join(e.Home, ".claude/projects/p/old.jsonl")
+	recentKey := path.Join(e.Home, ".claude/projects/p/new.jsonl")
+	if _, ok := c.Files[oldKey]; ok || c.Files[recentKey] == nil || len(c.Files[recentKey].Records) != 1 {
 		t.Errorf("cache keeps old records: %+v", c.Files)
 	}
 }
@@ -349,7 +353,7 @@ func TestCostCacheOneRecordPerResponse(t *testing.T) {
 	since := testNow.Add(-30 * 24 * time.Hour).Unix()
 	Cost(context.Background(), e, CostOptions{Since: since, Providers: []string{Claude}})
 	cache := filepath.Join(e.Base, CostCacheFile)
-	f := filepath.Join(e.Home, ".claude/projects/-home-u-alpha/s1.jsonl")
+	f := path.Join(e.Home, ".claude/projects/-home-u-alpha/s1.jsonl")
 	c := loadCostCache(cache)
 	if rs := c.Files[f].Records; len(rs) != 1 || rs[0].O != 500 {
 		t.Fatalf("records %+v", rs)
@@ -376,8 +380,8 @@ func TestCostReadsOn(t *testing.T) {
 	updates := filepath.Join(e.Home, ".grok/sessions/%2Fwork%2Fdelta/abc/updates.jsonl")
 	// Mark what was read: a record read again would lose the mark.
 	c := loadCostCache(cache)
-	c.Files[rollout].Records[0].O = 7777
-	c.Files[updates].Records[0].O = 8888
+	c.Files[path.Join(e.Home, ".codex/sessions/2026/11/15/rollout-new.jsonl")].Records[0].O = 7777
+	c.Files[path.Join(e.Home, ".grok/sessions/%2Fwork%2Fdelta/abc/updates.jsonl")].Records[0].O = 8888
 	saveCostCache(cache, c)
 	appendTo(t, rollout, `{"timestamp":"2026-11-15T10:01:00Z","type":"token_usage_record","payload":{"turn_id":"t1","response_id":"r2","usage":{"input_tokens":1000,"cached_input_tokens":0,"output_tokens":10}}}`+"\n")
 	appendTo(t, updates, grokUpdates)
@@ -446,7 +450,7 @@ func TestCostCacheWritesSeldom(t *testing.T) {
 	if st, _ := os.Stat(cache); time.Since(st.ModTime()) > time.Minute {
 		t.Errorf("an old cache not written")
 	}
-	if rs := loadCostCache(cache).Files[f].Records; len(rs) != 2 {
+	if rs := loadCostCache(cache).Files[path.Join(e.Home, ".claude/projects/-home-u-alpha/s1.jsonl")].Records; len(rs) != 2 {
 		t.Errorf("records %+v", rs)
 	}
 }

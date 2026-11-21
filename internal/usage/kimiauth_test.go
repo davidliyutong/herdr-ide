@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -185,7 +186,7 @@ func TestKimiRefreshWritesRotatedTokensBack(t *testing.T) {
 	if got := f.content(t); got != want {
 		t.Errorf("file\n%s\nwant\n%s", got, want)
 	}
-	if st, _ := os.Stat(f.file); st.Mode().Perm() != 0o640 {
+	if st, _ := os.Stat(f.file); runtime.GOOS != "windows" && st.Mode().Perm() != 0o640 {
 		t.Errorf("mode %v", st.Mode())
 	}
 	ents, _ := os.ReadDir(filepath.Dir(f.file))
