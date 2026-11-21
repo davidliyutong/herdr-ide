@@ -269,10 +269,10 @@ export function applyFont(remeasure?: () => void) {
   remeasure?.();
 }
 
-const common: MonacoNs.editor.IEditorOptions = {
+export const defaultEditorOptions: MonacoNs.editor.IEditorOptions = {
   automaticLayout: true,
   minimap: { enabled: false },
-  scrollBeyondLastLine: false,
+  scrollBeyondLastLine: true,
   fixedOverflowWidgets: true,
   renderWhitespace: 'selection',
 };
@@ -299,7 +299,7 @@ export async function createEditor(
   opts: MonacoNs.editor.IStandaloneEditorConstructionOptions = {},
 ): Promise<{ monaco: Monaco; editor: CodeEditor }> {
   const monaco = await loadMonaco();
-  const editor = monaco.editor.create(el, { ...common, ...unicodeOptions(), ...fontOptions(), theme: themeName(), ...opts });
+  const editor = monaco.editor.create(el, { ...defaultEditorOptions, ...unicodeOptions(), ...fontOptions(), theme: themeName(), ...opts });
   followFont(editor);
   return { monaco, editor };
 }
@@ -311,7 +311,7 @@ export async function createDiffEditor(
 ): Promise<{ monaco: Monaco; editor: DiffEditor }> {
   const monaco = await loadMonaco();
   const editor = monaco.editor.createDiffEditor(el, {
-    ...common,
+    ...defaultEditorOptions,
     ...unicodeOptions(),
     ...fontOptions(),
     theme: themeName(),

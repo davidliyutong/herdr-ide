@@ -4,6 +4,7 @@
 
 import { en as filesEn } from '../plugins/files/i18n/en';
 import { en as gitEn } from '../plugins/git/i18n/en';
+import { en as monitorEn } from '../plugins/monitor/i18n/en';
 import { en as usageEn } from '../plugins/usage/i18n/en';
 import { en as vaultEn } from '../plugins/vault/i18n/en';
 import { en as browserEn } from '../plugins/browser/i18n/en';
@@ -60,6 +61,11 @@ export const en = {
   'app.connected': 'Connected',
   'app.reconnecting': 'Reconnecting…',
   'app.machines': 'Machines {n}',
+  'statusbar.customize': 'Customize Status Bar',
+  'statusbar.hideWidget': 'Hide “{name}”',
+  'statusbar.showAll': 'Show All Widgets',
+  'statusbar.widget.machines': 'Machines',
+  'statusbar.widget.pane': 'Active Pane',
   'app.withKey': '{label} ({key})',
   'app.readOnly': 'Read-only',
   'app.noAgentPane': 'No pane to receive it: focus an agent pane first',
@@ -913,6 +919,11 @@ export const en = {
   'settings.plugins.git.enabled': 'Git',
   'settings.plugins.git.enabled.desc': 'A Source Control panel, a Git graph and diffs in Monaco for the repositories on the machines.',
   'command.view.panel.git': 'Show Source Control',
+  // monitor plugin
+  'settings.plugins.monitor.enabled': 'System Monitor',
+  'settings.plugins.monitor.enabled.desc':
+    'Live CPU, memory, per-GPU, network and disk usage on Cmd+hover or in the status bar, plus a searchable Task Manager with tree view.',
+  'command.view.panel.monitor': 'Show Task Manager',
   // unsaved changes
   'unsaved.title': 'Unsaved Changes',
   'unsaved.one': 'Do you want to save the changes you made to {name}?',
@@ -927,6 +938,7 @@ export const en = {
   'unsaved.leaveDetail': 'An editor has changes that are not saved. Closing the window loses them.',
   ...filesEn,
   ...gitEn,
+  ...monitorEn,
   ...usageEn,
   ...vaultEn,
   ...browserEn,

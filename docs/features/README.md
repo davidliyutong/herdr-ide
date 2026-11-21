@@ -34,6 +34,7 @@ shortcuts, paths) lives in [reference.md](../reference.md).
 | 31 | [Git](31-git.md) | VS Code's Source Control and the Git Graph extension without VS Code: a panel for the focused pane's repository (stage, commit, branches, stashes, fetch, pull, push), a graph pane with lanes, badges, details and context menus, diffs in Monaco with selected ranges staged as patches; git run with fixed arguments on machines. |
 | 32 | [Browser pane and port forwards](32-browser-and-ports.md) | A tab that shows a web page: a machine's `localhost` service through a forward on the core host's loopback (as `ssh -L`), kept another origin than the UI; links of terminals open there; a menu of the kinds of tab. |
 | 33 | [Workspaces after the terminal core starts again](33-workspace-restore.md) | After a reboot or a stopped terminal core the layout's tabs come back as shells in their directories (kept terminals at their addresses, the others replaced by the page), and Claude Code and Codex continue the directory's latest conversation, by a command from a fixed table. |
+| 34 | [System monitor and task manager](34-system-monitor.md) | Live CPU, memory, per-GPU, network and disk dashboard on ⌘+hover over sidebar machines and from an upward-floating status bar menu, plus a searchable Task Manager panel/pane with parent-child tree view and guarded process signaling. |
 
 ## Writing a feature document
 

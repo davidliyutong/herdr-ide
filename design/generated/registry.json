@@ -286,6 +286,11 @@
       "when": "terminal"
     },
     {
+      "id": "view.panel.monitor",
+      "section": "view",
+      "when": "terminal"
+    },
+    {
       "id": "find.open",
       "section": "find",
       "when": "terminal"
@@ -379,6 +384,7 @@
     "command.tab.unpin",
     "command.view.panel.files",
     "command.view.panel.git",
+    "command.view.panel.monitor",
     "command.view.panel.usage",
     "command.view.panel.vault",
     "command.view.togglePanel",
@@ -469,6 +475,9 @@
     "settings.gui.gpuPick",
     "settings.gui.video",
     "settings.layout.undoClose",
+    "settings.monitor.confirmKill",
+    "settings.monitor.refreshSeconds",
+    "settings.monitor.statusBar",
     "settings.notifications.badge",
     "settings.notifications.mutedAgents",
     "settings.notifications.sound",
@@ -477,6 +486,7 @@
     "settings.plugins.browser.enabled",
     "settings.plugins.files.enabled",
     "settings.plugins.git.enabled",
+    "settings.plugins.monitor.enabled",
     "settings.plugins.usage.enabled",
     "settings.plugins.vault.enabled",
     "settings.plugins.vscode.browser",
@@ -489,6 +499,7 @@
     "settings.section.git",
     "settings.section.gui",
     "settings.section.layout",
+    "settings.section.monitor",
     "settings.section.notifications",
     "settings.section.performance",
     "settings.section.plugins",
@@ -1020,6 +1031,9 @@
     "gui.gpuPick": false,
     "gui.video": true,
     "layout.undoClose": 5,
+    "monitor.confirmKill": true,
+    "monitor.refreshSeconds": 2,
+    "monitor.statusBar": true,
     "notifications.badge": true,
     "notifications.mutedAgents": [
       "droid"
@@ -1030,6 +1044,7 @@
     "plugins.browser.enabled": true,
     "plugins.files.enabled": true,
     "plugins.git.enabled": true,
+    "plugins.monitor.enabled": true,
     "plugins.usage.enabled": true,
     "plugins.vault.enabled": true,
     "plugins.vscode.browser": false,

@@ -18,7 +18,7 @@ export const guiPlugin: PluginDef = {
   description: 'plugins.gui.description',
   icon: AppWindow,
   enableSetting: 'gui.enabled',
-  statusItems: [GuiTray],
+  statusItems: [{ id: 'gui', title: 'plugins.gui.title', component: GuiTray }],
   paletteItems() {
     const items: PaletteItem[] = [];
     const f = actions.focusedContext();

@@ -320,6 +320,7 @@ does not have says so. Read-only pages do not drag panels into panes.
 | `vault` | `plugins.vault.enabled` | The variable vault: its panel, approval prompts and file dialogs, its settings page (section `vault`, ending with Import and Export), the op `vault` and the `mcp` command ([30](30-variable-vault.md)). |
 | `usage` | `plugins.usage.enabled` | The AI usage panel, its status bar item, its settings page (section `usage`) and its scheduler in the core ([29](29-ai-usage.md)). |
 | `git` | `plugins.git.enabled` | Source Control's panel, the graph and diff panes, the file explorer's decorations of changed files, and its settings page (section `git`) ([31](31-git.md)). |
+| `monitor` | `plugins.monitor.enabled` | Live resource dashboard (⌘+hover on sidebar machines and an upward-floating status bar item), the Task Manager panel/pane with tree view and search, and its settings page (section `monitor`) ([34](34-system-monitor.md)). |
 
 ## Alternatives considered
 

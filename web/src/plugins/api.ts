@@ -127,6 +127,22 @@ export interface NewTabItem {
   run(m: string, workspace: string): void | Promise<void>;
 }
 
+/** A visible status bar widget that users can hide or show from the status
+ * bar's menu. Plain components in statusItems (portal dialogs, overlays)
+ * always stay mounted and are not listed as widgets. */
+export interface StatusWidgetDef {
+  /** Unique widget id (e.g. "<plugin>" or "<plugin>.<name>"). */
+  id: string;
+  title: MessageKey;
+  component: ComponentType;
+}
+
+export type StatusItemDef = ComponentType | StatusWidgetDef;
+
+export function isStatusWidget(item: StatusItemDef): item is StatusWidgetDef {
+  return typeof item === 'object' && item !== null && 'component' in item;
+}
+
 export interface PluginDef {
   /** As the core's plugin (internal/plugin): lower-case letters and digits. */
   id: string;
@@ -150,8 +166,10 @@ export interface PluginDef {
   paneViews?: Record<string, PaneViewDef>;
   /** By command id. */
   commands?: Record<string, CommandDef>;
-  /** Shown in the status bar, right of the machine's line. */
-  statusItems?: ComponentType[];
+  /** Shown in the status bar, right of the machine's line. StatusWidgetDef
+   * entries can be toggled from the status bar's menu; plain components stay
+   * mounted (portal dialogs, overlays). */
+  statusItems?: StatusItemDef[];
   paletteItems?(): PaletteItem[];
   /** The kinds of tab it adds to the new-tab menu for machine m: any
    * number, in the order it lists them. Nothing while the plugin is off. */

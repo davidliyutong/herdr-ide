@@ -108,6 +108,11 @@ export interface UIState {
   toast(msg: string, action?: ToastAction, ttl?: number, kind?: ToastKind): number;
   openAuth(m?: string): void;
   openAddMachine(open: boolean): void;
+  /** Status bar widget ids hidden in this browser. */
+  hiddenStatusWidgets: string[];
+  setStatusWidgetVisible(id: string, visible: boolean): void;
+  toggleStatusWidget(id: string): void;
+  showAllStatusWidgets(): void;
   setReadOnly(v: boolean): void;
 }
 
@@ -149,6 +154,7 @@ export const useStore = create<UIState>((set, get) => ({
   panel: loadPref<string | null>('panel', null) ?? undefined,
   lastPanel: loadPref<string | null>('lastPanel', null) ?? undefined,
   panelWidth: loadPref('panelWidth', PANEL_WIDTH.def),
+  hiddenStatusWidgets: loadPref<string[]>('hiddenStatusWidgets', []),
   toasts: [],
 
   setConnected: (connected) => set({ connected }),
@@ -207,6 +213,22 @@ export const useStore = create<UIState>((set, get) => ({
   openAddMachine: (addMachine) => set({ addMachine }),
   readOnly: false,
   setReadOnly: (readOnly) => set({ readOnly }),
+  setStatusWidgetVisible: (id, visible) => {
+    const cur = get().hiddenStatusWidgets;
+    const next = visible ? cur.filter((x) => x !== id) : cur.includes(id) ? cur : [...cur, id];
+    if (next === cur) return;
+    savePref('hiddenStatusWidgets', next);
+    set({ hiddenStatusWidgets: next });
+  },
+  toggleStatusWidget: (id) => {
+    const hidden = get().hiddenStatusWidgets.includes(id);
+    get().setStatusWidgetVisible(id, hidden);
+  },
+  showAllStatusWidgets: () => {
+    if (!get().hiddenStatusWidgets.length) return;
+    savePref('hiddenStatusWidgets', []);
+    set({ hiddenStatusWidgets: [] });
+  },
   sshLogin: true,
   toast: (msg, action, ttl, kind) => {
     const id = ++toastSeq;

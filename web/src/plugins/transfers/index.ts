@@ -11,5 +11,8 @@ export const transfersPlugin: PluginDef = {
   description: 'plugins.transfers.description',
   icon: ArrowDownUp,
   enableSetting: null,
-  statusItems: [TransfersTray, DownloadsTray],
+  statusItems: [
+    { id: 'transfers.uploads', title: 'transfers.title', component: TransfersTray },
+    { id: 'transfers.downloads', title: 'downloads.title', component: DownloadsTray },
+  ],
 };

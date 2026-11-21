@@ -148,6 +148,7 @@ in the UI; a setting with a scope can have its own value per machine, under
 | `browser.forwardIdle` | integer, 0–1440 | `30` | – | – |
 | `plugins.files.enabled` | `true`, `false` | `true` | – | – |
 | `plugins.git.enabled` | `true`, `false` | `true` | – | – |
+| `plugins.monitor.enabled` | `true`, `false` | `true` | – | – |
 | `plugins.usage.enabled` | `true`, `false` | `true` | – | – |
 | `plugins.vault.enabled` | `true`, `false` | `true` | – | – |
 | `files.showHidden` | `true`, `false` | `false` | – | – |
@@ -161,6 +162,7 @@ in the UI; a setting with a scope can have its own value per machine, under
 | `git.autoFetch` | integer, 0–240 | `0` | – | – |
 | `git.confirmSync` | `true`, `false` | `false` | – | – |
 | `git.graphPageSize` | integer, 50–1000 | `300` | – | – |
+| `monitor.refreshSeconds` | integer, 1–30 | `2` | – | – |
 | `usage.refresh` | `manual`, `1`, `2`, `5`, `15`, `30`, `60`, `adaptive` | `"adaptive"` | – | – |
 | `usage.refreshOpen` | integer, 1–60 | `5` | – | – |
 | `usage.refreshWorking` | integer, 1–120 | `10` | – | – |
@@ -168,8 +170,10 @@ in the UI; a setting with a scope can have its own value per machine, under
 | `usage.costRefresh` | integer, 1–1440 | `15` | – | – |
 | `usage.statusBar` | `true`, `false` | `true` | – | – |
 | `usage.alerts` | `true`, `false` | `true` | – | – |
+| `monitor.statusBar` | `true`, `false` | `true` | – | – |
 | `usage.thresholds` | list of strings | `["80","95"]` | – | – |
 | `usage.prices` | list of strings | `[]` | – | – |
+| `monitor.confirmKill` | `true`, `false` | `true` | – | – |
 | `usage.providers.claude` | `true`, `false` | `true` | – | – |
 | `usage.claudeKeychain` | `true`, `false` | `true` | – | – |
 | `usage.providers.codex` | `true`, `false` | `true` | – | – |
@@ -318,6 +322,7 @@ by `scripts/registry`.
 | `view.panel.vault` | `terminal` | – | – | – | – |
 | `view.panel.usage` | `terminal` | – | – | – | – |
 | `view.panel.git` | `terminal` | `ctrl+shift+g` | – | `ctrl+shift+g` | – |
+| `view.panel.monitor` | `terminal` | – | – | – | – |
 | `find.open` | `terminal` | `cmd+f` | `cmd+f` | `ctrl+shift+f` | `ctrl+shift+f` |
 | `find.next` | `terminal` | `cmd+g` | – | – | – |
 | `find.previous` | `terminal` | `cmd+shift+g` | – | – | – |
@@ -446,8 +451,8 @@ missing here.
 | `GET /api/p/vault/requests` | – | The MCP requests waiting for an answer. |
 | `POST /api/p/vault/requests/{id}` | writes, gated (but `deny`) | Answers one (`{"answer": "once"\|"always"\|"deny", "proof"?, "passphrase"?}`), audited as `vault.answered`. Allowing takes a session, a proof of an `answer` nonce issued for this request and answer, or the passphrase again; with the vault's rule to verify every Allow a session is not enough (`401 vault_proof`); the first answer wins, later ones and those after the request expired get `404`, so `200` means the requester gets this answer. |
 | `GET /api/p/vault/log` | – | The access log, kept in `vault[-<instance>]-access.jsonl` across restarts: the last 1000 records that let values out and the last 500 others, newest first; never values. Each has `id`, `time`, `m` (the machine; `""` for a page), `tool` (`list`, `get`, `env`; a page's `reveal`, `export`), `names`, what the MCP server said of itself (`client`, `terminal`, `cwd`), the process that connected to `vault.sock` and its parents as the machine's agent saw them (`process`: `[{pid, name}]`), a page's `remote` and `userAgent`, and `result`: `allowed`, `approved`, `approved_always`, `exempted` (an exempt app's), `revealed`, `exported` (values let out), `listed`, `denied`, `expired` (no answer in time), `cancelled` (the requester went away), `log_failed` (not released: its record could not be written) or a refusal's code such as `busy`, `not_found`, `vault_locked`, `inject_only` or `bad_request`; `count` for repeated list calls or refusals merged into one. |
-| `GET /api/p/usage` | – | The AI usage plugin's snapshot: accounts (provider, id, email, plan, windows with pace, credits, balances, status and code, machines seen on), each machine's last poll, the providers' status pages, the alerts fired in the last hour; `?watch=1` marks the panel open for the adaptive refresh ([29](features/29-ai-usage.md)). |
-| `GET /api/p/usage/cost` | – | The cost of the machines' AI CLI logs (and OpenCode's sessions) at API prices by day, provider, model, project and machine, with each machine's logs it could not read (`failed`: `<provider>:<code>`) (`?days=` 1–90, `&tz=` the user's offset east of UTC in minutes). |
+| `GET /api/p/usage` | – | The AI usage plugin's snapshot: accounts (provider, id, email, plan, windows with pace, credits, balances, status and code, machines seen on), each machine's last poll, the providers' status pages, the alerts fired in the last hour; `?watch=1` marks the panel open for the adaptive refresh; supports `ETag` / `If-None-Match` (`304 Not Modified`, still recording `?watch=1`) ([29](features/29-ai-usage.md)). |
+| `GET /api/p/usage/cost` | – | The cost of the machines' AI CLI logs (including Antigravity's and OpenCode's sessions) at API prices by day, provider, model, project and machine, with each machine's logs it could not read (`failed`: `<provider>:<code>`) (`?days=` 1–90, `&tz=` the user's offset east of UTC in minutes); supports `ETag` / `If-None-Match` (`304 Not Modified`). |
 | `POST /api/p/usage/refresh` | writes | Asks every connected machine for its limits now, or 30 s after the last poll when that was sooner (202 `{queued, at}`: when the poll runs). |
 | `PUT /api/m/{id}/p/usage/deepseek-key` | writes | Writes the machine's DeepSeek key file (`{"key"}`; `""` removes it); never read back, audited without the key. |
 | `/` | – | The web UI (`/licenses.md`: the notices of its bundle); any other path gets the app shell for the UI's own routes, except `/api/…` paths no route takes, which are 404. |

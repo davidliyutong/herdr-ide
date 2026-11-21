@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CircleAlert, TriangleAlert } from 'lucide-react';
+import { Check, CircleAlert, SlidersHorizontal, TriangleAlert } from 'lucide-react';
 import { useStore } from './state/store';
 import { terms, useTerms } from './state/terms';
 import { rememberFollowed } from './state/followed';
@@ -31,9 +31,11 @@ import { bridgeDownload, downloadEvent, resyncDownloads } from './download';
 import { noteFocusedTerminal, sendTarget } from './lib/bridge';
 import { windowFocused } from './codeFrames';
 import { followVSCodeSwitch } from './plugins/vscode/workers';
+import { isStatusWidget, type StatusWidgetDef } from './plugins/api';
 import { describeView, pluginMessage, useActivePlugins, usePanels, usePluginOn } from './plugins/registry';
 import { RightBar } from './components/RightBar';
 import { PluginBoundary } from './components/PluginBoundary';
+import { openMenu, type MenuEntry } from './contextMenu';
 import './plugins';
 import './commands';
 import { actions, current, workspaceTitle } from './actions';
@@ -227,8 +229,18 @@ export function App() {
   );
 }
 
-function StatusBar({ connected, chord }: { connected: boolean; chord: boolean }) {
+const BUILTIN_STATUS_WIDGETS = [
+  { id: 'app.machines', title: 'statusbar.widget.machines' },
+  { id: 'app.pane', title: 'statusbar.widget.pane' },
+  { id: 'app.keyboardShortcuts', title: 'command.app.keyboardShortcuts' },
+  { id: 'app.commandPalette', title: 'command.app.commandPalette' },
+] as const;
+
+export function StatusBar({ connected, chord }: { connected: boolean; chord: boolean }) {
   const readOnly = useStore((s) => s.readOnly);
+  const hiddenList = useStore((s) => s.hiddenStatusWidgets);
+  const hidden = new Set(hiddenList);
+  const plugins = useActivePlugins();
   // Re-rendered when the bindings change.
   useKeys((s) => s.effective);
   const m = useStore((s) => s.machineId);
@@ -256,30 +268,89 @@ function StatusBar({ connected, chord }: { connected: boolean; chord: boolean })
     for (const id of s.order) if (s.machines[id]?.status === 'ready') ready++;
     return `${ready}/${s.order.length}`;
   });
+
+  const pluginWidgets: StatusWidgetDef[] = plugins.flatMap((p) => (p.statusItems ?? []).filter(isStatusWidget));
+  const allWidgets = [
+    ...BUILTIN_STATUS_WIDGETS.slice(0, 2).map((w) => ({ id: w.id, label: t(w.title) })),
+    ...pluginWidgets.map((w) => ({ id: w.id, label: t(w.title) })),
+    ...BUILTIN_STATUS_WIDGETS.slice(2).map((w) => ({ id: w.id, label: t(w.title) })),
+  ];
+
+  const openWidgetMenu = (
+    ev: { clientX: number; clientY: number; preventDefault(): void; stopPropagation(): void },
+    targetWidgetId?: string,
+  ) => {
+    const s = useStore.getState();
+    const entries: MenuEntry[] = [];
+    if (targetWidgetId) {
+      const target = allWidgets.find((w) => w.id === targetWidgetId);
+      if (target && !s.hiddenStatusWidgets.includes(target.id)) {
+        entries.push({
+          label: t('statusbar.hideWidget', { name: target.label }),
+          run: () => s.setStatusWidgetVisible(target.id, false),
+        });
+        entries.push('sep');
+      }
+    }
+    for (const w of allWidgets) {
+      const visible = !s.hiddenStatusWidgets.includes(w.id);
+      entries.push({
+        label: w.label,
+        icon: visible ? <Check /> : <span className="status-menu-blank" aria-hidden />,
+        run: () => s.toggleStatusWidget(w.id),
+      });
+    }
+    if (allWidgets.some((w) => s.hiddenStatusWidgets.includes(w.id))) {
+      entries.push('sep');
+      entries.push({
+        label: t('statusbar.showAll'),
+        run: () => s.showAllStatusWidgets(),
+      });
+    }
+    openMenu(ev, entries);
+  };
+
   return (
-    <footer className="statusbar">
+    <footer
+      className="statusbar"
+      onContextMenu={(e) => {
+        const hit = (e.target as HTMLElement).closest<HTMLElement>('[data-status-widget]')?.dataset.statusWidget;
+        openWidgetMenu(e, hit);
+      }}
+    >
       <span className={`conn ${connected ? 'on' : 'off'}`}>{connected ? t('app.connected') : t('app.reconnecting')}</span>
       {readOnly && <span className="prefix-badge ro">{t('app.readOnly')}</span>}
-      <span>{t('app.machines', { n: counts })}</span>
-      {about && machine && (
-        <span className="ellipsis">
+      {!hidden.has('app.machines') && <span data-status-widget="app.machines">{t('app.machines', { n: counts })}</span>}
+      {!hidden.has('app.pane') && about && machine && (
+        <span className="ellipsis" data-status-widget="app.pane">
           {machine.label} · {about.title} · {shortPath(about.path, machine.info?.home) || '~'}
         </span>
       )}
       <span className="spacer" />
-      <PluginStatusItems />
+      <PluginStatusItems hidden={hidden} />
       {chord && <span className="prefix-badge">{pendingChord()}</span>}
-      <StatusCommand command="app.keyboardShortcuts" />
-      <StatusCommand command="app.commandPalette" />
+      {!hidden.has('app.keyboardShortcuts') && <StatusCommand widgetId="app.keyboardShortcuts" command="app.keyboardShortcuts" />}
+      {!hidden.has('app.commandPalette') && <StatusCommand widgetId="app.commandPalette" command="app.commandPalette" />}
+      <button
+        className="status-widgets-btn"
+        title={t('statusbar.customize')}
+        aria-label={t('statusbar.customize')}
+        onClick={(e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          openWidgetMenu({ clientX: r.right, clientY: r.top, preventDefault() {}, stopPropagation: () => e.stopPropagation() });
+        }}
+      >
+        <SlidersHorizontal />
+      </button>
     </footer>
   );
 }
 
 /** A command the status bar offers: its name, and its key when it has one. */
-function StatusCommand({ command }: { command: string }) {
+function StatusCommand({ widgetId, command }: { widgetId: string; command: string }) {
   const key = keyHint(command);
   return (
-    <button className="status-command" data-command={command} onClick={() => runCommand(command)}>
+    <button className="status-command" data-command={command} data-status-widget={widgetId} onClick={() => runCommand(command)}>
       {commandLabel(command)}
       {key && <kbd>{key}</kbd>}
     </button>
@@ -287,17 +358,32 @@ function StatusCommand({ command }: { command: string }) {
 }
 
 /** The status bar's items of the plugins that are on, each in an error
- * boundary of its own. */
-function PluginStatusItems() {
+ * boundary of its own. Toggleable widgets (StatusWidgetDef) are skipped while
+ * hidden; plain components (dialogs, overlays) always stay mounted. */
+function PluginStatusItems({ hidden }: { hidden: ReadonlySet<string> }) {
   const plugins = useActivePlugins();
   return (
     <>
       {plugins.flatMap((p) =>
-        (p.statusItems ?? []).map((Item, i) => (
-          <PluginBoundary key={`${p.id}:${i}`} plugin={t(p.title)} compact>
-            <Item />
-          </PluginBoundary>
-        )),
+        (p.statusItems ?? []).map((entry, i) => {
+          if (isStatusWidget(entry)) {
+            if (hidden.has(entry.id)) return null;
+            const Item = entry.component;
+            return (
+              <span key={`${p.id}:${entry.id}`} className="status-widget" data-status-widget={entry.id}>
+                <PluginBoundary plugin={t(p.title)} compact>
+                  <Item />
+                </PluginBoundary>
+              </span>
+            );
+          }
+          const Item = entry;
+          return (
+            <PluginBoundary key={`${p.id}:${i}`} plugin={t(p.title)} compact>
+              <Item />
+            </PluginBoundary>
+          );
+        }),
       )}
     </>
   );

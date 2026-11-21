@@ -10,6 +10,7 @@ import { filesPlugin } from './files';
 import { usagePlugin } from './usage';
 import { vaultPlugin } from './vault';
 import { gitPlugin } from './git';
+import { monitorPlugin } from './monitor';
 
 setPanelCommand((panel) => ({ run: () => togglePanel(panel.id) }));
-definePlugins([transfersPlugin, guiPlugin, vscodePlugin, browserPlugin, filesPlugin, gitPlugin, usagePlugin, vaultPlugin]);
+definePlugins([transfersPlugin, guiPlugin, vscodePlugin, browserPlugin, filesPlugin, gitPlugin, monitorPlugin, usagePlugin, vaultPlugin]);

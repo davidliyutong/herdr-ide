@@ -193,6 +193,8 @@ var Commands = func() []Command {
 		cmd("view.panel.usage", "view"),
 		// The Git plugin's panel, with VS Code's key for its Source Control.
 		cmd("view.panel.git", "view", on(macApp, "ctrl+shift+g"), on(pcApp, "ctrl+shift+g")),
+		// The System Monitor & Task Manager plugin's panel (web/src/plugins/monitor).
+		cmd("view.panel.monitor", "view"),
 
 		cmd("find.open", "find", on(macAll, "cmd+f"), on(pcAll, "ctrl+shift+f")),
 		cmd("find.next", "find", on(macApp, "cmd+g")),

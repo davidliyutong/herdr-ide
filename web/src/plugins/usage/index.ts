@@ -18,7 +18,7 @@ export const usagePlugin: PluginDef = {
   icon: Gauge,
   settings: { section: 'usage', layout: UsageSettings },
   panels: [{ id: 'usage', title: 'usage.title', icon: Gauge, component: UsagePanel, command: 'view.panel.usage' }],
-  statusItems: [UsageStatusItem],
+  statusItems: [{ id: 'usage', title: 'usage.title', component: UsageStatusItem }],
   onMessage(_m, data) {
     if (data && typeof data === 'object') applySnapshot(data as UsageSnapshot);
   },

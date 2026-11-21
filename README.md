@@ -177,6 +177,15 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   editable, files that mix line endings keeping each line's own. Changed
   files are colored, ignored ones muted, in the file explorer; Settings ›
   Plugins › Git has the plugin's settings ([31](docs/features/31-git.md)).
+- **System monitor and task manager.** Hold ⌘ (Ctrl/Meta on Windows and
+  Linux) and hover any machine in the left sidebar—or hover/click the
+  bottom-right status bar indicator whose menu floats upward—to inspect live
+  CPU (with sparkline and load averages), memory and swap, per-GPU
+  utilization/VRAM/temperature/power, network throughput and disk I/O and
+  mounts. Open the **Task Manager** panel (in the right sidebar, or as a
+  split pane or tab) for a searchable process explorer with parent-child
+  tree view, flat list, subtree sorting and guarded process signaling
+  ([34](docs/features/34-system-monitor.md)).
 - **Variable vault.** API keys and other environment variables, encrypted
   on the core's computer under a key made from your passphrase, for coding
   agents on every machine: Claude Code, Codex and other MCP clients read
@@ -210,7 +219,7 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   thresholds you choose. Laid out as CodexBar: a tile per service with its
   logo and color, an overview of what the CLIs' local logs would cost at
   API prices (by day, model, project and machine; or the tokens by kind,
-  which also count the models without a price), OpenCode's sessions
+  which also count the models without a price), Antigravity's and OpenCode's sessions
   among them, and a page per service. Its settings list the providers,
   each opening its own.
   Credentials are read where they are and never leave the machine; only Kimi Code's

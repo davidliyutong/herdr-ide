@@ -2,6 +2,7 @@ import type { Messages } from './en';
 
 import { zhCN as filesZhCN } from '../plugins/files/i18n/zh-CN';
 import { zhCN as gitZhCN } from '../plugins/git/i18n/zh-CN';
+import { zhCN as monitorZhCN } from '../plugins/monitor/i18n/zh-CN';
 import { zhCN as usageZhCN } from '../plugins/usage/i18n/zh-CN';
 import { zhCN as vaultZhCN } from '../plugins/vault/i18n/zh-CN';
 import { zhCN as browserZhCN } from '../plugins/browser/i18n/zh-CN';
@@ -55,6 +56,11 @@ export const zhCN: Messages = {
   'app.connected': '已连接',
   'app.reconnecting': '正在重新连接…',
   'app.machines': '机器 {n}',
+  'statusbar.customize': '自定义状态栏',
+  'statusbar.hideWidget': '隐藏“{name}”',
+  'statusbar.showAll': '显示全部组件',
+  'statusbar.widget.machines': '机器数量',
+  'statusbar.widget.pane': '当前窗格',
   'app.withKey': '{label}（{key}）',
   'app.readOnly': '只读',
   'app.noAgentPane': '没有可接收的窗格：请先聚焦一个智能体窗格',
@@ -886,6 +892,11 @@ export const zhCN: Messages = {
   'settings.plugins.git.enabled': 'Git',
   'settings.plugins.git.enabled.desc': '为机器上的仓库提供源代码管理面板、Git 图和 Monaco 中的差异视图。',
   'command.view.panel.git': '显示源代码管理',
+  // monitor plugin
+  'settings.plugins.monitor.enabled': '系统监控',
+  'settings.plugins.monitor.enabled.desc':
+    '按住 ⌘ 悬停主机或通过状态栏查看实时 CPU、内存、每块 GPU、网络与磁盘占用，并提供支持树状视图与搜索的任务管理器。',
+  'command.view.panel.monitor': '显示任务管理器',
   // unsaved changes
   'unsaved.title': '未保存的更改',
   'unsaved.one': '要保存对 {name} 的更改吗？',
@@ -900,6 +911,7 @@ export const zhCN: Messages = {
   'unsaved.leaveDetail': '有编辑器中的更改尚未保存，关闭窗口会丢失这些更改。',
   ...filesZhCN,
   ...gitZhCN,
+  ...monitorZhCN,
   ...usageZhCN,
   ...vaultZhCN,
   ...browserZhCN,
