@@ -106,6 +106,19 @@ function onTabsKey(e: React.KeyboardEvent<HTMLElement>, m: string, ws: string) {
 }
 
 /** The shown machine's selected workspace: its tab bar and the selected tab's panes. */
+function SidebarToggle() {
+  return (
+    <button
+      className="icon sidebar-toggle"
+      title={withKey(t('command.view.toggleSidebar'), 'view.toggleSidebar')}
+      aria-label={t('command.view.toggleSidebar')}
+      onClick={() => actions.toggleSidebar()}
+    >
+      <PanelLeft />
+    </button>
+  );
+}
+
 export function Workspace() {
   const m = useStore((s) => s.machineId);
   const machine = useStore((s) => (s.machineId ? s.machines[s.machineId] : undefined));
@@ -126,6 +139,9 @@ export function Workspace() {
     // Every workspace of the machine was closed.
     return (
       <main className="workspace">
+        <div className="tabbar tabbar-empty">
+          <SidebarToggle />
+        </div>
         <div className="workspace-body">
           <div className="empty-state">
             <div>{t('workspace.none', { machine: machine.label })}</div>
@@ -149,11 +165,16 @@ export function Workspace() {
           ? t('workspace.hcError', { machine: machine.label, error: t(`backend.${backend.code}` as MessageKey) })
           : t('workspace.hcStarting', { machine: machine.label });
     return (
-      <main className="workspace empty">
-        <div className="muted">
-          {status}
-          {machine?.code && <div className="small">{codeText(machine.code)}</div>}
-          <div className="small">{t('workspace.pick')}</div>
+      <main className="workspace">
+        <div className="tabbar tabbar-empty">
+          <SidebarToggle />
+        </div>
+        <div className="workspace-body empty">
+          <div className="muted">
+            {status}
+            {machine?.code && <div className="small">{codeText(machine.code)}</div>}
+            <div className="small">{t('workspace.pick')}</div>
+          </div>
         </div>
       </main>
     );
@@ -167,14 +188,7 @@ export function Workspace() {
   return (
     <main className="workspace">
       <div className="tabbar">
-        <button
-          className="icon sidebar-toggle"
-          title={withKey(t('command.view.toggleSidebar'), 'view.toggleSidebar')}
-          aria-label={t('command.view.toggleSidebar')}
-          onClick={() => actions.toggleSidebar()}
-        >
-          <PanelLeft />
-        </button>
+        <SidebarToggle />
         <div
           ref={tabsRef}
           className="tabs"

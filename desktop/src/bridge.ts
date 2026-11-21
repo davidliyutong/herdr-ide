@@ -37,4 +37,9 @@ export const channels = {
   /** shell → page: the address a page in a browser pane's webview opened in
    * a window of its own (a URL string); the page shows it in a new tab. */
   browserOpen: 'desktop:browser-open',
+  /** shell → page (macOS): whether the main window is in native full screen,
+   * where macOS hides the traffic lights from the window chrome. */
+  fullScreen: 'desktop:full-screen',
+  /** page → shell (macOS): asks the shell to send the current full-screen state. */
+  fullScreenQuery: 'desktop:full-screen-query',
 } as const;

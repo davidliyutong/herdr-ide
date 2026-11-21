@@ -6,13 +6,14 @@
 
 import { applies, commandEnabled, keyContext, runCommand, type KeyContext } from './keymap';
 import { useKeys } from './keybindings';
-import { desktopShell } from './shell';
+import { desktopShell, type DesktopShell } from './shell';
 import { useStore } from './state/store';
 import { terms, useTerms } from './state/terms';
 import { focusedFrame, useFrames } from './codeFrames';
 import * as L from './term/layout';
 import { useDialog } from './dialog';
 import { useSettings } from './settings';
+import { currentZoom } from './zoom';
 
 /** Where the keyboard is: a dialog, a VS Code pane or the main UI. */
 function menuContext(): KeyContext {
@@ -48,12 +49,40 @@ export function disabledCommands(): string[] {
     .map((c) => c.id);
 }
 
+/** Applies the desktop shell's integrated title bar attributes and CSS
+ * geometry variables to :root (no-op in browsers and on platforms with a
+ * native window frame). Called before the first paint and whenever zoom
+ * changes. */
+export function applyTitlebar(shell: DesktopShell | undefined = desktopShell) {
+  if (typeof document === 'undefined') return;
+  const root = document.documentElement;
+  const tb = shell?.titlebar;
+  if (!tb) {
+    delete root.dataset.titlebar;
+    delete root.dataset.fullscreen;
+    root.style.removeProperty('--titlebar-inset-px');
+    root.style.removeProperty('--titlebar-min-h-px');
+    root.style.removeProperty('--titlebar-top-px');
+    root.style.removeProperty('--desktop-zoom');
+    return;
+  }
+  root.dataset.titlebar = tb.kind;
+  root.style.setProperty('--titlebar-inset-px', `${tb.inset}px`);
+  root.style.setProperty('--titlebar-min-h-px', `${tb.minHeight}px`);
+  root.style.setProperty('--titlebar-top-px', `${tb.topSpace}px`);
+  root.style.setProperty('--desktop-zoom', String(currentZoom() / 100));
+}
+
 /** Runs the menu's commands and keeps its items' enabled states current;
  * returns a function that stops it. */
-export function initDesktop(): () => void {
-  const shell = desktopShell;
+export function initDesktop(shell: DesktopShell | undefined = desktopShell): () => void {
+  applyTitlebar(shell);
   if (!shell) return () => {};
   const off = shell.onCommand(runMenuCommand);
+  const offFullScreen = shell.titlebar?.onFullScreen((full) => {
+    if (full) document.documentElement.dataset.fullscreen = 'true';
+    else delete document.documentElement.dataset.fullscreen;
+  });
   let last = '';
   let timer: ReturnType<typeof setTimeout> | undefined;
   const update = () => {
@@ -66,17 +95,21 @@ export function initDesktop(): () => void {
       shell.setDisabledCommands(list);
     }, 50);
   };
-  // The zoom's items depend on the zoom (settings).
+  // The zoom's items and the integrated title bar's CSS inset depend on settings.
   const subs = [
     useStore.subscribe(update),
     useTerms.subscribe(update),
     useDialog.subscribe(update),
     useKeys.subscribe(update),
-    useSettings.subscribe(update),
+    useSettings.subscribe(() => {
+      applyTitlebar(shell);
+      update();
+    }),
   ];
   update();
   return () => {
     off();
+    offFullScreen?.();
     clearTimeout(timer);
     for (const u of subs) u();
   };

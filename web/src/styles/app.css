@@ -9,3 +9,57 @@
 .app.no-sidebar {
   grid-template-columns: 0 minmax(0, 1fr) var(--panel-w, 0) var(--rail-w, 0);
 }
+
+/* ---------- integrated desktop title bar (macOS) ---------- */
+:root[data-titlebar='mac'] {
+  --titlebar-top: calc(var(--titlebar-top-px, 4px) / var(--desktop-zoom, 1));
+  --h-header: max(calc(var(--ds-size-header) + var(--titlebar-top)), calc(var(--titlebar-min-h-px, 44px) / var(--desktop-zoom, 1)));
+  --titlebar-inset: calc(var(--titlebar-inset-px, 84px) / var(--desktop-zoom, 1));
+}
+:root[data-titlebar='mac'][data-fullscreen='true'] {
+  --titlebar-top: 0px;
+  --h-header: var(--ds-size-header);
+  --titlebar-inset: 0px;
+}
+
+/* The top header strip across the sidebar, tab bar and right panel drags the
+   window; interactive controls and resize handles stay clickable/draggable. */
+:root[data-titlebar='mac'] .sidebar-head,
+:root[data-titlebar='mac'] .tabbar,
+:root[data-titlebar='mac'] .panel-head {
+  -webkit-app-region: drag;
+}
+:root[data-titlebar='mac'] .sidebar-head :is(button, a, input),
+:root[data-titlebar='mac'] .tabbar :is(button, a, input, .tab),
+:root[data-titlebar='mac'] .panel-head :is(button, a, input, .panel-title),
+:root[data-titlebar='mac'] .sidebar-resizer,
+:root[data-titlebar='mac'] .panel-resizer {
+  -webkit-app-region: no-drag;
+}
+
+/* Windowed macOS: traffic lights sit in the top-left of the sidebar header
+   (replacing the redundant brand text), or in the tab bar when the sidebar
+   is collapsed. Extra top breathing space keeps controls comfortably below
+   the top window edge while keeping traffic lights, buttons and tabs on one
+   vertical axis. Full screen hides the traffic lights and restores normal padding. */
+:root[data-titlebar='mac']:not([data-fullscreen='true']) .sidebar-head {
+  padding-top: var(--titlebar-top);
+  padding-left: var(--titlebar-inset);
+  justify-content: flex-end;
+}
+:root[data-titlebar='mac']:not([data-fullscreen='true']) .sidebar-head .brand {
+  display: none;
+}
+:root[data-titlebar='mac']:not([data-fullscreen='true']) .panel-head {
+  padding-top: var(--titlebar-top);
+}
+:root[data-titlebar='mac']:not([data-fullscreen='true']) .tabbar {
+  padding-top: calc((var(--h-header) - 1px - var(--tab-row) + var(--titlebar-top)) / 2);
+  padding-bottom: calc((var(--h-header) - 1px - var(--tab-row) - var(--titlebar-top)) / 2);
+}
+:root[data-titlebar='mac']:not([data-fullscreen='true']) .panel-rail {
+  padding-top: calc((var(--h-header) - var(--ds-size-rail-button) + var(--titlebar-top)) / 2);
+}
+:root[data-titlebar='mac']:not([data-fullscreen='true']) .app.no-sidebar .tabbar {
+  padding-left: calc(var(--titlebar-inset) + 4px);
+}

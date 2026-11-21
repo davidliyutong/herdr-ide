@@ -9,6 +9,7 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
 import type { DesktopShell, OpenedFolders, ProcessUsage } from '../../web/src/shell';
 import { channels } from './bridge';
+import { MAC_TITLEBAR_INSET, MAC_TITLEBAR_MIN_HEIGHT, MAC_TITLEBAR_TOP_SPACE } from './titlebar';
 
 /** Listens on channel for payloads that pass valid; returns a function that
  * stops it. */
@@ -23,6 +24,7 @@ function listen<T>(channel: string, valid: (value: unknown) => value is T, fn: (
 }
 
 const isString = (v: unknown): v is string => typeof v === 'string';
+const isBoolean = (v: unknown): v is boolean => typeof v === 'boolean';
 
 function isOpened(v: unknown): v is OpenedFolders {
   const o = v as OpenedFolders | null;
@@ -121,7 +123,8 @@ const shell: DesktopShell = {
   },
 };
 
-/** The bridge of a system (process.platform): Full Disk Access is macOS's. */
+/** The bridge of a system (process.platform): Full Disk Access and the
+ * integrated title bar are macOS's. */
 export function desktopShellFor(platform: string): DesktopShell {
   return {
     ...shell,
@@ -130,6 +133,17 @@ export function desktopShellFor(platform: string): DesktopShell {
         openFullDiskAccess: () => ipcRenderer.send(channels.openFullDiskAccess),
         revealTerminalCore: () => ipcRenderer.send(channels.revealTerminalCore),
         relaunch: () => ipcRenderer.send(channels.relaunch),
+      },
+      titlebar: {
+        kind: 'mac',
+        inset: MAC_TITLEBAR_INSET,
+        minHeight: MAC_TITLEBAR_MIN_HEIGHT,
+        topSpace: MAC_TITLEBAR_TOP_SPACE,
+        onFullScreen(fn) {
+          const off = listen(channels.fullScreen, isBoolean, fn);
+          ipcRenderer.send(channels.fullScreenQuery);
+          return off;
+        },
       },
     }),
   };

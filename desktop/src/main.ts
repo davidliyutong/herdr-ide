@@ -54,6 +54,7 @@ import {
   webPreferences,
 } from './policy';
 import { bundleOf, privacyActions, terminalCoreExecutable } from './privacy';
+import { macTrafficLightPosition, windowFrameOptions } from './titlebar';
 import { verifier, type Verifier } from './verify';
 import { helloFor, HELLO_TIMEOUT_MS, POWERSHELL_ARGS, powershellPath, type RunPowerShell } from './windowsHello';
 
@@ -104,6 +105,9 @@ let language = 'auto';
 // origin, so the app's other windows (program windows, VS Code's own) share
 // it. The setting is the only place it is kept.
 let zoomFactor = 1;
+// appearance.uiFontSize in CSS pixels: paired with zoomFactor to keep the
+// macOS traffic lights vertically centered in the integrated header row.
+let uiFontSize = tokens.font.root;
 // The commands whose menu items are disabled, as the page last said.
 let disabled = new Set<string>();
 // Folders opened with the app, until the page takes them.
@@ -239,13 +243,23 @@ function applyZoom() {
   if (contents && !contents.isDestroyed() && contents.getZoomFactor() !== zoomFactor) contents.setZoomFactor(zoomFactor);
 }
 
+/** Keeps the macOS traffic lights vertically centered in the integrated header
+ * row as the UI font size or window zoom changes. */
+function applyWindowButtons() {
+  if (platform === 'darwin' && mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.setWindowButtonPosition(macTrafficLightPosition(uiFontSize, zoomFactor));
+  }
+}
+
 // The core's settings and keybindings: the theme becomes the title bar's and
 // native controls' (also when it differs from the system's appearance), the
 // language the menu's, the zoom the windows'.
 function applySettings(s: ShellSettings) {
   nativeTheme.themeSource = s.theme;
   zoomFactor = s.zoom;
+  uiFontSize = s.uiFontSize;
   applyZoom();
+  applyWindowButtons();
   if (s.language === language) return;
   language = s.language;
   buildMenu();
@@ -283,6 +297,12 @@ ipcMain.on(channels.foldersWanted, (event, wanted: unknown) => {
   if (!fromMainPage(event)) return;
   const contents = event.sender;
   folders.takenBy(wanted === true ? (opened) => contents.send(channels.openFolders, opened) : undefined);
+});
+
+ipcMain.on(channels.fullScreenQuery, (event) => {
+  if (fromMainPage(event) && mainWindow && !mainWindow.isDestroyed()) {
+    event.sender.send(channels.fullScreen, mainWindow.isFullScreen());
+  }
 });
 
 // Full Disk Access (macOS): the page asks; what opens is the shell's own.
@@ -388,6 +408,7 @@ function createWindow() {
     minHeight: 500,
     show: false,
     backgroundColor: windowBackground(),
+    ...windowFrameOptions(platform, uiFontSize, zoomFactor),
     // Linux takes the window's icon from the window (macOS and Windows from
     // the application).
     ...(platform === 'linux' && { icon: join(app.getAppPath(), 'assets', 'icon.png') }),
@@ -457,6 +478,17 @@ function createWindow() {
   });
   // Each page loaded (also after a reload) gets the zoom.
   win.webContents.on('did-finish-load', applyZoom);
+  if (platform === 'darwin') {
+    const sendFullScreen = (full: boolean) => {
+      if (!win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send(channels.fullScreen, full);
+    };
+    win.on('enter-full-screen', () => sendFullScreen(true));
+    win.on('leave-full-screen', () => {
+      // macOS resets custom traffic light coordinates after exiting full screen.
+      applyWindowButtons();
+      sendFullScreen(false);
+    });
+  }
   win.once('ready-to-show', () => win.show());
   win.on('closed', () => {
     g.reset();

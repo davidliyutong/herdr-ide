@@ -9,6 +9,7 @@ import { loadedVt } from './vt/module';
 import { useStore } from './state/store';
 import { APP_SLUG } from './brand';
 import { currentAppearance, initAppearance } from './appearance';
+import { applyTitlebar } from './desktop';
 import { loadTermFont } from './terminal/fonts';
 import { initGuiAuto } from './gui/auto';
 import { initUpdateCheck } from './update';
@@ -36,6 +37,7 @@ import { guardImeKeys } from './ime';
 };
 
 initAppearance();
+applyTitlebar();
 refuseStrayFileDrops();
 guardImeKeys();
 // The settings come from the core; until it answers the built-in defaults

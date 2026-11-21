@@ -224,11 +224,21 @@ system's rules run in the tests on any of them:
   Quitting (the menu, ⌘Q) stops the core. Windows and Linux: closing the
   main window quits, and program windows do not keep the app open; a
   second launch focuses the main window.
-- Each system's native window frame and title bar. On Windows and Linux
-  the menu bar is in the window; on Linux the main window gets the app's
-  icon (macOS and Windows take it from the application). About shows the
-  name and version on every system (`app.setAboutPanelOptions` on Windows
-  and Linux; macOS reads its bundle).
+- **Window frames and title bar** (`desktop/src/titlebar.ts`). On macOS the
+  main window hides its separate title bar (`titleBarStyle: 'hidden'`) and
+  embeds the traffic lights into the UI's own top header row (the sidebar
+  header, or the tab bar when the sidebar is collapsed), with the empty
+  regions of the sidebar header, tab bar and right-panel header acting as
+  the window drag bar while controls, tabs and resizers remain interactive.
+  Traffic light vertical positioning and CSS left clearance stay aligned
+  across `appearance.uiFontSize` and `window.zoom`, and entering native full
+  screen clears the traffic-light inset until full screen ends. Secondary
+  windows (program windows, standalone VS Code) keep the standard native
+  title bar. On Windows and Linux the main window keeps its native frame and
+  in-window menu bar; on Linux it also sets the window icon (macOS and
+  Windows take it from the application). About shows the name and version on
+  every system (`app.setAboutPanelOptions` on Windows and Linux; macOS reads
+  its bundle).
 - The shell follows its core (`desktop/src/follow.ts`): it holds its own
   event channel (`/ws`), reads `GET /api/settings` and
   `GET /api/keybindings` when it opens and applies the `settings` and

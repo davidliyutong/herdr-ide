@@ -13,6 +13,9 @@ export interface ShellSettings {
   language: string;
   /** window.zoom as a zoom factor (1 is 100%), within Chromium's 0.25 to 5. */
   zoom: number;
+  /** appearance.uiFontSize in CSS pixels (11–20, default 13), used on macOS to
+   * keep the traffic lights vertically centered in the header row. */
+  uiFontSize: number;
 }
 
 /** The bindings in effect on platform in a /api/keybindings reply or a
@@ -34,10 +37,12 @@ export function settingsOf(reply: unknown): ShellSettings | undefined {
   const theme = values['appearance.theme']?.value;
   const language = values['appearance.language']?.value;
   const zoom = values['window.zoom']?.value;
+  const fontSize = values['appearance.uiFontSize']?.value;
   return {
     theme: theme === 'light' || theme === 'dark' ? theme : 'system',
     language: typeof language === 'string' ? language : 'auto',
     zoom: typeof zoom === 'number' && zoom >= 25 && zoom <= 500 ? zoom / 100 : 1,
+    uiFontSize: typeof fontSize === 'number' && Number.isFinite(fontSize) && fontSize >= 11 && fontSize <= 20 ? fontSize : 13,
   };
 }
 

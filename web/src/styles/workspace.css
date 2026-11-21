@@ -6,7 +6,9 @@
   min-width: 0;
   min-height: 0;
 }
-.workspace.empty {
+.workspace.empty,
+.workspace-body.empty {
+  display: flex;
   align-items: center;
   justify-content: center;
   text-align: center;

@@ -28,6 +28,9 @@ export interface DesktopShell {
   setDisabledCommands(commands: string[]): void;
   /** macOS only: Full Disk Access, which the user grants in System Settings. */
   privacy?: DesktopPrivacy;
+  /** macOS only: integrated window title bar geometry and full-screen state so
+   * the UI reserves space for the traffic lights in its top header row. */
+  titlebar?: DesktopTitlebar;
   /** Tells the shell how many panes have unsaved changes: while any has,
    * closing the main window or quitting asks the page (onCloseRequest). */
   setUnsaved(count: number): void;
@@ -88,6 +91,21 @@ export interface DesktopPrivacy {
   /** Quits the app and opens it again, as macOS applies a grant to the
    * app's processes started afterwards. */
   relaunch(): void;
+}
+
+/** Integrated window title bar metadata (macOS). */
+export interface DesktopTitlebar {
+  /** Which platform's integrated chrome the window uses. */
+  kind: 'mac';
+  /** Unzoomed window points to reserve on the left for the traffic lights. */
+  inset: number;
+  /** Minimum header row height in unzoomed window points. */
+  minHeight: number;
+  /** Extra top breathing space in unzoomed window points. */
+  topSpace: number;
+  /** Calls fn when the window enters or leaves native full screen (and once
+   * with the current state on subscribe); returns a function that stops it. */
+  onFullScreen(fn: (fullScreen: boolean) => void): () => void;
 }
 
 export const desktopShell: DesktopShell | undefined = (globalThis as { desktopShell?: DesktopShell }).desktopShell;

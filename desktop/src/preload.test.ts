@@ -21,8 +21,28 @@ const common = [
 
 test('the page gets only the desktopShell bridge, with these functions', () => {
   assert.deepEqual(Object.keys(exposed), ['desktopShell']);
-  assert.deepEqual(Object.keys(shell).sort(), process.platform === 'darwin' ? [...common, 'privacy'].sort() : common);
+  assert.deepEqual(Object.keys(shell).sort(), process.platform === 'darwin' ? [...common, 'privacy', 'titlebar'].sort() : common);
   for (const platform of ['win32', 'linux']) assert.deepEqual(Object.keys(desktopShellFor(platform)).sort(), common);
+});
+
+test("integrated title bar is macOS's: reports geometry and boolean full-screen updates", () => {
+  const tb = desktopShellFor('darwin').titlebar!;
+  assert.equal(tb.kind, 'mac');
+  assert.ok(tb.inset >= 80);
+  assert.ok(tb.minHeight >= 42);
+  assert.ok(tb.topSpace > 0);
+  sent.length = 0;
+  const states: boolean[] = [];
+  const off = tb.onFullScreen((full) => states.push(full));
+  assert.deepEqual(sent, [{ channel: channels.fullScreenQuery, value: undefined }]);
+  receive(channels.fullScreen, true);
+  receive(channels.fullScreen, 'yes');
+  receive(channels.fullScreen, 1);
+  receive(channels.fullScreen, false);
+  off();
+  receive(channels.fullScreen, true);
+  assert.deepEqual(states, [true, false]);
+  sent.length = 0;
 });
 
 test("Full Disk Access is macOS's: three requests on their own channels, carrying nothing from the page", () => {
