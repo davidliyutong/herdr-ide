@@ -19,6 +19,16 @@ type Memo struct {
 	// kimi maps a credential file to the digest of its content when its
 	// refresh token was refused.
 	kimi map[string][32]byte
+	// agLS remembers the last working Antigravity language server endpoint
+	// (port, CSRF token and scheme) so polls avoid spawning ps/lsof and
+	// probing non-RPC ports while the same server stays up.
+	agLS *agLSEndpoint
+}
+
+type agLSEndpoint struct {
+	port   int
+	csrf   string
+	scheme string
 }
 
 type agyRun struct {
@@ -133,4 +143,34 @@ func (m *Memo) keepKimiRefused(file string, b []byte) {
 		m.kimi = map[string][32]byte{}
 	}
 	m.kimi[file] = kimiFileSum(b)
+}
+
+func (m *Memo) lastAntigravityLS() (agLSEndpoint, bool) {
+	if m == nil {
+		return agLSEndpoint{}, false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.agLS == nil {
+		return agLSEndpoint{}, false
+	}
+	return *m.agLS, true
+}
+
+func (m *Memo) keepAntigravityLS(ep agLSEndpoint) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.agLS = &ep
+}
+
+func (m *Memo) dropAntigravityLS() {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.agLS = nil
 }

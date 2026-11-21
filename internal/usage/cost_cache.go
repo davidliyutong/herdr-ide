@@ -1,6 +1,7 @@
 package usage
 
 import (
+	"bufio"
 	"encoding/json"
 	"os"
 	"path"
@@ -24,6 +25,60 @@ type fileEntry struct {
 type costCache struct {
 	Version int                   `json:"version"`
 	Files   map[string]*fileEntry `json:"files"`
+}
+
+// memCostState keeps the last loaded costCache in memory (guarded by
+// costMu) so scans do not re-read and unmarshal megabytes of JSON from
+// disk when the file has not changed externally, and keep incremental
+// progress between periodic disk flushes.
+type memCostState struct {
+	path  string
+	cache *costCache
+	stat  os.FileInfo
+	size  int64
+	mtime int64
+	dirty bool
+	gen   uint64
+}
+
+var memCost memCostState
+
+// acquireCostCache returns the in-memory costCache for p when the file on
+// disk has not been modified externally, else reloads it from disk.
+// Must be called with costMu held.
+func acquireCostCache(p string) (c *costCache, dirty bool, gen uint64) {
+	if p == "" {
+		memCost.gen++
+		return &costCache{Version: costCacheVer, Files: map[string]*fileEntry{}}, false, memCost.gen
+	}
+	st, err := os.Stat(p)
+	if memCost.path == p && memCost.cache != nil {
+		if err == nil && memCost.stat != nil && os.SameFile(st, memCost.stat) && st.Size() == memCost.size && st.ModTime().UnixNano() == memCost.mtime {
+			return memCost.cache, memCost.dirty, memCost.gen
+		}
+		if os.IsNotExist(err) && memCost.stat == nil {
+			return memCost.cache, memCost.dirty, memCost.gen
+		}
+	}
+	c = loadCostCache(p)
+	memCost.gen++
+	memCost = memCostState{path: p, cache: c, gen: memCost.gen}
+	if err == nil {
+		memCost.stat, memCost.size, memCost.mtime = st, st.Size(), st.ModTime().UnixNano()
+	}
+	return c, false, memCost.gen
+}
+
+// markCostSaved records the new on-disk stamp after saveCostCache writes p.
+// Must be called with costMu held.
+func markCostSaved(p string) {
+	if memCost.path != p {
+		return
+	}
+	memCost.dirty = false
+	if st, err := os.Stat(p); err == nil {
+		memCost.stat, memCost.size, memCost.mtime = st, st.Size(), st.ModTime().UnixNano()
+	}
 }
 
 // persistDue tells whether a scan that changed the cache and read n bytes
@@ -53,14 +108,17 @@ func loadCostCache(p string) *costCache {
 // dedupe keeps one record per key, the one with the most output (the
 // first of equals), where the key first was: Claude logs a streamed
 // response once per content block, each line with the usage so far.
-// Records without a key all stay.
+// Records without a key all stay (without allocating a map).
 func dedupe(rs []Record) []Record {
-	at := make(map[string]int, len(rs))
+	var at map[string]int
 	out := rs[:0]
 	for _, r := range rs {
 		if r.K == "" {
 			out = append(out, r)
 			continue
+		}
+		if at == nil {
+			at = make(map[string]int, len(rs))
 		}
 		if i, ok := at[r.K]; ok {
 			if r.O > out[i].O {
@@ -75,12 +133,10 @@ func dedupe(rs []Record) []Record {
 	return out
 }
 
-// saveCostCache writes the cache atomically, 0600 in a 0700 directory.
+// saveCostCache writes the cache atomically, 0600 in a 0700 directory,
+// streaming JSON through a buffered writer to avoid a second full-size
+// buffer in memory.
 func saveCostCache(p string, c *costCache) error {
-	b, err := json.Marshal(c)
-	if err != nil {
-		return err
-	}
 	dir := path.Dir(p)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
@@ -94,7 +150,14 @@ func saveCostCache(p string, c *costCache) error {
 		tmp.Close()
 		return err
 	}
-	if _, err := tmp.Write(b); err != nil {
+	bw := bufio.NewWriterSize(tmp, 64<<10)
+	enc := json.NewEncoder(bw)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(c); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := bw.Flush(); err != nil {
 		tmp.Close()
 		return err
 	}

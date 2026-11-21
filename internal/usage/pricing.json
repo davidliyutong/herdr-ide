@@ -182,6 +182,123 @@
         "source": "https://developers.openai.com/api/docs/pricing",
         "tiers": [{ "inputMax": null, "input": 1.75, "cached": 0.175, "output": 14.0 }]
       }
+    },
+    "antigravity": {
+      "gemini-4-neon": {
+        "source": "https://ai.google.dev/gemini-api/docs/pricing",
+        "tiers": [{ "inputMax": null, "input": 3.0, "cached": 0.15, "output": 15.0 }]
+      },
+      "gemini-4-argon": {
+        "source": "https://ai.google.dev/gemini-api/docs/pricing",
+        "tiers": [{ "inputMax": null, "input": 2.0, "cached": 0.1, "output": 10.0 }]
+      },
+      "gemini-4-carbon": {
+        "source": "https://ai.google.dev/gemini-api/docs/pricing",
+        "tiers": [{ "inputMax": null, "input": 2.0, "cached": 0.1, "output": 10.0 }]
+      },
+      "gemini-4-hydrogen": {
+        "source": "https://ai.google.dev/gemini-api/docs/pricing",
+        "tiers": [{ "inputMax": null, "input": 1.5, "cached": 0.075, "output": 7.5 }]
+      },
+      "gemini-3.8-flash-cyber": {
+        "source": "https://ai.google.dev/gemini-api/docs/pricing",
+        "tiers": [{ "inputMax": null, "input": 1.5, "cached": 0.15, "output": 7.5 }]
+      },
+      "gemini-3.8-flash": {
+        "source": "https://ai.google.dev/gemini-api/docs/pricing",
+        "tiers": [{ "inputMax": null, "input": 0.75, "cached": 0.075, "output": 3.75 }]
+      },
+      "gemini-3.7-flash": {
+        "source": "https://ai.google.dev/gemini-api/docs/pricing",
+        "tiers": [{ "inputMax": null, "input": 0.75, "cached": 0.075, "output": 3.75 }]
+      },
+      "gemini-3.6-flash": {
+        "source": "https://ai.google.dev/gemini-api/docs/pricing",
+        "tiers": [{ "inputMax": null, "input": 0.75, "cached": 0.075, "output": 3.75 }]
+      },
+      "gemini-3.5-flash-lite": {
+        "source": "https://ai.google.dev/gemini-api/docs/pricing",
+        "tiers": [{ "inputMax": null, "input": 0.3, "cached": 0.03, "output": 2.5 }]
+      },
+      "gemini-3.5-flash": {
+        "source": "https://ai.google.dev/gemini-api/docs/pricing",
+        "tiers": [{ "inputMax": null, "input": 1.5, "cached": 0.15, "output": 9.0 }]
+      },
+      "gemini-3.1-pro": {
+        "source": "https://ai.google.dev/gemini-api/docs/pricing",
+        "tiers": [
+          { "inputMax": 200000, "input": 2.0, "cached": 0.2, "output": 12.0 },
+          { "inputMax": null, "input": 4.0, "cached": 0.4, "output": 18.0 }
+        ]
+      },
+      "gemini-3.1-flash-lite": {
+        "source": "https://ai.google.dev/gemini-api/docs/pricing",
+        "tiers": [{ "inputMax": null, "input": 0.25, "cached": 0.025, "output": 1.5 }]
+      },
+      "gemini-3-pro": {
+        "source": "https://ai.google.dev/gemini-api/docs/pricing",
+        "tiers": [
+          { "inputMax": 200000, "input": 2.0, "cached": 0.2, "output": 12.0 },
+          { "inputMax": null, "input": 4.0, "cached": 0.4, "output": 18.0 }
+        ]
+      },
+      "gemini-3-flash": {
+        "source": "https://ai.google.dev/gemini-api/docs/pricing",
+        "tiers": [{ "inputMax": null, "input": 0.5, "cached": 0.05, "output": 3.0 }]
+      },
+      "gemini-2.5-pro": {
+        "source": "https://ai.google.dev/gemini-api/docs/pricing",
+        "tiers": [
+          { "inputMax": 200000, "input": 1.25, "cached": 0.125, "output": 10.0 },
+          { "inputMax": null, "input": 2.5, "cached": 0.25, "output": 15.0 }
+        ]
+      },
+      "gemini-2.5-flash-lite": {
+        "source": "https://ai.google.dev/gemini-api/docs/pricing",
+        "tiers": [{ "inputMax": null, "input": 0.1, "cached": 0.01, "output": 0.4 }]
+      },
+      "gemini-2.5-flash": {
+        "source": "https://ai.google.dev/gemini-api/docs/pricing",
+        "tiers": [{ "inputMax": null, "input": 0.3, "cached": 0.03, "output": 2.5 }]
+      }
+    },
+    "kimi": {
+      "kimi-k3.1-pro-highspeed": {
+        "source": "https://platform.moonshot.ai/docs/pricing/chat",
+        "tiers": [{ "inputMax": null, "input": 4.0, "cached": 0.2, "output": 20.0 }]
+      },
+      "kimi-k3.1-pro": {
+        "source": "https://platform.moonshot.ai/docs/pricing/chat",
+        "tiers": [{ "inputMax": null, "input": 2.0, "cached": 0.2, "output": 10.0 }]
+      },
+      "kimi-k3": {
+        "source": "https://platform.moonshot.ai/docs/pricing/chat",
+        "tiers": [{ "inputMax": null, "input": 3.0, "cached": 0.3, "output": 15.0 }]
+      },
+      "kimi-k2.7-code-highspeed": {
+        "source": "https://platform.moonshot.ai/docs/pricing/chat",
+        "tiers": [{ "inputMax": null, "input": 1.9, "cached": 0.38, "output": 8.0 }]
+      },
+      "kimi-k2.7-code": {
+        "source": "https://platform.moonshot.ai/docs/pricing/chat",
+        "tiers": [{ "inputMax": null, "input": 0.95, "cached": 0.19, "output": 4.0 }]
+      },
+      "kimi-k2.6": {
+        "source": "https://platform.moonshot.ai/docs/pricing/chat",
+        "tiers": [{ "inputMax": null, "input": 0.95, "cached": 0.16, "output": 4.0 }]
+      },
+      "kimi-k2.5": {
+        "source": "https://platform.moonshot.ai/docs/pricing/chat",
+        "tiers": [{ "inputMax": null, "input": 0.6, "cached": 0.1, "output": 3.0 }]
+      },
+      "kimi-for-coding-highspeed": {
+        "source": "https://platform.moonshot.ai/docs/pricing/chat",
+        "tiers": [{ "inputMax": null, "input": 1.9, "cached": 0.38, "output": 8.0 }]
+      },
+      "kimi-for-coding": {
+        "source": "https://platform.moonshot.ai/docs/pricing/chat",
+        "tiers": [{ "inputMax": null, "input": 0.95, "cached": 0.19, "output": 4.0 }]
+      }
     }
   }
 }

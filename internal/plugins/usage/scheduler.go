@@ -157,6 +157,9 @@ type Plugin struct {
 	polling   bool
 	working   map[string]bool // machine|terminal of agents working
 	costCache map[string]costEntry
+	// machineCosts keeps each machine's last CostReport and ETag so
+	// unchanged scans transfer only {notModified: true} over SSH.
+	machineCosts map[string]machineCostEntry
 	// recent are the alerts fired in the last alertKeep.
 	recent []Alert
 	// costFlights are the machines' scans in progress.
@@ -476,6 +479,8 @@ func (p *Plugin) poll(ctx context.Context, only []string, joined bool) {
 		return
 	}
 	ready := p.readyList()
+	now := p.now()
+	showStart := p.updatedAt.IsZero() || p.refreshPending || now.Sub(p.lastWatch) < watchFor
 	if joined {
 		ready = only
 	} else {
@@ -487,7 +492,6 @@ func (p *Plugin) poll(ctx context.Context, only []string, joined bool) {
 		return
 	}
 	p.polling = true
-	now := p.now()
 	iv := p.interval()
 	// Accounts a provider asked to wait for (Retry-After) are skipped
 	// until then: by id on every machine, those without an id on theirs.
@@ -510,7 +514,9 @@ func (p *Plugin) poll(ctx context.Context, only []string, joined bool) {
 		}
 	}
 	p.mu.Unlock()
-	p.broadcast()
+	if showStart {
+		p.broadcast()
+	}
 
 	opts := p.options()
 	seen := map[string][]string{}

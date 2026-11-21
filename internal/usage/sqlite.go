@@ -20,7 +20,8 @@ import (
 // neither the -shm file nor anything for writing, so it never stands in
 // the way of the program that owns the database. A writer that
 // checkpointed or restarted the WAL meanwhile shows in changed, and the
-// read is then tried again (OpenCode's database, cost_opencode.go).
+// read is then tried again (OpenCode's and Antigravity's databases,
+// cost_opencode.go and cost_antigravity.go).
 //
 // The file is another program's and may be damaged or made to hurt: every
 // offset and length is checked before it is used (without arithmetic that
@@ -222,7 +223,8 @@ func (f *sqliteFile) readWAL() error {
 	} else if f.pageSize != ps {
 		return nil
 	}
-	r := bufio.NewReaderSize(io.NewSectionReader(f.wal, walHeader, f.walLen-walHeader), 1<<20)
+	bufSize := min(1<<20, max(4096, int(f.walLen-walHeader)))
+	r := bufio.NewReaderSize(io.NewSectionReader(f.wal, walHeader, f.walLen-walHeader), bufSize)
 	frame := make([]byte, walFrameHead+ps)
 	pending := map[uint32]int64{}
 	off := int64(walHeader)
@@ -440,6 +442,12 @@ func (f *sqliteFile) cells(pg []byte, h int, leaf bool) ([]cell, error) {
 // its values (nil, int64, float64, string or []byte). Rows whose record is
 // longer than maxRecord are skipped unread.
 func (f *sqliteFile) rows(root uint32, maxRecord int64, fn func(rowid int64, vals []any) error) error {
+	return f.rowsWhere(root, maxRecord, nil, fn)
+}
+
+// rowsWhere is rows, skipping any row whose rowid want rejects before
+// reading its overflow pages or decoding its record.
+func (f *sqliteFile) rowsWhere(root uint32, maxRecord int64, want func(rowid int64) bool, fn func(rowid int64, vals []any) error) error {
 	stack := []uint32{root}
 	// Every page of the tree, overflow pages too: each once.
 	seen := map[uint32]bool{}
@@ -488,6 +496,9 @@ func (f *sqliteFile) rows(root uint32, maxRecord int64, fn func(rowid int64, val
 				if f.produced++; f.produced > sqliteMaxRows {
 					return errSQLiteBudget
 				}
+				if want != nil && !want(int64(c.rowid)) {
+					continue
+				}
 				rec, err := f.payload(pg, c.at, int(c.size), seen)
 				if err != nil {
 					return err
@@ -512,6 +523,16 @@ func (f *sqliteFile) rows(root uint32, maxRecord int64, fn func(rowid int64, val
 // chain of overflow pages, each a page of the tree not read before.
 func (f *sqliteFile) payload(pg []byte, at, size int, seen map[uint32]bool) ([]byte, error) {
 	local := f.localSize(size)
+	if local < size {
+		// Overflow pages each hold at most usable-4 bytes, and a walk reads
+		// at most f.limit pages in all: refuse a claimed size the file
+		// cannot hold before allocating for it.
+		rem := uint64(size - local)
+		maxPages := f.limit - uint64(len(seen))
+		if rem > maxPages*uint64(f.usable-4) {
+			return nil, errSQLite
+		}
+	}
 	out := make([]byte, 0, size)
 	out = append(out, pg[at:at+local]...)
 	if local == size {
@@ -589,7 +610,10 @@ func sqliteRecord(b []byte) ([]any, error) {
 		case t == 7:
 			vals[i] = math.Float64frombits(binary.BigEndian.Uint64(v))
 		case t%2 == 0:
-			vals[i] = bytes.Clone(v)
+			// payload() allocates a fresh buffer per row that nothing else
+			// mutates, so slicing directly avoids doubling peak memory on
+			// multi-megabyte BLOB rows.
+			vals[i] = v
 		default:
 			vals[i] = string(v)
 		}
@@ -597,13 +621,26 @@ func sqliteRecord(b []byte) ([]any, error) {
 	return vals, nil
 }
 
-// table finds a table in the schema: its root page and its columns in
-// their order. A WITHOUT ROWID table (an index b-tree) is not read.
-func (f *sqliteFile) table(name string) (uint32, []string, error) {
-	var root uint32
-	var cols []string
+// sqliteTable is a table's root page and column list from sqlite_master.
+type sqliteTable struct {
+	root uint32
+	cols []string
+}
+
+// tables finds every named table in the schema in a single walk of page 1.
+// A WITHOUT ROWID table (an index b-tree) fails with errSQLite.
+func (f *sqliteFile) tables(names ...string) (map[string]sqliteTable, error) {
+	want := make(map[string]bool, len(names))
+	for _, n := range names {
+		want[n] = true
+	}
+	found := make(map[string]sqliteTable, len(names))
 	err := f.rows(1, 1<<20, func(_ int64, v []any) error {
-		if len(v) < 5 || v[0] != "table" || v[1] != name {
+		if len(v) < 5 || v[0] != "table" {
+			return nil
+		}
+		name, _ := v[1].(string)
+		if !want[name] {
 			return nil
 		}
 		r, _ := v[3].(int64)
@@ -611,13 +648,27 @@ func (f *sqliteFile) table(name string) (uint32, []string, error) {
 		if r <= 0 || r > math.MaxUint32 || strings.Contains(strings.ToUpper(sql), "WITHOUT ROWID") {
 			return errSQLite
 		}
-		root, cols = uint32(r), sqliteColumns(sql)
+		found[name] = sqliteTable{root: uint32(r), cols: sqliteColumns(sql)}
 		return nil
 	})
-	if err == nil && root == 0 {
-		err = os.ErrNotExist
+	if err != nil {
+		return nil, err
 	}
-	return root, cols, err
+	return found, nil
+}
+
+// table finds a table in the schema: its root page and its columns in
+// their order. A WITHOUT ROWID table (an index b-tree) is not read.
+func (f *sqliteFile) table(name string) (uint32, []string, error) {
+	found, err := f.tables(name)
+	if err != nil {
+		return 0, nil, err
+	}
+	t, ok := found[name]
+	if !ok {
+		return 0, nil, os.ErrNotExist
+	}
+	return t.root, t.cols, nil
 }
 
 // sqliteColumns are the names of the columns a CREATE TABLE statement

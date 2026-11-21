@@ -16,7 +16,7 @@ import { useSettings } from '../settings';
 import type { MachineState } from '../lib/machine';
 import { groupWindows, UsagePanel } from '../plugins/usage/UsagePanel';
 import { UsageStatusItem } from '../plugins/usage/StatusItem';
-import { applySnapshot, setView, useUsage } from '../plugins/usage/state';
+import { applySnapshot, costStale, fetchCost, fetchSnapshot, setView, useUsage } from '../plugins/usage/state';
 import {
   costOf,
   daily,
@@ -529,5 +529,74 @@ describe('usage panel and status item', () => {
     expect(host.querySelector('.usage-kind-legend')).not.toBeNull();
     await act(async () => host.querySelectorAll<HTMLButtonElement>('.usage-spend [aria-pressed]')[0].click());
     expect(useUsage.getState().metric).toBe('spend');
+  });
+
+  it('sends If-None-Match and handles 304 Not Modified for snapshot and cost', async () => {
+    const snapHeaders: Array<string | null> = [];
+    const costHeaders: Array<string | null> = [];
+    const oldGen = Math.floor(Date.now() / 1000) - 3600;
+    const day = new Date().toISOString().slice(0, 10);
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      const h = new Headers(init?.headers);
+      if (String(url).startsWith('/api/p/usage/cost')) {
+        costHeaders.push(h.get('If-None-Match'));
+        if (h.get('If-None-Match') === '"cost-1"') {
+          return new Response(null, { status: 304, headers: { ETag: '"cost-1"' } });
+        }
+        return new Response(
+          JSON.stringify({
+            generatedAt: oldGen,
+            days: 90,
+            tzOffset: 0,
+            since: 0,
+            weekHours: 168,
+            monthHours: 750,
+            machines: { local: { files: 1 } },
+            rows: [
+              {
+                day,
+                provider: 'claude',
+                model: 'claude-opus-4-6',
+                project: 'alpha',
+                machine: 'local',
+                input: 10,
+                cached: 0,
+                cacheWrite: 0,
+                output: 5,
+                requests: 1,
+                cost: 1.25,
+                priced: true,
+              },
+            ],
+          }),
+          { headers: { ETag: '"cost-1"' } },
+        );
+      }
+      if (String(url).startsWith('/api/p/usage')) {
+        snapHeaders.push(h.get('If-None-Match'));
+        if (h.get('If-None-Match') === '"snap-1"') {
+          return new Response(null, { status: 304, headers: { ETag: '"snap-1"' } });
+        }
+        return new Response(JSON.stringify(snapshot([account('claude:b', [40])])), {
+          headers: { ETag: '"snap-1"' },
+        });
+      }
+      return new Response('{}', { status: 404 });
+    });
+
+    await fetchSnapshot(true);
+    expect(useUsage.getState().snapshot?.accounts).toHaveLength(1);
+    await fetchSnapshot(true);
+    expect(snapHeaders).toEqual([null, '"snap-1"']);
+    expect(useUsage.getState().snapshot?.accounts).toHaveLength(1);
+
+    await fetchCost();
+    expect(useUsage.getState().cost?.rows).toHaveLength(1);
+    expect(costStale()).toBe(true);
+    await fetchCost();
+    expect(costHeaders).toEqual([null, '"cost-1"']);
+    expect(useUsage.getState().costLoading).toBe(false);
+    expect(useUsage.getState().cost?.rows).toHaveLength(1);
+    expect(costStale()).toBe(false);
   });
 });

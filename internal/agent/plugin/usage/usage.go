@@ -10,8 +10,9 @@
 //     and balances, until the core stops waiting (an ended Kimi Code token
 //     is renewed first with kimiRefresh);
 //   - cost {since, tzOffset, codexHomes, providers}: the logs' tokens and
-//     cost by day, model and project (OpenCode's sessions from its
-//     database, read-only), until the core stops waiting;
+//     cost by day, model and project (Antigravity's conversation databases
+//     and OpenCode's sessions from their databases, read-only), until the
+//     core stops waiting;
 //   - setDeepseekKey {key}: writes (or with "" removes) the DeepSeek key
 //     file; the key is never read back.
 package usage

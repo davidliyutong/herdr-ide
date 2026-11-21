@@ -46,12 +46,26 @@ func antigravityAccounts(ctx context.Context, e *Env, o *Options) []Account {
 	if o.skips(Antigravity, "", "") {
 		return []Account{skipped(Account{Provider: Antigravity})}
 	}
+	if ep, ok := e.Memo.lastAntigravityLS(); ok {
+		if m := getUserStatusOn(ctx, e, ep.port, ep.csrf, ep.scheme); m != nil {
+			a := Account{Provider: Antigravity, Source: "ls"}
+			if parseAntigravity(&a, m) {
+				if o.skips(Antigravity, a.ID, "") {
+					return []Account{skipped(a)}
+				}
+				a.Status, a.AsOf = StatusOK, e.now().Unix()
+				return []Account{a}
+			}
+		}
+		e.Memo.dropAntigravityLS()
+	}
 	procs := findLanguageServers(ctx, e)
 	for _, p := range procs {
 		for _, port := range listeningPorts(ctx, e, p.PID) {
-			if m := getUserStatus(ctx, e, port, p.CSRF); m != nil {
+			if m, scheme := getUserStatusWithScheme(ctx, e, port, p.CSRF); m != nil {
 				a := Account{Provider: Antigravity, Source: "ls"}
 				if parseAntigravity(&a, m) {
+					e.Memo.keepAntigravityLS(agLSEndpoint{port: port, csrf: p.CSRF, scheme: scheme})
 					if o.skips(Antigravity, a.ID, "") {
 						return []Account{skipped(a)}
 					}
@@ -202,6 +216,20 @@ func procPorts(root string, pid int) []int {
 // getUserStatus asks the language server on port, over HTTPS and then
 // HTTP; nil when it does not answer with an object.
 func getUserStatus(ctx context.Context, e *Env, port int, csrf string) map[string]any {
+	m, _ := getUserStatusWithScheme(ctx, e, port, csrf)
+	return m
+}
+
+func getUserStatusWithScheme(ctx context.Context, e *Env, port int, csrf string) (map[string]any, string) {
+	for _, scheme := range []string{"https", "http"} {
+		if m := getUserStatusOn(ctx, e, port, csrf, scheme); m != nil {
+			return m, scheme
+		}
+	}
+	return nil, ""
+}
+
+func getUserStatusOn(ctx context.Context, e *Env, port int, csrf, scheme string) map[string]any {
 	if e.LocalClient == nil {
 		return nil
 	}
@@ -212,16 +240,14 @@ func getUserStatus(ctx context.Context, e *Env, port int, csrf string) map[strin
 		[]byte(`{"metadata":{"ideName":"antigravity","extensionName":"antigravity","locale":"en"}}`),
 		[]byte(`{}`),
 	}
-	for _, scheme := range []string{"https", "http"} {
-		url := scheme + "://127.0.0.1:" + strconv.Itoa(port) + "/exa.language_server_pb.LanguageServerService/GetUserStatus"
-		for _, body := range bodies {
-			m, err := getMap(ctx, c, "POST", url, headers, body)
-			if err == nil {
-				return m
-			}
-			if he, ok := err.(*httpError); ok && he.Code == "network" {
-				break // try the other scheme
-			}
+	url := scheme + "://127.0.0.1:" + strconv.Itoa(port) + "/exa.language_server_pb.LanguageServerService/GetUserStatus"
+	for _, body := range bodies {
+		m, err := getMap(ctx, c, "POST", url, headers, body)
+		if err == nil {
+			return m
+		}
+		if he, ok := err.(*httpError); ok && he.Code == "network" {
+			break
 		}
 	}
 	return nil

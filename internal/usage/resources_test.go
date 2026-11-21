@@ -282,3 +282,79 @@ func TestAgyAccountFromItsLog(t *testing.T) {
 		t.Errorf("id without a log %+v", a)
 	}
 }
+
+// Antigravity caches its running language server endpoint across polls so
+// ps and lsof are not spawned every time, and re-discovers when the server
+// restarts on a new port.
+func TestAntigravityLSCache(t *testing.T) {
+	ls1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Codeium-Csrf-Token") != "tok-1" {
+			http.Error(w, "bad csrf", http.StatusUnauthorized)
+			return
+		}
+		w.Write([]byte(`{"userStatus":{"email":"ag@example.com","cascadeModelConfigData":{"clientModelConfigs":[{"label":"M","quotaInfo":{"remainingFraction":0.6}}]}}}`))
+	}))
+	port1 := ls1.Listener.Addr().(*net.TCPAddr).Port
+
+	var activePort atomic.Int64
+	activePort.Store(int64(port1))
+	var csrfMu sync.Mutex
+	activeCSRF := "tok-1"
+	var psCount, lsofCount atomic.Int64
+
+	e := testEnv(t, nil)
+	e.Memo = &Memo{}
+	e.GOOS = "darwin"
+	e.LocalClient = localClient
+	e.Command = func(_ context.Context, _ []string, name string, _ ...string) ([]byte, error) {
+		switch filepath.Base(name) {
+		case "ps":
+			psCount.Add(1)
+			csrfMu.Lock()
+			tok := activeCSRF
+			csrfMu.Unlock()
+			return []byte("  501   345 /x/language_server_macos_arm --csrf_token " + tok + " antigravity\n"), nil
+		case "lsof":
+			lsofCount.Add(1)
+			return []byte("n127.0.0.1:" + itoa(activePort.Load()) + "\n"), nil
+		}
+		return nil, errors.New("unexpected " + name)
+	}
+
+	// First poll discovers the server via ps + lsof.
+	a1 := one(t, Limits(context.Background(), e, Options{Providers: []string{Antigravity}}))
+	if a1.Status != StatusOK || a1.Windows[0].UsedPct != 40 || psCount.Load() != 1 || lsofCount.Load() != 1 {
+		t.Fatalf("first poll: %+v ps=%d lsof=%d", a1, psCount.Load(), lsofCount.Load())
+	}
+
+	// Second poll reuses the cached endpoint without spawning ps or lsof.
+	a2 := one(t, Limits(context.Background(), e, Options{Providers: []string{Antigravity}}))
+	if a2.Status != StatusOK || a2.Windows[0].UsedPct != 40 || psCount.Load() != 1 || lsofCount.Load() != 1 {
+		t.Fatalf("second poll: %+v ps=%d lsof=%d", a2, psCount.Load(), lsofCount.Load())
+	}
+
+	// Language server restarts on a new port with a new token: cache misses,
+	// falls back to discovery, and caches the new endpoint.
+	ls1.Close()
+	ls2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Codeium-Csrf-Token") != "tok-2" {
+			http.Error(w, "bad csrf", http.StatusUnauthorized)
+			return
+		}
+		w.Write([]byte(`{"userStatus":{"email":"ag@example.com","cascadeModelConfigData":{"clientModelConfigs":[{"label":"M","quotaInfo":{"remainingFraction":0.25}}]}}}`))
+	}))
+	defer ls2.Close()
+	activePort.Store(int64(ls2.Listener.Addr().(*net.TCPAddr).Port))
+	csrfMu.Lock()
+	activeCSRF = "tok-2"
+	csrfMu.Unlock()
+
+	a3 := one(t, Limits(context.Background(), e, Options{Providers: []string{Antigravity}}))
+	if a3.Status != StatusOK || a3.Windows[0].UsedPct != 75 || psCount.Load() != 2 || lsofCount.Load() != 2 {
+		t.Fatalf("after restart: %+v ps=%d lsof=%d", a3, psCount.Load(), lsofCount.Load())
+	}
+	a4 := one(t, Limits(context.Background(), e, Options{Providers: []string{Antigravity}}))
+	if a4.Status != StatusOK || a4.Windows[0].UsedPct != 75 || psCount.Load() != 2 || lsofCount.Load() != 2 {
+		t.Fatalf("cached new endpoint: %+v ps=%d lsof=%d", a4, psCount.Load(), lsofCount.Load())
+	}
+}

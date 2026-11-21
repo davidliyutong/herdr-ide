@@ -56,13 +56,15 @@ var families = map[string]struct {
 	litellm string
 	names   *regexp.Regexp
 }{
-	usage.Grok:   {"xai", regexp.MustCompile(`^grok-[0-9]`)},
-	usage.Claude: {"anthropic", regexp.MustCompile(`^claude-`)},
-	usage.Codex:  {"openai", regexp.MustCompile(`^gpt-[5-9]`)},
+	usage.Grok:        {"xai", regexp.MustCompile(`^grok-[0-9]`)},
+	usage.Claude:      {"anthropic", regexp.MustCompile(`^claude-`)},
+	usage.Codex:       {"openai", regexp.MustCompile(`^gpt-[5-9]`)},
+	usage.Antigravity: {"gemini", regexp.MustCompile(`^gemini-(2\.5|[3-9])`)},
+	usage.Kimi:        {"moonshot", regexp.MustCompile(`^kimi-`)},
 }
 
 // notCLI are LiteLLM's models of those families that are no CLI's.
-var notCLI = regexp.MustCompile(`(audio|realtime|image|tts|transcribe|search|chat-latest|-instant)`)
+var notCLI = regexp.MustCompile(`(audio|realtime|image|tts|transcribe|search|chat-latest|-instant|live|embed|robotics|computer|customtools|-exp)`)
 
 var longKey = regexp.MustCompile(`^(input|output)_cost_per_token_above_(\d+)k_tokens$`)
 

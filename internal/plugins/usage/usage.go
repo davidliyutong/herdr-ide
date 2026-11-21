@@ -8,6 +8,7 @@
 package usage
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"slices"
@@ -179,12 +180,49 @@ func (p *Plugin) ID() string { return ID }
 
 // getSnapshot answers with the current snapshot; ?watch=1 (the open panel,
 // every minute) counts the panel open for the adaptive refresh
-// (usage.refreshOpen).
+// (usage.refreshOpen). Unchanged snapshots answer 304 Not Modified when
+// If-None-Match matches ETag.
 func (p *Plugin) getSnapshot(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("watch") == "1" {
 		p.watch()
 	}
-	plugin.WriteJSON(w, http.StatusOK, p.Snapshot())
+	s := p.Snapshot()
+	if etag := snapshotETag(s); etag != "" {
+		w.Header().Set("ETag", etag)
+		if r.Header.Get("If-None-Match") == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+	}
+	plugin.WriteJSON(w, http.StatusOK, s)
+}
+
+// snapshotETag hashes the poll-driven state of s, ignoring the continuous
+// per-second drift of Pace.ExpectedPct / Pace.ExhaustsAt so the open
+// panel's 1-minute ?watch=1 heartbeat gets 304 Not Modified between polls,
+// while still changing if a window passes its reset (Pace becomes nil) or
+// flips BeforeReset.
+func snapshotETag(s Snapshot) string {
+	norm := s
+	norm.Accounts = make([]AccountView, len(s.Accounts))
+	for i, a := range s.Accounts {
+		if len(a.Windows) > 0 {
+			ws := make([]WindowView, len(a.Windows))
+			for j, w := range a.Windows {
+				if w.Pace != nil {
+					w.Pace = &Pace{BeforeReset: w.Pace.BeforeReset}
+				}
+				ws[j] = w
+			}
+			a.Windows = ws
+		}
+		norm.Accounts[i] = a
+	}
+	b, err := json.Marshal(norm)
+	if err != nil {
+		return ""
+	}
+	return jsonETag("u", b)
 }
 
 // postRefresh asks for a poll: at once, or when minRefreshGap since the
@@ -195,7 +233,8 @@ func (p *Plugin) postRefresh(c *plugin.Call, w http.ResponseWriter, r *http.Requ
 }
 
 // getCost answers with the cost of the machines' logs: ?days= (1–90,
-// default 30), &tz= (the user's offset east of UTC in minutes).
+// default 30), &tz= (the user's offset east of UTC in minutes). Unchanged
+// reports answer 304 Not Modified when If-None-Match matches ETag.
 func (p *Plugin) getCost(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	days, err := strconv.Atoi(q.Get("days"))
@@ -207,7 +246,15 @@ func (p *Plugin) getCost(c *plugin.Call, w http.ResponseWriter, r *http.Request)
 	if tz < -14*60 || tz > 14*60 {
 		tz = 0
 	}
-	plugin.WriteJSON(w, http.StatusOK, p.cost(r.Context(), days, tz))
+	rep, etag := p.costWithETag(r.Context(), days, tz)
+	if etag != "" {
+		w.Header().Set("ETag", etag)
+		if r.Header.Get("If-None-Match") == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+	}
+	plugin.WriteJSON(w, http.StatusOK, rep)
 }
 
 // putDeepseekKey writes the DeepSeek key file on a machine ({"key"}; ""

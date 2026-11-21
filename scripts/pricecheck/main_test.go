@@ -21,7 +21,10 @@ const fixture = `{
   "claude-opus-4-5": {"litellm_provider": "anthropic", "mode": "chat", "input_cost_per_token": 5e-6, "output_cost_per_token": 2.5e-5},
   "gpt-5.9": {"litellm_provider": "openai", "mode": "chat", "input_cost_per_token": 1e-6, "output_cost_per_token": 1e-6},
   "gpt-5.9-2026-12-01": {"litellm_provider": "openai", "mode": "chat", "input_cost_per_token": 1e-6, "output_cost_per_token": 1e-6},
-  "gpt-4o": {"litellm_provider": "openai", "mode": "chat", "input_cost_per_token": 1e-6, "output_cost_per_token": 1e-6}
+  "gpt-4o": {"litellm_provider": "openai", "mode": "chat", "input_cost_per_token": 1e-6, "output_cost_per_token": 1e-6},
+  "gemini/gemini-4-neon": {"litellm_provider": "gemini", "mode": "chat", "input_cost_per_token": 3e-6, "output_cost_per_token": 1.5e-5, "cache_read_input_token_cost": 1.5e-7},
+  "gemini/gemini-4-live": {"litellm_provider": "gemini", "mode": "chat", "input_cost_per_token": 1e-6, "output_cost_per_token": 1e-6},
+  "moonshot/kimi-k3.1-pro": {"litellm_provider": "moonshot", "mode": "chat", "input_cost_per_token": 2e-6, "output_cost_per_token": 1e-5, "cache_read_input_token_cost": 2e-7}
 }`
 
 func TestCompare(t *testing.T) {
@@ -44,6 +47,12 @@ func TestCompare(t *testing.T) {
 			"claude-gone":     {Source: "https://example.com", Tiers: []usage.Tier{{Input: 1, Output: 1}}},
 			// Its dated version, not Opus 4.5, which starts with its name.
 			"claude-opus-4": {Tiers: []usage.Tier{{Input: 15, Output: 75}}},
+		},
+		usage.Antigravity: {
+			"gemini-4-neon": {Tiers: []usage.Tier{{Input: 3, Cached: 0.15, Output: 15}}},
+		},
+		usage.Kimi: {
+			"kimi-k3.1-pro": {Tiers: []usage.Tier{{Input: 2, Cached: 0.2, Output: 10}}},
 		},
 	}}
 	r := compare(ours, theirs)

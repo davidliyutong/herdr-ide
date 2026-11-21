@@ -864,3 +864,180 @@ func TestProviderGroups(t *testing.T) {
 		prev = slices.Max(orders[g])
 	}
 }
+
+// Turning a provider off or changing usage.codexHomes produces a different
+// cost cache key immediately instead of serving the previous report.
+func TestCostCacheKeyIncludesProvidersAndHomes(t *testing.T) {
+	now := time.Date(2026, 11, 16, 3, 0, 0, 0, time.UTC)
+	p, _ := testPlugin(t, &now, []string{"local"}, nil)
+	calls := 0
+	var got []usage.CostOptions
+	p.fetch = func(ctx context.Context, m, action string, params, out any) error {
+		calls++
+		got = append(got, params.(usage.CostOptions))
+		b, _ := json.Marshal(usage.CostReport{Files: calls})
+		return json.Unmarshal(b, out)
+	}
+	p.cost(context.Background(), 30, 0)
+	p.cost(context.Background(), 30, 0)
+	if calls != 1 {
+		t.Fatalf("cached call count %d, want 1", calls)
+	}
+	// Disable one provider: cache misses and sends the updated list.
+	if err := p.settings().Set(providerSetting(usage.Grok), "", false); err != nil {
+		t.Fatal(err)
+	}
+	p.cost(context.Background(), 30, 0)
+	if calls != 2 || slices.Contains(got[1].Providers, usage.Grok) {
+		t.Fatalf("after provider toggle: calls=%d providers=%v", calls, got[len(got)-1].Providers)
+	}
+	// Change codexHomes: cache misses and sends the new home.
+	if err := p.settings().Set(SettingCodexHomes, "", []any{"/srv/codex-alt"}); err != nil {
+		t.Fatal(err)
+	}
+	p.cost(context.Background(), 30, 0)
+	if calls != 3 || !slices.Equal(got[2].CodexHomes, []string{"/srv/codex-alt"}) {
+		t.Fatalf("after codexHomes change: calls=%d homes=%v", calls, got[len(got)-1].CodexHomes)
+	}
+}
+
+// Per-machine cost RPC sends IfNoneMatch and reuses the previous machine
+// report on NotModified; GET /api/p/usage/cost returns an ETag and answers
+// 304 Not Modified when If-None-Match matches.
+func TestCostMachineETagAndHTTP304(t *testing.T) {
+	now := time.Date(2026, 11, 16, 3, 0, 0, 0, time.UTC)
+	p, _ := testPlugin(t, &now, []string{"local"}, nil)
+	var seenMatch []string
+	agentETag := "cost-v1"
+	p.fetch = func(ctx context.Context, m, action string, params, out any) error {
+		o := params.(usage.CostOptions)
+		seenMatch = append(seenMatch, o.IfNoneMatch)
+		if o.IfNoneMatch == agentETag {
+			b, _ := json.Marshal(usage.CostReport{Since: o.Since, ETag: agentETag, NotModified: true})
+			return json.Unmarshal(b, out)
+		}
+		b, _ := json.Marshal(usage.CostReport{
+			Since: o.Since,
+			ETag:  agentETag,
+			Files: 2,
+			Rows:  []usage.CostRow{{Day: "2026-11-16", Provider: "claude", Model: "claude-opus-4-6", Cost: 1.5, Requests: 1, Priced: true}},
+		})
+		return json.Unmarshal(b, out)
+	}
+
+	// First HTTP GET returns 200 with ETag and rows.
+	w1 := httptest.NewRecorder()
+	p.getCost(&plugin.Call{}, w1, httptest.NewRequest("GET", "/api/p/usage/cost?days=30&tz=0", nil))
+	etag := w1.Header().Get("ETag")
+	if w1.Code != http.StatusOK || etag == "" {
+		t.Fatalf("first cost: code=%d etag=%q", w1.Code, etag)
+	}
+	var rep1 CostReport
+	if err := json.Unmarshal(w1.Body.Bytes(), &rep1); err != nil || len(rep1.Rows) != 1 {
+		t.Fatalf("first body: %+v %v", rep1, err)
+	}
+
+	// Matching If-None-Match while fresh returns 304 with empty body.
+	req2 := httptest.NewRequest("GET", "/api/p/usage/cost?days=30&tz=0", nil)
+	req2.Header.Set("If-None-Match", etag)
+	w2 := httptest.NewRecorder()
+	p.getCost(&plugin.Call{}, w2, req2)
+	if w2.Code != http.StatusNotModified || w2.Body.Len() != 0 || w2.Header().Get("ETag") != etag {
+		t.Fatalf("304 while fresh: code=%d len=%d etag=%q", w2.Code, w2.Body.Len(), w2.Header().Get("ETag"))
+	}
+
+	// Expire costFresh: core asks the agent with IfNoneMatch, reuses the
+	// cached machine rows on NotModified, and still answers 304 to the client.
+	now = now.Add(costFresh + time.Second)
+	req3 := httptest.NewRequest("GET", "/api/p/usage/cost?days=30&tz=0", nil)
+	req3.Header.Set("If-None-Match", etag)
+	w3 := httptest.NewRecorder()
+	p.getCost(&plugin.Call{}, w3, req3)
+	if len(seenMatch) != 2 || seenMatch[0] != "" || seenMatch[1] != "cost-v1" {
+		t.Fatalf("agent IfNoneMatch sequence: %v", seenMatch)
+	}
+	if w3.Code != http.StatusNotModified || w3.Body.Len() != 0 {
+		t.Fatalf("304 after machine NotModified: code=%d len=%d", w3.Code, w3.Body.Len())
+	}
+
+	// Agent reports a new ETag with identical rows: content-based HTTP ETag
+	// stays equal and still answers 304.
+	agentETag = "cost-v2"
+	now = now.Add(costFresh + time.Second)
+	req4 := httptest.NewRequest("GET", "/api/p/usage/cost?days=30&tz=0", nil)
+	req4.Header.Set("If-None-Match", etag)
+	w4 := httptest.NewRecorder()
+	p.getCost(&plugin.Call{}, w4, req4)
+	if w4.Code != http.StatusNotModified || w4.Header().Get("ETag") != etag {
+		t.Fatalf("identical content: code=%d etag=%q want 304 %q", w4.Code, w4.Header().Get("ETag"), etag)
+	}
+	// Now change rows too so the content ETag changes.
+	p.fetch = func(ctx context.Context, m, action string, params, out any) error {
+		b, _ := json.Marshal(usage.CostReport{
+			Since: params.(usage.CostOptions).Since,
+			ETag:  "cost-v3",
+			Files: 3,
+			Rows:  []usage.CostRow{{Day: "2026-11-16", Provider: "claude", Model: "claude-opus-4-6", Cost: 3.0, Requests: 2, Priced: true}},
+		})
+		return json.Unmarshal(b, out)
+	}
+	now = now.Add(costFresh + time.Second)
+	req5 := httptest.NewRequest("GET", "/api/p/usage/cost?days=30&tz=0", nil)
+	req5.Header.Set("If-None-Match", etag)
+	w5 := httptest.NewRecorder()
+	p.getCost(&plugin.Call{}, w5, req5)
+	if w5.Code != http.StatusOK || w5.Header().Get("ETag") == etag {
+		t.Fatalf("changed data: code=%d etag=%q prev=%q", w5.Code, w5.Header().Get("ETag"), etag)
+	}
+}
+
+// GET /api/p/usage returns ETag and answers 304 on matching If-None-Match
+// while still recording ?watch=1; background idle polls omit the redundant
+// start-of-poll broadcast while watched/manual polls keep it.
+func TestSnapshotETagAndIdlePollBroadcast(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	p, h := testPlugin(t, &now, []string{"local"}, func(string, usage.Options) ([]usage.Account, error) {
+		return []usage.Account{{Provider: "claude", ID: "acc-1", Status: "ok", AsOf: now.Unix(), Windows: []usage.Window{win("session", 25, now.Unix()+3600, 18000)}}}, nil
+	})
+	// First poll broadcasts start + end (2 messages).
+	p.Poll(context.Background())
+	if len(h.sent) != 2 {
+		t.Fatalf("first poll broadcasts %d, want 2", len(h.sent))
+	}
+
+	// Background idle poll (no watch, not manual) omits the start broadcast (1 message).
+	h.sent = nil
+	now = now.Add(30 * time.Minute)
+	p.Poll(context.Background())
+	if len(h.sent) != 1 || h.sent[0].(Snapshot).Polling {
+		t.Fatalf("idle poll broadcasts: %+v", h.sent)
+	}
+
+	// GET /api/p/usage?watch=1 returns 200 + ETag, and a matching
+	// If-None-Match returns 304 while still refreshing lastWatch.
+	w1 := httptest.NewRecorder()
+	p.getSnapshot(&plugin.Call{}, w1, httptest.NewRequest("GET", "/api/p/usage?watch=1", nil))
+	etag := w1.Header().Get("ETag")
+	if w1.Code != http.StatusOK || etag == "" {
+		t.Fatalf("first snapshot: code=%d etag=%q", w1.Code, etag)
+	}
+
+	now = now.Add(2 * time.Minute)
+	req304 := httptest.NewRequest("GET", "/api/p/usage?watch=1", nil)
+	req304.Header.Set("If-None-Match", etag)
+	w2 := httptest.NewRecorder()
+	p.getSnapshot(&plugin.Call{}, w2, req304)
+	if w2.Code != http.StatusNotModified || w2.Body.Len() != 0 {
+		t.Fatalf("snapshot 304: code=%d len=%d", w2.Code, w2.Body.Len())
+	}
+	if !p.lastWatch.Equal(now) {
+		t.Fatalf("304 did not record watch: lastWatch=%v now=%v", p.lastWatch, now)
+	}
+
+	// Watched poll sends both start (polling: true) and end broadcasts.
+	h.sent = nil
+	p.Poll(context.Background())
+	if len(h.sent) != 2 || !h.sent[0].(Snapshot).Polling || h.sent[1].(Snapshot).Polling {
+		t.Fatalf("watched poll broadcasts: %+v", h.sent)
+	}
+}

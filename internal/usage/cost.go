@@ -2,11 +2,15 @@ package usage
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -59,6 +63,8 @@ const (
 	logGrok        = "grok"
 	logGrokLegacy  = "grok-legacy"
 	logGrokEvents  = "grok-events"
+	logAntigravity = "antigravity"
+	logKimi        = "kimi"
 	logOpenCode    = "opencode"
 	costCacheVer   = 2
 	maxCacheMemory = 256 << 20
@@ -77,6 +83,9 @@ type CostOptions struct {
 	// Prices are the user's (usage.prices, ParsePrices), over the table's
 	// (PricingWith).
 	Prices map[string]Tier `json:"prices,omitempty"`
+	// IfNoneMatch is the ETag of the caller's last report: when the cache
+	// and options yield the same ETag, Cost answers NotModified with no rows.
+	IfNoneMatch string `json:"ifNoneMatch,omitempty"`
 }
 
 // CostRow is a day's tokens and cost of one model in one project.
@@ -105,6 +114,10 @@ type CostReport struct {
 	Retries  int64    `json:"retries,omitempty"`
 	Unpriced []string `json:"unpriced,omitempty"`
 	Files    int      `json:"files"`
+	// ETag identifies this report's inputs; NotModified is true when
+	// CostOptions.IfNoneMatch matched ETag (Rows is omitted).
+	ETag        string `json:"etag,omitempty"`
+	NotModified bool   `json:"notModified,omitempty"`
 }
 
 var costMu sync.Mutex
@@ -162,6 +175,18 @@ func costLogs(e *Env, o CostOptions) []logFile {
 			return !strings.Contains(p, "/") && strings.HasPrefix(p, "unified.jsonl")
 		})
 	}
+	if want(Antigravity) {
+		for _, db := range antigravityDBs(e) {
+			out = append(out, logFile{db, logAntigravity})
+		}
+	}
+	if want(Kimi) {
+		walk(path.Join(kimiHome(e), "sessions"), logKimi, func(p string) bool {
+			parts := strings.Split(p, "/")
+			return len(parts) == 5 && parts[2] == "agents" && parts[4] == "wire.jsonl" ||
+				len(parts) == 3 && parts[2] == "wire.jsonl"
+		})
+	}
 	if want(OpenCode) {
 		for _, db := range openCodeDBs(e) {
 			out = append(out, logFile{db, logOpenCode})
@@ -176,6 +201,10 @@ func providerOf(kind string) string {
 		return Claude
 	case logCodex:
 		return Codex
+	case logAntigravity:
+		return Antigravity
+	case logKimi:
+		return Kimi
 	case logOpenCode:
 		return OpenCode
 	}
@@ -183,14 +212,15 @@ func providerOf(kind string) string {
 }
 
 // logStamp is a log's size and time (ns), which tell whether it changed:
-// for OpenCode's database with its WAL's, where commits go first.
+// for SQLite databases (OpenCode's and Antigravity's) with their WAL's,
+// where commits go first.
 func logStamp(lf logFile) (int64, int64, error) {
 	st, err := os.Stat(lf.path)
 	if err != nil || !st.Mode().IsRegular() {
 		return 0, 0, os.ErrNotExist
 	}
 	size, mtime := st.Size(), st.ModTime().UnixNano()
-	if lf.kind == logOpenCode {
+	if lf.kind == logOpenCode || lf.kind == logAntigravity {
 		if w, err := os.Stat(lf.path + "-wal"); err == nil {
 			size += w.Size()
 			mtime = max(mtime, w.ModTime().UnixNano())
@@ -227,7 +257,7 @@ func Cost(ctx context.Context, e *Env, o CostOptions) (*CostReport, error) {
 	if e.Base != "" {
 		cachePath = path.Join(e.Base, CostCacheFile)
 	}
-	cache := loadCostCache(cachePath)
+	cache, dirty, gen := acquireCostCache(cachePath)
 	seen := map[string]bool{}
 	logs := costLogs(e, o)
 	changed := false
@@ -237,12 +267,19 @@ func Cost(ctx context.Context, e *Env, o CostOptions) (*CostReport, error) {
 	for _, lf := range logs {
 		if err := ctx.Err(); err != nil {
 			if changed && cachePath != "" {
-				saveCostCache(cachePath, cache)
+				memCost.gen++
+				memCost.dirty = true
+				if saveCostCache(cachePath, cache) == nil {
+					markCostSaved(cachePath)
+				}
 			}
 			return nil, err
 		}
-		if changed && cachePath != "" && time.Since(lastSave) >= costSaveEvery {
-			saveCostCache(cachePath, cache)
+		if (changed || dirty) && cachePath != "" && time.Since(lastSave) >= costSaveEvery {
+			if saveCostCache(cachePath, cache) == nil {
+				markCostSaved(cachePath)
+				dirty = false
+			}
 			lastSave = time.Now()
 		}
 		size, mtime, err := logStamp(lf)
@@ -270,7 +307,11 @@ func Cost(ctx context.Context, e *Env, o CostOptions) (*CostReport, error) {
 	// Stopped in the last log: what was read stays, as between logs.
 	if err := ctx.Err(); err != nil {
 		if changed && cachePath != "" {
-			saveCostCache(cachePath, cache)
+			memCost.gen++
+			memCost.dirty = true
+			if saveCostCache(cachePath, cache) == nil {
+				markCostSaved(cachePath)
+			}
 		}
 		return nil, err
 	}
@@ -294,13 +335,57 @@ func Cost(ctx context.Context, e *Env, o CostOptions) (*CostReport, error) {
 			changed = true
 		}
 	}
-	if changed && cachePath != "" && persistDue(cachePath, read) {
-		saveCostCache(cachePath, cache)
+	if changed && cachePath != "" {
+		memCost.gen++
+		gen = memCost.gen
+		memCost.dirty = true
+		dirty = true
+	}
+	if (changed || dirty) && cachePath != "" && persistDue(cachePath, read) {
+		if saveCostCache(cachePath, cache) == nil {
+			markCostSaved(cachePath)
+		}
+	}
+	slices.Sort(failed)
+	failed = slices.Compact(failed)
+	etag := costETag(gen, o, failed)
+	if cachePath != "" && o.IfNoneMatch != "" && o.IfNoneMatch == etag {
+		return &CostReport{Since: o.Since, ETag: etag, NotModified: true}, nil
 	}
 	rep := aggregateCost(cache, seen, o)
-	slices.Sort(failed)
-	rep.Failed = slices.Compact(failed)
+	rep.Failed = failed
+	rep.ETag = etag
 	return rep, nil
+}
+
+// costETag hashes the cache generation and query parameters so unchanged
+// scans can short-circuit aggregation and SSH transfer.
+func costETag(gen uint64, o CostOptions, failed []string) string {
+	h := sha256.New()
+	fmt.Fprintf(h, "%d|%d|%d|", gen, o.Since, o.TZOffset)
+	provs := slices.Clone(o.Providers)
+	sort.Strings(provs)
+	fmt.Fprintf(h, "%q|", provs)
+	homes := slices.Clone(o.CodexHomes)
+	sort.Strings(homes)
+	fmt.Fprintf(h, "%q|", homes)
+	fmt.Fprintf(h, "%q|", failed)
+	if len(o.Prices) > 0 {
+		keys := make([]string, 0, len(o.Prices))
+		for k := range o.Prices {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			t := o.Prices[k]
+			cw := -1.0
+			if t.CacheWrite != nil {
+				cw = *t.CacheWrite
+			}
+			fmt.Fprintf(h, "%s:%g,%g,%g,%g;", k, t.Input, t.Cached, t.Output, cw)
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil)[:8])
 }
 
 // readFailure is the code of a log that could not be read: too_large (a

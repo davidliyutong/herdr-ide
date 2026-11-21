@@ -39,10 +39,10 @@ const openCodeMaxRecord = 64 << 10
 var openCodeMaxRecords = 300_000
 
 // openCodeTables are the price tables of the providers whose APIs serve
-// models the table prices (Anthropic's, OpenAI's, xAI's): their steps
-// cost what the CLIs' logs would, also signed in with a subscription,
+// models the table prices (Anthropic's, OpenAI's, xAI's, Google's): their
+// steps cost what the CLIs' logs would, also signed in with a subscription,
 // which OpenCode records as free.
-var openCodeTables = map[string]string{"anthropic": Claude, "openai": Codex, "xai": Grok}
+var openCodeTables = map[string]string{"anthropic": Claude, "openai": Codex, "xai": Grok, "google": Antigravity}
 
 var errSQLiteChanged = errors.New("the database changed while it was read")
 

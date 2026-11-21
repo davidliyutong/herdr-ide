@@ -19,11 +19,15 @@ import (
 // from where old ended when the log only grew (old's records, models and
 // parser state carried over), else from the start. A log that is not
 // gzipped may be growing: its last line counts once it ends. It returns
-// how many bytes it read. OpenCode's database is read whole (its rows
-// change in place), from since on, until ctx ends.
+// how many bytes it read. SQLite databases (OpenCode's and Antigravity's)
+// are read whole (their rows or WAL change in place), from since on, until
+// ctx ends.
 func parseLog(ctx context.Context, lf logFile, old, ent *fileEntry, since int64) (int64, error) {
-	if lf.kind == logOpenCode {
+	switch lf.kind {
+	case logOpenCode:
 		return parseOpenCodeDB(ctx, lf.path, ent, since)
+	case logAntigravity:
+		return parseAntigravityDB(ctx, lf.path, ent, since)
 	}
 	f, err := openRegular(lf.path)
 	if err != nil {
@@ -83,6 +87,7 @@ var logParsers = map[string]logParser{
 		}
 		return eachLine(r, final, func(line []byte) { parseGrokEvent(line, ent) })
 	},
+	logKimi: parseKimiLog,
 }
 
 // perLine is the parser of a log whose lines are read one by one.

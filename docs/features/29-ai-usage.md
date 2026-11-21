@@ -53,10 +53,12 @@ same in its sessions' database.
   `skipLocal` (`provider`, or `provider:home` for a Codex home), is answered
   `skipped` without a request. The agent asks the providers through one
   HTTP client, so polls reuse its connections.
-- `cost {since, tzOffset, codexHomes, providers}`: the logs' tokens and
+- `cost {since, tzOffset, codexHomes, providers, ifNoneMatch}`: the logs' tokens and
   cost by day (the user's), provider, model and project, OpenCode's
-  database among the logs. The scan stops between files when the request
-  ends, keeping what it read.
+  database among the logs. Each answer carries an `etag`; a repeat scan
+  whose `ifNoneMatch` matches returns `{since, etag, notModified: true}`
+  without re-aggregating or sending the rows again. The scan stops between
+  files when the request ends, keeping what it read.
 - `setDeepseekKey {key}`: writes or removes the key file.
 
 | Provider | Credentials | Asks | Account id |
@@ -64,7 +66,7 @@ same in its sessions' database.
 | Claude | `~/.claude/.credentials.json` (`$CLAUDE_CONFIG_DIR`) `claudeAiOauth`; on macOS the keychain item `Claude Code-credentials` when the file has none (`usage.claudeKeychain`) | `GET api.anthropic.com/api/oauth/usage` (`anthropic-beta: oauth-2025-04-20`): `five_hour`, `seven_day`, `seven_day_opus`, `seven_day_sonnet` (`utilization`, `resets_at`), `extra_usage` (amounts in cents) | `~/.claude.json`'s `oauthAccount.accountUuid`, else `/api/oauth/profile` |
 | Codex | `$CODEX_HOME` or `~/.codex/auth.json`, and each of `usage.codexHomes` | `GET chatgpt.com/backend-api/wham/usage` with `ChatGPT-Account-Id`: `rate_limit.primary_window`/`secondary_window`, `additional_rate_limits`, `credits`, `plan_type`. Without an answer (network) or with an expired token: the newest session log's `rate_limits` (read backwards from its end, and not again while the log is unchanged), as `stale` with `code: from_log` | `tokens.account_id`; email and plan from the id token's claims |
 | Grok | `$GROK_HOME` or `~/.grok/auth.json`, x.ai's issuer first | `GET cli-chat-proxy.grok.com/v1/billing?format=credits` (`X-XAI-Token-Auth: xai-grok-cli`): `creditUsagePercent` (else on-demand used over cap) for `currentPeriod`, a window whose kind its length tells: weekly (the subscriptions' credits start over every 7 days, and when the answer gives no period), a session up to a day, monthly from 20 days; `productUsage` per product over the same period; `/v1/settings` for the plan | `user_id` |
-| Antigravity | none: the running language server | `/bin/ps` (else `ps` on the `PATH`) for the agent's user's own Antigravity `language_server` and its `--csrf_token`; its loopback ports (`/proc` on Linux, `/usr/sbin/lsof` on macOS); `POST https://127.0.0.1:<port>/exa.language_server_pb.LanguageServerService/GetUserStatus` (then HTTP, then an empty body; no connection is kept); without one, `agy -p /usage --output-format json` (20 s, in a process group of its own that is killed when it exits or times out), at most every 10 minutes (the polls in between get its last answer) and not again for 30 minutes after it failed: it takes seconds and a few hundred MB | a hash of the email; agy 1.5 names none, so the email comes from the end of agy's log, `~/.gemini/antigravity-cli/cli.log` (`authenticated successfully as …`), and the account merges with the language server's across machines |
+| Antigravity | none: the running language server | `/bin/ps` (else `ps` on the `PATH`) for the agent's user's own Antigravity `language_server` and its `--csrf_token`; its loopback ports (`/proc` on Linux, `/usr/sbin/lsof` on macOS); `POST https://127.0.0.1:<port>/exa.language_server_pb.LanguageServerService/GetUserStatus` (then HTTP, then an empty body; no connection is kept; the working port, token and scheme are kept in memory across polls and re-discovered only when the server stops answering); without one, `agy -p /usage --output-format json` (20 s, in a process group of its own that is killed when it exits or times out), at most every 10 minutes (the polls in between get its last answer) and not again for 30 minutes after it failed: it takes seconds and a few hundred MB | a hash of the email; agy 1.5 names none, so the email comes from the end of agy's log, `~/.gemini/antigravity-cli/cli.log` (`authenticated successfully as …`), and the account merges with the language server's across machines |
 | Kimi Code | `$KIMI_CODE_HOME` or `~/.kimi-code/credentials/kimi-code*.json`; an ended token of `kimi-code.json` is renewed first (below) | `GET api.kimi.com/coding/v1/usages`, in either shape, the one with more windows (Kimi Code 2.2.0's when they tie): `usages` as Kimi Code 2.2.0 reads it (`limit_5h`, `limit_7d`, `limit_month_total`, and `limit_month_code`, Kimi Code's part of the month, labelled Code; each `used_ratio` 0–1 and `reset_time`; a month taken as 30 days) with `boosterWallet` (extra usage: its balance, used this month and monthly limit, in its currency), or `usage` (weekly) and `limits[]` (`window.duration` × `timeUnit`); numbers may be strings | the token's `user_id` (or `sub`) claim |
 | DeepSeek | the key file the panel writes (the user's choice, first), `DEEPSEEK_API_KEY`, or Claude Code's `settings.json` when its `ANTHROPIC_BASE_URL` is DeepSeek's (`https` on `api.deepseek.com` or another host below `deepseek.com`; a gateway that only has deepseek in its name does not count) | `GET api.deepseek.com/user/balance`: `balance_infos`, `is_available` (no windows) | a hash of the key |
 
@@ -177,10 +179,57 @@ events, an event whose total did not move being a replay); Grok's
 `sessions/*/*/updates.jsonl` (`turn_completed`, by model, the tier by the
 turn's average prompt) and the legacy `logs/unified.jsonl*` (also gzipped;
 the model from the session's `events.jsonl`, retries only counted);
+Kimi Code's `sessions/*/*/agents/*/wire.jsonl` (`usage.record` events for
+main and sub-agents across turn and session compaction scopes: `inputOther`,
+`inputCacheRead`, `inputCacheCreation`, `output`; model prefixes normalized
+to `kimi-*`; the project from the session's `state.json` `cwd`/`workDir`,
+else the workspace directory name);
+Antigravity's conversation databases (below); and
 OpenCode's database (below). `internal/usage/pricing.json` has the prices by provider and the longest
 model prefix, with tiers by prompt length and cache-write prices (5 minutes:
 the input price unless given; 1 hour: twice it). A week is 168 hours and a
 month 750 for the equivalents (cost × 168 or 750 / the range's hours).
+
+### Antigravity's sessions
+
+Antigravity keeps each conversation in an SQLite database in WAL mode under
+`~/.gemini/antigravity/conversations/<id>.db`,
+`~/.gemini/antigravity-cli/conversations/<id>.db` and
+`~/.gemini/antigravity-ide/conversations/<id>.db`
+(`internal/usage/cost_antigravity.go`). Three tables are read with the same
+lock-free, read-only SQLite reader (`internal/usage/sqlite.go`) as OpenCode's:
+
+- `gen_metadata`: one protobuf blob (`data`) per LLM generation.
+  `field 1` holds `field 4` with exact token counts (`field 2` non-cached
+  prompt tokens, `field 3` total output tokens, `field 5` cached input
+  tokens, `field 9` thinking tokens, `field 10` content tokens; if
+  `field 3` is absent, output is reconciled from thinking plus content),
+  `field 19` with the model identifier, and `field 20` map entries
+  (`request_id`, `cascade_id`, `last_step_index`). Top-level `field 2`
+  holds the step indices generated by that call. Earlier turns are ~1.5 KiB,
+  while a conversation's last row embeds the prompt context before `field 4`
+  and can span tens of megabytes; rows up to 64 MiB are read (the SQLite
+  reader refuses any claimed record larger than the file's pages can hold
+  before allocating) and zero-token generations are skipped.
+- `steps` (optional, rows up to 256 KiB): `metadata` protobuf timestamps
+  (`field 1`, else `6`/`7`/`8`), matched to each generation by its `field 2`
+  step indices or `last_step_index` so multi-day conversations split by day.
+  Only the rowids referenced by non-empty generations are decoded (unreferenced
+  rows are skipped before following overflow pages), and databases with no
+  usage in `gen_metadata` return before reading `steps`.
+- `trajectory_metadata_blob` (optional, rows up to 64 KiB): workspace URI
+  (`field 7`, else `field 1.1`) for the project name and conversation start
+  timestamp (`field 2.1`) as fallback when a step has none (falling back
+  further to the database/WAL mtime).
+
+Each record is keyed by `request_id` (else `cascade_id` or conversation id
+and `idx`), so overlapping databases across Antigravity's directories are
+not double-counted, and up to 100,000 generations are kept per database.
+Gemini models are priced from the `antigravity` table in `pricing.json`;
+`claude-*`, `gpt-*` and `grok-*` models used in Antigravity are priced from
+their respective tables, with `usage.prices` overriding any of them. Each
+conversation database is cached by its combined `.db` and `-wal` size and
+mtime, so unchanged conversations are not re-read.
 
 ### OpenCode's sessions
 
@@ -253,7 +302,7 @@ fail the read, never take the process down or its memory. So:
 
 Its steps are priced, in this order, by the user's prices and the table
 of the API that served them (Anthropic's as Claude, OpenAI's as Codex,
-xAI's as Grok: OpenCode records them free when signed in with a
+xAI's as Grok, Google's as Antigravity: OpenCode records them free when signed in with a
 subscription), else at the cost OpenCode recorded, else not (the tokens
 count, the model is listed without a price: a coding plan's model, or a
 free one, which a price of 0 in `usage.prices` silences).
@@ -267,7 +316,7 @@ up in three ways:
   pages): an entry whose prices differ there, one LiteLLM does not have,
   one with a single price where LiteLLM has a long-context one, and the
   models of the families the CLIs use (`grok-<digit>`, `claude-`,
-  `gpt-5` and later; not images, audio, realtime or search) that the
+  `gpt-5` and later, `gemini-2.5` and later, `kimi-`; not images, audio, realtime, live, embed or search) that the
   table does not price, a dated version of a listed one not listed again.
   It writes nothing: each finding is checked against the provider's own
   page, which stays an entry's `source`. Only the script reaches the
@@ -290,7 +339,9 @@ up in three ways:
   at `usage.prices`.
 
 The scanner keeps `usage/cost-cache.json` below the agent's data directory
-(0600): per log its size, time, the offset after its last complete line,
+(0600) and retains it in memory across scans (reloading from disk only if
+the file's identity, size or modification time changed externally): per log
+its size, time, the offset after its last complete line,
 its records, one per key (Claude logs a streamed response once per content
 block), and for a Codex rollout the parser's state there (the last turn's
 model, the project, the last legacy total). An unchanged log is not read
@@ -299,10 +350,10 @@ is still a newline (else from the start), and its last line counts once it
 ends; gzipped logs are read whole. Claude's lines are decoded only when
 they have both `"usage"` and `"assistant"` as JSON's own strings, so a
 tool's long output is not. Logs and records older than 90 days leave the
-cache. A scan that changed the cache writes it when the file is older than
-5 minutes or the scan read at least 8 MiB of logs; otherwise the next scan
-reads on from the file's offsets, which costs less than writing every
-record again whenever a log in use grew a line. A long scan saves the cache
+cache. A scan that changed the cache streams it to disk when the file is older than
+5 minutes or the scan read at least 8 MiB of logs; otherwise the dirty
+state stays in memory and the next scan reads on from it, avoiding writing
+every record again whenever a log in use grew a line. A long scan saves the cache
 every 20 s, and one that is cancelled saves what it read, so the next one
 goes on from there.
 
@@ -363,11 +414,17 @@ Antigravity's product); x.ai's and DeepSeek's pages are links. A page that
 does not answer keeps what it said last.
 
 Each poll's result goes to every page as `/ws` `plugin {plugin: "usage",
-data: snapshot}`; `GET /api/p/usage` returns the same snapshot.
-`GET /api/p/usage/cost?days=&tz=` asks the machines in parallel (2 min each)
-and is served again for a minute; the reports of the last 4 ranges are
-kept. A machine scans one range at a time: requests for the range being
-scanned share that scan, others wait for it.
+data: snapshot}` (idle background polls with no open panel omit the
+start-of-poll `polling: true` broadcast); `GET /api/p/usage` returns the
+same snapshot with an `ETag` and answers `304 Not Modified` when
+`If-None-Match` matches (still recording `?watch=1`).
+`GET /api/p/usage/cost?days=&tz=` asks the machines in parallel (2 min each,
+passing each machine's last `ifNoneMatch` so unchanged machines answer
+`notModified` without re-sending rows) and is served again for a minute
+(keyed by range, timezone, enabled providers, Codex homes and custom
+prices), also with `ETag` / `304 Not Modified`; the reports of the last 4
+ranges are kept. A machine scans one range at a time: requests for the
+range being scanned share that scan, others wait for it.
 
 On a core on Windows no agent runs on the local machine, so its CLIs are
 not read; SSH machines are.
@@ -533,9 +590,9 @@ window over a threshold is said at the next poll.
   one without an id, on its machine.
 - `agy` fails or times out (20 s): `agy_failed` (or `bad_response`), the
   last numbers stay, and it is not run again for 30 minutes.
-- OpenCode's database unreadable (damaged, over a read's budget, a WAL
-  over 1 GiB, not a regular file, a schema without the table or its
-  `data`, a writer changing it at each of three reads): its last records
+- OpenCode's or Antigravity's database unreadable (damaged, over a read's budget, a WAL
+  over 1 GiB, not a regular file, a schema without the expected columns,
+  a writer changing it at each of three reads): its last records
   stay until a read succeeds, and the spend says which machine could not
   read it and why.
 - A redirect: not followed; `http_3xx`, so credentials reach only the
@@ -549,7 +606,7 @@ window over a threshold is said at the next poll.
 
 [SECURITY.md](../../SECURITY.md) lists the credential files read, the hosts
 asked, the language server's loopback client, the DeepSeek key file, the
-status pages and how OpenCode's database is read. Resources and retention:
+status pages and how OpenCode's and Antigravity's databases are read. Resources and retention:
 [deployment](../deployment.md#remote-resources).
 
 ## Testing
@@ -563,7 +620,9 @@ status pages and how OpenCode's database is read. Resources and retention:
   file's modes, no token in a reply, redirects not followed, a lookalike
   DeepSeek gateway, `skipLocal`.
 - `internal/usage/resources_test.go`: the language server's client
-  leaves no connection open, the agent's polls share one client, `agy` at
+  leaves no connection open, the agent's polls share one client,
+  Antigravity's language server endpoint memoized across polls and
+  re-discovered on restart, `agy` at
   most every 10 minutes and backed off after a failure, agy's account
   from its log, Antigravity's
   `skip` and `skipLocal`, the Codex log read backwards across long lines
@@ -581,6 +640,23 @@ status pages and how OpenCode's database is read. Resources and retention:
   removed once taken over; refusals (`invalid_grant`, 401) not sent again
   until the file changes; retried 5xx, other statuses, an answer without
   a refresh token, a redirect, the network; no token in a reply.
+- `internal/usage/kimi_cost_test.go`: Kimi Code's `wire.jsonl` logs (main
+  and sub-agents, turn and session compaction scopes, `step.end` loop
+  events not double-counted, `state.json` v1/v2 and workspace-dir project
+  names, model normalization, pricing and custom prices, incremental
+  append waiting for a newline, `$KIMI_CODE_HOME`).
+- `internal/usage/antigravity_cost_test.go`: Antigravity's conversation
+  databases of `testdata/antigravity` (made by `make.sh` with `sqlite3`,
+  512-byte pages): protobuf decoding (`gen_metadata` tokens, thinking,
+  reconciled output, large embedded prompt padding, `request_id`, packed
+  and unpacked step indices, `trajectory_metadata_blob` workspace URI and
+  timestamp, `steps.metadata` timestamps, malformed inputs), multi-day
+  split, Gemini short and >200k long tiers, Claude model routing, unpriced
+  and user-priced models, deduplication across `antigravity` and
+  `antigravity-ide`, WAL commits, cache reuse, damaged and tableless DBs,
+  oversized payload pre-allocation refusal, unreferenced `steps` rowids
+  skipped before overflow reads (and early exit on zero-token `gen_metadata`),
+  and `FuzzAntigravityProto`.
 - `internal/usage/opencode_test.go`: OpenCode's databases of
   `testdata/opencode` (made by `make.sh` with the `sqlite3` shell, 512-byte
   pages): the schema's columns (one added later, quoted names, table
@@ -610,6 +686,8 @@ status pages and how OpenCode's database is read. Resources and retention:
   record per response in the cache (a cache of another version not read),
   Codex and Grok logs read on from their offsets (a rewritten one from
   the start, an unfinished line once it ends), the cache written seldom,
+  in-memory cache reuse and `IfNoneMatch` / `NotModified` short-circuiting,
+  keyless `dedupe` zero allocations,
   a cancelled scan keeping its progress.
 - `internal/agent/plugin/usage/usage_test.go`: the actions and their codes.
 - `internal/plugins/usage/alerts_test.go`: each alert at most once per
@@ -622,7 +700,10 @@ status pages and how OpenCode's database is read. Resources and retention:
 - `internal/plugins/usage/usage_test.go`: cadence, dedupe across machines,
   last good numbers, `Retry-After` (also without an id), the manual
   refresh's minimum gap on a fake clock, history and pace, status pages,
-  the cost report, shared scans and its cache, settings (Kimi Code's
+  the cost report, shared scans and its cache (keyed by providers and Codex
+  homes), per-machine `IfNoneMatch` / `NotModified`, HTTP `ETag` / `304` on
+  `/api/p/usage` and `/api/p/usage/cost`, idle background polls omitting the
+  start broadcast, settings (Kimi Code's
   renewal never asked of agents by a read-only core, `TestSettings`), a
   machine that connects later asked alone, no poll without machines, machines kept
   when their poll fails, no history from kept numbers, a provider turned
@@ -651,7 +732,8 @@ status pages and how OpenCode's database is read. Resources and retention:
   (no render loop), no `watch` from a hidden page, the spend read again
   while the panel stays open (`usage.costRefresh`), DeepSeek's key form
   without an account, an older snapshot ignored, the machines that could
-  not read an account, the interval picker.
+  not read an account, the interval picker, `If-None-Match` and `304 Not
+  Modified` for snapshot and cost.
 - `web/src/__tests__/usageSettings.test.ts`: the settings page: the
   plugin's groups, then the providers with On or Off and the bar of a
   changed one, a provider's page and back, opened at a provider's row or

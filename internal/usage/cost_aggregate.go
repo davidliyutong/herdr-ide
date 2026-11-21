@@ -68,12 +68,15 @@ func aggregateCost(c *costCache, seen map[string]bool, o CostOptions) *CostRepor
 	for _, k := range plain {
 		r := k.r
 		day := time.Unix(r.T, 0).In(zone).Format("2006-01-02")
-		// OpenCode's steps by the table of the API that served them (none
-		// for the others: the user's prices only), else at the cost it
-		// recorded.
+		// OpenCode's and Antigravity's steps by the table of the API that
+		// served them (none for OpenCode's others: the user's prices only),
+		// else at the cost OpenCode recorded.
 		table := k.provider
-		if k.provider == OpenCode {
+		switch k.provider {
+		case OpenCode:
 			table = openCodeTables[r.V]
+		case Antigravity:
+			table = antigravityTable(r.M)
 		}
 		label, mp := Pricing.PricingWith(table, r.M, o.Prices)
 		cost, priced := 0.0, mp != nil

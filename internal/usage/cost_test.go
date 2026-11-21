@@ -450,3 +450,85 @@ func TestCostCacheWritesSeldom(t *testing.T) {
 		t.Errorf("records %+v", rs)
 	}
 }
+
+// The in-memory cost cache serves unchanged scans without reading the disk
+// file again, retains unsaved incremental updates across scans, returns
+// NotModified when IfNoneMatch matches, and dedupe allocates nothing when
+// records have no keys.
+func TestCostInMemoryCacheAndETag(t *testing.T) {
+	e := testEnv(t, nil)
+	costFixtures(t, e)
+	since := testNow.Add(-30 * 24 * time.Hour).Unix()
+	o := CostOptions{Since: since, Providers: []string{Claude}}
+
+	first, err := Cost(context.Background(), e, o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ETag == "" || first.NotModified || len(first.Rows) == 0 {
+		t.Fatalf("first scan: etag=%q notMod=%v rows=%d", first.ETag, first.NotModified, len(first.Rows))
+	}
+
+	// Make the on-disk cache unreadable: the in-memory cache still serves
+	// the unchanged scan and honors IfNoneMatch without touching the file.
+	cache := filepath.Join(e.Base, CostCacheFile)
+	if err := os.Chmod(cache, 0); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(cache, 0o600)
+
+	oMatch := o
+	oMatch.IfNoneMatch = first.ETag
+	nm, err := Cost(context.Background(), e, oMatch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !nm.NotModified || nm.ETag != first.ETag || len(nm.Rows) != 0 {
+		t.Fatalf("not modified: %+v", nm)
+	}
+
+	// Different prices produce a different ETag and full rows.
+	oPrice := oMatch
+	oPrice.Prices = map[string]Tier{"claude-sonnet-4-6": {Input: 9, Cached: 1, Output: 20}}
+	priced, err := Cost(context.Background(), e, oPrice)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if priced.NotModified || priced.ETag == first.ETag || len(priced.Rows) == 0 {
+		t.Fatalf("price change: notMod=%v etag=%q rows=%d", priced.NotModified, priced.ETag, len(priced.Rows))
+	}
+
+	// Appending one line bumps the in-memory generation even when the
+	// recent cache file is not persisted yet, so IfNoneMatch misses and
+	// the next scan sees the new generation.
+	os.Chmod(cache, 0o600)
+	recent := time.Now().Add(-time.Minute).Truncate(time.Second)
+	os.Chtimes(cache, recent, recent)
+	f := filepath.Join(e.Home, ".claude/projects/-home-u-alpha/s1.jsonl")
+	appendTo(t, f, `{"timestamp":"2026-11-15T09:10:00Z","requestId":"req-9","cwd":"/home/u/alpha","message":{"role":"assistant","model":"claude-haiku-4-5","id":"msg-9","usage":{"input_tokens":10,"output_tokens":20}}}`+"\n")
+	updated, err := Cost(context.Background(), e, oMatch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.NotModified || updated.ETag == first.ETag || rowsBy(updated)["claude|claude-haiku-4-5|alpha"].Requests != 1 {
+		t.Fatalf("after append: notMod=%v etag=%q rows=%+v", updated.NotModified, updated.ETag, updated.Rows)
+	}
+	// Matching the new ETag short-circuits again even while the dirty
+	// state lives only in memory.
+	oMatch2 := o
+	oMatch2.IfNoneMatch = updated.ETag
+	nm2, err := Cost(context.Background(), e, oMatch2)
+	if err != nil || !nm2.NotModified || len(nm2.Rows) != 0 {
+		t.Fatalf("second match: %+v err=%v", nm2, err)
+	}
+
+	// Keyless records (Grok, Kimi) do not allocate a dedupe map.
+	keyless := []Record{{T: 1, M: "m", I: 10}, {T: 2, M: "m", I: 20}, {T: 3, M: "m", I: 30}}
+	if allocs := testing.AllocsPerRun(100, func() {
+		if got := dedupe(keyless); len(got) != 3 {
+			t.Fatalf("dedupe len %d", len(got))
+		}
+	}); allocs != 0 {
+		t.Errorf("keyless dedupe allocated %.0f times", allocs)
+	}
+}

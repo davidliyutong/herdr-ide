@@ -123,11 +123,23 @@ function notify(text: string, tag: string) {
   useStore.getState().toast(text, undefined, undefined, 'warning');
 }
 
-/** Fetches the snapshot; watch tells the core the panel is open. */
+let snapshotEtag: string | undefined;
+let costEtag: string | undefined;
+let costEtagTZ: number | undefined;
+
+/** Fetches the snapshot; watch tells the core the panel is open. Sends
+ * If-None-Match when a snapshot is already loaded so unchanged watch
+ * heartbeats return 304 Not Modified. */
 export async function fetchSnapshot(watch = false): Promise<void> {
   try {
-    const r = await fetch(`/api/p/usage${watch ? '?watch=1' : ''}`);
-    if (r.ok) applySnapshot((await r.json()) as UsageSnapshot);
+    const headers: Record<string, string> = {};
+    if (snapshotEtag && useUsage.getState().snapshot) headers['If-None-Match'] = snapshotEtag;
+    const r = await fetch(`/api/p/usage${watch ? '?watch=1' : ''}`, Object.keys(headers).length ? { headers } : undefined);
+    if (r.status === 304) return;
+    if (r.ok) {
+      snapshotEtag = r.headers?.get('ETag') ?? undefined;
+      applySnapshot((await r.json()) as UsageSnapshot);
+    }
   } catch {
     /* the core is unreachable: the next message brings it */
   }
@@ -157,13 +169,24 @@ export function costStale(now = Date.now() / 1000): boolean {
   return !s.costLoading && (!s.cost || now - s.cost.generatedAt > costFresh());
 }
 
-/** Fetches the cost of the last 90 days (the user's days). */
+/** Fetches the cost of the last 90 days (the user's days). Sends
+ * If-None-Match so unchanged reports return 304 Not Modified without
+ * re-transferring 90 days of rows. */
 export async function fetchCost(): Promise<void> {
   useUsage.setState({ costLoading: true, costError: undefined });
   try {
     const tz = -new Date().getTimezoneOffset();
-    const r = await fetch(`/api/p/usage/cost?days=90&tz=${tz}`);
+    const cur = useUsage.getState().cost;
+    const headers: Record<string, string> = {};
+    if (costEtag && costEtagTZ === tz && cur) headers['If-None-Match'] = costEtag;
+    const r = await fetch(`/api/p/usage/cost?days=90&tz=${tz}`, Object.keys(headers).length ? { headers } : undefined);
+    if (r.status === 304 && cur) {
+      useUsage.setState({ cost: { ...cur, generatedAt: Math.floor(Date.now() / 1000) }, costLoading: false });
+      return;
+    }
     if (!r.ok) throw new Error(`http_${r.status}`);
+    costEtag = r.headers?.get('ETag') ?? undefined;
+    costEtagTZ = tz;
     useUsage.setState({ cost: (await r.json()) as CostReport, costLoading: false });
   } catch (e) {
     useUsage.setState({ costLoading: false, costError: e instanceof Error ? e.message : 'failed' });

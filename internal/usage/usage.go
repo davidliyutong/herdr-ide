@@ -2,7 +2,8 @@
 // machine: the rate-limit windows, credits and balances of the accounts the
 // CLIs there are signed in to (Claude Code, Codex, Grok, Antigravity, Kimi
 // Code, DeepSeek), and the token cost of the CLIs' local logs at API prices
-// (Claude Code's, Codex's, Grok's, and OpenCode's sessions in its database).
+// (Claude Code's, Codex's, Grok's, Kimi Code's, Antigravity's conversation
+// databases and OpenCode's sessions in its database).
 //
 // It runs where the credentials are (the agent's plugin usage,
 // internal/agent/plugin/usage): it reads the CLIs' credential files, asks
