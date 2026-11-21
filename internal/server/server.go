@@ -103,6 +103,7 @@ type Server struct {
 
 	clientsMu sync.Mutex
 	clients   map[*wsClient]bool
+	activeSeq uint64
 
 	term termHub
 
@@ -386,7 +387,9 @@ const maxIdle = 30 * 24 * time.Hour
 func (s *Server) markActive(c *wsClient, idle time.Duration) {
 	idle = min(max(idle, 0), maxIdle)
 	s.clientsMu.Lock()
+	s.activeSeq++
 	c.active = time.Now().Add(-idle)
+	c.activeSeq = s.activeSeq
 	s.clientsMu.Unlock()
 }
 
@@ -397,7 +400,7 @@ func (s *Server) soundClient() *wsClient {
 	defer s.clientsMu.Unlock()
 	var best *wsClient
 	for c := range s.clients {
-		if best == nil || c.active.After(best.active) {
+		if best == nil || c.active.After(best.active) || (c.active.Equal(best.active) && c.activeSeq > best.activeSeq) {
 			best = c
 		}
 	}

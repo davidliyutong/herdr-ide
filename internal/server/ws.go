@@ -61,8 +61,9 @@ type wsClient struct {
 
 	// active is when the user last used this page (guarded by
 	// Server.clientsMu); the most recently used page plays sounds. A client
-	// plays none before it reports activity.
-	active time.Time
+	// plays none before it reports activity. activeSeq breaks same-tick ties.
+	active    time.Time
+	activeSeq uint64
 }
 
 const sendQueue = 8192
