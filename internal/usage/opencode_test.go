@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -294,11 +295,11 @@ func TestOpenCodeDatabases(t *testing.T) {
 		write(t, filepath.Join(data, "opencode", n), "")
 	}
 	got := openCodeDBs(e)
-	if !slices.Equal(got, []string{filepath.Join(data, "opencode/opencode-dev.db"), filepath.Join(data, "opencode/opencode.db")}) {
+	if !slices.Equal(got, []string{path.Join(data, "opencode/opencode-dev.db"), path.Join(data, "opencode/opencode.db")}) {
 		t.Errorf("databases %v", got)
 	}
 	env["OPENCODE_DB"] = "mine.db"
-	if got := openCodeDBs(e); !slices.Equal(got, []string{filepath.Join(data, "opencode/mine.db")}) {
+	if got := openCodeDBs(e); !slices.Equal(got, []string{path.Join(data, "opencode/mine.db")}) {
 		t.Errorf("OPENCODE_DB %v", got)
 	}
 	env["OPENCODE_DB"] = ":memory:"
@@ -307,7 +308,7 @@ func TestOpenCodeDatabases(t *testing.T) {
 	}
 	delete(env, "XDG_DATA_HOME")
 	delete(env, "OPENCODE_DB")
-	if got := openCodeDir(e); got != filepath.Join(e.Home, ".local/share/opencode") {
+	if got := openCodeDir(e); got != path.Join(e.Home, ".local/share/opencode") {
 		t.Errorf("dir %s", got)
 	}
 	// No quota of its own: no account, nothing asked.

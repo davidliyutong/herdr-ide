@@ -50,6 +50,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -541,7 +542,7 @@ type kimiLock struct {
 // kimiLockAbandoned) is waited for until kimiLockWait, never broken.
 func lockKimi(ctx context.Context, target string) (*kimiLock, error) {
 	// As the CLI prepares it: the directory and the empty file it locks.
-	if err := os.MkdirAll(path.Dir(target), 0o777); err != nil {
+	if err := os.MkdirAll(filepath.Dir(target), 0o777); err != nil {
 		return nil, err
 	}
 	if f, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o666); err == nil {

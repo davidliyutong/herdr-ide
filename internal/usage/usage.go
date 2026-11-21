@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strconv"
@@ -246,7 +247,7 @@ func (e *Env) expand(p string) string {
 	if strings.HasPrefix(p, "~/") {
 		return path.Join(e.Home, p[2:])
 	}
-	if !path.IsAbs(p) {
+	if !path.IsAbs(p) && !filepath.IsAbs(p) {
 		return path.Join(e.Home, p)
 	}
 	return p

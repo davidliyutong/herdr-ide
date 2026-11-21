@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 )
@@ -62,7 +63,7 @@ func openCodeDBs(e *Env) []string {
 		if db == ":memory:" {
 			return nil
 		}
-		if !path.IsAbs(db) {
+		if !path.IsAbs(db) && !filepath.IsAbs(db) {
 			db = path.Join(dir, db)
 		}
 		return []string{db}
