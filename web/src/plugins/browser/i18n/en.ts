@@ -1,0 +1,63 @@
+// The browser plugin's English messages: the source of its message keys
+// (web/src/i18n/en.ts gathers every plugin's). Placeholders: {name}.
+
+export const en = {
+  // browser plugin
+  'browser.title': 'Browser',
+  'browser.description':
+    'A browser pane: a web page in a tab, mainly a development server on a machine’s localhost, reached through a port forward. Links to localhost in terminals and documents open in it.',
+  'settings.section.browser': 'Browser',
+  'settings.browser.openLinks': 'Open web links',
+  'settings.browser.openLinks.desc':
+    'Where a web address opens when you Cmd/Ctrl+click it in a terminal or click it in a document: localhost addresses in a browser pane (a remote machine’s through a port forward) and the others in your browser; every address a pane can show in one (the desktop app’s shows any); or every address outside the app.',
+  'settings.browser.openLinks.loopback': 'Localhost in a pane',
+  'settings.browser.openLinks.all': 'All in a pane',
+  'settings.browser.openLinks.external': 'Outside the app',
+  'settings.browser.forwardIdle': 'Forwards end after',
+  'settings.browser.forwardIdle.desc':
+    'Minutes a port forward stays unused before it ends, with the connections still open. 0 keeps forwards until they are stopped.',
+  'settings.browser.forwardIdle.unit': 'min',
+  'command.browser.open': 'New Browser Tab',
+  'command.browser.reload': 'Reload Browser Page',
+  'browser.back': 'Back',
+  'browser.forward': 'Forward',
+  'browser.reload': 'Reload',
+  'browser.address': 'Address',
+  'browser.addressPlaceholder': 'Address or port (3000)',
+  'browser.ports': 'Ports',
+  'browser.openOutside': 'Open outside the app',
+  'browser.chip': '{machine} port {port}',
+  'browser.chipLocal': '{machine} port {port}, on this computer’s port {local}',
+  'browser.portNotice': 'The page is served on port {local} here, not {port}: some development servers refuse a port other than their own.',
+  'browser.retry': 'Retry',
+  'browser.starting': 'Opening port {port} of {machine}…',
+  'browser.error.forward_local_only':
+    'Port forwards listen on the computer the server runs on. Open the app from that computer (http://localhost or http://127.0.0.1) to show this page.',
+  'browser.error.offline': '{machine} is not connected.',
+  'browser.error.too_many': 'Too many port forwards are open: stop some in Ports.',
+  'browser.error.local_machine': 'This machine needs no port forward.',
+  'browser.error.network': 'The server did not answer: {error}',
+  'browser.error.failed': 'The port could not be forwarded: {error}',
+  'browser.error.host': 'Pages of ports are shown on 127.0.0.1 or localhost only: open the app from one of them.',
+  'browser.error.other_machine': 'This pane names a port of another machine, which is not opened from here. Enter the address again.',
+  'browser.ask': 'Port {port} of {machine} is not forwarded now.',
+  'browser.askForward': 'Forward and open',
+  'browser.refused': 'Only http and https addresses can be opened.',
+  'browser.refusedOwn': 'This is the app’s own address, which is not shown in a pane.',
+  'browser.outside':
+    'This address cannot be shown in the app’s page: only addresses on this computer’s localhost can. It opens in your browser.',
+  'browser.outsideOpen': 'Open It',
+  'browser.loadFailed': 'The page did not load: {error}',
+  'browser.notResolved': 'The name {host} could not be resolved.',
+  'browser.openSystem': 'Open in System Browser',
+  'browser.portsListening': 'Listening on {machine}',
+  'browser.portsNone': 'No program is listening on a port there.',
+  'browser.portsLoading': 'Looking for listening ports…',
+  'browser.portsFailed': 'The listening ports could not be read.',
+  'browser.portsOpen': 'Open port {port}',
+  'browser.forwards': 'Port forwards',
+  'browser.forwardsNone': 'No port is forwarded.',
+  'browser.forwardsUnavailable': 'Forwards are not available here: open the app from the server’s own computer.',
+  'browser.forwardStop': 'Stop forwarding port {port} of {machine}',
+  'browser.forwardLine': '{machine} {port} → {local}',
+} as const;

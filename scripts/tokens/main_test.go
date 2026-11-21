@@ -14,6 +14,14 @@ const sample = `{
     "borderStrong": { "light": "#d4d4d4", "dark": { "hex": "#ffffff", "alpha": 0.14 } }
   },
   "status": { "working": { "light": "#eab308", "dark": "#eab308" } },
+  "git": { "added": { "light": "#587c0c", "dark": "#81b88b" } },
+  "chart": { "blue": { "light": "#2e7de9", "dark": "#7aa2f7" } },
+  "fileIcon": { "lightBlue": { "light": "#2b6cb0", "dark": "#5aa3e0" } },
+  "syntax": { "keyword": { "light": "#7847bd", "dark": "#bb9af7" } },
+  "themes": [
+    { "id": "first", "accent": { "light": "#3a63c8", "dark": "#7aa2f7" }, "onAccent": { "light": "#ffffff", "dark": "#0a0a0a" } },
+    { "id": "second", "accent": { "light": "#005fb8", "dark": "#0078d4" }, "onAccent": { "light": "#fffffe", "dark": "#fffffd" } }
+  ],
   "terminal": {
     "light": { "background": "#ffffff", "foreground": "#0a0a0a", "cursor": "#0a0a0a", "selection": "#b6d4fe", "palette": [
       "#000001", "#000002", "#000003", "#000004", "#000005", "#000006", "#000007", "#000008",
@@ -23,7 +31,8 @@ const sample = `{
       "#100009", "#10000a", "#10000b", "#10000c", "#10000d", "#10000e", "#10000f", "#100010"] }
   },
   "metric": { "rowHeight": 26, "radius": 6 },
-  "font": { "size": { "base": 12.5 } }
+  "size": { "toolbar": 28 },
+  "font": { "root": 13, "size": { "base": 13, "small": 11 } }
 }`
 
 func TestParse(t *testing.T) {
@@ -37,7 +46,7 @@ func TestParse(t *testing.T) {
 	if c := tok.Color["borderStrong"].Dark; c != (Color{0xffffff, 0.14}) {
 		t.Errorf("borderStrong dark = %+v", c)
 	}
-	if tok.Metric["rowHeight"] != 26 || tok.Font.Size["base"] != 12.5 {
+	if tok.Metric["rowHeight"] != 26 || tok.Font.Size["base"] != 13 || tok.Size["toolbar"] != 28 {
 		t.Errorf("metric %v, font sizes %v", tok.Metric, tok.Font.Size)
 	}
 	if got := tok.Terminal.Dark.Palette[15].hex(); got != "#100010" {
@@ -69,14 +78,24 @@ func TestGenerate(t *testing.T) {
 			"  --ds-status-working: #eab308;\n",
 			"  --ds-terminal-ansi-15: #100010;\n",
 			"  --ds-metric-row-height: 26px;\n",
-			"  --ds-font-size-base: 12.5px;\n",
-			":root[data-theme='light'] {\n  --ds-color-background: #ffffff;\n  --ds-color-border-strong: #d4d4d4;\n",
+			"  --ds-font-size-base: 1rem;\n",
+			"  --ds-font-size-small: 0.8462rem;\n",
+			"  --ds-size-toolbar: 2.1538rem;\n",
+			"  --ds-git-added: #81b88b;\n",
+			"  --ds-chart-blue: #7aa2f7;\n",
+			"  --ds-file-icon-light-blue: #5aa3e0;\n",
+			"  --ds-syntax-keyword: #bb9af7;\n",
+			":root {\n  --ds-accent: #7aa2f7;\n  --ds-on-accent: #0a0a0a;\n",
+			":root[data-theme='light'] {\n  --ds-accent: #3a63c8;\n  --ds-on-accent: #ffffff;\n  --ds-color-background: #ffffff;\n  --ds-color-border-strong: #d4d4d4;\n",
+			":root[data-accent='second'] {\n  --ds-accent: #0078d4;\n  --ds-on-accent: #fffffd;\n}\n",
+			":root[data-accent='second'][data-theme='light'] {\n  --ds-accent: #005fb8;\n  --ds-on-accent: #fffffe;\n}\n",
 		},
 		goOut: {
 			"// " + header + "\n\npackage uisettings\n",
 			"\"dark\": {\n\t\tBackground: \"#0a0a0a\", Foreground: \"#f0f0f0\", Cursor: \"#f0f0f0\", Selection: \"#3b4a6b\",\n",
 			"\"#100009\", \"#10000a\"",
 			"\"light\": {",
+			"var tokenThemes = []string{\"first\", \"second\"}\n",
 		},
 	} {
 		for _, s := range want {
@@ -86,8 +105,14 @@ func TestGenerate(t *testing.T) {
 		}
 	}
 	// Lengths are written once: the light theme changes only colors.
-	if n := strings.Count(string(files[cssOut]), "--ds-metric-radius"); n != 1 {
-		t.Errorf("--ds-metric-radius written %d times", n)
+	for _, v := range []string{"--ds-metric-radius", "--ds-size-toolbar", "--ds-font-size-base"} {
+		if n := strings.Count(string(files[cssOut]), v); n != 1 {
+			t.Errorf("%s written %d times", v, n)
+		}
+	}
+	// The first theme is the default: it has no selector of its own.
+	if strings.Contains(string(files[cssOut]), "data-accent='first'") {
+		t.Error("the default theme has a selector of its own")
 	}
 }
 
@@ -104,6 +129,11 @@ func TestRejects(t *testing.T) {
 		"token name":         {`"rowHeight"`, `"row-height"`},
 		"negative metric":    {`"radius": 6`, `"radius": -6`},
 		"no terminal":        {`"light": { "background": "#ffffff", "foreground"`, `"other": { "background": "#ffffff", "foreground"`},
+		"no themes":          {`"themes": [`, `"themes": [], "x": [`},
+		"theme twice":        {`"id": "second"`, `"id": "first"`},
+		"theme no accent":    {`"id": "second", "accent"`, `"id": "second", "other"`},
+		"no font root":       {`"root": 13, `, ``},
+		"negative size":      {`"toolbar": 28`, `"toolbar": -28`},
 	} {
 		data := strings.Replace(sample, edit[0], edit[1], 1)
 		if data == sample {

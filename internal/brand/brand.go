@@ -21,9 +21,9 @@ const (
 	// EnvPrefix prefixes environment variables.
 	EnvPrefix = "HERDR_IDE_"
 
-	// CoreBin and AgentBin are the binary names.
-	CoreBin  = Slug
-	AgentBin = Slug + "-agent"
+	// CoreBin is the name of the binary: the core and, on machines, the
+	// agent it starts.
+	CoreBin = Slug
 	// BridgeExt is the VS Code bridge extension name; its publisher is Slug.
 	BridgeExt = Slug + "-bridge"
 

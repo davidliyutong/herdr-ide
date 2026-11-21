@@ -8,9 +8,10 @@ output, and stores small JSON documents for its clients. It knows no workspaces,
 tabs or panes. One account can run several cores side by side, one per
 session name.
 
-Facts the design relies on (herdr-core 0.1.21, `schema/README.md`,
-`src/wire.rs`, `src/server.rs`, `src/paths.rs`, `src/client.rs`, checked
-against a running core by the integration tests):
+Facts the design relies on (herdr-core 0.1.21, `schema/README.md` and,
+below `crates/herdr-core/src/`, `wire.rs`, `server.rs`, `paths.rs`,
+`client.rs`, `viewers.rs` and `api/run.rs`, checked against a running core
+by the integration tests):
 
 - The API is JSON-RPC 2.0, one message per line, on a unix socket. `hello`
   with `framed: true` switches the connection to frames
@@ -19,8 +20,18 @@ against a running core by the integration tests):
 - `terminal.attach` answers with a channel. On it the core sends a first
   paint (the screen as escape sequences, starting with CAN and a reset) and
   then the program's output; the viewer sends input bytes, its size, focus
-  and display facts. The core encodes no keys. The viewer that was active
-  last sets the terminal's size; an `observe` viewer never does.
+  and display facts. The core encodes no keys.
+- A terminal's size is that of its viewer active last among those not
+  observing (`apply_size` in `viewers.rs`); an `observe` viewer never
+  holds it. A terminal without such a viewer gets the *headless* size:
+  `headless` in herdr-core's `config.toml`, 200x120 by default. That file
+  is the user's own (`$XDG_CONFIG_HOME/herdr-core/config.toml`), shared by
+  their other herdr-core sessions, and herdr-ide never writes it. The
+  `size` of `terminal.run` is only the size a terminal has before its
+  first viewer. An attach of the size the terminal has causes no resize
+  and gets an exact first paint. No call sets a terminal's size outside a
+  stream, so the core keeps a terminal's last viewer attached while no
+  client shows it ([22](22-terminal-protocol.md)).
 - Output is sent against credit: 256 KiB per channel at first, returned by
   the viewer as it passes bytes on. A viewer more than 4 MiB behind gets a
   new paint instead of the backlog. Event channels use credit too; input
@@ -31,6 +42,19 @@ against a running core by the integration tests):
   subscriber that fell behind.
 - A terminal's status is what its program reported through OSC 7501; the
   core infers nothing from the screen.
+- A terminal's address is never given twice. A finished terminal's record
+  stays for 24 h, with the `reason` it ended for (`exited`, `killed`, or
+  the core's own end: `stopped_by_restart`, `holder_lost`, `server_stop`,
+  `host_shutdown`), unless a client removes it (`terminal.rm`).
+- A terminal started with `keep: true` whose program was lost with the
+  core gets a new shell from the core when it runs again, at the same
+  address, in the directory it was last in (events `lost` and
+  `restarted`); an exit with a code and an explicit kill stay final. The
+  web UI starts its terminals this way
+  ([33](33-workspace-restore.md)).
+- Documents (`doc.get`, `doc.set`) are kept with their versions in the
+  core's state directory (`docs.json`), across restarts of the core and
+  of the machine.
 - `HC_SESSION` selects the core, its terminals and its state directory
   (`~/.local/state/herdr-core/<session>/`); `HC_SOCKET` moves the API
   socket, with the holders' sockets beside it. `herdr-core server start`
@@ -45,8 +69,13 @@ against a running core by the integration tests):
   prompts for Desktop, Documents and Downloads) therefore treat a
   terminal's programs as herdr-core's, not as those of the app that
   started the core ([16](16-desktop-packaging.md)).
-- Programs inherit the core's environment plus `HC_TERMINAL_ID`,
-  `HC_TERMINAL_SOCKET`, `TERM=xterm-256color` and `COLORTERM`. The agent
+- Programs get the core's environment without the variables that name a
+  terminal (`TERM`, `TERM_PROGRAM`, `TERM_PROGRAM_VERSION`, `COLORTERM`),
+  which herdr-core sets itself: `TERM=xterm-256color`,
+  `COLORTERM=truecolor` and `TERM_PROGRAM=ghostty`, with no version. To
+  that it adds `HC_TERMINAL_ID`, `HC_TERMINAL_SOCKET`, `HC_SCOPE` (by
+  which it finds a terminal's programs again), `HC_SESSION` when the core
+  has one, `PWD`, and what the client that runs the terminal passes. The agent
   starts the core (and code-server and the display) with its own
   environment without the variables of a terminal or multiplexer it was
   started in (`cleanEnv` in `internal/agent/procutil.go`): herdr-core's
@@ -56,6 +85,18 @@ against a running core by the integration tests):
   local machine's agent in its own process, so without this its terminals
   would take themselves for nested sessions, and an agent's hooks would
   report to the herdr pane the core was started from.
+- The new terminals of an ssh machine get `SSH_CONNECTION` and `SSH_CLIENT`
+  from the core (`internal/server/sshenv.go`), with the values of the ssh
+  session its agent runs in, which the agent tells in its hello apart from
+  the information clients see. A terminal core that systemd started as a
+  service of the user has not inherited them, and programs take them as the
+  sign that the user's clipboard and browser are on another computer: Codex
+  then also copies through the terminal (OSC 52), takes pastes from it and
+  logs in with a device code; prompts show the host name. Only an
+  `SSH_CONNECTION` of two addresses and two ports is passed on; a value the
+  client gave stays; the local machine gets none, since there they would
+  not be true. `terminal.sshEnv` (on by default, per machine) turns them
+  off. Terminals that already run keep their environment.
 - The protocol is generation 1 and only grows within it.
 
 ## Goals / non-goals
@@ -127,7 +168,10 @@ directory, short enough for the holders' sockets beside it. Op `hc`:
   carries; the agent hashes `hc/herdr-core` again (not from its cache)
   and answers `bad_digest` without running it when it differs. A build
   without an executable sends none, and the installed one runs. `stop`
-  runs `server stop`, which ends the session's programs.
+  runs `server stop`, which ends the session's programs; the terminals'
+  records and the documents stay in the state directory, from which the
+  web UI brings the workspaces back when the core runs again
+  ([33](33-workspace-restore.md)).
 - `status`, and the reply of every action, report the installed digest and
   whether a core answers on the socket, with its version.
 
@@ -175,7 +219,11 @@ machine's menu ([02](02-multi-machine-transport.md)).
   `Stream.Exit` has the reason (`exited`, `killed`, `server_stop`, …).
 - **Machine reboot or logout where logind ends user processes** → the core
   and its programs end; herdr-core reports in `hello` whether lingering is
-  enabled.
+  enabled. When the core runs again, terminals started with `keep: true`
+  have a new shell in their last directory, the others are finished
+  records with the core's end as the reason, and the documents are as they
+  were written; the web UI restores its layout from that
+  ([33](33-workspace-restore.md)).
 
 ## Security
 
@@ -203,6 +251,11 @@ the status of a core on the socket and the API pipe;
 `TestHCVerifiedBeforeStartAndSocketPrivate` an executable of another
 digest or changed in place (same size and time) refused by `start` and
 `restart`, and the socket made 0600 after both.
+`internal/server/term_test.go` (`TestTermRunGetsTheSSHSession`,
+`TestSSHEnv`): the ssh session's variables in a new terminal of an ssh
+machine, a client's own value kept, the setting off, nothing but addresses
+and ports passed on, none for the local machine, none in the state clients
+see; `internal/agent/agent_test.go` the hello telling the session.
 `internal/agent/procutil_test.go` (`TestCleanEnv`): the variables of
 terminals and multiplexers removed (every `HC_*`), `TMUX_TMPDIR`,
 `TERM_PROGRAM` and the product's own kept. `TestIntegrationTerminal` (`internal/hc`) and `TestIntegrationHC`

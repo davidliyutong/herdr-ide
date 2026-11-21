@@ -24,21 +24,26 @@ Windows core host; the interactive ssh login from a core on Windows.
 
 ## Design
 
-- **Agent.** `cmd/herdr-ide-agent` is a static Go binary (`CGO_ENABLED=0`)
-  built for linux/darwin × amd64/arm64 and embedded gzipped in the core
-  (`internal/embedded`). Its version is the content hash, so a changed build
+- **Agent.** The agent is the command `agent` of the one binary
+  (`cmd/herdr-ide`), so there is one program to build, name and reason
+  about. A core cannot embed itself for other platforms, so what it carries
+  for machines is the same program built with the tag `machine`: a static
+  Go binary (`CGO_ENABLED=0`) for linux/darwin × amd64/arm64 without the
+  server, the UI and the embedded payloads, embedded gzipped in the core
+  (`internal/embedded`; `scripts/check.sh` fails when that build links the
+  core's packages). Its version is the content hash, so a changed build
   is always re-uploaded and core and agent can never disagree on the
-  protocol. The agent and `internal/agent` are `//go:build unix`: unix
+  protocol. The agent's command and `internal/agent` are `//go:build unix`: unix
   sockets with peer checks, process groups, code-server and Xvfb are
   POSIX. The yamux configuration both ends share is
   `agentproto.YamuxConfig`, so the core builds without the agent.
 - **Connect** (`internal/transport/ssh.go`, `DialSSH`):
   1. probe `uname -s`, `uname -m`, `$HOME` through `/bin/sh -c` (works with
      any login shell; 30 s);
-  2. if `~/.herdr-ide/agent/<hash>/herdr-ide-agent` is missing, upload it with
+  2. if `~/.herdr-ide/agent/<hash>/herdr-ide` is missing, upload it with
      `cat >` to a temporary name and rename atomically (5 min); builds in
      `~/.herdr-ide/agent/` unused for 14 days are removed in the same step;
-  3. `exec` it with `serve --instance NAME` and speak yamux over the ssh
+  3. `exec` it with `agent --instance NAME` and speak yamux over the ssh
      session's stdin/stdout.
 - **ssh options** (`SSHArgs`). `BatchMode=yes`, `ConnectTimeout=10`,
   `ServerAliveInterval=15` with `ServerAliveCountMax=4`, and
@@ -256,7 +261,7 @@ Windows core host; the interactive ssh login from a core on Windows.
   it. Read-only browsers can do none of this (`403`); everything is
   audited (`machine.add`, `machine.rename`, `machine.remove`,
   `machine.enable`, `machine.disable`, with the error when it failed).
-- **The terminal core of each machine** (`internal/server/term.go`,
+- **The terminal core of each machine** (`internal/server/term_backend.go`,
   `internal/agent/hc.go`, [21](21-terminal-core.md)). Connecting a machine
   starts nothing but its agent. When the first client of `/api/v1/term`
   subscribes to a machine's terminals ([22](22-terminal-protocol.md)), the

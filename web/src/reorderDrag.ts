@@ -1,13 +1,16 @@
-// Dragging a tab within the tab bar, or a workspace within its machine's list
-// in the sidebar, reorders it in the machine's layout document; dragging a
+// Dragging a tab within the tab bar (tabDrag.ts), or a workspace within its
+// machine's list in the sidebar, reorders it in the machine's layout document; dragging a
 // machine's header among the machines reorders the machines (the core stores
 // their order). A drop lands
 // in a slot of the current order: 0 before the first item, n after the
 // last; the slots on either side of the dragged item change nothing, so
-// they show no marker.
+// they show no marker. A row dragged while it is one of several selected
+// (state/multiSelect.ts) moves them all, in their order, as one block.
 
 import { actions } from './actions';
 import { trackDrag, type Box, type DragStart } from './drag';
+import { t } from './i18n';
+import { movedBlock } from './term/layout';
 
 export interface Slot {
   index: number;
@@ -51,6 +54,19 @@ export function insertSlot(boxes: Box[], from: number, x: number, y: number, axi
   return { index, box };
 }
 
+/** The slot for a block of items (ids in block) dragged among items, or
+ * undefined where dropping it changes nothing. */
+export function blockSlot(boxes: Box[], ids: readonly string[], block: readonly string[], x: number, y: number, axis: 'x' | 'y') {
+  const slot = insertSlot(boxes, -2, x, y, axis);
+  if (!slot) return undefined;
+  const after = movedBlock(
+    ids,
+    block.map((id) => ids.indexOf(id)),
+    slot.index,
+  );
+  return after.every((id, i) => id === ids[i]) ? undefined : slot;
+}
+
 /** Items of a list and their boxes, when the point is near the list. */
 export function near(list: Element | null, items: string, idAttr: string, x: number, y: number, axis: 'x' | 'y') {
   if (!list) return undefined;
@@ -75,55 +91,52 @@ function startReorder(
     list: () => Element | null;
     items: string;
     idAttr: string;
+    /** The rows moved together, the dragged one among them. */
+    block?: string[];
     move(index: number): Promise<void>;
   },
 ) {
+  const block = o.block && o.block.length > 1 ? o.block : undefined;
   trackDrag(ev, {
     label: o.label,
     find: (x, y) => {
       const l = near(o.list(), o.items, o.idAttr, x, y, o.axis);
-      return l && insertSlot(l.boxes, l.ids.indexOf(o.id), x, y, o.axis);
+      if (!l) return undefined;
+      return block ? blockSlot(l.boxes, l.ids, block, x, y, o.axis) : insertSlot(l.boxes, l.ids.indexOf(o.id), x, y, o.axis);
     },
     marker: (slot) => ({ box: slot.box, zone: 'slot' }),
     drop: (slot) => o.move(slot.index),
   });
 }
 
-/** Starts tracking a possible drag of a tab within its tab bar. */
-export function startTabDrag(ev: DragStart, src: { m: string; ws: string; index: number; label: string }) {
+/** Starts tracking a possible drag of a workspace within its machine's
+ * list (with block: the workspaces selected with it). */
+export function startWorkspaceDrag(ev: DragStart, src: { m: string; ws: string; label: string; block?: string[] }) {
+  const many = src.block && src.block.length > 1 ? src.block : undefined;
   startReorder(ev, {
-    label: src.label,
-    id: String(src.index),
-    axis: 'x',
-    list: () => document.querySelector(`.tabs[data-m="${CSS.escape(src.m)}"][data-ws="${CSS.escape(src.ws)}"]`),
-    items: '.tab[data-tab]',
-    idAttr: 'data-tab',
-    move: async (index) => actions.moveTab(src.m, src.ws, src.index, index),
-  });
-}
-
-/** Starts tracking a possible drag of a workspace within its machine's list. */
-export function startWorkspaceDrag(ev: DragStart, src: { m: string; ws: string; label: string }) {
-  startReorder(ev, {
-    label: src.label,
+    label: many ? t('drag.workspaces', { n: many.length }) : src.label,
     id: src.ws,
     axis: 'y',
     list: () => document.querySelector(`.machine-body[data-m="${CSS.escape(src.m)}"]`),
     items: '.ws-item[data-ws-id]',
     idAttr: 'data-ws-id',
-    move: async (index) => actions.moveWorkspace(src.m, src.ws, index),
+    block: many,
+    move: async (index) => (many ? actions.moveWorkspaces(src.m, many, index) : actions.moveWorkspace(src.m, src.ws, index)),
   });
 }
 
-/** Starts tracking a possible drag of a machine among the machines. */
-export function startMachineDrag(ev: DragStart, src: { m: string; label: string }) {
+/** Starts tracking a possible drag of a machine among the machines (with
+ * block: the machines selected with it). */
+export function startMachineDrag(ev: DragStart, src: { m: string; label: string; block?: string[] }) {
+  const many = src.block && src.block.length > 1 ? src.block : undefined;
   startReorder(ev, {
-    label: src.label,
+    label: many ? t('drag.machines', { n: many.length }) : src.label,
     id: src.m,
     axis: 'y',
     list: () => document.querySelector('.sidebar-scroll'),
     items: '.machine[data-machine]',
     idAttr: 'data-machine',
-    move: (index) => actions.moveMachine(src.m, index),
+    block: many,
+    move: (index) => (many ? actions.moveMachines(many, index) : actions.moveMachine(src.m, index)),
   });
 }

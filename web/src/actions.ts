@@ -6,7 +6,9 @@
 // they came from (docs/features/05-vscode-panes.md).
 
 import * as L from './term/layout';
+import { describeView, isPluginOn } from './plugins/registry';
 import { isLive, type TerminalRecord } from './term/protocol';
+import { procName, SHELLS } from './term/place';
 import { terms, useTerms } from './state/terms';
 import { useStore } from './state/store';
 import { withView } from './state/panes';
@@ -14,6 +16,10 @@ import { agentOf, agentStatus, statusRank, terminalTitle, type AgentStatus } fro
 import { mediaExt } from './terminal/links';
 import { bridge, hasFrame, type BridgeCommand } from './lib/bridge';
 import { reloadFrame, setStopped } from './codeFrames';
+import { closingGroup, rememberClosed, rememberWorkspace, takeClosed, undoMs, type ClosedRecord } from './closedPanes';
+import { nameList } from './state/multiSelect';
+import { confirmUnsaved } from './unsaved';
+import { go, paneOpen, type Spot } from './paneHistory';
 import { hasMessage, t } from './i18n';
 import { confirmCheckDialog, confirmDialog, editWorkspaceDialog, newWorkspaceDialog } from './dialog';
 import type { MessageKey } from './i18n/en';
@@ -44,6 +50,9 @@ export function attentionList(): AttentionItem[] {
 export const paneRects = L.paneRects;
 
 /** The shown machine's selected workspace and tab, and the focused pane. */
+/** Whether a pane of the history is still open. */
+export const spotOpen = (s: Spot) => paneOpen(useTerms.getState().machines[s.m]?.layout, s.pane);
+
 export function current() {
   const m = useStore.getState().machineId;
   const layout = m ? useTerms.getState().machines[m]?.layout : undefined;
@@ -69,6 +78,7 @@ export function paneDirectory(m: string, leaf: L.Leaf | null | undefined): strin
   if (!leaf) return undefined;
   if (L.isTerminalLeaf(leaf)) return terms.directory(m, leaf.terminal);
   if (L.isCodeLeaf(leaf)) return leaf.code.folder || undefined;
+  if (L.isPluginLeaf(leaf)) return describeView(m, leaf.view).directory;
   return L.isPreviewLeaf(leaf) ? dirname(leaf.preview.path) : undefined;
 }
 
@@ -168,35 +178,6 @@ function awaitLogin(m: string) {
   timer = setTimeout(() => off(), LOGIN_WAIT_MS);
 }
 
-/** Shells a terminal waits at the prompt in. */
-const SHELLS = new Set([
-  'sh',
-  'bash',
-  'zsh',
-  'fish',
-  'dash',
-  'ash',
-  'ksh',
-  'mksh',
-  'yash',
-  'csh',
-  'tcsh',
-  'nu',
-  'xonsh',
-  'elvish',
-  'osh',
-  'pwsh',
-  'powershell',
-  'cmd',
-]);
-
-const procName = (n: string) =>
-  n
-    .replace(/^-/, '')
-    .replace(/\.exe$/i, '')
-    .split('/')
-    .pop() ?? n;
-
 /** What runs in a terminal in front of its shell: the agent's name for an
  * agent, the foreground program's otherwise; '' when only the shell waits
  * at its prompt or the program has ended. Jobs sent to the background do
@@ -210,31 +191,53 @@ export function runningProgram(r: TerminalRecord | undefined): string {
   return agentOf(r) ?? name;
 }
 
-/** Asks before ending the programs that run in these terminals; true when
- * nothing runs or the user agreed. */
-async function confirmEnd(m: string, addresses: string[], title: MessageKey, single?: boolean): Promise<boolean> {
-  const running = [...new Set(addresses.map((a) => runningProgram(terms.terminal(m, a))).filter(Boolean))];
-  if (!running.length) return true;
-  return confirmDialog({
-    title: t(title),
-    message: single
-      ? t('confirm.closePanePrograms', { programs: running.join(', ') })
-      : t('confirm.closeTabPrograms', { programs: running.join(', ') }),
-    confirm: t('confirm.close'),
-    danger: true,
-  });
+/** Records panes about to close for Undo Close (each list a tab's, all
+ * brought back by one undo), has their terminals end when it can no
+ * longer bring them back, and says how to bring them back. */
+function closeWithUndo(m: string, layout: L.Layout, tabs: string[][], message: string) {
+  const group = closingGroup();
+  const now = Date.now();
+  const closed = tabs.flatMap((panes) => rememberClosed(m, layout, panes, now, group) ?? []);
+  undoable(m, closed, message);
 }
 
-/** Tabs and panes being closed: a second close while the first asks does nothing. */
-const closing = new Set<string>();
+/** Has the terminals of records end when Undo Close can no longer bring
+ * them back, and says how to bring them back (nothing without records). */
+function undoable(m: string, closed: ClosedRecord[], message: string, always = false) {
+  for (const c of closed) for (const a of c.terminals) terms.closeLater(m, a, c.deadline);
+  if (closed.length || always)
+    useStore.getState().toast(message, { label: t('closed.undo'), run: () => actions.undoClose(), ttl: undoMs() });
+}
 
-async function once(key: string, fn: () => Promise<void>) {
-  if (closing.has(key)) return;
-  closing.add(key);
+/** Names as a confirmation lists them: quoted, the first few, then how many more. */
+export const quotedNames = (names: readonly string[]) =>
+  nameList(
+    names.map((name) => t('list.quoted', { name })),
+    t('list.sep'),
+    (n) => t('list.more', { n }),
+  );
+
+/** The tabs of a layout holding these panes (one each), as the workspace
+ * of the first and their indexes in it. */
+function tabsAt(layout: L.Layout, keys: readonly string[]): { ws: L.Workspace; indexes: number[] } | undefined {
+  const at = keys.map((k) => L.locate(layout, k)).filter((x) => x !== null);
+  if (!at.length) return undefined;
+  const ws = layout.workspaces[at[0].workspace];
+  const indexes = [...new Set(at.filter((a) => a.workspace === at[0].workspace).map((a) => a.tab))].sort((a, b) => a - b);
+  return { ws, indexes };
+}
+
+/** Enables or disables a machine (PUT /api/m/{id}/enabled); failures are reported. */
+async function putEnabled(m: string, enabled: boolean) {
   try {
-    await fn();
-  } finally {
-    closing.delete(key);
+    const res = await fetch(`/api/m/${encodeURIComponent(m)}/enabled`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    });
+    if (!res.ok) throw new Error(t('machine.enableFailed', { detail: await machineError(res) }));
+  } catch (e) {
+    report(e);
   }
 }
 
@@ -320,21 +323,63 @@ export const actions = {
     focusDom(m, pane);
   },
 
-  /** Closes a pane. A terminal ends after asking when a program runs in it,
-   * and its pane goes with the event that follows; VS Code and previews just
-   * go. */
+  /** Closes a pane at once, without asking: its terminal ends the undo time
+   * later, and Undo Close brings it back until then (closedPanes.ts). */
   async closePane(m: string, pane: string) {
+    if (!(await confirmUnsaved(m, [pane]))) return;
     const layout = terms.layout(m);
-    const leaf = layout ? L.findLeaf(layout, pane) : null;
-    if (leaf && !L.isTerminalLeaf(leaf)) {
-      terms.mutate(m, (l) => L.closePane(l, pane));
-      return;
+    if (layout) closeWithUndo(m, layout, [[pane]], t('closed.pane'));
+    terms.mutate(m, (l) => L.closePane(l, pane));
+  },
+
+  /** Puts back the panes closed last (a pane, a tab's, or the tabs closed
+   * together), as they were and where they were, their terminals' programs
+   * still running. */
+  undoClose() {
+    const { tabs, workspaces } = takeClosed();
+    // Workspaces first, at their places (the first first), then the tabs
+    // at theirs: the first ones first.
+    let shown: string | undefined;
+    for (const w of workspaces.sort((a, b) => a.index - b.index)) {
+      useStore.getState().selectMachine(w.m);
+      terms.mutate(w.m, (l) => L.restoreWorkspace(l, w.workspace, w.index, w.known));
+      shown = w.m;
     }
-    await once(`pane ${m} ${pane}`, async () => {
-      if (!(await confirmEnd(m, [pane], 'confirm.closePaneTitle', true))) return;
-      terms.mutate(m, (l) => L.closePane(l, pane));
-      await terms.kill(m, pane);
-    });
+    const records = tabs.sort((a, b) => a.index - b.index);
+    for (const c of records) {
+      const { m } = c;
+      const restored = new Map<string, L.Leaf>();
+      for (const key of c.closed) {
+        const leaf = L.leafOf(c.tab.root, key);
+        if (!leaf) continue;
+        if (L.isTerminalLeaf(leaf)) {
+          // A terminal whose program ended meanwhile stays closed.
+          const r = terms.terminal(m, key);
+          if (!r || !isLive(r)) continue;
+          terms.cancelClose(m, key);
+        } else {
+          // A view opened again meanwhile stays where it is.
+          const layout = terms.layout(m);
+          if (layout && L.locate(layout, key)) continue;
+        }
+        restored.set(key, leaf);
+      }
+      if (!restored.size) continue;
+      useStore.getState().selectMachine(m);
+      terms.mutate(m, (l) => L.reopen(l, c, restored));
+      shown = m;
+    }
+    // Each workspace shows the tab it showed, and the last one is shown.
+    for (const w of workspaces) {
+      terms.mutate(w.m, (l) => {
+        const now = l.workspaces.find((x) => x.id === w.workspace.id);
+        const back = now && Math.min(w.workspace.selected, now.tabs.length - 1);
+        return back !== undefined && back >= 0 ? L.selectTab(l, w.workspace.id, back) : l;
+      });
+    }
+    const layout = shown ? terms.layout(shown) : undefined;
+    const focused = layout && L.focusedPane(layout);
+    if (shown && focused) focusDom(shown, focused);
   },
 
   /** A new terminal in a new tab of a workspace (the selected one). */
@@ -351,21 +396,93 @@ export const actions = {
     }
   },
 
-  /** Closes a tab and ends its terminals, asking first when a program runs. */
+  /** Closes a tab at once, without asking: its terminals end the undo time
+   * later, and Undo Close brings it back until then. */
   async closeTab(m: string, ws: string, index: number) {
-    const tab = terms.layout(m)?.workspaces.find((w) => w.id === ws)?.tabs[index];
-    if (!tab) return;
-    const addresses = L.tabTerminals(tab);
-    const panes = L.tabPanes(tab).join();
-    await once(`tab ${m} ${ws} ${panes}`, async () => {
-      if (!(await confirmEnd(m, addresses, 'confirm.closeTabTitle'))) return;
-      terms.mutate(m, (l) => {
-        const w = l.workspaces.find((x) => x.id === ws);
-        const i = w?.tabs.findIndex((x) => L.tabPanes(x).join() === panes) ?? -1;
-        return i < 0 ? l : L.closeTab(l, ws, i);
-      });
-      await Promise.all(addresses.map((a) => terms.kill(m, a)));
+    const layout = terms.layout(m);
+    const tab = layout?.workspaces.find((w) => w.id === ws)?.tabs[index];
+    if (!layout || !tab) return;
+    if (!(await confirmUnsaved(m, L.tabPanes(tab)))) return;
+    closeWithUndo(m, layout, [L.tabPanes(tab)], t('closed.tab'));
+    terms.mutate(m, (l) => L.closeTab(l, ws, index));
+  },
+
+  /** Closes the tabs holding these panes (one each, of one workspace) at
+   * once, without asking but for unsaved changes: one Undo Close brings
+   * them all back. */
+  async closeTabs(m: string, keys: string[]) {
+    const before = terms.layout(m);
+    const found = before && tabsAt(before, keys);
+    if (!found) return;
+    if (found.indexes.length === 1) return actions.closeTab(m, found.ws.id, found.indexes[0]);
+    if (
+      !(await confirmUnsaved(
+        m,
+        found.indexes.flatMap((i) => L.tabPanes(found.ws.tabs[i])),
+      ))
+    )
+      return;
+    // Read again: another client may have changed the tabs meanwhile.
+    const layout = terms.layout(m);
+    const now = layout && tabsAt(layout, keys);
+    if (!layout || !now) return;
+    const tabs = now.indexes.map((i) => now.ws.tabs[i]);
+    closeWithUndo(m, layout, tabs.map(L.tabPanes), t('closed.tabs', { n: tabs.length }));
+    terms.mutate(m, (l) => {
+      const at = tabsAt(l, keys);
+      if (!at) return l;
+      // From the last, so the others keep their indexes.
+      return [...at.indexes].reverse().reduce((acc, i) => L.closeTab(acc, at.ws.id, i), l);
     });
+  },
+
+  /** Closes every tab of a workspace but one (others) or those after it
+   * (right), at once, with one Undo, as closeTabs; pinned tabs stay. */
+  async closeTabsBeside(m: string, ws: string, index: number, which: 'others' | 'right') {
+    const w = terms.layout(m)?.workspaces.find((x) => x.id === ws);
+    if (!w?.tabs[index]) return;
+    const keys = w.tabs.filter((tab, i) => !tab.pinned && (which === 'others' ? i !== index : i > index)).map((tab) => L.tabPanes(tab)[0]);
+    if (keys.length) await actions.closeTabs(m, keys);
+  },
+
+  /** Pins a tab (it moves to the end of the pinned ones) or unpins it. */
+  pinTab(m: string, ws: string, index: number, pinned: boolean) {
+    terms.mutate(m, (l) => L.pinTab(l, ws, index, pinned));
+  },
+
+  /** Moves the tabs holding these panes, in their order, as one block to a
+   * slot of their workspace's tabs. */
+  moveTabs(m: string, keys: string[], slot: number) {
+    terms.mutate(m, (l) => {
+      const at = tabsAt(l, keys);
+      return at ? L.moveTabs(l, at.ws.id, at.indexes, slot) : l;
+    });
+  },
+
+  /** Moves the tabs holding these panes to the end of another workspace
+   * (a new one: create), which is shown with the last of them. */
+  moveTabsToWorkspace(m: string, keys: string[], target: string, create?: { name: string; cwd: string }) {
+    const moved = terms.mutate(m, (l) => {
+      const at = tabsAt(l, keys);
+      if (!at) return l;
+      return L.moveTabsToWorkspace(create ? L.createWorkspace(l, target, create.name, create.cwd) : l, at.ws.id, at.indexes, target);
+    });
+    const layout = terms.layout(m);
+    const focused = moved && layout && L.focusedPane(layout);
+    if (focused) focusDom(m, focused);
+  },
+
+  /** Moves tabs into a new workspace: the dialog asks for its directory
+   * (the first tab's focused pane's to begin with) and name. */
+  async moveTabsToNewWorkspace(m: string, keys: string[]) {
+    const layout = terms.layout(m);
+    const at = layout && tabsAt(layout, keys);
+    if (!at) return;
+    const first = at.ws.tabs[at.indexes[0]];
+    const def = paneDirectory(m, L.leafOf(first.root, first.focused)) || useStore.getState().machines[m]?.info?.home || '~';
+    const input = await newWorkspaceDialog(m, def);
+    if (!input) return;
+    actions.moveTabsToWorkspace(m, keys, L.newId(), { name: input.label, cwd: input.cwd });
   },
 
   /** Adds an SSH machine to the core's machines (docs/features/02) and
@@ -415,16 +532,38 @@ export const actions = {
     // Stopped before the session ends; a failed stop is reported and the
     // machine is disabled all the same.
     if (stop) await runCore(m, 'stop');
-    try {
-      const res = await fetch(`/api/m/${encodeURIComponent(m)}/enabled`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled }),
-      });
-      if (!res.ok) throw new Error(t('machine.enableFailed', { detail: await machineError(res) }));
-    } catch (e) {
-      report(e);
+    await putEnabled(m, enabled);
+  },
+
+  /** Enables or disables several machines; disabling asks once, naming
+   * them, and may stop the terminal services of those connected. Machines
+   * already so, and those never connected (a code), are left. */
+  async setMachinesEnabled(ids: string[], enabled: boolean) {
+    const s = useStore.getState();
+    const list = ids
+      .map((id) => s.machines[id])
+      .filter((st) => st && !st.code && (enabled ? st.status === 'disabled' : st.status !== 'disabled'));
+    if (list.length <= 1) return list[0] && actions.setMachineEnabled(list[0].id, enabled);
+    let stop = false;
+    if (!enabled) {
+      const ask = {
+        title: t('confirm.disableMachinesTitle', { n: list.length }),
+        message: t('confirm.disableMachines', { machines: quotedNames(list.map((st) => st.label)) }),
+        confirm: t('confirm.disable'),
+        danger: true,
+      };
+      if (list.some((st) => st.status === 'ready')) {
+        const res = await confirmCheckDialog({ ...ask, check: t('confirm.disableStopCores'), checked: false });
+        if (!res) return;
+        stop = res.checked;
+      } else if (!(await confirmDialog(ask))) return;
     }
+    await Promise.all(
+      list.map(async (st) => {
+        if (stop && st.status === 'ready') await runCore(st.id, 'stop');
+        await putEnabled(st.id, enabled);
+      }),
+    );
   },
 
   /** Removes an SSH machine from the core's machines after asking. */
@@ -449,6 +588,33 @@ export const actions = {
     }
   },
 
+  /** Removes several SSH machines after asking once, naming them. */
+  async removeMachines(ids: string[]) {
+    const s = useStore.getState();
+    const list = ids.map((id) => s.machines[id]).filter((st) => st?.kind === 'ssh');
+    if (list.length <= 1) return list[0] && actions.removeMachine(list[0].id);
+    if (
+      !(await confirmDialog({
+        title: t('confirm.removeMachinesTitle', { n: list.length }),
+        message: t('confirm.removeMachines', { machines: quotedNames(list.map((st) => st.label)) }),
+        confirm: t('confirm.remove'),
+        danger: true,
+      }))
+    )
+      return;
+    let removed = 0;
+    for (const st of list) {
+      try {
+        const res = await fetch(`/api/m/${encodeURIComponent(st.id)}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error(t('machine.removeFailed', { machine: st.label, detail: await machineError(res) }));
+        removed++;
+      } catch (e) {
+        report(e);
+      }
+    }
+    if (removed) useStore.getState().toast(t('machine.removedMany', { n: removed }));
+  },
+
   /** Renames an SSH machine. */
   async renameMachine(m: string, label: string) {
     const st = useStore.getState().machines[m];
@@ -469,11 +635,18 @@ export const actions = {
    * machine count after the last): shown at once, stored by the core
    * (PUT /api/machines/order), which sends every page the new list. */
   async moveMachine(m: string, slot: number) {
+    return actions.moveMachines([m], slot);
+  },
+
+  /** Moves machines, in their order, as one block to a slot of the
+   * machines; stored as moveMachine does. */
+  async moveMachines(ids: string[], slot: number) {
     const before = useStore.getState().order;
-    const from = before.indexOf(m);
-    if (from < 0) return;
-    const order = before.filter((x) => x !== m);
-    order.splice(Math.max(0, Math.min(slotIndex(from, slot), order.length)), 0, m);
+    const order = L.movedBlock(
+      before,
+      ids.map((id) => before.indexOf(id)),
+      slot,
+    );
     if (order.every((x, i) => x === before[i])) return;
     useStore.setState({ order });
     try {
@@ -533,23 +706,10 @@ export const actions = {
     await actions.newTab(m, id);
   },
 
-  /** Closes a workspace after asking, unless it has no tab, and ends its terminals. */
+  /** Closes a workspace at once, without asking: its terminals end
+   * the undo time later, and Undo Close brings it back until then. */
   async closeWorkspace(m: string, ws: string) {
-    const w = terms.layout(m)?.workspaces.find((x) => x.id === ws);
-    if (!w) return;
-    const addresses = L.workspaceTerminals(w);
-    if (
-      w.tabs.length > 0 &&
-      !(await confirmDialog({
-        title: t('confirm.closeWorkspaceTitle'),
-        message: t('confirm.closeWorkspace', { label: workspaceTitle(m, w) }),
-        confirm: t('confirm.close'),
-        danger: true,
-      }))
-    )
-      return;
-    terms.mutate(m, (l) => L.closeWorkspace(l, ws));
-    await Promise.all(addresses.map((a) => terms.kill(m, a)));
+    return actions.closeWorkspaces(m, [ws]);
   },
 
   /** Moves a tab to a slot of its workspace's tabs: 0 is before the first
@@ -564,6 +724,43 @@ export const actions = {
       const from = l.workspaces.findIndex((w) => w.id === ws);
       return from < 0 ? l : L.moveWorkspace(l, ws, slotIndex(from, slot));
     });
+  },
+
+  /** Moves workspaces, in their order, as one block to a slot of their machine's. */
+  moveWorkspaces(m: string, ids: string[], slot: number) {
+    terms.mutate(m, (l) => L.moveWorkspaces(l, ids, slot));
+  },
+
+  /** Closes every other workspace of a machine, as closeWorkspaces does. */
+  async closeOtherWorkspaces(m: string, ws: string) {
+    const others = (terms.layout(m)?.workspaces ?? []).filter((w) => w.id !== ws).map((w) => w.id);
+    if (others.length) await actions.closeWorkspaces(m, others);
+  },
+
+  /** Closes workspaces of a machine at once, without asking (but for
+   * unsaved changes): their terminals end the undo time later, and one Undo
+   * Close brings them all back, at their places, until then. */
+  async closeWorkspaces(m: string, ids: string[]) {
+    const layout = terms.layout(m);
+    const list = ids.map((id) => layout?.workspaces.find((w) => w.id === id)).filter((w) => w !== undefined);
+    if (!list.length) return;
+    if (
+      !(await confirmUnsaved(
+        m,
+        list.flatMap((w) => w.tabs.flatMap(L.tabPanes)),
+      ))
+    )
+      return;
+    // What they hold now: another client may have changed them meanwhile.
+    const now = terms.layout(m);
+    if (!now) return;
+    const group = closingGroup();
+    const at = Date.now();
+    const closed = list.flatMap((w) => rememberWorkspace(m, now, w.id, at, group) ?? []);
+    const message =
+      list.length === 1 ? t('closed.workspace', { label: workspaceTitle(m, list[0]) }) : t('closed.workspaces', { n: list.length });
+    undoable(m, closed, message, true);
+    terms.mutate(m, (l) => ids.reduce((acc, id) => L.closeWorkspace(acc, id), l));
   },
 
   /** Starts renaming in place; the tab, workspace or pane header shows an editor. */
@@ -628,6 +825,12 @@ export const actions = {
     if (c && next) actions.focusPane(c.m, next);
   },
 
+  /** Goes back (-1) or forward (1) through the panes focused (paneHistory.ts). */
+  goPane(step: -1 | 1) {
+    const s = go(step, spotOpen);
+    if (s) actions.focusPane(s.m, s.pane);
+  },
+
   cyclePane(step: number) {
     const c = current();
     if (!c?.tab) return;
@@ -666,15 +869,17 @@ export const actions = {
     return { m: c.m, pane: leaf ? c.focused : undefined, terminal, cwd };
   },
 
-  /** Opens a path found in a pane (from; the focused pane by default): media
-   * in a preview pane (openPreview), anything else in VS Code at the line:
+  /** Opens a path found in a pane (from; the focused pane by default): media,
+   * and anything with the VS Code plugin off, in a preview pane
+   * (openPreview), anything else in VS Code at the line:
    * in a VS Code pane of the workspace, the one of from's tab whose folder
    * holds the file first, then one of another tab that holds it, then any
    * of from's tab, then any; else in a new one split beside from, for the
    * terminal's directory or the workspace's when the file is below it, else
    * for the file's directory. */
   async openPath(m: string, path: string, line?: number, col?: number, from?: string) {
-    if (mediaExt.test(path)) return actions.openPreview(m, path, from);
+    // Without VS Code, Quick Look shows text as well.
+    if (mediaExt.test(path) || !isPluginOn('vscode')) return actions.openPreview(m, path, from);
     return actions.openInCode(m, path, line, col, from);
   },
 
@@ -713,6 +918,37 @@ export const actions = {
     const id = L.newId();
     openBeside(m, { preview: { id, path } }, o.ws, o.from);
     focusDom(m, L.previewKey(id));
+  },
+
+  /** Shows a plugin's pane in from's workspace (from: the focused pane by
+   * default): one of its kind that reuse accepts gets fields, the one of
+   * from's tab first, then (for a pane opened as a tab) any of the
+   * workspace's; else a new one opens, in a tab of its own (tab: editors,
+   * diffs, graphs, as terminals and VS Code open) or split beside from.
+   * Returns its key. */
+  async openView(
+    m: string,
+    view: { plugin: string; kind: string } & Record<string, unknown>,
+    opts: { from?: string; reuse?: (v: L.PluginView) => boolean; tab?: boolean } = {},
+  ) {
+    await whenLoaded(m);
+    const layout = terms.layout(m)!;
+    const o = originOf(m, layout, opts.from);
+    useStore.getState().selectMachine(m);
+    const views = o.ws ? L.pluginViews(o.ws, view.plugin, view.kind).filter((v) => opts.reuse?.(v.view)) : [];
+    // A pane beside from is reused in from's tab only: one in another tab
+    // would take the view away from from.
+    const found = views.find((v) => v.tab === o.tab) ?? (opts.tab ? views[0] : undefined);
+    if (found) {
+      terms.mutate(m, (l) => L.focusPane(L.setViewFields(l, found.key, view), found.key));
+      focusDom(m, found.key);
+      return found.key;
+    }
+    const id = L.newId();
+    if (opts.tab) terms.mutate(m, (l) => L.openPane(l, { view: { ...view, id } }, o.ws?.id));
+    else openBeside(m, { view: { ...view, id } }, o.ws, o.from);
+    focusDom(m, L.viewKey(id));
+    return L.viewKey(id);
   },
 
   /** Opens VS Code for a folder (the workspace's by default) as a new tab of
@@ -803,6 +1039,7 @@ export function workspaceTitle(m: string, ws: L.Workspace): string {
 export function paneTitle(m: string, leaf: L.Leaf | null, key: string): string {
   if (leaf && L.isCodeLeaf(leaf)) return L.folderName(leaf.code.folder, useStore.getState().machines[m]?.info?.home);
   if (leaf && L.isPreviewLeaf(leaf)) return leaf.preview.path.split('/').pop() || leaf.preview.path;
+  if (leaf && L.isPluginLeaf(leaf)) return describeView(m, leaf.view).title;
   return terminalTitle(terms.terminal(m, key), key);
 }
 

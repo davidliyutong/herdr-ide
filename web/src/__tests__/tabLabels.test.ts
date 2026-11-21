@@ -89,7 +89,18 @@ describe('tab labels', () => {
     expect(tabs()[2].querySelector('.tab-split')).not.toBeNull();
     expect(tabs()[2].title).toContain('✳ Fix the tests · 2 panes');
     expect(tabs()[2].querySelector('.dot-blocked')).not.toBeNull();
-    expect(host.querySelector('.crumb')?.textContent).toBe('nus-ws-1 / website');
+    // The tab bar holds the tabs alone: the sidebar names the workspace.
+    expect(host.querySelector('.crumb')).toBeNull();
+  });
+
+  it('marks a pinned tab with a pin that a click does not unpin', async () => {
+    core.model.mutate('m', (l) => L.pinTab(l, 'wwwwwwww', 1, true));
+    await act(async () => root.render(createElement(Workspace)));
+    const pin = host.querySelector<HTMLElement>('.tab.pinned .tab-pin')!;
+    expect(pin.tagName).toBe('SPAN');
+    expect(host.querySelector('.tab.pinned .tab-close')).toBeNull();
+    await act(async () => pin.click());
+    expect(core.model.layout('m')!.workspaces[0].tabs[0].pinned).toBe(true);
   });
 
   it('shows a tab of VS Code or a preview alone by its mark and name, a tab with a terminal by its number', async () => {

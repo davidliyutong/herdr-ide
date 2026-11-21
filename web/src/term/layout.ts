@@ -24,8 +24,12 @@ export type CodeLeaf = Extra & { code: CodeView };
 /** A file or directory of the machine, shown by the preview. */
 export type PreviewView = Extra & { id: string; path: string };
 export type PreviewLeaf = Extra & { preview: PreviewView };
-/** A pane: a terminal, a VS Code view or a preview. */
-export type Leaf = TerminalLeaf | CodeLeaf | PreviewLeaf;
+/** A pane a plugin draws (web/src/plugins): its kind of pane, and fields
+ * of the plugin's own. */
+export type PluginView = Extra & { id: string; plugin: string; kind: string };
+export type PluginLeaf = Extra & { view: PluginView };
+/** A pane: a terminal, a VS Code view, a preview or a plugin's pane. */
+export type Leaf = TerminalLeaf | CodeLeaf | PreviewLeaf | PluginLeaf;
 /** ratio is the first child's share, 0.1 to 0.9. */
 export type Split = Extra & { split: Axis; ratio: number; children: [Node, Node] };
 /** A leaf, a split, or a node of a kind this version does not know, kept as it is. */
@@ -34,6 +38,9 @@ export type Node = Leaf | Split | Extra;
 export type Tab = Extra & {
   /** Set only when the user named the tab. */
   name?: string;
+  /** Pinned: it stays left of the others, Close Others and Close to the
+   * Right leave it, and it shows a pin where the others have ×. */
+  pinned?: true;
   root: Node;
   /** The pane with the keyboard focus (paneKey). */
   focused: string;
@@ -64,18 +71,27 @@ const id = (v: unknown) => isObject(v) && typeof v.id === 'string' && v.id !== '
  * here name it by. Terminals go by their address. */
 export const codeKey = (id: string) => `code:${id}`;
 export const previewKey = (id: string) => `preview:${id}`;
+export const viewKey = (id: string) => `view:${id}`;
 
 export const isTerminalLeaf = (node: Node): node is TerminalLeaf => typeof node.terminal === 'string' && node.terminal !== '';
 export const isCodeLeaf = (node: Node): node is CodeLeaf => !isTerminalLeaf(node) && id(node.code);
 export const isPreviewLeaf = (node: Node): node is PreviewLeaf =>
   !isTerminalLeaf(node) && !isCodeLeaf(node) && id(node.preview) && text((node.preview as Extra).path) !== '';
+export const isPluginLeaf = (node: Node): node is PluginLeaf =>
+  !isTerminalLeaf(node) &&
+  !isCodeLeaf(node) &&
+  !isPreviewLeaf(node) &&
+  id(node.view) &&
+  text((node.view as Extra).plugin) !== '' &&
+  text((node.view as Extra).kind) !== '';
 
-/** A pane's key: a terminal's address, code:<id> or preview:<id>; undefined
- * for splits and nodes of unknown kinds. */
+/** A pane's key: a terminal's address, code:<id>, preview:<id> or
+ * view:<id>; undefined for splits and nodes of unknown kinds. */
 export function paneKey(node: Node): string | undefined {
   if (isTerminalLeaf(node)) return node.terminal;
   if (isCodeLeaf(node)) return codeKey(node.code.id);
   if (isPreviewLeaf(node)) return previewKey(node.preview.id);
+  if (isPluginLeaf(node)) return viewKey(node.view.id);
   return undefined;
 }
 
@@ -168,11 +184,13 @@ export function focusedLeaf(ws: Workspace): Leaf | null {
  * when key is its first and only pane and it has no directory yet: a
  * workspace is named after the folder its first pane started in. A
  * workspace whose directory the user emptied keeps none: its new terminals
- * start in the focused one's. */
-export function adoptDirectory(layout: Layout, key: string, dir: string): Layout {
+ * start in the focused one's. The machine's home directory (home), where
+ * a terminal without a directory starts, is not adopted: the workspace
+ * stays free of a fixed directory. */
+export function adoptDirectory(layout: Layout, key: string, dir: string, home = ''): Layout {
   const at = locate(layout, key);
   const ws = at && layout.workspaces[at.workspace];
-  if (!ws || ws.cwd || !dir) return layout;
+  if (!ws || ws.cwd || !dir || (home && normFolder(dir) === normFolder(home))) return layout;
   const sole = soleLeaf(ws);
   return sole && paneKey(sole) === key ? withWorkspace(layout, at.workspace, { ...ws, cwd: dir }) : layout;
 }
@@ -203,6 +221,7 @@ function parseNode(raw: Extra): Node {
     return { ...raw, code: { ...code, id: code.id as string, folder: text(code.folder) } };
   }
   if (isPreviewLeaf(raw)) return { ...raw, preview: { ...raw.preview } };
+  if (isPluginLeaf(raw)) return { ...raw, view: { ...raw.view } };
   const { split, ratio, children, ...extra } = raw;
   if ((split === 'horizontal' || split === 'vertical') && Array.isArray(children) && children.length === 2 && children.every(isObject)) {
     const r = typeof ratio === 'number' && Number.isFinite(ratio) ? clampRatio(ratio) : 0.5;
@@ -213,12 +232,13 @@ function parseNode(raw: Extra): Node {
 
 function parseTab(raw: unknown): Tab | null {
   if (!isObject(raw) || !isObject(raw.root)) return null;
-  const { name, root: rawRoot, focused, ...extra } = raw;
+  const { name, root: rawRoot, focused, pinned, ...extra } = raw;
   const root = parseNode(rawRoot);
   const panes = panesOf(root);
   return {
     ...extra,
     ...(typeof name === 'string' && name ? { name } : {}),
+    ...(pinned === true ? { pinned: true as const } : {}),
     root,
     focused: typeof focused === 'string' && panes.includes(focused) ? focused : (panes[0] ?? ''),
   };
@@ -284,6 +304,15 @@ function withWorkspace(layout: Layout, index: number, ws: Workspace, select = fa
   return { ...layout, workspaces: layout.workspaces.map((w, i) => (i === index ? ws : w)), ...(select ? { selected: index } : {}) };
 }
 
+/** A workspace with its pinned tabs first, each group in its order, the
+ * selected tab kept; the same workspace when they are. */
+function pinnedFirst(ws: Workspace): Workspace {
+  const pinned = ws.tabs.filter((t) => t.pinned);
+  if (ws.tabs.slice(0, pinned.length).every((t) => t.pinned)) return ws;
+  const tabs = [...pinned, ...ws.tabs.filter((t) => !t.pinned)];
+  return { ...ws, tabs, selected: Math.max(0, tabs.indexOf(ws.tabs[ws.selected])) };
+}
+
 function updateWorkspace(layout: Layout, wsId: string, change: (ws: Workspace) => Workspace): Layout {
   const index = workspaceIndex(layout, wsId);
   if (index < 0) return layout;
@@ -319,6 +348,20 @@ export function closeWorkspace(layout: Layout, wsId: string): Layout {
   return { ...layout, workspaces, selected: afterRemoval(layout.selected, index, layout.workspaces.length) };
 }
 
+/** Puts a closed workspace back at its place (index, within the list),
+ * empty, as it was but for its tabs, which come back after it (reopen),
+ * and selects it; a workspace of that id there already stays as it is.
+ * The blank workspace a layout gets when its last one closed (no tab,
+ * name or directory, and not among known, the workspaces there when it
+ * closed) goes. */
+export function restoreWorkspace(layout: Layout, ws: Workspace, index: number, known: readonly string[] = []): Layout {
+  if (workspaceIndex(layout, ws.id) >= 0) return layout;
+  const kept = layout.workspaces.filter((w) => w.tabs.length || w.name || w.cwd || known.includes(w.id));
+  const place = clampIndex(index, kept.length + 1);
+  const workspaces = [...kept.slice(0, place), { ...ws, tabs: [], selected: 0 }, ...kept.slice(place)];
+  return { ...layout, workspaces, selected: place };
+}
+
 export function moveWorkspace(layout: Layout, wsId: string, to: number): Layout {
   const from = workspaceIndex(layout, wsId);
   const target = clampIndex(to, layout.workspaces.length);
@@ -348,12 +391,92 @@ export function closeTab(layout: Layout, workspace: string, tab: number): Layout
   );
 }
 
+/** Pins a tab (to the end of the pinned ones) or unpins it (to the start
+ * of the others). A preview editor of a tab pinned is kept, as a pinned
+ * tab is not one to replace. */
+export function pinTab(layout: Layout, workspace: string, tab: number, pinned: boolean): Layout {
+  return updateWorkspace(layout, workspace, (ws) => {
+    const current = ws.tabs[tab];
+    if (!current || !!current.pinned === pinned) return ws;
+    const { pinned: _, ...rest } = current;
+    const next: Tab = pinned ? { ...rest, root: keptPreviews(rest.root), pinned: true } : rest;
+    const tabs = ws.tabs.map((t, i) => (i === tab ? next : t));
+    const target = tabs.filter((t, i) => t.pinned && i !== tab).length;
+    return { ...ws, tabs: moved(tabs, tab, target), selected: afterMove(ws.selected, tab, target) };
+  });
+}
+
+/** A tree whose plugin views shown as previews (`preview: true`) are kept. */
+function keptPreviews(node: Node): Node {
+  if (isPluginLeaf(node)) return node.view.preview === true ? { ...node, view: { ...node.view, preview: false } } : node;
+  if (!isSplit(node)) return node;
+  const [a, b] = node.children;
+  const ka = keptPreviews(a);
+  const kb = keptPreviews(b);
+  return ka === a && kb === b ? node : { ...node, children: [ka, kb] };
+}
+
+/** Moves a tab; the pinned tabs stay first (a tab moved among the others'
+ * places stops at their edge). */
 export function moveTab(layout: Layout, workspace: string, from: number, to: number): Layout {
   return updateWorkspace(layout, workspace, (ws) => {
     const target = clampIndex(to, ws.tabs.length);
     if (!ws.tabs[from] || from === target) return ws;
-    return { ...ws, tabs: moved(ws.tabs, from, target), selected: afterMove(ws.selected, from, target) };
+    const next = pinnedFirst({ ...ws, tabs: moved(ws.tabs, from, target), selected: afterMove(ws.selected, from, target) });
+    return next.tabs.every((t, i) => t === ws.tabs[i]) ? ws : next;
   });
+}
+
+/** A list with the items at picked (indexes, in any order; unknown ones
+ * left out) moved, in the list's order, as one block to a slot of the
+ * list as it is (0 before the first item, n after the last). */
+export function movedBlock<T>(list: readonly T[], picked: readonly number[], slot: number): T[] {
+  const set = new Set(picked.filter((i) => i >= 0 && i < list.length));
+  const block = list.filter((_, i) => set.has(i));
+  const rest = list.filter((_, i) => !set.has(i));
+  const at = clampIndex(slot, list.length + 1) - [...set].filter((i) => i < slot).length;
+  return [...rest.slice(0, at), ...block, ...rest.slice(at)];
+}
+
+/** Moves several tabs of a workspace, in their order, as one block to a
+ * slot of its tabs; the selected tab stays selected. */
+export function moveTabs(layout: Layout, workspace: string, tabs: readonly number[], slot: number): Layout {
+  return updateWorkspace(layout, workspace, (ws) => {
+    const next = pinnedFirst({ ...ws, tabs: movedBlock(ws.tabs, tabs, slot) });
+    if (next.tabs.every((t, i) => t === ws.tabs[i])) return ws;
+    return { ...next, selected: Math.max(0, next.tabs.indexOf(ws.tabs[ws.selected])) };
+  });
+}
+
+/** Moves several workspaces, in their order, as one block to a slot of
+ * the workspaces; the selected one stays selected. */
+export function moveWorkspaces(layout: Layout, ids: readonly string[], slot: number): Layout {
+  const picked = ids.map((x) => workspaceIndex(layout, x));
+  const next = movedBlock(layout.workspaces, picked, slot);
+  if (next.every((w, i) => w === layout.workspaces[i])) return layout;
+  return { ...layout, workspaces: next, selected: Math.max(0, next.indexOf(layout.workspaces[layout.selected])) };
+}
+
+/** Moves tabs of a workspace, in their order, to the end of another one,
+ * which is selected with the last of them; the tab selected in the first
+ * stays selected when it stays, else its neighbor is. A workspace the
+ * tabs leave empty stays. Nothing for the same or an unknown workspace. */
+export function moveTabsToWorkspace(layout: Layout, workspace: string, tabs: readonly number[], target: string): Layout {
+  const from = workspaceIndex(layout, workspace);
+  const to = workspaceIndex(layout, target);
+  const src = layout.workspaces[from];
+  if (from < 0 || to < 0 || from === to) return layout;
+  const set = new Set(tabs.filter((i) => i >= 0 && i < src.tabs.length));
+  if (!set.size) return layout;
+  const moving = src.tabs.filter((_, i) => set.has(i));
+  const rest = src.tabs.filter((_, i) => !set.has(i));
+  const kept = rest.indexOf(src.tabs[src.selected]);
+  const before = [...set].filter((i) => i < src.selected).length;
+  const selected = kept >= 0 ? kept : clampIndex(src.selected - before, rest.length);
+  const dst = layout.workspaces[to];
+  const added = pinnedFirst({ ...dst, tabs: [...dst.tabs, ...moving], selected: dst.tabs.length + moving.length - 1 });
+  const workspaces = layout.workspaces.map((w, i) => (i === from ? { ...w, tabs: rest, selected } : i === to ? added : w));
+  return { ...layout, workspaces, selected: to };
 }
 
 /** Selects a tab and its workspace. */
@@ -490,6 +613,40 @@ export function pruneLayout(layout: Layout, live: ReadonlySet<string>): Layout {
     .reduce(closePane, layout);
 }
 
+/** The layout with its terminals' leaves changed by change (which returns
+ * the same leaf for none); a tab's focus follows a leaf whose address
+ * changed. The same layout when no leaf changed. */
+export function mapTerminals(layout: Layout, change: (leaf: TerminalLeaf) => TerminalLeaf): Layout {
+  const moved = new Map<string, string>();
+  const at = (node: Node): Node => {
+    if (isTerminalLeaf(node)) {
+      const next = change(node);
+      if (next !== node && next.terminal !== node.terminal) moved.set(node.terminal, next.terminal);
+      return next;
+    }
+    if (!isSplit(node)) return node;
+    const [a, b] = node.children;
+    const na = at(a);
+    const nb = at(b);
+    return na === a && nb === b ? node : { ...node, children: [na, nb] };
+  };
+  let changed = false;
+  const workspaces = layout.workspaces.map((ws) => {
+    let any = false;
+    const tabs = ws.tabs.map((tab) => {
+      moved.clear();
+      const root = at(tab.root);
+      if (root === tab.root) return tab;
+      any = true;
+      return { ...tab, root, focused: moved.get(tab.focused) ?? tab.focused };
+    });
+    if (!any) return ws;
+    changed = true;
+    return { ...ws, tabs };
+  });
+  return changed ? { ...layout, workspaces } : layout;
+}
+
 /** Sets the ratio of the split at path (false: first child, true: second) in the selected tab. */
 export function setRatio(layout: Layout, path: readonly boolean[], ratio: number): Layout {
   const ws = selectedWorkspace(layout);
@@ -534,6 +691,30 @@ export function movePane(layout: Layout, key: string, target: string, axis: Axis
   return splitPane(closePane(layout, key), target, axis, leaf, before);
 }
 
+/** Moves a whole tab beside a pane of another tab of its workspace, as a
+ * split of that pane (after it, or before): the tab goes, its panes keep
+ * their own splits, the target's tab is selected and the moved tab's
+ * focused pane has the focus. Nothing when the pane is in the moved tab. */
+export function mergeTab(layout: Layout, workspace: string, tab: number, target: string, axis: Axis, before = false): Layout {
+  const index = workspaceIndex(layout, workspace);
+  const ws = layout.workspaces[index];
+  const from = ws?.tabs[tab];
+  const at = locate(layout, target);
+  if (!from || !at || at.workspace !== index || at.tab === tab) return layout;
+  const tabs = ws.tabs.map((t, i) =>
+    i === at.tab ? { ...t, root: splitting(t.root, target, axis, from.root, before), focused: from.focused } : t,
+  );
+  const remaining = tabs.filter((_, i) => i !== tab);
+  return withWorkspace(layout, index, { ...ws, tabs: remaining, selected: at.tab > tab ? at.tab - 1 : at.tab }, true);
+}
+
+/** The layout after dropping a tab on a zone of a pane of another tab: an
+ * edge places the tab's panes on that side; the middle, beside it. */
+export function dropTabOnPane(layout: Layout, workspace: string, tab: number, target: string, zone: DropZone): Layout {
+  const axis: Axis = zone === 'top' || zone === 'bottom' ? 'vertical' : 'horizontal';
+  return mergeTab(layout, workspace, tab, target, axis, zone === 'left' || zone === 'top');
+}
+
 /** Moves a pane into a new tab at the end of a workspace and selects it. */
 export function moveToNewTab(layout: Layout, key: string, workspace: string): Layout {
   const leaf = findLeaf(layout, key);
@@ -553,6 +734,33 @@ export function setPreviewPath(layout: Layout, key: string, path: string): Layou
   const at = locate(layout, key)!;
   const ws = layout.workspaces[at.workspace];
   return withWorkspace(layout, at.workspace, { ...ws, tabs: ws.tabs.map((t, i) => (i === at.tab ? { ...t, root: swap(t.root) } : t)) });
+}
+
+/** Changes the fields of a plugin's pane (its id, plugin and kind stay). */
+export function setViewFields(layout: Layout, key: string, fields: Extra): Layout {
+  const leaf = findLeaf(layout, key);
+  if (!leaf || !isPluginLeaf(leaf)) return layout;
+  const view = { ...leaf.view, ...fields, id: leaf.view.id, plugin: leaf.view.plugin, kind: leaf.view.kind };
+  if (jsonEqual(view, leaf.view)) return layout;
+  const next: PluginLeaf = { ...leaf, view };
+  const swap = (node: Node): Node => {
+    if (isLeaf(node)) return paneKey(node) === key ? next : node;
+    return isSplit(node) ? { ...node, children: [swap(node.children[0]), swap(node.children[1])] } : node;
+  };
+  const at = locate(layout, key)!;
+  const ws = layout.workspaces[at.workspace];
+  return withWorkspace(layout, at.workspace, { ...ws, tabs: ws.tabs.map((t, i) => (i === at.tab ? { ...t, root: swap(t.root) } : t)) });
+}
+
+/** A workspace's panes of a plugin's kind, in the order of its tabs and their trees. */
+export function pluginViews(ws: Workspace, plugin: string, kind?: string): { key: string; view: PluginView; tab: number }[] {
+  return ws.tabs.flatMap((t, tab) =>
+    leavesOf(t.root).flatMap((l) =>
+      isPluginLeaf(l) && l.view.plugin === plugin && (!kind || l.view.kind === kind)
+        ? [{ key: viewKey(l.view.id), view: l.view, tab }]
+        : [],
+    ),
+  );
 }
 
 /** A workspace's VS Code views, in the order of its tabs and their trees. */
@@ -674,4 +882,104 @@ function jsonEqual(a: unknown, b: unknown): boolean {
 /** Whether two layouts are the same document. */
 export function sameLayout(a: Layout, b: Layout): boolean {
   return jsonEqual(a, b);
+}
+
+// ---- reopening closed panes ----
+
+/** A tab as it was when panes of it were closed (all of them when the tab
+ * closed), for reopening them. */
+export interface Closed {
+  /** The workspace of the tab, and the tab's place in it. */
+  ws: string;
+  index: number;
+  tab: Tab;
+  /** The panes closed, in the tree's order. */
+  closed: string[];
+}
+
+/** A tree with leaves replaced (by key) and the others pruned: a split
+ * left with one child is that child. */
+function rebuild(node: Node, leafFor: (key: string) => Leaf | undefined): Node | null {
+  if (isLeaf(node)) return leafFor(paneKey(node)!) ?? null;
+  if (!isSplit(node)) return null;
+  const [a, b] = node.children;
+  const first = rebuild(a, leafFor);
+  const second = rebuild(b, leafFor);
+  if (!first) return second;
+  if (!second) return first;
+  return { ...node, children: [first, second] };
+}
+
+/** The split holding a pane directly in a tree, and whether the pane is
+ * its first child. */
+function parentOf(node: Node, key: string): { split: Split; first: boolean } | null {
+  if (!isSplit(node)) return null;
+  const [a, b] = node.children;
+  if (isLeaf(a) && paneKey(a) === key) return { split: node, first: true };
+  if (isLeaf(b) && paneKey(b) === key) return { split: node, first: false };
+  return parentOf(a, key) ?? parentOf(b, key);
+}
+
+/**
+ * Puts closed panes back, as far as they are restored (restored maps a
+ * closed pane's key to its new leaf: a new terminal for a terminal, the same
+ * view for VS Code and previews). In the tab that holds what is left of the
+ * closed one, unchanged since but for the closing, the tab is as it was,
+ * with its splits' shares; a tab that changed meanwhile gets each pane split
+ * in beside its neighbor of then; a closed tab comes back at its place in
+ * its workspace (the selected one when that is gone). The reopened pane, or
+ * the tab's focused one, is focused.
+ */
+export function reopen(layout: Layout, c: Closed, restored: ReadonlyMap<string, Leaf>): Layout {
+  const added = new Map([...restored].filter(([, leaf]) => paneKey(leaf)));
+  const addedKeys = new Set([...added.values()].map((l) => paneKey(l)!));
+  const before = panesOf(c.tab.root);
+  const survivors = before.filter((k) => !c.closed.includes(k));
+  const at = [...survivors, ...addedKeys].map((k) => locate(layout, k)).find((x) => x !== null) ?? null;
+  const keyOf = (old: string) => (added.has(old) ? paneKey(added.get(old)!)! : old);
+  const focusOld = added.has(c.tab.focused) ? c.tab.focused : [...added.keys()].pop();
+  const focused = focusOld ? keyOf(focusOld) : undefined;
+
+  if (at) {
+    const ws = layout.workspaces[at.workspace];
+    const tab = ws.tabs[at.tab];
+    const now = tabPanes(tab);
+    const known = new Set([...survivors, ...addedKeys]);
+    let next: Tab;
+    if (now.every((k) => known.has(k))) {
+      // Unchanged but for the closing: the tab as it was.
+      const kept = new Set(now);
+      const root = rebuild(c.tab.root, (k) => (added.has(k) ? added.get(k) : kept.has(k) ? leafOf(tab.root, k)! : undefined));
+      if (!root) return layout;
+      next = { ...tab, root, focused: focused && panesOf(root).includes(focused) ? focused : tab.focused };
+    } else {
+      // Changed meanwhile: each pane missing beside its neighbor of then.
+      let root = tab.root;
+      for (const [old, leaf] of added) {
+        const key = paneKey(leaf)!;
+        if (panesOf(root).includes(key)) continue;
+        const parent = parentOf(c.tab.root, old);
+        const near = parent ? panesOf(parent.split.children[parent.first ? 1 : 0]).map(keyOf) : [];
+        const target = near.find((k) => panesOf(root).includes(k)) ?? panesOf(root)[0];
+        if (!target) continue;
+        root = splitting(root, target, parent?.split.split ?? 'horizontal', { ...leaf }, parent?.first ?? false);
+      }
+      if (root === tab.root) return layout;
+      next = { ...tab, root, focused: focused && panesOf(root).includes(focused) ? focused : tab.focused };
+    }
+    const tabs = ws.tabs.map((t, i) => (i === at.tab ? next : t));
+    return withWorkspace(layout, at.workspace, { ...ws, tabs, selected: at.tab }, true);
+  }
+
+  // The tab is gone: it comes back with what is restored of it.
+  const root = rebuild(c.tab.root, (k) => added.get(k));
+  if (!root) return layout;
+  let index = workspaceIndex(layout, c.ws);
+  if (index < 0) index = layout.selected;
+  const ws = layout.workspaces[index];
+  if (!ws) return layout;
+  const place = Math.min(Math.max(c.index, 0), ws.tabs.length);
+  const tab: Tab = { ...c.tab, root, focused: focused ?? panesOf(root)[0] };
+  const tabs = [...ws.tabs.slice(0, place), tab, ...ws.tabs.slice(place)];
+  return withWorkspace(layout, index, pinnedFirst({ ...ws, tabs, selected: place }), true);
 }

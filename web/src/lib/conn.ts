@@ -18,12 +18,18 @@ type Listener = {
   onBridgeDownload(machine: string, paths: string[], window?: string): void;
   /** A VS Code window got the keyboard. */
   onBridgeFocus(machine: string, window: string, folders?: string[]): void;
+  /** VS Code's key for closing was pressed in a window without editors. */
+  onBridgeClose?(machine: string, window: string, folders?: string[]): void;
+  /** The extension's key for giving the keyboard back to the page. */
+  onBridgeLeave?(machine: string, window: string, folders?: string[]): void;
   /** Progress or end of a download a page started (download.ts). */
   onDownload(ev: DownloadEvent): void;
   onGui(st: GuiState): void;
   /** The settings or keybindings changed: their new state. */
   onSettings?(m: Record<string, unknown>): void;
   onKeybindings?(m: Record<string, unknown>): void;
+  /** A message of a plugin's core side, for machine m ("" for the core's). */
+  onPlugin?(plugin: string, m: string, data: unknown): void;
 };
 
 const text = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
@@ -92,6 +98,12 @@ class Conn {
       case 'bridge.focus':
         if (text(m.window)) this.listener?.onBridgeFocus(m.m, m.window, strings(m.folders));
         break;
+      case 'bridge.close':
+        if (text(m.window)) this.listener?.onBridgeClose?.(m.m, m.window, strings(m.folders));
+        break;
+      case 'bridge.leave':
+        if (text(m.window)) this.listener?.onBridgeLeave?.(m.m, m.window, strings(m.folders));
+        break;
       case 'download':
         this.listener?.onDownload(m);
         break;
@@ -103,6 +115,9 @@ class Conn {
         break;
       case 'keybindings':
         this.listener?.onKeybindings?.(m);
+        break;
+      case 'plugin':
+        if (text(m.plugin)) this.listener?.onPlugin?.(m.plugin, typeof m.m === 'string' ? m.m : '', m.data);
         break;
     }
   }

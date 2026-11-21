@@ -18,6 +18,8 @@ import (
 	"unicode/utf8"
 
 	"herdr-ide/internal/machines"
+	"herdr-ide/internal/perf"
+	"herdr-ide/internal/plugin"
 	"herdr-ide/internal/sshconfig"
 )
 
@@ -44,6 +46,12 @@ func (s *Server) broadcastMachines() {
 
 func (s *Server) handleMachines(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.mg.States())
+}
+
+// handlePerf says what the core's own process uses now (internal/perf), for
+// the settings' Performance page.
+func (s *Server) handlePerf(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, perf.Sample())
 }
 
 // handleSSHHosts lists the Host aliases of the core host's ssh configuration
@@ -203,7 +211,8 @@ func (s *Server) handleMachineRemove(w http.ResponseWriter, r *http.Request) {
 
 // forgetMachine drops what the server keeps for a removed machine: its
 // display, its terminal backend, its code-server proxy and state, and
-// whether it was ready. Its id may come back with the same target.
+// whether it was ready, and what plugins keep for it (the vault's allowed
+// machines). Its id may come back with the same target.
 func (s *Server) forgetMachine(id string) {
 	s.gui.Forget(id)
 	s.term.forget(id)
@@ -212,6 +221,11 @@ func (s *Server) forgetMachine(id string) {
 	s.readyMu.Lock()
 	delete(s.ready, id)
 	s.readyMu.Unlock()
+	for _, p := range s.opts.Plugins {
+		if f, ok := p.(plugin.MachineForgetter); ok {
+			f.ForgetMachine(pluginHost{s}, id)
+		}
+	}
 }
 
 // handleMachineRename renames a machine, the local one too ({"label": "..."}, trimmed).

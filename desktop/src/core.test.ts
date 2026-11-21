@@ -1,7 +1,20 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { tmpdir } from 'node:os';
-import { CoreProcess, coreArgs, coreEnv, coreInstance, corePort, DesktopError } from './core';
+import { APP_SLUG } from '../../web/src/brand';
+import {
+  CoreProcess,
+  coreArgs,
+  coreEnv,
+  coreHello,
+  coreInstance,
+  corePort,
+  DESKTOP_COOKIE,
+  desktopCookie,
+  DesktopError,
+  desktopToken,
+  verifyKey,
+} from './core';
 
 function fakeCore(source: string) {
   return ['-e', source];
@@ -155,4 +168,76 @@ test('an error after startup does not escape as an uncaught exception', async ()
   } finally {
     await core.stop();
   }
+});
+
+// The desktop app tells its windows from browsers with a token of its
+// launch: new each time, sent to the core on stdin (its hello), never in
+// the core's environment, and set for the core's origin only.
+test('the token of a launch goes to the core on stdin and into a cookie of its origin only', async () => {
+  const token = desktopToken();
+  assert.match(token, /^[0-9a-f]{64}$/);
+  assert.notEqual(desktopToken(), token);
+  assert.equal(
+    desktopToken((n) => Buffer.alloc(n, 1)),
+    '01'.repeat(32),
+  );
+  assert.equal(coreHello(token), `{"desktop_token":"${token}"}\n`);
+  assert.equal(coreHello(''), '{}\n');
+  assert.equal(coreHello(token, 'ab'), `{"desktop_token":"${token}","verify_key":"ab"}\n`);
+  assert.equal(coreHello('', 'ab'), '{"verify_key":"ab"}\n');
+
+  // A core that answers only when its first line on stdin is the hello
+  // with this token, and whose environment holds no token.
+  const core = new CoreProcess();
+  try {
+    const check = `
+      let input = '';
+      process.stdin.on('data', (d) => {
+        input += d;
+        const nl = input.indexOf('\\n');
+        if (nl < 0) return;
+        const hello = JSON.parse(input.slice(0, nl));
+        if (hello.desktop_token !== ${JSON.stringify(token)}) process.exit(5);
+        if (Object.values(process.env).includes(${JSON.stringify(token)})) process.exit(6);
+        ${ready}
+      });`;
+    const env = coreEnv(process.env, '/home/test', 'linux');
+    assert.equal(await core.start(process.execPath, fakeCore(check), 7781, env, tmpdir(), () => {}, token), 'http://127.0.0.1:7781');
+  } finally {
+    await core.stop();
+  }
+
+  const cookie = desktopCookie('http://127.0.0.1:7781', token);
+  assert.deepEqual(cookie, {
+    url: 'http://127.0.0.1:7781/',
+    name: DESKTOP_COOKIE,
+    value: token,
+    path: '/',
+    secure: false,
+    httpOnly: true,
+    sameSite: 'strict',
+  });
+  // Host-only and kept for this launch: no domain, no expiry.
+  assert.ok(!('domain' in cookie) && !('expirationDate' in cookie));
+  assert.equal(DESKTOP_COOKIE, `${APP_SLUG}-desktop`);
+  for (const origin of ['https://127.0.0.1:7781', 'http://localhost:7781', 'http://127.0.0.1:7781/x', 'http://example.com'])
+    assert.throws(() => desktopCookie(origin, token));
+});
+
+test('the key of the system prompts is another random value than the token, sent only in the hello', () => {
+  const key = verifyKey();
+  assert.match(key, /^[0-9a-f]{64}$/);
+  assert.notEqual(key, desktopToken());
+  assert.notEqual(verifyKey(), key);
+  assert.equal(
+    verifyKey((n) => Buffer.alloc(n, 2)),
+    '02'.repeat(32),
+  );
+  const token = desktopToken();
+  const hello = JSON.parse(coreHello(token, key));
+  assert.equal(hello.desktop_token, token);
+  assert.equal(hello.verify_key, key);
+  assert.notEqual(hello.verify_key, hello.desktop_token);
+  // The cookie carries the token only.
+  assert.ok(!JSON.stringify(desktopCookie('http://127.0.0.1:7781', token)).includes(key));
 });

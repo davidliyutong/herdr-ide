@@ -62,7 +62,8 @@ describe('terminal font', () => {
     expect(appearanceOf(prefs)).toMatchObject({
       fontWeight: 400,
       lineHeight: 1.05,
-      cursorStyle: 'block',
+      cursorStyle: 'bar',
+      cursorWidth: 1,
       cursorBlink: true,
       boldIsBright: false,
     });
@@ -72,13 +73,15 @@ describe('terminal font', () => {
       termLineHeight: 1.3,
       termFontFamily: 'Menlo',
       theme: 'light',
-      cursorStyle: 'bar',
+      cursorStyle: 'underline',
+      cursorWidth: 2,
       boldIsBright: true,
     });
     expect(a).toMatchObject({
       lineHeight: 1.3,
       fontFamily: 'Menlo',
-      cursorStyle: 'bar',
+      cursorStyle: 'underline',
+      cursorWidth: 2,
       boldIsBright: true,
       colors: { background: '#ffffff' },
     });

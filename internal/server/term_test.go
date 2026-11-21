@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -22,7 +23,10 @@ import (
 
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/machines"
+	"herdr-ide/internal/registry"
+	"herdr-ide/internal/settings"
 	"herdr-ide/internal/transport"
+	"herdr-ide/internal/uisettings"
 )
 
 // fakeTermCore is a terminal core on a machine's socket: it answers the
@@ -37,6 +41,12 @@ type fakeTermCore struct {
 	frames []string // "kind:payload" of stream frames
 	attach []string // params of terminal.attach
 	calls  []string // params of terminal.run
+	labels []string // params of terminal.label
+	// snap, when set, is the terminals of events.subscribe (JSON), sent
+	// without the status event that otherwise follows.
+	snap string
+	// notify sends a notification (JSON) on each events subscription.
+	notify []func(string)
 }
 
 func (f *fakeTermCore) seen(want string) bool {
@@ -127,8 +137,22 @@ func (f *fakeTermCore) serve(c net.Conn) {
 		switch req.Method {
 		case "events.subscribe":
 			next++
+			ch := next
+			f.mu.Lock()
+			snap := f.snap
+			f.notify = append(f.notify, func(line string) { write(frameOf(ch, 0, []byte(line+"\n"))) })
+			f.mu.Unlock()
+			if snap != "" {
+				write(reply(`"result":{"channel":` + string('0'+byte(next)) + `,"seq":1,"terminals":` + snap + `}`))
+				break
+			}
 			write(reply(`"result":{"channel":` + string('0'+byte(next)) + `,"seq":1,"terminals":[{"address":"t1","state":"live","cols":80,"rows":24,"future_field":7}]}`))
 			write(frameOf(next, 0, []byte(`{"jsonrpc":"2.0","method":"event","params":{"seq":2,"type":"status","terminal":"t1","data":{"status":{"state":"working"},"records":{},"reported":true}}}`+"\n")))
+		case "terminal.label":
+			f.mu.Lock()
+			f.labels = append(f.labels, string(req.Params))
+			f.mu.Unlock()
+			write(reply(`"result":{}`))
 		case "terminal.attach":
 			f.mu.Lock()
 			f.attach = append(f.attach, string(req.Params))
@@ -169,6 +193,16 @@ func (f *fakeTermCore) serve(c net.Conn) {
 // the machine's socket.
 func termServer(t *testing.T, opts Options, core bool) (*Server, *fakeTermCore, *lockedWriter) {
 	t.Helper()
+	return termServerSSH(t, opts, core, "")
+}
+
+// termServerSSH is termServer with the machine's agent started in the ssh
+// session ssh (its SSH_CONNECTION; "" for none). The agent runs in the
+// test's process, so without this it would report the session the tests
+// themselves run in.
+func termServerSSH(t *testing.T, opts Options, core bool, ssh string) (*Server, *fakeTermCore, *lockedWriter) {
+	t.Helper()
+	t.Setenv("SSH_CONNECTION", ssh)
 	dialLocal := dialAgent(t)
 	home, err := os.MkdirTemp("/tmp", "hct")
 	if err != nil {
@@ -416,15 +450,23 @@ func TestTermProtocol(t *testing.T) {
 	core.waitFor("4:\x01")
 	c.send(map[string]any{"t": "facts", "s": sid, "display": map[string]any{"bg": "#101010"}})
 	core.waitFor(`5:{"bg":"#101010"}`)
+	// The terminal's last viewer detaches: the program is told its focus is
+	// gone, and the stream stays at the core, so that the terminal keeps
+	// its size while no page shows it.
 	c.send(map[string]any{"t": "detach", "s": sid})
-	core.waitFor("2:")
+	core.waitFor("4:\x00")
 
 	c.send(map[string]any{"t": "attach", "rid": 4, "m": "x", "terminal": "t404", "cols": 80, "rows": 24})
 	if m := c.until("res"); m["rid"] != float64(4) || m["error"].(map[string]any)["kind"] != "not_found" {
 		t.Fatalf("attach to a missing terminal: %v", m)
 	}
-	// A program that ends closes its stream with how.
+	if core.seen("2:") {
+		t.Fatalf("the last viewer's stream was closed on detach: %q", core.frames)
+	}
+	// A program that ends closes its stream with how. The terminal's new
+	// viewer attached, the kept stream ends.
 	c.send(map[string]any{"t": "attach", "rid": 5, "m": "x", "terminal": "t1", "cols": 80, "rows": 24, "history": 1})
+	core.waitFor("2:")
 	if m := c.until("closed"); m["reason"] != "exited" || m["exit_code"] != float64(0) {
 		t.Fatalf("closed %v", m)
 	}
@@ -686,6 +728,85 @@ func TestTermRunGetsTheDisplay(t *testing.T) {
 	}
 }
 
+// New terminals of an ssh machine get the variables of its agent's ssh
+// session, which a terminal core running as a service does not pass on:
+// what the client gave stays, the audit log names the ones added, the
+// setting turns them off, and clients do not see the session in the
+// machine's state.
+func TestTermRunGetsTheSSHSession(t *testing.T) {
+	st := settings.New("", registry.Settings()...)
+	s, core, audit := termServerSSH(t, Options{Settings: st}, true, "10.0.0.2 51000 10.0.0.9 22")
+	c := dialTerm(t, s)
+	c.ready()
+	last := func() string {
+		core.mu.Lock()
+		defer core.mu.Unlock()
+		return core.calls[len(core.calls)-1]
+	}
+	c.send(map[string]any{"t": "call", "rid": 1, "m": "x", "method": "terminal.run", "params": map[string]any{"argv": []string{"sh"}}})
+	if m := c.until("res"); m["error"] != nil {
+		t.Fatalf("run %v", m)
+	}
+	if got := last(); !strings.Contains(got, `"SSH_CONNECTION":"10.0.0.2 51000 10.0.0.9 22"`) || !strings.Contains(got, `"SSH_CLIENT":"10.0.0.2 51000 22"`) {
+		t.Fatalf("run params %s", got)
+	}
+	if a := audit.String(); !strings.Contains(a, `"env":["SSH_CLIENT","SSH_CONNECTION"]`) || strings.Contains(a, "51000") {
+		t.Fatalf("audit %s", a)
+	}
+	// The client's own value stays, and the display's variables come too.
+	s.displayEnv = func(*machines.Machine) map[string]string { return map[string]string{"DISPLAY": ":20"} }
+	c.send(map[string]any{"t": "call", "rid": 2, "m": "x", "method": "terminal.run",
+		"params": map[string]any{"argv": []string{"sh"}, "env": map[string]string{"SSH_CONNECTION": "mine"}}})
+	c.until("res")
+	if got := last(); !strings.Contains(got, `"SSH_CONNECTION":"mine"`) || !strings.Contains(got, `"SSH_CLIENT":"10.0.0.2 51000 22"`) || !strings.Contains(got, `"DISPLAY":":20"`) {
+		t.Fatalf("run params %s", got)
+	}
+	if a := audit.String(); !strings.Contains(a, `"env":["DISPLAY","SSH_CLIENT"]`) {
+		t.Fatalf("audit %s", a)
+	}
+	s.displayEnv = func(*machines.Machine) map[string]string { return nil }
+	// Clients see the machine, not its ssh session.
+	if b, _ := json.Marshal(s.mg.Get("x").State()); strings.Contains(string(b), "51000") {
+		t.Fatalf("state %s", b)
+	}
+	// Off for this machine: nothing is added.
+	if err := st.Set(uisettings.SSHEnv, "x", false); err != nil {
+		t.Fatal(err)
+	}
+	c.send(map[string]any{"t": "call", "rid": 3, "m": "x", "method": "terminal.run", "params": map[string]any{"argv": []string{"sh"}}})
+	c.until("res")
+	if got := last(); strings.Contains(got, "env") {
+		t.Fatalf("env with the setting off: %s", got)
+	}
+}
+
+// Only addresses and ports become the ssh variables, and the local machine
+// gets none.
+func TestSSHEnv(t *testing.T) {
+	for conn, client := range map[string]string{
+		"10.0.0.2 51000 10.0.0.9 22":        "10.0.0.2 51000 22",
+		"  fe80::1%en0 4022 fe80::2%en0 22": "fe80::1%en0 4022 22",
+		"::1 1 ::1 2":                       "::1 1 2",
+	} {
+		env := sshEnv(conn)
+		if env["SSH_CLIENT"] != client || env["SSH_CONNECTION"] != strings.Join(strings.Fields(conn), " ") {
+			t.Errorf("%q: %v", conn, env)
+		}
+	}
+	for _, conn := range []string{"", "10.0.0.2 51000 10.0.0.9", "host 1 host 2", "10.0.0.2 x 10.0.0.9 22", "10.0.0.2 70000 10.0.0.9 22",
+		"10.0.0.2 1 10.0.0.9 22 extra", "10.0.0.2 1 10.0.0.9 22\nEVIL=1", "$(id) 1 10.0.0.9 22",
+		"fe80::1%$(id) 1 fe80::2 22", "fe80::1%a\x1b[31m 1 fe80::2 22", "fe80::1%a;b 1 fe80::2 22", "fe80::1%" + strings.Repeat("a", 40) + " 1 fe80::2 22"} {
+		if env := sshEnv(conn); env != nil {
+			t.Errorf("%q: %v", conn, env)
+		}
+	}
+	mg := machines.NewManager([]machines.Spec{{ID: "local", Kind: machines.KindLocal, Enabled: true}}, nil, log.New(io.Discard, "", 0))
+	s := New(mg, Options{Logger: log.New(io.Discard, "", 0), Plugins: testPlugins()})
+	if env := s.machineSSHEnv(mg.Get("local")); env != nil {
+		t.Errorf("local machine: %v", env)
+	}
+}
+
 // Enabling program windows in terminals reads each terminal's record now
 // and types as a viewer of the terminal's own size; without a connected
 // terminal core, or a display, nothing is typed.
@@ -730,6 +851,77 @@ func TestTermShells(t *testing.T) {
 // event) and /ws (agent messages, with the terminal's address). A turn
 // that ended is seen, and reported idle, when a client has the terminal
 // focused, then or later.
+// A done the program reports itself (OSC 7501) outlives the core: a client
+// that sees it labels the terminal with its turn, and a core that starts
+// again (the app restarted) reads that turn's done as seen; a later turn's
+// done is news.
+func TestTermSeenTurnOutlivesTheCore(t *testing.T) {
+	rec := func(turn int, labels string) string {
+		return `[{"address":"t1","state":"live","cols":80,"rows":24,"labels":` + labels +
+			`,"reported":true,"status":{"state":"done"},"turn":` + strconv.Itoa(turn) + `}]`
+	}
+	status := func(c *termConn) string {
+		t.Helper()
+		for {
+			if m := c.until("event"); m["type"] == "agent" {
+				return m["data"].(map[string]any)["agent_status"].(string)
+			}
+		}
+	}
+	start := func(snap string) (*termBackend, *termConn, *fakeTermCore) {
+		t.Helper()
+		s, core, _ := termServer(t, Options{}, true)
+		core.mu.Lock()
+		core.snap = snap
+		core.mu.Unlock()
+		c := dialTerm(t, s)
+		c.ready()
+		return s.term.existing("x"), c, core
+	}
+
+	// The turn seen before: idle, and no new label.
+	b, c, core := start(rec(3, `{"seen":"3","closing":""}`))
+	b.applyAgent(agentproto.DetectEvent{Terminal: "t1", Agent: "codex", Status: "done"})
+	if st := status(c); st != "idle" {
+		t.Fatalf("seen turn: %s", st)
+	}
+	// A later turn: news, until a client looks.
+	b, c, core = start(rec(4, `{"seen":"3"}`))
+	b.applyAgent(agentproto.DetectEvent{Terminal: "t1", Agent: "codex", Status: "done"})
+	if st := status(c); st != "done" {
+		t.Fatalf("new turn: %s", st)
+	}
+	core.mu.Lock()
+	if len(core.labels) != 0 {
+		t.Fatalf("labelled before it was seen: %q", core.labels)
+	}
+	core.mu.Unlock()
+	c.send(map[string]any{"t": "attach", "rid": 1, "m": "x", "terminal": "t1", "cols": 80, "rows": 24})
+	sid := c.until("attached")["s"]
+	c.send(map[string]any{"t": "focus", "s": sid, "focused": true})
+	if st := status(c); st != "idle" {
+		t.Fatalf("focused: %s", st)
+	}
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+		core.mu.Lock()
+		got := strings.Join(core.labels, " ")
+		core.mu.Unlock()
+		if got == `{"labels":{"seen":"4"},"terminal":"t1"}` {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("labels %q", got)
+		}
+	}
+	// A done the program does not report itself (read from the screen) is
+	// never taken for seen.
+	b, c, _ = start(`[{"address":"t1","state":"live","cols":80,"rows":24,"labels":{"seen":"0"}}]`)
+	b.applyAgent(agentproto.DetectEvent{Terminal: "t1", Agent: "claude", Status: "done"})
+	if st := status(c); st != "done" {
+		t.Fatalf("screen's done: %s", st)
+	}
+}
+
 func TestTermAgents(t *testing.T) {
 	s, _, _ := termServer(t, Options{}, true)
 	var mu sync.Mutex
@@ -789,4 +981,137 @@ func TestTermAgents(t *testing.T) {
 	if len(ws) != 6 || !strings.Contains(ws[0], `"terminal":"t1"`) || !strings.Contains(ws[0], `"agent_status":"working"`) || !strings.Contains(ws[1], `"done"`) {
 		t.Fatalf("/ws agent messages %q", ws)
 	}
+}
+
+// A terminal's size is its last active viewer's, and herdr-core gives a
+// terminal without one its headless size: the stream of the last viewer
+// that sets the size stays attached until another has attached or the
+// terminal ends. Any other viewer's stream is closed when it leaves, and
+// an observer's always.
+func TestTermKeepsTheLastViewer(t *testing.T) {
+	s, core, _ := termServer(t, Options{}, true)
+	closes := func() int {
+		core.mu.Lock()
+		defer core.mu.Unlock()
+		n := 0
+		for _, fr := range core.frames {
+			if fr == "2:" {
+				n++
+			}
+		}
+		return n
+	}
+	waitCloses := func(want int) {
+		t.Helper()
+		for deadline := time.Now().Add(5 * time.Second); closes() != want; time.Sleep(5 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("%d streams closed, want %d; frames %q", closes(), want, core.frames)
+			}
+		}
+	}
+	attach := func(c *termConn, rid int, observe bool) any {
+		c.send(map[string]any{"t": "attach", "rid": rid, "m": "x", "terminal": "t1", "cols": 80, "rows": 24, "observe": observe})
+		return c.until("attached")["s"]
+	}
+	a, b := dialTerm(t, s), dialTerm(t, s)
+	for _, c := range []*termConn{a, b} {
+		c.send(map[string]any{"t": "sub", "m": "x"})
+		c.until("snapshot")
+	}
+	sa, sb, so := attach(a, 1, false), attach(b, 1, false), attach(a, 2, true)
+	// One of two viewers leaves, and an observer: both streams are closed.
+	a.send(map[string]any{"t": "detach", "s": sa})
+	waitCloses(1)
+	a.send(map[string]any{"t": "detach", "s": so})
+	waitCloses(2)
+	// The last one leaves: its stream stays.
+	b.send(map[string]any{"t": "detach", "s": sb})
+	a.send(map[string]any{"t": "attach", "rid": 3, "m": "x", "terminal": "t404", "cols": 80, "rows": 24})
+	a.until("res")
+	if closes() != 2 {
+		t.Fatalf("the last viewer's stream was closed: %q", core.frames)
+	}
+	// An observer does not take its place; the next viewer does.
+	so = attach(a, 4, true)
+	a.send(map[string]any{"t": "detach", "s": so})
+	waitCloses(3)
+	attach(a, 5, false)
+	waitCloses(4)
+	// A client that leaves with the terminal's last viewer: the stream
+	// stays as after a detach, until the next client's viewer has attached.
+	a.ws.Close(websocket.StatusNormalClosure, "")
+	b.send(map[string]any{"t": "attach", "rid": 6, "m": "x", "terminal": "t404", "cols": 80, "rows": 24})
+	b.until("res")
+	time.Sleep(50 * time.Millisecond)
+	if closes() != 4 {
+		t.Fatalf("the stream of a client that left was closed: %q", core.frames)
+	}
+	attach(b, 7, false)
+	waitCloses(5)
+}
+
+// The stream kept for a terminal's size is handed back by a client that
+// stopped following the machine, and ends with its terminal also when the
+// events saying so were missed: a missed's snapshot is the whole state.
+func TestTermKeptViewerEnds(t *testing.T) {
+	s, core, _ := termServer(t, Options{}, true)
+	closes := func() int {
+		core.mu.Lock()
+		defer core.mu.Unlock()
+		n := 0
+		for _, fr := range core.frames {
+			if fr == "2:" {
+				n++
+			}
+		}
+		return n
+	}
+	waitCloses := func(want int) {
+		t.Helper()
+		for deadline := time.Now().Add(5 * time.Second); closes() != want; time.Sleep(5 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("%d streams closed, want %d; frames %q", closes(), want, core.frames)
+			}
+		}
+	}
+	a := dialTerm(t, s)
+	sub := func() {
+		a.send(map[string]any{"t": "sub", "m": "x"})
+		a.until("snapshot")
+	}
+	attach := func(rid int) any {
+		a.send(map[string]any{"t": "attach", "rid": rid, "m": "x", "terminal": "t1", "cols": 80, "rows": 24})
+		return a.until("attached")["s"]
+	}
+	// Messages are taken in order: an answered attach comes after those before it.
+	barrier := func(rid int) {
+		a.send(map[string]any{"t": "attach", "rid": rid, "m": "x", "terminal": "t404", "cols": 80, "rows": 24})
+		a.until("res")
+	}
+	sub()
+	sa := attach(1)
+	a.send(map[string]any{"t": "unsub", "m": "x"})
+	a.send(map[string]any{"t": "detach", "s": sa})
+	barrier(2)
+	if closes() != 0 {
+		t.Fatalf("the last viewer's stream was closed after unsub: %q", core.frames)
+	}
+	// The next viewer takes its place and is the last one in turn: the
+	// count went back to none.
+	sub()
+	sa = attach(3)
+	waitCloses(1)
+	a.send(map[string]any{"t": "detach", "s": sa})
+	barrier(4)
+	if closes() != 1 {
+		t.Fatalf("the last viewer's stream was closed: %q", core.frames)
+	}
+	// t1 ended while the events were missed.
+	core.mu.Lock()
+	notify := core.notify
+	core.mu.Unlock()
+	for _, fn := range notify {
+		fn(`{"jsonrpc":"2.0","method":"missed","params":{"seq":9,"terminals":[]}}`)
+	}
+	waitCloses(2)
 }

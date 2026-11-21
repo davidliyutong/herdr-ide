@@ -19,3 +19,6 @@ var tokenColors = map[string]terminalColors{
 		},
 	},
 }
+
+// tokenThemes are the color themes, the default first.
+var tokenThemes = []string{"blue", "vscode", "teal", "violet", "rose", "amber", "graphite"}

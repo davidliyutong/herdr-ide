@@ -339,7 +339,7 @@ describe('key table (testdata/vt-keys.json)', () => {
 });
 
 describe('drawRow', () => {
-  const look = { selection: 0x334455, match: 0x5c4813, matchCurrent: 0x9a6a00 };
+  const look = { selection: 0x334455, match: 0x5c4813, matchCurrent: 0x9a6a00, cursorWidth: 1 };
   const ov = (o: Partial<Overlay> = {}): Overlay => ({ focused: true, blinkOn: true, matches: [], ...o });
   const frameWith = (text: string, cols = 20) => {
     const t = term(cols, 3);
@@ -415,7 +415,9 @@ describe('drawRow', () => {
     // A bar, and nothing in the blink's off phase.
     t.writeText('\x1b[5 q');
     t.update(f);
-    expect(glyphs(drawRow(f.lines[0], 0, f, look, ov())).pop()).toMatchObject({ kind: 'cursor', style: 'bar' });
+    expect(glyphs(drawRow(f.lines[0], 0, f, look, ov())).pop()).toMatchObject({ kind: 'cursor', style: 'bar', width: 1 });
+    // As thick as the settings ask.
+    expect(glyphs(drawRow(f.lines[0], 0, f, { ...look, cursorWidth: 2.5 }, ov())).pop()).toMatchObject({ width: 2.5 });
     expect(glyphs(drawRow(f.lines[0], 0, f, look, ov({ blinkOn: false }))).some((g) => g.kind === 'cursor')).toBe(false);
     t.dispose();
   });

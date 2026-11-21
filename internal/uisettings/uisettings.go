@@ -21,17 +21,30 @@ type terminalColors struct {
 // Setting keys the core itself does not read are named here for tests and
 // the clients' documentation; the clients use the same strings.
 const (
-	Language     = "appearance.language"
-	Theme        = "appearance.theme"
-	UIFontSize   = "appearance.uiFontSize"
-	Zoom         = "window.zoom"
-	FontFamily   = "terminal.fontFamily"
-	FontSize     = "terminal.fontSize"
-	Scrollback   = "terminal.scrollback"
-	MutedAgents  = "notifications.mutedAgents"
-	SchemePrefix = "terminal.colorScheme."
-	ColorsPrefix = "terminal.colors."
+	Language   = "appearance.language"
+	Theme      = "appearance.theme"
+	ColorTheme = "appearance.colorTheme"
+	UIFontSize = "appearance.uiFontSize"
+	Zoom       = "window.zoom"
+	FontFamily = "terminal.fontFamily"
+	FontSize   = "terminal.fontSize"
+	Scrollback = "terminal.scrollback"
+	UndoClose  = "layout.undoClose"
+	// KeptTerminals is how many terminals a page keeps attached, hidden,
+	// besides the ones it shows.
+	KeptTerminals = "performance.keptTerminals"
+	MutedAgents   = "notifications.mutedAgents"
+	SchemePrefix  = "terminal.colorScheme."
+	ColorsPrefix  = "terminal.colors."
 )
+
+// SSHEnv is read by the core: whether the new terminals of an ssh machine
+// get the variables of its ssh session (internal/server/sshenv.go).
+const SSHEnv = "terminal.sshEnv"
+
+// MaxKeptTerminals is the most terminals a page keeps attached while they
+// are not shown: each holds a stream and an emulator with its scrollback.
+const MaxKeptTerminals = 64
 
 // MaxScrollback is the most lines a terminal keeps above its screen.
 const MaxScrollback = 100_000
@@ -40,6 +53,13 @@ const MaxScrollback = 100_000
 const (
 	MinZoom = 50
 	MaxZoom = 300
+)
+
+// MinUndoClose and MaxUndoClose bound the time, in seconds, a closed pane,
+// tab or workspace can be brought back.
+const (
+	MinUndoClose = 3
+	MaxUndoClose = 120
 )
 
 // Agents are the coding agents the terminals recognize (the manifests'
@@ -64,11 +84,23 @@ func defs() []settings.Def {
 	zoomMin, zoomMax := rng(MinZoom, MaxZoom)
 	fontMin, fontMax := rng(6, 40)
 	lineMin, lineMax := rng(0.8, 2)
+	cursorMin, cursorMax := rng(0.5, 4)
 	scrollMin, scrollMax := rng(0, MaxScrollback)
+	undoMin, undoMax := rng(MinUndoClose, MaxUndoClose)
+	keptMin, keptMax := rng(0, MaxKeptTerminals)
 	out := []settings.Def{
+		// Performance: the terminals a page keeps attached while another tab,
+		// workspace or machine is shown (the web UI's keptPanes.ts); 0 keeps none.
+		{Key: KeptTerminals, Type: settings.TypeNumber, Default: 12, Min: keptMin, Max: keptMax, Integer: true, Step: 1,
+			Section: "performance", Order: 10},
+
 		// Appearance.
 		{Key: Theme, Type: settings.TypeEnum, Default: "system", Enum: []string{"system", "light", "dark"},
 			Section: "appearance", Order: 10},
+		// The accent of the chrome (design/tokens.json themes); the neutrals
+		// are the same in every one.
+		{Key: ColorTheme, Type: settings.TypeEnum, Default: tokenThemes[0], Enum: append([]string(nil), tokenThemes...),
+			Section: "appearance", Order: 15},
 		{Key: Language, Type: settings.TypeEnum, Default: "auto", Enum: []string{"auto", "en", "zh-CN"},
 			Section: "appearance", Order: 20},
 		{Key: UIFontSize, Type: settings.TypeNumber, Default: 13, Min: uiMin, Max: uiMax, Integer: true,
@@ -78,6 +110,11 @@ func defs() []settings.Def {
 		{Key: Zoom, Type: settings.TypeNumber, Default: 100, Min: zoomMin, Max: zoomMax, Integer: true, Step: 10,
 			Section: "appearance", Order: 35},
 
+		// Panes, tabs and workspaces: how long a close can be undone, in
+		// seconds (the web UI's Undo Close).
+		{Key: UndoClose, Type: settings.TypeNumber, Default: 5, Min: undoMin, Max: undoMax, Integer: true, Step: 1,
+			Section: "layout", Order: 10},
+
 		// Terminal.
 		{Key: FontFamily, Type: settings.TypeString, Default: "", Section: "terminal", Group: "text", Order: 10},
 		{Key: FontSize, Type: settings.TypeNumber, Default: 13, Min: fontMin, Max: fontMax, Step: 1,
@@ -86,8 +123,13 @@ func defs() []settings.Def {
 			Section: "terminal", Group: "text", Order: 30},
 		{Key: "terminal.lineHeight", Type: settings.TypeNumber, Default: 1.05, Min: lineMin, Max: lineMax, Step: 0.05,
 			Section: "terminal", Group: "text", Order: 40},
-		{Key: "terminal.cursorStyle", Type: settings.TypeEnum, Default: "block", Enum: []string{"block", "bar", "underline"},
+		// A thin bar by default, as text fields and editors show it; programs
+		// may ask for another shape (DECSCUSR).
+		{Key: "terminal.cursorStyle", Type: settings.TypeEnum, Default: "bar", Enum: []string{"block", "bar", "underline"},
 			Section: "terminal", Group: "cursor", Order: 50},
+		// The bar's and the underline's thickness, in CSS pixels.
+		{Key: "terminal.cursorWidth", Type: settings.TypeNumber, Default: 1, Min: cursorMin, Max: cursorMax, Step: 0.5,
+			Section: "terminal", Group: "cursor", Order: 55},
 		{Key: "terminal.cursorBlink", Type: settings.TypeBool, Default: true, Section: "terminal", Group: "cursor", Order: 60},
 		{Key: Scrollback, Type: settings.TypeNumber, Default: 10000, Min: scrollMin, Max: scrollMax, Integer: true,
 			Step: 1000, Section: "terminal", Group: "behavior", Order: 70},
@@ -96,6 +138,9 @@ func defs() []settings.Def {
 		{Key: "terminal.optionIsMeta", Type: settings.TypeBool, Default: false, Section: "terminal", Group: "behavior", Order: 90},
 		// LaTeX formulas in panes shown rendered under the pointer.
 		{Key: "terminal.mathHover", Type: settings.TypeBool, Default: true, Section: "terminal", Group: "behavior", Order: 100},
+		// SSH_CONNECTION and SSH_CLIENT in the terminals of ssh machines.
+		{Key: SSHEnv, Type: settings.TypeBool, Default: true, Scope: settings.ScopeRemoteMachine,
+			Section: "terminal", Group: "behavior", Order: 105},
 		{Key: "terminal.copyOnSelect", Type: settings.TypeBool, Default: false, Section: "terminal", Group: "clipboard", Order: 110},
 		// What a program's clipboard write (OSC 52) does.
 		{Key: "terminal.programClipboard", Type: settings.TypeEnum, Default: "auto", Enum: []string{"auto", "ask", "off"},
@@ -164,9 +209,11 @@ func scrollbackInRange(v any) (any, bool) {
 var Module = settings.Module{
 	Sections: []settings.Section{
 		{ID: "appearance", Order: 10},
+		{ID: "layout", Order: 20},
 		{ID: "terminal", Order: 30},
 		{ID: "colors", Order: 40},
 		{ID: "notifications", Order: 50},
+		{ID: "performance", Order: 90, Advanced: true},
 	},
 	Defs: defs(),
 	Migrations: []settings.Migration{

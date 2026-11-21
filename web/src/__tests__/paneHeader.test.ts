@@ -17,6 +17,13 @@ import { PaneHeader } from '../components/PaneHeader';
 import * as L from '../term/layout';
 import { useMenu } from '../contextMenu';
 import { FakeCore, settle } from './fakeTerms';
+import { definePlugins } from '../plugins/registry';
+import { vscodePlugin } from '../plugins/vscode';
+import { vscodeOn } from './fakeSettings';
+
+// VS Code is a plugin, off by default: these tests have it on.
+definePlugins([vscodePlugin]);
+vscodeOn();
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -87,7 +94,7 @@ describe('PaneHeader', () => {
     await act(settle);
     // The split starts in p1's folder and goes below p1.
     expect(core.calls.find((c) => c.method === 'terminal.run')?.params).toEqual({
-      keep: false,
+      keep: true,
       cwd: '/home/u/src',
       display: expect.any(Object),
     });
@@ -164,6 +171,45 @@ describe('PaneHeader', () => {
     expect(terminalTitle({ ...r, labels: {} }, 't1')).toBe('srv');
     expect(terminalTitle({ address: 't1', title: 'zsh' }, 't1')).toBe('zsh');
     expect(terminalTitle(undefined, 't1')).toBe('t1');
+  });
+
+  it('is a toolbar for the keyboard: one Tab stop, arrows, F2 or Enter to rename, the menu key, Escape', async () => {
+    await render();
+    const header = host.querySelector<HTMLElement>('.pane-header')!;
+    expect(header.getAttribute('role')).toBe('toolbar');
+    expect(header.tabIndex).toBe(0);
+    expect(buttons().every((b) => b.tabIndex === -1)).toBe(true);
+    // The keyboard on the header makes its pane the focused one.
+    await act(async () => header.focus());
+    await settle();
+    expect(core.layout('m')!.workspaces[0].tabs[0].focused).toBe('p1');
+    const key = (k: string, o: KeyboardEventInit = {}) =>
+      act(
+        async () =>
+          void document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...o })),
+      );
+    await key('ArrowRight');
+    expect(document.activeElement).toBe(host.querySelector('.pane-title'));
+    await key('ArrowRight');
+    expect((document.activeElement as HTMLElement).getAttribute('aria-label')).toBe('Open in VS Code');
+    await key('End');
+    expect((document.activeElement as HTMLElement).getAttribute('aria-label')).toBe('Close Pane');
+    await key('Home');
+    await key('F2');
+    expect(useStore.getState().renaming).toEqual({ kind: 'pane', m: 'm', id: 'p1' });
+    await act(async () => useStore.getState().setRenaming(undefined));
+    header.focus();
+    await key('Enter');
+    expect(useStore.getState().renaming).toEqual({ kind: 'pane', m: 'm', id: 'p1' });
+    await act(async () => useStore.getState().setRenaming(undefined));
+    header.focus();
+    await key('F10', { shiftKey: true });
+    expect(useMenu.getState().menu?.entries.length).toBeGreaterThan(0);
+    useMenu.setState({ menu: undefined });
+    // A press with the mouse focuses the pane, not the header.
+    const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+    header.dispatchEvent(down);
+    expect(down.defaultPrevented).toBe(true);
   });
 
   it('has no commands in read-only mode', async () => {

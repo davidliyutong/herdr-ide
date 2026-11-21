@@ -10,6 +10,7 @@ import {
   editWorkspace,
   focusedLeaf,
   dropOnPane,
+  dropTabOnPane,
   emptyLayout,
   focusDirection,
   focusedPane,
@@ -18,6 +19,10 @@ import {
   layoutTerminals,
   locate,
   moveTab,
+  pinTab,
+  moveTabs,
+  moveTabsToWorkspace,
+  moveWorkspaces,
   movePane,
   moveToNewTab,
   moveWorkspace,
@@ -33,6 +38,7 @@ import {
   selectTab,
   selectWorkspace,
   setPreviewPath,
+  setViewFields,
   soleLeaf,
   workspaceTitle,
   setRatio,
@@ -163,6 +169,14 @@ function applyOp(layout: Layout, op: Record<string, unknown>): Layout {
       return closeTab(layout, s('workspace'), n('tab'));
     case 'moveTab':
       return moveTab(layout, s('workspace'), n('from'), n('to'));
+    case 'pinTab':
+      return pinTab(layout, s('workspace'), n('tab'), op.pinned as boolean);
+    case 'moveTabs':
+      return moveTabs(layout, s('workspace'), op.tabs as number[], n('slot'));
+    case 'moveTabsToWorkspace':
+      return moveTabsToWorkspace(layout, s('workspace'), op.tabs as number[], s('target'));
+    case 'moveWorkspaces':
+      return moveWorkspaces(layout, op.workspaces as string[], n('slot'));
     case 'selectTab':
       return selectTab(layout, s('workspace'), n('tab'));
     case 'splitFocused':
@@ -177,6 +191,8 @@ function applyOp(layout: Layout, op: Record<string, unknown>): Layout {
       return splitPane(layout, s('target'), op.axis as Axis, op.leaf as Leaf, op.before === true);
     case 'setPreviewPath':
       return setPreviewPath(layout, s('pane'), s('path'));
+    case 'setViewFields':
+      return setViewFields(layout, s('pane'), op.fields as Record<string, unknown>);
     case 'prune':
       return pruneLayout(layout, new Set(op.live as string[]));
     case 'setRatio':
@@ -194,6 +210,8 @@ function applyOp(layout: Layout, op: Record<string, unknown>): Layout {
       return focusDirection(layout, op.dir as Direction);
     case 'dropOnPane':
       return dropOnPane(layout, s('terminal') ?? s('pane'), s('target'), op.zone as DropZone);
+    case 'dropTabOnPane':
+      return dropTabOnPane(layout, s('workspace'), n('tab'), s('target'), op.zone as DropZone);
   }
   throw new Error(`unknown op ${String(op.op)}`);
 }
@@ -256,6 +274,11 @@ describe('layout', () => {
     expect(layout.workspaces[0].cwd).toBe('/home/u/app');
     layout = splitFocused(layout, 'vertical', 't2');
     expect(adoptDirectory(layout, 't2', '/home/u/lib')).toBe(layout);
+    // The home directory, where a terminal without one starts, is not taken.
+    const bare = openTerminal(createWorkspace(emptyLayout, 'w', ''), 't1');
+    expect(adoptDirectory(bare, 't1', '/home/u/', '/home/u')).toBe(bare);
+    expect(adoptDirectory(bare, 't1', '/home/u', '/home/u').workspaces[0].cwd).toBe('');
+    expect(adoptDirectory(bare, 't1', '/home/u/app', '/home/u').workspaces[0].cwd).toBe('/home/u/app');
     const ws = () => layout.workspaces[0];
     expect(soleLeaf(ws())).toBeNull();
     expect(workspaceTitle(ws(), '/home/u')).toBe('app');

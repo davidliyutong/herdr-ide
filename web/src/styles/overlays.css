@@ -1,0 +1,124 @@
+/* ---------- palette / modal / toast ---------- */
+.palette-backdrop,
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--backdrop);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 12vh;
+  z-index: 50;
+}
+.palette {
+  width: min(640px, 92vw);
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 18px 50px var(--shadow);
+  overflow: hidden;
+}
+.palette input {
+  width: 100%;
+  font: inherit;
+  font-size: var(--fs-lg);
+  padding: 12px 14px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  color: var(--fg);
+  outline: none;
+}
+.palette-list {
+  max-height: 50vh;
+  overflow: auto;
+  padding: 0 4px;
+}
+/* Only the items in view are drawn, placed in a box of the list's height. */
+.palette-rows {
+  position: relative;
+}
+.palette-item {
+  position: absolute;
+  left: 0;
+  right: 0;
+  box-sizing: border-box;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: var(--h-toolbar);
+  padding: 2px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.palette-item.sel {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.palette-item.sel .muted,
+.palette-item.sel .hint {
+  color: inherit;
+  opacity: 0.85;
+}
+.palette-item .hint {
+  margin-left: auto;
+  white-space: nowrap;
+}
+.modal {
+  width: min(820px, 94vw);
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  height: var(--h-header);
+  padding: 0 6px 0 14px;
+  border-bottom: 1px solid var(--line);
+}
+.auth-term {
+  flex: none;
+  height: 360px;
+}
+.toasts {
+  position: fixed;
+  right: 14px;
+  bottom: calc(var(--h-status) + 12px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 60;
+}
+/* A toast is plain; one that reports a failure or a warning has an icon
+   and a bar of its color. */
+.toast {
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  max-width: 420px;
+  box-shadow: 0 8px 24px var(--shadow);
+}
+.toast > .lucide {
+  flex: none;
+  width: var(--ic);
+  height: var(--ic);
+}
+.toast.error {
+  box-shadow:
+    inset 3px 0 0 var(--error),
+    0 8px 24px var(--shadow);
+}
+.toast.error > .lucide {
+  color: var(--error);
+}
+.toast.warning {
+  box-shadow:
+    inset 3px 0 0 var(--warning),
+    0 8px 24px var(--shadow);
+}
+.toast.warning > .lucide {
+  color: var(--warning);
+}

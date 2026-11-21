@@ -1,6 +1,7 @@
 // Dragging a pane by its header onto another pane swaps the two (centre) or
 // places the dragged pane beside the target (edges); dropping it on a tab
-// moves it into that tab, on the new-tab button into a new tab, on another
+// moves it into that tab, anywhere else on the tab bar (the new-tab button,
+// the empty part after it) into a new tab, on another
 // workspace of its machine in the sidebar into a new tab there. These are
 // edits of the machine's layout document (term/layout.ts).
 
@@ -32,29 +33,40 @@ export function dropZone(r: Box, x: number, y: number): Zone {
 }
 
 function findTarget(src: DragSource, x: number, y: number): DropTarget | undefined {
+  return dropTargetAt(src.m, x, y, src);
+}
+
+/** Where a pane (or a panel, which becomes one) dropped at x, y on machine
+ * m's panes would go: a pane other than skip.pane, a tab not holding it,
+ * the new-tab button, or a workspace other than skip.ws in the sidebar. */
+export function dropTargetAt(m: string, x: number, y: number, skip: { pane?: string; ws?: string } = {}): DropTarget | undefined {
   const el = document.elementFromPoint(x, y) as HTMLElement | null;
   const pane = el?.closest<HTMLElement>('.pane[data-pane]');
-  if (pane && pane.dataset.m === src.m && pane.dataset.pane !== src.pane) {
+  if (pane && pane.dataset.m === m && pane.dataset.pane !== skip.pane) {
     const rect = pane.getBoundingClientRect();
     return { kind: 'pane', pane: pane.dataset.pane!, zone: dropZone(rect, x, y), rect };
   }
   const tab = el?.closest<HTMLElement>('.tab[data-tab]');
-  if (tab && tab.dataset.m === src.m) {
+  if (tab) {
     const index = Number(tab.dataset.tab);
-    const tabs = terms.layout(src.m)?.workspaces.find((w) => w.id === tab.dataset.ws)?.tabs;
-    if (tabs?.[index] && !L.tabPanes(tabs[index]).includes(src.pane))
+    const tabs = tab.dataset.m === m ? terms.layout(m)?.workspaces.find((w) => w.id === tab.dataset.ws)?.tabs : undefined;
+    if (tabs?.[index] && !(skip.pane && L.tabPanes(tabs[index]).includes(skip.pane)))
       return { kind: 'tab', ws: tab.dataset.ws!, index, rect: tab.getBoundingClientRect() };
+    return undefined;
   }
-  const add = el?.closest<HTMLElement>('[data-new-tab]');
-  if (add && add.dataset.m === src.m) return { kind: 'newTab', ws: add.dataset.newTab!, rect: add.getBoundingClientRect() };
+  // Anywhere else on the tab bar (its empty part, the gaps between tabs,
+  // the new-tab button) it gets a tab of its own, which comes where the
+  // new-tab button is: the marker shows the button.
+  const add = el?.closest('.tabbar')?.querySelector<HTMLElement>('[data-new-tab]');
+  if (add && add.dataset.m === m) return { kind: 'newTab', ws: add.dataset.newTab!, rect: add.getBoundingClientRect() };
   // Another workspace of the machine, in the sidebar.
   const row = el?.closest<HTMLElement>('.ws-item[data-ws-id]');
-  if (row && row.dataset.m === src.m && row.dataset.wsId !== src.ws)
+  if (row && row.dataset.m === m && row.dataset.wsId !== skip.ws)
     return { kind: 'workspace', ws: row.dataset.wsId!, rect: row.getBoundingClientRect() };
 }
 
 /** The part of the target a drop would fill, for the highlight. */
-function markerRect(tg: DropTarget): Box {
+export function markerRect(tg: DropTarget): Box {
   const r = tg.rect;
   if (tg.kind !== 'pane') return r;
   switch (tg.zone) {

@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"context"
 	"io"
 	"log"
 	"net"
@@ -98,5 +99,39 @@ func TestStopMasterOnlyWhenSSHStaysUp(t *testing.T) {
 	stopMasterIfStuck(make(chan struct{}), 10*time.Millisecond, func() { stops.Add(1) })()
 	if stops.Load() != 1 {
 		t.Fatal("did not stop the master of an ssh that kept running")
+	}
+}
+
+// A reply waits ReplyTimeout without a deadline of the caller's, and the
+// caller's deadline when it has one, also a longer one: actions that answer
+// after their work (a scan, a push) are not cut short.
+func TestOpenWaitsForTheCallersDeadline(t *testing.T) {
+	old := ReplyTimeout
+	ReplyTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { ReplyTimeout = old })
+	s, srv, _ := pair(t, nil)
+	go func() {
+		for {
+			st, err := srv.AcceptStream()
+			if err != nil {
+				return
+			}
+			go func() {
+				var h agentproto.Header
+				if agentproto.ReadLine(st, &h) != nil {
+					return
+				}
+				time.Sleep(300 * time.Millisecond)
+				agentproto.WriteLine(st, agentproto.Reply{OK: true})
+			}()
+		}
+	}()
+	if _, err := s.Request(context.Background(), agentproto.Header{Op: agentproto.OpHello}); err == nil {
+		t.Fatal("a reply after ReplyTimeout without a deadline was taken")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := s.Request(ctx, agentproto.Header{Op: agentproto.OpHello}); err != nil {
+		t.Fatalf("a reply within the caller's longer deadline: %v", err)
 	}
 }

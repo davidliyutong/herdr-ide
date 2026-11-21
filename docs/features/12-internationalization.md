@@ -20,7 +20,14 @@ reference documentation.
 - **Web UI** (`web/src/i18n`): `en.ts` is the source of keys; other locales
   are typed `Record<MessageKey, string>`, so a missing or extra key fails
   `tsc`. `t(key, vars)` substitutes `{placeholders}`; a test checks that every
-  translation uses the same placeholders. The locale comes from the core's
+  translation uses the same placeholders. A plugin's messages are in its
+  own directory, `web/src/plugins/<id>/i18n/en.ts` and `zh-CN.ts` (typed
+  against that plugin's `en`), and `web/src/i18n`'s files spread them into
+  the one table `t` reads: changes to two plugins touch no common file. Its
+  keys are `<id>.…`, its settings' (`settings.<id>.…`,
+  `settings.section.<id>`, `settings.group.<id>…`), its commands'
+  (`command.<id>.…`) and `plugins.<id>.…`; a test fails for any other key
+  in a plugin's file. The locale comes from the core's
   `appearance.language` setting (`auto`, `en`, `zh-CN`; one value for every
   client of the core), where `auto` follows `navigator.languages`, then
   English; `<html lang>` is set accordingly. The settings dialog and the

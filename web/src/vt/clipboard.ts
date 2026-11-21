@@ -16,7 +16,8 @@ export const CLIP_AUTO_MS = 10_000;
 /** How long a program's copy stays available to the menu's Copy. */
 export const PROGRAM_CLIP_MS = 120_000;
 
-/** When this page last sent a terminal a key, text, paste or button press. */
+/** When this page last sent a terminal a key, text, paste, button press or
+ * the release of a button its program tracks. */
 let lastInput = 0;
 
 /** The text a program of machine `m` copied in answer to the user (a copy
@@ -31,6 +32,14 @@ let programClip: { text: string; m: string; at: number } | undefined;
 export function userInput() {
   lastInput = Date.now();
   programClip = undefined;
+}
+
+/** Records the release of a button a program tracks. The automatic gate
+ * counts from it too, since a program answers the release with its copy
+ * (Codex copies its selection then, however long the drag took); the copy
+ * a program made before stays, as the release types nothing. */
+export function userRelease() {
+  lastInput = Date.now();
 }
 
 /** The program's copy for the menu's Copy and ⌘C on machine m. */

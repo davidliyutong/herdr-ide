@@ -22,7 +22,7 @@ machine platform and pushes it through the agent
 
 ## Design
 
-- **Embedded**: the web UI, the agents for four platforms, herdr-core for
+- **Embedded**: the web UI, the binary's machine builds for four platforms, herdr-core for
   the same four platforms (the release pinned in `internal/hcdist`, its
   archives checked against the SHA-256 digests there when the build
   fetches them, `scripts/fetch-hc`), the video encoder for program windows

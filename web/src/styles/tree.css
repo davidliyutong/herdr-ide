@@ -1,0 +1,145 @@
+/* ---------- trees and lists (components/tree) ---------- */
+/* A tree: its rows are absolutely placed (windowed) inside a box of the
+   full height. */
+.tree {
+  position: relative;
+  outline: none;
+}
+.tree-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: var(--h-row);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px 0 6px;
+  font-size: var(--fs-base);
+  cursor: default;
+  user-select: none;
+  white-space: nowrap;
+}
+.tree-row:hover {
+  background: var(--bg-2);
+}
+.tree-row.selected {
+  background: var(--bg-3);
+}
+.tree:focus-within .tree-row.selected {
+  background: var(--accent-soft);
+}
+.tree:focus-visible .tree-row.cursor {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: -1px;
+}
+.tree-row.drop {
+  background: var(--accent-soft);
+}
+.tree-row.dimmed {
+  opacity: 0.55;
+}
+/* One per level above the row (12 px with the row's gap): a line below
+   the parent's twisty. */
+.tree-guide,
+.tree-indent {
+  position: relative;
+  flex: none;
+  align-self: stretch;
+  width: 8px;
+}
+.tree-guide::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--ic-sm) / 2);
+  border-left: 1px solid var(--line);
+}
+.tree:hover .tree-guide::before,
+.tree:focus-within .tree-guide::before {
+  border-left-color: var(--line-2);
+}
+.tree-twisty {
+  display: inline-flex;
+  width: var(--ic-sm);
+  flex: none;
+  color: var(--fg-dim);
+}
+.tree-twisty svg {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
+.tree-text {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+.tree-label {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.tree-description {
+  flex: 0 10 auto;
+  min-width: 0;
+  color: var(--fg-dim);
+  font-size: var(--fs-md);
+}
+.tree-actions {
+  display: none;
+  flex: none;
+  align-items: center;
+}
+.tree-row:hover .tree-actions,
+.tree-row:focus-within .tree-actions,
+.tree:focus-within .tree-row.cursor .tree-actions {
+  display: inline-flex;
+}
+.tree-badge {
+  flex: none;
+  min-width: 1em;
+  text-align: center;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+/* A collapsible section (components/tree/Section.tsx): the head is the
+   design's .section-head; the toggle fills it. */
+.section-head .section-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  line-height: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.section-head .section-toggle:hover {
+  background: none;
+}
+/* A count: neutral, as VS Code's (only what asks for attention takes the accent). */
+.section-count {
+  flex: none;
+  min-width: 1.5em;
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--bg-3);
+  color: var(--fg-dim);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  text-transform: none;
+  letter-spacing: 0;
+}

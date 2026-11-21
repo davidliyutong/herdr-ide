@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Check, CircleAlert, SlidersHorizontal, TriangleAlert } from 'lucide-react';
 import { useStore } from './state/store';
 import { terms, useTerms } from './state/terms';
 import { rememberFollowed } from './state/followed';
@@ -7,6 +8,7 @@ import { conn } from './lib/conn';
 import { Sidebar } from './components/Sidebar';
 import { Workspace } from './components/Workspace';
 import { CodeLayer } from './components/CodeLayer';
+import { BrowserLayer } from './plugins/browser/BrowserLayer';
 import { Palette } from './components/Palette';
 import { AuthDialog } from './components/AuthDialog';
 import { AddMachineDialog } from './components/AddMachineDialog';
@@ -14,8 +16,10 @@ import { SettingsDialog } from './components/SettingsDialog';
 import { Dialogs } from './components/Dialogs';
 import { ContextMenu } from './components/ContextMenu';
 import { initDesktop } from './desktop';
+import { warnOnUnload } from './unsaved';
+import { followDesktopClose } from './quitGuard';
 import { takeOpenedFolders } from './drop';
-import { commandLabel, handleFrameKey, handleKey, keyHint, onChordChange, pendingChord, runCommand } from './keymap';
+import { closeWindowPane, leaveWindowPane, commandLabel, handleKey, keyHint, onChordChange, pendingChord, runCommand } from './keymap';
 import { applySettings, loadSettings } from './settings';
 import { applyKeybindings, loadKeybindings, useKeys } from './keybindings';
 import { t } from './i18n';
@@ -23,13 +27,19 @@ import { notifyAgent, updateBadge } from './notify';
 import { shortPath, terminalTitle } from './lib/machine';
 import * as L from './term/layout';
 import { useGui } from './gui/state';
-import { GuiTray } from './gui/GuiMenus';
 import { bridgeDownload, downloadEvent, resyncDownloads } from './download';
 import { noteFocusedTerminal, sendTarget } from './lib/bridge';
-import { onFrameKey, windowFocused } from './codeFrames';
-import { TransfersTray } from './components/Transfers';
-import { DownloadsTray } from './components/Downloads';
-import { actions, workspaceTitle } from './actions';
+import { windowFocused } from './codeFrames';
+import { followVSCodeSwitch } from './plugins/vscode/workers';
+import { isStatusWidget, type StatusWidgetDef } from './plugins/api';
+import { describeView, pluginMessage, useActivePlugins, usePanels, usePluginOn } from './plugins/registry';
+import { RightBar } from './components/RightBar';
+import { PluginBoundary } from './components/PluginBoundary';
+import { openMenu, type MenuEntry } from './contextMenu';
+import './plugins';
+import './commands';
+import { actions, current, workspaceTitle } from './actions';
+import { noteFocus } from './paneHistory';
 
 /** Text sent from VS Code ("Send to agent") is pasted, not submitted, into
  * the terminal sendTarget picks: an agent of the sending VS Code pane's tab
@@ -66,8 +76,16 @@ function followTerms() {
   show(useStore.getState().machineId);
   // The machines followed before are followed again once connected.
   const offFollowed = rememberFollowed(() => terms);
+  // The panes focused, for Go Back and Go Forward.
+  const noteFocused = () => {
+    const c = current();
+    if (c?.focused) noteFocus({ m: c.m, pane: c.focused });
+  };
   const offStore = useStore.subscribe((s, prev) => {
-    if (s.machineId !== prev.machineId) show(s.machineId);
+    if (s.machineId !== prev.machineId) {
+      show(s.machineId);
+      noteFocused();
+    }
     // Machines removed from the core are no longer followed.
     for (const m of prev.order) if (!s.machines[m] && prev.machines[m]) terms.forget(m);
   });
@@ -78,6 +96,7 @@ function followTerms() {
     if (layout && layout !== (m ? prev.machines[m]?.layout : undefined)) {
       s.setWorkspace(L.selectedWorkspace(layout)?.id);
       noteFocusedTerminal(m!, layout);
+      noteFocused();
     }
     updateBadge();
   });
@@ -93,6 +112,11 @@ export function App() {
   const sidebarWidth = useStore((s) => s.sidebarWidth);
   const connected = useStore((s) => s.connected);
   const toasts = useStore((s) => s.toasts);
+  const panels = usePanels();
+  const browserOn = usePluginOn('browser');
+  const panel = useStore((s) => s.panel);
+  const panelWidth = useStore((s) => s.panelWidth);
+  const panelShown = panels.some((p) => p.id === panel);
   const [chord, setChord] = useState(false);
 
   useEffect(() => {
@@ -116,15 +140,21 @@ export function App() {
       onBridgeSend: (m, text, window, folders) => pasteToAgent(m, text, window, folders),
       onBridgeDownload: (m, paths, window) => bridgeDownload(m, paths, window),
       onBridgeFocus: (m, window, folders) => void windowFocused(m, window, folders),
+      onBridgeClose: (m, window, folders) => closeWindowPane(m, window, folders),
+      onBridgeLeave: (m, window, folders) => leaveWindowPane(m, window, folders),
       onDownload: (ev) => downloadEvent(ev),
       onGui: (st) => useGui.getState().setState(st),
       onSettings: (m) => applySettings(m),
       onKeybindings: (m) => applyKeybindings(m),
+      onPlugin: (plugin, m, data) => pluginMessage(plugin, m, data),
     });
     const offTerms = followTerms();
     void loadKeybindings();
     const offDesktop = initDesktop();
+    const offUnload = warnOnUnload();
+    const offClose = followDesktopClose();
     const offFolders = takeOpenedFolders();
+    const offWorkers = followVSCodeSwitch();
     fetch('/api/config')
       .then((r) => r.json())
       .then((c) => useStore.setState({ readOnly: !!c.read_only, sshLogin: c.ssh_login !== false }))
@@ -137,24 +167,37 @@ export function App() {
       handleKey(ev);
     };
     window.addEventListener('keydown', onKey);
-    // A VS Code pane gives the app its pane keys (cmd+w) before VS Code.
-    onFrameKey(handleFrameKey);
     return () => {
       off();
       offTerms();
       offDesktop();
+      offUnload();
+      offClose();
       offFolders();
+      offWorkers();
       window.removeEventListener('keydown', onKey);
     };
   }, []);
 
   return (
-    <div className={`app ${sidebarOpen ? '' : 'no-sidebar'}`} style={{ '--sidebar-w': `${sidebarWidth}px` } as React.CSSProperties}>
+    <div
+      className={`app ${sidebarOpen ? '' : 'no-sidebar'}`}
+      style={
+        {
+          '--sidebar-w': `${sidebarWidth}px`,
+          '--panel-w': panelShown ? `${panelWidth}px` : '0px',
+          '--panel-px': `${panelWidth}px`,
+          '--rail-w': panels.length ? 'var(--ds-size-rail)' : '0px',
+        } as React.CSSProperties
+      }
+    >
       {sidebarOpen && <Sidebar />}
       {/* On a narrow screen the sidebar lies over the panes: a press beside it closes it. */}
       {sidebarOpen && <div className="sidebar-backdrop" onClick={() => actions.toggleSidebar()} />}
       <Workspace />
       <CodeLayer />
+      {browserOn && <BrowserLayer />}
+      <RightBar />
       <StatusBar connected={connected} chord={chord} />
       <Palette />
       <SettingsDialog />
@@ -164,11 +207,13 @@ export function App() {
       <ContextMenu />
       <div className="toasts">
         {toasts.map((toast) => (
-          <div key={toast.id} className="toast">
+          <div key={toast.id} className={`toast ${toast.kind ?? ''}`} role={toast.kind === 'error' ? 'alert' : 'status'}>
+            {toast.kind === 'error' && <CircleAlert />}
+            {toast.kind === 'warning' && <TriangleAlert />}
             <span>{toast.msg}</span>
             {toast.action && (
               <button
-                className="primary"
+                className="sm"
                 onClick={() => {
                   toast.action!.run();
                   useStore.setState((s) => ({ toasts: s.toasts.filter((x) => x.id !== toast.id) }));
@@ -184,8 +229,18 @@ export function App() {
   );
 }
 
-function StatusBar({ connected, chord }: { connected: boolean; chord: boolean }) {
+const BUILTIN_STATUS_WIDGETS = [
+  { id: 'app.machines', title: 'statusbar.widget.machines' },
+  { id: 'app.pane', title: 'statusbar.widget.pane' },
+  { id: 'app.keyboardShortcuts', title: 'command.app.keyboardShortcuts' },
+  { id: 'app.commandPalette', title: 'command.app.commandPalette' },
+] as const;
+
+export function StatusBar({ connected, chord }: { connected: boolean; chord: boolean }) {
   const readOnly = useStore((s) => s.readOnly);
+  const hiddenList = useStore((s) => s.hiddenStatusWidgets);
+  const hidden = new Set(hiddenList);
+  const plugins = useActivePlugins();
   // Re-rendered when the bindings change.
   useKeys((s) => s.effective);
   const m = useStore((s) => s.machineId);
@@ -205,40 +260,131 @@ function StatusBar({ connected, chord }: { connected: boolean; chord: boolean })
       ? { title: t('code.title'), path: leaf.code.folder }
       : L.isPreviewLeaf(leaf)
         ? { title: t('preview.title'), path: leaf.preview.path }
-        : { title, path: cwd };
+        : L.isPluginLeaf(leaf)
+          ? (({ title, path }) => ({ title, path }))(describeView(m!, leaf.view))
+          : { title, path: cwd };
   const counts = useStore((s) => {
     let ready = 0;
     for (const id of s.order) if (s.machines[id]?.status === 'ready') ready++;
     return `${ready}/${s.order.length}`;
   });
+
+  const pluginWidgets: StatusWidgetDef[] = plugins.flatMap((p) => (p.statusItems ?? []).filter(isStatusWidget));
+  const allWidgets = [
+    ...BUILTIN_STATUS_WIDGETS.slice(0, 2).map((w) => ({ id: w.id, label: t(w.title) })),
+    ...pluginWidgets.map((w) => ({ id: w.id, label: t(w.title) })),
+    ...BUILTIN_STATUS_WIDGETS.slice(2).map((w) => ({ id: w.id, label: t(w.title) })),
+  ];
+
+  const openWidgetMenu = (
+    ev: { clientX: number; clientY: number; preventDefault(): void; stopPropagation(): void },
+    targetWidgetId?: string,
+  ) => {
+    const s = useStore.getState();
+    const entries: MenuEntry[] = [];
+    if (targetWidgetId) {
+      const target = allWidgets.find((w) => w.id === targetWidgetId);
+      if (target && !s.hiddenStatusWidgets.includes(target.id)) {
+        entries.push({
+          label: t('statusbar.hideWidget', { name: target.label }),
+          run: () => s.setStatusWidgetVisible(target.id, false),
+        });
+        entries.push('sep');
+      }
+    }
+    for (const w of allWidgets) {
+      const visible = !s.hiddenStatusWidgets.includes(w.id);
+      entries.push({
+        label: w.label,
+        icon: visible ? <Check /> : <span className="status-menu-blank" aria-hidden />,
+        run: () => s.toggleStatusWidget(w.id),
+      });
+    }
+    if (allWidgets.some((w) => s.hiddenStatusWidgets.includes(w.id))) {
+      entries.push('sep');
+      entries.push({
+        label: t('statusbar.showAll'),
+        run: () => s.showAllStatusWidgets(),
+      });
+    }
+    openMenu(ev, entries);
+  };
+
   return (
-    <footer className="statusbar">
+    <footer
+      className="statusbar"
+      onContextMenu={(e) => {
+        const hit = (e.target as HTMLElement).closest<HTMLElement>('[data-status-widget]')?.dataset.statusWidget;
+        openWidgetMenu(e, hit);
+      }}
+    >
       <span className={`conn ${connected ? 'on' : 'off'}`}>{connected ? t('app.connected') : t('app.reconnecting')}</span>
       {readOnly && <span className="prefix-badge ro">{t('app.readOnly')}</span>}
-      <span className="muted">{t('app.machines', { n: counts })}</span>
-      {about && machine && (
-        <span className="muted ellipsis">
+      {!hidden.has('app.machines') && <span data-status-widget="app.machines">{t('app.machines', { n: counts })}</span>}
+      {!hidden.has('app.pane') && about && machine && (
+        <span className="ellipsis" data-status-widget="app.pane">
           {machine.label} · {about.title} · {shortPath(about.path, machine.info?.home) || '~'}
         </span>
       )}
       <span className="spacer" />
-      <TransfersTray />
-      <DownloadsTray />
-      <GuiTray />
+      <PluginStatusItems hidden={hidden} />
       {chord && <span className="prefix-badge">{pendingChord()}</span>}
-      <StatusCommand command="app.keyboardShortcuts" />
-      <StatusCommand command="app.commandPalette" />
+      {!hidden.has('app.keyboardShortcuts') && <StatusCommand widgetId="app.keyboardShortcuts" command="app.keyboardShortcuts" />}
+      {!hidden.has('app.commandPalette') && <StatusCommand widgetId="app.commandPalette" command="app.commandPalette" />}
+      <button
+        className="status-widgets-btn"
+        title={t('statusbar.customize')}
+        aria-label={t('statusbar.customize')}
+        onClick={(e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          openWidgetMenu({ clientX: r.right, clientY: r.top, preventDefault() {}, stopPropagation: () => e.stopPropagation() });
+        }}
+      >
+        <SlidersHorizontal />
+      </button>
     </footer>
   );
 }
 
 /** A command the status bar offers: its name, and its key when it has one. */
-function StatusCommand({ command }: { command: string }) {
+function StatusCommand({ widgetId, command }: { widgetId: string; command: string }) {
   const key = keyHint(command);
   return (
-    <button className="status-command muted small" data-command={command} onClick={() => runCommand(command)}>
+    <button className="status-command" data-command={command} data-status-widget={widgetId} onClick={() => runCommand(command)}>
       {commandLabel(command)}
       {key && <kbd>{key}</kbd>}
     </button>
+  );
+}
+
+/** The status bar's items of the plugins that are on, each in an error
+ * boundary of its own. Toggleable widgets (StatusWidgetDef) are skipped while
+ * hidden; plain components (dialogs, overlays) always stay mounted. */
+function PluginStatusItems({ hidden }: { hidden: ReadonlySet<string> }) {
+  const plugins = useActivePlugins();
+  return (
+    <>
+      {plugins.flatMap((p) =>
+        (p.statusItems ?? []).map((entry, i) => {
+          if (isStatusWidget(entry)) {
+            if (hidden.has(entry.id)) return null;
+            const Item = entry.component;
+            return (
+              <span key={`${p.id}:${entry.id}`} className="status-widget" data-status-widget={entry.id}>
+                <PluginBoundary plugin={t(p.title)} compact>
+                  <Item />
+                </PluginBoundary>
+              </span>
+            );
+          }
+          const Item = entry;
+          return (
+            <PluginBoundary key={`${p.id}:${i}`} plugin={t(p.title)} compact>
+              <Item />
+            </PluginBoundary>
+          );
+        }),
+      )}
+    </>
   );
 }

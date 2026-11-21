@@ -7,16 +7,18 @@ changes.
 
 ## What this is
 
-A Go server (`cmd/herdr-ide`) that serves a React terminal UI and reaches
-several machines through a per-machine Go agent (`cmd/herdr-ide-agent`) over
-ssh. Every machine's terminals live in a terminal core of the agent's own
+One Go program (`cmd/herdr-ide`): the server, which serves a React terminal
+UI, and the per-machine agent it reaches several machines through over ssh
+(the command `agent` of the same binary). Every machine's terminals live in a terminal core of the agent's own
 (herdr-core, `hc`, in a session apart from the user's); the browser emulates
 them with Ghostty's libghostty-vt as WebAssembly through the core's terminal
 protocol (`/api/v1/term`), and an Electron desktop app (`desktop/`) wraps the
 same UI and a core of its own on macOS, Windows and Linux. The agent runs on
 Linux and macOS only, so a core on Windows reaches SSH machines only.
-code-server provides VS Code panels. One binary embeds the UI, the agents
-and herdr-core for 4 platforms, and a VS Code extension.
+code-server provides VS Code panels. One binary embeds the UI, its own
+machine builds (the tag `machine`: the same program without the server, the
+UI and these payloads) and herdr-core for 4 platforms, and a VS Code
+extension.
 
 ## Commands
 
@@ -24,9 +26,10 @@ and herdr-core for 4 platforms, and a VS Code extension.
 | --- | --- |
 | Install JS deps | `make deps` |
 | Unit tests (Go + web + desktop) | `make test` |
-| All checks (gofmt, vet, also for linux/amd64, darwin/arm64 and windows/amd64, tsc, prettier, brand/doc/README consistency, generated tokens, the terminal emulator's digest, shared test vectors run by the web tests) | `make check` |
+| All checks (gofmt, vet, also for linux/amd64, darwin/arm64 and windows/amd64, tsc, prettier, no import cycles among the web UI's modules, brand/doc/README consistency, generated tokens, the terminal emulator's digest, the GPU selection library's digests, shared test vectors run by the web tests) | `make check` |
 | Regenerate the design tokens' CSS and Go after editing `design/tokens.json`, and `design/generated/registry.json` with the settings and commands tables of `docs/reference.md` after changing settings or commands | `make tokens` |
 | Rebuild the web UI's terminal emulator (Ghostty's libghostty-vt as WebAssembly; zig 0.17) | `make vt-wasm` |
+| Rebuild the library machines preload to show a program only the GPUs of its `CUDA_VISIBLE_DEVICES` (`scripts/gpupick`; zig 0.17) | `make gpupick` |
 | Integration test with a real terminal core (`HC_TEST_BIN=<herdr-core>`; the pinned one: `go run ./scripts/fetch-hc -exe <file> <os>/<arch>`) | `make it` |
 | Full build into `dist/` | `make build` (or `scripts/build.sh`) |
 | Desktop app of this system (macOS, Windows, Linux): unpacked / installers (DMG and zip, NSIS setup, AppImage and deb) | `make desktop-app` / `make desktop-dist` (`scripts/desktop.sh app` / `dist` in Git Bash on Windows) |
@@ -49,7 +52,8 @@ Run `make check test` before finishing a change.
    `storage` from `web/src/brand.ts`, `src/brand.ts` in the extension.
    `scripts/check.sh` fails otherwise. Renames: `scripts/rename.sh`.
 3. **All UI text through i18n.** Add the key to `web/src/i18n/en.ts` and the
-   translation to `zh-CN.ts` (the build fails if one is missing). The server
+   translation to `zh-CN.ts` (the build fails if one is missing); a plugin's
+   messages are in its own `web/src/plugins/<id>/i18n/` instead. The server
    returns codes, not prose. Comments, logs and identifiers are English.
 4. **Docs move with code.** New or changed flags and endpoints →
    `docs/reference.md` (CI checks; its settings and commands tables are
@@ -110,6 +114,10 @@ playbooks):
   change it only with `make vt-wasm` (zig 0.17), which rewrites the digest;
   libghostty-vt's functions read and write wasm memory, whose buffer may
   change after any call, so take views again after each one.
+- `internal/agent/gpupick/*.so` are build artifacts of
+  `scripts/gpupick/gpupick.c` with recorded digests, of the source too:
+  after changing the source run `make gpupick` (zig 0.17) and commit the
+  libraries with it. Its tests run on Linux only (`TestGPUPick`).
 - yamux streams cannot be half-closed: use `agentproto.ChunkWriter` for
   uploads that expect a reply.
 - `web/dist` is embedded at build time; run `pnpm -C web build` (or
@@ -122,10 +130,14 @@ playbooks):
   that grow with features are lists with one item per line.
 - macOS limits unix socket paths to 104 bytes; keep socket paths short.
 - The core builds for Windows, the agent does not: `internal/agent` and
-  `cmd/herdr-ide-agent` are `//go:build unix`, so code the core runs on
+  `cmd/herdr-ide/machine_unix.go` are `//go:build unix`, so code the core runs on
   Windows must not import them (put what both need in
   `internal/agentproto`); POSIX-only tests skip on Windows. Paths on
   machines are POSIX: use package `path`, not `filepath`, for them.
   `.gitattributes` keeps LF line endings on Windows checkouts.
+- The binary a machine gets is `cmd/herdr-ide` built with the tag
+  `machine`. Files of that directory that need the server, the UI or
+  `internal/embedded` are `//go:build !machine`; `scripts/check.sh` fails
+  when the machine build links them (it would embed itself).
 - code-server's webviews need a secure context; test VS Code features on
   `http://localhost` or HTTPS, not a LAN IP.

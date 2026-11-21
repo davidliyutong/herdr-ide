@@ -41,6 +41,10 @@ func migrateLegacyDataDir(home, base string, logger *log.Logger) {
 	}
 }
 
+// housekeepers are plugins' own retention rules, run with housekeeping on
+// the data directory.
+var housekeepers []func(base string, now time.Time)
+
 // housekeeping bounds disk use: old uploads and code-server logs go away, and
 // this agent's build directory is touched so other cores' cleanup keeps it.
 func housekeeping(base string, logger *log.Logger) {
@@ -53,6 +57,9 @@ func housekeeping(base string, logger *log.Logger) {
 	}
 	pruneOlder(filepath.Join(base, "uploads"), now.Add(-uploadRetention), logger)
 	pruneOlder(filepath.Join(base, "cs-data", "logs"), now.Add(-logRetention), logger)
+	for _, h := range housekeepers {
+		h(base, now)
+	}
 }
 
 // pruneOlder removes direct children of dir not modified since cutoff.

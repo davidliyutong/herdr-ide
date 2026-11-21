@@ -11,6 +11,7 @@ import (
 	"github.com/coder/websocket"
 
 	"herdr-ide/internal/machines"
+	"herdr-ide/internal/plugin"
 )
 
 // /ws is the event channel of the clients (the browser UI and the desktop
@@ -53,11 +54,16 @@ type wsClient struct {
 	// readOnly clients watch: they cannot make machines reconnect or change
 	// VS Code's theme.
 	readOnly bool
+	// client is the kind of client of the page (clientOf its upgrade
+	// request): VS Code's bridge messages reach it only while VS Code is
+	// on for it.
+	client plugin.Client
 
 	// active is when the user last used this page (guarded by
 	// Server.clientsMu); the most recently used page plays sounds. A client
-	// plays none before it reports activity.
-	active time.Time
+	// plays none before it reports activity. activeSeq breaks same-tick ties.
+	active    time.Time
+	activeSeq uint64
 }
 
 const sendQueue = 8192
@@ -73,7 +79,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	conn.SetReadLimit(1 << 20)
 	ctx, cancel := context.WithCancel(context.Background())
-	c := &wsClient{s: s, conn: conn, ctx: ctx, cancel: cancel, send: make(chan []byte, sendQueue), req: r, readOnly: s.opts.ReadOnly}
+	c := &wsClient{s: s, conn: conn, ctx: ctx, cancel: cancel, send: make(chan []byte, sendQueue), req: r, readOnly: s.opts.ReadOnly, client: s.clientOf(r)}
 	s.audit.log(r, "ws.connect", nil)
 	defer s.audit.log(r, "ws.disconnect", nil)
 	defer c.close()

@@ -2,6 +2,9 @@ package agent
 
 import (
 	"net"
+	"os"
+	"strconv"
+	"strings"
 	"syscall"
 )
 
@@ -43,4 +46,25 @@ func peerCred(c *net.UnixConn) (pid, uid int, err error) {
 		return 0, 0, serr
 	}
 	return int(cred.Pid), int(cred.Uid), nil
+}
+
+// parentOf returns pid's parent and pid's name (its comm) from
+// /proc/<pid>/stat; ok is false when the process is gone.
+func parentOf(pid int) (ppid int, name string, ok bool) {
+	b, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+	if err != nil {
+		return 0, "", false
+	}
+	// "pid (comm) state ppid …": the name may hold spaces and parentheses.
+	s := string(b)
+	open, end := strings.IndexByte(s, '('), strings.LastIndexByte(s, ')')
+	if open < 0 || end < open {
+		return 0, "", false
+	}
+	f := strings.Fields(s[end+1:])
+	if len(f) < 2 {
+		return 0, "", false
+	}
+	ppid, _ = strconv.Atoi(f[1])
+	return ppid, s[open+1 : end], true
 }

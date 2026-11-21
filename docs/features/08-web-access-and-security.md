@@ -33,8 +33,12 @@ core on `127.0.0.1:7781`, [16](16-desktop-packaging.md)).
    browser must carry `X-herdr-ide-Proxy-Secret` (constant-time compare). A
    same-host proxy is recognized by its non-loopback Host or
    `X-Forwarded-For`, so it cannot skip the secret.
-3. **Host / Origin allowlist**: loopback plus `--allowed-origin`, against DNS
-   rebinding and cross-site WebSocket hijacking.
+3. **Host / Origin checks**: the Host is loopback or an `--allowed-origin`'s,
+   against DNS rebinding. An Origin is an `--allowed-origin` or, on loopback,
+   the request's own (the host and port of its Host header), against
+   cross-site WebSocket hijacking: a page on another loopback port, such as
+   a development server or a forwarded port of a machine, is another site,
+   and the core has no login that would stop its scripts.
 4. **Read-only mode** (`--read-only`): terminals are shown but only
    observed: no input, size or focus reaches them, writing calls of the
    terminal protocol are refused and no terminal core is installed or
@@ -67,6 +71,27 @@ core on `127.0.0.1:7781`, [16](16-desktop-packaging.md)).
    bridge use, program windows, ssh authentication and denials, with the
    user from `--user-header` or common proxy headers.
 
+**Content on the UI's origin** (`internal/server/client.go`). VS Code's
+windows are code-server proxied below `/m/{id}/code/`, on the UI's own
+origin: any script in them (an extension, a webview, a page an extension
+opens) can do what the page can, on every machine. VS Code is therefore
+off by default, with two switches ([05](05-vscode-panes.md)):
+`plugins.vscode.enabled` for the desktop app's windows and
+`plugins.vscode.browser` for browsers, which the UI turns on only after
+the user ticked that they understand this risk and pressed **Enable** (the
+acceptance is the setting, kept in the settings file until turned off).
+The core applies the switch of the requesting client to every route of
+VS Code (code-server's status and start, the proxy with its WebSockets,
+the bridge's commands) and sends VS Code's bridge messages only to pages
+whose switch is on, so a browser never loads code-server while its switch
+is off, whatever the desktop app's. A request is the desktop app's when
+it carries the token of the app's launch (32 random bytes the app hands
+its core on stdin and sets as an HttpOnly, SameSite=Strict, host-only
+session cookie for the core's origin in its own Electron session, compared
+in constant time, [16](16-desktop-packaging.md)); anything else is a
+browser. `GET /api/settings` and `GET /api/config` tell the page which
+switch applies (`client`), so the UI shows that one.
+
 **Startup checks** (`cmd/herdr-ide`): a non-loopback `--listen` is refused
 unless a proxy secret is configured or `--insecure-listen` is given; on
 Linux and macOS the ssh control directory must be private (a core on
@@ -86,6 +111,12 @@ reaches only sockets there ([02](02-multi-machine-transport.md)).
 | Tauri desktop app | macOS WKWebView does not provide service workers to arbitrary origins; VS Code webviews (Git Graph, media preview) break. |
 | Built-in password login | Duplicates what proxies do better (SSO, 2FA, device trust); authentication is delegated to the proxy by design. |
 | Blocklist of dangerous terminal core methods | New methods would be exposed by default. |
+| One VS Code switch for every client | A desktop user who turned VS Code on would find it on in any browser opening the same core and data, without having accepted there that its scripts run with the page's access. |
+| Telling the desktop app by `desktopShell` or its user agent | Both are the page's own claims: any page, VS Code's scripts in a browser included, can make them. Only a secret the browser never sees tells the app's requests apart. |
+| The desktop token in the core's environment | Programs the core starts (the local agent's terminals, code-server) would inherit it unless every path scrubbed it, and `/proc/<pid>/environ` keeps the original; stdin is inherited by nothing. |
+| A header the desktop app adds to its requests (`webRequest`) | Every request of every window would pass through the main process, and service workers' and WebSockets' requests depend on Electron's proxying; a cookie of the session is sent by Chromium itself. |
+| Any loopback Origin accepted | Every program listening on a loopback port of the computer serves pages whose scripts could then open the core's WebSockets: a development server's dependencies, another user's service, a port forwarded from a machine. Only the page the core served has its Host as Origin. |
+| Serving code-server from an origin of its own | Would close the risk itself, but needs a second host name or port that every deployment's proxy, certificate and allowed origins would have to carry. |
 
 ## Failure modes
 
@@ -93,16 +124,33 @@ reaches only sockets there ([02](02-multi-machine-transport.md)).
   allowed" (fails closed).
 - **Plain HTTP over a LAN address** → works for terminals, but VS Code
   webviews, clipboard and notifications are unavailable; HTTPS is required.
+- **A core the desktop app did not start** (`herdr-ide serve` from a
+  terminal or a service) → it has no desktop token, so every client is a
+  browser and VS Code follows `plugins.vscode.browser`. A desktop app
+  whose cookie could not be set reports a startup failure instead of
+  showing a page that would count as a browser.
 
 ## Testing
 
-- `internal/server/server_test.go`: Host/Origin guard (`TestGuard`), proxy
+- `internal/server/server_test.go`: Host/Origin guard, other loopback ports
+  and the other loopback name refused (`TestGuard`), proxy
   secret: local, remote, wrong secret, same-host proxy
   (`TestProxySecret`), CSP and headers on the shell, a client-side route
   and an unknown API path (`TestCSPOnAppShell`), every mutating route
   refusing other origins and read-only mode (`TestMutatingRoutesAreGuarded`,
   `TestReadOnlyRetryKeepsTheSession`), refused port proxy paths
   (`TestCodeServerPortProxyRefused`).
+- `internal/server/plugins_test.go`, `client_test.go`: VS Code's routes
+  refusing a browser while only the desktop app's switch is on and the
+  other way round, a wrong or cut token, a core without one and no cookie
+  taken as a browser (`TestCodeRoutesFollowTheirClientsSwitch`), the
+  client reported to the page (`TestClientReported`), the cookie kept from
+  code-server and code-server's `Service-Worker-Allowed` and `Set-Cookie`
+  of it dropped (`TestDesktopCookieNotForwarded`), bridge messages only to
+  pages whose switch is on (`TestBridgeMessagesFollowTheClientsSwitch`),
+  each switch ending its client's connections
+  (`TestVSCodeOffEndsItsWork`); `cmd/herdr-ide/parent_test.go`: the
+  launcher's hello on stdin (`TestReadHello`).
 - `internal/server/term_test.go`: the terminal protocol's allowlist and its
   audit (`TestTermProtocol`), read-only terminals (`TestTermReadOnly`,
   `TestTermWithoutCore`).

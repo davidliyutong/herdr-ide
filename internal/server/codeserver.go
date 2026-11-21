@@ -13,6 +13,9 @@ import (
 	"time"
 
 	"herdr-ide/internal/machines"
+	"herdr-ide/internal/plugin"
+	"herdr-ide/internal/plugins/vscode"
+	"herdr-ide/internal/settings"
 )
 
 // codeServerProxy serves /m/{id}/code/... from the machine's code-server,
@@ -26,10 +29,110 @@ type codeServerProxy struct {
 	// open upgraded (WebSocket) connections and last request per machine
 	active map[string]int
 	last   map[string]time.Time
+	// work are the contexts of VS Code's work: per kind of client, its
+	// proxied requests and WebSockets and the bridge's commands, which end
+	// when that client's switch is turned off; under prepare, preparing
+	// code-server on machines, which ends when VS Code is off for every
+	// client (stop). The next use makes a new one.
+	work     map[plugin.Client]context.Context
+	stopWork map[plugin.Client]context.CancelFunc
 }
 
+// prepare is the key of work for preparations, which serve every client.
+const prepare plugin.Client = ""
+
+// clients are the kinds of clients, each with its switch for VS Code.
+var clients = []plugin.Client{plugin.Browser, plugin.Desktop}
+
 func newCodeServerProxy(s *Server) *codeServerProxy {
-	return &codeServerProxy{s: s, proxies: map[string]*httputil.ReverseProxy{}, active: map[string]int{}, last: map[string]time.Time{}}
+	p := &codeServerProxy{s: s, proxies: map[string]*httputil.ReverseProxy{}, active: map[string]int{}, last: map[string]time.Time{},
+		work: map[plugin.Client]context.Context{}, stopWork: map[plugin.Client]context.CancelFunc{}}
+	if st := s.opts.Settings; st != nil {
+		keys := map[string]bool{}
+		for _, pl := range s.opts.Plugins {
+			if pl.ID() == vscode.ID {
+				for _, c := range clients {
+					keys[plugin.SettingFor(pl, c)] = true
+				}
+			}
+		}
+		st.OnChange(func(changes []settings.Change) {
+			for _, ch := range changes {
+				if keys[ch.Key] {
+					p.follow()
+					return
+				}
+			}
+		})
+	}
+	return p
+}
+
+// follow ends the work of each client whose switch is off, and the
+// preparations when every switch is.
+func (p *codeServerProxy) follow() {
+	on := false
+	for _, c := range clients {
+		if p.s.pluginOn(vscode.ID, c) {
+			on = true
+		} else {
+			p.stop(c)
+		}
+	}
+	if !on {
+		p.stop(prepare)
+	}
+}
+
+// workContext is the context of VS Code's work for client c, or of
+// preparations (prepare; see work).
+func (p *codeServerProxy) workContext(c plugin.Client) context.Context {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.work[c] == nil {
+		p.work[c], p.stopWork[c] = context.WithCancel(context.Background())
+	}
+	return p.work[c]
+}
+
+// workFor is the context of client c's VS Code work (on, true), or of the
+// preparations of code-server for client c (on, false), taken only while
+// c's switch is on: nil when it is off. The switch is read after the
+// context is taken, as follow ends the work only after the setting
+// changed: a switch turned off meanwhile has either ended this context or
+// is seen here, so no request holds a new context that nothing would end.
+func (p *codeServerProxy) workFor(c plugin.Client, own bool) context.Context {
+	key := c
+	if !own {
+		key = prepare
+	}
+	ctx := p.workContext(key)
+	if !p.s.pluginOn(vscode.ID, c) {
+		return nil
+	}
+	return ctx
+}
+
+// stop ends VS Code's work for client c when its switch is turned off:
+// proxied requests and WebSockets of that kind of client are closed, so
+// its VS Code windows open elsewhere stop working, and code-server,
+// without connections, is stopped once idle (--code-server-idle). For
+// prepare, preparing code-server stops at its next step (an upload, and a
+// download on the machine, end with their stream).
+func (p *codeServerProxy) stop(c plugin.Client) {
+	p.mu.Lock()
+	stop := p.stopWork[c]
+	delete(p.work, c)
+	delete(p.stopWork, c)
+	p.mu.Unlock()
+	if stop != nil {
+		if c == prepare {
+			p.s.logger.Printf("VS Code turned off: its preparations end")
+		} else {
+			p.s.logger.Printf("VS Code turned off for %s clients: their connections end", c)
+		}
+		stop()
+	}
 }
 
 func (p *codeServerProxy) touch(id string, delta int) {
@@ -103,11 +206,20 @@ func (p *codeServerProxy) proxy(mc *machines.Machine) *httputil.ReverseProxy {
 			// code-server checks WebSocket Origin against Host.
 			pr.Out.Host = pr.In.Host
 			pr.Out.Header.Del(ProxySecretHeader)
+			// The desktop app's token stays in the core.
+			stripDesktopCookie(pr.Out.Header)
 			pr.SetXForwarded()
 		},
 		ModifyResponse: func(resp *http.Response) error {
 			// Our page frames code-server; nobody else may.
 			resp.Header.Set("X-Frame-Options", "SAMEORIGIN")
+			// Nothing code-server answers outlasts VS Code's switch on the
+			// UI's origin: no service worker of its may claim a scope above
+			// the path of its script (code-server allows / for its own),
+			// where it would control the UI's pages, and it sets no cookie
+			// named as the desktop app's.
+			resp.Header.Del("Service-Worker-Allowed")
+			stripSetDesktopCookie(resp.Header)
 			return nil
 		},
 		Transport: &http.Transport{
@@ -157,10 +269,23 @@ func (p *codeServerProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if mc == nil {
 		return
 	}
+	client := p.s.clientOf(r)
+	// The switch again, now that the request follows its work: turned off
+	// since withPlugin, the context taken may be a new one.
+	work := p.workFor(client, true)
+	if work == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "plugin_disabled"})
+		return
+	}
 	if !p.s.cs.Ready(mc) {
-		go p.s.cs.Ensure(context.Background(), mc)
+		prep := p.workFor(client, false)
+		if prep == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "plugin_disabled"})
+			return
+		}
+		go p.s.cs.Ensure(prep, mc)
 		if r.Method == http.MethodGet && r.Header.Get("Upgrade") == "" && strings.TrimSuffix(r.URL.Path, "/") == "/m/"+mc.ID()+"/code" {
-			p.s.audit.log(r, "code_server.open", map[string]any{"machine": mc.ID(), "folder": r.URL.Query().Get("folder")})
+			p.s.audit.log(r, "code_server.open", map[string]any{"machine": mc.ID(), "folder": r.URL.Query().Get("folder"), "client": string(client)})
 			p.loadingPage(w, mc)
 			return
 		}
@@ -176,7 +301,12 @@ func (p *codeServerProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	} else {
 		p.touch(mc.ID(), 0)
 	}
-	p.proxy(mc).ServeHTTP(w, r)
+	// Turning VS Code off ends the request: the proxy closes a WebSocket
+	// whose request's context ends.
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	defer context.AfterFunc(work, cancel)()
+	p.proxy(mc).ServeHTTP(w, r.WithContext(ctx))
 }
 
 // loadingPage is shown in the VS Code panel while code-server is prepared.
@@ -234,8 +364,13 @@ func (s *Server) handleCodeStart(w http.ResponseWriter, r *http.Request) {
 	if mc == nil {
 		return
 	}
+	prep := s.csProxy.workFor(s.clientOf(r), false)
+	if prep == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "plugin_disabled"})
+		return
+	}
 	s.cs.Invalidate(mc.ID())
-	go s.cs.Ensure(context.Background(), mc)
+	go s.cs.Ensure(prep, mc)
 	writeJSON(w, http.StatusAccepted, s.cs.Status(mc.ID()))
 }
 

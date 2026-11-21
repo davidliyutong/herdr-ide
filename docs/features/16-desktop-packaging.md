@@ -57,7 +57,22 @@ system's rules run in the tests on any of them:
   app's resources, or the `dist/<slug>-<goos>-<goarch>[.exe]` that
   `scripts/build.sh` wrote, unpackaged.
 - `quitsWithLastWindow`: closing the main window quits on Windows and
-  Linux; on macOS the app stays in the Dock with its core.
+  Linux; on macOS the app stays in the Dock with its core. Quitting closes
+  the main window first, and the core stops only once the window has
+  closed; a system shutdown never waits. While panes have changes not
+  saved (editors, diffs; the page tells the shell how many,
+  `desktopShell.setUnsaved`), closing the window or quitting asks the page
+  (`desktop/src/closeGuard.ts`, `web/src/quitGuard.ts`): it lists the files
+  with where each is (machine · workspace · tab), and **Show** beside a
+  file keeps the app open and shows its pane; **Save All** closes once
+  every file is saved (a failed save keeps the app), **Don't Save** closes,
+  **Cancel** or Escape keeps the app and its core running. The answer
+  withdraws only the page's own objection to unloading: a VS Code window
+  with unsaved files still objects, and any objection is asked about
+  natively (`will-prevent-unload`: **Close Anyway** or **Cancel**), as it
+  is when the page reloads. A page that does not take the question within
+  3 s (one that hangs), and a second close or quit while the page asks
+  (Save All waiting on a machine), go to that native question at once.
 - `foldersOf`: the folders a Linux command line names (below).
 
 **Building** (`scripts/desktop.sh`, `desktop/electron-builder.cjs`)
@@ -133,13 +148,34 @@ system's rules run in the tests on any of them:
 
 **The owned core** (`desktop/src/core.ts`, `desktop/src/main.ts`)
 
-- The shell owns one child core. `--parent-stdio` adds one JSON readiness
-  message to stdout and cancels the core when stdin closes. Logs stay on
+- The shell owns one child core. `--parent-stdio` makes the core read the
+  launcher's hello, one JSON line on stdin, before it serves, adds one JSON
+  readiness message to stdout and cancels the core when stdin closes. Logs stay on
   stderr, and the core ignores SIGPIPE so that writing to the pipes of a
   crashed launcher fails instead of killing it before cleanup. The core is
   spawned with `windowsHide`, since Windows would give the console program
   a console window. Failed binding never connects the UI to an unrelated
   listener. The shell has a 30 s startup timeout.
+- **The app's token.** VS Code has a switch for the app's windows and one
+  for browsers ([05](05-vscode-panes.md)), and the core must tell the
+  app's requests from a browser's, also a browser on the same computer
+  opening the same core. At each launch the shell makes a token of 32
+  random bytes (`desktopToken` in `desktop/src/core.ts`), sends it in the
+  hello (`{"desktop_token":"<hex>"}`), and, once the core is ready and
+  before the window loads, sets it in its session as a cookie for the
+  core's origin (`<slug>-desktop`: the URL of the core, no domain, so
+  host-only; path `/`; HttpOnly, so no script of the page or of VS Code
+  reads it; SameSite=Strict; no expiry, so it is gone when the app quits;
+  `desktopCookie`). Chromium then sends it with every request of the
+  app's windows to the core, VS Code's frames, workers and WebSockets
+  included, and the core compares it with its own in constant time
+  ([08](08-web-access-and-security.md)); a cookie that cannot be set
+  fails the startup. The token is never in the core's environment, which
+  terminals, agents and code-server inherit; stdin is inherited by
+  nothing the core starts. Cookies are kept per host, not per port, so a
+  request the app's windows make to another port of `127.0.0.1` carries
+  it too: only content in those windows can make one, and the token tells
+  a core only that a request is the app's.
 - Stopping closes the core's stdin, on every system: Windows has no signal
   a process can clean up after (Node's `kill` terminates it there). The
   core allows 3 s for HTTP and 15 s for its agents; after 20 s the shell
@@ -188,11 +224,21 @@ system's rules run in the tests on any of them:
   Quitting (the menu, ⌘Q) stops the core. Windows and Linux: closing the
   main window quits, and program windows do not keep the app open; a
   second launch focuses the main window.
-- Each system's native window frame and title bar. On Windows and Linux
-  the menu bar is in the window; on Linux the main window gets the app's
-  icon (macOS and Windows take it from the application). About shows the
-  name and version on every system (`app.setAboutPanelOptions` on Windows
-  and Linux; macOS reads its bundle).
+- **Window frames and title bar** (`desktop/src/titlebar.ts`). On macOS the
+  main window hides its separate title bar (`titleBarStyle: 'hidden'`) and
+  embeds the traffic lights into the UI's own top header row (the sidebar
+  header, or the tab bar when the sidebar is collapsed), with the empty
+  regions of the sidebar header, tab bar and right-panel header acting as
+  the window drag bar while controls, tabs and resizers remain interactive.
+  Traffic light vertical positioning and CSS left clearance stay aligned
+  across `appearance.uiFontSize` and `window.zoom`, and entering native full
+  screen clears the traffic-light inset until full screen ends. Secondary
+  windows (program windows, standalone VS Code) keep the standard native
+  title bar. On Windows and Linux the main window keeps its native frame and
+  in-window menu bar; on Linux it also sets the window icon (macOS and
+  Windows take it from the application). About shows the name and version on
+  every system (`app.setAboutPanelOptions` on Windows and Linux; macOS reads
+  its bundle).
 - The shell follows its core (`desktop/src/follow.ts`): it holds its own
   event channel (`/ws`), reads `GET /api/settings` and
   `GET /api/keybindings` when it opens and applies the `settings` and
@@ -236,7 +282,7 @@ system's rules run in the tests on any of them:
   Keyboard Shortcuts, Quit, titled Exit on Windows), Shell, Edit, View,
   **Window** (Minimize) and **Help** (About). The other menus are the same
   everywhere: **Shell** (New Tab, Split Right, Split Down, New, Rename and
-  Close Workspace…, Rename Tab, Close Pane, Close Tab, Add Machine…),
+  Close Workspace, Rename Tab, Close Pane, Close Tab, Add Machine…),
   **Edit** (Undo, Redo, Cut, Copy, Paste, Select All, Find…, Find Next,
   Find Previous), **View** (Command Palette…, Go to Workspace…, Go to Agent
   Needing Attention, Toggle Sidebar, Open in VS Code, Maximize Pane,
@@ -255,10 +301,9 @@ system's rules run in the tests on any of them:
   page left (a text field, a VS Code pane or another window has the
   keyboard); Chromium's text fields edit with Cmd keys only through the
   Edit roles. While a VS Code pane has the keyboard, the menu's commands
-  for the main UI act on that pane; VS Code keeps its own keys (⌘J
-  toggles its own bottom panel there), except ⌘W (**Close Pane**), which
-  the page takes before VS Code sees it, so it closes the VS Code pane
-  ([04](04-layout-and-keyboard.md)).
+  for the main UI act on that pane; VS Code keeps its own keys first (⌘J
+  toggles its own bottom panel there, ⌘W closes its editor, and the pane
+  in a window without editors) ([04](04-layout-and-keyboard.md)).
   Keys without Cmd are shown but not registered, since macOS would offer
   them to a menu before the page. Such a key therefore runs its command
   only where the page matches keys itself: in a terminal or elsewhere in
@@ -288,9 +333,12 @@ system's rules run in the tests on any of them:
 
 - The main window has a preload (`desktop/src/preload.ts`, sandboxed) that
   exposes one object, `desktopShell` (`web/src/shell.ts`): the commands of
-  menu items chosen, where a dropped file is on disk, and the folders
-  opened with the app. The page sends only whether it takes opened
-  folders and which commands' items to disable; messages count only from
+  menu items chosen, where a dropped file is on disk, the folders
+  opened with the app, and the question before the window closes with
+  unsaved changes (a request without data). The page sends only whether it
+  takes opened folders, which commands' items to disable, how many panes
+  have unsaved changes (an integer up to 10000) and its answer to that
+  question (`asking`, `close` or `stay`); messages count only from
   the top frame of the main window showing the core's origin. Program windows have no preload.
 - The bridge's `pathForFile` returns where a file the user dropped on the
   page is on disk (`webUtils.getPathForFile`; Electron removed
@@ -301,6 +349,17 @@ system's rules run in the tests on any of them:
   folders dropped on a pane of the local machine are pasted as their own
   paths instead of being uploaded ([06](06-quick-look-and-files.md)). It
   is answered in the preload; nothing goes to the main process.
+- The bridge's `metrics` answers what the app's processes use now, for
+  the settings' Performance page ([13](13-settings-and-appearance.md)).
+  The main process answers the main window's page, and anyone else with
+  an empty list, from Electron's `app.getAppMetrics()`: per process its
+  kind (`Browser`, the shell's main process; `Tab`, a page; `GPU`;
+  `Utility`, a helper), a helper's name, its share of one processor since
+  the last asking and its working set in bytes. The preload passes on at
+  most 64 processes that have a kind, with text cut to 64 characters and
+  a number that is no amount as 0. The core the shell starts is no
+  process of Electron's and is not among them: the page asks the core
+  itself (`GET /api/perf`).
 - Folders opened with the app: on macOS the app's Info.plist declares
   folders (`public.folder`, rank `None`: the Dock accepts dropped folders,
   but the app never becomes Finder's opener for them), so folders dropped
@@ -497,7 +556,9 @@ has a preload, whose bridge carries menu commands (strings) and opened
 folders (paths and a count, both checked in the preload) to the page and,
 from it, one boolean (whether it takes opened folders); it also tells the
 page the disk path of a file the user dropped on it, which a browser keeps
-from pages but which reveals nothing the user did not hand over; sandboxing,
+from pages but which reveals nothing the user did not hand over, and
+answers the page's request for what the app's processes use with their
+kinds, helpers' names and amounts, nothing of what they hold; sandboxing,
 context isolation and web security are enabled on every system, and the
 app is never started with `--no-sandbox` (the deb's AppArmor profile lets
 Chromium's sandbox run on Ubuntu 24.04 and later). The shell reads its
@@ -530,21 +591,29 @@ open and close a folder without reading it, and the one in the terminal
 core is a fixed command herdr-core ends after 10 s. The existing
 HTTP guards, API allowlist, read-only behavior and CSP remain in force. On
 Windows the core keeps no ssh control sockets and offers no ssh login
-([02](02-multi-machine-transport.md)). Release builds get no secret; only
+([02](02-multi-machine-transport.md)). The token of a launch, on the
+core's stdin and in an HttpOnly cookie of the app's session for the
+core's origin, tells the core which requests are the app's windows', so
+VS Code follows the app's own switch there and the browsers' switch
+everywhere else; it is no authentication against other processes on the
+host, which reach the core over loopback anyway. Release builds get no secret; only
 the macOS Package step receives the optional signing and notarization
 credentials. See [SECURITY.md](../../SECURITY.md) for the local HTTP trust
 boundary.
 
 ## Testing
 
-`cmd/herdr-ide/parent_test.go` covers readiness, pipe EOF/error cancellation
+`cmd/herdr-ide/parent_test.go` covers the launcher's hello (`TestReadHello`),
+readiness, pipe EOF/error cancellation
 and surviving writes to broken stdout pipes (`TestBrokenPipesDoNotKill`
 skips on Windows). `desktop/src/*.test.ts` cover what differs per system
 (`platform`: the keybindings' platform, quitting with the last window and
 the app id; the core's path packaged and unpackaged; folders on a command
 line as paths or `file:` URLs, with switches and leading arguments left
 out), the owned core (`core`: isolation arguments and development instance
-names, PATH on macOS and Linux and Windows' kept as is, stopping by closing
+names, PATH on macOS and Linux and Windows' kept as is, the token of a
+launch, new each time, in the hello the core reads on stdin and not in its
+environment, and its cookie for the core's origin only, stopping by closing
 stdin without a signal, a stuck core killed after the deadline, spawn
 failures, malformed readiness, ephemeral ports, unexpected exits, late
 child errors and idempotent child shutdown, with fake Node children),
@@ -561,8 +630,17 @@ Windows and Linux, the bundle of a packaged executable, reopening through
 Launch Services after the app exited and through Electron in development,
 and `HERDR_IDE_DESKTOP_NO_OPEN`, which opens nothing) and the preload's
 functions against a stand-in for Electron (`preload`: the Full Disk Access
-requests only on macOS, carrying nothing the page passes), with no network
-or real terminal cores.
+requests only on macOS, carrying nothing the page passes; the count of
+unsaved panes and the close answer, well-formed only), closing with
+unsaved changes (`closeGuard`: the page asked, Close, Stay cancelling a
+quit, the native question for a page that does not take the question and
+for a second close while it asks, a shutdown never held, a new page
+cancelling a quit that waited on the old one),
+with no network or real terminal cores.
+`web/src/__tests__/quitGuard.test.ts` covers the page's side: the count it
+tells the shell, the files listed with where each is, Show, Save All (a
+failed or throwing save stays), Don't Save and Cancel, and the page's own
+objection to unloading withdrawn only after it let the window close.
 `web/src/__tests__/desktop.test.ts` covers the page's side of menu
 commands (dialogs, the main UI's commands acting on the VS Code pane that
 has the keyboard, ⌘W taken from VS Code to close its pane, **Open in

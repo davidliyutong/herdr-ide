@@ -22,12 +22,14 @@ export interface TermColors {
 export const prefKeys = {
   locale: 'appearance.language',
   theme: 'appearance.theme',
+  colorTheme: 'appearance.colorTheme',
   uiFontSize: 'appearance.uiFontSize',
   termFontFamily: 'terminal.fontFamily',
   termFontSize: 'terminal.fontSize',
   termFontWeight: 'terminal.fontWeight',
   termLineHeight: 'terminal.lineHeight',
   cursorStyle: 'terminal.cursorStyle',
+  cursorWidth: 'terminal.cursorWidth',
   cursorBlink: 'terminal.cursorBlink',
   scrollback: 'terminal.scrollback',
   copyOnSelect: 'terminal.copyOnSelect',
@@ -36,6 +38,8 @@ export const prefKeys = {
   optionIsMeta: 'terminal.optionIsMeta',
   programClipboard: 'terminal.programClipboard',
   mathHover: 'terminal.mathHover',
+  undoClose: 'layout.undoClose',
+  keptTerminals: 'performance.keptTerminals',
   notifySound: 'notifications.sound',
   notifySystem: 'notifications.system',
   notifyBadge: 'notifications.badge',
@@ -47,12 +51,15 @@ export type PrefKey = keyof typeof prefKeys;
 export interface Prefs {
   locale: 'auto' | 'en' | 'zh-CN';
   theme: 'system' | 'dark' | 'light';
+  colorTheme: string;
   uiFontSize: number;
   termFontFamily: string;
   termFontSize: number;
   termFontWeight: 'regular' | 'medium';
   termLineHeight: number;
   cursorStyle: 'block' | 'bar' | 'underline';
+  /** The bar's and underline's thickness, CSS pixels. */
+  cursorWidth: number;
   cursorBlink: boolean;
   scrollback: number;
   copyOnSelect: boolean;
@@ -61,6 +68,10 @@ export interface Prefs {
   optionIsMeta: boolean;
   programClipboard: 'auto' | 'ask' | 'off';
   mathHover: boolean;
+  /** layout.undoClose: seconds a close can be undone. */
+  undoClose: number;
+  /** performance.keptTerminals: terminals kept attached while not shown. */
+  keptTerminals: number;
   notifySound: boolean;
   notifySystem: boolean;
   notifyBadge: boolean;

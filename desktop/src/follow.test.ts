@@ -20,18 +20,25 @@ test('the bindings of the platform, well-formed ones only', () => {
   for (const bad of [null, {}, { effective: {} }, { effective: { mac: 'x' } }]) assert.equal(bindingsOf(bad, 'mac'), undefined);
 });
 
-test('the theme, language and zoom settings, defaults for anything else', () => {
-  const values = (theme: unknown, language: unknown, zoom?: unknown) => ({
-    values: { 'appearance.theme': { value: theme }, 'appearance.language': { value: language }, 'window.zoom': { value: zoom } },
+test('the theme, language, zoom and UI font size settings, defaults for anything else', () => {
+  const values = (theme: unknown, language: unknown, zoom?: unknown, uiFontSize?: unknown) => ({
+    values: {
+      'appearance.theme': { value: theme },
+      'appearance.language': { value: language },
+      'window.zoom': { value: zoom },
+      'appearance.uiFontSize': { value: uiFontSize },
+    },
   });
-  assert.deepEqual(settingsOf(values('dark', 'zh-CN', 125)), { theme: 'dark', language: 'zh-CN', zoom: 1.25 });
-  assert.deepEqual(settingsOf(values('light', 'auto')), { theme: 'light', language: 'auto', zoom: 1 });
+  assert.deepEqual(settingsOf(values('dark', 'zh-CN', 125, 15)), { theme: 'dark', language: 'zh-CN', zoom: 1.25, uiFontSize: 15 });
+  assert.deepEqual(settingsOf(values('light', 'auto')), { theme: 'light', language: 'auto', zoom: 1, uiFontSize: 13 });
   for (const theme of ['Dark', 'auto', 1, null, { toString: () => 'dark' }])
-    assert.deepEqual(settingsOf(values(theme, 3)), { theme: 'system', language: 'auto', zoom: 1 });
+    assert.deepEqual(settingsOf(values(theme, 3)), { theme: 'system', language: 'auto', zoom: 1, uiFontSize: 13 });
   // Zooms Chromium does not take, and anything that is not a number.
   for (const zoom of [0, 10, 501, -100, '150', null, NaN, Infinity])
     assert.equal(settingsOf(values('dark', 'en', zoom))?.zoom, 1, String(zoom));
-  assert.deepEqual(settingsOf({ values: {} }), { theme: 'system', language: 'auto', zoom: 1 });
+  for (const fs of [0, 10, 21, '14', null, NaN, Infinity])
+    assert.equal(settingsOf(values('dark', 'en', 100, fs))?.uiFontSize, 13, String(fs));
+  assert.deepEqual(settingsOf({ values: {} }), { theme: 'system', language: 'auto', zoom: 1, uiFontSize: 13 });
   assert.equal(settingsOf(null), undefined);
 });
 
@@ -79,7 +86,7 @@ test('reads the state once the channel is open, then follows its messages', asyn
   sockets[0].onopen!();
   await settle();
   assert.deepEqual(fetched.sort(), ['/api/keybindings', '/api/settings']);
-  assert.deepEqual(got.settings, [{ theme: 'dark', language: 'auto', zoom: 1 }]);
+  assert.deepEqual(got.settings, [{ theme: 'dark', language: 'auto', zoom: 1, uiFontSize: 13 }]);
   assert.deepEqual(got.bindings, [[{ key: 'cmd+t', command: 'tab.new', when: 'terminal' }]]);
 
   // A rebinding arrives as a push, with the bindings of every platform.
@@ -88,7 +95,7 @@ test('reads the state once the channel is open, then follows its messages', asyn
   sockets[0].push({ t: 'machines', list: [] });
   sockets[0].onmessage!({ data: 'not json' });
   assert.deepEqual(got.bindings.at(-1), [{ key: 'cmd+shift+t', command: 'tab.new', when: 'terminal' }]);
-  assert.deepEqual(got.settings.at(-1), { theme: 'system', language: 'zh-CN', zoom: 0.9 });
+  assert.deepEqual(got.settings.at(-1), { theme: 'system', language: 'zh-CN', zoom: 0.9, uiFontSize: 13 });
   assert.equal(got.bindings.length, 2);
 
   stop();

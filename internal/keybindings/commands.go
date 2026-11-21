@@ -120,6 +120,9 @@ var Commands = func() []Command {
 		cmd("workspace.new", "workspace", on(macApp, "cmd+n"), on(pcApp, "ctrl+shift+n")),
 		cmd("workspace.edit", "workspace"),
 		cmd("workspace.close", "workspace"),
+		// Every other workspace of the machine, asking once as Close
+		// Workspace does.
+		cmd("workspace.closeOthers", "workspace"),
 
 		cmd("tab.new", "tab", on(macApp, "cmd+t"), on(pcApp, "ctrl+shift+t")),
 		cmd("tab.rename", "tab"),
@@ -132,19 +135,49 @@ var Commands = func() []Command {
 	}
 	out = append(out,
 		cmd("tab.close", "tab", on(macApp, "cmd+shift+w"), on(pcApp, "ctrl+shift+w")),
+		// As browsers offer them; at once, with one Undo, as Close Tab.
+		cmd("tab.closeOthers", "tab"),
+		cmd("tab.closeRight", "tab"),
+		// Pinned tabs stay first and Close Others and Close to the Right
+		// leave them; as VS Code and browsers offer, without a key.
+		cmd("tab.pin", "tab"),
+		cmd("tab.unpin", "tab"),
+		// The browser plugin: a new tab with an empty browser pane on the
+		// focused machine, and the focused browser pane's page again.
+		cmd("browser.open", "tab"),
+		cmd("browser.reload", "tab"),
 
 		cmd("pane.splitRight", "pane", on(macApp, "cmd+d")),
 		cmd("pane.splitDown", "pane", on(macApp, "cmd+shift+d")),
 		cmd("pane.close", "pane", on(macApp, "cmd+w")),
 		cmd("pane.zoom", "pane", on(macApp, "cmd+shift+enter"), on(pcApp, "ctrl+shift+enter")),
+		// Renames the focused terminal's pane in its header. No default:
+		// F2 and the like belong to the programs in the terminals.
+		cmd("pane.rename", "pane"),
+		// The focused pane's menu (its header's), at its header: every
+		// command of the pane from the keyboard.
+		cmd("pane.actions", "pane"),
 		cmd("pane.focusLeft", "pane", on(macApp, "cmd+alt+left")),
 		cmd("pane.focusDown", "pane", on(macApp, "cmd+alt+down")),
 		cmd("pane.focusUp", "pane", on(macApp, "cmd+alt+up")),
 		cmd("pane.focusRight", "pane", on(macApp, "cmd+alt+right")),
-		cmd("pane.focusNext", "pane", on(macApp, "cmd+bracketright")),
-		cmd("pane.focusPrevious", "pane", on(macApp, "cmd+bracketleft")),
+		cmd("pane.focusNext", "pane"),
+		cmd("pane.focusPrevious", "pane"),
+		// Back and forward through the panes focused, with the keys of
+		// Safari, Finder and Xcode.
+		cmd("pane.back", "pane", on(macApp, "cmd+bracketleft")),
+		cmd("pane.forward", "pane", on(macApp, "cmd+bracketright")),
+		// Brings back what Close Pane or Close Tab closed in the last
+		// seconds. Cmd+Z in a terminal: the page takes it there; text fields
+		// and VS Code keep it for Undo (desktop/src/menu.ts).
+		cmd("pane.undoClose", "pane", on(macApp, "cmd+z")),
 
 		cmd("view.toggleSidebar", "view", on(macApp, "cmd+b")),
+		// The right sidebar: the plugins' panels (web/src/plugins), with
+		// VS Code's key for its secondary sidebar.
+		cmd("view.togglePanel", "view", on(macApp, "cmd+alt+b")),
+		// The file explorer's panel, with VS Code's key for its explorer.
+		cmd("view.panel.files", "view", on(macApp, "cmd+shift+e")),
 		// The desktop app's zoom (the window.zoom setting), with the keys
 		// browsers zoom pages with, which they keep for themselves; also in
 		// dialogs and VS Code, as the window's zoom is. Ctrl+= is Zoom In
@@ -154,15 +187,27 @@ var Commands = func() []Command {
 			on(pcApp, "ctrl+shift+equal"), on(pcApp, "ctrl+equal")),
 		always("view.zoomOut", "view", on(macApp, "cmd+minus"), on(pcApp, "ctrl+minus")),
 		always("view.zoomReset", "view", on(macApp, "cmd+0"), on(pcApp, "ctrl+0")),
+		// The variable vault's panel (plugin vault).
+		cmd("view.panel.vault", "view"),
+		// The AI usage plugin's panel (web/src/plugins/usage).
+		cmd("view.panel.usage", "view"),
+		// The Git plugin's panel, with VS Code's key for its Source Control.
+		cmd("view.panel.git", "view", on(macApp, "ctrl+shift+g"), on(pcApp, "ctrl+shift+g")),
+		// The System Monitor & Task Manager plugin's panel (web/src/plugins/monitor).
+		cmd("view.panel.monitor", "view"),
 
 		cmd("find.open", "find", on(macAll, "cmd+f"), on(pcAll, "ctrl+shift+f")),
 		cmd("find.next", "find", on(macApp, "cmd+g")),
 		cmd("find.previous", "find", on(macApp, "cmd+shift+g")),
 
-		// Inside VS Code its own cmd+j (its panel) runs instead.
+		// Inside VS Code its own cmd+j (its panel) runs instead; on a
+		// VS Code pane whose header has the keyboard (the bridge
+		// extension's ctrl+b) it shows the pane focused before it.
 		cmd("code.open", "code", on(macApp, "cmd+j"), on(pcApp, "ctrl+shift+j")),
 		cmd("code.diff", "code"),
 		cmd("code.gitGraph", "code"),
+		// The Git plugin's graph pane.
+		cmd("git.graph", "code"),
 	)
 	return out
 }()

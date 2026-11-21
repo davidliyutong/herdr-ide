@@ -1,0 +1,367 @@
+/* ---------- program windows (gui/) ---------- */
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.toast button {
+  flex: none;
+}
+.gui-menu-anchor {
+  position: relative;
+  display: inline-flex;
+}
+.pane-actions .gui-menu-anchor button {
+  width: auto;
+  min-width: 1.95rem;
+  gap: 2px;
+  padding: 0 4px;
+}
+.gui-count {
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+.pane-actions button.attention,
+.gui-tray.attention {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.gui-tray {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: var(--ctl-sm);
+  min-height: 0;
+  padding: 0 6px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  cursor: pointer;
+}
+.gui-tray:hover {
+  color: var(--fg);
+  background: var(--bg-3);
+}
+.gui-tray .lucide,
+.gui-note .lucide {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+  flex: none;
+}
+.gui-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--fg-dim);
+}
+button.gui-note {
+  height: var(--ctl-sm);
+  min-height: 0;
+  padding: 0 6px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+button.gui-note:hover {
+  background: var(--bg-3);
+}
+.gui-note.error {
+  color: var(--error);
+}
+.gui-error {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(420px, calc(100vw - 32px));
+  padding: 10px;
+  white-space: normal;
+}
+.gui-error-title {
+  font-weight: 600;
+}
+.gui-error-text {
+  margin: 0;
+  max-height: 30vh;
+  overflow: auto;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  background: var(--bg);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+.gui-error-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.gui-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 40;
+  min-width: 240px;
+  max-width: 420px;
+  max-height: 50vh;
+  overflow: auto;
+  padding: 4px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 32px var(--shadow);
+}
+.statusbar .gui-menu {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
+
+/* The uploads panel (components/Transfers.tsx), above the status bar. */
+.transfers-panel {
+  width: min(420px, calc(100vw - 32px));
+  max-width: none;
+  max-height: 60vh;
+  padding: 0 0 4px;
+  white-space: normal;
+}
+.transfers-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line);
+}
+.transfers-title {
+  font-weight: 600;
+}
+.transfers-empty,
+.transfers-section {
+  padding: 8px 10px 2px;
+}
+.transfer {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 6px 6px 10px;
+}
+.transfer:hover {
+  background: var(--bg-3);
+}
+.transfer-icon {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  margin-top: 2px;
+  color: var(--accent);
+}
+.transfer.done .transfer-icon {
+  color: var(--done);
+}
+.transfer.failed .transfer-icon {
+  color: var(--error);
+}
+.transfer.cancelled .transfer-icon,
+.transfer.queued .transfer-icon {
+  color: var(--fg-dim);
+}
+.transfer-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.transfer-detail {
+  display: flex;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.transfer-detail .ellipsis {
+  flex: 1;
+}
+.transfer-when {
+  flex: none;
+  color: var(--fg-dim);
+}
+.transfer-bar {
+  height: 4px;
+  margin: 2px 0;
+  border-radius: 2px;
+  background: var(--bg-3);
+  overflow: hidden;
+}
+.transfer-bar > div {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.25s linear;
+}
+.transfer.finishing .transfer-bar > div {
+  animation: transfer-pulse 1.2s ease-in-out infinite;
+}
+@keyframes transfer-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+/* A download whose size is not known (an archive, or before it starts). */
+.transfer-bar.indeterminate > div {
+  width: 30%;
+  animation: transfer-slide 1.4s ease-in-out infinite;
+}
+@keyframes transfer-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(340%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .transfer-bar > div {
+    transition: none;
+  }
+  .transfer.finishing .transfer-bar > div {
+    animation: none;
+  }
+  .transfer-bar.indeterminate > div {
+    width: 100%;
+    opacity: 0.5;
+    animation: none;
+  }
+}
+.transfer-actions {
+  flex: none;
+  display: flex;
+}
+.transfer-actions .icon {
+  min-width: var(--ctl-sm);
+  height: var(--ctl-sm);
+}
+.transfer-actions .icon .lucide {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
+
+/* The page of a browser window showing one program window. */
+.gui-page {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  overflow: hidden;
+}
+.gui-host {
+  position: absolute;
+  inset: 0;
+  touch-action: none;
+  user-select: none;
+}
+.gui-stage {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+}
+.gui-stage canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: block;
+}
+.gui-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--overlay);
+  color: var(--fg-dim);
+  pointer-events: none;
+}
+/* Frame statistics (#stats in the address). */
+.gui-stats {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  max-width: calc(100% - 16px);
+  padding: 6px 8px;
+  background: var(--float);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  color: var(--fg-dim);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  pointer-events: none;
+}
+.gui-banner {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.gui-banner-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--float);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px var(--shadow);
+}
+.gui-banner-row .ellipsis {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Per-machine values in the settings dialog. */
+.settings-machines {
+  padding: 10px 0 4px;
+}
+.settings-machines-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 8px;
+}
+.settings-machines-grid {
+  display: grid;
+  align-items: center;
+  gap: 6px 10px;
+}
+.settings-machines-row {
+  display: contents;
+}
+.settings-machine {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.gui-state {
+  flex: none;
+  font-size: var(--fs-sm);
+  color: var(--fg-dim);
+}
+.gui-state.ready {
+  color: var(--done);
+}
+.gui-state.error {
+  color: var(--error);
+}
+.gui-state.installing,
+.gui-state.starting {
+  color: var(--working);
+}

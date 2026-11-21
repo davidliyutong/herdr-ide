@@ -5,6 +5,7 @@ package agent_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"log"
 	"net"
@@ -31,6 +32,8 @@ func dialAgent(t *testing.T) (*transport.Session, string) {
 }
 
 func TestHelloAndPrivateRunDir(t *testing.T) {
+	// The ssh session the agent runs in is told apart from Info.
+	t.Setenv("SSH_CONNECTION", "10.0.0.2 51000 10.0.0.9 22")
 	s, home := dialAgent(t)
 	rep, err := s.Request(context.Background(), agentproto.Header{Op: agentproto.OpHello})
 	if err != nil {
@@ -38,6 +41,9 @@ func TestHelloAndPrivateRunDir(t *testing.T) {
 	}
 	if rep.Info.OS != runtime.GOOS || rep.Info.Home != home {
 		t.Fatalf("info = %+v", rep.Info)
+	}
+	if b, _ := json.Marshal(rep.Info); rep.SSH != "10.0.0.2 51000 10.0.0.9 22" || strings.Contains(string(b), "51000") {
+		t.Fatalf("ssh = %q, info = %s", rep.SSH, b)
 	}
 	st, err := os.Stat(filepath.Join(home, ".herdr-ide", "run"))
 	if err != nil || st.Mode().Perm() != 0o700 {
@@ -77,8 +83,10 @@ func TestFileOps(t *testing.T) {
 	if err != nil || len(lst.Entries) != 1 || lst.Entries[0].Name != "data.bin" {
 		t.Fatalf("list = %+v %v", lst, err)
 	}
-	if _, err := s.Request(ctx, agentproto.Header{Op: agentproto.OpFsStat, Path: "~/missing"}); err == nil {
-		t.Fatal("stat of missing file succeeded")
+	// A path not there has a code, which the core answers with 404 (a
+	// failure for another reason is not taken for a missing file).
+	if rep, err := s.Request(ctx, agentproto.Header{Op: agentproto.OpFsStat, Path: "~/missing"}); err == nil || rep == nil || rep.Code != "not_found" {
+		t.Fatalf("stat of missing file: %+v %v", rep, err)
 	}
 }
 

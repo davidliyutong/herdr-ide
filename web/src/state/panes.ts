@@ -66,3 +66,44 @@ export function withView(m: string, pane: string, fn: (h: ViewHandle) => void, m
 export function withPane(m: string, terminal: string, fn: (h: PaneHandle) => void, ms = 5000) {
   withView(m, terminal, (h) => isTerminal(h) && fn(h), ms);
 }
+
+/** A pane with changes that are not saved (an editor): its file's name, and
+ * how to save them (true once saved). */
+export interface UnsavedGuard {
+  name: string;
+  save(): Promise<boolean>;
+}
+
+const guards = new Map<string, UnsavedGuard>();
+const unsavedListeners = new Set<() => void>();
+
+/** Marks a pane as having unsaved changes (guard) or none (undefined). */
+export function setUnsaved(m: string, pane: string, guard: UnsavedGuard | undefined) {
+  const had = guards.has(key(m, pane));
+  if (guard) guards.set(key(m, pane), guard);
+  else guards.delete(key(m, pane));
+  if (had !== !!guard) for (const fn of unsavedListeners) fn();
+}
+
+/** Calls fn when a pane gains or loses unsaved changes; returns a
+ * function that stops it. */
+export function onUnsavedChange(fn: () => void): () => void {
+  unsavedListeners.add(fn);
+  return () => unsavedListeners.delete(fn);
+}
+
+/** Every pane of the page with unsaved changes: its machine and key. */
+export function allUnsaved(): (UnsavedGuard & { m: string; pane: string })[] {
+  return [...guards].map(([k, g]) => {
+    const [m, pane] = k.split('\n');
+    return { ...g, m, pane };
+  });
+}
+
+/** The panes of m among panes with unsaved changes. */
+export function unsavedPanes(m: string, panes: readonly string[]): UnsavedGuard[] {
+  return panes.flatMap((p) => guards.get(key(m, p)) ?? []);
+}
+
+/** Whether any pane on the page has unsaved changes. */
+export const anyUnsaved = () => guards.size > 0;

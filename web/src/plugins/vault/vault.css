@@ -1,0 +1,720 @@
+/* The variable vault (web/src/plugins/vault): its panel, its page of
+   Settings, the editor's dialog and the approval prompts. */
+.vault {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 2px 10px 16px;
+}
+.vault .lucide {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
+.vault-hint {
+  margin: 0;
+  color: var(--fg-dim);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+/* Why the vault did not load, with a retry. */
+.callout.vault-load-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+:not(.vault) > .callout.vault-load-error {
+  margin: 2px 10px;
+}
+.vault-load-error > span {
+  flex: 1;
+}
+
+/* ---- the gate ---- */
+.vault-gate {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+}
+.vault-gate-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-lg);
+}
+.vault-gate-head > .lucide {
+  width: var(--ic);
+  height: var(--ic);
+  color: var(--accent);
+}
+.vault-gate-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.vault-unlock-row {
+  display: flex;
+  gap: 6px;
+}
+.vault-unlock-row .input {
+  flex: 1;
+  min-width: 0;
+}
+.vault-unlock-row [data-action='forget-key'] {
+  margin-left: auto;
+}
+/* A passphrase's strength: four bars, filled as it grows. */
+.vault-strength {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 3px;
+  margin-top: -3px;
+}
+.vault-strength i {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--bg-3);
+}
+.vault-strength.s1 i:nth-child(-n + 1) {
+  background: var(--error);
+}
+.vault-strength.s2 i:nth-child(-n + 2) {
+  background: var(--warning);
+}
+.vault-strength.s3 i:nth-child(-n + 3),
+.vault-strength.s4 i {
+  background: var(--done);
+}
+.vault-session {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 10px;
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--done) 10%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--done) 30%, transparent);
+}
+.vault-session > .lucide {
+  color: var(--done);
+}
+.vault-session-text {
+  flex: 1 1 140px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-size: var(--fs-md);
+}
+.vault-session button {
+  flex: none;
+  white-space: nowrap;
+}
+/* The buttons stay together, and go below the text when the panel is
+ * narrow. */
+.vault-session-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-left: auto;
+}
+/* The auto-lock's countdown: digits that do not shift as they change; a
+ * time set for this unlock in the accent. */
+.vault-autolock-time {
+  font-variant-numeric: tabular-nums;
+}
+.vault-session .vault-autolock.custom {
+  color: var(--accent);
+}
+
+/* ---- tabs and tools ---- */
+.vault-tabs {
+  display: flex;
+}
+.vault-tabs button {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-size: var(--fs-md);
+}
+.vault-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.vault-toolbar select,
+.vault-toolbar .picker-button {
+  flex: 1;
+  min-width: 0;
+}
+.vault-search {
+  flex: 1;
+  min-width: 6em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--ctl);
+  padding: 0 8px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg-mute);
+}
+.vault-search:focus-within {
+  border-color: var(--accent);
+}
+.vault-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+}
+
+/* ---- variables ---- */
+.vault-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+  overflow: hidden;
+}
+.vault-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 6px 8px;
+  padding: 10px 8px 10px 10px;
+}
+.vault-row.selected {
+  background: var(--accent-soft);
+}
+.vault-row-check {
+  margin: 3px 0 0;
+}
+/* Choosing variables: all of those shown, and what to do with the chosen. */
+.vault-select-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--ctl);
+  padding: 0 8px 0 10px;
+  font-size: var(--fs-md);
+}
+.vault-select-bar .muted {
+  font-size: var(--fs-sm);
+}
+.vault-row + .vault-row {
+  border-top: 1px solid var(--line);
+}
+.vault-row:hover {
+  background: var(--bg-2);
+}
+.vault-row-main {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+.vault-row-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+}
+.vault-name {
+  font-family: var(--mono);
+  font-weight: 600;
+}
+/* The copy button beside a variable's name: quiet until the row is
+   pointed at. */
+.vault-row-head .vault-copy {
+  flex: none;
+  opacity: 0.45;
+}
+.vault-row:hover .vault-row-head .vault-copy,
+.vault-row-head .vault-copy:focus-visible {
+  opacity: 1;
+}
+.vault-desc {
+  color: var(--fg-dim);
+  font-size: var(--fs-md);
+  line-height: 1.4;
+}
+.vault-row-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+  opacity: 0.6;
+}
+.vault-row:hover .vault-row-actions,
+.vault-row-actions:focus-within {
+  opacity: 1;
+}
+/* Who may read without asking. */
+.vault-access {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vault-access .lucide {
+  width: 0.9em;
+  height: 0.9em;
+  flex: none;
+}
+.vault-access.ask {
+  color: var(--done);
+  background: color-mix(in srgb, var(--done) 12%, transparent);
+}
+.vault-access.some {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.vault-access.all {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+}
+.vault-value {
+  grid-column: 2 / -1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 4px 4px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-2);
+}
+.vault-value code {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  user-select: text;
+}
+.vault-row .callout {
+  grid-column: 2 / -1;
+}
+
+/* ---- the editor's dialog ---- */
+.modal.dialog.vault-editor {
+  width: min(520px, 94vw);
+}
+.vault-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.vault-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.vault-field > span:first-child,
+.vault-field > legend {
+  padding: 0;
+  margin-bottom: 5px;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--fg-dim);
+}
+.vault-field textarea {
+  resize: vertical;
+}
+.vault-secret {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.vault-secret .input {
+  flex: 1;
+  min-width: 0;
+}
+.vault-modes {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+.vault-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: var(--fs-md);
+}
+.vault-mode input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.vault-mode small {
+  color: var(--fg-dim);
+  font-size: var(--fs-sm);
+  line-height: 1.35;
+}
+.vault-mode:hover {
+  background: var(--bg-2);
+}
+.vault-mode.on {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.vault-mode:focus-within {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+/* The machines that may read without asking: a searchable choice. */
+.vault-machines-picker {
+  margin-top: 6px;
+}
+.vault-switch-row {
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+}
+.vault-switch-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--fs-md);
+}
+.vault-switch-text small {
+  color: var(--fg-dim);
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+}
+.vault-editor .dialog-actions .danger-text .lucide {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
+
+/* ---- the access log ---- */
+.vault-log section + section {
+  margin-top: 6px;
+}
+.vault-log ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+  overflow: hidden;
+}
+.vault-log .section-head {
+  cursor: default;
+  margin: 0;
+}
+.vault-entry {
+  display: flex;
+  gap: 10px;
+  padding: 7px 10px;
+  font-size: var(--fs-md);
+}
+.vault-entry + .vault-entry {
+  border-top: 1px solid var(--line);
+}
+.vault-entry-time {
+  flex: none;
+  color: var(--fg-mute);
+  font-size: var(--fs-sm);
+  padding-top: 1px;
+}
+.vault-entry-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.vault-entry-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.vault-entry-tool {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--fg-dim);
+}
+.vault-entry-names {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.vault-entry-names code,
+.vault-request-names code {
+  padding: 0 5px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-3);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+}
+.vault-entry-who {
+  font-size: var(--fs-sm);
+}
+/* An outcome: allowed by the list, approved by the user, refused, listed. */
+.vault-outcome {
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  line-height: 1.6;
+}
+.vault-outcome.ok {
+  color: var(--done);
+  background: color-mix(in srgb, var(--done) 14%, transparent);
+}
+.vault-outcome.asked {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.vault-outcome.refused {
+  color: var(--error);
+  background: color-mix(in srgb, var(--error) 14%, transparent);
+}
+.vault-outcome.info {
+  color: var(--fg-dim);
+  background: var(--bg-3);
+}
+
+/* ---- connecting a CLI ---- */
+.vault-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.vault-snippet {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  overflow: hidden;
+}
+.vault-snippet-head {
+  display: flex;
+  align-items: center;
+  height: var(--h-row);
+  padding: 0 4px 0 10px;
+  background: var(--bg-2);
+  font-size: var(--fs-sm);
+  color: var(--fg-dim);
+}
+.vault-snippet pre {
+  margin: 0;
+  padding: 8px 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  user-select: text;
+}
+
+/* ---- approval prompts ---- */
+.vault-pending {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.vault-approvals {
+  position: fixed;
+  top: calc(var(--h-header) + 10px);
+  right: 14px;
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(400px, calc(100vw - 28px));
+}
+.vault-approvals .vault-request {
+  box-shadow: 0 12px 32px var(--shadow);
+}
+.vault-request {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-lg);
+  background: var(--bg-2);
+  box-shadow: inset 3px 0 0 var(--accent);
+  font-size: var(--fs-md);
+}
+.vault-request-head {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  overflow-wrap: anywhere;
+}
+.vault-request-head .lucide {
+  flex: none;
+  width: var(--ic);
+  height: var(--ic);
+  margin-top: 1px;
+  color: var(--accent);
+}
+.vault-request-text {
+  flex: 1;
+  line-height: 1.45;
+}
+.vault-request-left {
+  flex: none;
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+.vault-request-names {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.vault-request-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--fg-dim);
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+}
+.vault-request-meta .lucide {
+  flex: none;
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
+.vault-request-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.vault-request-buttons {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The prompt's choice between biometrics and the passphrase. */
+.vault-request-proof {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: var(--fs-sm);
+}
+
+/* ---- biometrics and exempt apps (the vault's page of Settings) ---- */
+.vault-auths {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 4px 0;
+  padding: 0;
+  list-style: none;
+  max-width: 46rem;
+}
+.vault-auths li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.vault-auth-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  font-size: var(--fs-md);
+}
+.vault-auth-text .muted {
+  font-size: var(--fs-sm);
+}
+
+/* ---- export and import ---- */
+.modal.dialog.vault-transfer {
+  width: min(520px, 94vw);
+}
+.modal.dialog.vault-transfer.wide {
+  width: min(680px, 94vw);
+}
+.vault-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-height: 120px;
+  overflow: auto;
+}
+.vault-chips code {
+  padding: 0 5px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-3);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+}
+.vault-import-bulk {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-md);
+}
+.vault-import-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: min(50vh, 420px);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+}
+.vault-import-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+}
+.vault-import-row + .vault-import-row {
+  border-top: 1px solid var(--line);
+}
+.vault-import-row.skip .vault-name {
+  color: var(--fg-mute);
+  text-decoration: line-through;
+}
+.vault-import-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.vault-import-head .tag.warn {
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 40%, transparent);
+}
+.vault-import-head .tag.danger {
+  color: var(--error);
+  border-color: color-mix(in srgb, var(--error) 40%, transparent);
+}
+.vault-import-access {
+  font-size: var(--fs-sm);
+}
+.vault-import-unknown {
+  color: var(--warning);
+}

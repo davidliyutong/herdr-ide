@@ -6,7 +6,7 @@
 # - replaces the slug (lowercase), the env prefix (UPPER_) and, with --name,
 #   the display name in all tracked text files;
 # - with --module, rewrites the Go module path (go.mod and imports);
-# - moves cmd/<slug>, cmd/<slug>-agent and extensions/<slug>-bridge;
+# - moves cmd/<slug> and extensions/<slug>-bridge;
 # - records the old names in internal/brand and web/src/brand.ts so that
 #   existing installs migrate: machines move ~/.<old> to ~/.<new>, browsers
 #   move their stored preferences, code-server drops the old bridge extension.
@@ -85,7 +85,6 @@ mv_path() {
   [[ -e "$1" ]] || return 0
   if git ls-files --error-unmatch "$1" >/dev/null 2>&1; then git mv "$1" "$2"; else mv "$1" "$2"; fi
 }
-mv_path "cmd/$old-agent" "cmd/$new-agent"
 mv_path "cmd/$old" "cmd/$new"
 mv_path "extensions/$old-bridge" "extensions/$new-bridge"
 rm -rf dist internal/embedded/agents/*.gz internal/embedded/ext/*.vsix "extensions/$new-bridge/"*.vsix "extensions/$new-bridge/dist"

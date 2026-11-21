@@ -8,6 +8,14 @@ import (
 	"herdr-ide/internal/codeserver"
 	"herdr-ide/internal/gui"
 	"herdr-ide/internal/keybindings"
+	"herdr-ide/internal/plugin"
+	browserplugin "herdr-ide/internal/plugins/browser"
+	"herdr-ide/internal/plugins/files"
+	gitplugin "herdr-ide/internal/plugins/git"
+	monitorplugin "herdr-ide/internal/plugins/monitor"
+	usageplugin "herdr-ide/internal/plugins/usage"
+	vaultplugin "herdr-ide/internal/plugins/vault"
+	"herdr-ide/internal/plugins/vscode"
 	"herdr-ide/internal/settings"
 	"herdr-ide/internal/uisettings"
 )
@@ -16,8 +24,19 @@ import (
 // the desktop app's shortcut settings of earlier versions, which became
 // keybinding rules before the settings are loaded.
 func Settings() []settings.Module {
-	return []settings.Module{uisettings.Module, codeserver.Settings, gui.Settings, legacyShortcuts()}
+	return []settings.Module{uisettings.Module, codeserver.Settings, gui.Settings, plugin.Settings(Plugins(), pluginsOff), legacyShortcuts(), browserplugin.Settings, files.Settings, gitplugin.Settings, monitorplugin.Settings, usageplugin.Settings, vaultplugin.Settings}
 }
+
+// Plugins are the core's plugins (internal/plugin), in the order the UIs
+// list them.
+func Plugins() []plugin.Plugin {
+	return []plugin.Plugin{vscode.New(), browserplugin.New(), files.New(), gitplugin.New(), monitorplugin.New(), usageplugin.New(), vaultplugin.New()}
+}
+
+// pluginsOff are the plugins that are off until the user turns them on:
+// VS Code, whose windows run on the UI's origin (its switch for browsers
+// is off by default too, plugin.BrowserRisk).
+var pluginsOff = plugin.Defaults{vscode.ID: true}
 
 // legacyShortcuts drops the desktop app's old shortcut settings
 // (desktop-*-key) from the settings file.

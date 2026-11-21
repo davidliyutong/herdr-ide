@@ -1,0 +1,74 @@
+{
+  "description": "Pinned tabs stay first: pinning moves a tab to the end of the pinned ones and keeps a preview editor it shows, unpinning moves it to the start of the others, a tab moved among the others' places stops at the pinned ones' edge, the selected tab stays selected; pinning a pinned tab changes nothing.",
+  "input": {
+    "version": 2,
+    "workspaces": [
+      {
+        "id": "w",
+        "name": "",
+        "cwd": "",
+        "tabs": [
+          { "root": { "terminal": "t1" }, "focused": "t1" },
+          { "root": { "terminal": "t2" }, "focused": "t2" },
+          { "root": { "terminal": "t3" }, "focused": "t3" },
+          { "root": { "terminal": "t4" }, "focused": "t4" },
+          {
+            "root": {
+              "view": {
+                "id": "v1",
+                "plugin": "files",
+                "kind": "editor",
+                "path": "/a",
+                "preview": true
+              }
+            },
+            "focused": "view:v1"
+          }
+        ],
+        "selected": 0
+      }
+    ],
+    "selected": 0
+  },
+  "ops": [
+    { "op": "pinTab", "workspace": "w", "tab": 2, "pinned": true },
+    { "op": "pinTab", "workspace": "w", "tab": 3, "pinned": true },
+    { "op": "moveTab", "workspace": "w", "from": 3, "to": 0 },
+    { "op": "moveTab", "workspace": "w", "from": 0, "to": 3 },
+    { "op": "pinTab", "workspace": "w", "tab": 0, "pinned": false },
+    { "op": "pinTab", "workspace": "w", "tab": 0, "pinned": true },
+    { "op": "pinTab", "workspace": "w", "tab": 4, "pinned": true }
+  ],
+  "changed": true,
+  "expected": {
+    "version": 2,
+    "workspaces": [
+      {
+        "id": "w",
+        "name": "",
+        "cwd": "",
+        "tabs": [
+          { "root": { "terminal": "t3" }, "focused": "t3", "pinned": true },
+          {
+            "root": {
+              "view": {
+                "id": "v1",
+                "plugin": "files",
+                "kind": "editor",
+                "path": "/a",
+                "preview": false
+              }
+            },
+            "focused": "view:v1",
+            "pinned": true
+          },
+          { "root": { "terminal": "t4" }, "focused": "t4" },
+          { "root": { "terminal": "t2" }, "focused": "t2" },
+          { "root": { "terminal": "t1" }, "focused": "t1" }
+        ],
+        "selected": 4
+      }
+    ],
+    "selected": 0
+  }
+}

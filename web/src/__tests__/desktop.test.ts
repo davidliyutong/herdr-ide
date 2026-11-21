@@ -5,15 +5,23 @@ vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 
 import { keyName } from '../keys';
 import { disabledCommands, runMenuCommand } from '../desktop';
-import { handleFrameKey } from '../keymap';
-import { useKeys, type Binding } from '../keybindings';
-import registry from '../../../design/generated/registry.json';
+import { closeWindowPane, leaveWindowPane } from '../keymap';
+import '../commands';
+import { noteFocus, resetHistory } from '../paneHistory';
 import { useDialog } from '../dialog';
 import { useStore } from '../state/store';
 import type { MachineState } from '../lib/machine';
 import * as L from '../term/layout';
-import { resetFrames, useFrames } from '../codeFrames';
+import { frameLoaded, resetFrames, useFrames } from '../codeFrames';
 import { FakeCore, settle } from './fakeTerms';
+import { resetClosed } from '../closedPanes';
+import { definePlugins } from '../plugins/registry';
+import { vscodePlugin } from '../plugins/vscode';
+import { vscodeOn } from './fakeSettings';
+
+// VS Code is a plugin, off by default: these tests have it on.
+definePlugins([vscodePlugin]);
+vscodeOn();
 
 describe('keyName', () => {
   it('names a key after its character on the current layout', () => {
@@ -66,32 +74,36 @@ describe('runMenuCommand', () => {
     core.model.subscribe('m');
     await settle();
   };
-  beforeEach(() => setup([shell('t1'), shell('t2')]));
+  beforeEach(() => {
+    // A short time to undo a close: terminals end soon after.
+    resetClosed(50);
+    return setup([shell('t1'), shell('t2')]);
+  });
   afterEach(() => {
     useDialog.setState({ current: undefined });
     document.body.innerHTML = '';
   });
 
   const dialog = () => useDialog.getState().current;
-  /** Answers the confirmation shown, as Dialogs.tsx does, and returns its
-   * message. */
-  const reply = async (ok: boolean) => {
-    await vi.waitFor(() => expect(dialog()?.kind).toBe('confirm'));
-    const req = dialog()!;
-    useDialog.setState({ current: undefined });
-    if (req.kind !== 'confirm') throw new Error(req.kind);
-    req.resolve(ok);
-    await new Promise((r) => setTimeout(r));
-    return req.message;
-  };
   const killed = () => core.calls.filter((c) => c.method === 'terminal.kill').map((c) => c.params.terminal);
 
-  it('closes a tab at once when its terminals only have shells at the prompt', async () => {
+  it('closes a tab at once, without asking, its terminals ending once it can no longer be undone', async () => {
+    await setup([shell('t1'), running('t2', 'vim')]);
     runMenuCommand('tab.close');
-    await vi.waitFor(() => expect(killed()).toEqual(['t1', 't2']));
-    expect(dialog()).toBeUndefined();
     await settle();
+    expect(dialog()).toBeUndefined();
     expect(core.layout('m')?.workspaces[0].tabs).toEqual([]);
+    expect(killed()).toEqual([]);
+    await vi.waitFor(() => expect(killed().sort()).toEqual(['t1', 't2']));
+  });
+
+  it('closes a pane at once, without asking, a program running in it or not', async () => {
+    await setup([running('t1', 'htop'), shell('t2')]);
+    runMenuCommand('pane.close');
+    await settle();
+    expect(dialog()).toBeUndefined();
+    expect(core.layout('m')?.workspaces[0].tabs[0].root).toEqual({ terminal: 't2' });
+    await vi.waitFor(() => expect(killed()).toEqual(['t1']));
   });
 
   it('closes a workspace with no tab left at the next press of the pane’s key, not while it is held', async () => {
@@ -102,7 +114,6 @@ describe('runMenuCommand', () => {
       // workspace, empty now.
       now.mockReturnValue(1_000_000);
       runMenuCommand('pane.close');
-      await vi.waitFor(() => expect(killed()).toEqual(['t1']));
       await settle();
       expect(core.layout('m')?.workspaces[0].tabs).toEqual([]);
       expect(disabledCommands()).not.toContain('pane.close');
@@ -113,7 +124,7 @@ describe('runMenuCommand', () => {
       await settle();
       expect(core.layout('m')?.workspaces.map((w) => w.id)).toEqual(['wwwwwwww']);
       // Pressed again: it goes, without asking, as it has nothing to lose
-      // (a machine left with none gets a new, empty one).
+      // (a machine may be left with none).
       now.mockReturnValue(1_002_000);
       runMenuCommand('pane.close');
       await settle();
@@ -122,31 +133,6 @@ describe('runMenuCommand', () => {
     } finally {
       now.mockRestore();
     }
-  });
-
-  it('asks before closing a tab with a program running, naming it', async () => {
-    await setup([shell('t1'), running('t2', 'vim')]);
-    runMenuCommand('tab.close');
-    expect(await reply(false)).toBe('Closing this tab ends the programs still running in it: vim.');
-    expect(killed()).toEqual([]);
-
-    // An agent waiting for input still runs: it goes by its name.
-    await setup([running('t1', 'node', { agent: 'claude', agent_status: 'idle' }), shell('t2')]);
-    runMenuCommand('tab.close');
-    expect(await reply(true)).toContain(': claude.');
-    await vi.waitFor(() => expect(killed()).toEqual(['t1', 't2']));
-  });
-
-  it('asks before closing a pane with a program running; a shell closes at once', async () => {
-    await setup([running('t1', 'htop'), shell('t2')]);
-    runMenuCommand('pane.close');
-    expect(await reply(false)).toBe('Closing this pane ends the program still running in it: htop.');
-    expect(killed()).toEqual([]);
-    core.model.mutate('m', (l) => ({ ...l, workspaces: [{ ...l.workspaces[0], tabs: [{ ...l.workspaces[0].tabs[0], focused: 't2' }] }] }));
-    runMenuCommand('pane.close');
-    await vi.waitFor(() => expect(killed()).toEqual(['t2']));
-    await settle();
-    expect(core.layout('m')?.workspaces[0].tabs[0].root).toEqual({ terminal: 't1' });
   });
 
   it('does nothing while a dialog is open', async () => {
@@ -199,23 +185,85 @@ describe('runMenuCommand', () => {
     expect(useDialog.getState().current?.kind).toBe('workspace');
   });
 
-  it('takes cmd+w from VS Code before VS Code does: it closes the VS Code pane', async () => {
+  it('leaves VS Code its keys; cmd+w in a window without editors closes the pane that has the keyboard', async () => {
     core.model.mutate('m', (l) => L.splitPane(l, 't2', 'vertical', { code: { id: 'c1', folder: '/srv/app' } }));
-    useKeys.setState({ effective: registry.keybindings.mac as Binding[] });
+    useFrames.setState({ frames: { 'm|c1': { m: 'm', id: 'c1', folder: '/srv/app', load: 0 } } });
+    const iframe = document.createElement('iframe');
+    iframe.className = 'code-frame';
+    iframe.dataset.frame = 'm|c1';
+    document.body.append(iframe);
+    const w = iframe.contentWindow!;
+    frameLoaded('m|c1', iframe);
+    const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
     try {
-      const key = (init: KeyboardEventInit) => new KeyboardEvent('keydown', { cancelable: true, ...init });
-      const focus = vi.fn(() => core.model.mutate('m', (l) => L.focusPane(l, 'code:c1')));
-      // VS Code keeps its other keys.
-      expect(handleFrameKey(key({ key: 't', code: 'KeyT', metaKey: true }), focus)).toBe(false);
-      expect(handleFrameKey(key({ key: 'j', code: 'KeyJ', metaKey: true }), focus)).toBe(false);
-      expect(focus).not.toHaveBeenCalled();
-      expect(handleFrameKey(key({ key: 'w', code: 'KeyW', metaKey: true }), focus)).toBe(true);
-      expect(focus).toHaveBeenCalled();
+      // The app takes no key from VS Code.
+      const ev = new KeyboardEvent('keydown', { key: 'w', code: 'KeyW', metaKey: true, cancelable: true });
+      w.dispatchEvent(ev);
+      expect(ev.defaultPrevented).toBe(false);
+      // The extension's cmd+w, from a window whose pane does not have the keyboard: nothing.
+      closeWindowPane('m', 'w1', ['/srv/app']);
+      await settle();
+      expect(L.findLeaf(core.layout('m') as L.Layout, 'code:c1')).not.toBeNull();
+      // From the window the focused iframe shows: its pane closes.
+      iframe.focus();
+      closeWindowPane('m', 'w1', ['/srv/app']);
       await settle();
       expect(L.findLeaf(core.layout('m') as L.Layout, 'code:c1')).toBeNull();
       expect(killed()).toEqual([]);
     } finally {
-      useKeys.setState({ effective: registry.keybindings['pc-browser'] as Binding[] });
+      hasFocus.mockRestore();
+      iframe.remove();
+    }
+  });
+
+  it('gives the keyboard back from VS Code to its pane header, where code.open hides VS Code again', async () => {
+    resetHistory();
+    core.model.mutate('m', (l) => L.focusPane(l, 't1'));
+    noteFocus({ m: 'm', pane: 't1' });
+    runMenuCommand('code.open');
+    await vi.waitFor(() => expect(core.layout('m')?.workspaces[0].tabs).toHaveLength(2));
+    const key = L.codeViews(L.parseLayout(core.layout('m')).workspaces[0])[0].key;
+    const id = key.slice('code:'.length);
+    noteFocus({ m: 'm', pane: key });
+    useFrames.setState({ frames: { [`m|${id}`]: { m: 'm', id, folder: '/srv/app', load: 0 } } });
+    const iframe = document.createElement('iframe');
+    iframe.className = 'code-frame';
+    iframe.dataset.frame = `m|${id}`;
+    const header = document.createElement('div');
+    header.className = 'pane-header';
+    header.tabIndex = 0;
+    header.dataset.m = 'm';
+    header.dataset.pane = key;
+    document.body.append(iframe, header);
+    const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    try {
+      // From a window whose pane does not have the keyboard: nothing.
+      leaveWindowPane('m', 'w1', ['/srv/app']);
+      expect(document.activeElement).not.toBe(header);
+      iframe.focus();
+      // Nor while a dialog is open.
+      const backdrop = document.createElement('div');
+      backdrop.className = 'modal-backdrop';
+      document.body.append(backdrop);
+      leaveWindowPane('m', 'w1', ['/srv/app']);
+      backdrop.remove();
+      expect(document.activeElement).toBe(iframe);
+      const before = JSON.stringify(core.layout('m'));
+      leaveWindowPane('m', 'w1', ['/srv/app']);
+      expect(document.activeElement).toBe(header);
+      // The pane had the focus already: the layout is as it was.
+      await settle();
+      expect(JSON.stringify(core.layout('m'))).toBe(before);
+      // There code.open shows the pane focused before VS Code.
+      runMenuCommand('code.open');
+      await vi.waitFor(() => expect(core.layout('m')?.workspaces[0].selected).toBe(0));
+      expect(core.layout('m')?.workspaces[0].tabs[0].focused).toBe('t1');
+      expect(L.codeViews(L.parseLayout(core.layout('m')).workspaces[0])).toHaveLength(1);
+    } finally {
+      hasFocus.mockRestore();
+      iframe.remove();
+      header.remove();
+      resetHistory();
     }
   });
 

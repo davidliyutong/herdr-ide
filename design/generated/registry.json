@@ -61,6 +61,11 @@
       "when": "terminal"
     },
     {
+      "id": "workspace.closeOthers",
+      "section": "workspace",
+      "when": "terminal"
+    },
+    {
       "id": "tab.new",
       "section": "tab",
       "when": "terminal"
@@ -131,6 +136,36 @@
       "when": "terminal"
     },
     {
+      "id": "tab.closeOthers",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.closeRight",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.pin",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.unpin",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "browser.open",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "browser.reload",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
       "id": "pane.splitRight",
       "section": "pane",
       "when": "terminal"
@@ -147,6 +182,16 @@
     },
     {
       "id": "pane.zoom",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.rename",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.actions",
       "section": "pane",
       "when": "terminal"
     },
@@ -181,7 +226,32 @@
       "when": "terminal"
     },
     {
+      "id": "pane.back",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.forward",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.undoClose",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
       "id": "view.toggleSidebar",
+      "section": "view",
+      "when": "terminal"
+    },
+    {
+      "id": "view.togglePanel",
+      "section": "view",
+      "when": "terminal"
+    },
+    {
+      "id": "view.panel.files",
       "section": "view",
       "when": "terminal"
     },
@@ -199,6 +269,26 @@
       "id": "view.zoomReset",
       "section": "view",
       "when": "always"
+    },
+    {
+      "id": "view.panel.vault",
+      "section": "view",
+      "when": "terminal"
+    },
+    {
+      "id": "view.panel.usage",
+      "section": "view",
+      "when": "terminal"
+    },
+    {
+      "id": "view.panel.git",
+      "section": "view",
+      "when": "terminal"
+    },
+    {
+      "id": "view.panel.monitor",
+      "section": "view",
+      "when": "terminal"
     },
     {
       "id": "find.open",
@@ -229,6 +319,11 @@
       "id": "code.gitGraph",
       "section": "code",
       "when": "terminal"
+    },
+    {
+      "id": "git.graph",
+      "section": "code",
+      "when": "terminal"
     }
   ],
   "i18n": [
@@ -238,12 +333,17 @@
     "command.app.fullDiskAccess",
     "command.app.keyboardShortcuts",
     "command.app.settings",
+    "command.browser.open",
+    "command.browser.reload",
     "command.code.diff",
     "command.code.gitGraph",
     "command.code.open",
     "command.find.next",
     "command.find.open",
     "command.find.previous",
+    "command.git.graph",
+    "command.pane.actions",
+    "command.pane.back",
     "command.pane.close",
     "command.pane.focusDown",
     "command.pane.focusLeft",
@@ -251,8 +351,11 @@
     "command.pane.focusPrevious",
     "command.pane.focusRight",
     "command.pane.focusUp",
+    "command.pane.forward",
+    "command.pane.rename",
     "command.pane.splitDown",
     "command.pane.splitRight",
+    "command.pane.undoClose",
     "command.pane.zoom",
     "command.section.app",
     "command.section.code",
@@ -262,8 +365,11 @@
     "command.section.view",
     "command.section.workspace",
     "command.tab.close",
+    "command.tab.closeOthers",
+    "command.tab.closeRight",
     "command.tab.new",
     "command.tab.next",
+    "command.tab.pin",
     "command.tab.previous",
     "command.tab.rename",
     "command.tab.select1",
@@ -275,16 +381,32 @@
     "command.tab.select7",
     "command.tab.select8",
     "command.tab.select9",
+    "command.tab.unpin",
+    "command.view.panel.files",
+    "command.view.panel.git",
+    "command.view.panel.monitor",
+    "command.view.panel.usage",
+    "command.view.panel.vault",
+    "command.view.togglePanel",
     "command.view.toggleSidebar",
     "command.view.zoomIn",
     "command.view.zoomOut",
     "command.view.zoomReset",
     "command.workspace.close",
+    "command.workspace.closeOthers",
     "command.workspace.edit",
     "command.workspace.new",
     "command.workspace.next",
     "command.workspace.previous",
     "command.workspace.switch",
+    "settings.appearance.colorTheme",
+    "settings.appearance.colorTheme.amber",
+    "settings.appearance.colorTheme.blue",
+    "settings.appearance.colorTheme.graphite",
+    "settings.appearance.colorTheme.rose",
+    "settings.appearance.colorTheme.teal",
+    "settings.appearance.colorTheme.violet",
+    "settings.appearance.colorTheme.vscode",
     "settings.appearance.language",
     "settings.appearance.language.auto",
     "settings.appearance.language.en",
@@ -294,30 +416,96 @@
     "settings.appearance.theme.light",
     "settings.appearance.theme.system",
     "settings.appearance.uiFontSize",
+    "settings.browser.forwardIdle",
+    "settings.browser.openLinks",
+    "settings.browser.openLinks.all",
+    "settings.browser.openLinks.external",
+    "settings.browser.openLinks.loopback",
     "settings.codeServer.install",
     "settings.codeServer.install.download",
     "settings.codeServer.install.existing",
     "settings.codeServer.install.push",
     "settings.codeServer.path",
+    "settings.files.confirmTrash",
+    "settings.files.exclude",
+    "settings.files.followFocus",
+    "settings.files.showHidden",
+    "settings.files.sortOrder",
+    "settings.files.sortOrder.default",
+    "settings.files.sortOrder.filesFirst",
+    "settings.files.sortOrder.mixed",
+    "settings.files.sortOrder.modified",
+    "settings.files.sortOrder.type",
+    "settings.git.autoFetch",
+    "settings.git.changesView",
+    "settings.git.changesView.list",
+    "settings.git.changesView.tree",
+    "settings.git.confirmSync",
+    "settings.git.graphPageSize",
+    "settings.git.mixedLineEndings",
+    "settings.git.mixedLineEndings.keep",
+    "settings.git.mixedLineEndings.readOnly",
+    "settings.git.mixedLineEndings.unify",
+    "settings.git.untrackedChanges",
+    "settings.git.untrackedChanges.mixed",
+    "settings.git.untrackedChanges.separate",
     "settings.group.behavior",
     "settings.group.clipboard",
     "settings.group.cursor",
     "settings.group.text",
+    "settings.group.usageAlerts",
+    "settings.group.usageAntigravity",
+    "settings.group.usageClaude",
+    "settings.group.usageCodex",
+    "settings.group.usageDeepseek",
+    "settings.group.usageGrok",
+    "settings.group.usageKimi",
+    "settings.group.usageOpencode",
+    "settings.group.usageRefresh",
+    "settings.group.usageSpend",
+    "settings.group.vaultRun",
+    "settings.group.vaultSessions",
+    "settings.gui.display",
+    "settings.gui.display.auto",
+    "settings.gui.display.xvfb",
     "settings.gui.enabled",
     "settings.gui.gpu",
     "settings.gui.gpu.all",
     "settings.gui.gpu.vglrun",
+    "settings.gui.gpuPick",
     "settings.gui.video",
+    "settings.layout.undoClose",
+    "settings.monitor.confirmKill",
+    "settings.monitor.refreshSeconds",
+    "settings.monitor.statusBar",
     "settings.notifications.badge",
     "settings.notifications.mutedAgents",
     "settings.notifications.sound",
     "settings.notifications.system",
+    "settings.performance.keptTerminals",
+    "settings.plugins.browser.enabled",
+    "settings.plugins.files.enabled",
+    "settings.plugins.git.enabled",
+    "settings.plugins.monitor.enabled",
+    "settings.plugins.usage.enabled",
+    "settings.plugins.vault.enabled",
+    "settings.plugins.vscode.browser",
+    "settings.plugins.vscode.enabled",
     "settings.section.appearance",
+    "settings.section.browser",
     "settings.section.codeServer",
     "settings.section.colors",
+    "settings.section.files",
+    "settings.section.git",
     "settings.section.gui",
+    "settings.section.layout",
+    "settings.section.monitor",
     "settings.section.notifications",
+    "settings.section.performance",
+    "settings.section.plugins",
     "settings.section.terminal",
+    "settings.section.usage",
+    "settings.section.vault",
     "settings.terminal.bell",
     "settings.terminal.bell.none",
     "settings.terminal.bell.sound",
@@ -363,6 +551,7 @@
     "settings.terminal.cursorStyle.bar",
     "settings.terminal.cursorStyle.block",
     "settings.terminal.cursorStyle.underline",
+    "settings.terminal.cursorWidth",
     "settings.terminal.fontFamily",
     "settings.terminal.fontSize",
     "settings.terminal.fontWeight",
@@ -376,6 +565,42 @@
     "settings.terminal.programClipboard.auto",
     "settings.terminal.programClipboard.off",
     "settings.terminal.scrollback",
+    "settings.terminal.sshEnv",
+    "settings.usage.alerts",
+    "settings.usage.claudeKeychain",
+    "settings.usage.codexHomes",
+    "settings.usage.costRefresh",
+    "settings.usage.kimiRefresh",
+    "settings.usage.prices",
+    "settings.usage.providers.antigravity",
+    "settings.usage.providers.claude",
+    "settings.usage.providers.codex",
+    "settings.usage.providers.deepseek",
+    "settings.usage.providers.grok",
+    "settings.usage.providers.kimi",
+    "settings.usage.providers.opencode",
+    "settings.usage.refresh",
+    "settings.usage.refresh.1",
+    "settings.usage.refresh.15",
+    "settings.usage.refresh.2",
+    "settings.usage.refresh.30",
+    "settings.usage.refresh.5",
+    "settings.usage.refresh.60",
+    "settings.usage.refresh.adaptive",
+    "settings.usage.refresh.manual",
+    "settings.usage.refreshIdle",
+    "settings.usage.refreshOpen",
+    "settings.usage.refreshWorking",
+    "settings.usage.statusBar",
+    "settings.usage.thresholds",
+    "settings.vault.approvalTimeout",
+    "settings.vault.autoLock",
+    "settings.vault.passphraseHours",
+    "settings.vault.runMaxTimeout",
+    "settings.vault.runOutput",
+    "settings.vault.runTimeout",
+    "settings.vault.sessionIdle",
+    "settings.vault.sessionMax",
     "settings.window.zoom"
   ],
   "keybindings": {
@@ -536,18 +761,33 @@
         "when": "terminal"
       },
       {
-        "key": "cmd+bracketright",
-        "command": "pane.focusNext",
+        "key": "cmd+bracketleft",
+        "command": "pane.back",
         "when": "terminal"
       },
       {
-        "key": "cmd+bracketleft",
-        "command": "pane.focusPrevious",
+        "key": "cmd+bracketright",
+        "command": "pane.forward",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+z",
+        "command": "pane.undoClose",
         "when": "terminal"
       },
       {
         "key": "cmd+b",
         "command": "view.toggleSidebar",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+alt+b",
+        "command": "view.togglePanel",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+shift+e",
+        "command": "view.panel.files",
         "when": "terminal"
       },
       {
@@ -569,6 +809,11 @@
         "key": "cmd+0",
         "command": "view.zoomReset",
         "when": "always"
+      },
+      {
+        "key": "ctrl+shift+g",
+        "command": "view.panel.git",
+        "when": "terminal"
       },
       {
         "key": "cmd+f",
@@ -725,6 +970,11 @@
         "when": "always"
       },
       {
+        "key": "ctrl+shift+g",
+        "command": "view.panel.git",
+        "when": "terminal"
+      },
+      {
         "key": "ctrl+shift+f",
         "command": "find.open",
         "when": "terminal"
@@ -749,20 +999,56 @@
     ]
   },
   "settings": {
+    "appearance.colorTheme": "blue",
     "appearance.language": "auto",
     "appearance.theme": "system",
     "appearance.uiFontSize": 13,
+    "browser.forwardIdle": 30,
+    "browser.openLinks": "loopback",
     "codeServer.install": "push",
     "codeServer.path": "",
+    "files.confirmTrash": false,
+    "files.exclude": [
+      ".git",
+      ".svn",
+      ".hg",
+      "CVS",
+      ".DS_Store",
+      "Thumbs.db"
+    ],
+    "files.followFocus": true,
+    "files.showHidden": false,
+    "files.sortOrder": "default",
+    "git.autoFetch": 0,
+    "git.changesView": "list",
+    "git.confirmSync": false,
+    "git.graphPageSize": 300,
+    "git.mixedLineEndings": "keep",
+    "git.untrackedChanges": "mixed",
+    "gui.display": "auto",
     "gui.enabled": true,
     "gui.gpu": "vglrun",
+    "gui.gpuPick": false,
     "gui.video": true,
+    "layout.undoClose": 5,
+    "monitor.confirmKill": true,
+    "monitor.refreshSeconds": 2,
+    "monitor.statusBar": true,
     "notifications.badge": true,
     "notifications.mutedAgents": [
       "droid"
     ],
     "notifications.sound": true,
     "notifications.system": true,
+    "performance.keptTerminals": 12,
+    "plugins.browser.enabled": true,
+    "plugins.files.enabled": true,
+    "plugins.git.enabled": true,
+    "plugins.monitor.enabled": true,
+    "plugins.usage.enabled": true,
+    "plugins.vault.enabled": true,
+    "plugins.vscode.browser": false,
+    "plugins.vscode.enabled": false,
     "terminal.bell": "visual",
     "terminal.boldIsBright": false,
     "terminal.colorScheme.dark": "default",
@@ -813,7 +1099,8 @@
     "terminal.colors.light.selection": "#b6d4fe",
     "terminal.copyOnSelect": false,
     "terminal.cursorBlink": true,
-    "terminal.cursorStyle": "block",
+    "terminal.cursorStyle": "bar",
+    "terminal.cursorWidth": 1,
     "terminal.fontFamily": "",
     "terminal.fontSize": 13,
     "terminal.fontWeight": "regular",
@@ -822,6 +1109,37 @@
     "terminal.optionIsMeta": false,
     "terminal.programClipboard": "auto",
     "terminal.scrollback": 10000,
+    "terminal.sshEnv": true,
+    "usage.alerts": true,
+    "usage.claudeKeychain": true,
+    "usage.codexHomes": [],
+    "usage.costRefresh": 15,
+    "usage.kimiRefresh": true,
+    "usage.prices": [],
+    "usage.providers.antigravity": true,
+    "usage.providers.claude": true,
+    "usage.providers.codex": true,
+    "usage.providers.deepseek": true,
+    "usage.providers.grok": true,
+    "usage.providers.kimi": true,
+    "usage.providers.opencode": true,
+    "usage.refresh": "adaptive",
+    "usage.refreshIdle": 30,
+    "usage.refreshOpen": 5,
+    "usage.refreshWorking": 10,
+    "usage.statusBar": true,
+    "usage.thresholds": [
+      "80",
+      "95"
+    ],
+    "vault.approvalTimeout": 60,
+    "vault.autoLock": 60,
+    "vault.passphraseHours": 24,
+    "vault.runMaxTimeout": 600,
+    "vault.runOutput": 64,
+    "vault.runTimeout": 120,
+    "vault.sessionIdle": 30,
+    "vault.sessionMax": 12,
     "window.zoom": 100
   }
 }

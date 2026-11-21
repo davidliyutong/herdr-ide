@@ -130,13 +130,118 @@ returns. Focus changes are reported to programs that asked (mode 1004).
   draws it; the bytes drawn are then acknowledged, which returns the core's
   credit: a program floods at the speed the page draws, and a page that
   falls far behind gets a fresh paint ([22](22-terminal-protocol.md)). A
-  new attach (after a reconnect) starts a new emulator, which the first
-  paint fills. A program's end shows how it ended; its pane goes when the
-  core reports it ([22](22-terminal-protocol.md)).
+  program's end shows how it ended; its pane goes when the
+  core reports it ([22](22-terminal-protocol.md)), unless the terminal
+  ended with its core and is started again
+  ([33](33-workspace-restore.md)).
+- A stream that ends with `disconnected` is attached again, with a new
+  emulator that the first paint fills and whose view goes back where it
+  was scrolled (below): when the page's connection to the
+  core is back, and, since a machine or its terminal core going away ends
+  its streams while that connection stays, whenever the machine's
+  terminals are there again (the snapshot its backend sends;
+  `TermModel.onTerminals` in `state/terms.ts`, `onConnection` in
+  `TerminalView`). An attach the core refuses (a terminal whose shell
+  herdr-core is starting again answers unavailable for a moment,
+  [33](33-workspace-restore.md)) is tried again up to 5 times, 1.5 s
+  apart (`ATTACH_RETRIES`, `ATTACH_RETRY_MS` in `vt/pane.ts`), and after
+  those once more each time the connection or the machine's terminals
+  come back.
+- The first paint of an attach is not drawn piecemeal. The screen and its
+  history come as output like any other, in as many frames as their size
+  and the stream's credit make of them, and the protocol has no mark for
+  the paint's end; drawn as it came, the history ran past before the
+  screen stood, which showed when turning to a busy agent. The paint
+  comes in bulk (on a local core one of 374 KB came as 23 frames of
+  16 KiB within 2 ms), so after an attach nothing is drawn until the bulk
+  pauses (`PAINT_QUIET_MS`, `PAINT_QUIET_LONG_MS`, `PAINT_MAX_MS`,
+  `PAINT_BULK`, `PAINT_ONE_CREDIT` in `vt/pane.ts`):
+  - a frame of at least 4096 bytes is bulk and puts the paint's end off:
+    to 40 ms after it while the paint is at most 192 KiB (it fits the
+    credit and comes at once), to 250 ms after it once the paint is
+    larger (its next part waits for the credit returned);
+  - a smaller frame is a program's own output (an agent at work writes a
+    spinner every few tens of milliseconds) and never puts the end off:
+    the paint ends 40 ms after it, or sooner if it was to end sooner;
+  - 600 ms after the attach the screen is drawn, whatever has come, for a
+    program that writes in bulk without a pause.
+
+  Meanwhile the emulator takes the output and its bytes are acknowledged
+  at once, so the rest of the paint is not held back, and a bell in the
+  history painted does not ring.
+- The terminals shown last stay in the page while another tab, workspace
+  or machine is shown (`keptPanes.ts`, `TabView` in
+  `components/Workspace.tsx`): as many as the setting
+  `performance.keptTerminals` says besides the ones shown (12 by default,
+  0 to 64, 0 keeps none; [13](13-settings-and-appearance.md)), the latest
+  first, each still mounted and attached, hidden, at the place and size it
+  had. A kept terminal's emulator takes the output; it draws nothing,
+  measures nothing (it keeps the grid it had, so the terminal is not
+  resized), shows no formula and rings no bell (`TerminalView`'s `shown`,
+  `TermPane.setShown`). It also gives up what it draws with: its renderer
+  is disposed, which hands back the WebGL context (a page has about 16)
+  and the glyph atlas's texture, and its canvas is replaced by one of no
+  size. A kept terminal thus costs a stream and an emulator with its
+  scrollback, and the terminals holding a context are the ones shown.
+  The emulator is the cost: measured in Chromium on a local core, 4
+  terminals of 127 columns with a full scrollback of 10 000 lines grew
+  the emulators' WebAssembly memory from 0.4 MB to 47 MB, about 11 MB
+  each, and an idle terminal with little history takes a small fraction
+  of that. WebAssembly memory is reused, not returned, after an emulator
+  is disposed.
+  Output that arrives while a terminal is hidden goes into its emulator
+  and is acknowledged at once, without being drawn, so a hidden terminal
+  keeps up with its program ([22](22-terminal-protocol.md)). Coming back to it shows it at once,
+  where the user had scrolled it: it gets a new renderer and is measured
+  and drawn again, with no new attach. A terminal shown longer ago than
+  the ones kept, or one whose pane closed, is unmounted and detached;
+  shown again, it attaches again with a new emulator, is painted anew and
+  scrolled where it was (below). The kept terminals are the page's own,
+  by machine and address, and are forgotten with the page.
+- Leaving a terminal does not resize it. A pane that is unmounted
+  detaches, and a page that closes leaves, but the core keeps
+  the stream of a terminal's last viewer attached to the terminal core,
+  unread, until the terminal's next viewer has attached
+  ([22](22-terminal-protocol.md)). The terminal therefore keeps the size
+  its pane had instead of getting herdr-core's headless size (200x120 by
+  default, [21](21-terminal-core.md)) while no page shows it, and the
+  pane that attaches next, of the same size, resizes nothing and gets an
+  exact first paint. This is for full-screen programs (Claude Code, which
+  draws on the alternate screen and scrolls its transcript itself; Codex):
+  laid out for 200x120 at a detach and for the pane again at the next
+  attach, Claude Code lost its own scroll position, and the first paint
+  showed the 200x120 layout until the program drew again. The size is
+  kept while a page is subscribed to the machine's terminals; 10 s after
+  the last one left, the core's connection to the terminal core closes
+  and the terminals get the headless size.
+- The place a terminal was scrolled to outlives its emulator
+  (`vt/scrollMemory.ts`; `TermPane.noteScroll`, `restoreScroll` and
+  `frameText` in `vt/pane.ts`). A pane that is unmounted, or attached
+  again after its machine or the connection was away, gets a new
+  emulator, which the first paint fills at the end. Before the old
+  emulator goes, the pane notes the place: the text of the first 3 rows
+  shown (`ANCHOR_ROWS`) and the scrollbar's numbers, which give the
+  distance from the end. A terminal at the end, or on the alternate
+  screen (whose program draws it again and has no history), notes
+  nothing and forgets a place noted before. When the first paint is in,
+  the rows are looked for in the new emulator: in the screen at the same
+  distance from the end first, then upward a screen at a time, the
+  nearest rows first, through at most 200 screens (`MAX_SCREENS`) or to
+  the top; the view
+  goes where they are, else as far from the end as it was. Rows that are
+  all blank are no mark, and the distance alone is used. The places are
+  kept in the page's memory, by machine and address, for at most 200
+  terminals (`MAX_REMEMBERED`; the ones noted longest ago go first), and
+  each is used once.
 - A pane's size follows its element; a new grid resizes the emulator and
   the terminal. The focused pane has the keyboard; focus and blur go to the
   core (a turn an agent ended is seen when its terminal has the focus,
-  [25](25-agent-detection.md)) and, when asked for, to the program.
+  [25](25-agent-detection.md)) and, when asked for, to the program. A
+  pane that has the keyboard when it attaches anew tells the program so
+  again at the end of the first paint, when the paint brought mode 1004:
+  the program was told of the loss when the pane before lost the focus
+  or let go of its stream, and the new emulator knows the mode only from
+  the paint.
 - Mouse: where the program asked for mouse events (and Shift is not held,
   and the page is not read-only), presses, releases and moves with a button
   go to it, encoded at the pixel position; moves without a button go to
@@ -170,12 +275,25 @@ returns. Focus changes are reported to programs that asked (mode 1004).
 - Programs' clipboard writes (OSC 52, up to Ghostty's limit;
   `vt/clipboard.ts`), by `terminal.programClipboard`: **Automatic** copies
   at once when the write arrives within 10 s of this page's last key, text,
-  paste or button press in a terminal and the browser allows it, with a
+  paste or button press in a terminal, or of the release of a button the
+  program tracks (a program copies what was dragged over at the release,
+  however long the drag took), and the browser allows it, with a
   toast saying what was copied; otherwise, or when the browser refuses, a
   toast offers **Copy** (5 s). **Ask** always asks; **Off** ignores them. A
   copy that passed the automatic gate is kept for the menu's **Copy** and
   ⌘C for 2 minutes or until the next key or button press in a terminal.
   Reading the clipboard (OSC 52 `?`) is not answered.
+- Which programs copy this way is theirs to decide. Claude Code writes
+  OSC 52 for its selection. Codex writes the clipboard of the machine it
+  runs on and adds OSC 52 only where it finds a multiplexer or an ssh
+  session (`SSH_CONNECTION`), so the terminals of ssh machines carry the
+  agent's ssh session ([21](21-terminal-core.md), `terminal.sshEnv`); on
+  the local machine its own copy is already the user's clipboard when the
+  page runs there. Codex copies on release unless its `copy_on_select` is
+  off; its `auto` copies in a terminal that says it is Ghostty without a
+  version, which is what herdr-core tells every program
+  (`TERM_PROGRAM=ghostty`, [21](21-terminal-core.md)), whatever terminal
+  the core was started from.
 - Find (`vt/find.ts`, `components/FindBar.tsx`): the `find.open` binding
   (⌘F on macOS, Ctrl+Shift+F elsewhere in browsers) or **Find…** in the
   menu opens a bar at the terminal's top right corner, with a one-line
@@ -198,7 +316,19 @@ returns. Focus changes are reported to programs that asked (mode 1004).
 | Polling the emulator for replies, titles and bells after each write | Replies would be late and ordered differently from Ghostty's, and events between two polls could be lost. |
 | Canvas 2D only | Every glyph costs a draw call on the CPU; a full screen of a busy program at a high pixel ratio takes milliseconds per frame. |
 | One canvas per tab | The panes' layout would have to be drawn in the canvas; with a canvas per pane the split tree stays HTML and a pane keeps its terminal while the tree changes. |
-| Keeping the terminals of hidden tabs attached | Every hidden terminal's output would cross the connection and be emulated; attaching again brings the screen and its history. |
+| Keeping every terminal of hidden tabs, workspaces and machines attached | The streams and the emulators with their scrollback would grow with every terminal ever shown; the ones shown last, as many as the setting says, cover going back and forth between the tabs in use. |
+| A fixed number of kept terminals (6, the previous design) | What a kept terminal costs is memory, an emulator with up to `terminal.scrollback` lines, and how much of it there is to spend differs per computer; the number is a setting, with 0 for none. |
+| Kept terminals keeping their renderers (the previous design) | Every renderer holds a WebGL context and a page has about 16: the kept terminals and the ones shown together reach that, and the browser then takes a context from a terminal, which draws with Canvas 2D from then on. A hidden terminal draws nothing, so it holds none. |
+| Detaching every terminal that is not shown (the previous design) | Every return attached again: the pane stayed empty until the screen and its history were painted anew, the selection went with the emulator, and the place the user had scrolled to was lost then; it is found again now, by its text, for the terminals beyond the ones kept. |
+| Keeping a terminal's size by passing the pane's as `size` with `terminal.run` | herdr-core uses it only until the terminal's first viewer attaches; a terminal whose viewers left gets the headless size whatever it was started with. |
+| The page holding a hidden stream of no size on each terminal it does not show, to keep the size | What herdr-core does with a viewer of no size is not part of its API; the stream of the viewer that left is a viewer as herdr-core describes them. |
+| Writing the size into `headless` of herdr-core's `config.toml` | The file is the user's own, shared with their other herdr-core sessions; herdr-ide never writes it. |
+| Closing the last viewer's stream and letting the next attach resize the terminal (the previous design) | The terminal was 200x120 between two viewers: a full-screen program was laid out twice around every detach and attach, lost its own scroll position and was first painted in the wrong layout. |
+| Finding the place scrolled to by its row number from the top | The paint's history is the terminal core's, which may be cut at the top where the page's was not: a paint brought 2870 rows where the page's emulator had 3003. |
+| Finding the place by its distance from the end alone | The program writes while its terminal is away, which moves the place up: with 100 rows written meanwhile the view came back 105 rows off by its number and exactly by its text. The distance is where the search starts, and what is used when the rows are not found. |
+| Drawing the first paint as it arrives (the previous design) | The history ran past before the screen stood, for as long as the paint took to cross the connection; on a local core, where a paint arrives within milliseconds, one frame of the middle of the history was still drawn before the screen. |
+| Every frame putting the first paint's end off (the first version of the rule, with 1.5 s as the latest) | An agent at work writes a small frame every few tens of milliseconds, and each started the wait again: the pane of a working Codex stayed blank until the latest time. Only bulk puts the end off now, and the latest time is 600 ms. |
+| Waiting for a mark that ends the first paint | The terminal protocol has none: the paint is output like any other, so the page takes a pause in the output for its end. |
 | Building the module in CI | CI would need zig and Ghostty's dependencies; the build is reproducible, so the committed module's digest is checked instead. |
 | Regular expressions and whole words in find (the previous design) | The emulator's search finds text; regular expressions would need a search of the agent's over the terminal's text. |
 
@@ -213,7 +343,44 @@ returns. Focus changes are reported to programs that asked (mode 1004).
   at 256 KiB unacknowledged; 4 MiB behind it sends a new paint and the
   page skips the backlog.
 - **The connection drops** → streams end with `disconnected`; terminals
-  attach again when it is back, with a new paint.
+  attach again when it is back, the kept ones too, with a new paint,
+  scrolled where they were.
+- **A machine or its terminal core goes away while the page's connection
+  stays** → its streams end with `disconnected`; its terminals, shown and
+  kept, attach again when the machine's terminals are there again, with a
+  new paint, scrolled where they were. The streams the core kept went
+  with its connection, so the terminals had the headless size meanwhile
+  and are resized once.
+- **No page is connected to a machine's terminals for 10 s** (every page
+  closed, the core started again) → its terminals get herdr-core's
+  headless size; the next pane resizes its terminal once, and a
+  full-screen program lays itself out again.
+- **A pane attaches with another size than the terminal has** (another
+  window, another font size) → the terminal is resized once, as between
+  two pages.
+- **The page is loaded anew** → the places terminals were scrolled to are
+  forgotten with the page; its terminals are painted at the end.
+- **The rows noted are not found** (they scrolled out of the terminal
+  core's history, or a pane of another width wraps them otherwise) → the
+  view goes as far from the end as it was, to the top of a history
+  shorter than that.
+- **The same three rows occur more than once** (a program repeating its
+  output) → the view goes to the ones found first: in the screen at the
+  place's distance from the end, else the nearest above it.
+- **More than 200 terminals were left scrolled up** → the places noted
+  longest ago are forgotten; those terminals are painted at the end.
+- **The core refuses an attach** → it is tried again 5 times, 1.5 s
+  apart, then once at each return of the connection or of the machine's
+  terminals; the pane is empty meanwhile.
+- **A program writes in bulk without a pause while its terminal attaches**
+  → the screen is drawn 600 ms after the attach, whatever has arrived by
+  then.
+- **The page shows no tab** (a machine whose layout is not read yet, a
+  workspace without tabs) → the kept terminals are unmounted with the
+  tab's panes, detached and forgotten; each attaches again when it is
+  next shown.
+- **The output pauses in the middle of the first paint** (a slow
+  connection) → the part that came is drawn, and the rest as it comes.
 - **The terminal font loads late** → terminals draw with the fallbacks and
   are measured again when it arrives, which resizes them.
 - **A character the font and its fallbacks draw wider than its cells**
@@ -228,7 +395,10 @@ returns. Focus changes are reported to programs that asked (mode 1004).
 The CSP of the UI allows compiling WebAssembly (`'wasm-unsafe-eval'`), not
 `eval` or inline scripts; the module is served from the core like the
 page's scripts. Programs' clipboard writes follow the setting above and
-reads are refused; only `http`, `https` and `mailto` hyperlinks open. See
+reads are refused; only `http`, `https` and `mailto` hyperlinks open. The
+rows noted for the place a terminal was scrolled to are text of its screen
+held in the page's memory only, neither stored nor sent. The stream the
+core keeps for a terminal's size belongs to no client. See
 [SECURITY.md](../../SECURITY.md).
 
 ## Testing
@@ -242,12 +412,23 @@ by gesture and their text, find, hyperlinks; the mouse, paste and focus
 encoders; every row of the key table in legacy, application and kitty
 modes; and `drawRow` (colors, inverse, invisible, faint, wide characters,
 shapes, underline styles, highlights, cursor styles, links and formulas).
+`keptPanes.test.ts` (the terminals shown before kept, the latest first,
+not the ones shown; one that closed and those shown longest ago dropped;
+fewer kept with a smaller limit and none with 0),
+`scrollMemory.test.ts` (a terminal scrolled up noted by its first rows
+and taken once, none noted at the end; the terminals noted longest ago
+forgotten beyond the bound; the rows found at once in the same history,
+above the place after the program wrote, and in a history cut at the
+top; the distance from the end when the rows are gone, wrap otherwise or
+are blank),
+`perf.test.tsx` (the terminals shown and kept and the ones holding a
+WebGL context counted, [13](13-settings-and-appearance.md)),
 `terms.test.ts` (the layout document's reading and writing, other clients'
 versions, ended programs, terminals asked for early, attention order),
 `termOptions.test.ts` (the terminal settings as the emulator's options,
 the font stack before and after the bundled font loads, the colors'
 contrast), `clipToast.test.ts`, `paneHeader.test.ts`, `menus.test.ts`,
-`desktop.test.ts` (closing asks when a program runs), `drop.test.ts`,
+`desktop.test.ts` (closing at once, terminals ending after the time to undo), `drop.test.ts`,
 `codePanes.test.ts` (paths from a terminal opened in panes beside it). In
 headless Chromium against a dev core: a shell
 with colors, 256 and true colors, box drawing, CJK and emoji; typing; vim
@@ -255,4 +436,9 @@ with colors, 256 and true colors, box drawing, CJK and emoji; typing; vim
 tabs and workspaces; find; selection and copy; the wheel in the
 scrollback; font size and a palette color changed live; WebGL and Canvas 2D
 (WebGL disabled, pixel ratio 2); an agent's states in the sidebar; and a
-flood of 200 000 lines without a dropped frame.
+flood of 200 000 lines without a dropped frame. With Claude Code 2.1.329
+on a dev core and `performance.keptTerminals` 0, so that its pane was
+unmounted when another tab was shown: the terminal's record stayed 127x38
+and Claude Code's view came back at the same rows at three positions, one
+of which went to the end before. The core's side is tested in
+`internal/server/term_test.go` ([22](22-terminal-protocol.md)).

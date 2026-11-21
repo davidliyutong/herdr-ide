@@ -1,5 +1,6 @@
 // Context menus of pane headers (also their "more" button), tabs,
-// workspaces, machines and the terminals' text. They call the same commands as the buttons and bindings;
+// workspaces, machines and the terminals' text, and of several tabs,
+// workspaces or machines selected together (state/multiSelect.ts). They call the same commands as the buttons and bindings;
 // read-only mode has no items that change anything (the terminals' text
 // keeps copying and opening links), so elsewhere the browser's menu shows.
 
@@ -23,7 +24,10 @@ import {
   Link,
   Maximize2,
   Minimize2,
+  PanelRight,
   Pencil,
+  Pin,
+  PinOff,
   Play,
   Plus,
   Power,
@@ -34,22 +38,27 @@ import {
   ServerPlus,
   Settings,
   Square,
+  SquareTerminal,
   Trash2,
   Wrench,
   X,
 } from 'lucide-react';
 import { actions, current, workspaceTitle } from './actions';
 import { CodeIcon } from './components/icons';
-import type { MenuEntry } from './contextMenu';
+import { isPluginOn, newTabGroups, paneView } from './plugins/registry';
+import { openMenu, type MenuEntry } from './contextMenu';
 import { downloadDialog } from './dialog';
 import { canDownload, downloadPath } from './download';
-import { t } from './i18n';
+import { t, type MessageKey } from './i18n';
 import { keyHint } from './keymap';
-import { mediaExt, openLink, resolvePath, safeUrl, type LinkContext } from './terminal/links';
+import { mediaExt, resolvePath, safeUrl, type LinkContext } from './terminal/links';
+import { openLink } from './terminal/openLink';
 import { useStore } from './state/store';
 import { conn } from './lib/conn';
 import { terms } from './state/terms';
 import * as L from './term/layout';
+import { tabId } from './state/multiSelect';
+import { moveToSidebar, panelOfView } from './panelPanes';
 
 /** A command's key, as menu items show it; none when it is unbound. */
 const hint = (action: string) => keyHint(action) || undefined;
@@ -58,6 +67,31 @@ const hint = (action: string) => keyHint(action) || undefined;
 const hintIf = (current: boolean, action: string) => (current ? hint(action) : undefined);
 
 const workspaceOf = (m: string, ws: string) => terms.layout(m)?.workspaces.find((w) => w.id === ws);
+
+/** The new-tab button's menu: the kinds of tab, Terminal first, then what
+ * each plugin that is on offers (plugin order, a separator between
+ * plugins). The tab opens in workspace ws of machine m. */
+export function newTabMenu(m: string, ws: string): MenuEntry[] {
+  if (useStore.getState().readOnly) return [];
+  const out: MenuEntry[] = [
+    { label: t('tab.newKind.terminal'), icon: <SquareTerminal />, hint: hint('tab.new'), run: () => void actions.newTab(m, ws) },
+  ];
+  for (const group of newTabGroups(m)) {
+    out.push('sep');
+    for (const item of group) out.push({ label: t(item.title), icon: <item.icon />, run: () => void item.run(m, ws) });
+  }
+  return out;
+}
+
+/** The entries a plugin's pane adds to its header's and tab's menus
+ * (PaneViewDef.menu), with a separator after them; none while its plugin
+ * is off. */
+function viewEntries(m: string, leaf: L.Leaf | null | undefined): MenuEntry[] {
+  if (!leaf || !L.isPluginLeaf(leaf)) return [];
+  const { def, on } = paneView(leaf.view.plugin, leaf.view.kind);
+  const own = on ? (def?.menu?.(m, leaf.view) ?? []) : [];
+  return own.length ? [...own, 'sep'] : [];
+}
 
 /** A pane's menu: what it is (a terminal's name, VS Code's window, a
  * preview's file), splitting it (a new terminal in its directory), showing
@@ -95,7 +129,7 @@ export function paneMenu(m: string, pane: string): MenuEntry[] {
     label: t('menu.moveToWorkspace'),
     icon: <ArrowRightLeft />,
     submenu: [
-      ...others.map((w) => ({ label: workspaceTitle(m, w), run: () => actions.movePaneToWorkspace(m, pane, w.id) })),
+      ...others.map((w) => ({ label: workspaceTitle(m, w), keywords: w.cwd, run: () => actions.movePaneToWorkspace(m, pane, w.id) })),
       ...(others.length ? ['sep' as const] : []),
       { label: t('command.workspace.new'), icon: <FolderPlus />, run: () => void actions.movePaneToNewWorkspace(m, pane) },
     ],
@@ -107,8 +141,10 @@ export function paneMenu(m: string, pane: string): MenuEntry[] {
     danger: true,
     run: () => void actions.closePane(m, pane),
   };
+  const code = isPluginOn('vscode');
   if (leaf && L.isCodeLeaf(leaf)) {
     const machine = s.machines[m]?.label ?? m;
+    if (!code) return [...arrange, 'sep', close];
     return [
       { label: t('code.reload'), icon: <RotateCw />, run: () => actions.reloadCode(m, leaf.code.id) },
       'sep',
@@ -119,10 +155,19 @@ export function paneMenu(m: string, pane: string): MenuEntry[] {
       close,
     ];
   }
+  if (leaf && L.isPluginLeaf(leaf)) {
+    const view = leaf.view;
+    const toSidebar: MenuEntry[] = panelOfView(view)
+      ? [{ label: t('plugins.moveToSidebar'), icon: <PanelRight />, run: () => void moveToSidebar(m, pane, view) }, 'sep']
+      : [];
+    return [...viewEntries(m, leaf), ...toSidebar, ...arrange, 'sep', close];
+  }
   if (leaf && L.isPreviewLeaf(leaf)) {
     const path = leaf.preview.path;
     return [
-      { label: t('preview.openInCode'), icon: <CodeIcon />, run: () => void actions.openInCode(m, path, 1, undefined, pane) },
+      ...(code
+        ? [{ label: t('preview.openInCode'), icon: <CodeIcon />, run: () => void actions.openInCode(m, path, 1, undefined, pane) }]
+        : []),
       ...(canDownload(m) ? [{ label: t('preview.download'), icon: <Download />, run: () => void downloadPath(m, path) }] : []),
       'sep',
       ...arrange,
@@ -132,19 +177,28 @@ export function paneMenu(m: string, pane: string): MenuEntry[] {
   }
   const cwd = terms.directory(m, pane);
   return [
-    { label: t('menu.renamePane'), icon: <Pencil />, run: () => actions.startRename('pane', m, pane) },
+    {
+      label: t('command.pane.rename'),
+      hint: hintIf(current()?.focused === pane && current()?.m === m, 'pane.rename'),
+      icon: <Pencil />,
+      run: () => actions.startRename('pane', m, pane),
+    },
     'sep',
     ...arrange,
     'sep',
-    { label: t('command.code.open'), hint: hint('code.open'), icon: <CodeIcon />, run: () => void actions.openCode(m, cwd) },
-    { label: t('command.code.diff'), hint: hint('code.diff'), icon: <FileDiff />, run: () => void actions.openDiff(m, cwd, pane) },
-    {
-      label: t('command.code.gitGraph'),
-      hint: hint('code.gitGraph'),
-      icon: <GitGraph />,
-      run: () => void actions.openGitGraph(m, cwd, pane),
-    },
-    'sep',
+    ...(code
+      ? ([
+          { label: t('command.code.open'), hint: hint('code.open'), icon: <CodeIcon />, run: () => void actions.openCode(m, cwd) },
+          { label: t('command.code.diff'), hint: hint('code.diff'), icon: <FileDiff />, run: () => void actions.openDiff(m, cwd, pane) },
+          {
+            label: t('command.code.gitGraph'),
+            hint: hint('code.gitGraph'),
+            icon: <GitGraph />,
+            run: () => void actions.openGitGraph(m, cwd, pane),
+          },
+          'sep',
+        ] satisfies MenuEntry[])
+      : []),
     close,
   ];
 }
@@ -181,7 +235,7 @@ export function surfaceMenu(o: {
       icon: <Eye />,
       run: () => void actions.openPreview(o.ctx.m, r.path, o.ctx.pane),
     });
-    if (!mediaExt.test(r.path))
+    if (!mediaExt.test(r.path) && isPluginOn('vscode'))
       out.push({
         label: t('link.menuCode', { name }),
         icon: <CodeIcon />,
@@ -291,7 +345,90 @@ export function machineMenu(m: string): MenuEntry[] {
   ];
 }
 
-/** A tab's menu: rename, new tab, move left or right, close. */
+/** Moving tabs (by their first panes) to another workspace of their
+ * machine, or into a new one. */
+function moveTabsSubmenu(m: string, ws: string, keys: string[]): MenuEntry[] {
+  const others = (terms.layout(m)?.workspaces ?? []).filter((w) => w.id !== ws);
+  return [
+    ...others.map((w) => ({ label: workspaceTitle(m, w), keywords: w.cwd, run: () => actions.moveTabsToWorkspace(m, keys, w.id) })),
+    ...(others.length ? ['sep' as const] : []),
+    { label: t('command.workspace.new'), icon: <FolderPlus />, run: () => void actions.moveTabsToNewWorkspace(m, keys) },
+  ];
+}
+
+/** The menu of several tabs of a workspace selected together: move them
+ * to another workspace, close them (one undo). */
+export function tabsMenu(m: string, ws: string, keys: string[]): MenuEntry[] {
+  if (useStore.getState().readOnly || !workspaceOf(m, ws)) return [];
+  return [
+    { label: t('menu.moveToWorkspace'), icon: <ArrowRightLeft />, submenu: moveTabsSubmenu(m, ws, keys) },
+    'sep',
+    { label: t('menu.closeTabs', { n: keys.length }), icon: <X />, danger: true, run: () => void actions.closeTabs(m, keys) },
+  ];
+}
+
+/** The menu of several workspaces of a machine selected together: close them (asking once). */
+export function workspacesMenu(m: string, ids: string[]): MenuEntry[] {
+  if (useStore.getState().readOnly || !terms.layout(m)) return [];
+  return [
+    {
+      label: t('menu.closeWorkspaces', { n: ids.length }),
+      icon: <X />,
+      danger: true,
+      run: () => void actions.closeWorkspaces(m, ids),
+    },
+  ];
+}
+
+/** The menu of several machines selected together: their connections
+ * (enable, retry, disable; each item counting the machines it acts on)
+ * and removing the SSH ones, asking once. */
+export function machinesMenu(ids: string[]): MenuEntry[] {
+  const s = useStore.getState();
+  if (s.readOnly) return [];
+  const list = ids.map((id) => s.machines[id]).filter((st) => st && !st.code);
+  const off = list.filter((st) => st.status === 'disabled').map((st) => st.id);
+  const on = list.filter((st) => st.status !== 'disabled').map((st) => st.id);
+  const failed = list.filter((st) => st.status === 'error' || st.status === 'auth_required').map((st) => st.id);
+  const ssh = ids.filter((id) => s.machines[id]?.kind === 'ssh');
+  const count = (n: number, one: MessageKey, many: MessageKey) => (n === 1 ? t(one) : t(many, { n }));
+  return [
+    ...(failed.length
+      ? [{ label: count(failed.length, 'sidebar.retry', 'menu.retryMachines'), icon: <RotateCw />, run: () => failed.forEach(conn.retry) }]
+      : []),
+    ...(off.length
+      ? [
+          {
+            label: count(off.length, 'menu.enableMachine', 'menu.enableMachines'),
+            icon: <Power />,
+            run: () => void actions.setMachinesEnabled(off, true),
+          },
+        ]
+      : []),
+    ...(on.length
+      ? [
+          {
+            label: count(on.length, 'menu.disableMachine', 'menu.disableMachines'),
+            icon: <PowerOff />,
+            run: () => void actions.setMachinesEnabled(on, false),
+          },
+        ]
+      : []),
+    'sep',
+    ...(ssh.length
+      ? [
+          {
+            label: count(ssh.length, 'menu.removeMachine', 'menu.removeMachines'),
+            icon: <Trash2 />,
+            danger: true,
+            run: () => void actions.removeMachines(ssh),
+          },
+        ]
+      : []),
+  ];
+}
+
+/** A tab's menu: rename, new tab, move left or right or to another workspace, close. */
 export function tabMenu(m: string, ws: string, index: number): MenuEntry[] {
   const s = useStore.getState();
   const w = workspaceOf(m, ws);
@@ -299,24 +436,38 @@ export function tabMenu(m: string, ws: string, index: number): MenuEntry[] {
   const c = current();
   const isCurrent = c?.m === m && c.ws?.id === ws && c.tabIndex === index;
   const n = w.tabs.length;
+  const pinned = !!w.tabs[index]?.pinned;
+  // Close Others and Close to the Right leave pinned tabs.
+  const others = w.tabs.some((x, i) => i !== index && !x.pinned);
+  const right = w.tabs.some((x, i) => i > index && !x.pinned);
   // A move uses the position when it runs: another client may have moved tabs.
   const move = (by: -1 | 1) => () => {
     const tab = w.tabs[index];
     const now = workspaceOf(m, ws)?.tabs.indexOf(tab) ?? -1;
     if (now >= 0) terms.mutate(m, (l) => L.moveTab(l, ws, now, now + by));
   };
+  const shown = w.tabs[index];
   return [
+    // What the pane the tab shows adds (an editor's file).
+    ...viewEntries(m, shown ? L.leafOf(shown.root, shown.focused) : null),
     {
       label: t('command.tab.rename'),
       hint: hintIf(isCurrent, 'tab.rename'),
       icon: <Pencil />,
       run: () => actions.startRename('tab', m, `${ws}:${index}`),
     },
+    {
+      label: t(pinned ? 'command.tab.unpin' : 'command.tab.pin'),
+      hint: hintIf(isCurrent, pinned ? 'tab.unpin' : 'tab.pin'),
+      icon: pinned ? <PinOff /> : <Pin />,
+      run: () => actions.pinTab(m, ws, index, !pinned),
+    },
     'sep',
     { label: t('command.tab.new'), hint: hint('tab.new'), icon: <Plus />, run: () => void actions.newTab(m, ws) },
     'sep',
     { label: t('menu.moveLeft'), icon: <ArrowLeft />, disabled: index <= 0, run: move(-1) },
     { label: t('menu.moveRight'), icon: <ArrowRight />, disabled: index >= n - 1, run: move(1) },
+    { label: t('menu.moveToWorkspace'), icon: <ArrowRightLeft />, submenu: moveTabsSubmenu(m, ws, [tabId(w.tabs[index])]) },
     'sep',
     {
       label: t('command.tab.close'),
@@ -324,6 +475,22 @@ export function tabMenu(m: string, ws: string, index: number): MenuEntry[] {
       icon: <X />,
       danger: true,
       run: () => void actions.closeTab(m, ws, index),
+    },
+    {
+      label: t('command.tab.closeOthers'),
+      hint: hintIf(isCurrent, 'tab.closeOthers'),
+      icon: <X />,
+      danger: true,
+      disabled: !others,
+      run: () => void actions.closeTabsBeside(m, ws, index, 'others'),
+    },
+    {
+      label: t('command.tab.closeRight'),
+      hint: hintIf(isCurrent, 'tab.closeRight'),
+      icon: <X />,
+      danger: true,
+      disabled: !right,
+      run: () => void actions.closeTabsBeside(m, ws, index, 'right'),
     },
   ];
 }
@@ -362,5 +529,29 @@ export function workspaceMenu(m: string, ws: string): MenuEntry[] {
       danger: true,
       run: () => void actions.closeWorkspace(m, ws),
     },
+    {
+      label: t('command.workspace.closeOthers'),
+      hint: hintIf(isCurrent, 'workspace.closeOthers'),
+      icon: <X />,
+      danger: true,
+      disabled: n < 2,
+      run: () => void actions.closeOtherWorkspaces(m, ws),
+    },
   ];
+}
+
+/** Opens a pane's menu at its header (pane.actions), or in the middle of
+ * the window when the header is not drawn. */
+export function openPaneMenu(m: string, pane: string) {
+  const header = document.querySelector(`.pane-header[data-m="${CSS.escape(m)}"][data-pane="${CSS.escape(pane)}"]`);
+  const r = header?.getBoundingClientRect();
+  openMenu(
+    {
+      clientX: r ? r.left + 8 : window.innerWidth / 2,
+      clientY: r ? r.bottom : window.innerHeight / 3,
+      preventDefault() {},
+      stopPropagation() {},
+    },
+    paneMenu(m, pane),
+  );
 }

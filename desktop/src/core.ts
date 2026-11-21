@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { posix } from 'node:path';
 import { APP_SLUG } from '../../web/src/brand';
 import type { MessageKey } from '../../web/src/i18n/en';
@@ -44,6 +45,59 @@ export function coreArgs(instance: string, port: number): string[] {
   ];
 }
 
+// The desktop app's token of a launch tells the core which requests are
+// its windows' (internal/server/client.go): VS Code has a switch for the
+// desktop app and one for browsers, and the core applies the requesting
+// client's. The token goes to the core on stdin, the first line of
+// --parent-stdio (never in its environment, which terminals, agents and
+// code-server inherit), and to the app's own session as a cookie for the
+// core's origin, which every request of its windows then carries.
+
+/** The cookie's name; the core's DesktopCookie. */
+export const DESKTOP_COOKIE = `${APP_SLUG}-desktop`;
+
+/** A new token: 32 random bytes as hex, for one launch. */
+export function desktopToken(random: (n: number) => Buffer = randomBytes): string {
+  return random(32).toString('hex');
+}
+
+/** A new key for the system's prompts (verify.ts): 32 random bytes as hex,
+ * for one launch. Unlike the token it is sent to the core only in the
+ * hello and kept in the main process: never in a cookie, an environment
+ * variable, an argument or a log. */
+export function verifyKey(random: (n: number) => Buffer = randomBytes): string {
+  return random(32).toString('hex');
+}
+
+/** The launcher's hello, the first line the core reads on stdin. */
+export function coreHello(token: string, verifyKey = ''): string {
+  return (
+    JSON.stringify({
+      ...(token && { desktop_token: token }),
+      ...(verifyKey && { verify_key: verifyKey }),
+    }) + '\n'
+  );
+}
+
+/** What Electron's cookies.set gets for the token: the core's origin only
+ * (host-only: no domain; the whole site: path /), HttpOnly so that no
+ * script of the page or of VS Code reads it, SameSite=Strict, and a
+ * session cookie (no expiry), gone when the app quits. */
+export function desktopCookie(origin: string, token: string) {
+  const url = new URL(origin);
+  if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || url.origin !== origin)
+    throw new DesktopError('desktop.coreBadReady', origin);
+  return {
+    url: `${origin}/`,
+    name: DESKTOP_COOKIE,
+    value: token,
+    path: '/',
+    secure: false,
+    httpOnly: true,
+    sameSite: 'strict' as const,
+  };
+}
+
 export function coreEnv(env: NodeJS.ProcessEnv, home: string, platform: Platform): NodeJS.ProcessEnv {
   // Windows keeps its Path as it is (its name differs in case, which a copy
   // of the environment would duplicate).
@@ -75,11 +129,25 @@ export class CoreProcess {
   }
 
   // port is the one passed in --listen; 0 accepts the port the core chose.
-  async start(binary: string, args: string[], port: number, env: NodeJS.ProcessEnv, cwd: string, onExit: () => void): Promise<string> {
+  // token and verifyKey are the desktop app's of this launch, sent in the
+  // hello.
+  async start(
+    binary: string,
+    args: string[],
+    port: number,
+    env: NodeJS.ProcessEnv,
+    cwd: string,
+    onExit: () => void,
+    token = '',
+    verifyKey = '',
+  ): Promise<string> {
     // windowsHide: the core is a console program, which would get a window.
     const child = spawn(binary, args, { env, cwd, stdio: 'pipe', shell: false, windowsHide: true });
     this.child = child;
     child.stdin.on('error', () => {});
+    // The core reads the hello before it serves; stdin stays open (its
+    // end stops the core).
+    child.stdin.write(coreHello(token, verifyKey));
     child.stderr.on('data', (data: Buffer) => {
       this.stderr = (this.stderr + data.toString()).slice(-16_384);
       process.stderr.write(data);

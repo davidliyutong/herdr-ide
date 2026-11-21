@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -135,6 +136,65 @@ func TestDownload(t *testing.T) {
 	}
 	if !strings.Contains(audit.String(), `"event":"file.download"`) {
 		t.Fatalf("no audit record: %s", audit.String())
+	}
+}
+
+// /file answers 404 only for a path that is not there: a file the agent
+// cannot stat for another reason is not taken for a new one (the editor
+// would offer to create it).
+func TestFileStatFailures(t *testing.T) {
+	mg, _, logger := agentMachine(t)
+	srv := httptest.NewServer(New(mg, Options{Logger: logger}).Handler())
+	defer srv.Close()
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0o644)
+	locked := filepath.Join(dir, "locked")
+	os.Mkdir(locked, 0o700)
+	os.WriteFile(filepath.Join(locked, "f"), []byte("f"), 0o644)
+	os.Chmod(locked, 0)
+	defer os.Chmod(locked, 0o700)
+	head := func(p string) int {
+		t.Helper()
+		res, err := http.Head(srv.URL + "/api/m/x/file?" + url.Values{"path": {p}}.Encode())
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		return res.StatusCode
+	}
+	want := map[string]int{"a.txt": 200, "missing": 404, "a.txt/below": 404}
+	if os.Geteuid() != 0 {
+		want["locked/f"] = 403
+	}
+	for p, code := range want {
+		if got := head(filepath.Join(dir, p)); got != code {
+			t.Errorf("%s: %d, want %d", p, got, code)
+		}
+	}
+}
+
+func TestStatFailure(t *testing.T) {
+	failed := errors.New("agent fs.stat: failed")
+	for _, c := range []struct {
+		rep  *agentproto.Reply
+		err  error
+		want int
+	}{
+		{nil, machines.ErrNotConnected, 502},
+		{nil, context.DeadlineExceeded, 502},
+		{&agentproto.Reply{Code: "not_found"}, failed, 404},
+		{&agentproto.Reply{Code: "denied"}, failed, 403},
+		{&agentproto.Reply{Error: "lstat /x: input/output error"}, failed, 502},
+		// Agents from before the codes.
+		{&agentproto.Reply{Error: "lstat /x: no such file or directory"}, failed, 404},
+		{&agentproto.Reply{Error: "lstat /x/y: not a directory"}, failed, 404},
+		{&agentproto.Reply{Error: "lstat /x: permission denied"}, failed, 403},
+		// Answered, without a stat.
+		{&agentproto.Reply{OK: true}, failed, 502},
+	} {
+		if got := statFailure(c.rep, c.err); got != c.want {
+			t.Errorf("%+v %v: %d, want %d", c.rep, c.err, got, c.want)
+		}
 	}
 }
 
@@ -513,4 +573,44 @@ func TestDownloadEdges(t *testing.T) {
 	if e := final("left-0001"); e.State != "cancelled" {
 		t.Fatalf("browser gone during the stat: %+v", e)
 	}
+}
+
+// VS Code's key for closing in a window without editors reaches the pages as
+// bridge.close, naming the window; before its hello no page could tell it.
+// The extension's key for leaving VS Code reaches them as bridge.leave.
+func TestBridgeClose(t *testing.T) {
+	s := newTestServer()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c := &wsClient{s: s, ctx: ctx, cancel: cancel, send: make(chan []byte, 8)}
+	s.clients[c] = true
+	mc := machines.NewManager([]machines.Spec{{ID: "m", Label: "m", Kind: machines.KindSSH, Target: "m"}}, nil, log.New(io.Discard, "", 0)).Get("m")
+	a, b := net.Pipe()
+	go s.bridge.serve(mc, a)
+	r := bufio.NewReader(b)
+	if _, err := r.ReadString('\n'); err != nil { // the bridge's reply
+		t.Fatal(err)
+	}
+	b.Write([]byte(`{"type":"closePane"}` + "\n"))
+	b.Write([]byte(`{"type":"hello","id":"w1","folders":["/srv"]}` + "\n"))
+	b.Write([]byte(`{"type":"closePane"}` + "\n"))
+	select {
+	case m := <-c.send:
+		if string(m) != `{"folders":["/srv"],"m":"m","t":"bridge.close","window":"w1"}` {
+			t.Fatalf("got %s", m)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no bridge.close")
+	}
+	// The key that gives the keyboard back to the page: bridge.leave.
+	b.Write([]byte(`{"type":"leave"}` + "\n"))
+	select {
+	case m := <-c.send:
+		if string(m) != `{"folders":["/srv"],"m":"m","t":"bridge.leave","window":"w1"}` {
+			t.Fatalf("got %s", m)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no bridge.leave")
+	}
+	b.Close()
 }

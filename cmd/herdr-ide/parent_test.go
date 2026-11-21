@@ -1,6 +1,9 @@
+//go:build !machine
+
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -8,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -65,6 +69,44 @@ func TestBrokenPipesDoNotKill(t *testing.T) {
 	cmd.Stdout = w
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("child with a broken stdout: %v", err)
+	}
+}
+
+// The launcher's hello is its first line on stdin: the desktop app's token
+// of this launch, which the core takes from nowhere else (no environment
+// variable that terminals, agents or code-server would inherit). What
+// follows it stays in the reader that waits for stdin to close.
+func TestReadHello(t *testing.T) {
+	token := strings.Repeat("0f", 32)
+	in := bufio.NewReaderSize(strings.NewReader(`{"desktop_token":"`+token+`"}`+"\nmore\n"), maxHello)
+	h, err := readHello(in)
+	if err != nil || h.DesktopToken != token {
+		t.Fatalf("hello %+v, %v", h, err)
+	}
+	if rest, _ := io.ReadAll(in); string(rest) != "more\n" {
+		t.Fatalf("after the hello: %q", rest)
+	}
+	if h, err := readHello(bufio.NewReader(strings.NewReader("{}\n"))); err != nil || h.DesktopToken != "" {
+		t.Fatalf("a launcher without a token: %+v, %v", h, err)
+	}
+	// The key the shell signs the user's presence with comes the same way.
+	key := strings.Repeat("7a", 32)
+	if h, err := readHello(bufio.NewReader(strings.NewReader(`{"desktop_token":"` + token + `","verify_key":"` + key + `"}` + "\n"))); err != nil || h.VerifyKey != key {
+		t.Fatalf("a hello with a verify key: %+v, %v", h, err)
+	}
+	for name, line := range map[string]string{
+		"gone":          "",
+		"unfinished":    `{"desktop_token":"` + token + `"}`,
+		"not JSON":      "hello\n",
+		"short token":   `{"desktop_token":"abc"}` + "\n",
+		"short key":     `{"desktop_token":"` + token + `","verify_key":"abc"}` + "\n",
+		"key is token":  `{"desktop_token":"` + token + `","verify_key":"` + token + `"}` + "\n",
+		"cookie syntax": `{"desktop_token":"` + token + `; x=1"}` + "\n",
+		"too long":      `{"desktop_token":"` + strings.Repeat("a", maxHello) + `"}` + "\n",
+	} {
+		if h, err := readHello(bufio.NewReaderSize(strings.NewReader(line), maxHello)); err == nil {
+			t.Errorf("%s: accepted %+v", name, h)
+		}
 	}
 }
 

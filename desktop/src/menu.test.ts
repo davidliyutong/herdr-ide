@@ -97,6 +97,12 @@ test('items show the first single-stroke key of their command and run it', () =>
   assert.equal(byCommand('tab.close').accelerator, 'Super+Shift+W');
   assert.equal(byCommand('pane.focusLeft').accelerator, 'Super+Alt+Left');
   assert.equal(byCommand('pane.zoom').accelerator, 'Super+Shift+Enter');
+  assert.equal(byCommand('pane.back').accelerator, 'Super+[');
+  assert.equal(byCommand('pane.forward').registerAccelerator, true);
+  // Cmd+Z is Edit's Undo in text fields and VS Code: the item only shows it,
+  // and the page takes it in a terminal.
+  assert.equal(byCommand('pane.undoClose').accelerator, 'Super+Z');
+  assert.equal(byCommand('pane.undoClose').registerAccelerator, false);
   // The window's zoom, shown with the key it is known by (⌘+).
   assert.equal(byCommand('view.zoomIn').label, 'Zoom In');
   assert.equal(byCommand('view.zoomIn').accelerator, 'Super+Plus');

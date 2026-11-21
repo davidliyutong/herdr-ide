@@ -28,6 +28,57 @@ export interface DesktopShell {
   setDisabledCommands(commands: string[]): void;
   /** macOS only: Full Disk Access, which the user grants in System Settings. */
   privacy?: DesktopPrivacy;
+  /** macOS only: integrated window title bar geometry and full-screen state so
+   * the UI reserves space for the traffic lights in its top header row. */
+  titlebar?: DesktopTitlebar;
+  /** Tells the shell how many panes have unsaved changes: while any has,
+   * closing the main window or quitting asks the page (onCloseRequest). */
+  setUnsaved(count: number): void;
+  /** Calls fn when the main window is about to close while panes have
+   * unsaved changes; the page answers with answerClose. Returns a function
+   * that stops it. */
+  onCloseRequest(fn: () => void): () => void;
+  /** The page's answer: it shows the question (at once), the window may
+   * close, or it stays. */
+  answerClose(answer: 'asking' | 'close' | 'stay'): void;
+  /** The system's own prompt (Touch ID, Windows Hello) that stands in for
+   * the vault's passphrase. */
+  verifyUser?: DesktopVerifyUser;
+  /** The browser panes' webviews (plugins/browser): present when the shell
+   * lets the page show any web address in an Electron <webview>. */
+  browser?: DesktopBrowser;
+  /** What the app's own processes use now, for the settings' Performance
+   * page: Electron's count of each (the window's page, the GPU process, the
+   * shell itself, helpers); the core is not among them. */
+  metrics?(): Promise<ProcessUsage[]>;
+}
+
+/** One process of the desktop app. */
+export interface ProcessUsage {
+  /** Electron's kind of process: "Browser" (the shell), "Tab" (a page),
+   * "GPU", "Utility"… */
+  type: string;
+  /** A helper's name, when it has one. */
+  name: string;
+  /** Share of one processor since the last asking, in percent. */
+  cpu: number;
+  /** Memory in use, in bytes. */
+  memory: number;
+}
+
+export interface DesktopBrowser {
+  /** Calls fn with the address a page in a webview opened in a window of
+   * its own (a popup); the page shows it in a new browser tab. Returns a
+   * function that stops it. */
+  onOpen(fn: (url: string) => void): () => void;
+}
+
+export interface DesktopVerifyUser {
+  /** Which prompt the app has, if any. */
+  available(): Promise<'touchid' | 'hello' | null>;
+  /** Prompts the user for the nonce's purpose; the proof's MAC (hex), or
+   * null when the user did not confirm. */
+  prove(nonce: string): Promise<string | null>;
 }
 
 /** What the shell does for Full Disk Access; nothing is passed. */
@@ -40,6 +91,21 @@ export interface DesktopPrivacy {
   /** Quits the app and opens it again, as macOS applies a grant to the
    * app's processes started afterwards. */
   relaunch(): void;
+}
+
+/** Integrated window title bar metadata (macOS). */
+export interface DesktopTitlebar {
+  /** Which platform's integrated chrome the window uses. */
+  kind: 'mac';
+  /** Unzoomed window points to reserve on the left for the traffic lights. */
+  inset: number;
+  /** Minimum header row height in unzoomed window points. */
+  minHeight: number;
+  /** Extra top breathing space in unzoomed window points. */
+  topSpace: number;
+  /** Calls fn when the window enters or leaves native full screen (and once
+   * with the current state on subscribe); returns a function that stops it. */
+  onFullScreen(fn: (fullScreen: boolean) => void): () => void;
 }
 
 export const desktopShell: DesktopShell | undefined = (globalThis as { desktopShell?: DesktopShell }).desktopShell;

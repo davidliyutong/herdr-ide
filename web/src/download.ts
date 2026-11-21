@@ -13,7 +13,7 @@
 // per browser (the last HISTORY_MAX, in localStorage; names and paths, no
 // contents).
 
-import { desktopShell } from './desktop';
+import { desktopShell } from './shell';
 import { downloadUrl } from './lib/files';
 import { frameOfWindow } from './codeFrames';
 import { useStore } from './state/store';
@@ -108,7 +108,8 @@ function end(id: string, p: Pick<Download, 'status'> & Partial<Download>) {
   entry.speed = entry.status === 'done' && ended > x.started ? (entry.sent * 1000) / (ended - x.started) : 0;
   if (entry.status === 'done') entry.size = entry.sent;
   list.archive(entry);
-  if (entry.status === 'failed') useStore.getState().toast(t('download.failed', { name: entry.name, error: downloadError(entry.error) }));
+  if (entry.status === 'failed')
+    useStore.getState().toast(t('download.failed', { name: entry.name, error: downloadError(entry.error) }), undefined, undefined, 'error');
 }
 
 /** An id the core accepts (internal/server/downloads.go), random enough
@@ -256,7 +257,7 @@ export async function downloadPath(m: string, path: string) {
     const r = await fetch(downloadUrl(m, [path]), { method: 'HEAD' });
     if (!r.ok) throw new Error(r.status === 404 ? 'not found' : r.statusText || `HTTP ${r.status}`);
   } catch (e) {
-    useStore.getState().toast(t('download.failed', { name, error: (e as Error).message }));
+    useStore.getState().toast(t('download.failed', { name, error: (e as Error).message }), undefined, undefined, 'error');
     return;
   }
   startDownload(m, [path]);

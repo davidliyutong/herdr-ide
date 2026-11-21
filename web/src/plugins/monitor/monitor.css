@@ -1,0 +1,690 @@
+/* System Monitor & Task Manager plugin (web/src/plugins/monitor):
+   shared DashboardCard (Cmd+hover on sidebar machines & upward-floating status
+   bar menu) and the responsive Tern-inspired Task Manager panel/pane. */
+
+.monitor-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.monitor-spin {
+  animation: monitor-spin 0.9s linear infinite;
+}
+@keyframes monitor-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.level-warn {
+  color: var(--warning);
+}
+.level-hot {
+  color: var(--error);
+}
+
+/* ---- Status bar item & upward-floating dashboard ---- */
+.monitor-status-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: var(--ctl-sm);
+  min-height: 0;
+  padding: 0 6px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+.monitor-status-item:hover {
+  color: var(--fg);
+  background: var(--bg-3);
+}
+.monitor-status-item .lucide {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+  flex: none;
+}
+.monitor-status-nums {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.monitor-status-metric {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.monitor-status-val {
+  display: inline-block;
+  width: 3.2em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.monitor-dot {
+  opacity: 0.5;
+}
+
+.monitor-popover {
+  width: min(350px, calc(100vw - 16px));
+  max-width: none;
+  max-height: min(76vh, 620px);
+  padding: 0;
+  white-space: normal;
+  pointer-events: auto;
+}
+
+/* ---- Left sidebar Cmd+hover floating dashboard ---- */
+/* Left padding bridges the 8 px visual gap between the sidebar and the card so
+   horizontal pointer movement never drops the hover state. */
+.monitor-hover-card {
+  position: fixed;
+  z-index: 45;
+  padding-left: 8px;
+}
+.monitor-hover-card.no-bridge {
+  padding-left: 0;
+}
+.monitor-hover-surface {
+  width: min(350px, calc(100vw - 16px));
+  max-height: min(78vh, 640px);
+  overflow: auto;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 32px var(--shadow);
+}
+
+/* ---- Shared DashboardCard ---- */
+.monitor-card {
+  display: flex;
+  flex-direction: column;
+  padding: 10px;
+  gap: 10px;
+  color: var(--fg);
+  font-size: var(--fs-md);
+}
+.monitor-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.monitor-card-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.monitor-card-name {
+  font-weight: 600;
+  font-size: var(--fs-base);
+}
+.monitor-card-sub {
+  font-size: var(--fs-xs);
+}
+.monitor-card-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+.monitor-tm-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  font-size: var(--fs-sm);
+}
+.monitor-tm-btn .lucide {
+  width: 12px;
+  height: 12px;
+}
+.monitor-card-empty {
+  padding: 10px 2px;
+  font-size: var(--fs-sm);
+}
+.monitor-error {
+  color: var(--error);
+}
+
+.monitor-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.monitor-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.monitor-sec + .monitor-sec {
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.monitor-sec-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.monitor-sec-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 600;
+  font-size: var(--fs-sm);
+  color: var(--fg);
+}
+.monitor-sec-label .lucide {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+  color: var(--fg-dim);
+}
+.monitor-sec-meta {
+  font-size: var(--fs-xs);
+  margin-left: auto;
+  white-space: nowrap;
+}
+.monitor-sec-val {
+  font-weight: 600;
+  font-size: var(--fs-md);
+  font-variant-numeric: tabular-nums;
+  width: 3.4em;
+  text-align: right;
+  flex: none;
+}
+.monitor-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.monitor-meter {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-3);
+  overflow: hidden;
+}
+.monitor-meter.small {
+  height: 4px;
+  border-radius: 2px;
+}
+.monitor-meter > i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  transition: width 0.25s ease;
+}
+.monitor-spark {
+  width: 52px;
+  height: 14px;
+  flex: none;
+}
+.monitor-subline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- GPU per-item rows ---- */
+.monitor-gpu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.monitor-gpu-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+}
+.monitor-gpu-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  font-size: var(--fs-sm);
+}
+.monitor-gpu-idx {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--accent);
+  flex: none;
+}
+.monitor-gpu-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 500;
+}
+.monitor-chip {
+  flex: none;
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-3);
+  color: var(--fg-dim);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+.monitor-gpu-metric {
+  display: grid;
+  grid-template-columns: 3.1em 1fr auto;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-xs);
+}
+
+/* ---- Network & Disk rows ---- */
+.monitor-net-rates {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+.monitor-net-rx,
+.monitor-net-tx {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.monitor-net-rx .lucide {
+  width: 12px;
+  height: 12px;
+  color: var(--ds-chart-green);
+}
+.monitor-net-tx .lucide {
+  width: 12px;
+  height: 12px;
+  color: var(--ds-chart-blue);
+}
+.monitor-ifaces {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 2px;
+}
+.monitor-iface {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--fs-xs);
+}
+
+.monitor-disk-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.monitor-disk-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.monitor-disk-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-xs);
+}
+.monitor-disk-mount {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+}
+.monitor-disk-pct {
+  min-width: 2.8em;
+  text-align: right;
+  font-weight: 600;
+}
+
+/* ---- Task Manager Panel / Pane ---- */
+.monitor-tm {
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  font-size: var(--fs-md);
+}
+.monitor-tm-empty {
+  padding: 20px 12px;
+  text-align: center;
+  font-size: var(--fs-sm);
+}
+.monitor-tm-err {
+  padding: 4px 10px;
+}
+
+.monitor-tm-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-1);
+}
+.monitor-tm-machine {
+  min-width: 110px;
+  max-width: 180px;
+}
+.monitor-tm-machine-label {
+  font-weight: 600;
+  font-size: var(--fs-sm);
+}
+.monitor-tm-pills {
+  margin-left: auto;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.monitor-pill {
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-3);
+  color: var(--fg-dim);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.monitor-pill.level-warn {
+  color: var(--warning);
+}
+.monitor-pill.level-hot {
+  color: var(--error);
+}
+
+.monitor-tm-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.monitor-search-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.monitor-search-icon {
+  position: absolute;
+  left: 7px;
+  width: 13px;
+  height: 13px;
+  color: var(--fg-mute);
+  pointer-events: none;
+}
+.monitor-search-input {
+  width: 100%;
+  height: var(--ctl);
+  padding: 0 24px 0 25px;
+  font-size: var(--fs-md);
+}
+.monitor-search-clear {
+  position: absolute;
+  right: 2px;
+  width: 20px;
+  height: 20px;
+  min-width: 0;
+  min-height: 0;
+}
+.monitor-tm-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.monitor-seg {
+  display: inline-flex;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.monitor-seg > button {
+  border: none;
+  border-radius: 0;
+  width: 24px;
+  height: 22px;
+  min-width: 0;
+  min-height: 0;
+}
+.monitor-seg > button.active,
+.monitor-tm-controls > button.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.monitor-tm-count {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Process table grid: adapts cleanly between narrow sidebar and wide pane */
+.monitor-tm-cols,
+.monitor-proc-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 54px 50px 66px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+}
+.monitor-tm-cols .col-user,
+.monitor-tm-cols .col-state,
+.monitor-proc-row .col-user,
+.monitor-proc-row .col-state {
+  display: none;
+}
+
+@container (min-width: 460px) {
+  .monitor-tm-cols,
+  .monitor-proc-row {
+    grid-template-columns: minmax(0, 1fr) 60px 84px 44px 56px 76px;
+  }
+  .monitor-tm-cols .col-user,
+  .monitor-tm-cols .col-state,
+  .monitor-proc-row .col-user,
+  .monitor-proc-row .col-state {
+    display: block;
+  }
+}
+
+.monitor-tm-cols {
+  height: 24px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-1);
+  color: var(--fg-dim);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  user-select: none;
+}
+.monitor-col {
+  min-width: 0;
+  text-align: left;
+  white-space: nowrap;
+}
+.monitor-col.col-pid,
+.monitor-col.col-cpu,
+.monitor-col.col-mem {
+  text-align: right;
+  justify-content: flex-end;
+}
+.monitor-col.col-state {
+  text-align: center;
+}
+.monitor-col.sortable {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+.monitor-col.sortable:hover,
+.monitor-col.sortable.active {
+  color: var(--fg);
+}
+.monitor-sort-arrow {
+  font-size: 9px;
+  color: var(--accent);
+}
+
+.monitor-tm-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  outline: none;
+}
+
+.monitor-proc-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  cursor: default;
+  user-select: none;
+  font-size: var(--fs-md);
+  border-bottom: 1px solid transparent;
+}
+.monitor-proc-row:hover {
+  background: var(--bg-2);
+}
+.monitor-proc-row.selected {
+  background: var(--accent-soft);
+}
+.monitor-proc-row.ancestor {
+  opacity: 0.58;
+}
+.monitor-proc-row .col-name {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  height: 100%;
+}
+.monitor-proc-row .col-pid,
+.monitor-proc-row .col-cpu,
+.monitor-proc-row .col-mem {
+  text-align: right;
+  font-size: var(--fs-sm);
+}
+.monitor-proc-row .col-user {
+  font-size: var(--fs-sm);
+}
+.monitor-proc-row .col-state {
+  text-align: center;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+.monitor-state.st-R {
+  color: var(--done);
+  font-weight: 600;
+}
+.monitor-state.st-Z,
+.monitor-state.st-T {
+  color: var(--warning);
+}
+.monitor-proc-name {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.monitor-child-badge {
+  flex: none;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--bg-3);
+  color: var(--fg-dim);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.monitor-proc-actions {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: none;
+  align-items: center;
+  gap: 2px;
+  padding-left: 6px;
+  background: var(--bg-2);
+}
+.monitor-proc-row.selected .monitor-proc-actions {
+  background: var(--bg-3);
+}
+.monitor-proc-row:hover .monitor-proc-actions,
+.monitor-proc-row.selected .monitor-proc-actions {
+  display: inline-flex;
+}
+.monitor-proc-actions .icon {
+  width: 20px;
+  height: 20px;
+  min-width: 0;
+  min-height: 0;
+}
+.monitor-proc-actions .icon.danger:hover {
+  color: var(--error);
+}
+
+/* ---- Process detail footer ---- */
+.monitor-tm-detail {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--line-2);
+  background: var(--bg-1);
+}
+.monitor-tm-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--fs-sm);
+}
+.monitor-tm-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+.monitor-tm-detail-cmd {
+  display: block;
+  max-height: 4.5em;
+  overflow: auto;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  word-break: break-all;
+  user-select: text;
+}

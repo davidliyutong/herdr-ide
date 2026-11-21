@@ -1,0 +1,157 @@
+/* ---------- right sidebar (plugins' panels) ---------- */
+.panel-rail {
+  grid-area: rail;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  /* The first button is centered on the header row beside it. */
+  padding-top: calc((var(--h-header) - var(--ds-size-rail-button)) / 2);
+  background: var(--bg-1);
+  border-left: 1px solid var(--line);
+  min-height: 0;
+}
+.rail-button {
+  position: relative;
+  width: var(--ds-size-rail-button);
+  height: var(--ds-size-rail-button);
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius);
+  color: var(--fg-mute);
+  background: transparent;
+}
+.rail-button:hover {
+  color: var(--fg);
+  background: var(--bg-2);
+}
+.rail-button.active {
+  color: var(--fg);
+  background: var(--bg-3);
+}
+/* The shown panel's button: a bar of the accent on the rail's edge. */
+.rail-button.active::before {
+  content: '';
+  position: absolute;
+  left: calc((var(--ds-size-rail) - var(--ds-size-rail-button)) / -2);
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+.rail-button svg {
+  width: var(--ds-size-rail-icon);
+  height: var(--ds-size-rail-icon);
+  stroke-width: 1.6;
+}
+.panel {
+  grid-area: panel;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  background: var(--bg-1);
+  border-left: 1px solid var(--line);
+}
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  height: var(--h-header);
+  padding: 0 4px 0 12px;
+}
+.panel-title {
+  flex: 1;
+  font-weight: 600;
+  font-size: var(--fs-sm);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+}
+.panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.panel-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  width: 8px;
+  z-index: 6;
+  cursor: col-resize;
+}
+.panel-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+  transition: background 0.12s 0.1s;
+}
+.panel-resizer:hover::after,
+body.resizing .panel-resizer::after {
+  background: var(--accent);
+}
+.panel-backdrop {
+  display: none;
+}
+.plugin-pane {
+  position: relative;
+  flex: 1;
+  display: flex;
+  background: var(--bg);
+  flex-direction: column;
+  min-height: 0;
+  outline: none;
+}
+/* A panel of the right sidebar as a pane (panelPanes.ts): its body as in
+   the sidebar. */
+.panel-pane {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.panel-head .panel-title {
+  cursor: grab;
+}
+.plugin-pane-off {
+  margin: auto;
+  padding: 16px;
+  text-align: center;
+}
+/* A plugin that failed while drawing (components/PluginBoundary.tsx). */
+.plugin-error {
+  margin: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+  color: var(--fg-dim);
+}
+.plugin-error p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.plugin-error-item {
+  display: inline-flex;
+  align-items: center;
+  height: var(--ctl-sm);
+  min-height: 0;
+  padding: 0 6px;
+  border: none;
+  background: transparent;
+  color: var(--error);
+}

@@ -99,6 +99,9 @@ type Machine struct {
 	state   State
 	sess    *transport.Session
 	retryCh chan struct{}
+	// ssh is what the agent said of its ssh session in its last hello
+	// (agentproto.Reply.SSH); it is not part of State, which clients see.
+	ssh string
 	// enabled is the spec's flag as the user last set it; stopRun ends the
 	// connection loop of an enabled machine; enableCh wakes a disabled one
 	// (under mu).
@@ -154,6 +157,21 @@ func (m *Machine) Label() string {
 // Local reports whether this is the machine the core runs on.
 func (m *Machine) Local() bool { return m.spec.Kind == KindLocal }
 
+// SSHConnection is the SSH_CONNECTION of the ssh session the machine's
+// agent runs in, as it last reported it ("" when it did not).
+func (m *Machine) SSHConnection() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.ssh
+}
+
+// Kind returns the machine's kind (KindLocal, KindSSH).
+func (m *Machine) Kind() string { return m.spec.Kind }
+
+// Target returns an ssh machine's target as configured ("" for the local
+// machine).
+func (m *Machine) Target() string { return m.spec.Target }
+
 // StreamHandler handles streams opened by the agent (VS Code bridge).
 type StreamHandler func(m *Machine, conn net.Conn, h agentproto.Header)
 
@@ -204,11 +222,17 @@ var ErrNotConnected = errors.New("machine not connected")
 
 // Open starts an agent stream on this machine.
 func (m *Machine) Open(ctx context.Context, h agentproto.Header) (net.Conn, *agentproto.Reply, error) {
+	return m.OpenWith(ctx, h, nil)
+}
+
+// OpenWith starts an agent stream on this machine with body after the
+// header line (transport.Session.OpenWith).
+func (m *Machine) OpenWith(ctx context.Context, h agentproto.Header, body []byte) (net.Conn, *agentproto.Reply, error) {
 	sess := m.Session()
 	if sess == nil {
 		return nil, nil, ErrNotConnected
 	}
-	return sess.Open(ctx, h)
+	return sess.OpenWith(ctx, h, body)
 }
 
 // Run keeps the machine connected while it is enabled, until ctx ends. A
@@ -365,6 +389,7 @@ func (m *Machine) serve(ctx context.Context, sess *transport.Session, platform s
 	info := rep.Info
 	m.mu.Lock()
 	m.sess = sess
+	m.ssh = rep.SSH
 	m.mu.Unlock()
 	// The agent answered: the machine is ready.
 	m.update(func(st *State) {

@@ -34,6 +34,11 @@
         "command": "herdr-ide.reconnect",
         "title": "%command.reconnect%",
         "category": "herdr-ide"
+      },
+      {
+        "command": "herdr-ide.leave",
+        "title": "%command.leave%",
+        "category": "herdr-ide"
       }
     ],
     "menus": {
@@ -60,6 +65,18 @@
         "key": "ctrl+alt+a",
         "mac": "cmd+alt+a",
         "when": "editorTextFocus"
+      },
+      {
+        "command": "herdr-ide.closePane",
+        "key": "ctrl+w",
+        "mac": "cmd+w",
+        "when": "!editorIsOpen && !multipleEditorGroups"
+      },
+      {
+        "command": "herdr-ide.leave",
+        "key": "ctrl+alt+shift+b",
+        "mac": "ctrl+b",
+        "when": "!terminalFocus"
       }
     ]
   },

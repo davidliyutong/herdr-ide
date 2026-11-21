@@ -1,4 +1,4 @@
-import { Columns2, Ellipsis, FileDiff, GitGraph, Maximize2, Minimize2, RotateCw, Rows2, X } from 'lucide-react';
+import { Columns2, Ellipsis, FileDiff, GitGraph, Maximize2, Minimize2, PanelRight, RotateCw, Rows2, X } from 'lucide-react';
 import { useStore } from '../state/store';
 import { terms } from '../state/terms';
 import * as L from '../term/layout';
@@ -9,22 +9,25 @@ import { openMenu } from '../contextMenu';
 import { paneMenu } from '../menus';
 import { CodeIcon } from './icons';
 import { t } from '../i18n';
+import { usePluginOn } from '../plugins/registry';
+import { moveToSidebar, panelOfView } from '../panelPanes';
 
 /** A pane's commands: a terminal's program windows and its folder in VS Code
  * (folder, changes, Git Graph), reloading VS Code, then split, zoom, the
  * pane's menu and close. A header too narrow for them all hides the less
- * important ones (styles.css) and shows the menu's button, which has them;
+ * important ones (styles/workspace.css) and shows the menu's button, which has them;
  * close always stays. Read-only pages get the program windows only. A press
  * leaves the keyboard where it is. */
 export function PaneActions({ m, pane, leaf, zoomed }: { m: string; pane: string; leaf: L.Leaf; zoomed?: boolean }) {
   const readOnly = useStore((s) => s.readOnly);
+  const code = usePluginOn('vscode');
   const terminal = L.isTerminalLeaf(leaf);
   return (
     <span className="pane-actions" onMouseDown={(e) => (e.target as HTMLElement).closest('button') && e.preventDefault()}>
       {terminal && <PaneGuiButton m={m} terminal={pane} />}
       {!readOnly && (
         <>
-          {terminal && (
+          {terminal && code && (
             <>
               <button
                 className="code"
@@ -53,7 +56,7 @@ export function PaneActions({ m, pane, leaf, zoomed }: { m: string; pane: string
               <span className="sep code" />
             </>
           )}
-          {L.isCodeLeaf(leaf) && (
+          {L.isCodeLeaf(leaf) && code && (
             <button
               className="code"
               title={t('code.reload')}
@@ -61,6 +64,16 @@ export function PaneActions({ m, pane, leaf, zoomed }: { m: string; pane: string
               onClick={() => actions.reloadCode(m, leaf.code.id)}
             >
               <RotateCw />
+            </button>
+          )}
+          {L.isPluginLeaf(leaf) && panelOfView(leaf.view) && (
+            <button
+              className="split"
+              title={t('plugins.moveToSidebar')}
+              aria-label={t('plugins.moveToSidebar')}
+              onClick={() => void moveToSidebar(m, pane, leaf.view)}
+            >
+              <PanelRight />
             </button>
           )}
           <button

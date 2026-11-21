@@ -11,7 +11,11 @@ import { TermConnection } from '../term/connection';
 import { TerminalStore } from '../term/store';
 import { isLive, type BackendState, type TerminalRecord } from '../term/protocol';
 import * as L from '../term/layout';
+import { nextPlace, settled, SETTLE_MS, type Place } from '../term/place';
 import { currentDisplay } from '../appearance';
+import { useStore } from './store';
+import { AGENT_FORGET_MS, endedWithCore, rememberAgents, replaceTerminal, takeResume } from '../restore';
+import { agentOf } from '../lib/machine';
 
 export interface MachineTerms {
   backend?: BackendState;
@@ -27,6 +31,10 @@ interface TermsState {
 }
 
 export const useTerms = create<TermsState>(() => ({ connected: false, machines: {} }));
+
+/** The label of a terminal whose pane was closed: when it ends (Date.now()
+ * in ms); empty or absent for one that is not closing. */
+export const CLOSING_LABEL = 'closing';
 
 /** Where a new terminal starts and how it is placed. */
 export interface RunOptions {
@@ -52,7 +60,29 @@ export class TermModel {
   /** Machines a terminal was asked for before their terminals and layout were ready. */
   private readonly pending = new Map<string, Array<(m: string) => void>>();
   private readonly listeners = new Set<(up: boolean) => void>();
+  /** Called when a machine's terminals are there (again), by machine. */
+  private readonly arrivals = new Map<string, Set<() => void>>();
   private readonly subscribed = new Set<string>();
+  /** Terminals whose pane closed, ending at their deadline, by machine and address. */
+  private readonly closing = new Map<string, { timer: ReturnType<typeof setTimeout>; value: string }>();
+  /** Where each terminal's user is (term/place.ts), by machine and address,
+   * and the timers of programs that may settle where they were first seen. */
+  private readonly places = new Map<string, Place>();
+  private readonly settling = new Map<string, ReturnType<typeof setTimeout>>();
+  /** When each terminal the layout remembers an agent of was first seen without it, by machine and address. */
+  private readonly agentGone = new Map<string, number>();
+  /** Terminals being started again in place of ones that ended with their core, by machine and old address. */
+  private readonly restoring = new Set<string>();
+  /** Terminals started in place of ended ones whose layout is not written
+   * yet, with the ended ones they replace, by machine: the ended one is
+   * removed once a layout naming its replacement is written or read, and
+   * stays to be started again when that layout lost. */
+  private readonly replacements = new Map<string, Map<string, string>>();
+  /** Layout writes started, by machine: a read that a write began during
+   * may be from before it. */
+  private readonly writes = new Map<string, number>();
+  /** Called once a machine's layout as it is now was written (true) or was not, by machine. */
+  private readonly written = new Map<string, Array<(ok: boolean) => void>>();
   private started = false;
 
   constructor(connection: TermConnection) {
@@ -63,6 +93,7 @@ export class TermModel {
         this.loaded.clear();
         this.saving.clear();
         this.dirty.clear();
+        for (const m of [...this.written.keys()]) this.settle(m, false);
       }
       useTerms.setState({ connected: up });
       for (const l of [...this.listeners]) l(up);
@@ -80,6 +111,18 @@ export class TermModel {
   onConnection(fn: (up: boolean) => void): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
+  }
+
+  /** Calls fn whenever a machine's terminals are there: its backend sent
+   * their snapshot, the first time and after the machine or its terminal
+   * core was away, which ends the streams without ending the connection. */
+  onTerminals(m: string, fn: () => void): () => void {
+    const set = this.arrivals.get(m) ?? new Set();
+    this.arrivals.set(m, set.add(fn));
+    return () => {
+      set.delete(fn);
+      if (!set.size && this.arrivals.get(m) === set) this.arrivals.delete(m);
+    };
   }
 
   /** Follows a machine's terminals: the core installs and starts its
@@ -102,6 +145,9 @@ export class TermModel {
 
   /** A machine that is gone: no longer followed. */
   forget(m: string) {
+    this.replacements.delete(m);
+    this.settle(m, false);
+    for (const key of this.agentGone.keys()) if (key.startsWith(`${m}\n`)) this.agentGone.delete(key);
     this.subscribed.delete(m);
     this.connection.unsubscribe(m);
     this.pending.delete(m);
@@ -112,6 +158,7 @@ export class TermModel {
     this.saving.delete(m);
     this.dirty.delete(m);
     this.store.forget(m);
+    this.trackPlaces(m);
     this.publish();
   }
 
@@ -146,7 +193,10 @@ export class TermModel {
     const m = msg.m;
     if (typeof m !== 'string') return;
     this.store.apply(msg);
+    this.trackPlaces(m, msg.t === 'event' && typeof msg.terminal === 'string' ? msg.terminal : undefined);
+    this.watchLabels(m, msg);
     if (msg.t === 'snapshot') {
+      for (const fn of [...(this.arrivals.get(m) ?? [])]) fn();
       this.loadLayout(m, () => {
         const waiting = this.pending.get(m);
         this.pending.delete(m);
@@ -160,23 +210,36 @@ export class TermModel {
         if (!this.saving.has(m) && data.version !== this.versions.get(m)) this.loadLayout(m);
       }
       const address = msg.terminal;
-      if ((msg.type === 'removed' || msg.type === 'finished') && typeof address === 'string') {
+      // A terminal that ends with its core keeps its pane: the layout
+      // brings it back when the core runs again (restore.ts).
+      const kept = msg.type === 'finished' && typeof address === 'string' && endedWithCore(this.store.terminal(m, address));
+      if ((msg.type === 'removed' || msg.type === 'finished') && typeof address === 'string' && !kept) {
         this.mutate(m, (l) => L.closePane(l, address));
         if (msg.type === 'finished') void this.call(m, 'terminal.rm', { terminal: address }).catch(() => {});
       }
     }
+    this.remember(m);
     this.publish();
   }
 
-  /** A layout always has a workspace to open terminals in: one without a
-   * name or a directory, shown as the home directory (L.workspaceTitle). */
-  private ensureWorkspace(l: L.Layout): L.Layout {
-    return l.workspaces.length ? l : L.createWorkspace(l, L.newId(), '');
+  /** A machine whose layout was never written starts with a workspace to
+   * open terminals in: one without a name or a directory, shown as the
+   * home directory (L.workspaceTitle). A layout the user closed every
+   * workspace of stays empty: the next pane opened makes one (mutate). */
+  private firstWorkspace(l: L.Layout, written: boolean): L.Layout {
+    return written || l.workspaces.length ? l : L.createWorkspace(l, L.newId(), '');
   }
 
   private loadLayout(m: string, done?: () => void) {
+    const writes = this.writes.get(m) ?? 0;
     this.call(m, 'doc.get', { name: L.LAYOUT_DOCUMENT }).then(
       (doc) => {
+        // A write of ours is on its way, or began since the read was asked
+        // for: the read may be from before it (calls run at once on the
+        // core) and would end the replacements that write names. Read
+        // again once it is done.
+        if (this.saving.has(m)) return void this.afterWrite(m, () => this.loadLayout(m, done));
+        if ((this.writes.get(m) ?? 0) !== writes) return this.loadLayout(m, done);
         this.versions.set(m, typeof doc.version === 'number' ? doc.version : 0);
         const live = new Set(
           this.store
@@ -185,10 +248,24 @@ export class TermModel {
             .map((r) => r.address),
         );
         const read = L.parseLayout(doc.value);
-        const layout = this.ensureWorkspace(L.pruneLayout(read, live));
+        // Another page's layout won: a terminal this one started in place
+        // of an ended one and that the layout does not name ends again, and
+        // the ended one stays for the layout that names it.
+        const named = new Set(L.layoutTerminals(read));
+        for (const [a, old] of this.replacements.get(m) ?? []) {
+          if (named.has(a)) this.retire(m, old);
+          else void this.kill(m, a);
+        }
+        this.replacements.delete(m);
+        // Terminals that ended with their core stay, to be started again.
+        const back = this.readOnly() ? [] : L.layoutTerminals(read).filter((a) => endedWithCore(this.store.terminal(m, a)));
+        for (const a of back) live.add(a);
+        const layout = this.firstWorkspace(L.pruneLayout(read, live), doc.value !== null && doc.value !== undefined);
         this.layouts.set(m, layout);
         this.loaded.add(m);
         if (!L.sameLayout(layout, read)) this.save(m);
+        for (const a of back) this.restore(m, a);
+        this.remember(m);
         this.publish();
         done?.();
       },
@@ -207,22 +284,48 @@ export class TermModel {
     const layout = this.layouts.get(m);
     if (!layout) return;
     this.saving.add(m);
+    this.writes.set(m, (this.writes.get(m) ?? 0) + 1);
     const version = this.versions.get(m) ?? 0;
     this.call(m, 'doc.set', { name: L.LAYOUT_DOCUMENT, value: layout, version }).then(
       (doc) => {
         this.saving.delete(m);
         const again = this.dirty.delete(m);
         this.versions.set(m, typeof doc.version === 'number' ? doc.version : version + 1);
-        if (again) this.save(m);
-        else if ((this.announced.get(m) ?? 0) > (this.versions.get(m) ?? 0)) this.loadLayout(m);
+        if (again) return this.save(m);
+        for (const old of this.replacements.get(m)?.values() ?? []) this.retire(m, old);
+        this.replacements.delete(m);
+        this.settle(m, true);
+        if ((this.announced.get(m) ?? 0) > (this.versions.get(m) ?? 0)) this.loadLayout(m);
       },
       (e: { kind?: string }) => {
         this.saving.delete(m);
         this.dirty.delete(m);
+        this.settle(m, false);
         // Another client arranged it: theirs wins.
         if (e?.kind === 'conflict') this.loadLayout(m);
       },
     );
+  }
+
+  /** Calls fn once the write of a machine's layout on its way is done,
+   * whether it was written or not. */
+  private afterWrite(m: string, fn: (ok: boolean) => void) {
+    const waiting = this.written.get(m) ?? [];
+    waiting.push(fn);
+    this.written.set(m, waiting);
+  }
+
+  /** Removes the record of a terminal that ended with its core once a
+   * written layout names its replacement. */
+  private retire(m: string, old: string) {
+    void this.call(m, 'terminal.rm', { terminal: old }).catch(() => {});
+  }
+
+  /** Tells those waiting for a machine's layout to be written how it went. */
+  private settle(m: string, ok: boolean) {
+    const waiting = this.written.get(m);
+    this.written.delete(m);
+    for (const fn of waiting ?? []) fn(ok);
   }
 
   /** Changes a machine's layout once it was read, and saves it when that
@@ -230,7 +333,13 @@ export class TermModel {
   mutate(m: string, change: (l: L.Layout) => L.Layout): boolean {
     const before = this.layout(m);
     if (!before) return false;
-    const after = this.ensureWorkspace(change(before));
+    let after = change(before);
+    // A pane opened where every workspace was closed gets a workspace, as
+    // a machine's first one: the layout's functions place panes in one.
+    if (!before.workspaces.length && L.sameLayout(after, before)) {
+      const placed = change(L.createWorkspace(before, L.newId(), ''));
+      if (placed.workspaces.some((w) => w.tabs.length)) after = placed;
+    }
     if (L.sameLayout(after, before)) return false;
     this.layouts.set(m, after);
     this.save(m);
@@ -238,17 +347,209 @@ export class TermModel {
     return true;
   }
 
-  /** The directory of a terminal: its foreground program's, else the one it started in. */
+  private readOnly(): boolean {
+    return useStore.getState().readOnly;
+  }
+
+  /** Starts a terminal in place of one that ended with its core, in the
+   * directory that one started in, once: the page whose layout still names
+   * the old one when its terminal runs has it take the place, and another
+   * page's ends again. */
+  private restore(m: string, old: string) {
+    const key = `${m}\n${old}`;
+    if (this.restoring.has(key)) return;
+    this.restoring.add(key);
+    const cwd = this.store.terminal(m, old)?.cwd;
+    const params: Record<string, unknown> = { keep: true, display: currentDisplay() };
+    if (typeof cwd === 'string' && cwd) params.cwd = cwd;
+    this.call(m, 'terminal.run', params)
+      .then(
+        (rec) => {
+          // From here the replacement is the layout's to keep or end: a
+          // read after a write it lost may start the ended one again.
+          this.restoring.delete(key);
+          const address = typeof rec.address === 'string' ? rec.address : undefined;
+          if (!address) return;
+          if (!this.mutate(m, (l) => replaceTerminal(l, old, address))) return void this.kill(m, address);
+          // Until the layout naming it is written, it may still lose to
+          // another page's: the ended terminal is removed then (save).
+          this.replacements.set(m, (this.replacements.get(m) ?? new Map()).set(address, old));
+        },
+        () => void this.restoring.delete(key),
+      )
+      .catch(() => {});
+  }
+
+  /** Keeps what the layout remembers of its terminals' agents current (restore.ts). */
+  private remember(m: string) {
+    if (!this.layout(m) || this.readOnly()) return;
+    const now = Date.now();
+    this.mutate(m, (l) =>
+      rememberAgents(
+        l,
+        (a) => this.store.terminal(m, a),
+        (a) => {
+          const key = `${m}\n${a}`;
+          if (agentOf(this.store.terminal(m, a))) {
+            this.agentGone.delete(key);
+            return false;
+          }
+          const since = this.agentGone.get(key);
+          if (since === undefined) {
+            this.agentGone.set(key, now);
+            setTimeout(() => this.remember(m), AGENT_FORGET_MS + 100);
+            return false;
+          }
+          if (now - since < AGENT_FORGET_MS) return false;
+          this.agentGone.delete(key);
+          return true;
+        },
+      ),
+    );
+  }
+
+  /** Types the command that continues an agent's conversation into a
+   * terminal that lost its agent with its core, once it is attached: type
+   * sends text to it. The request is taken out of the layout first and the
+   * command typed once the core took that layout: of several pages that
+   * have the terminal, the one whose write won types, and the others read
+   * a layout that asks for nothing. */
+  resumeAgent(m: string, address: string, type: (text: string) => void) {
+    const layout = this.layout(m);
+    const taken = layout && !this.readOnly() ? takeResume(layout, address) : undefined;
+    if (!taken || !this.mutate(m, () => taken.layout)) return;
+    const command = taken.command;
+    if (!command) return;
+    this.afterWrite(m, (ok) => ok && type(`${command}\r`));
+  }
+
+  /** Ends a terminal whose pane was closed at deadline (Date.now()), unless
+   * cancelClose comes first. Its CLOSING_LABEL holds the deadline, so that
+   * every client showing the machine ends it then, also when this page is
+   * gone by that time; one whose pane is back is left alone. */
+  closeLater(m: string, address: string, deadline: number) {
+    const value = String(deadline);
+    this.watchClosing(m, address, value, true);
+    void this.call(m, 'terminal.label', { terminal: address, labels: { ...this.labels(m, address), [CLOSING_LABEL]: value } }).catch(
+      () => {},
+    );
+  }
+
+  /** Keeps a terminal closeLater would end: its pane is back. */
+  cancelClose(m: string, address: string) {
+    this.unwatch(m, address);
+    void this.call(m, 'terminal.label', { terminal: address, labels: { ...this.labels(m, address), [CLOSING_LABEL]: '' } }).catch(() => {});
+  }
+
+  private labels(m: string, address: string): Record<string, string> {
+    const labels = this.store.terminal(m, address)?.labels;
+    return labels && typeof labels === 'object' ? { ...(labels as Record<string, string>) } : {};
+  }
+
+  /** Follows the closing labels of a machine's terminals: a snapshot, or an
+   * event that changed a terminal's labels. */
+  private watchLabels(m: string, msg: Record<string, unknown>) {
+    const records =
+      msg.t === 'snapshot'
+        ? this.store.terminals(m)
+        : msg.t === 'event' && (msg.type === 'labels' || msg.type === 'created') && typeof msg.terminal === 'string'
+          ? [this.store.terminal(m, msg.terminal)].filter((r) => r !== undefined)
+          : [];
+    for (const r of records) {
+      const value = (r.labels as Record<string, unknown> | undefined)?.[CLOSING_LABEL];
+      const key = `${m}\n${r.address}`;
+      if (typeof value === 'string' && value) {
+        if (this.closing.get(key)?.value !== value) this.watchClosing(m, r.address, value, false);
+      } else if (this.closing.has(key)) {
+        // Brought back by another client.
+        this.unwatch(m, r.address);
+      }
+    }
+  }
+
+  private watchClosing(m: string, address: string, value: string, own: boolean) {
+    this.unwatch(m, address);
+    const deadline = Number(value);
+    if (!Number.isFinite(deadline)) return;
+    const timer = setTimeout(
+      () => {
+        this.closing.delete(`${m}\n${address}`);
+        const r = this.store.terminal(m, address);
+        if (!r || !isLive(r)) return;
+        // Another client's close ends only while its label still says so.
+        if (!own && (r.labels as Record<string, unknown> | undefined)?.[CLOSING_LABEL] !== value) return;
+        const layout = this.layouts.get(m);
+        if (layout && L.locate(layout, address)) return;
+        void this.kill(m, address);
+      },
+      Math.max(0, deadline - Date.now()),
+    );
+    this.closing.set(`${m}\n${address}`, { timer, value });
+  }
+
+  private unwatch(m: string, address: string) {
+    const key = `${m}\n${address}`;
+    const c = this.closing.get(key);
+    if (c) clearTimeout(c.timer);
+    this.closing.delete(key);
+  }
+
+  /** The directory of a terminal: where its user is (term/place.ts: its
+   * shell's, or that of a program which stayed where it started; not that
+   * of a program walking a tree), else the one it started in. */
   directory(m: string, address: string | undefined): string | undefined {
-    const r = address ? this.store.terminal(m, address) : undefined;
-    const fg = r?.foreground as { cwd?: unknown } | undefined;
-    const cwd = typeof fg?.cwd === 'string' && fg.cwd ? fg.cwd : r?.cwd;
+    if (!address) return undefined;
+    const dir = this.places.get(`${m}\n${address}`)?.dir;
+    if (dir) return dir;
+    const cwd = this.store.terminal(m, address)?.cwd;
     return typeof cwd === 'string' && cwd ? cwd : undefined;
+  }
+
+  /** Works out the places of a machine's terminals after their records
+   * changed: of one terminal, or of all (a snapshot; none left when the
+   * machine is forgotten or its backend is not ready). */
+  private trackPlaces(m: string, address?: string) {
+    const now = Date.now();
+    const one = (a: string) => {
+      const key = `${m}\n${a}`;
+      const r = this.store.terminal(m, a);
+      clearTimeout(this.settling.get(key));
+      this.settling.delete(key);
+      if (!r) return void this.places.delete(key);
+      const place = nextPlace(this.places.get(key), r, now);
+      this.places.set(key, place);
+      if (!place.seen) return;
+      // A program that is where it was first seen by then gives the place.
+      this.settling.set(
+        key,
+        setTimeout(
+          () => {
+            this.settling.delete(key);
+            const p = this.places.get(key);
+            const next = p && settled(p, Date.now());
+            if (!p || next === p) return;
+            this.places.set(key, next!);
+            this.publish();
+          },
+          Math.max(0, place.seen.at + SETTLE_MS - now),
+        ),
+      );
+    };
+    if (address) return one(address);
+    const live = new Set(this.store.terminals(m).map((r) => r.address));
+    for (const key of [...this.places.keys()]) {
+      const [km, a] = key.split('\n');
+      if (km === m && !live.has(a)) one(a);
+    }
+    for (const a of live) one(a);
   }
 
   /** Starts a terminal (the machine's shell unless argv names a program) and
    * places it with place once it runs. A new tab starts in its workspace's
    * directory, else in the focused terminal's; a split the other way round.
+   * A workspace in the home directory (the machine's first one takes it
+   * from its first terminal) sends new tabs to the focused terminal's
+   * directory too: home is where they would start without one.
    * Asked for while the machine's terminals or layout are not ready, it runs
    * once they are. */
   run(m: string, o: RunOptions, place: (l: L.Layout, address: string) => L.Layout): Promise<string | undefined> {
@@ -262,19 +563,22 @@ export class TermModel {
       });
     }
     const ws = (o.workspace && layout.workspaces.find((w) => w.id === o.workspace)) || L.selectedWorkspace(layout);
-    const base = ws?.cwd || undefined;
+    const home = useStore.getState().machines[m]?.info?.home;
+    const base = ws?.cwd && !(home && L.normFolder(ws.cwd) === L.normFolder(home)) && ws.cwd !== '~' ? ws.cwd : undefined;
     const focused = this.directory(m, ws?.tabs[ws.selected]?.focused);
     const cwd = o.cwd ?? (o.split ? (focused ?? base) : (base ?? focused));
     // The theme's colors answer the program's first color queries, made
     // before a pane attaches.
-    const params: Record<string, unknown> = { keep: false, display: currentDisplay() };
+    // Kept: when the core starts again without the terminal's program (a
+    // reboot), it gives the terminal a new shell in its last directory.
+    const params: Record<string, unknown> = { keep: true, display: currentDisplay() };
     if (cwd) params.cwd = cwd;
     if (o.argv?.length) params.argv = o.argv;
     return this.call(m, 'terminal.run', params).then((rec) => {
       const address = typeof rec.address === 'string' ? rec.address : undefined;
       // The first pane of a workspace without a directory gives it its own.
       const dir = (typeof rec.cwd === 'string' && rec.cwd) || cwd;
-      if (address) this.mutate(m, (l) => (dir ? L.adoptDirectory(place(l, address), address, dir) : place(l, address)));
+      if (address) this.mutate(m, (l) => (dir ? L.adoptDirectory(place(l, address), address, dir, home) : place(l, address)));
       return address;
     });
   }

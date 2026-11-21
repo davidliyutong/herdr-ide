@@ -7,15 +7,24 @@ vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 
 import { useStore } from '../state/store';
 import { insertSlot, near } from '../reorderDrag';
-import { dragBegins, trackDrag } from '../drag';
+import { dragBegins, edgeScroll, trackDrag } from '../drag';
 import type { MachineState } from '../lib/machine';
 import { FakeCore, settle } from './fakeTerms';
 import { closeMenu, isItem, openMenu, stepIndex, tidy, useMenu, type MenuEntry, type MenuItem } from '../contextMenu';
 import { machineMenu, paneMenu, sidebarMenu, tabMenu, workspaceMenu } from '../menus';
 import { actions } from '../actions';
 import { useKeys } from '../keybindings';
+import { commandEnabled, keyHint, runCommand } from '../keymap';
+import '../commands';
 import { useDialog } from '../dialog';
 import { ContextMenu } from '../components/ContextMenu';
+import { definePlugins } from '../plugins/registry';
+import { vscodePlugin } from '../plugins/vscode';
+import { vscodeOn } from './fakeSettings';
+
+// VS Code is a plugin, off by default: these tests have it on.
+definePlugins([vscodePlugin]);
+vscodeOn();
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -93,6 +102,43 @@ describe('drag start', () => {
     expect(document.querySelector('.drag-ghost')).not.toBeNull();
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     expect(document.querySelector('.drag-ghost')).toBeNull();
+  });
+
+  it('scrolls the sidebar while the pointer is held near its top or bottom edge', () => {
+    const rect = { left: 0, right: 200, top: 100, bottom: 500 };
+    expect(edgeScroll(rect, 50, 300)).toBe(0);
+    expect(edgeScroll(rect, 300, 490)).toBe(0);
+    expect(edgeScroll(rect, 50, 499)).toBeGreaterThan(0);
+    expect(edgeScroll(rect, 50, 101)).toBeLessThan(0);
+    // Nearer the edge (or beyond it) is faster.
+    expect(edgeScroll(rect, 50, 520)).toBeGreaterThan(edgeScroll(rect, 50, 480));
+
+    vi.useFakeTimers();
+    const list = document.createElement('div');
+    list.className = 'sidebar-scroll';
+    list.getBoundingClientRect = () => ({ ...rect, x: 0, y: 100, width: 200, height: 400, toJSON() {} });
+    let top = 0;
+    Object.defineProperty(list, 'scrollTop', { get: () => top, set: (v: number) => (top = v) });
+    document.body.append(list);
+    const find = vi.fn(() => 1);
+    trackDrag(
+      { clientX: 50, clientY: 300, screenX: 50, screenY: 300, pointerId: 1 },
+      { label: 'ws', find, marker: () => ({ box: { left: 0, top: 0, width: 1, height: 1 }, zone: 'slot' }), drop: () => Promise.resolve() },
+    );
+    const move = (y: number) =>
+      window.dispatchEvent(Object.assign(new Event('pointermove'), { pointerId: 1, clientX: 50, clientY: y, screenX: 50, screenY: y }));
+    move(495);
+    vi.advanceTimersByTime(160);
+    expect(top).toBeGreaterThan(50);
+    // The marker follows what scrolls into view.
+    expect(find.mock.calls.length).toBeGreaterThan(5);
+    const held = top;
+    move(300);
+    vi.advanceTimersByTime(160);
+    expect(top).toBe(held);
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    list.remove();
+    vi.useRealTimers();
   });
 });
 
@@ -201,7 +247,7 @@ describe('menus', () => {
     find(paneMenu('m', 'p1'), 'Split Down').run!();
     await vi.waitFor(() => expect(core.calls.some((c) => c.method === 'terminal.run')).toBe(true));
     // The new terminal starts in the split one's folder and goes below it.
-    expect(core.calls.find((c) => c.method === 'terminal.run')?.params).toEqual({ keep: false, cwd: '/src', display: expect.any(Object) });
+    expect(core.calls.find((c) => c.method === 'terminal.run')?.params).toEqual({ keep: true, cwd: '/src', display: expect.any(Object) });
     await settle();
     expect(core.layout('m')!.workspaces[0].tabs[0]).toMatchObject({
       root: { split: 'vertical', children: [{ terminal: 'p1' }, { terminal: 't1' }] },
@@ -275,24 +321,93 @@ describe('menus', () => {
   it('moves workspaces', async () => {
     const w2 = workspaceMenu('m', 'w2w2w2w2');
     expect(find(w2, 'Move Down').disabled).toBe(true);
-    expect(find(w2, 'Close Workspace…').hint).toBeUndefined();
+    expect(find(w2, 'Close Workspace').hint).toBeUndefined();
     // No default binding closes a workspace: the current one's item shows none either.
-    expect(find(workspaceMenu('m', 'w1w1w1w1'), 'Close Workspace…').hint).toBeUndefined();
+    expect(find(workspaceMenu('m', 'w1w1w1w1'), 'Close Workspace').hint).toBeUndefined();
     find(w2, 'Move Up').run!();
     await settle();
     expect(core.layout('m')!.workspaces.map((w) => w.name)).toEqual(['two', 'one']);
   });
 
+  it('closes the other tabs or those to the right, and the other workspaces, at once with one Undo', async () => {
+    const second = tabMenu('m', 'w1w1w1w1', 1);
+    expect(labels(second).slice(-3)).toEqual(['Close Tab', 'Close Other Tabs', 'Close Tabs to the Right']);
+    expect(find(tabMenu('m', 'w1w1w1w1', 2), 'Close Tabs to the Right').disabled).toBe(true);
+    find(second, 'Close Tabs to the Right').run!();
+    await settle();
+    expect(tabNames()).toEqual(['a', 'b']);
+    actions.undoClose();
+    await settle();
+    expect(tabNames()).toEqual(['a', 'b', 'd']);
+    find(tabMenu('m', 'w1w1w1w1', 1), 'Close Other Tabs').run!();
+    await settle();
+    expect(tabNames()).toEqual(['b']);
+    expect(useStore.getState().toasts.at(-1)?.msg).toBe('2 tabs closed.');
+    // The commands act on the tab shown.
+    expect(commandEnabled('tab.closeOthers')).toBe(false);
+    expect(commandEnabled('tab.closeRight')).toBe(false);
+    // One other workspace: closed at once, as Close Workspace closes, with Undo.
+    expect(commandEnabled('workspace.closeOthers')).toBe(true);
+    find(workspaceMenu('m', 'w2w2w2w2'), 'Close Other Workspaces').run!();
+    await settle();
+    expect(useDialog.getState().current?.kind).not.toBe('confirm');
+    expect(core.layout('m')!.workspaces.map((w) => w.name)).toEqual(['two']);
+    expect(useStore.getState().toasts.at(-1)?.msg).toBe('Workspace “one” closed.');
+    expect(find(workspaceMenu('m', 'w2w2w2w2'), 'Close Other Workspaces').disabled).toBe(true);
+    actions.undoClose();
+    await settle();
+    expect(core.layout('m')!.workspaces.map((w) => w.name)).toEqual(['one', 'two']);
+  });
+
+  it('pins a tab: it goes first, Close Others and Close to the Right leave it, Unpin takes it back', async () => {
+    // The tabs are a, b, d; b is shown.
+    expect(commandEnabled('tab.pin')).toBe(true);
+    expect(commandEnabled('tab.unpin')).toBe(false);
+    find(tabMenu('m', 'w1w1w1w1', 2), 'Pin Tab').run!();
+    await settle();
+    expect(tabNames()).toEqual(['d', 'a', 'b']);
+    expect(core.layout('m')!.workspaces[0].tabs[0].pinned).toBe(true);
+    // The pinned tab's menu unpins it; a tab moved before it stops after it.
+    expect(labels(tabMenu('m', 'w1w1w1w1', 0))).toContain('Unpin Tab');
+    find(tabMenu('m', 'w1w1w1w1', 1), 'Move Left').run!();
+    await settle();
+    expect(tabNames()).toEqual(['d', 'a', 'b']);
+    // Close Others from the last tab keeps the pinned one.
+    find(tabMenu('m', 'w1w1w1w1', 2), 'Close Other Tabs').run!();
+    await settle();
+    expect(tabNames()).toEqual(['d', 'b']);
+    // Only pinned tabs besides it: nothing to close.
+    expect(find(tabMenu('m', 'w1w1w1w1', 1), 'Close Other Tabs').disabled).toBe(true);
+    expect(find(tabMenu('m', 'w1w1w1w1', 0), 'Close Tabs to the Right').disabled).toBe(false);
+    find(tabMenu('m', 'w1w1w1w1', 0), 'Unpin Tab').run!();
+    await settle();
+    expect(core.layout('m')!.workspaces[0].tabs.some((t) => t.pinned)).toBe(false);
+  });
+
+  it('renames the focused pane and opens its menu from commands, which take no key', async () => {
+    expect(keyHint('pane.rename')).toBe('');
+    expect(commandEnabled('pane.rename')).toBe(true);
+    runCommand('pane.rename');
+    expect(useStore.getState().renaming).toEqual({ kind: 'pane', m: 'm', id: 'p1' });
+    useStore.getState().setRenaming(undefined);
+    runCommand('pane.actions');
+    expect(useMenu.getState().menu?.entries.filter(isItem)[0].label).toBe('Rename Pane');
+    closeMenu(false);
+    useStore.getState().setReadOnly(true);
+    expect(commandEnabled('pane.rename')).toBe(false);
+    expect(commandEnabled('pane.actions')).toBe(false);
+  });
+
   it("creates a tab in its workspace's folder, else the focused terminal's", async () => {
     await actions.newTab('m', 'w2w2w2w2');
     expect(core.calls.filter((c) => c.method === 'terminal.run').pop()?.params).toEqual({
-      keep: false,
+      keep: true,
       cwd: '/tmp',
       display: expect.any(Object),
     });
     await actions.newTab('m', 'w1w1w1w1');
     expect(core.calls.filter((c) => c.method === 'terminal.run').pop()?.params).toEqual({
-      keep: false,
+      keep: true,
       cwd: '/src',
       display: expect.any(Object),
     });
@@ -364,6 +479,121 @@ describe('ContextMenu', () => {
     await act(async () => void menus()[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
     expect(ran).toEqual(['c', 'y']);
     expect(menus()).toHaveLength(0);
+    await act(async () => root.unmount());
+  });
+
+  it('filters its items as one types: Backspace widens, Escape clears, then closes', async () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const root = createRoot(host);
+    await act(async () => root.render(createElement(ContextMenu)));
+    const ran: string[] = [];
+    const item = (label: string, more: Partial<MenuItem> = {}): MenuItem => ({ label, run: () => ran.push(label), ...more });
+    const ev = { clientX: 10, clientY: 10, preventDefault: vi.fn(), stopPropagation: vi.fn() };
+    await act(async () =>
+      openMenu(ev, [
+        item('Rename Tab'),
+        'sep',
+        item('New Tab'),
+        item('Close Tab', { disabled: true }),
+        item('website', { keywords: 'gpu' }),
+      ]),
+    );
+    const menu = () => host.querySelector<HTMLElement>('[role=menu]');
+    const field = () => host.querySelector<HTMLInputElement>('.context-filter input');
+    const shown = () => [...host.querySelectorAll('.context-item')].map((e) => e.textContent);
+    const key = (k: string, target: HTMLElement = (document.activeElement as HTMLElement) ?? menu()!) =>
+      act(async () => void target.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })));
+    // A short menu shows no field until a key is typed.
+    expect(field()).toBeNull();
+    await key('t');
+    expect(field()?.value).toBe('t');
+    expect(document.activeElement).toBe(field());
+    // Matched characters are marked; separators go; disabled items stay.
+    expect(shown()).toEqual(['Rename Tab', 'New Tab', 'Close Tab', 'website']);
+    const type = (v: string) =>
+      act(async () => {
+        const f = field()!;
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(f, v);
+        f.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    await type('tab');
+    expect(shown()).toEqual(['Rename Tab', 'New Tab', 'Close Tab']);
+    expect(host.querySelector('.context-item.sel')?.textContent).toBe('Rename Tab');
+    expect(host.querySelector('.context-item.sel mark.match')?.textContent).toBe('Tab');
+    await type('na');
+    expect(shown()).toEqual(['Rename Tab']);
+    // Letters that start words.
+    await type('nt');
+    expect(shown()).toEqual(['New Tab']);
+    // Keywords match too, without marks.
+    await type('gpu');
+    expect(shown()).toEqual(['website']);
+    await type('zz');
+    expect(shown()).toEqual([]);
+    expect(host.querySelector('.context-empty')?.textContent).toBe('No matching items');
+    // Escape clears the filter, then closes the menu.
+    await key('Escape', field()!);
+    expect(field()?.value).toBe('');
+    expect(shown()).toHaveLength(4);
+    await key('Escape', field()!);
+    expect(menu()).toBeNull();
+
+    // Typing on the menu itself filters, and Backspace there widens.
+    await act(async () => openMenu(ev, [item('alpha'), item('beta')]));
+    menu()!.focus();
+    await key('b', menu()!);
+    expect(shown()).toEqual(['beta']);
+    await key('Enter', field()!);
+    expect(ran).toEqual(['beta']);
+    await act(async () => root.unmount());
+  });
+
+  it('keeps long menus usable: a field from the start, pages, scrolling inside', async () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const root = createRoot(host);
+    await act(async () => root.render(createElement(ContextMenu)));
+    const ran: string[] = [];
+    const many: MenuItem[] = Array.from({ length: 300 }, (_, i) => ({ label: `workspace ${i}`, run: () => ran.push(String(i)) }));
+    const ev = { clientX: 10, clientY: 10, preventDefault: vi.fn(), stopPropagation: vi.fn() };
+    const scrolled = vi.fn();
+    Element.prototype.scrollIntoView = scrolled;
+    await act(async () => openMenu(ev, [{ label: 'Move to Workspace', submenu: many }]));
+    const menus = () => [...host.querySelectorAll<HTMLElement>('[role=menu]')];
+    const key = (k: string) =>
+      act(
+        async () => void document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })),
+      );
+    await key('ArrowDown');
+    await key('ArrowRight');
+    expect(menus()).toHaveLength(2);
+    // The submenu of many items has its field, which has the keyboard.
+    const field = menus()[1].querySelector<HTMLInputElement>('.context-filter input')!;
+    expect(document.activeElement).toBe(field);
+    expect(menus()[1].querySelectorAll('.context-item')).toHaveLength(300);
+    await key('End');
+    expect(menus()[1].querySelector('.context-item.sel')?.textContent).toBe('workspace 299');
+    expect(scrolled).toHaveBeenCalled();
+    await key('PageUp');
+    expect(menus()[1].querySelector('.context-item.sel')?.textContent).toBe('workspace 291');
+    // Scrolling the menu's own list keeps it open.
+    await act(async () => void menus()[1].querySelector('.context-list')!.dispatchEvent(new Event('scroll')));
+    expect(menus()).toHaveLength(2);
+    // Typing narrows it; ← (in an empty field) goes back to the parent.
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, '42');
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    // In the menu's order.
+    expect([...menus()[1].querySelectorAll('.context-item')].map((e) => e.textContent)).toEqual([
+      'workspace 42',
+      'workspace 142',
+      'workspace 242',
+    ]);
+    await key('Enter');
+    expect(ran).toEqual(['42']);
+    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
     await act(async () => root.unmount());
   });
 });

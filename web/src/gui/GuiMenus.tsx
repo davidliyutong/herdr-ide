@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { AppWindow, MonitorUp, MonitorX } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../state/store';
@@ -6,55 +6,55 @@ import { t } from '../i18n';
 import { guiKey, openGuiWindow, terminalWindows, useGui, type GuiWindow } from './state';
 import { enableGui } from './enable';
 import { useDismiss } from '../components/useDismiss';
+import { pick } from '../components/Picker';
 
 interface Entry {
   m: string;
   w: GuiWindow;
 }
 
-/** A button listing program windows; one window opens directly. */
+/** A button listing program windows (one opens directly) in a searchable
+ * list, grouped by machine when they are on several. */
 function WindowsButton({ entries, className, label }: { entries: Entry[]; className?: string; label?: string }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLSpanElement>(null);
   const unseen = useGui((g) => entries.some((e) => g.unseen[guiKey(e.m, e.w.id)]));
   const labels = useStore(useShallow((s) => Object.fromEntries(Object.entries(s.machines).map(([id, st]) => [id, st.label]))));
-  useEffect(() => {
-    if (!open) return;
-    const close = (e: PointerEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
-    document.addEventListener('pointerdown', close);
-    return () => document.removeEventListener('pointerdown', close);
-  }, [open]);
   if (entries.length === 0) return null;
   const title = (e: Entry) => e.w.title || t('gui.untitled');
   const machines = new Set(entries.map((e) => e.m));
   const openOne = (e: Entry) => {
+    if (!openGuiWindow(e.m, e.w)) useStore.getState().toast(t('gui.popupBlocked'), undefined, undefined, 'warning');
+  };
+  const choose = async (anchor: HTMLElement) => {
+    setOpen(true);
+    const key = await pick(anchor, {
+      items: entries.map((e) => ({
+        value: guiKey(e.m, e.w.id),
+        label: title(e),
+        description: `${e.w.w}×${e.w.h}`,
+        icon: <AppWindow />,
+        group: machines.size > 1 ? (labels[e.m] ?? e.m) : undefined,
+      })),
+      keepOrder: true,
+      label: t('gui.windows'),
+      placeholder: t('gui.findWindow'),
+    });
     setOpen(false);
-    if (!openGuiWindow(e.m, e.w)) useStore.getState().toast(t('gui.popupBlocked'));
+    const e = entries.find((x) => guiKey(x.m, x.w.id) === key);
+    if (e) openOne(e);
   };
   return (
-    <span className="gui-menu-anchor" ref={ref}>
+    <span className="gui-menu-anchor">
       <button
         className={`${className ?? ''} ${unseen ? 'attention' : ''}`}
         title={entries.length === 1 ? t('gui.openTitle', { title: title(entries[0]) }) : t('gui.windows')}
-        onClick={() => (entries.length === 1 ? openOne(entries[0]) : setOpen(!open))}
+        aria-haspopup={entries.length > 1 ? 'listbox' : undefined}
+        aria-expanded={entries.length > 1 ? open : undefined}
+        onClick={(ev) => (entries.length === 1 ? openOne(entries[0]) : void choose(ev.currentTarget))}
       >
         <AppWindow />
         {(label || entries.length > 1) && <span className="gui-count">{label ?? entries.length}</span>}
       </button>
-      {open && (
-        <div className="gui-menu" role="menu">
-          {entries.map((e) => (
-            <div key={guiKey(e.m, e.w.id)} className="gui-menu-item" role="menuitem" onClick={() => openOne(e)}>
-              <AppWindow />
-              <span className="ellipsis">{title(e)}</span>
-              {machines.size > 1 && <span className="muted small">{labels[e.m] ?? e.m}</span>}
-              <span className="muted small">
-                {e.w.w}×{e.w.h}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
     </span>
   );
 }
@@ -167,7 +167,16 @@ export function GuiMachineStatus({ m }: { m: string }) {
   return (
     <span className={`gui-state ${st.phase}`} title={st.error}>
       {t(`gui.state.${st.phase}` as 'gui.state.ready')}
-      {st.gpu && st.phase === 'ready' && ' · GPU'}
+      {st.phase === 'ready' && st.display === 'xwayland' && ` · ${t('gui.state.gpuDisplay')}`}
+      {st.gpu && st.phase === 'ready' && ' · VirtualGL'}
+      {st.phase === 'ready' && st.vulkan_gpu !== undefined && (
+        <span
+          data-vulkan-gpu={st.vulkan_gpu}
+          title={t(st.pick ? 'gui.state.vulkanPick.desc' : 'gui.state.vulkanGpu.desc', { n: st.vulkan_gpu })}
+        >
+          {` · ${t(st.pick ? 'gui.state.vulkanPick' : 'gui.state.vulkanGpu', { n: st.vulkan_gpu })}`}
+        </span>
+      )}
     </span>
   );
 }

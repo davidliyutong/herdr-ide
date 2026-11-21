@@ -19,12 +19,13 @@ directory); follow uploads (progress, speed, time left), cancel them and see
 the recent ones; download a path from a pane, or files and folders chosen in
 the pane's directory, into the browser, folders as zip archives.
 
-Non-goals: a file manager (the download chooser picks entries, nothing
-more); editing files (that is VS Code's job).
+Non-goals: browsing and changing files, and editing them: the file
+explorer does that ([28](28-file-explorer.md)), and VS Code panes; the
+download chooser picks entries, nothing more.
 
 ## Design
 
-**Links** (`web/src/terminal/links.ts`)
+**Links** (`web/src/terminal/links.ts` finds them, `openLink.ts` opens them)
 
 - With ⌘ or Ctrl held, the row under the pointer is scanned for URLs, paths
   with a slash, `~`-paths and bare file names with known extensions,
@@ -43,9 +44,10 @@ more); editing files (that is VS Code's job).
   media) and **Copy full path**, or **Open** and **Copy link** for URLs. A
   path wrapped in a way detection does not join (a margin before the last
   column, a diff's `+` in front of the next row) is opened by selecting it.
-- Relative paths resolve against the directory of the terminal's
-  foreground program (the terminal core's record), else where it started;
-  `~` against the machine's home.
+- Relative paths resolve against the terminal's directory (its shell's,
+  or that of a program which stayed where it started,
+  [28](28-file-explorer.md)), else where it started; `~` against the
+  machine's home.
 - Activation requires ⌘ or Ctrl, so plain clicks still reach mouse-aware
   applications. What a path opens in is a pane of the terminal's
   workspace (`actions.openPath`):
@@ -71,13 +73,37 @@ more); editing files (that is VS Code's job).
   header, maximized and closed like any pane, can be a tab's only pane,
   and comes back after a reload or a restart ([04](04-layout-and-keyboard.md)).
   A split from it starts a terminal in its file's directory. Closing it
-  ends nothing.
+  ends nothing. A file deleted or moved away since strikes its title
+  through in its header and tab, as the file explorer's editors are
+  ([28](28-file-explorer.md); only while the explorer is on), and the
+  preview keeps what it showed: also when it is drawn again (another tab
+  shown, then this one), the last text or directory shown of the path
+  (the page keeps those of the last 8 paths) stands in for the 404. Once
+  the file is there again, the preview loads it again.
 - `GET /api/m/<machine>/file?path=` streams through the agent (`fs.stat`,
   `fs.read` with offset/length) and supports single HTTP ranges, ETags and
   `download=1`.
 - Images, video and audio use native elements; PDFs an iframe; text files
   read the first 2 MiB and refuse binary content; directories list entries
-  that open on click. Sibling media in the same directory are navigable with
+  that open on click (`GET /api/m/<machine>/list`, at most 20 000; a
+  listing larger than the agent's reply line holds, as of an archive just
+  unpacked, follows the line, [architecture](../architecture.md)). Text is colored in the language of the file's name or
+  first line ([28](28-file-explorer.md), `web/src/highlight`). A Markdown
+  file shows rendered, with a toolbar button for its source
+  (`web/src/markdown`): GitHub's tables, task lists, strikethrough and
+  footnotes, formulas (KaTeX, with the terminal's limits), and code blocks
+  colored by their fence's language with a copy button. A file is text the
+  page does not trust, so the renderer shows HTML in it as text; a link
+  keeps its target only for `http`, `https` and `mailto` (a web one opens as
+  a link in a terminal of the document's machine does,
+  [32](32-browser-and-ports.md): an address of that machine's `localhost`
+  in a browser pane, any other outside the app; `mailto` outside), a link
+  to a file beside the document shows that file in the
+  pane, and any other link is its text; an image loads only from a `data:`
+  URL of a raster type, a `blob:` URL or a file beside the document, through
+  the file route. A remote image is a link instead: loading it would tell
+  its server who reads the file. The renderer (react-markdown) loads when a
+  Markdown file is first shown. Sibling media in the same directory are navigable with
   ← →. Stepping to a sibling or entering a directory shows that path in the
   same preview pane (the layout document's path changes, so every client
   follows).
@@ -101,9 +127,14 @@ more); editing files (that is VS Code's job).
   or selected (checked with a `HEAD` request first, so text that names no
   file becomes a note instead of a failed download) and **Download files…**:
   a chooser listing the pane's working directory, where entries are
-  checked (or all at once), directories entered by clicking their names and
-  left with the up button, and **Download** takes the checked entries of the
-  directory shown in one download. Neither is offered for the desktop app's
+  checked (or all at once; Shift-clicking a box or name checks or unchecks
+  every entry from the one clicked last, alike), a field filters the
+  entries by name (the matched characters marked; **Select all shown**
+  then takes those shown, checked entries stay checked while hidden, and
+  Escape clears the filter before it closes the chooser), directories are
+  entered by clicking their names and left with the up button, and
+  **Download** takes the checked entries of the directory shown in one
+  download. Neither is offered for the desktop app's
   own machine, whose files are already on the computer; a browser offers
   them for every machine.
 - The page starts a download with a same-origin link, so the browser (or the
@@ -151,7 +182,8 @@ more); editing files (that is VS Code's job).
   every file is uploaded.
 - Other files are `POST`ed to `/api/m/<machine>/upload?name=` of the pane's
   machine, one after the other, streamed with chunk framing; the reply holds
-  the path. Folders are not uploaded; they are skipped with a note. A failed
+  the path. Folders are not uploaded on panes; they are skipped with a note
+  (the file explorer uploads them, [28](28-file-explorer.md)). A failed
   or cancelled upload shows in the uploads panel (a failure also as a note),
   and the paths of the others are still pasted.
 - Dropped files go into the pane's working directory (its foreground
@@ -174,6 +206,16 @@ more); editing files (that is VS Code's job).
   the status bar, where a button appears once the browser has uploaded
   something; while files go it shows how many and how far they are
   together. The note of a drop that uploads has a **Show** button for it.
+- The mouse resting on the button for 200 ms opens the panel without a
+  click, and it closes 300 ms after the mouse has left the button and the
+  panel (the pointer may cross the gap between them). A panel opened this
+  way does not take the keyboard. A click on the button while it is open
+  that way, or a press or the keyboard in the panel, keeps it open until
+  the button, a press outside, Escape or × closes it; a click while it is
+  closed opens it kept, as does other code (a starting upload). Only a
+  mouse hovers; touch and pen click, and the
+  keyboard is as before (Enter and Space toggle, Escape closes)
+  (`web/src/components/useHoverOpen.ts`).
 - The files of one paste or drop are queued together. A running upload
   shows the bytes sent of its size, its speed over the last 3 seconds and
   the time left; a waiting one shows that it waits. The browser sends the
@@ -195,6 +237,11 @@ more); editing files (that is VS Code's job).
   last 50 in `localStorage` (names, machines and paths, not contents);
   opening the panel shows the ones other tabs finished. Entries can be
   removed one by one or all at once; this does not touch the files.
+- The keyboard (as in the downloads panel): the list of transfers is one
+  stop of the Tab key; ↑ ↓ Home End move between them, ← → between a
+  transfer and its buttons, Delete (or Backspace) cancels a running one or
+  removes a finished one from the list, the keyboard going on to the next;
+  Escape closes the panel and gives the keyboard back to its button.
 
 **Downloads panel** (`web/src/download.ts`, `web/src/components/Downloads.tsx`,
 `internal/server/downloads.go`; what it shares with the uploads panel is in
@@ -202,7 +249,8 @@ more); editing files (that is VS Code's job).
 
 - The same design as the uploads panel, with its own button in the status
   bar (shown once the browser has downloaded something): the downloads
-  running, then the finished ones, newest first.
+  running, then the finished ones, newest first. It opens on hover and
+  is kept by a click as the uploads panel is.
 - A browser tells a page nothing about the downloads it saves, so the core
   reports them. A download whose link has an id (8–64 URL-safe characters;
   the page makes 128 random bits) is followed. Before starting it, the page
@@ -315,11 +363,13 @@ links, selected links), `web/src/__tests__/codePanes.test.ts` (a path
 from a terminal in a VS Code pane of the workspace or beside the terminal,
 media in a preview pane beside it that then shows the next file),
 `web/src/__tests__/vt.test.ts` (hyperlinks and the
-link underline), `web/src/__tests__/drop.test.ts`
+link underline), `web/src/__tests__/filesGone.test.ts` (a preview of a
+file deleted: its titles struck through, what it showed kept, the file
+loaded again once back), `web/src/__tests__/drop.test.ts`
 (dropped files' paths on the local machine, uploads and skipped folders for
 another, refused stray drops), `web/src/__tests__/transfers.test.ts`
 (progress and speed, cancelling running and waiting uploads, the fallback
-to the upload directory, the kept history, the panel), and
+to the upload directory, the kept history, the panel and its keys), and
 `TestCancelledUploadLeavesNoFile` in `internal/server/server_test.go` (an
 aborted upload through a real agent leaves no file; a complete one arrives).
 Downloads: `internal/agent/archive_test.go` (archive contents, repeated
@@ -337,7 +387,7 @@ download cancelled before its request refused, `416` for a range past the
 end, a file removed between stat and read not found, the browser leaving
 during the stat reported as cancelled),
 `web/src/__tests__/download.test.ts` (the pane menu's items, the check
-before a path's download, the chooser, no downloads for the desktop app's
+before a path's download, the chooser (Shift ranges, the filter), no downloads for the desktop app's
 own machine; the panel: progress and speed, an archive without a size,
 failures and their notes, cancelling, a download the browser holds back,
 asking again after a reconnect and ending what the core no longer knows,

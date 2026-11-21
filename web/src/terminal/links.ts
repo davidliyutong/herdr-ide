@@ -1,11 +1,10 @@
 // Path and URL detection in pane output, also over rows a long path was
-// wrapped on. Cmd/Ctrl+click (or the pane's context menu) opens media in a
-// preview pane and code files in a VS Code pane, beside the terminal or in
-// one its workspace has, resolving relative paths against the terminal's
+// wrapped on. Cmd/Ctrl+click (or the pane's context menu) opens what is
+// found (openLink.ts), resolving relative paths against the terminal's
 // working directory.
 
-import { actions } from '../actions';
 import { t } from '../i18n';
+import { safeWebUrl } from '../lib/webUrl';
 
 export interface LinkContext {
   m: string;
@@ -151,22 +150,8 @@ export function linkTitle(l: { kind: FoundLink['kind']; text: string }): string 
   return t(mediaExt.test(l.text) ? 'link.preview' : 'link.open');
 }
 
-/** Whether a link target may be opened: http(s) and mailto only. */
+/** Whether a link target may be opened: an absolute http(s) URL or mailto,
+ * never on the page's own origin (see safeWebUrl). */
 export function safeUrl(url: string): boolean {
-  try {
-    return ['http:', 'https:', 'mailto:'].includes(new URL(url).protocol);
-  } catch {
-    return false;
-  }
-}
-
-/** Opens a URL in a new tab, or a path in a preview or VS Code pane. */
-export function openLink(l: { kind: FoundLink['kind']; text: string }, ctx: LinkContext) {
-  if (l.kind === 'url') {
-    // Targets come from pane output (OSC 8): web links only.
-    if (safeUrl(l.text)) window.open(l.text, '_blank', 'noopener');
-    return;
-  }
-  const r = resolvePath(l.text, ctx);
-  void actions.openPath(ctx.m, r.path, r.line, r.col, ctx.pane);
+  return safeWebUrl(url) !== undefined;
 }

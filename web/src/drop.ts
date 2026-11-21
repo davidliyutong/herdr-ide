@@ -16,7 +16,7 @@
 // page.
 
 import { actions } from './actions';
-import { desktopShell } from './desktop';
+import { desktopShell } from './shell';
 import { t } from './i18n';
 import { shellQuote } from './lib/files';
 import { shortPath, type MachineState } from './lib/machine';
@@ -135,7 +135,7 @@ async function openWaiting() {
     while (opened.length) {
       const local = await readyLocal();
       if (!local) {
-        useStore.getState().toast(t('sidebar.openFoldersFailed', { n: opened.length }));
+        useStore.getState().toast(t('sidebar.openFoldersFailed', { n: opened.length }), undefined, undefined, 'error');
         opened.length = 0;
         return;
       }

@@ -1,393 +1,56 @@
 // Command herdr-ide is the terminal-first, multi-machine, agent-native web
-// IDE. It serves the web UI and orchestrates agents on every machine.
+// IDE: one program that is the core, which serves the web UI, and the helper
+// the core starts on every machine.
 //
-//	herdr-ide [serve] [flags]       run the server (default)
-//	herdr-ide fetch-assets DIR      download code-server and extensions for
-//	                               air-gapped installs (use with --seed-dir)
+//	herdr-ide [serve] [flags]         run the server (default)
+//	herdr-ide fetch-assets DIR        download code-server and extensions for
+//	                                 air-gapped installs (use with --seed-dir)
+//	herdr-ide mcp [--instance NAME]   the variable vault's MCP server (stdio)
+//	herdr-ide agent [--instance NAME] a machine's helper over stdio; started
+//	                                 by the core over ssh (Linux and macOS)
+//	herdr-ide gui-keep --instance NAME
+//	                                 holds a machine's virtual display;
+//	                                 started by the agent (Linux and macOS)
+//	herdr-ide gui-wl --device NODE [--nvidia]
+//	                                 the compositor of a machine's GPU
+//	                                 display; started by the agent
 //	herdr-ide version
+//
+// The copies the core carries for machines of other platforms are this
+// program built with the tag "machine": without the server, the web UI and
+// what the core embeds for machines, so they have the commands mcp, agent,
+// gui-keep, gui-wl and version only.
 package main
 
 import (
-	"context"
-	"errors"
-	"flag"
 	"fmt"
-	"io"
-	"io/fs"
-	"log"
-	"net"
-	"net/http"
 	"os"
-	"os/signal"
-	"path/filepath"
-	"runtime"
 	"strings"
-	"syscall"
-	"time"
 
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/brand"
-	"herdr-ide/internal/codeserver"
-	"herdr-ide/internal/embedded"
-	"herdr-ide/internal/keybindings"
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/registry"
-	"herdr-ide/internal/server"
-	"herdr-ide/internal/settings"
-	"herdr-ide/internal/transport"
-	"herdr-ide/web"
+	"herdr-ide/internal/vaultmcp"
 )
 
-type listFlag []string
-
-func (l *listFlag) String() string     { return strings.Join(*l, ",") }
-func (l *listFlag) Set(v string) error { *l = append(*l, v); return nil }
-
-// codeServerFlags are shared by serve and fetch-assets.
-type codeServerFlags struct {
-	version, tarballURL, extensionURL string
-	seedDirs                          listFlag
-	offline                           bool
-}
-
-func (f *codeServerFlags) register(fs *flag.FlagSet) {
-	fs.StringVar(&f.version, "code-server-version", codeserver.DefaultVersion, "code-server release to install on machines")
-	fs.StringVar(&f.tarballURL, "code-server-url", codeserver.DefaultTarballURL, "code-server download URL template ({version}, {asset}, {file}); point at a mirror")
-	fs.StringVar(&f.extensionURL, "extension-url", codeserver.DefaultExtensionURL, "VS Code extension (VSIX) download URL template ({publisher}, {name}, {version}, {file})")
-	fs.Var(&f.seedDirs, "seed-dir", "directory with pre-downloaded code-server tarballs and VSIXs, searched before downloading (repeatable; see fetch-assets)")
-	fs.BoolVar(&f.offline, "offline", false, "never download; artifacts must come from --seed-dir or the cache")
-}
-
-func (f *codeServerFlags) manager(logger *log.Logger) *codeserver.Manager {
-	cs := codeserver.New(logger)
-	cs.Version = f.version
-	cs.TarballURL = f.tarballURL
-	cs.ExtensionURL = f.extensionURL
-	cs.SeedDirs = f.seedDirs
-	cs.Offline = f.offline
-	cs.BridgeVSIX = embedded.BridgeVSIX
-	return cs
-}
-
-// besideSettings is a file of the same instance beside the settings file
-// (settingsPath): machines.json or machines-<instance>.json for name
-// "machines".
-func besideSettings(settings, name string) string {
-	return filepath.Join(filepath.Dir(settings), strings.Replace(filepath.Base(settings), "settings", name, 1))
-}
-
-// settingsPath is the settings file on the core host. A directory left by a
-// previous product name is moved first.
-func settingsPath(instance string) (string, error) {
-	base, err := os.UserConfigDir()
-	if err != nil {
-		return "", err
-	}
-	dir := filepath.Join(base, brand.Slug)
-	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
-		for _, old := range brand.LegacySlugs {
-			if os.Rename(filepath.Join(base, old), dir) == nil {
-				break
-			}
-		}
-	}
-	name := "settings.json"
-	if instance != "" {
-		name = "settings-" + instance + ".json"
-	}
-	return filepath.Join(dir, name), nil
-}
-
 func main() {
+	// Started by the stable link <data dir>/bin/<slug>-mcp: the vault's MCP
+	// server.
+	if vaultmcp.IsLink(os.Args[0]) {
+		os.Exit(vaultmcp.Main(os.Args[0], os.Args[1:]))
+	}
 	args := os.Args[1:]
-	cmd := "serve"
+	cmd := defaultCommand
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		cmd, args = args[0], args[1:]
 	}
-	logger := log.New(os.Stderr, brand.CoreBin+": ", log.LstdFlags)
-	switch cmd {
-	case "version":
+	switch {
+	case cmd == "version":
 		fmt.Println(brand.CoreBin, agentproto.Version)
-	case "serve":
-		serve(args, logger)
-	case "fetch-assets":
-		fetchAssets(args, logger)
+	case cmd == "mcp":
+		os.Exit(vaultmcp.Main(os.Args[0], args))
+	case machineCommand(cmd, args), coreCommand(cmd, args):
 	default:
-		fmt.Fprintf(os.Stderr, "usage: %s [serve] [flags] | fetch-assets [flags] DIR | version\n", brand.CoreBin)
+		fmt.Fprintf(os.Stderr, "usage: %s %s%smcp [--instance NAME] | version\n", brand.CoreBin, coreUsage, machineUsage)
 		os.Exit(2)
 	}
-}
-
-func fetchAssets(args []string, logger *log.Logger) {
-	fl := flag.NewFlagSet("fetch-assets", flag.ExitOnError)
-	var csf codeServerFlags
-	csf.register(fl)
-	platforms := fl.String("platforms", strings.Join(codeserver.AllAssets, ","), "code-server assets to fetch")
-	fl.Usage = func() {
-		fmt.Fprintf(fl.Output(), "usage: %s fetch-assets [flags] DIR\n\nDownloads and verifies everything machines need, for carrying into an\nair-gapped network. Then run: %s --offline --seed-dir DIR\n\n", brand.CoreBin, brand.CoreBin)
-		fl.PrintDefaults()
-	}
-	fl.Parse(args)
-	if fl.NArg() != 1 {
-		fl.Usage()
-		os.Exit(2)
-	}
-	cs := csf.manager(logger)
-	files, err := cs.FetchAssets(context.Background(), fl.Arg(0), strings.Split(*platforms, ","))
-	for _, f := range files {
-		fmt.Println(filepath.Join(fl.Arg(0), f))
-	}
-	if err != nil {
-		logger.Fatal(err)
-	}
-}
-
-func serve(args []string, logger *log.Logger) {
-	fl := flag.NewFlagSet("serve", flag.ExitOnError)
-	var (
-		listen      = fl.String("listen", "127.0.0.1:7780", "address to listen on")
-		parentStdio = fl.Bool("parent-stdio", false, "launcher lifecycle: write a ready JSON line to stdout and stop when stdin closes")
-		insecure    = fl.Bool("insecure-listen", false, "allow a non-loopback --listen without --proxy-secret-file (anyone reaching the port gets shell access)")
-		proxySecret = fl.String("proxy-secret-file", "", "file with a secret the reverse proxy sends in the "+server.ProxySecretHeader+" header; required for requests that do not come from loopback")
-		readOnly    = fl.Bool("read-only", false, "watch only: no input, no changes to terminals or settings, no uploads, no VS Code")
-		auditLog    = fl.String("audit-log", "", "append security-relevant events as JSON lines to this file")
-		userHeader  = fl.String("user-header", "", "request header carrying the authenticated user, for the audit log (e.g. Tailscale-User-Login)")
-		instance    = fl.String("instance", "", "state instance: machines use ~/"+brand.DataDirName+"-<instance> (lets a development core run next to the daily one)")
-		localOnly   = fl.Bool("local-only", false, "do not connect to the stored SSH machines (only to --ssh targets)")
-		csIdle      = fl.Duration("code-server-idle", 20*time.Minute, "stop a machine's code-server after this long without VS Code connections (0 disables)")
-		agentDir    = fl.String("agent-dir", "", "directory with uncompressed "+brand.AgentBin+"-<os>-<arch> builds (development)")
-		extDir      = fl.String("ext-dir", "", "directory containing "+brand.BridgeExt+".vsix (development)")
-		webDir      = fl.String("web-dir", "", "serve the UI from this directory instead of the embedded build (development)")
-		only        listFlag
-		origins     listFlag
-		extraSSH    listFlag
-		csf         codeServerFlags
-		prefs       = settings.New("", registry.Settings()...)
-		keys        = keybindings.New("", registry.Commands())
-	)
-	fl.Var(&origins, "allowed-origin", "browser origin of the reverse proxy, e.g. https://ide.example.com (repeatable)")
-	fl.Var(&only, "machine", "connect only these machines, by id, label or ssh target (repeatable)")
-	fl.Var(&extraSSH, "ssh", "extra ssh target (~/.ssh/config alias or user@host) for this run, not stored (repeatable)")
-	csf.register(fl)
-	prefs.RegisterFlags(fl)
-	fl.Parse(args)
-	if *parentStdio {
-		ignoreBrokenPipes() // before the first log line
-	}
-
-	if !brand.ValidInstance(*instance) {
-		logger.Fatalf("--instance must be lowercase letters, digits and dashes")
-	}
-	for _, t := range extraSSH {
-		if !machines.ValidTarget(t) {
-			logger.Fatalf("--ssh %q: a target is [user@]host, an ssh:// URL or a ~/.ssh/config alias of at most %d bytes, not starting with -, without whitespace, control characters or any of ! \" $ & ' ( ) * ; < > ? \\ ` { | }", t, machines.MaxTargetLen)
-		}
-	}
-	machinesFile := ""
-	if p, err := settingsPath(*instance); err != nil {
-		logger.Printf("settings are not saved: %v", err)
-	} else {
-		keys.SetPath(besideSettings(p, "keybindings"))
-		// Before the settings drop the desktop app's old shortcut settings.
-		if _, err := keys.MigrateDesktopShortcuts(p, runtime.GOOS == "darwin"); err != nil {
-			logger.Printf("migrating shortcuts: %v", err)
-		}
-		if err := keys.Load(); err != nil {
-			logger.Printf("ignoring keybindings: %v", err)
-		}
-		prefs.SetPath(p)
-		if err := prefs.Load(); err != nil {
-			logger.Printf("ignoring settings: %v", err)
-		}
-		machinesFile = besideSettings(p, "machines")
-	}
-	embedded.AgentDir = *agentDir
-	embedded.ExtDir = *extDir
-
-	secret := ""
-	if *proxySecret != "" {
-		b, err := os.ReadFile(*proxySecret)
-		if err != nil {
-			logger.Fatal(err)
-		}
-		secret = strings.TrimSpace(string(b))
-		if len(secret) < 16 {
-			logger.Fatalf("%s: secret must be at least 16 characters", *proxySecret)
-		}
-	}
-	host, _, err := net.SplitHostPort(*listen)
-	if err != nil {
-		logger.Fatal(err)
-	}
-	if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
-		switch {
-		case secret != "":
-		case *insecure:
-			logger.Printf("WARNING: listening on %s without authentication (--insecure-listen); anyone reaching it gets shell access to every machine", *listen)
-		default:
-			logger.Fatalf("refusing to listen on %s: the server has no authentication of its own. Keep it on loopback behind an authenticating reverse proxy, or pass --proxy-secret-file (or --insecure-listen to accept the risk)", *listen)
-		}
-	}
-
-	// The core's own machines; herdr's saved machines are imported once,
-	// when the file does not exist yet.
-	registry, err := machines.OpenRegistry(machinesFile, machines.SavedSpecs)
-	if err != nil {
-		logger.Printf("machines are not stored: %v", err)
-	}
-	if n := registry.Kept(); n > 0 {
-		logger.Printf("%s: %d entries are not machines this version can use; they are kept in the file as they are", machinesFile, n)
-	}
-	for _, s := range registry.Specs() {
-		if s.Kind == machines.KindSSH && !machines.ValidTarget(s.Target) {
-			logger.Printf("machine %s: its ssh target is refused (%s); it is shown in error and never connected", s.ID, machines.CodeInvalidTarget)
-		}
-	}
-	specs := selectSpecs(machines.LoadSpecs(registry.Specs(), extraSpecs(extraSSH)), *localOnly, extraSSH, only)
-	controlDir, err := transport.ControlDir()
-	if err != nil {
-		logger.Fatal(err)
-	}
-	dial := func(ctx context.Context, spec machines.Spec) (*transport.Session, string, error) {
-		switch spec.Kind {
-		case machines.KindLocal:
-			s, err := dialLocal(ctx, *instance, logger)
-			return s, runtime.GOOS + "/" + runtime.GOARCH, err
-		case machines.KindSSH:
-			// Machines never dial such a target; this keeps it from ssh
-			// whatever calls.
-			if !machines.ValidTarget(spec.Target) {
-				return nil, "", machines.ErrInvalidTarget
-			}
-			s, p, err := transport.DialSSH(ctx, transport.SSHOptions{
-				Target: spec.Target, ControlDir: controlDir, Agents: embedded.Agent, Logger: logger, Instance: *instance,
-			})
-			platform := ""
-			if p != nil {
-				platform = p.OS + "/" + p.Arch
-			}
-			return s, platform, err
-		}
-		return nil, "", errors.New("unknown machine kind " + spec.Kind)
-	}
-	mg := machines.NewManager(specs, dial, logger)
-	mg.UseRegistry(registry)
-
-	var static fs.FS = web.Dist()
-	if *webDir != "" {
-		static = os.DirFS(*webDir)
-	}
-	var audit io.Writer
-	if *auditLog != "" {
-		f, err := os.OpenFile(*auditLog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-		if err != nil {
-			logger.Fatal(err)
-		}
-		defer f.Close()
-		audit = f
-	}
-	cs := csf.manager(logger)
-	cs.RemoveLegacyCaches()
-	cs.Settings = prefs
-	srv := server.New(mg, server.Options{
-		AllowedOrigins: origins,
-		Static:         static,
-		Logger:         logger,
-		ControlDir:     controlDir,
-		CodeServer:     cs,
-		CodeServerIdle: *csIdle,
-		ReadOnly:       *readOnly,
-		ProxySecret:    secret,
-		Audit:          audit,
-		UserHeader:     *userHeader,
-		Settings:       prefs,
-		Keybindings:    keys,
-		HC:             embedded.HC,
-	})
-
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer cancel()
-	if *parentStdio {
-		go stopWithParent(os.Stdin, cancel)
-	}
-	// Edits of the files by hand apply without a restart.
-	go prefs.Watch(ctx, 2*time.Second)
-	go keys.Watch(ctx, 2*time.Second)
-	// Bind before connecting to machines: a failed launch must not start agents.
-	ln, err := net.Listen("tcp", *listen)
-	if err != nil {
-		logger.Fatal(err)
-	}
-	defer ln.Close()
-	machinesDone := make(chan struct{})
-	go func() {
-		mg.Run(ctx)
-		close(machinesDone)
-	}()
-	go srv.Run(ctx)
-
-	hs := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 15 * time.Second}
-	go func() {
-		<-ctx.Done()
-		sctx, c := context.WithTimeout(context.Background(), 3*time.Second)
-		defer c()
-		hs.Shutdown(sctx)
-	}()
-	mode := ""
-	if *readOnly {
-		mode = " (read-only)"
-	}
-	logger.Printf("%s %s listening on http://%s (%d machines)%s", brand.Name, agentproto.Version, ln.Addr(), len(specs), mode)
-	if *parentStdio {
-		if err := writeReady(os.Stdout, ln.Addr().String()); err != nil {
-			logger.Printf("launcher disconnected: %v", err)
-			cancel()
-		}
-	}
-	if err := hs.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		logger.Fatal(err)
-	}
-	// Machine sessions end with ctx; wait for them so that the local agent
-	// stops the code-server it started instead of leaving it behind.
-	select {
-	case <-machinesDone:
-	case <-time.After(15 * time.Second):
-		logger.Printf("machines did not disconnect within 15s")
-	}
-}
-
-func extraSpecs(targets []string) []machines.Spec {
-	var out []machines.Spec
-	for _, t := range targets {
-		out = append(out, machines.Spec{ID: t, Label: t, Kind: machines.KindSSH, Target: t, Enabled: true})
-	}
-	return out
-}
-
-// selectSpecs applies --local-only and --machine; each machine appears once.
-func selectSpecs(specs []machines.Spec, localOnly bool, extraSSH, only []string) []machines.Spec {
-	var out []machines.Spec
-	for i, s := range specs {
-		if selectSpec(s, i == 0, localOnly, extraSSH, only) {
-			out = append(out, s)
-		}
-	}
-	return out
-}
-
-// selectSpec reports whether --local-only and --machine take machine s;
-// local tells whether s is the local machine.
-func selectSpec(s machines.Spec, local, localOnly bool, extraSSH, only []string) bool {
-	in := func(list []string) bool {
-		for _, v := range list {
-			if v == s.ID || v == s.Label || v == s.Target {
-				return true
-			}
-		}
-		return false
-	}
-	if localOnly && !local && !in(extraSSH) {
-		return false
-	}
-	return len(only) == 0 || in(only)
 }

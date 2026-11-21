@@ -5,18 +5,18 @@
 // terminal; so is the second press of a chord's first stroke, which the
 // terminal encodes as any other key. No default binding is a chord. In the
 // desktop app the page sees a key before the application menu, which gets
-// only the keys the page leaves (desktop.ts).
+// only the keys the page leaves (desktop.ts). What a command does is not
+// here: plugins bring their commands' handlers, commands.ts the others'.
 
-import { actions, attentionList, current } from './actions';
-import { useStore } from './state/store';
+import { actions } from './actions';
 import * as L from './term/layout';
 import { hasMessage, t } from './i18n';
 import { keyLabel, strokeOf } from './keys';
 import { platform, useKeys, type Binding, type When } from './keybindings';
-import { findStep, openFind, useFind } from './vt/find';
-import { paneHandle } from './state/panes';
-import { currentZoom, zoom, zoomAvailable, ZOOM_LEVELS } from './zoom';
-import { fullDiskAccessAvailable, openFullDiskAccess } from './fullDiskAccess';
+import { fullDiskAccessAvailable } from './fullDiskAccess';
+import type { CommandDef } from './plugins/api';
+import { commandOfOffPlugin, pluginCommand } from './plugins/registry';
+import { useFrames, windowFocused } from './codeFrames';
 
 /** Where a key is pressed: the main UI, a VS Code pane, or a dialog. */
 export type KeyContext = 'terminal' | 'vscode' | 'dialog';
@@ -107,6 +107,8 @@ export const REPEATING_COMMANDS: ReadonlySet<string> = new Set([
   'pane.focusUp',
   'pane.focusDown',
   'pane.focusNext',
+  'pane.back',
+  'pane.forward',
   'pane.focusPrevious',
   'workspace.next',
   'workspace.previous',
@@ -143,22 +145,29 @@ export function handleKey(ev: KeyboardEvent, ctx: KeyContext = keyContext()): bo
   }
 }
 
-/** Commands whose keys a VS Code pane gives the app before VS Code sees
- * them, so that they act on the pane as on a terminal's: cmd+w closes it
- * (VS Code would close an editor). VS Code keeps every other key. */
-export const PANE_COMMANDS: ReadonlySet<string> = new Set(['pane.close']);
+/** VS Code's key for closing, pressed in a window without editors
+ * (bridge.close; the extension binds it there, as VS Code closes such a
+ * window): closes the VS Code pane showing that window, when this page has
+ * the keyboard there. Every other key in a VS Code pane is VS Code's
+ * first. */
+export function closeWindowPane(m: string, window: string, folders?: string[]) {
+  const k = windowFocused(m, window, folders);
+  const fr = k ? useFrames.getState().frames[k] : undefined;
+  if (!fr || keyContext() === 'dialog' || !commandEnabled('pane.close')) return;
+  void actions.closePane(fr.m, L.codeKey(fr.id));
+}
 
-/** A key pressed in a VS Code pane, before VS Code: runs a PANE_COMMANDS
- * command bound to it as one stroke, on that pane (focus makes it the
- * focused one), and returns true (the caller keeps it from VS Code). */
-export function handleFrameKey(ev: KeyboardEvent, focus: () => void = () => {}): boolean {
-  if (ev.type !== 'keydown' || keyContext() === 'dialog' || pending) return false;
-  const stroke = strokeOf(ev);
-  const b = stroke ? bindings().find((x) => PANE_COMMANDS.has(x.command) && x.key === stroke && applies(x.when, 'vscode')) : undefined;
-  if (!b) return false;
-  focus();
-  if (!ev.repeat || REPEATING_COMMANDS.has(b.command)) runCommand(b.command);
-  return true;
+/** The extension's key for leaving VS Code, pressed in a window
+ * (bridge.leave): when this page has the keyboard in that window's pane,
+ * it moves to the pane's header, where the page's keys work (code.open
+ * then hides VS Code again). */
+export function leaveWindowPane(m: string, window: string, folders?: string[]) {
+  const k = windowFocused(m, window, folders);
+  const fr = k ? useFrames.getState().frames[k] : undefined;
+  if (!fr || keyContext() === 'dialog') return;
+  const pane = L.codeKey(fr.id);
+  const header = document.querySelector<HTMLElement>(`.pane-header[data-m="${CSS.escape(fr.m)}"][data-pane="${CSS.escape(pane)}"]`);
+  header?.focus({ preventScroll: true });
 }
 
 /** The label of a command, e.g. "New Tab". */
@@ -194,229 +203,27 @@ export function commandShown(id: string): boolean {
   return id !== 'app.fullDiskAccess' || fullDiskAccessAvailable();
 }
 
-/** When pane.close last ran, and how soon after it another run counts as
- * the key held (the desktop app's menu repeats without saying so; the first
- * repeat comes after the system's delay, about 400 ms by default). */
-let lastPaneClose = 0;
-const HELD_CLOSE_MS = 600;
+/** The handlers of the commands that are no plugin's, by id. */
+const builtins = new Map<string, CommandDef>();
 
-/** Whether the selected workspace has no tab left: closing a pane closes it. */
-function emptyWorkspace(): boolean {
-  const ws = current()?.ws;
-  return !!ws && ws.tabs.length === 0;
+/** Adds handlers of commands that are no plugin's (commands.ts defines the
+ * app's at its start). A plugin's handler of the same id comes first. */
+export function defineCommands(table: Record<string, CommandDef>) {
+  for (const [id, def] of Object.entries(table)) builtins.set(id, def);
 }
 
 /** Whether a command can run now: a pane, tab or workspace for it to act
  * on, something to switch to, a page that may change things. The desktop
- * app's menu shows the others disabled, the palette leaves them out. */
+ * app's menu shows the others disabled, the palette leaves them out. A
+ * command of a plugin that is off cannot; one nothing handles can. */
 export function commandEnabled(id: string): boolean {
-  const s = useStore.getState();
-  const c = actions.focusedContext();
-  const cur = current();
-  const layout = cur?.layout;
-  const tabs = cur?.ws?.tabs.length ?? 0;
-  const panes = cur?.tab ? L.tabPanes(cur.tab).length : 0;
-  const changes = !s.readOnly;
-  if (/^tab\.select[1-9]$/.test(id)) return tabs > 1;
-  switch (id) {
-    case 'workspace.new':
-      return changes && !!s.machineId && s.machines[s.machineId]?.status === 'ready';
-    case 'tab.new':
-      return changes && !!layout;
-    case 'workspace.edit':
-    case 'workspace.close':
-      return changes && !!cur?.ws;
-    case 'workspace.next':
-    case 'workspace.previous':
-      return (layout?.workspaces.length ?? 0) > 1;
-    case 'workspace.switch':
-      return Object.values(s.machines).length > 0;
-    case 'tab.rename':
-    case 'tab.close':
-      return changes && !!cur?.tab;
-    case 'tab.next':
-    case 'tab.previous':
-      return tabs > 1;
-    case 'pane.splitRight':
-    case 'pane.splitDown':
-      return changes && !!c?.pane;
-    case 'pane.close':
-      // With no pane left, it closes the empty workspace.
-      return changes && (!!c?.pane || emptyWorkspace());
-    case 'pane.zoom':
-      return !!c?.pane && panes > 1;
-    case 'pane.focusLeft':
-    case 'pane.focusRight':
-    case 'pane.focusUp':
-    case 'pane.focusDown':
-    case 'pane.focusNext':
-    case 'pane.focusPrevious':
-      return panes > 1;
-    case 'find.open':
-    case 'find.next':
-    case 'find.previous':
-      return !!c?.terminal;
-    case 'code.open':
-    case 'code.diff':
-    case 'code.gitGraph':
-      return changes && !!c;
-    case 'app.agentAttention':
-      return attentionList().length > 0;
-    case 'app.addMachine':
-      return changes;
-    case 'app.fullDiskAccess':
-      return fullDiskAccessAvailable();
-    case 'view.zoomIn':
-      return zoomAvailable(s.readOnly) && currentZoom() < ZOOM_LEVELS[ZOOM_LEVELS.length - 1];
-    case 'view.zoomOut':
-      return zoomAvailable(s.readOnly) && currentZoom() > ZOOM_LEVELS[0];
-    case 'view.zoomReset':
-      return zoomAvailable(s.readOnly) && currentZoom() !== 100;
-  }
-  return true;
+  const plugin = pluginCommand(id);
+  if (plugin) return plugin.enabled?.() ?? true;
+  if (commandOfOffPlugin(id)) return false;
+  return builtins.get(id)?.enabled?.() ?? true;
 }
 
 /** Runs a command; unknown ones do nothing. */
 export function runCommand(id: string) {
-  const ctx = actions.focusedContext();
-  const s = useStore.getState();
-  const select = /^tab\.select([1-9])$/.exec(id);
-  if (select) {
-    // The ninth is the last tab, as in browsers.
-    actions.switchTab(select[1] === '9' ? { last: true } : { index: Number(select[1]) - 1 });
-    return;
-  }
-  switch (id) {
-    case 'app.commandPalette':
-      s.setPalette?.('commands');
-      break;
-    case 'app.keyboardShortcuts':
-      s.openSettings({ page: 'keys' });
-      break;
-    case 'app.settings':
-      s.openSettings({});
-      break;
-    case 'app.agentAttention':
-      actions.openAttention();
-      break;
-    case 'app.addMachine':
-      s.openAddMachine(true);
-      break;
-    case 'app.fullDiskAccess':
-      openFullDiskAccess();
-      break;
-    case 'workspace.switch':
-      s.setPalette?.('workspaces');
-      break;
-    case 'workspace.next':
-      actions.cycleWorkspace(1);
-      break;
-    case 'workspace.previous':
-      actions.cycleWorkspace(-1);
-      break;
-    case 'workspace.new':
-      actions.newWorkspace();
-      break;
-    case 'workspace.edit':
-      if (s.machineId && s.workspaceId) void actions.editWorkspace(s.machineId, s.workspaceId);
-      break;
-    case 'workspace.close':
-      if (s.machineId && s.workspaceId) void actions.closeWorkspace(s.machineId, s.workspaceId);
-      break;
-    case 'tab.new':
-      void actions.newTab();
-      break;
-    case 'tab.rename': {
-      const c = actions.currentTab();
-      if (c) actions.startRename('tab', c.m, `${c.ws}:${c.index}`);
-      break;
-    }
-    case 'tab.next':
-      actions.switchTab(1);
-      break;
-    case 'tab.previous':
-      actions.switchTab(-1);
-      break;
-    case 'tab.close': {
-      const c = actions.currentTab();
-      if (c) void actions.closeTab(c.m, c.ws, c.index);
-      break;
-    }
-    case 'pane.splitRight':
-      if (ctx?.pane) void actions.split(ctx.m, ctx.pane, 'right');
-      break;
-    case 'pane.splitDown':
-      if (ctx?.pane) void actions.split(ctx.m, ctx.pane, 'down');
-      break;
-    case 'pane.close': {
-      const now = Date.now();
-      const held = now - lastPaneClose < HELD_CLOSE_MS;
-      lastPaneClose = now;
-      if (ctx?.pane) void actions.closePane(ctx.m, ctx.pane);
-      // A press of its own closes the empty workspace, not a held key that
-      // closed its last pane.
-      else if (!held && emptyWorkspace()) {
-        const cur = current();
-        if (cur?.ws) void actions.closeWorkspace(cur.m, cur.ws.id);
-      }
-      break;
-    }
-    case 'pane.zoom':
-      if (ctx?.pane) actions.zoom(ctx.m, ctx.pane);
-      break;
-    case 'pane.focusLeft':
-      actions.focusDirection('left');
-      break;
-    case 'pane.focusRight':
-      actions.focusDirection('right');
-      break;
-    case 'pane.focusUp':
-      actions.focusDirection('up');
-      break;
-    case 'pane.focusDown':
-      actions.focusDirection('down');
-      break;
-    case 'pane.focusNext':
-      actions.cyclePane(1);
-      break;
-    case 'pane.focusPrevious':
-      actions.cyclePane(-1);
-      break;
-    case 'view.toggleSidebar':
-      actions.toggleSidebar();
-      break;
-    case 'view.zoomIn':
-      zoom(1);
-      break;
-    case 'view.zoomOut':
-      zoom(-1);
-      break;
-    case 'view.zoomReset':
-      zoom(0);
-      break;
-    case 'find.open': {
-      if (!ctx?.terminal) break;
-      const h = paneHandle(ctx.m, ctx.terminal);
-      if (h) h.openFind();
-      else openFind(ctx.m, ctx.terminal);
-      break;
-    }
-    case 'find.next':
-      if (useFind.getState().terminal) findStep(true);
-      else if (ctx?.terminal) openFind(ctx.m, ctx.terminal);
-      break;
-    case 'find.previous':
-      if (useFind.getState().terminal) findStep(false);
-      else if (ctx?.terminal) openFind(ctx.m, ctx.terminal);
-      break;
-    case 'code.open':
-      if (ctx) void actions.openCode(ctx.m, ctx.cwd);
-      break;
-    case 'code.diff':
-      if (ctx) void actions.openDiff(ctx.m, ctx.cwd, ctx.pane);
-      break;
-    case 'code.gitGraph':
-      if (ctx) void actions.openGitGraph(ctx.m, ctx.cwd, ctx.pane);
-      break;
-  }
+  (pluginCommand(id) ?? builtins.get(id))?.run();
 }

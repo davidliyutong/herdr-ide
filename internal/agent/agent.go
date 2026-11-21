@@ -1,6 +1,7 @@
 //go:build unix
 
-// Package agent implements herdr-ide-agent: the per-machine helper that the
+// Package agent implements the agent (the command "agent" of the one
+// binary): the per-machine helper that the
 // core reaches over a yamux session (ssh stdio for remote machines, an
 // in-process pipe for the local machine). It runs on Linux and macOS only
 // (every file is built for unix): its sockets, peer checks, process groups,
@@ -59,7 +60,7 @@ type Options struct {
 func Serve(ctx context.Context, conn io.ReadWriteCloser, opts Options) error {
 	logger := opts.Logger
 	if logger == nil {
-		logger = log.New(os.Stderr, brand.AgentBin+": ", log.LstdFlags)
+		logger = log.New(os.Stderr, brand.CoreBin+" agent: ", log.LstdFlags)
 	}
 	if !brand.ValidInstance(opts.Instance) {
 		return fmt.Errorf("invalid instance name %q", opts.Instance)
@@ -80,7 +81,19 @@ func Serve(ctx context.Context, conn io.ReadWriteCloser, opts Options) error {
 	// private even if it already existed with looser permissions.
 	_ = os.Chmod(base, 0o700)
 	_ = os.Chmod(runDir, 0o700)
-	go housekeeping(base, logger)
+	// What the agent runs (requests, its sockets, housekeeping) is waited
+	// for when the session ends, at most handlerDrain, so it is done (a
+	// save or an upload removed what it staged, a socket was removed)
+	// before the process may exit.
+	var running sync.WaitGroup
+	spawn := func(f func()) {
+		running.Add(1)
+		go func() {
+			defer running.Done()
+			f()
+		}()
+	}
+	spawn(func() { housekeeping(base, logger) })
 
 	sess, err := yamux.Server(conn, agentproto.YamuxConfig(logger))
 	if err != nil {
@@ -105,17 +118,46 @@ func Serve(ctx context.Context, conn io.ReadWriteCloser, opts Options) error {
 		<-ctx.Done()
 		sess.Close()
 	}()
-	go a.serveBridge(ctx)
+	spawn(func() { a.serveBridge(ctx) })
+	spawn(func() { a.serveVault(ctx) })
+	spawn(a.linkMCP)
 
 	for {
 		st, err := sess.AcceptStream()
 		if err != nil {
-			if errors.Is(err, io.EOF) || sess.IsClosed() {
+			ended := errors.Is(err, io.EOF) || sess.IsClosed()
+			// The requests still running fail with their streams, the
+			// sockets close with the context.
+			cancel()
+			sess.Close()
+			waitAtMost(&running, handlerDrain)
+			if ended {
 				return nil
 			}
 			return err
 		}
-		go a.handle(ctx, st)
+		spawn(func() { a.handle(ctx, st) })
+	}
+}
+
+// handlerDrain is how long Serve waits, once its session ended, for what
+// it runs (requests, its sockets, housekeeping) to end.
+const handlerDrain = 5 * time.Second
+
+// waitAtMost waits for wg at most d, and reports whether it ended.
+func waitAtMost(wg *sync.WaitGroup, d time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-done:
+		return true
+	case <-t.C:
+		return false
 	}
 }
 
@@ -130,7 +172,7 @@ func (a *Agent) handle(ctx context.Context, st net.Conn) {
 	var err error
 	switch h.Op {
 	case agentproto.OpHello:
-		err = agentproto.WriteLine(st, agentproto.Reply{OK: true, Info: a.info()})
+		err = agentproto.WriteLine(st, agentproto.Reply{OK: true, Info: a.info(), SSH: os.Getenv("SSH_CONNECTION")})
 		st.Close()
 	case agentproto.OpFsStat, agentproto.OpFsList, agentproto.OpFsRead, agentproto.OpFsWrite:
 		err = a.handleFS(st, h)
@@ -150,6 +192,8 @@ func (a *Agent) handle(ctx context.Context, st net.Conn) {
 		err = a.handleDetect(ctx, st)
 	case agentproto.OpPrivacy:
 		err = a.handlePrivacy(ctx, st)
+	case agentproto.OpPlugin:
+		err = a.handlePlugin(ctx, st, h)
 	default:
 		err = agentproto.Fail(st, fmt.Errorf("unknown op %q", h.Op))
 		st.Close()

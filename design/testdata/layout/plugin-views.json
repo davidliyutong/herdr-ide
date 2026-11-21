@@ -1,0 +1,133 @@
+{
+  "description": "Plugins' panes ({\"view\": {id, plugin, kind, ...}}) are panes like terminals, named view:<id>: they are split beside, focused and closed; setViewFields changes the plugin's own fields and never id, plugin or kind, and changes nothing for other panes; a view without a plugin or a kind is a node of an unknown kind, kept as it is.",
+  "input": {
+    "version": 2,
+    "workspaces": [
+      {
+        "id": "w",
+        "name": "",
+        "cwd": "/p",
+        "tabs": [
+          {
+            "root": {
+              "split": "horizontal",
+              "ratio": 0.5,
+              "children": [
+                {
+                  "terminal": "t1"
+                },
+                {
+                  "view": {
+                    "id": "v1",
+                    "plugin": "files",
+                    "kind": "editor",
+                    "path": "/p/a.go",
+                    "extra": 1
+                  }
+                }
+              ]
+            },
+            "focused": "t1"
+          },
+          {
+            "root": {
+              "view": {
+                "id": "v9",
+                "plugin": "git"
+              }
+            },
+            "focused": ""
+          }
+        ],
+        "selected": 0
+      }
+    ],
+    "selected": 0
+  },
+  "ops": [
+    {
+      "op": "splitPane",
+      "target": "t1",
+      "axis": "vertical",
+      "leaf": {
+        "view": {
+          "id": "v2",
+          "plugin": "git",
+          "kind": "diff",
+          "path": "a.go"
+        }
+      }
+    },
+    {
+      "op": "setViewFields",
+      "pane": "view:v2",
+      "fields": {
+        "path": "b.go",
+        "staged": true,
+        "id": "hijack",
+        "plugin": "x",
+        "kind": "y"
+      }
+    },
+    {
+      "op": "setViewFields",
+      "pane": "t1",
+      "fields": {
+        "path": "c.go"
+      }
+    },
+    {
+      "op": "focus",
+      "pane": "view:v2"
+    },
+    {
+      "op": "closePane",
+      "pane": "view:v1"
+    }
+  ],
+  "changed": true,
+  "expected": {
+    "version": 2,
+    "workspaces": [
+      {
+        "id": "w",
+        "name": "",
+        "cwd": "/p",
+        "tabs": [
+          {
+            "root": {
+              "split": "vertical",
+              "ratio": 0.5,
+              "children": [
+                {
+                  "terminal": "t1"
+                },
+                {
+                  "view": {
+                    "id": "v2",
+                    "plugin": "git",
+                    "kind": "diff",
+                    "path": "b.go",
+                    "staged": true
+                  }
+                }
+              ]
+            },
+            "focused": "view:v2"
+          },
+          {
+            "root": {
+              "view": {
+                "id": "v9",
+                "plugin": "git"
+              }
+            },
+            "focused": ""
+          }
+        ],
+        "selected": 0
+      }
+    ],
+    "selected": 0
+  }
+}

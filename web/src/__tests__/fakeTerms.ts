@@ -18,7 +18,8 @@ export class FakeCore {
   readonly calls: Array<{ m: string; method: string; params: Record<string, unknown> }> = [];
   readonly sent: Array<Record<string, unknown>> = [];
   private socket?: FakeSocket;
-  private next = 1;
+  /** The number of the next terminal's address; a core never gives an address twice. */
+  next = 1;
   model!: TermModel;
 
   machine(m: string, terminals: FakeMachine['terminals'] = [], layout?: unknown): FakeMachine {
@@ -86,7 +87,8 @@ export class FakeCore {
             res(rec);
             return this.event(m, 'created', rec.address, rec);
           }
-          case 'terminal.kill': {
+          case 'terminal.kill':
+          case 'terminal.rm': {
             const a = params.terminal as string;
             fm.terminals = fm.terminals.filter((r) => r.address !== a);
             res({});

@@ -3,6 +3,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"herdr-ide/internal/brand"
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 
 	"herdr-ide/internal/agentproto"
 )
@@ -31,6 +33,19 @@ func statOf(path string, fi fs.FileInfo, isLink bool) agentproto.Stat {
 	}
 }
 
+// failFS answers a failed file operation with a code for the core:
+// not_found when the path is not there, denied without permission.
+func failFS(st net.Conn, err error) error {
+	rep := agentproto.Reply{OK: false, Error: err.Error()}
+	switch {
+	case errors.Is(err, fs.ErrNotExist), errors.Is(err, syscall.ENOTDIR):
+		rep.Code = "not_found"
+	case errors.Is(err, fs.ErrPermission):
+		rep.Code = "denied"
+	}
+	return agentproto.WriteLine(st, rep)
+}
+
 func (a *Agent) handleFS(st net.Conn, h agentproto.Header) error {
 	defer st.Close()
 	path, err := a.expand(h.Path)
@@ -41,7 +56,7 @@ func (a *Agent) handleFS(st net.Conn, h agentproto.Header) error {
 	case agentproto.OpFsStat:
 		lfi, err := os.Lstat(path)
 		if err != nil {
-			return agentproto.Fail(st, err)
+			return failFS(st, err)
 		}
 		fi := lfi
 		if lfi.Mode()&os.ModeSymlink != 0 {
@@ -82,7 +97,7 @@ func (a *Agent) handleFS(st net.Conn, h agentproto.Header) error {
 			return out[i].Name < out[j].Name
 		})
 		s := agentproto.Stat{Name: filepath.Base(path), Path: path, IsDir: true}
-		return agentproto.WriteLine(st, agentproto.Reply{OK: true, Stat: &s, Entries: out})
+		return writeListing(st, agentproto.Reply{OK: true, Stat: &s}, out)
 
 	case agentproto.OpFsRead:
 		f, err := os.Open(path)
@@ -161,6 +176,27 @@ func (a *Agent) handleFS(st net.Conn, h agentproto.Header) error {
 		return agentproto.WriteLine(st, agentproto.Reply{OK: true, Stat: &s})
 	}
 	return agentproto.Fail(st, fmt.Errorf("unknown fs op %q", h.Op))
+}
+
+// writeListing answers fs.list with entries: in the reply line while they
+// are small, else as a body after it (Reply.EntriesLength), since a
+// directory of thousands of names (an archive just unpacked) is more than
+// the line may hold.
+func writeListing(st net.Conn, rep agentproto.Reply, entries []agentproto.Stat) error {
+	b, err := json.Marshal(entries)
+	if err != nil {
+		return agentproto.Fail(st, err)
+	}
+	if len(b) <= agentproto.MaxInline {
+		rep.Entries = entries
+		return agentproto.WriteLine(st, rep)
+	}
+	rep.EntriesLength = int64(len(b))
+	if err := agentproto.WriteLine(st, rep); err != nil {
+		return err
+	}
+	_, err = st.Write(b)
+	return err
 }
 
 // freeName claims path, or the first free name with -1, -2… before its

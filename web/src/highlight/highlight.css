@@ -1,0 +1,59 @@
+/* The colors of code by the role of a token (roles.ts): the design tokens'
+   syntax colors in the theme in use. The editor takes the same tokens
+   (plugins/monaco.ts). */
+.syn-comment {
+  color: var(--ds-syntax-comment);
+}
+.syn-keyword {
+  color: var(--ds-syntax-keyword);
+}
+.syn-string {
+  color: var(--ds-syntax-string);
+}
+.syn-number {
+  color: var(--ds-syntax-number);
+}
+.syn-type {
+  color: var(--ds-syntax-type);
+}
+.syn-function {
+  color: var(--ds-syntax-function);
+}
+.syn-property {
+  color: var(--ds-syntax-property);
+}
+.syn-tag {
+  color: var(--ds-syntax-tag);
+}
+.syn-attribute {
+  color: var(--ds-syntax-attribute);
+}
+.syn-delimiter {
+  color: var(--ds-syntax-delimiter);
+}
+.syn-regexp {
+  color: var(--ds-syntax-regexp);
+}
+.syn-heading {
+  color: var(--ds-syntax-function);
+  font-weight: 600;
+}
+.syn-strong {
+  font-weight: 600;
+}
+.syn-emphasis {
+  font-style: italic;
+}
+.syn-link {
+  color: var(--ds-syntax-property);
+  text-decoration: underline;
+}
+.syn-inserted {
+  color: var(--ds-git-added);
+}
+.syn-deleted {
+  color: var(--ds-git-deleted);
+}
+.syn-changed {
+  color: var(--ds-git-modified);
+}

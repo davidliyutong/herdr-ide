@@ -62,6 +62,18 @@ const (
 	// agent's own process and the terminal core's do. It starts no terminal
 	// core and reads no file.
 	OpPrivacy Op = "privacy"
+	// OpPlugin runs Action of the agent's side of Plugin with Params (JSON)
+	// and replies with its result in Reply.Plugin; an action that streams
+	// writes JSON lines after the reply until either side closes the stream
+	// (internal/agent/plugin). Params and results larger than MaxInline
+	// follow their line as a body (Header.ParamsLength,
+	// Reply.PluginLength).
+	OpPlugin Op = "plugin"
+	// OpVault is opened by the agent towards the core for every connection
+	// of an MCP server (the mcp command) to <run>/vault.sock: after the
+	// core's reply, one VaultRequest line and one VaultResponse line
+	// (vault.go).
+	OpVault Op = "vault"
 )
 
 // DetectEvent is one line of an OpDetect stream: the agent a terminal runs
@@ -106,16 +118,34 @@ type Header struct {
 	// one a start or restart may run.
 	URL    string `json:"url,omitempty"`
 	Digest string `json:"digest,omitempty"`
+
+	// Plugin (OpPlugin) names the plugin whose Action runs, with Params,
+	// the action's own JSON.
+	Plugin string          `json:"plugin,omitempty"`
+	Params json.RawMessage `json:"params,omitempty"`
+	// ParamsLength (OpPlugin): the params are not in Params but follow
+	// the header line, that many bytes of JSON (at most MaxBody); the
+	// core sends params larger than MaxInline so.
+	ParamsLength int64 `json:"params_length,omitempty"`
+
+	// Process (OpVault) is the process connected to vault.sock (peer
+	// credentials) and its parents, as the agent saw them.
+	Process []VaultProcess `json:"process,omitempty"`
 }
 
 // Reply is the first line written back by the acceptor.
 type Reply struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
-	// Code classifies Error for ops that define codes (hc).
+	// Code classifies Error for ops that define codes (hc, plugins; fs.stat:
+	// not_found, denied).
 	Code string `json:"code,omitempty"`
 
-	Info    *Info       `json:"info,omitempty"`
+	Info *Info `json:"info,omitempty"`
+	// SSH (OpHello) is the SSH_CONNECTION of the session the agent was
+	// started in ("" when it was not started over ssh). It is apart from
+	// Info, which every client of the core sees.
+	SSH     string      `json:"ssh,omitempty"`
 	Stat    *Stat       `json:"stat,omitempty"`
 	Entries []Stat      `json:"entries,omitempty"`
 	Exec    *ExecResult `json:"exec,omitempty"`
@@ -125,6 +155,19 @@ type Reply struct {
 	HC      *HCStatus   `json:"hc,omitempty"`
 
 	Privacy *PrivacyStatus `json:"privacy,omitempty"`
+	// Plugin is an OpPlugin action's result, the plugin's own JSON.
+	Plugin json.RawMessage `json:"plugin,omitempty"`
+	// PluginLength (OpPlugin): the result is not in Plugin but follows the
+	// reply line, that many bytes of JSON (at most MaxBody); the agent
+	// sends results larger than MaxInline so.
+	PluginLength int64 `json:"plugin_length,omitempty"`
+
+	// EntriesLength (fs.list): the entries are not in Entries but follow
+	// the reply line, that many bytes of JSON (at most MaxBody); the agent
+	// sends listings larger than MaxInline so: the names of a directory of
+	// some ten thousand entries are more than a line's MaxHeaderLine.
+	// Session.Open reads them into Entries.
+	EntriesLength int64 `json:"entries_length,omitempty"`
 }
 
 // Full Disk Access as an OpPrivacy reply reports it.
@@ -228,6 +271,28 @@ func WriteLine(w io.Writer, v any) error {
 
 // MaxHeaderLine bounds header and reply lines.
 const MaxHeaderLine = 1 << 20
+
+// MaxInline is the largest JSON an OpPlugin header or reply carries in its
+// line (Header.Params, Reply.Plugin); larger JSON follows the line as a
+// body of at most MaxBody bytes, which is not read byte by byte as lines
+// are.
+const (
+	MaxInline = 32 << 10
+	MaxBody   = 64 << 20
+)
+
+// ReadBody reads the n bytes of JSON that follow a line (Header.ParamsLength,
+// Reply.PluginLength).
+func ReadBody(r io.Reader, n int64) (json.RawMessage, error) {
+	if n < 0 || n > MaxBody {
+		return nil, fmt.Errorf("agentproto: body of %d bytes", n)
+	}
+	b := make([]byte, n)
+	if _, err := io.ReadFull(r, b); err != nil {
+		return nil, fmt.Errorf("agentproto: body: %w", err)
+	}
+	return b, nil
+}
 
 // ReadLine reads one JSON line byte by byte so that no bytes following the
 // line are consumed from r.

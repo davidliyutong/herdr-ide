@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../state/store';
 import { actions, attentionList, terminalPlace, workspaceTitle } from '../actions';
 import { commandEnabled, commandLabel, keyHint, runCommand } from '../keymap';
@@ -8,8 +8,16 @@ import { usePrefs } from '../prefs';
 import { agentOf, terminalTitle } from '../lib/machine';
 import { useTerms } from '../state/terms';
 import { StatusDot } from './StatusDot';
-import { useGui } from '../gui/state';
-import { enableGui } from '../gui/enable';
+import { pluginPaletteItems } from '../plugins/registry';
+import { match, matchScore } from '../lib/match';
+import { Highlight } from './Highlight';
+import { titleIfCut } from './ContextMenu';
+import { useReturnFocus } from './useDismiss';
+import { revealTop, visibleRange } from '../lib/windowed';
+import { useSize } from '../lib/sizes';
+
+// The matcher is shared with the pickers (lib/match.ts).
+export { matchScore };
 
 interface Item {
   id: string;
@@ -19,34 +27,21 @@ interface Item {
   run(): void;
 }
 
-const wordStart = (s: string, i: number) => i === 0 || /[\s·:/(（.-]/.test(s[i - 1]);
-
-/** How well an item matches a query: 3 when a word starts with it, 2 when
- * it holds it, 1 when its letters are the starts of words or follow each
- * other there ("fpl" for "Focus Pane Left", "spri" for "Split Right"), 0
- * otherwise. */
-export function matchScore(q: string, s: string): number {
-  q = q.toLowerCase().trim();
-  s = s.toLowerCase();
-  const at = s.indexOf(q);
-  if (at >= 0 && wordStart(s, at)) return 3;
-  if (at > 0) return 2;
-  let j = -1;
-  for (const ch of q) {
-    let k = j + 1;
-    while (k < s.length && !(s[k] === ch && (k === j + 1 || wordStart(s, k)))) k++;
-    if (k >= s.length) return 0;
-    j = k;
-  }
-  return 1;
-}
-
 export function Palette() {
   const mode = useStore((s) => s.palette);
   const setPalette = useStore((s) => s.setPalette);
   const [q, setQ] = useState('');
   const [sel, setSel] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  // Only the items in view are drawn (lib/windowed.ts), so every item is
+  // listed however many there are: rows of one height, in a view of at most
+  // half the window.
+  const rowPx = useSize('toolbar');
+  const [scrollTop, setScrollTop] = useState(0);
+  // The keyboard's item is scrolled into view; the pointer's is not.
+  const reveal = useRef(false);
+  useReturnFocus(!!mode);
 
   useEffect(() => {
     setQ('');
@@ -103,19 +98,7 @@ export function Palette() {
         run: () => usePrefs.getState().setPref('theme', th),
       });
     }
-    const f = actions.focusedContext();
-    const focused = f?.terminal;
-    if (f && focused && useGui.getState().machines[f.m]?.phase === 'ready') {
-      cmds.push({ id: 'gui:pane', label: t('action.enableGuiPane'), run: () => void enableGui(f.m, [focused]) });
-    }
-    for (const st of Object.values(useGui.getState().machines)) {
-      if (st.phase !== 'ready') continue;
-      cmds.push({
-        id: `gui:${st.m}`,
-        label: t('action.enableGuiMachine', { m: s.machines[st.m]?.label ?? st.m }),
-        run: () => void enableGui(st.m),
-      });
-    }
+    cmds.push(...pluginPaletteItems());
     if (mode === 'workspaces') return [...ws, ...agents];
     return [...cmds, ...ws, ...agents];
   }, [mode]);
@@ -127,9 +110,32 @@ export function Palette() {
         .sort((a, b) => b.score - a.score)
         .map((x) => x.i)
     : items;
+  const total = filtered.length * rowPx;
+  const viewHeight = Math.min(total, Math.round(window.innerHeight * 0.5));
+  const page = Math.max(1, Math.floor(viewHeight / rowPx) - 1);
+  useLayoutEffect(() => {
+    const el = listRef.current;
+    if (!reveal.current || !el) return;
+    reveal.current = false;
+    const top = revealTop(el.scrollTop, viewHeight, sel * rowPx, (sel + 1) * rowPx);
+    if (top !== el.scrollTop) {
+      el.scrollTop = top;
+      setScrollTop(top);
+    }
+  }, [sel, viewHeight, rowPx]);
+  // A new query starts at the top.
+  useLayoutEffect(() => {
+    if (listRef.current) listRef.current.scrollTop = 0;
+    setScrollTop(0);
+  }, [q, mode]);
   if (!mode) return null;
 
   const close = () => setPalette(undefined);
+  const move = (to: number) => {
+    reveal.current = true;
+    setSel(Math.max(0, Math.min(to, filtered.length - 1)));
+  };
+  const [from, to] = visibleRange(filtered.length, rowPx, scrollTop, viewHeight);
   const run = (i?: Item) => {
     close();
     i?.run();
@@ -148,21 +154,52 @@ export function Palette() {
           }}
           onKeyDown={(e) => {
             if (e.key === 'Escape') close();
-            else if (e.key === 'ArrowDown') setSel((v) => Math.min(v + 1, filtered.length - 1));
-            else if (e.key === 'ArrowUp') setSel((v) => Math.max(v - 1, 0));
+            else if (e.key === 'ArrowDown') move(sel + 1);
+            else if (e.key === 'ArrowUp') move(sel - 1);
+            else if (e.key === 'PageDown') move(sel + page);
+            else if (e.key === 'PageUp') move(sel - page);
             else if (e.key === 'Enter') run(filtered[sel]);
             else return;
             e.preventDefault();
           }}
         />
-        <div className="palette-list">
-          {filtered.slice(0, 200).map((i, idx) => (
-            <div key={i.id} className={`palette-item ${idx === sel ? 'sel' : ''}`} onMouseEnter={() => setSel(idx)} onClick={() => run(i)}>
-              {i.icon}
-              <span className="ellipsis">{i.label}</span>
-              {i.hint && <span className="muted small hint">{i.hint}</span>}
+        <div
+          className="palette-list"
+          ref={listRef}
+          role="listbox"
+          aria-label={t('palette.placeholder')}
+          style={filtered.length ? { height: viewHeight } : undefined}
+          onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+        >
+          {filtered.length > 0 && (
+            <div className="palette-rows" style={{ height: total }}>
+              {filtered.slice(from, to).map((i, k) => {
+                const idx = from + k;
+                return (
+                  <div
+                    key={i.id}
+                    role="option"
+                    aria-selected={idx === sel}
+                    aria-setsize={filtered.length}
+                    aria-posinset={idx + 1}
+                    className={`palette-item ${idx === sel ? 'sel' : ''}`}
+                    style={{ top: idx * rowPx, height: rowPx }}
+                    onMouseEnter={(e) => {
+                      titleIfCut(e);
+                      setSel(idx);
+                    }}
+                    onClick={() => run(i)}
+                  >
+                    {i.icon}
+                    <span className="ellipsis">
+                      <Highlight text={i.label} ranges={q ? match(q, i.label)?.ranges : undefined} />
+                    </span>
+                    {i.hint && <span className="muted small hint">{i.hint}</span>}
+                  </div>
+                );
+              })}
             </div>
-          ))}
+          )}
           {filtered.length === 0 && <div className="muted pad">{t('palette.noMatch')}</div>}
         </div>
       </div>

@@ -1,0 +1,10 @@
+/* ---------- characters a query matched (components/Highlight.tsx) ---------- */
+mark.match {
+  background: none;
+  color: inherit;
+  font-weight: 650;
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+}

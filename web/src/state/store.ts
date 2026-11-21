@@ -20,9 +20,14 @@ export interface ToastAction {
   ttl?: number;
 }
 
+/** How a toast looks: plain, or with the icon and bar of a warning or a
+ * failure. Only these two have a color: most toasts report something done. */
+export type ToastKind = 'info' | 'warning' | 'error';
+
 export interface Toast {
   id: number;
   msg: string;
+  kind?: ToastKind;
   action?: ToastAction;
 }
 
@@ -41,6 +46,8 @@ export interface SettingsView {
 
 /** The sidebar's default width and the range it can be dragged in. */
 export const SIDEBAR_WIDTH = { def: 260, min: 180, max: 520 };
+/** The right sidebar's (plugins' panels). */
+export const PANEL_WIDTH = { def: 320, min: 220, max: 720 };
 
 export interface UIState {
   connected: boolean;
@@ -62,6 +69,11 @@ export interface UIState {
   settings?: SettingsView;
   /** The sidebar's width in pixels. */
   sidebarWidth: number;
+  /** The panel the right sidebar shows (web/src/plugins), none while it is hidden. */
+  panel?: string;
+  /** The last panel shown, which showing the right sidebar again brings back. */
+  lastPanel?: string;
+  panelWidth: number;
   renaming?: Renaming;
   toasts: Toast[];
   auth?: string;
@@ -87,12 +99,20 @@ export interface UIState {
   /** Opens the settings dialog (on a page, in a scope), or closes it (false). */
   openSettings(view: SettingsView | false): void;
   setSidebarWidth(w: number): void;
+  /** Shows a panel in the right sidebar, or hides it (undefined). */
+  setPanel(id: string | undefined): void;
+  setPanelWidth(w: number): void;
   setRenaming(r: Renaming | undefined): void;
   /** Shows a toast for ttl ms (default: 5 s, 15 s with an action, or the
    * action's own) and returns its id. */
-  toast(msg: string, action?: ToastAction, ttl?: number): number;
+  toast(msg: string, action?: ToastAction, ttl?: number, kind?: ToastKind): number;
   openAuth(m?: string): void;
   openAddMachine(open: boolean): void;
+  /** Status bar widget ids hidden in this browser. */
+  hiddenStatusWidgets: string[];
+  setStatusWidgetVisible(id: string, visible: boolean): void;
+  toggleStatusWidget(id: string): void;
+  showAllStatusWidgets(): void;
   setReadOnly(v: boolean): void;
 }
 
@@ -131,6 +151,10 @@ export const useStore = create<UIState>((set, get) => ({
   machines: {},
   sidebarOpen: loadPref('sidebarOpen', true),
   sidebarWidth: loadPref('sidebarWidth', SIDEBAR_WIDTH.def),
+  panel: loadPref<string | null>('panel', null) ?? undefined,
+  lastPanel: loadPref<string | null>('lastPanel', null) ?? undefined,
+  panelWidth: loadPref('panelWidth', PANEL_WIDTH.def),
+  hiddenStatusWidgets: loadPref<string[]>('hiddenStatusWidgets', []),
   toasts: [],
 
   setConnected: (connected) => set({ connected }),
@@ -165,6 +189,16 @@ export const useStore = create<UIState>((set, get) => ({
     savePref('sidebarWidth', width);
     set({ sidebarWidth: width });
   },
+  setPanel: (panel) => {
+    savePref('panel', panel ?? null);
+    if (panel) savePref('lastPanel', panel);
+    set(panel ? { panel, lastPanel: panel } : { panel: undefined });
+  },
+  setPanelWidth: (w) => {
+    const width = Math.round(Math.min(PANEL_WIDTH.max, Math.max(PANEL_WIDTH.min, w)));
+    savePref('panelWidth', width);
+    set({ panelWidth: width });
+  },
   setRenaming: (renaming) => set({ renaming }),
   openAuth: (auth) => set({ auth }),
   hcBusy: {},
@@ -179,10 +213,26 @@ export const useStore = create<UIState>((set, get) => ({
   openAddMachine: (addMachine) => set({ addMachine }),
   readOnly: false,
   setReadOnly: (readOnly) => set({ readOnly }),
+  setStatusWidgetVisible: (id, visible) => {
+    const cur = get().hiddenStatusWidgets;
+    const next = visible ? cur.filter((x) => x !== id) : cur.includes(id) ? cur : [...cur, id];
+    if (next === cur) return;
+    savePref('hiddenStatusWidgets', next);
+    set({ hiddenStatusWidgets: next });
+  },
+  toggleStatusWidget: (id) => {
+    const hidden = get().hiddenStatusWidgets.includes(id);
+    get().setStatusWidgetVisible(id, hidden);
+  },
+  showAllStatusWidgets: () => {
+    if (!get().hiddenStatusWidgets.length) return;
+    savePref('hiddenStatusWidgets', []);
+    set({ hiddenStatusWidgets: [] });
+  },
   sshLogin: true,
-  toast: (msg, action, ttl) => {
+  toast: (msg, action, ttl, kind) => {
     const id = ++toastSeq;
-    set((s) => ({ toasts: [...s.toasts, { id, msg, action }] }));
+    set((s) => ({ toasts: [...s.toasts, { id, msg, action, kind }] }));
     // A toast with an action waits longer for the click.
     if (!action?.sticky)
       setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), action?.ttl ?? ttl ?? (action ? 15000 : 5000));

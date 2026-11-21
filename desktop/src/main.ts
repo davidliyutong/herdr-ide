@@ -8,8 +8,10 @@ import {
   powerMonitor,
   session,
   shell,
+  systemPreferences,
   type BaseWindow,
   type IpcMainEvent,
+  type IpcMainInvokeEvent,
 } from 'electron';
 import { spawn } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
@@ -21,13 +23,40 @@ import { detectLocale, translate } from '../../web/src/i18n';
 import type { MessageKey } from '../../web/src/i18n/en';
 import type { OpenedFolders } from '../../web/src/shell';
 import { channels } from './bridge';
-import { CoreProcess, coreArgs, coreEnv, coreInstance, corePort, DesktopError, ENV_PREFIX } from './core';
+import { closeGuard, isCloseAnswer, parseUnsaved, type CloseGuard } from './closeGuard';
+import {
+  CoreProcess,
+  coreArgs,
+  coreEnv,
+  coreInstance,
+  corePort,
+  DesktopError,
+  desktopCookie,
+  desktopToken,
+  ENV_PREFIX,
+  verifyKey,
+} from './core';
 import { FolderQueue } from './folders';
 import { followCore, type ShellSettings } from './follow';
 import { menuCommands, menuTemplate, parseDisabled, type Binding } from './menu';
 import { APP_ID, coreBinary, foldersOf, keyPlatform, quitsWithLastWindow, type Platform } from './platform';
-import { allowPermission, isExternal, isInternal, mainWindowPreferences, webPreferences } from './policy';
+import {
+  allowGuestPermission,
+  allowPermission,
+  BROWSER_PARTITION,
+  guestMayNavigate,
+  guestPreferences,
+  hostResolver,
+  isExternal,
+  isInternal,
+  mainWindowPreferences,
+  popupGate,
+  webPreferences,
+} from './policy';
 import { bundleOf, privacyActions, terminalCoreExecutable } from './privacy';
+import { macTrafficLightPosition, windowFrameOptions } from './titlebar';
+import { verifier, type Verifier } from './verify';
+import { helloFor, HELLO_TIMEOUT_MS, POWERSHELL_ARGS, powershellPath, type RunPowerShell } from './windowsHello';
 
 const platform = process.platform as Platform;
 app.setName(APP_NAME);
@@ -57,8 +86,12 @@ const leadingArgs = process.defaultApp ? 2 : 1;
 
 const core = new CoreProcess();
 let mainWindow: BrowserWindow | undefined;
+// The main window's page asks about unsaved changes before it closes.
+let guard: CloseGuard | undefined;
 let origin = '';
 let quitting = false;
+// Quit was chosen while the main window was open: it closes first.
+let quitAfterClose = false;
 let stopped = false;
 let systemShutdown = false;
 let reportingError = false;
@@ -72,6 +105,9 @@ let language = 'auto';
 // origin, so the app's other windows (program windows, VS Code's own) share
 // it. The setting is the only place it is kept.
 let zoomFactor = 1;
+// appearance.uiFontSize in CSS pixels: paired with zoomFactor to keep the
+// macOS traffic lights vertically centered in the integrated header row.
+let uiFontSize = tokens.font.root;
 // The commands whose menu items are disabled, as the page last said.
 let disabled = new Set<string>();
 // Folders opened with the app, until the page takes them.
@@ -110,7 +146,39 @@ function openExternal(url: string) {
 
 // Install on every window, including program windows and standalone VS Code.
 app.on('web-contents-created', (_event, contents) => {
-  contents.on('will-attach-webview', (event) => event.preventDefault());
+  // A webview attaches only in the main window's own page, and only as the
+  // browser panes' guest, at an address that is not the core's (policy.ts
+  // guestPreferences).
+  contents.on('will-attach-webview', (event, prefs, params) => {
+    const ok =
+      !!mainWindow &&
+      contents === mainWindow.webContents &&
+      isInternal(contents.getURL(), origin) &&
+      guestPreferences(prefs, params, origin);
+    if (!ok) event.preventDefault();
+  });
+  if (contents.getType() === 'webview') {
+    // A guest is a web page of the browser pane: it follows http(s) links
+    // itself, never to the core's own address, and a popup becomes a new
+    // browser tab in the page, a few at a time (policy.ts popupGate). Its
+    // scripts never hand anything to the system's browser, and it gets no
+    // menu.
+    contents.on('will-navigate', (event, url) => {
+      if (!guestMayNavigate(url, origin)) event.preventDefault();
+    });
+    contents.on('will-redirect', (event, url) => {
+      if (!guestMayNavigate(url, origin)) event.preventDefault();
+    });
+    const mayPopup = popupGate();
+    contents.setWindowOpenHandler(({ url }) => {
+      const host = contents.hostWebContents;
+      if (guestMayNavigate(url, origin) && host && !host.isDestroyed() && host.mainFrame && mayPopup()) {
+        host.mainFrame.send(channels.browserOpen, url);
+      }
+      return { action: 'deny' };
+    });
+    return;
+  }
   contents.on('will-navigate', (event, url) => {
     if (!isInternal(url, origin)) {
       event.preventDefault();
@@ -175,13 +243,23 @@ function applyZoom() {
   if (contents && !contents.isDestroyed() && contents.getZoomFactor() !== zoomFactor) contents.setZoomFactor(zoomFactor);
 }
 
+/** Keeps the macOS traffic lights vertically centered in the integrated header
+ * row as the UI font size or window zoom changes. */
+function applyWindowButtons() {
+  if (platform === 'darwin' && mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.setWindowButtonPosition(macTrafficLightPosition(uiFontSize, zoomFactor));
+  }
+}
+
 // The core's settings and keybindings: the theme becomes the title bar's and
 // native controls' (also when it differs from the system's appearance), the
 // language the menu's, the zoom the windows'.
 function applySettings(s: ShellSettings) {
   nativeTheme.themeSource = s.theme;
   zoomFactor = s.zoom;
+  uiFontSize = s.uiFontSize;
   applyZoom();
+  applyWindowButtons();
   if (s.language === language) return;
   language = s.language;
   buildMenu();
@@ -193,7 +271,7 @@ function applyBindings(b: Binding[]) {
 }
 
 // Messages count only from the top frame of the main window showing the core.
-function fromMainPage(event: IpcMainEvent): boolean {
+function fromMainPage(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
   const frame = event.senderFrame;
   return (
     !!mainWindow && !!frame && event.sender === mainWindow.webContents && frame === event.sender.mainFrame && isInternal(frame.url, origin)
@@ -206,10 +284,25 @@ ipcMain.on(channels.menuState, (event, value: unknown) => {
   if (next) applyDisabled(next);
 });
 
+ipcMain.on(channels.unsaved, (event, value: unknown) => {
+  const n = parseUnsaved(value);
+  if (fromMainPage(event) && n !== undefined) guard?.setUnsaved(n);
+});
+
+ipcMain.on(channels.closeAnswer, (event, value: unknown) => {
+  if (fromMainPage(event) && isCloseAnswer(value)) guard?.answer(value);
+});
+
 ipcMain.on(channels.foldersWanted, (event, wanted: unknown) => {
   if (!fromMainPage(event)) return;
   const contents = event.sender;
   folders.takenBy(wanted === true ? (opened) => contents.send(channels.openFolders, opened) : undefined);
+});
+
+ipcMain.on(channels.fullScreenQuery, (event) => {
+  if (fromMainPage(event) && mainWindow && !mainWindow.isDestroyed()) {
+    event.sender.send(channels.fullScreen, mainWindow.isFullScreen());
+  }
 });
 
 // Full Disk Access (macOS): the page asks; what opens is the shell's own.
@@ -241,6 +334,66 @@ ipcMain.on(channels.relaunch, (event) => {
   if (fromMainPage(event)) privacy.relaunch();
 });
 
+// What the app's processes use, for the page's Performance settings: the
+// kind of each process, its share of a processor since the last asking and
+// its memory. Nothing of what the processes hold.
+ipcMain.handle(channels.metrics, (event) =>
+  fromMainPage(event)
+    ? app.getAppMetrics().map((p) => ({
+        type: p.type,
+        name: p.name ?? p.serviceName ?? '',
+        cpu: p.cpu.percentCPUUsage,
+        memory: p.memory.workingSetSize * 1024,
+      }))
+    : [],
+);
+
+// The system's prompt for the variable vault (verify.ts). The verifier
+// exists once the core runs, with the key of this launch, which only this
+// process holds.
+let verify: Verifier | undefined;
+ipcMain.handle(channels.verifyAvailable, async (event) => (fromMainPage(event) && verify ? await verify.available() : null));
+ipcMain.handle(channels.verifyProve, async (event, nonce: unknown) => (fromMainPage(event) && verify ? await verify.prove(nonce) : null));
+
+/** Runs PowerShell with the script on stdin (Windows Hello). */
+const runPowerShell: RunPowerShell = (script, env) =>
+  new Promise((resolve, reject) => {
+    const child = spawn(powershellPath(process.env.SystemRoot), POWERSHELL_ARGS, {
+      env: { ...process.env, ...env },
+      stdio: 'pipe',
+      shell: false,
+      windowsHide: true,
+    });
+    let out = '';
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error('timeout'));
+    }, HELLO_TIMEOUT_MS);
+    child.stdout.on('data', (data: Buffer) => {
+      out = (out + data.toString()).slice(-4096);
+    });
+    child.on('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (code === 0) resolve(out);
+      else reject(new Error(`exit ${code}`));
+    });
+    child.stdin.on('error', () => {});
+    child.stdin.end(script);
+  });
+
+/** What the core says a nonce of the vault's proofs is for. */
+async function proofPurpose(nonce: string): Promise<unknown> {
+  const res = await session.defaultSession.fetch(`${origin}/api/p/vault/proof/${encodeURIComponent(nonce)}`, {
+    credentials: 'include',
+    signal: AbortSignal.timeout(5000),
+  });
+  return res.ok ? await res.json() : undefined;
+}
+
 /** The page's background (color.background in design/tokens.json), shown before it paints. */
 function windowBackground(): string {
   return tokens.color.background[nativeTheme.shouldUseDarkColors ? 'dark' : 'light'];
@@ -255,12 +408,33 @@ function createWindow() {
     minHeight: 500,
     show: false,
     backgroundColor: windowBackground(),
+    ...windowFrameOptions(platform, uiFontSize, zoomFactor),
     // Linux takes the window's icon from the window (macOS and Windows from
     // the application).
     ...(platform === 'linux' && { icon: join(app.getAppPath(), 'assets', 'icon.png') }),
     webPreferences: { ...mainWindowPreferences, preload: join(__dirname, 'preload.cjs') },
   });
   mainWindow = win;
+  const g = closeGuard({
+    ask: () => {
+      // The question shows in the window: in front, also from the Dock's Quit.
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+      win.webContents.send(channels.closeRequest);
+    },
+    close: () => {
+      if (!win.isDestroyed()) win.close();
+    },
+    cancelled: () => {
+      quitAfterClose = false;
+    },
+    setTimer: (fn, ms) => {
+      const t = setTimeout(fn, ms);
+      return () => clearTimeout(t);
+    },
+  });
+  guard = g;
   const onTheme = () => win.setBackgroundColor(windowBackground());
   nativeTheme.on('updated', onTheme);
   // Folders opened from now on wait for the next page, which asks for them;
@@ -268,9 +442,35 @@ function createWindow() {
   win.webContents.on('did-start-navigation', (details) => {
     if (details.isMainFrame && !details.isSameDocument) folders.takenBy(undefined);
   });
+  // What a page said of its unsaved changes goes with it, once another one
+  // is there (a navigation that never commits keeps it).
+  win.webContents.on('did-navigate', () => g.reset());
+  // Closing (also quitting) with unsaved changes: the page lists them and
+  // asks; a system shutdown never waits.
+  win.on('close', (event) => {
+    if (!g.onClose(systemShutdown)) event.preventDefault();
+  });
   win.webContents.on('render-process-gone', (_event, details) => {
     folders.takenBy(undefined);
+    g.reset();
     if (!quitting) void fail(new DesktopError('desktop.rendererGone', details.reason));
+  });
+  // A frame objects to unloading (the page with unsaved changes it did not
+  // ask about: a reload, a page that did not answer; a VS Code window): the
+  // user decides, natively; a system shutdown never waits.
+  win.webContents.on('will-prevent-unload', (event) => {
+    if (systemShutdown) return event.preventDefault();
+    const choice = dialog.showMessageBoxSync(win, {
+      type: 'warning',
+      buttons: [t('unsaved.leave'), t('dialog.cancel')],
+      defaultId: 1,
+      cancelId: 1,
+      message: t('unsaved.title'),
+      detail: t('unsaved.leaveDetail'),
+    });
+    // preventDefault here ignores the page's objection: the window goes.
+    if (choice === 0) event.preventDefault();
+    else quitAfterClose = false;
   });
   // Windows ends a session (log off, restart, shut down) with this.
   win.on('session-end', () => {
@@ -278,18 +478,40 @@ function createWindow() {
   });
   // Each page loaded (also after a reload) gets the zoom.
   win.webContents.on('did-finish-load', applyZoom);
+  if (platform === 'darwin') {
+    const sendFullScreen = (full: boolean) => {
+      if (!win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send(channels.fullScreen, full);
+    };
+    win.on('enter-full-screen', () => sendFullScreen(true));
+    win.on('leave-full-screen', () => {
+      // macOS resets custom traffic light coordinates after exiting full screen.
+      applyWindowButtons();
+      sendFullScreen(false);
+    });
+  }
   win.once('ready-to-show', () => win.show());
   win.on('closed', () => {
+    g.reset();
+    if (guard === g) guard = undefined;
     nativeTheme.off('updated', onTheme);
     folders.takenBy(undefined);
     mainWindow = undefined;
     // Program windows do not keep the app open.
-    if (quitsWithLastWindow(platform)) app.quit();
+    if (quitAfterClose || quitsWithLastWindow(platform)) app.quit();
   });
   void win.loadURL(origin).catch(fail);
 }
 
 app.on('before-quit', (event) => {
+  // The main window closes first, so a page with unsaved changes can keep
+  // the app (will-prevent-unload) before the core stops; quitting goes on
+  // once it has closed.
+  if (!stopped && !systemShutdown && mainWindow && !mainWindow.isDestroyed()) {
+    event.preventDefault();
+    quitAfterClose = true;
+    mainWindow.close();
+    return;
+  }
   quitting = true;
   stopFollowing();
   if (stopped) return;
@@ -362,6 +584,8 @@ if (!app.requestSingleInstanceLock()) {
     .then(async () => {
       if (quitting) return;
       if (typeof instance !== 'string') throw instance;
+      // Before anything loads: names resolve as in the system's browser.
+      app.configureHostResolver(hostResolver);
       // Linux and macOS report a logout, restart or shutdown here.
       powerMonitor.on('shutdown', () => {
         systemShutdown = true;
@@ -372,6 +596,13 @@ if (!app.requestSingleInstanceLock()) {
       buildMenu();
       const port = corePort(process.env[`${ENV_PREFIX}DESKTOP_PORT`] || (dev ? '7791' : '7781'));
       const binary = coreBinary(platform, process.arch, app.isPackaged ? process.resourcesPath : undefined, join(app.getAppPath(), '..'));
+      // The token of this launch: on the core's stdin, and in this
+      // session's cookie for the core's origin before the page loads, so
+      // the core tells the app's windows from browsers (core.ts).
+      const token = desktopToken();
+      // The key of the system's prompts: to the core in the hello, and to
+      // nothing else.
+      const key = verifyKey();
       origin = await core.start(
         binary,
         coreArgs(instance, port),
@@ -379,15 +610,34 @@ if (!app.requestSingleInstanceLock()) {
         coreEnv(process.env, app.getPath('home'), platform),
         app.getPath('home'),
         () => void fail(new DesktopError('desktop.coreLost')),
+        token,
+        key,
       );
       if (quitting) return;
+      verify = verifier(key, {
+        platform,
+        canPromptTouchID: () => platform === 'darwin' && systemPreferences.canPromptTouchID(),
+        promptTouchID: (reason) => systemPreferences.promptTouchID(reason),
+        hello: helloFor(runPowerShell),
+        purpose: proofPurpose,
+        t,
+      });
       const ses = session.defaultSession;
+      await ses.cookies.set(desktopCookie(origin, token));
       ses.setPermissionRequestHandler((contents, permission, callback, details) => {
         callback(allowPermission(permission, details.requestingUrl, contents.getURL(), origin));
       });
       ses.setPermissionCheckHandler((contents, permission, requestingOrigin) => {
         return allowPermission(permission, requestingOrigin, contents?.getURL() || '', origin);
       });
+      // The browser panes' guests live in their own partition, so they share
+      // nothing with the app. The desktop cookie above is set in the default
+      // session only: that separation keeps a guest from being taken for the
+      // app by the core. A guest gets no permission but full screen; downloads
+      // keep Electron's save dialog (no will-download handler saves by itself).
+      const guests = session.fromPartition(BROWSER_PARTITION);
+      guests.setPermissionRequestHandler((_contents, permission, callback) => callback(allowGuestPermission(permission)));
+      guests.setPermissionCheckHandler((_contents, permission) => allowGuestPermission(permission));
       stopFollowing = followCore(origin, keys, { bindings: applyBindings, settings: applySettings });
       createWindow();
     })

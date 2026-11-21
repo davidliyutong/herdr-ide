@@ -130,19 +130,57 @@ afterEach(async () => {
 const q = <T extends Element = HTMLElement>(sel: string) => host.querySelector<T>(sel);
 const qa = (sel: string) => [...host.querySelectorAll<HTMLElement>(sel)];
 const byText = (sel: string, text: string) => qa(sel).find((e) => e.textContent === text)!;
+/** The rows of the picker open (in a portal on the body), and a click on one. */
+const pickerRows = () => [...document.body.querySelectorAll<HTMLElement>('.picker-row')];
+const pickRow = (text: string) =>
+  act(async () =>
+    pickerRows()
+      .find((r) => r.textContent === text)!
+      .click(),
+  );
 
 describe('settings dialog', () => {
+  it('offers its pages in a searchable list, which a phone shows instead of the navigation', async () => {
+    await act(async () => useStore.getState().openSettings({ page: 'terminal' }));
+    const button = q<HTMLButtonElement>('.settings-nav-pick .picker-button')!;
+    expect(button.textContent).toBe('Terminal');
+    await act(async () => button.click());
+    expect([...document.body.querySelectorAll<HTMLElement>('.picker-row, .picker-group')].map((r) => r.textContent)).toEqual([
+      'Terminal',
+      'Notifications',
+      'Plugins',
+      'Keyboard Shortcuts',
+      'Advanced',
+      'VS Code',
+      'Program Windows',
+    ]);
+    await pickRow('Keyboard Shortcuts');
+    expect(q('.settings-nav button.on')?.textContent).toBe('Keyboard Shortcuts');
+    expect(q('.settings-nav-pick .picker-button')?.textContent).toBe('Keyboard Shortcuts');
+  });
+
   it('lists sections, the advanced ones last, and one scope per machine', async () => {
     await act(async () => useStore.getState().openSettings({ page: 'terminal' }));
     expect(qa('.settings-nav button').map((b) => b.textContent)).toEqual([
       'Terminal',
       'Notifications',
+      'Plugins',
       'Keyboard Shortcuts',
       'VS Code',
       'Program Windows',
     ]);
     expect(q('.settings-nav-heading')?.textContent).toBe('Advanced');
-    expect(qa('.settings-scopes button').map((b) => b.textContent)).toEqual(['User', 'mac', 'gpu-box']);
+    // User, and the machines in a searchable list, whatever their number.
+    expect(qa('.settings-scopes button').map((b) => b.textContent)).toEqual(['User', 'Machine']);
+    await act(async () => q<HTMLButtonElement>('.settings-scope-machine')!.click());
+    expect(pickerRows().map((r) => r.textContent)).toEqual(['macThis computer', 'gpu-boxu@gpu']);
+    await pickRow('gpu-boxu@gpu');
+    expect(q('.settings-scopes .on')?.textContent).toBe('gpu-box');
+    // A page the machine has none of shows its overview.
+    expect(q('.settings-nav button.on')?.textContent).toBe('Overview');
+    await act(async () => byText('.settings-scopes button', 'User').click());
+    expect(q('.settings-scopes .on')?.textContent).toBe('User');
+    await act(async () => byText('.settings-nav button', 'Terminal').click());
     // Groups head their settings; no setting shows its id.
     expect(qa('.settings-group').map((h) => h.textContent)).toEqual(['Text', 'Cursor', 'Behavior']);
     expect(host.textContent).not.toContain('terminal.fontSize');
@@ -174,24 +212,39 @@ describe('settings dialog', () => {
 
   it('edits a list with its offered values and free ones', async () => {
     await act(async () => useStore.getState().openSettings({ page: 'notifications' }));
-    const boxes = qa('.list-option input') as HTMLInputElement[];
-    expect(boxes.map((b) => b.checked)).toEqual([false, false, true]);
-    await act(async () => boxes[1].click());
-    expect(requests.at(-1)?.body).toMatchObject({ key: 'notifications.mutedAgents', value: ['droid', 'codex'] });
-    const field = q<HTMLInputElement>('.list-add input')!;
+    const button = q<HTMLButtonElement>('.setting[data-key="notifications.mutedAgents"] .picker-button')!;
+    expect(button.textContent).toBe('droid');
+    await act(async () => button.click());
+    const checked = () => pickerRows().map((r) => r.getAttribute('aria-selected'));
+    expect(pickerRows().map((r) => r.textContent)).toEqual(['claude', 'codex', 'droid']);
+    expect(checked()).toEqual(['false', 'false', 'true']);
+    await pickRow('codex');
+    // In the offered values' order.
+    expect(requests.at(-1)?.body).toMatchObject({ key: 'notifications.mutedAgents', value: ['codex', 'droid'] });
+    // The list stays open; a value it does not offer is added from the search.
+    const search = document.body.querySelector<HTMLInputElement>('.picker-search')!;
     const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
     await act(async () => {
-      set.call(field, 'my-agent');
-      field.dispatchEvent(new Event('input', { bubbles: true }));
+      set.call(search, 'my-agent');
+      search.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    await act(async () => field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
-    expect(requests.at(-1)?.body).toMatchObject({ value: ['droid', 'codex', 'my-agent'] });
-    expect(qa('.list-chip').map((c) => c.textContent)).toEqual(['my-agent']);
+    expect(document.body.querySelector('.picker-row')?.textContent).toBe('Add “my-agent”');
+    await act(async () => search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
+    expect(requests.at(-1)?.body).toMatchObject({ value: ['codex', 'droid', 'my-agent'] });
+    expect(checked()).toEqual(['false', 'true', 'true', 'true']);
+    await act(async () => search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+    // Escape closed the list, not the dialog.
+    expect(pickerRows()).toHaveLength(0);
+    expect(q('.settings')).not.toBeNull();
+    // Every value is a chip that removes it.
+    expect(qa('.list-chip').map((c) => c.textContent)).toEqual(['codex', 'droid', 'my-agent']);
+    await act(async () => qa('.list-chip button')[0].click());
+    expect(requests.at(-1)?.body).toMatchObject({ value: ['droid', 'my-agent'] });
   });
 
   it("shows a machine's own settings, which follow the user's until set", async () => {
     await act(async () => useStore.getState().openSettings({ machine: 'gpu' }));
-    expect(q('.settings-scopes button.on')?.textContent).toBe('gpu-box');
+    expect(q('.settings-scopes .on')?.textContent).toBe('gpu-box');
     expect(qa('.settings-nav button').map((b) => b.textContent)).toEqual(['Overview', 'VS Code', 'Program Windows']);
     expect(q('.settings-body')?.textContent).toContain('u@gpu');
     await act(async () => byText('.settings-nav button', 'VS Code').click());
@@ -208,9 +261,82 @@ describe('settings dialog', () => {
       select.dispatchEvent(new Event('change', { bubbles: true }));
     });
     expect(requests.at(-1)).toMatchObject({ method: 'DELETE', url: '/api/settings?key=codeServer.install&machine=gpu' });
+    // On, Off and a few options stay a native select.
+    expect(q('.setting[data-key="gui.enabled"] select')).toBeNull();
+    await act(async () => byText('.settings-nav button', 'Program Windows').click());
+    expect(q<HTMLSelectElement>('.setting[data-key="gui.enabled"] select')!.options).toHaveLength(3);
     // The local machine has no program windows of its own.
     expect(machineScoped(defs[5], machines[0])).toBe(false);
     expect(machineScoped(defs[4], machines[0])).toBe(true);
+  });
+});
+
+describe('long lists of options', () => {
+  const many: SettingDef = {
+    key: 'terminal.colorScheme.dark',
+    type: 'enum',
+    enum: ['default', ...Object.keys(schemes)],
+    default: 'default',
+    scope: 'app',
+    section: 'colors',
+    order: 10,
+  };
+  const modes: SettingDef = {
+    key: 'codeServer.mode',
+    type: 'enum',
+    enum: ['a', 'b', 'c', 'd', 'e'],
+    default: 'a',
+    scope: 'machine',
+    section: 'codeServer',
+    order: 20,
+  };
+  beforeEach(() =>
+    useSettings.setState((st) => ({
+      defs: [...st.defs, many, modes],
+      sections: [...st.sections, { id: 'colors', order: 40 }],
+      values: { ...st.values, [many.key]: { value: 'default', source: 'default' }, [modes.key]: { value: 'a', source: 'default' } },
+    })),
+  );
+  const typeIn = (v: string) =>
+    act(async () => {
+      const search = document.body.querySelector<HTMLInputElement>('.picker-search')!;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, v);
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  const enter = () =>
+    act(
+      async () =>
+        void document.body
+          .querySelector('.picker-search')!
+          .dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })),
+    );
+
+  it('chooses a color scheme in a searchable list, each with its colors', async () => {
+    await act(async () => useStore.getState().openSettings({ page: 'colors' }));
+    const button = q<HTMLButtonElement>(`.setting[data-key="${many.key}"] .picker-button`)!;
+    expect(button.textContent).toBe('Default (matches the app)');
+    await act(async () => button.click());
+    expect(pickerRows()).toHaveLength(many.enum!.length);
+    expect(pickerRows()[1].querySelector('.scheme-mini')).not.toBeNull();
+    await typeIn('nord');
+    expect(pickerRows().map((r) => r.textContent)).toEqual(['Nord']);
+    await enter();
+    expect(requests.at(-1)).toMatchObject({ method: 'PUT', body: { key: many.key, value: 'nord' } });
+    // Focus is back on the button.
+    expect(document.activeElement).toBe(q(`.setting[data-key="${many.key}"] .picker-button`));
+  });
+
+  it("offers a machine's own value of many options in a list that starts with the user's", async () => {
+    await act(async () => useStore.getState().openSettings({ machine: 'gpu', page: 'codeServer' }));
+    const button = q<HTMLButtonElement>(`.setting[data-key="${modes.key}"] .picker-button`)!;
+    expect(button.textContent).toBe('Same as User (a)');
+    await act(async () => button.click());
+    expect(pickerRows().map((r) => r.textContent)).toEqual(['Same as User (a)', 'a', 'b', 'c', 'd', 'e']);
+    await pickRow('d');
+    expect(requests.at(-1)).toMatchObject({ method: 'PUT', body: { key: modes.key, value: 'd', machine: 'gpu' } });
+    await act(async () => q<HTMLButtonElement>(`.setting[data-key="${modes.key}"] .picker-button`)!.click());
+    await pickRow('Same as User (a)');
+    expect(requests.at(-1)).toMatchObject({ method: 'DELETE', url: `/api/settings?key=${modes.key}&machine=gpu` });
   });
 });
 

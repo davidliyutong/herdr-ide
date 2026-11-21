@@ -15,6 +15,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -68,23 +69,40 @@ func TestContentTypeNeverActive(t *testing.T) {
 
 func newTestServer(origins ...string) *Server {
 	mg := machines.NewManager(nil, nil, log.New(os.Stderr, "", 0))
-	return New(mg, Options{AllowedOrigins: origins, Logger: log.New(os.Stderr, "", 0)})
+	return New(mg, Options{AllowedOrigins: origins, Logger: log.New(os.Stderr, "", 0), Plugins: testPlugins()})
 }
 
 func TestGuard(t *testing.T) {
-	h := newTestServer("https://ide.example.com").Handler()
+	h := newTestServer("https://ide.example.com", "http://localhost:5173", "https://dev.example.com").Handler()
 	cases := []struct {
 		host, origin string
 		want         int
 	}{
 		{"127.0.0.1:7780", "", 200},
-		{"localhost:7780", "http://localhost:5173", 200},
+		{"localhost:7780", "http://localhost:7780", 200}, // the page the core served
+		{"LocalHost:7780", "http://localhost:7780", 200},
+		{"[::1]:7780", "http://[::1]:7780", 200},
+		{"localhost:8443", "https://localhost:8443", 200}, // behind a TLS proxy on loopback
+		// Without a port the scheme tells the port: only the http one is
+		// the core's.
+		{"localhost", "http://localhost", 200},
+		{"localhost", "https://localhost", 403},
+		{"[::1]", "https://[::1]", 403},
 		{"[::1]:7780", "", 200},
 		{"ide.example.com", "https://ide.example.com", 200},
-		{"evil.example.com", "", 403},                   // DNS rebinding
-		{"127.0.0.1:7780", "https://evil.example", 403}, // cross-site
+		{"dev.example.com", "http://localhost:5173", 200}, // an --allowed-origin on loopback
+		{"evil.example.com", "", 403},                     // DNS rebinding
+		{"127.0.0.1:7780", "https://evil.example", 403},   // cross-site
 		{"127.0.0.1:7780", "null", 403},
 		{"ide.example.com", "http://ide.example.com", 403}, // scheme must match
+		// Another page of the same machine is another site: a development
+		// server, a forwarded port, the same port under the other name.
+		{"localhost:7780", "http://localhost:3000", 403},
+		{"127.0.0.1:7780", "http://localhost:7780", 403},
+		{"localhost:7780", "http://127.0.0.1:7780", 403},
+		{"localhost:7780", "http://app.localhost:7780", 403},
+		{"localhost:7780", "ftp://localhost:7780", 403},
+		{"ide.example.com", "http://localhost:7780", 403},
 	}
 	for _, c := range cases {
 		r := httptest.NewRequest("GET", "/api/machines", nil)
@@ -206,7 +224,9 @@ func TestMutatingRoutesAreGuarded(t *testing.T) {
 	// do change something.
 	readOnlyAllowed := map[string]string{
 		"POST /api/m/{id}/code/stop": "only frees the machine's resources",
-		"/m/{id}/code":               "only redirects to /m/{id}/code/",
+		// A POST for the length of its paths.
+		"POST /api/m/{id}/p/files/stat": "only reads the state of paths",
+		"/m/{id}/code":                  "only redirects to /m/{id}/code/",
 	}
 	mutatingGET := map[string]bool{
 		"GET /api/m/{id}/auth": true, // starts an interactive ssh login
@@ -220,6 +240,7 @@ func TestMutatingRoutesAreGuarded(t *testing.T) {
 	ro := newTestServer("https://ide.example.com")
 	ro.opts.ReadOnly = true
 	hro := ro.Handler()
+	wildcard := regexp.MustCompile(`\{[a-z]+\}`)
 	wild := strings.NewReplacer("{id}", "x", "{action}", "start", "{win}", "1")
 	checked := 0
 	for _, rt := range s.routes() {
@@ -234,7 +255,7 @@ func TestMutatingRoutesAreGuarded(t *testing.T) {
 		if method == "" {
 			method = "POST"
 		}
-		path = wild.Replace(path)
+		path = wildcard.ReplaceAllString(wild.Replace(path), "x")
 		do := func(h http.Handler, origin string) *httptest.ResponseRecorder {
 			r := httptest.NewRequest(method, path, strings.NewReader("{}"))
 			r.Host = "127.0.0.1:7780"
@@ -303,8 +324,67 @@ func TestCSPOnAppShell(t *testing.T) {
 		if csp := w.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "frame-ancestors 'self'") || !strings.Contains(csp, "script-src 'self' 'wasm-unsafe-eval';") || strings.Contains(csp, "'unsafe-eval'") || strings.Contains(csp, "script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline'") {
 			t.Errorf("%s: csp = %q", c.path, csp)
 		}
+		// Frames: the UI's own and pages under the other loopback name
+		// than the UI's, on any port (the browser pane); no other site,
+		// and no scheme but http there.
+		if csp := w.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "; frame-src 'self' http://127.0.0.1:*; ") {
+			t.Errorf("%s: frames allowed by %q", c.path, csp)
+		}
 		if w.Header().Get("X-Content-Type-Options") != "nosniff" {
 			t.Errorf("%s: nosniff missing", c.path)
+		}
+	}
+
+	// The policy lets the page frame loopback pages only under the
+	// loopback name it is not served from: cookies ignore ports, so a
+	// frame under the UI's own name, also one that went there by itself,
+	// would share the cookies of the UI's host. Any other host frames
+	// none, and neither does the desktop app, whose browser panes are
+	// webviews.
+	token := strings.Repeat("d", 64)
+	s = New(machines.NewManager(nil, nil, log.New(os.Stderr, "", 0)), Options{
+		Logger:         log.New(os.Stderr, "", 0),
+		Static:         fstest.MapFS{"index.html": {Data: []byte("<html></html>")}},
+		AllowedOrigins: []string{"https://ide.example.com"},
+		DesktopToken:   token,
+	})
+	h = s.Handler()
+	for _, c := range []struct {
+		host, cookie, want string
+	}{
+		{"localhost:7780", "", "'self' http://127.0.0.1:*"},
+		{"localhost", "", "'self' http://127.0.0.1:*"},
+		{"LocalHost:7780", "", "'self' http://127.0.0.1:*"},
+		{"127.0.0.1:7780", "", "'self' http://localhost:*"},
+		{"127.0.0.1", "", "'self' http://localhost:*"},
+		// Other names of the loopback, and a reverse proxy's.
+		{"[::1]:7780", "", "'self'"},
+		{"127.0.0.2:7780", "", "'self'"},
+		{"app.localhost:7780", "", "'self'"},
+		{"ide.example.com", "", "'self'"},
+		// The desktop app's own requests; a wrong token is a browser's.
+		{"127.0.0.1:7780", DesktopCookie + "=" + token, "'self'"},
+		{"localhost:7780", DesktopCookie + "=" + token, "'self'"},
+		{"127.0.0.1:7780", DesktopCookie + "=" + strings.Repeat("e", 64), "'self' http://localhost:*"},
+	} {
+		// The shell on its own path, on a client-side route, and on a
+		// program window's path, which another handler serves.
+		for _, path := range []string{"/", "/some/route", "/m/x/gui/1"} {
+			r := httptest.NewRequest("GET", path, nil)
+			r.Host = c.host
+			if c.cookie != "" {
+				r.Header.Set("Cookie", c.cookie)
+			}
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			csp := w.Header().Get("Content-Security-Policy")
+			if w.Code != 200 || !strings.Contains(csp, "; frame-src "+c.want+"; ") {
+				t.Errorf("%s%s (cookie %t): %d, frames allowed by %q, want %q", c.host, path, c.cookie != "", w.Code, csp, c.want)
+			}
+			// Never the name the page itself is on, nor every loopback page.
+			if strings.Contains(csp, "http://localhost:* http://127.0.0.1:*") || strings.Contains(csp, "http://"+strings.ToLower(hostOnly(c.host))+":*") {
+				t.Errorf("%s%s: the policy frames the UI's own host: %q", c.host, path, csp)
+			}
 		}
 	}
 }
@@ -770,4 +850,28 @@ func closeReason(err error) string {
 		return ce.Reason
 	}
 	return ""
+}
+
+// The core's own usage is an amount of each thing, for any client that reads.
+func TestPerfEndpoint(t *testing.T) {
+	s := newTestServer()
+	s.opts.ReadOnly = true
+	h := s.Handler()
+	r := httptest.NewRequest("GET", "/api/perf", nil)
+	r.Host = "localhost:7780"
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /api/perf: %d %s", w.Code, w.Body)
+	}
+	var u struct {
+		CPUMs      *int64 `json:"cpu_ms"`
+		Memory     uint64 `json:"memory"`
+		Goroutines int    `json:"goroutines"`
+		UptimeMs   *int64 `json:"uptime_ms"`
+		CPUs       int    `json:"cpus"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &u); err != nil || u.CPUMs == nil || u.UptimeMs == nil || u.Memory == 0 || u.Goroutines < 1 || u.CPUs < 1 {
+		t.Fatalf("usage: %s (%v)", w.Body, err)
+	}
 }

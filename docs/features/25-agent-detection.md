@@ -92,7 +92,7 @@ attaches as an observer, whose output only says that the screen changed
 `terminal.read` when needed. Each change goes to the core as one line
 `{terminal, agent, status}`; an agent that leaves sends `{terminal}`.
 
-**In the core** (`internal/server/term.go`). The backend keeps the agents
+**In the core** (`internal/server/term_events.go`). The backend keeps the agents
 per terminal, merges them into the terminal records as `agent` and
 `agent_status` (snapshots for later subscribers included) and sends
 subscribers an `event {type: "agent", terminal, data: {agent,
@@ -103,7 +103,16 @@ sent again. `/ws` clients get the agent message
 sound}`, with the same choice of the page that plays the sound
 ([07](07-agent-native-workflow.md)). A client's `focus {s, focused: true}`
 on a stream of the terminal marks a `done` seen (`idle`); a `done` arriving
-while a client has the terminal focused is reported idle.
+while a client has the terminal focused is reported idle. A program that
+reports its own status (Codex does, with OSC 7501) keeps saying `done`
+until its next turn, and the terminal core keeps that report: after the
+core or the agent starts again (the desktop app restarted), a new
+detection reads it as a turn that just ended. So while the core holds such
+a `done` seen, it labels the terminal `seen` with the record's turn (which
+goes up each time the status leaves `working`; `terminal.label`, which
+keeps the other labels), and the first word of a new detection that is
+the `done` of that turn is idle. A later turn's `done` is news, and a
+`done` read from the screen is never taken for seen.
 
 **Client.** The web UI reads a terminal's state from `agent_status`, else
 from the program's own status (OSC 7501), and its agent from `agent`
@@ -112,7 +121,10 @@ from the program's own status (OSC 7501), and its agent from `agent`
 status dots, orders the attention inbox blocked, done, working, idle
 (`attentionList` in `web/src/actions.ts`), and notifies and plays sounds
 from the `/ws` agent message (`notify.ts`, `sound.ts`,
-[07](07-agent-native-workflow.md)).
+[07](07-agent-native-workflow.md)). The agent detected in a terminal is
+also what the layout's leaf remembers of it (`claude` and `codex`), so
+that the agent continues its conversation after the terminal core started
+again ([33](33-workspace-restore.md)).
 
 ## Alternatives considered
 
@@ -136,7 +148,10 @@ from the `/ws` agent message (`notify.ts`, `sound.ts`,
   through hooks) → named, status `unknown` unless the program reports one.
 - **The detect stream ends** (agent or terminal core gone) → the core
   clears every agent of the machine and opens a new stream after 5 s while
-  its connection lasts; the new stream reports the agents again.
+  its connection lasts; the new stream reports the agents again (a
+  program's reported `done` of a turn labeled `seen` as idle).
+- **The `seen` label cannot be set** (the terminal core refused or went
+  away) → logged; after a restart that turn's `done` is news once more.
 - **A terminal the observer cannot attach to** → its screen is read every
   300 ms.
 - **Screen reads fail** (the terminal ended meanwhile) → the next event
@@ -161,7 +176,10 @@ wrapped scripts, package entry points and inline code; the startup grace,
 the idle confirmation and its cap, done after working and after blocked,
 done on exit, precedence and clearing of the program's own report.
 `internal/server/term_test.go` (`TestTermAgents`): records, events, `/ws`
-messages, done seen by focus, cleared agents. `TestIntegrationDetect`
+messages, done seen by focus, cleared agents; `TestTermSeenTurnOutlivesTheCore`:
+a program's reported done of the turn labeled `seen` is idle after a
+restart, a later turn's is news until focused, which labels its turn, and
+a done read from the screen is never seen. `TestIntegrationDetect`
 (`make it`, `HC_TEST_BIN`) runs a script named `claude` in a real
 herdr-core that shows a turn, a permission dialog and its prompt, and
 follows working, blocked and done through the agent to `/api/v1/term` and

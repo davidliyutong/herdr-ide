@@ -1,0 +1,223 @@
+/* The browser plugin's panes (web/src/plugins/browser): the layer of their
+ * frames over the panes (BrowserLayer.tsx, as .code-layer), and a pane's
+ * toolbar and the states in its body. */
+.browser-layer {
+  grid-area: main;
+  position: relative;
+  overflow: hidden;
+  z-index: 2;
+  pointer-events: none;
+}
+.browser-frame {
+  position: absolute;
+  display: none;
+  border: 0;
+  background: var(--bg);
+  pointer-events: auto;
+}
+/* A webview takes pointer events from the page's own splitters as iframes
+ * do (styles.css). */
+body.resizing webview,
+body.resizing-row webview,
+body.dragging webview {
+  pointer-events: none;
+}
+.browser-pane {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+.browser-bar {
+  position: relative;
+  gap: 4px;
+  padding: 0 4px;
+  border-bottom: 1px solid var(--line);
+}
+.browser-address {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: calc(var(--h-toolbar) - 8px);
+  font-size: var(--fs-md);
+}
+.browser-chip {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: var(--fs-sm);
+  color: var(--fg-dim);
+}
+.browser-note {
+  flex: none;
+  padding: 4px 12px;
+  font-size: var(--fs-sm);
+  border-bottom: 1px solid var(--line);
+}
+.browser-error {
+  color: var(--error);
+}
+/* A page that did not load: what happened, and the way outside. */
+.browser-failed {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.browser-failed > button {
+  flex: none;
+  margin-left: auto;
+}
+.browser-slot {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: var(--bg);
+}
+/* In place of the page: a start page, a failure, a notice. */
+.browser-cover {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  text-align: center;
+  overflow: auto;
+}
+.browser-start {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  max-width: 480px;
+}
+.browser-url {
+  max-width: 100%;
+  font-family: var(--mono);
+}
+.browser-failure {
+  white-space: pre-wrap;
+}
+/* An empty pane: the machine's listening ports, a column near the top. */
+.browser-home {
+  align-items: flex-start;
+  padding-top: 40px;
+  text-align: left;
+}
+.browser-home > .browser-ports {
+  width: min(420px, 100%);
+}
+/* Lists of ports (the start page, Ports): a head, then rows as a tree's
+   (styles/tree.css): a row high, no frame, the fill on hover; the columns
+   are the port, a name (the program, the machine), the local port of a
+   forward and its stop button. */
+.browser-ports {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  text-align: left;
+}
+.browser-ports-head {
+  display: flex;
+  align-items: center;
+  flex: none;
+  height: var(--h-row);
+  padding: 0 8px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+  user-select: none;
+}
+.browser-ports-note {
+  display: flex;
+  align-items: center;
+  min-height: var(--h-row);
+  padding: 0 8px;
+  font-size: var(--fs-md);
+  color: var(--fg-dim);
+}
+.browser-port {
+  display: grid;
+  grid-template-columns: 5ch minmax(0, 1fr);
+  align-items: center;
+  column-gap: 12px;
+  width: 100%;
+  height: var(--h-row);
+  min-height: 0;
+  padding: 0 4px 0 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg);
+  font-size: var(--fs-base);
+  line-height: normal;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+.browser-port:hover {
+  background: var(--bg-2);
+}
+.browser-port-n {
+  font-variant-numeric: tabular-nums;
+}
+.browser-port-name,
+.browser-port-local {
+  color: var(--fg-dim);
+  font-size: var(--fs-md);
+}
+.browser-port-local {
+  font-variant-numeric: tabular-nums;
+}
+.browser-forward {
+  grid-template-columns: 5ch minmax(0, 1fr) auto auto;
+  cursor: default;
+}
+/* A forward's stop button, as a tree row's actions: shown while the row is
+   pointed at or has the keyboard. */
+.browser-port-stop {
+  visibility: hidden;
+}
+.browser-forward:hover .browser-port-stop,
+.browser-forward:focus-within .browser-port-stop {
+  visibility: visible;
+}
+/* Ports, under its toolbar button: a floating list as a picker's. */
+.browser-popover {
+  position: absolute;
+  top: 100%;
+  right: 4px;
+  z-index: 6;
+  width: min(320px, calc(100% - 8px));
+  max-height: 60vh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 32px var(--shadow);
+}
+.browser-popover .browser-ports + .browser-ports {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+.browser-popover .browser-port:hover {
+  background: var(--bg-3);
+}
+/* On the row's fill, the stop button's own as a button's (controls.css). */
+.browser-popover .browser-port-stop:hover {
+  background: color-mix(in srgb, var(--fg) 8%, var(--bg-3));
+}

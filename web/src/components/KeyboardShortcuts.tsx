@@ -5,15 +5,17 @@
 // × removes a key; reset returns to the defaults. The search matches
 // commands, ids and key names, or the keys pressed while "record keys" is on.
 // Changes replace the user's rules (PUT /api/keybindings), which the core
-// turns into the bindings of every platform.
+// turns into the bindings of every platform. Only the rows in view of the
+// settings' scrolling page are drawn (useTableWindow).
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { AlertTriangle, Keyboard, Plus, RotateCcw, X } from 'lucide-react';
 import { hasMessage, t } from '../i18n';
 import { commandLabel, commandShown } from '../keymap';
 import { altOnly, keyLabel, MAX_STROKES, strokeOf, tryNormalize, KeyError, normalizeKeys } from '../keys';
 import { keysOf, resetRules, rulesFor, saveUserRules, useKeys, type Conflict } from '../keybindings';
 import { openMenu, type MenuEntry } from '../contextMenu';
+import { rowOffsets, visibleRows } from '../lib/windowed';
 
 function sectionLabel(id: string): string {
   const k = `command.section.${id}`;
@@ -57,6 +59,56 @@ export function commandMatches(label: string, id: string, keys: string[], q: str
 /** Which recording a row has open: replacing its keys or adding one. */
 type Recording = { command: string; replace: boolean };
 
+/** A row of the table: a section's heading or a command. */
+type Entry = { key: string; section?: string; command?: string };
+
+/** The rows of a table to draw: those in view of the page that scrolls it
+ * (the settings' body) and a few around them, the others standing in as
+ * space of their height (measured once drawn, else estimated), so a table
+ * of any length scrolls as one of a few rows. All of them while all is
+ * set (a row records keys) or before the page is measured (tests). */
+export function useTableWindow(table: RefObject<HTMLElement | null>, entries: readonly Entry[], all: boolean) {
+  const [view, setView] = useState({ top: 0, height: 0 });
+  const measured = useRef(new Map<string, number>());
+  const [, remeasured] = useState(0);
+  useEffect(() => {
+    const scroller = table.current?.closest<HTMLElement>('.settings-body');
+    if (!scroller || !table.current) return;
+    const update = () => {
+      const top = table.current!.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+      setView((v) => {
+        const next = { top: scroller.scrollTop - top, height: scroller.clientHeight };
+        return v.top === next.top && v.height === next.height ? v : next;
+      });
+    };
+    update();
+    scroller.addEventListener('scroll', update, { passive: true });
+    const ro = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(update);
+    ro?.observe(scroller);
+    return () => {
+      scroller.removeEventListener('scroll', update);
+      ro?.disconnect();
+    };
+  }, [table]);
+  const rem = typeof document === 'undefined' ? 13 : parseFloat(getComputedStyle(document.documentElement).fontSize) || 13;
+  const heights = entries.map((e) => measured.current.get(e.key) ?? Math.round(e.section ? 2.4 * rem : 2.2 * rem + 4));
+  const offsets = rowOffsets(heights);
+  const [from, to] = all || view.height <= 0 ? [0, entries.length] : visibleRows(offsets, Math.max(0, view.top), view.height);
+  // Rows drawn tell their heights, which place the others better.
+  useLayoutEffect(() => {
+    let changed = false;
+    for (const el of table.current?.querySelectorAll<HTMLElement>('[data-entry]') ?? []) {
+      const h = el.offsetHeight;
+      if (h > 0 && measured.current.get(el.dataset.entry!) !== h) {
+        measured.current.set(el.dataset.entry!, h);
+        changed = true;
+      }
+    }
+    if (changed) remeasured((n) => n + 1);
+  });
+  return { from, to, before: offsets[from], after: offsets[entries.length] - offsets[to] };
+}
+
 export function KeyboardShortcuts({ query, readOnly, embedded }: { query: string; readOnly: boolean; embedded?: boolean }) {
   const k = useKeys();
   const [error, setError] = useState<string>();
@@ -77,6 +129,16 @@ export function KeyboardShortcuts({ query, readOnly, embedded }: { query: string
   const sections = (k.sections.length ? k.sections : [...new Set(k.commands.map((c) => c.section))].map((id) => ({ id, order: 0 }))).filter(
     (s) => commands.some((c) => c.section === s.id),
   );
+  const entries = useMemo<Entry[]>(
+    () =>
+      sections.flatMap((s) => [
+        { key: `s:${s.id}`, section: s.id },
+        ...commands.filter((c) => c.section === s.id).map((c) => ({ key: c.id, command: c.id })),
+      ]),
+    [sections.map((s) => s.id).join(), commands],
+  );
+  const table = useRef<HTMLDivElement>(null);
+  const win = useTableWindow(table, entries, !!recording);
   if (embedded && commands.length === 0) return null;
   const save = async (rules: Parameters<typeof saveUserRules>[0]) => {
     setError(undefined);
@@ -98,7 +160,6 @@ export function KeyboardShortcuts({ query, readOnly, embedded }: { query: string
       {embedded ? <h3>{t('settings.section.keyboard')}</h3> : <h2 className="settings-page-title">{t('settings.section.keyboard')}</h2>}
       {!embedded && (
         <div className="keys-toolbar">
-          <span className="muted small">{t('keys.note')}</span>
           <span className="spacer" />
           <KeySearch
             active={byKeys}
@@ -127,106 +188,103 @@ export function KeyboardShortcuts({ query, readOnly, embedded }: { query: string
         </div>
       )}
       {error && <p className="error small">{error}</p>}
-      <div className="keys-table" role="table">
+      <div className="keys-table" role="table" ref={table}>
         <div className="keys-row keys-head" role="row">
           <span role="columnheader">{t('keys.command')}</span>
           <span role="columnheader">{t('keys.keybinding')}</span>
           <span role="columnheader">{t('keys.source')}</span>
         </div>
-        {sections.map((s) => (
-          <div key={s.id} role="rowgroup">
-            <div className="keys-section" role="row">
-              {sectionLabel(s.id)}
-            </div>
-            {commands
-              .filter((c) => c.section === s.id)
-              .map((c) => {
-                const keys = keysOf(k.effective, c.id);
-                const user = changed(c.id);
-                const rec = recording?.command === c.id ? recording : undefined;
-                return (
-                  <div
-                    key={c.id}
-                    className={`keys-row ${user ? 'modified' : ''}`}
-                    role="row"
-                    data-command={c.id}
-                    title={c.id}
-                    onDoubleClick={(e) =>
-                      !readOnly && !(e.target as HTMLElement).closest('button') && setRecording({ command: c.id, replace: true })
-                    }
-                    onContextMenu={(e) => openMenu(e, menu(c.id, keys))}
-                  >
-                    <span className="keys-label ellipsis" role="cell">
-                      {commandLabel(c.id)}
-                    </span>
-                    <span className="keys-keys" role="cell">
-                      {rec?.replace ? null : keys.length === 0 && !rec ? <span className="muted small">—</span> : null}
-                      {!rec?.replace &&
-                        keys.map((key) => {
-                          const others = conflictsOf(k.conflicts, c.id, key);
-                          return (
-                            <span key={key} className={`key-chip ${others.length ? 'conflict' : ''}`}>
-                              {others.length > 0 && (
-                                <span title={t('keys.conflict', { commands: others.map(commandLabel).join(', ') })}>
-                                  <AlertTriangle />
-                                </span>
-                              )}
-                              <kbd>{keyLabel(key)}</kbd>
-                              {!readOnly && (
-                                <button
-                                  className="icon key-remove"
-                                  title={t('keys.remove')}
-                                  onClick={() =>
-                                    void save(
-                                      rulesFor(
-                                        k.user,
-                                        k.defaults,
-                                        c.id,
-                                        keys.filter((x) => x !== key),
-                                      ),
-                                    )
-                                  }
-                                >
-                                  <X />
-                                </button>
-                              )}
-                            </span>
-                          );
-                        })}
-                      {rec ? (
-                        <Recorder
-                          onDone={(seq) => {
-                            setRecording(undefined);
-                            if (!seq) return;
-                            if (rec.replace) void save(rulesFor(k.user, k.defaults, c.id, [seq]));
-                            else if (!keys.includes(seq)) void save(rulesFor(k.user, k.defaults, c.id, [...keys, seq]));
-                          }}
-                        />
-                      ) : (
-                        !readOnly && (
+        {win.before > 0 && <div aria-hidden style={{ height: win.before }} />}
+        {entries.slice(win.from, win.to).map((e) => {
+          if (e.section)
+            return (
+              <div key={e.key} className="keys-section" role="row" data-entry={e.key}>
+                {sectionLabel(e.section)}
+              </div>
+            );
+          const c = { id: e.command! };
+          const keys = keysOf(k.effective, c.id);
+          const user = changed(c.id);
+          const rec = recording?.command === c.id ? recording : undefined;
+          return (
+            <div
+              key={c.id}
+              className={`keys-row ${user ? 'modified' : ''}`}
+              role="row"
+              data-command={c.id}
+              data-entry={c.id}
+              title={c.id}
+              onDoubleClick={(e) =>
+                !readOnly && !(e.target as HTMLElement).closest('button') && setRecording({ command: c.id, replace: true })
+              }
+              onContextMenu={(e) => openMenu(e, menu(c.id, keys))}
+            >
+              <span className="keys-label ellipsis" role="cell">
+                {commandLabel(c.id)}
+              </span>
+              <span className="keys-keys" role="cell">
+                {rec?.replace ? null : keys.length === 0 && !rec ? <span className="muted small">—</span> : null}
+                {!rec?.replace &&
+                  keys.map((key) => {
+                    const others = conflictsOf(k.conflicts, c.id, key);
+                    return (
+                      <span key={key} className={`key-chip ${others.length ? 'conflict' : ''}`}>
+                        {others.length > 0 && (
+                          <span title={t('keys.conflict', { commands: others.map(commandLabel).join(', ') })}>
+                            <AlertTriangle />
+                          </span>
+                        )}
+                        <kbd>{keyLabel(key)}</kbd>
+                        {!readOnly && (
                           <button
-                            className="icon key-add"
-                            title={t('keys.add')}
-                            onClick={() => setRecording({ command: c.id, replace: false })}
+                            className="icon key-remove"
+                            title={t('keys.remove')}
+                            onClick={() =>
+                              void save(
+                                rulesFor(
+                                  k.user,
+                                  k.defaults,
+                                  c.id,
+                                  keys.filter((x) => x !== key),
+                                ),
+                              )
+                            }
                           >
-                            <Plus />
+                            <X />
                           </button>
-                        )
-                      )}
-                    </span>
-                    <span className="keys-source muted small" role="cell">
-                      {user ? t('keys.sourceUser') : keys.length ? t('keys.sourceDefault') : ''}
-                      {!readOnly && user && (
-                        <button className="icon" title={t('keys.reset')} onClick={() => void save(resetRules(k.user, c.id))}>
-                          <RotateCcw />
-                        </button>
-                      )}
-                    </span>
-                  </div>
-                );
-              })}
-          </div>
-        ))}
+                        )}
+                      </span>
+                    );
+                  })}
+                {rec ? (
+                  <Recorder
+                    onDone={(seq) => {
+                      setRecording(undefined);
+                      if (!seq) return;
+                      if (rec.replace) void save(rulesFor(k.user, k.defaults, c.id, [seq]));
+                      else if (!keys.includes(seq)) void save(rulesFor(k.user, k.defaults, c.id, [...keys, seq]));
+                    }}
+                  />
+                ) : (
+                  !readOnly && (
+                    <button className="icon key-add" title={t('keys.add')} onClick={() => setRecording({ command: c.id, replace: false })}>
+                      <Plus />
+                    </button>
+                  )
+                )}
+              </span>
+              <span className="keys-source muted small" role="cell">
+                {user ? t('keys.sourceUser') : keys.length ? t('keys.sourceDefault') : ''}
+                {!readOnly && user && (
+                  <button className="icon" title={t('keys.reset')} onClick={() => void save(resetRules(k.user, c.id))}>
+                    <RotateCcw />
+                  </button>
+                )}
+              </span>
+            </div>
+          );
+        })}
+        {win.after > 0 && <div aria-hidden style={{ height: win.after }} />}
         {commands.length === 0 && <p className="muted pad">{t('settings.noMatch')}</p>}
       </div>
       {!embedded && !readOnly && <p className="muted small">{t('keys.hint')}</p>}

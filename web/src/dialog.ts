@@ -3,6 +3,7 @@
 // time; a new request cancels the previous one.
 
 import { create } from 'zustand';
+import { t } from './i18n';
 
 export interface NewWorkspace {
   cwd: string;
@@ -19,7 +20,13 @@ export type DialogRequest =
       /** A checkbox shown under the message, with its initial state. */
       check?: string;
       checked?: boolean;
-      resolve(ok: boolean, checked?: boolean): void;
+      /** A third answer between Cancel and confirm (Don't Save). */
+      alt?: string;
+      /** What the Cancel button says (Skip), Cancel by default. */
+      cancel?: string;
+      /** A fourth answer, at the start of the row (Skip beside Cancel). */
+      extra?: string;
+      resolve(ok: boolean, checked?: boolean, alt?: boolean, extra?: boolean): void;
     }
   | {
       kind: 'workspace';
@@ -30,13 +37,32 @@ export type DialogRequest =
       edit?: { name: string };
       resolve(v: NewWorkspace | undefined): void;
     }
-  | { kind: 'download'; m: string; dir: string; resolve(v: undefined): void };
+  | { kind: 'download'; m: string; dir: string; resolve(v: undefined): void }
+  | {
+      kind: 'unsaved';
+      /** The files with unsaved changes, and where each is. */
+      files: { name: string; place: string }[];
+      /** Save all, Don't Save, Cancel, or show the file at that index. */
+      resolve(v: UnsavedAnswer | undefined): void;
+    }
+  | {
+      kind: 'risk';
+      title: string;
+      /** The paragraph before the list of what is at risk, and those after. */
+      intro: string;
+      points: string[];
+      outro: string[];
+      /** The box to tick before the confirm button can be pressed. */
+      check: string;
+      confirm: string;
+      resolve(ok: boolean): void;
+    };
 
 export const useDialog = create<{ current?: DialogRequest }>(() => ({}));
 
 function show(req: DialogRequest) {
   const prev = useDialog.getState().current;
-  if (prev?.kind === 'confirm') prev.resolve(false);
+  if (prev?.kind === 'confirm' || prev?.kind === 'risk') prev.resolve(false);
   else if (prev) prev.resolve(undefined);
   useDialog.setState({ current: req });
 }
@@ -65,6 +91,67 @@ export function confirmCheckDialog(opts: {
   );
 }
 
+/** A question with three answers, cancel (Escape too), alt and confirm,
+ * a fourth one (extra) when given, and a box to tick: resolves with the
+ * answer and the box's state. */
+export function choiceDialog(opts: {
+  title: string;
+  message: string;
+  confirm: string;
+  alt: string;
+  cancel?: string;
+  extra?: string;
+  check?: string;
+  checked?: boolean;
+}): Promise<{ answer: 'confirm' | 'alt' | 'extra' | 'cancel'; checked: boolean }> {
+  return new Promise((resolve) =>
+    show({
+      kind: 'confirm',
+      ...opts,
+      resolve: (ok, checked, alt, extra) =>
+        resolve({ answer: ok ? 'confirm' : alt ? 'alt' : extra ? 'extra' : 'cancel', checked: !!checked }),
+    }),
+  );
+}
+
+/** Asks the user to accept a risk: what is at risk, a box to tick (I
+ * understand…) and the confirm button, which works only once it is
+ * ticked. Resolves true when accepted; Cancel and Escape resolve false. */
+export function riskDialog(opts: {
+  title: string;
+  intro: string;
+  points: string[];
+  outro: string[];
+  check: string;
+  confirm: string;
+}): Promise<boolean> {
+  return new Promise((resolve) => show({ kind: 'risk', ...opts, resolve }));
+}
+
+/** Asks whether to save changes before they are closed: save, discard
+ * (Don't Save) or cancel (Escape, Cancel). */
+export function saveChangesDialog(opts: { title: string; message: string }): Promise<'save' | 'discard' | 'cancel'> {
+  return new Promise((resolve) =>
+    show({
+      kind: 'confirm',
+      ...opts,
+      confirm: t('unsaved.save'),
+      alt: t('unsaved.discard'),
+      resolve: (ok, _checked, alt) => resolve(ok ? 'save' : alt ? 'discard' : 'cancel'),
+    }),
+  );
+}
+
+/** The answer to quitDialog: save every file, close without saving, keep
+ * the window (cancel), or keep it and show a file (its index). */
+export type UnsavedAnswer = 'save' | 'discard' | 'cancel' | { show: number };
+
+/** Asks, before the app closes, about the files with unsaved changes it
+ * lists with where each is (Escape cancels). */
+export function quitDialog(files: { name: string; place: string }[]): Promise<UnsavedAnswer> {
+  return new Promise((resolve) => show({ kind: 'unsaved', files, resolve: (v) => resolve(v ?? 'cancel') }));
+}
+
 /** Asks for the working directory and name of a new workspace on machine m. */
 export function newWorkspaceDialog(m: string, cwd: string): Promise<NewWorkspace | undefined> {
   return new Promise((resolve) => show({ kind: 'workspace', m, cwd, resolve }));
@@ -89,3 +176,27 @@ export function completionParts(value: string): [dir: string, prefix: string] {
   if (i < 0) return [value === '~' ? '~' : '', value === '~' ? '' : value];
   return [value.slice(0, i) || '/', value.slice(i + 1)];
 }
+
+/** A path the way the machine's agent reads it: "~" and "~/x" from home,
+ * a relative path below home, an absolute one as it is (without trailing
+ * slashes). Used when the machine's answer carries no path. */
+export function expandPath(path: string, home: string): string {
+  const p = path.length > 1 ? path.replace(/\/+$/, '') || '/' : path;
+  if (p.startsWith('/')) return p;
+  const h = home.length > 1 ? home.replace(/\/+$/, '') : home;
+  if (p === '~') return h;
+  return `${h === '/' ? '' : h}/${p.startsWith('~/') ? p.slice(2) : p}`;
+}
+
+/** What a failed listing of a typed folder says: the path is not there, it
+ * is not a folder, the user may not read it, or the failure tells nothing
+ * about the path (a lost connection). */
+export function folderProblem(err: unknown): FolderProblem | undefined {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (/not a directory/i.test(msg)) return 'file';
+  if (/permission denied/i.test(msg)) return 'denied';
+  if (/no such file|not exist/i.test(msg)) return 'missing';
+  return undefined;
+}
+
+export type FolderProblem = 'missing' | 'file' | 'denied';

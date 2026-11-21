@@ -5,6 +5,7 @@ package transport
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -77,14 +78,28 @@ func (s *Session) Err() error {
 	return s.err
 }
 
+// ReplyTimeout bounds the wait for an agent's reply when the caller's
+// context has no deadline, so a stream whose reply never comes ends.
+var ReplyTimeout = 60 * time.Second
+
 // Open starts a stream with header h and waits for the agent's reply.
 func (s *Session) Open(ctx context.Context, h agentproto.Header) (net.Conn, *agentproto.Reply, error) {
+	return s.OpenWith(ctx, h, nil)
+}
+
+// OpenWith is Open with body written right after the header line, before
+// the reply is read: an op's data that does not fit the line (a plugin's
+// params, agentproto.Header.ParamsLength).
+func (s *Session) OpenWith(ctx context.Context, h agentproto.Header, body []byte) (net.Conn, *agentproto.Reply, error) {
 	st, err := s.ys.OpenStream()
 	if err != nil {
 		return nil, nil, err
 	}
-	deadline := time.Now().Add(60 * time.Second)
-	if dl, ok := ctx.Deadline(); ok && dl.Before(deadline) {
+	// The reply comes within ReplyTimeout unless the caller's context says
+	// otherwise: actions that answer only after their work (a scan of logs,
+	// a git push) give their own, longer deadline.
+	deadline := time.Now().Add(ReplyTimeout)
+	if dl, ok := ctx.Deadline(); ok {
 		deadline = dl
 	}
 	_ = st.SetDeadline(deadline)
@@ -101,6 +116,15 @@ func (s *Session) Open(ctx context.Context, h agentproto.Header) (net.Conn, *age
 		st.Close()
 		return nil, nil, err
 	}
+	if len(body) > 0 {
+		if _, err := st.Write(body); err != nil {
+			st.Close()
+			if ctx.Err() != nil {
+				return nil, nil, ctx.Err()
+			}
+			return nil, nil, fmt.Errorf("agent %s: %w", h.Op, err)
+		}
+	}
 	var rep agentproto.Reply
 	if err := agentproto.ReadLine(st, &rep); err != nil {
 		st.Close()
@@ -113,8 +137,32 @@ func (s *Session) Open(ctx context.Context, h agentproto.Header) (net.Conn, *age
 		st.Close()
 		return nil, &rep, fmt.Errorf("agent %s: %s", h.Op, rep.Error)
 	}
+	if rep.EntriesLength > 0 {
+		// A listing too large for the line follows it (fs.list).
+		if err := readEntries(st, &rep); err != nil {
+			st.Close()
+			if ctx.Err() != nil {
+				return nil, nil, ctx.Err()
+			}
+			return nil, nil, fmt.Errorf("agent %s: %w", h.Op, err)
+		}
+	}
 	_ = st.SetDeadline(time.Time{})
 	return st, &rep, nil
+}
+
+// readEntries reads the entries that follow a reply line
+// (Reply.EntriesLength, at most agentproto.MaxBody bytes) into rep.Entries.
+func readEntries(r io.Reader, rep *agentproto.Reply) error {
+	b, err := agentproto.ReadBody(r, rep.EntriesLength)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(b, &rep.Entries); err != nil {
+		return fmt.Errorf("agentproto: entries: %w", err)
+	}
+	rep.EntriesLength = 0
+	return nil
 }
 
 // Request opens a stream, returns the reply and closes the stream.

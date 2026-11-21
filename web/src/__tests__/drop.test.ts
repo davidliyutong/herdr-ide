@@ -38,6 +38,9 @@ const shell: DesktopShell = {
     };
   },
   onCommand: () => () => {},
+  setUnsaved: () => {},
+  onCloseRequest: () => () => {},
+  answerClose: () => {},
   setDisabledCommands: () => {},
   pathForFile: (f: File) => onDisk.get(f) ?? '',
 };

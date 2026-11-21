@@ -5,7 +5,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../state/store';
-import { terms } from '../state/terms';
+import { terms, useTerms } from '../state/terms';
+import * as L from '../term/layout';
 import { registerPane } from '../state/panes';
 import { usePrefs, getPrefs } from '../prefs';
 import { appearanceOf, useThemeKind } from '../appearance';
@@ -28,6 +29,9 @@ interface Props {
   focused: boolean;
   /** A press in the terminal focuses it in the layout. */
   onActivate(): void;
+  /** False for a terminal kept mounted while its tab is not shown
+   * (keptPanes.ts): it takes its output and draws nothing. */
+  shown?: boolean;
 }
 
 /** What dropping files on the terminal does. */
@@ -45,7 +49,7 @@ function closedText(reason: string): string {
   return hasMessage(key) ? t(key) : t('term.closed.other', { reason });
 }
 
-export function TerminalView({ m, terminal, focused, onActivate }: Props) {
+export function TerminalView({ m, terminal, focused, onActivate, shown = true }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -77,7 +81,16 @@ export function TerminalView({ m, terminal, focused, onActivate }: Props) {
         m,
         address: terminal,
         connection: terms.connection,
-        onConnection: (fn) => terms.onConnection(fn),
+        // Attached again when the connection is back, and when the machine
+        // is: its streams end while the connection to the core stays.
+        onConnection: (fn) => {
+          const offCore = terms.onConnection(fn);
+          const offMachine = terms.onTerminals(m, () => fn(true));
+          return () => {
+            offCore();
+            offMachine();
+          };
+        },
         readOnly: () => useStore.getState().readOnly,
         appKey: (ev) => handleKey(ev),
         activate: () => activate.current(),
@@ -103,6 +116,8 @@ export function TerminalView({ m, terminal, focused, onActivate }: Props) {
         onScroll: setBar,
         onCell: (cw, ch) => setCell({ cw, ch }),
         onRenderer: setRenderer,
+        // A terminal that lost its agent with its core gets it back (restore.ts).
+        onAttached: () => terms.resumeAgent(m, terminal, (text) => pane.type(text)),
       },
       appearanceOf(getPrefs()),
     );
@@ -122,6 +137,20 @@ export function TerminalView({ m, terminal, focused, onActivate }: Props) {
       paneRef.current = undefined;
     };
   }, [m, terminal]);
+
+  useEffect(() => paneRef.current?.setShown(shown), [shown, m, terminal]);
+
+  // A terminal that lost its agent with its core gets it back (restore.ts):
+  // asked for while the pane is attached here, and in onAttached otherwise.
+  const resume = useTerms((s) => {
+    const layout = s.machines[m]?.layout;
+    const leaf = layout && L.findLeaf(layout, terminal);
+    return leaf && L.isTerminalLeaf(leaf) && typeof leaf.resume === 'string' ? leaf.resume : undefined;
+  });
+  useEffect(() => {
+    const pane = paneRef.current;
+    if (resume && pane?.attached) terms.resumeAgent(m, terminal, (text) => pane.type(text));
+  }, [resume, m, terminal]);
 
   // Appearance: colors, font and size, cursor, scrollback.
   useEffect(() => {

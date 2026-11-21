@@ -22,7 +22,18 @@ export function receive(channel: string, value: unknown) {
   for (const l of listeners.get(channel) ?? []) l({}, value);
 }
 
+/** What the stand-in's invoke got, and the answers it gives by channel (an
+ * Error rejects). */
+export const invoked: Array<{ channel: string; args: unknown[] }> = [];
+export const answers = new Map<string, unknown>();
+
 export const ipcRenderer = {
+  async invoke(channel: string, ...args: unknown[]): Promise<unknown> {
+    invoked.push({ channel, args });
+    const answer = answers.get(channel);
+    if (answer instanceof Error) throw answer;
+    return answer;
+  },
   send(channel: string, value?: unknown) {
     sent.push({ channel, value });
   },
